@@ -42,7 +42,7 @@ const api = new Function(`${trustHelpers}
 
 const validated = api.validate(structuredClone(sample));
 if (api.dayPnlDisplayValue(validated, validated.totals.dayPnl) !== null) {
-  throw new Error("Stage 0 day P&L must stay unavailable until HOSTD-33");
+  throw new Error("day P&L must stay unavailable until producer contract lands");
 }
 if (api.positionsAvailability(validated) !== "absent") {
   throw new Error("sample without positions keys must be absent");

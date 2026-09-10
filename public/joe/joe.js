@@ -1029,7 +1029,7 @@
       node.textContent = "—";
       node.classList.remove("positive", "negative");
       node.classList.add("neutral");
-      node.title = "Day P&L unavailable in Stage 0 (blocked on HOSTD-33)";
+      node.title = "Day P&L is not available yet.";
       return;
     }
     node.title = "";
@@ -1044,7 +1044,7 @@
     if (heroLabels[3]) { heroLabels[3].textContent = "Snapshot age"; }
     var attributionNote = document.querySelector(".attribution-body .widget-note");
     if (attributionNote) {
-      attributionNote.textContent = "Day P&L unavailable in Stage 0 — attribution blocked on HOSTD-33";
+      attributionNote.textContent = "Day P&L is not available yet; attribution will appear when it is.";
     }
   }
 
@@ -1197,7 +1197,7 @@
 
   function renderAttribution() {
     var root = document.getElementById("attribution");
-    root.replaceChildren(el("p", "widget-note empty-attribution", "Day P&L unavailable in Stage 0 — attribution blocked on HOSTD-33."));
+    root.replaceChildren(el("p", "widget-note empty-attribution", "Day P&L is not available yet; attribution will appear when it is."));
   }
 
   function collectPositions(data) {
@@ -1360,7 +1360,7 @@
       var slot = document.querySelector('[data-desk-slot="' + deskId + '"]');
       if (slot) { slot.replaceChildren(el("p", "empty-cell", "Waiting for the first valid snapshot.")); }
     });
-    document.getElementById("attribution").replaceChildren(el("p", "widget-note", "Day P&L unavailable in Stage 0 — attribution blocked on HOSTD-33."));
+    document.getElementById("attribution").replaceChildren(el("p", "widget-note", "Day P&L is not available yet; attribution will appear when it is."));
     document.getElementById("positionsSummary").textContent = "Position detail not supplied in this snapshot";
     var emptyPositionsRow = el("tr");
     var emptyPositionsCell = cell("Position detail is not present in this snapshot.", "empty-cell");
