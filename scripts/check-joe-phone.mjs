@@ -12,11 +12,14 @@ function extractJoeBlock(startMarker, endMarker) {
   return joeSource.slice(start, end);
 }
 
+const viewportBlock = extractJoeBlock("  function layoutViewportWidth", "\n\n  function columnOptsFor");
+
 const phoneHelpers = `${extractJoeBlock("  var DEFAULT_LAYOUT = [", "\n  var stateCopy = ")}
   var SUPPORTED_COLUMNS = [3, 6, 12];
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
 ${extractJoeBlock("  function layoutCoordinate", "\n\n  function safeStoredLayout")}
 ${extractJoeBlock("  var NARROW_BREAKPOINT = 700", "  var SUPPORTED_COLUMNS = [3, 6, 12];")}
+${viewportBlock}
 ${extractJoeBlock("  function narrowGridTilePixels", "\n\n  function narrowLayoutFromItems")}
 ${extractJoeBlock("  function narrowLayoutFromItems", "\n\n  function rememberDesktopLayout")}`;
 
@@ -134,9 +137,38 @@ if (compactDeskInner < api.NARROW_TILE_MIN_PIXELS["desk-j"]) {
   throw new Error("48px desk inner height must cover measured scroll content");
 }
 
+function viewportApi(docWidth, gridWidth, innerWidth, visualWidth) {
+  return new Function(`
+    var NARROW_BREAKPOINT = 700;
+    var document = {
+      documentElement: { clientWidth: ${docWidth} },
+      getElementById: function(id) { return id === "joeGrid" ? { clientWidth: ${gridWidth} } : null; }
+    };
+    var window = { innerWidth: ${innerWidth}, visualViewport: { width: ${visualWidth} } };
+    ${viewportBlock}
+    return { layoutViewportWidth, isNarrowGridViewport };
+  `)();
+}
+
+const mobileMismatch = viewportApi(390, 366, 1280, 390);
+if (!mobileMismatch.isNarrowGridViewport()) {
+  throw new Error("390px client width must count as narrow when innerWidth is still desktop-sized");
+}
+if (mobileMismatch.layoutViewportWidth() !== 366) {
+  throw new Error("layout viewport width must use the narrowest reliable client measure");
+}
+
+const desktopViewport = viewportApi(1440, 1400, 1440, 1440);
+if (desktopViewport.isNarrowGridViewport()) {
+  throw new Error("1440px client width must stay desktop");
+}
+if (desktopViewport.layoutViewportWidth() !== 1400) {
+  throw new Error("desktop layout viewport must follow the grid container width");
+}
+
 console.log(JSON.stringify({
   ok: true,
-  checks: 16,
+  checks: 20,
   narrowBreakpoint: api.NARROW_BREAKPOINT,
   defaultDeskRows: defaultDesk.h,
   compactDeskRows: compactDesk.h,

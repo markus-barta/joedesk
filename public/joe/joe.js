@@ -86,6 +86,7 @@
   var restoringLayout = false;
   var narrowGridActive = false;
   var narrowFitFrame = 0;
+  var viewportSyncFrame = 0;
   var cachedDesktopLayout = null;
   var latestSnapshot = null;
   var lastValidSnapshot = null;
@@ -205,8 +206,27 @@
     return activeGridSettings.columns;
   }
 
+  function layoutViewportWidth() {
+    var widths = [];
+    var doc = document.documentElement;
+    if (doc && Number.isFinite(doc.clientWidth) && doc.clientWidth > 0) {
+      widths.push(doc.clientWidth);
+    }
+    var gridEl = document.getElementById("joeGrid");
+    if (gridEl && Number.isFinite(gridEl.clientWidth) && gridEl.clientWidth > 0) {
+      widths.push(gridEl.clientWidth);
+    }
+    if (window.visualViewport && Number.isFinite(window.visualViewport.width) && window.visualViewport.width > 0) {
+      widths.push(window.visualViewport.width);
+    }
+    if (widths.length) {
+      return Math.min.apply(Math, widths);
+    }
+    return window.innerWidth;
+  }
+
   function isNarrowGridViewport() {
-    return window.innerWidth <= NARROW_BREAKPOINT;
+    return layoutViewportWidth() <= NARROW_BREAKPOINT;
   }
 
   function columnOptsFor(columns) {
@@ -390,6 +410,31 @@
 
   function syncViewportDataset() {
     document.documentElement.dataset.joeViewport = isNarrowGridViewport() ? "narrow" : "desktop";
+  }
+
+  function syncLayoutViewport() {
+    syncViewportDataset();
+    positionHeaderMenus();
+    if (grid) {
+      syncGridColumnConfig(desktopColumnCount());
+    }
+  }
+
+  function scheduleViewportSync() {
+    if (viewportSyncFrame) { cancelAnimationFrame(viewportSyncFrame); }
+    viewportSyncFrame = requestAnimationFrame(function () {
+      viewportSyncFrame = 0;
+      syncLayoutViewport();
+    });
+  }
+
+  function scheduleViewportSettle() {
+    requestAnimationFrame(function () {
+      syncLayoutViewport();
+      requestAnimationFrame(function () {
+        syncLayoutViewport();
+      });
+    });
   }
 
   function syncGridColumnConfig(columns) {
@@ -1066,6 +1111,7 @@
       restoringLayout = false;
     }
     syncGridColumnConfig(activeGridSettings.columns);
+    scheduleViewportSettle();
     grid.on("change dragstop resizestop", saveLayout);
     grid.on("resizestop", function () { resizeVisuals(); });
     document.getElementById("resetLayout").addEventListener("click", function () {
@@ -1741,11 +1787,12 @@
       });
     });
     window.addEventListener("resize", function () {
-      syncViewportDataset();
-      positionHeaderMenus();
-      syncGridColumnConfig(desktopColumnCount());
+      scheduleViewportSync();
       resizeVisuals();
     });
+    if (window.visualViewport && window.visualViewport.addEventListener) {
+      window.visualViewport.addEventListener("resize", scheduleViewportSync);
+    }
   }
 
   async function refreshHistory() {
@@ -1816,12 +1863,13 @@
     narrowOuterPixelsForContent: narrowOuterPixelsForContent,
     narrowTileHeight: narrowTileHeight,
     narrowLayoutFromItems: narrowLayoutFromItems,
+    layoutViewportWidth: layoutViewportWidth,
     isNarrowGridViewport: isNarrowGridViewport,
+    syncLayoutViewport: syncLayoutViewport,
     rememberDesktopLayout: rememberDesktopLayout,
     desktopLayoutSnapshot: desktopLayoutSnapshot,
     todayUtcMidnight: todayUtcMidnight
   });
-  syncViewportDataset();
   initTheme();
   initGrid();
   bindControls();
