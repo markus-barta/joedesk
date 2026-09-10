@@ -18,6 +18,7 @@ function extractJoeBlock(startMarker, endMarker) {
 const trustHelpers = `${extractJoeBlock("  var DESK_IDS = [", "\n  var DEFAULT_LAYOUT = [")}
   var accountingDate = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "numeric", timeZone: "America/New_York" });
 ${extractJoeBlock("  function required(condition, message)", "\n\n  function amount(value, signed)")}
+${extractJoeBlock("  function amount(value, signed)", "\n\n  function moneyForCurrency")}
 ${extractJoeBlock("  function el(tag, className, text)", "\n\n  function endpoint")}
 ${extractJoeBlock("  function ageInSeconds(iso)", "\n\n  function openPnl(data)")}
 ${extractJoeBlock("  // HOSTD-33 / Wave D: Day P&L stays unavailable", "\n\n  function labelPaperCapital()")}
@@ -48,6 +49,7 @@ const api = new Function("document", `${trustHelpers}
     accountingPeriodLabel,
     accountingSinceLabel,
     renderAccountingBasis,
+    amount,
     dayPnlDisplayValue,
     deskPositionsCoverage,
     positionsAvailability,
@@ -102,6 +104,18 @@ try {
 }
 if (!malformedAccountingRejected) {
   throw new Error("client validator must reject invalid accounting periodStart");
+}
+
+const unavailableJ = structuredClone(accountingSnapshot);
+unavailableJ.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
+delete unavailableJ.desks[0].positions;
+unavailableJ.totals = { equity: null, dayPnl: null, totalPnl: null };
+const unavailableJValidated = api.validate(unavailableJ);
+if (
+  api.amount(unavailableJValidated.desks[0].money.equity, false) !== "—" ||
+  api.deskPositionsCoverage("j", unavailableJValidated) !== "absent"
+) {
+  throw new Error("unavailable J must render unknown money and unavailable positions, not zero or known-empty");
 }
 
 const nullTop = api.validate(Object.assign(structuredClone(sample), { positions: null }));

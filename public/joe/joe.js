@@ -1623,25 +1623,35 @@
     if (filtered.length < 2) {
       return { ok: false, reason: "insufficient-points" };
     }
-    var common = filtered.filter(function (point) {
-      return deskIds.every(function (deskId) {
+    var comparable = [];
+    var latestBreak = "incomplete-coverage";
+    filtered.forEach(function (point) {
+      var complete = deskIds.every(function (deskId) {
         var bag = seriesBag(point, deskId);
         return bag && Number.isFinite(bag.equity);
       });
-    });
-    if (common.length < 2) {
-      return { ok: false, reason: "incomplete-coverage", deskIds: deskIds.slice() };
-    }
-    var compatibleStart = 0;
-    for (var index = 1; index < common.length; index += 1) {
+      if (!complete) {
+        comparable = [];
+        latestBreak = "incomplete-coverage";
+        return;
+      }
+      if (!comparable.length) {
+        comparable = [point];
+        return;
+      }
+      var previous = comparable[comparable.length - 1];
       var basisChanged = deskIds.some(function (deskId) {
-        return !compatibleAccountingBasis(common[index - 1], common[index], deskId);
+        return !compatibleAccountingBasis(previous, point, deskId);
       });
-      if (basisChanged) { compatibleStart = index; }
-    }
-    var comparable = common.slice(compatibleStart);
+      if (basisChanged) {
+        comparable = [point];
+        latestBreak = "incompatible-basis";
+        return;
+      }
+      comparable.push(point);
+    });
     if (comparable.length < 2) {
-      return { ok: false, reason: "incompatible-basis", deskIds: deskIds.slice() };
+      return { ok: false, reason: latestBreak, deskIds: deskIds.slice() };
     }
     var startPoint = comparable[0];
     var endPoint = comparable[comparable.length - 1];

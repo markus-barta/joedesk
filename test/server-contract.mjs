@@ -304,6 +304,51 @@ describe("server contract", () => {
       j: scoped.desks[0].accounting,
     });
 
+    const unavailable = structuredClone(scoped);
+    unavailable.generatedAt = new Date(Date.parse(scoped.generatedAt) + 1000).toISOString();
+    unavailable.source.label = "Synthetic J-unavailable contract fixture";
+    unavailable.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
+    delete unavailable.desks[0].positions;
+    unavailable.totals = { equity: null, dayPnl: null, totalPnl: null };
+    const unavailablePush = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(unavailable),
+    });
+    assert.equal(unavailablePush.status, 200);
+    const unavailableData = await jsonFetch("/joe/data.json");
+    assert.deepEqual(unavailableData.body.desks[0].money, unavailable.desks[0].money);
+    assert.equal(Object.prototype.hasOwnProperty.call(unavailableData.body.desks[0], "positions"), false);
+    const unavailableHistory = await jsonFetch("/joe/history.json");
+    const unavailablePoint = unavailableHistory.body.points.at(-1);
+    assert.deepEqual(unavailablePoint.desks.j, unavailable.desks[0].money);
+    assert.deepEqual(unavailablePoint.desks.joe, unavailable.desks[1].money);
+    assert.deepEqual(unavailablePoint.desks.joel, unavailable.desks[2].money);
+    assert.deepEqual(unavailablePoint.totals, unavailable.totals);
+
+    const restored = structuredClone(scoped);
+    restored.generatedAt = new Date(Date.parse(unavailable.generatedAt) + 1000).toISOString();
+    restored.source.label = "Synthetic J-restored contract fixture";
+    const restoredPush = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(restored),
+    });
+    assert.equal(restoredPush.status, 200);
+    const restoredHistory = await jsonFetch("/joe/history.json");
+    const jWindow = restoredHistory.body.points.slice(-3).map((point) => point.desks.j.equity);
+    assert.deepEqual(jWindow, [scoped.desks[0].money.equity, null, restored.desks[0].money.equity]);
+    for (const deskId of ["joe", "joel"]) {
+      const expected = restored.desks.find((desk) => desk.id === deskId).money.equity;
+      assert.deepEqual(restoredHistory.body.points.slice(-3).map((point) => point.desks[deskId].equity), [expected, expected, expected]);
+    }
+
     const dirEntries = await readdir(DATA_DIR);
     assert.ok(dirEntries.includes("data.json"));
     assert.ok(dirEntries.includes("history.json"));

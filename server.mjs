@@ -107,9 +107,9 @@ function readHistory() {
 
 function moneyBag(bag) {
   if (!bag || typeof bag !== "object") {
-    return { equity: 0, dayPnl: 0, totalPnl: 0 };
+    return { equity: null, dayPnl: null, totalPnl: null };
   }
-  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   return {
     equity: num(bag.equity),
     dayPnl: num(bag.dayPnl),

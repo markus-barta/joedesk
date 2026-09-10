@@ -12,6 +12,7 @@
           "Desk figures show the verified reporting start date and supplied fee and currency basis.",
           "J-family reporting identifies J + J2–J5 while keeping Joe and Joel separate.",
           "History and comparisons keep earlier unverified results separate from the new reporting period.",
+          "Unavailable desk figures remain gaps in history while other desks continue updating.",
         ],
       },
       {
