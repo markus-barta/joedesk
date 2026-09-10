@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.5.0",
+    APP_VERSION: "0.6.0",
     VERSION_HISTORY: [
+      {
+        version: "0.6.0",
+        date: "2026-09-10",
+        title: "Clearer supplied positions",
+        changes: [
+          "Position values use their supplied currency; missing values remain unavailable.",
+          "Explicit legacy holdings are labeled as excluded from Stage-0 accounting.",
+          "Incoming position rows are validated, with distinct incomplete and empty coverage.",
+        ],
+      },
       {
         version: "0.5.0",
         date: "2026-09-10",
