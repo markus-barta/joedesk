@@ -43,9 +43,8 @@
   var THEME_KEY = "joe-board-theme-v1";
   var DEFAULT_LAYOUT_ID = "default";
   var MAX_LAYOUTS = 24;
-  var PHONE_BREAKPOINT = 390;
-  var HEADER_COMPACT_BREAKPOINT = 700;
-  var PHONE_TILE_HEIGHTS = {
+  var NARROW_BREAKPOINT = 700;
+  var NARROW_TILE_MIN_ROWS = {
     hero: 3,
     "desk-j": 5,
     "desk-joe": 5,
@@ -53,6 +52,15 @@
     attribution: 4,
     history: 8,
     positions: 7
+  };
+  var NARROW_TILE_MIN_PIXELS = {
+    hero: 230,
+    "desk-j": 300,
+    "desk-joe": 300,
+    "desk-joel": 300,
+    attribution: 190,
+    history: 320,
+    positions: 290
   };
   var SUPPORTED_COLUMNS = [3, 6, 12];
   var THEME_MODES = ["light", "dark", "system"];
@@ -74,7 +82,8 @@
   var shortTime = new Intl.DateTimeFormat("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
   var grid = null;
   var restoringLayout = false;
-  var phoneGridActive = false;
+  var narrowGridActive = false;
+  var cachedDesktopLayout = null;
   var latestSnapshot = null;
   var lastValidSnapshot = null;
   var refreshError = null;
@@ -193,24 +202,30 @@
     return activeGridSettings.columns;
   }
 
-  function isPhoneGridViewport() {
-    return window.innerWidth <= PHONE_BREAKPOINT;
-  }
-
-  function isHeaderCompactViewport() {
-    return window.innerWidth <= HEADER_COMPACT_BREAKPOINT;
+  function isNarrowGridViewport() {
+    return window.innerWidth <= NARROW_BREAKPOINT;
   }
 
   function columnOptsFor(columns) {
     var cols = SUPPORTED_COLUMNS.includes(columns) ? columns : DEFAULT_GRID_SETTINGS.columns;
     return {
-      breakpoints: [{ w: PHONE_BREAKPOINT, c: 1 }],
+      breakpoints: [{ w: NARROW_BREAKPOINT, c: 1 }],
       layout: "list",
       columnMax: cols
     };
   }
 
-  function phoneLayoutFromItems(items) {
+  function narrowTileHeight(id, settings) {
+    var clean = sanitizeGridSettings(settings);
+    var baseRows = NARROW_TILE_MIN_ROWS[id] || 4;
+    var defaultRowPixels = DEFAULT_GRID_SETTINGS.cellHeight + DEFAULT_GRID_SETTINGS.tileGap;
+    var minPixels = NARROW_TILE_MIN_PIXELS[id] || baseRows * defaultRowPixels;
+    var rowPixels = clean.cellHeight + clean.tileGap;
+    var scaledRows = Math.ceil(minPixels / rowPixels);
+    return Math.max(baseRows, scaledRows);
+  }
+
+  function narrowLayoutFromItems(items, settings) {
     if (!Array.isArray(items)) { return null; }
     var sorted = items.slice().sort(function (a, b) {
       if (a.y !== b.y) { return a.y - b.y; }
@@ -218,31 +233,46 @@
     });
     var y = 0;
     return sorted.map(function (item) {
-      var h = PHONE_TILE_HEIGHTS[item.id] || item.h;
+      var h = narrowTileHeight(item.id, settings || activeGridSettings);
       var next = { id: item.id, x: 0, y: y, w: 1, h: h };
       y += h;
       return next;
     });
   }
 
-  function persistDesktopItems(items) {
+  function rememberDesktopLayout(items) {
     var cols = desktopColumnCount();
     var clean = sanitizeLayoutItems(items, cols);
+    if (!clean) { return null; }
+    cachedDesktopLayout = clean;
+    return clean;
+  }
+
+  function desktopLayoutSnapshot() {
+    var cols = desktopColumnCount();
+    if (cachedDesktopLayout && sanitizeLayoutItems(cachedDesktopLayout, cols)) {
+      return cachedDesktopLayout.map(function (item) {
+        return { id: item.id, x: item.x, y: item.y, w: item.w, h: item.h };
+      });
+    }
+    return safeStoredLayout();
+  }
+
+  function persistDesktopItems(items) {
+    var clean = rememberDesktopLayout(items);
     if (!clean) { return false; }
     try {
       localStorage.setItem(LAYOUT_KEY, JSON.stringify(clean));
-      return true;
-    } catch (_) {
-      return false;
-    }
+    } catch (_) { /* private browsing may reject storage */ }
+    return true;
   }
 
-  function loadPhoneGridLayout(desktopItems) {
-    var phoneItems = phoneLayoutFromItems(desktopItems);
-    if (!phoneItems || !grid) { return false; }
+  function loadNarrowGridLayout(desktopItems) {
+    var narrowItems = narrowLayoutFromItems(desktopItems, activeGridSettings);
+    if (!narrowItems || !grid) { return false; }
     restoringLayout = true;
     if (typeof grid.checkDynamicColumn === "function") { grid.checkDynamicColumn(); }
-    grid.load(phoneItems, false);
+    grid.load(narrowItems, false);
     restoringLayout = false;
     return true;
   }
@@ -250,40 +280,36 @@
   function restoreDesktopGridLayout(columns) {
     if (!grid) { return; }
     var cols = SUPPORTED_COLUMNS.includes(columns) ? columns : DEFAULT_GRID_SETTINGS.columns;
-    var desktop = safeStoredLayout();
+    var desktop = desktopLayoutSnapshot() || DEFAULT_LAYOUT.slice();
     restoringLayout = true;
     if (grid.getColumn() !== cols) {
       grid.column(cols, "moveScale");
     }
-    if (desktop) {
-      grid.load(desktop, false);
-    }
+    grid.load(desktop, false);
     restoringLayout = false;
-    phoneGridActive = false;
+    narrowGridActive = false;
   }
 
   function syncViewportDataset() {
-    document.documentElement.dataset.joeViewport = isPhoneGridViewport()
-      ? "phone"
-      : (isHeaderCompactViewport() ? "compact" : "desktop");
+    document.documentElement.dataset.joeViewport = isNarrowGridViewport() ? "narrow" : "desktop";
   }
 
   function syncGridColumnConfig(columns) {
     if (!grid) { return; }
     var cols = SUPPORTED_COLUMNS.includes(columns) ? columns : DEFAULT_GRID_SETTINGS.columns;
-    var onPhone = isPhoneGridViewport();
+    var onNarrow = isNarrowGridViewport();
     grid.opts.columnOpts = columnOptsFor(cols);
-    if (onPhone) {
-      if (!phoneGridActive) {
+    if (onNarrow) {
+      if (!narrowGridActive) {
         persistDesktopLayoutGeometry(cols);
-        phoneGridActive = true;
+        narrowGridActive = true;
       }
       if (typeof grid.checkDynamicColumn === "function") { grid.checkDynamicColumn(); }
-      var stored = safeStoredLayout() || DEFAULT_LAYOUT.slice();
-      loadPhoneGridLayout(stored);
+      var stored = desktopLayoutSnapshot() || DEFAULT_LAYOUT.slice();
+      loadNarrowGridLayout(stored);
       return;
     }
-    if (phoneGridActive) {
+    if (narrowGridActive) {
       restoreDesktopGridLayout(cols);
       return;
     }
@@ -324,12 +350,11 @@
   function persistDesktopLayoutGeometry(cols) {
     var saved = captureDesktopGridLayout(cols);
     if (!saved) { return false; }
+    rememberDesktopLayout(saved);
     try {
       localStorage.setItem(LAYOUT_KEY, JSON.stringify(saved));
-      return true;
-    } catch (_) {
-      return false;
-    }
+    } catch (_) { /* private browsing may reject storage */ }
+    return true;
   }
 
   function catalogContainsEntry(catalog, entryId) {
@@ -389,7 +414,7 @@
       if (historyState.chart) { drawHistory(); }
       return false;
     }
-    if (isPhoneGridViewport()) {
+    if (isNarrowGridViewport()) {
       persistDesktopLayoutGeometry(clean.columns);
     }
     resizeVisuals();
@@ -468,7 +493,7 @@
   }
 
   function positionHeaderMenus() {
-    if (!isHeaderCompactViewport()) {
+    if (!isNarrowGridViewport()) {
       document.documentElement.style.removeProperty("--joe-header-bottom");
       return;
     }
@@ -587,11 +612,11 @@
   function currentGridLayout() {
     var cols = desktopColumnCount();
     if (!grid) { return DEFAULT_LAYOUT.slice(); }
-    if (!isPhoneGridViewport()) {
+    if (!isNarrowGridViewport()) {
       var live = layoutItemsFromGrid(cols);
       return live || DEFAULT_LAYOUT.slice();
     }
-    var stored = safeStoredLayout();
+    var stored = desktopLayoutSnapshot();
     if (stored && sanitizeLayoutItems(stored, cols)) {
       return stored;
     }
@@ -604,9 +629,9 @@
     var clean = sanitizeLayoutItems(items, desktopColumnCount());
     if (!clean) { return false; }
     restoringLayout = true;
-    if (isPhoneGridViewport()) {
+    if (isNarrowGridViewport()) {
       persistDesktopItems(clean);
-      loadPhoneGridLayout(clean);
+      loadNarrowGridLayout(clean);
     } else {
       grid.load(clean, false);
       saveLayout();
@@ -910,7 +935,7 @@
   }
 
   function saveLayout() {
-    if (!grid || restoringLayout || isPhoneGridViewport()) { return; }
+    if (!grid || restoringLayout || isNarrowGridViewport()) { return; }
     var cols = desktopColumnCount();
     var saved = layoutItemsFromGrid(cols);
     if (!saved) { return; }
@@ -1688,10 +1713,12 @@
     captureDesktopGridLayout: captureDesktopGridLayout,
     layoutItemsFromGrid: layoutItemsFromGrid,
     positionHeaderMenus: positionHeaderMenus,
-    phoneBreakpoint: PHONE_BREAKPOINT,
-    phoneTileHeights: Object.assign({}, PHONE_TILE_HEIGHTS),
-    phoneLayoutFromItems: phoneLayoutFromItems,
-    isPhoneGridViewport: isPhoneGridViewport,
+    narrowBreakpoint: NARROW_BREAKPOINT,
+    narrowTileHeight: narrowTileHeight,
+    narrowLayoutFromItems: narrowLayoutFromItems,
+    isNarrowGridViewport: isNarrowGridViewport,
+    rememberDesktopLayout: rememberDesktopLayout,
+    desktopLayoutSnapshot: desktopLayoutSnapshot,
     todayUtcMidnight: todayUtcMidnight
   });
   syncViewportDataset();

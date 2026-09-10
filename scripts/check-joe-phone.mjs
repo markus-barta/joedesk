@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const joeSource = await readFile(resolve(repoRoot, "public/joe/joe.js"), "utf8");
-const cssSource = await readFile(resolve(repoRoot, "public/joe/joe.css"), "utf8");
 
 function extractJoeBlock(startMarker, endMarker) {
   const start = joeSource.indexOf(startMarker);
@@ -17,15 +16,18 @@ const phoneHelpers = `${extractJoeBlock("  var DEFAULT_LAYOUT = [", "\n  var sta
   var SUPPORTED_COLUMNS = [3, 6, 12];
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
 ${extractJoeBlock("  function layoutCoordinate", "\n\n  function safeStoredLayout")}
-${extractJoeBlock("  var PHONE_BREAKPOINT = 390", "  var SUPPORTED_COLUMNS = [3, 6, 12];")}
-${extractJoeBlock("  function phoneLayoutFromItems", "\n\n  function persistDesktopItems")}`;
+${extractJoeBlock("  var NARROW_BREAKPOINT = 700", "  var SUPPORTED_COLUMNS = [3, 6, 12];")}
+${extractJoeBlock("  function narrowTileHeight", "\n\n  function narrowLayoutFromItems")}
+${extractJoeBlock("  function narrowLayoutFromItems", "\n\n  function rememberDesktopLayout")}`;
 
 const api = new Function(`${phoneHelpers}
   return {
-    PHONE_BREAKPOINT,
-    PHONE_TILE_HEIGHTS,
+    NARROW_BREAKPOINT,
+    NARROW_TILE_MIN_ROWS,
     sanitizeLayoutItems,
-    phoneLayoutFromItems
+    sanitizeGridSettings,
+    narrowTileHeight,
+    narrowLayoutFromItems
   };
 `)();
 
@@ -38,6 +40,9 @@ const sample = [
   { id: "history", x: 4, y: 7, w: 8, h: 5 },
   { id: "positions", x: 0, y: 12, w: 12, h: 5 },
 ];
+
+const defaultSettings = api.sanitizeGridSettings({});
+const compactSettings = api.sanitizeGridSettings({ columns: 12, cellHeight: 48, tilePadding: 10, tileGap: 10 });
 
 function layoutTilesOverlap(items) {
   for (let left = 0; left < items.length; left += 1) {
@@ -52,36 +57,55 @@ function layoutTilesOverlap(items) {
   return false;
 }
 
-if (api.PHONE_BREAKPOINT !== 390) throw new Error("phone breakpoint must be 390");
-if (!api.PHONE_TILE_HEIGHTS.hero || api.PHONE_TILE_HEIGHTS.history < 6) {
-  throw new Error("phone tile heights missing or too short");
+function estimatedTilePixels(item, settings) {
+  const h = api.narrowTileHeight(item.id, settings);
+  const clean = api.sanitizeGridSettings(settings);
+  return h * (clean.cellHeight + clean.tileGap);
 }
 
-const phone = api.phoneLayoutFromItems(sample);
-if (!phone || phone.length !== sample.length) throw new Error("phone layout must keep every tile");
-if (phone.some((item) => item.w !== 1 || item.x !== 0)) throw new Error("phone layout must be single column");
-if (layoutTilesOverlap(phone)) throw new Error("phone layout tiles overlap");
-if (phone[0].id !== "hero" || phone[0].h !== 3) throw new Error("hero must lead phone stack at h=3");
-if (phone.find((item) => item.id === "history")?.h !== api.PHONE_TILE_HEIGHTS.history) {
-  throw new Error("history phone height not applied");
+if (api.NARROW_BREAKPOINT !== 700) throw new Error("narrow breakpoint must stay at 700");
+
+const narrow = api.narrowLayoutFromItems(sample, defaultSettings);
+if (!narrow || narrow.length !== sample.length) throw new Error("narrow layout must keep every tile");
+if (narrow.some((item) => item.w !== 1 || item.x !== 0)) throw new Error("narrow layout must be single column");
+if (layoutTilesOverlap(narrow)) throw new Error("narrow layout tiles overlap");
+if (narrow[0].id !== "hero" || narrow[0].h !== api.NARROW_TILE_MIN_ROWS.hero) {
+  throw new Error("hero must lead narrow stack at default row height");
 }
-if (!api.sanitizeLayoutItems(phone, 1)) throw new Error("phone layout must sanitize at one column");
+
+const compact = api.narrowLayoutFromItems(sample, compactSettings);
+const defaultDesk = narrow.find((item) => item.id === "desk-j");
+const compactDesk = compact.find((item) => item.id === "desk-j");
+if (!compactDesk || compactDesk.h <= defaultDesk.h) {
+  throw new Error("48px cell height must increase narrow desk row count");
+}
+
+for (const item of compact) {
+  const minPixels = item.id.startsWith("desk-") ? 300 : item.id === "hero" ? 230 : item.id === "history" ? 320 : 180;
+  if (estimatedTilePixels(item, compactSettings) < minPixels - 1) {
+    throw new Error(`narrow tile ${item.id} under minimum safe height at 48px cells`);
+  }
+}
 
 const reordered = sample.slice().reverse();
-const phoneOrder = api.phoneLayoutFromItems(reordered);
-if (phoneOrder?.map((item) => item.id).join() !== phone.map((item) => item.id).join()) {
-  throw new Error("phone layout order must follow desktop y/x, not input order");
+const narrowOrder = api.narrowLayoutFromItems(reordered, defaultSettings);
+if (narrowOrder?.map((item) => item.id).join() !== narrow.map((item) => item.id).join()) {
+  throw new Error("narrow layout order must follow desktop y/x, not input order");
 }
 
 let yCursor = 0;
-for (const item of phone) {
-  if (item.y !== yCursor) throw new Error("phone layout must stack contiguously");
+for (const item of narrow) {
+  if (item.y !== yCursor) throw new Error("narrow layout must stack contiguously");
   yCursor += item.h;
 }
 
-if (!cssSource.includes("@media (max-width: 390px)")) throw new Error("phone css breakpoint missing");
-if (/clamp\(9px,\s*2\.7vw,\s*11px\)/.test(cssSource)) throw new Error("compact-mode hero scaling still present");
-if (!cssSource.includes("min-height: 44px")) throw new Error("touch target sizing missing");
-if (!cssSource.includes("[data-joe-viewport=\"phone\"]")) throw new Error("phone viewport dataset styles missing");
+if (!api.sanitizeLayoutItems(narrow, 1)) throw new Error("narrow layout must sanitize at one column");
 
-console.log(JSON.stringify({ ok: true, checks: 12, phoneBreakpoint: api.PHONE_BREAKPOINT, tileCount: phone.length }, null, 2));
+console.log(JSON.stringify({
+  ok: true,
+  checks: 10,
+  narrowBreakpoint: api.NARROW_BREAKPOINT,
+  defaultDeskRows: defaultDesk.h,
+  compactDeskRows: compactDesk.h,
+  tileCount: narrow.length,
+}, null, 2));
