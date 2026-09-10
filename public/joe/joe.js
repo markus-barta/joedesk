@@ -102,6 +102,7 @@
   var MAX_OBSERVED_EVENTS = 200;
   var DESK_TIMELINE_LIMIT = 5;
   var money = new Intl.NumberFormat("de-AT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
+  var moneyFormatters = { EUR: money };
   var number = new Intl.NumberFormat("de-AT", { maximumFractionDigits: 4 });
   var dateTime = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium", timeZone: "Europe/Vienna" });
   var shortTime = new Intl.DateTimeFormat("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
@@ -178,6 +179,46 @@
     var formatted = money.format(Math.abs(value));
     if (!signed || value === 0) { return value < 0 ? "−" + formatted : formatted; }
     return (value > 0 ? "+" : "−") + formatted;
+  }
+
+  function moneyForCurrency(currencyCode) {
+    if (!currencyCode) { return null; }
+    if (moneyFormatters[currencyCode]) { return moneyFormatters[currencyCode]; }
+    try {
+      moneyFormatters[currencyCode] = new Intl.NumberFormat("de-AT", { style: "currency", currency: currencyCode, minimumFractionDigits: 2 });
+      return moneyFormatters[currencyCode];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function positionCurrencyCode(position) {
+    if (!position || typeof position.currency !== "string") { return null; }
+    var code = position.currency.trim();
+    return /^[A-Z]{3}$/.test(code) ? code : null;
+  }
+
+  function positionAccountingScopeLabel(position) {
+    if (position && position.accountingScope === "legacy") {
+      return "Legacy · excluded from Stage-0";
+    }
+    return null;
+  }
+
+  function formatPositionMoney(value, signed, currencyCode) {
+    var formatter = moneyForCurrency(currencyCode);
+    if (!formatter || !Number.isFinite(value)) { return "—"; }
+    var formatted = formatter.format(Math.abs(value));
+    if (!signed || value === 0) { return value < 0 ? "−" + formatted : formatted; }
+    return (value > 0 ? "+" : "−") + formatted;
+  }
+
+  function positionMarketValue(position) {
+    return Number.isFinite(position.marketValue) ? position.marketValue : null;
+  }
+
+  function positionSymbolText(position) {
+    return position && position.symbol ? String(position.symbol) : "—";
   }
 
   function tone(value) {
@@ -1665,10 +1706,24 @@
   }
 
   function collectPositions(data) {
-    var result = Array.isArray(data.positions) ? data.positions.slice() : [];
+    var result = [];
+    var topLevel = Array.isArray(data.positions) ? data.positions : null;
+    if (!data || !Array.isArray(data.desks)) { return result; }
     data.desks.forEach(function (desk) {
-      if (Array.isArray(desk.positions)) {
-        desk.positions.forEach(function (position) { result.push(Object.assign({ desk: desk.id }, position)); });
+      if (Object.prototype.hasOwnProperty.call(desk, "positions")) {
+        if (!Array.isArray(desk.positions)) { return; }
+        desk.positions.forEach(function (position) {
+          result.push(Object.assign({ desk: desk.id }, position));
+        });
+        return;
+      }
+      if (topLevel) {
+        topLevel.forEach(function (position) {
+          var rowDesk = position.desk || position.deskId;
+          if (rowDesk === desk.id) {
+            result.push(Object.assign({}, position, { desk: desk.id }));
+          }
+        });
       }
     });
     return result.map(function (position) {
@@ -1771,15 +1826,22 @@
       var row = el("tr");
       row.dataset.desk = position.desk;
       var quantity = Number.isFinite(position.quantity) ? position.quantity : position.qty;
-      var marketValue = Number.isFinite(position.marketValue) ? position.marketValue : (Number.isFinite(quantity) && Number.isFinite(position.mark) ? quantity * position.mark : null);
+      var currencyCode = positionCurrencyCode(position);
+      var marketValue = positionMarketValue(position);
+      var scopeLabel = positionAccountingScopeLabel(position);
       row.appendChild(cell(String(position.desk).toUpperCase()));
-      row.appendChild(cell(position.symbol || "—"));
+      var symbolCell = el("td");
+      symbolCell.appendChild(document.createTextNode(positionSymbolText(position)));
+      if (scopeLabel) {
+        symbolCell.appendChild(el("span", "position-scope-note", " · " + scopeLabel));
+      }
+      row.appendChild(symbolCell);
       row.appendChild(cell(position.side || (Number.isFinite(quantity) && quantity < 0 ? "Short" : Number.isFinite(quantity) ? "Long" : "—")));
       row.appendChild(cell(Number.isFinite(quantity) ? number.format(quantity) : "—", "number"));
-      row.appendChild(cell(amount(position.mark, false), "number"));
-      row.appendChild(cell(amount(marketValue, false), "number"));
+      row.appendChild(cell(formatPositionMoney(position.mark, false, currencyCode), "number"));
+      row.appendChild(cell(formatPositionMoney(marketValue, false, currencyCode), "number"));
       row.appendChild(cell("—", "number neutral"));
-      row.appendChild(cell(amount(position.openPnl, true), "number " + tone(position.openPnl)));
+      row.appendChild(cell(formatPositionMoney(position.openPnl, true, currencyCode), "number " + tone(position.openPnl)));
       row.appendChild(cell(position.updatedAt && Number.isFinite(Date.parse(position.updatedAt)) ? shortTime.format(new Date(position.updatedAt)) : "—"));
       return row;
     }));
@@ -2270,6 +2332,11 @@
     gatewayHeartbeatAge: gatewayHeartbeatAge,
     validIsoTimestamp: validIsoTimestamp,
     collectPositions: collectPositions,
+    positionCurrencyCode: positionCurrencyCode,
+    positionAccountingScopeLabel: positionAccountingScopeLabel,
+    formatPositionMoney: formatPositionMoney,
+    positionMarketValue: positionMarketValue,
+    positionSymbolText: positionSymbolText,
     validate: validate,
     refresh: refresh,
     layoutStorageKey: LAYOUT_KEY,

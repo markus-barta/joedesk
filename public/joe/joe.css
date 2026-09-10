@@ -198,6 +198,7 @@ td.number, th.number { text-align: right; }
 tr[data-desk="j"] td:first-child { color: var(--desk-j); }
 tr[data-desk="joe"] td:first-child { color: var(--desk-joe); }
 tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
+.position-scope-note { color: var(--quiet); font-weight: 400; white-space: normal; }
 .empty-cell { padding: 30px 12px; color: var(--quiet); text-align: center; white-space: normal; }
 .footer { justify-content: space-between; gap: 18px; padding: 12px 7px 0; color: var(--quiet); font: 10px var(--mono); }
 .footer-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px 14px; margin-left: auto; }
