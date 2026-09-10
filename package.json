@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node scripts/check-package.mjs && node scripts/check-joe-layout.mjs",
+    "check": "node scripts/check-package.mjs && node scripts/check-joe-layout.mjs && node scripts/check-joe-history.mjs",
     "test": "node scripts/run-server-contract.mjs",
     "start": "node server.mjs"
   }

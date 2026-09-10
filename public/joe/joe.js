@@ -93,6 +93,7 @@
   var refreshError = null;
   var positionFilter = "all";
   var historyState = { selected: DESK_IDS.slice(), range: "all", points: [], chart: null };
+  var historyError = null;
   var layoutFormMode = null;
   var activeGridSettings = Object.assign({}, DEFAULT_GRID_SETTINGS);
   var activeThemeMode = "dark";
@@ -1532,11 +1533,82 @@
     updateFreshnessTick();
   }
 
+  function historyRangeSpanMs(range) {
+    if (range === "1d") { return 864e5; }
+    if (range === "1w") { return 7 * 864e5; }
+    if (range === "1m") { return 30 * 864e5; }
+    return null;
+  }
+
   function filterPoints(points, range) {
     if (!points.length || range === "all") { return points.slice(); }
     var last = Date.parse(points[points.length - 1].t);
-    var span = range === "1d" ? 864e5 : range === "1w" ? 7 * 864e5 : 30 * 864e5;
+    var span = historyRangeSpanMs(range);
+    if (!span) { return points.slice(); }
     return points.filter(function (point) { return Date.parse(point.t) >= last - span; });
+  }
+
+  function isValidHistoryPoint(point) {
+    if (!point || typeof point !== "object") { return false; }
+    if (typeof point.t !== "string" || !Number.isFinite(Date.parse(point.t))) { return false; }
+    if (!point.desks || typeof point.desks !== "object") { return false; }
+    return true;
+  }
+
+  function validateHistoryPayload(data) {
+    required(data && data.schema === "inspr.joe.household.history.v1", "unknown history schema");
+    required(Array.isArray(data.points), "history points must be an array");
+    if (!data.points.length) { return []; }
+    var points = data.points.filter(isValidHistoryPoint);
+    required(points.length, "history points contained no valid samples");
+    return points;
+  }
+
+  function applyHistoryFetchResult(currentPoints, data) {
+    try {
+      return { points: validateHistoryPayload(data), error: null };
+    } catch (error) {
+      return {
+        points: currentPoints,
+        error: error instanceof Error ? error : new Error(String(error))
+      };
+    }
+  }
+
+  function historyFailureMessage(error) {
+    if (!error) { return ""; }
+    var detail = error.message || String(error);
+    return "History refresh failed: " + detail + ". Showing the last good series.";
+  }
+
+  function updateHistoryStatusUI() {
+    var status = document.getElementById("historyStatus");
+    var text = document.getElementById("historyStatusText");
+    if (!status || !text) { return; }
+    if (!historyError) {
+      status.hidden = true;
+      text.textContent = "";
+      return;
+    }
+    status.hidden = false;
+    text.textContent = historyFailureMessage(historyError);
+  }
+
+  function historyEmptyMessage() {
+    if (historyError && !historyState.points.length) {
+      return historyFailureMessage(historyError);
+    }
+    return "History will fill as snapshots arrive.";
+  }
+
+  function sparklineSamples(points, range, deskId) {
+    return filterPoints(points, range).map(function (point) {
+      var bag = seriesBag(point, deskId);
+      return {
+        x: Date.parse(point.t),
+        y: bag && Number.isFinite(bag.equity) ? bag.equity : null
+      };
+    });
   }
 
   function seriesBag(point, deskId) {
@@ -1663,17 +1735,27 @@
     }
     var points = filterPoints(historyState.points, historyState.range);
     var datasets = historyState.selected.map(function (deskId) {
+      var series = points.map(function (point) {
+        var bag = seriesBag(point, deskId);
+        return {
+          x: Date.parse(point.t),
+          y: bag && Number.isFinite(bag.equity) ? bag.equity : null
+        };
+      });
+      if (!series.some(function (sample) { return Number.isFinite(sample.y); })) { return null; }
       return {
         label: deskId === "j" ? "J" : deskId.charAt(0).toUpperCase() + deskId.slice(1),
-        data: points.map(function (point) {
-          var bag = seriesBag(point, deskId);
-          return bag && Number.isFinite(bag.equity) ? { x: Date.parse(point.t), y: bag.equity } : null;
-        }).filter(Boolean),
+        data: series,
+        spanGaps: false,
         borderColor: deskColor(deskId), backgroundColor: deskColor(deskId), borderWidth: 2,
         pointRadius: 0, pointHoverRadius: 4, tension: .2
       };
-    }).filter(function (dataset) { return dataset.data.length; });
-    if (!datasets.length) { showHistoryEmpty("History will fill as snapshots arrive."); return; }
+    }).filter(Boolean);
+    if (!datasets.length) {
+      if (historyError && historyState.points.length) { updateHistoryStatusUI(); }
+      showHistoryEmpty(historyEmptyMessage());
+      return;
+    }
     document.getElementById("historyEmpty").hidden = true;
     var tickFont = { family: "SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace", size: 10 };
     var config = {
@@ -1712,7 +1794,7 @@
     resizeVisuals();
   }
 
-  function drawSpark(canvas, values, color) {
+  function drawSpark(canvas, samples, color) {
     var rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) { return; }
     var ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -1721,16 +1803,36 @@
     var context = canvas.getContext("2d");
     context.scale(ratio, ratio);
     context.clearRect(0, 0, rect.width, rect.height);
-    if (values.length < 2) {
+    if (!samples.length) {
       context.strokeStyle = cssVar("--spark-empty") || "#4a4b44"; context.setLineDash([3, 4]); context.beginPath(); context.moveTo(0, rect.height / 2); context.lineTo(rect.width, rect.height / 2); context.stroke();
       return;
     }
-    var min = Math.min.apply(Math, values); var max = Math.max.apply(Math, values); var spread = max - min || 1;
+    var finite = samples.filter(function (sample) { return Number.isFinite(sample.y); });
+    if (finite.length < 2) {
+      context.strokeStyle = cssVar("--spark-empty") || "#4a4b44"; context.setLineDash([3, 4]); context.beginPath(); context.moveTo(0, rect.height / 2); context.lineTo(rect.width, rect.height / 2); context.stroke();
+      return;
+    }
+    var minX = samples[0].x;
+    var maxX = samples[samples.length - 1].x;
+    var minY = Math.min.apply(Math, finite.map(function (sample) { return sample.y; }));
+    var maxY = Math.max.apply(Math, finite.map(function (sample) { return sample.y; }));
+    var spreadX = maxX - minX || 1;
+    var spreadY = maxY - minY || 1;
     context.strokeStyle = color; context.lineWidth = 1.7; context.setLineDash([]); context.beginPath();
-    values.forEach(function (value, index) {
-      var x = index / (values.length - 1) * rect.width;
-      var y = 5 + (max - value) / spread * (rect.height - 10);
-      if (index) { context.lineTo(x, y); } else { context.moveTo(x, y); }
+    var drawing = false;
+    samples.forEach(function (sample) {
+      if (!Number.isFinite(sample.y)) {
+        drawing = false;
+        return;
+      }
+      var x = (sample.x - minX) / spreadX * rect.width;
+      var y = 5 + (maxY - sample.y) / spreadY * (rect.height - 10);
+      if (drawing) {
+        context.lineTo(x, y);
+      } else {
+        context.moveTo(x, y);
+        drawing = true;
+      }
     });
     context.stroke();
   }
@@ -1738,8 +1840,7 @@
   function drawSparklines() {
     document.querySelectorAll("canvas[data-spark]").forEach(function (canvas) {
       var id = canvas.dataset.spark;
-      var values = historyState.points.slice(-40).map(function (point) { var bag = seriesBag(point, id); return bag && bag.equity; }).filter(Number.isFinite);
-      drawSpark(canvas, values, deskColor(id));
+      drawSpark(canvas, sparklineSamples(historyState.points, historyState.range, id), deskColor(id));
     });
   }
 
@@ -1782,9 +1883,11 @@
         historyState.range = button.dataset.range;
         document.querySelectorAll("button[data-range]").forEach(function (candidate) { candidate.setAttribute("aria-pressed", String(candidate === button)); });
         drawHistory();
+        drawSparklines();
       });
     });
     document.getElementById("resetZoom").addEventListener("click", function () { if (historyState.chart && historyState.chart.resetZoom) { historyState.chart.resetZoom(); } });
+    document.getElementById("historyRetry").addEventListener("click", function () { refreshHistory(); });
     document.querySelectorAll("button[data-position-filter]").forEach(function (button) {
       button.addEventListener("click", function () {
         positionFilter = button.dataset.positionFilter;
@@ -1805,12 +1908,13 @@
     try {
       var response = await fetch(endpoint("joe-history-endpoint", "JOE_HISTORY_URL", "./history.json"), { cache: "no-store", credentials: "same-origin" });
       if (!response.ok) { throw new Error("HTTP " + response.status); }
-      var data = await response.json();
-      required(data && data.schema === "inspr.joe.household.history.v1", "unknown history schema");
-      historyState.points = Array.isArray(data.points) ? data.points : [];
-    } catch (_) {
-      historyState.points = [];
+      var result = applyHistoryFetchResult(historyState.points, await response.json());
+      historyState.points = result.points;
+      historyError = result.error;
+    } catch (error) {
+      historyError = error instanceof Error ? error : new Error(String(error));
     }
+    updateHistoryStatusUI();
     drawHistory();
     drawSparklines();
   }
@@ -1874,7 +1978,12 @@
     syncLayoutViewport: syncLayoutViewport,
     rememberDesktopLayout: rememberDesktopLayout,
     desktopLayoutSnapshot: desktopLayoutSnapshot,
-    todayUtcMidnight: todayUtcMidnight
+    todayUtcMidnight: todayUtcMidnight,
+    filterPoints: filterPoints,
+    historyRangeSpanMs: historyRangeSpanMs,
+    validateHistoryPayload: validateHistoryPayload,
+    applyHistoryFetchResult: applyHistoryFetchResult,
+    sparklineSamples: sparklineSamples
   });
   initTheme();
   initGrid();

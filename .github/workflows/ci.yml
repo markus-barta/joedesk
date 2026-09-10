@@ -17,6 +17,7 @@ jobs:
       - run: node scripts/check-joe-layout.mjs
       - run: node scripts/check-joe-trust.mjs
       - run: node scripts/check-joe-phone.mjs
+      - run: node scripts/check-joe-history.mjs
       - name: Server contract tests (disposable tmpfs container)
         run: |
           docker run --rm --network none --tmpfs /var/lib/joe-board \
