@@ -18,14 +18,44 @@ const POSITION_KEYS = new Set([
   "currency",
   "accountingScope",
 ]);
-const MONEY_KEYS = new Set(["equity", "dayPnl", "totalPnl", "openPnl"]);
+const RFC3339_DATETIME =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/;
+const MAX_OFFSET_MINUTES = 14 * 60;
 
 function isObj(v) {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
-function validIsoTimestamp(iso) {
-  return typeof iso === "string" && iso.length > 0 && !Number.isNaN(Date.parse(iso));
+function daysInMonth(year, month) {
+  if (month === 2) {
+    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    return leap ? 29 : 28;
+  }
+  if (month === 4 || month === 6 || month === 9 || month === 11) return 30;
+  return 31;
+}
+
+export function validIsoTimestamp(iso) {
+  if (typeof iso !== "string" || !iso.length) return false;
+  const match = RFC3339_DATETIME.exec(iso);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  if (month < 1 || month > 12) return false;
+  if (day < 1 || day > daysInMonth(year, month)) return false;
+  if (hour > 23 || minute > 59 || second > 59) return false;
+
+  if (match[8] === "Z") return true;
+
+  const offHour = Number(match[10]);
+  const offMinute = Number(match[11]);
+  if (offHour > 23 || offMinute > 59) return false;
+  return offHour * 60 + offMinute <= MAX_OFFSET_MINUTES;
 }
 
 function finiteOrNull(v, path, errors) {
@@ -40,13 +70,13 @@ function moneyOk(m, path, errors) {
     return;
   }
   for (const k of ["equity", "dayPnl", "totalPnl"]) {
-    finiteOrNull(m[k], `${path}.${k}`, errors);
-  }
-  if (Object.prototype.hasOwnProperty.call(m, "openPnl")) {
-    finiteOrNull(m.openPnl, `${path}.openPnl`, errors);
+    const v = m[k];
+    if (!(v === null || (typeof v === "number" && Number.isFinite(v)))) {
+      errors.push(`${path}.${k} must be number or null`);
+    }
   }
   for (const k of Object.keys(m)) {
-    if (!MONEY_KEYS.has(k)) errors.push(`${path} unknown key ${k}`);
+    if (!["equity", "dayPnl", "totalPnl"].includes(k)) errors.push(`${path} unknown key ${k}`);
   }
 }
 

@@ -2,7 +2,7 @@
 /** Focused HOSTD-32 position contract checks (synthetic fixtures only). */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { validateHouseholdSnapshot } from "../validate.mjs";
+import { validateHouseholdSnapshot, validIsoTimestamp } from "../validate.mjs";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const sample = JSON.parse(
@@ -45,6 +45,54 @@ function coverageStates(snapshot) {
   );
   return { top, desks };
 }
+
+function assertTimestamp(value, expected, label) {
+  if (validIsoTimestamp(value) !== expected) {
+    throw new Error(`${label}: validIsoTimestamp(${JSON.stringify(value)}) expected ${expected}`);
+  }
+}
+
+function positionWithUpdatedAt(updatedAt) {
+  const snapshot = structuredClone(sample);
+  snapshot.positions = [{ desk: "j", symbol: "TS", updatedAt }];
+  return snapshot;
+}
+
+assertTimestamp("1", false, "numeric string");
+assertTimestamp("2026-09-10", false, "bare date without time or offset");
+assertTimestamp("2026-02-30T12:00:00Z", false, "impossible calendar date");
+assertTimestamp("2026-09-10T25:00:00Z", false, "impossible clock time");
+assertTimestamp("2026-09-10T12:00:00+25:00", false, "impossible offset hour");
+assertTimestamp("2026-09-10T12:00:00+14:01", false, "offset beyond RFC3339 bounds");
+assertTimestamp("2026-09-08T08:00:00.123Z", true, "fractional seconds with UTC");
+assertTimestamp("2026-09-08T08:00:00+02:00", true, "numeric offset");
+assertTimestamp(sample.generatedAt, true, "sample offset timestamp");
+
+assertOk(positionWithUpdatedAt(null), "position updatedAt null accepted");
+assertFail(positionWithUpdatedAt("1"), /updatedAt invalid/, "position updatedAt 1 rejected");
+assertFail(
+  positionWithUpdatedAt("2026-09-10"),
+  /updatedAt invalid/,
+  "position updatedAt bare date rejected",
+);
+assertFail(
+  positionWithUpdatedAt("2026-02-30T12:00:00Z"),
+  /updatedAt invalid/,
+  "position updatedAt impossible calendar date rejected",
+);
+assertFail(
+  positionWithUpdatedAt("2026-09-10T12:00:00+25:00"),
+  /updatedAt invalid/,
+  "position updatedAt impossible offset rejected",
+);
+assertOk(
+  positionWithUpdatedAt("2026-09-08T08:00:00.500Z"),
+  "position updatedAt fractional UTC accepted",
+);
+
+const openPnlTotals = structuredClone(sample);
+openPnlTotals.totals.openPnl = 12.5;
+assertFail(openPnlTotals, /totals unknown key openPnl/, "money.openPnl remains rejected on server");
 
 assertOk(structuredClone(sample), "legacy snapshot without positions keys");
 
@@ -194,7 +242,7 @@ console.log(
   JSON.stringify(
     {
       ok: true,
-      checks: 18,
+      checks: 30,
       note: "Synthetic fixtures only — not live broker evidence",
       accepted: {
         legacy: true,
@@ -213,6 +261,11 @@ console.log(
         "invalid dates",
         "bad currency",
         "bad accountingScope",
+        "money.openPnl",
+        "updatedAt:1",
+        "updatedAt:bare-date",
+        "updatedAt:feb30",
+        "updatedAt:bad-offset",
       ],
     },
     null,
