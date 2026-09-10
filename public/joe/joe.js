@@ -68,6 +68,8 @@
   var THEME_MODES = ["light", "dark", "system"];
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
   var DESK_IDS = ["j", "joe", "joel"];
+  var ACCOUNTING_METHOD = "execution-fifo-net-current-fx";
+  var ACCOUNTING_DETAIL_MAX = 240;
   var LEGACY_DEFAULT_LAYOUT = [
     { id: "hero", x: 0, y: 0, w: 12, h: 3 },
     { id: "desk-j", x: 0, y: 3, w: 4, h: 4 },
@@ -106,6 +108,7 @@
   var number = new Intl.NumberFormat("de-AT", { maximumFractionDigits: 4 });
   var dateTime = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium", timeZone: "Europe/Vienna" });
   var shortTime = new Intl.DateTimeFormat("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
+  var accountingDate = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "numeric", timeZone: "America/New_York" });
   var grid = null;
   var restoringLayout = false;
   var narrowGridActive = false;
@@ -144,6 +147,44 @@
     required(value === null || Number.isFinite(value), path + " must be a number or null");
   }
 
+  function validateAccounting(accounting, path) {
+    required(accounting && typeof accounting === "object" && !Array.isArray(accounting), path + " must be an object");
+    Object.keys(accounting).forEach(function (key) {
+      required(["periodStart", "method", "detail"].includes(key), path + " has unknown key " + key);
+    });
+    required(validIsoTimestamp(accounting.periodStart), path + ".periodStart is invalid");
+    required(accounting.method === ACCOUNTING_METHOD, path + ".method is invalid");
+    required(
+      typeof accounting.detail === "string" &&
+      accounting.detail.length >= 1 &&
+      accounting.detail.length <= ACCOUNTING_DETAIL_MAX &&
+      /^[\x20-\x7e]+$/.test(accounting.detail),
+      path + ".detail must be 1-" + ACCOUNTING_DETAIL_MAX + " printable English characters"
+    );
+    return accounting;
+  }
+
+  function accountingPeriodLabel(accounting) {
+    var parts = accountingDate.formatToParts(new Date(accounting.periodStart));
+    var day = parts.find(function (part) { return part.type === "day"; });
+    var month = parts.find(function (part) { return part.type === "month"; });
+    var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return Number(day.value) + " " + monthNames[Number(month.value) - 1];
+  }
+
+  function accountingSinceLabel(desk) {
+    return desk.accounting ? "Since " + accountingPeriodLabel(desk.accounting) : "Since start";
+  }
+
+  function renderAccountingBasis(desk) {
+    if (!desk.accounting) { return null; }
+    var root = el("div", "desk-accounting");
+    var scope = desk.id === "j" ? "J + J2–J5" : desk.label;
+    root.appendChild(el("p", "desk-accounting-basis", scope + " · verified from " + accountingPeriodLabel(desk.accounting)));
+    root.appendChild(el("p", "desk-accounting-detail", desk.accounting.detail));
+    return root;
+  }
+
   function validate(data) {
     required(data && typeof data === "object", "data must be an object");
     required(data.schema === "inspr.joe.household.v1", "unknown schema");
@@ -166,6 +207,7 @@
       required(desk.money && typeof desk.money === "object", path + ".money is required");
       ["equity", "dayPnl", "totalPnl"].forEach(function (key) { finiteOrNull(desk.money[key], path + ".money." + key); });
       if (Object.prototype.hasOwnProperty.call(desk.money, "openPnl")) { finiteOrNull(desk.money.openPnl, path + ".money.openPnl"); }
+      if (Object.prototype.hasOwnProperty.call(desk, "accounting")) { validateAccounting(desk.accounting, path + ".accounting"); }
       required(Array.isArray(desk.issues), path + ".issues must be an array");
     });
     required(data.totals && typeof data.totals === "object", "totals are required");
@@ -1238,8 +1280,30 @@
     return null;
   }
 
+  function daysInMonth(year, month) {
+    if (month === 2) {
+      var leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+      return leap ? 29 : 28;
+    }
+    return [4, 6, 9, 11].includes(month) ? 30 : 31;
+  }
+
   function validIsoTimestamp(iso) {
-    return typeof iso === "string" && iso.length && !Number.isNaN(Date.parse(iso));
+    if (typeof iso !== "string" || !iso.length) { return false; }
+    var match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/.exec(iso);
+    if (!match) { return false; }
+    var year = Number(match[1]);
+    var month = Number(match[2]);
+    var day = Number(match[3]);
+    var hour = Number(match[4]);
+    var minute = Number(match[5]);
+    var second = Number(match[6]);
+    if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) { return false; }
+    if (hour > 23 || minute > 59 || second > 59) { return false; }
+    if (match[8] === "Z") { return true; }
+    var offsetHours = Number(match[10]);
+    var offsetMinutes = Number(match[11]);
+    return offsetHours <= 14 && offsetMinutes <= 59 && (offsetHours < 14 || offsetMinutes === 0);
   }
 
   function gatewayHeartbeatAge(data) {
@@ -1559,22 +1623,43 @@
     if (filtered.length < 2) {
       return { ok: false, reason: "insufficient-points" };
     }
-    var common = filtered.filter(function (point) {
-      return deskIds.every(function (deskId) {
+    var comparable = [];
+    var latestBreak = "incomplete-coverage";
+    filtered.forEach(function (point) {
+      var complete = deskIds.every(function (deskId) {
         var bag = seriesBag(point, deskId);
         return bag && Number.isFinite(bag.equity);
       });
+      if (!complete) {
+        comparable = [];
+        latestBreak = "incomplete-coverage";
+        return;
+      }
+      if (!comparable.length) {
+        comparable = [point];
+        return;
+      }
+      var previous = comparable[comparable.length - 1];
+      var basisChanged = deskIds.some(function (deskId) {
+        return !compatibleAccountingBasis(previous, point, deskId);
+      });
+      if (basisChanged) {
+        comparable = [point];
+        latestBreak = "incompatible-basis";
+        return;
+      }
+      comparable.push(point);
     });
-    if (common.length < 2) {
-      return { ok: false, reason: "incomplete-coverage", deskIds: deskIds.slice() };
+    if (comparable.length < 2) {
+      return { ok: false, reason: latestBreak, deskIds: deskIds.slice() };
     }
-    var startPoint = common[0];
-    var endPoint = common[common.length - 1];
+    var startPoint = comparable[0];
+    var endPoint = comparable[comparable.length - 1];
     return {
       ok: true,
       startAt: startPoint.t,
       endAt: endPoint.t,
-      pointCount: common.length,
+      pointCount: comparable.length,
       desks: deskIds.map(function (deskId) {
         var startEquity = seriesBag(startPoint, deskId).equity;
         var endEquity = seriesBag(endPoint, deskId).equity;
@@ -1623,6 +1708,8 @@
       node.hidden = false;
       if (result.reason === "incomplete-coverage") {
         node.textContent = "Shared compare needs the same timestamps for every selected desk in this range.";
+      } else if (result.reason === "incompatible-basis") {
+        node.textContent = "Shared compare needs at least two points with compatible accounting bases.";
       } else if (result.reason === "insufficient-points") {
         node.textContent = "Not enough history in this range for a shared compare.";
       } else {
@@ -1650,7 +1737,7 @@
     [
       ["Virt net · paper", desk.money.equity, false, "equity"],
       ["Day", desk.money.dayPnl, true, "day"],
-      ["Since start", desk.money.totalPnl, true, "since"],
+      [accountingSinceLabel(desk), desk.money.totalPnl, true, "since"],
       ["Open", desk.money.openPnl, true, "open"],
       ["Trades", Number.isFinite(desk.tradeCount) ? desk.tradeCount : null, false, "trades"]
     ].forEach(function (item) {
@@ -1668,6 +1755,8 @@
       moneyRow.appendChild(cellNode);
     });
     content.appendChild(moneyRow);
+    var accountingBasisNode = renderAccountingBasis(desk);
+    if (accountingBasisNode) { content.appendChild(accountingBasisNode); }
     var spark = el("div", "spark-wrap");
     var canvas = el("canvas");
     canvas.dataset.spark = desk.id;
@@ -1938,6 +2027,18 @@
     if (!point || typeof point !== "object") { return false; }
     if (typeof point.t !== "string" || !Number.isFinite(Date.parse(point.t))) { return false; }
     if (!point.desks || typeof point.desks !== "object") { return false; }
+    if (Object.prototype.hasOwnProperty.call(point, "accounting")) {
+      if (!point.accounting || typeof point.accounting !== "object" || Array.isArray(point.accounting)) { return false; }
+      var accountingIds = Object.keys(point.accounting);
+      if (accountingIds.some(function (deskId) { return !DESK_IDS.includes(deskId); })) { return false; }
+      try {
+        accountingIds.forEach(function (deskId) {
+          validateAccounting(point.accounting[deskId], "accounting." + deskId);
+        });
+      } catch (_) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -1992,13 +2093,34 @@
   }
 
   function sparklineSamples(points, range, deskId) {
-    return filterPoints(points, range).map(function (point) {
+    return basisAwareSeries(filterPoints(points, range), deskId);
+  }
+
+  function pointAccountingBasis(point, deskId) {
+    return point && point.accounting && point.accounting[deskId] ? point.accounting[deskId] : null;
+  }
+
+  function compatibleAccountingBasis(leftPoint, rightPoint, deskId) {
+    var left = pointAccountingBasis(leftPoint, deskId);
+    var right = pointAccountingBasis(rightPoint, deskId);
+    if (!left || !right) { return !left && !right; }
+    return left.periodStart === right.periodStart && left.method === right.method;
+  }
+
+  function basisAwareSeries(points, deskId) {
+    var samples = [];
+    points.forEach(function (point, index) {
       var bag = seriesBag(point, deskId);
-      return {
+      var sample = {
         x: Date.parse(point.t),
         y: bag && Number.isFinite(bag.equity) ? bag.equity : null
       };
+      if (index > 0 && !compatibleAccountingBasis(points[index - 1], point, deskId)) {
+        samples.push({ x: sample.x, y: null });
+      }
+      samples.push(sample);
     });
+    return samples;
   }
 
   function seriesBag(point, deskId) {
@@ -2126,13 +2248,7 @@
     }
     var points = filterPoints(historyState.points, historyState.range);
     var datasets = historyState.selected.map(function (deskId) {
-      var series = points.map(function (point) {
-        var bag = seriesBag(point, deskId);
-        return {
-          x: Date.parse(point.t),
-          y: bag && Number.isFinite(bag.equity) ? bag.equity : null
-        };
-      });
+      var series = basisAwareSeries(points, deskId);
       if (!series.some(function (sample) { return Number.isFinite(sample.y); })) { return null; }
       return {
         label: deskId === "j" ? "J" : deskId.charAt(0).toUpperCase() + deskId.slice(1),
@@ -2382,6 +2498,10 @@
     applyHistoryFetchResult: applyHistoryFetchResult,
     historyFailureMessage: historyFailureMessage,
     sparklineSamples: sparklineSamples,
+    basisAwareSeries: basisAwareSeries,
+    compatibleAccountingBasis: compatibleAccountingBasis,
+    accountingPeriodLabel: accountingPeriodLabel,
+    accountingSinceLabel: accountingSinceLabel,
     formatDeskLearningCopy: formatDeskLearningCopy,
     deskTrackFields: deskTrackFields,
     diffDeskToEvents: diffDeskToEvents,

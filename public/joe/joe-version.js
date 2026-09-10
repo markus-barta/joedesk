@@ -2,8 +2,19 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.6.1",
+    APP_VERSION: "0.7.0",
     VERSION_HISTORY: [
+      {
+        version: "0.7.0",
+        date: "2026-09-10",
+        title: "Verified reporting periods",
+        changes: [
+          "Desk figures show the verified reporting start date and supplied fee and currency basis.",
+          "J-family reporting identifies J + J2–J5 while keeping Joe and Joel separate.",
+          "History and comparisons keep earlier unverified results separate from the new reporting period.",
+          "Unavailable desk figures remain gaps in history while other desks continue updating.",
+        ],
+      },
       {
         version: "0.6.1",
         date: "2026-09-10",

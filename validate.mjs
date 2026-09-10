@@ -5,6 +5,9 @@ const STATES = new Set(["working", "sit-out", "stuck"]);
 const LEARNING = new Set(["learning", "iterating", "steady", "blocked"]);
 const GW = new Set(["ok", "degraded", "down"]);
 const SIDES = new Set(["Long", "Short", "long", "short"]);
+const ACCOUNTING_METHOD = "execution-fifo-net-current-fx";
+const ACCOUNTING_DETAIL_MAX = 240;
+const ACCOUNTING_KEYS = new Set(["periodStart", "method", "detail"]);
 const POSITION_KEYS = new Set([
   "desk",
   "symbol",
@@ -77,6 +80,30 @@ function moneyOk(m, path, errors) {
   }
   for (const k of Object.keys(m)) {
     if (!["equity", "dayPnl", "totalPnl"].includes(k)) errors.push(`${path} unknown key ${k}`);
+  }
+}
+
+function accountingOk(accounting, path, errors) {
+  if (!isObj(accounting)) {
+    errors.push(`${path} must be object`);
+    return;
+  }
+  for (const key of Object.keys(accounting)) {
+    if (!ACCOUNTING_KEYS.has(key)) errors.push(`${path} unknown key ${key}`);
+  }
+  if (!validIsoTimestamp(accounting.periodStart)) {
+    errors.push(`${path}.periodStart invalid`);
+  }
+  if (accounting.method !== ACCOUNTING_METHOD) {
+    errors.push(`${path}.method invalid`);
+  }
+  if (
+    typeof accounting.detail !== "string" ||
+    accounting.detail.length < 1 ||
+    accounting.detail.length > ACCOUNTING_DETAIL_MAX ||
+    !/^[\x20-\x7e]+$/.test(accounting.detail)
+  ) {
+    errors.push(`${path}.detail must be 1-${ACCOUNTING_DETAIL_MAX} printable English characters`);
   }
 }
 
@@ -183,6 +210,9 @@ export function validateHouseholdSnapshot(raw) {
       if (typeof d.action !== "string" || !d.action) errors.push(`${p}.action`);
       if (!isObj(d.learning) || !LEARNING.has(d.learning.status)) errors.push(`${p}.learning`);
       moneyOk(d.money, `${p}.money`, errors);
+      if (Object.prototype.hasOwnProperty.call(d, "accounting")) {
+        accountingOk(d.accounting, `${p}.accounting`, errors);
+      }
       if (!Array.isArray(d.issues)) errors.push(`${p}.issues array`);
       if (Object.prototype.hasOwnProperty.call(d, "positions")) {
         positionsArrayOk(d.positions, `${p}.positions`, d.id, errors);

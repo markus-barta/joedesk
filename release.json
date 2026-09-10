@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "legacy",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "release_channel": "stable",
-  "release_sequence": 5,
-  "note": "Canonicalizes the board at /joe/ with a query-preserving permanent redirect and an explicit document base. Retains paper-only behavior and JoeDesk SemVer lineage."
+  "release_sequence": 6,
+  "note": "Adds optional verified accounting periods, visible J-family reporting scope, and history/compare boundaries. Earlier unverified results remain separate; paper-only and JoeDesk SemVer lineage are retained."
 }

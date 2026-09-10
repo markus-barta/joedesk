@@ -107,9 +107,9 @@ function readHistory() {
 
 function moneyBag(bag) {
   if (!bag || typeof bag !== "object") {
-    return { equity: 0, dayPnl: 0, totalPnl: 0 };
+    return { equity: null, dayPnl: null, totalPnl: null };
   }
-  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   return {
     equity: num(bag.equity),
     dayPnl: num(bag.dayPnl),
@@ -117,24 +117,47 @@ function moneyBag(bag) {
   };
 }
 
+function accountingBasis(accounting) {
+  if (!accounting || typeof accounting !== "object") return null;
+  if (
+    typeof accounting.periodStart !== "string" ||
+    accounting.method !== "execution-fifo-net-current-fx" ||
+    typeof accounting.detail !== "string"
+  ) {
+    return null;
+  }
+  return {
+    periodStart: accounting.periodStart,
+    method: accounting.method,
+    detail: accounting.detail,
+  };
+}
+
 function historyPointFromSnapshot(snapshot) {
   const desks = {};
+  const accounting = {};
   const list = Array.isArray(snapshot.desks) ? snapshot.desks : [];
   for (const desk of list) {
     if (!desk || typeof desk.id !== "string" || !desk.id) continue;
     desks[desk.id] = moneyBag(desk.money);
+    const basis = accountingBasis(desk.accounting);
+    if (basis) accounting[desk.id] = basis;
   }
   // Also accept object-shaped desks (defensive; producers may evolve).
   if (!list.length && snapshot.desks && typeof snapshot.desks === "object") {
     for (const [id, desk] of Object.entries(snapshot.desks)) {
       desks[id] = moneyBag(desk && desk.money ? desk.money : desk);
+      const basis = accountingBasis(desk && desk.accounting);
+      if (basis) accounting[id] = basis;
     }
   }
-  return {
+  const point = {
     t: snapshot.generatedAt,
     desks,
     totals: moneyBag(snapshot.totals),
   };
+  if (Object.keys(accounting).length) point.accounting = accounting;
+  return point;
 }
 
 function pruneHistoryPoints(points, nowMs = Date.now()) {

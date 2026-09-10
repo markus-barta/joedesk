@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const joeSource = await readFile(resolve(repoRoot, "public/joe/joe.js"), "utf8");
+const serverSource = await readFile(resolve(repoRoot, "server.mjs"), "utf8");
 
 function extractJoeBlock(startMarker, endMarker) {
   const start = joeSource.indexOf(startMarker);
@@ -15,6 +16,7 @@ function extractJoeBlock(startMarker, endMarker) {
 const historyHelpers = `${extractJoeBlock("  var DESK_IDS = [", "\n  var DEFAULT_LAYOUT = [")}
   var number = new Intl.NumberFormat("de-AT", { maximumFractionDigits: 4 });
 ${extractJoeBlock("  function required(condition, message)", "\n\n  function amount(value, signed)")}
+${extractJoeBlock("  function daysInMonth(year, month)", "\n\n  function gatewayHeartbeatAge")}
 ${extractJoeBlock("  function historyRangeSpanMs(range)", "\n\n  function seriesBag(point, deskId)")}
 ${extractJoeBlock("  function seriesBag(point, deskId)", "\n\n  function destroyHistoryChart")}
 ${extractJoeBlock("  function formatPctChange(value)", "\n\n  function sharedWindowCompare(points, deskIds, range)")}
@@ -29,10 +31,24 @@ const api = new Function(`${historyHelpers}
     applyHistoryFetchResult,
     historyFailureMessage,
     sparklineSamples,
+    basisAwareSeries,
+    compatibleAccountingBasis,
     sharedWindowCompare,
     formatPctChange
   };
 `)();
+
+function extractServerBlock(startMarker, endMarker) {
+  const start = serverSource.indexOf(startMarker);
+  const end = serverSource.indexOf(endMarker, start);
+  if (start < 0 || end < 0) throw new Error(`${startMarker} missing from server.mjs`);
+  return serverSource.slice(start, end);
+}
+
+const historyPointFromSnapshot = new Function(
+  `${extractServerBlock("function moneyBag(bag)", "\nfunction pruneHistoryPoints")}
+   return historyPointFromSnapshot;`,
+)();
 
 const points = [
   {
@@ -185,6 +201,121 @@ if (api.formatPctChange(null) !== "—") {
   throw new Error("missing percent change must render as dash");
 }
 
+const accounting = {
+  periodStart: "2026-09-10T04:00:00Z",
+  method: "execution-fifo-net-current-fx",
+  detail: "Net of recorded fees; converted at observed FX. Earlier results unavailable."
+};
+const legacyServerPoint = historyPointFromSnapshot({
+  generatedAt: "2026-09-09T12:00:00Z",
+  desks: [{ id: "j", money: { equity: 100, dayPnl: 0, totalPnl: 0 } }],
+  totals: { equity: 100, dayPnl: 0, totalPnl: 0 }
+});
+if (Object.prototype.hasOwnProperty.call(legacyServerPoint, "accounting")) {
+  throw new Error("server must not add accounting to legacy history points");
+}
+const scopedServerPoint = historyPointFromSnapshot({
+  generatedAt: "2026-09-10T12:00:00Z",
+  desks: [
+    { id: "j", accounting, money: { equity: 50, dayPnl: 0, totalPnl: 0 } },
+    { id: "joe", money: { equity: 210, dayPnl: 2, totalPnl: 10 } },
+    { id: "joel", money: { equity: 310, dayPnl: 3, totalPnl: 20 } }
+  ],
+  totals: { equity: 570, dayPnl: 5, totalPnl: 30 }
+});
+if (JSON.stringify(scopedServerPoint.accounting) !== JSON.stringify({ j: accounting })) {
+  throw new Error("server history point must preserve J accounting basis");
+}
+const unavailableServerPoint = historyPointFromSnapshot({
+  generatedAt: "2026-09-10T13:00:00Z",
+  desks: [
+    { id: "j", accounting, money: { equity: null, dayPnl: null, totalPnl: null } },
+    { id: "joe", money: { equity: 211, dayPnl: 2, totalPnl: 11 } },
+    { id: "joel", money: { equity: 311, dayPnl: 3, totalPnl: 21 } }
+  ],
+  totals: { equity: null, dayPnl: null, totalPnl: null }
+});
+if (
+  unavailableServerPoint.desks.j.equity !== null ||
+  unavailableServerPoint.desks.j.totalPnl !== null ||
+  unavailableServerPoint.totals.equity !== null ||
+  unavailableServerPoint.desks.joe.equity !== 211 ||
+  unavailableServerPoint.desks.joel.equity !== 311
+) {
+  throw new Error("server history must retain J/totals null without altering Joe or Joel");
+}
+const restoredServerPoint = historyPointFromSnapshot({
+  generatedAt: "2026-09-10T14:00:00Z",
+  desks: [
+    { id: "j", accounting, money: { equity: 55, dayPnl: 1, totalPnl: 5 } },
+    { id: "joe", money: { equity: 212, dayPnl: 2, totalPnl: 12 } },
+    { id: "joel", money: { equity: 312, dayPnl: 3, totalPnl: 22 } }
+  ],
+  totals: { equity: 579, dayPnl: 6, totalPnl: 39 }
+});
+const unavailableWindow = [scopedServerPoint, unavailableServerPoint, restoredServerPoint];
+const unavailableJSeries = api.sparklineSamples(unavailableWindow, "all", "j");
+if (JSON.stringify(unavailableJSeries.map((sample) => sample.y)) !== JSON.stringify([50, null, 55])) {
+  throw new Error("J series must retain the explicit unavailable gap");
+}
+const uninterruptedJoeSeries = api.sparklineSamples(unavailableWindow, "all", "joe");
+if (JSON.stringify(uninterruptedJoeSeries.map((sample) => sample.y)) !== JSON.stringify([210, 211, 212])) {
+  throw new Error("Joe series must remain available through J's gap");
+}
+const gapCompare = api.sharedWindowCompare(unavailableWindow, ["j", "joe"], "all");
+if (gapCompare.ok || gapCompare.reason !== "incomplete-coverage") {
+  throw new Error("shared compare must not bridge J's unavailable history gap");
+}
+const unaffectedCompare = api.sharedWindowCompare(unavailableWindow, ["joe", "joel"], "all");
+if (!unaffectedCompare.ok || unaffectedCompare.pointCount !== 3) {
+  throw new Error("Joe/Joel compare must continue through J's unavailable history gap");
+}
+const transitionPoints = [
+  { t: "2026-09-09T12:00:00Z", desks: { j: { equity: 100 }, joe: { equity: 200 }, joel: { equity: 300 } } },
+  { t: "2026-09-10T12:00:00Z", desks: { j: { equity: 50 }, joe: { equity: 210 }, joel: { equity: 310 } }, accounting: { j: accounting } },
+  { t: "2026-09-11T12:00:00Z", desks: { j: { equity: 60 }, joe: { equity: 220 }, joel: { equity: 330 } }, accounting: { j: accounting } }
+];
+const transitionPayload = { schema: "inspr.joe.household.history.v1", points: transitionPoints };
+if (api.validateHistoryPayload(transitionPayload).length !== 3) {
+  throw new Error("history points with optional per-desk accounting must be accepted");
+}
+const brokenJ = api.sparklineSamples(transitionPoints, "all", "j");
+if (brokenJ.length !== 4 || brokenJ[1].y !== null || brokenJ[2].y !== 50) {
+  throw new Error("J sparkline must insert a gap at the legacy-to-verified boundary");
+}
+const unchangedJoe = api.sparklineSamples(transitionPoints, "all", "joe");
+if (unchangedJoe.length !== 3 || unchangedJoe.some((sample) => sample.y === null)) {
+  throw new Error("Joe sparkline must remain unchanged when only J accounting changes");
+}
+const scopedCompare = api.sharedWindowCompare(transitionPoints, ["j", "joe"], "all");
+if (!scopedCompare.ok || scopedCompare.startAt !== transitionPoints[1].t || scopedCompare.pointCount !== 2) {
+  throw new Error("J compare must begin at the newest compatible accounting window");
+}
+if (scopedCompare.desks[0].pctChange !== 20) {
+  throw new Error("J compare must not use legacy equity as the verified-period baseline");
+}
+const unchangedCompare = api.sharedWindowCompare(transitionPoints, ["joe", "joel"], "all");
+if (!unchangedCompare.ok || unchangedCompare.startAt !== transitionPoints[0].t || unchangedCompare.pointCount !== 3) {
+  throw new Error("Joe/Joel compare must remain unchanged by J's accounting transition");
+}
+const oneVerifiedPoint = api.sharedWindowCompare(transitionPoints.slice(0, 2), ["j", "joe"], "all");
+if (oneVerifiedPoint.ok || oneVerifiedPoint.reason !== "incompatible-basis") {
+  throw new Error("compare must not connect a legacy point to a lone verified point");
+}
+
+let malformedAccountingRejected = false;
+try {
+  api.validateHistoryPayload({
+    schema: "inspr.joe.household.history.v1",
+    points: [{ ...transitionPoints[1], accounting: { j: { ...accounting, periodStart: "2026-09-10" } } }]
+  });
+} catch {
+  malformedAccountingRejected = true;
+}
+if (!malformedAccountingRejected) {
+  throw new Error("malformed history accounting basis must be rejected");
+}
+
 console.log(JSON.stringify({
   ok: true,
   checks: [
@@ -201,6 +332,19 @@ console.log(JSON.stringify({
     "range-aware-sparklines",
     "shared-window-percent-compare",
     "incomplete-coverage-honest",
-    "zero-baseline-honest"
+    "zero-baseline-honest",
+    "legacy-server-history-unchanged",
+    "server-history-persists-accounting",
+    "server-history-preserves-null",
+    "j-unavailable-series-gap",
+    "j-gap-compare-blocked",
+    "joe-joel-gap-unaffected",
+    "accounting-history-optional",
+    "j-basis-boundary-gap",
+    "joe-series-unchanged",
+    "compatible-basis-compare",
+    "joe-joel-compare-unchanged",
+    "legacy-vs-verified-compare-blocked",
+    "malformed-history-accounting-rejected"
   ]
 }, null, 2));
