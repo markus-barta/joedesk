@@ -179,6 +179,7 @@ button { color: inherit; }
 .positions-head { justify-content: space-between; gap: 12px; padding: 9px 12px; }
 .table-scroll { width: 100%; min-width: 0; max-width: 100%; flex: 1 1 auto; overflow-x: auto; overflow-y: auto; border-top: 1px solid var(--line); scrollbar-color: var(--line) transparent; }
 table { width: 100%; min-width: 780px; border-collapse: collapse; font: 11px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.positions-table-empty { min-width: 0; white-space: normal; }
 th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; }
 th { position: sticky; top: 0; z-index: 1; color: var(--quiet); background: var(--ink-2); font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
 td.number, th.number { text-align: right; }

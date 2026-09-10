@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const joeSource = await readFile(resolve(repoRoot, "public/joe/joe.js"), "utf8");
+const cssSource = await readFile(resolve(repoRoot, "public/joe/joe.css"), "utf8");
+const htmlSource = await readFile(resolve(repoRoot, "public/joe/index.html"), "utf8");
 const sample = JSON.parse(await readFile(resolve(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"));
 
 function extractJoeBlock(startMarker, endMarker) {
@@ -156,9 +158,26 @@ if (!haltProblems.some((problem) => /HALT/.test(problem))) {
   throw new Error("snapshotProblems must retain HALT even when snapshot age is fresh");
 }
 
+if (/attributionNote\.textContent\s*=\s*"Day P&L is not available yet; attribution/.test(joeSource)) {
+  throw new Error("labelPaperCapital must not duplicate attribution unavailable copy");
+}
+const attributionBodyHtml = htmlSource.match(/attribution-body[\s\S]*?<div id="attribution"/);
+if (attributionBodyHtml && /<p class="widget-note">/.test(attributionBodyHtml[0])) {
+  throw new Error("attribution tile must not keep a static note above the dynamic body");
+}
+if (/\+ "snapshot " \+ ageLabel\(snapshotAge\)/.test(joeSource)) {
+  throw new Error("hero freshness value must not repeat snapshot in the value cell");
+}
+if (!/table\.positions-table-empty/.test(cssSource)) {
+  throw new Error("positions empty table must drop the wide min-width");
+}
+if (!/syncPositionsTableLayout/.test(joeSource) || !/positions-table-empty/.test(joeSource)) {
+  throw new Error("renderPositions must toggle the empty positions table layout");
+}
+
 console.log(JSON.stringify({
   ok: true,
-  checks: 18,
+  checks: 23,
   positionsPartial: api.positionsAvailability(oneDeskEmptyValidated),
   dayPnl: api.dayPnlDisplayValue(validated, 0),
 }, null, 2));

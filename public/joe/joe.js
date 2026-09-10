@@ -772,7 +772,6 @@
     var clean = sanitizeLayoutItems(items, desktopColumnCount());
     if (!clean) { return false; }
     if (isNarrowGridViewport()) {
-      restoringLayout = true;
       persistDesktopItems(clean);
       loadNarrowGridLayout(clean);
     } else {
@@ -1187,10 +1186,6 @@
     if (heroLabels[1]) { heroLabels[1].textContent = "Day"; }
     if (heroLabels[2]) { heroLabels[2].textContent = "Open"; }
     if (heroLabels[3]) { heroLabels[3].textContent = "Snapshot age"; }
-    var attributionNote = document.querySelector(".attribution-body .widget-note");
-    if (attributionNote) {
-      attributionNote.textContent = "Day P&L is not available yet; attribution will appear when it is.";
-    }
   }
 
   function deskFreshnessFooter(desk, snapshotAge, snapshotStale, gatewayDown, staleAfterSeconds) {
@@ -1209,7 +1204,7 @@
 
   function updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale) {
     var freshValue = document.getElementById("freshValue");
-    freshValue.textContent = (snapshotStale ? "STALE · " : "Fresh · ") + "snapshot " + ageLabel(snapshotAge);
+    freshValue.textContent = (snapshotStale ? "STALE · " : "Fresh · ") + ageLabel(snapshotAge);
     freshValue.className = snapshotStale ? "negative" : "positive";
     var gateway = data.safety.gateway;
     var gatewayAge = gatewayHeartbeatAge(data);
@@ -1245,9 +1240,9 @@
           badgeEl.remove();
         }
       } else if (offline || stale) {
-        var footer = slot.querySelector(".desk-footer");
-        if (footer) {
-          footer.appendChild(el("span", "status-badge " + (offline ? "offline" : "stale"), offline ? "Offline" : "Stale"));
+        var footerSlot = slot.querySelector(".desk-footer");
+        if (footerSlot) {
+          footerSlot.appendChild(el("span", "status-badge " + (offline ? "offline" : "stale"), offline ? "Offline" : "Stale"));
         }
       }
     });
@@ -1426,6 +1421,14 @@
     return "No positions for this desk.";
   }
 
+  function syncPositionsTableLayout() {
+    var table = document.querySelector(".positions-widget table");
+    var body = document.getElementById("positionsBody");
+    if (!table || !body) { return; }
+    var onlyEmpty = body.children.length === 1 && body.querySelector("td.empty-cell");
+    table.classList.toggle("positions-table-empty", Boolean(onlyEmpty));
+  }
+
   function renderPositions(data) {
     var all = collectPositions(data);
     var positions = positionFilter === "all" ? all : all.filter(function (position) { return position.desk === positionFilter; });
@@ -1437,6 +1440,7 @@
       row.appendChild(cell(emptyMessage, "empty-cell"));
       row.firstChild.colSpan = 9;
       body.replaceChildren(row);
+      syncPositionsTableLayout();
       return;
     }
     body.replaceChildren.apply(body, positions.map(function (position) {
@@ -1455,6 +1459,7 @@
       row.appendChild(cell(position.updatedAt && Number.isFinite(Date.parse(position.updatedAt)) ? shortTime.format(new Date(position.updatedAt)) : "—"));
       return row;
     }));
+    syncPositionsTableLayout();
   }
 
   function render(data) {
@@ -1513,6 +1518,7 @@
     emptyPositionsCell.colSpan = 9;
     emptyPositionsRow.appendChild(emptyPositionsCell);
     document.getElementById("positionsBody").replaceChildren(emptyPositionsRow);
+    syncPositionsTableLayout();
     labelPaperCapital();
     document.documentElement.dataset.joeState = "broken";
   }
