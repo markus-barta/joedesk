@@ -16,7 +16,9 @@ function extractJoeBlock(startMarker, endMarker) {
 }
 
 const trustHelpers = `${extractJoeBlock("  var DESK_IDS = [", "\n  var DEFAULT_LAYOUT = [")}
+  var accountingDate = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "numeric", timeZone: "America/New_York" });
 ${extractJoeBlock("  function required(condition, message)", "\n\n  function amount(value, signed)")}
+${extractJoeBlock("  function el(tag, className, text)", "\n\n  function endpoint")}
 ${extractJoeBlock("  function ageInSeconds(iso)", "\n\n  function openPnl(data)")}
 ${extractJoeBlock("  // HOSTD-33 / Wave D: Day P&L stays unavailable", "\n\n  function labelPaperCapital()")}
 ${extractJoeBlock("  function deskFreshnessFooter(desk, snapshotAge", "\n\n  function updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale)")}
@@ -25,9 +27,27 @@ ${extractJoeBlock("  function deskPositionsCoverage(deskId, data)", "\n\n  funct
 ${extractJoeBlock("  function positionsAvailability(data)", "\n\n  function positionsSummaryText(data)")}
 ${extractJoeBlock("  function positionsEmptyMessage(data, filterDesk)", "\n\n  function renderPositions(data)")}`;
 
-const api = new Function(`${trustHelpers}
+const createdTags = [];
+const fakeDocument = {
+  createElement(tag) {
+    createdTags.push(tag);
+    return {
+      tag,
+      className: "",
+      children: [],
+      textContent: "",
+      appendChild(child) { this.children.push(child); return child; },
+    };
+  },
+};
+
+const api = new Function("document", `${trustHelpers}
   return {
     validate,
+    validateAccounting,
+    accountingPeriodLabel,
+    accountingSinceLabel,
+    renderAccountingBasis,
     dayPnlDisplayValue,
     deskPositionsCoverage,
     positionsAvailability,
@@ -40,7 +60,7 @@ const api = new Function(`${trustHelpers}
     ageInSeconds,
     ageLabel
   };
-`)();
+`)(fakeDocument);
 
 const validated = api.validate(structuredClone(sample));
 if (api.dayPnlDisplayValue(validated, validated.totals.dayPnl) !== null) {
@@ -48,6 +68,40 @@ if (api.dayPnlDisplayValue(validated, validated.totals.dayPnl) !== null) {
 }
 if (api.positionsAvailability(validated) !== "absent") {
   throw new Error("sample without positions keys must be absent");
+}
+if (api.accountingSinceLabel(validated.desks[0]) !== "Since start") {
+  throw new Error("legacy desk must retain Since start label");
+}
+
+const accountingSnapshot = structuredClone(sample);
+accountingSnapshot.desks[0].accounting = {
+  periodStart: "2026-09-10T04:00:00Z",
+  method: "execution-fifo-net-current-fx",
+  detail: "<img src=x onerror=globalThis.accountingInjected=true>",
+};
+const accountingValidated = api.validate(accountingSnapshot);
+if (api.accountingSinceLabel(accountingValidated.desks[0]) !== "Since 10 Sep") {
+  throw new Error("accounting period label must derive Sep 10 in New York from periodStart");
+}
+const basisNode = api.renderAccountingBasis(accountingValidated.desks[0]);
+if (
+  basisNode.children[0].textContent !== "J + J2–J5 · verified from 10 Sep" ||
+  basisNode.children[1].textContent !== accountingSnapshot.desks[0].accounting.detail ||
+  createdTags.includes("img") || createdTags.includes("script") || globalThis.accountingInjected
+) {
+  throw new Error("accounting detail must render as literal text without markup execution");
+}
+
+const malformedAccounting = structuredClone(accountingSnapshot);
+malformedAccounting.desks[0].accounting.periodStart = "2026-09-10";
+let malformedAccountingRejected = false;
+try {
+  api.validate(malformedAccounting);
+} catch {
+  malformedAccountingRejected = true;
+}
+if (!malformedAccountingRejected) {
+  throw new Error("client validator must reject invalid accounting periodStart");
 }
 
 const nullTop = api.validate(Object.assign(structuredClone(sample), { positions: null }));

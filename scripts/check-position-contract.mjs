@@ -96,6 +96,36 @@ assertFail(openPnlTotals, /totals unknown key openPnl/, "money.openPnl remains r
 
 assertOk(structuredClone(sample), "legacy snapshot without positions keys");
 
+const accounting = {
+  periodStart: "2026-09-10T04:00:00Z",
+  method: "execution-fifo-net-current-fx",
+  detail: "Net of recorded fees; converted at observed FX. Earlier results unavailable.",
+};
+const scopedAccounting = structuredClone(sample);
+scopedAccounting.desks[0].accounting = accounting;
+assertOk(scopedAccounting, "desk with bounded accounting basis");
+
+for (const [field, value, pattern] of [
+  ["periodStart", "2026-09-10", /periodStart invalid/],
+  ["periodStart", "2026-02-30T04:00:00Z", /periodStart invalid/],
+  ["method", "average-cost", /method invalid/],
+  ["detail", "", /detail must be/],
+  ["detail", "x".repeat(241), /detail must be/],
+  ["detail", "Observed FX €", /detail must be/],
+]) {
+  const invalidAccounting = structuredClone(scopedAccounting);
+  invalidAccounting.desks[0].accounting[field] = value;
+  assertFail(invalidAccounting, pattern, `accounting ${field}:${JSON.stringify(value).slice(0, 30)}`);
+}
+
+const accountingUnknownKey = structuredClone(scopedAccounting);
+accountingUnknownKey.desks[0].accounting.source = "unbounded";
+assertFail(accountingUnknownKey, /accounting unknown key source/, "accounting unknown key rejected");
+
+const accountingInMoney = structuredClone(sample);
+accountingInMoney.desks[0].money.accounting = accounting;
+assertFail(accountingInMoney, /money unknown key accounting/, "accounting stays outside money");
+
 const syntheticPerDesk = structuredClone(sample);
 syntheticPerDesk.source.label = "Synthetic position contract fixture";
 syntheticPerDesk.desks[0].positions = [
@@ -242,10 +272,11 @@ console.log(
   JSON.stringify(
     {
       ok: true,
-      checks: 30,
+      checks: 39,
       note: "Synthetic fixtures only — not live broker evidence",
       accepted: {
         legacy: true,
+        accounting: true,
         syntheticPerDesk: true,
         syntheticTopLevel: true,
         completeEmptyTop: true,

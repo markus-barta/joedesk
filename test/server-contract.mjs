@@ -249,7 +249,7 @@ describe("server contract", () => {
     assert.ok(Array.isArray(res.body.errors));
   });
 
-  test("POST /joe/inbox stores valid snapshot in ephemeral tmpfs", async () => {
+  test("POST /joe/inbox stores legacy and accounting-scoped snapshots in ephemeral tmpfs", async () => {
     assertServerAlive();
     const sample = JSON.parse(
       await readFile(join(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"),
@@ -281,6 +281,28 @@ describe("server contract", () => {
     assert.equal(history.body.schema, "inspr.joe.household.history.v1");
     assert.ok(history.body.points.length >= 1);
     assert.equal(history.body.points.at(-1).t, sample.generatedAt);
+    assert.equal(history.body.points.at(-1).accounting, undefined);
+
+    const scoped = structuredClone(sample);
+    scoped.generatedAt = new Date(Date.parse(sample.generatedAt) + 1000).toISOString();
+    scoped.desks[0].accounting = {
+      periodStart: "2026-09-10T04:00:00Z",
+      method: "execution-fifo-net-current-fx",
+      detail: "Net of recorded fees; converted at observed FX. Earlier results unavailable.",
+    };
+    const scopedPush = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(scoped),
+    });
+    assert.equal(scopedPush.status, 200);
+    const scopedHistory = await jsonFetch("/joe/history.json");
+    assert.deepEqual(scopedHistory.body.points.at(-1).accounting, {
+      j: scoped.desks[0].accounting,
+    });
 
     const dirEntries = await readdir(DATA_DIR);
     assert.ok(dirEntries.includes("data.json"));

@@ -26,6 +26,16 @@ position detail. Position rows accept desk, symbol, side, quantity, mark,
 market value, day/open PnL, update time, and the frozen optional extensions
 `currency` and `accountingScope`.
 
+A desk may also carry an `accounting` object beside (not inside) `money` with
+all three fields: RFC 3339 `periodStart`, method
+`execution-fifo-net-current-fx`, and a 1–240 character printable-English
+`detail`. Its presence means that desk's total PnL is scoped to that verified
+period and method; absence retains the legacy since-start meaning. For J, the
+current producer period begins at `2026-09-10T04:00:00Z` (10 September in New
+York), combines J and J2–J5, deducts recorded commissions, and converts using
+explicit observed FX. Unverified 2–3 September records are excluded rather
+than described as losses or lifetime performance.
+
 ### Position coverage semantics
 
 Position detail is optional at every level. A missing `positions` key means

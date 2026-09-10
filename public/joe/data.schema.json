@@ -63,6 +63,21 @@
         "openPnl": { "type": ["number", "null"] }
       }
     },
+    "accounting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["periodStart", "method", "detail"],
+      "properties": {
+        "periodStart": { "type": "string", "format": "date-time" },
+        "method": { "const": "execution-fifo-net-current-fx" },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 240,
+          "pattern": "^[ -~]+$"
+        }
+      }
+    },
     "position": {
       "type": "object",
       "additionalProperties": false,
@@ -103,6 +118,7 @@
           }
         },
         "money": { "$ref": "#/$defs/money" },
+        "accounting": { "$ref": "#/$defs/accounting" },
         "heartbeatAt": { "type": ["string", "null"], "format": "date-time" },
         "updatedAt": { "type": ["string", "null"], "format": "date-time" },
         "tradeCount": { "type": ["integer", "null"], "minimum": 0 },
