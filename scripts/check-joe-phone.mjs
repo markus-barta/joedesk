@@ -17,15 +17,20 @@ const phoneHelpers = `${extractJoeBlock("  var DEFAULT_LAYOUT = [", "\n  var sta
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
 ${extractJoeBlock("  function layoutCoordinate", "\n\n  function safeStoredLayout")}
 ${extractJoeBlock("  var NARROW_BREAKPOINT = 700", "  var SUPPORTED_COLUMNS = [3, 6, 12];")}
-${extractJoeBlock("  function narrowTileHeight", "\n\n  function narrowLayoutFromItems")}
+${extractJoeBlock("  function narrowGridTilePixels", "\n\n  function narrowLayoutFromItems")}
 ${extractJoeBlock("  function narrowLayoutFromItems", "\n\n  function rememberDesktopLayout")}`;
 
 const api = new Function(`${phoneHelpers}
   return {
     NARROW_BREAKPOINT,
     NARROW_TILE_MIN_ROWS,
+    NARROW_TILE_MIN_PIXELS,
+    NARROW_WIDGET_DRAG_PX,
     sanitizeLayoutItems,
     sanitizeGridSettings,
+    narrowGridTilePixels,
+    narrowRowsForOuterPixels,
+    narrowOuterPixelsForContent,
     narrowTileHeight,
     narrowLayoutFromItems
   };
@@ -57,13 +62,22 @@ function layoutTilesOverlap(items) {
   return false;
 }
 
-function estimatedTilePixels(item, settings) {
-  const h = api.narrowTileHeight(item.id, settings);
-  const clean = api.sanitizeGridSettings(settings);
-  return h * (clean.cellHeight + clean.tileGap);
+function innerPixelsForTile(item, settings) {
+  const outer = api.narrowGridTilePixels(item.h, settings);
+  const chrome = item.id === "hero"
+    ? settings.tilePadding * 2
+    : settings.tilePadding * 2 + api.NARROW_WIDGET_DRAG_PX;
+  return outer - chrome;
 }
 
 if (api.NARROW_BREAKPOINT !== 700) throw new Error("narrow breakpoint must stay at 700");
+
+if (api.narrowGridTilePixels(5, defaultSettings) !== 5 * 82 + 4 * 10) {
+  throw new Error("narrow grid pitch must use cellHeight rows plus tileGap margins");
+}
+if (api.narrowGridTilePixels(1, compactSettings) !== 48) {
+  throw new Error("single-row narrow tile must equal cellHeight");
+}
 
 const narrow = api.narrowLayoutFromItems(sample, defaultSettings);
 if (!narrow || narrow.length !== sample.length) throw new Error("narrow layout must keep every tile");
@@ -73,17 +87,23 @@ if (narrow[0].id !== "hero" || narrow[0].h !== api.NARROW_TILE_MIN_ROWS.hero) {
   throw new Error("hero must lead narrow stack at default row height");
 }
 
-const compact = api.narrowLayoutFromItems(sample, compactSettings);
 const defaultDesk = narrow.find((item) => item.id === "desk-j");
+const compact = api.narrowLayoutFromItems(sample, compactSettings);
 const compactDesk = compact.find((item) => item.id === "desk-j");
+if (!defaultDesk || defaultDesk.h !== 6) {
+  throw new Error("82px desk tiles must allocate six rows for measured phone content");
+}
 if (!compactDesk || compactDesk.h <= defaultDesk.h) {
   throw new Error("48px cell height must increase narrow desk row count");
 }
+if (compactDesk.h !== 9) {
+  throw new Error("48px desk tiles must allocate nine rows for measured phone content");
+}
 
 for (const item of compact) {
-  const minPixels = item.id.startsWith("desk-") ? 300 : item.id === "hero" ? 230 : item.id === "history" ? 320 : 180;
-  if (estimatedTilePixels(item, compactSettings) < minPixels - 1) {
-    throw new Error(`narrow tile ${item.id} under minimum safe height at 48px cells`);
+  const minInner = item.id.startsWith("desk-") ? 439 : item.id === "hero" ? 215 : item.id === "history" ? 320 : 180;
+  if (innerPixelsForTile(item, compactSettings) < minInner - 1) {
+    throw new Error(`narrow tile ${item.id} under measured inner height at 48px cells`);
   }
 }
 
@@ -101,9 +121,14 @@ for (const item of narrow) {
 
 if (!api.sanitizeLayoutItems(narrow, 1)) throw new Error("narrow layout must sanitize at one column");
 
+const deskOuter = api.narrowOuterPixelsForContent("desk-j", api.NARROW_TILE_MIN_PIXELS["desk-j"], defaultSettings);
+if (api.narrowRowsForOuterPixels(deskOuter, defaultSettings) !== defaultDesk.h) {
+  throw new Error("narrow row solver must match desk tile height at 82px cells");
+}
+
 console.log(JSON.stringify({
   ok: true,
-  checks: 10,
+  checks: 14,
   narrowBreakpoint: api.NARROW_BREAKPOINT,
   defaultDeskRows: defaultDesk.h,
   compactDeskRows: compactDesk.h,

@@ -54,14 +54,16 @@
     positions: 7
   };
   var NARROW_TILE_MIN_PIXELS = {
-    hero: 230,
-    "desk-j": 300,
-    "desk-joe": 300,
-    "desk-joel": 300,
+    hero: 215,
+    "desk-j": 439,
+    "desk-joe": 439,
+    "desk-joel": 439,
     attribution: 190,
     history: 320,
     positions: 290
   };
+  var NARROW_WIDGET_DRAG_PX = 31;
+  var NARROW_FIT_MAX_PASSES = 3;
   var SUPPORTED_COLUMNS = [3, 6, 12];
   var THEME_MODES = ["light", "dark", "system"];
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
@@ -83,6 +85,7 @@
   var grid = null;
   var restoringLayout = false;
   var narrowGridActive = false;
+  var narrowFitFrame = 0;
   var cachedDesktopLayout = null;
   var latestSnapshot = null;
   var lastValidSnapshot = null;
@@ -215,14 +218,101 @@
     };
   }
 
+  function narrowGridTilePixels(rows, settings) {
+    var clean = sanitizeGridSettings(settings);
+    if (!Number.isFinite(rows) || rows <= 0) { return 0; }
+    return rows * clean.cellHeight + (rows - 1) * clean.tileGap;
+  }
+
+  function narrowRowsForOuterPixels(outerPixels, settings) {
+    var clean = sanitizeGridSettings(settings);
+    var needed = Math.max(0, Math.ceil(outerPixels));
+    var rows = 1;
+    while (rows < 48 && narrowGridTilePixels(rows, clean) < needed) {
+      rows += 1;
+    }
+    return rows;
+  }
+
+  function narrowChromeForTile(id, settings) {
+    var pad = sanitizeGridSettings(settings).tilePadding * 2;
+    if (id === "hero") { return pad; }
+    return pad + NARROW_WIDGET_DRAG_PX;
+  }
+
+  function narrowOuterPixelsForContent(id, contentPixels, settings) {
+    return Math.ceil(contentPixels) + narrowChromeForTile(id, settings);
+  }
+
+  function narrowMeasureElement(itemEl, id) {
+    if (!itemEl) { return null; }
+    if (id.indexOf("desk-") === 0) { return itemEl.querySelector(".desk-slot"); }
+    if (id === "hero") { return itemEl.querySelector(".hero-widget"); }
+    if (id === "attribution") { return itemEl.querySelector(".widget-body"); }
+    if (id === "history") { return itemEl.querySelector(".history-widget"); }
+    if (id === "positions") { return itemEl.querySelector(".positions-widget"); }
+    return itemEl.querySelector(".grid-stack-item-content");
+  }
+
   function narrowTileHeight(id, settings) {
     var clean = sanitizeGridSettings(settings);
     var baseRows = NARROW_TILE_MIN_ROWS[id] || 4;
-    var defaultRowPixels = DEFAULT_GRID_SETTINGS.cellHeight + DEFAULT_GRID_SETTINGS.tileGap;
-    var minPixels = NARROW_TILE_MIN_PIXELS[id] || baseRows * defaultRowPixels;
-    var rowPixels = clean.cellHeight + clean.tileGap;
-    var scaledRows = Math.ceil(minPixels / rowPixels);
-    return Math.max(baseRows, scaledRows);
+    var minContent = NARROW_TILE_MIN_PIXELS[id] || narrowGridTilePixels(baseRows, clean) - narrowChromeForTile(id, clean);
+    var outerPixels = narrowOuterPixelsForContent(id, minContent, clean);
+    return Math.max(baseRows, narrowRowsForOuterPixels(outerPixels, clean));
+  }
+
+  function scheduleNarrowFit(pass) {
+    if (!grid || !isNarrowGridViewport()) { return; }
+    var nextPass = pass || 0;
+    if (nextPass >= NARROW_FIT_MAX_PASSES) { return; }
+    if (narrowFitFrame) { cancelAnimationFrame(narrowFitFrame); }
+    narrowFitFrame = requestAnimationFrame(function () {
+      narrowFitFrame = 0;
+      fitNarrowLayoutToContent(nextPass);
+    });
+  }
+
+  function fitNarrowLayoutToContent(pass) {
+    if (!grid || !isNarrowGridViewport() || restoringLayout) { return false; }
+    var settings = activeGridSettings;
+    var nodes = grid.engine && grid.engine.nodes ? grid.engine.nodes.slice() : [];
+    if (!nodes.length) { return false; }
+    var items = nodes.map(function (node) {
+      return { id: node.id, x: node.x, y: node.y, w: node.w, h: node.h };
+    }).sort(function (a, b) {
+      if (a.y !== b.y) { return a.y - b.y; }
+      return a.x - b.x;
+    });
+    var changed = false;
+    items = items.map(function (item) {
+      var itemEl = document.querySelector('#joeGrid [gs-id="' + item.id + '"]');
+      var measureEl = narrowMeasureElement(itemEl, item.id);
+      var contentPixels = measureEl ? Math.ceil(measureEl.scrollHeight) : 0;
+      var minContent = NARROW_TILE_MIN_PIXELS[item.id] || 0;
+      if (contentPixels < minContent) { contentPixels = minContent; }
+      var needRows = Math.max(
+        NARROW_TILE_MIN_ROWS[item.id] || 4,
+        narrowRowsForOuterPixels(narrowOuterPixelsForContent(item.id, contentPixels, settings), settings)
+      );
+      if (needRows > item.h) {
+        changed = true;
+        return Object.assign({}, item, { h: needRows });
+      }
+      return item;
+    });
+    if (!changed) { return false; }
+    var y = 0;
+    var stacked = items.map(function (item) {
+      var next = { id: item.id, x: 0, y: y, w: 1, h: item.h };
+      y += next.h;
+      return next;
+    });
+    restoringLayout = true;
+    grid.load(stacked, false);
+    restoringLayout = false;
+    if ((pass || 0) + 1 < NARROW_FIT_MAX_PASSES) { scheduleNarrowFit((pass || 0) + 1); }
+    return true;
   }
 
   function narrowLayoutFromItems(items, settings) {
@@ -274,6 +364,7 @@
     if (typeof grid.checkDynamicColumn === "function") { grid.checkDynamicColumn(); }
     grid.load(narrowItems, false);
     restoringLayout = false;
+    scheduleNarrowFit(0);
     return true;
   }
 
@@ -1334,6 +1425,7 @@
     labelPaperCapital();
     document.getElementById("sourceLine").textContent = "Source: " + (data.source && data.source.label ? data.source.label : "book.json projection") + " · paper projection";
     drawSparklines();
+    if (isNarrowGridViewport()) { scheduleNarrowFit(0); }
   }
 
   function renderNoData(error) {
@@ -1598,6 +1690,7 @@
         historyState.chart.resize(Math.max(1, Math.floor(wrap.clientWidth)), Math.max(1, Math.floor(wrap.clientHeight)));
       }
       drawSparklines();
+      if (isNarrowGridViewport()) { scheduleNarrowFit(0); }
     });
   }
 
@@ -1709,6 +1802,9 @@
     layoutItemsFromGrid: layoutItemsFromGrid,
     positionHeaderMenus: positionHeaderMenus,
     narrowBreakpoint: NARROW_BREAKPOINT,
+    narrowGridTilePixels: narrowGridTilePixels,
+    narrowRowsForOuterPixels: narrowRowsForOuterPixels,
+    narrowOuterPixelsForContent: narrowOuterPixelsForContent,
     narrowTileHeight: narrowTileHeight,
     narrowLayoutFromItems: narrowLayoutFromItems,
     isNarrowGridViewport: isNarrowGridViewport,
