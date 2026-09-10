@@ -1,0 +1,15 @@
+{
+  "name": "joedesk",
+  "version": "0.4.0",
+  "description": "JoeDesk paper-trading dashboard and inbox server",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "node scripts/check-package.mjs && node scripts/check-joe-layout.mjs",
+    "test": "node scripts/run-server-contract.mjs",
+    "start": "node server.mjs"
+  }
+}

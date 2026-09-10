@@ -1,0 +1,8 @@
+{
+  "product": "JoeDesk",
+  "version_scheme": "legacy",
+  "version": "0.4.0",
+  "release_channel": "stable",
+  "release_sequence": 1,
+  "note": "Independent repository release; retains the existing Joe board SemVer lineage. No calendar migration."
+}

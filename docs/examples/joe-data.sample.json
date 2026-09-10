@@ -1,0 +1,84 @@
+{
+  "schema": "inspr.joe.household.v1",
+  "generatedAt": "2026-09-08T08:00:00+02:00",
+  "mode": "PAPER",
+  "currency": "EUR",
+  "source": {
+    "label": "Synthetic book.json projection",
+    "revision": "sample-only"
+  },
+  "safety": {
+    "halt": false,
+    "haltReason": null,
+    "staleAfterSeconds": 300,
+    "gateway": {
+      "status": "ok",
+      "detail": "Paper gateway is answering",
+      "lastSeenAt": "2026-09-08T08:00:00+02:00"
+    }
+  },
+  "desks": [
+    {
+      "id": "j",
+      "label": "J",
+      "state": "working",
+      "stateSince": "2026-09-08T07:40:00+02:00",
+      "action": "Watching the opening range; no order is waiting.",
+      "learning": {
+        "status": "iterating",
+        "headline": "Testing a smaller first position",
+        "detail": "Iteration 18 compares a half-size entry with yesterday's rule.",
+        "iteration": 18
+      },
+      "money": {
+        "equity": 10000,
+        "dayPnl": 24.5,
+        "totalPnl": 134.25
+      },
+      "issues": []
+    },
+    {
+      "id": "joe",
+      "label": "Joe",
+      "state": "sit-out",
+      "stateSince": "2026-09-08T07:55:00+02:00",
+      "action": "The setup is not clean enough, so Joe is sitting out.",
+      "learning": {
+        "status": "learning",
+        "headline": "Recording why the trade was skipped",
+        "detail": "The next review checks whether the same warning appears again.",
+        "iteration": 7
+      },
+      "money": {
+        "equity": 10000,
+        "dayPnl": 0,
+        "totalPnl": -42
+      },
+      "issues": []
+    },
+    {
+      "id": "joel",
+      "label": "Joel",
+      "state": "working",
+      "stateSince": "2026-09-08T07:30:00+02:00",
+      "action": "Holding the long paper position; no change is planned.",
+      "learning": {
+        "status": "steady",
+        "headline": "Rule unchanged",
+        "detail": "Joel is measuring patience, not searching for a new entry.",
+        "iteration": 31
+      },
+      "money": {
+        "equity": 10000,
+        "dayPnl": -8.75,
+        "totalPnl": 251.5
+      },
+      "issues": []
+    }
+  ],
+  "totals": {
+    "equity": 30000,
+    "dayPnl": 15.75,
+    "totalPnl": 343.75
+  }
+}
