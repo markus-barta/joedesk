@@ -13,9 +13,12 @@ function extractJoeBlock(startMarker, endMarker) {
 }
 
 const historyHelpers = `${extractJoeBlock("  var DESK_IDS = [", "\n  var DEFAULT_LAYOUT = [")}
+  var number = new Intl.NumberFormat("de-AT", { maximumFractionDigits: 4 });
 ${extractJoeBlock("  function required(condition, message)", "\n\n  function amount(value, signed)")}
 ${extractJoeBlock("  function historyRangeSpanMs(range)", "\n\n  function seriesBag(point, deskId)")}
-${extractJoeBlock("  function seriesBag(point, deskId)", "\n\n  function destroyHistoryChart")}`;
+${extractJoeBlock("  function seriesBag(point, deskId)", "\n\n  function destroyHistoryChart")}
+${extractJoeBlock("  function formatPctChange(value)", "\n\n  function sharedWindowCompare(points, deskIds, range)")}
+${extractJoeBlock("  function sharedWindowCompare(points, deskIds, range)", "\n\n  function deskDisplayName(deskId)")}`;
 
 const api = new Function(`${historyHelpers}
   return {
@@ -23,7 +26,9 @@ const api = new Function(`${historyHelpers}
     historyRangeSpanMs,
     validateHistoryPayload,
     applyHistoryFetchResult,
-    sparklineSamples
+    sparklineSamples,
+    sharedWindowCompare,
+    formatPctChange
   };
 `)();
 
@@ -106,6 +111,39 @@ if (shortWindow.length !== 1 || shortWindow[0].y !== 120) {
   throw new Error("range changes must narrow sparkline samples to the selected window");
 }
 
+const compare = api.sharedWindowCompare(points, ["j", "joel"], "all");
+if (!compare.ok || compare.desks.length !== 2) {
+  throw new Error("shared compare must work on common timestamps");
+}
+if (compare.desks[0].pctChange !== 20 || compare.desks[1].pctChange !== 10) {
+  throw new Error("shared compare must use percent change from common start/end");
+}
+if (compare.startAt !== points[0].t || compare.endAt !== points[2].t) {
+  throw new Error("shared compare must use earliest and latest common timestamps");
+}
+
+const sparsePoints = [
+  { t: "2026-09-08T12:00:00+02:00", desks: { j: { equity: 100 }, joe: { equity: 200 } } },
+  { t: "2026-09-09T11:00:00+02:00", desks: { j: { equity: 110 } } },
+  { t: "2026-09-10T12:00:00+02:00", desks: { j: { equity: 120 }, joe: { equity: null } } }
+];
+const incomplete = api.sharedWindowCompare(sparsePoints, ["j", "joe"], "all");
+if (incomplete.ok || incomplete.reason !== "incomplete-coverage") {
+  throw new Error("incomplete common coverage must not fabricate a compare");
+}
+
+const zeroBaselinePoints = [
+  { t: "2026-09-08T12:00:00+02:00", desks: { j: { equity: 0 }, joe: { equity: 0 } } },
+  { t: "2026-09-09T12:00:00+02:00", desks: { j: { equity: 100 }, joe: { equity: 50 } } }
+];
+const zeroCompare = api.sharedWindowCompare(zeroBaselinePoints, ["j", "joe"], "all");
+if (!zeroCompare.ok || Number.isFinite(zeroCompare.desks[0].pctChange)) {
+  throw new Error("zero baseline must yield honest missing percent change");
+}
+if (api.formatPctChange(null) !== "—") {
+  throw new Error("missing percent change must render as dash");
+}
+
 console.log(JSON.stringify({
   ok: true,
   checks: [
@@ -114,6 +152,9 @@ console.log(JSON.stringify({
     "reject-malformed-history",
     "preserve-last-good-on-fail",
     "sparkline-time-proportional",
-    "range-aware-sparklines"
+    "range-aware-sparklines",
+    "shared-window-percent-compare",
+    "incomplete-coverage-honest",
+    "zero-baseline-honest"
   ]
 }, null, 2));
