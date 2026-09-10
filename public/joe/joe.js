@@ -1824,9 +1824,10 @@
     required(data && data.schema === "inspr.joe.household.history.v1", "unknown history schema");
     required(Array.isArray(data.points), "history points must be an array");
     if (!data.points.length) { return []; }
-    var points = data.points.filter(isValidHistoryPoint);
-    required(points.length, "history points contained no valid samples");
-    return points;
+    data.points.forEach(function (point, index) {
+      required(isValidHistoryPoint(point), "invalid history sample at index " + index);
+    });
+    return data.points;
   }
 
   function applyHistoryFetchResult(currentPoints, data) {
@@ -1840,10 +1841,13 @@
     }
   }
 
-  function historyFailureMessage(error) {
+  function historyFailureMessage(error, hasRetainedSeries) {
     if (!error) { return ""; }
     var detail = error.message || String(error);
-    return "History refresh failed: " + detail + ". Showing the last good series.";
+    if (hasRetainedSeries) {
+      return "History refresh failed: " + detail + ". Showing the last good series.";
+    }
+    return "History unavailable: " + detail + ". Use Retry when the connection recovers.";
   }
 
   function updateHistoryStatusUI() {
@@ -1856,12 +1860,12 @@
       return;
     }
     status.hidden = false;
-    text.textContent = historyFailureMessage(historyError);
+    text.textContent = historyFailureMessage(historyError, historyState.points.length > 0);
   }
 
   function historyEmptyMessage() {
     if (historyError && !historyState.points.length) {
-      return historyFailureMessage(historyError);
+      return historyFailureMessage(historyError, false);
     }
     return "History will fill as snapshots arrive.";
   }
@@ -2250,6 +2254,7 @@
     historyRangeSpanMs: historyRangeSpanMs,
     validateHistoryPayload: validateHistoryPayload,
     applyHistoryFetchResult: applyHistoryFetchResult,
+    historyFailureMessage: historyFailureMessage,
     sparklineSamples: sparklineSamples,
     formatDeskLearningCopy: formatDeskLearningCopy,
     deskTrackFields: deskTrackFields,

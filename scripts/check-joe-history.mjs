@@ -18,7 +18,8 @@ ${extractJoeBlock("  function required(condition, message)", "\n\n  function amo
 ${extractJoeBlock("  function historyRangeSpanMs(range)", "\n\n  function seriesBag(point, deskId)")}
 ${extractJoeBlock("  function seriesBag(point, deskId)", "\n\n  function destroyHistoryChart")}
 ${extractJoeBlock("  function formatPctChange(value)", "\n\n  function sharedWindowCompare(points, deskIds, range)")}
-${extractJoeBlock("  function sharedWindowCompare(points, deskIds, range)", "\n\n  function deskDisplayName(deskId)")}`;
+${extractJoeBlock("  function sharedWindowCompare(points, deskIds, range)", "\n\n  function deskDisplayName(deskId)")}
+${extractJoeBlock("  function historyFailureMessage(error, hasRetainedSeries)", "\n\n  function updateHistoryStatusUI")}`;
 
 const api = new Function(`${historyHelpers}
   return {
@@ -26,6 +27,7 @@ const api = new Function(`${historyHelpers}
     historyRangeSpanMs,
     validateHistoryPayload,
     applyHistoryFetchResult,
+    historyFailureMessage,
     sparklineSamples,
     sharedWindowCompare,
     formatPctChange
@@ -92,6 +94,45 @@ if (cleared.error || cleared.points.length !== 3) {
   throw new Error("successful refresh must clear history error and accept payload");
 }
 
+let mixedRejected = false;
+try {
+  api.validateHistoryPayload({
+    schema: "inspr.joe.household.history.v1",
+    points: [points[0], { t: "bad", desks: {} }]
+  });
+} catch {
+  mixedRejected = true;
+}
+if (!mixedRejected) {
+  throw new Error("mixed valid/malformed history payload must be rejected whole");
+}
+
+const mixedMalformed = api.applyHistoryFetchResult(goodPoints, {
+  schema: "inspr.joe.household.history.v1",
+  points: [points[0], { t: "bad", desks: {} }]
+});
+if (mixedMalformed.points.length !== goodPoints.length || !mixedMalformed.error) {
+  throw new Error("mixed valid/malformed refresh must preserve last good history");
+}
+
+const emptyClear = api.applyHistoryFetchResult(mixedMalformed.points, emptyPayload);
+if (emptyClear.error || emptyClear.points.length !== 0) {
+  throw new Error("genuine valid empty refresh must clear history error");
+}
+
+const firstFetchMessage = api.historyFailureMessage(new Error("HTTP 404"), false);
+if (firstFetchMessage.includes("last good")) {
+  throw new Error("first-fetch failure must not claim a retained series");
+}
+if (!firstFetchMessage.includes("Retry")) {
+  throw new Error("first-fetch failure must invite retry");
+}
+
+const retainedMessage = api.historyFailureMessage(new Error("HTTP 503"), true);
+if (!retainedMessage.includes("last good series")) {
+  throw new Error("retained-series failure must say last good series is shown");
+}
+
 const samples = api.sparklineSamples(points, "1w", "joe");
 if (samples.length !== 3) {
   throw new Error("sparkline samples must follow the filtered time window, not a fixed count");
@@ -151,6 +192,11 @@ console.log(JSON.stringify({
     "valid-empty-history",
     "reject-malformed-history",
     "preserve-last-good-on-fail",
+    "reject-mixed-valid-malformed",
+    "preserve-last-good-on-mixed-fail",
+    "genuine-valid-empty-clear",
+    "first-fetch-honest-copy",
+    "retained-series-copy",
     "sparkline-time-proportional",
     "range-aware-sparklines",
     "shared-window-percent-compare",
