@@ -260,6 +260,8 @@ try {
     zoomPlugin: Boolean(window.Chart?.registry?.plugins?.get('zoom')),
     externalScripts: [...document.scripts].filter(script => script.src && new URL(script.src).origin !== location.origin).length,
     overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    baseHref: document.querySelector('base')?.getAttribute('href'),
+    baseUrl: document.baseURI,
   }))()`);
     if (
       healthy.view !== "board" || healthy.state !== "ok" ||
@@ -276,6 +278,7 @@ try {
       !healthy.layoutSelectOptions || healthy.layoutSelectOptions < 1 ||
       !healthy.layoutMenu || !healthy.settingsMenu || !healthy.brandLogo || healthy.marketingCopy ||
       healthy.heroId !== "hero" ||
+      healthy.baseHref !== "/joe/" || healthy.baseUrl !== hsb1Url ||
       !/not present/i.test(healthy.positionFallback || "") || !healthy.zoomPlugin || healthy.externalScripts || healthy.overflow
     ) throw new Error(`Healthy board mismatch: ${JSON.stringify(healthy)}`);
 

@@ -190,6 +190,26 @@ describe("server contract", () => {
     assert.deepEqual(res.body, { schema: "inspr.joe.household.history.v1", points: [] });
   });
 
+  test("GET /joe permanently redirects to the canonical slash and preserves query", async () => {
+    assertServerAlive();
+    for (const [source, location] of [
+      ["/joe", "/joe/"],
+      ["/joe?desk=j&view=wide", "/joe/?desk=j&view=wide"],
+    ]) {
+      const res = await fetch(`${BASE}${source}`, { redirect: "manual" });
+      assert.equal(res.status, 308, source);
+      assert.equal(res.headers.get("location"), location, source);
+    }
+  });
+
+  test("GET /joe/ serves HTML with the canonical document base", async () => {
+    assertServerAlive();
+    const res = await fetch(`${BASE}/joe/`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") || "", /^text\/html\b/);
+    assert.match(await res.text(), /<base href="\/joe\/">/);
+  });
+
   test("static UI assets are served with JoeVersion from source", async () => {
     assertServerAlive();
     for (const path of ["/joe/", "/joe/joe.js", "/joe/joe-version.js", "/joe/data.schema.json"]) {

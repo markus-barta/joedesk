@@ -27,7 +27,6 @@ const BIND_PORT = 8080;
 const MAX_BODY = 262144;
 
 const STATIC_FILES = Object.freeze({
-  "/joe": "index.html",
   "/joe/": "index.html",
   "/joe/index.html": "index.html",
   "/joe/data.schema.json": "data.schema.json",
@@ -321,6 +320,11 @@ const server = http.createServer(async (req, res) => {
     const u = new URL(req.url || "/", `http://${host}`);
     const urlPath = u.pathname;
 
+    if (urlPath === "/joe") {
+      send(res, 308, "", { Location: `/joe/${u.search}` });
+      return;
+    }
+
     if (urlPath === "/healthz" || urlPath === "/readyz") {
       let hasData = false;
       try {
@@ -338,7 +342,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (urlPath === "/joe" || urlPath.startsWith("/joe/")) {
+    if (urlPath.startsWith("/joe/")) {
       if (req.method !== "GET" && req.method !== "HEAD") {
         sendJson(res, 405, { ok: false, error: "method not allowed" });
         return;

@@ -2,8 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.6.0",
+    APP_VERSION: "0.6.1",
     VERSION_HISTORY: [
+      {
+        version: "0.6.1",
+        date: "2026-09-10",
+        title: "One canonical board address",
+        changes: [
+          "Opening /joe now permanently redirects to /joe/ while keeping the query string.",
+          "The board declares /joe/ as its document base so relative assets and data load consistently.",
+        ],
+      },
       {
         version: "0.6.0",
         date: "2026-09-10",
