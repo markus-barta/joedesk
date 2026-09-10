@@ -168,8 +168,11 @@ if (attributionBodyHtml && /<p class="widget-note">/.test(attributionBodyHtml[0]
 if (/\+ "snapshot " \+ ageLabel\(snapshotAge\)/.test(joeSource)) {
   throw new Error("hero freshness value must not repeat snapshot in the value cell");
 }
-if (!/table\.positions-table-empty/.test(cssSource)) {
+if (!/table\.positions-table-empty\s*\{[^}]*min-width:\s*0/.test(cssSource)) {
   throw new Error("positions empty table must drop the wide min-width");
+}
+if (!/table\.positions-table-empty thead\s*\{[^}]*display:\s*none/.test(cssSource)) {
+  throw new Error("empty positions table must hide column headers that force horizontal scroll");
 }
 if (!/syncPositionsTableLayout/.test(joeSource) || !/positions-table-empty/.test(joeSource)) {
   throw new Error("renderPositions must toggle the empty positions table layout");
@@ -177,7 +180,7 @@ if (!/syncPositionsTableLayout/.test(joeSource) || !/positions-table-empty/.test
 
 console.log(JSON.stringify({
   ok: true,
-  checks: 23,
+  checks: 24,
   positionsPartial: api.positionsAvailability(oneDeskEmptyValidated),
   dayPnl: api.dayPnlDisplayValue(validated, 0),
 }, null, 2));
