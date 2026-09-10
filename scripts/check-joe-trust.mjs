@@ -16,17 +16,24 @@ function extractJoeBlock(startMarker, endMarker) {
 const trustHelpers = `${extractJoeBlock("  var DESK_IDS = [", "\n  var DEFAULT_LAYOUT = [")}
 ${extractJoeBlock("  function required(condition, message)", "\n\n  function amount(value, signed)")}
 ${extractJoeBlock("  function ageInSeconds(iso)", "\n\n  function openPnl(data)")}
-${extractJoeBlock("  var TRUSTED_DAY_PNL = {", "\n\n  function gatewayHeartbeatAge(data)")}
-${extractJoeBlock("  function collectPositions(data)", "\n\n  function positionsAvailability(data)")}
-${extractJoeBlock("  function positionsAvailability(data)", "\n\n  function cell(text, className)")}`;
+${extractJoeBlock("  // HOSTD-33 / Wave D: Day P&L stays unavailable", "\n\n  function labelPaperCapital()")}
+${extractJoeBlock("  function deskFreshnessFooter(desk, snapshotAge", "\n\n  function updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale)")}
+${extractJoeBlock("  function collectPositions(data)", "\n\n  function deskPositionsCoverage(deskId, data)")}
+${extractJoeBlock("  function deskPositionsCoverage(deskId, data)", "\n\n  function positionsAvailability(data)")}
+${extractJoeBlock("  function positionsAvailability(data)", "\n\n  function positionsSummaryText(data)")}
+${extractJoeBlock("  function positionsEmptyMessage(data, filterDesk)", "\n\n  function renderPositions(data)")}`;
 
 const api = new Function(`${trustHelpers}
   return {
     validate,
-    dayPnlProvenance,
-    dayPnlTrusted,
     dayPnlDisplayValue,
+    deskPositionsCoverage,
     positionsAvailability,
+    positionsEmptyMessage,
+    deskFreshnessFooter,
+    snapshotProblems,
+    gatewayHeartbeatAge,
+    validIsoTimestamp,
     collectPositions,
     ageInSeconds,
     ageLabel
@@ -34,44 +41,46 @@ const api = new Function(`${trustHelpers}
 `)();
 
 const validated = api.validate(structuredClone(sample));
-if (api.dayPnlTrusted(validated)) throw new Error("sample without provenance must not trust day P&L");
 if (api.dayPnlDisplayValue(validated, validated.totals.dayPnl) !== null) {
-  throw new Error("untrusted day P&L must not render a numeric display value");
+  throw new Error("Stage 0 day P&L must stay unavailable until HOSTD-33");
 }
 if (api.positionsAvailability(validated) !== "absent") {
   throw new Error("sample without positions keys must be absent");
 }
 
-const provenanced = structuredClone(sample);
-provenanced.source.dayPnl = "broker-daily";
-const trusted = api.validate(provenanced);
-if (!api.dayPnlTrusted(trusted)) throw new Error("broker-daily provenance must trust day P&L");
-if (api.dayPnlDisplayValue(trusted, trusted.totals.dayPnl) !== trusted.totals.dayPnl) {
-  throw new Error("trusted day P&L must display the supplied value");
+const nullTop = api.validate(Object.assign(structuredClone(sample), { positions: null }));
+if (api.positionsAvailability(nullTop) !== "partial") {
+  throw new Error("positions:null must be partial, not empty");
 }
 
-const zeroDay = structuredClone(sample);
-zeroDay.source.dayPnl = "broker-daily";
-zeroDay.totals.dayPnl = 0;
-zeroDay.desks.forEach((desk) => { desk.money.dayPnl = 0; });
-const zeroTrusted = api.validate(zeroDay);
-if (api.dayPnlDisplayValue(zeroTrusted, 0) !== 0) {
-  throw new Error("trusted zero day P&L must remain displayable");
+const malformedTop = api.validate(Object.assign(structuredClone(sample), { positions: "bad" }));
+if (api.positionsAvailability(malformedTop) !== "partial") {
+  throw new Error("non-array positions must be partial");
 }
 
-const fakeZero = structuredClone(sample);
-fakeZero.totals.dayPnl = 0;
-fakeZero.desks.forEach((desk) => { desk.money.dayPnl = 0; });
-const fakeValidated = api.validate(fakeZero);
-if (api.dayPnlDisplayValue(fakeValidated, 0) !== null) {
-  throw new Error("untrusted zero day P&L must not be shown as earnings");
+const oneDeskEmpty = structuredClone(sample);
+oneDeskEmpty.desks[0].positions = [];
+const oneDeskEmptyValidated = api.validate(oneDeskEmpty);
+if (api.positionsAvailability(oneDeskEmptyValidated) !== "partial") {
+  throw new Error("one empty desk with others absent must be partial");
+}
+if (api.deskPositionsCoverage("j", oneDeskEmptyValidated) !== "empty") {
+  throw new Error("desk j with positions:[] must be known empty");
+}
+if (api.deskPositionsCoverage("joe", oneDeskEmptyValidated) !== "absent") {
+  throw new Error("desk joe without positions key must stay absent in partial coverage");
 }
 
-const emptyPositions = structuredClone(sample);
-emptyPositions.positions = [];
-const emptyValidated = api.validate(emptyPositions);
-if (api.positionsAvailability(emptyValidated) !== "empty") {
-  throw new Error("explicit empty positions array must be empty, not absent");
+const allDeskEmpty = structuredClone(sample);
+allDeskEmpty.desks.forEach((desk) => { desk.positions = []; });
+const allDeskEmptyValidated = api.validate(allDeskEmpty);
+if (api.positionsAvailability(allDeskEmptyValidated) !== "empty") {
+  throw new Error("complete per-desk empty coverage must be empty");
+}
+
+const topLevelEmpty = api.validate(Object.assign(structuredClone(sample), { positions: [] }));
+if (api.positionsAvailability(topLevelEmpty) !== "empty") {
+  throw new Error("top-level positions:[] without desk keys must be complete empty");
 }
 
 const presentPositions = structuredClone(sample);
@@ -79,36 +88,77 @@ presentPositions.positions = [
   { desk: "j", symbol: "DEMO", side: "Long", quantity: 1, mark: 10, marketValue: 10, dayPnl: null, openPnl: 1, updatedAt: sample.generatedAt },
 ];
 const presentValidated = api.validate(presentPositions);
-if (api.positionsAvailability(presentValidated) !== "present") {
-  throw new Error("positions with rows must be present");
+if (api.positionsAvailability(presentValidated) !== "partial") {
+  throw new Error("single-desk top-level rows must be partial coverage");
 }
-if (api.collectPositions(presentValidated).length !== 1) {
-  throw new Error("collectPositions must return supplied rows");
+if (api.deskPositionsCoverage("j", presentValidated) !== "present") {
+  throw new Error("desk j must be present when row supplied");
 }
-
-const deskEmpty = structuredClone(sample);
-deskEmpty.desks[0].positions = [];
-const deskEmptyValidated = api.validate(deskEmpty);
-if (api.positionsAvailability(deskEmptyValidated) !== "empty") {
-  throw new Error("desk-level empty positions must be empty, not absent");
+if (api.deskPositionsCoverage("joe", presentValidated) !== "absent") {
+  throw new Error("desk joe must remain absent under partial top-level coverage");
 }
 
-const nestedProvenance = structuredClone(sample);
-nestedProvenance.provenance = { dayPnl: "snapshot-diff" };
-const nestedValidated = api.validate(nestedProvenance);
-if (!api.dayPnlTrusted(nestedValidated)) {
-  throw new Error("root provenance.dayPnl must be accepted");
+const partialMessage = api.positionsEmptyMessage(presentValidated, "all");
+if (!/partial/i.test(partialMessage)) {
+  throw new Error("partial coverage must not claim a full-account flat state");
 }
 
-const staleAge = api.ageInSeconds(new Date(Date.now() - 120_000).toISOString());
-if (!Number.isFinite(staleAge) || staleAge < 110 || staleAge > 130) {
-  throw new Error(`ageInSeconds drift unexpected: ${staleAge}`);
+const deskOnlyMessage = api.positionsEmptyMessage(oneDeskEmptyValidated, "joe");
+if (!/not available for this desk/i.test(deskOnlyMessage)) {
+  throw new Error("filtered absent desk must not inherit another desk's empty state");
 }
-if (api.ageLabel(staleAge) !== "2m") throw new Error("ageLabel must format minutes");
+
+const desk = validated.desks[0];
+const updatedAtOnly = api.deskFreshnessFooter(
+  Object.assign({}, desk, { updatedAt: new Date().toISOString(), heartbeatAt: null }),
+  30,
+  false,
+  false,
+  300
+);
+if (/Heartbeat/.test(updatedAtOnly.text)) {
+  throw new Error("updatedAt must not be relabeled as heartbeat");
+}
+if (!/Snapshot/.test(updatedAtOnly.text)) {
+  throw new Error("without heartbeatAt the footer must use snapshot age");
+}
+
+const heartbeatDesk = api.deskFreshnessFooter(
+  Object.assign({}, desk, { heartbeatAt: new Date().toISOString(), updatedAt: new Date().toISOString() }),
+  30,
+  false,
+  false,
+  300
+);
+if (!/Heartbeat/.test(heartbeatDesk.text)) {
+  throw new Error("heartbeatAt must label the desk footer as heartbeat");
+}
+
+const gatewaySeen = api.gatewayHeartbeatAge(validated);
+if (!Number.isFinite(gatewaySeen)) {
+  throw new Error("valid gateway.lastSeenAt must produce an age");
+}
+const badGateway = structuredClone(validated);
+badGateway.safety.gateway.lastSeenAt = "not-a-date";
+if (api.gatewayHeartbeatAge(badGateway) !== null) {
+  throw new Error("invalid gateway.lastSeenAt must be unknown");
+}
+
+const staleProblems = api.snapshotProblems(validated, validated.safety.staleAfterSeconds + 5);
+if (!staleProblems.some((problem) => /stale/i.test(problem))) {
+  throw new Error("snapshotProblems must flag stale age without a successful fetch");
+}
+const halted = structuredClone(validated);
+halted.safety.halt = true;
+halted.safety.haltReason = "Operator check";
+const haltProblems = api.snapshotProblems(halted, 1);
+if (!haltProblems.some((problem) => /HALT/.test(problem))) {
+  throw new Error("snapshotProblems must retain HALT even when snapshot age is fresh");
+}
 
 console.log(JSON.stringify({
   ok: true,
-  checks: 12,
-  provenance: api.dayPnlProvenance(validated),
-  trustedAfter: api.dayPnlProvenance(trusted),
+  checks: 18,
+  positionsPartial: api.positionsAvailability(oneDeskEmptyValidated),
+  dayPnl: api.dayPnlDisplayValue(validated, 0),
 }, null, 2));

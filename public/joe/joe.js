@@ -990,65 +990,46 @@
     return Math.floor(seconds / 3600) + "h";
   }
 
-  var TRUSTED_DAY_PNL = { "broker-daily": true, "snapshot-diff": true, available: true };
-
-  function dayPnlProvenance(data) {
-    if (!data || typeof data !== "object") { return null; }
-    if (data.provenance && typeof data.provenance === "object") {
-      var root = data.provenance.dayPnl;
-      if (typeof root === "string" && root.length) { return root; }
-    }
-    var source = data.source;
-    if (source && typeof source === "object") {
-      if (typeof source.dayPnl === "string" && source.dayPnl.length) { return source.dayPnl; }
-      if (source.provenance && typeof source.provenance === "object") {
-        var nested = source.provenance.dayPnl;
-        if (typeof nested === "string" && nested.length) { return nested; }
-      }
-    }
+  // HOSTD-33 / Wave D: Day P&L stays unavailable in Stage 0 until producer contract lands.
+  function dayPnlDisplayValue() {
     return null;
   }
 
-  function dayPnlTrusted(data) {
-    var provenance = dayPnlProvenance(data);
-    return Boolean(provenance && TRUSTED_DAY_PNL[provenance]);
-  }
-
-  function dayPnlDisplayValue(data, value) {
-    if (!dayPnlTrusted(data)) { return null; }
-    return Number.isFinite(value) ? value : null;
+  function validIsoTimestamp(iso) {
+    return typeof iso === "string" && iso.length && !Number.isNaN(Date.parse(iso));
   }
 
   function gatewayHeartbeatAge(data) {
     var gateway = data && data.safety && data.safety.gateway;
     var lastSeen = gateway && gateway.lastSeenAt;
-    return lastSeen ? ageInSeconds(lastSeen) : null;
+    if (!validIsoTimestamp(lastSeen)) { return null; }
+    return ageInSeconds(lastSeen);
   }
 
-  function newestDeskHeartbeatAge(data) {
-    if (!data || !Array.isArray(data.desks)) { return null; }
-    var newest = null;
-    data.desks.forEach(function (desk) {
-      var iso = desk.heartbeatAt || desk.updatedAt || null;
-      if (!iso) { return; }
-      var age = ageInSeconds(iso);
-      if (Number.isFinite(age) && (newest === null || age < newest)) { newest = age; }
-    });
-    return newest;
+  function snapshotProblems(data, snapshotAge) {
+    var problems = [];
+    if (!data) { return problems; }
+    var gateway = data.safety.gateway;
+    if (data.safety.halt) { problems.push("HALT is on" + (data.safety.haltReason ? ": " + data.safety.haltReason : ".")); }
+    if (gateway.status !== "ok") { problems.push("Gateway is " + gateway.status + (gateway.detail ? ": " + gateway.detail : ".")); }
+    if (snapshotAge > data.safety.staleAfterSeconds) { problems.push("The snapshot is stale (" + snapshotAge + " seconds old)."); }
+    data.desks.forEach(function (desk) { if (desk.state === "stuck") { problems.push(desk.label + " is stuck: " + desk.action); } });
+    return problems;
   }
 
-  function setMoneyField(node, data, value, signed, fieldKind) {
+  function applyAttentionState(problems) {
+    var alarm = document.getElementById("alarm");
+    alarm.hidden = problems.length === 0;
+    document.getElementById("alarmText").textContent = problems.join(" ");
+    document.documentElement.dataset.joeState = problems.length ? "attention" : "ok";
+  }
+
+  function setMoneyField(node, value, signed, fieldKind) {
     if (fieldKind === "day") {
-      var dayValue = dayPnlDisplayValue(data, value);
-      if (!Number.isFinite(dayValue)) {
-        node.textContent = "—";
-        node.classList.remove("positive", "negative");
-        node.classList.add("neutral");
-        node.title = "Day P&L not yet supplied by the producer";
-        return;
-      }
-      node.title = "";
-      setMoney(node, dayValue, signed);
+      node.textContent = "—";
+      node.classList.remove("positive", "negative");
+      node.classList.add("neutral");
+      node.title = "Day P&L unavailable in Stage 0 (blocked on HOSTD-33)";
       return;
     }
     node.title = "";
@@ -1063,11 +1044,22 @@
     if (heroLabels[3]) { heroLabels[3].textContent = "Snapshot age"; }
     var attributionNote = document.querySelector(".attribution-body .widget-note");
     if (attributionNote) {
-      var snapshot = latestSnapshot || lastValidSnapshot;
-      attributionNote.textContent = dayPnlTrusted(snapshot)
-        ? "Share of today’s absolute desk movement"
-        : "Day P&L not supplied — attribution unavailable";
+      attributionNote.textContent = "Day P&L unavailable in Stage 0 — attribution blocked on HOSTD-33";
     }
+  }
+
+  function deskFreshnessFooter(desk, snapshotAge, snapshotStale, gatewayDown, staleAfterSeconds) {
+    var heartbeatIso = desk.heartbeatAt || null;
+    var heartbeatAge = validIsoTimestamp(heartbeatIso) ? ageInSeconds(heartbeatIso) : null;
+    var offline = gatewayDown || (heartbeatIso && Number.isFinite(heartbeatAge) && heartbeatAge > staleAfterSeconds);
+    var stale = !offline && snapshotStale;
+    return {
+      text: heartbeatIso
+        ? "Heartbeat " + ageLabel(heartbeatAge) + " ago"
+        : "Snapshot " + ageLabel(snapshotAge) + " ago",
+      offline: offline,
+      stale: stale
+    };
   }
 
   function updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale) {
@@ -1078,7 +1070,9 @@
     var gatewayAge = gatewayHeartbeatAge(data);
     var gatewayText = gateway.status === "ok" ? "OK · connected" : gateway.status.toUpperCase();
     if (Number.isFinite(gatewayAge)) {
-      gatewayText += " · heartbeat " + ageLabel(gatewayAge);
+      gatewayText += " · gateway seen " + ageLabel(gatewayAge) + " ago";
+    } else if (gateway.lastSeenAt) {
+      gatewayText += " · gateway seen unknown";
     }
     setSignal("gatewaySignal", "gatewayValue", gatewayText, gateway.status === "ok" ? "good" : gateway.status === "degraded" ? "warn" : "bad");
     var updatedAt = document.getElementById("updatedAt");
@@ -1093,14 +1087,11 @@
       var heartbeatEl = slot.querySelector(".desk-heartbeat");
       var badgeEl = slot.querySelector(".desk-footer .status-badge");
       if (!heartbeatEl) { return; }
-      var heartbeatIso = desk.heartbeatAt || desk.updatedAt || null;
-      var heartbeatAge = heartbeatIso ? ageInSeconds(heartbeatIso) : null;
-      var offline = gatewayDown || (heartbeatIso && Number.isFinite(heartbeatAge) && heartbeatAge > data.safety.staleAfterSeconds);
-      var stale = !offline && snapshotStale;
-      heartbeatEl.textContent = heartbeatIso
-        ? "Heartbeat " + ageLabel(heartbeatAge) + " ago"
-        : "Snapshot " + ageLabel(snapshotAge) + " ago";
-      heartbeatEl.className = "desk-heartbeat" + (offline ? " offline" : stale ? " stale" : "");
+      var footer = deskFreshnessFooter(desk, snapshotAge, snapshotStale, gatewayDown, data.safety.staleAfterSeconds);
+      heartbeatEl.textContent = footer.text;
+      heartbeatEl.className = "desk-heartbeat" + (footer.offline ? " offline" : footer.stale ? " stale" : "");
+      var offline = footer.offline;
+      var stale = footer.stale;
       if (badgeEl) {
         if (offline || stale) {
           badgeEl.textContent = offline ? "Offline" : "Stale";
@@ -1125,12 +1116,9 @@
     var gatewayDown = data.safety.gateway.status === "down";
     updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale);
     updateDeskFreshnessFooters(data, snapshotAge, snapshotStale, gatewayDown);
-    if (refreshError) {
-      var alarm = document.getElementById("alarm");
-      alarm.hidden = false;
-      document.getElementById("alarmText").textContent = refreshFailureMessage(refreshError);
-      document.documentElement.dataset.joeState = "attention";
-    }
+    var problems = snapshotProblems(data, snapshotAge);
+    if (refreshError) { problems.push(refreshFailureMessage(refreshError)); }
+    applyAttentionState(problems);
   }
 
   function refreshFailureMessage(error) {
@@ -1175,7 +1163,7 @@
       if (item[3] === "trades") {
         value.textContent = Number.isFinite(item[1]) ? number.format(item[1]) : "—";
       } else if (item[3] === "day") {
-        setMoneyField(value, data, item[1], item[2], "day");
+        setMoneyField(value, item[1], item[2], "day");
       } else {
         setMoney(value, item[1], item[2]);
       }
@@ -1199,40 +1187,17 @@
     if (desk.issues.length) { content.appendChild(el("p", "issues negative", desk.issues.join(" · "))); }
 
     var footer = el("div", "desk-footer");
-    var heartbeatIso = desk.heartbeatAt || desk.updatedAt || null;
-    var heartbeatAge = heartbeatIso ? ageInSeconds(heartbeatIso) : snapshotAge;
-    var offline = gatewayDown || (heartbeatIso && heartbeatAge > data.safety.staleAfterSeconds);
-    var stale = !offline && snapshotStale;
-    var heartbeat = el("span", "desk-heartbeat" + (offline ? " offline" : stale ? " stale" : ""), (heartbeatIso ? "Heartbeat " : "Snapshot ") + ageLabel(heartbeatAge) + " ago");
+    var deskFooter = deskFreshnessFooter(desk, snapshotAge, snapshotStale, gatewayDown, data.safety.staleAfterSeconds);
+    var heartbeat = el("span", "desk-heartbeat" + (deskFooter.offline ? " offline" : deskFooter.stale ? " stale" : ""), deskFooter.text);
     footer.appendChild(heartbeat);
-    if (offline || stale) { footer.appendChild(el("span", "status-badge " + (offline ? "offline" : "stale"), offline ? "Offline" : "Stale")); }
+    if (deskFooter.offline || deskFooter.stale) { footer.appendChild(el("span", "status-badge " + (deskFooter.offline ? "offline" : "stale"), deskFooter.offline ? "Offline" : "Stale")); }
     content.appendChild(footer);
     slot.replaceChildren(content);
   }
 
-  function renderAttribution(desks, data) {
+  function renderAttribution() {
     var root = document.getElementById("attribution");
-    if (!dayPnlTrusted(data)) {
-      root.replaceChildren(el("p", "widget-note empty-attribution", "Day P&L not supplied — attribution unavailable."));
-      return;
-    }
-    var denominator = desks.reduce(function (sum, desk) {
-      var dayValue = dayPnlDisplayValue(data, desk.money.dayPnl);
-      return sum + (Number.isFinite(dayValue) ? Math.abs(dayValue) : 0);
-    }, 0);
-    root.replaceChildren.apply(root, desks.map(function (desk) {
-      var pnl = dayPnlDisplayValue(data, desk.money.dayPnl);
-      var percent = denominator && Number.isFinite(pnl) ? Math.abs(pnl) / denominator * 100 : 0;
-      var row = el("div", "attribution-row");
-      row.appendChild(el("strong", "", desk.label));
-      var track = el("div", "attribution-track");
-      var fill = el("div", "attribution-fill " + tone(pnl));
-      fill.style.width = percent + "%";
-      track.appendChild(fill);
-      row.appendChild(track);
-      row.appendChild(el("span", "attribution-value " + tone(pnl), Number.isFinite(pnl) ? Math.round(percent) + "%" : "—"));
-      return row;
-    }));
+    root.replaceChildren(el("p", "widget-note empty-attribution", "Day P&L unavailable in Stage 0 — attribution blocked on HOSTD-33."));
   }
 
   function collectPositions(data) {
@@ -1247,14 +1212,32 @@
     }).sort(function (a, b) { return String(a.desk).localeCompare(String(b.desk)) || String(a.symbol || "").localeCompare(String(b.symbol || "")); });
   }
 
+  function deskPositionsCoverage(deskId, data) {
+    if (!data || !Array.isArray(data.desks)) { return "absent"; }
+    var desk = data.desks.find(function (entry) { return entry.id === deskId; });
+    if (!desk) { return "absent"; }
+    if (Object.prototype.hasOwnProperty.call(desk, "positions")) {
+      if (!Array.isArray(desk.positions)) { return "invalid"; }
+      return desk.positions.length ? "present" : "empty";
+    }
+    if (!Object.prototype.hasOwnProperty.call(data, "positions")) { return "absent"; }
+    if (!Array.isArray(data.positions)) { return "invalid"; }
+    if (!data.positions.length) { return "empty"; }
+    var rows = data.positions.filter(function (position) {
+      return (position.desk || position.deskId) === deskId;
+    });
+    return rows.length ? "present" : "absent";
+  }
+
   function positionsAvailability(data) {
     if (!data || typeof data !== "object") { return "absent"; }
-    var hasTopKey = Object.prototype.hasOwnProperty.call(data, "positions");
-    var hasDeskKey = Array.isArray(data.desks) && data.desks.some(function (desk) {
-      return Object.prototype.hasOwnProperty.call(desk, "positions");
-    });
-    if (!hasTopKey && !hasDeskKey) { return "absent"; }
-    return collectPositions(data).length ? "present" : "empty";
+    var coverages = DESK_IDS.map(function (deskId) { return deskPositionsCoverage(deskId, data); });
+    if (coverages.every(function (state) { return state === "absent"; })) { return "absent"; }
+    if (coverages.some(function (state) { return state === "invalid"; })) { return "partial"; }
+    if (coverages.some(function (state) { return state === "absent"; })) { return "partial"; }
+    if (collectPositions(data).length) { return "present"; }
+    if (coverages.every(function (state) { return state === "empty"; })) { return "empty"; }
+    return "partial";
   }
 
   function cell(text, className) {
@@ -1266,25 +1249,45 @@
     if (availability === "absent") {
       return "Position detail not supplied in this snapshot";
     }
+    if (availability === "partial") {
+      return "Partial position coverage — some desks unavailable";
+    }
     if (availability === "empty") {
-      return "No open positions · producer supplied an empty positions list";
+      return "No open positions · complete empty coverage supplied";
     }
     var all = collectPositions(data);
     return all.length + " open position" + (all.length === 1 ? "" : "s") + " · grouped by desk";
   }
 
+  function positionsEmptyMessage(data, filterDesk) {
+    if (filterDesk !== "all") {
+      var deskCoverage = deskPositionsCoverage(filterDesk, data);
+      if (deskCoverage === "empty") { return "No positions for this desk."; }
+      if (deskCoverage === "absent" || deskCoverage === "invalid") {
+        return "Position detail not available for this desk.";
+      }
+      return "No positions for this desk.";
+    }
+    var availability = positionsAvailability(data);
+    if (availability === "absent") {
+      return "Position detail is not present in this snapshot. The board will populate this table when the projection adds it.";
+    }
+    if (availability === "partial") {
+      return "Position coverage is partial — not every desk is represented in this snapshot.";
+    }
+    if (availability === "empty") {
+      return "No open positions.";
+    }
+    return "No positions for this desk.";
+  }
+
   function renderPositions(data) {
     var all = collectPositions(data);
-    var availability = positionsAvailability(data);
     var positions = positionFilter === "all" ? all : all.filter(function (position) { return position.desk === positionFilter; });
     var body = document.getElementById("positionsBody");
     document.getElementById("positionsSummary").textContent = positionsSummaryText(data);
     if (!positions.length) {
-      var emptyMessage = availability === "absent"
-        ? "Position detail is not present in this snapshot. The board will populate this table when the projection adds it."
-        : availability === "empty"
-          ? "No open positions."
-          : "No positions for this desk.";
+      var emptyMessage = positionsEmptyMessage(data, positionFilter);
       var row = el("tr");
       row.appendChild(cell(emptyMessage, "empty-cell"));
       row.firstChild.colSpan = 9;
@@ -1296,14 +1299,13 @@
       row.dataset.desk = position.desk;
       var quantity = Number.isFinite(position.quantity) ? position.quantity : position.qty;
       var marketValue = Number.isFinite(position.marketValue) ? position.marketValue : (Number.isFinite(quantity) && Number.isFinite(position.mark) ? quantity * position.mark : null);
-      var dayValue = dayPnlDisplayValue(data, position.dayPnl);
       row.appendChild(cell(String(position.desk).toUpperCase()));
       row.appendChild(cell(position.symbol || "—"));
       row.appendChild(cell(position.side || (Number.isFinite(quantity) && quantity < 0 ? "Short" : Number.isFinite(quantity) ? "Long" : "—")));
       row.appendChild(cell(Number.isFinite(quantity) ? number.format(quantity) : "—", "number"));
       row.appendChild(cell(amount(position.mark, false), "number"));
       row.appendChild(cell(amount(marketValue, false), "number"));
-      row.appendChild(cell(Number.isFinite(dayValue) ? amount(dayValue, true) : "—", "number " + tone(dayValue)));
+      row.appendChild(cell("—", "number neutral"));
       row.appendChild(cell(amount(position.openPnl, true), "number " + tone(position.openPnl)));
       row.appendChild(cell(position.updatedAt && Number.isFinite(Date.parse(position.updatedAt)) ? shortTime.format(new Date(position.updatedAt)) : "—"));
       return row;
@@ -1318,26 +1320,19 @@
     var stale = snapshotAge > data.safety.staleAfterSeconds;
     var gateway = data.safety.gateway;
     var gatewayDown = gateway.status === "down";
-    var problems = [];
-    if (data.safety.halt) { problems.push("HALT is on" + (data.safety.haltReason ? ": " + data.safety.haltReason : ".")); }
-    if (gateway.status !== "ok") { problems.push("Gateway is " + gateway.status + (gateway.detail ? ": " + gateway.detail : ".")); }
-    if (stale) { problems.push("The snapshot is stale (" + snapshotAge + " seconds old)."); }
-    data.desks.forEach(function (desk) { if (desk.state === "stuck") { problems.push(desk.label + " is stuck: " + desk.action); } });
+    var problems = snapshotProblems(data, snapshotAge);
 
     setMoney(document.getElementById("totalEquity"), data.totals.equity, false);
-    setMoneyField(document.getElementById("totalDay"), data, data.totals.dayPnl, true, "day");
+    setMoneyField(document.getElementById("totalDay"), data.totals.dayPnl, true, "day");
     setMoney(document.getElementById("totalOpen"), openPnl(data), true);
     updateSnapshotFreshnessUI(data, snapshotAge, stale);
     setSignal("haltSignal", "haltValue", data.safety.halt ? "ON" : "Off", data.safety.halt ? "bad" : "good");
-    var alarm = document.getElementById("alarm");
-    alarm.hidden = problems.length === 0;
-    document.getElementById("alarmText").textContent = problems.join(" ");
+    applyAttentionState(problems);
     data.desks.forEach(function (desk) { renderDesk(desk, data, snapshotAge, stale, gatewayDown); });
-    renderAttribution(data.desks, data);
+    renderAttribution();
     renderPositions(data);
     labelPaperCapital();
     document.getElementById("sourceLine").textContent = "Source: " + (data.source && data.source.label ? data.source.label : "book.json projection") + " · paper projection";
-    document.documentElement.dataset.joeState = problems.length ? "attention" : "ok";
     drawSparklines();
   }
 
@@ -1365,7 +1360,7 @@
       var slot = document.querySelector('[data-desk-slot="' + deskId + '"]');
       if (slot) { slot.replaceChildren(el("p", "empty-cell", "Waiting for the first valid snapshot.")); }
     });
-    document.getElementById("attribution").replaceChildren(el("p", "widget-note", "Day P&L not supplied — attribution unavailable."));
+    document.getElementById("attribution").replaceChildren(el("p", "widget-note", "Day P&L unavailable in Stage 0 — attribution blocked on HOSTD-33."));
     document.getElementById("positionsSummary").textContent = "Position detail not supplied in this snapshot";
     var emptyPositionsRow = el("tr");
     var emptyPositionsCell = cell("Position detail is not present in this snapshot.", "empty-cell");
@@ -1382,10 +1377,6 @@
       renderNoData(error);
       return;
     }
-    var alarm = document.getElementById("alarm");
-    alarm.hidden = false;
-    document.getElementById("alarmText").textContent = refreshFailureMessage(error);
-    document.documentElement.dataset.joeState = "attention";
     updateFreshnessTick();
   }
 
@@ -1682,10 +1673,14 @@
 
   window.JoeBoard = Object.freeze({
     ingest: function (snapshot) { render(validate(snapshot)); },
-    dayPnlProvenance: dayPnlProvenance,
-    dayPnlTrusted: dayPnlTrusted,
     dayPnlDisplayValue: dayPnlDisplayValue,
+    deskPositionsCoverage: deskPositionsCoverage,
     positionsAvailability: positionsAvailability,
+    positionsEmptyMessage: positionsEmptyMessage,
+    deskFreshnessFooter: deskFreshnessFooter,
+    snapshotProblems: snapshotProblems,
+    gatewayHeartbeatAge: gatewayHeartbeatAge,
+    validIsoTimestamp: validIsoTimestamp,
     collectPositions: collectPositions,
     validate: validate,
     refresh: refresh,
