@@ -1416,17 +1416,24 @@
     return events;
   }
 
+  function snapshotInstantMs(generatedAt) {
+    var ms = Date.parse(generatedAt);
+    return Number.isNaN(ms) ? null : ms;
+  }
+
   function observeSnapshotChanges(data) {
     var sourceLabel = data.source && data.source.label ? data.source.label : "snapshot";
     var generatedAt = data.generatedAt;
+    var observedAtMs = snapshotInstantMs(generatedAt);
+    if (observedAtMs === null) { return; }
     if (!lastObservedSnapshot) {
-      lastObservedSnapshot = { generatedAt: generatedAt, desks: {} };
+      lastObservedSnapshot = { generatedAt: generatedAt, observedAtMs: observedAtMs, desks: {} };
       data.desks.forEach(function (desk) {
         lastObservedSnapshot.desks[desk.id] = deskTrackFields(desk);
       });
       return;
     }
-    if (lastObservedSnapshot.generatedAt === generatedAt) { return; }
+    if (observedAtMs <= lastObservedSnapshot.observedAtMs) { return; }
     var store = readObservedEvents();
     data.desks.forEach(function (desk) {
       diffDeskToEvents(lastObservedSnapshot.desks[desk.id], desk, generatedAt, sourceLabel).forEach(function (event) {
@@ -1435,6 +1442,7 @@
       lastObservedSnapshot.desks[desk.id] = deskTrackFields(desk);
     });
     lastObservedSnapshot.generatedAt = generatedAt;
+    lastObservedSnapshot.observedAtMs = observedAtMs;
     if (store.events.length > MAX_OBSERVED_EVENTS) {
       store.events = store.events.slice(store.events.length - MAX_OBSERVED_EVENTS);
     }

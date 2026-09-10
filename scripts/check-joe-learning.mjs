@@ -13,18 +13,30 @@ function extractJoeBlock(startMarker, endMarker) {
 }
 
 const learningHelpers = `${extractJoeBlock("  var stateCopy = {", "\n  var money = new Intl.NumberFormat")}
+  var lastObservedSnapshot = null;
+  var observedEventsMemory = null;
   var number = new Intl.NumberFormat("de-AT", { maximumFractionDigits: 4 });
 ${extractJoeBlock("  function nonEmptyString(value)", "\n\n  function deskTrackFields(desk)")}
 ${extractJoeBlock("  function deskTrackFields(desk)", "\n\n  function deskTrackFieldsEqual(left, right)")}
 ${extractJoeBlock("  function deskTrackFieldsEqual(left, right)", "\n\n  function readObservedEvents()")}
-${extractJoeBlock("  function diffDeskToEvents(previousFields, desk, snapshotAt, sourceLabel)", "\n\n  function observeSnapshotChanges(data)")}`;
+${extractJoeBlock("  function readObservedEvents()", "\n\n  function diffDeskToEvents(previousFields, desk, snapshotAt, sourceLabel)")}
+${extractJoeBlock("  function diffDeskToEvents(previousFields, desk, snapshotAt, sourceLabel)", "\n\n  function snapshotInstantMs(generatedAt)")}
+${extractJoeBlock("  function snapshotInstantMs(generatedAt)", "\n\n  function observeSnapshotChanges(data)")}
+${extractJoeBlock("  function observeSnapshotChanges(data)", "\n\n  function deskObservedEvents(deskId)")}`;
 
 const api = new Function(`${learningHelpers}
   return {
     formatDeskLearningCopy,
     deskTrackFields,
     diffDeskToEvents,
-    learningStatusLabel
+    learningStatusLabel,
+    observeSnapshotChanges,
+    readObservedEvents,
+    resetObservation: function () {
+      lastObservedSnapshot = null;
+      observedEventsMemory = null;
+    },
+    lastObservedSnapshot: function () { return lastObservedSnapshot; }
   };
 `)();
 
@@ -124,6 +136,67 @@ if (learningEvents[0].summary.includes("€") || learningEvents[0].summary.toLow
   throw new Error("learning events must not invent trade or euro P&L");
 }
 
+function snapshotDesk(action, generatedAt) {
+  return {
+    generatedAt,
+    source: { label: "book.json" },
+    desks: [{
+      id: "joe",
+      label: "Joe",
+      state: "sit-out",
+      action,
+      learning: {
+        status: "learning",
+        headline: "Recording why the trade was skipped",
+        detail: "The next review checks whether the same warning appears again.",
+        iteration: 7
+      },
+      issues: []
+    }]
+  };
+}
+
+api.resetObservation();
+api.observeSnapshotChanges(snapshotDesk("Baseline action.", "2026-09-09T10:00:00+02:00"));
+if (api.readObservedEvents().events.length !== 0) {
+  throw new Error("first snapshot must be baseline-only");
+}
+
+api.observeSnapshotChanges(snapshotDesk("Newer action after baseline.", "2026-09-09T10:05:00+02:00"));
+const newerEvents = api.readObservedEvents().events.filter((event) => event.deskId === "joe");
+if (newerEvents.length !== 1 || newerEvents[0].kind !== "action") {
+  throw new Error("newer changed action must create one observed event");
+}
+if (!newerEvents[0].summary.includes("Newer action after baseline")) {
+  throw new Error("newer event must carry the accepted action text");
+}
+
+const baselineBeforeOlder = api.lastObservedSnapshot().desks.joe.action;
+api.observeSnapshotChanges(snapshotDesk("Older different action must be ignored.", "2026-09-09T09:55:00+02:00"));
+if (api.readObservedEvents().events.length !== 1) {
+  throw new Error("older different action must not append timeline events");
+}
+if (api.lastObservedSnapshot().desks.joe.action !== baselineBeforeOlder) {
+  throw new Error("older different action must not change the accepted baseline");
+}
+
+api.observeSnapshotChanges(snapshotDesk("Same instant different offset must be ignored.", "2026-09-09T08:05:00Z"));
+if (api.readObservedEvents().events.length !== 1) {
+  throw new Error("same instant with different timezone must not append timeline events");
+}
+if (api.lastObservedSnapshot().desks.joe.action !== baselineBeforeOlder) {
+  throw new Error("same instant replay must not change the accepted baseline");
+}
+
+api.observeSnapshotChanges(snapshotDesk("Next newer legitimate transition.", "2026-09-09T10:10:00+02:00"));
+const timelineEvents = api.readObservedEvents().events.filter((event) => event.deskId === "joe");
+if (timelineEvents.length !== 2 || timelineEvents[1].kind !== "action") {
+  throw new Error("next newer action must produce exactly one legitimate transition");
+}
+if (!timelineEvents[1].summary.includes("Next newer legitimate transition")) {
+  throw new Error("legitimate newer transition must compare against the last accepted baseline");
+}
+
 console.log(JSON.stringify({
   ok: true,
   checks: [
@@ -133,6 +206,11 @@ console.log(JSON.stringify({
     "observed-action-diff",
     "no-fake-replay-events",
     "observed-state-diff",
-    "observed-learning-diff"
+    "observed-learning-diff",
+    "baseline-only-first-snapshot",
+    "newer-action-one-event",
+    "older-different-action-ignored",
+    "same-instant-timezone-ignored",
+    "next-newer-legitimate-transition"
   ]
 }, null, 2));
