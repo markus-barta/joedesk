@@ -41,12 +41,12 @@ const api = new Function(`${phoneHelpers}
 
 const sample = [
   { id: "hero", x: 0, y: 0, w: 12, h: 3 },
-  { id: "desk-j", x: 0, y: 3, w: 4, h: 8 },
-  { id: "desk-joe", x: 4, y: 3, w: 4, h: 8 },
-  { id: "desk-joel", x: 8, y: 3, w: 4, h: 8 },
-  { id: "attribution", x: 0, y: 11, w: 4, h: 3 },
-  { id: "history", x: 4, y: 11, w: 8, h: 5 },
-  { id: "positions", x: 0, y: 16, w: 12, h: 5 },
+  { id: "desk-j", x: 0, y: 3, w: 4, h: 9 },
+  { id: "desk-joe", x: 4, y: 3, w: 4, h: 9 },
+  { id: "desk-joel", x: 8, y: 3, w: 4, h: 9 },
+  { id: "attribution", x: 0, y: 12, w: 4, h: 3 },
+  { id: "history", x: 4, y: 12, w: 8, h: 5 },
+  { id: "positions", x: 0, y: 17, w: 12, h: 5 },
 ];
 
 const defaultSettings = api.sanitizeGridSettings({});

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const joeSource = await readFile(resolve(repoRoot, "public/joe/joe.js"), "utf8");
+const htmlSource = await readFile(resolve(repoRoot, "public/joe/index.html"), "utf8");
 const versionSource = await readFile(resolve(repoRoot, "public/joe/joe-version.js"), "utf8");
 
 function extractJoeBlock(startMarker, endMarker) {
@@ -20,8 +21,6 @@ const layoutHelpers = `${layoutContext}
   var MAX_LAYOUTS = 24;
   var SUPPORTED_COLUMNS = [3, 6, 12];
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
-  var NARROW_WIDGET_DRAG_PX = 31;
-  var DESK_TIMELINE_LIMIT = 5;
 ${extractJoeBlock("  function layoutCoordinate", "\n\n  function setLayoutStatus")}
 ${extractJoeBlock("  function defaultLayoutEntry", "\n\n  function bindLayoutControls")}`;
 
@@ -58,7 +57,33 @@ const legacySample = [
   { id: "history", x: 4, y: 7, w: 8, h: 5 },
   { id: "positions", x: 0, y: 12, w: 12, h: 5 },
 ];
+const legacySampleV2 = [
+  { id: "hero", x: 0, y: 0, w: 12, h: 3 },
+  { id: "desk-j", x: 0, y: 3, w: 4, h: 8 },
+  { id: "desk-joe", x: 4, y: 3, w: 4, h: 8 },
+  { id: "desk-joel", x: 8, y: 3, w: 4, h: 8 },
+  { id: "attribution", x: 0, y: 11, w: 4, h: 3 },
+  { id: "history", x: 4, y: 11, w: 8, h: 5 },
+  { id: "positions", x: 0, y: 16, w: 12, h: 5 },
+];
 const sample = api.defaultLayoutEntry().items;
+
+function layoutFromHtml(source) {
+  const items = [];
+  const itemRe = /gs-id="([^"]+)"\s+gs-x="(\d+)"\s+gs-y="(\d+)"\s+gs-w="(\d+)"\s+gs-h="(\d+)"/g;
+  let match = itemRe.exec(source);
+  while (match) {
+    items.push({
+      id: match[1],
+      x: Number(match[2]),
+      y: Number(match[3]),
+      w: Number(match[4]),
+      h: Number(match[5])
+    });
+    match = itemRe.exec(source);
+  }
+  return items;
+}
 
 function layoutTilesOverlap(items) {
   for (let left = 0; left < items.length; left += 1) {
@@ -98,16 +123,25 @@ if (defaultEntry.items.find((item) => item.id === "desk-j").y !== 3) throw new E
 if (!defaultEntry.items.filter((item) => item.id.startsWith("desk-")).every((item) => item.h === deskRows)) {
   throw new Error("default desk tiles must match measured desktop row budget");
 }
-if (defaultEntry.items.find((item) => item.id === "attribution").y !== 11) {
+if (defaultEntry.items.find((item) => item.id === "attribution").y !== 12) {
   throw new Error("default attribution must follow taller desk row");
 }
-if (defaultEntry.items.find((item) => item.id === "positions").y !== 16) {
+if (defaultEntry.items.find((item) => item.id === "positions").y !== 17) {
   throw new Error("default positions must follow history without overlap");
+}
+
+const htmlLayout = layoutFromHtml(htmlSource);
+if (!api.layoutItemsEqual(htmlLayout, sample)) {
+  throw new Error("index.html grid-stack defaults must match DEFAULT_LAYOUT");
 }
 
 const migratedLegacy = api.migrateLegacyDefaultLayout(legacySample);
 if (!api.layoutItemsEqual(migratedLegacy, sample)) {
   throw new Error("untouched legacy default geometry must migrate to current default");
+}
+const migratedLegacyV2 = api.migrateLegacyDefaultLayout(legacySampleV2);
+if (!api.layoutItemsEqual(migratedLegacyV2, sample)) {
+  throw new Error("untouched legacy v2 default geometry must migrate to current default");
 }
 const customizedLegacy = legacySample.map((item) => item.id === "hero" ? { ...item, h: 4 } : item);
 if (!api.layoutItemsEqual(api.migrateLegacyDefaultLayout(customizedLegacy), customizedLegacy)) {
@@ -178,4 +212,4 @@ restoringLayout = false;
 saveLayoutGuard();
 if (!layoutPersisted) throw new Error("desktop applyGridLayout must persist after restoringLayout clears");
 
-console.log(JSON.stringify({ ok: true, appVersion: version.APP_VERSION, checks: 25, desktopDeskRows: deskRows }, null, 2));
+console.log(JSON.stringify({ ok: true, appVersion: version.APP_VERSION, checks: 27, desktopDeskRows: deskRows }, null, 2));

@@ -77,7 +77,7 @@
     { id: "history", x: 4, y: 7, w: 8, h: 5 },
     { id: "positions", x: 0, y: 12, w: 12, h: 5 }
   ];
-  var DEFAULT_LAYOUT = [
+  var LEGACY_DEFAULT_LAYOUT_V2 = [
     { id: "hero", x: 0, y: 0, w: 12, h: 3 },
     { id: "desk-j", x: 0, y: 3, w: 4, h: 8 },
     { id: "desk-joe", x: 4, y: 3, w: 4, h: 8 },
@@ -85,6 +85,16 @@
     { id: "attribution", x: 0, y: 11, w: 4, h: 3 },
     { id: "history", x: 4, y: 11, w: 8, h: 5 },
     { id: "positions", x: 0, y: 16, w: 12, h: 5 }
+  ];
+  var DESKTOP_DESK_DEFAULT_ROWS = 9;
+  var DEFAULT_LAYOUT = [
+    { id: "hero", x: 0, y: 0, w: 12, h: 3 },
+    { id: "desk-j", x: 0, y: 3, w: 4, h: 9 },
+    { id: "desk-joe", x: 4, y: 3, w: 4, h: 9 },
+    { id: "desk-joel", x: 8, y: 3, w: 4, h: 9 },
+    { id: "attribution", x: 0, y: 12, w: 4, h: 3 },
+    { id: "history", x: 4, y: 12, w: 8, h: 5 },
+    { id: "positions", x: 0, y: 17, w: 12, h: 5 }
   ];
   var stateCopy = { working: "Working", "sit-out": "Sitting out", stuck: "Stuck" };
   var learningStatusCopy = { learning: "Learning", iterating: "Iterating", steady: "Steady", blocked: "Blocked" };
@@ -663,11 +673,7 @@
   }
 
   function desktopDeskDefaultRows() {
-    var cell = DEFAULT_GRID_SETTINGS.cellHeight;
-    var chrome = DEFAULT_GRID_SETTINGS.tilePadding * 2 + NARROW_WIDGET_DRAG_PX;
-    var timelinePixels = 20 + DESK_TIMELINE_LIMIT * 35;
-    var contentPixels = 26 + 28 + 50 + 65 + 70 + timelinePixels + 25;
-    return Math.max(8, Math.ceil((contentPixels + chrome) / cell));
+    return DESKTOP_DESK_DEFAULT_ROWS;
   }
 
   function layoutItemsEqual(left, right) {
@@ -688,8 +694,10 @@
   }
 
   function migrateLegacyDefaultLayout(items) {
-    if (!layoutItemsEqual(items, LEGACY_DEFAULT_LAYOUT)) { return items; }
-    return DEFAULT_LAYOUT.slice();
+    if (layoutItemsEqual(items, LEGACY_DEFAULT_LAYOUT) || layoutItemsEqual(items, LEGACY_DEFAULT_LAYOUT_V2)) {
+      return DEFAULT_LAYOUT.slice();
+    }
+    return items;
   }
 
   function sanitizeLayoutItems(value, columns) {
@@ -1156,11 +1164,9 @@
       resizable: { handles: "e,se,s,sw,w" }
     }, "#joeGrid");
     var stored = safeStoredLayout();
-    if (stored) {
-      restoringLayout = true;
-      grid.load(stored, false);
-      restoringLayout = false;
-    }
+    restoringLayout = true;
+    grid.load(stored || DEFAULT_LAYOUT.slice(), false);
+    restoringLayout = false;
     syncGridColumnConfig(activeGridSettings.columns);
     scheduleViewportSettle();
     grid.on("change dragstop resizestop", saveLayout);
