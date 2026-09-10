@@ -1,0 +1,62 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/check-package.mjs
+      - run: node scripts/check-joe-layout.mjs
+      - name: Server contract tests (disposable tmpfs container)
+        env:
+          JOE_INBOX_TOKEN: ci-inbox-token-min-16-chars
+        run: |
+          docker run --rm --network none --tmpfs /var/lib/joe-board \
+            -e JOE_INBOX_TOKEN="$JOE_INBOX_TOKEN" \
+            -v "$PWD:/repo:ro" -w /repo node:22 \
+            node --test test/server-contract.mjs
+
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Google Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget gnupg
+          wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y /tmp/google-chrome.deb
+      - name: Desktop smoke
+        env:
+          BROWSER_PATH: /usr/bin/google-chrome
+        run: node scripts/smoke-joe.mjs
+      - name: Mobile smoke
+        env:
+          BROWSER_PATH: /usr/bin/google-chrome
+          JOE_SMOKE_VIEWPORT: mobile
+        run: node scripts/smoke-joe.mjs
+      - name: Privacy smoke
+        env:
+          BROWSER_PATH: /usr/bin/google-chrome
+          JOE_SMOKE_VIEWPORT: privacy
+        run: node scripts/smoke-joe.mjs
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t joedesk:ci .
