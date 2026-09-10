@@ -13,11 +13,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: node scripts/check-package.mjs
-      - run: node scripts/check-joe-layout.mjs
-      - run: node scripts/check-joe-trust.mjs
-      - run: node scripts/check-joe-phone.mjs
-      - run: node scripts/check-joe-history.mjs
+      - run: npm run check
       - name: Server contract tests (disposable tmpfs container)
         run: |
           docker run --rm --network none --tmpfs /var/lib/joe-board \

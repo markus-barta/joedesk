@@ -68,7 +68,7 @@
   var THEME_MODES = ["light", "dark", "system"];
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
   var DESK_IDS = ["j", "joe", "joel"];
-  var DEFAULT_LAYOUT = [
+  var LEGACY_DEFAULT_LAYOUT = [
     { id: "hero", x: 0, y: 0, w: 12, h: 3 },
     { id: "desk-j", x: 0, y: 3, w: 4, h: 4 },
     { id: "desk-joe", x: 4, y: 3, w: 4, h: 4 },
@@ -76,6 +76,15 @@
     { id: "attribution", x: 0, y: 7, w: 4, h: 3 },
     { id: "history", x: 4, y: 7, w: 8, h: 5 },
     { id: "positions", x: 0, y: 12, w: 12, h: 5 }
+  ];
+  var DEFAULT_LAYOUT = [
+    { id: "hero", x: 0, y: 0, w: 12, h: 3 },
+    { id: "desk-j", x: 0, y: 3, w: 4, h: 8 },
+    { id: "desk-joe", x: 4, y: 3, w: 4, h: 8 },
+    { id: "desk-joel", x: 8, y: 3, w: 4, h: 8 },
+    { id: "attribution", x: 0, y: 11, w: 4, h: 3 },
+    { id: "history", x: 4, y: 11, w: 8, h: 5 },
+    { id: "positions", x: 0, y: 16, w: 12, h: 5 }
   ];
   var stateCopy = { working: "Working", "sit-out": "Sitting out", stuck: "Stuck" };
   var learningStatusCopy = { learning: "Learning", iterating: "Iterating", steady: "Steady", blocked: "Blocked" };
@@ -653,6 +662,36 @@
     document.documentElement.style.setProperty("--joe-header-bottom", bottom + "px");
   }
 
+  function desktopDeskDefaultRows() {
+    var cell = DEFAULT_GRID_SETTINGS.cellHeight;
+    var chrome = DEFAULT_GRID_SETTINGS.tilePadding * 2 + NARROW_WIDGET_DRAG_PX;
+    var timelinePixels = 20 + DESK_TIMELINE_LIMIT * 35;
+    var contentPixels = 26 + 28 + 50 + 65 + 70 + timelinePixels + 25;
+    return Math.max(8, Math.ceil((contentPixels + chrome) / cell));
+  }
+
+  function layoutItemsEqual(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) { return false; }
+    var byId = {};
+    var i;
+    for (i = 0; i < right.length; i += 1) {
+      byId[right[i].id] = right[i];
+    }
+    for (i = 0; i < left.length; i += 1) {
+      var item = left[i];
+      var other = byId[item.id];
+      if (!other || item.x !== other.x || item.y !== other.y || item.w !== other.w || item.h !== other.h) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function migrateLegacyDefaultLayout(items) {
+    if (!layoutItemsEqual(items, LEGACY_DEFAULT_LAYOUT)) { return items; }
+    return DEFAULT_LAYOUT.slice();
+  }
+
   function sanitizeLayoutItems(value, columns) {
     if (!Array.isArray(value)) { return null; }
     var cols = SUPPORTED_COLUMNS.includes(columns) ? columns : DEFAULT_GRID_SETTINGS.columns;
@@ -679,7 +718,13 @@
 
   function safeStoredLayout() {
     try {
-      return sanitizeLayoutItems(JSON.parse(localStorage.getItem(LAYOUT_KEY)), desktopColumnCount());
+      var parsed = sanitizeLayoutItems(JSON.parse(localStorage.getItem(LAYOUT_KEY)), desktopColumnCount());
+      if (!parsed) { return null; }
+      var migrated = migrateLegacyDefaultLayout(parsed);
+      if (!layoutItemsEqual(migrated, parsed)) {
+        try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(migrated)); } catch (_) {}
+      }
+      return migrated;
     } catch (_) {
       return null;
     }
@@ -1125,7 +1170,7 @@
       applyGridSettings(defaultLayoutEntry().settings, false);
       applyGridLayout(DEFAULT_LAYOUT);
       writeActiveGridSettings(activeGridSettings);
-      setLayoutStatus("Reset to default layout.");
+      setLayoutStatus("Reset to default layout with taller desk tiles for learning and timeline content.");
     });
   }
 

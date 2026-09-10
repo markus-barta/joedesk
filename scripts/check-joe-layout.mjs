@@ -13,13 +13,15 @@ function extractJoeBlock(startMarker, endMarker) {
   return joeSource.slice(start, end);
 }
 
-const layoutContext = extractJoeBlock("  var DEFAULT_LAYOUT = [", "\n  var stateCopy = ");
+const layoutContext = extractJoeBlock("  var LEGACY_DEFAULT_LAYOUT = [", "\n  var stateCopy = ");
 const layoutHelpers = `${layoutContext}
   var LAYOUTS_KEY = "joe-board-named-layouts-v1";
   var DEFAULT_LAYOUT_ID = "default";
   var MAX_LAYOUTS = 24;
   var SUPPORTED_COLUMNS = [3, 6, 12];
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
+  var NARROW_WIDGET_DRAG_PX = 31;
+  var DESK_TIMELINE_LIMIT = 5;
 ${extractJoeBlock("  function layoutCoordinate", "\n\n  function setLayoutStatus")}
 ${extractJoeBlock("  function defaultLayoutEntry", "\n\n  function bindLayoutControls")}`;
 
@@ -27,6 +29,9 @@ const api = new Function(`${layoutHelpers}
   return {
     sanitizeLayoutItems,
     sanitizeGridSettings,
+    desktopDeskDefaultRows,
+    layoutItemsEqual,
+    migrateLegacyDefaultLayout,
     defaultLayoutEntry,
     defaultLayoutsCatalog,
     normalizeLayoutEntry,
@@ -44,7 +49,7 @@ if (!version?.APP_VERSION || !Array.isArray(version.VERSION_HISTORY) || version.
   throw new Error("JoeVersion invalid");
 }
 
-const sample = [
+const legacySample = [
   { id: "hero", x: 0, y: 0, w: 12, h: 3 },
   { id: "desk-j", x: 0, y: 3, w: 4, h: 4 },
   { id: "desk-joe", x: 4, y: 3, w: 4, h: 4 },
@@ -53,6 +58,7 @@ const sample = [
   { id: "history", x: 4, y: 7, w: 8, h: 5 },
   { id: "positions", x: 0, y: 12, w: 12, h: 5 },
 ];
+const sample = api.defaultLayoutEntry().items;
 
 function layoutTilesOverlap(items) {
   for (let left = 0; left < items.length; left += 1) {
@@ -86,8 +92,27 @@ const sixCol = [
 if (!api.sanitizeLayoutItems(sixCol, 6)) throw new Error("valid six-column layout rejected");
 
 const defaultEntry = api.defaultLayoutEntry();
+const deskRows = api.desktopDeskDefaultRows();
 if (layoutTilesOverlap(defaultEntry.items)) throw new Error("default layout tiles overlap");
 if (defaultEntry.items.find((item) => item.id === "desk-j").y !== 3) throw new Error("default desks must start below hero");
+if (!defaultEntry.items.filter((item) => item.id.startsWith("desk-")).every((item) => item.h === deskRows)) {
+  throw new Error("default desk tiles must match measured desktop row budget");
+}
+if (defaultEntry.items.find((item) => item.id === "attribution").y !== 11) {
+  throw new Error("default attribution must follow taller desk row");
+}
+if (defaultEntry.items.find((item) => item.id === "positions").y !== 16) {
+  throw new Error("default positions must follow history without overlap");
+}
+
+const migratedLegacy = api.migrateLegacyDefaultLayout(legacySample);
+if (!api.layoutItemsEqual(migratedLegacy, sample)) {
+  throw new Error("untouched legacy default geometry must migrate to current default");
+}
+const customizedLegacy = legacySample.map((item) => item.id === "hero" ? { ...item, h: 4 } : item);
+if (!api.layoutItemsEqual(api.migrateLegacyDefaultLayout(customizedLegacy), customizedLegacy)) {
+  throw new Error("customized layouts must not be auto-migrated");
+}
 
 const alteredDefault = api.normalizeLayoutEntry({
   id: "default",
@@ -153,4 +178,4 @@ restoringLayout = false;
 saveLayoutGuard();
 if (!layoutPersisted) throw new Error("desktop applyGridLayout must persist after restoringLayout clears");
 
-console.log(JSON.stringify({ ok: true, appVersion: version.APP_VERSION, checks: 21 }, null, 2));
+console.log(JSON.stringify({ ok: true, appVersion: version.APP_VERSION, checks: 25, desktopDeskRows: deskRows }, null, 2));
