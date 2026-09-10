@@ -1,6 +1,6 @@
 {
   "name": "joedesk",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "JoeDesk paper-trading dashboard and inbox server",
   "type": "module",
   "private": true,

@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.4.0",
+    APP_VERSION: "0.4.1",
     VERSION_HISTORY: [
+      {
+        version: "0.4.1",
+        date: "2026-09-10",
+        title: "Clearer values and a readable phone layout",
+        changes: [
+          "Paper capital is labeled clearly; unavailable Day P&L and position data are no longer mistaken for zero or none.",
+          "The last valid snapshot stays visible through refresh failures, with advancing age and distinct heartbeat status.",
+          "Narrow screens stack tiles automatically while preserving desktop layouts and readable controls.",
+        ],
+      },
       {
         version: "0.4.0",
         date: "2026-09-10",

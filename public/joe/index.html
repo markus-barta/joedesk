@@ -37,10 +37,9 @@
 </section>
 
 <main class="shell" id="dashboard" hidden>
-  <header class="topline">
+  <header class="topline" aria-label="JoeDesk controls">
     <div class="brand">
-      <svg class="brand-logo" width="28" height="28" viewBox="0 0 28 28" role="img" aria-hidden="true">
-
+      <svg class="brand-logo" width="28" height="28" viewBox="0 0 28 28" role="img" aria-label="JoeDesk">
         <rect x="1" y="14" width="7" height="12" rx="1.5" fill="currentColor" opacity=".92"/>
         <rect x="10.5" y="10" width="7" height="16" rx="1.5" fill="currentColor"/>
         <rect x="20" y="6" width="7" height="20" rx="1.5" fill="currentColor" opacity=".78"/>
@@ -48,7 +47,7 @@
       </svg>
       <strong class="brand-wordmark">JoeDesk</strong>
     </div>
-    <div class="toolbar">
+    <div class="toolbar" role="toolbar" aria-label="Board tools">
       <span class="paper-mark">Paper only</span>
       <details class="header-menu" id="layoutMenu" data-dismissable>
         <summary class="header-menu-trigger" aria-haspopup="dialog">Layout</summary>
@@ -147,7 +146,7 @@
     <article class="grid-stack-item" gs-id="desk-joel" gs-x="8" gs-y="3" gs-w="4" gs-h="4"><div class="grid-stack-item-content widget desk-widget" data-desk="joel"><div class="widget-drag"><span>Desk Joel</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="joel"></div></div></article>
 
     <article class="grid-stack-item" gs-id="attribution" gs-x="0" gs-y="7" gs-w="4" gs-h="3">
-      <div class="grid-stack-item-content widget"><div class="widget-drag"><span>Day attribution</span><span class="drag-dots">•••</span></div><div class="widget-body attribution-body"><p class="widget-note">Share of today’s absolute desk movement</p><div id="attribution" class="attribution"></div></div></div>
+      <div class="grid-stack-item-content widget"><div class="widget-drag"><span>Day attribution</span><span class="drag-dots">•••</span></div><div class="widget-body attribution-body"><div id="attribution" class="attribution"></div></div></div>
     </article>
 
     <article class="grid-stack-item" gs-id="history" gs-x="4" gs-y="7" gs-w="8" gs-h="5">
@@ -195,7 +194,7 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">0.3.0</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">0.4.1</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>

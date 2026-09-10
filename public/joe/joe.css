@@ -179,6 +179,8 @@ button { color: inherit; }
 .positions-head { justify-content: space-between; gap: 12px; padding: 9px 12px; }
 .table-scroll { width: 100%; min-width: 0; max-width: 100%; flex: 1 1 auto; overflow-x: auto; overflow-y: auto; border-top: 1px solid var(--line); scrollbar-color: var(--line) transparent; }
 table { width: 100%; min-width: 780px; border-collapse: collapse; font: 11px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.positions-table-empty { width: 100%; min-width: 0; white-space: normal; }
+table.positions-table-empty thead { display: none; }
 th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; }
 th { position: sticky; top: 0; z-index: 1; color: var(--quiet); background: var(--ink-2); font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
 td.number, th.number { text-align: right; }
@@ -227,14 +229,27 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
     max-width: none;
     max-height: min(70vh, calc(100vh - var(--joe-header-bottom, 64px) - 16px));
     overflow-y: auto;
+    overscroll-behavior: contain;
   }
-  .hero-widget { overflow: auto; }
   .layout-select, .layout-name-input { max-width: 100%; }
-  .hero-values { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 7px 7px 5px; }
-  .hero-stat { padding: 6px 5px; }
-  .hero-stat strong { margin-top: 3px; font-size: clamp(9px, 2.7vw, 11px); }
-  .system-strip { gap: 4px; padding: 0 7px 6px; }
-  .system-strip .status-badge { padding: 3px 6px; font-size: 8px; }
+  .header-menu > summary,
+  .quiet-button,
+  .control-group button,
+  .version > summary {
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+  .layout-toolbar .quiet-button,
+  .settings-actions .quiet-button { min-width: 44px; }
+  .hero-values { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px 10px 8px; }
+  .hero-stat { padding: 8px 10px; }
+  .hero-stat strong { margin-top: 4px; font-size: 14px; }
+  .system-strip { gap: 6px; padding: 0 10px 10px; flex-wrap: wrap; }
+  .system-strip .status-badge { padding: 5px 8px; font-size: 9px; }
+  .system-strip .source-line { flex: 1 1 100%; margin-left: 0; white-space: normal; }
+  .desk-name { font-size: 20px; }
+  .desk-money-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .history-canvas-wrap { min-height: 160px; }
   .grid-fallback { display: block; }
   .grid-fallback > .grid-stack-item { min-height: 300px; margin-bottom: 12px; }
   .positions-head { align-items: flex-start; flex-direction: column; }
@@ -245,6 +260,20 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
   .history-controls { width: 100%; }
   .history-head #resetZoom { margin-left: 0; width: 100%; }
 }
+@media (max-width: 390px) {
+  .shell { width: min(100% - 12px, 1600px); padding-top: 6px; }
+  .topline { gap: 8px; }
+  .toolbar { gap: 6px; }
+  .header-menu-panel,
+  .settings-panel {
+    left: 8px;
+    right: 8px;
+    max-height: min(72vh, calc(100vh - var(--joe-header-bottom, 64px) - 8px));
+  }
+  .version__panel { left: 8px; right: 8px; width: auto; max-width: none; transform: none; }
+}
+[data-joe-viewport="narrow"] .grid-stack { min-height: 0; }
+[data-joe-viewport="narrow"] .desk-slot { overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 @media (prefers-reduced-motion: no-preference) {
   .flap { animation: settle .22s ease-out; }
   @keyframes settle { from { transform: translateY(-2px); opacity: .75; } to { transform: none; opacity: 1; } }

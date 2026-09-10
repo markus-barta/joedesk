@@ -139,4 +139,18 @@ if (canonical.layouts[0].items.find((item) => item.id === "hero").h !== 3) throw
 const tooMany = { schema: "inspr.joe.layouts.v1", layouts: Array.from({ length: 25 }, (_, index) => ({ id: `layout-${index}`, name: `Layout ${index}`, items: sample })) };
 if (api.writeLayoutsCatalog(tooMany)) throw new Error("catalog over limit accepted");
 
-console.log(JSON.stringify({ ok: true, appVersion: version.APP_VERSION, checks: 19 }, null, 2));
+let restoringLayout = true;
+let layoutPersisted = false;
+const saveLayoutGuard = () => {
+  if (!restoringLayout) { layoutPersisted = true; }
+};
+saveLayoutGuard();
+restoringLayout = false;
+if (layoutPersisted) throw new Error("saveLayout guard must ignore calls while restoringLayout is true");
+
+restoringLayout = true;
+restoringLayout = false;
+saveLayoutGuard();
+if (!layoutPersisted) throw new Error("desktop applyGridLayout must persist after restoringLayout clears");
+
+console.log(JSON.stringify({ ok: true, appVersion: version.APP_VERSION, checks: 21 }, null, 2));
