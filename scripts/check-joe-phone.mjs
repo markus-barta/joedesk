@@ -72,11 +72,14 @@ function innerPixelsForTile(item, settings) {
 
 if (api.NARROW_BREAKPOINT !== 700) throw new Error("narrow breakpoint must stay at 700");
 
-if (api.narrowGridTilePixels(5, defaultSettings) !== 5 * 82 + 4 * 10) {
-  throw new Error("narrow grid pitch must use cellHeight rows plus tileGap margins");
+if (api.narrowGridTilePixels(5, defaultSettings) !== 5 * 82) {
+  throw new Error("narrow grid outer height must be rows times cellHeight only");
 }
 if (api.narrowGridTilePixels(1, compactSettings) !== 48) {
   throw new Error("single-row narrow tile must equal cellHeight");
+}
+if (api.narrowGridTilePixels(9, compactSettings) !== 432) {
+  throw new Error("measured 48px nine-row outer height must be 432px");
 }
 
 const narrow = api.narrowLayoutFromItems(sample, defaultSettings);
@@ -96,8 +99,8 @@ if (!defaultDesk || defaultDesk.h !== 6) {
 if (!compactDesk || compactDesk.h <= defaultDesk.h) {
   throw new Error("48px cell height must increase narrow desk row count");
 }
-if (compactDesk.h !== 9) {
-  throw new Error("48px desk tiles must allocate nine rows for measured phone content");
+if (compactDesk.h !== 11) {
+  throw new Error("48px desk tiles must allocate eleven rows for measured phone content");
 }
 
 for (const item of compact) {
@@ -126,9 +129,14 @@ if (api.narrowRowsForOuterPixels(deskOuter, defaultSettings) !== defaultDesk.h) 
   throw new Error("narrow row solver must match desk tile height at 82px cells");
 }
 
+const compactDeskInner = innerPixelsForTile(compactDesk, compactSettings);
+if (compactDeskInner < api.NARROW_TILE_MIN_PIXELS["desk-j"]) {
+  throw new Error("48px desk inner height must cover measured scroll content");
+}
+
 console.log(JSON.stringify({
   ok: true,
-  checks: 14,
+  checks: 16,
   narrowBreakpoint: api.NARROW_BREAKPOINT,
   defaultDeskRows: defaultDesk.h,
   compactDeskRows: compactDesk.h,

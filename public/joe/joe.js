@@ -218,10 +218,17 @@
     };
   }
 
+  function narrowGridRowPixels(settings) {
+    if (typeof grid !== "undefined" && grid && typeof grid.getCellHeight === "function") {
+      var live = grid.getCellHeight();
+      if (Number.isFinite(live) && live > 0) { return live; }
+    }
+    return sanitizeGridSettings(settings).cellHeight;
+  }
+
   function narrowGridTilePixels(rows, settings) {
-    var clean = sanitizeGridSettings(settings);
     if (!Number.isFinite(rows) || rows <= 0) { return 0; }
-    return rows * clean.cellHeight + (rows - 1) * clean.tileGap;
+    return rows * narrowGridRowPixels(settings);
   }
 
   function narrowRowsForOuterPixels(outerPixels, settings) {
@@ -719,15 +726,16 @@
     if (!grid) { return false; }
     var clean = sanitizeLayoutItems(items, desktopColumnCount());
     if (!clean) { return false; }
-    restoringLayout = true;
     if (isNarrowGridViewport()) {
+      restoringLayout = true;
       persistDesktopItems(clean);
       loadNarrowGridLayout(clean);
     } else {
+      restoringLayout = true;
       grid.load(clean, false);
+      restoringLayout = false;
       saveLayout();
     }
-    restoringLayout = false;
     resizeVisuals();
     return true;
   }
@@ -1802,6 +1810,7 @@
     layoutItemsFromGrid: layoutItemsFromGrid,
     positionHeaderMenus: positionHeaderMenus,
     narrowBreakpoint: NARROW_BREAKPOINT,
+    narrowGridRowPixels: narrowGridRowPixels,
     narrowGridTilePixels: narrowGridTilePixels,
     narrowRowsForOuterPixels: narrowRowsForOuterPixels,
     narrowOuterPixelsForContent: narrowOuterPixelsForContent,

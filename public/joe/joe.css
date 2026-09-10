@@ -271,9 +271,7 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
   .version__panel { left: 8px; right: 8px; width: auto; max-width: none; transform: none; }
 }
 [data-joe-viewport="narrow"] .grid-stack { min-height: 0; }
-[data-joe-viewport="narrow"] .grid-stack-item-content.widget { overflow: visible; }
-[data-joe-viewport="narrow"] .hero-widget { overflow: visible; }
-[data-joe-viewport="narrow"] .desk-slot { overflow-x: hidden; overflow-y: visible; }
+[data-joe-viewport="narrow"] .desk-slot { overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 @media (prefers-reduced-motion: no-preference) {
   .flap { animation: settle .22s ease-out; }
   @keyframes settle { from { transform: translateY(-2px); opacity: .75; } to { transform: none; opacity: 1; } }
