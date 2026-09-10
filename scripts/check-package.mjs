@@ -74,6 +74,12 @@ const release = JSON.parse(await readFile(join(repoRoot, "release.json"), "utf8"
 if (release.version !== joeVersion.APP_VERSION || release.version_scheme !== "legacy") {
   fail("release metadata must match the retained product version scheme and UI version");
 }
+if (!Number.isSafeInteger(release.release_sequence) || release.release_sequence < 1) {
+  fail("release metadata must have a positive integer release_sequence");
+}
+if (joeVersion.VERSION_HISTORY?.[0]?.version !== joeVersion.APP_VERSION) {
+  fail("latest VERSION_HISTORY entry must match JoeVersion.APP_VERSION");
+}
 for (const rel of REQUIRED) {
   try {
     await access(join(repoRoot, rel), constants.R_OK);
