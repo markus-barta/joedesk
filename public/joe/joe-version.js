@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.4.1",
+    APP_VERSION: "0.5.0",
     VERSION_HISTORY: [
+      {
+        version: "0.5.0",
+        date: "2026-09-10",
+        title: "History that holds up and clearer desk activity",
+        changes: [
+          "History survives failed refreshes with a Retry control; sparklines follow the selected time range.",
+          "Desk cards explain supplied actions and learning state, with a timeline of changes observed by this browser.",
+          "Compare desks over shared timestamps, with explicit missing data and taller default desktop tiles.",
+        ],
+      },
       {
         version: "0.4.1",
         date: "2026-09-10",

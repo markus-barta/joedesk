@@ -141,15 +141,15 @@
       </div>
     </article>
 
-    <article class="grid-stack-item" gs-id="desk-j" gs-x="0" gs-y="3" gs-w="4" gs-h="4"><div class="grid-stack-item-content widget desk-widget" data-desk="j"><div class="widget-drag"><span>Desk J</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="j"></div></div></article>
-    <article class="grid-stack-item" gs-id="desk-joe" gs-x="4" gs-y="3" gs-w="4" gs-h="4"><div class="grid-stack-item-content widget desk-widget" data-desk="joe"><div class="widget-drag"><span>Desk Joe</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="joe"></div></div></article>
-    <article class="grid-stack-item" gs-id="desk-joel" gs-x="8" gs-y="3" gs-w="4" gs-h="4"><div class="grid-stack-item-content widget desk-widget" data-desk="joel"><div class="widget-drag"><span>Desk Joel</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="joel"></div></div></article>
+    <article class="grid-stack-item" gs-id="desk-j" gs-x="0" gs-y="3" gs-w="4" gs-h="9"><div class="grid-stack-item-content widget desk-widget" data-desk="j"><div class="widget-drag"><span>Desk J</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="j"></div></div></article>
+    <article class="grid-stack-item" gs-id="desk-joe" gs-x="4" gs-y="3" gs-w="4" gs-h="9"><div class="grid-stack-item-content widget desk-widget" data-desk="joe"><div class="widget-drag"><span>Desk Joe</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="joe"></div></div></article>
+    <article class="grid-stack-item" gs-id="desk-joel" gs-x="8" gs-y="3" gs-w="4" gs-h="9"><div class="grid-stack-item-content widget desk-widget" data-desk="joel"><div class="widget-drag"><span>Desk Joel</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="joel"></div></div></article>
 
-    <article class="grid-stack-item" gs-id="attribution" gs-x="0" gs-y="7" gs-w="4" gs-h="3">
+    <article class="grid-stack-item" gs-id="attribution" gs-x="0" gs-y="12" gs-w="4" gs-h="3">
       <div class="grid-stack-item-content widget"><div class="widget-drag"><span>Day attribution</span><span class="drag-dots">•••</span></div><div class="widget-body attribution-body"><div id="attribution" class="attribution"></div></div></div>
     </article>
 
-    <article class="grid-stack-item" gs-id="history" gs-x="4" gs-y="7" gs-w="8" gs-h="5">
+    <article class="grid-stack-item" gs-id="history" gs-x="4" gs-y="12" gs-w="8" gs-h="5">
       <div class="grid-stack-item-content widget history-widget">
         <div class="widget-drag"><span>History</span><span class="drag-dots">•••</span></div>
         <div class="history-head">
@@ -176,12 +176,14 @@
           </div>
           <button class="quiet-button" id="resetZoom" type="button">Reset zoom</button>
         </div>
-        <p class="history-help" id="historyHelp">Wheel or pinch to zoom · Shift-drag to pan</p>
+        <p class="history-status" id="historyStatus" hidden role="status"><span id="historyStatusText"></span><button class="quiet-button" id="historyRetry" type="button">Retry</button></p>
+        <p class="history-help" id="historyHelp">Wheel or pinch to zoom · Shift-drag to pan · Sparklines follow the selected range</p>
+        <p class="history-compare" id="historyCompare" hidden></p>
         <div class="history-canvas-wrap"><canvas id="historyChart" aria-label="Desk equity history chart" aria-describedby="historyHelp"></canvas><div class="empty-state" id="historyEmpty" hidden>History will fill as snapshots arrive.</div></div>
       </div>
     </article>
 
-    <article class="grid-stack-item" gs-id="positions" gs-x="0" gs-y="12" gs-w="12" gs-h="5">
+    <article class="grid-stack-item" gs-id="positions" gs-x="0" gs-y="17" gs-w="12" gs-h="5">
       <div class="grid-stack-item-content widget positions-widget">
         <div class="widget-drag"><span>Full positions</span><span class="drag-dots">•••</span></div>
         <div class="positions-head"><p class="widget-note" id="positionsSummary">Waiting for position detail</p><div class="control-group" role="group" aria-label="Filter positions by desk"><button type="button" data-position-filter="all" aria-pressed="true">All</button><button type="button" data-position-filter="j" aria-pressed="false">J</button><button type="button" data-position-filter="joe" aria-pressed="false">Joe</button><button type="button" data-position-filter="joel" aria-pressed="false">Joel</button></div></div>
@@ -194,7 +196,7 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">0.4.1</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">0.5.0</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>

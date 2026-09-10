@@ -10,6 +10,7 @@ const require = createRequire(import.meta.url);
 const WebSocketClient = globalThis.WebSocket || require("undici").WebSocket;
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
+const packageVersion = JSON.parse(await readFile(join(repoRoot, "package.json"), "utf8")).version;
 const browserPath = process.env.BROWSER_PATH || "/usr/bin/google-chrome";
 const site = await mkdtemp(join(tmpdir(), "hostdash-joe-site-"));
 const profile = await mkdtemp(join(tmpdir(), "hostdash-joe-browser-"));
@@ -271,7 +272,7 @@ try {
       healthy.selectedSeries !== 3 || healthy.allBotsPressed !== "true" ||
       healthy.historyTitle !== "History" || /drag here|compare up to two/i.test(healthy.historyHelp || "") ||
       healthy.deskLabel !== "Desks" || healthy.rangeLabel !== "Range" ||
-      !/v0\.4\.1/.test(healthy.versionSummary || "") || healthy.versionEntries < 4 ||
+      healthy.versionSummary?.trim() !== `v${packageVersion}` || healthy.versionEntries < 4 ||
       !healthy.layoutSelectOptions || healthy.layoutSelectOptions < 1 ||
       !healthy.layoutMenu || !healthy.settingsMenu || !healthy.brandLogo || healthy.marketingCopy ||
       healthy.heroId !== "hero" ||

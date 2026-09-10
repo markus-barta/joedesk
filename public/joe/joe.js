@@ -68,7 +68,7 @@
   var THEME_MODES = ["light", "dark", "system"];
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
   var DESK_IDS = ["j", "joe", "joel"];
-  var DEFAULT_LAYOUT = [
+  var LEGACY_DEFAULT_LAYOUT = [
     { id: "hero", x: 0, y: 0, w: 12, h: 3 },
     { id: "desk-j", x: 0, y: 3, w: 4, h: 4 },
     { id: "desk-joe", x: 4, y: 3, w: 4, h: 4 },
@@ -77,7 +77,30 @@
     { id: "history", x: 4, y: 7, w: 8, h: 5 },
     { id: "positions", x: 0, y: 12, w: 12, h: 5 }
   ];
+  var LEGACY_DEFAULT_LAYOUT_V2 = [
+    { id: "hero", x: 0, y: 0, w: 12, h: 3 },
+    { id: "desk-j", x: 0, y: 3, w: 4, h: 8 },
+    { id: "desk-joe", x: 4, y: 3, w: 4, h: 8 },
+    { id: "desk-joel", x: 8, y: 3, w: 4, h: 8 },
+    { id: "attribution", x: 0, y: 11, w: 4, h: 3 },
+    { id: "history", x: 4, y: 11, w: 8, h: 5 },
+    { id: "positions", x: 0, y: 16, w: 12, h: 5 }
+  ];
+  var DESKTOP_DESK_DEFAULT_ROWS = 9;
+  var DEFAULT_LAYOUT = [
+    { id: "hero", x: 0, y: 0, w: 12, h: 3 },
+    { id: "desk-j", x: 0, y: 3, w: 4, h: 9 },
+    { id: "desk-joe", x: 4, y: 3, w: 4, h: 9 },
+    { id: "desk-joel", x: 8, y: 3, w: 4, h: 9 },
+    { id: "attribution", x: 0, y: 12, w: 4, h: 3 },
+    { id: "history", x: 4, y: 12, w: 8, h: 5 },
+    { id: "positions", x: 0, y: 17, w: 12, h: 5 }
+  ];
   var stateCopy = { working: "Working", "sit-out": "Sitting out", stuck: "Stuck" };
+  var learningStatusCopy = { learning: "Learning", iterating: "Iterating", steady: "Steady", blocked: "Blocked" };
+  var OBSERVED_EVENTS_KEY = "joe-board-observed-events-v1";
+  var MAX_OBSERVED_EVENTS = 200;
+  var DESK_TIMELINE_LIMIT = 5;
   var money = new Intl.NumberFormat("de-AT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
   var number = new Intl.NumberFormat("de-AT", { maximumFractionDigits: 4 });
   var dateTime = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium", timeZone: "Europe/Vienna" });
@@ -93,6 +116,9 @@
   var refreshError = null;
   var positionFilter = "all";
   var historyState = { selected: DESK_IDS.slice(), range: "all", points: [], chart: null };
+  var historyError = null;
+  var lastObservedSnapshot = null;
+  var observedEventsMemory = null;
   var layoutFormMode = null;
   var activeGridSettings = Object.assign({}, DEFAULT_GRID_SETTINGS);
   var activeThemeMode = "dark";
@@ -646,6 +672,34 @@
     document.documentElement.style.setProperty("--joe-header-bottom", bottom + "px");
   }
 
+  function desktopDeskDefaultRows() {
+    return DESKTOP_DESK_DEFAULT_ROWS;
+  }
+
+  function layoutItemsEqual(left, right) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) { return false; }
+    var byId = {};
+    var i;
+    for (i = 0; i < right.length; i += 1) {
+      byId[right[i].id] = right[i];
+    }
+    for (i = 0; i < left.length; i += 1) {
+      var item = left[i];
+      var other = byId[item.id];
+      if (!other || item.x !== other.x || item.y !== other.y || item.w !== other.w || item.h !== other.h) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function migrateLegacyDefaultLayout(items) {
+    if (layoutItemsEqual(items, LEGACY_DEFAULT_LAYOUT) || layoutItemsEqual(items, LEGACY_DEFAULT_LAYOUT_V2)) {
+      return DEFAULT_LAYOUT.slice();
+    }
+    return items;
+  }
+
   function sanitizeLayoutItems(value, columns) {
     if (!Array.isArray(value)) { return null; }
     var cols = SUPPORTED_COLUMNS.includes(columns) ? columns : DEFAULT_GRID_SETTINGS.columns;
@@ -672,7 +726,13 @@
 
   function safeStoredLayout() {
     try {
-      return sanitizeLayoutItems(JSON.parse(localStorage.getItem(LAYOUT_KEY)), desktopColumnCount());
+      var parsed = sanitizeLayoutItems(JSON.parse(localStorage.getItem(LAYOUT_KEY)), desktopColumnCount());
+      if (!parsed) { return null; }
+      var migrated = migrateLegacyDefaultLayout(parsed);
+      if (!layoutItemsEqual(migrated, parsed)) {
+        try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(migrated)); } catch (_) {}
+      }
+      return migrated;
     } catch (_) {
       return null;
     }
@@ -1104,11 +1164,9 @@
       resizable: { handles: "e,se,s,sw,w" }
     }, "#joeGrid");
     var stored = safeStoredLayout();
-    if (stored) {
-      restoringLayout = true;
-      grid.load(stored, false);
-      restoringLayout = false;
-    }
+    restoringLayout = true;
+    grid.load(stored || DEFAULT_LAYOUT.slice(), false);
+    restoringLayout = false;
     syncGridColumnConfig(activeGridSettings.columns);
     scheduleViewportSettle();
     grid.on("change dragstop resizestop", saveLayout);
@@ -1118,7 +1176,7 @@
       applyGridSettings(defaultLayoutEntry().settings, false);
       applyGridLayout(DEFAULT_LAYOUT);
       writeActiveGridSettings(activeGridSettings);
-      setLayoutStatus("Reset to default layout.");
+      setLayoutStatus("Reset to default layout with taller desk tiles for learning and timeline content.");
     });
   }
 
@@ -1280,6 +1338,265 @@
     return deskValues.every(Number.isFinite) ? deskValues.reduce(function (sum, value) { return sum + value; }, 0) : null;
   }
 
+  function nonEmptyString(value) {
+    return typeof value === "string" && value.trim().length ? value.trim() : null;
+  }
+
+  function learningStatusLabel(status) {
+    if (!status) { return "Unknown"; }
+    return learningStatusCopy[status] || status;
+  }
+
+  function formatDeskLearningCopy(desk) {
+    var happenedParts = [];
+    var action = nonEmptyString(desk.action);
+    if (action) { happenedParts.push(action); }
+    if (desk.state === "stuck" && Array.isArray(desk.issues) && desk.issues.length) {
+      happenedParts.push(desk.issues.join(" · "));
+    }
+    var headline = desk.learning ? nonEmptyString(desk.learning.headline) : null;
+    var detail = desk.learning ? nonEmptyString(desk.learning.detail) : null;
+    var nextParts = [];
+    if (headline) { nextParts.push(headline); }
+    if (detail && detail !== headline) { nextParts.push(detail); }
+    if (desk.learning && Number.isFinite(desk.learning.iteration)) {
+      nextParts.push("Pass " + desk.learning.iteration);
+    }
+    return {
+      whatHappened: happenedParts.length ? happenedParts.join(" · ") : "Not supplied",
+      whatNext: nextParts.length ? nextParts.join(" · ") : "Not supplied",
+      statusLabel: learningStatusLabel(desk.learning && desk.learning.status)
+    };
+  }
+
+  function deskTrackFields(desk) {
+    return {
+      state: desk.state,
+      action: desk.action,
+      learningStatus: desk.learning && desk.learning.status,
+      learningHeadline: desk.learning && desk.learning.headline,
+      learningDetail: desk.learning && desk.learning.detail,
+      learningIteration: desk.learning && desk.learning.iteration,
+      issuesKey: Array.isArray(desk.issues) ? desk.issues.join("|") : ""
+    };
+  }
+
+  function deskTrackFieldsEqual(left, right) {
+    if (!left || !right) { return false; }
+    return left.state === right.state &&
+      left.action === right.action &&
+      left.learningStatus === right.learningStatus &&
+      left.learningHeadline === right.learningHeadline &&
+      left.learningDetail === right.learningDetail &&
+      left.learningIteration === right.learningIteration &&
+      left.issuesKey === right.issuesKey;
+  }
+
+  function readObservedEvents() {
+    if (observedEventsMemory) { return observedEventsMemory; }
+    try {
+      var raw = localStorage.getItem(OBSERVED_EVENTS_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (parsed && parsed.schema === "inspr.joe.observed-events.v1" && Array.isArray(parsed.events)) {
+          observedEventsMemory = parsed;
+          return observedEventsMemory;
+        }
+      }
+    } catch (_) {}
+    observedEventsMemory = { schema: "inspr.joe.observed-events.v1", events: [] };
+    return observedEventsMemory;
+  }
+
+  function writeObservedEvents(store) {
+    observedEventsMemory = store;
+    try { localStorage.setItem(OBSERVED_EVENTS_KEY, JSON.stringify(store)); } catch (_) {}
+  }
+
+  function diffDeskToEvents(previousFields, desk, snapshotAt, sourceLabel) {
+    if (!previousFields) { return []; }
+    var nextFields = deskTrackFields(desk);
+    if (deskTrackFieldsEqual(previousFields, nextFields)) { return []; }
+    var events = [];
+    if (previousFields.state !== nextFields.state) {
+      events.push({
+        deskId: desk.id,
+        kind: "state",
+        summary: "State observed as " + stateCopy[desk.state] + (desk.action ? " · " + desk.action : ""),
+        snapshotAt: snapshotAt,
+        sourceLabel: sourceLabel
+      });
+    } else if (previousFields.action !== nextFields.action) {
+      events.push({
+        deskId: desk.id,
+        kind: "action",
+        summary: desk.action,
+        snapshotAt: snapshotAt,
+        sourceLabel: sourceLabel
+      });
+    }
+    if (previousFields.learningStatus !== nextFields.learningStatus ||
+        previousFields.learningHeadline !== nextFields.learningHeadline ||
+        previousFields.learningDetail !== nextFields.learningDetail ||
+        previousFields.learningIteration !== nextFields.learningIteration) {
+      var learningParts = [];
+      if (nextFields.learningHeadline) { learningParts.push(nextFields.learningHeadline); }
+      if (nextFields.learningDetail && nextFields.learningDetail !== nextFields.learningHeadline) {
+        learningParts.push(nextFields.learningDetail);
+      }
+      if (Number.isFinite(nextFields.learningIteration)) {
+        learningParts.push("Pass " + nextFields.learningIteration);
+      }
+      events.push({
+        deskId: desk.id,
+        kind: "learning",
+        summary: learningParts.length ? learningParts.join(" · ") : "Learning update not supplied",
+        snapshotAt: snapshotAt,
+        sourceLabel: sourceLabel
+      });
+    }
+    if (previousFields.issuesKey !== nextFields.issuesKey && nextFields.issuesKey) {
+      events.push({
+        deskId: desk.id,
+        kind: "issues",
+        summary: desk.issues.join(" · "),
+        snapshotAt: snapshotAt,
+        sourceLabel: sourceLabel
+      });
+    }
+    return events;
+  }
+
+  function snapshotInstantMs(generatedAt) {
+    var ms = Date.parse(generatedAt);
+    return Number.isNaN(ms) ? null : ms;
+  }
+
+  function observeSnapshotChanges(data) {
+    var sourceLabel = data.source && data.source.label ? data.source.label : "snapshot";
+    var generatedAt = data.generatedAt;
+    var observedAtMs = snapshotInstantMs(generatedAt);
+    if (observedAtMs === null) { return; }
+    if (!lastObservedSnapshot) {
+      lastObservedSnapshot = { generatedAt: generatedAt, observedAtMs: observedAtMs, desks: {} };
+      data.desks.forEach(function (desk) {
+        lastObservedSnapshot.desks[desk.id] = deskTrackFields(desk);
+      });
+      return;
+    }
+    if (observedAtMs <= lastObservedSnapshot.observedAtMs) { return; }
+    var store = readObservedEvents();
+    data.desks.forEach(function (desk) {
+      diffDeskToEvents(lastObservedSnapshot.desks[desk.id], desk, generatedAt, sourceLabel).forEach(function (event) {
+        store.events.push(event);
+      });
+      lastObservedSnapshot.desks[desk.id] = deskTrackFields(desk);
+    });
+    lastObservedSnapshot.generatedAt = generatedAt;
+    lastObservedSnapshot.observedAtMs = observedAtMs;
+    if (store.events.length > MAX_OBSERVED_EVENTS) {
+      store.events = store.events.slice(store.events.length - MAX_OBSERVED_EVENTS);
+    }
+    writeObservedEvents(store);
+  }
+
+  function deskObservedEvents(deskId) {
+    return readObservedEvents().events.filter(function (event) { return event.deskId === deskId; });
+  }
+
+  function formatPctChange(value) {
+    if (!Number.isFinite(value)) { return "—"; }
+    var sign = value > 0 ? "+" : value < 0 ? "−" : "";
+    return sign + number.format(Math.abs(value)) + "%";
+  }
+
+  function sharedWindowCompare(points, deskIds, range) {
+    if (!Array.isArray(deskIds) || deskIds.length < 2 || !Array.isArray(points) || !points.length) {
+      return { ok: false, reason: "insufficient-selection" };
+    }
+    var filtered = filterPoints(points, range);
+    if (filtered.length < 2) {
+      return { ok: false, reason: "insufficient-points" };
+    }
+    var common = filtered.filter(function (point) {
+      return deskIds.every(function (deskId) {
+        var bag = seriesBag(point, deskId);
+        return bag && Number.isFinite(bag.equity);
+      });
+    });
+    if (common.length < 2) {
+      return { ok: false, reason: "incomplete-coverage", deskIds: deskIds.slice() };
+    }
+    var startPoint = common[0];
+    var endPoint = common[common.length - 1];
+    return {
+      ok: true,
+      startAt: startPoint.t,
+      endAt: endPoint.t,
+      pointCount: common.length,
+      desks: deskIds.map(function (deskId) {
+        var startEquity = seriesBag(startPoint, deskId).equity;
+        var endEquity = seriesBag(endPoint, deskId).equity;
+        var pctChange = startEquity === 0 ? null : (endEquity - startEquity) / startEquity * 100;
+        return { deskId: deskId, startEquity: startEquity, endEquity: endEquity, pctChange: pctChange };
+      })
+    };
+  }
+
+  function deskDisplayName(deskId) {
+    if (deskId === "j") { return "J"; }
+    return deskId.charAt(0).toUpperCase() + deskId.slice(1);
+  }
+
+  function renderDeskTimeline(deskId) {
+    var timeline = el("div", "desk-timeline");
+    timeline.appendChild(el("span", "label", "Observed changes"));
+    var events = deskObservedEvents(deskId);
+    if (!events.length) {
+      timeline.appendChild(el("p", "desk-timeline-empty", lastObservedSnapshot
+        ? "Baseline recorded. Changes appear when later snapshots differ."
+        : "Waiting for the first snapshot."));
+      return timeline;
+    }
+    var list = el("ul", "desk-timeline-list");
+    events.slice(-DESK_TIMELINE_LIMIT).reverse().forEach(function (event) {
+      var item = el("li", "desk-timeline-item");
+      item.appendChild(el("span", "desk-timeline-summary", event.summary));
+      item.appendChild(el("span", "desk-timeline-meta", "Observed " + dateTime.format(new Date(event.snapshotAt)) + " · " + event.sourceLabel));
+      list.appendChild(item);
+    });
+    timeline.appendChild(list);
+    return timeline;
+  }
+
+  function renderHistoryCompare() {
+    var node = document.getElementById("historyCompare");
+    if (!node) { return; }
+    if (historyState.selected.length < 2) {
+      node.hidden = true;
+      node.textContent = "";
+      return;
+    }
+    var result = sharedWindowCompare(historyState.points, historyState.selected, historyState.range);
+    if (!result.ok) {
+      node.hidden = false;
+      if (result.reason === "incomplete-coverage") {
+        node.textContent = "Shared compare needs the same timestamps for every selected desk in this range.";
+      } else if (result.reason === "insufficient-points") {
+        node.textContent = "Not enough history in this range for a shared compare.";
+      } else {
+        node.textContent = "Select two or more desks to compare over a shared window.";
+      }
+      return;
+    }
+    var windowLabel = shortTime.format(new Date(result.startAt)) + " → " + shortTime.format(new Date(result.endAt));
+    var parts = result.desks.map(function (desk) {
+      return deskDisplayName(desk.deskId) + " " + formatPctChange(desk.pctChange);
+    });
+    node.hidden = false;
+    node.textContent = "Shared window " + windowLabel + " · " + parts.join(" · ");
+  }
+
   function renderDesk(desk, data, snapshotAge, snapshotStale, gatewayDown) {
     var slot = document.querySelector('[data-desk-slot="' + desk.id + '"]');
     var content = el("div", "desk-content");
@@ -1287,7 +1604,6 @@
     top.appendChild(el("h2", "desk-name", desk.label));
     top.appendChild(el("span", "state state-" + desk.state, stateCopy[desk.state]));
     content.appendChild(top);
-    content.appendChild(el("p", "desk-now", desk.action));
 
     var moneyRow = el("div", "desk-money-row");
     [
@@ -1318,13 +1634,21 @@
     spark.appendChild(canvas);
     content.appendChild(spark);
 
-    var learning = el("div", "learning");
-    var learningLabel = "Learning · " + desk.learning.status + (desk.learning.iteration === null ? "" : " · pass " + desk.learning.iteration);
-    learning.appendChild(el("span", "label", learningLabel));
-    learning.appendChild(el("strong", "", desk.learning.headline));
-    learning.appendChild(el("p", "", desk.learning.detail));
+    var learningCopy = formatDeskLearningCopy(desk);
+    var learning = el("div", "desk-learning");
+    var happenedRow = el("div", "desk-learning-row");
+    happenedRow.appendChild(el("span", "label", "What happened"));
+    happenedRow.appendChild(el("p", "desk-learning-text", learningCopy.whatHappened));
+    learning.appendChild(happenedRow);
+    var nextRow = el("div", "desk-learning-row");
+    nextRow.appendChild(el("span", "label", "What next · " + learningCopy.statusLabel));
+    nextRow.appendChild(el("p", "desk-learning-text", learningCopy.whatNext));
+    learning.appendChild(nextRow);
     content.appendChild(learning);
-    if (desk.issues.length) { content.appendChild(el("p", "issues negative", desk.issues.join(" · "))); }
+    content.appendChild(renderDeskTimeline(desk.id));
+    if (desk.issues.length && desk.state !== "stuck") {
+      content.appendChild(el("p", "issues negative", desk.issues.join(" · ")));
+    }
 
     var footer = el("div", "desk-footer");
     var deskFooter = deskFreshnessFooter(desk, snapshotAge, snapshotStale, gatewayDown, data.safety.staleAfterSeconds);
@@ -1478,6 +1802,7 @@
     updateSnapshotFreshnessUI(data, snapshotAge, stale);
     setSignal("haltSignal", "haltValue", data.safety.halt ? "ON" : "Off", data.safety.halt ? "bad" : "good");
     applyAttentionState(problems);
+    observeSnapshotChanges(data);
     data.desks.forEach(function (desk) { renderDesk(desk, data, snapshotAge, stale, gatewayDown); });
     renderAttribution();
     renderPositions(data);
@@ -1532,11 +1857,86 @@
     updateFreshnessTick();
   }
 
+  function historyRangeSpanMs(range) {
+    if (range === "1d") { return 864e5; }
+    if (range === "1w") { return 7 * 864e5; }
+    if (range === "1m") { return 30 * 864e5; }
+    return null;
+  }
+
   function filterPoints(points, range) {
     if (!points.length || range === "all") { return points.slice(); }
     var last = Date.parse(points[points.length - 1].t);
-    var span = range === "1d" ? 864e5 : range === "1w" ? 7 * 864e5 : 30 * 864e5;
+    var span = historyRangeSpanMs(range);
+    if (!span) { return points.slice(); }
     return points.filter(function (point) { return Date.parse(point.t) >= last - span; });
+  }
+
+  function isValidHistoryPoint(point) {
+    if (!point || typeof point !== "object") { return false; }
+    if (typeof point.t !== "string" || !Number.isFinite(Date.parse(point.t))) { return false; }
+    if (!point.desks || typeof point.desks !== "object") { return false; }
+    return true;
+  }
+
+  function validateHistoryPayload(data) {
+    required(data && data.schema === "inspr.joe.household.history.v1", "unknown history schema");
+    required(Array.isArray(data.points), "history points must be an array");
+    if (!data.points.length) { return []; }
+    data.points.forEach(function (point, index) {
+      required(isValidHistoryPoint(point), "invalid history sample at index " + index);
+    });
+    return data.points;
+  }
+
+  function applyHistoryFetchResult(currentPoints, data) {
+    try {
+      return { points: validateHistoryPayload(data), error: null };
+    } catch (error) {
+      return {
+        points: currentPoints,
+        error: error instanceof Error ? error : new Error(String(error))
+      };
+    }
+  }
+
+  function historyFailureMessage(error, hasRetainedSeries) {
+    if (!error) { return ""; }
+    var detail = error.message || String(error);
+    if (hasRetainedSeries) {
+      return "History refresh failed: " + detail + ". Showing the last good series.";
+    }
+    return "History unavailable: " + detail + ". Use Retry when the connection recovers.";
+  }
+
+  function updateHistoryStatusUI() {
+    var status = document.getElementById("historyStatus");
+    var text = document.getElementById("historyStatusText");
+    if (!status || !text) { return; }
+    if (!historyError) {
+      status.hidden = true;
+      text.textContent = "";
+      return;
+    }
+    status.hidden = false;
+    text.textContent = historyFailureMessage(historyError, historyState.points.length > 0);
+  }
+
+  function historyEmptyMessage() {
+    if (historyError && !historyState.points.length) {
+      return historyFailureMessage(historyError, false);
+    }
+    return "History will fill as snapshots arrive.";
+  }
+
+  function sparklineSamples(points, range, deskId) {
+    return filterPoints(points, range).map(function (point) {
+      var bag = seriesBag(point, deskId);
+      return {
+        x: Date.parse(point.t),
+        y: bag && Number.isFinite(bag.equity) ? bag.equity : null
+      };
+    });
   }
 
   function seriesBag(point, deskId) {
@@ -1552,6 +1952,7 @@
     var empty = document.getElementById("historyEmpty");
     empty.hidden = false;
     empty.textContent = message;
+    renderHistoryCompare();
   }
 
   function easternOffsetMinutes(date) {
@@ -1663,17 +2064,27 @@
     }
     var points = filterPoints(historyState.points, historyState.range);
     var datasets = historyState.selected.map(function (deskId) {
+      var series = points.map(function (point) {
+        var bag = seriesBag(point, deskId);
+        return {
+          x: Date.parse(point.t),
+          y: bag && Number.isFinite(bag.equity) ? bag.equity : null
+        };
+      });
+      if (!series.some(function (sample) { return Number.isFinite(sample.y); })) { return null; }
       return {
         label: deskId === "j" ? "J" : deskId.charAt(0).toUpperCase() + deskId.slice(1),
-        data: points.map(function (point) {
-          var bag = seriesBag(point, deskId);
-          return bag && Number.isFinite(bag.equity) ? { x: Date.parse(point.t), y: bag.equity } : null;
-        }).filter(Boolean),
+        data: series,
+        spanGaps: false,
         borderColor: deskColor(deskId), backgroundColor: deskColor(deskId), borderWidth: 2,
         pointRadius: 0, pointHoverRadius: 4, tension: .2
       };
-    }).filter(function (dataset) { return dataset.data.length; });
-    if (!datasets.length) { showHistoryEmpty("History will fill as snapshots arrive."); return; }
+    }).filter(Boolean);
+    if (!datasets.length) {
+      if (historyError && historyState.points.length) { updateHistoryStatusUI(); }
+      showHistoryEmpty(historyEmptyMessage());
+      return;
+    }
     document.getElementById("historyEmpty").hidden = true;
     var tickFont = { family: "SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace", size: 10 };
     var config = {
@@ -1709,10 +2120,11 @@
     };
     destroyHistoryChart();
     historyState.chart = new window.Chart(document.getElementById("historyChart").getContext("2d"), config);
+    renderHistoryCompare();
     resizeVisuals();
   }
 
-  function drawSpark(canvas, values, color) {
+  function drawSpark(canvas, samples, color) {
     var rect = canvas.getBoundingClientRect();
     if (!rect.width || !rect.height) { return; }
     var ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -1721,16 +2133,36 @@
     var context = canvas.getContext("2d");
     context.scale(ratio, ratio);
     context.clearRect(0, 0, rect.width, rect.height);
-    if (values.length < 2) {
+    if (!samples.length) {
       context.strokeStyle = cssVar("--spark-empty") || "#4a4b44"; context.setLineDash([3, 4]); context.beginPath(); context.moveTo(0, rect.height / 2); context.lineTo(rect.width, rect.height / 2); context.stroke();
       return;
     }
-    var min = Math.min.apply(Math, values); var max = Math.max.apply(Math, values); var spread = max - min || 1;
+    var finite = samples.filter(function (sample) { return Number.isFinite(sample.y); });
+    if (finite.length < 2) {
+      context.strokeStyle = cssVar("--spark-empty") || "#4a4b44"; context.setLineDash([3, 4]); context.beginPath(); context.moveTo(0, rect.height / 2); context.lineTo(rect.width, rect.height / 2); context.stroke();
+      return;
+    }
+    var minX = samples[0].x;
+    var maxX = samples[samples.length - 1].x;
+    var minY = Math.min.apply(Math, finite.map(function (sample) { return sample.y; }));
+    var maxY = Math.max.apply(Math, finite.map(function (sample) { return sample.y; }));
+    var spreadX = maxX - minX || 1;
+    var spreadY = maxY - minY || 1;
     context.strokeStyle = color; context.lineWidth = 1.7; context.setLineDash([]); context.beginPath();
-    values.forEach(function (value, index) {
-      var x = index / (values.length - 1) * rect.width;
-      var y = 5 + (max - value) / spread * (rect.height - 10);
-      if (index) { context.lineTo(x, y); } else { context.moveTo(x, y); }
+    var drawing = false;
+    samples.forEach(function (sample) {
+      if (!Number.isFinite(sample.y)) {
+        drawing = false;
+        return;
+      }
+      var x = (sample.x - minX) / spreadX * rect.width;
+      var y = 5 + (maxY - sample.y) / spreadY * (rect.height - 10);
+      if (drawing) {
+        context.lineTo(x, y);
+      } else {
+        context.moveTo(x, y);
+        drawing = true;
+      }
     });
     context.stroke();
   }
@@ -1738,8 +2170,7 @@
   function drawSparklines() {
     document.querySelectorAll("canvas[data-spark]").forEach(function (canvas) {
       var id = canvas.dataset.spark;
-      var values = historyState.points.slice(-40).map(function (point) { var bag = seriesBag(point, id); return bag && bag.equity; }).filter(Number.isFinite);
-      drawSpark(canvas, values, deskColor(id));
+      drawSpark(canvas, sparklineSamples(historyState.points, historyState.range, id), deskColor(id));
     });
   }
 
@@ -1782,9 +2213,11 @@
         historyState.range = button.dataset.range;
         document.querySelectorAll("button[data-range]").forEach(function (candidate) { candidate.setAttribute("aria-pressed", String(candidate === button)); });
         drawHistory();
+        drawSparklines();
       });
     });
     document.getElementById("resetZoom").addEventListener("click", function () { if (historyState.chart && historyState.chart.resetZoom) { historyState.chart.resetZoom(); } });
+    document.getElementById("historyRetry").addEventListener("click", function () { refreshHistory(); });
     document.querySelectorAll("button[data-position-filter]").forEach(function (button) {
       button.addEventListener("click", function () {
         positionFilter = button.dataset.positionFilter;
@@ -1805,12 +2238,13 @@
     try {
       var response = await fetch(endpoint("joe-history-endpoint", "JOE_HISTORY_URL", "./history.json"), { cache: "no-store", credentials: "same-origin" });
       if (!response.ok) { throw new Error("HTTP " + response.status); }
-      var data = await response.json();
-      required(data && data.schema === "inspr.joe.household.history.v1", "unknown history schema");
-      historyState.points = Array.isArray(data.points) ? data.points : [];
-    } catch (_) {
-      historyState.points = [];
+      var result = applyHistoryFetchResult(historyState.points, await response.json());
+      historyState.points = result.points;
+      historyError = result.error;
+    } catch (error) {
+      historyError = error instanceof Error ? error : new Error(String(error));
     }
+    updateHistoryStatusUI();
     drawHistory();
     drawSparklines();
   }
@@ -1874,7 +2308,21 @@
     syncLayoutViewport: syncLayoutViewport,
     rememberDesktopLayout: rememberDesktopLayout,
     desktopLayoutSnapshot: desktopLayoutSnapshot,
-    todayUtcMidnight: todayUtcMidnight
+    todayUtcMidnight: todayUtcMidnight,
+    filterPoints: filterPoints,
+    historyRangeSpanMs: historyRangeSpanMs,
+    validateHistoryPayload: validateHistoryPayload,
+    applyHistoryFetchResult: applyHistoryFetchResult,
+    historyFailureMessage: historyFailureMessage,
+    sparklineSamples: sparklineSamples,
+    formatDeskLearningCopy: formatDeskLearningCopy,
+    deskTrackFields: deskTrackFields,
+    diffDeskToEvents: diffDeskToEvents,
+    observeSnapshotChanges: observeSnapshotChanges,
+    readObservedEvents: readObservedEvents,
+    writeObservedEvents: writeObservedEvents,
+    sharedWindowCompare: sharedWindowCompare,
+    formatPctChange: formatPctChange
   });
   initTheme();
   initGrid();
