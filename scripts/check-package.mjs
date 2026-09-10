@@ -5,8 +5,9 @@
 import { readFile, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { resolve, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const repoRoot = resolve(new URL("..", import.meta.url).pathname);
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const REQUIRED = [
   "package.json",

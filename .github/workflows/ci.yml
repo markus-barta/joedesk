@@ -16,11 +16,8 @@ jobs:
       - run: node scripts/check-package.mjs
       - run: node scripts/check-joe-layout.mjs
       - name: Server contract tests (disposable tmpfs container)
-        env:
-          JOE_INBOX_TOKEN: ci-inbox-token-min-16-chars
         run: |
           docker run --rm --network none --tmpfs /var/lib/joe-board \
-            -e JOE_INBOX_TOKEN="$JOE_INBOX_TOKEN" \
             -v "$PWD:/repo:ro" -w /repo node:22 \
             node --test test/server-contract.mjs
 

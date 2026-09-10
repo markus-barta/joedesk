@@ -80,7 +80,8 @@ button { color: inherit; }
 .topline, .toolbar, .brand, .system-strip, .footer, .history-head, .positions-head { display: flex; align-items: center; }
 .topline { justify-content: space-between; min-height: 42px; margin-bottom: 10px; gap: 12px; }
 .toolbar { gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.brand { gap: 0; color: var(--green); }
+.brand { gap: 8px; color: var(--green); }
+.brand-wordmark { font: 600 13px var(--mono); letter-spacing: .02em; }
 .brand-logo { display: block; flex: 0 0 auto; }
 .paper-mark, .status-badge { border: 1px solid var(--line); border-radius: 999px; padding: 5px 9px; color: var(--muted); font: 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .quiet-button, .control-group button { border: 1px solid var(--line); border-radius: 4px; padding: 6px 9px; color: var(--muted); background: var(--ink-2); cursor: pointer; font: 11px var(--mono); }
