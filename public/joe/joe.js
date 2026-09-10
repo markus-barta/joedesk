@@ -43,7 +43,17 @@
   var THEME_KEY = "joe-board-theme-v1";
   var DEFAULT_LAYOUT_ID = "default";
   var MAX_LAYOUTS = 24;
-  var MOBILE_BREAKPOINT = 700;
+  var PHONE_BREAKPOINT = 390;
+  var HEADER_COMPACT_BREAKPOINT = 700;
+  var PHONE_TILE_HEIGHTS = {
+    hero: 3,
+    "desk-j": 5,
+    "desk-joe": 5,
+    "desk-joel": 5,
+    attribution: 4,
+    history: 8,
+    positions: 7
+  };
   var SUPPORTED_COLUMNS = [3, 6, 12];
   var THEME_MODES = ["light", "dark", "system"];
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
@@ -64,6 +74,7 @@
   var shortTime = new Intl.DateTimeFormat("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
   var grid = null;
   var restoringLayout = false;
+  var phoneGridActive = false;
   var latestSnapshot = null;
   var lastValidSnapshot = null;
   var refreshError = null;
@@ -182,25 +193,98 @@
     return activeGridSettings.columns;
   }
 
-  function isMobileGridViewport() {
-    return window.innerWidth <= MOBILE_BREAKPOINT;
+  function isPhoneGridViewport() {
+    return window.innerWidth <= PHONE_BREAKPOINT;
+  }
+
+  function isHeaderCompactViewport() {
+    return window.innerWidth <= HEADER_COMPACT_BREAKPOINT;
   }
 
   function columnOptsFor(columns) {
     var cols = SUPPORTED_COLUMNS.includes(columns) ? columns : DEFAULT_GRID_SETTINGS.columns;
     return {
-      breakpoints: [{ w: MOBILE_BREAKPOINT, c: 1 }],
+      breakpoints: [{ w: PHONE_BREAKPOINT, c: 1 }],
       layout: "list",
       columnMax: cols
     };
   }
 
+  function phoneLayoutFromItems(items) {
+    if (!Array.isArray(items)) { return null; }
+    var sorted = items.slice().sort(function (a, b) {
+      if (a.y !== b.y) { return a.y - b.y; }
+      return a.x - b.x;
+    });
+    var y = 0;
+    return sorted.map(function (item) {
+      var h = PHONE_TILE_HEIGHTS[item.id] || item.h;
+      var next = { id: item.id, x: 0, y: y, w: 1, h: h };
+      y += h;
+      return next;
+    });
+  }
+
+  function persistDesktopItems(items) {
+    var cols = desktopColumnCount();
+    var clean = sanitizeLayoutItems(items, cols);
+    if (!clean) { return false; }
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(clean));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function loadPhoneGridLayout(desktopItems) {
+    var phoneItems = phoneLayoutFromItems(desktopItems);
+    if (!phoneItems || !grid) { return false; }
+    restoringLayout = true;
+    if (typeof grid.checkDynamicColumn === "function") { grid.checkDynamicColumn(); }
+    grid.load(phoneItems, false);
+    restoringLayout = false;
+    return true;
+  }
+
+  function restoreDesktopGridLayout(columns) {
+    if (!grid) { return; }
+    var cols = SUPPORTED_COLUMNS.includes(columns) ? columns : DEFAULT_GRID_SETTINGS.columns;
+    var desktop = safeStoredLayout();
+    restoringLayout = true;
+    if (grid.getColumn() !== cols) {
+      grid.column(cols, "moveScale");
+    }
+    if (desktop) {
+      grid.load(desktop, false);
+    }
+    restoringLayout = false;
+    phoneGridActive = false;
+  }
+
+  function syncViewportDataset() {
+    document.documentElement.dataset.joeViewport = isPhoneGridViewport()
+      ? "phone"
+      : (isHeaderCompactViewport() ? "compact" : "desktop");
+  }
+
   function syncGridColumnConfig(columns) {
     if (!grid) { return; }
     var cols = SUPPORTED_COLUMNS.includes(columns) ? columns : DEFAULT_GRID_SETTINGS.columns;
+    var onPhone = isPhoneGridViewport();
     grid.opts.columnOpts = columnOptsFor(cols);
-    if (isMobileGridViewport()) {
+    if (onPhone) {
+      if (!phoneGridActive) {
+        persistDesktopLayoutGeometry(cols);
+        phoneGridActive = true;
+      }
       if (typeof grid.checkDynamicColumn === "function") { grid.checkDynamicColumn(); }
+      var stored = safeStoredLayout() || DEFAULT_LAYOUT.slice();
+      loadPhoneGridLayout(stored);
+      return;
+    }
+    if (phoneGridActive) {
+      restoreDesktopGridLayout(cols);
       return;
     }
     if (grid.getColumn() !== cols) {
@@ -305,7 +389,7 @@
       if (historyState.chart) { drawHistory(); }
       return false;
     }
-    if (isMobileGridViewport()) {
+    if (isPhoneGridViewport()) {
       persistDesktopLayoutGeometry(clean.columns);
     }
     resizeVisuals();
@@ -384,7 +468,7 @@
   }
 
   function positionHeaderMenus() {
-    if (window.innerWidth > MOBILE_BREAKPOINT) {
+    if (!isHeaderCompactViewport()) {
       document.documentElement.style.removeProperty("--joe-header-bottom");
       return;
     }
@@ -503,7 +587,7 @@
   function currentGridLayout() {
     var cols = desktopColumnCount();
     if (!grid) { return DEFAULT_LAYOUT.slice(); }
-    if (!isMobileGridViewport()) {
+    if (!isPhoneGridViewport()) {
       var live = layoutItemsFromGrid(cols);
       return live || DEFAULT_LAYOUT.slice();
     }
@@ -520,9 +604,14 @@
     var clean = sanitizeLayoutItems(items, desktopColumnCount());
     if (!clean) { return false; }
     restoringLayout = true;
-    grid.load(clean, false);
+    if (isPhoneGridViewport()) {
+      persistDesktopItems(clean);
+      loadPhoneGridLayout(clean);
+    } else {
+      grid.load(clean, false);
+      saveLayout();
+    }
     restoringLayout = false;
-    saveLayout();
     resizeVisuals();
     return true;
   }
@@ -821,7 +910,7 @@
   }
 
   function saveLayout() {
-    if (!grid || restoringLayout || isMobileGridViewport()) { return; }
+    if (!grid || restoringLayout || isPhoneGridViewport()) { return; }
     var cols = desktopColumnCount();
     var saved = layoutItemsFromGrid(cols);
     if (!saved) { return; }
@@ -1535,6 +1624,7 @@
       });
     });
     window.addEventListener("resize", function () {
+      syncViewportDataset();
       positionHeaderMenus();
       syncGridColumnConfig(desktopColumnCount());
       resizeVisuals();
@@ -1598,8 +1688,13 @@
     captureDesktopGridLayout: captureDesktopGridLayout,
     layoutItemsFromGrid: layoutItemsFromGrid,
     positionHeaderMenus: positionHeaderMenus,
+    phoneBreakpoint: PHONE_BREAKPOINT,
+    phoneTileHeights: Object.assign({}, PHONE_TILE_HEIGHTS),
+    phoneLayoutFromItems: phoneLayoutFromItems,
+    isPhoneGridViewport: isPhoneGridViewport,
     todayUtcMidnight: todayUtcMidnight
   });
+  syncViewportDataset();
   initTheme();
   initGrid();
   bindControls();
