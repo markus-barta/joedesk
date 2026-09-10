@@ -65,6 +65,8 @@
   var grid = null;
   var restoringLayout = false;
   var latestSnapshot = null;
+  var lastValidSnapshot = null;
+  var refreshError = null;
   var positionFilter = "all";
   var historyState = { selected: DESK_IDS.slice(), range: "all", points: [], chart: null };
   var layoutFormMode = null;
@@ -874,6 +876,153 @@
     return Math.floor(seconds / 3600) + "h";
   }
 
+  var TRUSTED_DAY_PNL = { "broker-daily": true, "snapshot-diff": true, available: true };
+
+  function dayPnlProvenance(data) {
+    if (!data || typeof data !== "object") { return null; }
+    if (data.provenance && typeof data.provenance === "object") {
+      var root = data.provenance.dayPnl;
+      if (typeof root === "string" && root.length) { return root; }
+    }
+    var source = data.source;
+    if (source && typeof source === "object") {
+      if (typeof source.dayPnl === "string" && source.dayPnl.length) { return source.dayPnl; }
+      if (source.provenance && typeof source.provenance === "object") {
+        var nested = source.provenance.dayPnl;
+        if (typeof nested === "string" && nested.length) { return nested; }
+      }
+    }
+    return null;
+  }
+
+  function dayPnlTrusted(data) {
+    var provenance = dayPnlProvenance(data);
+    return Boolean(provenance && TRUSTED_DAY_PNL[provenance]);
+  }
+
+  function dayPnlDisplayValue(data, value) {
+    if (!dayPnlTrusted(data)) { return null; }
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function gatewayHeartbeatAge(data) {
+    var gateway = data && data.safety && data.safety.gateway;
+    var lastSeen = gateway && gateway.lastSeenAt;
+    return lastSeen ? ageInSeconds(lastSeen) : null;
+  }
+
+  function newestDeskHeartbeatAge(data) {
+    if (!data || !Array.isArray(data.desks)) { return null; }
+    var newest = null;
+    data.desks.forEach(function (desk) {
+      var iso = desk.heartbeatAt || desk.updatedAt || null;
+      if (!iso) { return; }
+      var age = ageInSeconds(iso);
+      if (Number.isFinite(age) && (newest === null || age < newest)) { newest = age; }
+    });
+    return newest;
+  }
+
+  function setMoneyField(node, data, value, signed, fieldKind) {
+    if (fieldKind === "day") {
+      var dayValue = dayPnlDisplayValue(data, value);
+      if (!Number.isFinite(dayValue)) {
+        node.textContent = "—";
+        node.classList.remove("positive", "negative");
+        node.classList.add("neutral");
+        node.title = "Day P&L not yet supplied by the producer";
+        return;
+      }
+      node.title = "";
+      setMoney(node, dayValue, signed);
+      return;
+    }
+    node.title = "";
+    setMoney(node, value, signed);
+  }
+
+  function labelPaperCapital() {
+    var heroLabels = document.querySelectorAll(".hero-values .hero-stat .label");
+    if (heroLabels[0]) { heroLabels[0].textContent = "Virt net · paper"; }
+    if (heroLabels[1]) { heroLabels[1].textContent = "Day"; }
+    if (heroLabels[2]) { heroLabels[2].textContent = "Open"; }
+    if (heroLabels[3]) { heroLabels[3].textContent = "Snapshot age"; }
+    var attributionNote = document.querySelector(".attribution-body .widget-note");
+    if (attributionNote) {
+      var snapshot = latestSnapshot || lastValidSnapshot;
+      attributionNote.textContent = dayPnlTrusted(snapshot)
+        ? "Share of today’s absolute desk movement"
+        : "Day P&L not supplied — attribution unavailable";
+    }
+  }
+
+  function updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale) {
+    var freshValue = document.getElementById("freshValue");
+    freshValue.textContent = (snapshotStale ? "STALE · " : "Fresh · ") + "snapshot " + ageLabel(snapshotAge);
+    freshValue.className = snapshotStale ? "negative" : "positive";
+    var gateway = data.safety.gateway;
+    var gatewayAge = gatewayHeartbeatAge(data);
+    var gatewayText = gateway.status === "ok" ? "OK · connected" : gateway.status.toUpperCase();
+    if (Number.isFinite(gatewayAge)) {
+      gatewayText += " · heartbeat " + ageLabel(gatewayAge);
+    }
+    setSignal("gatewaySignal", "gatewayValue", gatewayText, gateway.status === "ok" ? "good" : gateway.status === "degraded" ? "warn" : "bad");
+    var updatedAt = document.getElementById("updatedAt");
+    var suffix = refreshError ? " · refresh failed" : " · refreshes every 15 seconds";
+    updatedAt.textContent = "Snapshot " + dateTime.format(new Date(data.generatedAt)) + " · " + ageLabel(snapshotAge) + " old" + suffix;
+  }
+
+  function updateDeskFreshnessFooters(data, snapshotAge, snapshotStale, gatewayDown) {
+    data.desks.forEach(function (desk) {
+      var slot = document.querySelector('[data-desk-slot="' + desk.id + '"]');
+      if (!slot) { return; }
+      var heartbeatEl = slot.querySelector(".desk-heartbeat");
+      var badgeEl = slot.querySelector(".desk-footer .status-badge");
+      if (!heartbeatEl) { return; }
+      var heartbeatIso = desk.heartbeatAt || desk.updatedAt || null;
+      var heartbeatAge = heartbeatIso ? ageInSeconds(heartbeatIso) : null;
+      var offline = gatewayDown || (heartbeatIso && Number.isFinite(heartbeatAge) && heartbeatAge > data.safety.staleAfterSeconds);
+      var stale = !offline && snapshotStale;
+      heartbeatEl.textContent = heartbeatIso
+        ? "Heartbeat " + ageLabel(heartbeatAge) + " ago"
+        : "Snapshot " + ageLabel(snapshotAge) + " ago";
+      heartbeatEl.className = "desk-heartbeat" + (offline ? " offline" : stale ? " stale" : "");
+      if (badgeEl) {
+        if (offline || stale) {
+          badgeEl.textContent = offline ? "Offline" : "Stale";
+          badgeEl.className = "status-badge " + (offline ? "offline" : "stale");
+        } else {
+          badgeEl.remove();
+        }
+      } else if (offline || stale) {
+        var footer = slot.querySelector(".desk-footer");
+        if (footer) {
+          footer.appendChild(el("span", "status-badge " + (offline ? "offline" : "stale"), offline ? "Offline" : "Stale"));
+        }
+      }
+    });
+  }
+
+  function updateFreshnessTick() {
+    if (!lastValidSnapshot) { return; }
+    var data = lastValidSnapshot;
+    var snapshotAge = ageInSeconds(data.generatedAt);
+    var snapshotStale = snapshotAge > data.safety.staleAfterSeconds;
+    var gatewayDown = data.safety.gateway.status === "down";
+    updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale);
+    updateDeskFreshnessFooters(data, snapshotAge, snapshotStale, gatewayDown);
+    if (refreshError) {
+      var alarm = document.getElementById("alarm");
+      alarm.hidden = false;
+      document.getElementById("alarmText").textContent = refreshFailureMessage(refreshError);
+      document.documentElement.dataset.joeState = "attention";
+    }
+  }
+
+  function refreshFailureMessage(error) {
+    return "Latest refresh failed; showing last valid snapshot. " + error.message;
+  }
+
   function setSignal(id, valueId, value, signalTone) {
     document.getElementById(id).dataset.tone = signalTone;
     document.getElementById(valueId).textContent = value;
@@ -889,7 +1038,7 @@
     return deskValues.every(Number.isFinite) ? deskValues.reduce(function (sum, value) { return sum + value; }, 0) : null;
   }
 
-  function renderDesk(desk, snapshotAge, snapshotStale, gatewayDown) {
+  function renderDesk(desk, data, snapshotAge, snapshotStale, gatewayDown) {
     var slot = document.querySelector('[data-desk-slot="' + desk.id + '"]');
     var content = el("div", "desk-content");
     var top = el("div", "desk-top");
@@ -899,14 +1048,25 @@
     content.appendChild(el("p", "desk-now", desk.action));
 
     var moneyRow = el("div", "desk-money-row");
-    [["Net", desk.money.equity, false], ["Day", desk.money.dayPnl, true], ["Open", desk.money.openPnl, true], ["Trades", Number.isFinite(desk.tradeCount) ? desk.tradeCount : null, false]].forEach(function (item, index) {
-      var cell = el("div", "desk-money-cell");
-      cell.appendChild(el("span", "label", item[0]));
+    [
+      ["Virt net · paper", desk.money.equity, false, "equity"],
+      ["Day", desk.money.dayPnl, true, "day"],
+      ["Since start", desk.money.totalPnl, true, "since"],
+      ["Open", desk.money.openPnl, true, "open"],
+      ["Trades", Number.isFinite(desk.tradeCount) ? desk.tradeCount : null, false, "trades"]
+    ].forEach(function (item) {
+      var cellNode = el("div", "desk-money-cell");
+      cellNode.appendChild(el("span", "label", item[0]));
       var value = el("strong");
-      if (index === 3) { value.textContent = Number.isFinite(item[1]) ? number.format(item[1]) : "—"; }
-      else { setMoney(value, item[1], item[2]); }
-      cell.appendChild(value);
-      moneyRow.appendChild(cell);
+      if (item[3] === "trades") {
+        value.textContent = Number.isFinite(item[1]) ? number.format(item[1]) : "—";
+      } else if (item[3] === "day") {
+        setMoneyField(value, data, item[1], item[2], "day");
+      } else {
+        setMoney(value, item[1], item[2]);
+      }
+      cellNode.appendChild(value);
+      moneyRow.appendChild(cellNode);
     });
     content.appendChild(moneyRow);
     var spark = el("div", "spark-wrap");
@@ -927,7 +1087,7 @@
     var footer = el("div", "desk-footer");
     var heartbeatIso = desk.heartbeatAt || desk.updatedAt || null;
     var heartbeatAge = heartbeatIso ? ageInSeconds(heartbeatIso) : snapshotAge;
-    var offline = gatewayDown || (heartbeatIso && heartbeatAge > latestSnapshot.safety.staleAfterSeconds);
+    var offline = gatewayDown || (heartbeatIso && heartbeatAge > data.safety.staleAfterSeconds);
     var stale = !offline && snapshotStale;
     var heartbeat = el("span", "desk-heartbeat" + (offline ? " offline" : stale ? " stale" : ""), (heartbeatIso ? "Heartbeat " : "Snapshot ") + ageLabel(heartbeatAge) + " ago");
     footer.appendChild(heartbeat);
@@ -936,12 +1096,19 @@
     slot.replaceChildren(content);
   }
 
-  function renderAttribution(desks) {
+  function renderAttribution(desks, data) {
     var root = document.getElementById("attribution");
-    var denominator = desks.reduce(function (sum, desk) { return sum + Math.abs(Number.isFinite(desk.money.dayPnl) ? desk.money.dayPnl : 0); }, 0);
+    if (!dayPnlTrusted(data)) {
+      root.replaceChildren(el("p", "widget-note empty-attribution", "Day P&L not supplied — attribution unavailable."));
+      return;
+    }
+    var denominator = desks.reduce(function (sum, desk) {
+      var dayValue = dayPnlDisplayValue(data, desk.money.dayPnl);
+      return sum + (Number.isFinite(dayValue) ? Math.abs(dayValue) : 0);
+    }, 0);
     root.replaceChildren.apply(root, desks.map(function (desk) {
-      var pnl = Number.isFinite(desk.money.dayPnl) ? desk.money.dayPnl : 0;
-      var percent = denominator ? Math.abs(pnl) / denominator * 100 : 0;
+      var pnl = dayPnlDisplayValue(data, desk.money.dayPnl);
+      var percent = denominator && Number.isFinite(pnl) ? Math.abs(pnl) / denominator * 100 : 0;
       var row = el("div", "attribution-row");
       row.appendChild(el("strong", "", desk.label));
       var track = el("div", "attribution-track");
@@ -949,7 +1116,7 @@
       fill.style.width = percent + "%";
       track.appendChild(fill);
       row.appendChild(track);
-      row.appendChild(el("span", "attribution-value " + tone(pnl), Math.round(percent) + "%"));
+      row.appendChild(el("span", "attribution-value " + tone(pnl), Number.isFinite(pnl) ? Math.round(percent) + "%" : "—"));
       return row;
     }));
   }
@@ -966,18 +1133,46 @@
     }).sort(function (a, b) { return String(a.desk).localeCompare(String(b.desk)) || String(a.symbol || "").localeCompare(String(b.symbol || "")); });
   }
 
+  function positionsAvailability(data) {
+    if (!data || typeof data !== "object") { return "absent"; }
+    var hasTopKey = Object.prototype.hasOwnProperty.call(data, "positions");
+    var hasDeskKey = Array.isArray(data.desks) && data.desks.some(function (desk) {
+      return Object.prototype.hasOwnProperty.call(desk, "positions");
+    });
+    if (!hasTopKey && !hasDeskKey) { return "absent"; }
+    return collectPositions(data).length ? "present" : "empty";
+  }
+
   function cell(text, className) {
     return el("td", className || "", text);
   }
 
+  function positionsSummaryText(data) {
+    var availability = positionsAvailability(data);
+    if (availability === "absent") {
+      return "Position detail not supplied in this snapshot";
+    }
+    if (availability === "empty") {
+      return "No open positions · producer supplied an empty positions list";
+    }
+    var all = collectPositions(data);
+    return all.length + " open position" + (all.length === 1 ? "" : "s") + " · grouped by desk";
+  }
+
   function renderPositions(data) {
     var all = collectPositions(data);
+    var availability = positionsAvailability(data);
     var positions = positionFilter === "all" ? all : all.filter(function (position) { return position.desk === positionFilter; });
     var body = document.getElementById("positionsBody");
-    document.getElementById("positionsSummary").textContent = all.length ? all.length + " open position" + (all.length === 1 ? "" : "s") + " · grouped by desk" : "Snapshot totals are live · position fields not supplied yet";
+    document.getElementById("positionsSummary").textContent = positionsSummaryText(data);
     if (!positions.length) {
+      var emptyMessage = availability === "absent"
+        ? "Position detail is not present in this snapshot. The board will populate this table when the projection adds it."
+        : availability === "empty"
+          ? "No open positions."
+          : "No positions for this desk.";
       var row = el("tr");
-      row.appendChild(cell(all.length ? "No positions for this desk." : "Position detail is not present in this snapshot. The board will populate this table when the projection adds it.", "empty-cell"));
+      row.appendChild(cell(emptyMessage, "empty-cell"));
       row.firstChild.colSpan = 9;
       body.replaceChildren(row);
       return;
@@ -987,13 +1182,14 @@
       row.dataset.desk = position.desk;
       var quantity = Number.isFinite(position.quantity) ? position.quantity : position.qty;
       var marketValue = Number.isFinite(position.marketValue) ? position.marketValue : (Number.isFinite(quantity) && Number.isFinite(position.mark) ? quantity * position.mark : null);
+      var dayValue = dayPnlDisplayValue(data, position.dayPnl);
       row.appendChild(cell(String(position.desk).toUpperCase()));
       row.appendChild(cell(position.symbol || "—"));
       row.appendChild(cell(position.side || (Number.isFinite(quantity) && quantity < 0 ? "Short" : Number.isFinite(quantity) ? "Long" : "—")));
       row.appendChild(cell(Number.isFinite(quantity) ? number.format(quantity) : "—", "number"));
       row.appendChild(cell(amount(position.mark, false), "number"));
       row.appendChild(cell(amount(marketValue, false), "number"));
-      row.appendChild(cell(amount(position.dayPnl, true), "number " + tone(position.dayPnl)));
+      row.appendChild(cell(Number.isFinite(dayValue) ? amount(dayValue, true) : "—", "number " + tone(dayValue)));
       row.appendChild(cell(amount(position.openPnl, true), "number " + tone(position.openPnl)));
       row.appendChild(cell(position.updatedAt && Number.isFinite(Date.parse(position.updatedAt)) ? shortTime.format(new Date(position.updatedAt)) : "—"));
       return row;
@@ -1002,9 +1198,12 @@
 
   function render(data) {
     latestSnapshot = data;
+    lastValidSnapshot = data;
+    refreshError = null;
     var snapshotAge = ageInSeconds(data.generatedAt);
     var stale = snapshotAge > data.safety.staleAfterSeconds;
     var gateway = data.safety.gateway;
+    var gatewayDown = gateway.status === "down";
     var problems = [];
     if (data.safety.halt) { problems.push("HALT is on" + (data.safety.haltReason ? ": " + data.safety.haltReason : ".")); }
     if (gateway.status !== "ok") { problems.push("Gateway is " + gateway.status + (gateway.detail ? ": " + gateway.detail : ".")); }
@@ -1012,36 +1211,68 @@
     data.desks.forEach(function (desk) { if (desk.state === "stuck") { problems.push(desk.label + " is stuck: " + desk.action); } });
 
     setMoney(document.getElementById("totalEquity"), data.totals.equity, false);
-    setMoney(document.getElementById("totalDay"), data.totals.dayPnl, true);
+    setMoneyField(document.getElementById("totalDay"), data, data.totals.dayPnl, true, "day");
     setMoney(document.getElementById("totalOpen"), openPnl(data), true);
-    var freshValue = document.getElementById("freshValue");
-    freshValue.textContent = stale ? "STALE · " + ageLabel(snapshotAge) : "Fresh · " + ageLabel(snapshotAge);
-    freshValue.className = stale ? "negative" : "positive";
-    setSignal("gatewaySignal", "gatewayValue", gateway.status === "ok" ? "OK · connected" : gateway.status.toUpperCase(), gateway.status === "ok" ? "good" : gateway.status === "degraded" ? "warn" : "bad");
+    updateSnapshotFreshnessUI(data, snapshotAge, stale);
     setSignal("haltSignal", "haltValue", data.safety.halt ? "ON" : "Off", data.safety.halt ? "bad" : "good");
     var alarm = document.getElementById("alarm");
     alarm.hidden = problems.length === 0;
     document.getElementById("alarmText").textContent = problems.join(" ");
-    data.desks.forEach(function (desk) { renderDesk(desk, snapshotAge, stale, gateway.status === "down"); });
-    renderAttribution(data.desks);
+    data.desks.forEach(function (desk) { renderDesk(desk, data, snapshotAge, stale, gatewayDown); });
+    renderAttribution(data.desks, data);
     renderPositions(data);
-    document.getElementById("updatedAt").textContent = "Snapshot " + dateTime.format(new Date(data.generatedAt)) + " · refreshes every 15 seconds";
-    document.getElementById("sourceLine").textContent = "Source: " + (data.source && data.source.label ? data.source.label : "book.json projection");
+    labelPaperCapital();
+    document.getElementById("sourceLine").textContent = "Source: " + (data.source && data.source.label ? data.source.label : "book.json projection") + " · paper projection";
     document.documentElement.dataset.joeState = problems.length ? "attention" : "ok";
     drawSparklines();
   }
 
-  function renderFailure(error) {
+  function renderNoData(error) {
+    latestSnapshot = null;
+    lastValidSnapshot = null;
+    refreshError = error;
     setSignal("gatewaySignal", "gatewayValue", "Unknown", "bad");
     setSignal("haltSignal", "haltValue", "Unknown", "bad");
+    document.getElementById("totalEquity").textContent = "—";
+    document.getElementById("totalDay").textContent = "—";
+    document.getElementById("totalOpen").textContent = "—";
+    ["totalEquity", "totalDay", "totalOpen"].forEach(function (id) {
+      document.getElementById(id).classList.remove("positive", "negative");
+      document.getElementById(id).classList.add("neutral");
+    });
     document.getElementById("freshValue").textContent = "NO DATA";
     document.getElementById("freshValue").className = "negative";
     var alarm = document.getElementById("alarm");
     alarm.hidden = false;
-    document.getElementById("alarmText").textContent = "The local snapshot could not be read. " + error.message;
+    document.getElementById("alarmText").textContent = "No household snapshot is available yet. " + error.message;
     document.getElementById("updatedAt").textContent = "data.json unavailable";
-    document.getElementById("sourceLine").textContent = "Source: unavailable";
+    document.getElementById("sourceLine").textContent = "Source: unavailable · paper projection";
+    DESK_IDS.forEach(function (deskId) {
+      var slot = document.querySelector('[data-desk-slot="' + deskId + '"]');
+      if (slot) { slot.replaceChildren(el("p", "empty-cell", "Waiting for the first valid snapshot.")); }
+    });
+    document.getElementById("attribution").replaceChildren(el("p", "widget-note", "Day P&L not supplied — attribution unavailable."));
+    document.getElementById("positionsSummary").textContent = "Position detail not supplied in this snapshot";
+    var emptyPositionsRow = el("tr");
+    var emptyPositionsCell = cell("Position detail is not present in this snapshot.", "empty-cell");
+    emptyPositionsCell.colSpan = 9;
+    emptyPositionsRow.appendChild(emptyPositionsCell);
+    document.getElementById("positionsBody").replaceChildren(emptyPositionsRow);
+    labelPaperCapital();
     document.documentElement.dataset.joeState = "broken";
+  }
+
+  function renderRefreshFailure(error) {
+    refreshError = error;
+    if (!lastValidSnapshot) {
+      renderNoData(error);
+      return;
+    }
+    var alarm = document.getElementById("alarm");
+    alarm.hidden = false;
+    document.getElementById("alarmText").textContent = refreshFailureMessage(error);
+    document.documentElement.dataset.joeState = "attention";
+    updateFreshnessTick();
   }
 
   function filterPoints(points, range) {
@@ -1330,12 +1561,18 @@
       if (!response.ok) { throw new Error("HTTP " + response.status + " for data.json"); }
       render(validate(await response.json()));
     } catch (error) {
-      renderFailure(error instanceof Error ? error : new Error(String(error)));
+      renderRefreshFailure(error instanceof Error ? error : new Error(String(error)));
     }
   }
 
   window.JoeBoard = Object.freeze({
     ingest: function (snapshot) { render(validate(snapshot)); },
+    dayPnlProvenance: dayPnlProvenance,
+    dayPnlTrusted: dayPnlTrusted,
+    dayPnlDisplayValue: dayPnlDisplayValue,
+    positionsAvailability: positionsAvailability,
+    collectPositions: collectPositions,
+    validate: validate,
     refresh: refresh,
     layoutStorageKey: LAYOUT_KEY,
     layoutsStorageKey: LAYOUTS_KEY,
@@ -1376,4 +1613,5 @@
   refreshHistory();
   window.setInterval(refresh, 15000);
   window.setInterval(refreshHistory, 30000);
+  window.setInterval(updateFreshnessTick, 1000);
 }());
