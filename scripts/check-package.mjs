@@ -54,6 +54,22 @@ if (pkg.version !== joeVersion.APP_VERSION) {
   fail(`package.json version ${pkg.version} != JoeVersion.APP_VERSION ${joeVersion.APP_VERSION}`);
 }
 
+const indexHtml = await readFile(join(repoRoot, "public/joe/index.html"), "utf8");
+const appVersionSpanRe = /<span[^>]*\bid\s*=\s*["']appVersion["'][^>]*>([^<]*)<\/span>/gi;
+const appVersionMatches = [...indexHtml.matchAll(appVersionSpanRe)];
+if (appVersionMatches.length === 0) {
+  fail("index.html missing static #appVersion fallback span");
+}
+if (appVersionMatches.length > 1) {
+  fail(`index.html has ${appVersionMatches.length} #appVersion spans, expected exactly 1`);
+}
+const htmlFallbackVersion = appVersionMatches[0][1].trim();
+if (htmlFallbackVersion !== joeVersion.APP_VERSION || htmlFallbackVersion !== pkg.version) {
+  fail(
+    `index.html #appVersion fallback "${htmlFallbackVersion}" must match package.json (${pkg.version}) and JoeVersion.APP_VERSION (${joeVersion.APP_VERSION})`,
+  );
+}
+
 const release = JSON.parse(await readFile(join(repoRoot, "release.json"), "utf8"));
 if (release.version !== joeVersion.APP_VERSION || release.version_scheme !== "legacy") {
   fail("release metadata must match the retained product version scheme and UI version");
