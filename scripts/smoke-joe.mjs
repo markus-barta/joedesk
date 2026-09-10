@@ -244,6 +244,9 @@ try {
     historyHelp: document.getElementById('historyHelp')?.textContent,
     deskLabel: document.getElementById('deskControlsLabel')?.textContent,
     rangeLabel: document.getElementById('rangeControlsLabel')?.textContent,
+    totalDay: document.getElementById('totalDay')?.textContent,
+    totalDayTitle: document.getElementById('totalDay')?.title,
+    attributionDay: document.querySelector('#attribution .widget-note')?.textContent,
     versionSummary: document.querySelector('.version > summary')?.textContent,
     versionEntries: document.querySelectorAll('#versionPanel .version__entry').length,
     layoutSelectOptions: document.getElementById('layoutSelect')?.options?.length,
@@ -261,12 +264,14 @@ try {
       healthy.view !== "board" || healthy.state !== "ok" ||
       JSON.stringify(healthy.deskIds) !== JSON.stringify(["j", "joe", "joel"]) ||
       !healthy.states.includes("Working") || !healthy.states.includes("Sitting out") ||
-      !/30[\.\s]000/.test(healthy.total || "") || healthy.gateway !== "OK · connected" ||
+      !/30[\.\s]000/.test(healthy.total || "") || !/^OK · connected/.test(healthy.gateway || "") ||
+      healthy.totalDay !== "—" || !/not available yet/i.test(healthy.totalDayTitle || "") ||
+      !/Day P&L is not available yet/i.test(healthy.attributionDay || "") ||
       !healthy.halt.startsWith("Off") || !healthy.alarmHidden || !healthy.gridReady || healthy.widgets !== 7 ||
       healthy.selectedSeries !== 3 || healthy.allBotsPressed !== "true" ||
       healthy.historyTitle !== "History" || /drag here|compare up to two/i.test(healthy.historyHelp || "") ||
       healthy.deskLabel !== "Desks" || healthy.rangeLabel !== "Range" ||
-      !/v0\.4\.0/.test(healthy.versionSummary || "") || healthy.versionEntries < 4 ||
+      !/v0\.4\.1/.test(healthy.versionSummary || "") || healthy.versionEntries < 4 ||
       !healthy.layoutSelectOptions || healthy.layoutSelectOptions < 1 ||
       !healthy.layoutMenu || !healthy.settingsMenu || !healthy.brandLogo || healthy.marketingCopy ||
       healthy.heroId !== "hero" ||
@@ -328,6 +333,8 @@ try {
       liveHeroY: liveHero?.y,
       liveHeroH: liveHero?.h,
       headerStatusVisible: Boolean(document.querySelector('.header-status')),
+      viewport: document.documentElement.dataset.joeViewport,
+      narrowBreakpoint: window.JoeBoard.narrowBreakpoint,
       gateHidden: document.getElementById('privateGate').hidden,
       heroClipped: (() => { const hero = document.querySelector('[gs-id="hero"] .grid-stack-item-content'); return hero.scrollHeight > hero.clientHeight + 1; })(),
       heroOpen: document.getElementById('totalOpen')?.textContent,
@@ -340,6 +347,7 @@ try {
         mobile.overflow || mobile.gridColumns !== 1 || mobile.desktopColumns !== 12 || (mobile.storedColumns !== undefined && mobile.storedColumns !== 12) ||
         mobile.layoutPanel?.overflow || mobile.settingsPanel?.overflow ||
         mobile.defaultHeroY !== 0 || mobile.defaultHeroH !== 3 || mobile.liveHeroY !== 0 || mobile.liveHeroH !== 3 ||
+        mobile.viewport !== "narrow" || mobile.narrowBreakpoint !== 700 ||
         !mobile.headerStatusVisible || !mobile.gateHidden || mobile.heroClipped || !mobile.heroOpen || !mobile.heroFreshness || mobile.versionPanel?.overflow
       ) throw new Error(`Mobile layout mismatch: ${JSON.stringify(mobile)}`);
 
@@ -415,8 +423,20 @@ try {
     } else {
       const staleSnapshot = structuredClone(sample);
       staleSnapshot.generatedAt = new Date(Date.now() - 3600_000).toISOString();
-      stale = await value(`(() => { window.JoeBoard.ingest(${JSON.stringify(staleSnapshot)}); return { state: document.documentElement.dataset.joeState, freshness: document.getElementById('freshValue')?.textContent, alarm: document.getElementById('alarmText')?.textContent }; })()`);
-      if (stale.state !== "attention" || !stale.freshness.startsWith("STALE") || !/stale/i.test(stale.alarm || "")) throw new Error(`Stale state mismatch: ${JSON.stringify(stale)}`);
+      stale = await value(`(() => {
+        const equityBefore = document.getElementById('totalEquity')?.textContent;
+        const dayBefore = document.getElementById('totalDay')?.textContent;
+        window.JoeBoard.ingest(${JSON.stringify(staleSnapshot)});
+        return {
+          state: document.documentElement.dataset.joeState,
+          freshness: document.getElementById('freshValue')?.textContent,
+          alarm: document.getElementById('alarmText')?.textContent,
+          equityRetained: document.getElementById('totalEquity')?.textContent === equityBefore,
+          dayUnavailable: document.getElementById('totalDay')?.textContent === '—',
+          dayBefore,
+        };
+      })()`);
+      if (stale.state !== "attention" || !stale.freshness.startsWith("STALE") || !/stale/i.test(stale.alarm || "") || !stale.equityRetained || !stale.dayUnavailable || stale.dayBefore !== "—") throw new Error(`Stale state mismatch: ${JSON.stringify(stale)}`);
 
       const brokenSnapshot = structuredClone(sample);
       brokenSnapshot.generatedAt = new Date().toISOString();
@@ -436,8 +456,8 @@ try {
         { desk: "j", symbol: "DEMO1", side: "Long", quantity: 2, mark: 101, marketValue: 202, dayPnl: 4.5, openPnl: 12.5, updatedAt: new Date().toISOString() },
         { desk: "joel", symbol: "DEMO2", side: "Short", quantity: -1, mark: 88, marketValue: -88, dayPnl: -1, openPnl: 4.75, updatedAt: new Date().toISOString() },
       ];
-      richSnapshot = await value(`(() => { window.JoeBoard.ingest(${JSON.stringify(positionsSnapshot)}); return { rows: document.querySelectorAll('#positionsBody tr').length, symbols: document.getElementById('positionsBody')?.innerText, open: document.getElementById('totalOpen')?.textContent, tradeCount: document.querySelector('[data-desk-slot="j"] .desk-money-row')?.innerText }; })()`);
-      if (richSnapshot.rows !== 2 || !/DEMO1/.test(richSnapshot.symbols || "") || !/17,25/.test(richSnapshot.open || "") || !/4/.test(richSnapshot.tradeCount || "")) throw new Error(`Rich snapshot mismatch: ${JSON.stringify(richSnapshot)}`);
+      richSnapshot = await value(`(() => { window.JoeBoard.ingest(${JSON.stringify(positionsSnapshot)}); return { rows: document.querySelectorAll('#positionsBody tr').length, symbols: document.getElementById('positionsBody')?.innerText, open: document.getElementById('totalOpen')?.textContent, totalDay: document.getElementById('totalDay')?.textContent, positionDayCells: [...document.querySelectorAll('#positionsBody td.number.neutral')].map((node) => node.textContent), tradeCount: document.querySelector('[data-desk-slot="j"] .desk-money-row')?.innerText }; })()`);
+      if (richSnapshot.rows !== 2 || !/DEMO1/.test(richSnapshot.symbols || "") || !/17,25/.test(richSnapshot.open || "") || richSnapshot.totalDay !== "—" || !richSnapshot.positionDayCells?.every((value) => value === "—") || !/4/.test(richSnapshot.tradeCount || "")) throw new Error(`Rich snapshot mismatch: ${JSON.stringify(richSnapshot)}`);
 
       const layout = await value(`(async () => {
         document.getElementById('layoutMenu').setAttribute('open', '');
@@ -596,7 +616,9 @@ try {
       const mobileColumns = await value(`(() => ({
         gridColumns: window.JoeBoard.gridColumnCount(),
         desktopColumns: window.JoeBoard.desktopColumnCount(),
-        storedColumns: JSON.parse(localStorage.getItem('joe-board-grid-settings-v1') || 'null')?.columns
+        storedColumns: JSON.parse(localStorage.getItem('joe-board-grid-settings-v1') || 'null')?.columns,
+        viewport: document.documentElement.dataset.joeViewport,
+        narrowBreakpoint: window.JoeBoard.narrowBreakpoint,
       }))()`);
       await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
       await delay(300);
@@ -605,7 +627,7 @@ try {
         desktopColumns: window.JoeBoard.desktopColumnCount(),
         geometry: document.getElementById('joeGrid').gridstack.engine.nodes.map((node) => ({ id: node.id, x: node.x, w: node.w })).sort((a, b) => a.id.localeCompare(b.id))
       }))()`);
-      if (mobileColumns.gridColumns !== 1 || mobileColumns.desktopColumns !== 6 || mobileColumns.storedColumns !== 6) {
+      if (mobileColumns.gridColumns !== 1 || mobileColumns.desktopColumns !== 6 || mobileColumns.storedColumns !== 6 || mobileColumns.viewport !== "narrow" || mobileColumns.narrowBreakpoint !== 700) {
         throw new Error(`Mobile column roundtrip mismatch (narrow): ${JSON.stringify(mobileColumns)}`);
       }
       if (afterMobile.gridColumns !== 6 || afterMobile.desktopColumns !== 6 || JSON.stringify(afterMobile.geometry) !== JSON.stringify(geometryBeforeMobile)) {
