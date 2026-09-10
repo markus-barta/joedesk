@@ -21,11 +21,40 @@ The producer that can read `~/trading-team/shared/book.json` must emit exactly:
 - the real HALT state, gateway health, and a short staleness threshold.
 
 The existing compact snapshot remains valid. Producers may additionally emit
-`money.openPnl`, `tradeCount`, and `heartbeatAt` on each desk, plus a top-level
-`positions` array. Position rows accept desk, symbol, side, quantity, mark,
-market value, day/open PnL, and update time. When those optional fields are not
-present, the board shows an explicit dash or empty-table message; it never
-invents a zero position or a healthy heartbeat.
+`money.openPnl`, `tradeCount`, and `heartbeatAt` on each desk, plus optional
+position detail. Position rows accept desk, symbol, side, quantity, mark,
+market value, day/open PnL, update time, and the frozen optional extensions
+`currency` and `accountingScope`.
+
+### Position coverage semantics
+
+Position detail is optional at every level. A missing `positions` key means
+**unavailable** — the consumer must not treat absence as a known-empty book or
+infer EUR, Stage-0, or desk ownership from it.
+
+| Shape | Meaning |
+|---|---|
+| key absent | unavailable for that scope |
+| `[]` | complete known-empty coverage for that scope |
+| `[{…}]` | one or more supplied rows for that scope |
+| `null`, non-array, or invalid row | invalid snapshot (rejected by server validation) |
+
+Producers should prefer per-desk `desks[].positions` arrays. Each row still
+carries an explicit `desk` that must match its parent desk id. A legacy
+top-level `positions` array remains accepted when rows name their desk
+explicitly; unknown symbols must never default to Joe or any other desk.
+
+Optional row fields keep their own null/absent rules:
+
+- `currency` — when absent, position monetary values are unavailable for
+  display (not silently EUR). When present, it is an uppercase three-letter
+  ISO 4217 code such as `EUR` or `USD`.
+- `accountingScope` — when absent, accounting classification is unavailable
+  (not silently Stage-0). When present, it is either `stage0` or `legacy`.
+
+When optional position fields are not present, the board shows an explicit dash
+or empty-table message; it never invents a zero position, a currency, an
+accounting label, or a healthy heartbeat.
 
 The browser endpoint is isolated behind `window.JOE_DATA_URL` (or the
 `joe-data-endpoint` meta value), and validated snapshots can be pushed with

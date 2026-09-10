@@ -76,7 +76,9 @@
         "marketValue": { "type": ["number", "null"] },
         "dayPnl": { "type": ["number", "null"] },
         "openPnl": { "type": ["number", "null"] },
-        "updatedAt": { "type": ["string", "null"], "format": "date-time" }
+        "updatedAt": { "type": ["string", "null"], "format": "date-time" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "accountingScope": { "enum": ["stage0", "legacy"] }
       }
     },
     "desk": {

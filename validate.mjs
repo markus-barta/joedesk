@@ -4,9 +4,34 @@ const DESK_IDS = ["j", "joe", "joel"];
 const STATES = new Set(["working", "sit-out", "stuck"]);
 const LEARNING = new Set(["learning", "iterating", "steady", "blocked"]);
 const GW = new Set(["ok", "degraded", "down"]);
+const SIDES = new Set(["Long", "Short", "long", "short"]);
+const POSITION_KEYS = new Set([
+  "desk",
+  "symbol",
+  "side",
+  "quantity",
+  "mark",
+  "marketValue",
+  "dayPnl",
+  "openPnl",
+  "updatedAt",
+  "currency",
+  "accountingScope",
+]);
+const MONEY_KEYS = new Set(["equity", "dayPnl", "totalPnl", "openPnl"]);
 
 function isObj(v) {
   return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+function validIsoTimestamp(iso) {
+  return typeof iso === "string" && iso.length > 0 && !Number.isNaN(Date.parse(iso));
+}
+
+function finiteOrNull(v, path, errors) {
+  if (!(v === null || (typeof v === "number" && Number.isFinite(v)))) {
+    errors.push(`${path} must be number or null`);
+  }
 }
 
 function moneyOk(m, path, errors) {
@@ -15,13 +40,65 @@ function moneyOk(m, path, errors) {
     return;
   }
   for (const k of ["equity", "dayPnl", "totalPnl"]) {
-    const v = m[k];
-    if (!(v === null || (typeof v === "number" && Number.isFinite(v)))) {
-      errors.push(`${path}.${k} must be number or null`);
-    }
+    finiteOrNull(m[k], `${path}.${k}`, errors);
+  }
+  if (Object.prototype.hasOwnProperty.call(m, "openPnl")) {
+    finiteOrNull(m.openPnl, `${path}.openPnl`, errors);
   }
   for (const k of Object.keys(m)) {
-    if (!["equity", "dayPnl", "totalPnl"].includes(k)) errors.push(`${path} unknown key ${k}`);
+    if (!MONEY_KEYS.has(k)) errors.push(`${path} unknown key ${k}`);
+  }
+}
+
+function positionOk(position, path, expectedDesk, errors) {
+  if (!isObj(position)) {
+    errors.push(`${path} must be object`);
+    return;
+  }
+  for (const k of Object.keys(position)) {
+    if (!POSITION_KEYS.has(k)) errors.push(`${path} unknown key ${k}`);
+  }
+  if (typeof position.symbol !== "string" || !position.symbol) {
+    errors.push(`${path}.symbol required`);
+  }
+  if (typeof position.desk !== "string" || !DESK_IDS.includes(position.desk)) {
+    errors.push(`${path}.desk invalid`);
+  } else if (expectedDesk !== null && position.desk !== expectedDesk) {
+    errors.push(`${path}.desk must match ${expectedDesk}`);
+  }
+  if (Object.prototype.hasOwnProperty.call(position, "side") && !SIDES.has(position.side)) {
+    errors.push(`${path}.side invalid`);
+  }
+  for (const k of ["quantity", "mark", "marketValue", "dayPnl", "openPnl"]) {
+    if (Object.prototype.hasOwnProperty.call(position, k)) {
+      finiteOrNull(position[k], `${path}.${k}`, errors);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(position, "updatedAt")) {
+    const v = position.updatedAt;
+    if (!(v === null || validIsoTimestamp(v))) {
+      errors.push(`${path}.updatedAt invalid`);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(position, "currency")) {
+    if (typeof position.currency !== "string" || !/^[A-Z]{3}$/.test(position.currency)) {
+      errors.push(`${path}.currency must be uppercase three-letter code`);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(position, "accountingScope")) {
+    if (position.accountingScope !== "stage0" && position.accountingScope !== "legacy") {
+      errors.push(`${path}.accountingScope invalid`);
+    }
+  }
+}
+
+function positionsArrayOk(arr, path, expectedDesk, errors) {
+  if (!Array.isArray(arr)) {
+    errors.push(`${path} must be array`);
+    return;
+  }
+  for (let i = 0; i < arr.length; i++) {
+    positionOk(arr[i], `${path}[${i}]`, expectedDesk, errors);
   }
 }
 
@@ -52,6 +129,10 @@ export function validateHouseholdSnapshot(raw) {
     if (!isObj(gw) || !GW.has(gw.status)) errors.push("safety.gateway.status invalid");
   }
 
+  if (Object.prototype.hasOwnProperty.call(raw, "positions")) {
+    positionsArrayOk(raw.positions, "positions", null, errors);
+  }
+
   if (!Array.isArray(raw.desks) || raw.desks.length !== 3) {
     errors.push("desks must have length 3");
   } else {
@@ -73,6 +154,9 @@ export function validateHouseholdSnapshot(raw) {
       if (!isObj(d.learning) || !LEARNING.has(d.learning.status)) errors.push(`${p}.learning`);
       moneyOk(d.money, `${p}.money`, errors);
       if (!Array.isArray(d.issues)) errors.push(`${p}.issues array`);
+      if (Object.prototype.hasOwnProperty.call(d, "positions")) {
+        positionsArrayOk(d.positions, `${p}.positions`, d.id, errors);
+      }
     }
     for (const id of DESK_IDS) {
       if (!seen.has(id)) errors.push(`missing desk ${id}`);
