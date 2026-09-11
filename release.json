@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "legacy",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "release_channel": "stable",
-  "release_sequence": 11,
-  "note": "Standard named-layout workflow with remembered selection, dirty-state Save, protected overwrite/discard and quiet accessible SVG header controls."
+  "release_sequence": 12,
+  "note": "Continuous History with explicitly estimated gray dotted gaps, observed desk colors and unchanged stored financial records."
 }

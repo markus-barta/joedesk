@@ -66,8 +66,10 @@ function assertJoeHostGate(isCanonicalJoeHost) {
 const joeSource = await readFile(join(repoRoot, "public/joe/joe.js"), "utf8");
 assertJoeHostGate(extractIsCanonicalJoeHost(joeSource));
 
-const historyPoints = Array.from({ length: 8 }, (_, index) => ({
-  t: new Date(Date.now() - (7 - index) * 3600_000).toISOString(),
+const historyReferenceMs = Date.now();
+const historyOffsetsMs = [40 * 86400_000, 32 * 86400_000, 25 * 86400_000, 8 * 86400_000, 23 * 3600_000, 16 * 3600_000, 8 * 3600_000, 1000];
+const historyPoints = historyOffsetsMs.map((offset, index) => ({
+  t: new Date(historyReferenceMs - offset).toISOString(),
   desks: {
     j: { equity: 10000 + index * 4, dayPnl: index * 4, totalPnl: 100 + index * 4 },
     joe: { equity: 10000 - index, dayPnl: -index, totalPnl: -40 - index },
@@ -75,6 +77,12 @@ const historyPoints = Array.from({ length: 8 }, (_, index) => ({
   },
   totals: { equity: 30000 + index * 5, dayPnl: index * 5, totalPnl: 290 + index * 5 },
 }));
+delete historyPoints[4].desks.j;
+delete historyPoints[4].desks.joe;
+delete historyPoints[4].desks.joel;
+historyPoints[5].desks.j.equity = null;
+historyPoints[5].desks.joe.equity = null;
+historyPoints[5].desks.joel.equity = null;
 await writeFile(join(site, "joe", "history.json"), JSON.stringify({
   schema: "inspr.joe.household.history.v1",
   generatedAt: new Date().toISOString(),
@@ -82,6 +90,7 @@ await writeFile(join(site, "joe", "history.json"), JSON.stringify({
   points: historyPoints,
 }));
 
+let historyUnavailable = false;
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", "http://local.test");
   requests.push({ host: request.headers.host || "", path: url.pathname });
@@ -89,6 +98,11 @@ const server = createServer(async (request, response) => {
   if (relative.includes("..")) {
     response.writeHead(400);
     response.end("bad request");
+    return;
+  }
+  if (historyUnavailable && url.pathname === "/joe/history.json") {
+    response.writeHead(503, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+    response.end("history temporarily unavailable");
     return;
   }
   try {
@@ -134,12 +148,16 @@ async function withTimeout(promise, milliseconds) {
   await Promise.race([promise, delay(milliseconds)]);
 }
 
-async function waitForJson(path) {
-  const url = `http://127.0.0.1:${cdpPort}${path}`;
+async function waitForPageTarget() {
+  const url = `http://127.0.0.1:${cdpPort}/json/list`;
   for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
       const response = await fetch(url);
-      if (response.ok) return response.json();
+      if (response.ok) {
+        const pages = await response.json();
+        const page = pages.find(candidate => candidate.type === "page" && candidate.webSocketDebuggerUrl);
+        if (page) return page;
+      }
     } catch {
       // Browser not ready yet.
     }
@@ -157,9 +175,7 @@ async function cleanup() {
 }
 
 try {
-  const pages = await waitForJson("/json/list");
-  const page = pages.find(candidate => candidate.type === "page");
-  if (!page) throw new Error("No browser page target found");
+  const page = await waitForPageTarget();
   const ws = new WebSocketClient(page.webSocketDebuggerUrl);
   await new Promise(resolve => { ws.onopen = resolve; });
   let nextId = 0;
@@ -264,6 +280,78 @@ try {
     return geometry;
   }
 
+  async function inspectHistoryContinuity(label) {
+    const result = await value(`(() => {
+      const chart = window.Chart?.getChart?.('historyChart');
+      if (!chart) return { available: false };
+      const rootStyle = getComputedStyle(document.documentElement);
+      const colorContext = document.createElement('canvas').getContext('2d');
+      const normalizeColor = (color) => {
+        colorContext.fillStyle = '#000000';
+        colorContext.fillStyle = color;
+        return colorContext.fillStyle;
+      };
+      const datasets = chart.data.datasets.map((dataset) => ({
+        deskId: dataset.joeDeskId,
+        evidence: dataset.joeEvidence,
+        points: dataset.data.length,
+        finitePoints: dataset.data.filter((point) => Number.isFinite(point?.y)).length,
+        borderColor: normalizeColor(dataset.borderColor),
+        borderDash: dataset.borderDash || [],
+      }));
+      const selected = [...document.querySelectorAll('button[data-series][aria-pressed="true"]')].map((button) => button.dataset.series);
+      const expectedColors = Object.fromEntries(selected.map((deskId) => [deskId, normalizeColor(rootStyle.getPropertyValue('--desk-' + deskId).trim())]));
+      const legend = document.getElementById('historyEvidenceLegend');
+      const legendRect = legend?.getBoundingClientRect();
+      return {
+        available: true,
+        selected,
+        datasets,
+        expectedColors,
+        gapColor: normalizeColor(rootStyle.getPropertyValue('--chart-gap-fill').trim()),
+        chartLegend: (chart.legend?.legendItems || []).map((item) => ({ deskId: item.datasetIndex == null ? null : chart.data.datasets[item.datasetIndex]?.joeDeskId, evidence: item.datasetIndex == null ? null : chart.data.datasets[item.datasetIndex]?.joeEvidence })),
+        staticLegend: {
+          exists: Boolean(legend),
+          role: legend?.getAttribute('role'),
+          label: legend?.getAttribute('aria-label'),
+          text: legend?.textContent.replace(/\\s+/g, ' ').trim(),
+          swatches: legend?.querySelectorAll('svg').length,
+          hiddenSwatches: [...(legend?.querySelectorAll('svg') || [])].every((svg) => svg.getAttribute('aria-hidden') === 'true'),
+          overflow: Boolean(legendRect && (legendRect.left < -1 || legendRect.right > document.documentElement.clientWidth + 1)),
+        },
+        describedBy: document.getElementById('historyChart')?.getAttribute('aria-describedby') || '',
+        pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      };
+    })()`);
+    if (!result.available) throw new Error(`History continuity chart unavailable (${label})`);
+    const problems = [];
+    for (const deskId of result.selected) {
+      const pair = result.datasets.filter((dataset) => dataset.deskId === deskId);
+      if (pair.length !== 2) problems.push(`${deskId} has ${pair.length} datasets`);
+      const observed = pair.find((dataset) => dataset.evidence === 'observed');
+      const gapFill = pair.find((dataset) => dataset.evidence === 'gap-fill');
+      if (!observed) problems.push(`${deskId} observed dataset missing`);
+      else if (observed.borderColor !== result.expectedColors[deskId]) problems.push(`${deskId} observed color mismatch`);
+      if (!gapFill) problems.push(`${deskId} gap-fill dataset missing`);
+      else {
+        if (JSON.stringify(gapFill.borderDash) !== JSON.stringify([2, 4])) problems.push(`${deskId} gap dash mismatch`);
+        if (gapFill.borderColor !== result.gapColor) problems.push(`${deskId} gap color mismatch`);
+        if (gapFill.finitePoints < 2) problems.push(`${deskId} gap path is not drawable`);
+      }
+    }
+    if (result.datasets.length !== result.selected.length * 2) problems.push('unexpected history dataset count');
+    if (result.chartLegend.length !== result.selected.length || result.chartLegend.some((item) => item.evidence !== 'observed')) problems.push('ordinary chart legend exposes gap-fill datasets');
+    if (!result.staticLegend.exists || result.staticLegend.role !== 'group' || result.staticLegend.label !== 'History line meaning' ||
+        result.staticLegend.swatches !== 2 || !result.staticLegend.hiddenSwatches || result.staticLegend.overflow ||
+        !/Observed/.test(result.staticLegend.text || '') || !/Gap fill \/ carried estimate/.test(result.staticLegend.text || '') ||
+        !/assumed €5,000 start/.test(result.staticLegend.text || '') || !result.describedBy.split(/\s+/).includes('historyEvidenceLegend')) {
+      problems.push('accessible static history legend mismatch');
+    }
+    if (result.pageOverflow) problems.push('history continuity caused horizontal overflow');
+    if (problems.length) throw new Error(`History continuity mismatch (${label}): ${JSON.stringify({ ...result, problems })}`);
+    return result;
+  }
+
   await send("Page.enable");
   await send("Runtime.enable");
   const smokeMode = process.env.JOE_SMOKE_VIEWPORT || "desktop";
@@ -280,6 +368,7 @@ try {
   let richSnapshot;
   let backfillSnapshot;
   let historyGeometry;
+  let historyContinuity;
 
   if (smokeMode === "privacy") {
     const publicBefore = requests.filter(item => item.host.startsWith("example.com") && item.path === "/joe/data.json").length;
@@ -388,6 +477,29 @@ try {
     ) throw new Error(`Healthy board mismatch: ${JSON.stringify(healthy)}`);
 
     const initial = await measureHistoryGeometry("initial render");
+    const rangeContinuity = {};
+    for (const range of ['1d', '1w', '1m', 'all']) {
+      await value(`document.querySelector('button[data-range="${range}"]').click()`);
+      await delay(75);
+      rangeContinuity[range] = await inspectHistoryContinuity(`${range.toUpperCase()} range`);
+      await measureHistoryGeometry(`${range.toUpperCase()} continuity`);
+    }
+    await value(`window.JoeBoard.applyTheme('light')`);
+    const lightTheme = await inspectHistoryContinuity('light theme');
+    await value(`window.JoeBoard.applyTheme('dark')`);
+    const darkTheme = await inspectHistoryContinuity('dark theme');
+    historyUnavailable = true;
+    await value(`document.getElementById('historyRetry').click()`);
+    await delay(150);
+    const retainedRefresh = await inspectHistoryContinuity('failed refresh retained history');
+    const retainedStatus = await value(`({ hidden: document.getElementById('historyStatus').hidden, text: document.getElementById('historyStatusText').textContent })`);
+    if (retainedStatus.hidden || !/Showing the last good series/.test(retainedStatus.text || '')) {
+      throw new Error(`History retained-refresh status mismatch: ${JSON.stringify(retainedStatus)}`);
+    }
+    historyUnavailable = false;
+    await value(`document.getElementById('historyRetry').click()`);
+    await delay(150);
+    historyContinuity = { ranges: rangeContinuity, lightTheme, darkTheme, retainedRefresh, retainedStatus };
     const resizeSamples = [];
     for (const viewport of [
       { width: 390, height: 844, deviceScaleFactor: 2, mobile: true },
@@ -1093,7 +1205,7 @@ try {
   const source = await readFile(join(repoRoot, "public", "joe", "index.html"), "utf8");
   if (/DUR\d+|1,001,403|SXR8|TSLA/.test(source)) throw new Error("Static /joe/ source still contains Paper-Drill account or position data");
   if (exceptions.length) throw new Error(`Runtime exceptions: ${exceptions.join("; ")}`);
-  console.log(JSON.stringify({ healthy, historyGeometry, mobile, stale, broken, richSnapshot, backfillSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
+  console.log(JSON.stringify({ healthy, historyGeometry, historyContinuity, mobile, stale, broken, richSnapshot, backfillSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
   await withTimeout(send("Browser.close").catch(() => {}), 1000);
   ws.close();
 } finally {

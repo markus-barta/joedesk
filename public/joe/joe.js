@@ -3238,6 +3238,257 @@
     return point.desks && point.desks[deskId];
   }
 
+  var HISTORY_ASSUMED_BASELINE = 5000;
+  var HISTORY_OBSERVATION_INTERVAL_MS = 5 * 60 * 1000;
+
+  function continuityGapPoint(x, y, deskId, assumption, gapReason, extra) {
+    return Object.assign({
+      x: x,
+      y: y,
+      joeDeskId: deskId,
+      joeEvidence: "gap-fill",
+      observed: false,
+      estimated: true,
+      gap: true,
+      assumption: assumption,
+      gapReason: gapReason
+    }, extra || {});
+  }
+
+  function continuityValueAt(samples, x) {
+    if (x <= samples[0].x) { return samples[0].y; }
+    if (x >= samples[samples.length - 1].x) { return samples[samples.length - 1].y; }
+    var index;
+    for (index = 1; index < samples.length; index += 1) {
+      if (samples[index].x < x) { continue; }
+      var left = samples[index - 1];
+      var right = samples[index];
+      if (right.x === left.x) { return right.y; }
+      return left.y + (right.y - left.y) * ((x - left.x) / (right.x - left.x));
+    }
+    return samples[samples.length - 1].y;
+  }
+
+  function clipContinuityGap(samples, startAt, endAt, deskId) {
+    if (!samples.length || samples[samples.length - 1].x < startAt || samples[0].x > endAt) { return []; }
+    var clippedStart = Math.max(startAt, samples[0].x);
+    var clippedEnd = Math.min(endAt, samples[samples.length - 1].x);
+    var template = samples[0];
+    var clipped = [];
+    if (clippedStart > samples[0].x) {
+      clipped.push(continuityGapPoint(
+        clippedStart,
+        continuityValueAt(samples, clippedStart),
+        deskId,
+        template.assumption === "assumed-baseline" ? "baseline-interpolation" : template.assumption,
+        template.gapReason,
+        { displayBoundary: true }
+      ));
+    }
+    samples.forEach(function (sample) {
+      if (sample.x >= clippedStart && sample.x <= clippedEnd) { clipped.push(sample); }
+    });
+    if (clippedEnd < samples[samples.length - 1].x && !clipped.some(function (sample) { return sample.x === clippedEnd; })) {
+      clipped.push(continuityGapPoint(
+        clippedEnd,
+        continuityValueAt(samples, clippedEnd),
+        deskId,
+        template.assumption === "assumed-baseline" ? "baseline-interpolation" : template.assumption,
+        template.gapReason,
+        { displayBoundary: true }
+      ));
+    }
+    return clipped;
+  }
+
+  function clipContinuityObserved(samples, startAt, endAt) {
+    if (!samples.length) { return []; }
+    var firstInside = samples.findIndex(function (sample) { return sample.x >= startAt; });
+    if (firstInside < 0) { return []; }
+    var lastInside = -1;
+    var index;
+    for (index = samples.length - 1; index >= 0; index -= 1) {
+      if (samples[index].x <= endAt) { lastInside = index; break; }
+    }
+    if (lastInside < 0) { return []; }
+    var from = Math.max(0, firstInside - 1);
+    var to = Math.min(samples.length - 1, lastInside + 1);
+    if (firstInside > lastInside) {
+      from = Math.max(0, lastInside);
+      to = Math.min(samples.length - 1, firstInside);
+    }
+    return samples.slice(from, to + 1);
+  }
+
+  function historyContinuitySeries(points, deskId, range, referenceMs) {
+    var endAt = Number.isFinite(referenceMs) ? referenceMs : Date.now();
+    var retained = (Array.isArray(points) ? points : []).map(function (point, index) {
+      return { point: point, index: index, x: point && typeof point.t === "string" ? Date.parse(point.t) : NaN };
+    }).filter(function (entry) {
+      return Number.isFinite(entry.x) && entry.x <= endAt;
+    }).sort(function (left, right) {
+      return left.x === right.x ? left.index - right.index : left.x - right.x;
+    }).map(function (entry) { return entry.point; });
+    var span = historyRangeSpanMs(range);
+    var earliestRetainedAt = retained.length ? Date.parse(retained[0].t) : null;
+    var startAt = span
+      ? endAt - span
+      : earliestRetainedAt === null ? endAt - 864e5 : earliestRetainedAt;
+    var selected = latestCompatibleBasis(retained, deskId).points;
+    var rows = selected.map(function (point) {
+      var bag = seriesBag(point, deskId);
+      var hasEquity = Boolean(bag) && Object.prototype.hasOwnProperty.call(bag, "equity");
+      return {
+        x: Date.parse(point.t),
+        y: bag && Number.isFinite(bag.equity) ? bag.equity : null,
+        gapReason: hasEquity ? "explicit-null" : "absent-observation"
+      };
+    });
+    var observed = [];
+    rows.forEach(function (row, index) {
+      var previous = index ? rows[index - 1] : null;
+      if (previous && row.x - previous.x > HISTORY_OBSERVATION_INTERVAL_MS) {
+        observed.push({
+          x: previous.x + (row.x - previous.x) / 2,
+          y: null,
+          joeDeskId: deskId,
+          joeEvidence: "observed",
+          observed: false,
+          gap: true,
+          gapReason: "timestamp-gap"
+        });
+      }
+      if (Number.isFinite(row.y)) {
+        var previousSolid = Boolean(previous) && Number.isFinite(previous.y) && row.x - previous.x <= HISTORY_OBSERVATION_INTERVAL_MS;
+        var next = index + 1 < rows.length ? rows[index + 1] : null;
+        var nextSolid = Boolean(next) && Number.isFinite(next.y) && next.x - row.x <= HISTORY_OBSERVATION_INTERVAL_MS;
+        observed.push({
+          x: row.x,
+          y: row.y,
+          joeDeskId: deskId,
+          joeEvidence: "observed",
+          observed: true,
+          estimated: false,
+          isolated: !previousSolid && !nextSolid
+        });
+      } else {
+        observed.push({
+          x: row.x,
+          y: null,
+          joeDeskId: deskId,
+          joeEvidence: "observed",
+          observed: false,
+          gap: true,
+          gapReason: row.gapReason
+        });
+      }
+    });
+
+    var observationIndexes = [];
+    rows.forEach(function (row, index) {
+      if (Number.isFinite(row.y)) { observationIndexes.push(index); }
+    });
+    var gapGroups = [];
+    if (!observationIndexes.length) {
+      gapGroups.push([
+        continuityGapPoint(startAt, HISTORY_ASSUMED_BASELINE, deskId, "no-history-baseline", "no-observation", { baseline: true }),
+        continuityGapPoint(endAt, HISTORY_ASSUMED_BASELINE, deskId, "no-history-baseline", "no-observation")
+      ]);
+    } else {
+      var firstObservationIndex = observationIndexes[0];
+      var firstObservation = rows[firstObservationIndex];
+      var baselineAt = earliestRetainedAt === null ? startAt : Math.min(startAt, earliestRetainedAt);
+      if (baselineAt < firstObservation.x) {
+        gapGroups.push([
+          continuityGapPoint(baselineAt, HISTORY_ASSUMED_BASELINE, deskId, "assumed-baseline", "leading-history", { baseline: true }),
+          continuityGapPoint(firstObservation.x, firstObservation.y, deskId, "baseline-interpolation", "leading-history", { observedBoundary: true })
+        ]);
+      }
+      observationIndexes.forEach(function (leftIndex, observationOffset) {
+        if (observationOffset + 1 >= observationIndexes.length) { return; }
+        var rightIndex = observationIndexes[observationOffset + 1];
+        var left = rows[leftIndex];
+        var right = rows[rightIndex];
+        var markers = [];
+        var rowIndex;
+        for (rowIndex = leftIndex; rowIndex < rightIndex; rowIndex += 1) {
+          var nextRow = rows[rowIndex + 1];
+          if (nextRow.x - rows[rowIndex].x > HISTORY_OBSERVATION_INTERVAL_MS) {
+            markers.push({ x: rows[rowIndex].x + (nextRow.x - rows[rowIndex].x) / 2, reason: "timestamp-gap" });
+          }
+          if (rowIndex > leftIndex && !Number.isFinite(rows[rowIndex].y)) {
+            markers.push({ x: rows[rowIndex].x, reason: rows[rowIndex].gapReason });
+          }
+        }
+        if (!markers.length && rightIndex === leftIndex + 1 && right.x - left.x <= HISTORY_OBSERVATION_INTERVAL_MS) { return; }
+        markers.sort(function (a, b) { return a.x - b.x; });
+        var reasons = Array.from(new Set(markers.map(function (marker) { return marker.reason; })));
+        var reason = reasons.join("+") || "missing-history";
+        var group = [continuityGapPoint(left.x, left.y, deskId, "interpolated", reason, { observedBoundary: true })];
+        markers.forEach(function (marker) {
+          if (group.some(function (sample) { return sample.x === marker.x; })) { return; }
+          var y = left.y + (right.y - left.y) * ((marker.x - left.x) / (right.x - left.x));
+          group.push(continuityGapPoint(marker.x, y, deskId, "interpolated", marker.reason));
+        });
+        group.push(continuityGapPoint(right.x, right.y, deskId, "interpolated", reason, { observedBoundary: true }));
+        gapGroups.push(group);
+      });
+      var lastObservation = rows[observationIndexes[observationIndexes.length - 1]];
+      if (lastObservation.x < endAt) {
+        gapGroups.push([
+          continuityGapPoint(lastObservation.x, lastObservation.y, deskId, "last-value-carry", "trailing-history", { observedBoundary: true }),
+          continuityGapPoint(endAt, lastObservation.y, deskId, "last-value-carry", "trailing-history", { carried: true })
+        ]);
+      }
+    }
+
+    var gapFill = [];
+    gapGroups.forEach(function (group) {
+      var clipped = clipContinuityGap(group, startAt, endAt, deskId);
+      if (!clipped.length) { return; }
+      if (gapFill.length) {
+        gapFill.push({
+          x: clipped[0].x,
+          y: null,
+          joeDeskId: deskId,
+          joeEvidence: "gap-fill",
+          observed: false,
+          estimated: true,
+          gap: true,
+          separator: true
+        });
+      }
+      gapFill = gapFill.concat(clipped);
+    });
+    return {
+      observed: clipContinuityObserved(observed, startAt, endAt),
+      gapFill: gapFill,
+      startAt: startAt,
+      endAt: endAt,
+      assumedBaseline: HISTORY_ASSUMED_BASELINE,
+      observationIntervalMs: HISTORY_OBSERVATION_INTERVAL_MS
+    };
+  }
+
+  function toggleHistoryDeskDatasets(chart, datasetIndex) {
+    if (!chart || !chart.data || !Array.isArray(chart.data.datasets)) { return false; }
+    var selected = chart.data.datasets[datasetIndex];
+    if (!selected || !selected.joeDeskId) { return false; }
+    var pairedIndexes = [];
+    chart.data.datasets.forEach(function (dataset, index) {
+      if (dataset.joeDeskId === selected.joeDeskId) { pairedIndexes.push(index); }
+    });
+    if (!pairedIndexes.length) { return false; }
+    var showPair = !pairedIndexes.some(function (index) { return chart.isDatasetVisible(index); });
+    pairedIndexes.forEach(function (index) { chart.setDatasetVisibility(index, showPair); });
+    chart.update();
+    return showPair;
+  }
+
+  function historyTooltipItemVisible(item) {
+    return !(item.dataset.joeEvidence === "gap-fill" && item.raw && item.raw.observedBoundary);
+  }
+
   function historyBasisNotice(points, deskIds, range) {
     var filtered = filterPoints(points, range);
     var excluded = deskIds.map(function (deskId) {
@@ -3403,24 +3654,40 @@
       showHistoryEmpty("Select one or more desks to compare.");
       return;
     }
-    var points = filterPoints(historyState.points, historyState.range);
-    var datasets = historyState.selected.map(function (deskId) {
-      var series = basisAwareSeries(points, deskId);
-      if (!series.some(function (sample) { return Number.isFinite(sample.y); })) { return null; }
-      var finiteCount = series.filter(function (sample) { return Number.isFinite(sample.y); }).length;
-      return {
-        label: deskId === "j" ? "J" : deskId.charAt(0).toUpperCase() + deskId.slice(1),
-        data: series,
+    var chartReferenceMs = Date.now();
+    var continuity = historyState.selected.map(function (deskId) {
+      return { deskId: deskId, model: historyContinuitySeries(historyState.points, deskId, historyState.range, chartReferenceMs) };
+    });
+    var datasets = [];
+    continuity.forEach(function (entry) {
+      var deskId = entry.deskId;
+      var label = deskDisplayName(deskId);
+      datasets.push({
+        label: label,
+        data: entry.model.observed,
+        joeDeskId: deskId,
+        joeEvidence: "observed",
         spanGaps: false,
         borderColor: deskColor(deskId), backgroundColor: deskColor(deskId), borderWidth: 2,
-        pointRadius: finiteCount === 1 ? 3 : 0, pointHoverRadius: 4, tension: .2
-      };
-    }).filter(Boolean);
-    if (!datasets.length) {
-      if (historyError && historyState.points.length) { updateHistoryStatusUI(); }
-      showHistoryEmpty(historyEmptyMessage());
-      return;
-    }
+        pointRadius: function (context) { return context.raw && context.raw.isolated ? 3 : 0; },
+        pointHoverRadius: 4,
+        tension: .2
+      });
+      datasets.push({
+        label: label,
+        data: entry.model.gapFill,
+        joeDeskId: deskId,
+        joeEvidence: "gap-fill",
+        spanGaps: false,
+        borderColor: cssVar("--chart-gap-fill") || "#85857d",
+        backgroundColor: cssVar("--chart-gap-fill") || "#85857d",
+        borderWidth: 1.5,
+        borderDash: [2, 4],
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        tension: 0
+      });
+    });
     document.getElementById("historyEmpty").hidden = true;
     var tickFont = { family: "SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace", size: 10 };
     var historyCanvas = document.getElementById("historyChart");
@@ -3436,16 +3703,38 @@
         responsive: false, maintainAspectRatio: false, animation: false, parsing: false,
         interaction: { mode: "nearest", intersect: false },
         plugins: {
-          legend: { display: true, labels: { color: cssVar("--chart-legend") || "#aaa79d", boxWidth: 14, boxHeight: 2, font: tickFont } },
+          legend: {
+            display: true,
+            onClick: function (_event, item, legend) { toggleHistoryDeskDatasets(legend.chart, item.datasetIndex); },
+            labels: {
+              color: cssVar("--chart-legend") || "#aaa79d",
+              boxWidth: 14,
+              boxHeight: 2,
+              font: tickFont,
+              filter: function (item, chartData) { return chartData.datasets[item.datasetIndex].joeEvidence !== "gap-fill"; }
+            }
+          },
           tooltip: {
             backgroundColor: cssVar("--chart-tooltip-bg") || "rgba(41,42,38,.96)",
             titleColor: cssVar("--chart-tooltip-title") || "#eee6d4",
             bodyColor: cssVar("--chart-tooltip-body") || "#c9c4b7",
             borderColor: cssVar("--chart-tooltip-border") || "#454641",
             borderWidth: 1,
+            filter: historyTooltipItemVisible,
             callbacks: {
             title: function (items) { return items.length ? HISTORY_TOOLTIP_TIME.format(new Date(items[0].parsed.x)) : ""; },
-            label: function (item) { return item.dataset.label + "  " + amount(item.parsed.y, false); }
+            label: function (item) {
+              var raw = item.raw || {};
+              if (item.dataset.joeEvidence !== "gap-fill") {
+                return item.dataset.label + "  " + amount(item.parsed.y, false) + " · recorded";
+              }
+              var explanation = "estimated through missing history";
+              if (raw.assumption === "assumed-baseline") { explanation = "estimated · assumed €5,000 starting baseline (display only)"; }
+              if (raw.assumption === "baseline-interpolation") { explanation = "estimated · interpolated from assumed €5,000 baseline"; }
+              if (raw.assumption === "last-value-carry") { explanation = "estimated · last recorded value carried"; }
+              if (raw.assumption === "no-history-baseline") { explanation = "estimated · assumed €5,000 guide · no recorded history"; }
+              return item.dataset.label + "  " + amount(item.parsed.y, false) + " · " + explanation;
+            }
           } },
           zoom: {
             limits: { x: { minRange: 60 * 1000 } },
@@ -3456,6 +3745,8 @@
         scales: {
           x: {
             type: "linear",
+            min: continuity[0].model.startAt,
+            max: continuity[0].model.endAt,
             afterBuildTicks: function (scale) {
               var plotWidth = currentHistoryPlotWidth(scale, initialWidth);
               var plan = historyAxisPlan(scale.min, scale.max, plotWidth);
@@ -3717,6 +4008,9 @@
     validateHistoryPayload: validateHistoryPayload,
     applyHistoryFetchResult: applyHistoryFetchResult,
     historyFailureMessage: historyFailureMessage,
+    historyContinuitySeries: historyContinuitySeries,
+    toggleHistoryDeskDatasets: toggleHistoryDeskDatasets,
+    historyTooltipItemVisible: historyTooltipItemVisible,
     sparklineSamples: sparklineSamples,
     basisAwareSeries: basisAwareSeries,
     latestCompatibleBasis: latestCompatibleBasis,

@@ -15,13 +15,14 @@
   --blue: #96b6c9;
   --desk-j: #8ecf78;
   --desk-joe: #6aaee8;
-  --desk-joel: #e0b85a;
+  --desk-joel: #b98d62;
   --widget-bg-top: rgba(47, 48, 43, .98);
   --widget-bg-bottom: rgba(33, 34, 30, .98);
   --widget-drag-bg: rgba(20, 21, 18, .42);
   --chart-grid: rgba(63, 64, 59, .45);
   --chart-tick: #77766f;
   --chart-legend: #aaa79d;
+  --chart-gap-fill: #8a8982;
   --chart-tooltip-bg: rgba(41, 42, 38, .96);
   --chart-tooltip-title: #eee6d4;
   --chart-tooltip-body: #c9c4b7;
@@ -52,13 +53,14 @@
   --blue: #2f6f9c;
   --desk-j: #3f8f3a;
   --desk-joe: #2f6fae;
-  --desk-joel: #b07a1f;
+  --desk-joel: #855f3e;
   --widget-bg-top: rgba(255, 255, 255, .98);
   --widget-bg-bottom: rgba(247, 245, 239, .98);
   --widget-drag-bg: rgba(243, 241, 234, .9);
   --chart-grid: rgba(120, 118, 111, .28);
   --chart-tick: #7a776f;
   --chart-legend: #5f5d56;
+  --chart-gap-fill: #74726c;
   --chart-tooltip-bg: rgba(255, 255, 255, .98);
   --chart-tooltip-title: #1f1e1a;
   --chart-tooltip-body: #4a4842;
@@ -227,6 +229,11 @@ button { color: inherit; }
 .control-divider { width: 1px; align-self: stretch; min-height: 24px; background: var(--line); }
 .control-group { display: flex; flex-wrap: wrap; gap: 4px; }
 .history-head #resetZoom { margin-left: auto; }
+.history-evidence-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding: 0 11px 5px; color: var(--muted); font: 9px/1.3 var(--mono); }
+.history-evidence-legend span { display: inline-flex; min-width: 0; align-items: center; gap: 5px; }
+.history-evidence-legend svg { flex: 0 0 auto; overflow: visible; }
+.history-evidence-legend line { stroke: currentColor; stroke-width: 2; }
+.history-evidence-legend .gap-fill line { stroke: var(--chart-gap-fill); stroke-dasharray: 2 4; stroke-linecap: round; }
 .history-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding: 0 11px 6px; color: var(--amber); font: 10px var(--mono); }
 .history-status[hidden] { display: none; }
 .history-help { margin: 0; padding: 0 11px 5px; color: var(--quiet); font: 9px var(--mono); }

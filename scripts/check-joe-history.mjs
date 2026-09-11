@@ -32,6 +32,9 @@ const api = new Function(`${historyHelpers}
     validateHistoryPayload,
     applyHistoryFetchResult,
     historyFailureMessage,
+    historyContinuitySeries,
+    toggleHistoryDeskDatasets,
+    historyTooltipItemVisible,
     historyAxisPlan,
     historyAxisLabel,
     historyCalendarBoundaries,
@@ -729,6 +732,172 @@ if (oneCurrentPoint.length !== 1 || oneCurrentPoint[0].y !== 5000) {
   throw new Error("a single current-basis point must be retained without inventing a trend");
 }
 
+const continuityReference = Date.parse("2026-09-11T12:00:00Z");
+const expectedRangeSpans = { "1d": 864e5, "1w": 7 * 864e5, "1m": 30 * 864e5, all: 864e5 };
+for (const deskId of ["j", "joe", "joel"]) {
+  for (const range of ["1d", "1w", "1m", "all"]) {
+    const emptyContinuity = api.historyContinuitySeries([], deskId, range, continuityReference);
+    if (emptyContinuity.endAt !== continuityReference || emptyContinuity.startAt !== continuityReference - expectedRangeSpans[range]) {
+      throw new Error(`${deskId} ${range} continuity must use the deterministic reference and exact range`);
+    }
+    if (emptyContinuity.observed.length !== 0 || emptyContinuity.gapFill.length !== 2) {
+      throw new Error(`${deskId} ${range} no-history continuity must retain an empty observed series and one guide`);
+    }
+    if (emptyContinuity.gapFill.some((sample) => sample.y !== 5000 || sample.joeEvidence !== "gap-fill" || !sample.estimated)) {
+      throw new Error(`${deskId} ${range} no-history guide must remain explicitly estimated at EUR 5000`);
+    }
+  }
+}
+
+const continuityStart = Date.parse("2026-09-11T10:00:00Z");
+const leadingFixture = [
+  { t: new Date(continuityStart).toISOString(), desks: { j: {}, joe: {}, joel: {} } },
+  { t: new Date(continuityStart + 10 * 60e3).toISOString(), desks: { j: { equity: 5100 }, joe: { equity: 5200 }, joel: { equity: 5300 } } }
+];
+const leadingBytes = JSON.stringify(leadingFixture);
+for (const deskId of ["j", "joe", "joel"]) {
+  const model = api.historyContinuitySeries(leadingFixture, deskId, "all", continuityStart + 20 * 60e3);
+  const firstGap = model.gapFill.find((sample) => Number.isFinite(sample.y));
+  const lastGap = model.gapFill.filter((sample) => Number.isFinite(sample.y)).at(-1);
+  if (!firstGap || firstGap.x !== continuityStart || firstGap.y !== 5000 || !firstGap.baseline || firstGap.assumption !== "assumed-baseline") {
+    throw new Error(`${deskId} leading continuity must anchor an explicit display-only EUR 5000 baseline`);
+  }
+  if (!lastGap || lastGap.x !== model.endAt || lastGap.y !== 5000 + ({ j: 100, joe: 200, joel: 300 })[deskId] || !lastGap.carried) {
+    throw new Error(`${deskId} trailing continuity must carry the last observation to the reference time`);
+  }
+  if (model.observed.filter((sample) => Number.isFinite(sample.y)).length !== 1 || !model.observed.find((sample) => sample.isolated)) {
+    throw new Error(`${deskId} isolated observation must remain visible as recorded evidence`);
+  }
+}
+if (JSON.stringify(leadingFixture) !== leadingBytes) {
+  throw new Error("continuity modeling must not mutate retained history");
+}
+
+const explicitNullFixture = [
+  { t: "2026-09-11T10:00:00Z", desks: { joe: { equity: 5000 } } },
+  { t: "2026-09-11T10:02:00Z", desks: { joe: { equity: null } } },
+  { t: "2026-09-11T10:04:00Z", desks: { joe: { equity: 5004 } } }
+];
+const explicitNull = api.historyContinuitySeries(explicitNullFixture, "joe", "all", Date.parse("2026-09-11T10:06:00Z"));
+const nullEstimate = explicitNull.gapFill.find((sample) => sample.x === Date.parse("2026-09-11T10:02:00Z") && Number.isFinite(sample.y));
+if (!nullEstimate || nullEstimate.y !== 5002 || nullEstimate.gapReason !== "explicit-null" || nullEstimate.assumption !== "interpolated") {
+  throw new Error("explicit null must become a labelled linear interpolation, never a solid bridge");
+}
+if (!explicitNull.observed.some((sample) => sample.y === null && sample.gapReason === "explicit-null")) {
+  throw new Error("explicit null must break the observed dataset");
+}
+
+const absentFixture = [
+  { t: "2026-09-11T10:00:00Z", desks: { j: { equity: 5000 } } },
+  { t: "2026-09-11T10:02:00Z", desks: {} },
+  { t: "2026-09-11T10:04:00Z", desks: { j: { equity: 5008 } } }
+];
+const absentContinuity = api.historyContinuitySeries(absentFixture, "j", "all", Date.parse("2026-09-11T10:04:00Z"));
+const absentEstimate = absentContinuity.gapFill.find((sample) => sample.x === Date.parse("2026-09-11T10:02:00Z") && Number.isFinite(sample.y));
+if (!absentEstimate || absentEstimate.y !== 5004 || absentEstimate.gapReason !== "absent-observation") {
+  throw new Error("an absent desk sample must become an explicitly estimated interpolation");
+}
+
+const timestampHoleFixture = [
+  { t: "2026-09-11T10:00:00Z", desks: { joel: { equity: 5000 } } },
+  { t: "2026-09-11T10:05:00Z", desks: { joel: { equity: 5005 } } },
+  { t: "2026-09-11T10:10:01Z", desks: { joel: { equity: 5010 } } }
+];
+const timestampHole = api.historyContinuitySeries(timestampHoleFixture, "joel", "all", Date.parse("2026-09-11T10:10:01Z"));
+if (!timestampHole.observed.some((sample) => sample.y === null && sample.gapReason === "timestamp-gap")) {
+  throw new Error("an observation interval over five minutes must break the solid dataset");
+}
+if (!timestampHole.gapFill.some((sample) => Number.isFinite(sample.y) && sample.gapReason === "timestamp-gap")) {
+  throw new Error("a timestamp hole must receive a dotted interpolated connector");
+}
+
+const whollyMissing = api.historyContinuitySeries([
+  { t: "2026-09-08T12:00:00Z", desks: { j: { equity: 5123 } } }
+], "j", "1d", continuityReference);
+const whollyMissingFinite = whollyMissing.gapFill.filter((sample) => Number.isFinite(sample.y));
+if (whollyMissing.observed.length !== 0 || whollyMissingFinite.length !== 2 ||
+    whollyMissingFinite[0].x !== whollyMissing.startAt || whollyMissingFinite[1].x !== whollyMissing.endAt ||
+    whollyMissingFinite.some((sample) => sample.y !== 5123 || sample.assumption !== "last-value-carry")) {
+  throw new Error("a view wholly inside a trailing hole must draw a clipped carried connector across the full window");
+}
+
+const futureExcluded = api.historyContinuitySeries([
+  { t: "2026-09-11T11:58:00Z", desks: { joe: { equity: 5001 } } },
+  { t: "2026-09-11T12:01:00Z", desks: { joe: { equity: 9999 } } }
+], "joe", "1d", continuityReference);
+if (futureExcluded.observed.some((sample) => sample.y === 9999) || futureExcluded.gapFill.some((sample) => sample.y === 9999)) {
+  throw new Error("continuity must not observe or extrapolate a future sample past the reference time");
+}
+
+const joelContinuity = api.historyContinuitySeries(syntheticJoelBasisPoints, "joel", "all", continuityReference);
+if (joelContinuity.observed.some((sample) => sample.y === 11000 || sample.y === 12000) ||
+    joelContinuity.gapFill.some((sample) => sample.y === 11000 || sample.y === 12000)) {
+  throw new Error("continuity must not reintroduce incompatible legacy accounting values as observations or estimates");
+}
+if (!joelContinuity.gapFill.some((sample) => sample.baseline && sample.y === 5000)) {
+  throw new Error("excluded leading accounting history must be joined only from the assumed display baseline");
+}
+
+const compareFixtureBytes = JSON.stringify(unavailableWindow);
+const compareBeforeContinuity = JSON.stringify(api.sharedWindowCompare(unavailableWindow, ["joe", "joel"], "all"));
+api.historyContinuitySeries(unavailableWindow, "j", "all", Date.parse("2026-09-10T15:00:00Z"));
+const compareAfterContinuity = JSON.stringify(api.sharedWindowCompare(unavailableWindow, ["joe", "joel"], "all"));
+if (compareAfterContinuity !== compareBeforeContinuity || JSON.stringify(unavailableWindow) !== compareFixtureBytes) {
+  throw new Error("display continuity must leave compare results and history input unchanged");
+}
+
+if (!/joeEvidence:\s*"observed"[\s\S]*joeEvidence:\s*"gap-fill"/.test(joeSource) ||
+    !/borderColor:\s*cssVar\("--chart-gap-fill"\)/.test(joeSource) ||
+    !/borderDash:\s*\[2, 4\]/.test(joeSource) ||
+    !/filter:\s*function \(item, chartData\).*joeEvidence !== "gap-fill"/.test(joeSource)) {
+  throw new Error("Chart.js history rendering must expose two evidence datasets and hide dotted connectors from its ordinary legend");
+}
+if (!joeSource.includes("assumed €5,000 starting baseline (display only)") ||
+    !joeSource.includes("estimated · last recorded value carried")) {
+  throw new Error("gap tooltips must explicitly distinguish baseline assumptions and estimates");
+}
+
+const legendDatasets = [
+  { joeDeskId: "joe", joeEvidence: "observed" },
+  { joeDeskId: "joe", joeEvidence: "gap-fill" },
+  { joeDeskId: "joel", joeEvidence: "observed" },
+  { joeDeskId: "joel", joeEvidence: "gap-fill" }
+];
+const legendVisibility = [true, true, true, true];
+let legendUpdates = 0;
+const legendChart = {
+  data: { datasets: legendDatasets },
+  isDatasetVisible(index) { return legendVisibility[index]; },
+  setDatasetVisibility(index, visible) { legendVisibility[index] = visible; },
+  update() { legendUpdates += 1; }
+};
+if (api.toggleHistoryDeskDatasets(legendChart, 0) !== false ||
+    JSON.stringify(legendVisibility) !== JSON.stringify([false, false, true, true]) || legendUpdates !== 1) {
+  throw new Error("legend hide must toggle both datasets for one desk and leave another desk untouched");
+}
+if (api.toggleHistoryDeskDatasets(legendChart, 0) !== true ||
+    JSON.stringify(legendVisibility) !== JSON.stringify([true, true, true, true]) || legendUpdates !== 2) {
+  throw new Error("legend show must restore both desk datasets and the observed legend state together");
+}
+if (!/onClick:\s*function \(_event, item, legend\) \{ toggleHistoryDeskDatasets\(legend\.chart, item\.datasetIndex\); \}/.test(joeSource)) {
+  throw new Error("the Chart.js legend click handler must use the coordinated desk-pair toggle");
+}
+
+const tooltipItems = {
+  observed: { dataset: { joeEvidence: "observed" }, raw: { observedBoundary: true } },
+  boundary: { dataset: { joeEvidence: "gap-fill" }, raw: { observedBoundary: true } },
+  interpolated: { dataset: { joeEvidence: "gap-fill" }, raw: { assumption: "interpolated" } },
+  baseline: { dataset: { joeEvidence: "gap-fill" }, raw: { assumption: "assumed-baseline", baseline: true } },
+  carried: { dataset: { joeEvidence: "gap-fill" }, raw: { assumption: "last-value-carry", carried: true } }
+};
+if (!api.historyTooltipItemVisible(tooltipItems.observed) ||
+    api.historyTooltipItemVisible(tooltipItems.boundary) ||
+    !api.historyTooltipItemVisible(tooltipItems.interpolated) ||
+    !api.historyTooltipItemVisible(tooltipItems.baseline) ||
+    !api.historyTooltipItemVisible(tooltipItems.carried)) {
+  throw new Error("history tooltips must suppress duplicate gap boundaries while retaining recorded and genuine estimate items");
+}
+
 console.log(JSON.stringify({
   ok: true,
   checks: [
@@ -791,6 +960,21 @@ console.log(JSON.stringify({
     "same-tag-unidentified-gap-neutral-copy",
     "malformed-history-basis-rejected",
     "snapshot-history-basis-validation",
-    "empty-current-one-point-honest"
+    "empty-current-one-point-honest",
+    "continuity-every-range-and-desk",
+    "continuity-display-baseline-and-trailing-carry",
+    "continuity-isolated-observation-visible",
+    "continuity-input-immutable",
+    "continuity-explicit-null-interpolation",
+    "continuity-absent-desk-interpolation",
+    "continuity-five-minute-threshold",
+    "continuity-wholly-missing-window",
+    "continuity-future-excluded",
+    "continuity-accounting-basis-exclusion",
+    "continuity-compare-unaffected",
+    "continuity-chart-datasets-and-legend",
+    "continuity-explicit-tooltip-copy",
+    "continuity-legend-pair-toggle",
+    "continuity-tooltip-boundary-deduplication"
   ]
 }, null, 2));
