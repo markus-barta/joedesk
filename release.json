@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "legacy",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "release_channel": "stable",
-  "release_sequence": 12,
-  "note": "Continuous History with explicitly estimated gray dotted gaps, observed desk colors and unchanged stored financial records."
+  "release_sequence": 13,
+  "note": "Independent phone tile order in draft and named layouts, preserving desktop geometry across reloads and responsive changes."
 }

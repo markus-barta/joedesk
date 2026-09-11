@@ -2,7 +2,7 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Version:** `0.7.6` (package and UI share `JoeVersion.APP_VERSION` in `public/joe/joe-version.js`).
+**Version:** `0.7.7` (package and UI share `JoeVersion.APP_VERSION` in `public/joe/joe-version.js`).
 
 ## Provenance
 
@@ -32,7 +32,7 @@ Provision the data directory and inbox token on your deployment host (not shown 
 **Docker (recommended):**
 
 ```bash
-docker build -t joedesk:0.7.6 .
+docker build -t joedesk:0.7.7 .
 ```
 
 Image copies `public/` unchanged. No sample or synthetic `data.json` is baked in — an empty store shows `NO DATA`.
@@ -83,7 +83,7 @@ node server.mjs
 docker run --rm -p 127.0.0.1:8080:8080 \
   -v joe-board-data:/var/lib/joe-board \
   -v /path/to/push-token:/run/secrets/joe-board-push-token:ro \
-  joedesk:0.7.6
+  joedesk:0.7.7
 ```
 
 ## Deploy notes
@@ -107,7 +107,8 @@ The UI gates non-canonical hosts client-side (privacy stub). That is UX only, no
 ### Preserved contracts
 
 - Storage: `/var/lib/joe-board/data.json`, `history.json`
-- Browser `localStorage` keys: `joe-board-layout-v1`, `joe-board-named-layouts-v1`, `joe-board-active-layout-v1`, `joe-board-grid-settings-v1`, `joe-board-theme-v1`
+- Browser `localStorage` keys: `joe-board-layout-v1`, `joe-board-named-layouts-v1`, `joe-board-active-layout-v1`, `joe-board-grid-settings-v1`, `joe-board-phone-order-v1`, `joe-board-theme-v1`
+- Phone order is an optional field on named layouts and a separate active draft; desktop geometry retains its existing array format. Legacy layouts derive their initial phone order from desktop positions. On phones, scroll the page between tile drags; helper-edge autoscroll is disabled because tall tiles can otherwise pull against the drag direction. Desktop drag autoscroll remains enabled.
 - API paths: `/healthz`, `/readyz`, `/joe/*` as served today
 - Schemas: `inspr.joe.household.v1`, `inspr.joe.household.history.v1`
 - Vendor JS/CSS under `public/joe/vendor/` with bundled LICENSE files

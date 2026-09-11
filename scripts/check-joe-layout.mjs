@@ -20,6 +20,7 @@ const layoutHelpers = `${layoutContext}
   var LAYOUTS_KEY = "joe-board-named-layouts-v1";
   var ACTIVE_LAYOUT_KEY = "joe-board-active-layout-v1";
   var SETTINGS_KEY = "joe-board-grid-settings-v1";
+  var PHONE_ORDER_KEY = "joe-board-phone-order-v1";
   var DEFAULT_LAYOUT_ID = "default";
   var MAX_LAYOUTS = 24;
   var NARROW_BREAKPOINT = 700;
@@ -39,6 +40,7 @@ const layoutHelpers = `${layoutContext}
   var activeLayoutId = DEFAULT_LAYOUT_ID;
   var layoutBaseline = null;
   var layoutDirty = false;
+  var activePhoneOrder = null;
   var pendingLayoutSelectionId = null;
   var layoutFormMode = null;
   var historyState = { chart: null };
@@ -56,6 +58,10 @@ function makeApi(localStorage, document, window) {
     sanitizeGridSettings,
     desktopDeskDefaultRows,
     layoutItemsEqual,
+    derivePhoneOrder,
+    sanitizePhoneOrder,
+    resolvePhoneOrder,
+    phoneOrdersEqual,
     migrateLegacyDefaultLayout,
     defaultLayoutEntry,
     defaultLayoutsCatalog,
@@ -66,10 +72,15 @@ function makeApi(localStorage, document, window) {
     readStoredGridSettings,
     readActiveLayoutId,
     writeActiveLayoutId,
+    readStoredPhoneOrder,
     persistDraftSnapshot,
     makeLayoutSnapshot,
     layoutSnapshotsEqual,
     resolveInitialLayoutState,
+    livePhoneOrder,
+    saveLayout,
+    savePhoneOrderFromDrag,
+    fitNarrowLayoutToContent,
     requestLayoutSelection,
     cancelPendingLayoutSelection,
     discardAndCompletePendingSelection,
@@ -80,12 +91,13 @@ function makeApi(localStorage, document, window) {
     deleteSelectedLayout,
     resetToDefaultLayout,
     initGrid,
-    state: function() { return { activeLayoutId, activeGridSettings, layoutDirty, pendingLayoutSelectionId }; },
+    state: function() { return { activeLayoutId, activeGridSettings, activePhoneOrder, layoutDirty, pendingLayoutSelectionId }; },
     setState: function(next) {
       if (next.grid !== undefined) grid = next.grid;
       if (next.activeLayoutId !== undefined) activeLayoutId = next.activeLayoutId;
       if (next.layoutDirty !== undefined) layoutDirty = next.layoutDirty;
       if (next.layoutBaseline !== undefined) layoutBaseline = next.layoutBaseline;
+      if (next.activePhoneOrder !== undefined) activePhoneOrder = next.activePhoneOrder;
       if (next.activeGridSettings !== undefined) activeGridSettings = next.activeGridSettings;
       if (next.cachedDesktopLayout !== undefined) cachedDesktopLayout = next.cachedDesktopLayout;
       if (next.pendingLayoutSelectionId !== undefined) pendingLayoutSelectionId = next.pendingLayoutSelectionId;
@@ -170,6 +182,21 @@ const legacySampleV2 = [
   { id: "positions", x: 0, y: 16, w: 12, h: 5 },
 ];
 const sample = api.defaultLayoutEntry().items;
+const desktopPhoneOrder = ["hero", "desk-j", "desk-joe", "desk-joel", "attribution", "history", "positions"];
+const customPhoneOrder = ["hero", "desk-joe", "desk-j", "desk-joel", "history", "attribution", "positions"];
+
+if (!api.phoneOrdersEqual(api.derivePhoneOrder(sample), desktopPhoneOrder)) {
+  throw new Error("phone order was not derived from desktop y/x geometry");
+}
+if (!api.phoneOrdersEqual(api.sanitizePhoneOrder(customPhoneOrder), customPhoneOrder)) {
+  throw new Error("valid phone order rejected");
+}
+if (api.sanitizePhoneOrder(customPhoneOrder.slice(0, -1)) || api.sanitizePhoneOrder(customPhoneOrder.map((id, index) => index === 1 ? "hero" : id))) {
+  throw new Error("invalid phone order accepted");
+}
+if (!api.phoneOrdersEqual(api.resolvePhoneOrder(["unknown"], sample), desktopPhoneOrder)) {
+  throw new Error("invalid phone order did not fall back to desktop geometry");
+}
 
 const settingsOnly = { columns: 6, cellHeight: 96, tilePadding: 14, tileGap: 6 };
 const settingsOnlyStorage = new MemoryStorage({
@@ -326,9 +353,15 @@ const custom = api.normalizeLayoutEntry({
   name: "QA",
   items: sixCol,
   settings: { columns: 6, cellHeight: 96, tilePadding: 8, tileGap: 12 },
+  phoneOrder: customPhoneOrder,
 });
-if (!custom || custom.settings.columns !== 6 || custom.settings.cellHeight !== 96) {
+if (!custom || custom.settings.columns !== 6 || custom.settings.cellHeight !== 96 || !api.phoneOrdersEqual(custom.phoneOrder, customPhoneOrder)) {
   throw new Error("custom layout settings not preserved");
+}
+
+const invalidPhoneEntry = api.normalizeLayoutEntry({ id: "invalid-phone", name: "Invalid phone", items: sample, phoneOrder: ["hero"] });
+if (!invalidPhoneEntry || invalidPhoneEntry.phoneOrder !== undefined || !api.phoneOrdersEqual(api.makeLayoutSnapshot(invalidPhoneEntry.items, invalidPhoneEntry.settings, invalidPhoneEntry.phoneOrder).phoneOrder, desktopPhoneOrder)) {
+  throw new Error("invalid optional named phone order did not derive from desktop geometry");
 }
 
 if (api.sanitizeGridSettings({ columns: 99, cellHeight: 12, tilePadding: -4, tileGap: 40 }).columns !== 12) {
@@ -399,8 +432,44 @@ const settingsDirtyReload = api.resolveInitialLayoutState(
   { ...namedEntry.settings, tileGap: namedEntry.settings.tileGap + 1 },
 );
 if (!settingsDirtyReload.dirty) throw new Error("grid settings change did not mark layout dirty");
+const phoneDirtyReload = api.resolveInitialLayoutState(
+  migratedCatalog,
+  namedEntry.id,
+  namedEntry.items,
+  namedEntry.settings,
+  customPhoneOrder,
+);
+if (!phoneDirtyReload.dirty || !api.phoneOrdersEqual(phoneDirtyReload.phoneOrder, customPhoneOrder)) {
+  throw new Error("active phone draft did not survive reload as an unsaved change");
+}
+const savedPhoneEntry = api.normalizeLayoutEntry({
+  id: "saved-phone",
+  name: "Saved phone",
+  items: sample,
+  settings: namedEntry.settings,
+  phoneOrder: customPhoneOrder,
+});
+const savedPhoneCatalog = { schema: "inspr.joe.layouts.v1", layouts: [api.defaultLayoutEntry(), savedPhoneEntry] };
+const missingPhoneDraftReload = api.resolveInitialLayoutState(savedPhoneCatalog, savedPhoneEntry.id, savedPhoneEntry.items, savedPhoneEntry.settings, null);
+if (missingPhoneDraftReload.dirty || !api.phoneOrdersEqual(missingPhoneDraftReload.phoneOrder, customPhoneOrder)) {
+  throw new Error("missing active phone draft did not restore the named phone order cleanly");
+}
+const invalidPhoneDraftReload = api.resolveInitialLayoutState(savedPhoneCatalog, savedPhoneEntry.id, savedPhoneEntry.items, savedPhoneEntry.settings, ["hero"]);
+if (invalidPhoneDraftReload.dirty || !api.phoneOrdersEqual(invalidPhoneDraftReload.phoneOrder, customPhoneOrder)) {
+  throw new Error("invalid active phone draft did not restore the named phone order cleanly");
+}
+const validPhoneDraftReload = api.resolveInitialLayoutState(savedPhoneCatalog, savedPhoneEntry.id, savedPhoneEntry.items, savedPhoneEntry.settings, desktopPhoneOrder);
+if (!validPhoneDraftReload.dirty || !api.phoneOrdersEqual(validPhoneDraftReload.phoneOrder, desktopPhoneOrder)) {
+  throw new Error("valid active phone draft did not take precedence over the named phone order");
+}
 if (!api.layoutSnapshotsEqual(api.makeLayoutSnapshot(namedEntry.items, namedEntry.settings), api.makeLayoutSnapshot(namedEntry.items, namedEntry.settings))) {
   throw new Error("unchanged layout snapshot reported dirty");
+}
+if (api.layoutSnapshotsEqual(
+  api.makeLayoutSnapshot(namedEntry.items, namedEntry.settings, desktopPhoneOrder),
+  api.makeLayoutSnapshot(namedEntry.items, namedEntry.settings, customPhoneOrder),
+)) {
+  throw new Error("phone-only order change was not included in snapshot equality");
 }
 
 const deniedStorage = new MemoryStorage();
@@ -429,6 +498,7 @@ api.setState({
   layoutDirty: true,
   layoutBaseline: api.makeLayoutSnapshot(sample, { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 }),
   activeGridSettings: { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 },
+  activePhoneOrder: customPhoneOrder,
   cachedDesktopLayout: sample,
 });
 api.requestLayoutSelection(namedEntry.id);
@@ -448,7 +518,8 @@ if (api.state().pendingLayoutSelectionId !== null || dom.nodes.get("layoutSelect
 
 api.requestLayoutSelection(namedEntry.id);
 api.discardAndCompletePendingSelection();
-if (api.state().activeLayoutId !== namedEntry.id || api.state().layoutDirty || gridModel.loads !== 1) {
+if (api.state().activeLayoutId !== namedEntry.id || api.state().layoutDirty || gridModel.loads !== 1 ||
+  !api.phoneOrdersEqual(api.state().activePhoneOrder, desktopPhoneOrder)) {
   throw new Error("discard did not load the requested clean layout");
 }
 
@@ -469,12 +540,13 @@ if (api.state().activeLayoutId !== namedEntry.id || api.state().layoutDirty) {
 }
 
 gridModel.items = sample.map((item) => item.id === "hero" ? { ...item, h: 5 } : { ...item });
-api.setState({ layoutDirty: true });
+api.setState({ layoutDirty: true, activePhoneOrder: customPhoneOrder });
 const countBeforeOverwrite = api.readLayoutsCatalog().layouts.length;
 if (!api.saveCurrentNamedLayout()) throw new Error("dirty named layout was not overwritten");
 const overwrittenCatalog = api.readLayoutsCatalog();
 const overwrittenNamed = overwrittenCatalog.layouts.find((entry) => entry.id === namedEntry.id);
-if (overwrittenCatalog.layouts.length !== countBeforeOverwrite || overwrittenNamed?.items.find((item) => item.id === "hero")?.h !== 5 || api.state().layoutDirty) {
+if (overwrittenCatalog.layouts.length !== countBeforeOverwrite || overwrittenNamed?.items.find((item) => item.id === "hero")?.h !== 5 ||
+  !api.phoneOrdersEqual(overwrittenNamed?.phoneOrder, customPhoneOrder) || api.state().layoutDirty) {
   throw new Error("Save did not update the active named id and clean its baseline");
 }
 
@@ -489,8 +561,21 @@ if (storage.getItem("joe-board-named-layouts-v1") !== catalogBeforeCancelledColl
 testWindow.confirm = () => true;
 if (!api.saveNamedLayout(collisionTarget.name)) throw new Error("confirmed Save As collision was not overwritten");
 const collisionCatalog = api.readLayoutsCatalog();
-if (collisionCatalog.layouts.length !== countBeforeOverwrite || api.state().activeLayoutId !== collisionTarget.id || collisionCatalog.layouts.find((entry) => entry.id === collisionTarget.id)?.items.find((item) => item.id === "hero")?.h !== 5) {
+if (collisionCatalog.layouts.length !== countBeforeOverwrite || api.state().activeLayoutId !== collisionTarget.id ||
+  collisionCatalog.layouts.find((entry) => entry.id === collisionTarget.id)?.items.find((item) => item.id === "hero")?.h !== 5 ||
+  !api.phoneOrdersEqual(collisionCatalog.layouts.find((entry) => entry.id === collisionTarget.id)?.phoneOrder, customPhoneOrder)) {
   throw new Error("confirmed Save As collision did not preserve target identity");
+}
+if (!api.renameSelectedLayout("Mobile order")) throw new Error("named layout rename failed");
+const renamedEntry = api.readLayoutsCatalog().layouts.find((entry) => entry.id === collisionTarget.id);
+if (!renamedEntry || renamedEntry.name !== "Mobile order" || !api.phoneOrdersEqual(renamedEntry.phoneOrder, customPhoneOrder)) {
+  throw new Error("rename did not preserve named phone order");
+}
+if (!api.requestLayoutSelection("default") || !api.phoneOrdersEqual(api.state().activePhoneOrder, desktopPhoneOrder)) {
+  throw new Error("loading Default did not restore its derived phone order");
+}
+if (!api.requestLayoutSelection(collisionTarget.id) || !api.phoneOrdersEqual(api.state().activePhoneOrder, customPhoneOrder)) {
+  throw new Error("loading a named layout did not restore its saved phone order");
 }
 
 api.setState({ activeLayoutId: "default", layoutDirty: true });
@@ -533,8 +618,64 @@ if (api.resetToDefaultLayout() || api.state().activeLayoutId !== namedEntry.id) 
   throw new Error("cancelled reset discarded the active draft");
 }
 testWindow.confirm = () => true;
-if (!api.resetToDefaultLayout() || api.state().activeLayoutId !== "default" || api.state().layoutDirty) {
+if (!api.resetToDefaultLayout() || api.state().activeLayoutId !== "default" || api.state().layoutDirty ||
+  !api.phoneOrdersEqual(api.state().activePhoneOrder, desktopPhoneOrder)) {
   throw new Error("confirmed reset did not select clean Default");
+}
+
+const narrowStorage = new MemoryStorage({
+  "joe-board-layout-v1": JSON.stringify(sample),
+  "joe-board-grid-settings-v1": JSON.stringify({ columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 }),
+});
+const narrowDom = makeDom();
+narrowDom.document.documentElement.clientWidth = 390;
+narrowDom.nodes.get("joeGrid").clientWidth = 366;
+const narrowWindow = { innerWidth: 390, visualViewport: { width: 390 }, confirm: () => true };
+const narrowApi = makeApi(narrowStorage, narrowDom.document, narrowWindow);
+const narrowItems = customPhoneOrder.map((id, index) => ({ id, x: 0, y: index * 10, w: 1, h: 10 }));
+const narrowGridModel = {
+  opts: {},
+  items: narrowItems,
+  engine: { nodes: narrowItems },
+  el: { offsetHeight: 1 },
+  getColumn() { return 1; },
+  getCellHeight() { return 82; },
+  hasAnimationCSS() { return false; },
+  save() { return this.items.map((item) => ({ ...item })); },
+  load(items) {
+    this.items = items.map((item) => ({ ...item }));
+    this.engine.nodes = this.items;
+  },
+};
+const defaultSnapshot = narrowApi.makeLayoutSnapshot(sample, { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 }, desktopPhoneOrder);
+narrowApi.setState({
+  grid: narrowGridModel,
+  activeLayoutId: "default",
+  activeGridSettings: defaultSnapshot.settings,
+  activePhoneOrder: desktopPhoneOrder,
+  layoutBaseline: defaultSnapshot,
+  layoutDirty: false,
+  cachedDesktopLayout: sample,
+});
+const desktopBeforePhoneDrag = narrowStorage.getItem("joe-board-layout-v1");
+narrowApi.saveLayout();
+if (narrowApi.state().layoutDirty || narrowStorage.getItem("joe-board-phone-order-v1") !== null) {
+  throw new Error("broad narrow change event persisted or dirtied automatic layout movement");
+}
+narrowApi.savePhoneOrderFromDrag();
+if (!narrowApi.state().layoutDirty || !narrowApi.phoneOrdersEqual(narrowApi.state().activePhoneOrder, customPhoneOrder) ||
+  !narrowApi.phoneOrdersEqual(JSON.parse(narrowStorage.getItem("joe-board-phone-order-v1")), customPhoneOrder) ||
+  narrowStorage.getItem("joe-board-layout-v1") !== desktopBeforePhoneDrag) {
+  throw new Error("narrow dragstop did not persist phone order independently from desktop geometry");
+}
+const customSnapshot = narrowApi.makeLayoutSnapshot(sample, defaultSnapshot.settings, customPhoneOrder);
+narrowApi.setState({ layoutBaseline: customSnapshot, layoutDirty: false });
+narrowGridModel.items[0].h = 2;
+const draftBeforeFit = narrowStorage.getItem("joe-board-phone-order-v1");
+narrowApi.fitNarrowLayoutToContent(0);
+if (narrowApi.state().layoutDirty || narrowStorage.getItem("joe-board-phone-order-v1") !== draftBeforeFit ||
+  narrowStorage.getItem("joe-board-layout-v1") !== desktopBeforePhoneDrag) {
+  throw new Error("automatic narrow content fit dirtied or persisted semantic layout state");
 }
 
 let restoringLayout = true;
@@ -551,4 +692,4 @@ restoringLayout = false;
 saveLayoutGuard();
 if (!layoutPersisted) throw new Error("desktop applyGridLayout must persist after restoringLayout clears");
 
-console.log(JSON.stringify({ ok: true, appVersion: version.APP_VERSION, checks: 71, desktopDeskRows: deskRows }, null, 2));
+console.log(JSON.stringify({ ok: true, appVersion: version.APP_VERSION, checks: 88, desktopDeskRows: deskRows }, null, 2));

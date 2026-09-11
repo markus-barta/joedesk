@@ -41,6 +41,7 @@
   var LAYOUTS_KEY = "joe-board-named-layouts-v1";
   var ACTIVE_LAYOUT_KEY = "joe-board-active-layout-v1";
   var SETTINGS_KEY = "joe-board-grid-settings-v1";
+  var PHONE_ORDER_KEY = "joe-board-phone-order-v1";
   var THEME_KEY = "joe-board-theme-v1";
   var DEFAULT_LAYOUT_ID = "default";
   var MAX_LAYOUTS = 24;
@@ -142,6 +143,7 @@
   var activeLayoutId = DEFAULT_LAYOUT_ID;
   var layoutBaseline = null;
   var layoutDirty = false;
+  var activePhoneOrder = null;
   var pendingLayoutSelectionId = null;
   var activeGridSettings = Object.assign({}, DEFAULT_GRID_SETTINGS);
   var activeThemeMode = "dark";
@@ -766,11 +768,13 @@
     var settings = activeGridSettings;
     var nodes = grid.engine && grid.engine.nodes ? grid.engine.nodes.slice() : [];
     if (!nodes.length) { return false; }
-    var items = nodes.map(function (node) {
+    var byId = {};
+    nodes.forEach(function (node) {
+      byId[node.id] = node;
+    });
+    var items = resolvePhoneOrder(activePhoneOrder, desktopLayoutSnapshot() || DEFAULT_LAYOUT).map(function (id) {
+      var node = byId[id];
       return { id: node.id, x: node.x, y: node.y, w: node.w, h: node.h };
-    }).sort(function (a, b) {
-      if (a.y !== b.y) { return a.y - b.y; }
-      return a.x - b.x;
     });
     var changed = false;
     items = items.map(function (item) {
@@ -805,11 +809,12 @@
     return true;
   }
 
-  function narrowLayoutFromItems(items, settings) {
+  function narrowLayoutFromItems(items, settings, phoneOrder) {
     if (!Array.isArray(items)) { return null; }
-    var sorted = items.slice().sort(function (a, b) {
-      if (a.y !== b.y) { return a.y - b.y; }
-      return a.x - b.x;
+    var byId = {};
+    items.forEach(function (item) { byId[item.id] = item; });
+    var sorted = resolvePhoneOrder(phoneOrder, items).map(function (id) {
+      return byId[id];
     });
     var y = 0;
     return sorted.map(function (item) {
@@ -845,7 +850,7 @@
   }
 
   function loadNarrowGridLayout(desktopItems) {
-    var narrowItems = narrowLayoutFromItems(desktopItems, activeGridSettings);
+    var narrowItems = narrowLayoutFromItems(desktopItems, activeGridSettings, activePhoneOrder);
     if (!narrowItems || !grid) { return false; }
     var wasRestoring = restoringLayout;
     restoringLayout = true;
@@ -899,10 +904,16 @@
     });
   }
 
+  function syncGridDragScrollPolicy(onNarrow) {
+    if (!grid || !grid.opts || !grid.opts.draggable) { return; }
+    grid.opts.draggable.scroll = !onNarrow;
+  }
+
   function syncGridColumnConfig(columns) {
     if (!grid) { return; }
     var cols = SUPPORTED_COLUMNS.includes(columns) ? columns : DEFAULT_GRID_SETTINGS.columns;
     var onNarrow = isNarrowGridViewport();
+    syncGridDragScrollPolicy(onNarrow);
     grid.opts.columnOpts = columnOptsFor(cols);
     if (onNarrow) {
       if (!narrowGridActive) {
@@ -1138,6 +1149,52 @@
     return true;
   }
 
+  function derivePhoneOrder(items) {
+    var requiredIds = DEFAULT_LAYOUT.map(function (item) { return item.id; });
+    var allowed = new Set(requiredIds);
+    var seen = new Set();
+    var candidates = [];
+    if (Array.isArray(items)) {
+      items.forEach(function (item) {
+        if (!item || !allowed.has(item.id) || seen.has(item.id) || !Number.isFinite(item.x) || !Number.isFinite(item.y)) { return; }
+        seen.add(item.id);
+        candidates.push(item);
+      });
+    }
+    if (candidates.length !== requiredIds.length) {
+      candidates = DEFAULT_LAYOUT.slice();
+    }
+    return candidates.slice().sort(function (a, b) {
+      if (a.y !== b.y) { return a.y - b.y; }
+      if (a.x !== b.x) { return a.x - b.x; }
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    }).map(function (item) { return item.id; });
+  }
+
+  function sanitizePhoneOrder(value) {
+    if (!Array.isArray(value) || value.length !== DEFAULT_LAYOUT.length) { return null; }
+    var allowed = new Set(DEFAULT_LAYOUT.map(function (item) { return item.id; }));
+    var seen = new Set();
+    var clean = [];
+    for (var i = 0; i < value.length; i += 1) {
+      var id = value[i];
+      if (typeof id !== "string" || !allowed.has(id) || seen.has(id)) { return null; }
+      seen.add(id);
+      clean.push(id);
+    }
+    return seen.size === allowed.size ? clean : null;
+  }
+
+  function resolvePhoneOrder(value, items) {
+    return sanitizePhoneOrder(value) || derivePhoneOrder(items);
+  }
+
+  function phoneOrdersEqual(left, right) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length && left.every(function (id, index) {
+      return id === right[index];
+    });
+  }
+
   function gridSettingsEqual(left, right) {
     var a = sanitizeGridSettings(left);
     var b = sanitizeGridSettings(right);
@@ -1145,15 +1202,16 @@
       a.tilePadding === b.tilePadding && a.tileGap === b.tileGap;
   }
 
-  function makeLayoutSnapshot(items, settings) {
+  function makeLayoutSnapshot(items, settings, phoneOrder) {
     var cleanSettings = sanitizeGridSettings(settings);
     var cleanItems = sanitizeLayoutItems(items, cleanSettings.columns);
     if (!cleanItems) { return null; }
-    return { items: cleanItems, settings: cleanSettings };
+    return { items: cleanItems, settings: cleanSettings, phoneOrder: resolvePhoneOrder(phoneOrder, cleanItems) };
   }
 
   function layoutSnapshotsEqual(left, right) {
-    return Boolean(left && right && layoutItemsEqual(left.items, right.items) && gridSettingsEqual(left.settings, right.settings));
+    return Boolean(left && right && layoutItemsEqual(left.items, right.items) && gridSettingsEqual(left.settings, right.settings) &&
+      phoneOrdersEqual(left.phoneOrder, right.phoneOrder));
   }
 
   function migrateLegacyDefaultLayout(items) {
@@ -1240,7 +1298,10 @@
     var settings = sanitizeGridSettings(entry.settings);
     var items = sanitizeLayoutItems(entry.items, settings.columns);
     if (!items) { return null; }
-    return { id: id, name: name, items: items, settings: settings, builtin: false };
+    var normalized = { id: id, name: name, items: items, settings: settings, builtin: false };
+    var phoneOrder = sanitizePhoneOrder(entry.phoneOrder);
+    if (phoneOrder) { normalized.phoneOrder = phoneOrder; }
+    return normalized;
   }
 
   function uniqueCatalogText(value, used, maxLength) {
@@ -1353,7 +1414,15 @@
     }
   }
 
-  function resolveInitialLayoutState(catalog, entryId, draftItems, draftSettings) {
+  function readStoredPhoneOrder() {
+    try {
+      return sanitizePhoneOrder(JSON.parse(localStorage.getItem(PHONE_ORDER_KEY)));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function resolveInitialLayoutState(catalog, entryId, draftItems, draftSettings, draftPhoneOrder) {
     var available = catalog || defaultLayoutsCatalog();
     var activeEntry = available.layouts.find(function (entry) { return entry.id === entryId; }) || defaultLayoutEntry();
     var hasDraftSettings = draftSettings !== null && draftSettings !== undefined;
@@ -1363,11 +1432,13 @@
       items = scaleLayoutColumns(activeEntry.items, activeEntry.settings.columns, settings.columns);
     }
     var baseline = entryLayoutSnapshot(activeEntry);
-    var snapshot = makeLayoutSnapshot(items, settings);
+    var phoneOrder = sanitizePhoneOrder(draftPhoneOrder) || sanitizePhoneOrder(activeEntry.phoneOrder);
+    var snapshot = makeLayoutSnapshot(items, settings, phoneOrder);
     return {
       activeId: activeEntry.id,
       items: snapshot.items,
       settings: snapshot.settings,
+      phoneOrder: snapshot.phoneOrder,
       baseline: baseline,
       dirty: !layoutSnapshotsEqual(snapshot, baseline)
     };
@@ -1396,18 +1467,19 @@
   }
 
   function currentLayoutSnapshot() {
-    return makeLayoutSnapshot(currentGridLayout(), activeGridSettings);
+    return makeLayoutSnapshot(currentGridLayout(), activeGridSettings, activePhoneOrder);
   }
 
   function entryLayoutSnapshot(entry) {
-    return entry ? makeLayoutSnapshot(entry.items, entry.settings) : null;
+    return entry ? makeLayoutSnapshot(entry.items, entry.settings, entry.phoneOrder) : null;
   }
 
   function persistDraftSnapshot(snapshot) {
     if (!snapshot) { return false; }
     var geometryOk = writeJsonStorage(LAYOUT_KEY, snapshot.items);
     var settingsOk = writeJsonStorage(SETTINGS_KEY, snapshot.settings);
-    return geometryOk && settingsOk;
+    var phoneOrderOk = writeJsonStorage(PHONE_ORDER_KEY, snapshot.phoneOrder);
+    return geometryOk && settingsOk && phoneOrderOk;
   }
 
   function refreshLayoutDirty(announce) {
@@ -1433,7 +1505,7 @@
       grid.load(clean, false);
     }
     restoringLayout = wasRestoring;
-    if (!skipPersist && !persistDraftSnapshot(makeLayoutSnapshot(clean, activeGridSettings))) {
+    if (!skipPersist && !persistDraftSnapshot(makeLayoutSnapshot(clean, activeGridSettings, activePhoneOrder))) {
       setLayoutStatus("Layout changed for this session but storage is unavailable.", true);
     }
     resizeVisuals();
@@ -1538,6 +1610,7 @@
     var wasRestoring = restoringLayout;
     restoringLayout = true;
     activeGridSettings = snapshot.settings;
+    activePhoneOrder = snapshot.phoneOrder;
     rememberDesktopLayout(snapshot.items);
     applyGridSettings(snapshot.settings, true);
     var applied = applyGridLayout(snapshot.items, true);
@@ -1611,6 +1684,7 @@
       name: trimmed,
       items: snapshot.items,
       settings: snapshot.settings,
+      phoneOrder: snapshot.phoneOrder,
       builtin: false
     };
     if (conflict) {
@@ -1647,6 +1721,7 @@
     }
     entry.items = snapshot.items;
     entry.settings = snapshot.settings;
+    entry.phoneOrder = snapshot.phoneOrder;
     if (!persistDraftSnapshot(snapshot) || !writeNamedLayoutsCatalog(catalog, entry.id) || !writeActiveLayoutId(entry.id)) {
       setLayoutStatus("That layout could not be saved because storage is unavailable.", true);
       return false;
@@ -1912,8 +1987,9 @@
   }
 
   function saveLayout() {
-    if (!grid || restoringLayout || isNarrowGridViewport()) { return; }
-    var snapshot = makeLayoutSnapshot(layoutItemsFromGrid(desktopColumnCount()), activeGridSettings);
+    if (!grid || restoringLayout || isNarrowGridViewport() ||
+      (typeof grid.isIgnoreChangeCB === "function" && grid.isIgnoreChangeCB())) { return; }
+    var snapshot = makeLayoutSnapshot(layoutItemsFromGrid(desktopColumnCount()), activeGridSettings, activePhoneOrder);
     if (!snapshot) { return; }
     rememberDesktopLayout(snapshot.items);
     if (!persistDraftSnapshot(snapshot)) {
@@ -1922,15 +1998,49 @@
     refreshLayoutDirty(true);
   }
 
+  function livePhoneOrder() {
+    if (!grid || !isNarrowGridViewport()) { return null; }
+    var items = grid.save(false, false, undefined, grid.getColumn()).map(function (item) {
+      return { id: item.id, x: item.x, y: item.y };
+    });
+    return sanitizePhoneOrder(items.sort(function (a, b) {
+      if (a.y !== b.y) { return a.y - b.y; }
+      if (a.x !== b.x) { return a.x - b.x; }
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    }).map(function (item) { return item.id; }));
+  }
+
+  function savePhoneOrderFromDrag() {
+    if (!grid || restoringLayout || !isNarrowGridViewport()) { return; }
+    var nextOrder = livePhoneOrder();
+    if (!nextOrder || phoneOrdersEqual(nextOrder, activePhoneOrder)) {
+      scheduleNarrowFit(0);
+      return;
+    }
+    activePhoneOrder = nextOrder;
+    if (!persistDraftSnapshot(currentLayoutSnapshot())) {
+      setLayoutStatus("Phone order changed for this session but storage is unavailable.", true);
+    }
+    refreshLayoutDirty(true);
+    scheduleNarrowFit(0);
+  }
+
   function initGrid() {
     var catalog = readLayoutsCatalog();
     activeLayoutId = readActiveLayoutId(catalog);
     var draftSettings = readStoredGridSettings();
     var activeEntry = catalog.layouts.find(function (entry) { return entry.id === activeLayoutId; }) || defaultLayoutEntry();
     activeGridSettings = draftSettings || sanitizeGridSettings(activeEntry.settings);
-    var initial = resolveInitialLayoutState(catalog, activeLayoutId, safeStoredLayout(activeLayoutId !== DEFAULT_LAYOUT_ID), draftSettings);
+    var initial = resolveInitialLayoutState(
+      catalog,
+      activeLayoutId,
+      safeStoredLayout(activeLayoutId !== DEFAULT_LAYOUT_ID),
+      draftSettings,
+      readStoredPhoneOrder()
+    );
     activeLayoutId = initial.activeId;
     activeGridSettings = initial.settings;
+    activePhoneOrder = initial.phoneOrder;
     var initialItems = initial.items;
     layoutBaseline = initial.baseline;
     layoutDirty = initial.dirty;
@@ -1956,7 +2066,8 @@
     restoringLayout = false;
     syncGridColumnConfig(activeGridSettings.columns);
     scheduleViewportSettle();
-    grid.on("change dragstop resizestop", saveLayout);
+    grid.on("change", saveLayout);
+    grid.on("dragstop", savePhoneOrderFromDrag);
     grid.on("resizestop", function () { resizeVisuals(); });
     document.getElementById("resetLayout").addEventListener("click", resetToDefaultLayout);
   }

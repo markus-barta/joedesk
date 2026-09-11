@@ -220,6 +220,192 @@ try {
     }
     throw new Error(`Page did not become ready: ${url}`);
   }
+  async function readPhoneOrderState() {
+    return value(`(() => {
+      const board = document.getElementById('joeGrid');
+      const grid = board?.gridstack;
+      const sortItems = (items) => (items || []).map((item) => ({
+        id: item.id,
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h,
+      })).sort((left, right) => left.y - right.y || left.x - right.x || left.id.localeCompare(right.id));
+      let storedDraft = null;
+      let storedPhoneOrder = null;
+      try {
+        storedDraft = JSON.parse(localStorage.getItem(window.JoeBoard.layoutStorageKey) || 'null');
+      } catch (_) {
+        storedDraft = 'invalid JSON';
+      }
+      try {
+        storedPhoneOrder = JSON.parse(localStorage.getItem('joe-board-phone-order-v1') || 'null');
+      } catch (_) {
+        storedPhoneOrder = 'invalid JSON';
+      }
+      const liveItems = sortItems(grid?.engine?.nodes);
+      const storedDraftItems = Array.isArray(storedDraft) ? storedDraft : storedDraft?.items;
+      const catalog = window.JoeBoard.readLayoutsCatalog();
+      return {
+        viewport: document.documentElement.dataset.joeViewport,
+        viewportWidth: document.documentElement.clientWidth,
+        gridColumns: grid?.getColumn(),
+        order: liveItems.map((item) => item.id),
+        liveItems,
+        desktopGeometry: sortItems(window.JoeBoard.desktopLayoutSnapshot()),
+        storedDraft: {
+          items: Array.isArray(storedDraftItems) ? sortItems(storedDraftItems) : null,
+          phoneOrder: Array.isArray(storedPhoneOrder) ? storedPhoneOrder.slice() : storedPhoneOrder,
+        },
+        selectedId: document.getElementById('layoutSelect')?.value,
+        selectedName: document.getElementById('layoutSelect')?.selectedOptions[0]?.textContent,
+        layouts: catalog.layouts.map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          builtin: Boolean(entry.builtin),
+          phoneOrder: Array.isArray(entry.phoneOrder) ? entry.phoneOrder.slice() : null,
+          items: sortItems(entry.items),
+        })),
+        dirty: document.getElementById('layoutToolbar')?.dataset.dirty === 'true',
+        saveDisabled: document.getElementById('saveLayout')?.disabled,
+      };
+    })()`);
+  }
+  async function readPhoneOrderInstrumentation() {
+    return value(`(() => {
+      const proof = window.__joePhoneOrderProof || {};
+      const gridEvents = proof.gridEvents || [];
+      const summarize = (entries, keyFor) => entries.reduce((summary, entry) => {
+        const key = keyFor(entry);
+        summary[key] = (summary[key] || 0) + 1;
+        return summary;
+      }, {});
+      return {
+        capability: {
+          maxTouchPoints: navigator.maxTouchPoints,
+          documentTouchStart: 'ontouchstart' in document,
+          windowTouchStart: 'ontouchstart' in window,
+          anyPointerCoarse: window.matchMedia('(any-pointer: coarse)').matches,
+        },
+        registrations: summarize(proof.registrations || [], (entry) => entry.type + ':' + entry.target),
+        inputEvents: summarize(proof.inputEvents || [], (entry) => entry.type + ':' + entry.trusted + ':' + (entry.pointerType || '')),
+        firstInputEvents: (proof.inputEvents || []).slice(0, 4),
+        lastInputEvents: (proof.inputEvents || []).slice(-4),
+        gridEventCounts: summarize(gridEvents, (entry) => entry.type),
+        sourceTrace: gridEvents.map((entry) => ({ type: entry.type, clientX: entry.clientX, clientY: entry.clientY, source: entry.source, dirty: entry.dirty })),
+        orderEvents: gridEvents.filter((entry, index) => !index || JSON.stringify(entry.order) !== JSON.stringify(gridEvents[index - 1].order)),
+      };
+    })()`);
+  }
+  async function armPhoneOrderInstrumentation(label, sourceId) {
+    await value(`(() => {
+      const proof = window.__joePhoneOrderProof;
+      if (!proof) return false;
+      proof.label = ${JSON.stringify(label)};
+      proof.sourceId = ${JSON.stringify(sourceId)};
+      proof.inputEvents = [];
+      proof.gridEvents = [];
+      proof.armed = true;
+      const grid = document.getElementById('joeGrid')?.gridstack;
+      if (!grid) return false;
+      const record = (event, type) => {
+        if (proof.gridEvents.length >= 120) return;
+        const items = grid.engine.nodes.slice().sort((left, right) => left.y - right.y || left.x - right.x || left.id.localeCompare(right.id));
+        const source = grid.engine.nodes.find((item) => item.id === proof.sourceId);
+        proof.gridEvents.push({
+          type: type || event.type,
+          trusted: event.isTrusted,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          order: items.map((item) => item.id),
+          source: source && { id: source.id, x: source.x, y: source.y, w: source.w, h: source.h },
+          dirty: document.getElementById('layoutToolbar')?.dataset.dirty === 'true',
+        });
+      };
+      if (!proof.gridHooked) {
+        proof.gridHooked = true;
+        ['dragstart', 'drag', 'dragstop'].forEach((type) => {
+          const original = grid._gsEventHandler?.[type];
+          grid.on(type, function(...args) {
+            if (original) original.apply(this, args);
+            record(args[0], type);
+          });
+        });
+        grid.el.addEventListener('change', (event) => record(event, 'change'));
+      }
+      return true;
+    })()`);
+  }
+  async function preparePhoneOrderDrag(sourceId = "desk-joe", targetId = "desk-j") {
+    const pair = await value(`(() => {
+      const grid = document.getElementById('joeGrid')?.gridstack;
+      const ordered = (grid?.engine?.nodes || []).slice().sort((left, right) => left.y - right.y || left.x - right.x || left.id.localeCompare(right.id));
+      const targetNode = ordered.find((item) => item.id === ${JSON.stringify(targetId)});
+      const sourceNode = ordered.find((item) => item.id === ${JSON.stringify(sourceId)});
+      if (!sourceNode || !targetNode) return { error: 'requested source and target GridStack tiles are required' };
+      if (sourceNode.w !== targetNode.w || sourceNode.h !== targetNode.h || sourceNode.y !== targetNode.y + targetNode.h) {
+        return { error: 'requested source and target are not equal-sized adjacent tiles', source: { id: sourceNode.id, x: sourceNode.x, y: sourceNode.y, w: sourceNode.w, h: sourceNode.h }, target: { id: targetNode.id, x: targetNode.x, y: targetNode.y, w: targetNode.w, h: targetNode.h } };
+      }
+      const target = targetNode.el?.querySelector('.widget-drag');
+      const source = sourceNode.el?.querySelector('.widget-drag');
+      if (!source || !target) return { error: 'requested source and target do not both have .widget-drag handles' };
+      const sourceDocumentY = source.getBoundingClientRect().top + window.scrollY;
+      const targetDocumentY = target.getBoundingClientRect().top + window.scrollY;
+      const midpoint = (sourceDocumentY + targetDocumentY) / 2;
+      window.scrollTo(0, Math.max(0, midpoint - window.innerHeight / 2));
+      return { sourceId: sourceNode.id, targetId: targetNode.id };
+    })()`);
+    if (pair.error) throw new Error(`phone-order gesture unavailable: ${pair.error}`);
+    await delay(150);
+    const plan = await value(`(() => {
+      const source = document.querySelector('[gs-id="${pair.sourceId}"] .widget-drag');
+      const target = document.querySelector('[gs-id="${pair.targetId}"] .widget-drag');
+      if (!source || !target) return { error: 'a selected .widget-drag handle disappeared', sourceId: ${JSON.stringify(pair.sourceId)}, targetId: ${JSON.stringify(pair.targetId)} };
+      const sourceRect = source.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const point = (rect) => ({ x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) });
+      const sourcePoint = point(sourceRect);
+      const targetPoint = point(targetRect);
+      const endPoint = { x: targetPoint.x, y: Math.max(8, targetPoint.y - 32) };
+      const visible = (rect) => rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 && rect.right <= window.innerWidth;
+      return {
+        sourceId: ${JSON.stringify(pair.sourceId)},
+        targetId: ${JSON.stringify(pair.targetId)},
+        source: sourcePoint,
+        target: targetPoint,
+        end: endPoint,
+        manhattanDistance: Math.abs(sourcePoint.x - endPoint.x) + Math.abs(sourcePoint.y - endPoint.y),
+        gridStackDragThreshold: 3,
+        sourceRect: { top: sourceRect.top, bottom: sourceRect.bottom, left: sourceRect.left, right: sourceRect.right },
+        targetRect: { top: targetRect.top, bottom: targetRect.bottom, left: targetRect.left, right: targetRect.right },
+        viewport: { width: window.innerWidth, height: window.innerHeight, scrollY: window.scrollY },
+        bothVisible: visible(sourceRect) && visible(targetRect),
+      };
+    })()`);
+    if (plan.error) throw new Error(`phone-order gesture unavailable: ${JSON.stringify(plan)}`);
+    if (!plan.bothVisible) {
+      throw new Error(`phone-order gesture unavailable: adjacent .widget-drag handles are not simultaneously visible at 390px: ${JSON.stringify(plan)}`);
+    }
+    return plan;
+  }
+  async function dispatchPhoneOrderTouchDrag(plan) {
+    const touchPoint = (x, y) => ({ x, y, radiusX: 1, radiusY: 1, force: 1, id: 0 });
+    await send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [touchPoint(plan.source.x, plan.source.y)] });
+    await delay(120);
+    const activation = { x: plan.source.x, y: plan.source.y - 6 };
+    await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [touchPoint(activation.x, activation.y)] });
+    await delay(180);
+    const steps = 24;
+    for (let step = 1; step <= steps; step += 1) {
+      const ratio = step / steps;
+      const x = Math.round(activation.x + (plan.end.x - activation.x) * ratio);
+      const y = Math.round(activation.y + (plan.end.y - activation.y) * ratio);
+      await send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [touchPoint(x, y)] });
+      await delay(45);
+    }
+    await delay(200);
+    await send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  }
   async function measureHistoryGeometry(label) {
     let geometry;
     for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -356,7 +542,32 @@ try {
   await send("Runtime.enable");
   const smokeMode = process.env.JOE_SMOKE_VIEWPORT || "desktop";
   const mobileViewport = smokeMode === "mobile";
-  await send("Emulation.setDeviceMetricsOverride", mobileViewport
+  const phoneOrderViewport = smokeMode === "phone-order";
+  if (phoneOrderViewport) {
+    await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1, configuration: "mobile" });
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => {
+      const proof = window.__joePhoneOrderProof = { armed: false, registrations: [], inputEvents: [], gridEvents: [] };
+      const originalAddEventListener = EventTarget.prototype.addEventListener;
+      EventTarget.prototype.addEventListener = function(type, listener, options) {
+        if (this instanceof Element && this.matches('.widget-drag') && ['mousedown', 'pointerdown', 'touchstart', 'touchmove', 'touchend'].includes(type)) {
+          proof.registrations.push({ type, target: this.closest('[gs-id]')?.getAttribute('gs-id') || this.className });
+        }
+        return originalAddEventListener.call(this, type, listener, options);
+      };
+      const point = (event) => {
+        const touch = event.changedTouches?.[0] || event.touches?.[0];
+        return { x: touch?.clientX ?? event.clientX, y: touch?.clientY ?? event.clientY };
+      };
+      ['touchstart', 'touchmove', 'touchend', 'pointerdown', 'pointermove', 'pointerup', 'mousedown', 'mousemove', 'mouseup'].forEach((type) => {
+        originalAddEventListener.call(document, type, (event) => {
+          if (!proof.armed || proof.inputEvents.length >= 120) return;
+          const coordinates = point(event);
+          proof.inputEvents.push({ type, trusted: event.isTrusted, pointerType: event.pointerType, x: coordinates.x, y: coordinates.y });
+        }, true);
+      });
+    })();` });
+  }
+  await send("Emulation.setDeviceMetricsOverride", mobileViewport || phoneOrderViewport
     ? { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }
     : { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   const hsb1Url = `http://hsb1.lan:${sitePort}/joe/`;
@@ -369,6 +580,7 @@ try {
   let backfillSnapshot;
   let historyGeometry;
   let historyContinuity;
+  let phoneOrder;
 
   if (smokeMode === "privacy") {
     const publicBefore = requests.filter(item => item.host.startsWith("example.com") && item.path === "/joe/data.json").length;
@@ -377,6 +589,210 @@ try {
     stub = await value(`({ view: document.documentElement.dataset.joeView, gateHidden: document.getElementById('privateGate')?.hidden, dashboardHidden: document.getElementById('dashboard')?.hidden, text: document.body.innerText, title: document.title })`);
     const publicAfter = requests.filter(item => item.host.startsWith("example.com") && item.path === "/joe/data.json").length;
     if (stub.view !== "stub" || stub.gateHidden || !stub.dashboardHidden || !/Joe lives at home/.test(stub.text) || stub.title !== "Joe · Private household board" || publicAfter !== publicBefore) throw new Error(`public privacy stub mismatch: ${JSON.stringify({ stub, publicBefore, publicAfter })}`);
+  } else if (phoneOrderViewport) {
+    await navigate(hsb1Url, "document.getElementById('joeGrid')?.gridstack?.getColumn() === 1 && document.documentElement.dataset.joeViewport === 'narrow'");
+    await delay(700);
+    const before = await readPhoneOrderState();
+    if (before.viewportWidth !== 390 || before.gridColumns !== 1 || before.order.length < 2) {
+      throw new Error(`phone-order setup mismatch: ${JSON.stringify(before)}`);
+    }
+    const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+    const baselineDesktop = before.desktopGeometry;
+    const compactState = (state) => ({
+      order: state.order,
+      dirty: state.dirty,
+      selectedId: state.selectedId,
+      selectedName: state.selectedName,
+      desktopGeometry: state.desktopGeometry,
+      storedDraft: state.storedDraft,
+    });
+    const assertDesktopPreserved = (label, state, requireStored = true) => {
+      if (!same(state.desktopGeometry, baselineDesktop) || (requireStored && !same(state.storedDraft.items, baselineDesktop))) {
+        throw new Error(`phone-order changed stored desktop geometry (${label}): ${JSON.stringify({ baselineDesktop, state: compactState(state) })}`);
+      }
+    };
+    const assertPhoneState = (label, state, expectedOrder, expectedDirty) => {
+      if (!same(state.order, expectedOrder) || state.dirty !== expectedDirty || !same(state.storedDraft.phoneOrder, expectedOrder)) {
+        throw new Error(`phone-order state mismatch (${label}): ${JSON.stringify({ expectedOrder, expectedDirty, state: compactState(state) })}`);
+      }
+      assertDesktopPreserved(label, state);
+    };
+    const reloadPhoneBoard = async () => {
+      await send("Page.reload", { ignoreCache: true });
+      await delay(150);
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        if (await value("document.getElementById('joeGrid')?.gridstack?.getColumn() === 1 && document.documentElement.dataset.joeViewport === 'narrow'").catch(() => false)) {
+          await delay(700);
+          return readPhoneOrderState();
+        }
+        await delay(100);
+      }
+      throw new Error("phone-order board did not become ready after reload");
+    };
+    const runGesture = async ({ sourceId, targetId, label }) => {
+      const gestureBefore = await readPhoneOrderState();
+      const attempts = [];
+      const runAttempt = async (kind) => {
+        const gesture = await preparePhoneOrderDrag(sourceId, targetId);
+        await armPhoneOrderInstrumentation(kind, gesture.sourceId);
+        await dispatchPhoneOrderTouchDrag(gesture);
+        const immediate = await readPhoneOrderState();
+        if (process.env.JOE_SCREENSHOT_DIR && !same(immediate.order, gestureBefore.order)) {
+          const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+          await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "joe-dash-phone-order.png"), Buffer.from(shot.data, "base64"));
+        }
+        await delay(700);
+        const settled = await readPhoneOrderState();
+        const instrumentation = await readPhoneOrderInstrumentation();
+        const evidence = {
+          kind,
+          gesture,
+          immediateOrder: immediate.order,
+          settledOrder: settled.order,
+          instrumentation,
+        };
+        attempts.push(evidence);
+        const eventMove = instrumentation.orderEvents.find((event) => !same(event.order, gestureBefore.order));
+        return { gesture, immediate, settled, eventMove, evidence };
+      };
+      const result = await runAttempt("touch");
+      const movedOrder = !same(result.immediate.order, gestureBefore.order)
+        ? result.immediate.order
+        : !same(result.settled.order, gestureBefore.order)
+          ? result.settled.order
+          : result.eventMove?.order;
+      if (!movedOrder) {
+        throw new Error(`phone-order CDP touch gesture did not move a GridStack tile (${label}): ${JSON.stringify({ beforeOrder: gestureBefore.order, attempts })}`);
+      }
+      if (movedOrder.indexOf(sourceId) >= movedOrder.indexOf(targetId)) {
+        throw new Error(`phone-order gesture did not place source before target (${label}): ${JSON.stringify({ sourceId, targetId, movedOrder, attempts })}`);
+      }
+      if (!same(result.settled.order, movedOrder)) {
+        throw new Error(`phone-order responsive settle reverted the physical move (${label}): ${JSON.stringify({ movedOrder, settledOrder: result.settled.order, attempts })}`);
+      }
+      return {
+        label,
+        effectiveInput: "touch",
+        sourceId,
+        targetId,
+        beforeOrder: gestureBefore.order,
+        after: result.immediate,
+        settled: result.settled,
+        attempts,
+      };
+    };
+    const click = async (expression) => {
+      await value(expression);
+      await delay(150);
+    };
+    const selectLayout = async (id) => {
+      await click(`(() => { const select = document.getElementById('layoutSelect'); select.value = ${JSON.stringify(id)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    };
+
+    const initialGesture = await runGesture({ sourceId: "desk-joe", targetId: "desk-j", label: "initial phone reorder" });
+    const firstOrder = initialGesture.settled.order;
+    assertPhoneState("after initial gesture", initialGesture.settled, firstOrder, true);
+    const reloaded = await reloadPhoneBoard();
+    assertPhoneState("initial reload", reloaded, firstOrder, true);
+
+    await click(`(() => {
+      document.getElementById('layoutMenu').setAttribute('open', '');
+      document.getElementById('saveAsLayout').click();
+      const input = document.getElementById('layoutNameInput');
+      input.value = 'Phone order proof';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      document.getElementById('layoutFormConfirm').click();
+    })()`);
+    const savedAs = await readPhoneOrderState();
+    const namedEntry = savedAs.layouts.find((entry) => entry.name === "Phone order proof");
+    if (!namedEntry || savedAs.selectedId !== namedEntry.id || savedAs.dirty || !same(namedEntry.phoneOrder, firstOrder) || !same(namedEntry.items, baselineDesktop)) {
+      throw new Error(`phone-order Save As mismatch: ${JSON.stringify({ firstOrder, state: compactState(savedAs), namedEntry })}`);
+    }
+    assertPhoneState("Save As", savedAs, firstOrder, false);
+
+    const saveGesture = await runGesture({ sourceId: "desk-joel", targetId: "desk-j", label: "named layout edit" });
+    const savedOrder = saveGesture.settled.order;
+    assertPhoneState("before Save", saveGesture.settled, savedOrder, true);
+    await click("document.getElementById('saveLayout').click()");
+    const saved = await readPhoneOrderState();
+    const savedEntry = saved.layouts.find((entry) => entry.id === namedEntry.id);
+    if (!savedEntry || saved.dirty || !same(savedEntry.phoneOrder, savedOrder) || !same(savedEntry.items, baselineDesktop)) {
+      throw new Error(`phone-order Save mismatch: ${JSON.stringify({ savedOrder, state: compactState(saved), savedEntry })}`);
+    }
+    assertPhoneState("Save", saved, savedOrder, false);
+
+    await click("document.getElementById('resetLayout').click()");
+    const reset = await readPhoneOrderState();
+    if (reset.selectedId !== "default" || reset.dirty || !same(reset.order, before.order)) {
+      throw new Error(`phone-order Reset mismatch: ${JSON.stringify({ defaultOrder: before.order, state: compactState(reset) })}`);
+    }
+    assertDesktopPreserved("Reset", reset);
+
+    await selectLayout(namedEntry.id);
+    const loaded = await readPhoneOrderState();
+    assertPhoneState("named Load", loaded, savedOrder, false);
+
+    const discardGesture = await runGesture({ sourceId: "desk-j", targetId: "desk-joel", label: "discard candidate" });
+    assertPhoneState("before Discard", discardGesture.settled, discardGesture.settled.order, true);
+    await selectLayout("default");
+    const discardPromptOpen = await value("document.getElementById('layoutUnsavedDialog').open");
+    if (!discardPromptOpen) throw new Error("phone-order Discard did not open the unsaved-changes dialog");
+    await click("document.getElementById('layoutUnsavedDiscard').click()");
+    const discarded = await readPhoneOrderState();
+    if (discarded.selectedId !== "default" || discarded.dirty || !same(discarded.order, before.order)) {
+      throw new Error(`phone-order Discard mismatch: ${JSON.stringify({ defaultOrder: before.order, state: compactState(discarded) })}`);
+    }
+    assertDesktopPreserved("Discard", discarded);
+
+    await selectLayout(namedEntry.id);
+    const loadedAgain = await readPhoneOrderState();
+    assertPhoneState("named reload after Discard", loadedAgain, savedOrder, false);
+
+    await send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await delay(700);
+    const desktopRoundtrip = await readPhoneOrderState();
+    if (desktopRoundtrip.viewport !== "desktop" || desktopRoundtrip.gridColumns !== 12 || desktopRoundtrip.dirty || !same(desktopRoundtrip.liveItems, baselineDesktop)) {
+      throw new Error(`phone-order desktop roundtrip mismatch: ${JSON.stringify({ baselineDesktop, state: compactState(desktopRoundtrip), liveItems: desktopRoundtrip.liveItems })}`);
+    }
+    assertDesktopPreserved("desktop roundtrip", desktopRoundtrip);
+
+    await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await delay(700);
+    const phoneRoundtrip = await readPhoneOrderState();
+    assertPhoneState("phone roundtrip", phoneRoundtrip, savedOrder, false);
+    const finalReload = await reloadPhoneBoard();
+    assertPhoneState("final reload", finalReload, savedOrder, false);
+
+    phoneOrder = {
+      physicalGesture: {
+        effectiveInput: initialGesture.effectiveInput,
+        touchProved: true,
+        sourceId: initialGesture.sourceId,
+        targetId: initialGesture.targetId,
+        beforeOrder: initialGesture.beforeOrder,
+        afterOrder: initialGesture.after.order,
+        settledOrder: initialGesture.settled.order,
+        attempts: initialGesture.attempts,
+      },
+      reloadOrder: reloaded.order,
+      lifecycle: {
+        saveAs: { id: namedEntry.id, order: firstOrder },
+        save: { order: savedOrder },
+        reset: reset.order,
+        load: loaded.order,
+        discard: discarded.order,
+        loadAfterDiscard: loadedAgain.order,
+      },
+      responsiveRoundtrip: {
+        desktopColumns: desktopRoundtrip.gridColumns,
+        desktopGeometryUnchanged: same(desktopRoundtrip.liveItems, baselineDesktop) && same(desktopRoundtrip.storedDraft.items, baselineDesktop),
+        desktopDirty: desktopRoundtrip.dirty,
+        phoneOrder: phoneRoundtrip.order,
+        phoneDirty: phoneRoundtrip.dirty,
+        finalReloadOrder: finalReload.order,
+        finalDirty: finalReload.dirty,
+      },
+    };
   } else {
 
     const cs0Before = requests.filter(item => item.host.startsWith("cs0.barta.cm") && item.path === "/joe/data.json").length;
@@ -1205,7 +1621,7 @@ try {
   const source = await readFile(join(repoRoot, "public", "joe", "index.html"), "utf8");
   if (/DUR\d+|1,001,403|SXR8|TSLA/.test(source)) throw new Error("Static /joe/ source still contains Paper-Drill account or position data");
   if (exceptions.length) throw new Error(`Runtime exceptions: ${exceptions.join("; ")}`);
-  console.log(JSON.stringify({ healthy, historyGeometry, historyContinuity, mobile, stale, broken, richSnapshot, backfillSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
+  console.log(JSON.stringify({ healthy, historyGeometry, historyContinuity, mobile, phoneOrder, stale, broken, richSnapshot, backfillSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
   await withTimeout(send("Browser.close").catch(() => {}), 1000);
   ws.close();
 } finally {
