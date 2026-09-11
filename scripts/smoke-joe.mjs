@@ -1068,6 +1068,48 @@ try {
       fleetBound.actionItems !== 1 || !/success/i.test(fleetBound.actionText) || !/amy-smoke/.test(fleetBound.actionText) || !/fc-000000 → fc-000001/.test(fleetBound.actionText) || !/desks\.maxBusyDesks/.test(fleetBound.actionText)
     ) throw new Error(`Fleet Config binding mismatch: ${JSON.stringify(fleetBound)}`);
 
+    await value(`document.querySelector('[data-fleet-section="secrets"]').click()`);
+    const fleetSecrets = await value(`(() => ({
+      selected: document.getElementById('fleetSelectedLabel').textContent,
+      headline: document.getElementById('fleetEliHeadline').textContent,
+      intro: document.getElementById('fleetEliIntro').textContent,
+      explanation: document.getElementById('fleetEliSections').innerText,
+      fields: [...document.querySelectorAll('#fleetEditFields input')].map((node) => ({
+        field: node.dataset.fleetField,
+        value: node.value,
+        readOnly: node.readOnly,
+        type: node.type,
+      })),
+      slots: [...document.querySelectorAll('#fleetSecretSlots .fleet-secret-slot')].map((node) => ({
+        capability: node.querySelector('.fleet-secret-capability')?.textContent,
+        ref: node.querySelector('.fleet-secret-ref')?.textContent || null,
+        marker: node.querySelector('.fleet-redacted')?.textContent || null,
+        empty: node.querySelector('.fleet-secret-empty')?.textContent || null,
+      })),
+      slotsHidden: document.getElementById('fleetSecretSlots').getAttribute('aria-hidden'),
+      ops: document.getElementById('fleetSecretOps').textContent,
+      passwordInputs: document.querySelectorAll('#fleetConfigBoard input[type="password"]').length,
+      rotationControls: [...document.querySelectorAll('#fleetConfigBoard button, #fleetConfigBoard input')]
+        .filter((node) => /rotate|rotation/i.test((node.textContent || '') + ' ' + (node.value || '') + ' ' + (node.name || ''))).length,
+    }))()`);
+    if (
+      fleetSecrets.selected !== 'Selected: Secret slots' || fleetSecrets.headline !== 'Names on the board. Values stay in AGE.' ||
+      !/readable paper file/i.test(fleetSecrets.intro) || !/encrypted secret material/i.test(fleetSecrets.intro) || !/capability and path refs/i.test(fleetSecrets.intro) ||
+      !/Plaintext policy vs AGE secrets/.test(fleetSecrets.explanation) || !/Always REDACTED/.test(fleetSecrets.explanation) ||
+      !/Janus\/agenix ops/.test(fleetSecrets.explanation) || fleetSecrets.slotsHidden !== 'true' ||
+      JSON.stringify(fleetSecrets.fields) !== JSON.stringify([
+        { field: 'agenixRefs', value: 'joe-board-push-token', readOnly: true, type: 'text' },
+        { field: 'janusRefs', value: 'none', readOnly: true, type: 'text' },
+        { field: 'displayMode', value: 'REDACTED', readOnly: true, type: 'text' },
+      ]) ||
+      JSON.stringify(fleetSecrets.slots) !== JSON.stringify([
+        { capability: 'agenix', ref: 'joe-board-push-token', marker: 'REDACTED', empty: null },
+        { capability: 'janus', ref: null, marker: null, empty: 'No slots declared' },
+      ]) ||
+      !/Rotate and inject AGE secrets/.test(fleetSecrets.ops) || !/docs\/joe-fleet-config-secrets\.md/.test(fleetSecrets.ops) ||
+      fleetSecrets.passwordInputs !== 0 || fleetSecrets.rotationControls !== 0
+    ) throw new Error(`Fleet Config secret-slot mismatch: ${JSON.stringify(fleetSecrets)}`);
+
     await value(`(() => {
       document.querySelector('[data-fleet-section="desks"]').click();
       const first = document.querySelector('#fleetEditFields input');
@@ -1125,7 +1167,7 @@ try {
       fleetClosed.backHidden !== 'true' || !fleetClosed.backInert || fleetClosed.focused !== 'fleetConfigOpen' || !fleetClosed.gridReady ||
       fleetClosed.stagePerspective !== 'none' || fleetClosed.flipperTransform !== 'none' || !fleetClosed.mobileMenuViewport.ok
     ) throw new Error(`Fleet Config close mismatch: ${JSON.stringify(fleetClosed)}`);
-    fleet = { open: fleetOpen, bound: fleetBound, failure: fleetFailure, closed: fleetClosed };
+    fleet = { open: fleetOpen, bound: fleetBound, secrets: fleetSecrets, failure: fleetFailure, closed: fleetClosed };
 
     const initial = await measureHistoryGeometry("initial render");
     const rangeContinuity = {};
@@ -1180,7 +1222,18 @@ try {
         await delay(850);
         const fleetBackShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
         await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-48-fleet-config-back.png"), Buffer.from(fleetBackShot.data, "base64"));
-        await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-50-action-log.png"), Buffer.from(fleetBackShot.data, "base64"));
+        await value(`document.getElementById('fleetActionLog').scrollIntoView({ block: 'center' })`);
+        await delay(250);
+        const fleetActionShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+        await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-50-action-log.png"), Buffer.from(fleetActionShot.data, "base64"));
+        await value(`(() => {
+          document.querySelector('[data-fleet-section="secrets"]').click();
+          document.querySelector('[data-fleet-section="secrets"]').scrollIntoView({ block: 'center' });
+        })()`);
+        await delay(250);
+        const fleetSecretsShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+        await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-51-secret-slots.png"), Buffer.from(fleetSecretsShot.data, "base64"));
+        await value(`window.scrollTo(0, 0)`);
         await value(`window.JoeBoard.showTradingBoard()`);
         await delay(850);
         await value(`window.JoeBoard.showFleetConfig()`);

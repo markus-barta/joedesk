@@ -346,12 +346,24 @@
           <button class="fleet-section" type="button" data-fleet-section="secrets" aria-pressed="false">
             <span class="fleet-row-main">
               <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg>
-              <span class="fleet-row-copy"><strong>Secret slots</strong><small>Encrypted references</small></span>
-              <span class="fleet-row-values"><em class="fleet-redacted" data-fleet-readout="displayMode" data-fleet-display-separator=" ">Redacted</em><span><span data-fleet-readout="agenixRefs" data-fleet-prefix="agenix: ">agenix: joe-board-push-token</span> · <span data-fleet-readout="janusRefs" data-fleet-prefix="Janus: ">Janus: none</span></span></span>
+              <span class="fleet-row-copy"><strong>Secret slots</strong><small>Capability and path refs only</small></span>
+              <span class="fleet-row-values"><em class="fleet-redacted" data-fleet-readout="displayMode">REDACTED</em><span><span data-fleet-readout="agenixRefs" data-fleet-prefix="agenix: ">agenix: joe-board-push-token</span> · <span data-fleet-readout="janusRefs" data-fleet-prefix="Janus: ">Janus: none</span></span></span>
               <span class="fleet-chevron" aria-hidden="true">›</span>
+            </span>
+            <span class="fleet-secret-slots" id="fleetSecretSlots" aria-hidden="true">
+              <span class="fleet-secret-slot">
+                <span class="fleet-secret-capability">agenix</span>
+                <code class="fleet-secret-ref">joe-board-push-token</code>
+                <em class="fleet-redacted">REDACTED</em>
+              </span>
+              <span class="fleet-secret-slot fleet-secret-slot--empty">
+                <span class="fleet-secret-capability">janus</span>
+                <span class="fleet-secret-empty">No slots declared</span>
+              </span>
             </span>
           </button>
         </div>
+        <p class="fleet-secret-ops" id="fleetSecretOps">Janus/agenix ops stay off this plane. Rotate and inject AGE secrets in the host secret workflow; JoeDesk lists capability/path refs only. See <span>docs/joe-fleet-config-secrets.md</span>.</p>
       </section>
 
       <aside class="fleet-panel fleet-eli" aria-labelledby="fleetEliTitle">

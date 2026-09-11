@@ -675,7 +675,7 @@ async function handleFleetPropagate(req, res) {
     },
     action,
     hooks: {
-      secretSlots: "HOSTD-51",
+      secretSlots: "read-only-refs",
       rotation: "HOSTD-52",
     },
   });

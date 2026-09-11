@@ -152,6 +152,7 @@
       }
     },
     "secretSlots": {
+      "description": "agenix and Janus capability/path references only. Never plaintext credentials or AGE ciphertext.",
       "type": "object",
       "additionalProperties": false,
       "required": ["agenix", "janus"],
@@ -173,6 +174,7 @@
     "label": { "type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[ -~]+$" },
     "path": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^(?:~/|/)[ -~]+$" },
     "secretRefs": {
+      "description": "Capability or path reference names (for example joe-board-push-token). Secret values are forbidden.",
       "type": "array",
       "maxItems": 32,
       "uniqueItems": true,
