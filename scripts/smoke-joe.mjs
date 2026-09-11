@@ -887,7 +887,17 @@ try {
         const dirtyPromptOpen = document.getElementById('layoutUnsavedDialog').open;
         document.getElementById('layoutUnsavedSave').click();
         await pause();
-        const defaultSaveRoutedToSaveAs = !document.getElementById('layoutInlineForm').hidden;
+        const layoutMenu = document.getElementById('layoutMenu');
+        const layoutForm = document.getElementById('layoutInlineForm');
+        const nameInput = document.getElementById('layoutNameInput');
+        const nameInputStyle = getComputedStyle(nameInput);
+        const nameInputRect = nameInput.getBoundingClientRect();
+        const defaultSaveAsPrompt = {
+          formOpen: !layoutForm.hidden,
+          menuOpen: layoutMenu.open,
+          nameFieldVisible: nameInput.getClientRects().length > 0 && nameInputRect.width > 0 && nameInputRect.height > 0 && nameInputStyle.display !== 'none' && nameInputStyle.visibility !== 'hidden',
+          nameFieldFocused: document.activeElement === nameInput,
+        };
         document.getElementById('layoutFormCancel').click();
         await pause();
 
@@ -909,13 +919,14 @@ try {
         return {
           defaultLoadedClean,
           dirtyPromptOpen,
-          defaultSaveRoutedToSaveAs,
+          defaultSaveAsPrompt,
           afterFreshSave,
           pendingTargetId: ${JSON.stringify(layout.nightId)},
           restored: { selectedId: select.value, heroHeight: hero.gridstackNode.h },
         };
       })()`);
-      if (!cancelledDefaultSaveAs.defaultLoadedClean || !cancelledDefaultSaveAs.dirtyPromptOpen || !cancelledDefaultSaveAs.defaultSaveRoutedToSaveAs ||
+      if (!cancelledDefaultSaveAs.defaultLoadedClean || !cancelledDefaultSaveAs.dirtyPromptOpen || !cancelledDefaultSaveAs.defaultSaveAsPrompt.formOpen ||
+          !cancelledDefaultSaveAs.defaultSaveAsPrompt.menuOpen || !cancelledDefaultSaveAs.defaultSaveAsPrompt.nameFieldVisible || !cancelledDefaultSaveAs.defaultSaveAsPrompt.nameFieldFocused ||
           !cancelledDefaultSaveAs.afterFreshSave.freshId || cancelledDefaultSaveAs.afterFreshSave.selectedId !== cancelledDefaultSaveAs.afterFreshSave.freshId ||
           cancelledDefaultSaveAs.afterFreshSave.selectedId === cancelledDefaultSaveAs.pendingTargetId || cancelledDefaultSaveAs.afterFreshSave.selectedName !== 'Fresh after cancel' ||
           cancelledDefaultSaveAs.afterFreshSave.savedHeight !== 4 || cancelledDefaultSaveAs.restored.selectedId !== layout.nightId || cancelledDefaultSaveAs.restored.heroHeight !== 2) {

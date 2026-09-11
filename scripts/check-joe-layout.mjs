@@ -33,6 +33,7 @@ const layoutHelpers = `${layoutContext}
   var restoringLayout = false;
   var narrowGridActive = false;
   var narrowFitFrame = 0;
+  var viewportSyncFrame = 0;
   var cachedDesktopLayout = null;
   var activeGridSettings = Object.assign({}, DEFAULT_GRID_SETTINGS);
   var activeLayoutId = DEFAULT_LAYOUT_ID;
@@ -44,7 +45,8 @@ const layoutHelpers = `${layoutContext}
   function resizeVisuals() {}
   function drawHistory() {}
 ${extractJoeBlock("  function layoutCoordinate", "\n\n  function setLayoutStatus")}
-${extractJoeBlock("  function defaultLayoutEntry", "\n\n  function bindLayoutControls")}`;
+${extractJoeBlock("  function defaultLayoutEntry", "\n\n  function bindLayoutControls")}
+${extractJoeBlock("  function saveLayout()", "\n\n  function ageInSeconds")}`;
 
 function makeApi(localStorage, document, window) {
   return new Function("localStorage", "document", "window", "requestAnimationFrame", "cancelAnimationFrame", `${layoutHelpers}
@@ -61,6 +63,7 @@ function makeApi(localStorage, document, window) {
     canonicalLayoutsCatalog,
     readLayoutsCatalog,
     writeLayoutsCatalog,
+    readStoredGridSettings,
     readActiveLayoutId,
     writeActiveLayoutId,
     persistDraftSnapshot,
@@ -76,7 +79,8 @@ function makeApi(localStorage, document, window) {
     renameSelectedLayout,
     deleteSelectedLayout,
     resetToDefaultLayout,
-    state: function() { return { activeLayoutId, layoutDirty, pendingLayoutSelectionId }; },
+    initGrid,
+    state: function() { return { activeLayoutId, activeGridSettings, layoutDirty, pendingLayoutSelectionId }; },
     setState: function(next) {
       if (next.grid !== undefined) grid = next.grid;
       if (next.activeLayoutId !== undefined) activeLayoutId = next.activeLayoutId;
@@ -123,10 +127,11 @@ function makeDom() {
     replaceChildren(...children) { this.children = children; },
     showModal() { this.open = true; },
     close() { this.open = false; },
-    focus() {},
+    addEventListener() {},
+    focus() { this.focused = true; },
     select() {},
   });
-  ["layoutSelect", "saveLayout", "deleteLayout", "renameLayout", "resetLayout", "layoutToolbar", "layoutStatus", "layoutUnsavedDialog", "layoutUnsavedMessage", "layoutInlineForm", "layoutNameInput"].forEach((id) => nodes.set(id, makeNode(id)));
+  ["joeGrid", "layoutMenu", "layoutSelect", "saveLayout", "deleteLayout", "renameLayout", "resetLayout", "layoutToolbar", "layoutStatus", "layoutUnsavedDialog", "layoutUnsavedMessage", "layoutInlineForm", "layoutNameInput"].forEach((id) => nodes.set(id, makeNode(id)));
   const document = {
     documentElement: { clientWidth: 1200, dataset: {}, style: { setProperty() {}, removeProperty() {} } },
     getElementById(id) { return nodes.get(id) || null; },
@@ -165,6 +170,50 @@ const legacySampleV2 = [
   { id: "positions", x: 0, y: 16, w: 12, h: 5 },
 ];
 const sample = api.defaultLayoutEntry().items;
+
+const settingsOnly = { columns: 6, cellHeight: 96, tilePadding: 14, tileGap: 6 };
+const settingsOnlyStorage = new MemoryStorage({
+  "joe-board-grid-settings-v1": JSON.stringify(settingsOnly),
+});
+const settingsOnlyDom = makeDom();
+let settingsOnlyInitOptions = null;
+const settingsOnlyGrid = {
+  opts: {},
+  loaded: null,
+  getColumn() { return settingsOnly.columns; },
+  column() {},
+  cellHeight() {},
+  margin() {},
+  load(items) { this.loaded = items.map((item) => ({ ...item })); },
+  save() { return this.loaded.map((item) => ({ ...item })); },
+  on() {},
+};
+const settingsOnlyWindow = {
+  innerWidth: 1200,
+  visualViewport: null,
+  confirm: () => true,
+  GridStack: {
+    init(options) {
+      settingsOnlyInitOptions = options;
+      settingsOnlyGrid.opts = { columnOpts: options.columnOpts };
+      return settingsOnlyGrid;
+    },
+  },
+};
+const settingsOnlyApi = makeApi(settingsOnlyStorage, settingsOnlyDom.document, settingsOnlyWindow);
+settingsOnlyApi.initGrid();
+const settingsOnlyState = settingsOnlyApi.state();
+if (
+  settingsOnlyState.activeGridSettings.columns !== 6 ||
+  settingsOnlyState.activeGridSettings.cellHeight !== 96 ||
+  settingsOnlyState.activeGridSettings.tilePadding !== 14 ||
+  settingsOnlyState.activeGridSettings.tileGap !== 6 ||
+  settingsOnlyInitOptions?.cellHeight !== 96 ||
+  settingsOnlyGrid.loaded?.find((item) => item.id === "hero")?.w !== 6 ||
+  !settingsOnlyState.layoutDirty
+) {
+  throw new Error("settings-only legacy storage was not retained, fitted, and marked dirty at init");
+}
 
 function layoutFromHtml(source) {
   const items = [];
@@ -446,7 +495,13 @@ if (collisionCatalog.layouts.length !== countBeforeOverwrite || api.state().acti
 
 api.setState({ activeLayoutId: "default", layoutDirty: true });
 dom.nodes.get("layoutInlineForm").hidden = true;
-if (api.saveCurrentNamedLayout() || dom.nodes.get("layoutInlineForm").hidden || api.state().activeLayoutId !== "default") {
+if (
+  api.saveCurrentNamedLayout() ||
+  dom.nodes.get("layoutInlineForm").hidden ||
+  !dom.nodes.get("layoutMenu").open ||
+  !dom.nodes.get("layoutNameInput").focused ||
+  api.state().activeLayoutId !== "default"
+) {
   throw new Error("dirty Default Save did not route to Save As");
 }
 
@@ -496,4 +551,4 @@ restoringLayout = false;
 saveLayoutGuard();
 if (!layoutPersisted) throw new Error("desktop applyGridLayout must persist after restoringLayout clears");
 
-console.log(JSON.stringify({ ok: true, appVersion: version.APP_VERSION, checks: 68, desktopDeskRows: deskRows }, null, 2));
+console.log(JSON.stringify({ ok: true, appVersion: version.APP_VERSION, checks: 71, desktopDeskRows: deskRows }, null, 2));

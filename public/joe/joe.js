@@ -980,12 +980,17 @@
     return cssVar(map[deskId]) || "#888888";
   }
 
-  function readActiveGridSettings() {
+  function readStoredGridSettings() {
     try {
-      return sanitizeGridSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY)));
+      var stored = localStorage.getItem(SETTINGS_KEY);
+      return stored === null ? null : sanitizeGridSettings(JSON.parse(stored));
     } catch (_) {
-      return Object.assign({}, DEFAULT_GRID_SETTINGS);
+      return null;
     }
+  }
+
+  function readActiveGridSettings() {
+    return readStoredGridSettings() || Object.assign({}, DEFAULT_GRID_SETTINGS);
   }
 
   function writeActiveGridSettings(settings) {
@@ -1351,11 +1356,11 @@
   function resolveInitialLayoutState(catalog, entryId, draftItems, draftSettings) {
     var available = catalog || defaultLayoutsCatalog();
     var activeEntry = available.layouts.find(function (entry) { return entry.id === entryId; }) || defaultLayoutEntry();
-    var settings = sanitizeGridSettings(draftSettings);
+    var hasDraftSettings = draftSettings !== null && draftSettings !== undefined;
+    var settings = hasDraftSettings ? sanitizeGridSettings(draftSettings) : sanitizeGridSettings(activeEntry.settings);
     var items = sanitizeLayoutItems(draftItems, settings.columns);
     if (!items) {
-      settings = sanitizeGridSettings(activeEntry.settings);
-      items = sanitizeLayoutItems(activeEntry.items, settings.columns);
+      items = scaleLayoutColumns(activeEntry.items, activeEntry.settings.columns, settings.columns);
     }
     var baseline = entryLayoutSnapshot(activeEntry);
     var snapshot = makeLayoutSnapshot(items, settings);
@@ -1495,11 +1500,13 @@
   function showLayoutForm(mode) {
     if (!grid) { return; }
     layoutFormMode = mode;
+    var menu = document.getElementById("layoutMenu");
     var input = document.getElementById("layoutNameInput");
     var select = document.getElementById("layoutSelect");
     var catalog = readLayoutsCatalog();
     var selected = catalog.layouts.find(function (entry) { return entry.id === select.value; });
     input.value = mode === "rename" && selected ? selected.name : "";
+    if (menu) { menu.open = true; }
     document.getElementById("layoutInlineForm").hidden = false;
     input.focus();
     input.select();
@@ -1824,6 +1831,7 @@
 
   function bindDismissableDetails() {
     document.addEventListener("click", function (event) {
+      if (event.target instanceof Element && event.target.closest("dialog")) { return; }
       document.querySelectorAll("details[data-dismissable][open]").forEach(function (open) {
         if (event.target instanceof Node && !open.contains(event.target)) {
           if (open.matches("[data-settings-menu]")) {
@@ -1917,8 +1925,9 @@
   function initGrid() {
     var catalog = readLayoutsCatalog();
     activeLayoutId = readActiveLayoutId(catalog);
-    var draftSettings = readActiveGridSettings();
-    activeGridSettings = draftSettings;
+    var draftSettings = readStoredGridSettings();
+    var activeEntry = catalog.layouts.find(function (entry) { return entry.id === activeLayoutId; }) || defaultLayoutEntry();
+    activeGridSettings = draftSettings || sanitizeGridSettings(activeEntry.settings);
     var initial = resolveInitialLayoutState(catalog, activeLayoutId, safeStoredLayout(activeLayoutId !== DEFAULT_LAYOUT_ID), draftSettings);
     activeLayoutId = initial.activeId;
     activeGridSettings = initial.settings;
