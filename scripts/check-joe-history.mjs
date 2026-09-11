@@ -136,6 +136,11 @@ assertAxisPlanFits(resizedAxis, resizedPlotWidth, "post-phone 768px resize");
 if (resizedAxis.ticks.length >= 6) {
   throw new Error("the reproduced 342.99px plot must not retain the six overlapping desktop ticks");
 }
+const reviewerBlankRepro = axisRange("2026-09-01T00:00:00Z", "2026-09-07T20:00:00Z", 259);
+assertAxisPlanFits(reviewerBlankRepro, 259, "reviewer blank-axis repro");
+if (!reviewerBlankRepro.ticks.length || !reviewerBlankRepro.labelBoxes[0].label.trim()) {
+  throw new Error("the reviewer blank-axis repro must retain a useful date label");
+}
 
 [
   ["2026-09-11T08:00:00Z", "2026-09-11T08:01:00Z", 80, "one-minute phone zoom"],
@@ -146,10 +151,38 @@ if (resizedAxis.ticks.length >= 6) {
 ].forEach(([from, to, width, label]) => {
   const plan = axisRange(from, to, width);
   assertAxisPlanFits(plan, width, label);
+  if (!plan.ticks.length || !plan.labelBoxes.some((box) => box.label.trim())) {
+    throw new Error(`${label} planner must always retain a meaningful label`);
+  }
   if (plan.ticks.length > Math.floor(width / 50) + 1) {
     throw new Error(`${label} planner must not overflow its width budget`);
   }
 });
+
+const slidingBase = Date.parse("2026-09-01T00:00:00Z");
+for (let hour = 0; hour < 336; hour += 1) {
+  const start = slidingBase + hour * 3600000;
+  [
+    [7 * 86400000, 259, "sliding 1W"],
+    [30 * 86400000, 259, "sliding 1M"],
+    [7.5 * 86400000, 343, "sliding 7.5-day"],
+    [12 * 86400000, 259, "sliding 12-day phone"],
+    [12 * 86400000, 343, "sliding 12-day tablet"],
+    [20 * 86400000, 259, "sliding 20-day phone"],
+    [20 * 86400000, 343, "sliding 20-day tablet"],
+  ].forEach(([span, width, label]) => {
+    const plan = api.historyAxisPlan(start, start + span, width);
+    assertAxisPlanFits(plan, width, label);
+    if (!plan.ticks.length || !plan.labelBoxes.some((box) => box.label.trim())) {
+      throw new Error(`${label} plan must not be blank at offset hour ${hour}`);
+    }
+  });
+}
+const withinYear = axisRange("2027-02-01T00:00:00Z", "2027-11-30T00:00:00Z", 259);
+assertAxisPlanFits(withinYear, 259, "single-year nine-month view");
+if (!withinYear.ticks.length || withinYear.unit !== "month" || !withinYear.labelBoxes.every((box) => /2027/.test(box.label))) {
+  throw new Error("a single-year multi-month view without January must retain useful month/year labels");
+}
 
 const springBoundaries = api.historyCalendarBoundaries(
   Date.parse("2026-03-27T00:00:00Z"), Date.parse("2026-03-31T00:00:00Z"), "day", 1
@@ -705,6 +738,9 @@ console.log(JSON.stringify({
     "current-width-after-resize",
     "measured-inner-edge-label-spacing",
     "narrow-intraday-planner-budget",
+    "sliding-narrow-windows-never-blank",
+    "chartjs-single-tick-right-align-model",
+    "single-year-range-keeps-month-year-label",
     "english-weekday-date-time-labels",
     "vienna-spring-dst-day-boundary",
     "vienna-fall-dst-day-boundary",

@@ -2680,7 +2680,7 @@
       var x = (tick - min) / span * width;
       var label = historyAxisLabel(tick, plan);
       var labelWidth = label.length * 6 + 2;
-      var left = ticks.length === 1 ? x - labelWidth / 2
+      var left = ticks.length === 1 ? x - labelWidth
         : index === 0 ? x
           : index === ticks.length - 1 ? x - labelWidth : x - labelWidth / 2;
       return { value: tick, label: label, left: left, right: left + labelWidth };
@@ -2711,7 +2711,11 @@
     var separatorUnit = pixelsPerDay >= 36 ? "day"
       : pixelsPerDay * 7 >= 48 ? "week"
         : pixelsPerDay * 30.4375 >= 35 ? "month" : "year";
-    var unit = span <= 6 * 3600000 ? "minute" : span <= 2 * 86400000 ? "hour" : separatorUnit;
+    var unit = span <= 6 * 3600000 ? "minute"
+      : span <= 2 * 86400000 ? "hour"
+        : daySpan <= 21 ? "day"
+          : daySpan <= 120 ? "week"
+            : daySpan <= 2 * 365.2425 ? "month" : "year";
     var nominal = { minute: 60000, hour: 3600000, day: 86400000, week: 7 * 86400000, month: 30.4375 * 86400000, year: 365.2425 * 86400000 }[unit];
     var minimumSpacing = unit === "minute" || unit === "hour" ? 64 : unit === "year" ? 50 : 78;
     var tickBudget = Math.max(2, Math.floor(width / minimumSpacing));
@@ -2731,17 +2735,33 @@
         timeZone: HISTORY_TIME_ZONE
       };
       plan.labelBoxes = historyAxisLabelBoxes(ticks, min, max, width, plan);
-      if (historyAxisLabelsFit(plan.labelBoxes, width)) { return plan; }
+      if (ticks.length && historyAxisLabelsFit(plan.labelBoxes, width)) { return plan; }
       if (detailedTime) {
         plan.detailedTime = false;
         plan.labelBoxes = historyAxisLabelBoxes(ticks, min, max, width, plan);
-        if (historyAxisLabelsFit(plan.labelBoxes, width)) { return plan; }
+        if (ticks.length && historyAxisLabelsFit(plan.labelBoxes, width)) { return plan; }
       }
       step = historyAxisStep(unit, step + 1);
     }
-    plan.ticks = [];
-    plan.labelBoxes = [];
-    return plan;
+    var anchor = min + span / 2;
+    var fallback = {
+      unit: unit,
+      step: 0,
+      ticks: [anchor],
+      separatorUnit: separatorUnit,
+      separators: historyCalendarBoundaries(min, max, separatorUnit, 1),
+      detailedTime: false,
+      fallback: true,
+      timeZone: HISTORY_TIME_ZONE
+    };
+    fallback.labelBoxes = historyAxisLabelBoxes(fallback.ticks, min, max, width, fallback);
+    if (fallback.labelBoxes[0].left < 4) {
+      var labelWidth = fallback.labelBoxes[0].right - fallback.labelBoxes[0].left;
+      var anchorX = Math.min(width - 4, Math.max(width / 2, labelWidth + 4));
+      fallback.ticks = [min + anchorX / width * span];
+      fallback.labelBoxes = historyAxisLabelBoxes(fallback.ticks, min, max, width, fallback);
+    }
+    return fallback;
   }
 
   function historyAxisLabel(ms, plan) {
