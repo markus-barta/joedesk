@@ -141,6 +141,10 @@
   var activeGridSettings = Object.assign({}, DEFAULT_GRID_SETTINGS);
   var activeThemeMode = "dark";
   var settingsFormDirty = false;
+  var historyResizeObserver = null;
+  var visualResizeFrame = 0;
+  var visualResizeNeedsNarrowFit = false;
+  var historyChartSize = { width: 0, height: 0 };
 
   var gate = document.getElementById("privateGate");
   var dashboard = document.getElementById("dashboard");
@@ -718,6 +722,14 @@
     return Math.max(baseRows, narrowRowsForOuterPixels(outerPixels, clean));
   }
 
+  function narrowHistoryFitRows(item, historyWidget, settings) {
+    var minRows = NARROW_TILE_MIN_ROWS.history;
+    if (!historyWidget) { return Math.max(minRows, item.h); }
+    var overflow = Math.max(0, Math.ceil(historyWidget.scrollHeight - historyWidget.clientHeight));
+    var currentOuterPixels = narrowGridTilePixels(item.h, settings);
+    return Math.max(minRows, item.h, narrowRowsForOuterPixels(currentOuterPixels + overflow, settings));
+  }
+
   function scheduleNarrowFit(pass) {
     if (!grid || !isNarrowGridViewport()) { return; }
     var nextPass = pass || 0;
@@ -762,10 +774,12 @@
       var contentPixels = measureEl ? Math.ceil(measureEl.scrollHeight) : 0;
       var minContent = NARROW_TILE_MIN_PIXELS[item.id] || 0;
       if (contentPixels < minContent) { contentPixels = minContent; }
-      var needRows = Math.max(
-        NARROW_TILE_MIN_ROWS[item.id] || 4,
-        narrowRowsForOuterPixels(narrowOuterPixelsForContent(item.id, contentPixels, settings), settings)
-      );
+      var needRows = item.id === "history"
+        ? narrowHistoryFitRows(item, measureEl, settings)
+        : Math.max(
+          NARROW_TILE_MIN_ROWS[item.id] || 4,
+          narrowRowsForOuterPixels(narrowOuterPixelsForContent(item.id, contentPixels, settings), settings)
+        );
       if (needRows > item.h) {
         changed = true;
         return Object.assign({}, item, { h: needRows });
@@ -2546,6 +2560,223 @@
     return "History unavailable: " + detail + ". Use Retry when the connection recovers.";
   }
 
+  var HISTORY_TIME_ZONE = "Europe/Vienna";
+  var HISTORY_CALENDAR_PARTS = new Intl.DateTimeFormat("en-GB-u-ca-gregory-nu-latn", {
+    timeZone: HISTORY_TIME_ZONE,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+  });
+  var HISTORY_WEEKDAY = new Intl.DateTimeFormat("en-GB", { timeZone: HISTORY_TIME_ZONE, weekday: "short" });
+  var HISTORY_MONTH = new Intl.DateTimeFormat("en-GB", { timeZone: HISTORY_TIME_ZONE, month: "short" });
+  var HISTORY_TOOLTIP_TIME = new Intl.DateTimeFormat("en-GB", {
+    timeZone: HISTORY_TIME_ZONE,
+    weekday: "short", day: "numeric", month: "short", year: "numeric",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", timeZoneName: "short"
+  });
+
+  function viennaCalendarParts(ms) {
+    var values = {};
+    HISTORY_CALENDAR_PARTS.formatToParts(new Date(ms)).forEach(function (part) {
+      if (part.type !== "literal") { values[part.type] = Number(part.value); }
+    });
+    return {
+      year: values.year, month: values.month, day: values.day,
+      hour: values.hour, minute: values.minute, second: values.second
+    };
+  }
+
+  function viennaCalendarInstant(parts) {
+    var target = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour || 0, parts.minute || 0, parts.second || 0);
+    var guess = target;
+    for (var pass = 0; pass < 4; pass += 1) {
+      var observed = viennaCalendarParts(guess);
+      var observedWallTime = Date.UTC(observed.year, observed.month - 1, observed.day, observed.hour, observed.minute, observed.second);
+      var adjustment = target - observedWallTime;
+      if (!adjustment) { break; }
+      guess += adjustment;
+    }
+    return guess;
+  }
+
+  function shiftViennaCalendar(parts, unit, amount) {
+    var calendar = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour || 0, parts.minute || 0, parts.second || 0));
+    if (unit === "minute") { calendar.setUTCMinutes(calendar.getUTCMinutes() + amount); }
+    else if (unit === "hour") { calendar.setUTCHours(calendar.getUTCHours() + amount); }
+    else if (unit === "day" || unit === "week") { calendar.setUTCDate(calendar.getUTCDate() + amount * (unit === "week" ? 7 : 1)); }
+    else if (unit === "month") { calendar.setUTCMonth(calendar.getUTCMonth() + amount); }
+    else { calendar.setUTCFullYear(calendar.getUTCFullYear() + amount); }
+    return {
+      year: calendar.getUTCFullYear(), month: calendar.getUTCMonth() + 1, day: calendar.getUTCDate(),
+      hour: calendar.getUTCHours(), minute: calendar.getUTCMinutes(), second: calendar.getUTCSeconds()
+    };
+  }
+
+  function historyCalendarBoundaries(min, max, unit, step) {
+    if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) { return []; }
+    var increment = Math.max(1, Math.floor(step || 1));
+    var local = viennaCalendarParts(min);
+    var cursor;
+    if (unit === "minute") {
+      local.second = 0;
+      local.minute -= local.minute % increment;
+      cursor = viennaCalendarInstant(local);
+    } else if (unit === "hour") {
+      local.minute = 0; local.second = 0;
+      local.hour -= local.hour % increment;
+      cursor = viennaCalendarInstant(local);
+    } else if (unit === "day") {
+      local.hour = 0; local.minute = 0; local.second = 0;
+      cursor = viennaCalendarInstant(local);
+    } else if (unit === "week") {
+      local.hour = 0; local.minute = 0; local.second = 0;
+      var localDate = new Date(Date.UTC(local.year, local.month - 1, local.day));
+      local.day -= (localDate.getUTCDay() + 6) % 7;
+      cursor = viennaCalendarInstant(local);
+    } else if (unit === "month") {
+      local.day = 1; local.hour = 0; local.minute = 0; local.second = 0;
+      local.month -= (local.month - 1) % increment;
+      cursor = viennaCalendarInstant(local);
+    } else {
+      local.month = 1; local.day = 1; local.hour = 0; local.minute = 0; local.second = 0;
+      local.year -= local.year % increment;
+      cursor = viennaCalendarInstant(local);
+    }
+    var boundaries = [];
+    var guard = 0;
+    while (cursor < min && guard < 512) {
+      local = shiftViennaCalendar(viennaCalendarParts(cursor), unit, increment);
+      cursor = viennaCalendarInstant(local);
+      guard += 1;
+    }
+    while (cursor <= max && guard < 512) {
+      boundaries.push(cursor);
+      local = shiftViennaCalendar(viennaCalendarParts(cursor), unit, increment);
+      var next = viennaCalendarInstant(local);
+      if (next <= cursor) { break; }
+      cursor = next;
+      guard += 1;
+    }
+    return boundaries;
+  }
+
+  function historyAxisStep(unit, rawStep) {
+    var choices = unit === "minute" ? [1, 2, 5, 10, 15, 30, 60, 120, 180, 360]
+      : unit === "hour" ? [1, 2, 3, 6, 12, 24, 48]
+        : unit === "day" ? [1, 2, 3, 7, 14]
+          : unit === "week" ? [1, 2, 4, 8, 13, 26, 52]
+            : unit === "month" ? [1, 2, 3, 6, 12, 24, 60]
+              : [1, 2, 5, 10, 20, 50, 100];
+    for (var i = 0; i < choices.length; i += 1) {
+      if (choices[i] >= rawStep) { return choices[i]; }
+    }
+    var largest = choices[choices.length - 1];
+    return largest * Math.ceil(rawStep / largest);
+  }
+
+  function historyAxisLabelBoxes(ticks, min, max, plotWidth, plan) {
+    var width = Math.max(1, plotWidth);
+    var span = Math.max(1, max - min);
+    return ticks.map(function (tick, index) {
+      var x = (tick - min) / span * width;
+      var label = historyAxisLabel(tick, plan);
+      var labelWidth = label.length * 6 + 2;
+      var left = ticks.length === 1 ? x - labelWidth
+        : index === 0 ? x
+          : index === ticks.length - 1 ? x - labelWidth : x - labelWidth / 2;
+      return { value: tick, label: label, left: left, right: left + labelWidth };
+    });
+  }
+
+  function historyAxisLabelsFit(boxes, plotWidth) {
+    for (var i = 0; i < boxes.length; i += 1) {
+      if (boxes[i].left < 0 || boxes[i].right > plotWidth) { return false; }
+      if (i && boxes[i].left - boxes[i - 1].right < 8) { return false; }
+    }
+    return true;
+  }
+
+  function currentHistoryPlotWidth(scale, fallbackWidth) {
+    var chart = scale && scale.chart;
+    var chartWidth = chart && Number.isFinite(chart.width) && chart.width > 0 ? chart.width : fallbackWidth;
+    var yScale = chart && chart.scales && chart.scales.y;
+    var yGutter = yScale && Number.isFinite(yScale.width) && yScale.width > 0 ? yScale.width : 72;
+    return Math.max(80, chartWidth - yGutter - 8);
+  }
+
+  function historyAxisPlan(min, max, plotWidth) {
+    var width = Math.max(80, Number(plotWidth) || 0);
+    var span = Math.max(1, max - min);
+    var daySpan = span / 86400000;
+    var pixelsPerDay = width / daySpan;
+    var separatorUnit = pixelsPerDay >= 36 ? "day"
+      : pixelsPerDay * 7 >= 48 ? "week"
+        : pixelsPerDay * 30.4375 >= 35 ? "month" : "year";
+    var unit = span <= 6 * 3600000 ? "minute"
+      : span <= 2 * 86400000 ? "hour"
+        : daySpan <= 21 ? "day"
+          : daySpan <= 120 ? "week"
+            : daySpan <= 2 * 365.2425 ? "month" : "year";
+    var nominal = { minute: 60000, hour: 3600000, day: 86400000, week: 7 * 86400000, month: 30.4375 * 86400000, year: 365.2425 * 86400000 }[unit];
+    var minimumSpacing = unit === "minute" || unit === "hour" ? 64 : unit === "year" ? 50 : 78;
+    var tickBudget = Math.max(2, Math.floor(width / minimumSpacing));
+    var rawStep = Math.max(1, Math.ceil((span / nominal) / tickBudget));
+    var step = historyAxisStep(unit, rawStep);
+    var plan;
+    for (var pass = 0; pass < 12; pass += 1) {
+      var ticks = historyCalendarBoundaries(min, max, unit, step);
+      var detailedTime = (unit === "minute" || unit === "hour") && ticks.length * 78 <= width;
+      plan = {
+        unit: unit,
+        step: step,
+        ticks: ticks,
+        separatorUnit: separatorUnit,
+        separators: historyCalendarBoundaries(min, max, separatorUnit, 1),
+        detailedTime: detailedTime,
+        timeZone: HISTORY_TIME_ZONE
+      };
+      plan.labelBoxes = historyAxisLabelBoxes(ticks, min, max, width, plan);
+      if (ticks.length && historyAxisLabelsFit(plan.labelBoxes, width)) { return plan; }
+      if (detailedTime) {
+        plan.detailedTime = false;
+        plan.labelBoxes = historyAxisLabelBoxes(ticks, min, max, width, plan);
+        if (ticks.length && historyAxisLabelsFit(plan.labelBoxes, width)) { return plan; }
+      }
+      step = historyAxisStep(unit, step + 1);
+    }
+    var anchor = min + span / 2;
+    var fallback = {
+      unit: unit,
+      step: 0,
+      ticks: [anchor],
+      separatorUnit: separatorUnit,
+      separators: historyCalendarBoundaries(min, max, separatorUnit, 1),
+      detailedTime: false,
+      fallback: true,
+      timeZone: HISTORY_TIME_ZONE
+    };
+    fallback.labelBoxes = historyAxisLabelBoxes(fallback.ticks, min, max, width, fallback);
+    if (fallback.labelBoxes[0].left < 4) {
+      var labelWidth = fallback.labelBoxes[0].right - fallback.labelBoxes[0].left;
+      var anchorX = Math.min(width - 4, Math.max(width / 2, labelWidth + 4));
+      fallback.ticks = [min + anchorX / width * span];
+      fallback.labelBoxes = historyAxisLabelBoxes(fallback.ticks, min, max, width, fallback);
+    }
+    return fallback;
+  }
+
+  function historyAxisLabel(ms, plan) {
+    var date = new Date(ms);
+    var parts = viennaCalendarParts(ms);
+    var day = String(parts.day);
+    var month = HISTORY_MONTH.format(date);
+    var weekday = HISTORY_WEEKDAY.format(date);
+    var time = String(parts.hour).padStart(2, "0") + ":" + String(parts.minute).padStart(2, "0");
+    if (plan.unit === "minute" || plan.unit === "hour") { return plan.detailedTime ? weekday + " " + time : time; }
+    if (plan.unit === "day" || plan.unit === "week") { return weekday + " " + day + " " + month; }
+    if (plan.unit === "month") { return month + " " + parts.year; }
+    return String(parts.year);
+  }
+
   function updateHistoryStatusUI() {
     var status = document.getElementById("historyStatus");
     var text = document.getElementById("historyStatusText");
@@ -2681,6 +2912,7 @@
 
   function destroyHistoryChart() {
     if (historyState.chart) { historyState.chart.destroy(); historyState.chart = null; }
+    historyChartSize = { width: 0, height: 0 };
   }
 
   function showHistoryEmpty(message) {
@@ -2691,38 +2923,10 @@
     renderHistoryCompare();
   }
 
-  function easternOffsetMinutes(date) {
-    var year = date.getUTCFullYear();
-    var march = new Date(Date.UTC(year, 2, 8));
-    march.setUTCDate(8 + (7 - march.getUTCDay()) % 7);
-    var november = new Date(Date.UTC(year, 10, 1));
-    november.setUTCDate(1 + (7 - november.getUTCDay()) % 7);
-    return date >= march && date < november ? 240 : 300;
-  }
-
-  function easternSessionBounds(dayStartMs) {
-    var day = new Date(dayStartMs);
-    day.setUTCHours(0, 0, 0, 0);
-    var offset = easternOffsetMinutes(day);
-    var open = day.getTime() + ((9 * 60 + 30) + offset) * 60 * 1000;
-    var close = day.getTime() + (16 * 60 + offset) * 60 * 1000;
-    return { open: open, close: close };
-  }
-
   function chartVisibleDomain(chart) {
     var scale = chart.scales.x;
     if (!scale || !Number.isFinite(scale.min) || !Number.isFinite(scale.max)) { return null; }
     return { min: scale.min, max: scale.max };
-  }
-
-  function utcDayStart(ms) {
-    var day = new Date(ms);
-    day.setUTCHours(0, 0, 0, 0);
-    return day.getTime();
-  }
-
-  function todayUtcMidnight() {
-    return utcDayStart(Date.now());
   }
 
   var historyOverlayPlugin = {
@@ -2734,52 +2938,22 @@
       var domain = chartVisibleDomain(chart);
       if (!domain || domain.max <= domain.min) { return; }
       var context = chart.ctx;
-      var maxShadingSpanMs = 400 * 86400000;
+      var plan = historyAxisPlan(domain.min, domain.max, area.right - area.left);
       context.save();
       context.beginPath();
       context.rect(area.left, area.top, area.right - area.left, area.bottom - area.top);
       context.clip();
-      if (domain.max - domain.min <= maxShadingSpanMs) {
-        context.fillStyle = cssVar("--chart-session-fill") || "rgba(169, 201, 154, 0.06)";
-        var day = utcDayStart(domain.min);
-        var lastDay = utcDayStart(domain.max);
-        while (day <= lastDay) {
-          var weekday = new Date(day).getUTCDay();
-          if (weekday >= 1 && weekday <= 5) {
-            var session = easternSessionBounds(day);
-            var start = Math.max(domain.min, session.open);
-            var end = Math.min(domain.max, session.close);
-            if (end > start) {
-              var left = scale.getPixelForValue(start);
-              var right = scale.getPixelForValue(end);
-              var x = Math.max(area.left, Math.min(left, right));
-              var x2 = Math.min(area.right, Math.max(left, right));
-              var width = x2 - x;
-              if (width > 0) {
-                context.fillRect(x, area.top, width, area.bottom - area.top);
-              }
-            }
-          }
-          day += 86400000;
-        }
-      }
-      var todayMs = todayUtcMidnight();
-      if (todayMs >= domain.min && todayMs <= domain.max) {
-        var marker = scale.getPixelForValue(todayMs);
-        if (marker >= area.left && marker <= area.right) {
-          context.strokeStyle = cssVar("--chart-today-line") || "rgba(238, 230, 212, 0.55)";
-          context.lineWidth = 1;
-          context.setLineDash([4, 4]);
-          context.beginPath();
-          context.moveTo(marker, area.top);
-          context.lineTo(marker, area.bottom);
-          context.stroke();
-          context.setLineDash([]);
-          context.fillStyle = cssVar("--chart-today-label") || "rgba(238, 230, 212, 0.75)";
-          context.font = "10px SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace";
-          context.fillText("Today UTC", Math.min(marker + 4, area.right - 58), area.top + 12);
-        }
-      }
+      context.strokeStyle = cssVar("--chart-calendar-line") || cssVar("--chart-grid") || "rgba(127, 126, 119, 0.32)";
+      context.lineWidth = plan.separatorUnit === "month" || plan.separatorUnit === "year" ? 1.25 : 1;
+      context.setLineDash(plan.separatorUnit === "day" ? [2, 3] : []);
+      plan.separators.forEach(function (boundary) {
+        var marker = scale.getPixelForValue(boundary);
+        if (marker < area.left || marker > area.right) { return; }
+        context.beginPath();
+        context.moveTo(Math.round(marker) + 0.5, area.top);
+        context.lineTo(Math.round(marker) + 0.5, area.bottom);
+        context.stroke();
+      });
       context.restore();
     }
   };
@@ -2900,6 +3074,12 @@
     }
     document.getElementById("historyEmpty").hidden = true;
     var tickFont = { family: "SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace", size: 10 };
+    var historyCanvas = document.getElementById("historyChart");
+    var historyWrap = document.querySelector(".history-canvas-wrap");
+    var initialWidth = historyWrap ? Math.max(1, Math.floor(historyWrap.clientWidth)) : 1;
+    var initialHeight = historyWrap ? Math.max(1, Math.floor(historyWrap.clientHeight)) : 1;
+    historyCanvas.width = initialWidth;
+    historyCanvas.height = initialHeight;
     var config = {
       type: "line",
       data: { datasets: datasets },
@@ -2915,7 +3095,7 @@
             borderColor: cssVar("--chart-tooltip-border") || "#454641",
             borderWidth: 1,
             callbacks: {
-            title: function (items) { return items.length ? dateTime.format(new Date(items[0].parsed.x)) : ""; },
+            title: function (items) { return items.length ? HISTORY_TOOLTIP_TIME.format(new Date(items[0].parsed.x)) : ""; },
             label: function (item) { return item.dataset.label + "  " + amount(item.parsed.y, false); }
           } },
           zoom: {
@@ -2925,14 +3105,31 @@
           }
         },
         scales: {
-          x: { type: "linear", ticks: { color: cssVar("--chart-tick") || "#77766f", maxTicksLimit: 7, font: tickFont, callback: function (value) { return shortTime.format(new Date(value)); } }, grid: { color: cssVar("--chart-grid") || "rgba(63,64,59,.45)" } },
+          x: {
+            type: "linear",
+            afterBuildTicks: function (scale) {
+              var plotWidth = currentHistoryPlotWidth(scale, initialWidth);
+              var plan = historyAxisPlan(scale.min, scale.max, plotWidth);
+              scale.$joeHistoryAxisPlan = plan;
+              scale.ticks = plan.ticks.map(function (value) { return { value: value }; });
+            },
+            ticks: {
+              color: cssVar("--chart-tick") || "#77766f", autoSkip: false,
+              minRotation: 0, maxRotation: 0, align: "inner", font: tickFont,
+              callback: function (value) {
+                return historyAxisLabel(value, this.$joeHistoryAxisPlan || historyAxisPlan(this.min, this.max, this.width));
+              }
+            },
+            grid: { display: false }
+          },
           y: { ticks: { color: cssVar("--chart-tick") || "#77766f", font: tickFont, callback: function (value) { return amount(value, false); } }, grid: { color: cssVar("--chart-grid") || "rgba(63,64,59,.45)" } }
         }
       },
       plugins: [historyOverlayPlugin]
     };
     destroyHistoryChart();
-    historyState.chart = new window.Chart(document.getElementById("historyChart").getContext("2d"), config);
+    historyState.chart = new window.Chart(historyCanvas.getContext("2d"), config);
+    resizeHistoryChart(true);
     renderHistoryCompare();
     resizeVisuals();
   }
@@ -2987,15 +3184,42 @@
     });
   }
 
-  function resizeVisuals() {
-    window.requestAnimationFrame(function () {
-      if (historyState.chart) {
-        var wrap = document.querySelector(".history-canvas-wrap");
-        historyState.chart.resize(Math.max(1, Math.floor(wrap.clientWidth)), Math.max(1, Math.floor(wrap.clientHeight)));
-      }
+  function resizeHistoryChart(force) {
+    if (!historyState.chart) { return; }
+    var wrap = document.querySelector(".history-canvas-wrap");
+    if (!wrap) { return; }
+    var width = Math.max(1, Math.floor(wrap.clientWidth));
+    var height = Math.max(1, Math.floor(wrap.clientHeight));
+    if (!force && width === historyChartSize.width && height === historyChartSize.height) { return; }
+    historyChartSize = { width: width, height: height };
+    historyState.chart.resize(width, height);
+  }
+
+  function resizeVisuals(includeNarrowFit) {
+    if (includeNarrowFit !== false) { visualResizeNeedsNarrowFit = true; }
+    if (visualResizeFrame) { return; }
+    visualResizeFrame = window.requestAnimationFrame(function () {
+      visualResizeFrame = 0;
+      var needsNarrowFit = visualResizeNeedsNarrowFit;
+      visualResizeNeedsNarrowFit = false;
+      resizeHistoryChart(false);
       drawSparklines();
-      if (isNarrowGridViewport()) { scheduleNarrowFit(0); }
+      if (needsNarrowFit && isNarrowGridViewport()) { scheduleNarrowFit(0); }
     });
+  }
+
+  function observeHistoryCanvas() {
+    if (historyResizeObserver || !window.ResizeObserver) { return; }
+    var wrap = document.querySelector(".history-canvas-wrap");
+    if (!wrap) { return; }
+    historyResizeObserver = new window.ResizeObserver(function () { resizeVisuals(false); });
+    historyResizeObserver.observe(wrap);
+    window.addEventListener("pagehide", function () {
+      historyResizeObserver.disconnect();
+      historyResizeObserver = null;
+      visualResizeNeedsNarrowFit = false;
+      if (visualResizeFrame) { window.cancelAnimationFrame(visualResizeFrame); visualResizeFrame = 0; }
+    }, { once: true });
   }
 
   function bindControls() {
@@ -3132,7 +3356,9 @@
     syncLayoutViewport: syncLayoutViewport,
     rememberDesktopLayout: rememberDesktopLayout,
     desktopLayoutSnapshot: desktopLayoutSnapshot,
-    todayUtcMidnight: todayUtcMidnight,
+    historyAxisPlan: historyAxisPlan,
+    historyAxisLabel: historyAxisLabel,
+    historyCalendarBoundaries: historyCalendarBoundaries,
     filterPoints: filterPoints,
     historyRangeSpanMs: historyRangeSpanMs,
     validateHistoryPayload: validateHistoryPayload,
@@ -3157,6 +3383,7 @@
   initTheme();
   initGrid();
   bindControls();
+  observeHistoryCanvas();
   bindLayoutControls();
   bindSettingsControls();
   bindDismissableDetails();

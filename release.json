@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "legacy",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "release_channel": "stable",
-  "release_sequence": 9,
-  "note": "Centers virtual desk equity, separates whole paper-account NAV, and brings captured J-family results into History with shared time filters and explicit native currency. Accepts supplied Open P&L and distinguishes restored accounting from partial history."
+  "release_sequence": 10,
+  "note": "Readable Vienna calendar boundaries and adaptive History labels; stable chart sizing across phone, desktop and saved tile layouts. Financial data and accounting are unchanged."
 }

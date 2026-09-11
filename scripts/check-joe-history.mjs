@@ -32,6 +32,10 @@ const api = new Function(`${historyHelpers}
     validateHistoryPayload,
     applyHistoryFetchResult,
     historyFailureMessage,
+    historyAxisPlan,
+    historyAxisLabel,
+    historyCalendarBoundaries,
+    currentHistoryPlotWidth,
     sparklineSamples,
     basisAwareSeries,
     latestCompatibleBasis,
@@ -73,6 +77,209 @@ const points = [
 
 if (api.historyRangeSpanMs("1d") !== 864e5) throw new Error("1d span mismatch");
 if (api.historyRangeSpanMs("all") !== null) throw new Error("all span must be open-ended");
+
+const axisRange = (from, to, width) => api.historyAxisPlan(Date.parse(from), Date.parse(to), width);
+const closeAxis = axisRange("2026-09-11T08:00:00Z", "2026-09-11T12:00:00Z", 720);
+const dailyAxis = axisRange("2026-09-08T00:00:00Z", "2026-09-15T00:00:00Z", 720);
+const weeklyAxis = axisRange("2026-07-01T00:00:00Z", "2026-10-01T00:00:00Z", 720);
+const monthlyAxis = axisRange("2025-09-01T00:00:00Z", "2026-09-01T00:00:00Z", 720);
+const yearlyAxis = axisRange("2016-01-01T00:00:00Z", "2026-01-01T00:00:00Z", 720);
+if (closeAxis.unit !== "minute" || closeAxis.separatorUnit !== "day") {
+  throw new Error("close history ranges must show readable times with Vienna day separators");
+}
+if (dailyAxis.unit !== "day" || weeklyAxis.unit !== "week" || monthlyAxis.unit !== "month" || yearlyAxis.unit !== "year") {
+  throw new Error("history axis must transition through day, week, month, and year calendar scales");
+}
+[closeAxis, dailyAxis, weeklyAxis, monthlyAxis, yearlyAxis].forEach((plan) => {
+  if (plan.ticks.length > Math.floor(720 / 50) + 1) {
+    throw new Error(`history ${plan.unit} ticks exceed the available plot-width density`);
+  }
+  if (plan.ticks.some((tick, index) => index && tick <= plan.ticks[index - 1])) {
+    throw new Error(`history ${plan.unit} ticks must be strictly ordered`);
+  }
+});
+const narrowDailyAxis = axisRange("2026-09-08T00:00:00Z", "2026-09-15T00:00:00Z", 260);
+if (narrowDailyAxis.ticks.length >= dailyAxis.ticks.length) {
+  throw new Error("narrow history plots must reduce tick density");
+}
+const dayLabel = api.historyAxisLabel(dailyAxis.ticks[0], dailyAxis);
+if (!/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept?|Oct|Nov|Dec)$/.test(dayLabel)) {
+  throw new Error("daily history labels must use short English weekday/date copy");
+}
+if (closeAxis.ticks.some((tick) => !/^([A-Z][a-z]{2} )?\d{2}:\d{2}$/.test(api.historyAxisLabel(tick, closeAxis)))) {
+  throw new Error("close history labels must use compact English weekday/time copy as width permits");
+}
+
+function assertAxisPlanFits(plan, width, label) {
+  plan.labelBoxes.forEach((box, index) => {
+    if (box.left < 0 || box.right > width) {
+      throw new Error(`${label} tick label must stay inside its actual plot width`);
+    }
+    if (index && box.left - plan.labelBoxes[index - 1].right < 8) {
+      throw new Error(`${label} tick labels must retain measured spacing, including inner-aligned edges`);
+    }
+  });
+}
+
+const resizedPlotWidth = api.currentHistoryPlotWidth({
+  chart: {
+    width: 418,
+    chartArea: { left: 74, right: 866 },
+    scales: { y: { width: 74.009765625 } },
+  },
+}, 866);
+if (Math.abs(resizedPlotWidth - 335.990234375) > 0.001) {
+  throw new Error("history planning must use current chart width and y-axis gutter, not stale chartArea width");
+}
+const resizedAxis = axisRange("2026-09-01T00:00:00Z", "2026-09-13T00:00:00Z", resizedPlotWidth);
+assertAxisPlanFits(resizedAxis, resizedPlotWidth, "post-phone 768px resize");
+if (resizedAxis.ticks.length >= 6) {
+  throw new Error("the reproduced 342.99px plot must not retain the six overlapping desktop ticks");
+}
+const reviewerBlankRepro = axisRange("2026-09-01T00:00:00Z", "2026-09-07T20:00:00Z", 259);
+assertAxisPlanFits(reviewerBlankRepro, 259, "reviewer blank-axis repro");
+if (!reviewerBlankRepro.ticks.length || !reviewerBlankRepro.labelBoxes[0].label.trim()) {
+  throw new Error("the reviewer blank-axis repro must retain a useful date label");
+}
+
+[
+  ["2026-09-11T08:00:00Z", "2026-09-11T08:01:00Z", 80, "one-minute phone zoom"],
+  ["2026-09-11T08:00:00Z", "2026-09-11T14:00:00Z", 80, "six-hour phone zoom"],
+  ["2026-09-10T08:00:00Z", "2026-09-12T08:00:00Z", 120, "two-day narrow zoom"],
+  ["2026-09-01T00:00:00Z", "2026-09-13T00:00:00Z", 256.99, "phone plot"],
+  ["2016-01-01T00:00:00Z", "2026-01-01T00:00:00Z", 180, "ten-year narrow plot"],
+].forEach(([from, to, width, label]) => {
+  const plan = axisRange(from, to, width);
+  assertAxisPlanFits(plan, width, label);
+  if (!plan.ticks.length || !plan.labelBoxes.some((box) => box.label.trim())) {
+    throw new Error(`${label} planner must always retain a meaningful label`);
+  }
+  if (plan.ticks.length > Math.floor(width / 50) + 1) {
+    throw new Error(`${label} planner must not overflow its width budget`);
+  }
+});
+
+const slidingBase = Date.parse("2026-09-01T00:00:00Z");
+for (let hour = 0; hour < 336; hour += 1) {
+  const start = slidingBase + hour * 3600000;
+  [
+    [7 * 86400000, 259, "sliding 1W"],
+    [30 * 86400000, 259, "sliding 1M"],
+    [7.5 * 86400000, 343, "sliding 7.5-day"],
+    [12 * 86400000, 259, "sliding 12-day phone"],
+    [12 * 86400000, 343, "sliding 12-day tablet"],
+    [20 * 86400000, 259, "sliding 20-day phone"],
+    [20 * 86400000, 343, "sliding 20-day tablet"],
+  ].forEach(([span, width, label]) => {
+    const plan = api.historyAxisPlan(start, start + span, width);
+    assertAxisPlanFits(plan, width, label);
+    if (!plan.ticks.length || !plan.labelBoxes.some((box) => box.label.trim())) {
+      throw new Error(`${label} plan must not be blank at offset hour ${hour}`);
+    }
+  });
+}
+const withinYear = axisRange("2027-02-01T00:00:00Z", "2027-11-30T00:00:00Z", 259);
+assertAxisPlanFits(withinYear, 259, "single-year nine-month view");
+if (!withinYear.ticks.length || withinYear.unit !== "month" || !withinYear.labelBoxes.every((box) => /2027/.test(box.label))) {
+  throw new Error("a single-year multi-month view without January must retain useful month/year labels");
+}
+
+const springBoundaries = api.historyCalendarBoundaries(
+  Date.parse("2026-03-27T00:00:00Z"), Date.parse("2026-03-31T00:00:00Z"), "day", 1
+);
+const springDurations = springBoundaries.slice(1).map((value, index) => value - springBoundaries[index]);
+if (!springDurations.includes(23 * 3600000)) {
+  throw new Error("Vienna spring DST calendar boundaries must include a 23-hour local day");
+}
+const fallBoundaries = api.historyCalendarBoundaries(
+  Date.parse("2026-10-23T00:00:00Z"), Date.parse("2026-10-27T00:00:00Z"), "day", 1
+);
+const fallDurations = fallBoundaries.slice(1).map((value, index) => value - fallBoundaries[index]);
+if (!fallDurations.includes(25 * 3600000)) {
+  throw new Error("Vienna fall DST calendar boundaries must include a 25-hour local day");
+}
+[
+  ["2026-03-29T00:00:00Z", "2026-03-29T05:00:00Z", "spring"],
+  ["2026-10-25T00:00:00Z", "2026-10-25T05:00:00Z", "fall"],
+].forEach(([from, to, season]) => {
+  const ticks = api.historyCalendarBoundaries(Date.parse(from), Date.parse(to), "hour", 1);
+  if (!ticks.length || ticks.length > 8 || ticks.some((tick, index) => index && tick <= ticks[index - 1])) {
+    throw new Error(`Vienna ${season} DST intraday boundaries must make bounded forward progress`);
+  }
+});
+
+const resizeHelpers = extractJoeBlock("  function resizeHistoryChart(force)", "\n\n  function bindControls()");
+const resizeHarness = new Function(`
+  var pendingFrame = null;
+  var observerCallback = null;
+  var narrowFits = 0;
+  var chartResizes = 0;
+  var historyChartSize = { width: 0, height: 0 };
+  var visualResizeFrame = 0;
+  var visualResizeNeedsNarrowFit = false;
+  var historyResizeObserver = null;
+  var wrap = { clientWidth: 332, clientHeight: 178 };
+  var historyState = { chart: { resize: function () { chartResizes += 1; } } };
+  var document = { querySelector: function () { return wrap; } };
+  function FakeResizeObserver(callback) { observerCallback = callback; }
+  FakeResizeObserver.prototype.observe = function () {};
+  FakeResizeObserver.prototype.disconnect = function () {};
+  var window = {
+    ResizeObserver: FakeResizeObserver,
+    requestAnimationFrame: function (callback) { pendingFrame = callback; return 1; },
+    cancelAnimationFrame: function () { pendingFrame = null; },
+    addEventListener: function () {}
+  };
+  function drawSparklines() {}
+  function isNarrowGridViewport() { return true; }
+  function scheduleNarrowFit() { narrowFits += 1; }
+${resizeHelpers}
+  return {
+    observe: observeHistoryCanvas,
+    observerTick: function () { observerCallback(); },
+    generalResize: function () { resizeVisuals(); },
+    flush: function () { var callback = pendingFrame; pendingFrame = null; if (callback) { callback(); } },
+    counts: function () { return { fits: narrowFits, chartResizes: chartResizes }; }
+  };
+`);
+const resizeApi = resizeHarness();
+resizeApi.observe();
+resizeApi.observerTick();
+resizeApi.flush();
+if (resizeApi.counts().fits !== 0 || resizeApi.counts().chartResizes !== 1) {
+  throw new Error("history ResizeObserver must resize the chart without rearming narrow content fit");
+}
+resizeApi.generalResize();
+resizeApi.observerTick();
+resizeApi.flush();
+if (resizeApi.counts().fits !== 1) {
+  throw new Error("normal window/grid resize must preserve one bounded narrow content-fit request");
+}
+resizeApi.observerTick();
+resizeApi.flush();
+if (resizeApi.counts().fits !== 1) {
+  throw new Error("observer-only resize must not recursively grow the mobile history tile");
+}
+
+const narrowHistoryFitRows = new Function(`
+  var NARROW_TILE_MIN_ROWS = { history: 8 };
+  function narrowGridTilePixels(rows) { return rows * 82; }
+  function narrowRowsForOuterPixels(pixels) { return Math.max(1, Math.ceil(pixels / 82)); }
+${extractJoeBlock("  function narrowHistoryFitRows(item, historyWidget, settings)", "\n\n  function scheduleNarrowFit(pass)")}
+  return narrowHistoryFitRows;
+`)();
+const fittedHistoryWidget = { clientHeight: 636, scrollHeight: 636 };
+const initialHistoryItem = { id: "history", h: 8 };
+const firstStableRows = narrowHistoryFitRows(initialHistoryItem, fittedHistoryWidget, {});
+const repeatedStableRows = narrowHistoryFitRows({ ...initialHistoryItem, h: firstStableRows }, fittedHistoryWidget, {});
+if (firstStableRows !== 8 || repeatedStableRows !== 8) {
+  throw new Error("repeated history draws must not add drag, border, or tile padding to an already fitted widget");
+}
+const overflowRows = narrowHistoryFitRows(initialHistoryItem, { clientHeight: 636, scrollHeight: 700 }, {});
+const settledRows = narrowHistoryFitRows({ ...initialHistoryItem, h: overflowRows }, { clientHeight: 718, scrollHeight: 718 }, {});
+if (overflowRows !== 9 || settledRows !== 9) {
+  throw new Error("history fitting must grow once for true intrinsic overflow and remain stable after it fits");
+}
 
 const oneDay = api.filterPoints(points, "1d");
 if (oneDay.length !== 1 || oneDay[0].t !== points[2].t) {
@@ -526,6 +733,21 @@ console.log(JSON.stringify({
   ok: true,
   checks: [
     "time-window-filter",
+    "adaptive-vienna-axis-scales",
+    "plot-width-tick-density",
+    "current-width-after-resize",
+    "measured-inner-edge-label-spacing",
+    "narrow-intraday-planner-budget",
+    "sliding-narrow-windows-never-blank",
+    "chartjs-single-tick-right-align-model",
+    "single-year-range-keeps-month-year-label",
+    "english-weekday-date-time-labels",
+    "vienna-spring-dst-day-boundary",
+    "vienna-fall-dst-day-boundary",
+    "vienna-dst-intraday-forward-progress",
+    "observer-chart-resize-does-not-rearm-mobile-fit",
+    "history-mobile-fit-idempotent-after-draw",
+    "history-mobile-fit-grows-only-for-real-overflow",
     "valid-empty-history",
     "reject-malformed-history",
     "preserve-last-good-on-fail",
