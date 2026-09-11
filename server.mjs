@@ -570,7 +570,7 @@ async function handleFleetPropagate(req, res) {
     return;
   }
   if (!isDeepStrictEqual(body.config.secretSlots, current.secretSlots)) {
-    sendFleetFailure(res, 422, "secret slots are reference-only and read-only; rotation remains HOSTD-52", {
+    sendFleetFailure(res, 422, "secret slots are read-only in HOSTD-49", {
       actor,
       current,
       candidate: body.config,
@@ -675,6 +675,7 @@ async function handleFleetPropagate(req, res) {
     },
     action,
     hooks: {
+      secretSlots: "HOSTD-51",
       rotation: "HOSTD-52",
     },
   });

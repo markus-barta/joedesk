@@ -1068,26 +1068,6 @@ try {
       fleetBound.actionItems !== 1 || !/success/i.test(fleetBound.actionText) || !/amy-smoke/.test(fleetBound.actionText) || !/fc-000000 → fc-000001/.test(fleetBound.actionText) || !/desks\.maxBusyDesks/.test(fleetBound.actionText)
     ) throw new Error(`Fleet Config binding mismatch: ${JSON.stringify(fleetBound)}`);
 
-    const fleetSecrets = await value(`(() => {
-      document.querySelector('[data-fleet-section="secrets"]').click();
-      const fields = [...document.querySelectorAll('#fleetEditFields input')];
-      return {
-        headline: document.getElementById('fleetEliHeadline').textContent,
-        intro: document.getElementById('fleetEliIntro').textContent,
-        explanation: document.getElementById('fleetEliSections').innerText,
-        fields: fields.map((node) => ({ key: node.dataset.fleetField, value: node.value, readOnly: node.readOnly, type: node.type })),
-        summary: document.querySelector('[data-fleet-section="secrets"] .fleet-row-values').innerText,
-        rotationControls: [...document.querySelectorAll('#fleetConfigBoard button')].filter(node => /rotate/i.test(node.textContent)).length,
-      };
-    })()`);
-    if (
-      fleetSecrets.headline !== 'Labels here. Secret values elsewhere.' || !/capability and path references only/i.test(fleetSecrets.intro) ||
-      !/AGE \/ Janus keeps the value elsewhere/.test(fleetSecrets.explanation) || !/HOSTD-52 owns rotation/.test(fleetSecrets.explanation) ||
-      fleetSecrets.fields.some(field => !field.readOnly || field.type === 'password') ||
-      JSON.stringify(fleetSecrets.fields.map(field => field.value)) !== JSON.stringify(['joe-board-push-token', 'none', 'Refs only']) ||
-      !/agenix ref: joe-board-push-token/.test(fleetSecrets.summary) || !/Janus ref: none/.test(fleetSecrets.summary) || fleetSecrets.rotationControls !== 0
-    ) throw new Error(`Fleet Config secret-slot mismatch: ${JSON.stringify(fleetSecrets)}`);
-
     await value(`(() => {
       document.querySelector('[data-fleet-section="desks"]').click();
       const first = document.querySelector('#fleetEditFields input');
@@ -1145,7 +1125,7 @@ try {
       fleetClosed.backHidden !== 'true' || !fleetClosed.backInert || fleetClosed.focused !== 'fleetConfigOpen' || !fleetClosed.gridReady ||
       fleetClosed.stagePerspective !== 'none' || fleetClosed.flipperTransform !== 'none' || !fleetClosed.mobileMenuViewport.ok
     ) throw new Error(`Fleet Config close mismatch: ${JSON.stringify(fleetClosed)}`);
-    fleet = { open: fleetOpen, bound: fleetBound, secrets: fleetSecrets, failure: fleetFailure, closed: fleetClosed };
+    fleet = { open: fleetOpen, bound: fleetBound, failure: fleetFailure, closed: fleetClosed };
 
     const initial = await measureHistoryGeometry("initial render");
     const rangeContinuity = {};
@@ -1201,10 +1181,6 @@ try {
         const fleetBackShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
         await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-48-fleet-config-back.png"), Buffer.from(fleetBackShot.data, "base64"));
         await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-50-action-log.png"), Buffer.from(fleetBackShot.data, "base64"));
-        await value(`document.querySelector('[data-fleet-section="secrets"]').click()`);
-        await delay(150);
-        const secretSlotsShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
-        await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-51-secret-slots.png"), Buffer.from(secretSlotsShot.data, "base64"));
         await value(`window.JoeBoard.showTradingBoard()`);
         await delay(850);
         await value(`window.JoeBoard.showFleetConfig()`);

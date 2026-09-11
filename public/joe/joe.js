@@ -248,16 +248,16 @@
     secrets: {
       label: "Secret slots",
       headline: "Labels here. Secret values elsewhere.",
-      intro: "Fleet config names capability and path references only. This plane never reads, displays or stores credential contents.",
+      intro: "Fleet config can point to encrypted slots, but this plane never reads, displays or stores their contents.",
       sections: [
-        ["Plain config names the slot", "JoeDesk receives an agenix or Janus reference such as joe-board-push-token, never the credential stored behind it."],
-        ["AGE / Janus keeps the value elsewhere", "Encrypted material stays in the existing agenix or Janus operator workflow, outside JoeDesk and its action log."],
-        ["Rotation stays outside this cut", "Operators resolve references in the existing agenix/Janus workflow. HOSTD-52 owns rotation; there is no rotate control here."],
+        ["Always redacted", "The browser receives reference names only. Secret values do not belong in previews or diffs."],
+        ["Encrypted at rest", "agenix owns encrypted configuration references; Janus references keep their existing boundary."],
+        ["No new sign-in path", "This plane inherits the same externally enforced Zitadel SSO boundary as JoeDesk."],
       ],
       fields: [
         { key: "agenixRefs", label: "agenix refs", value: "joe-board-push-token", path: "secretSlots.agenix", type: "refs", editable: false },
         { key: "janusRefs", label: "Janus refs", value: "", path: "secretSlots.janus", type: "refs", editable: false },
-        { key: "displayMode", label: "Display", value: "Refs only", editable: false },
+        { key: "displayMode", label: "Display", value: "Redacted", editable: false },
       ],
     },
   };

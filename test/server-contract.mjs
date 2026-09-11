@@ -272,7 +272,7 @@ describe("server contract", () => {
       body: JSON.stringify({ baseRev: initial.body.rev, config: protectedSlot }),
     });
     assert.equal(protectedSlotResult.status, 422);
-    assert.equal(protectedSlotResult.body.error, "secret slots are reference-only and read-only; rotation remains HOSTD-52");
+    assert.equal(protectedSlotResult.body.error, "secret slots are read-only in HOSTD-49");
     assert.deepEqual(protectedSlotResult.body.action.changedKeys, ["secretSlots.[redacted]"]);
 
     const noChange = await jsonFetch("/joe/fleet-config/propagate", {

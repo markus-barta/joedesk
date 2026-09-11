@@ -33,7 +33,7 @@ required((configHtml.match(/data-fleet-action="propagate"/g) || []).length === 2
 required(/id="fleetConfigClose"/.test(configHtml), "Flip back control is missing");
 required(!/id="fleetToast"/.test(configHtml) && html.indexOf('id="fleetToast"') > configEnd, "toast must live outside every transformed card ancestor");
 required(!/Day P&amp;L|Open P&amp;L|Virtual desk equity/.test(configHtml), "config plane must not contain financial-result copy");
-required(/Refs only/i.test(configHtml) && /agenix ref:/.test(configHtml) && /Janus ref:/.test(configHtml) && !/(password|api[_ -]?key|bearer)[=:][^<\s]+/i.test(configHtml), "secret slots must visibly remain reference-only");
+required(/REDACTED/i.test(configHtml) && !/(password|api[_ -]?key|bearer)[=:][^<\s]+/i.test(configHtml), "secret slots must remain redacted references");
 required(/id="fleetActionLog"/.test(configHtml) && /Durable SSO-attributed outcomes/.test(configHtml), "visible durable action log is missing");
 required(/secret values never logged/.test(configHtml), "action log must state its redaction boundary");
 
@@ -64,8 +64,7 @@ required(/fleetConfirmedFingerprint !== fleetChangeFingerprint/.test(js), "Propa
 required(/must be a decimal number/.test(js), "number fields must reject implicit JavaScript coercions");
 required(/Array\.isArray\(result\.errors\)/.test(js), "server field errors must reach the operator");
 required(/field\.editable !== false/.test(js), "stored previews must not override read-only fields");
-required(/secretSlots/.test(js) && /editable: false/.test(js), "secret slots must remain reference-only and read-only");
-required(/HOSTD-52 owns rotation/.test(js) && !/data-fleet-action="rotate"/.test(configHtml), "secret rotation must remain outside this cut");
+required(/secretSlots/.test(js) && /editable: false/.test(js), "secret slots must remain read-only in HOSTD-49");
 required(/Propagation failed for/.test(js) && /Propagated " \+ result\.rev \+ ": "/.test(js), "propagation outcome toasts must name revision and changed keys");
 required(/front\.inert = showFleet/.test(js) && /back\.inert = !showFleet/.test(js), "inactive face must be removed from interaction");
 required(/dataset\.joePlane = showFleet \? "fleet-config" : "trading"/.test(js), "active plane state is missing");

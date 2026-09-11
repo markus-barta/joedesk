@@ -12,7 +12,7 @@
           "Diff and Confirm now guard every Fleet Config propagation from the back plane.",
           "Each propagation writes a new shared revision for Amy and desks plus a durable, SSO-attributed outcome containing changed-key names only.",
           "The plane shows success and failure toasts and the latest propagation records without logging config values.",
-          "Secret slots show agenix and Janus references only; values and rotation remain outside JoeDesk.",
+          "The v1 schema keeps the mode paper-only and accepts encrypted secret-slot reference names, never secret values.",
         ],
       },
       {
