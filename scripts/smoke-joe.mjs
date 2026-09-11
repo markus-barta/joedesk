@@ -18,6 +18,7 @@ const requests = [];
 
 await cp(join(repoRoot, "public"), site, { recursive: true });
 const sample = JSON.parse(await readFile(join(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"));
+let fleetConfig = JSON.parse(await readFile(join(repoRoot, "public/joe/fleet-config.example.json"), "utf8"));
 
 async function writeSnapshot(overrides = {}) {
   const snapshot = structuredClone(sample);
@@ -94,6 +95,34 @@ let historyUnavailable = false;
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", "http://local.test");
   requests.push({ host: request.headers.host || "", path: url.pathname });
+  if (request.method === "GET" && url.pathname === "/joe/fleet-config.json") {
+    response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(JSON.stringify(fleetConfig));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/joe/fleet-config/propagate") {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (body.baseRev !== fleetConfig.rev || body.config?.rev !== fleetConfig.rev) {
+      response.writeHead(409, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ok: false, error: "fleet config revision conflict", currentRev: fleetConfig.rev }));
+      return;
+    }
+    const sequence = Number(fleetConfig.rev.slice(3)) + 1;
+    fleetConfig = structuredClone(body.config);
+    fleetConfig.rev = `fc-${String(sequence).padStart(6, "0")}`;
+    fleetConfig.updatedAt = new Date().toISOString();
+    response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(JSON.stringify({
+      ok: true,
+      rev: fleetConfig.rev,
+      propagatedAt: fleetConfig.updatedAt,
+      config: fleetConfig,
+      adapter: { id: "shared-file", status: "written", path: "/var/lib/joe-board/fleet-config.json", consumers: ["amy", "desks"], reload: "read-on-revision" },
+    }));
+    return;
+  }
   const relative = url.pathname === "/" ? "index.html" : url.pathname.replace(/^\/+/, "");
   if (relative.includes("..")) {
     response.writeHead(400);
@@ -916,24 +945,47 @@ try {
     if (
       fleetOpen.plane !== 'fleet-config' || !fleetOpen.flipped || fleetOpen.transform === 'none' ||
       fleetOpen.frontHidden !== 'true' || !fleetOpen.frontInert || fleetOpen.backHidden !== 'false' || fleetOpen.backInert ||
-      !/Fleet Config/.test(fleetOpen.title) || fleetOpen.revision !== packageVersion ||
+      !/Fleet Config/.test(fleetOpen.title) || fleetOpen.revision !== 'fc-000000' ||
       fleetOpen.selected !== 'Selected: Quota policy' || fleetOpen.headline !== 'Keep a little in the tank.' ||
       fleetOpen.sections !== 7 || JSON.stringify(fleetOpen.fields) !== JSON.stringify(['grok.reservePct', 'codex.reservePct', 'onRed']) ||
       !fleetOpen.actions.includes('diff') || !fleetOpen.actions.includes('confirm') || !fleetOpen.actions.includes('propagate') || !fleetOpen.actions.includes('save') ||
       /Day P&L|Open P&L|Virtual desk equity/.test(fleetOpen.configText) || fleetOpen.overflow
     ) throw new Error(`Fleet Config open mismatch: ${JSON.stringify(fleetOpen)}`);
 
-    const fleetBound = await value(`(() => {
+    await value(`(() => {
       document.querySelector('[data-fleet-section="desks"]').click();
-      const first = document.querySelector('#fleetEditFields input');
+      let inputs = [...document.querySelectorAll('#fleetEditFields input')];
+      inputs[1].value = '';
+      inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-action="diff"]').click();
+      const emptyNumberToast = document.getElementById('fleetToast').textContent;
+      inputs[1].value = '0x10';
+      inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-action="diff"]').click();
+      const coercedNumberToast = document.getElementById('fleetToast').textContent;
+      inputs[1].value = '250.0';
+      inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-action="diff"]').click();
+      const normalizedNumberToast = document.getElementById('fleetToast').textContent;
+      inputs = [...document.querySelectorAll('#fleetEditFields input')];
+      const first = inputs[0];
       first.value = '4';
       first.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector('[data-fleet-action="diff"]').click();
-      const diffToast = document.getElementById('fleetToast').textContent;
+      window.__fleetSmokeFlow = {
+        emptyNumberToast,
+        coercedNumberToast,
+        normalizedNumberToast,
+        diffToast: document.getElementById('fleetToast').textContent,
+        diffOpen: document.getElementById('fleetDiffDialog').open,
+        diffText: document.getElementById('fleetDiffList').innerText,
+      };
       document.querySelector('[data-fleet-action="confirm"]').click();
-      const confirmToast = document.getElementById('fleetToast').textContent;
+      window.__fleetSmokeFlow.confirmToast = document.getElementById('fleetToast').textContent;
       document.querySelector('[data-fleet-action="propagate"]').click();
-      const propagateToast = document.getElementById('fleetToast').textContent;
+    })()`);
+    await delay(200);
+    const fleetBound = await value(`(() => {
       const toastRect = document.getElementById('fleetToast').getBoundingClientRect();
       const result = {
         selected: document.getElementById('fleetSelectedLabel').textContent,
@@ -941,25 +993,32 @@ try {
         fields: [...document.querySelectorAll('#fleetEditFields input')].map(node => node.dataset.fleetField),
         changed: window.JoeBoard.fleetChangedEntries(),
         summaryValue: document.querySelector('[data-fleet-readout="maxBusyDesks"]').textContent,
-        diffToast,
-        confirmToast,
-        propagateToast,
+        diffToast: window.__fleetSmokeFlow.diffToast,
+        diffOpen: window.__fleetSmokeFlow.diffOpen,
+        diffText: window.__fleetSmokeFlow.diffText,
+        confirmToast: window.__fleetSmokeFlow.confirmToast,
+        propagateToast: document.getElementById('fleetToast').textContent,
         toastPosition: getComputedStyle(document.getElementById('fleetToast')).position,
         toastInViewport: toastRect.top >= 0 && toastRect.bottom <= innerHeight,
         note: document.getElementById('fleetPreviewNote').textContent,
+        revision: document.getElementById('fleetRevision').textContent,
+        emptyNumberToast: window.__fleetSmokeFlow.emptyNumberToast,
+        coercedNumberToast: window.__fleetSmokeFlow.coercedNumberToast,
+        normalizedNumberToast: window.__fleetSmokeFlow.normalizedNumberToast,
       };
-      first.value = '5';
-      first.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector('[data-fleet-section="quota"]').click();
       return result;
     })()`);
     if (
       fleetBound.selected !== 'Selected: Desk fleet' || fleetBound.headline !== 'Five desks, one guarded runway.' ||
       JSON.stringify(fleetBound.fields) !== JSON.stringify(['maxBusyDesks', 'stage0CapEur', 'keepSymbols']) ||
-      JSON.stringify(fleetBound.changed) !== JSON.stringify(['maxBusyDesks']) ||
+      JSON.stringify(fleetBound.changed) !== JSON.stringify([]) ||
       fleetBound.summaryValue !== '4' || fleetBound.toastPosition !== 'fixed' || !fleetBound.toastInViewport ||
-      !/1 preview change: maxBusyDesks/.test(fleetBound.diffToast) || !/Preview confirmed/.test(fleetBound.confirmToast) ||
-      !/HOSTD-49\/50/.test(fleetBound.propagateToast) || !/confirmed/.test(fleetBound.note)
+      !/must be a decimal number/.test(fleetBound.emptyNumberToast) || !/must be a decimal number/.test(fleetBound.coercedNumberToast) ||
+      !/matches the current Fleet Config revision/.test(fleetBound.normalizedNumberToast) ||
+      !fleetBound.diffOpen || !/maxBusyDesks/.test(fleetBound.diffText) ||
+      !/1 preview change: maxBusyDesks/.test(fleetBound.diffToast) || !/Preview confirmed for fc-000000/.test(fleetBound.confirmToast) ||
+      !/Propagated fc-000001/.test(fleetBound.propagateToast) || fleetBound.revision !== 'fc-000001' || !/Current fc-000001/.test(fleetBound.note)
     ) throw new Error(`Fleet Config binding mismatch: ${JSON.stringify(fleetBound)}`);
 
     await value(`window.JoeBoard.showTradingBoard()`);

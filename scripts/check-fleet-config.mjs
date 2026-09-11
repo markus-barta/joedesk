@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { validateFleetConfig, nextFleetRevision } from "../fleet-config.mjs";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
-const [html, css, js, packageJson] = await Promise.all([
+const [html, css, js, packageJson, schema, example] = await Promise.all([
   readFile(resolve(repoRoot, "public/joe/index.html"), "utf8"),
   readFile(resolve(repoRoot, "public/joe/joe.css"), "utf8"),
   readFile(resolve(repoRoot, "public/joe/joe.js"), "utf8"),
   readFile(resolve(repoRoot, "package.json"), "utf8").then(JSON.parse),
+  readFile(resolve(repoRoot, "public/joe/fleet-config.schema.json"), "utf8").then(JSON.parse),
+  readFile(resolve(repoRoot, "public/joe/fleet-config.example.json"), "utf8").then(JSON.parse),
 ]);
 
 function required(condition, message) {
@@ -52,10 +55,23 @@ for (const [id, section] of Object.entries(model)) {
   required(section.fields.every((field) => /^[A-Za-z][A-Za-z0-9.]*$/.test(field.key) && typeof field.value === "string"), `${id} has an invalid preview field`);
   required(section.fields.every((field) => configHtml.includes(`data-fleet-readout="${field.key}"`)), `${id} summary does not mirror every preview field`);
 }
-required(/HOSTD-49\/50 will carry confirmed previews/.test(js), "Propagate must name its follow-up tickets");
+required(/\.\/fleet-config\.json/.test(js) && /\.\/fleet-config\/propagate/.test(js), "Fleet Config read/write endpoints are missing");
+required(/fleetDiffFingerprint !== fleetChangeFingerprint/.test(js), "Confirm must require the current diff preview");
+required(/fleetConfirmedFingerprint !== fleetChangeFingerprint/.test(js), "Propagate must require the current confirmed diff");
+required(/must be a decimal number/.test(js), "number fields must reject implicit JavaScript coercions");
+required(/Array\.isArray\(result\.errors\)/.test(js), "server field errors must reach the operator");
+required(/field\.editable !== false/.test(js), "stored previews must not override read-only fields");
+required(/secretSlots/.test(js) && /editable: false/.test(js), "secret slots must remain read-only in HOSTD-49");
 required(/front\.inert = showFleet/.test(js) && /back\.inert = !showFleet/.test(js), "inactive face must be removed from interaction");
 required(/dataset\.joePlane = showFleet \? "fleet-config" : "trading"/.test(js), "active plane state is missing");
-required(new RegExp(`rev <span id="fleetRevision">${packageJson.version.replaceAll(".", "\\.")}</span>`).test(configHtml), "Fleet Config fallback revision must match package version");
+required(/rev <span id="fleetRevision">fc-000000<\/span>/.test(configHtml), "Fleet Config fallback revision is missing");
+required(schema.$id && schema.properties?.mode?.const === "paper", "Fleet Config schema must be paper-only");
+required(schema.properties?.secretSlots?.$ref || schema.properties?.secretSlots, "Fleet Config schema must define secret slots");
+const validated = validateFleetConfig(example);
+required(validated.ok, `Fleet Config example is invalid: ${validated.errors.join("; ")}`);
+required(example.rev === "fc-000000" && nextFleetRevision(example.rev) === "fc-000001", "Fleet Config revision fixture is invalid");
+required(example.mode === "paper", "Fleet Config example must remain paper-only");
+required(!/(?:password|apiKey|tokenValue|secretValue)/i.test(JSON.stringify(example)), "Fleet Config example contains a plaintext-secret field");
 
 console.log(JSON.stringify({
   ok: true,
@@ -63,5 +79,6 @@ console.log(JSON.stringify({
   sections: Object.keys(model).length,
   fields: Object.values(model).reduce((count, section) => count + section.fields.length, 0),
   motion: "native CSS 3D rigid-card transform",
-  propagate: "stubbed to HOSTD-49/50",
+  propagate: "atomic shared-file adapter",
+  exampleRev: example.rev,
 }, null, 2));

@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 /**
  * Joe household board service (csb0).
- * Serves static /joe/ UI + schema + latest snapshot + history series.
+ * Serves static /joe/ UI + schemas + latest snapshot + history + Fleet Config.
  * Accepts POST /joe/inbox with Bearer token (machine push; no browser OAuth).
- * Paper projection only — never talks to IB, never places orders.
+ * Accepts same-origin POST /joe/fleet-config/propagate behind external Zitadel SSO.
+ * Paper mutation only — never talks to IB, never places orders.
  */
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { validateHouseholdSnapshot } from "./validate.mjs";
+import { validateFleetConfig, withNextFleetRevision } from "./fleet-config.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public", "joe");
@@ -18,6 +21,8 @@ const PUBLIC = path.join(__dirname, "public", "joe");
 const DATA_DIR = "/var/lib/joe-board";
 const DATA_FILE = path.join(DATA_DIR, "data.json");
 const HISTORY_FILE = path.join(DATA_DIR, "history.json");
+const FLEET_CONFIG_FILE = path.join(DATA_DIR, "fleet-config.json");
+const FLEET_CONFIG_EXAMPLE = path.join(PUBLIC, "fleet-config.example.json");
 const HISTORY_SCHEMA = "inspr.joe.household.history.v1";
 const HISTORY_MAX_POINTS = 10000;
 const HISTORY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
@@ -32,6 +37,8 @@ const STATIC_FILES = Object.freeze({
   "/joe/": "index.html",
   "/joe/index.html": "index.html",
   "/joe/data.schema.json": "data.schema.json",
+  "/joe/fleet-config.schema.json": "fleet-config.schema.json",
+  "/joe/fleet-config.example.json": "fleet-config.example.json",
   "/joe/joe.css": "joe.css",
   "/joe/joe.js": "joe.js",
   "/joe/joe-version.js": "joe-version.js",
@@ -85,6 +92,41 @@ function atomicWriteJson(file, obj) {
   const tmp = `${file}.next`;
   fs.writeFileSync(tmp, text, { mode: 0o644 });
   fs.renameSync(tmp, file);
+}
+
+function parseFleetConfig(raw, source) {
+  const parsed = JSON.parse(raw);
+  const result = validateFleetConfig(parsed);
+  if (!result.ok) {
+    throw new Error(`${source} failed Fleet Config validation: ${result.errors.slice(0, 5).join("; ")}`);
+  }
+  return parsed;
+}
+
+function readFleetConfig() {
+  try {
+    return parseFleetConfig(fs.readFileSync(FLEET_CONFIG_FILE, "utf8"), FLEET_CONFIG_FILE);
+  } catch (err) {
+    if (!err || err.code !== "ENOENT") throw err;
+    return parseFleetConfig(fs.readFileSync(FLEET_CONFIG_EXAMPLE, "utf8"), FLEET_CONFIG_EXAMPLE);
+  }
+}
+
+function requestIsSameOrigin(req) {
+  if (req.headers["sec-fetch-site"] && req.headers["sec-fetch-site"] !== "same-origin") return false;
+  const origin = String(req.headers.origin || "");
+  if (!origin) return false;
+  let originHost;
+  try {
+    originHost = new URL(origin).host.toLowerCase();
+  } catch {
+    return false;
+  }
+  const requestHosts = [req.headers["x-forwarded-host"], req.headers.host]
+    .flatMap((value) => String(value || "").split(","))
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  return requestHosts.includes(originHost);
 }
 
 
@@ -216,8 +258,8 @@ function send(res, status, body, headers = {}) {
   res.end(payload);
 }
 
-function sendJson(res, status, obj) {
-  send(res, status, `${JSON.stringify(obj)}\n`, { "Content-Type": "application/json; charset=utf-8" });
+function sendJson(res, status, obj, headers = {}) {
+  send(res, status, `${JSON.stringify(obj)}\n`, { "Content-Type": "application/json; charset=utf-8", ...headers });
 }
 
 function readBody(req, limit) {
@@ -309,7 +351,131 @@ async function handleInbox(req, res) {
   });
 }
 
+function sendFleetConfig(req, res) {
+  let config;
+  try {
+    config = readFleetConfig();
+  } catch (err) {
+    console.error("fleet config read failed", err);
+    sendJson(res, 503, { ok: false, error: "fleet config unavailable" });
+    return;
+  }
+  const etag = `"${config.rev}"`;
+  if (req.headers["if-none-match"] === etag) {
+    send(res, 304, "", { ETag: etag, "Cache-Control": "private, no-cache" });
+    return;
+  }
+  sendJson(res, 200, config, { ETag: etag, "Cache-Control": "private, no-cache" });
+}
+
+async function handleFleetPropagate(req, res) {
+  if (req.method !== "POST") {
+    sendJson(res, 405, { ok: false, error: "method not allowed" });
+    return;
+  }
+  // The route inherits JoeDesk's Zitadel reverse-proxy boundary. These browser
+  // signals additionally reject cross-site and direct unauthenticated writes.
+  if (!requestIsSameOrigin(req)) {
+    sendJson(res, 403, { ok: false, error: "same-origin authenticated browser required" });
+    return;
+  }
+  if (!String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
+    sendJson(res, 415, { ok: false, error: "content-type must be application/json" });
+    return;
+  }
+
+  let raw;
+  try {
+    raw = await readBody(req, MAX_BODY);
+  } catch (err) {
+    sendJson(res, err.code === "TOO_LARGE" ? 413 : 400, { ok: false, error: err.code === "TOO_LARGE" ? "body too large" : "bad body" });
+    return;
+  }
+
+  let body;
+  try {
+    body = JSON.parse(raw.toString("utf8"));
+  } catch {
+    sendJson(res, 400, { ok: false, error: "invalid json" });
+    return;
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => !["baseRev", "config"].includes(key)) || !Object.hasOwn(body, "baseRev") || !Object.hasOwn(body, "config")) {
+    sendJson(res, 422, { ok: false, error: "propagate envelope is invalid" });
+    return;
+  }
+
+  let current;
+  try {
+    current = readFleetConfig();
+  } catch (err) {
+    console.error("fleet config read failed", err);
+    sendJson(res, 503, { ok: false, error: "fleet config unavailable" });
+    return;
+  }
+  if (body.baseRev !== current.rev || body.config?.rev !== body.baseRev) {
+    sendJson(res, 409, { ok: false, error: "fleet config revision conflict", currentRev: current.rev });
+    return;
+  }
+
+  const candidateResult = validateFleetConfig(body.config);
+  if (!candidateResult.ok) {
+    sendJson(res, 422, { ok: false, error: "schema validation failed", errors: candidateResult.errors.slice(0, 20) });
+    return;
+  }
+  if (!isDeepStrictEqual(body.config.tools, current.tools)) {
+    sendJson(res, 422, { ok: false, error: "tools are read-only" });
+    return;
+  }
+  if (!isDeepStrictEqual(body.config.secretSlots, current.secretSlots)) {
+    sendJson(res, 422, { ok: false, error: "secret slots are read-only in HOSTD-49" });
+    return;
+  }
+  const comparable = structuredClone(body.config);
+  comparable.rev = current.rev;
+  comparable.updatedAt = current.updatedAt;
+  if (isDeepStrictEqual(comparable, current)) {
+    sendJson(res, 422, { ok: false, error: "fleet config has no changes" });
+    return;
+  }
+
+  let next;
+  try {
+    next = withNextFleetRevision(body.config, current.rev);
+    const nextResult = validateFleetConfig(next);
+    if (!nextResult.ok) throw new Error(nextResult.errors.slice(0, 5).join("; "));
+    atomicWriteJson(FLEET_CONFIG_FILE, next);
+  } catch (err) {
+    console.error("fleet config atomic write failed", err);
+    sendJson(res, 500, { ok: false, error: "fleet config store failed" });
+    return;
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    rev: next.rev,
+    propagatedAt: next.updatedAt,
+    config: next,
+    adapter: {
+      id: "shared-file",
+      status: "written",
+      path: FLEET_CONFIG_FILE,
+      consumers: ["amy", "desks"],
+      reload: "read-on-revision",
+    },
+    hooks: {
+      actionLog: "HOSTD-50",
+      secretSlots: "HOSTD-51",
+      rotation: "HOSTD-52",
+    },
+  });
+}
+
 function handleStatic(req, res, urlPath) {
+  if (urlPath === "/joe/fleet-config.json") {
+    sendFleetConfig(req, res);
+    return;
+  }
+
   if (urlPath === "/joe/data.json") {
     let body;
     try {
@@ -379,6 +545,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (urlPath === "/joe/fleet-config/propagate") {
+      await handleFleetPropagate(req, res);
+      return;
+    }
+
     if (urlPath.startsWith("/joe/")) {
       if (req.method !== "GET" && req.method !== "HEAD") {
         sendJson(res, 405, { ok: false, error: "method not allowed" });
@@ -396,6 +567,12 @@ const server = http.createServer(async (req, res) => {
 });
 
 ensureDataDir();
+try {
+  readFleetConfig();
+} catch (err) {
+  // Keep the household board available; Fleet Config routes fail closed with 503.
+  console.error("fleet config unavailable at startup", err);
+}
 server.listen(BIND_PORT, BIND_HOST, () => {
   console.log(`joe-board listening on ${BIND_HOST}:${BIND_PORT} data=${DATA_DIR}`);
 });

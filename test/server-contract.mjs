@@ -6,7 +6,7 @@
  * See scripts/run-server-contract.mjs or CI package job.
  */
 import { spawn } from "node:child_process";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { readFileSync, readdirSync } from "node:fs";
 import http from "node:http";
 import assert from "node:assert/strict";
@@ -212,7 +212,7 @@ describe("server contract", () => {
 
   test("static UI assets are served with JoeVersion from source", async () => {
     assertServerAlive();
-    for (const path of ["/joe/", "/joe/joe.js", "/joe/joe-version.js", "/joe/data.schema.json"]) {
+    for (const path of ["/joe/", "/joe/joe.js", "/joe/joe-version.js", "/joe/data.schema.json", "/joe/fleet-config.schema.json", "/joe/fleet-config.example.json"]) {
       const res = await fetch(`${BASE}${path}`);
       assert.equal(res.status, 200, path);
       const text = await res.text();
@@ -221,6 +221,98 @@ describe("server contract", () => {
     const versionRes = await fetch(`${BASE}/joe/joe-version.js`);
     const versionText = await versionRes.text();
     assert.match(versionText, new RegExp(`APP_VERSION:\\s*"${appVersion.replace(/\./g, "\\.")}"`));
+  });
+
+  test("Fleet Config propagates one atomic paper revision to the shared adapter", async () => {
+    assertServerAlive();
+    const initial = await jsonFetch("/joe/fleet-config.json");
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.schema, "inspr.joe.fleet-config.v1");
+    assert.equal(initial.body.mode, "paper");
+    assert.equal(initial.body.rev, "fc-000000");
+    assert.equal(initial.headers.get("etag"), '"fc-000000"');
+
+    const missingBrowserBoundary = await jsonFetch("/joe/fleet-config/propagate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ baseRev: initial.body.rev, config: initial.body }),
+    });
+    assert.equal(missingBrowserBoundary.status, 403);
+
+    const invalid = structuredClone(initial.body);
+    invalid.secretSlots.agenix = ["NOT-A-REFERENCE"];
+    const rejected = await jsonFetch("/joe/fleet-config/propagate", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ baseRev: initial.body.rev, config: invalid }),
+    });
+    assert.equal(rejected.status, 422);
+    assert.equal(rejected.body.error, "schema validation failed");
+
+    const protectedSlot = structuredClone(initial.body);
+    protectedSlot.secretSlots.janus = ["paper-session"];
+    const protectedSlotResult = await jsonFetch("/joe/fleet-config/propagate", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ baseRev: initial.body.rev, config: protectedSlot }),
+    });
+    assert.equal(protectedSlotResult.status, 422);
+    assert.equal(protectedSlotResult.body.error, "secret slots are read-only in HOSTD-49");
+
+    const noChange = await jsonFetch("/joe/fleet-config/propagate", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ baseRev: initial.body.rev, config: initial.body }),
+    });
+    assert.equal(noChange.status, 422);
+    assert.equal(noChange.body.error, "fleet config has no changes");
+
+    const candidate = structuredClone(initial.body);
+    candidate.desks.maxBusyDesks = 4;
+    const propagated = await jsonFetch("/joe/fleet-config/propagate", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ baseRev: initial.body.rev, config: candidate }),
+    });
+    assert.equal(propagated.status, 200);
+    assert.equal(propagated.body.ok, true);
+    assert.equal(propagated.body.rev, "fc-000001");
+    assert.equal(propagated.body.config.mode, "paper");
+    assert.equal(propagated.body.config.desks.maxBusyDesks, 4);
+    assert.deepEqual(propagated.body.adapter, {
+      id: "shared-file",
+      status: "written",
+      path: "/var/lib/joe-board/fleet-config.json",
+      consumers: ["amy", "desks"],
+      reload: "read-on-revision",
+    });
+
+    const stored = JSON.parse(await readFile(join(DATA_DIR, "fleet-config.json"), "utf8"));
+    assert.deepEqual(stored, propagated.body.config);
+    assert.equal((await stat(join(DATA_DIR, "fleet-config.json"))).mode & 0o777, 0o644);
+    assert.equal((await readdir(DATA_DIR)).includes("fleet-config.json.next"), false);
+
+    const current = await jsonFetch("/joe/fleet-config.json");
+    assert.equal(current.body.rev, "fc-000001");
+    const notModified = await fetch(`${BASE}/joe/fleet-config.json`, { headers: { "if-none-match": '"fc-000001"' } });
+    assert.equal(notModified.status, 304);
+    assert.equal(notModified.headers.get("cache-control"), "private, no-cache");
+    const stale = await jsonFetch("/joe/fleet-config/propagate", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ baseRev: initial.body.rev, config: candidate }),
+    });
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.currentRev, "fc-000001");
+
+    await writeFile(join(DATA_DIR, "fleet-config.json"), '{"schema":"invalid"}\n');
+    const unavailable = await jsonFetch("/joe/fleet-config.json");
+    assert.equal(unavailable.status, 503);
+    assert.deepEqual(unavailable.body, { ok: false, error: "fleet config unavailable" });
+    const boardHealth = await jsonFetch("/healthz");
+    assert.equal(boardHealth.status, 200);
+    assert.equal(boardHealth.body.ok, true);
+    await writeFile(join(DATA_DIR, "fleet-config.json"), `${JSON.stringify(stored, null, 2)}\n`);
   });
 
   test("POST /joe/inbox rejects missing auth per server", async () => {

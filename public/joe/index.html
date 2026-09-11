@@ -237,7 +237,7 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">0.8.0</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">26.09.11</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>
@@ -255,7 +255,7 @@
           <path d="M1 14h26" stroke="currentColor" stroke-width="1.2" opacity=".35"/>
         </svg>
         <h1 id="fleetConfigTitle">JoeDesk <span>·</span> Fleet Config</h1>
-        <span class="fleet-revision">rev <span id="fleetRevision">0.8.0</span></span>
+        <span class="fleet-revision">rev <span id="fleetRevision">fc-000000</span></span>
       </div>
       <div class="fleet-actions" role="toolbar" aria-label="Fleet Config actions">
         <button class="fleet-button" type="button" data-fleet-action="diff">
@@ -320,7 +320,7 @@
             <span class="fleet-row-main">
               <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3z"/></svg>
               <span class="fleet-row-copy"><strong>Mac shared paths</strong><small>Where things live</small></span>
-              <span class="fleet-row-values fleet-row-values--paths"><code data-fleet-readout="configPath">~/Shared/JoeDesk/fleet-config</code><code data-fleet-readout="docsPath">~/Shared/JoeDesk/docs</code></span>
+              <span class="fleet-row-values fleet-row-values--paths"><code data-fleet-readout="configPath">~/trading-team/shared/fleet-config.json</code><code data-fleet-readout="docsPath">~/trading-team/shared/docs</code></span>
               <span class="fleet-chevron" aria-hidden="true">›</span>
             </span>
           </button>
@@ -337,8 +337,8 @@
           <button class="fleet-section" type="button" data-fleet-section="tools" aria-pressed="false">
             <span class="fleet-row-main">
               <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6a5 5 0 0 0-6 6L3 17l4 4 5-5a5 5 0 0 0 6-6l-3 3-3-3z"/></svg>
-              <span class="fleet-row-copy"><strong>Tools</strong><small>External connections</small></span>
-              <span class="fleet-row-values"><span class="fleet-online" data-fleet-readout="gateway">IB Gateway</span><span class="fleet-online" data-fleet-readout="joelAdapter">joel-ib</span><span class="fleet-online" data-fleet-readout="hostTool">codexbar@hsb0</span></span>
+              <span class="fleet-row-copy"><strong>Tools</strong><small>Declared connections</small></span>
+              <span class="fleet-row-values"><span class="fleet-declared" data-fleet-readout="gateway">IB Gateway</span><span class="fleet-declared" data-fleet-readout="joelAdapter">joel-ib</span><span class="fleet-declared" data-fleet-readout="hostTool">codexbar@hsb0</span></span>
               <span class="fleet-chevron" aria-hidden="true">›</span>
             </span>
           </button>
@@ -347,7 +347,7 @@
             <span class="fleet-row-main">
               <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg>
               <span class="fleet-row-copy"><strong>Secret slots</strong><small>Encrypted references</small></span>
-              <span class="fleet-row-values"><em class="fleet-redacted" data-fleet-readout="displayMode" data-fleet-display-separator=" ">Redacted</em><span><span data-fleet-readout="agenixRefMode" data-fleet-prefix="agenix ">agenix refs</span> · <span data-fleet-readout="janusRefMode" data-fleet-prefix="Janus ">Janus refs only</span></span></span>
+              <span class="fleet-row-values"><em class="fleet-redacted" data-fleet-readout="displayMode" data-fleet-display-separator=" ">Redacted</em><span><span data-fleet-readout="agenixRefs" data-fleet-prefix="agenix: ">agenix: joe-board-push-token</span> · <span data-fleet-readout="janusRefs" data-fleet-prefix="Janus: ">Janus: none</span></span></span>
               <span class="fleet-chevron" aria-hidden="true">›</span>
             </span>
           </button>
@@ -390,6 +390,19 @@
 </main>
 
 <div class="fleet-toast" id="fleetToast" role="status" aria-live="polite" hidden></div>
+
+<dialog class="fleet-diff-dialog" id="fleetDiffDialog" aria-labelledby="fleetDiffTitle" aria-describedby="fleetDiffHelp">
+  <div class="fleet-diff-card">
+    <p class="fleet-kicker">Revision <span id="fleetDiffBase">fc-000000</span></p>
+    <h2 id="fleetDiffTitle">Review Fleet Config diff</h2>
+    <p id="fleetDiffHelp">Only these paper-fleet values will be written. Amy and desks read the resulting shared revision.</p>
+    <ul class="fleet-diff-list" id="fleetDiffList"></ul>
+    <div class="fleet-diff-actions">
+      <button class="fleet-button" id="fleetDiffCancel" type="button">Keep editing</button>
+      <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="confirm">Confirm changes</button>
+    </div>
+  </div>
+</dialog>
 
 <dialog class="layout-unsaved-dialog" id="layoutUnsavedDialog" aria-label="Unsaved layout changes" aria-describedby="layoutUnsavedMessage">
   <form method="dialog" class="layout-unsaved-card">

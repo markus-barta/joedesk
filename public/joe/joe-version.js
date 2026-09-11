@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.8.0",
+    APP_VERSION: "26.09.11",
     VERSION_HISTORY: [
+      {
+        version: "26.09.11",
+        date: "2026-09-11",
+        title: "Fleet Config reaches the paper fleet",
+        changes: [
+          "Diff and Confirm now guard every Fleet Config propagation from the back plane.",
+          "Each propagation atomically writes a new shared revision for Amy and desks to read directly.",
+          "The v1 schema keeps the mode paper-only and accepts encrypted secret-slot reference names, never secret values.",
+        ],
+      },
       {
         version: "0.8.0",
         date: "2026-09-11",
