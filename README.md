@@ -32,7 +32,7 @@ Provision the data directory and inbox token on your deployment host (not shown 
 **Docker (recommended):**
 
 ```bash
-docker build -t joedesk:0.7.6 .
+docker build -t joedesk:0.7.7 .
 ```
 
 Image copies `public/` unchanged. No sample or synthetic `data.json` is baked in — an empty store shows `NO DATA`.
@@ -83,7 +83,7 @@ node server.mjs
 docker run --rm -p 127.0.0.1:8080:8080 \
   -v joe-board-data:/var/lib/joe-board \
   -v /path/to/push-token:/run/secrets/joe-board-push-token:ro \
-  joedesk:0.7.6
+  joedesk:0.7.7
 ```
 
 ## Deploy notes
