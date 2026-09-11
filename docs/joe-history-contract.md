@@ -59,4 +59,12 @@ unknown, not a new basis: a trailing unknown row remains a visible gap after
 the last valid series, and matching known observations on both sides retain
 that gap without being joined across it.
 
+When selected J has a validated captured backfill curve in the current
+snapshot, the History tile also shows it in a distinct native-currency panel.
+The desk and range controls apply to that panel, but its USD or EUR realized
+result is never overlaid on the complete EUR desk-equity axis and never written
+to this history payload. A 1D selection is a trailing 24-hour window ending at
+the latest retained history observation (or the snapshot observation when no
+history exists); captured points outside it remain accurately unavailable.
+
 The hsb0 pusher submits observed snapshots to the authenticated cs0 inbox. The JoeDesk server appends accepted observations to `history.json`, retaining up to 10,000 points from the last 14 days. A repeat of the latest snapshot timestamp updates that point rather than appending another. Publisher heartbeats must not invent financial observations.

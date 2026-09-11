@@ -130,11 +130,12 @@
         <div class="widget-drag" aria-label="Drag household summary"><span>Household · paper</span><span class="drag-dots" aria-hidden="true">•••</span></div>
         <div class="hero-values">
           <div class="hero-stat hero-net">
-            <span class="label">Paper account equity</span>
-            <strong class="flap" id="brokerEquity">—</strong>
-            <span class="hero-meta" id="brokerAccountMeta">Includes KEEP · waiting for account observation</span>
-            <span class="hero-secondary"><b>Virtual desk total</b> <span id="totalEquity">—</span></span>
+            <span class="label">Virtual desk equity</span>
+            <strong class="flap" id="totalEquity">—</strong>
             <span class="hero-meta" id="deskTotalsMeta">Waiting for desk accounting</span>
+            <span class="hero-secondary"><b>Virtual starting capital</b> <span id="virtualStartingCapital">€15,000</span></span>
+            <span class="hero-secondary"><b>IB paper account NAV</b> <span id="brokerEquity">—</span></span>
+            <span class="hero-meta" id="brokerAccountMeta">Whole account including KEEP · not virtual desk capital</span>
           </div>
           <div class="hero-stat"><span class="label">Day</span><strong id="totalDay">—</strong></div>
           <div class="hero-stat"><span class="label">Open</span><strong id="totalOpen">—</strong></div>
@@ -188,6 +189,11 @@
         <p class="history-compare" id="historyBasisNotice" hidden role="status"></p>
         <p class="history-compare" id="historyCompare" hidden></p>
         <div class="history-canvas-wrap"><canvas id="historyChart" aria-label="Desk equity history chart" aria-describedby="historyHelp historyBasisNotice"></canvas><div class="empty-state" id="historyEmpty" hidden>History will fill as snapshots arrive.</div></div>
+        <section class="history-captured" id="historyCaptured" hidden aria-labelledby="historyCapturedTitle">
+          <div class="history-captured-head"><strong id="historyCapturedTitle">Captured J results</strong><span id="historyCapturedValue"></span></div>
+          <p id="historyCapturedMeta"></p>
+          <div class="history-captured-plot" id="historyCapturedPlot"></div>
+        </section>
       </div>
     </article>
 
@@ -204,7 +210,7 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">0.7.2</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">0.7.3</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>

@@ -121,8 +121,11 @@ function moneyOk(m, path, errors) {
       errors.push(`${path}.${k} must be number or null`);
     }
   }
+  if (Object.prototype.hasOwnProperty.call(m, "openPnl")) {
+    finiteOrNull(m.openPnl, `${path}.openPnl`, errors);
+  }
   for (const k of Object.keys(m)) {
-    if (!["equity", "dayPnl", "totalPnl"].includes(k)) errors.push(`${path} unknown key ${k}`);
+    if (!["equity", "dayPnl", "totalPnl", "openPnl"].includes(k)) errors.push(`${path} unknown key ${k}`);
   }
 }
 

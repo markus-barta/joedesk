@@ -167,6 +167,28 @@ if (curveSummary?.textContent !== "Captured J history · USD · partial" ||
   throw new Error("captured curve must be accessible, separately titled, visible, and honest about truncation");
 }
 
+const stuckCapturedJ = structuredClone(curvedBackfill);
+stuckCapturedJ.desks[0].state = "stuck";
+stuckCapturedJ.desks[0].action = "BACKFILL_REQUIRED at 00:00:00";
+stuckCapturedJ.desks[0].issues = ["raw internal accounting detail"];
+const capturedProblems = api.snapshotProblems(api.validate(stuckCapturedJ), 0);
+if (!capturedProblems.some((problem) => /captured partial results are available/i.test(problem)) ||
+    capturedProblems.some((problem) => /BACKFILL_REQUIRED|raw internal accounting detail/.test(problem))) {
+  throw new Error("captured J alarm copy must be useful while raw accounting diagnostics stay out of the banner");
+}
+
+const completeCapturedJ = structuredClone(stuckCapturedJ);
+completeCapturedJ.desks[0].money = { equity: 5012.5, dayPnl: null, totalPnl: 12.5, openPnl: 0 };
+completeCapturedJ.totals = { equity: 15012.5, dayPnl: null, totalPnl: 12.5, openPnl: 0 };
+const completeCapturedProblems = api.snapshotProblems(api.validate(completeCapturedJ), 0);
+if (completeCapturedProblems.some((problem) => /complete equity is unavailable|Coverage gaps remain/.test(problem))) {
+  throw new Error("restored complete J money must not produce the partial-accounting gap banner");
+}
+if (!completeCapturedProblems.some((problem) => /complete accounting is available/.test(problem)) ||
+    completeCapturedProblems.some((problem) => /BACKFILL_REQUIRED|raw internal accounting detail/.test(problem))) {
+  throw new Error("a still-stuck complete J must keep raw diagnostics behind details without hiding restored accounting");
+}
+
 const unrelatedMethod = structuredClone(syntheticBackfill);
 unrelatedMethod.capturedSubtotal.method = "account-average-cost-realized";
 if (api.backfillPresentation(unrelatedMethod).method !== null) {
@@ -248,7 +270,8 @@ const freshAccountView = api.brokerAccountPresentation(freshAccountValidated);
 if (
   freshAccountView.value !== sample.brokerAccount.equity ||
   freshAccountView.state !== "available" ||
-  !/Includes KEEP/.test(freshAccountView.meta)
+  !/including KEEP/i.test(freshAccountView.meta) ||
+  !/not virtual desk capital/.test(freshAccountView.meta)
 ) {
   throw new Error("valid broker account equity must be useful and explicitly include KEEP");
 }
@@ -482,15 +505,21 @@ if (!/table\.positions-table-empty thead\s*\{[^}]*display:\s*none/.test(cssSourc
 if (!/syncPositionsTableLayout/.test(joeSource) || !/positions-table-empty/.test(joeSource)) {
   throw new Error("renderPositions must toggle the empty positions table layout");
 }
-if (!/Paper account equity/.test(htmlSource) || !/id="brokerEquity"/.test(htmlSource) || !/Includes KEEP/.test(htmlSource)) {
-  throw new Error("hero must clearly label scoped paper account equity and KEEP inclusion");
+const virtualEquityAt = htmlSource.indexOf("Virtual desk equity");
+const brokerNavAt = htmlSource.indexOf("IB paper account NAV");
+if (virtualEquityAt < 0 || brokerNavAt < 0 || virtualEquityAt > brokerNavAt || !/id="brokerEquity"/.test(htmlSource) || !/including KEEP/.test(htmlSource)) {
+  throw new Error("hero must lead with virtual desk equity and keep whole-account IB NAV secondary");
 }
-if (!/Virtual desk total/.test(htmlSource) || !/J accounting incomplete · desk total unavailable/.test(joeSource)) {
-  throw new Error("hero must keep desk totals separate and explain incomplete J accounting");
+if (!/Virtual starting capital/.test(htmlSource) || !/J accounting incomplete · desk total unavailable/.test(joeSource) || !/not virtual desk capital/.test(joeSource)) {
+  throw new Error("hero must separate starting capital, virtual desk equity, and whole-account NAV scope");
 }
 if (!/\.desk-backfill-history\s*\{[^}]*max-width:\s*100%[^}]*overflow:\s*hidden/.test(cssSource) ||
     !/\.desk-backfill-chart\s*\{[^}]*width:\s*100%[^}]*max-width:\s*100%/.test(cssSource)) {
   throw new Error("captured history disclosure and SVG must remain bounded on mobile");
+}
+if (!/\.history-captured\s*\{[^}]*min-width:\s*0[^}]*overflow:\s*hidden/.test(cssSource) ||
+    !/id="historyCaptured"/.test(htmlSource) || !/Native /.test(joeSource)) {
+  throw new Error("main History must provide a bounded, explicitly native-currency J panel");
 }
 
 console.log(JSON.stringify({

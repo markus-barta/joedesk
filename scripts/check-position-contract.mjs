@@ -92,7 +92,21 @@ assertOk(
 
 const openPnlTotals = structuredClone(sample);
 openPnlTotals.totals.openPnl = 12.5;
-assertFail(openPnlTotals, /totals unknown key openPnl/, "money.openPnl remains rejected on server");
+openPnlTotals.desks[0].money.openPnl = 0;
+openPnlTotals.desks[1].money.openPnl = null;
+assertOk(openPnlTotals, "optional finite-or-null money.openPnl accepted on desks and totals");
+
+const invalidDeskOpenPnl = structuredClone(openPnlTotals);
+invalidDeskOpenPnl.desks[0].money.openPnl = Number.NaN;
+assertFail(invalidDeskOpenPnl, /desks\[0\]\.money\.openPnl must be number or null/, "non-finite desk money.openPnl rejected");
+
+const invalidTotalsOpenPnl = structuredClone(openPnlTotals);
+invalidTotalsOpenPnl.totals.openPnl = "12.5";
+assertFail(invalidTotalsOpenPnl, /totals\.openPnl must be number or null/, "string totals.openPnl rejected");
+
+const unknownMoneyKey = structuredClone(openPnlTotals);
+unknownMoneyKey.desks[0].money.accountValue = 1;
+assertFail(unknownMoneyKey, /money unknown key accountValue/, "unknown money keys remain rejected");
 
 assertOk(structuredClone(sample), "snapshot with scoped broker account observation");
 
@@ -432,6 +446,7 @@ console.log(
         singletonBackfill: true,
         emptyBackfill: true,
         nullMethodBackfill: true,
+        moneyOpenPnl: true,
       },
       rejected: [
         "positions:null",
@@ -445,7 +460,7 @@ console.log(
         "bad accountingScope",
         "malformed J backfill",
         "backfill outside J",
-        "money.openPnl",
+        "invalid money.openPnl",
         "updatedAt:1",
         "updatedAt:bare-date",
         "updatedAt:feb30",

@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.7.2",
+    APP_VERSION: "0.7.3",
     VERSION_HISTORY: [
+      {
+        version: "0.7.3",
+        date: "2026-09-11",
+        title: "Desk equity and accessible J history",
+        changes: [
+          "Virtual desk equity is primary; whole paper-account NAV, including KEEP holdings, is shown separately.",
+          "Captured J-family results appear in History with shared desk and time filters, on their own native-currency scale.",
+          "Supplied Open P&L is accepted, and restored desk accounting no longer carries an unavailable warning just because captured history remains available.",
+        ],
+      },
       {
         version: "0.7.2",
         date: "2026-09-11",

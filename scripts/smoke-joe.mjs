@@ -236,6 +236,8 @@ try {
     deskIds: [...document.querySelectorAll('.desk-widget')].map(node => node.dataset.desk),
     states: [...document.querySelectorAll('.state')].map(node => node.textContent),
     total: document.getElementById('totalEquity')?.textContent,
+    primaryHeroLabel: document.querySelector('.hero-net > .label')?.textContent,
+    startingCapital: document.getElementById('virtualStartingCapital')?.textContent,
     brokerEquity: document.getElementById('brokerEquity')?.textContent,
     brokerMeta: document.getElementById('brokerAccountMeta')?.textContent,
     deskTotalsMeta: document.getElementById('deskTotalsMeta')?.textContent,
@@ -273,7 +275,8 @@ try {
       JSON.stringify(healthy.deskIds) !== JSON.stringify(["j", "joe", "joel"]) ||
       !healthy.states.includes("Working") || !healthy.states.includes("Sitting out") ||
       !/30[\.\s]000/.test(healthy.total || "") || !/^OK · connected/.test(healthy.gateway || "") ||
-      !/31[\.\s]482,75/.test(healthy.brokerEquity || "") || !/Includes KEEP/.test(healthy.brokerMeta || "") ||
+      !/31[\.\s]482,75/.test(healthy.brokerEquity || "") || !/including KEEP/.test(healthy.brokerMeta || "") ||
+      healthy.primaryHeroLabel !== "Virtual desk equity" || !/15[\.\s]000/.test(healthy.startingCapital || "") || !/not virtual desk capital/.test(healthy.brokerMeta || "") ||
       !/virtual books/i.test(healthy.deskTotalsMeta || "") ||
       healthy.totalDay !== "—" || !/not available yet/i.test(healthy.totalDayTitle || "") ||
       !/Day P&L is not available yet/i.test(healthy.attributionDay || "") ||
@@ -484,6 +487,8 @@ try {
       partialBackfill.brokerAccount.observedAt = partialBackfill.generatedAt;
       partialBackfill.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
       partialBackfill.totals = { equity: null, dayPnl: null, totalPnl: null };
+      const capturedStart = Date.now() - 6 * 3600_000;
+      const capturedAt = offset => new Date(capturedStart + offset).toISOString();
       partialBackfill.desks[0].backfill = {
         status: "BEST_AVAILABLE",
         fullTotalAvailable: false,
@@ -493,17 +498,17 @@ try {
           method: "captured-fifo-matched-roundtrips",
           executionCount: 43,
           commissionCount: 42,
-          fromInclusive: "2026-09-10T08:00:00.000Z",
-          throughInclusive: "2026-09-10T08:05:00.000Z",
+          fromInclusive: capturedAt(0),
+          throughInclusive: capturedAt(5 * 60_000),
           points: [
-            { at: "2026-09-10T08:00:20.000Z", realizedPnl: -4.5 },
-            { at: "2026-09-10T08:01:20.000Z", realizedPnl: 8.25 },
-            { at: "2026-09-10T08:04:20.000Z", realizedPnl: 8.25 },
-            { at: "2026-09-10T08:05:00.000Z", realizedPnl: -37.125 },
+            { at: capturedAt(20_000), realizedPnl: -4.5 },
+            { at: capturedAt(80_000), realizedPnl: 8.25 },
+            { at: capturedAt(260_000), realizedPnl: 8.25 },
+            { at: capturedAt(5 * 60_000), realizedPnl: -37.125 },
           ],
           pointsTruncated: true,
         },
-        coverage: { target: { fromInclusive: "2026-09-10T08:00:00.000Z", toExclusive: "2026-09-10T08:20:00.000Z" }, completeIntervalCount: 0, knownIntervalCount: 1, gapCount: 1, firstGap: { fromInclusive: "2026-09-10T08:05:00.000Z", toExclusive: "2026-09-10T08:20:00.000Z" } },
+        coverage: { target: { fromInclusive: capturedAt(0), toExclusive: capturedAt(20 * 60_000) }, completeIntervalCount: 0, knownIntervalCount: 1, gapCount: 1, firstGap: { fromInclusive: capturedAt(5 * 60_000), toExclusive: capturedAt(20 * 60_000) } },
         missingOpeningLotCount: 1,
         orphanCommissionCount: 1,
       };
@@ -512,6 +517,7 @@ try {
         const card = document.querySelector('[data-desk-slot="j"] .desk-backfill');
         const details = card?.querySelector('.desk-backfill-history');
         details?.querySelector('summary')?.click();
+        document.querySelector('button[data-range="1d"]')?.click();
         const svg = details?.querySelector('svg');
         return {
           text: card?.innerText,
@@ -523,7 +529,12 @@ try {
           path: svg?.querySelector('path')?.getAttribute('d'),
           pointCount: window.JoeBoard.capturedHistorySeries(${JSON.stringify(partialBackfill.desks[0].backfill)}).points.length,
           bounded: !card || card.scrollWidth <= card.clientWidth + 1,
-          mainHistoryHasPartial: document.querySelector('[gs-id="history"]')?.innerText.includes('-37.125') || false,
+          mainHistoryVisible: !document.getElementById('historyCaptured')?.hidden,
+          mainHistoryTitle: document.getElementById('historyCapturedTitle')?.textContent,
+          mainHistoryMeta: document.getElementById('historyCapturedMeta')?.textContent,
+          mainHistoryPath: document.querySelector('#historyCapturedPlot path')?.getAttribute('d'),
+          mainHistoryBounded: document.getElementById('historyCaptured')?.scrollWidth <= document.getElementById('historyCaptured')?.clientWidth + 1,
+          rangePressed: document.querySelector('button[data-range="1d"]')?.getAttribute('aria-pressed'),
         };
       })()`);
       if (!/Captured results \(partial\)/i.test(backfillSnapshot.text || "") || !/USD/.test(backfillSnapshot.text || "") || !/43 fills/.test(backfillSnapshot.text || "") || !/Coverage gap/.test(backfillSnapshot.text || "") || !/Historical EUR FX is not evidenced/.test(backfillSnapshot.text || "") || backfillSnapshot.total !== "—") {
@@ -532,7 +543,10 @@ try {
       if (backfillSnapshot.title !== "Captured J history · USD · partial" || !backfillSnapshot.open ||
           backfillSnapshot.svgRole !== "img" || backfillSnapshot.svgLabel !== backfillSnapshot.title ||
           !backfillSnapshot.path || backfillSnapshot.pointCount !== 4 || !backfillSnapshot.bounded ||
-          backfillSnapshot.mainHistoryHasPartial || !/J-family FIFO, net of fees/.test(backfillSnapshot.text || "") ||
+          !backfillSnapshot.mainHistoryVisible || backfillSnapshot.mainHistoryTitle !== "Captured J results · USD · partial" ||
+          !/1D window/.test(backfillSnapshot.mainHistoryMeta || "") || !/Historical EUR FX is not evidenced/.test(backfillSnapshot.mainHistoryMeta || "") ||
+          !backfillSnapshot.mainHistoryPath || !backfillSnapshot.mainHistoryBounded || backfillSnapshot.rangePressed !== "true" ||
+          !/J-family FIFO, net of fees/.test(backfillSnapshot.text || "") ||
           !/latest captured points/.test(backfillSnapshot.text || "")) {
         throw new Error(`Captured history interaction mismatch: ${JSON.stringify(backfillSnapshot)}`);
       }
@@ -586,12 +600,14 @@ try {
         await new Promise(resolve => setTimeout(resolve, 25));
         const cleared = {
           selected: document.querySelectorAll('button[data-series][aria-pressed="true"]').length,
-          empty: document.getElementById('historyEmpty')?.hidden === false
+          empty: document.getElementById('historyEmpty')?.hidden === false,
+          capturedHidden: document.getElementById('historyCaptured')?.hidden === true,
         };
         document.getElementById('seriesAll').click();
         await new Promise(resolve => setTimeout(resolve, 25));
         const restored = document.querySelectorAll('button[data-series][aria-pressed="true"]').length;
-        return { resetResult, afterSave, afterRename, heightBeforeLoad, loadedHeight, afterDelete, cleared, restored };
+        const restoredCapturedVisible = document.getElementById('historyCaptured')?.hidden === false;
+        return { resetResult, afterSave, afterRename, heightBeforeLoad, loadedHeight, afterDelete, cleared, restored, restoredCapturedVisible };
       })()`);
       if (layout.resetResult.savedHeight !== 4 || layout.resetResult.resetHeight !== 3 || layout.resetResult.defaultHeight !== 3 || !layout.resetResult.storageRepersisted) {
         throw new Error(`Layout persistence mismatch: ${JSON.stringify(layout.resetResult)}`);
@@ -605,7 +621,7 @@ try {
       if (layout.afterDelete.selectedName !== 'Default' || !layout.afterDelete.renameDisabled || !layout.afterDelete.deleteDisabled) {
         throw new Error(`Delete layout control state mismatch: ${JSON.stringify(layout.afterDelete)}`);
       }
-      if (layout.cleared.selected !== 0 || !layout.cleared.empty || layout.restored !== 3) {
+      if (layout.cleared.selected !== 0 || !layout.cleared.empty || !layout.cleared.capturedHidden || layout.restored !== 3 || !layout.restoredCapturedVisible) {
         throw new Error(`History UX mismatch: ${JSON.stringify({ cleared: layout.cleared, restored: layout.restored })}`);
       }
 

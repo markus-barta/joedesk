@@ -16,6 +16,7 @@ const learningHelpers = `${extractJoeBlock("  var stateCopy = {", "\n  var money
   var lastObservedSnapshot = null;
   var observedEventsMemory = null;
   var number = new Intl.NumberFormat("de-AT", { maximumFractionDigits: 4 });
+${extractJoeBlock("  function hasCapturedJResults(desk)", "\n\n  function snapshotProblems")}
 ${extractJoeBlock("  function nonEmptyString(value)", "\n\n  function deskTrackFields(desk)")}
 ${extractJoeBlock("  function deskTrackFields(desk)", "\n\n  function deskTrackFieldsEqual(left, right)")}
 ${extractJoeBlock("  function deskTrackFieldsEqual(left, right)", "\n\n  function readObservedEvents()")}
@@ -89,6 +90,31 @@ const stuckDesk = {
 const stuckCopy = api.formatDeskLearningCopy(stuckDesk);
 if (!stuckCopy.whatHappened.includes("Gateway timeout")) {
   throw new Error("stuck issues must appear in what happened");
+}
+
+const capturedJCopy = api.formatDeskLearningCopy({
+  ...stuckDesk,
+  id: "j",
+  label: "J",
+  action: "BACKFILL_REQUIRED at midnight",
+  issues: ["raw accounting diagnostic"],
+  backfill: { capturedSubtotal: { realizedPnl: -12.5, currency: "USD", executionCount: 7 } },
+});
+if (!/Captured partial J history is available/.test(capturedJCopy.whatHappened) ||
+    /BACKFILL_REQUIRED|raw accounting diagnostic/.test(capturedJCopy.whatHappened)) {
+  throw new Error("captured J learning copy must keep raw accounting diagnostics out of the primary card copy");
+}
+
+const completeCapturedJCopy = api.formatDeskLearningCopy({
+  ...stuckDesk,
+  id: "j",
+  label: "J",
+  money: { equity: 5004, dayPnl: null, totalPnl: 4, openPnl: 0 },
+  backfill: { capturedSubtotal: { realizedPnl: -12.5, currency: "USD", executionCount: 7, points: [{ at: "2026-09-10T10:00:00Z", realizedPnl: -12.5 }] } },
+});
+if (!/Complete J accounting is available/.test(completeCapturedJCopy.whatHappened) ||
+    /complete J equity remains unavailable|Broker feed stopped|Gateway timeout/.test(completeCapturedJCopy.whatHappened)) {
+  throw new Error("complete J money must not be described as unavailable merely because captured history remains present");
 }
 
 const previous = api.deskTrackFields(sampleDesk);
@@ -203,6 +229,8 @@ console.log(JSON.stringify({
     "learning-copy-from-supplied-fields",
     "honest-empty-learning",
     "stuck-issues-in-what-happened",
+    "captured-j-primary-copy-hides-raw-diagnostic",
+    "complete-j-with-captured-history-keeps-complete-copy",
     "observed-action-diff",
     "no-fake-replay-events",
     "observed-state-diff",

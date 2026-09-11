@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "legacy",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "release_channel": "stable",
-  "release_sequence": 8,
-  "note": "Shows separately scoped paper-account equity and captured J-family FIFO results with actual-timestamp partial history. Unavailable complete desk totals, historical FX and Day P&L remain explicit; prior history is preserved."
+  "release_sequence": 9,
+  "note": "Centers virtual desk equity, separates whole paper-account NAV, and brings captured J-family results into History with shared time filters and explicit native currency. Accepts supplied Open P&L and distinguishes restored accounting from partial history."
 }
