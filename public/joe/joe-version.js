@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.7.3",
+    APP_VERSION: "0.7.4",
     VERSION_HISTORY: [
+      {
+        version: "0.7.4",
+        date: "2026-09-11",
+        title: "Readable History at every size",
+        changes: [
+          "History labels adapt from weekday and time to days, weeks, months and years in Europe/Vienna.",
+          "Subtle calendar boundaries replace unexplained trading-session shading.",
+          "Chart sizing stays stable across phone, desktop and saved tile layouts, keeping labels clear of the frame.",
+        ],
+      },
       {
         version: "0.7.3",
         date: "2026-09-11",

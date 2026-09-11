@@ -194,6 +194,65 @@ try {
     }
     throw new Error(`Page did not become ready: ${url}`);
   }
+  async function measureHistoryGeometry(label) {
+    let geometry;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      geometry = await value(`(() => {
+        const empty = document.getElementById('historyEmpty');
+        const chart = window.Chart?.getChart?.('historyChart');
+        if (!chart) return { available: false, empty: Boolean(empty && !empty.hidden) };
+        const wrapper = chart.canvas.parentElement;
+        const canvasRect = chart.canvas.getBoundingClientRect();
+        const scale = chart.scales.x;
+        const labels = scale.getLabelItems().map((item) => {
+          chart.ctx.font = item.font.string;
+          const lines = Array.isArray(item.label) ? item.label : [String(item.label)];
+          const width = Math.max(...lines.map((line) => chart.ctx.measureText(line).width));
+          const [x, y] = item.options.translation;
+          const align = item.options.textAlign;
+          const centerY = y + (item.textOffset || 0);
+          return {
+            text: lines.join(' / '),
+            left: x - (align === 'right' ? width : align === 'center' ? width / 2 : 0),
+            right: x + (align === 'left' ? width : align === 'center' ? width / 2 : 0),
+            top: centerY - item.font.lineHeight / 2,
+            bottom: centerY + (lines.length - 0.5) * item.font.lineHeight,
+          };
+        }).sort((left, right) => left.left - right.left);
+        return {
+          available: true,
+          width: chart.width,
+          height: chart.height,
+          canvasWidth: canvasRect.width,
+          canvasHeight: canvasRect.height,
+          wrapperWidth: wrapper.clientWidth,
+          wrapperHeight: wrapper.clientHeight,
+          plotBottom: chart.chartArea.bottom,
+          labels,
+        };
+      })()`);
+      if (geometry.available || geometry.empty) break;
+      await delay(50);
+    }
+    if (!geometry?.available) {
+      if (!historyPoints.length && geometry?.empty) return geometry;
+      throw new Error(`History chart unavailable for ${label}: ${JSON.stringify(geometry)}`);
+    }
+    const problems = [];
+    if (geometry.height > 1000) problems.push(`runaway chart height ${geometry.height}`);
+    if (Math.abs(geometry.width - geometry.wrapperWidth) > 1 || Math.abs(geometry.height - geometry.wrapperHeight) > 1 ||
+        Math.abs(geometry.canvasWidth - geometry.wrapperWidth) > 1 || Math.abs(geometry.canvasHeight - geometry.wrapperHeight) > 1) {
+      problems.push("chart and wrapper dimensions differ");
+    }
+    if (!geometry.labels.length) problems.push("no visible x-axis labels");
+    geometry.labels.forEach((item, index) => {
+      if (item.left < 0 || item.right > geometry.width) problems.push(`label outside canvas: ${item.text}`);
+      if (item.top < geometry.plotBottom - 1 || item.bottom > geometry.height - 2) problems.push(`label crosses plot/frame: ${item.text}`);
+      if (index && item.left < geometry.labels[index - 1].right + 2) problems.push(`overlapping labels: ${geometry.labels[index - 1].text} / ${item.text}`);
+    });
+    if (problems.length) throw new Error(`History geometry mismatch (${label}): ${JSON.stringify({ ...geometry, problems })}`);
+    return geometry;
+  }
 
   await send("Page.enable");
   await send("Runtime.enable");
@@ -210,6 +269,7 @@ try {
   let stub;
   let richSnapshot;
   let backfillSnapshot;
+  let historyGeometry;
 
   if (smokeMode === "privacy") {
     const publicBefore = requests.filter(item => item.host.startsWith("example.com") && item.path === "/joe/data.json").length;
@@ -291,6 +351,28 @@ try {
       healthy.baseHref !== "/joe/" || healthy.baseUrl !== hsb1Url ||
       !/not present/i.test(healthy.positionFallback || "") || !healthy.zoomPlugin || healthy.externalScripts || healthy.overflow
     ) throw new Error(`Healthy board mismatch: ${JSON.stringify(healthy)}`);
+
+    const initial = await measureHistoryGeometry("initial render");
+    const resizeSamples = [];
+    for (const viewport of [
+      { width: 390, height: 844, deviceScaleFactor: 2, mobile: true },
+      { width: 768, height: 900, deviceScaleFactor: 1, mobile: false },
+    ]) {
+      await send("Emulation.setDeviceMetricsOverride", viewport);
+      await delay(500);
+      const after500ms = await measureHistoryGeometry(`${viewport.width}px after 500ms`);
+      await delay(500);
+      const after1s = await measureHistoryGeometry(`${viewport.width}px after 1s`);
+      if (after500ms.available && after1s.available && Math.abs(after500ms.height - after1s.height) > 4) {
+        throw new Error(`History height did not settle at ${viewport.width}px: ${JSON.stringify({ after500ms: after500ms.height, after1s: after1s.height })}`);
+      }
+      resizeSamples.push({ width: viewport.width, after500ms, after1s });
+    }
+    await send("Emulation.setDeviceMetricsOverride", mobileViewport
+      ? { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }
+      : { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await delay(300);
+    historyGeometry = { initial, resizeSamples };
 
     if (process.env.JOE_SCREENSHOT_DIR) {
       const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
@@ -754,7 +836,7 @@ try {
   const source = await readFile(join(repoRoot, "public", "joe", "index.html"), "utf8");
   if (/DUR\d+|1,001,403|SXR8|TSLA/.test(source)) throw new Error("Static /joe/ source still contains Paper-Drill account or position data");
   if (exceptions.length) throw new Error(`Runtime exceptions: ${exceptions.join("; ")}`);
-  console.log(JSON.stringify({ healthy, mobile, stale, broken, richSnapshot, backfillSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
+  console.log(JSON.stringify({ healthy, historyGeometry, mobile, stale, broken, richSnapshot, backfillSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
   await withTimeout(send("Browser.close").catch(() => {}), 1000);
   ws.close();
 } finally {
