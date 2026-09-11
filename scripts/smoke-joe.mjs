@@ -581,6 +581,7 @@ try {
   let historyGeometry;
   let historyContinuity;
   let phoneOrder;
+  let fleet;
 
   if (smokeMode === "privacy") {
     const publicBefore = requests.filter(item => item.host.startsWith("example.com") && item.path === "/joe/data.json").length;
@@ -892,6 +893,111 @@ try {
       !/not present/i.test(healthy.positionFallback || "") || !healthy.zoomPlugin || healthy.externalScripts || healthy.overflow
     ) throw new Error(`Healthy board mismatch: ${JSON.stringify(healthy)}`);
 
+    await value(`document.getElementById('fleetConfigOpen').click()`);
+    await delay(850);
+    const fleetOpen = await value(`(() => ({
+      plane: document.documentElement.dataset.joePlane,
+      flipped: document.getElementById('boardFlipper').classList.contains('is-flipped'),
+      transform: getComputedStyle(document.getElementById('boardFlipper')).transform,
+      frontHidden: document.getElementById('tradingBoard').getAttribute('aria-hidden'),
+      frontInert: document.getElementById('tradingBoard').inert,
+      backHidden: document.getElementById('fleetConfigBoard').getAttribute('aria-hidden'),
+      backInert: document.getElementById('fleetConfigBoard').inert,
+      title: document.getElementById('fleetConfigTitle').textContent.trim(),
+      revision: document.getElementById('fleetRevision').textContent,
+      selected: document.getElementById('fleetSelectedLabel').textContent,
+      headline: document.getElementById('fleetEliHeadline').textContent,
+      sections: document.querySelectorAll('[data-fleet-section]').length,
+      actions: [...document.querySelectorAll('[data-fleet-action]')].map(node => node.dataset.fleetAction),
+      fields: [...document.querySelectorAll('#fleetEditFields input')].map(node => node.dataset.fleetField),
+      configText: document.getElementById('fleetConfigBoard').innerText,
+      overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    }))()`);
+    if (
+      fleetOpen.plane !== 'fleet-config' || !fleetOpen.flipped || fleetOpen.transform === 'none' ||
+      fleetOpen.frontHidden !== 'true' || !fleetOpen.frontInert || fleetOpen.backHidden !== 'false' || fleetOpen.backInert ||
+      !/Fleet Config/.test(fleetOpen.title) || fleetOpen.revision !== packageVersion ||
+      fleetOpen.selected !== 'Selected: Quota policy' || fleetOpen.headline !== 'Keep a little in the tank.' ||
+      fleetOpen.sections !== 7 || JSON.stringify(fleetOpen.fields) !== JSON.stringify(['grok.reservePct', 'codex.reservePct', 'onRed']) ||
+      !fleetOpen.actions.includes('diff') || !fleetOpen.actions.includes('confirm') || !fleetOpen.actions.includes('propagate') || !fleetOpen.actions.includes('save') ||
+      /Day P&L|Open P&L|Virtual desk equity/.test(fleetOpen.configText) || fleetOpen.overflow
+    ) throw new Error(`Fleet Config open mismatch: ${JSON.stringify(fleetOpen)}`);
+
+    const fleetBound = await value(`(() => {
+      document.querySelector('[data-fleet-section="desks"]').click();
+      const first = document.querySelector('#fleetEditFields input');
+      first.value = '4';
+      first.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-action="diff"]').click();
+      const diffToast = document.getElementById('fleetToast').textContent;
+      document.querySelector('[data-fleet-action="confirm"]').click();
+      const confirmToast = document.getElementById('fleetToast').textContent;
+      document.querySelector('[data-fleet-action="propagate"]').click();
+      const propagateToast = document.getElementById('fleetToast').textContent;
+      const toastRect = document.getElementById('fleetToast').getBoundingClientRect();
+      const result = {
+        selected: document.getElementById('fleetSelectedLabel').textContent,
+        headline: document.getElementById('fleetEliHeadline').textContent,
+        fields: [...document.querySelectorAll('#fleetEditFields input')].map(node => node.dataset.fleetField),
+        changed: window.JoeBoard.fleetChangedEntries(),
+        summaryValue: document.querySelector('[data-fleet-readout="maxBusyDesks"]').textContent,
+        diffToast,
+        confirmToast,
+        propagateToast,
+        toastPosition: getComputedStyle(document.getElementById('fleetToast')).position,
+        toastInViewport: toastRect.top >= 0 && toastRect.bottom <= innerHeight,
+        note: document.getElementById('fleetPreviewNote').textContent,
+      };
+      first.value = '5';
+      first.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-section="quota"]').click();
+      return result;
+    })()`);
+    if (
+      fleetBound.selected !== 'Selected: Desk fleet' || fleetBound.headline !== 'Five desks, one guarded runway.' ||
+      JSON.stringify(fleetBound.fields) !== JSON.stringify(['maxBusyDesks', 'stage0CapEur', 'keepSymbols']) ||
+      JSON.stringify(fleetBound.changed) !== JSON.stringify(['maxBusyDesks']) ||
+      fleetBound.summaryValue !== '4' || fleetBound.toastPosition !== 'fixed' || !fleetBound.toastInViewport ||
+      !/1 preview change: maxBusyDesks/.test(fleetBound.diffToast) || !/Preview confirmed/.test(fleetBound.confirmToast) ||
+      !/HOSTD-49\/50/.test(fleetBound.propagateToast) || !/confirmed/.test(fleetBound.note)
+    ) throw new Error(`Fleet Config binding mismatch: ${JSON.stringify(fleetBound)}`);
+
+    await value(`window.JoeBoard.showTradingBoard()`);
+    await delay(850);
+    const fleetClosed = await value(`({
+      plane: document.documentElement.dataset.joePlane,
+      flipped: document.getElementById('boardFlipper').classList.contains('is-flipped'),
+      frontHidden: document.getElementById('tradingBoard').getAttribute('aria-hidden'),
+      frontInert: document.getElementById('tradingBoard').inert,
+      backHidden: document.getElementById('fleetConfigBoard').getAttribute('aria-hidden'),
+      backInert: document.getElementById('fleetConfigBoard').inert,
+      focused: document.activeElement?.id,
+      gridReady: Boolean(document.getElementById('joeGrid')?.gridstack),
+      stagePerspective: getComputedStyle(document.getElementById('dashboard')).perspective,
+      flipperTransform: getComputedStyle(document.getElementById('boardFlipper')).transform,
+      mobileMenuViewport: (() => {
+        if (innerWidth > 700) return { ok: true, skipped: true };
+        window.scrollTo(0, 120);
+        const menu = document.getElementById('layoutMenu');
+        menu.setAttribute('open', '');
+        window.JoeBoard.positionHeaderMenus();
+        const panel = menu.querySelector('.header-menu-panel');
+        const expectedTop = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--joe-header-bottom'));
+        const actualTop = panel.getBoundingClientRect().top;
+        const position = getComputedStyle(panel).position;
+        const offsetParent = panel.offsetParent?.id || panel.offsetParent?.className || null;
+        menu.removeAttribute('open');
+        window.scrollTo(0, 0);
+        return { ok: position === 'fixed' && Math.abs(actualTop - expectedTop) <= 1, position, expectedTop, actualTop, offsetParent };
+      })(),
+    })`);
+    if (
+      fleetClosed.plane !== 'trading' || fleetClosed.flipped || fleetClosed.frontHidden !== 'false' || fleetClosed.frontInert ||
+      fleetClosed.backHidden !== 'true' || !fleetClosed.backInert || fleetClosed.focused !== 'fleetConfigOpen' || !fleetClosed.gridReady ||
+      fleetClosed.stagePerspective !== 'none' || fleetClosed.flipperTransform !== 'none' || !fleetClosed.mobileMenuViewport.ok
+    ) throw new Error(`Fleet Config close mismatch: ${JSON.stringify(fleetClosed)}`);
+    fleet = { open: fleetOpen, bound: fleetBound, closed: fleetClosed };
+
     const initial = await measureHistoryGeometry("initial render");
     const rangeContinuity = {};
     for (const range of ['1d', '1w', '1m', 'all']) {
@@ -940,6 +1046,21 @@ try {
     if (process.env.JOE_SCREENSHOT_DIR) {
       const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
       await writeFile(join(process.env.JOE_SCREENSHOT_DIR, mobileViewport ? "joe-dash-mobile.png" : "joe-dash-desktop.png"), Buffer.from(shot.data, "base64"));
+      if (!mobileViewport) {
+        await value(`window.JoeBoard.showFleetConfig()`);
+        await delay(850);
+        const fleetBackShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+        await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-48-fleet-config-back.png"), Buffer.from(fleetBackShot.data, "base64"));
+        await value(`window.JoeBoard.showTradingBoard()`);
+        await delay(850);
+        await value(`window.JoeBoard.showFleetConfig()`);
+        await delay(300);
+        const fleetMidShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+        await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-48-fleet-config-mid.png"), Buffer.from(fleetMidShot.data, "base64"));
+        await delay(550);
+        await value(`window.JoeBoard.showTradingBoard()`);
+        await delay(850);
+      }
     }
 
     if (mobileViewport) {
@@ -1619,9 +1740,14 @@ try {
   }
 
   const source = await readFile(join(repoRoot, "public", "joe", "index.html"), "utf8");
-  if (/DUR\d+|1,001,403|SXR8|TSLA/.test(source)) throw new Error("Static /joe/ source still contains Paper-Drill account or position data");
+  const fleetSourceStart = source.indexOf('id="fleetConfigBoard"');
+  const fleetSourceEnd = source.indexOf("\n</section>\n</div>\n</main>", fleetSourceStart);
+  const fleetSource = source.slice(fleetSourceStart, fleetSourceEnd);
+  const nonFleetSource = source.slice(0, fleetSourceStart) + source.slice(fleetSourceEnd);
+  if (/DUR\d+|1,001,403|SXR8|TSLA/.test(nonFleetSource)) throw new Error("Static trading-plane source still contains Paper-Drill account or position data");
+  if (!/KEEP SXR8\+TSLA/.test(fleetSource)) throw new Error("Fleet Config must retain the declared KEEP symbols from HOSTD-48");
   if (exceptions.length) throw new Error(`Runtime exceptions: ${exceptions.join("; ")}`);
-  console.log(JSON.stringify({ healthy, historyGeometry, historyContinuity, mobile, phoneOrder, stale, broken, richSnapshot, backfillSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
+  console.log(JSON.stringify({ healthy, fleet, historyGeometry, historyContinuity, mobile, phoneOrder, stale, broken, richSnapshot, backfillSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
   await withTimeout(send("Browser.close").catch(() => {}), 1000);
   ws.close();
 } finally {

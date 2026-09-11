@@ -37,7 +37,9 @@
   </div>
 </section>
 
-<main class="shell" id="dashboard" hidden>
+<main class="board-stage" id="dashboard" hidden>
+<div class="board-flipper" id="boardFlipper">
+<section class="shell board-face board-face--front" id="tradingBoard" aria-label="Household paper-trading board">
   <header class="topline" aria-label="JoeDesk controls">
     <div class="brand">
       <svg class="brand-logo" width="28" height="28" viewBox="0 0 28 28" role="img" aria-label="JoeDesk">
@@ -50,6 +52,10 @@
     </div>
     <div class="toolbar" role="toolbar" aria-label="Board tools">
       <span class="paper-mark">Paper only</span>
+      <button class="quiet-button fleet-open" id="fleetConfigOpen" type="button" aria-controls="fleetConfigBoard">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M9 17h6"/></svg>
+        Fleet Config
+      </button>
       <details class="header-menu" id="layoutMenu" data-dismissable>
         <summary class="header-menu-trigger header-icon-trigger" aria-haspopup="dialog" aria-label="Layout" title="Layout">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -231,12 +237,159 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">0.7.7</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">0.8.0</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>
   </footer>
+</section>
+
+<section class="shell board-face board-face--back fleet-config" id="fleetConfigBoard" aria-labelledby="fleetConfigTitle" aria-hidden="true" inert>
+  <div class="fleet-frame">
+    <header class="fleet-topline">
+      <div class="fleet-title-lockup">
+        <svg class="brand-logo" width="30" height="30" viewBox="0 0 28 28" aria-hidden="true">
+          <rect x="1" y="14" width="7" height="12" rx="1.5" fill="currentColor" opacity=".92"/>
+          <rect x="10.5" y="10" width="7" height="16" rx="1.5" fill="currentColor"/>
+          <rect x="20" y="6" width="7" height="20" rx="1.5" fill="currentColor" opacity=".78"/>
+          <path d="M1 14h26" stroke="currentColor" stroke-width="1.2" opacity=".35"/>
+        </svg>
+        <h1 id="fleetConfigTitle">JoeDesk <span>·</span> Fleet Config</h1>
+        <span class="fleet-revision">rev <span id="fleetRevision">0.8.0</span></span>
+      </div>
+      <div class="fleet-actions" role="toolbar" aria-label="Fleet Config actions">
+        <button class="fleet-button" type="button" data-fleet-action="diff">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l4 4v14H7zM14 3v5h5"/></svg>
+          Diff
+        </button>
+        <button class="fleet-button" type="button" data-fleet-action="confirm">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+          Confirm
+        </button>
+        <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="propagate">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7z"/></svg>
+          Propagate
+        </button>
+        <button class="fleet-button" id="fleetConfigClose" type="button" aria-controls="tradingBoard">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 9A7 7 0 0 1 18 6l2 1M17.9 15A7 7 0 0 1 6 18l-2-1"/></svg>
+          Flip back
+        </button>
+      </div>
+    </header>
+
+    <p class="fleet-kicker">Docs + control plane</p>
+
+    <div class="fleet-columns">
+      <section class="fleet-panel fleet-technical" aria-labelledby="fleetTechnicalTitle">
+        <h2 id="fleetTechnicalTitle">Technical</h2>
+        <div class="fleet-section-list" role="group" aria-label="Fleet Config sections">
+          <button class="fleet-section is-selected" type="button" data-fleet-section="quota" aria-pressed="true">
+            <span class="fleet-row-main">
+              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/></svg>
+              <span class="fleet-row-copy"><strong>Quota policy</strong><small>Keep capacity in reserve</small></span>
+              <span class="fleet-radio" aria-hidden="true"></span>
+            </span>
+            <span class="fleet-quota-detail" aria-hidden="true">
+              <span class="fleet-meter-block"><span>Grok reserve <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">10%</b></span><span class="fleet-meter"><i data-fleet-meter="grok.reservePct" style="width:10%"></i></span></span>
+              <span class="fleet-meter-block"><span>Codex reserve <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">10%</b></span><span class="fleet-meter"><i data-fleet-meter="codex.reservePct" style="width:10%"></i></span></span>
+              <span class="fleet-threshold fleet-threshold--green"><b><i></i>Green</b><small>Run normally</small></span>
+              <span class="fleet-threshold fleet-threshold--amber"><b><i></i>Amber</b><small>Slow down</small></span>
+              <span class="fleet-threshold fleet-threshold--red"><b><i></i>Red</b><small data-fleet-readout="onRed" data-fleet-humanize="true">Park nonessential</small></span>
+            </span>
+          </button>
+
+          <button class="fleet-section" type="button" data-fleet-section="desks" aria-pressed="false">
+            <span class="fleet-row-main">
+              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2"/><path d="M3 20c0-4 2-7 6-7s6 3 6 7M14 14c4 0 7 2 7 6"/></svg>
+              <span class="fleet-row-copy"><strong>Desk fleet</strong><small>Desks and capital limits</small></span>
+              <span class="fleet-row-values"><span>max busy Js <b data-fleet-readout="maxBusyDesks">5</b></span><span>Stage-0 € cap <b data-fleet-readout="stage0CapEur">250</b></span><em data-fleet-readout="keepSymbols" data-fleet-prefix="✓ KEEP " data-fleet-join="+">✓ KEEP SXR8+TSLA</em></span>
+              <span class="fleet-chevron" aria-hidden="true">›</span>
+            </span>
+          </button>
+
+          <button class="fleet-section" type="button" data-fleet-section="cadence" aria-pressed="false">
+            <span class="fleet-row-main">
+              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/></svg>
+              <span class="fleet-row-copy"><strong>Cadence</strong><small>Schedules and governors</small></span>
+              <span class="fleet-row-values"><span>US-open arm <b data-fleet-readout="usOpenArm">15:35</b></span><span data-fleet-readout="watcher">desk-watch</span><span>Darwin</span><span data-fleet-readout="governor" data-fleet-display-separator=" ">quota governor</span></span>
+              <span class="fleet-chevron" aria-hidden="true">›</span>
+            </span>
+          </button>
+
+          <button class="fleet-section" type="button" data-fleet-section="paths" aria-pressed="false">
+            <span class="fleet-row-main">
+              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3z"/></svg>
+              <span class="fleet-row-copy"><strong>Mac shared paths</strong><small>Where things live</small></span>
+              <span class="fleet-row-values fleet-row-values--paths"><code data-fleet-readout="configPath">~/Shared/JoeDesk/fleet-config</code><code data-fleet-readout="docsPath">~/Shared/JoeDesk/docs</code></span>
+              <span class="fleet-chevron" aria-hidden="true">›</span>
+            </span>
+          </button>
+
+          <button class="fleet-section" type="button" data-fleet-section="routines" aria-pressed="false">
+            <span class="fleet-row-main">
+              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+              <span class="fleet-row-copy"><strong>Amy Grok routines</strong><small>Daily routines</small></span>
+              <span class="fleet-row-values"><span data-fleet-readout="morningRoutine" data-fleet-display-separator=" ">Morning brief</span><span data-fleet-readout="reviewRoutine" data-fleet-display-separator=" ">Desk review</span><span data-fleet-readout="closeRoutine" data-fleet-display-separator=" ">Close recap</span></span>
+              <span class="fleet-chevron" aria-hidden="true">›</span>
+            </span>
+          </button>
+
+          <button class="fleet-section" type="button" data-fleet-section="tools" aria-pressed="false">
+            <span class="fleet-row-main">
+              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6a5 5 0 0 0-6 6L3 17l4 4 5-5a5 5 0 0 0 6-6l-3 3-3-3z"/></svg>
+              <span class="fleet-row-copy"><strong>Tools</strong><small>External connections</small></span>
+              <span class="fleet-row-values"><span class="fleet-online" data-fleet-readout="gateway">IB Gateway</span><span class="fleet-online" data-fleet-readout="joelAdapter">joel-ib</span><span class="fleet-online" data-fleet-readout="hostTool">codexbar@hsb0</span></span>
+              <span class="fleet-chevron" aria-hidden="true">›</span>
+            </span>
+          </button>
+
+          <button class="fleet-section" type="button" data-fleet-section="secrets" aria-pressed="false">
+            <span class="fleet-row-main">
+              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg>
+              <span class="fleet-row-copy"><strong>Secret slots</strong><small>Encrypted references</small></span>
+              <span class="fleet-row-values"><em class="fleet-redacted" data-fleet-readout="displayMode" data-fleet-display-separator=" ">Redacted</em><span><span data-fleet-readout="agenixRefMode" data-fleet-prefix="agenix ">agenix refs</span> · <span data-fleet-readout="janusRefMode" data-fleet-prefix="Janus ">Janus refs only</span></span></span>
+              <span class="fleet-chevron" aria-hidden="true">›</span>
+            </span>
+          </button>
+        </div>
+      </section>
+
+      <aside class="fleet-panel fleet-eli" aria-labelledby="fleetEliTitle">
+        <header class="fleet-eli-head">
+          <div><h2 id="fleetEliTitle">ELI10</h2><p>How the magic works</p></div>
+          <span class="fleet-selected-label">▣ <span id="fleetSelectedLabel">Selected: Quota policy</span></span>
+        </header>
+        <div class="fleet-eli-body" id="fleetEliBody">
+          <h3 id="fleetEliHeadline">Keep a little in the tank.</h3>
+          <p id="fleetEliIntro">Grok and Codex keep 10% in reserve so the fleet can still watch, report and recover.</p>
+          <div class="fleet-eli-status" id="fleetEliStatus">
+            <p><b class="fleet-status fleet-status--green"><i></i>Green</b><span>Desks can work.</span></p>
+            <p><b class="fleet-status fleet-status--amber"><i></i>Amber</b><span>Ease off and save capacity.</span></p>
+            <p><b class="fleet-status fleet-status--red"><i></i>Red</b><span>Park nonessential work.</span></p>
+          </div>
+          <div class="fleet-eli-sections" id="fleetEliSections"></div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="fleet-edit-strip">
+      <strong>Edit selected values</strong>
+      <div class="fleet-edit-fields" id="fleetEditFields" aria-label="Selected config values"></div>
+      <div class="fleet-edit-actions">
+        <button class="fleet-button" type="button" data-fleet-action="save">Save preview</button>
+        <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="propagate">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7z"/></svg>
+          Propagate
+        </button>
+        <small id="fleetPreviewNote">Preview only · No changes propagated</small>
+      </div>
+    </footer>
+  </div>
+</section>
+</div>
 </main>
+
+<div class="fleet-toast" id="fleetToast" role="status" aria-live="polite" hidden></div>
 
 <dialog class="layout-unsaved-dialog" id="layoutUnsavedDialog" aria-label="Unsaved layout changes" aria-describedby="layoutUnsavedMessage">
   <form method="dialog" class="layout-unsaved-card">

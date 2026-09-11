@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "legacy",
-  "version": "0.7.7",
+  "version": "0.8.0",
   "release_channel": "stable",
-  "release_sequence": 13,
-  "note": "Independent phone tile order in draft and named layouts, preserving desktop geometry across reloads and responsive changes."
+  "release_sequence": 14,
+  "note": "Whole-board Fleet Config flip with a two-column technical and plain-language preview plane."
 }

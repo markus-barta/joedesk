@@ -152,6 +152,120 @@
   var visualResizeFrame = 0;
   var visualResizeNeedsNarrowFit = false;
   var historyChartSize = { width: 0, height: 0 };
+  var FLEET_PREVIEW_KEY = "joe-fleet-config-preview-v1";
+  var FLEET_CONFIG = {
+    quota: {
+      label: "Quota policy",
+      headline: "Keep a little in the tank.",
+      intro: "Grok and Codex keep 10% in reserve so the fleet can still watch, report and recover.",
+      status: true,
+      sections: [
+        ["Learning desks", "Desks learn with paper trades. Only five can be busy at once. Stage-0 stays within its euro cap."],
+        ["Failsafe arms", "The US-open arm waits until 15:35. Watchers check the desks. If capacity runs low, nonessential work parks."],
+        ["Plain files. Locked secrets.", "Fleet settings stay in plaintext so changes are easy to read and compare. Only references point to encrypted values; secret material never appears here."],
+        ["Preview → Confirm → Propagate", "Review the change before the fleet receives it."],
+      ],
+      fields: [
+        { key: "grok.reservePct", label: "Grok reserve", value: "10", suffix: "%" },
+        { key: "codex.reservePct", label: "Codex reserve", value: "10", suffix: "%" },
+        { key: "onRed", label: "Red policy", value: "park_nonessential" },
+      ],
+    },
+    desks: {
+      label: "Desk fleet",
+      headline: "Five desks, one guarded runway.",
+      intro: "The J desk family may use up to five active desks while Stage-0 stays inside its configured capital ceiling.",
+      sections: [
+        ["Keep means keep", "SXR8 and TSLA remain outside learning-desk changes."],
+        ["Paper first", "Desk learning stays in the paper environment. Nothing on this plane can place a trade."],
+        ["Small, reversible steps", "Preview and confirm limit changes before the propagation workflow is connected."],
+      ],
+      fields: [
+        { key: "maxBusyDesks", label: "Busy J desks", value: "5" },
+        { key: "stage0CapEur", label: "Stage-0 cap", value: "250" },
+        { key: "keepSymbols", label: "Keep symbols", value: "SXR8,TSLA" },
+      ],
+    },
+    cadence: {
+      label: "Cadence",
+      headline: "The fleet wakes up on a schedule.",
+      intro: "A timed arm, desk watcher and quota governor keep routine work predictable.",
+      sections: [
+        ["US-open arm", "The arm waits until 15:35 before the session workflow can proceed."],
+        ["Watch before work", "desk-watch checks fleet state before scheduled routines continue."],
+        ["Capacity has the last word", "The quota governor can slow or park nonessential work."],
+      ],
+      fields: [
+        { key: "usOpenArm", label: "US-open arm", value: "15:35" },
+        { key: "watcher", label: "Watcher", value: "desk-watch" },
+        { key: "governor", label: "Governor", value: "quota governor" },
+      ],
+    },
+    paths: {
+      label: "Mac shared paths",
+      headline: "One shelf for settings. One for explanations.",
+      intro: "Shared paths keep the fleet config and its human-readable docs easy to find.",
+      sections: [
+        ["Fleet config", "~/Shared/JoeDesk/fleet-config holds the plain configuration source."],
+        ["Fleet docs", "~/Shared/JoeDesk/docs holds the matching operator explanations."],
+        ["References, not secret values", "Shared files may name encrypted slots but never contain the secret material."],
+      ],
+      fields: [
+        { key: "configPath", label: "Config path", value: "~/Shared/JoeDesk/fleet-config" },
+        { key: "docsPath", label: "Docs path", value: "~/Shared/JoeDesk/docs" },
+      ],
+    },
+    routines: {
+      label: "Amy Grok routines",
+      headline: "Three calm check-ins each day.",
+      intro: "The daily routine opens with context, reviews desk work, then closes with a short recap.",
+      sections: [
+        ["Morning brief", "Start with the current constraints and the work that matters today."],
+        ["Desk review", "Check what each desk learned and whether any guardrail needs attention."],
+        ["Close recap", "Record the useful result without turning the board into a noisy activity feed."],
+      ],
+      fields: [
+        { key: "morningRoutine", label: "Morning", value: "Morning brief" },
+        { key: "reviewRoutine", label: "Review", value: "Desk review" },
+        { key: "closeRoutine", label: "Close", value: "Close recap" },
+      ],
+    },
+    tools: {
+      label: "Tools",
+      headline: "Connections report health, not credentials.",
+      intro: "The plane shows which external tools are expected without exposing their authentication material.",
+      sections: [
+        ["IB Gateway", "The paper gateway connection is represented as an availability signal only."],
+        ["joel-ib", "The declared integration stays separately named so its boundary is visible."],
+        ["codexbar@hsb0", "The host tool is addressed by its declared service name; authentication stays outside this UI."],
+      ],
+      fields: [
+        { key: "gateway", label: "Gateway", value: "IB Gateway" },
+        { key: "joelAdapter", label: "Integration", value: "joel-ib" },
+        { key: "hostTool", label: "Host tool", value: "codexbar@hsb0" },
+      ],
+    },
+    secrets: {
+      label: "Secret slots",
+      headline: "Labels here. Secret values elsewhere.",
+      intro: "Fleet config can point to encrypted slots, but this plane never reads, displays or stores their contents.",
+      sections: [
+        ["Always redacted", "The browser receives reference names only. Secret values do not belong in previews or diffs."],
+        ["Encrypted at rest", "agenix owns encrypted configuration references; Janus references keep their existing boundary."],
+        ["No new sign-in path", "This plane inherits the same externally enforced Zitadel SSO boundary as JoeDesk."],
+      ],
+      fields: [
+        { key: "agenixRefMode", label: "agenix", value: "refs" },
+        { key: "janusRefMode", label: "Janus", value: "refs only" },
+        { key: "displayMode", label: "Display", value: "Redacted" },
+      ],
+    },
+  };
+  var fleetSectionId = "quota";
+  var fleetDraft = {};
+  var fleetConfirmed = false;
+  var fleetToastTimer = 0;
+  var fleetFlipTimer = 0;
 
   var gate = document.getElementById("privateGate");
   var dashboard = document.getElementById("dashboard");
@@ -162,6 +276,7 @@
     return;
   }
   document.documentElement.dataset.joeView = "board";
+  document.documentElement.dataset.joePlane = "trading";
   dashboard.hidden = false;
 
   function required(condition, message) {
@@ -1887,8 +2002,10 @@
   }
 
   function renderVersionPanel() {
-    var version = window.JoeVersion || { APP_VERSION: "0.2.0", VERSION_HISTORY: [] };
+    var version = window.JoeVersion || { APP_VERSION: document.getElementById("appVersion").textContent, VERSION_HISTORY: [] };
     document.getElementById("appVersion").textContent = version.APP_VERSION;
+    var fleetRevision = document.getElementById("fleetRevision");
+    if (fleetRevision) { fleetRevision.textContent = version.APP_VERSION; }
     var panel = document.getElementById("versionPanel");
     panel.replaceChildren.apply(panel, version.VERSION_HISTORY.map(function (entry) {
       var section = el("section", "version__entry");
@@ -3973,6 +4090,211 @@
     }, { once: true });
   }
 
+  function fleetFieldDefinitions() {
+    return Object.keys(FLEET_CONFIG).flatMap(function (sectionId) {
+      return FLEET_CONFIG[sectionId].fields;
+    });
+  }
+
+  function fleetDefaultValues() {
+    var values = {};
+    fleetFieldDefinitions().forEach(function (field) { values[field.key] = field.value; });
+    return values;
+  }
+
+  function readFleetPreview() {
+    var defaults = fleetDefaultValues();
+    try {
+      var stored = JSON.parse(localStorage.getItem(FLEET_PREVIEW_KEY) || "null");
+      if (!stored || typeof stored !== "object" || Array.isArray(stored)) { return defaults; }
+      Object.keys(defaults).forEach(function (key) {
+        if (typeof stored[key] === "string" && stored[key].length <= 80 && /^[\x20-\x7e]*$/.test(stored[key])) {
+          defaults[key] = stored[key];
+        }
+      });
+    } catch (_) {
+      return defaults;
+    }
+    return defaults;
+  }
+
+  function fleetChangedEntries() {
+    var defaults = fleetDefaultValues();
+    return Object.keys(defaults).filter(function (key) { return fleetDraft[key] !== defaults[key]; });
+  }
+
+  function updateFleetPreviewNote() {
+    var note = document.getElementById("fleetPreviewNote");
+    if (!note) { return; }
+    var count = fleetChangedEntries().length;
+    note.textContent = fleetConfirmed && count
+      ? count + " change" + (count === 1 ? "" : "s") + " confirmed · Not propagated"
+      : count
+        ? count + " unsaved preview change" + (count === 1 ? "" : "s")
+        : "Preview only · No changes propagated";
+  }
+
+  function updateFleetReadouts() {
+    document.querySelectorAll("[data-fleet-readout]").forEach(function (readout) {
+      var key = readout.dataset.fleetReadout;
+      var value = fleetDraft[key] || "";
+      if (readout.dataset.fleetJoin) { value = value.split(",").map(function (part) { return part.trim(); }).filter(Boolean).join(readout.dataset.fleetJoin); }
+      if (readout.dataset.fleetHumanize) {
+        value = value.replace(/[_-]+/g, " ");
+        value = value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+      }
+      readout.textContent = (readout.dataset.fleetPrefix || "") + value + (readout.dataset.fleetSuffix || "");
+    });
+    ["grok.reservePct", "codex.reservePct"].forEach(function (key) {
+      var raw = fleetDraft[key];
+      var numeric = Math.max(0, Math.min(100, Number(raw)));
+      var value = Number.isFinite(numeric) ? numeric : 0;
+      var meter = document.querySelector('[data-fleet-meter="' + key + '"]');
+      if (meter) { meter.style.width = value + "%"; }
+    });
+  }
+
+  function renderFleetConfigSection(sectionId, focusHeading) {
+    var section = FLEET_CONFIG[sectionId];
+    if (!section) { return false; }
+    fleetSectionId = sectionId;
+    document.querySelectorAll("[data-fleet-section]").forEach(function (button) {
+      var selected = button.dataset.fleetSection === sectionId;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+    document.getElementById("fleetSelectedLabel").textContent = "Selected: " + section.label;
+    var headline = document.getElementById("fleetEliHeadline");
+    headline.textContent = section.headline;
+    document.getElementById("fleetEliIntro").textContent = section.intro;
+    document.getElementById("fleetEliStatus").hidden = !section.status;
+    var explanation = document.getElementById("fleetEliSections");
+    explanation.replaceChildren.apply(explanation, section.sections.map(function (entry) {
+      var item = el("section", "fleet-eli-section");
+      item.appendChild(el("h4", "", entry[0]));
+      item.appendChild(el("p", "", entry[1]));
+      return item;
+    }));
+    var fields = document.getElementById("fleetEditFields");
+    fields.replaceChildren.apply(fields, section.fields.map(function (field, index) {
+      var label = el("label", "fleet-edit-field");
+      var inputId = "fleetField" + sectionId.charAt(0).toUpperCase() + sectionId.slice(1) + index;
+      var caption = el("span", "", field.key);
+      var input = el("input");
+      input.id = inputId;
+      input.type = "text";
+      input.maxLength = 80;
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.value = fleetDraft[field.key];
+      input.setAttribute("aria-label", field.label);
+      input.dataset.fleetField = field.key;
+      input.addEventListener("input", function () {
+        fleetDraft[field.key] = input.value;
+        fleetConfirmed = false;
+        updateFleetPreviewNote();
+        updateFleetReadouts();
+      });
+      label.appendChild(caption);
+      label.appendChild(input);
+      return label;
+    }));
+    updateFleetPreviewNote();
+    updateFleetReadouts();
+    if (focusHeading) { headline.focus({ preventScroll: true }); }
+    return true;
+  }
+
+  function showFleetToast(message, warning) {
+    var toast = document.getElementById("fleetToast");
+    window.clearTimeout(fleetToastTimer);
+    toast.textContent = message;
+    toast.classList.toggle("is-warning", Boolean(warning));
+    toast.hidden = false;
+    fleetToastTimer = window.setTimeout(function () { toast.hidden = true; }, 4400);
+  }
+
+  function runFleetAction(action) {
+    var changes = fleetChangedEntries();
+    if (action === "diff") {
+      showFleetToast(changes.length
+        ? changes.length + " preview change" + (changes.length === 1 ? "" : "s") + ": " + changes.join(", ") + "."
+        : "Preview matches the current Fleet Config baseline.", false);
+      return;
+    }
+    if (action === "save") {
+      try {
+        localStorage.setItem(FLEET_PREVIEW_KEY, JSON.stringify(fleetDraft));
+        showFleetToast("Preview saved in this browser. Nothing was propagated.", false);
+      } catch (_) {
+        showFleetToast("Preview could not be saved in this browser.", true);
+      }
+      updateFleetPreviewNote();
+      return;
+    }
+    if (action === "confirm") {
+      if (!changes.length) {
+        showFleetToast("There are no preview changes to confirm.", true);
+        return;
+      }
+      fleetConfirmed = true;
+      updateFleetPreviewNote();
+      showFleetToast("Preview confirmed. Propagation remains disconnected in HOSTD-48.", false);
+      return;
+    }
+    if (action === "propagate") {
+      showFleetToast("Propagation is not connected yet. HOSTD-49/50 will carry confirmed previews to the fleet.", true);
+    }
+  }
+
+  function setBoardPlane(showFleet) {
+    var flipper = document.getElementById("boardFlipper");
+    var stage = document.getElementById("dashboard");
+    var front = document.getElementById("tradingBoard");
+    var back = document.getElementById("fleetConfigBoard");
+    if (!flipper || flipper.classList.contains("is-flipped") === showFleet) { return; }
+    window.clearTimeout(fleetFlipTimer);
+    document.querySelectorAll("details[data-dismissable][open]").forEach(function (open) { open.removeAttribute("open"); });
+    front.inert = showFleet;
+    back.inert = !showFleet;
+    front.setAttribute("aria-hidden", String(showFleet));
+    back.setAttribute("aria-hidden", String(!showFleet));
+    document.documentElement.dataset.joePlane = showFleet ? "fleet-config" : "trading";
+    stage.classList.add("is-flipping");
+    if (showFleet) { stage.classList.add("is-fleet"); }
+    if (showFleet) { window.scrollTo(0, 0); }
+    window.requestAnimationFrame(function () { flipper.classList.toggle("is-flipped", showFleet); });
+    fleetFlipTimer = window.setTimeout(function () {
+      stage.classList.remove("is-flipping");
+      if (!showFleet) { stage.classList.remove("is-fleet"); }
+      if (showFleet) {
+        document.getElementById("fleetConfigTitle").setAttribute("tabindex", "-1");
+        document.getElementById("fleetConfigTitle").focus({ preventScroll: true });
+      } else {
+        document.getElementById("fleetConfigOpen").focus({ preventScroll: true });
+        resizeVisuals();
+      }
+    }, window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 780);
+  }
+
+  function bindFleetConfigControls() {
+    fleetDraft = readFleetPreview();
+    renderFleetConfigSection(fleetSectionId, false);
+    document.getElementById("fleetConfigOpen").addEventListener("click", function () { setBoardPlane(true); });
+    document.getElementById("fleetConfigClose").addEventListener("click", function () { setBoardPlane(false); });
+    document.querySelectorAll("[data-fleet-section]").forEach(function (button) {
+      button.addEventListener("click", function () { renderFleetConfigSection(button.dataset.fleetSection, false); });
+    });
+    document.querySelectorAll("[data-fleet-action]").forEach(function (button) {
+      button.addEventListener("click", function () { runFleetAction(button.dataset.fleetAction); });
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && document.documentElement.dataset.joePlane === "fleet-config") {
+        setBoardPlane(false);
+      }
+    });
+  }
+
   function bindControls() {
     document.getElementById("seriesAll").addEventListener("click", function () {
       if (historyState.selected.length === DESK_IDS.length) {
@@ -4136,11 +4458,17 @@
     readObservedEvents: readObservedEvents,
     writeObservedEvents: writeObservedEvents,
     sharedWindowCompare: sharedWindowCompare,
-    formatPctChange: formatPctChange
+    formatPctChange: formatPctChange,
+    fleetPreviewStorageKey: FLEET_PREVIEW_KEY,
+    fleetChangedEntries: fleetChangedEntries,
+    selectFleetConfigSection: renderFleetConfigSection,
+    showFleetConfig: function () { setBoardPlane(true); },
+    showTradingBoard: function () { setBoardPlane(false); }
   });
   initTheme();
   initGrid();
   bindControls();
+  bindFleetConfigControls();
   observeHistoryCanvas();
   bindLayoutControls();
   bindSettingsControls();
