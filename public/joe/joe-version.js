@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.7.5",
+    APP_VERSION: "0.7.6",
     VERSION_HISTORY: [
+      {
+        version: "0.7.6",
+        date: "2026-09-11",
+        title: "Continuous History, clear evidence",
+        changes: [
+          "Gray dotted lines connect missing History spans and carry the last value; an assumed €5,000 start is explicitly marked.",
+          "Observed desk values stay solid green, blue and brown. Estimates never change stored history, P&L or comparisons.",
+          "The same gap policy applies to every desk and time range, with readable calendar labels and a line-meaning legend.",
+        ],
+      },
       {
         version: "0.7.5",
         date: "2026-09-11",
