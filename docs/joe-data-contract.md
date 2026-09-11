@@ -26,6 +26,121 @@ position detail. Position rows accept desk, symbol, side, quantity, mark,
 market value, day/open PnL, update time, and the frozen optional extensions
 `currency` and `accountingScope`.
 
+Producers may also emit the additive top-level account observation:
+
+```json
+{
+  "brokerAccount": {
+    "equity": 31482.75,
+    "currency": "EUR",
+    "observedAt": "2026-09-08T06:00:00.000Z",
+    "scope": "paper-account-including-keep",
+    "status": "available"
+  }
+}
+```
+
+This is the paper broker account's authoritative EUR `NetLiquidation`, not a
+sum of virtual desk equities. Its scope includes KEEP. `observedAt` is the
+actual completed broker-book observation and must not advance on publisher
+heartbeats. `available` requires a finite `NetLiquidation` whose own currency
+proves EUR, a live gateway, and a fresh observation. Missing, invalid, or
+foreign-currency values publish `equity: null` with `status: unavailable`.
+After upstream loss or staleness, a last-good finite value may be retained with
+its original `observedAt` and `status: unavailable`.
+
+`totals` remains the sum of the three virtual desk money objects. If any desk,
+including J, has incomplete accounting, the affected total fields remain
+`null`; neither the broker account value nor a partial desk sum may replace
+them. The server deliberately excludes `brokerAccount` from J, Joe, Joel, and
+All bots history. Consumers must continue accepting older snapshots where the
+additive object is absent.
+
+### J backfill summary
+
+The producer may receive an optional `familyHistory` result from the ledger
+adapter through `projectBook(book, { familyHistory })`. A valid result adds only
+`desks[j].backfill`; older producers and snapshots without it remain valid.
+The public summary is deliberately smaller than the private ledger result:
+
+```json
+{
+  "backfill": {
+    "status": "BEST_AVAILABLE",
+    "fullTotalAvailable": false,
+    "capturedSubtotal": {
+      "realizedPnl": -37.125,
+      "currency": "USD",
+      "method": "captured-fifo-matched-roundtrips",
+      "executionCount": 43,
+      "commissionCount": 42,
+      "fromInclusive": "2026-09-10T08:00:00.000Z",
+      "throughInclusive": "2026-09-10T08:05:00.000Z",
+      "points": [
+        { "at": "2026-09-10T08:00:30.000Z", "realizedPnl": -4.5 },
+        { "at": "2026-09-10T08:05:00.000Z", "realizedPnl": -37.125 }
+      ],
+      "pointsTruncated": false
+    },
+    "coverage": {
+      "target": {
+        "fromInclusive": "2026-09-10T08:00:00.000Z",
+        "toExclusive": "2026-09-10T08:20:00.000Z"
+      },
+      "completeIntervalCount": 0,
+      "knownIntervalCount": 1,
+      "gapCount": 1,
+      "firstGap": {
+        "fromInclusive": "2026-09-10T08:05:00.000Z",
+        "toExclusive": "2026-09-10T08:20:00.000Z"
+      }
+    },
+    "missingOpeningLotCount": 1,
+    "orphanCommissionCount": 1
+  }
+}
+```
+
+`BEST_AVAILABLE` means the captured subtotal is useful but partial. It stays in
+its evidenced native currency; a USD subtotal is never converted to EUR when
+historical FX is absent. `fullTotalAvailable` can be true only for `COMPLETE`
+coverage with finite ledger equity, no gaps, no missing opening lots, and no
+orphan commissions. Even then, `backfill.capturedSubtotal` remains presentation
+metadata and never replaces `desks[j].money`, household `totals`, or history.
+
+`capturedSubtotal.method` is optional for compatibility. The only evidenced
+value is `captured-fifo-matched-roundtrips`: J-family FIFO matched round trips,
+net of recorded fees and calculated only from family-owned fills. The board
+labels that value “J-family FIFO, net of fees.” An absent or `null` method makes
+no FIFO claim. Producers map missing, unavailable, and unrelated account-level
+methods to `null`, and must emit `null` when the captured subtotal is
+unavailable. Broker account realized PnL or average-cost results must not be
+substituted because concurrent activity can share a symbol. This method does
+not change or populate full J money, virtual desk totals, History, or FX.
+
+`capturedSubtotal.points` and `pointsTruncated` are an optional pair, so older
+backfill summaries without a curve remain compatible. When present, the array
+contains at most 2048 cumulative native-currency realized-PnL observations.
+Every point inherits `capturedSubtotal.currency`; point objects cannot carry a
+second currency or any account, receipt, or execution identifier. Timestamps
+must be strictly increasing RFC 3339 values inside the inclusive capture
+interval, and the last point must match `realizedPnl` within `0.000001`.
+Same-time fills therefore arrive already aggregated. The producer and clients
+reject malformed curves rather than inventing an opening anchor, a wall-clock
+endpoint, or an FX conversion. `pointsTruncated: true` means only the latest
+captured points are shown.
+
+The public projection includes only bounded counts and time intervals. It
+discards gap reasons, raw account and execution identifiers, receipt objects,
+and the contents of missing-lot or orphan-commission arrays. The J card labels
+best-available data as “Captured results (partial)”, shows the native-currency
+subtotal and fill count, and states that the full J total is unavailable while
+coverage gaps remain. A new `familyHistory` result appears on the next ordinary
+snapshot push without changing broker observation time or history semantics.
+The disclosure titled “Captured J history · [currency] · partial” plots only
+these actual observations. It is separate from the preserved household History
+dataset and never adds a J, Joe, Joel, or All bots history point.
+
 A desk may also carry an `accounting` object beside (not inside) `money` with
 all three fields: RFC 3339 `periodStart`, method
 `execution-fifo-net-current-fx`, and a 1–240 character printable-English

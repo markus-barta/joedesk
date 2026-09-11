@@ -23,6 +23,7 @@ async function writeSnapshot(overrides = {}) {
   const snapshot = structuredClone(sample);
   snapshot.generatedAt = new Date().toISOString();
   if (overrides.generatedAt) snapshot.generatedAt = overrides.generatedAt;
+  snapshot.brokerAccount.observedAt = overrides.brokerObservedAt || snapshot.generatedAt;
   if (overrides.halt !== undefined) snapshot.safety.halt = overrides.halt;
   if (overrides.haltReason !== undefined) snapshot.safety.haltReason = overrides.haltReason;
   if (overrides.gatewayStatus) snapshot.safety.gateway.status = overrides.gatewayStatus;
@@ -208,6 +209,7 @@ try {
   let broken;
   let stub;
   let richSnapshot;
+  let backfillSnapshot;
 
   if (smokeMode === "privacy") {
     const publicBefore = requests.filter(item => item.host.startsWith("example.com") && item.path === "/joe/data.json").length;
@@ -234,6 +236,9 @@ try {
     deskIds: [...document.querySelectorAll('.desk-widget')].map(node => node.dataset.desk),
     states: [...document.querySelectorAll('.state')].map(node => node.textContent),
     total: document.getElementById('totalEquity')?.textContent,
+    brokerEquity: document.getElementById('brokerEquity')?.textContent,
+    brokerMeta: document.getElementById('brokerAccountMeta')?.textContent,
+    deskTotalsMeta: document.getElementById('deskTotalsMeta')?.textContent,
     gateway: document.getElementById('gatewayValue')?.textContent,
     halt: document.getElementById('haltValue')?.textContent,
     alarmHidden: document.getElementById('alarm')?.hidden,
@@ -268,6 +273,8 @@ try {
       JSON.stringify(healthy.deskIds) !== JSON.stringify(["j", "joe", "joel"]) ||
       !healthy.states.includes("Working") || !healthy.states.includes("Sitting out") ||
       !/30[\.\s]000/.test(healthy.total || "") || !/^OK · connected/.test(healthy.gateway || "") ||
+      !/31[\.\s]482,75/.test(healthy.brokerEquity || "") || !/Includes KEEP/.test(healthy.brokerMeta || "") ||
+      !/virtual books/i.test(healthy.deskTotalsMeta || "") ||
       healthy.totalDay !== "—" || !/not available yet/i.test(healthy.totalDayTitle || "") ||
       !/Day P&L is not available yet/i.test(healthy.attributionDay || "") ||
       !healthy.halt.startsWith("Off") || !healthy.alarmHidden || !healthy.gridReady || healthy.widgets !== 7 ||
@@ -350,7 +357,8 @@ try {
       if (
         mobile.overflow || mobile.gridColumns !== 1 || mobile.desktopColumns !== 12 || (mobile.storedColumns !== undefined && mobile.storedColumns !== 12) ||
         mobile.layoutPanel?.overflow || mobile.settingsPanel?.overflow ||
-        mobile.defaultHeroY !== 0 || mobile.defaultHeroH !== 3 || mobile.liveHeroY !== 0 || mobile.liveHeroH !== 3 ||
+        mobile.defaultHeroY !== 0 || mobile.defaultHeroH !== 3 || mobile.liveHeroY !== 0 ||
+        !Number.isInteger(mobile.liveHeroH) || mobile.liveHeroH < mobile.defaultHeroH ||
         mobile.viewport !== "narrow" || mobile.narrowBreakpoint !== 700 ||
         !mobile.headerStatusVisible || !mobile.gateHidden || mobile.heroClipped || !mobile.heroOpen || !mobile.heroFreshness || mobile.versionPanel?.overflow
       ) throw new Error(`Mobile layout mismatch: ${JSON.stringify(mobile)}`);
@@ -462,6 +470,64 @@ try {
       ];
       richSnapshot = await value(`(() => { window.JoeBoard.ingest(${JSON.stringify(positionsSnapshot)}); return { rows: document.querySelectorAll('#positionsBody tr').length, symbols: document.getElementById('positionsBody')?.innerText, open: document.getElementById('totalOpen')?.textContent, totalDay: document.getElementById('totalDay')?.textContent, positionDayCells: [...document.querySelectorAll('#positionsBody td.number.neutral')].map((node) => node.textContent), tradeCount: document.querySelector('[data-desk-slot="j"] .desk-money-row')?.innerText }; })()`);
       if (richSnapshot.rows !== 2 || !/DEMO1/.test(richSnapshot.symbols || "") || !/17,25/.test(richSnapshot.open || "") || richSnapshot.totalDay !== "—" || !richSnapshot.positionDayCells?.every((value) => value === "—") || !/4/.test(richSnapshot.tradeCount || "")) throw new Error(`Rich snapshot mismatch: ${JSON.stringify(richSnapshot)}`);
+
+      const partialBackfill = structuredClone(sample);
+      partialBackfill.generatedAt = new Date().toISOString();
+      partialBackfill.brokerAccount.observedAt = partialBackfill.generatedAt;
+      partialBackfill.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
+      partialBackfill.totals = { equity: null, dayPnl: null, totalPnl: null };
+      partialBackfill.desks[0].backfill = {
+        status: "BEST_AVAILABLE",
+        fullTotalAvailable: false,
+        capturedSubtotal: {
+          realizedPnl: -37.125,
+          currency: "USD",
+          method: "captured-fifo-matched-roundtrips",
+          executionCount: 43,
+          commissionCount: 42,
+          fromInclusive: "2026-09-10T08:00:00.000Z",
+          throughInclusive: "2026-09-10T08:05:00.000Z",
+          points: [
+            { at: "2026-09-10T08:00:20.000Z", realizedPnl: -4.5 },
+            { at: "2026-09-10T08:01:20.000Z", realizedPnl: 8.25 },
+            { at: "2026-09-10T08:04:20.000Z", realizedPnl: 8.25 },
+            { at: "2026-09-10T08:05:00.000Z", realizedPnl: -37.125 },
+          ],
+          pointsTruncated: true,
+        },
+        coverage: { target: { fromInclusive: "2026-09-10T08:00:00.000Z", toExclusive: "2026-09-10T08:20:00.000Z" }, completeIntervalCount: 0, knownIntervalCount: 1, gapCount: 1, firstGap: { fromInclusive: "2026-09-10T08:05:00.000Z", toExclusive: "2026-09-10T08:20:00.000Z" } },
+        missingOpeningLotCount: 1,
+        orphanCommissionCount: 1,
+      };
+      backfillSnapshot = await value(`(() => {
+        window.JoeBoard.ingest(${JSON.stringify(partialBackfill)});
+        const card = document.querySelector('[data-desk-slot="j"] .desk-backfill');
+        const details = card?.querySelector('.desk-backfill-history');
+        details?.querySelector('summary')?.click();
+        const svg = details?.querySelector('svg');
+        return {
+          text: card?.innerText,
+          total: document.getElementById('totalEquity')?.textContent,
+          title: details?.querySelector('summary')?.textContent,
+          open: details?.open,
+          svgRole: svg?.getAttribute('role'),
+          svgLabel: svg?.getAttribute('aria-label'),
+          path: svg?.querySelector('path')?.getAttribute('d'),
+          pointCount: window.JoeBoard.capturedHistorySeries(${JSON.stringify(partialBackfill.desks[0].backfill)}).points.length,
+          bounded: !card || card.scrollWidth <= card.clientWidth + 1,
+          mainHistoryHasPartial: document.querySelector('[gs-id="history"]')?.innerText.includes('-37.125') || false,
+        };
+      })()`);
+      if (!/Captured results \(partial\)/i.test(backfillSnapshot.text || "") || !/USD/.test(backfillSnapshot.text || "") || !/43 fills/.test(backfillSnapshot.text || "") || !/Coverage gap/.test(backfillSnapshot.text || "") || !/Historical EUR FX is not evidenced/.test(backfillSnapshot.text || "") || backfillSnapshot.total !== "—") {
+        throw new Error(`Backfill snapshot mismatch: ${JSON.stringify(backfillSnapshot)}`);
+      }
+      if (backfillSnapshot.title !== "Captured J history · USD · partial" || !backfillSnapshot.open ||
+          backfillSnapshot.svgRole !== "img" || backfillSnapshot.svgLabel !== backfillSnapshot.title ||
+          !backfillSnapshot.path || backfillSnapshot.pointCount !== 4 || !backfillSnapshot.bounded ||
+          backfillSnapshot.mainHistoryHasPartial || !/J-family FIFO, net of fees/.test(backfillSnapshot.text || "") ||
+          !/latest captured points/.test(backfillSnapshot.text || "")) {
+        throw new Error(`Captured history interaction mismatch: ${JSON.stringify(backfillSnapshot)}`);
+      }
 
       const layout = await value(`(async () => {
         document.getElementById('layoutMenu').setAttribute('open', '');
@@ -664,7 +730,7 @@ try {
   const source = await readFile(join(repoRoot, "public", "joe", "index.html"), "utf8");
   if (/DUR\d+|1,001,403|SXR8|TSLA/.test(source)) throw new Error("Static /joe/ source still contains Paper-Drill account or position data");
   if (exceptions.length) throw new Error(`Runtime exceptions: ${exceptions.join("; ")}`);
-  console.log(JSON.stringify({ healthy, mobile, stale, broken, richSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
+  console.log(JSON.stringify({ healthy, mobile, stale, broken, richSnapshot, backfillSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
   await withTimeout(send("Browser.close").catch(() => {}), 1000);
   ws.close();
 } finally {

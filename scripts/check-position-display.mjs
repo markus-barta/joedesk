@@ -18,6 +18,7 @@ const displayHelpers = `${extractJoeBlock("  var DESK_IDS = [", "\n  var DEFAULT
   var money = new Intl.NumberFormat("de-AT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
   var moneyFormatters = { EUR: money };
 ${extractJoeBlock("  function required(condition, message)", "\n\n  function amount(value, signed)")}
+${extractJoeBlock("  function daysInMonth(year, month)", "\n\n  function brokerAccountPresentation(data)")}
 ${extractJoeBlock("  function moneyForCurrency(currencyCode)", "\n\n  function tone(value)")}
 ${extractJoeBlock("  function collectPositions(data)", "\n\n  function deskPositionsCoverage(deskId, data)")}`;
 

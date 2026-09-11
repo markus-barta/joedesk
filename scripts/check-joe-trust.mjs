@@ -17,10 +17,15 @@ function extractJoeBlock(startMarker, endMarker) {
 
 const trustHelpers = `${extractJoeBlock("  var DESK_IDS = [", "\n  var DEFAULT_LAYOUT = [")}
   var accountingDate = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "numeric", timeZone: "America/New_York" });
+  var shortTime = new Intl.DateTimeFormat("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
+  var money = new Intl.NumberFormat("de-AT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
+  var moneyFormatters = { EUR: money };
 ${extractJoeBlock("  function required(condition, message)", "\n\n  function amount(value, signed)")}
 ${extractJoeBlock("  function amount(value, signed)", "\n\n  function moneyForCurrency")}
+${extractJoeBlock("  function moneyForCurrency(currencyCode)", "\n\n  function positionMarketValue(position)")}
 ${extractJoeBlock("  function el(tag, className, text)", "\n\n  function endpoint")}
 ${extractJoeBlock("  function ageInSeconds(iso)", "\n\n  function openPnl(data)")}
+${extractJoeBlock("  function openPnl(data)", "\n\n  function nonEmptyString(value)")}
 ${extractJoeBlock("  // HOSTD-33 / Wave D: Day P&L stays unavailable", "\n\n  function labelPaperCapital()")}
 ${extractJoeBlock("  function deskFreshnessFooter(desk, snapshotAge", "\n\n  function updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale)")}
 ${extractJoeBlock("  function collectPositions(data)", "\n\n  function deskPositionsCoverage(deskId, data)")}
@@ -29,18 +34,34 @@ ${extractJoeBlock("  function positionsAvailability(data)", "\n\n  function posi
 ${extractJoeBlock("  function positionsEmptyMessage(data, filterDesk)", "\n\n  function renderPositions(data)")}`;
 
 const createdTags = [];
+function fakeNode(tag) {
+  return {
+    tag,
+    className: "",
+    attributes: {},
+    children: [],
+    textContent: "",
+    appendChild(child) { this.children.push(child); return child; },
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
+      if (name === "class") this.className = String(value);
+    },
+  };
+}
 const fakeDocument = {
   createElement(tag) {
     createdTags.push(tag);
-    return {
-      tag,
-      className: "",
-      children: [],
-      textContent: "",
-      appendChild(child) { this.children.push(child); return child; },
-    };
+    return fakeNode(tag);
+  },
+  createElementNS(_namespace, tag) {
+    createdTags.push(tag);
+    return fakeNode(tag);
   },
 };
+
+function descendants(node) {
+  return [node, ...(node.children || []).flatMap(descendants)];
+}
 
 const api = new Function("document", `${trustHelpers}
   return {
@@ -56,15 +77,231 @@ const api = new Function("document", `${trustHelpers}
     positionsEmptyMessage,
     deskFreshnessFooter,
     snapshotProblems,
+    brokerAccountPresentation,
+    backfillPresentation,
+    capturedHistorySeries,
+    renderBackfill,
     gatewayHeartbeatAge,
     validIsoTimestamp,
     collectPositions,
     ageInSeconds,
-    ageLabel
+    ageLabel,
+    openPnl
   };
 `)(fakeDocument);
 
 const validated = api.validate(structuredClone(sample));
+const syntheticBackfill = {
+  status: "BEST_AVAILABLE",
+  fullTotalAvailable: false,
+  capturedSubtotal: {
+    realizedPnl: -37.125,
+    currency: "USD",
+    executionCount: 43,
+    commissionCount: 42,
+    fromInclusive: "2026-09-10T08:00:00.000Z",
+    throughInclusive: "2026-09-10T08:05:00.000Z",
+  },
+  coverage: {
+    target: { fromInclusive: "2026-09-10T08:00:00.000Z", toExclusive: "2026-09-10T08:20:00.000Z" },
+    completeIntervalCount: 0,
+    knownIntervalCount: 1,
+    gapCount: 1,
+    firstGap: { fromInclusive: "2026-09-10T08:05:00.000Z", toExclusive: "2026-09-10T08:20:00.000Z" },
+  },
+  missingOpeningLotCount: 1,
+  orphanCommissionCount: 1,
+};
+const partialJBackfill = structuredClone(sample);
+partialJBackfill.desks[0].backfill = syntheticBackfill;
+partialJBackfill.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
+partialJBackfill.totals = { equity: null, dayPnl: null, totalPnl: null };
+const validatedBackfill = api.validate(partialJBackfill);
+const backfillCopy = api.backfillPresentation(validatedBackfill.desks[0].backfill);
+if (
+  backfillCopy.title !== "Captured results (partial)" ||
+  !/^USD /.test(backfillCopy.subtotal) ||
+  !/43 fills/.test(backfillCopy.subtotal) ||
+  !/known interval/.test(backfillCopy.interval) ||
+  !/Full J total unavailable/.test(backfillCopy.coverage) ||
+  !/Coverage gap/.test(backfillCopy.coverage) ||
+  !/Historical EUR FX is not evidenced/.test(backfillCopy.fx) ||
+  backfillCopy.method !== null
+) {
+  throw new Error("legacy partial USD backfill must render truth without implicitly claiming FIFO");
+}
+const backfillNode = api.renderBackfill(validatedBackfill.desks[0].backfill);
+if (backfillNode.children[0].textContent !== "Captured results (partial)" || createdTags.includes("script")) {
+  throw new Error("backfill must render bounded literal UI content");
+}
+const unavailableHistory = descendants(backfillNode).find((node) => node.className === "desk-backfill-history-empty");
+if (unavailableHistory?.textContent !== "Captured J history is unavailable.") {
+  throw new Error("legacy backfill without points must explicitly mark its curve unavailable");
+}
+
+const curvedBackfill = structuredClone(partialJBackfill);
+curvedBackfill.desks[0].backfill.capturedSubtotal.method = "captured-fifo-matched-roundtrips";
+curvedBackfill.desks[0].backfill.capturedSubtotal.points = [
+  { at: "2026-09-10T08:00:20.000Z", realizedPnl: -4.5 },
+  { at: "2026-09-10T08:01:20.000Z", realizedPnl: 8.25 },
+  { at: "2026-09-10T08:04:20.000Z", realizedPnl: 8.25 },
+  { at: "2026-09-10T08:05:00.000Z", realizedPnl: -37.125 },
+];
+curvedBackfill.desks[0].backfill.capturedSubtotal.pointsTruncated = true;
+const validatedCurve = api.validate(curvedBackfill).desks[0].backfill;
+const curve = api.capturedHistorySeries(validatedCurve);
+if (!curve.available || curve.points.length !== 4 || !curve.path ||
+    !(curve.points[1].x - curve.points[0].x < curve.points[2].x - curve.points[1].x) ||
+    curve.points[1].y !== curve.points[2].y || curve.points[0].realizedPnl !== -4.5) {
+  throw new Error("captured curve must scale nonuniform actual times and negative-positive-flat native values");
+}
+const curveNode = api.renderBackfill(validatedCurve);
+const curveNodes = descendants(curveNode);
+const curveSummary = curveNodes.find((node) => node.className === "desk-backfill-history-summary");
+const curveSvg = curveNodes.find((node) => node.tag === "svg");
+const curvePath = curveNodes.find((node) => node.className === "desk-backfill-path");
+if (curveSummary?.textContent !== "Captured J history · USD · partial" ||
+    curveSvg?.attributes.role !== "img" || curveSvg?.attributes["aria-label"] !== curveSummary.textContent ||
+    !curvePath?.attributes.d || !curveNodes.some((node) => node.textContent === "J-family FIFO, net of fees") ||
+    !curveNodes.some((node) => /latest captured points/.test(node.textContent))) {
+  throw new Error("captured curve must be accessible, separately titled, visible, and honest about truncation");
+}
+
+const unrelatedMethod = structuredClone(syntheticBackfill);
+unrelatedMethod.capturedSubtotal.method = "account-average-cost-realized";
+if (api.backfillPresentation(unrelatedMethod).method !== null) {
+  throw new Error("an unrelated account-realized method must never be presented as J-family FIFO");
+}
+
+const singletonBackfill = structuredClone(partialJBackfill);
+singletonBackfill.desks[0].backfill.capturedSubtotal.points = [
+  { at: "2026-09-10T08:03:00.000Z", realizedPnl: -37.125 },
+];
+singletonBackfill.desks[0].backfill.capturedSubtotal.pointsTruncated = false;
+const singleton = api.validate(singletonBackfill).desks[0].backfill;
+const singletonSeries = api.capturedHistorySeries(singleton);
+const singletonNodes = descendants(api.renderBackfill(singleton));
+if (singletonSeries.points.length !== 1 || singletonSeries.path !== "" ||
+    !singletonNodes.some((node) => node.tag === "circle") ||
+    !singletonNodes.some((node) => /^Actual point /.test(node.textContent))) {
+  throw new Error("singleton captured history must render only its actual point and label");
+}
+const eurBackfill = structuredClone(partialJBackfill);
+eurBackfill.desks[0].backfill.capturedSubtotal.currency = "EUR";
+eurBackfill.desks[0].backfill.capturedSubtotal.realizedPnl = 18.625;
+const eurCopy = api.backfillPresentation(api.validate(eurBackfill).desks[0].backfill);
+if (!/^EUR /.test(eurCopy.subtotal) || eurCopy.fx !== null) {
+  throw new Error("EUR backfill must stay in EUR without a missing-FX warning");
+}
+const eurCurve = structuredClone(curvedBackfill);
+eurCurve.desks[0].backfill.capturedSubtotal.currency = "EUR";
+const eurCurveNodes = descendants(api.renderBackfill(api.validate(eurCurve).desks[0].backfill));
+if (!eurCurveNodes.some((node) => node.textContent === "Captured J history · EUR · partial")) {
+  throw new Error("captured history title must use its native EUR currency");
+}
+const updatedBackfill = structuredClone(validatedBackfill.desks[0].backfill);
+updatedBackfill.capturedSubtotal.executionCount = 45;
+if (!/45 fills/.test(api.backfillPresentation(updatedBackfill).subtotal)) {
+  throw new Error("updated familyHistory summary must have a live presentation path");
+}
+for (const mutate of [
+  function (snapshot) { snapshot.desks[0].backfill.status = "PARTIAL"; },
+  function (snapshot) { snapshot.desks[0].backfill.capturedSubtotal.currency = "GBP"; },
+  function (snapshot) { snapshot.desks[0].backfill.capturedSubtotal.method = "account-average-cost-realized"; },
+  function (snapshot) { snapshot.desks[0].backfill.coverage.gapCount = 0; },
+  function (snapshot) { snapshot.desks[0].backfill.receipts = []; },
+  function (snapshot) { snapshot.desks[1].backfill = snapshot.desks[0].backfill; delete snapshot.desks[0].backfill; },
+]) {
+  const malformed = structuredClone(partialJBackfill);
+  mutate(malformed);
+  let rejected = false;
+  try { api.validate(malformed); } catch (_) { rejected = true; }
+  if (!rejected) { throw new Error("client validator accepted malformed or misplaced J backfill"); }
+}
+for (const mutate of [
+  function (captured) { delete captured.pointsTruncated; },
+  function (captured) { captured.points[1].at = captured.points[0].at; },
+  function (captured) { captured.points[0].at = "2026-09-10T07:59:00.000Z"; },
+  function (captured) { captured.points[0].realizedPnl = Number.NaN; },
+  function (captured) { captured.points[captured.points.length - 1].realizedPnl = -37; },
+  function (captured) { captured.points[0].execId = "private"; },
+  function (captured) { captured.points[0].currency = "USD"; },
+]) {
+  const malformed = structuredClone(curvedBackfill);
+  mutate(malformed.desks[0].backfill.capturedSubtotal);
+  let rejected = false;
+  try { api.validate(malformed); } catch (_) { rejected = true; }
+  if (!rejected) { throw new Error("client validator accepted malformed captured history points"); }
+}
+const olderPayload = structuredClone(sample);
+delete olderPayload.brokerAccount;
+const olderValidated = api.validate(olderPayload);
+if (api.brokerAccountPresentation(olderValidated).state !== "legacy") {
+  throw new Error("older payload without brokerAccount must remain compatible");
+}
+
+const freshAccount = structuredClone(sample);
+freshAccount.generatedAt = new Date().toISOString();
+freshAccount.brokerAccount.observedAt = freshAccount.generatedAt;
+const freshAccountValidated = api.validate(freshAccount);
+const freshAccountView = api.brokerAccountPresentation(freshAccountValidated);
+if (
+  freshAccountView.value !== sample.brokerAccount.equity ||
+  freshAccountView.state !== "available" ||
+  !/Includes KEEP/.test(freshAccountView.meta)
+) {
+  throw new Error("valid broker account equity must be useful and explicitly include KEEP");
+}
+
+const incompleteJAccount = structuredClone(freshAccount);
+incompleteJAccount.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
+incompleteJAccount.totals = { equity: null, dayPnl: null, totalPnl: null };
+const incompleteJValidated = api.validate(incompleteJAccount);
+if (api.brokerAccountPresentation(incompleteJValidated).value !== sample.brokerAccount.equity) {
+  throw new Error("incomplete J accounting must not blank valid broker account equity");
+}
+
+const retainedAccount = structuredClone(freshAccount);
+retainedAccount.brokerAccount.status = "unavailable";
+const retainedView = api.brokerAccountPresentation(api.validate(retainedAccount));
+if (retainedView.value !== sample.brokerAccount.equity || retainedView.state !== "unavailable" || !/last observed/.test(retainedView.meta)) {
+  throw new Error("last-good broker equity must display with honest unavailable treatment");
+}
+
+const staleAccount = structuredClone(freshAccount);
+staleAccount.brokerAccount.observedAt = new Date(Date.now() - 3600_000).toISOString();
+const staleView = api.brokerAccountPresentation(api.validate(staleAccount));
+if (staleView.state !== "stale" || !/stale/.test(staleView.meta) || !staleView.problem) {
+  throw new Error("old broker observation must receive explicit stale treatment");
+}
+
+const missingAccountEquity = structuredClone(freshAccount);
+missingAccountEquity.brokerAccount.status = "unavailable";
+missingAccountEquity.brokerAccount.equity = null;
+const missingAccountView = api.brokerAccountPresentation(api.validate(missingAccountEquity));
+if (missingAccountView.value !== null || missingAccountView.state !== "unavailable") {
+  throw new Error("unavailable broker equity must remain an explicit unknown");
+}
+
+const partialOpenPnl = structuredClone(incompleteJAccount);
+partialOpenPnl.positions = [{ desk: "joel", symbol: "DEMO", openPnl: 9 }];
+if (api.openPnl(api.validate(partialOpenPnl)) !== null) {
+  throw new Error("partial position P&L must not fabricate a household total");
+}
+
+for (const [field, value] of [
+  ["equity", null],
+  ["currency", "USD"],
+  ["observedAt", "2026-09-08"],
+  ["scope", "virtual-desks"],
+  ["status", "stale"],
+]) {
+  const malformed = structuredClone(freshAccount);
+  malformed.brokerAccount[field] = value;
+  let rejected = false;
+  try { api.validate(malformed); } catch (_) { rejected = true; }
+  if (!rejected) { throw new Error("client validator accepted invalid brokerAccount." + field); }
+}
 if (api.dayPnlDisplayValue(validated, validated.totals.dayPnl) !== null) {
   throw new Error("day P&L must stay unavailable until producer contract lands");
 }
@@ -245,10 +482,20 @@ if (!/table\.positions-table-empty thead\s*\{[^}]*display:\s*none/.test(cssSourc
 if (!/syncPositionsTableLayout/.test(joeSource) || !/positions-table-empty/.test(joeSource)) {
   throw new Error("renderPositions must toggle the empty positions table layout");
 }
+if (!/Paper account equity/.test(htmlSource) || !/id="brokerEquity"/.test(htmlSource) || !/Includes KEEP/.test(htmlSource)) {
+  throw new Error("hero must clearly label scoped paper account equity and KEEP inclusion");
+}
+if (!/Virtual desk total/.test(htmlSource) || !/J accounting incomplete · desk total unavailable/.test(joeSource)) {
+  throw new Error("hero must keep desk totals separate and explain incomplete J accounting");
+}
+if (!/\.desk-backfill-history\s*\{[^}]*max-width:\s*100%[^}]*overflow:\s*hidden/.test(cssSource) ||
+    !/\.desk-backfill-chart\s*\{[^}]*width:\s*100%[^}]*max-width:\s*100%/.test(cssSource)) {
+  throw new Error("captured history disclosure and SVG must remain bounded on mobile");
+}
 
 console.log(JSON.stringify({
   ok: true,
-  checks: 24,
+  checks: 62,
   positionsPartial: api.positionsAvailability(oneDeskEmptyValidated),
   dayPnl: api.dayPnlDisplayValue(validated, 0),
 }, null, 2));

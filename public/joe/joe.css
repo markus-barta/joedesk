@@ -127,6 +127,14 @@ button { color: inherit; }
 .hero-values { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 12px; align-items: stretch; padding: 12px 14px 9px; }
 .hero-stat { display: flex; min-width: 0; flex-direction: column; justify-content: center; padding: 10px 12px; border: 1px solid var(--line); background: var(--flap); }
 .hero-stat strong { overflow: hidden; margin-top: 5px; font: 700 clamp(14px, 1.45vw, 23px) var(--mono); text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hero-meta, .hero-secondary { overflow: hidden; margin-top: 4px; color: var(--quiet); font: 9px var(--mono); line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.hero-secondary { color: var(--muted); }
+.hero-secondary b { color: var(--quiet); font-weight: 500; text-transform: uppercase; letter-spacing: .05em; }
+.hero-secondary span { color: var(--paper); font-variant-numeric: tabular-nums; }
+.hero-meta.attention { color: var(--amber); }
+.hero-meta.unavailable { color: var(--red); }
+.broker-stale { color: var(--amber) !important; }
+.broker-unavailable { color: var(--red) !important; }
 .system-strip { gap: 8px; padding: 0 14px 10px; flex-wrap: wrap; }
 .status-badge { padding: 4px 8px; background: var(--ink-2); }
 .status-badge b { color: var(--quiet); font-weight: 500; }
@@ -153,6 +161,21 @@ button { color: inherit; }
 .desk-accounting-basis, .desk-accounting-detail { margin: 0; font-size: 10px; line-height: 1.35; }
 .desk-accounting-basis { color: var(--muted); font-family: var(--mono); }
 .desk-accounting-detail { margin-top: 2px; color: var(--quiet); }
+.desk-backfill { margin-top: 8px; padding: 7px 8px; border: 1px solid color-mix(in srgb, var(--amber) 38%, var(--line)); background: color-mix(in srgb, var(--amber) 6%, transparent); }
+.desk-backfill-title, .desk-backfill-subtotal, .desk-backfill-meta, .desk-backfill-coverage { margin: 0; font-size: 10px; line-height: 1.35; }
+.desk-backfill-title { color: var(--amber); font: 600 10px var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+.desk-backfill-subtotal { margin-top: 3px; color: var(--paper); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.desk-backfill-meta { margin-top: 2px; color: var(--quiet); }
+.desk-backfill-coverage { margin-top: 3px; color: var(--amber); }
+.desk-backfill-history { min-width: 0; max-width: 100%; margin-top: 5px; border-top: 1px solid color-mix(in srgb, var(--line) 75%, transparent); padding-top: 4px; overflow: hidden; }
+.desk-backfill-history-summary { cursor: pointer; color: var(--muted); font: 500 10px var(--mono); line-height: 1.35; }
+.desk-backfill-history-summary::marker { color: var(--amber); }
+.desk-backfill-chart { display: block; width: 100%; max-width: 100%; height: auto; max-height: 96px; margin-top: 5px; overflow: visible; color: var(--amber); }
+.desk-backfill-zero { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.desk-backfill-path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.desk-backfill-point { fill: var(--paper); stroke: currentColor; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.desk-backfill-history-meta, .desk-backfill-history-empty { margin: 3px 0 0; color: var(--quiet); font: 9px var(--mono); line-height: 1.35; overflow-wrap: anywhere; }
+.desk-backfill-history-empty { color: var(--muted); }
 .spark-wrap { height: 48px; margin: 9px 0 8px; border-bottom: 1px solid var(--line); }
 .spark-wrap canvas { display: block; width: 100%; max-width: 100%; height: 100%; }
 .desk-learning { display: grid; gap: 8px; padding-top: 7px; }

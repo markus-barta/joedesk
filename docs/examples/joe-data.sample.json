@@ -3,6 +3,13 @@
   "generatedAt": "2026-09-08T08:00:00+02:00",
   "mode": "PAPER",
   "currency": "EUR",
+  "brokerAccount": {
+    "equity": 31482.75,
+    "currency": "EUR",
+    "observedAt": "2026-09-08T08:00:00+02:00",
+    "scope": "paper-account-including-keep",
+    "status": "available"
+  },
   "source": {
     "label": "Synthetic book.json projection",
     "revision": "sample-only"

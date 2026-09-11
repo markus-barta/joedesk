@@ -129,7 +129,13 @@
       <div class="grid-stack-item-content widget hero-widget">
         <div class="widget-drag" aria-label="Drag household summary"><span>Household · paper</span><span class="drag-dots" aria-hidden="true">•••</span></div>
         <div class="hero-values">
-          <div class="hero-stat hero-net"><span class="label">Net</span><strong class="flap" id="totalEquity">—</strong></div>
+          <div class="hero-stat hero-net">
+            <span class="label">Paper account equity</span>
+            <strong class="flap" id="brokerEquity">—</strong>
+            <span class="hero-meta" id="brokerAccountMeta">Includes KEEP · waiting for account observation</span>
+            <span class="hero-secondary"><b>Virtual desk total</b> <span id="totalEquity">—</span></span>
+            <span class="hero-meta" id="deskTotalsMeta">Waiting for desk accounting</span>
+          </div>
           <div class="hero-stat"><span class="label">Day</span><strong id="totalDay">—</strong></div>
           <div class="hero-stat"><span class="label">Open</span><strong id="totalOpen">—</strong></div>
           <div class="hero-stat"><span class="label">Freshness</span><strong id="freshValue">Checking</strong></div>
@@ -198,7 +204,7 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">0.7.1</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">0.7.2</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>

@@ -94,7 +94,149 @@ const openPnlTotals = structuredClone(sample);
 openPnlTotals.totals.openPnl = 12.5;
 assertFail(openPnlTotals, /totals unknown key openPnl/, "money.openPnl remains rejected on server");
 
-assertOk(structuredClone(sample), "legacy snapshot without positions keys");
+assertOk(structuredClone(sample), "snapshot with scoped broker account observation");
+
+const olderPayload = structuredClone(sample);
+delete olderPayload.brokerAccount;
+assertOk(olderPayload, "older snapshot without brokerAccount");
+
+const retainedBrokerAccount = structuredClone(sample);
+retainedBrokerAccount.brokerAccount.status = "unavailable";
+assertOk(retainedBrokerAccount, "last-good broker equity retained as unavailable");
+
+const unavailableBrokerAccount = structuredClone(sample);
+unavailableBrokerAccount.brokerAccount.status = "unavailable";
+unavailableBrokerAccount.brokerAccount.equity = null;
+assertOk(unavailableBrokerAccount, "unavailable broker equity remains null");
+
+for (const [field, value, pattern] of [
+  ["equity", Number.NaN, /equity must be number or null/],
+  ["currency", "USD", /currency must be EUR/],
+  ["observedAt", "2026-09-08", /observedAt invalid/],
+  ["scope", "virtual-desks", /scope invalid/],
+  ["status", "stale", /status invalid/],
+]) {
+  const invalidBrokerAccount = structuredClone(sample);
+  invalidBrokerAccount.brokerAccount[field] = value;
+  assertFail(invalidBrokerAccount, pattern, `brokerAccount ${field} rejected`);
+}
+
+const availableWithoutBrokerEquity = structuredClone(sample);
+availableWithoutBrokerEquity.brokerAccount.equity = null;
+assertFail(
+  availableWithoutBrokerEquity,
+  /equity must be finite when available/,
+  "available broker account requires finite equity",
+);
+
+const brokerAccountUnknownKey = structuredClone(sample);
+brokerAccountUnknownKey.brokerAccount.account = "redacted";
+assertFail(brokerAccountUnknownKey, /brokerAccount unknown key account/, "broker account identifiers rejected");
+
+const brokerAccountMissingField = structuredClone(sample);
+delete brokerAccountMissingField.brokerAccount.observedAt;
+assertFail(brokerAccountMissingField, /observedAt required/, "broker account requires observation time");
+
+const syntheticBackfill = {
+  status: "BEST_AVAILABLE",
+  fullTotalAvailable: false,
+  capturedSubtotal: {
+    realizedPnl: -37.125,
+    currency: "USD",
+    executionCount: 43,
+    commissionCount: 42,
+    fromInclusive: "2026-09-10T08:00:00.000Z",
+    throughInclusive: "2026-09-10T08:05:00.000Z",
+  },
+  coverage: {
+    target: {
+      fromInclusive: "2026-09-10T08:00:00.000Z",
+      toExclusive: "2026-09-10T08:20:00.000Z",
+    },
+    completeIntervalCount: 0,
+    knownIntervalCount: 1,
+    gapCount: 1,
+    firstGap: {
+      fromInclusive: "2026-09-10T08:05:00.000Z",
+      toExclusive: "2026-09-10T08:20:00.000Z",
+    },
+  },
+  missingOpeningLotCount: 1,
+  orphanCommissionCount: 1,
+};
+const partialJBackfill = structuredClone(sample);
+partialJBackfill.desks[0].backfill = syntheticBackfill;
+partialJBackfill.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
+partialJBackfill.totals = { equity: null, dayPnl: null, totalPnl: null };
+assertOk(partialJBackfill, "bounded partial J backfill with unknown full totals");
+
+const curvedBackfill = structuredClone(partialJBackfill);
+curvedBackfill.desks[0].backfill.capturedSubtotal.method = "captured-fifo-matched-roundtrips";
+curvedBackfill.desks[0].backfill.capturedSubtotal.points = [
+  { at: "2026-09-10T08:00:20.000Z", realizedPnl: -4.5 },
+  { at: "2026-09-10T08:01:50.000Z", realizedPnl: 8.25 },
+  { at: "2026-09-10T08:04:10.000Z", realizedPnl: 8.25 },
+  { at: "2026-09-10T08:05:00.000Z", realizedPnl: -37.125 },
+];
+curvedBackfill.desks[0].backfill.capturedSubtotal.pointsTruncated = true;
+assertOk(curvedBackfill, "nonuniform native-currency captured history curve");
+
+const nullMethodBackfill = structuredClone(partialJBackfill);
+nullMethodBackfill.desks[0].backfill.capturedSubtotal.method = null;
+assertOk(nullMethodBackfill, "captured subtotal with unavailable calculation method");
+
+const singletonBackfill = structuredClone(partialJBackfill);
+singletonBackfill.desks[0].backfill.capturedSubtotal.points = [
+  { at: "2026-09-10T08:03:00.000Z", realizedPnl: -37.125 },
+];
+singletonBackfill.desks[0].backfill.capturedSubtotal.pointsTruncated = false;
+assertOk(singletonBackfill, "singleton captured history curve");
+
+const emptyBackfill = structuredClone(partialJBackfill);
+emptyBackfill.desks[0].backfill.capturedSubtotal.realizedPnl = null;
+emptyBackfill.desks[0].backfill.capturedSubtotal.currency = null;
+emptyBackfill.desks[0].backfill.capturedSubtotal.points = [];
+emptyBackfill.desks[0].backfill.capturedSubtotal.pointsTruncated = false;
+assertOk(emptyBackfill, "explicitly unavailable captured history curve");
+
+const eurBackfill = structuredClone(partialJBackfill);
+eurBackfill.desks[0].backfill.capturedSubtotal.currency = "EUR";
+assertOk(eurBackfill, "native EUR backfill subtotal");
+
+for (const [mutate, pattern, label] of [
+  [(value) => { value.status = "PARTIAL"; }, /status invalid/, "invalid status"],
+  [(value) => { value.capturedSubtotal.currency = "GBP"; }, /currency invalid/, "invalid currency"],
+  [(value) => { value.capturedSubtotal.realizedPnl = Number.NaN; }, /realizedPnl must be/, "invalid subtotal"],
+  [(value) => { value.capturedSubtotal.fromInclusive = "2026-09-10"; }, /fromInclusive invalid/, "invalid capture interval"],
+  [(value) => { value.capturedSubtotal.method = "account-average-cost-realized"; }, /method invalid/, "unrelated account method"],
+  [(value) => { value.coverage.gapCount = 0; }, /firstGap must be null/, "gap summary mismatch"],
+  [(value) => { value.fullTotalAvailable = true; }, /conflicts with incomplete coverage/, "partial promoted to full"],
+  [(value) => { value.receipts = []; }, /unknown key receipts/, "private receipt surface"],
+]) {
+  const invalidBackfill = structuredClone(partialJBackfill);
+  mutate(invalidBackfill.desks[0].backfill);
+  assertFail(invalidBackfill, pattern, `backfill ${label} rejected`);
+}
+
+for (const [mutate, pattern, label] of [
+  [(captured) => { delete captured.pointsTruncated; }, /must appear together/, "missing truncation flag"],
+  [(captured) => { captured.pointsTruncated = "no"; }, /must be boolean/, "invalid truncation flag"],
+  [(captured) => { captured.points[1].at = captured.points[0].at; }, /strictly increasing/, "same-time points"],
+  [(captured) => { captured.points[0].at = "2026-09-10T07:59:59.000Z"; }, /outside captured interval/, "point outside capture"],
+  [(captured) => { captured.points.at = "ignored"; captured.points[0].execId = "private"; }, /unknown key execId/, "raw id on point"],
+  [(captured) => { captured.points[0].currency = "USD"; }, /unknown key currency/, "per-point currency"],
+  [(captured) => { captured.points.at = "ignored"; captured.points[captured.points.length - 1].realizedPnl = -37; }, /endpoint must match/, "endpoint mismatch"],
+  [(captured) => { captured.points = Array.from({ length: 2049 }, (_, index) => ({ at: new Date(Date.parse(captured.fromInclusive) + index).toISOString(), realizedPnl: index })); }, /at most 2048/, "oversized curve"],
+  [(captured) => { captured.realizedPnl = null; captured.currency = null; captured.method = "captured-fifo-matched-roundtrips"; captured.points = []; }, /method must be null/, "FIFO claim without subtotal"],
+]) {
+  const invalidCurve = structuredClone(curvedBackfill);
+  mutate(invalidCurve.desks[0].backfill.capturedSubtotal);
+  assertFail(invalidCurve, pattern, `captured curve ${label} rejected`);
+}
+
+const misplacedBackfill = structuredClone(sample);
+misplacedBackfill.desks[1].backfill = syntheticBackfill;
+assertFail(misplacedBackfill, /only valid for desk j/, "backfill rejected outside J");
 
 const accounting = {
   periodStart: "2026-09-10T04:00:00Z",
@@ -272,7 +414,7 @@ console.log(
   JSON.stringify(
     {
       ok: true,
-      checks: 39,
+      checks: 75,
       note: "Synthetic fixtures only — not live broker evidence",
       accepted: {
         legacy: true,
@@ -281,6 +423,15 @@ console.log(
         syntheticTopLevel: true,
         completeEmptyTop: true,
         completeEmptyDesks: true,
+        brokerAccount: true,
+        olderPayload: true,
+        retainedBrokerAccount: true,
+        partialJBackfill: true,
+        eurBackfill: true,
+        curvedBackfill: true,
+        singletonBackfill: true,
+        emptyBackfill: true,
+        nullMethodBackfill: true,
       },
       rejected: [
         "positions:null",
@@ -292,6 +443,8 @@ console.log(
         "invalid dates",
         "bad currency",
         "bad accountingScope",
+        "malformed J backfill",
+        "backfill outside J",
         "money.openPnl",
         "updatedAt:1",
         "updatedAt:bare-date",

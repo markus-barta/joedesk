@@ -72,6 +72,17 @@
   var ACCOUNTING_DETAIL_MAX = 240;
   var HISTORY_BASIS_MAX = 96;
   var HISTORY_BASIS = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
+  var BROKER_ACCOUNT_KEYS = ["equity", "currency", "observedAt", "scope", "status"];
+  var BACKFILL_KEYS = ["status", "fullTotalAvailable", "capturedSubtotal", "coverage", "missingOpeningLotCount", "orphanCommissionCount"];
+  var BACKFILL_CAPTURE_KEYS = ["realizedPnl", "currency", "method", "executionCount", "commissionCount", "fromInclusive", "throughInclusive", "points", "pointsTruncated"];
+  var BACKFILL_CAPTURE_REQUIRED_KEYS = ["realizedPnl", "currency", "executionCount", "commissionCount", "fromInclusive", "throughInclusive"];
+  var BACKFILL_POINT_KEYS = ["at", "realizedPnl"];
+  var BACKFILL_COVERAGE_KEYS = ["target", "completeIntervalCount", "knownIntervalCount", "gapCount", "firstGap"];
+  var BACKFILL_INTERVAL_KEYS = ["fromInclusive", "toExclusive"];
+  var MAX_BACKFILL_COUNT = 1000000;
+  var MAX_BACKFILL_POINTS = 2048;
+  var BACKFILL_ENDPOINT_TOLERANCE = 0.000001;
+  var CAPTURED_FIFO_METHOD = "captured-fifo-matched-roundtrips";
   var LEGACY_DEFAULT_LAYOUT = [
     { id: "hero", x: 0, y: 0, w: 12, h: 3 },
     { id: "desk-j", x: 0, y: 3, w: 4, h: 4 },
@@ -177,6 +188,126 @@
     return historyBasis;
   }
 
+  function validateBrokerAccount(account) {
+    required(account && typeof account === "object" && !Array.isArray(account), "brokerAccount must be an object");
+    Object.keys(account).forEach(function (key) {
+      required(BROKER_ACCOUNT_KEYS.includes(key), "brokerAccount has unknown key " + key);
+    });
+    BROKER_ACCOUNT_KEYS.forEach(function (key) {
+      required(Object.prototype.hasOwnProperty.call(account, key), "brokerAccount." + key + " is required");
+    });
+    finiteOrNull(account.equity, "brokerAccount.equity");
+    required(account.currency === "EUR", "brokerAccount.currency must be EUR");
+    required(validIsoTimestamp(account.observedAt), "brokerAccount.observedAt is invalid");
+    required(account.scope === "paper-account-including-keep", "brokerAccount.scope is invalid");
+    required(["available", "unavailable"].includes(account.status), "brokerAccount.status is invalid");
+    required(account.status !== "available" || Number.isFinite(account.equity), "brokerAccount.equity must be finite when available");
+    return account;
+  }
+
+  function validateExactKeys(value, keys, path, requiredKeys) {
+    required(value && typeof value === "object" && !Array.isArray(value), path + " must be an object");
+    Object.keys(value).forEach(function (key) {
+      required(keys.includes(key), path + " has unknown key " + key);
+    });
+    (requiredKeys || keys).forEach(function (key) {
+      required(Object.prototype.hasOwnProperty.call(value, key), path + "." + key + " is required");
+    });
+  }
+
+  function validateBackfillPoints(captured, path) {
+    var hasPoints = Object.prototype.hasOwnProperty.call(captured, "points");
+    var hasTruncated = Object.prototype.hasOwnProperty.call(captured, "pointsTruncated");
+    if (!hasPoints && !hasTruncated) { return; }
+    required(hasPoints && hasTruncated, path + ".points and " + path + ".pointsTruncated must appear together");
+    required(Array.isArray(captured.points) && captured.points.length <= MAX_BACKFILL_POINTS, path + ".points is invalid");
+    required(typeof captured.pointsTruncated === "boolean", path + ".pointsTruncated must be boolean");
+    var from = Date.parse(captured.fromInclusive);
+    var through = Date.parse(captured.throughInclusive);
+    var previous = null;
+    captured.points.forEach(function (point, index) {
+      var pointPath = path + ".points[" + index + "]";
+      validateExactKeys(point, BACKFILL_POINT_KEYS, pointPath);
+      required(validIsoTimestamp(point.at), pointPath + ".at is invalid");
+      required(Number.isFinite(point.realizedPnl), pointPath + ".realizedPnl must be finite");
+      var at = Date.parse(point.at);
+      required(at >= from && at <= through, pointPath + ".at is outside the captured interval");
+      required(previous === null || at > previous, path + ".points timestamps must be strictly increasing");
+      previous = at;
+    });
+    if (captured.points.length === 0) {
+      required(captured.realizedPnl === null, path + ".points cannot be empty with a finite subtotal");
+      required(captured.pointsTruncated === false, path + ".pointsTruncated cannot be true for an empty series");
+      return;
+    }
+    required(
+      Number.isFinite(captured.realizedPnl) &&
+      Math.abs(captured.points[captured.points.length - 1].realizedPnl - captured.realizedPnl) <= BACKFILL_ENDPOINT_TOLERANCE,
+      path + ".points endpoint must match realizedPnl"
+    );
+  }
+
+  function validateBackfillCount(value, path) {
+    required(Number.isInteger(value) && value >= 0 && value <= MAX_BACKFILL_COUNT, path + " is invalid");
+  }
+
+  function validateBackfillInterval(interval, path) {
+    validateExactKeys(interval, BACKFILL_INTERVAL_KEYS, path);
+    required(validIsoTimestamp(interval.fromInclusive), path + ".fromInclusive is invalid");
+    required(validIsoTimestamp(interval.toExclusive), path + ".toExclusive is invalid");
+    required(Date.parse(interval.fromInclusive) < Date.parse(interval.toExclusive), path + " must have positive duration");
+  }
+
+  function validateBackfill(backfill, path) {
+    validateExactKeys(backfill, BACKFILL_KEYS, path);
+    required(["BEST_AVAILABLE", "COMPLETE"].includes(backfill.status), path + ".status is invalid");
+    required(typeof backfill.fullTotalAvailable === "boolean", path + ".fullTotalAvailable must be boolean");
+    validateBackfillCount(backfill.missingOpeningLotCount, path + ".missingOpeningLotCount");
+    validateBackfillCount(backfill.orphanCommissionCount, path + ".orphanCommissionCount");
+
+    var captured = backfill.capturedSubtotal;
+    var capturedPath = path + ".capturedSubtotal";
+    validateExactKeys(captured, BACKFILL_CAPTURE_KEYS, capturedPath, BACKFILL_CAPTURE_REQUIRED_KEYS);
+    finiteOrNull(captured.realizedPnl, capturedPath + ".realizedPnl");
+    required(["USD", "EUR", null].includes(captured.currency), capturedPath + ".currency is invalid");
+    required(!Number.isFinite(captured.realizedPnl) || captured.currency !== null, capturedPath + ".currency is required for finite subtotal");
+    if (Object.prototype.hasOwnProperty.call(captured, "method")) {
+      required([CAPTURED_FIFO_METHOD, null].includes(captured.method), capturedPath + ".method is invalid");
+    }
+    required(
+      captured.realizedPnl !== null || captured.method !== CAPTURED_FIFO_METHOD,
+      capturedPath + ".method must be null when subtotal is unavailable"
+    );
+    validateBackfillCount(captured.executionCount, capturedPath + ".executionCount");
+    validateBackfillCount(captured.commissionCount, capturedPath + ".commissionCount");
+    required(validIsoTimestamp(captured.fromInclusive), capturedPath + ".fromInclusive is invalid");
+    required(validIsoTimestamp(captured.throughInclusive), capturedPath + ".throughInclusive is invalid");
+    required(Date.parse(captured.fromInclusive) <= Date.parse(captured.throughInclusive), capturedPath + " interval is invalid");
+    validateBackfillPoints(captured, capturedPath);
+
+    var coverage = backfill.coverage;
+    var coveragePath = path + ".coverage";
+    validateExactKeys(coverage, BACKFILL_COVERAGE_KEYS, coveragePath);
+    validateBackfillInterval(coverage.target, coveragePath + ".target");
+    validateBackfillCount(coverage.completeIntervalCount, coveragePath + ".completeIntervalCount");
+    validateBackfillCount(coverage.knownIntervalCount, coveragePath + ".knownIntervalCount");
+    validateBackfillCount(coverage.gapCount, coveragePath + ".gapCount");
+    if (coverage.firstGap === null) {
+      required(coverage.gapCount === 0, coveragePath + ".firstGap is required when gaps exist");
+    } else {
+      validateBackfillInterval(coverage.firstGap, coveragePath + ".firstGap");
+      required(coverage.gapCount > 0, coveragePath + ".firstGap must be null without gaps");
+    }
+    if (backfill.fullTotalAvailable) {
+      required(
+        backfill.status === "COMPLETE" && coverage.gapCount === 0 &&
+        backfill.missingOpeningLotCount === 0 && backfill.orphanCommissionCount === 0,
+        path + ".fullTotalAvailable conflicts with incomplete coverage"
+      );
+    }
+    return backfill;
+  }
+
   function accountingPeriodLabel(accounting) {
     var parts = accountingDate.formatToParts(new Date(accounting.periodStart));
     var day = parts.find(function (part) { return part.type === "day"; });
@@ -198,6 +329,168 @@
     return root;
   }
 
+  function backfillPresentation(backfill) {
+    if (!backfill) { return null; }
+    var captured = backfill.capturedSubtotal;
+    var coverage = backfill.coverage;
+    var subtotal = Number.isFinite(captured.realizedPnl) && captured.currency
+      ? captured.currency + " " + formatPositionMoney(captured.realizedPnl, true, captured.currency)
+      : "Captured subtotal unavailable";
+    var knownCount = coverage.knownIntervalCount;
+    var interval = "Known capture " + shortTime.format(new Date(captured.fromInclusive)) + " → " +
+      shortTime.format(new Date(captured.throughInclusive)) + " · " + knownCount +
+      " known interval" + (knownCount === 1 ? "" : "s");
+    var coverageText;
+    if (backfill.fullTotalAvailable) {
+      coverageText = "Coverage reports complete; captured results remain separate from J totals.";
+    } else if (coverage.gapCount > 0) {
+      coverageText = "Full J total unavailable · Coverage gap: " + coverage.gapCount +
+        (coverage.firstGap
+          ? "; first " + shortTime.format(new Date(coverage.firstGap.fromInclusive)) + " → " +
+            shortTime.format(new Date(coverage.firstGap.toExclusive))
+          : "");
+    } else if (backfill.status === "COMPLETE") {
+      coverageText = "Full J total unavailable · Coverage is complete, but no verified total is available.";
+    } else {
+      coverageText = "Full J total unavailable · Best-available coverage is not a complete history.";
+    }
+    var quality = [];
+    if (backfill.missingOpeningLotCount) {
+      quality.push(backfill.missingOpeningLotCount + " missing opening lot" + (backfill.missingOpeningLotCount === 1 ? "" : "s"));
+    }
+    if (backfill.orphanCommissionCount) {
+      quality.push(backfill.orphanCommissionCount + " unmatched commission" + (backfill.orphanCommissionCount === 1 ? "" : "s"));
+    }
+    return {
+      title: backfill.fullTotalAvailable ? "Captured results" : "Captured results (partial)",
+      subtotal: subtotal + " · " + captured.executionCount + " fills · " + captured.commissionCount + " commissions",
+      method: Number.isFinite(captured.realizedPnl) && captured.method === CAPTURED_FIFO_METHOD
+        ? "J-family FIFO, net of fees"
+        : null,
+      interval: interval,
+      coverage: coverageText,
+      fx: captured.currency === "USD" && !backfill.fullTotalAvailable
+        ? "Historical EUR FX is not evidenced; the subtotal stays in USD."
+        : null,
+      quality: quality.join(" · "),
+      captureTitle: captured.fromInclusive + " through " + captured.throughInclusive,
+      targetTitle: coverage.target.fromInclusive + " to " + coverage.target.toExclusive
+    };
+  }
+
+  function capturedHistorySeries(backfill) {
+    var captured = backfill && backfill.capturedSubtotal;
+    var source = captured && Array.isArray(captured.points) ? captured.points : [];
+    if (!source.length) { return { available: false, points: [], path: "", zeroY: null }; }
+    var width = 320;
+    var height = 96;
+    var insetX = 10;
+    var insetY = 12;
+    var times = source.map(function (point) { return Date.parse(point.at); });
+    var values = source.map(function (point) { return point.realizedPnl; });
+    var firstTime = times[0];
+    var lastTime = times[times.length - 1];
+    var low = Math.min.apply(null, values);
+    var high = Math.max.apply(null, values);
+    function xFor(time) {
+      return firstTime === lastTime ? width / 2 : insetX + ((time - firstTime) / (lastTime - firstTime)) * (width - insetX * 2);
+    }
+    function yFor(value) {
+      return low === high ? height / 2 : insetY + ((high - value) / (high - low)) * (height - insetY * 2);
+    }
+    var points = source.map(function (point, index) {
+      return { at: point.at, realizedPnl: point.realizedPnl, x: xFor(times[index]), y: yFor(point.realizedPnl) };
+    });
+    return {
+      available: true,
+      width: width,
+      height: height,
+      points: points,
+      path: points.length > 1 ? points.map(function (point, index) {
+        return (index ? "L" : "M") + point.x.toFixed(2) + " " + point.y.toFixed(2);
+      }).join(" ") : "",
+      zeroY: low <= 0 && high >= 0 ? yFor(0) : null
+    };
+  }
+
+  function svgEl(tag, className) {
+    var node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    if (className) { node.setAttribute("class", className); }
+    return node;
+  }
+
+  function renderCapturedHistory(backfill) {
+    var captured = backfill.capturedSubtotal;
+    var currency = captured.currency || "currency unavailable";
+    var titleText = "Captured J history · " + currency + " · " + (backfill.fullTotalAvailable ? "complete" : "partial");
+    var details = el("details", "desk-backfill-history");
+    details.appendChild(el("summary", "desk-backfill-history-summary", titleText));
+    var series = capturedHistorySeries(backfill);
+    if (!series.available) {
+      details.appendChild(el("p", "desk-backfill-history-empty", "Captured J history is unavailable."));
+      return details;
+    }
+
+    var svg = svgEl("svg", "desk-backfill-chart");
+    svg.setAttribute("viewBox", "0 0 " + series.width + " " + series.height);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", titleText);
+    var title = svgEl("title");
+    title.textContent = titleText;
+    svg.appendChild(title);
+    if (series.zeroY !== null) {
+      var zero = svgEl("line", "desk-backfill-zero");
+      zero.setAttribute("x1", "0");
+      zero.setAttribute("x2", String(series.width));
+      zero.setAttribute("y1", series.zeroY.toFixed(2));
+      zero.setAttribute("y2", series.zeroY.toFixed(2));
+      svg.appendChild(zero);
+    }
+    if (series.path) {
+      var path = svgEl("path", "desk-backfill-path");
+      path.setAttribute("d", series.path);
+      svg.appendChild(path);
+    }
+    series.points.forEach(function (point, index) {
+      if (series.points.length > 1 && index !== series.points.length - 1) { return; }
+      var dot = svgEl("circle", "desk-backfill-point");
+      dot.setAttribute("cx", point.x.toFixed(2));
+      dot.setAttribute("cy", point.y.toFixed(2));
+      dot.setAttribute("r", series.points.length === 1 ? "3.5" : "2.5");
+      svg.appendChild(dot);
+    });
+    details.appendChild(svg);
+    var first = series.points[0];
+    var last = series.points[series.points.length - 1];
+    var meta = series.points.length === 1
+      ? "Actual point " + shortTime.format(new Date(first.at)) + " · " + currency + " " + formatPositionMoney(first.realizedPnl, true, currency)
+      : shortTime.format(new Date(first.at)) + " → " + shortTime.format(new Date(last.at)) + " · " + series.points.length + " actual points";
+    details.appendChild(el("p", "desk-backfill-history-meta", meta));
+    if (captured.pointsTruncated) {
+      details.appendChild(el("p", "desk-backfill-history-meta", "Showing only the latest captured points."));
+    }
+    return details;
+  }
+
+  function renderBackfill(backfill) {
+    var copy = backfillPresentation(backfill);
+    if (!copy) { return null; }
+    var root = el("section", "desk-backfill");
+    root.appendChild(el("h3", "desk-backfill-title", copy.title));
+    root.appendChild(el("p", "desk-backfill-subtotal", copy.subtotal));
+    if (copy.method) { root.appendChild(el("p", "desk-backfill-meta", copy.method)); }
+    var interval = el("p", "desk-backfill-meta", copy.interval);
+    interval.title = copy.captureTitle;
+    root.appendChild(interval);
+    var coverage = el("p", "desk-backfill-coverage", copy.coverage);
+    coverage.title = copy.targetTitle;
+    root.appendChild(coverage);
+    if (copy.fx) { root.appendChild(el("p", "desk-backfill-meta", copy.fx)); }
+    if (copy.quality) { root.appendChild(el("p", "desk-backfill-meta", copy.quality)); }
+    root.appendChild(renderCapturedHistory(backfill));
+    return root;
+  }
+
   function validate(data) {
     required(data && typeof data === "object", "data must be an object");
     required(data.schema === "inspr.joe.household.v1", "unknown schema");
@@ -208,6 +501,7 @@
     required(typeof data.safety.halt === "boolean", "safety.halt must be boolean");
     required(["ok", "degraded", "down"].includes(data.safety.gateway && data.safety.gateway.status), "gateway status is invalid");
     required(Number.isFinite(data.safety.staleAfterSeconds) && data.safety.staleAfterSeconds > 0, "staleAfterSeconds is invalid");
+    if (Object.prototype.hasOwnProperty.call(data, "brokerAccount")) { validateBrokerAccount(data.brokerAccount); }
     required(Array.isArray(data.desks) && data.desks.length === 3, "exactly three desks are required");
     required(new Set(data.desks.map(function (desk) { return desk.id; })).size === 3, "desk ids must be unique");
     data.desks.forEach(function (desk, index) {
@@ -222,6 +516,10 @@
       if (Object.prototype.hasOwnProperty.call(desk.money, "openPnl")) { finiteOrNull(desk.money.openPnl, path + ".money.openPnl"); }
       if (Object.prototype.hasOwnProperty.call(desk, "accounting")) { validateAccounting(desk.accounting, path + ".accounting"); }
       if (Object.prototype.hasOwnProperty.call(desk, "historyBasis")) { validateHistoryBasis(desk.historyBasis, path + ".historyBasis"); }
+      if (Object.prototype.hasOwnProperty.call(desk, "backfill")) {
+        required(desk.id === "j", path + ".backfill is only valid for desk j");
+        validateBackfill(desk.backfill, path + ".backfill");
+      }
       required(Array.isArray(desk.issues), path + ".issues must be an array");
     });
     required(data.totals && typeof data.totals === "object", "totals are required");
@@ -1320,6 +1618,64 @@
     return offsetHours <= 14 && offsetMinutes <= 59 && (offsetHours < 14 || offsetMinutes === 0);
   }
 
+  function brokerAccountPresentation(data) {
+    var account = data && data.brokerAccount;
+    if (!account) {
+      return {
+        value: null,
+        state: "legacy",
+        meta: "Includes KEEP · not supplied by this producer",
+        problem: null
+      };
+    }
+    var hasEquity = Number.isFinite(account.equity);
+    var observedAge = ageInSeconds(account.observedAt);
+    var stale = Number.isFinite(observedAge) && observedAge > data.safety.staleAfterSeconds;
+    var unavailable = account.status === "unavailable";
+    var observationCopy = (unavailable ? "last observed " : "observed ") + ageLabel(observedAge) + " ago";
+    var state = unavailable ? "unavailable" : stale ? "stale" : "available";
+    return {
+      value: hasEquity ? account.equity : null,
+      state: state,
+      meta: "Includes KEEP · " + observationCopy + (unavailable ? " · unavailable" : stale ? " · stale" : ""),
+      problem: unavailable
+        ? "Paper account equity is unavailable; any displayed value is the last complete broker observation."
+        : stale
+        ? "Paper account equity is stale."
+        : null
+    };
+  }
+
+  function renderBrokerAccountSummary(data) {
+    var view = brokerAccountPresentation(data);
+    var value = document.getElementById("brokerEquity");
+    var meta = document.getElementById("brokerAccountMeta");
+    setMoney(value, view.value, false);
+    value.classList.remove("broker-stale", "broker-unavailable");
+    meta.className = "hero-meta";
+    if (view.state === "stale") {
+      value.classList.add("broker-stale");
+      meta.classList.add("attention");
+    } else if (view.state === "unavailable") {
+      value.classList.add("broker-unavailable");
+      meta.classList.add("unavailable");
+    }
+    meta.textContent = view.meta;
+    meta.title = data.brokerAccount
+      ? "Broker observation " + dateTime.format(new Date(data.brokerAccount.observedAt))
+      : "Older compatible payload without brokerAccount";
+  }
+
+  function renderDeskTotalsSummary(data) {
+    var j = data.desks.find(function (desk) { return desk.id === "j"; });
+    var incompleteJ = !j || !Number.isFinite(j.money.equity) || !Number.isFinite(j.money.totalPnl);
+    var meta = document.getElementById("deskTotalsMeta");
+    meta.textContent = incompleteJ
+      ? "J accounting incomplete · desk total unavailable"
+      : "J + Joe + Joel virtual books";
+    meta.className = "hero-meta" + (incompleteJ ? " attention" : "");
+  }
+
   function gatewayHeartbeatAge(data) {
     var gateway = data && data.safety && data.safety.gateway;
     var lastSeen = gateway && gateway.lastSeenAt;
@@ -1334,6 +1690,8 @@
     if (data.safety.halt) { problems.push("HALT is on" + (data.safety.haltReason ? ": " + data.safety.haltReason : ".")); }
     if (gateway.status !== "ok") { problems.push("Gateway is " + gateway.status + (gateway.detail ? ": " + gateway.detail : ".")); }
     if (snapshotAge > data.safety.staleAfterSeconds) { problems.push("The snapshot is stale (" + snapshotAge + " seconds old)."); }
+    var brokerProblem = brokerAccountPresentation(data).problem;
+    if (brokerProblem) { problems.push(brokerProblem); }
     data.desks.forEach(function (desk) { if (desk.state === "stuck") { problems.push(desk.label + " is stuck: " + desk.action); } });
     return problems;
   }
@@ -1359,7 +1717,7 @@
 
   function labelPaperCapital() {
     var heroLabels = document.querySelectorAll(".hero-values .hero-stat .label");
-    if (heroLabels[0]) { heroLabels[0].textContent = "Virt net · paper"; }
+    if (heroLabels[0]) { heroLabels[0].textContent = "Paper account equity"; }
     if (heroLabels[1]) { heroLabels[1].textContent = "Day"; }
     if (heroLabels[2]) { heroLabels[2].textContent = "Open"; }
     if (heroLabels[3]) { heroLabels[3].textContent = "Snapshot age"; }
@@ -1432,6 +1790,7 @@
     var snapshotStale = snapshotAge > data.safety.staleAfterSeconds;
     var gatewayDown = data.safety.gateway.status === "down";
     updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale);
+    renderBrokerAccountSummary(data);
     updateDeskFreshnessFooters(data, snapshotAge, snapshotStale, gatewayDown);
     var problems = snapshotProblems(data, snapshotAge);
     if (refreshError) { problems.push(refreshFailureMessage(refreshError)); }
@@ -1449,10 +1808,6 @@
 
   function openPnl(data) {
     if (Number.isFinite(data.totals.openPnl)) { return data.totals.openPnl; }
-    var positions = collectPositions(data);
-    if (positions.length && positions.every(function (position) { return Number.isFinite(position.openPnl); })) {
-      return positions.reduce(function (sum, position) { return sum + position.openPnl; }, 0);
-    }
     var deskValues = data.desks.map(function (desk) { return desk.money.openPnl; });
     return deskValues.every(Number.isFinite) ? deskValues.reduce(function (sum, value) { return sum + value; }, 0) : null;
   }
@@ -1771,6 +2126,8 @@
     content.appendChild(moneyRow);
     var accountingBasisNode = renderAccountingBasis(desk);
     if (accountingBasisNode) { content.appendChild(accountingBasisNode); }
+    var backfillNode = renderBackfill(desk.backfill);
+    if (backfillNode) { content.appendChild(backfillNode); }
     var spark = el("div", "spark-wrap");
     var canvas = el("canvas");
     canvas.dataset.spark = desk.id;
@@ -1961,7 +2318,9 @@
     var gatewayDown = gateway.status === "down";
     var problems = snapshotProblems(data, snapshotAge);
 
+    renderBrokerAccountSummary(data);
     setMoney(document.getElementById("totalEquity"), data.totals.equity, false);
+    renderDeskTotalsSummary(data);
     setMoneyField(document.getElementById("totalDay"), data.totals.dayPnl, true, "day");
     setMoney(document.getElementById("totalOpen"), openPnl(data), true);
     updateSnapshotFreshnessUI(data, snapshotAge, stale);
@@ -1984,9 +2343,14 @@
     setSignal("gatewaySignal", "gatewayValue", "Unknown", "bad");
     setSignal("haltSignal", "haltValue", "Unknown", "bad");
     document.getElementById("totalEquity").textContent = "—";
+    document.getElementById("brokerEquity").textContent = "—";
+    document.getElementById("brokerAccountMeta").textContent = "Includes KEEP · waiting for account observation";
+    document.getElementById("brokerAccountMeta").className = "hero-meta unavailable";
+    document.getElementById("deskTotalsMeta").textContent = "Waiting for desk accounting";
+    document.getElementById("deskTotalsMeta").className = "hero-meta attention";
     document.getElementById("totalDay").textContent = "—";
     document.getElementById("totalOpen").textContent = "—";
-    ["totalEquity", "totalDay", "totalOpen"].forEach(function (id) {
+    ["brokerEquity", "totalEquity", "totalDay", "totalOpen"].forEach(function (id) {
       document.getElementById(id).classList.remove("positive", "negative");
       document.getElementById(id).classList.add("neutral");
     });
@@ -2545,6 +2909,10 @@
     positionsEmptyMessage: positionsEmptyMessage,
     deskFreshnessFooter: deskFreshnessFooter,
     snapshotProblems: snapshotProblems,
+    brokerAccountPresentation: brokerAccountPresentation,
+    backfillPresentation: backfillPresentation,
+    capturedHistorySeries: capturedHistorySeries,
+    renderBackfill: renderBackfill,
     gatewayHeartbeatAge: gatewayHeartbeatAge,
     validIsoTimestamp: validIsoTimestamp,
     collectPositions: collectPositions,

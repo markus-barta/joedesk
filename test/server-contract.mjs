@@ -283,6 +283,7 @@ describe("server contract", () => {
     assert.equal(history.body.points.at(-1).t, sample.generatedAt);
     assert.equal(history.body.points.at(-1).accounting, undefined);
     assert.equal(history.body.points.at(-1).historyBasis, undefined);
+    assert.equal(history.body.points.at(-1).brokerAccount, undefined);
     const retainedLegacyPointBytes = JSON.stringify(history.body.points.at(-1));
 
     const scoped = structuredClone(sample);
@@ -314,6 +315,34 @@ describe("server contract", () => {
     unavailable.generatedAt = new Date(Date.parse(scoped.generatedAt) + 1000).toISOString();
     unavailable.source.label = "Synthetic J-unavailable contract fixture";
     unavailable.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
+    unavailable.desks[0].backfill = {
+      status: "BEST_AVAILABLE",
+      fullTotalAvailable: false,
+      capturedSubtotal: {
+        realizedPnl: -37.125,
+        currency: "USD",
+        method: "captured-fifo-matched-roundtrips",
+        executionCount: 43,
+        commissionCount: 42,
+        fromInclusive: "2026-09-10T08:00:00.000Z",
+        throughInclusive: "2026-09-10T08:05:00.000Z",
+        points: [
+          { at: "2026-09-10T08:00:20.000Z", realizedPnl: -4.5 },
+          { at: "2026-09-10T08:03:40.000Z", realizedPnl: 8.25 },
+          { at: "2026-09-10T08:05:00.000Z", realizedPnl: -37.125 },
+        ],
+        pointsTruncated: false,
+      },
+      coverage: {
+        target: { fromInclusive: "2026-09-10T08:00:00.000Z", toExclusive: "2026-09-10T08:20:00.000Z" },
+        completeIntervalCount: 0,
+        knownIntervalCount: 1,
+        gapCount: 1,
+        firstGap: { fromInclusive: "2026-09-10T08:05:00.000Z", toExclusive: "2026-09-10T08:20:00.000Z" },
+      },
+      missingOpeningLotCount: 1,
+      orphanCommissionCount: 1,
+    };
     delete unavailable.desks[0].accounting;
     delete unavailable.desks[0].positions;
     unavailable.totals = { equity: null, dayPnl: null, totalPnl: null };
@@ -328,14 +357,20 @@ describe("server contract", () => {
     assert.equal(unavailablePush.status, 200);
     const unavailableData = await jsonFetch("/joe/data.json");
     assert.deepEqual(unavailableData.body.desks[0].money, unavailable.desks[0].money);
+    assert.deepEqual(unavailableData.body.desks[0].backfill, unavailable.desks[0].backfill);
+    assert.deepEqual(unavailableData.body.brokerAccount, unavailable.brokerAccount);
     assert.equal(Object.prototype.hasOwnProperty.call(unavailableData.body.desks[0], "positions"), false);
     const unavailableHistory = await jsonFetch("/joe/history.json");
     const unavailablePoint = unavailableHistory.body.points.at(-1);
     assert.equal(unavailablePoint.accounting, undefined);
     assert.deepEqual(unavailablePoint.desks.j, unavailable.desks[0].money);
+    assert.equal(unavailablePoint.desks.j.backfill, undefined);
     assert.deepEqual(unavailablePoint.desks.joe, unavailable.desks[1].money);
     assert.deepEqual(unavailablePoint.desks.joel, unavailable.desks[2].money);
     assert.deepEqual(unavailablePoint.totals, unavailable.totals);
+    assert.equal(unavailablePoint.brokerAccount, undefined);
+    assert.equal(JSON.stringify(unavailablePoint).includes("-37.125"), false);
+    assert.equal(JSON.stringify(unavailablePoint).includes("2026-09-10T08:03:40.000Z"), false);
 
     const restored = structuredClone(scoped);
     restored.generatedAt = new Date(Date.parse(unavailable.generatedAt) + 1000).toISOString();
@@ -363,6 +398,23 @@ describe("server contract", () => {
       { joel: "joel.stage0-keep-excluded.v1" },
     ]);
 
+    const older = structuredClone(restored);
+    older.generatedAt = new Date(Date.parse(restored.generatedAt) + 1000).toISOString();
+    delete older.brokerAccount;
+    const olderPush = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(older),
+    });
+    assert.equal(olderPush.status, 200);
+    const olderData = await jsonFetch("/joe/data.json");
+    assert.equal(Object.prototype.hasOwnProperty.call(olderData.body, "brokerAccount"), false);
+    const olderHistory = await jsonFetch("/joe/history.json");
+    assert.equal(olderHistory.body.points.at(-1).brokerAccount, undefined);
+
     const dirEntries = await readdir(DATA_DIR);
     assert.ok(dirEntries.includes("data.json"));
     assert.ok(dirEntries.includes("history.json"));
@@ -385,6 +437,85 @@ describe("server contract", () => {
     });
     assert.equal(res.status, 422);
     assert.ok(res.body.errors.some((error) => error.includes("historyBasis")));
+  });
+
+  test("POST /joe/inbox rejects a foreign-currency broker account object", async () => {
+    assertServerAlive();
+    const sample = JSON.parse(
+      await readFile(join(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"),
+    );
+    sample.generatedAt = new Date(Date.now() + 120_000).toISOString();
+    sample.brokerAccount.currency = "USD";
+    const res = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(sample),
+    });
+    assert.equal(res.status, 422);
+    assert.ok(res.body.errors.some((error) => error.includes("brokerAccount.currency")));
+  });
+
+  test("POST /joe/inbox rejects an incomplete J backfill summary", async () => {
+    assertServerAlive();
+    const sample = JSON.parse(
+      await readFile(join(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"),
+    );
+    sample.generatedAt = new Date(Date.now() + 180_000).toISOString();
+    sample.desks[0].backfill = { status: "BEST_AVAILABLE" };
+    const res = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(sample),
+    });
+    assert.equal(res.status, 422);
+    assert.ok(res.body.errors.some((error) => error.includes("backfill")));
+  });
+
+  test("POST /joe/inbox rejects a malformed captured J curve", async () => {
+    assertServerAlive();
+    const sample = JSON.parse(
+      await readFile(join(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"),
+    );
+    sample.generatedAt = new Date(Date.now() + 240_000).toISOString();
+    sample.desks[0].backfill = {
+      status: "BEST_AVAILABLE",
+      fullTotalAvailable: false,
+      capturedSubtotal: {
+        realizedPnl: -12.5,
+        currency: "USD",
+        executionCount: 9,
+        commissionCount: 9,
+        fromInclusive: "2026-09-10T08:00:00.000Z",
+        throughInclusive: "2026-09-10T08:05:00.000Z",
+        points: [{ at: "2026-09-10T08:04:00.000Z", realizedPnl: -12 }],
+        pointsTruncated: false,
+      },
+      coverage: {
+        target: { fromInclusive: "2026-09-10T08:00:00.000Z", toExclusive: "2026-09-10T08:20:00.000Z" },
+        completeIntervalCount: 0,
+        knownIntervalCount: 1,
+        gapCount: 1,
+        firstGap: { fromInclusive: "2026-09-10T08:05:00.000Z", toExclusive: "2026-09-10T08:20:00.000Z" },
+      },
+      missingOpeningLotCount: 0,
+      orphanCommissionCount: 0,
+    };
+    const res = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(sample),
+    });
+    assert.equal(res.status, 422);
+    assert.ok(res.body.errors.some((error) => error.includes("points endpoint")));
   });
 
   test("unknown routes match server 404 contract", async () => {
