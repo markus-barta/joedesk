@@ -330,10 +330,11 @@
     return root;
   }
 
-  function backfillPresentation(backfill) {
+  function backfillPresentation(backfill, deskMoney) {
     if (!backfill) { return null; }
     var captured = backfill.capturedSubtotal;
     var coverage = backfill.coverage;
+    var completeJMoney = deskMoney && Number.isFinite(deskMoney.equity) && Number.isFinite(deskMoney.totalPnl);
     var subtotal = Number.isFinite(captured.realizedPnl) && captured.currency
       ? captured.currency + " " + formatPositionMoney(captured.realizedPnl, true, captured.currency)
       : "Captured subtotal unavailable";
@@ -345,15 +346,19 @@
     if (backfill.fullTotalAvailable) {
       coverageText = "Coverage reports complete; captured results remain separate from J totals.";
     } else if (coverage.gapCount > 0) {
-      coverageText = "Full J total unavailable · Coverage gap: " + coverage.gapCount +
+      coverageText = (completeJMoney ? "Historical capture gap: " : "Full J total unavailable · Coverage gap: ") + coverage.gapCount +
         (coverage.firstGap
           ? "; first " + shortTime.format(new Date(coverage.firstGap.fromInclusive)) + " → " +
             shortTime.format(new Date(coverage.firstGap.toExclusive))
           : "");
     } else if (backfill.status === "COMPLETE") {
-      coverageText = "Full J total unavailable · Coverage is complete, but no verified total is available.";
+      coverageText = completeJMoney
+        ? "Historical capture coverage is complete; current J accounting is shown separately."
+        : "Full J total unavailable · Coverage is complete, but no verified total is available.";
     } else {
-      coverageText = "Full J total unavailable · Best-available coverage is not a complete history.";
+      coverageText = completeJMoney
+        ? "Historical capture is best-available and not a complete history."
+        : "Full J total unavailable · Best-available coverage is not a complete history.";
     }
     var quality = [];
     if (backfill.missingOpeningLotCount) {
@@ -475,8 +480,8 @@
     return details;
   }
 
-  function renderBackfill(backfill) {
-    var copy = backfillPresentation(backfill);
+  function renderBackfill(backfill, deskMoney) {
+    var copy = backfillPresentation(backfill, deskMoney);
     if (!copy) { return null; }
     var root = el("section", "desk-backfill");
     root.appendChild(el("h3", "desk-backfill-title", copy.title));
@@ -1866,7 +1871,7 @@
   function formatDeskLearningCopy(desk) {
     var happenedParts = [];
     var action = nonEmptyString(desk.action);
-    var hasCapturedJ = hasCapturedJResults(desk);
+    var hasCapturedJ = desk.state === "stuck" && hasCapturedJResults(desk);
     var hasIncompleteCapturedJ = hasCapturedJ && hasIncompleteJAccounting(desk);
     if (hasIncompleteCapturedJ) {
       happenedParts.push("Captured partial J history is available; complete J equity remains unavailable.");
@@ -2176,7 +2181,7 @@
     content.appendChild(moneyRow);
     var accountingBasisNode = renderAccountingBasis(desk);
     if (accountingBasisNode) { content.appendChild(accountingBasisNode); }
-    var backfillNode = renderBackfill(desk.backfill);
+    var backfillNode = renderBackfill(desk.backfill, desk.money);
     if (backfillNode) { content.appendChild(backfillNode); }
     var spark = el("div", "spark-wrap");
     var canvas = el("canvas");
@@ -2559,7 +2564,10 @@
       return historyFailureMessage(historyError, false);
     }
     if (primaryCapturedHistoryModel(latestSnapshot, historyState.selected, historyState.range, historyState.points)) {
-      return "Complete EUR J equity is unavailable; captured native-currency results are shown separately.";
+      var j = latestSnapshot.desks.find(function (desk) { return desk.id === "j"; });
+      return hasIncompleteJAccounting(j)
+        ? "Complete EUR J equity history is unavailable; captured native-currency results are shown separately."
+        : "No compatible EUR J history is available in this range; current J equity remains available above and captured native-currency results are shown separately.";
     }
     return "History will fill as snapshots arrive.";
   }
@@ -2794,7 +2802,7 @@
       referenceAt: referenceAt,
       points: points,
       series: capturedHistorySeries(scopedBackfill),
-      presentation: backfillPresentation(desk.backfill),
+      presentation: backfillPresentation(desk.backfill, desk.money),
       fillCount: captured.executionCount,
       method: captured.method === CAPTURED_FIFO_METHOD ? "J-family FIFO, net of fees" : null,
       truncated: captured.pointsTruncated

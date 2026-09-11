@@ -117,6 +117,19 @@ if (!/Complete J accounting is available/.test(completeCapturedJCopy.whatHappene
   throw new Error("complete J money must not be described as unavailable merely because captured history remains present");
 }
 
+const workingCapturedJCopy = api.formatDeskLearningCopy({
+  ...sampleDesk,
+  id: "j",
+  label: "J",
+  state: "working",
+  action: "J is working from the accepted current book.",
+  money: { equity: 5004, dayPnl: null, totalPnl: 4, openPnl: 0 },
+  backfill: { capturedSubtotal: { realizedPnl: -12.5, currency: "USD", executionCount: 7, points: [{ at: "2026-09-10T10:00:00Z", realizedPnl: -12.5 }] } },
+});
+if (workingCapturedJCopy.whatHappened !== "J is working from the accepted current book.") {
+  throw new Error("working J must preserve its actual action copy when captured history is also present");
+}
+
 const previous = api.deskTrackFields(sampleDesk);
 const changedAction = {
   ...sampleDesk,
@@ -231,6 +244,7 @@ console.log(JSON.stringify({
     "stuck-issues-in-what-happened",
     "captured-j-primary-copy-hides-raw-diagnostic",
     "complete-j-with-captured-history-keeps-complete-copy",
+    "working-j-preserves-action-with-captured-history",
     "observed-action-diff",
     "no-fake-replay-events",
     "observed-state-diff",

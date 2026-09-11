@@ -180,13 +180,35 @@ if (!capturedProblems.some((problem) => /captured partial results are available/
 const completeCapturedJ = structuredClone(stuckCapturedJ);
 completeCapturedJ.desks[0].money = { equity: 5012.5, dayPnl: null, totalPnl: 12.5, openPnl: 0 };
 completeCapturedJ.totals = { equity: 15012.5, dayPnl: null, totalPnl: 12.5, openPnl: 0 };
-const completeCapturedProblems = api.snapshotProblems(api.validate(completeCapturedJ), 0);
+const completeCapturedValidated = api.validate(completeCapturedJ);
+const completeCapturedProblems = api.snapshotProblems(completeCapturedValidated, 0);
 if (completeCapturedProblems.some((problem) => /complete equity is unavailable|Coverage gaps remain/.test(problem))) {
   throw new Error("restored complete J money must not produce the partial-accounting gap banner");
 }
 if (!completeCapturedProblems.some((problem) => /complete accounting is available/.test(problem)) ||
     completeCapturedProblems.some((problem) => /BACKFILL_REQUIRED|raw internal accounting detail/.test(problem))) {
   throw new Error("a still-stuck complete J must keep raw diagnostics behind details without hiding restored accounting");
+}
+const restoredBackfillCopy = api.backfillPresentation(
+  completeCapturedValidated.desks[0].backfill,
+  completeCapturedValidated.desks[0].money,
+);
+const restoredBackfillNode = api.renderBackfill(
+  completeCapturedValidated.desks[0].backfill,
+  completeCapturedValidated.desks[0].money,
+);
+const restoredBackfillText = descendants(restoredBackfillNode).map((node) => node.textContent).join(" ");
+if (!/Historical capture gap/.test(restoredBackfillCopy.coverage) ||
+    /Full J total unavailable/.test(restoredBackfillCopy.coverage) ||
+    /Full J total unavailable/.test(restoredBackfillText)) {
+  throw new Error("restored finite J money must scope partial backfill gaps to historical capture in card copy");
+}
+if (!/backfillPresentation\(desk\.backfill, desk\.money\)/.test(joeSource)) {
+  throw new Error("History metadata must receive current J money when presenting captured coverage");
+}
+if (!/No compatible EUR J history is available in this range; current J equity remains available above/.test(joeSource) ||
+    !/hasIncompleteJAccounting\(j\)/.test(joeSource)) {
+  throw new Error("empty History copy must distinguish missing range history from restored current J money");
 }
 
 const unrelatedMethod = structuredClone(syntheticBackfill);
