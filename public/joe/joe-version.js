@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.7.7",
+    APP_VERSION: "0.8.0",
     VERSION_HISTORY: [
+      {
+        version: "0.8.0",
+        date: "2026-09-11",
+        title: "Fleet Config, explained on the back",
+        changes: [
+          "The whole JoeDesk board flips as one card between the trading view and Fleet Config.",
+          "Technical controls and plain-language explanations stay side by side, with selection-bound preview fields.",
+          "Diff, Confirm and Save Preview are browser-local; Propagate clearly points to HOSTD-49/50 until delivery is connected.",
+        ],
+      },
       {
         version: "0.7.7",
         date: "2026-09-11",

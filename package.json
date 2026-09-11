@@ -1,6 +1,6 @@
 {
   "name": "joedesk",
-  "version": "0.7.7",
+  "version": "0.8.0",
   "description": "JoeDesk paper-trading dashboard and inbox server",
   "type": "module",
   "private": true,
@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node scripts/check-package.mjs && node scripts/check-joe-layout.mjs && node scripts/check-joe-trust.mjs && node scripts/check-joe-phone.mjs && node scripts/check-joe-history.mjs && node scripts/check-joe-learning.mjs && node scripts/check-position-contract.mjs && node scripts/check-position-display.mjs",
+    "check": "node scripts/check-package.mjs && node scripts/check-joe-layout.mjs && node scripts/check-fleet-config.mjs && node scripts/check-joe-trust.mjs && node scripts/check-joe-phone.mjs && node scripts/check-joe-history.mjs && node scripts/check-joe-learning.mjs && node scripts/check-position-contract.mjs && node scripts/check-position-display.mjs",
     "test": "node scripts/run-server-contract.mjs",
     "start": "node server.mjs"
   }
