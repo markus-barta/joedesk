@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "legacy",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "release_channel": "stable",
-  "release_sequence": 10,
-  "note": "Readable Vienna calendar boundaries and adaptive History labels; stable chart sizing across phone, desktop and saved tile layouts. Financial data and accounting are unchanged."
+  "release_sequence": 11,
+  "note": "Standard named-layout workflow with remembered selection, dirty-state Save, protected overwrite/discard and quiet accessible SVG header controls."
 }

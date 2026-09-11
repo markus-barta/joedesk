@@ -39,6 +39,7 @@
 
   var LAYOUT_KEY = "joe-board-layout-v1";
   var LAYOUTS_KEY = "joe-board-named-layouts-v1";
+  var ACTIVE_LAYOUT_KEY = "joe-board-active-layout-v1";
   var SETTINGS_KEY = "joe-board-grid-settings-v1";
   var THEME_KEY = "joe-board-theme-v1";
   var DEFAULT_LAYOUT_ID = "default";
@@ -138,6 +139,10 @@
   var lastObservedSnapshot = null;
   var observedEventsMemory = null;
   var layoutFormMode = null;
+  var activeLayoutId = DEFAULT_LAYOUT_ID;
+  var layoutBaseline = null;
+  var layoutDirty = false;
+  var pendingLayoutSelectionId = null;
   var activeGridSettings = Object.assign({}, DEFAULT_GRID_SETTINGS);
   var activeThemeMode = "dark";
   var settingsFormDirty = false;
@@ -836,19 +841,17 @@
   function persistDesktopItems(items) {
     var clean = rememberDesktopLayout(items);
     if (!clean) { return false; }
-    try {
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify(clean));
-    } catch (_) { /* private browsing may reject storage */ }
-    return true;
+    return writeJsonStorage(LAYOUT_KEY, clean);
   }
 
   function loadNarrowGridLayout(desktopItems) {
     var narrowItems = narrowLayoutFromItems(desktopItems, activeGridSettings);
     if (!narrowItems || !grid) { return false; }
+    var wasRestoring = restoringLayout;
     restoringLayout = true;
     if (typeof grid.checkDynamicColumn === "function") { grid.checkDynamicColumn(); }
     loadFittedNarrowLayout(narrowItems);
-    restoringLayout = false;
+    restoringLayout = wasRestoring;
     scheduleNarrowFit(0);
     return true;
   }
@@ -857,12 +860,13 @@
     if (!grid) { return; }
     var cols = SUPPORTED_COLUMNS.includes(columns) ? columns : DEFAULT_GRID_SETTINGS.columns;
     var desktop = desktopLayoutSnapshot() || DEFAULT_LAYOUT.slice();
+    var wasRestoring = restoringLayout;
     restoringLayout = true;
     if (grid.getColumn() !== cols) {
       grid.column(cols, "moveScale");
     }
     grid.load(desktop, false);
-    restoringLayout = false;
+    restoringLayout = wasRestoring;
     narrowGridActive = false;
   }
 
@@ -902,7 +906,7 @@
     grid.opts.columnOpts = columnOptsFor(cols);
     if (onNarrow) {
       if (!narrowGridActive) {
-        persistDesktopLayoutGeometry(cols);
+        if (!restoringLayout) { persistDesktopLayoutGeometry(cols); }
         narrowGridActive = true;
       }
       if (typeof grid.checkDynamicColumn === "function") { grid.checkDynamicColumn(); }
@@ -934,6 +938,7 @@
     if (!grid) { return sanitizeLayoutItems(DEFAULT_LAYOUT.slice(), cols); }
     var previousCols = grid.getColumn();
     var items = null;
+    var wasRestoring = restoringLayout;
     restoringLayout = true;
     grid.opts.columnOpts = columnOptsFor(cols);
     if (previousCols !== cols) {
@@ -944,7 +949,7 @@
       grid.column(previousCols, previousCols === 1 ? "list" : "moveScale");
       grid.opts.columnOpts = columnOptsFor(desktopColumnCount());
     }
-    restoringLayout = false;
+    restoringLayout = wasRestoring;
     return items;
   }
 
@@ -952,10 +957,7 @@
     var saved = captureDesktopGridLayout(cols);
     if (!saved) { return false; }
     rememberDesktopLayout(saved);
-    try {
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify(saved));
-    } catch (_) { /* private browsing may reject storage */ }
-    return true;
+    return writeJsonStorage(LAYOUT_KEY, saved);
   }
 
   function catalogContainsEntry(catalog, entryId) {
@@ -987,12 +989,7 @@
   }
 
   function writeActiveGridSettings(settings) {
-    try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(sanitizeGridSettings(settings)));
-      return true;
-    } catch (_) {
-      return false;
-    }
+    return writeJsonStorage(SETTINGS_KEY, sanitizeGridSettings(settings));
   }
 
   function applyTilePadding(padding) {
@@ -1000,8 +997,18 @@
   }
 
   function applyGridSettings(settings, skipPersist) {
+    var previousSettings = activeGridSettings;
+    var narrowSettingsChange = Boolean(grid && isNarrowGridViewport() && previousSettings.columns !== sanitizeGridSettings(settings).columns);
+    var previousDesktop = narrowSettingsChange ? desktopLayoutSnapshot() : null;
     var clean = sanitizeGridSettings(settings);
     activeGridSettings = clean;
+    var scaledDesktop = narrowSettingsChange
+      ? scaleLayoutColumns(previousDesktop, previousSettings.columns, clean.columns)
+      : null;
+    if (scaledDesktop) {
+      rememberDesktopLayout(scaledDesktop);
+      narrowGridActive = true;
+    }
     applyTilePadding(clean.tilePadding);
     if (grid) {
       grid.opts.columnOpts = columnOptsFor(clean.columns);
@@ -1009,18 +1016,19 @@
       grid.margin(clean.tileGap);
       syncGridColumnConfig(clean.columns);
     }
-    if (!skipPersist && !writeActiveGridSettings(clean)) {
-      setLayoutStatus("Settings storage is unavailable.", true);
-      resizeVisuals();
-      if (historyState.chart) { drawHistory(); }
-      return false;
+    if (isNarrowGridViewport() && !restoringLayout) {
+      if (scaledDesktop) { persistDesktopItems(scaledDesktop); }
+      else { persistDesktopLayoutGeometry(clean.columns); }
     }
-    if (isNarrowGridViewport()) {
-      persistDesktopLayoutGeometry(clean.columns);
+    var persisted = true;
+    if (!skipPersist) {
+      persisted = persistDraftSnapshot(currentLayoutSnapshot());
+      if (!persisted) { setLayoutStatus("Settings applied for this session but storage is unavailable.", true); }
+      if (layoutBaseline) { refreshLayoutDirty(true); }
     }
     resizeVisuals();
     if (historyState.chart) { drawHistory(); }
-    return true;
+    return persisted;
   }
 
   function readStoredThemeMode() {
@@ -1125,6 +1133,24 @@
     return true;
   }
 
+  function gridSettingsEqual(left, right) {
+    var a = sanitizeGridSettings(left);
+    var b = sanitizeGridSettings(right);
+    return a.columns === b.columns && a.cellHeight === b.cellHeight &&
+      a.tilePadding === b.tilePadding && a.tileGap === b.tileGap;
+  }
+
+  function makeLayoutSnapshot(items, settings) {
+    var cleanSettings = sanitizeGridSettings(settings);
+    var cleanItems = sanitizeLayoutItems(items, cleanSettings.columns);
+    if (!cleanItems) { return null; }
+    return { items: cleanItems, settings: cleanSettings };
+  }
+
+  function layoutSnapshotsEqual(left, right) {
+    return Boolean(left && right && layoutItemsEqual(left.items, right.items) && gridSettingsEqual(left.settings, right.settings));
+  }
+
   function migrateLegacyDefaultLayout(items) {
     if (layoutItemsEqual(items, LEGACY_DEFAULT_LAYOUT) || layoutItemsEqual(items, LEGACY_DEFAULT_LAYOUT_V2)) {
       return DEFAULT_LAYOUT.slice();
@@ -1156,11 +1182,25 @@
     return clean;
   }
 
-  function safeStoredLayout() {
+  function scaleLayoutColumns(items, fromColumns, toColumns) {
+    var from = SUPPORTED_COLUMNS.includes(fromColumns) ? fromColumns : DEFAULT_GRID_SETTINGS.columns;
+    var to = SUPPORTED_COLUMNS.includes(toColumns) ? toColumns : DEFAULT_GRID_SETTINGS.columns;
+    var clean = sanitizeLayoutItems(items, from);
+    if (!clean) { return null; }
+    if (from === to) { return clean; }
+    return sanitizeLayoutItems(clean.map(function (item) {
+      var x = Math.round(item.x * to / from);
+      var w = Math.max(1, Math.round(item.w * to / from));
+      if (x + w > to) { x = Math.max(0, to - w); }
+      return { id: item.id, x: x, y: item.y, w: w, h: item.h };
+    }), to);
+  }
+
+  function safeStoredLayout(preserveLegacyGeometry) {
     try {
       var parsed = sanitizeLayoutItems(JSON.parse(localStorage.getItem(LAYOUT_KEY)), desktopColumnCount());
       if (!parsed) { return null; }
-      var migrated = migrateLegacyDefaultLayout(parsed);
+      var migrated = preserveLegacyGeometry ? parsed : migrateLegacyDefaultLayout(parsed);
       if (!layoutItemsEqual(migrated, parsed)) {
         try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(migrated)); } catch (_) {}
       }
@@ -1198,14 +1238,51 @@
     return { id: id, name: name, items: items, settings: settings, builtin: false };
   }
 
+  function uniqueCatalogText(value, used, maxLength) {
+    var base = String(value || "Layout").trim() || "Layout";
+    var candidate = base.slice(0, maxLength);
+    var suffix = 2;
+    while (used.has(candidate.toLowerCase())) {
+      var ending = " (" + suffix + ")";
+      candidate = base.slice(0, Math.max(1, maxLength - ending.length)) + ending;
+      suffix += 1;
+    }
+    used.add(candidate.toLowerCase());
+    return candidate;
+  }
+
+  function uniqueCatalogId(value, used) {
+    var base = String(value || "layout").slice(0, 64) || "layout";
+    var candidate = base;
+    var suffix = 2;
+    while (used.has(candidate)) {
+      var ending = "-" + suffix;
+      candidate = base.slice(0, Math.max(1, 64 - ending.length)) + ending;
+      suffix += 1;
+    }
+    used.add(candidate);
+    return candidate;
+  }
+
   function canonicalLayoutsCatalog(layouts) {
-    var seen = new Set();
-    var normalized = layouts.map(normalizeLayoutEntry).filter(function (entry) {
-      if (!entry || seen.has(entry.id)) { return false; }
-      seen.add(entry.id);
-      return true;
+    var usedIds = new Set([DEFAULT_LAYOUT_ID]);
+    var usedNames = new Set(["default"]);
+    var normalized = [];
+    var sawStoredDefault = false;
+    (Array.isArray(layouts) ? layouts : []).forEach(function (rawEntry) {
+      if (rawEntry && rawEntry.id === DEFAULT_LAYOUT_ID && !sawStoredDefault) {
+        sawStoredDefault = true;
+        return;
+      }
+      var candidateEntry = rawEntry && rawEntry.id === DEFAULT_LAYOUT_ID
+        ? Object.assign({}, rawEntry, { id: DEFAULT_LAYOUT_ID + "-copy" })
+        : rawEntry;
+      var entry = normalizeLayoutEntry(candidateEntry);
+      if (!entry) { return; }
+      entry.id = uniqueCatalogId(entry.id, usedIds);
+      entry.name = uniqueCatalogText(entry.name, usedNames, 48);
+      normalized.push(entry);
     });
-    normalized = normalized.filter(function (entry) { return entry.id !== DEFAULT_LAYOUT_ID; });
     normalized.unshift(defaultLayoutEntry());
     return { schema: "inspr.joe.layouts.v1", layouts: normalized };
   }
@@ -1216,7 +1293,11 @@
       if (!raw || raw.schema !== "inspr.joe.layouts.v1" || !Array.isArray(raw.layouts)) {
         return defaultLayoutsCatalog();
       }
-      return canonicalLayoutsCatalog(raw.layouts);
+      var canonical = canonicalLayoutsCatalog(raw.layouts);
+      if (JSON.stringify(raw) !== JSON.stringify(canonical)) {
+        try { localStorage.setItem(LAYOUTS_KEY, JSON.stringify(canonical)); } catch (_) {}
+      }
+      return canonical;
     } catch (_) {
       return defaultLayoutsCatalog();
     }
@@ -1230,11 +1311,61 @@
       return false;
     }
     try {
-      localStorage.setItem(LAYOUTS_KEY, JSON.stringify(canonicalLayoutsCatalog(catalog.layouts)));
-      return true;
+      var canonical = canonicalLayoutsCatalog(catalog.layouts);
+      var serialized = JSON.stringify(canonical);
+      localStorage.setItem(LAYOUTS_KEY, serialized);
+      return localStorage.getItem(LAYOUTS_KEY) === serialized;
     } catch (_) {
       return false;
     }
+  }
+
+  function readActiveLayoutId(catalog) {
+    var available = catalog || readLayoutsCatalog();
+    try {
+      var stored = localStorage.getItem(ACTIVE_LAYOUT_KEY);
+      if (available.layouts.some(function (entry) { return entry.id === stored; })) { return stored; }
+    } catch (_) {}
+    return DEFAULT_LAYOUT_ID;
+  }
+
+  function writeActiveLayoutId(entryId) {
+    try {
+      localStorage.setItem(ACTIVE_LAYOUT_KEY, entryId);
+      return localStorage.getItem(ACTIVE_LAYOUT_KEY) === entryId;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function writeJsonStorage(key, value) {
+    try {
+      var serialized = JSON.stringify(value);
+      localStorage.setItem(key, serialized);
+      return localStorage.getItem(key) === serialized;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function resolveInitialLayoutState(catalog, entryId, draftItems, draftSettings) {
+    var available = catalog || defaultLayoutsCatalog();
+    var activeEntry = available.layouts.find(function (entry) { return entry.id === entryId; }) || defaultLayoutEntry();
+    var settings = sanitizeGridSettings(draftSettings);
+    var items = sanitizeLayoutItems(draftItems, settings.columns);
+    if (!items) {
+      settings = sanitizeGridSettings(activeEntry.settings);
+      items = sanitizeLayoutItems(activeEntry.items, settings.columns);
+    }
+    var baseline = entryLayoutSnapshot(activeEntry);
+    var snapshot = makeLayoutSnapshot(items, settings);
+    return {
+      activeId: activeEntry.id,
+      items: snapshot.items,
+      settings: snapshot.settings,
+      baseline: baseline,
+      dirty: !layoutSnapshotsEqual(snapshot, baseline)
+    };
   }
 
   function setLayoutStatus(message, isError) {
@@ -1259,18 +1390,46 @@
     return captured || DEFAULT_LAYOUT.slice();
   }
 
-  function applyGridLayout(items) {
+  function currentLayoutSnapshot() {
+    return makeLayoutSnapshot(currentGridLayout(), activeGridSettings);
+  }
+
+  function entryLayoutSnapshot(entry) {
+    return entry ? makeLayoutSnapshot(entry.items, entry.settings) : null;
+  }
+
+  function persistDraftSnapshot(snapshot) {
+    if (!snapshot) { return false; }
+    var geometryOk = writeJsonStorage(LAYOUT_KEY, snapshot.items);
+    var settingsOk = writeJsonStorage(SETTINGS_KEY, snapshot.settings);
+    return geometryOk && settingsOk;
+  }
+
+  function refreshLayoutDirty(announce) {
+    var wasDirty = layoutDirty;
+    layoutDirty = !layoutSnapshotsEqual(currentLayoutSnapshot(), layoutBaseline);
+    updateLayoutControlState();
+    if (announce && layoutDirty && !wasDirty) {
+      setLayoutStatus("Layout has unsaved changes.");
+    }
+    return layoutDirty;
+  }
+
+  function applyGridLayout(items, skipPersist) {
     if (!grid) { return false; }
     var clean = sanitizeLayoutItems(items, desktopColumnCount());
     if (!clean) { return false; }
+    rememberDesktopLayout(clean);
+    var wasRestoring = restoringLayout;
+    restoringLayout = true;
     if (isNarrowGridViewport()) {
-      persistDesktopItems(clean);
       loadNarrowGridLayout(clean);
     } else {
-      restoringLayout = true;
       grid.load(clean, false);
-      restoringLayout = false;
-      saveLayout();
+    }
+    restoringLayout = wasRestoring;
+    if (!skipPersist && !persistDraftSnapshot(makeLayoutSnapshot(clean, activeGridSettings))) {
+      setLayoutStatus("Layout changed for this session but storage is unavailable.", true);
     }
     resizeVisuals();
     return true;
@@ -1286,9 +1445,14 @@
     }
     setLayoutToolbarEnabled(true);
     var catalog = readLayoutsCatalog();
-    var selected = catalog.layouts.find(function (entry) { return entry.id === select.value; });
+    var selected = catalog.layouts.find(function (entry) { return entry.id === activeLayoutId; });
+    var saveButton = document.getElementById("saveLayout");
+    if (saveButton) { saveButton.disabled = !layoutDirty; }
     document.getElementById("deleteLayout").disabled = !selected || selected.builtin;
     document.getElementById("renameLayout").disabled = !selected || selected.builtin;
+    var toolbar = document.getElementById("layoutToolbar");
+    if (toolbar) { toolbar.dataset.dirty = layoutDirty ? "true" : "false"; }
+    select.setAttribute("aria-label", (selected ? selected.name : "Saved layout") + (layoutDirty ? " (unsaved changes)" : ""));
   }
 
   function setLayoutToolbarEnabled(enabled) {
@@ -1303,7 +1467,7 @@
     var select = document.getElementById("layoutSelect");
     if (!select) { return; }
     var catalog = readLayoutsCatalog();
-    var current = selectedId || select.value;
+    var current = selectedId || activeLayoutId || select.value;
     select.replaceChildren.apply(select, catalog.layouts.map(function (entry) {
       var option = document.createElement("option");
       option.value = entry.id;
@@ -1318,10 +1482,14 @@
     updateLayoutControlState();
   }
 
-  function hideLayoutForm() {
+  function hideLayoutForm(keepPendingSelection) {
     layoutFormMode = null;
     document.getElementById("layoutInlineForm").hidden = true;
     document.getElementById("layoutNameInput").value = "";
+    if (keepPendingSelection !== true) {
+      pendingLayoutSelectionId = null;
+      renderLayoutSelect(activeLayoutId);
+    }
   }
 
   function showLayoutForm(mode) {
@@ -1337,16 +1505,73 @@
     input.select();
   }
 
-  function uniqueLayoutId(name) {
+  function uniqueLayoutId(name, catalog) {
     var base = String(name || "layout").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "layout";
-    var catalog = readLayoutsCatalog();
+    var available = catalog || readLayoutsCatalog();
     var candidate = base;
     var suffix = 2;
-    while (catalog.layouts.some(function (entry) { return entry.id === candidate; })) {
-      candidate = base + "-" + suffix;
+    while (available.layouts.some(function (entry) { return entry.id === candidate; })) {
+      var ending = "-" + suffix;
+      candidate = base.slice(0, Math.max(1, 64 - ending.length)) + ending;
       suffix += 1;
     }
     return candidate.slice(0, 64);
+  }
+
+  function findLayoutByName(catalog, name, exceptId) {
+    var wanted = String(name || "").trim().toLowerCase();
+    return catalog.layouts.find(function (entry) {
+      return entry.id !== exceptId && entry.name.toLowerCase() === wanted;
+    });
+  }
+
+  function applyLayoutEntryLive(entry) {
+    var snapshot = entryLayoutSnapshot(entry);
+    if (!snapshot || !grid) { return false; }
+    var wasRestoring = restoringLayout;
+    restoringLayout = true;
+    activeGridSettings = snapshot.settings;
+    rememberDesktopLayout(snapshot.items);
+    applyGridSettings(snapshot.settings, true);
+    var applied = applyGridLayout(snapshot.items, true);
+    restoringLayout = wasRestoring;
+    if (!applied) { return false; }
+    activeLayoutId = entry.id;
+    layoutBaseline = snapshot;
+    layoutDirty = false;
+    renderLayoutSelect(activeLayoutId);
+    return true;
+  }
+
+  function loadLayoutById(entryId) {
+    if (!grid) { return false; }
+    var catalog = readLayoutsCatalog();
+    var entry = catalog.layouts.find(function (item) { return item.id === entryId; });
+    var snapshot = entryLayoutSnapshot(entry);
+    if (!entry || !snapshot) {
+      setLayoutStatus("Choose a saved layout.", true);
+      renderLayoutSelect(activeLayoutId);
+      return false;
+    }
+    if (!persistDraftSnapshot(snapshot) || !writeActiveLayoutId(entry.id)) {
+      setLayoutStatus("That layout could not be loaded because storage is unavailable.", true);
+      renderLayoutSelect(activeLayoutId);
+      return false;
+    }
+    if (!applyLayoutEntryLive(entry)) {
+      setLayoutStatus("That layout could not be loaded.", true);
+      renderLayoutSelect(activeLayoutId);
+      return false;
+    }
+    setLayoutStatus('Loaded layout "' + entry.name + '".');
+    return true;
+  }
+
+  function completePendingLayoutSelection() {
+    if (!pendingLayoutSelectionId) { return true; }
+    var nextId = pendingLayoutSelectionId;
+    pendingLayoutSelectionId = null;
+    return loadLayoutById(nextId);
   }
 
   function saveNamedLayout(name) {
@@ -1357,31 +1582,73 @@
       return false;
     }
     var catalog = readLayoutsCatalog();
-    if (catalog.layouts.length >= MAX_LAYOUTS) {
+    var conflict = findLayoutByName(catalog, trimmed);
+    if (conflict && conflict.builtin) {
+      setLayoutStatus('"Default" is reserved. Choose another layout name.', true);
+      return false;
+    }
+    if (conflict && !window.confirm('Replace the saved layout "' + conflict.name + '"?')) {
+      return false;
+    }
+    if (!conflict && catalog.layouts.length >= MAX_LAYOUTS) {
       setLayoutStatus("Layout catalog is full (" + MAX_LAYOUTS + " saved layouts). Delete one before saving.", true);
       return false;
     }
-    var settings = Object.assign({}, activeGridSettings);
-    var items = sanitizeLayoutItems(currentGridLayout(), settings.columns);
-    if (!items) {
+    var snapshot = currentLayoutSnapshot();
+    if (!snapshot) {
       setLayoutStatus("That layout could not be saved with the current grid settings.", true);
       return false;
     }
     var entry = {
-      id: uniqueLayoutId(trimmed),
+      id: conflict ? conflict.id : uniqueLayoutId(trimmed, catalog),
       name: trimmed,
-      items: items,
-      settings: settings,
+      items: snapshot.items,
+      settings: snapshot.settings,
       builtin: false
     };
-    catalog.layouts.push(entry);
-    if (!writeNamedLayoutsCatalog(catalog, entry.id)) {
-      setLayoutStatus("That layout could not be saved.", true);
+    if (conflict) {
+      catalog.layouts = catalog.layouts.map(function (item) { return item.id === conflict.id ? entry : item; });
+    } else {
+      catalog.layouts.push(entry);
+    }
+    if (!persistDraftSnapshot(snapshot) || !writeNamedLayoutsCatalog(catalog, entry.id) || !writeActiveLayoutId(entry.id)) {
+      setLayoutStatus("That layout could not be saved because storage is unavailable.", true);
       return false;
     }
-    renderLayoutSelect(entry.id);
-    hideLayoutForm();
+    activeLayoutId = entry.id;
+    layoutBaseline = snapshot;
+    layoutDirty = false;
+    renderLayoutSelect(activeLayoutId);
+    hideLayoutForm(true);
     setLayoutStatus('Saved layout "' + trimmed + '".');
+    completePendingLayoutSelection();
+    return true;
+  }
+
+  function saveCurrentNamedLayout() {
+    var catalog = readLayoutsCatalog();
+    var entry = catalog.layouts.find(function (item) { return item.id === activeLayoutId; });
+    if (!entry || entry.builtin) {
+      showLayoutForm("save");
+      return false;
+    }
+    if (!layoutDirty) { return true; }
+    var snapshot = currentLayoutSnapshot();
+    if (!snapshot) {
+      setLayoutStatus("That layout could not be saved with the current grid settings.", true);
+      return false;
+    }
+    entry.items = snapshot.items;
+    entry.settings = snapshot.settings;
+    if (!persistDraftSnapshot(snapshot) || !writeNamedLayoutsCatalog(catalog, entry.id) || !writeActiveLayoutId(entry.id)) {
+      setLayoutStatus("That layout could not be saved because storage is unavailable.", true);
+      return false;
+    }
+    layoutBaseline = snapshot;
+    layoutDirty = false;
+    renderLayoutSelect(activeLayoutId);
+    setLayoutStatus('Saved layout "' + entry.name + '".');
+    completePendingLayoutSelection();
     return true;
   }
 
@@ -1392,49 +1659,93 @@
       setLayoutStatus("Enter a layout name.", true);
       return false;
     }
-    var select = document.getElementById("layoutSelect");
     var catalog = readLayoutsCatalog();
-    var entry = catalog.layouts.find(function (item) { return item.id === select.value; });
+    var entry = catalog.layouts.find(function (item) { return item.id === activeLayoutId; });
     if (!entry || entry.builtin) {
       setLayoutStatus("The default layout cannot be renamed.", true);
       return false;
     }
+    var conflict = findLayoutByName(catalog, trimmed, entry.id);
+    if (conflict && conflict.builtin) {
+      setLayoutStatus('"Default" is reserved. Choose another layout name.', true);
+      return false;
+    }
+    if (conflict && !window.confirm('Replace the saved layout "' + conflict.name + '"?')) {
+      return false;
+    }
+    if (conflict) {
+      catalog.layouts = catalog.layouts.filter(function (item) { return item.id !== conflict.id; });
+    }
     entry.name = trimmed;
-    if (!writeLayoutsCatalog(catalog)) {
+    if (!writeLayoutsCatalog(catalog) || !writeActiveLayoutId(entry.id)) {
       setLayoutStatus("Layout storage is unavailable.", true);
       return false;
     }
     renderLayoutSelect(entry.id);
-    hideLayoutForm();
+    hideLayoutForm(true);
     setLayoutStatus('Renamed layout to "' + trimmed + '".');
     return true;
   }
 
-  function loadSelectedLayout() {
-    if (!grid) { return false; }
-    var select = document.getElementById("layoutSelect");
+  function cancelPendingLayoutSelection() {
+    pendingLayoutSelectionId = null;
+    renderLayoutSelect(activeLayoutId);
+    var dialog = document.getElementById("layoutUnsavedDialog");
+    if (dialog && dialog.open) { dialog.close(); }
+  }
+
+  function requestLayoutSelection(entryId) {
+    if (!entryId || entryId === activeLayoutId) {
+      renderLayoutSelect(activeLayoutId);
+      return true;
+    }
+    if (!layoutDirty) { return loadLayoutById(entryId); }
+    pendingLayoutSelectionId = entryId;
+    renderLayoutSelect(activeLayoutId);
     var catalog = readLayoutsCatalog();
-    var entry = catalog.layouts.find(function (item) { return item.id === select.value; });
-    if (!entry) {
-      setLayoutStatus("Choose a saved layout.", true);
+    var target = catalog.layouts.find(function (entry) { return entry.id === entryId; });
+    var message = document.getElementById("layoutUnsavedMessage");
+    if (message) {
+      message.textContent = 'Save changes before switching to "' + (target ? target.name : "that layout") + '"?';
+    }
+    var dialog = document.getElementById("layoutUnsavedDialog");
+    if (!dialog || typeof dialog.showModal !== "function") {
+      cancelPendingLayoutSelection();
+      setLayoutStatus("Unsaved layout changes must be saved or discarded before switching.", true);
       return false;
     }
-    if (entry.settings) { applyGridSettings(entry.settings); }
-    if (!applyGridLayout(entry.items)) {
-      setLayoutStatus("That layout could not be loaded.", true);
-      return false;
-    }
-    setLayoutStatus('Loaded layout "' + entry.name + '".');
-    return true;
+    dialog.showModal();
+    return false;
+  }
+
+  function discardAndCompletePendingSelection() {
+    var dialog = document.getElementById("layoutUnsavedDialog");
+    if (dialog && dialog.open) { dialog.close(); }
+    return completePendingLayoutSelection();
+  }
+
+  function saveBeforePendingSelection() {
+    var dialog = document.getElementById("layoutUnsavedDialog");
+    if (dialog && dialog.open) { dialog.close(); }
+    return saveCurrentNamedLayout();
   }
 
   function deleteSelectedLayout() {
     if (!grid) { return false; }
-    var select = document.getElementById("layoutSelect");
     var catalog = readLayoutsCatalog();
-    var entry = catalog.layouts.find(function (item) { return item.id === select.value; });
+    var entry = catalog.layouts.find(function (item) { return item.id === activeLayoutId; });
     if (!entry || entry.builtin) {
       setLayoutStatus("The default layout cannot be deleted.", true);
+      return false;
+    }
+    if (!window.confirm('Delete layout "' + entry.name + '"' + (layoutDirty ? " and discard its unsaved changes" : "") + "?")) {
+      renderLayoutSelect(activeLayoutId);
+      return false;
+    }
+    var fallback = defaultLayoutEntry();
+    var fallbackSnapshot = entryLayoutSnapshot(fallback);
+    if (!persistDraftSnapshot(fallbackSnapshot) || !writeActiveLayoutId(DEFAULT_LAYOUT_ID)) {
+      setLayoutStatus("That layout could not be deleted because storage is unavailable.", true);
       return false;
     }
     catalog.layouts = catalog.layouts.filter(function (item) { return item.id !== entry.id; });
@@ -1442,19 +1753,30 @@
       setLayoutStatus("Layout storage is unavailable.", true);
       return false;
     }
-    renderLayoutSelect(DEFAULT_LAYOUT_ID);
+    applyLayoutEntryLive(fallback);
     setLayoutStatus('Deleted layout "' + entry.name + '".');
     return true;
   }
 
+  function resetToDefaultLayout() {
+    if (layoutDirty && !window.confirm("Discard unsaved layout changes and reset to Default?")) {
+      renderLayoutSelect(activeLayoutId);
+      return false;
+    }
+    return loadLayoutById(DEFAULT_LAYOUT_ID);
+  }
+
   function bindLayoutControls() {
-    renderLayoutSelect();
-    document.getElementById("layoutSelect").addEventListener("change", updateLayoutControlState);
-    document.getElementById("saveLayout").addEventListener("click", function () { showLayoutForm("save"); });
+    renderLayoutSelect(activeLayoutId);
+    document.getElementById("layoutSelect").addEventListener("change", function (event) {
+      requestLayoutSelection(event.target.value);
+    });
+    document.getElementById("saveLayout").addEventListener("click", saveCurrentNamedLayout);
+    var saveAsButton = document.getElementById("saveAsLayout");
+    if (saveAsButton) { saveAsButton.addEventListener("click", function () { showLayoutForm("save"); }); }
     document.getElementById("renameLayout").addEventListener("click", function () { showLayoutForm("rename"); });
-    document.getElementById("loadLayout").addEventListener("click", loadSelectedLayout);
     document.getElementById("deleteLayout").addEventListener("click", deleteSelectedLayout);
-    document.getElementById("layoutFormCancel").addEventListener("click", hideLayoutForm);
+    document.getElementById("layoutFormCancel").addEventListener("click", function () { hideLayoutForm(); });
     document.getElementById("layoutFormConfirm").addEventListener("click", function () {
       var name = document.getElementById("layoutNameInput").value;
       if (layoutFormMode === "rename") { renameSelectedLayout(name); }
@@ -1470,6 +1792,16 @@
         hideLayoutForm();
       }
     });
+    var unsavedDialog = document.getElementById("layoutUnsavedDialog");
+    if (unsavedDialog) {
+      document.getElementById("layoutUnsavedSave").addEventListener("click", saveBeforePendingSelection);
+      document.getElementById("layoutUnsavedDiscard").addEventListener("click", discardAndCompletePendingSelection);
+      document.getElementById("layoutUnsavedCancel").addEventListener("click", cancelPendingLayoutSelection);
+      unsavedDialog.addEventListener("cancel", function (event) {
+        event.preventDefault();
+        cancelPendingLayoutSelection();
+      });
+    }
   }
 
   function renderVersionPanel() {
@@ -1544,9 +1876,11 @@
       populateSettingsForm(activeGridSettings, activeThemeMode);
       if (settingsOk && themeOk) {
         menu.removeAttribute("open");
-        setLayoutStatus("Board settings applied.");
+        setLayoutStatus("Board settings applied." + (layoutDirty ? " Layout has unsaved changes." : ""));
       } else if (!settingsOk && !themeOk) {
         setLayoutStatus("Settings applied for this session but storage is unavailable.", true);
+      } else if (!settingsOk) {
+        setLayoutStatus("Grid settings applied for this session but storage is unavailable.", true);
       } else if (!themeOk) {
         setLayoutStatus("Theme applied for this session but storage is unavailable.", true);
       }
@@ -1571,14 +1905,27 @@
 
   function saveLayout() {
     if (!grid || restoringLayout || isNarrowGridViewport()) { return; }
-    var cols = desktopColumnCount();
-    var saved = layoutItemsFromGrid(cols);
-    if (!saved) { return; }
-    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(saved)); } catch (_) { /* private browsing may reject storage */ }
+    var snapshot = makeLayoutSnapshot(layoutItemsFromGrid(desktopColumnCount()), activeGridSettings);
+    if (!snapshot) { return; }
+    rememberDesktopLayout(snapshot.items);
+    if (!persistDraftSnapshot(snapshot)) {
+      setLayoutStatus("Layout changed for this session but storage is unavailable.", true);
+    }
+    refreshLayoutDirty(true);
   }
 
   function initGrid() {
-    activeGridSettings = readActiveGridSettings();
+    var catalog = readLayoutsCatalog();
+    activeLayoutId = readActiveLayoutId(catalog);
+    var draftSettings = readActiveGridSettings();
+    activeGridSettings = draftSettings;
+    var initial = resolveInitialLayoutState(catalog, activeLayoutId, safeStoredLayout(activeLayoutId !== DEFAULT_LAYOUT_ID), draftSettings);
+    activeLayoutId = initial.activeId;
+    activeGridSettings = initial.settings;
+    var initialItems = initial.items;
+    layoutBaseline = initial.baseline;
+    layoutDirty = initial.dirty;
+    rememberDesktopLayout(initialItems);
     applyTilePadding(activeGridSettings.tilePadding);
     if (!window.GridStack) {
       document.getElementById("joeGrid").classList.add("grid-fallback");
@@ -1595,21 +1942,14 @@
       handle: ".widget-drag",
       resizable: { handles: "e,se,s,sw,w" }
     }, "#joeGrid");
-    var stored = safeStoredLayout();
     restoringLayout = true;
-    grid.load(stored || DEFAULT_LAYOUT.slice(), false);
+    grid.load(initialItems, false);
     restoringLayout = false;
     syncGridColumnConfig(activeGridSettings.columns);
     scheduleViewportSettle();
     grid.on("change dragstop resizestop", saveLayout);
     grid.on("resizestop", function () { resizeVisuals(); });
-    document.getElementById("resetLayout").addEventListener("click", function () {
-      try { localStorage.removeItem(LAYOUT_KEY); } catch (_) { /* storage unavailable */ }
-      applyGridSettings(defaultLayoutEntry().settings, false);
-      applyGridLayout(DEFAULT_LAYOUT);
-      writeActiveGridSettings(activeGridSettings);
-      setLayoutStatus("Reset to default layout with taller desk tiles for learning and timeline content.");
-    });
+    document.getElementById("resetLayout").addEventListener("click", resetToDefaultLayout);
   }
 
   function ageInSeconds(iso) {
@@ -3322,6 +3662,7 @@
     refresh: refresh,
     layoutStorageKey: LAYOUT_KEY,
     layoutsStorageKey: LAYOUTS_KEY,
+    activeLayoutStorageKey: ACTIVE_LAYOUT_KEY,
     settingsStorageKey: SETTINGS_KEY,
     themeStorageKey: THEME_KEY,
     defaultLayoutId: DEFAULT_LAYOUT_ID,
@@ -3332,7 +3673,10 @@
     readActiveGridSettings: readActiveGridSettings,
     sanitizeGridSettings: sanitizeGridSettings,
     sanitizeLayoutItems: sanitizeLayoutItems,
+    scaleLayoutColumns: scaleLayoutColumns,
     canonicalLayoutsCatalog: canonicalLayoutsCatalog,
+    resolveInitialLayoutState: resolveInitialLayoutState,
+    layoutSnapshotsEqual: layoutSnapshotsEqual,
     applyGridSettings: applyGridSettings,
     applyTheme: applyTheme,
     readThemeMode: readThemeMode,
