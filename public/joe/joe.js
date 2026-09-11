@@ -83,6 +83,7 @@
   var MAX_BACKFILL_POINTS = 2048;
   var BACKFILL_ENDPOINT_TOLERANCE = 0.000001;
   var CAPTURED_FIFO_METHOD = "captured-fifo-matched-roundtrips";
+  var VIRTUAL_STARTING_CAPITAL_EUR = 15000;
   var LEGACY_DEFAULT_LAYOUT = [
     { id: "hero", x: 0, y: 0, w: 12, h: 3 },
     { id: "desk-j", x: 0, y: 3, w: 4, h: 4 },
@@ -329,10 +330,11 @@
     return root;
   }
 
-  function backfillPresentation(backfill) {
+  function backfillPresentation(backfill, deskMoney) {
     if (!backfill) { return null; }
     var captured = backfill.capturedSubtotal;
     var coverage = backfill.coverage;
+    var completeJMoney = deskMoney && Number.isFinite(deskMoney.equity) && Number.isFinite(deskMoney.totalPnl);
     var subtotal = Number.isFinite(captured.realizedPnl) && captured.currency
       ? captured.currency + " " + formatPositionMoney(captured.realizedPnl, true, captured.currency)
       : "Captured subtotal unavailable";
@@ -344,15 +346,19 @@
     if (backfill.fullTotalAvailable) {
       coverageText = "Coverage reports complete; captured results remain separate from J totals.";
     } else if (coverage.gapCount > 0) {
-      coverageText = "Full J total unavailable · Coverage gap: " + coverage.gapCount +
+      coverageText = (completeJMoney ? "Historical capture gap: " : "Full J total unavailable · Coverage gap: ") + coverage.gapCount +
         (coverage.firstGap
           ? "; first " + shortTime.format(new Date(coverage.firstGap.fromInclusive)) + " → " +
             shortTime.format(new Date(coverage.firstGap.toExclusive))
           : "");
     } else if (backfill.status === "COMPLETE") {
-      coverageText = "Full J total unavailable · Coverage is complete, but no verified total is available.";
+      coverageText = completeJMoney
+        ? "Historical capture coverage is complete; current J accounting is shown separately."
+        : "Full J total unavailable · Coverage is complete, but no verified total is available.";
     } else {
-      coverageText = "Full J total unavailable · Best-available coverage is not a complete history.";
+      coverageText = completeJMoney
+        ? "Historical capture is best-available and not a complete history."
+        : "Full J total unavailable · Best-available coverage is not a complete history.";
     }
     var quality = [];
     if (backfill.missingOpeningLotCount) {
@@ -406,6 +412,8 @@
       width: width,
       height: height,
       points: points,
+      low: low,
+      high: high,
       path: points.length > 1 ? points.map(function (point, index) {
         return (index ? "L" : "M") + point.x.toFixed(2) + " " + point.y.toFixed(2);
       }).join(" ") : "",
@@ -472,8 +480,8 @@
     return details;
   }
 
-  function renderBackfill(backfill) {
-    var copy = backfillPresentation(backfill);
+  function renderBackfill(backfill, deskMoney) {
+    var copy = backfillPresentation(backfill, deskMoney);
     if (!copy) { return null; }
     var root = el("section", "desk-backfill");
     root.appendChild(el("h3", "desk-backfill-title", copy.title));
@@ -1639,7 +1647,7 @@
       return {
         value: null,
         state: "legacy",
-        meta: "Includes KEEP · not supplied by this producer",
+        meta: "Whole IB paper account including KEEP · not virtual desk capital · not supplied",
         problem: null
       };
     }
@@ -1652,11 +1660,11 @@
     return {
       value: hasEquity ? account.equity : null,
       state: state,
-      meta: "Includes KEEP · " + observationCopy + (unavailable ? " · unavailable" : stale ? " · stale" : ""),
+      meta: "Whole IB paper account including KEEP · not virtual desk capital · " + observationCopy + (unavailable ? " · unavailable" : stale ? " · stale" : ""),
       problem: unavailable
-        ? "Paper account equity is unavailable; any displayed value is the last complete broker observation."
+        ? "IB paper account NAV is unavailable; any displayed value is the last complete broker observation."
         : stale
-        ? "Paper account equity is stale."
+        ? "IB paper account NAV is stale."
         : null
     };
   }
@@ -1698,6 +1706,21 @@
     return ageInSeconds(lastSeen);
   }
 
+  function hasCapturedJResults(desk) {
+    var captured = desk && desk.id === "j" && desk.backfill && desk.backfill.capturedSubtotal;
+    return Boolean(captured && Number.isFinite(captured.realizedPnl) && captured.currency && captured.executionCount > 0);
+  }
+
+  function hasCapturedHistory(desk) {
+    var captured = desk && desk.id === "j" && desk.backfill && desk.backfill.capturedSubtotal;
+    return Boolean(captured && Array.isArray(captured.points) && captured.points.length > 0);
+  }
+
+  function hasIncompleteJAccounting(desk) {
+    return Boolean(desk && desk.id === "j" &&
+      (!desk.money || !Number.isFinite(desk.money.equity) || !Number.isFinite(desk.money.totalPnl)));
+  }
+
   function snapshotProblems(data, snapshotAge) {
     var problems = [];
     if (!data) { return problems; }
@@ -1707,7 +1730,16 @@
     if (snapshotAge > data.safety.staleAfterSeconds) { problems.push("The snapshot is stale (" + snapshotAge + " seconds old)."); }
     var brokerProblem = brokerAccountPresentation(data).problem;
     if (brokerProblem) { problems.push(brokerProblem); }
-    data.desks.forEach(function (desk) { if (desk.state === "stuck") { problems.push(desk.label + " is stuck: " + desk.action); } });
+    data.desks.forEach(function (desk) {
+      if (desk.state !== "stuck") { return; }
+      if (hasCapturedJResults(desk)) {
+        problems.push(hasIncompleteJAccounting(desk)
+          ? "J complete equity is unavailable; captured partial results are available below. Coverage gaps remain."
+          : "J is marked stuck; complete accounting is available. See Accounting diagnostic.");
+      } else {
+        problems.push(desk.label + " is stuck: " + desk.action);
+      }
+    });
     return problems;
   }
 
@@ -1732,7 +1764,7 @@
 
   function labelPaperCapital() {
     var heroLabels = document.querySelectorAll(".hero-values .hero-stat .label");
-    if (heroLabels[0]) { heroLabels[0].textContent = "Paper account equity"; }
+    if (heroLabels[0]) { heroLabels[0].textContent = "Virtual desk equity"; }
     if (heroLabels[1]) { heroLabels[1].textContent = "Day"; }
     if (heroLabels[2]) { heroLabels[2].textContent = "Open"; }
     if (heroLabels[3]) { heroLabels[3].textContent = "Snapshot age"; }
@@ -1839,8 +1871,16 @@
   function formatDeskLearningCopy(desk) {
     var happenedParts = [];
     var action = nonEmptyString(desk.action);
-    if (action) { happenedParts.push(action); }
-    if (desk.state === "stuck" && Array.isArray(desk.issues) && desk.issues.length) {
+    var hasCapturedJ = desk.state === "stuck" && hasCapturedJResults(desk);
+    var hasIncompleteCapturedJ = hasCapturedJ && hasIncompleteJAccounting(desk);
+    if (hasIncompleteCapturedJ) {
+      happenedParts.push("Captured partial J history is available; complete J equity remains unavailable.");
+    } else if (hasCapturedJ) {
+      happenedParts.push("Complete J accounting is available; captured native-currency history remains separate.");
+    } else if (action) {
+      happenedParts.push(action);
+    }
+    if (!hasCapturedJ && desk.state === "stuck" && Array.isArray(desk.issues) && desk.issues.length) {
       happenedParts.push(desk.issues.join(" · "));
     }
     var headline = desk.learning ? nonEmptyString(desk.learning.headline) : null;
@@ -2141,7 +2181,7 @@
     content.appendChild(moneyRow);
     var accountingBasisNode = renderAccountingBasis(desk);
     if (accountingBasisNode) { content.appendChild(accountingBasisNode); }
-    var backfillNode = renderBackfill(desk.backfill);
+    var backfillNode = renderBackfill(desk.backfill, desk.money);
     if (backfillNode) { content.appendChild(backfillNode); }
     var spark = el("div", "spark-wrap");
     var canvas = el("canvas");
@@ -2161,6 +2201,13 @@
     nextRow.appendChild(el("p", "desk-learning-text", learningCopy.whatNext));
     learning.appendChild(nextRow);
     content.appendChild(learning);
+    if (desk.id === "j" && desk.state === "stuck" && desk.backfill) {
+      var diagnostic = el("details", "desk-diagnostic");
+      diagnostic.appendChild(el("summary", "", "Accounting diagnostic"));
+      var rawDiagnostic = [nonEmptyString(desk.action)].concat(Array.isArray(desk.issues) ? desk.issues : []).filter(Boolean);
+      diagnostic.appendChild(el("p", "", rawDiagnostic.length ? rawDiagnostic.join(" · ") : "No diagnostic detail supplied."));
+      content.appendChild(diagnostic);
+    }
     content.appendChild(renderDeskTimeline(desk.id));
     if (desk.issues.length && desk.state !== "stuck") {
       content.appendChild(el("p", "issues negative", desk.issues.join(" · ")));
@@ -2335,6 +2382,7 @@
 
     renderBrokerAccountSummary(data);
     setMoney(document.getElementById("totalEquity"), data.totals.equity, false);
+    document.getElementById("virtualStartingCapital").textContent = amount(VIRTUAL_STARTING_CAPITAL_EUR, false);
     renderDeskTotalsSummary(data);
     setMoneyField(document.getElementById("totalDay"), data.totals.dayPnl, true, "day");
     setMoney(document.getElementById("totalOpen"), openPnl(data), true);
@@ -2347,6 +2395,7 @@
     renderPositions(data);
     labelPaperCapital();
     document.getElementById("sourceLine").textContent = "Source: " + (data.source && data.source.label ? data.source.label : "book.json projection") + " · paper projection";
+    renderPrimaryCapturedHistory();
     drawSparklines();
     if (isNarrowGridViewport()) { scheduleNarrowFit(0); }
   }
@@ -2358,8 +2407,9 @@
     setSignal("gatewaySignal", "gatewayValue", "Unknown", "bad");
     setSignal("haltSignal", "haltValue", "Unknown", "bad");
     document.getElementById("totalEquity").textContent = "—";
+    document.getElementById("virtualStartingCapital").textContent = amount(VIRTUAL_STARTING_CAPITAL_EUR, false);
     document.getElementById("brokerEquity").textContent = "—";
-    document.getElementById("brokerAccountMeta").textContent = "Includes KEEP · waiting for account observation";
+    document.getElementById("brokerAccountMeta").textContent = "Whole IB paper account including KEEP · not virtual desk capital · waiting for observation";
     document.getElementById("brokerAccountMeta").className = "hero-meta unavailable";
     document.getElementById("deskTotalsMeta").textContent = "Waiting for desk accounting";
     document.getElementById("deskTotalsMeta").className = "hero-meta attention";
@@ -2388,6 +2438,7 @@
     emptyPositionsRow.appendChild(emptyPositionsCell);
     document.getElementById("positionsBody").replaceChildren(emptyPositionsRow);
     syncPositionsTableLayout();
+    renderPrimaryCapturedHistory();
     labelPaperCapital();
     document.documentElement.dataset.joeState = "broken";
   }
@@ -2414,6 +2465,24 @@
     var span = historyRangeSpanMs(range);
     if (!span) { return points.slice(); }
     return points.filter(function (point) { return Date.parse(point.t) >= last - span; });
+  }
+
+  function capturedHistoryWindow(backfill, range, referenceAt) {
+    var captured = backfill && backfill.capturedSubtotal;
+    var source = captured && Array.isArray(captured.points) ? captured.points : [];
+    if (!source.length || range === "all") { return source.slice(); }
+    var reference = Date.parse(referenceAt);
+    var span = historyRangeSpanMs(range);
+    if (!Number.isFinite(reference) || !span) { return []; }
+    return source.filter(function (point) {
+      var at = Date.parse(point.at);
+      return at >= reference - span && at <= reference;
+    });
+  }
+
+  function capturedHistoryReferenceAt(snapshot, historyPoints) {
+    if (historyPoints.length) { return historyPoints[historyPoints.length - 1].t; }
+    return snapshot && snapshot.generatedAt ? snapshot.generatedAt : null;
   }
 
   function isValidHistoryPoint(point) {
@@ -2493,6 +2562,12 @@
   function historyEmptyMessage() {
     if (historyError && !historyState.points.length) {
       return historyFailureMessage(historyError, false);
+    }
+    if (primaryCapturedHistoryModel(latestSnapshot, historyState.selected, historyState.range, historyState.points)) {
+      var j = latestSnapshot.desks.find(function (desk) { return desk.id === "j"; });
+      return hasIncompleteJAccounting(j)
+        ? "Complete EUR J equity history is unavailable; captured native-currency results are shown separately."
+        : "No compatible EUR J history is available in this range; current J equity remains available above and captured native-currency results are shown separately.";
     }
     return "History will fill as snapshots arrive.";
   }
@@ -2709,6 +2784,86 @@
     }
   };
 
+  function primaryCapturedHistoryModel(snapshot, selected, range, historyPoints) {
+    if (!snapshot || !selected.includes("j")) { return null; }
+    var desk = snapshot.desks.find(function (candidate) { return candidate.id === "j"; });
+    if (!desk || !desk.backfill || !hasCapturedHistory(desk)) { return null; }
+    var captured = desk.backfill.capturedSubtotal;
+    var currency = captured.currency || "currency unavailable";
+    var referenceAt = capturedHistoryReferenceAt(snapshot, historyPoints);
+    var points = capturedHistoryWindow(desk.backfill, range, referenceAt);
+    var scopedBackfill = Object.assign({}, desk.backfill, {
+      capturedSubtotal: Object.assign({}, captured, { points: points })
+    });
+    return {
+      title: "Captured J results · " + currency + " · " + (desk.backfill.fullTotalAvailable ? "complete" : "partial"),
+      currency: currency,
+      range: range,
+      referenceAt: referenceAt,
+      points: points,
+      series: capturedHistorySeries(scopedBackfill),
+      presentation: backfillPresentation(desk.backfill, desk.money),
+      fillCount: captured.executionCount,
+      method: captured.method === CAPTURED_FIFO_METHOD ? "J-family FIFO, net of fees" : null,
+      truncated: captured.pointsTruncated
+    };
+  }
+
+  function renderPrimaryCapturedHistory() {
+    var root = document.getElementById("historyCaptured");
+    if (!root) { return; }
+    var model = primaryCapturedHistoryModel(latestSnapshot, historyState.selected, historyState.range, historyState.points);
+    root.hidden = !model;
+    if (!model) { return; }
+    document.getElementById("historyCapturedTitle").textContent = model.title;
+    document.getElementById("historyCapturedValue").textContent = model.fillCount + " fills" + (model.method ? " · " + model.method : "");
+    var rangeLabel = model.range === "all" ? "all captured points" : model.range.toUpperCase() + " window";
+    var metadata = rangeLabel + " · " + model.presentation.coverage;
+    if (model.presentation.fx) { metadata += " " + model.presentation.fx; }
+    if (model.truncated) { metadata += " Showing only the latest captured points."; }
+    document.getElementById("historyCapturedMeta").textContent = metadata;
+    var plot = document.getElementById("historyCapturedPlot");
+    if (!model.series.available) {
+      plot.replaceChildren(el("div", "history-captured-empty", "No actual captured J points fall within this range."));
+      return;
+    }
+    var svg = svgEl("svg", "desk-backfill-chart");
+    svg.setAttribute("viewBox", "0 0 " + model.series.width + " " + model.series.height);
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", model.title);
+    var title = svgEl("title");
+    title.textContent = model.title;
+    svg.appendChild(title);
+    if (model.series.zeroY !== null) {
+      var zero = svgEl("line", "desk-backfill-zero");
+      zero.setAttribute("x1", "0");
+      zero.setAttribute("x2", String(model.series.width));
+      zero.setAttribute("y1", model.series.zeroY.toFixed(2));
+      zero.setAttribute("y2", model.series.zeroY.toFixed(2));
+      svg.appendChild(zero);
+    }
+    if (model.series.path) {
+      var path = svgEl("path", "desk-backfill-path");
+      path.setAttribute("d", model.series.path);
+      svg.appendChild(path);
+    }
+    model.series.points.forEach(function (point, index) {
+      if (model.series.points.length > 1 && index !== model.series.points.length - 1) { return; }
+      var dot = svgEl("circle", "desk-backfill-point");
+      dot.setAttribute("cx", point.x.toFixed(2));
+      dot.setAttribute("cy", point.y.toFixed(2));
+      dot.setAttribute("r", model.series.points.length === 1 ? "3.5" : "2.5");
+      svg.appendChild(dot);
+    });
+    var first = model.series.points[0];
+    var last = model.series.points[model.series.points.length - 1];
+    var scale = el("p", "history-captured-scale", "Native " + model.currency + " scale · " +
+      formatPositionMoney(model.series.low, true, model.currency) + " to " +
+      formatPositionMoney(model.series.high, true, model.currency) + " · " +
+      shortTime.format(new Date(first.at)) + (first.at === last.at ? " · one actual point" : " → " + shortTime.format(new Date(last.at)) + " · " + model.series.points.length + " actual points"));
+    plot.replaceChildren(svg, scale);
+  }
+
   function updateSeriesButtons() {
     var allSelected = DESK_IDS.every(function (id) { return historyState.selected.includes(id); });
     document.getElementById("seriesAll").setAttribute("aria-pressed", String(allSelected && historyState.selected.length === DESK_IDS.length));
@@ -2719,6 +2874,7 @@
 
   function drawHistory() {
     renderHistoryBasisNotice();
+    renderPrimaryCapturedHistory();
     if (!window.Chart) { showHistoryEmpty("The local chart library could not be loaded."); return; }
     if (!historyState.selected.length) {
       showHistoryEmpty("Select one or more desks to compare.");
@@ -2927,6 +3083,8 @@
     brokerAccountPresentation: brokerAccountPresentation,
     backfillPresentation: backfillPresentation,
     capturedHistorySeries: capturedHistorySeries,
+    capturedHistoryWindow: capturedHistoryWindow,
+    primaryCapturedHistoryModel: primaryCapturedHistoryModel,
     renderBackfill: renderBackfill,
     gatewayHeartbeatAge: gatewayHeartbeatAge,
     validIsoTimestamp: validIsoTimestamp,

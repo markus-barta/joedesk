@@ -27,6 +27,7 @@ ${extractJoeBlock("  function historyFailureMessage(error, hasRetainedSeries)", 
 const api = new Function(`${historyHelpers}
   return {
     filterPoints,
+    capturedHistoryWindow,
     historyRangeSpanMs,
     validateHistoryPayload,
     applyHistoryFetchResult,
@@ -79,6 +80,26 @@ if (oneDay.length !== 1 || oneDay[0].t !== points[2].t) {
 }
 if (api.filterPoints(points, "all").length !== 3) {
   throw new Error("filterPoints all must preserve every sample");
+}
+
+const capturedBackfill = {
+  capturedSubtotal: {
+    points: [
+      { at: "2026-09-10T08:00:00.000Z", realizedPnl: -2 },
+      { at: "2026-09-10T11:00:00.000Z", realizedPnl: 4 },
+      { at: "2026-09-10T16:30:00.000Z", realizedPnl: 4 },
+    ],
+  },
+};
+if (api.capturedHistoryWindow(capturedBackfill, "1d", "2026-09-11T16:31:00.000Z").length !== 0) {
+  throw new Error("captured 1D history must be an exact trailing 24-hour window, not an all-time fallback");
+}
+const capturedInWindow = api.capturedHistoryWindow(capturedBackfill, "1d", "2026-09-11T08:00:00.000Z");
+if (capturedInWindow.length !== 3 || capturedInWindow[0].at !== capturedBackfill.capturedSubtotal.points[0].at) {
+  throw new Error("captured 1D history must preserve only actual points inside the reference window");
+}
+if (api.capturedHistoryWindow(capturedBackfill, "all", "2026-09-20T00:00:00.000Z").length !== 3) {
+  throw new Error("captured ALL history must preserve every actual point");
 }
 
 const validPayload = {

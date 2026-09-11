@@ -54,7 +54,10 @@ including J, has incomplete accounting, the affected total fields remain
 `null`; neither the broker account value nor a partial desk sum may replace
 them. The server deliberately excludes `brokerAccount` from J, Joe, Joel, and
 All bots history. Consumers must continue accepting older snapshots where the
-additive object is absent.
+additive object is absent. The board leads with virtual desk equity, labels the
+configured EUR 15,000 virtual starting capital separately, and presents the IB
+paper account NAV only as secondary whole-account detail: including KEEP and
+not virtual desk capital.
 
 ### J backfill summary
 
@@ -137,9 +140,13 @@ best-available data as “Captured results (partial)”, shows the native-curren
 subtotal and fill count, and states that the full J total is unavailable while
 coverage gaps remain. A new `familyHistory` result appears on the next ordinary
 snapshot push without changing broker observation time or history semantics.
-The disclosure titled “Captured J history · [currency] · partial” plots only
-these actual observations. It is separate from the preserved household History
-dataset and never adds a J, Joe, Joel, or All bots history point.
+The J card disclosure and the History tile plot only these actual observations.
+Inside History the panel is titled “Captured J results · [currency] · partial,”
+uses the existing 1D (exact trailing 24 hours), 1W, 1M, and ALL controls, and
+keeps its native-currency scale separate from the complete EUR equity chart.
+An empty range is shown as empty; no anchor, endpoint, zero, or FX value is
+invented. This remains separate from the preserved household History dataset
+and never adds a J, Joe, Joel, or All bots history point.
 
 A desk may also carry an `accounting` object beside (not inside) `money` with
 all three fields: RFC 3339 `periodStart`, method
