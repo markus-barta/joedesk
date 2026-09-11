@@ -166,9 +166,9 @@
         ["Preview → Confirm → Propagate", "Review the change before the fleet receives it."],
       ],
       fields: [
-        { key: "grok.reservePct", label: "Grok reserve", value: "10", suffix: "%" },
-        { key: "codex.reservePct", label: "Codex reserve", value: "10", suffix: "%" },
-        { key: "onRed", label: "Red policy", value: "park_nonessential" },
+        { key: "grok.reservePct", label: "Grok reserve", value: "10", path: "quota.grok.reservePct", type: "integer", min: 0, max: 100 },
+        { key: "codex.reservePct", label: "Codex reserve", value: "10", path: "quota.codex.reservePct", type: "integer", min: 0, max: 100 },
+        { key: "onRed", label: "Red policy", value: "park_nonessential", path: "quota.behavior.red", editable: false },
       ],
     },
     desks: {
@@ -181,9 +181,9 @@
         ["Small, reversible steps", "Preview and confirm limit changes before the propagation workflow is connected."],
       ],
       fields: [
-        { key: "maxBusyDesks", label: "Busy J desks", value: "5" },
-        { key: "stage0CapEur", label: "Stage-0 cap", value: "250" },
-        { key: "keepSymbols", label: "Keep symbols", value: "SXR8,TSLA" },
+        { key: "maxBusyDesks", label: "Busy J desks", value: "5", path: "desks.maxBusyDesks", type: "integer", min: 1, max: 32 },
+        { key: "stage0CapEur", label: "Stage-0 cap", value: "250", path: "desks.stage0.capEur", type: "number", min: 0, max: 1000000 },
+        { key: "keepSymbols", label: "Keep symbols", value: "SXR8,TSLA", path: "desks.keep", type: "symbols", maxLength: 160 },
       ],
     },
     cadence: {
@@ -196,9 +196,9 @@
         ["Capacity has the last word", "The quota governor can slow or park nonessential work."],
       ],
       fields: [
-        { key: "usOpenArm", label: "US-open arm", value: "15:35" },
-        { key: "watcher", label: "Watcher", value: "desk-watch" },
-        { key: "governor", label: "Governor", value: "quota governor" },
+        { key: "usOpenArm", label: "US-open arm", value: "15:35", path: "cadence.usOpenArm", type: "time" },
+        { key: "watcher", label: "Watcher", value: "desk-watch", path: "cadence.deskWatch", type: "routine", maxLength: 64 },
+        { key: "governor", label: "Governor", value: "quota-governor", path: "cadence.quotaGovernor", type: "routine", maxLength: 64 },
       ],
     },
     paths: {
@@ -206,13 +206,13 @@
       headline: "One shelf for settings. One for explanations.",
       intro: "Shared paths keep the fleet config and its human-readable docs easy to find.",
       sections: [
-        ["Fleet config", "~/Shared/JoeDesk/fleet-config holds the plain configuration source."],
-        ["Fleet docs", "~/Shared/JoeDesk/docs holds the matching operator explanations."],
+        ["Fleet config", "~/trading-team/shared/fleet-config.json is the declared Mac-side mirror of the plain configuration source."],
+        ["Fleet docs", "~/trading-team/shared/docs holds the matching operator explanations."],
         ["References, not secret values", "Shared files may name encrypted slots but never contain the secret material."],
       ],
       fields: [
-        { key: "configPath", label: "Config path", value: "~/Shared/JoeDesk/fleet-config" },
-        { key: "docsPath", label: "Docs path", value: "~/Shared/JoeDesk/docs" },
+        { key: "configPath", label: "Config path", value: "~/trading-team/shared/fleet-config.json", path: "mac.shared.configPath", type: "path", maxLength: 160 },
+        { key: "docsPath", label: "Docs path", value: "~/trading-team/shared/docs", path: "mac.shared.docsPath", type: "path", maxLength: 160 },
       ],
     },
     routines: {
@@ -225,9 +225,9 @@
         ["Close recap", "Record the useful result without turning the board into a noisy activity feed."],
       ],
       fields: [
-        { key: "morningRoutine", label: "Morning", value: "Morning brief" },
-        { key: "reviewRoutine", label: "Review", value: "Desk review" },
-        { key: "closeRoutine", label: "Close", value: "Close recap" },
+        { key: "morningRoutine", label: "Morning", value: "Morning brief", path: "amy.routines.morning" },
+        { key: "reviewRoutine", label: "Review", value: "Desk review", path: "amy.routines.review" },
+        { key: "closeRoutine", label: "Close", value: "Close recap", path: "amy.routines.close" },
       ],
     },
     tools: {
@@ -240,30 +240,35 @@
         ["codexbar@hsb0", "The host tool is addressed by its declared service name; authentication stays outside this UI."],
       ],
       fields: [
-        { key: "gateway", label: "Gateway", value: "IB Gateway" },
-        { key: "joelAdapter", label: "Integration", value: "joel-ib" },
-        { key: "hostTool", label: "Host tool", value: "codexbar@hsb0" },
+        { key: "gateway", label: "Gateway", value: "IB Gateway", path: "tools.entries.0.label", editable: false },
+        { key: "joelAdapter", label: "Integration", value: "joel-ib", path: "tools.entries.1.label", editable: false },
+        { key: "hostTool", label: "Host tool", value: "codexbar@hsb0", path: "tools.entries.2.label", editable: false },
       ],
     },
     secrets: {
       label: "Secret slots",
-      headline: "Labels here. Secret values elsewhere.",
-      intro: "Fleet config can point to encrypted slots, but this plane never reads, displays or stores their contents.",
+      headline: "Names on the board. Values stay in AGE.",
+      intro: "Fleet Config is a readable paper file. AGE/agenix holds the encrypted secret material. This plane lists capability and path refs only.",
       sections: [
-        ["Always redacted", "The browser receives reference names only. Secret values do not belong in previews or diffs."],
-        ["Encrypted at rest", "agenix owns encrypted configuration references; Janus references keep their existing boundary."],
-        ["No new sign-in path", "This plane inherits the same externally enforced Zitadel SSO boundary as JoeDesk."],
+        ["Plaintext policy vs AGE secrets", "Quota, desks and paths stay in plaintext so changes are easy to read. Secret values never enter this JSON, this browser, previews or diffs. AGE ciphertext lives only in the host secret store."],
+        ["Always REDACTED", "Each slot shows its agenix or Janus capability/path ref and a REDACTED marker. The UI has no field for a password, token or key value."],
+        ["Janus/agenix ops", "Rotation and injection stay in the existing host workflow. The short note under Secret slots points at Janus/agenix ops for v1."],
       ],
       fields: [
-        { key: "agenixRefMode", label: "agenix", value: "refs" },
-        { key: "janusRefMode", label: "Janus", value: "refs only" },
-        { key: "displayMode", label: "Display", value: "Redacted" },
+        { key: "agenixRefs", label: "agenix refs", value: "joe-board-push-token", path: "secretSlots.agenix", type: "refs", editable: false },
+        { key: "janusRefs", label: "Janus refs", value: "", path: "secretSlots.janus", type: "refs", editable: false },
+        { key: "displayMode", label: "Display", value: "REDACTED", editable: false },
       ],
     },
   };
   var fleetSectionId = "quota";
   var fleetDraft = {};
+  var fleetBaseline = {};
+  var fleetBaselineConfig = null;
+  var fleetDiffFingerprint = "";
+  var fleetConfirmedFingerprint = "";
   var fleetConfirmed = false;
+  var fleetBusy = false;
   var fleetToastTimer = 0;
   var fleetFlipTimer = 0;
 
@@ -2004,8 +2009,6 @@
   function renderVersionPanel() {
     var version = window.JoeVersion || { APP_VERSION: document.getElementById("appVersion").textContent, VERSION_HISTORY: [] };
     document.getElementById("appVersion").textContent = version.APP_VERSION;
-    var fleetRevision = document.getElementById("fleetRevision");
-    if (fleetRevision) { fleetRevision.textContent = version.APP_VERSION; }
     var panel = document.getElementById("versionPanel");
     panel.replaceChildren.apply(panel, version.VERSION_HISTORY.map(function (entry) {
       var section = el("section", "version__entry");
@@ -4102,42 +4105,79 @@
     return values;
   }
 
-  function readFleetPreview() {
-    var defaults = fleetDefaultValues();
+  function fleetPathValue(source, field) {
+    if (!field.path) { return field.value; }
+    var value = field.path.split(".").reduce(function (current, key) {
+      return current === null || current === undefined ? undefined : current[key];
+    }, source);
+    if (Array.isArray(value)) { return field.type === "refs" && !value.length ? "none" : value.join(","); }
+    return value === null || value === undefined ? field.value : String(value);
+  }
+
+  function fleetValuesFromConfig(config) {
+    var values = {};
+    fleetFieldDefinitions().forEach(function (field) { values[field.key] = fleetPathValue(config, field); });
+    return values;
+  }
+
+  function readFleetPreview(baseRev, defaults) {
+    var values = Object.assign({}, defaults);
     try {
       var stored = JSON.parse(localStorage.getItem(FLEET_PREVIEW_KEY) || "null");
-      if (!stored || typeof stored !== "object" || Array.isArray(stored)) { return defaults; }
-      Object.keys(defaults).forEach(function (key) {
-        if (typeof stored[key] === "string" && stored[key].length <= 80 && /^[\x20-\x7e]*$/.test(stored[key])) {
-          defaults[key] = stored[key];
+      if (!stored || stored.baseRev !== baseRev || !stored.values || typeof stored.values !== "object" || Array.isArray(stored.values)) { return values; }
+      fleetFieldDefinitions().forEach(function (field) {
+        if (field.editable !== false && typeof stored.values[field.key] === "string" && stored.values[field.key].length <= (field.maxLength || 80) && /^[\x20-\x7e]*$/.test(stored.values[field.key])) {
+          values[field.key] = stored.values[field.key];
         }
       });
     } catch (_) {
-      return defaults;
+      return values;
     }
-    return defaults;
+    return values;
   }
 
   function fleetChangedEntries() {
-    var defaults = fleetDefaultValues();
-    return Object.keys(defaults).filter(function (key) { return fleetDraft[key] !== defaults[key]; });
+    return Object.keys(fleetBaseline).filter(function (key) { return fleetDraft[key] !== fleetBaseline[key]; });
+  }
+
+  function fleetChangeFingerprint() {
+    return JSON.stringify(fleetChangedEntries().map(function (key) { return [key, fleetBaseline[key], fleetDraft[key]]; }));
+  }
+
+  function updateFleetActionStates() {
+    var changes = fleetChangedEntries();
+    var fingerprint = fleetChangeFingerprint();
+    document.querySelectorAll('[data-fleet-action="diff"]').forEach(function (button) {
+      button.disabled = fleetBusy || !fleetBaselineConfig || !changes.length;
+    });
+    document.querySelectorAll('[data-fleet-action="confirm"]').forEach(function (button) {
+      button.disabled = fleetBusy || !changes.length || fleetDiffFingerprint !== fingerprint;
+    });
+    document.querySelectorAll('[data-fleet-action="propagate"]').forEach(function (button) {
+      button.disabled = fleetBusy || !changes.length || !fleetConfirmed || fleetConfirmedFingerprint !== fingerprint;
+    });
   }
 
   function updateFleetPreviewNote() {
     var note = document.getElementById("fleetPreviewNote");
     if (!note) { return; }
     var count = fleetChangedEntries().length;
-    note.textContent = fleetConfirmed && count
-      ? count + " change" + (count === 1 ? "" : "s") + " confirmed · Not propagated"
+    note.textContent = fleetBusy
+      ? "Writing a new revision…"
+      : !fleetBaselineConfig
+        ? "Loading current Fleet Config…"
+        : fleetConfirmed && count
+          ? count + " change" + (count === 1 ? "" : "s") + " confirmed for " + fleetBaselineConfig.rev
       : count
-        ? count + " unsaved preview change" + (count === 1 ? "" : "s")
-        : "Preview only · No changes propagated";
+          ? count + " preview change" + (count === 1 ? "" : "s") + " · Diff before confirm"
+          : "Current " + fleetBaselineConfig.rev + " · No preview changes";
+    updateFleetActionStates();
   }
 
   function updateFleetReadouts() {
     document.querySelectorAll("[data-fleet-readout]").forEach(function (readout) {
       var key = readout.dataset.fleetReadout;
-      var value = fleetDraft[key] || "";
+      var value = key === "displayMode" ? "REDACTED" : fleetDraft[key] === undefined ? "" : fleetDraft[key];
       if (readout.dataset.fleetJoin) { value = value.split(",").map(function (part) { return part.trim(); }).filter(Boolean).join(readout.dataset.fleetJoin); }
       if (readout.dataset.fleetHumanize) {
         value = value.replace(/[_-]+/g, " ");
@@ -4152,6 +4192,42 @@
       var meter = document.querySelector('[data-fleet-meter="' + key + '"]');
       if (meter) { meter.style.width = value + "%"; }
     });
+    renderSecretSlots();
+  }
+
+  function fleetSecretRefName(value) {
+    return typeof value === "string" && /^[a-z][a-z0-9]*(?:[._/-][a-z0-9]+)*$/.test(value) ? value : "";
+  }
+
+  function fleetSecretSlotRefs(capability) {
+    var slots = fleetBaselineConfig && fleetBaselineConfig.secretSlots;
+    var listed = slots && Array.isArray(slots[capability]) ? slots[capability] : null;
+    if (!listed && capability === "agenix") { return ["joe-board-push-token"]; }
+    return (listed || []).map(fleetSecretRefName).filter(Boolean);
+  }
+
+  function renderSecretSlots() {
+    var list = document.getElementById("fleetSecretSlots");
+    if (!list) { return; }
+    var rows = [];
+    ["agenix", "janus"].forEach(function (capability) {
+      var refs = fleetSecretSlotRefs(capability);
+      if (!refs.length) {
+        var empty = el("span", "fleet-secret-slot fleet-secret-slot--empty");
+        empty.appendChild(el("span", "fleet-secret-capability", capability));
+        empty.appendChild(el("span", "fleet-secret-empty", "No slots declared"));
+        rows.push(empty);
+        return;
+      }
+      refs.forEach(function (ref) {
+        var item = el("span", "fleet-secret-slot");
+        item.appendChild(el("span", "fleet-secret-capability", capability));
+        item.appendChild(el("code", "fleet-secret-ref", ref));
+        item.appendChild(el("em", "fleet-redacted", "REDACTED"));
+        rows.push(item);
+      });
+    });
+    list.replaceChildren.apply(list, rows);
   }
 
   function renderFleetConfigSection(sectionId, focusHeading) {
@@ -4183,15 +4259,20 @@
       var input = el("input");
       input.id = inputId;
       input.type = "text";
-      input.maxLength = 80;
+      input.maxLength = field.maxLength || 80;
       input.autocomplete = "off";
       input.spellcheck = false;
       input.value = fleetDraft[field.key];
+      input.readOnly = field.editable === false;
+      if (input.readOnly) { input.setAttribute("aria-readonly", "true"); }
       input.setAttribute("aria-label", field.label);
       input.dataset.fleetField = field.key;
       input.addEventListener("input", function () {
+        if (field.editable === false) { return; }
         fleetDraft[field.key] = input.value;
         fleetConfirmed = false;
+        fleetDiffFingerprint = "";
+        fleetConfirmedFingerprint = "";
         updateFleetPreviewNote();
         updateFleetReadouts();
       });
@@ -4214,18 +4295,178 @@
     fleetToastTimer = window.setTimeout(function () { toast.hidden = true; }, 4400);
   }
 
-  function runFleetAction(action) {
+  function fleetActionTime(value) {
+    var instant = new Date(value);
+    if (!Number.isFinite(instant.getTime())) { return "Unknown time"; }
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Vienna",
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(instant);
+  }
+
+  function renderFleetActions(payload) {
+    var list = document.getElementById("fleetActionLog");
+    if (!list) { return; }
+    var entries = payload && payload.schema === "inspr.joe.fleet-config.actions.v1" && Array.isArray(payload.entries)
+      ? payload.entries.slice(-5).reverse()
+      : [];
+    if (!entries.length) {
+      list.replaceChildren(el("li", "fleet-action-empty", "No propagation attempts recorded yet."));
+      return;
+    }
+    list.replaceChildren.apply(list, entries.map(function (entry) {
+      var item = el("li", "fleet-action-item fleet-action-item--" + entry.outcome);
+      var outcome = el("strong", "fleet-action-outcome", entry.outcome);
+      var identity = el("span", "fleet-action-identity", entry.actor + " · " + fleetActionTime(entry.at));
+      var revisions = el("code", "fleet-action-revisions", (entry.revBefore || "—") + " → " + (entry.revAfter || "—"));
+      var keys = Array.isArray(entry.changedKeys) && entry.changedKeys.length ? entry.changedKeys.join(", ") : "no accepted config keys";
+      var summary = el("span", "fleet-action-keys", keys);
+      item.appendChild(outcome);
+      item.appendChild(identity);
+      item.appendChild(revisions);
+      item.appendChild(summary);
+      return item;
+    }));
+  }
+
+  async function loadFleetActions(showWarning) {
+    try {
+      var response = await fetch("./fleet-config/actions.json", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) { throw new Error("HTTP " + response.status); }
+      var payload = await response.json();
+      if (!payload || payload.schema !== "inspr.joe.fleet-config.actions.v1" || !Array.isArray(payload.entries)) {
+        throw new Error("invalid action log response");
+      }
+      renderFleetActions(payload);
+    } catch (_) {
+      var list = document.getElementById("fleetActionLog");
+      if (list) { list.replaceChildren(el("li", "fleet-action-empty fleet-action-empty--warning", "Propagation log unavailable.")); }
+      if (showWarning) { showFleetToast("Propagation log could not be refreshed.", true); }
+    }
+  }
+
+  function setFleetPath(target, path, value) {
+    var parts = path.split(".");
+    var cursor = target;
+    parts.slice(0, -1).forEach(function (part) { cursor = cursor[part]; });
+    cursor[parts[parts.length - 1]] = value;
+  }
+
+  function parsedFleetFieldValue(field, raw) {
+    var value = raw.trim();
+    if (field.type === "integer") {
+      if (!/^-?[0-9]+$/.test(value)) { throw new Error(field.label + " must be a whole number."); }
+      var integer = Number(value);
+      if (!Number.isSafeInteger(integer) || integer < field.min || integer > field.max) { throw new Error(field.label + " must be from " + field.min + " to " + field.max + "."); }
+      return integer;
+    }
+    if (field.type === "number") {
+      if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(value)) { throw new Error(field.label + " must be a decimal number."); }
+      var numberValue = Number(value);
+      if (!Number.isFinite(numberValue) || numberValue < field.min || numberValue > field.max) { throw new Error(field.label + " must be from " + field.min + " to " + field.max + "."); }
+      return numberValue;
+    }
+    if (field.type === "symbols") {
+      var symbols = value.split(",").map(function (part) { return part.trim(); }).filter(Boolean);
+      if (symbols.length > 64 || symbols.some(function (symbol) { return !/^[A-Z0-9][A-Z0-9._-]{0,15}$/.test(symbol); }) || new Set(symbols).size !== symbols.length) {
+        throw new Error(field.label + " must be unique uppercase symbols separated by commas.");
+      }
+      return symbols;
+    }
+    if (field.type === "time" && !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(value)) { throw new Error(field.label + " must use HH:mm."); }
+    if (field.type === "routine" && !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(value)) { throw new Error(field.label + " must be a lowercase routine id."); }
+    if (field.type === "path" && !/^(?:~\/|\/)[\x20-\x7e]+$/.test(value)) { throw new Error(field.label + " must be an absolute or ~/ path."); }
+    if (!value || value.length > (field.maxLength || 80) || !/^[\x20-\x7e]+$/.test(value)) { throw new Error(field.label + " is invalid."); }
+    return value;
+  }
+
+  function fleetCandidateConfig() {
+    if (!fleetBaselineConfig) { throw new Error("Current Fleet Config is not loaded."); }
+    var candidate = JSON.parse(JSON.stringify(fleetBaselineConfig));
+    fleetFieldDefinitions().forEach(function (field) {
+      if (field.editable === false || !field.path) { return; }
+      setFleetPath(candidate, field.path, parsedFleetFieldValue(field, fleetDraft[field.key]));
+    });
+    return candidate;
+  }
+
+  function closeFleetDiff() {
+    var dialog = document.getElementById("fleetDiffDialog");
+    if (dialog && dialog.open) { dialog.close(); }
+  }
+
+  function showFleetDiff(changes) {
+    var list = document.getElementById("fleetDiffList");
+    list.replaceChildren.apply(list, changes.map(function (key) {
+      var row = el("li", "fleet-diff-row");
+      row.appendChild(el("code", "", key));
+      row.appendChild(el("span", "fleet-diff-old", fleetBaseline[key] || "(empty)"));
+      row.appendChild(el("span", "fleet-diff-arrow", "→"));
+      row.appendChild(el("span", "fleet-diff-new", fleetDraft[key] || "(empty)"));
+      return row;
+    }));
+    document.getElementById("fleetDiffBase").textContent = fleetBaselineConfig.rev;
+    var dialog = document.getElementById("fleetDiffDialog");
+    if (!dialog.open) { dialog.showModal(); }
+  }
+
+  async function loadFleetConfig() {
+    try {
+      var response = await fetch("./fleet-config.json", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) { throw new Error("HTTP " + response.status); }
+      var config = await response.json();
+      if (!config || config.schema !== "inspr.joe.fleet-config.v1" || !/^fc-[0-9]{6}$/.test(config.rev) || config.mode !== "paper") {
+        throw new Error("invalid Fleet Config response");
+      }
+      fleetBaselineConfig = config;
+      fleetBaseline = fleetValuesFromConfig(config);
+      fleetDraft = readFleetPreview(config.rev, fleetBaseline);
+      fleetDiffFingerprint = "";
+      fleetConfirmedFingerprint = "";
+      fleetConfirmed = false;
+      document.getElementById("fleetRevision").textContent = config.rev;
+      renderFleetConfigSection(fleetSectionId, false);
+    } catch (error) {
+      fleetBaselineConfig = null;
+      fleetBaseline = fleetDefaultValues();
+      fleetDraft = Object.assign({}, fleetBaseline);
+      document.getElementById("fleetRevision").textContent = "unavailable";
+      renderFleetConfigSection(fleetSectionId, false);
+      showFleetToast("Fleet Config could not be loaded. Propagation is disabled.", true);
+    }
+  }
+
+  async function runFleetAction(action) {
     var changes = fleetChangedEntries();
     if (action === "diff") {
-      showFleetToast(changes.length
-        ? changes.length + " preview change" + (changes.length === 1 ? "" : "s") + ": " + changes.join(", ") + "."
-        : "Preview matches the current Fleet Config baseline.", false);
+      if (!changes.length) { showFleetToast("Preview matches the current Fleet Config revision.", false); return; }
+      var previewCandidate;
+      try { previewCandidate = fleetCandidateConfig(); } catch (error) { showFleetToast(error.message, true); return; }
+      var normalized = fleetValuesFromConfig(previewCandidate);
+      fleetFieldDefinitions().forEach(function (field) {
+        if (field.editable !== false) { fleetDraft[field.key] = normalized[field.key]; }
+      });
+      changes = fleetChangedEntries();
+      renderFleetConfigSection(fleetSectionId, false);
+      if (!changes.length) { showFleetToast("Preview matches the current Fleet Config revision.", false); return; }
+      fleetDiffFingerprint = fleetChangeFingerprint();
+      fleetConfirmed = false;
+      fleetConfirmedFingerprint = "";
+      updateFleetPreviewNote();
+      showFleetDiff(changes);
+      showFleetToast(changes.length + " preview change" + (changes.length === 1 ? "" : "s") + ": " + changes.join(", ") + ".", false);
       return;
     }
     if (action === "save") {
       try {
-        localStorage.setItem(FLEET_PREVIEW_KEY, JSON.stringify(fleetDraft));
-        showFleetToast("Preview saved in this browser. Nothing was propagated.", false);
+        if (!fleetBaselineConfig) { throw new Error("not loaded"); }
+        localStorage.setItem(FLEET_PREVIEW_KEY, JSON.stringify({ baseRev: fleetBaselineConfig.rev, values: fleetDraft }));
+        showFleetToast("Preview saved in this browser for " + fleetBaselineConfig.rev + ".", false);
       } catch (_) {
         showFleetToast("Preview could not be saved in this browser.", true);
       }
@@ -4237,13 +4478,62 @@
         showFleetToast("There are no preview changes to confirm.", true);
         return;
       }
+      if (fleetDiffFingerprint !== fleetChangeFingerprint()) {
+        showFleetToast("Preview the current diff before confirming.", true);
+        return;
+      }
       fleetConfirmed = true;
+      fleetConfirmedFingerprint = fleetDiffFingerprint;
       updateFleetPreviewNote();
-      showFleetToast("Preview confirmed. Propagation remains disconnected in HOSTD-48.", false);
+      closeFleetDiff();
+      showFleetToast("Preview confirmed for " + fleetBaselineConfig.rev + ".", false);
       return;
     }
     if (action === "propagate") {
-      showFleetToast("Propagation is not connected yet. HOSTD-49/50 will carry confirmed previews to the fleet.", true);
+      if (!fleetConfirmed || fleetConfirmedFingerprint !== fleetChangeFingerprint()) {
+        showFleetToast("Preview and confirm the current diff before propagating.", true);
+        return;
+      }
+      var candidate;
+      try { candidate = fleetCandidateConfig(); } catch (error) { showFleetToast(error.message, true); return; }
+      var attemptedRev = fleetBaselineConfig.rev;
+      var attemptedKeys = changes.slice();
+      fleetBusy = true;
+      updateFleetPreviewNote();
+      try {
+        var propagated = await fetch("./fleet-config/propagate", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ baseRev: fleetBaselineConfig.rev, config: candidate }),
+        });
+        var result = await propagated.json();
+        if (!propagated.ok || !result.ok || !result.config) {
+          var detail = Array.isArray(result.errors) && result.errors.length ? result.errors[0] : result.error;
+          throw new Error(result.currentRev ? "revision changed to " + result.currentRev + "; reload before retrying" : detail || "request rejected");
+        }
+        fleetBaselineConfig = result.config;
+        fleetBaseline = fleetValuesFromConfig(result.config);
+        fleetDraft = Object.assign({}, fleetBaseline);
+        fleetDiffFingerprint = "";
+        fleetConfirmedFingerprint = "";
+        fleetConfirmed = false;
+        localStorage.removeItem(FLEET_PREVIEW_KEY);
+        document.getElementById("fleetRevision").textContent = result.rev;
+        renderFleetConfigSection(fleetSectionId, false);
+        var writtenKeys = result.action && Array.isArray(result.action.changedKeys) && result.action.changedKeys.length
+          ? result.action.changedKeys
+          : attemptedKeys;
+        showFleetToast("Propagated " + result.rev + ": " + writtenKeys.join(", ") + ". Shared file ready for Amy and desks.", false);
+      } catch (error) {
+        fleetConfirmed = false;
+        fleetConfirmedFingerprint = "";
+        showFleetToast("Propagation failed for " + attemptedRev + " (" + attemptedKeys.join(", ") + "): " + (error.message || "request rejected") + ".", true);
+      } finally {
+        fleetBusy = false;
+        updateFleetPreviewNote();
+        await loadFleetActions(false);
+      }
     }
   }
 
@@ -4278,7 +4568,8 @@
   }
 
   function bindFleetConfigControls() {
-    fleetDraft = readFleetPreview();
+    fleetBaseline = fleetDefaultValues();
+    fleetDraft = Object.assign({}, fleetBaseline);
     renderFleetConfigSection(fleetSectionId, false);
     document.getElementById("fleetConfigOpen").addEventListener("click", function () { setBoardPlane(true); });
     document.getElementById("fleetConfigClose").addEventListener("click", function () { setBoardPlane(false); });
@@ -4286,13 +4577,22 @@
       button.addEventListener("click", function () { renderFleetConfigSection(button.dataset.fleetSection, false); });
     });
     document.querySelectorAll("[data-fleet-action]").forEach(function (button) {
-      button.addEventListener("click", function () { runFleetAction(button.dataset.fleetAction); });
+      button.addEventListener("click", function () { void runFleetAction(button.dataset.fleetAction); });
+    });
+    document.getElementById("fleetDiffCancel").addEventListener("click", closeFleetDiff);
+    document.getElementById("fleetActionLogRefresh").addEventListener("click", function () { void loadFleetActions(true); });
+    document.getElementById("fleetDiffDialog").addEventListener("cancel", function (event) {
+      event.preventDefault();
+      closeFleetDiff();
     });
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape" && document.documentElement.dataset.joePlane === "fleet-config") {
+        if (document.getElementById("fleetDiffDialog").open) { return; }
         setBoardPlane(false);
       }
     });
+    void loadFleetConfig();
+    void loadFleetActions(false);
   }
 
   function bindControls() {
@@ -4461,6 +4761,7 @@
     formatPctChange: formatPctChange,
     fleetPreviewStorageKey: FLEET_PREVIEW_KEY,
     fleetChangedEntries: fleetChangedEntries,
+    loadFleetActions: loadFleetActions,
     selectFleetConfigSection: renderFleetConfigSection,
     showFleetConfig: function () { setBoardPlane(true); },
     showTradingBoard: function () { setBoardPlane(false); }

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Run server-contract tests inside a disposable Docker container when needed.
+ * Run server-contract tests inside a disposable Docker container or Linux
+ * user/mount/network namespace when needed.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
@@ -60,9 +61,20 @@ const result = spawnSync(
 );
 
 if (result.error) {
+  const isolated = spawnSync(
+    "unshare",
+    [
+      "--user", "--map-root-user", "--mount", "--net", "--fork",
+      "sh", "-c",
+      "set -eu; mount -t tmpfs tmpfs /var/lib; mkdir -p /var/lib/joe-board; mount -t tmpfs tmpfs /var/lib/joe-board; ip link set lo up; exec node --test test/server-contract.mjs",
+    ],
+    { cwd: repoRoot, stdio: "inherit", env: { ...process.env, JOE_INBOX_TOKEN: token } },
+  );
+  if (!isolated.error) process.exit(isolated.status ?? 1);
   console.error(`docker run failed: ${result.error.message}`);
+  console.error(`unshare failed: ${isolated.error.message}`);
   console.error(
-    "Run manually:\n" +
+    "Run manually with Docker:\n" +
     `  docker run --rm --network none --tmpfs /var/lib/joe-board ` +
     `-e JOE_INBOX_TOKEN='${token}' -v "$PWD:/repo:ro" -w /repo node:22 ` +
     "node --test test/server-contract.mjs",

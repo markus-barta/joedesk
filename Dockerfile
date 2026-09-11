@@ -2,7 +2,7 @@
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
-COPY package.json server.mjs validate.mjs ./
+COPY package.json server.mjs validate.mjs fleet-config.mjs ./
 COPY public ./public
 RUN mkdir -p /var/lib/joe-board && chown -R node:node /var/lib/joe-board /app
 USER node

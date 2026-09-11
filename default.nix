@@ -25,7 +25,7 @@ exec ${pkgs.nodejs_22}/bin/node $out/share/joedesk/server.mjs
 EOF
     chmod +x $out/bin/joedesk-server
 
-    install -m 644 $src/server.mjs $src/validate.mjs $out/share/joedesk/
+    install -m 644 $src/server.mjs $src/validate.mjs $src/fleet-config.mjs $out/share/joedesk/
   '';
 
   meta = {

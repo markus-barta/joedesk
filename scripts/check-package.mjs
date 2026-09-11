@@ -13,12 +13,16 @@ const REQUIRED = [
   "package.json",
   "server.mjs",
   "validate.mjs",
+  "fleet-config.mjs",
   "Dockerfile",
   "public/joe/index.html",
   "public/joe/joe.js",
   "public/joe/joe.css",
   "public/joe/joe-version.js",
   "public/joe/data.schema.json",
+  "public/joe/fleet-config.schema.json",
+  "public/joe/fleet-config-actions.schema.json",
+  "public/joe/fleet-config.example.json",
   "public/joe/vendor/chart-4.4.8.umd.js",
   "public/joe/vendor/chartjs-plugin-zoom-2.2.0.min.js",
   "public/joe/vendor/gridstack-13.2.0-all.js",
@@ -29,6 +33,9 @@ const REQUIRED = [
 const STATIC_ROUTES = [
   "index.html",
   "data.schema.json",
+  "fleet-config.schema.json",
+  "fleet-config-actions.schema.json",
+  "fleet-config.example.json",
   "joe.css",
   "joe.js",
   "joe-version.js",
@@ -71,8 +78,11 @@ if (htmlFallbackVersion !== joeVersion.APP_VERSION || htmlFallbackVersion !== pk
 }
 
 const release = JSON.parse(await readFile(join(repoRoot, "release.json"), "utf8"));
-if (release.version !== joeVersion.APP_VERSION || release.version_scheme !== "legacy") {
-  fail("release metadata must match the retained product version scheme and UI version");
+if (release.version !== joeVersion.APP_VERSION || release.version_scheme !== "calendar") {
+  fail("release metadata must match the calendar product version scheme and UI version");
+}
+if (!/^\d{2}\.\d{2}\.\d{2}(?:\.\d{2}\.\d{2})?$/.test(joeVersion.APP_VERSION)) {
+  fail("JoeVersion.APP_VERSION must use calendar yy.mm.dd[.hh.mm]");
 }
 if (!Number.isSafeInteger(release.release_sequence) || release.release_sequence < 1) {
   fail("release metadata must have a positive integer release_sequence");

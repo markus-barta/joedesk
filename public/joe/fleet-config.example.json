@@ -1,0 +1,55 @@
+{
+  "$schema": "/joe/fleet-config.schema.json",
+  "schema": "inspr.joe.fleet-config.v1",
+  "rev": "fc-000000",
+  "updatedAt": "2026-09-11T00:00:00.000Z",
+  "mode": "paper",
+  "quota": {
+    "grok": { "reservePct": 10 },
+    "codex": { "reservePct": 10 },
+    "behavior": {
+      "green": "run_normally",
+      "amber": "slow_nonessential",
+      "red": "park_nonessential"
+    }
+  },
+  "desks": {
+    "maxBusyDesks": 5,
+    "stage0": { "capEur": 250 },
+    "keep": ["SXR8", "TSLA"]
+  },
+  "cadence": {
+    "timeZone": "Europe/Vienna",
+    "usOpenArm": "15:35",
+    "deskWatch": "desk-watch",
+    "darwin": "darwin",
+    "quotaGovernor": "quota-governor",
+    "wakeWindows": []
+  },
+  "amy": {
+    "routines": {
+      "morning": "Morning brief",
+      "review": "Desk review",
+      "close": "Close recap"
+    }
+  },
+  "mac": {
+    "shared": {
+      "configPath": "~/trading-team/shared/fleet-config.json",
+      "docsPath": "~/trading-team/shared/docs"
+    },
+    "knobs": { "syncMode": "read_on_revision" }
+  },
+  "tools": {
+    "statusSource": "/joe/data.json",
+    "entries": [
+      { "id": "ib-gateway", "label": "IB Gateway" },
+      { "id": "joel-ib", "label": "joel-ib" },
+      { "id": "codexbar-hsb0", "label": "codexbar@hsb0" }
+    ]
+  },
+  "secretSlots": {
+    "agenix": ["joe-board-push-token"],
+    "janus": []
+  }
+}
