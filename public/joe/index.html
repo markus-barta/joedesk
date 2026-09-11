@@ -179,8 +179,9 @@
         </div>
         <p class="history-status" id="historyStatus" hidden role="status"><span id="historyStatusText"></span><button class="quiet-button" id="historyRetry" type="button">Retry</button></p>
         <p class="history-help" id="historyHelp">Wheel or pinch to zoom · Shift-drag to pan · Sparklines follow the selected range</p>
+        <p class="history-compare" id="historyBasisNotice" hidden role="status"></p>
         <p class="history-compare" id="historyCompare" hidden></p>
-        <div class="history-canvas-wrap"><canvas id="historyChart" aria-label="Desk equity history chart" aria-describedby="historyHelp"></canvas><div class="empty-state" id="historyEmpty" hidden>History will fill as snapshots arrive.</div></div>
+        <div class="history-canvas-wrap"><canvas id="historyChart" aria-label="Desk equity history chart" aria-describedby="historyHelp historyBasisNotice"></canvas><div class="empty-state" id="historyEmpty" hidden>History will fill as snapshots arrive.</div></div>
       </div>
     </article>
 
@@ -197,7 +198,7 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">0.7.0</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">0.7.1</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>

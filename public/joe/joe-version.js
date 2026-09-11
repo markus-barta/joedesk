@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.7.0",
+    APP_VERSION: "0.7.1",
     VERSION_HISTORY: [
+      {
+        version: "0.7.1",
+        date: "2026-09-11",
+        title: "Comparable desk history",
+        changes: [
+          "History separates changed calculations so older Joel values cannot distort the current chart.",
+          "Earlier observations remain stored, with a clear explanation when they are excluded from comparisons.",
+          "J reporting periods and gaps remain intact while other desks keep updating.",
+        ],
+      },
       {
         version: "0.7.0",
         date: "2026-09-10",

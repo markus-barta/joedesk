@@ -8,6 +8,8 @@ const SIDES = new Set(["Long", "Short", "long", "short"]);
 const ACCOUNTING_METHOD = "execution-fifo-net-current-fx";
 const ACCOUNTING_DETAIL_MAX = 240;
 const ACCOUNTING_KEYS = new Set(["periodStart", "method", "detail"]);
+const HISTORY_BASIS_MAX = 96;
+const HISTORY_BASIS = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 const POSITION_KEYS = new Set([
   "desk",
   "symbol",
@@ -104,6 +106,17 @@ function accountingOk(accounting, path, errors) {
     !/^[\x20-\x7e]+$/.test(accounting.detail)
   ) {
     errors.push(`${path}.detail must be 1-${ACCOUNTING_DETAIL_MAX} printable English characters`);
+  }
+}
+
+function historyBasisOk(historyBasis, path, errors) {
+  if (
+    typeof historyBasis !== "string" ||
+    historyBasis.length < 1 ||
+    historyBasis.length > HISTORY_BASIS_MAX ||
+    !HISTORY_BASIS.test(historyBasis)
+  ) {
+    errors.push(`${path} must be a 1-${HISTORY_BASIS_MAX} character stable lowercase basis id`);
   }
 }
 
@@ -212,6 +225,9 @@ export function validateHouseholdSnapshot(raw) {
       moneyOk(d.money, `${p}.money`, errors);
       if (Object.prototype.hasOwnProperty.call(d, "accounting")) {
         accountingOk(d.accounting, `${p}.accounting`, errors);
+      }
+      if (Object.prototype.hasOwnProperty.call(d, "historyBasis")) {
+        historyBasisOk(d.historyBasis, `${p}.historyBasis`, errors);
       }
       if (!Array.isArray(d.issues)) errors.push(`${p}.issues array`);
       if (Object.prototype.hasOwnProperty.call(d, "positions")) {

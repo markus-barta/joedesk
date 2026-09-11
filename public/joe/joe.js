@@ -70,6 +70,8 @@
   var DESK_IDS = ["j", "joe", "joel"];
   var ACCOUNTING_METHOD = "execution-fifo-net-current-fx";
   var ACCOUNTING_DETAIL_MAX = 240;
+  var HISTORY_BASIS_MAX = 96;
+  var HISTORY_BASIS = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
   var LEGACY_DEFAULT_LAYOUT = [
     { id: "hero", x: 0, y: 0, w: 12, h: 3 },
     { id: "desk-j", x: 0, y: 3, w: 4, h: 4 },
@@ -164,6 +166,17 @@
     return accounting;
   }
 
+  function validateHistoryBasis(historyBasis, path) {
+    required(
+      typeof historyBasis === "string" &&
+      historyBasis.length >= 1 &&
+      historyBasis.length <= HISTORY_BASIS_MAX &&
+      HISTORY_BASIS.test(historyBasis),
+      path + " must be a stable lowercase basis id"
+    );
+    return historyBasis;
+  }
+
   function accountingPeriodLabel(accounting) {
     var parts = accountingDate.formatToParts(new Date(accounting.periodStart));
     var day = parts.find(function (part) { return part.type === "day"; });
@@ -208,6 +221,7 @@
       ["equity", "dayPnl", "totalPnl"].forEach(function (key) { finiteOrNull(desk.money[key], path + ".money." + key); });
       if (Object.prototype.hasOwnProperty.call(desk.money, "openPnl")) { finiteOrNull(desk.money.openPnl, path + ".money.openPnl"); }
       if (Object.prototype.hasOwnProperty.call(desk, "accounting")) { validateAccounting(desk.accounting, path + ".accounting"); }
+      if (Object.prototype.hasOwnProperty.call(desk, "historyBasis")) { validateHistoryBasis(desk.historyBasis, path + ".historyBasis"); }
       required(Array.isArray(desk.issues), path + ".issues must be an array");
     });
     required(data.totals && typeof data.totals === "object", "totals are required");
@@ -2039,6 +2053,18 @@
         return false;
       }
     }
+    if (Object.prototype.hasOwnProperty.call(point, "historyBasis")) {
+      if (!point.historyBasis || typeof point.historyBasis !== "object" || Array.isArray(point.historyBasis)) { return false; }
+      var historyBasisIds = Object.keys(point.historyBasis);
+      if (historyBasisIds.some(function (deskId) { return !DESK_IDS.includes(deskId); })) { return false; }
+      try {
+        historyBasisIds.forEach(function (deskId) {
+          validateHistoryBasis(point.historyBasis[deskId], "historyBasis." + deskId);
+        });
+      } catch (_) {
+        return false;
+      }
+    }
     return true;
   }
 
@@ -2100,24 +2126,72 @@
     return point && point.accounting && point.accounting[deskId] ? point.accounting[deskId] : null;
   }
 
+  function pointHistoryBasis(point, deskId) {
+    var explicit = point && point.historyBasis && Object.prototype.hasOwnProperty.call(point.historyBasis, deskId)
+      ? point.historyBasis[deskId]
+      : null;
+    var accounting = pointAccountingBasis(point, deskId);
+    return "id:" + (explicit || "untyped") +
+      "|accounting:" + (accounting ? accounting.periodStart + ":" + accounting.method : "untyped");
+  }
+
+  function hasIdentifiedHistoryBasis(point, deskId) {
+    return Boolean(
+      point && point.historyBasis && Object.prototype.hasOwnProperty.call(point.historyBasis, deskId)
+    ) || Boolean(pointAccountingBasis(point, deskId));
+  }
+
+  function hasMeaningfulDeskObservation(point, deskId) {
+    if (hasIdentifiedHistoryBasis(point, deskId)) { return true; }
+    var bag = seriesBag(point, deskId);
+    return Boolean(bag) && ["equity", "dayPnl", "totalPnl"].some(function (key) {
+      return Number.isFinite(bag[key]);
+    });
+  }
+
   function compatibleAccountingBasis(leftPoint, rightPoint, deskId) {
-    var left = pointAccountingBasis(leftPoint, deskId);
-    var right = pointAccountingBasis(rightPoint, deskId);
-    if (!left || !right) { return !left && !right; }
-    return left.periodStart === right.periodStart && left.method === right.method;
+    return pointHistoryBasis(leftPoint, deskId) === pointHistoryBasis(rightPoint, deskId);
+  }
+
+  function latestCompatibleBasis(points, deskId) {
+    if (!points.length) { return { points: [], excludedCount: 0 }; }
+    var anchor = -1;
+    var index;
+    for (index = points.length - 1; index >= 0; index -= 1) {
+      if (hasMeaningfulDeskObservation(points[index], deskId)) {
+        anchor = index;
+        break;
+      }
+    }
+    if (anchor < 0) {
+      return { points: points.slice(), excludedCount: 0, identified: false };
+    }
+    var start = anchor;
+    for (index = anchor - 1; index >= 0; index -= 1) {
+      if (!hasMeaningfulDeskObservation(points[index], deskId)) { continue; }
+      if (!compatibleAccountingBasis(points[index], points[anchor], deskId)) { break; }
+      start = index;
+    }
+    var excludedCount = points.slice(0, start).filter(function (point) {
+      var bag = seriesBag(point, deskId);
+      return bag && Number.isFinite(bag.equity);
+    }).length;
+    return {
+      points: points.slice(start),
+      excludedCount: excludedCount,
+      identified: hasIdentifiedHistoryBasis(points[anchor], deskId)
+    };
   }
 
   function basisAwareSeries(points, deskId) {
+    var selected = latestCompatibleBasis(points, deskId).points;
     var samples = [];
-    points.forEach(function (point, index) {
+    selected.forEach(function (point) {
       var bag = seriesBag(point, deskId);
       var sample = {
         x: Date.parse(point.t),
         y: bag && Number.isFinite(bag.equity) ? bag.equity : null
       };
-      if (index > 0 && !compatibleAccountingBasis(points[index - 1], point, deskId)) {
-        samples.push({ x: sample.x, y: null });
-      }
       samples.push(sample);
     });
     return samples;
@@ -2125,6 +2199,31 @@
 
   function seriesBag(point, deskId) {
     return point.desks && point.desks[deskId];
+  }
+
+  function historyBasisNotice(points, deskIds, range) {
+    var filtered = filterPoints(points, range);
+    var excluded = deskIds.map(function (deskId) {
+      var selected = latestCompatibleBasis(filtered, deskId);
+      return { deskId: deskId, count: selected.excludedCount, identified: selected.identified };
+    }).filter(function (entry) { return entry.count > 0; });
+    if (!excluded.length) { return ""; }
+    var labels = excluded.map(function (entry) {
+      return entry.deskId === "j" ? "J" : entry.deskId.charAt(0).toUpperCase() + entry.deskId.slice(1);
+    });
+    if (excluded.every(function (entry) { return entry.identified; })) {
+      var owner = labels.length === 1 ? labels[0] + "’s calculation changed." : labels.join(" and ") + " calculations changed.";
+      return owner + " This chart shows comparable records; older records are retained in history.json.";
+    }
+    return "Some selected records do not identify the same calculation. This chart shows only comparable records; all records are retained in history.json.";
+  }
+
+  function renderHistoryBasisNotice() {
+    var node = document.getElementById("historyBasisNotice");
+    if (!node) { return; }
+    var message = historyBasisNotice(historyState.points, historyState.selected, historyState.range);
+    node.hidden = !message;
+    node.textContent = message;
   }
 
   function destroyHistoryChart() {
@@ -2241,6 +2340,7 @@
   }
 
   function drawHistory() {
+    renderHistoryBasisNotice();
     if (!window.Chart) { showHistoryEmpty("The local chart library could not be loaded."); return; }
     if (!historyState.selected.length) {
       showHistoryEmpty("Select one or more desks to compare.");
@@ -2250,12 +2350,13 @@
     var datasets = historyState.selected.map(function (deskId) {
       var series = basisAwareSeries(points, deskId);
       if (!series.some(function (sample) { return Number.isFinite(sample.y); })) { return null; }
+      var finiteCount = series.filter(function (sample) { return Number.isFinite(sample.y); }).length;
       return {
         label: deskId === "j" ? "J" : deskId.charAt(0).toUpperCase() + deskId.slice(1),
         data: series,
         spanGaps: false,
         borderColor: deskColor(deskId), backgroundColor: deskColor(deskId), borderWidth: 2,
-        pointRadius: 0, pointHoverRadius: 4, tension: .2
+        pointRadius: finiteCount === 1 ? 3 : 0, pointHoverRadius: 4, tension: .2
       };
     }).filter(Boolean);
     if (!datasets.length) {
@@ -2499,6 +2600,8 @@
     historyFailureMessage: historyFailureMessage,
     sparklineSamples: sparklineSamples,
     basisAwareSeries: basisAwareSeries,
+    latestCompatibleBasis: latestCompatibleBasis,
+    historyBasisNotice: historyBasisNotice,
     compatibleAccountingBasis: compatibleAccountingBasis,
     accountingPeriodLabel: accountingPeriodLabel,
     accountingSinceLabel: accountingSinceLabel,

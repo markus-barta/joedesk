@@ -119,6 +119,12 @@
         },
         "money": { "$ref": "#/$defs/money" },
         "accounting": { "$ref": "#/$defs/accounting" },
+        "historyBasis": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+        },
         "heartbeatAt": { "type": ["string", "null"], "format": "date-time" },
         "updatedAt": { "type": ["string", "null"], "format": "date-time" },
         "tradeCount": { "type": ["integer", "null"], "minimum": 0 },
