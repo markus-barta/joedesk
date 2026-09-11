@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.7.1",
+    APP_VERSION: "0.7.2",
     VERSION_HISTORY: [
+      {
+        version: "0.7.2",
+        date: "2026-09-11",
+        title: "Account equity and captured J history",
+        changes: [
+          "Paper account equity remains visible when a desk has incomplete accounting, with KEEP holdings clearly included.",
+          "J shows captured results and an actual-timestamp history curve, calculated from family-owned fills using FIFO and recorded fees.",
+          "Partial coverage, native currency and unavailable complete totals stay explicit; existing desk history is preserved.",
+        ],
+      },
       {
         version: "0.7.1",
         date: "2026-09-11",

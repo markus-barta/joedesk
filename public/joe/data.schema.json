@@ -10,6 +10,7 @@
     "generatedAt": { "type": "string", "format": "date-time" },
     "mode": { "const": "PAPER" },
     "currency": { "const": "EUR" },
+    "brokerAccount": { "$ref": "#/$defs/brokerAccount" },
     "source": {
       "type": "object",
       "additionalProperties": false,
@@ -52,6 +53,126 @@
     }
   },
   "$defs": {
+    "brokerAccount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["equity", "currency", "observedAt", "scope", "status"],
+      "properties": {
+        "equity": { "type": ["number", "null"] },
+        "currency": { "const": "EUR" },
+        "observedAt": { "type": "string", "format": "date-time" },
+        "scope": { "const": "paper-account-including-keep" },
+        "status": { "enum": ["available", "unavailable"] }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "available" } }, "required": ["status"] },
+          "then": { "properties": { "equity": { "type": "number" } } }
+        }
+      ]
+    },
+    "backfillInterval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fromInclusive", "toExclusive"],
+      "properties": {
+        "fromInclusive": { "type": "string", "format": "date-time" },
+        "toExclusive": { "type": "string", "format": "date-time" }
+      }
+    },
+    "backfillPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "realizedPnl"],
+      "properties": {
+        "at": { "type": "string", "format": "date-time" },
+        "realizedPnl": { "type": "number" }
+      }
+    },
+    "backfillCapturedSubtotal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["realizedPnl", "currency", "executionCount", "commissionCount", "fromInclusive", "throughInclusive"],
+      "properties": {
+        "realizedPnl": { "type": ["number", "null"] },
+        "currency": { "enum": ["USD", "EUR", null] },
+        "method": { "enum": ["captured-fifo-matched-roundtrips", null] },
+        "executionCount": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "commissionCount": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "fromInclusive": { "type": "string", "format": "date-time" },
+        "throughInclusive": { "type": "string", "format": "date-time" },
+        "points": {
+          "type": "array",
+          "maxItems": 2048,
+          "items": { "$ref": "#/$defs/backfillPoint" }
+        },
+        "pointsTruncated": { "type": "boolean" }
+      },
+      "dependentRequired": {
+        "points": ["pointsTruncated"],
+        "pointsTruncated": ["points"]
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "realizedPnl": { "type": "number" } }, "required": ["realizedPnl"] },
+          "then": { "properties": { "currency": { "enum": ["USD", "EUR"] } } }
+        },
+        {
+          "if": { "properties": { "realizedPnl": { "type": "null" } }, "required": ["realizedPnl"] },
+          "then": { "properties": { "method": { "type": "null" } } }
+        }
+      ]
+    },
+    "backfillCoverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "completeIntervalCount", "knownIntervalCount", "gapCount", "firstGap"],
+      "properties": {
+        "target": { "$ref": "#/$defs/backfillInterval" },
+        "completeIntervalCount": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "knownIntervalCount": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "gapCount": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "firstGap": {
+          "oneOf": [
+            { "$ref": "#/$defs/backfillInterval" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "gapCount": { "const": 0 } }, "required": ["gapCount"] },
+          "then": { "properties": { "firstGap": { "type": "null" } } },
+          "else": { "properties": { "firstGap": { "$ref": "#/$defs/backfillInterval" } } }
+        }
+      ]
+    },
+    "backfill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "fullTotalAvailable", "capturedSubtotal", "coverage", "missingOpeningLotCount", "orphanCommissionCount"],
+      "properties": {
+        "status": { "enum": ["BEST_AVAILABLE", "COMPLETE"] },
+        "fullTotalAvailable": { "type": "boolean" },
+        "capturedSubtotal": { "$ref": "#/$defs/backfillCapturedSubtotal" },
+        "coverage": { "$ref": "#/$defs/backfillCoverage" },
+        "missingOpeningLotCount": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+        "orphanCommissionCount": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "fullTotalAvailable": { "const": true } }, "required": ["fullTotalAvailable"] },
+          "then": {
+            "properties": {
+              "status": { "const": "COMPLETE" },
+              "coverage": { "properties": { "gapCount": { "const": 0 } } },
+              "missingOpeningLotCount": { "const": 0 },
+              "orphanCommissionCount": { "const": 0 }
+            }
+          }
+        }
+      ]
+    },
     "money": {
       "type": "object",
       "additionalProperties": false,
@@ -119,6 +240,7 @@
         },
         "money": { "$ref": "#/$defs/money" },
         "accounting": { "$ref": "#/$defs/accounting" },
+        "backfill": { "$ref": "#/$defs/backfill" },
         "historyBasis": {
           "type": "string",
           "minLength": 1,
@@ -140,7 +262,13 @@
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "id": { "enum": ["joe", "joel"] } }, "required": ["id"] },
+          "then": { "not": { "required": ["backfill"] } }
+        }
+      ]
     }
   }
 }

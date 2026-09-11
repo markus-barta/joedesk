@@ -273,7 +273,21 @@ if (JSON.stringify(explicitlyBasedServerPoint.historyBasis) !== JSON.stringify({
 const unavailableServerPoint = historyPointFromSnapshot({
   generatedAt: "2026-09-10T13:00:00Z",
   desks: [
-    { id: "j", money: { equity: null, dayPnl: null, totalPnl: null } },
+    {
+      id: "j",
+      money: { equity: null, dayPnl: null, totalPnl: null },
+      backfill: {
+        capturedSubtotal: {
+          realizedPnl: -37.125,
+          currency: "USD",
+          points: [
+            { at: "2026-09-10T08:01:00.000Z", realizedPnl: 6.5 },
+            { at: "2026-09-10T08:05:00.000Z", realizedPnl: -37.125 },
+          ],
+          pointsTruncated: false,
+        },
+      }
+    },
     { id: "joe", money: { equity: 211, dayPnl: 2, totalPnl: 11 } },
     { id: "joel", money: { equity: 311, dayPnl: 3, totalPnl: 21 } }
   ],
@@ -281,6 +295,11 @@ const unavailableServerPoint = historyPointFromSnapshot({
 });
 if (Object.prototype.hasOwnProperty.call(unavailableServerPoint, "accounting")) {
   throw new Error("an unavailable untyped J row must remain explicitly without accounting metadata");
+}
+if (Object.prototype.hasOwnProperty.call(unavailableServerPoint.desks.j, "backfill") ||
+    JSON.stringify(unavailableServerPoint).includes("-37.125") ||
+    JSON.stringify(unavailableServerPoint).includes("2026-09-10T08:01:00.000Z")) {
+  throw new Error("server history must not copy partial J backfill metadata, subtotal, or curve");
 }
 if (
   unavailableServerPoint.desks.j.equity !== null ||
@@ -505,6 +524,7 @@ console.log(JSON.stringify({
     "server-history-persists-accounting",
     "server-history-persists-explicit-basis",
     "server-history-preserves-null",
+    "server-history-excludes-backfill",
     "j-unavailable-series-gap",
     "j-trailing-untyped-null-preserves-last-valid",
     "j-gap-compare-blocked",
