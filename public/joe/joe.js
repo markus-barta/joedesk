@@ -721,6 +721,21 @@
     });
   }
 
+  function loadFittedNarrowLayout(items) {
+    if (!grid) { return false; }
+    var animated = typeof grid.hasAnimationCSS === "function" && grid.hasAnimationCSS();
+    if (animated) { grid.setAnimation(false); }
+    try {
+      grid.load(items, false);
+      // GridStack updates node.h before its animated CSS height settles. A
+      // content fit must expose the matching box before the next measurement.
+      if (grid.el) { void grid.el.offsetHeight; }
+    } finally {
+      if (animated) { grid.setAnimation(true); }
+    }
+    return true;
+  }
+
   function fitNarrowLayoutToContent(pass) {
     if (!grid || !isNarrowGridViewport() || restoringLayout) { return false; }
     var settings = activeGridSettings;
@@ -757,7 +772,7 @@
       return next;
     });
     restoringLayout = true;
-    grid.load(stacked, false);
+    loadFittedNarrowLayout(stacked);
     restoringLayout = false;
     if ((pass || 0) + 1 < NARROW_FIT_MAX_PASSES) { scheduleNarrowFit((pass || 0) + 1); }
     return true;
@@ -810,7 +825,7 @@
     if (!narrowItems || !grid) { return false; }
     restoringLayout = true;
     if (typeof grid.checkDynamicColumn === "function") { grid.checkDynamicColumn(); }
-    grid.load(narrowItems, false);
+    loadFittedNarrowLayout(narrowItems);
     restoringLayout = false;
     scheduleNarrowFit(0);
     return true;

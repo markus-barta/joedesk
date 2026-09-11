@@ -331,7 +331,11 @@ try {
       const settingsPanel = panelBounds('#settingsMenu .header-menu-panel');
       document.getElementById('settingsMenu').removeAttribute('open');
       const defaultHero = window.JoeBoard.readLayoutsCatalog().layouts.find((entry) => entry.id === 'default')?.items.find((item) => item.id === 'hero');
-      const liveHero = document.querySelector('[gs-id="hero"]')?.gridstackNode;
+      const liveHeroElement = document.querySelector('[gs-id="hero"]');
+      const liveHero = liveHeroElement?.gridstackNode;
+      const liveCellHeight = document.getElementById('joeGrid')?.gridstack?.getCellHeight();
+      const heroRenderedHeight = liveHeroElement?.getBoundingClientRect().height;
+      const heroModelHeight = Number.isFinite(liveHero?.h) && Number.isFinite(liveCellHeight) ? liveHero.h * liveCellHeight : null;
       return {
       overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
       gridColumns: document.getElementById('joeGrid')?.gridstack?.getColumn(),
@@ -343,6 +347,9 @@ try {
       defaultHeroH: defaultHero?.h,
       liveHeroY: liveHero?.y,
       liveHeroH: liveHero?.h,
+      heroRenderedHeight,
+      heroModelHeight,
+      heroFitSettled: Number.isFinite(heroRenderedHeight) && Number.isFinite(heroModelHeight) && Math.abs(heroRenderedHeight - heroModelHeight) <= 1,
       headerStatusVisible: Boolean(document.querySelector('.header-status')),
       viewport: document.documentElement.dataset.joeViewport,
       narrowBreakpoint: window.JoeBoard.narrowBreakpoint,
@@ -359,6 +366,7 @@ try {
         mobile.layoutPanel?.overflow || mobile.settingsPanel?.overflow ||
         mobile.defaultHeroY !== 0 || mobile.defaultHeroH !== 3 || mobile.liveHeroY !== 0 ||
         !Number.isInteger(mobile.liveHeroH) || mobile.liveHeroH < mobile.defaultHeroH ||
+        !mobile.heroFitSettled ||
         mobile.viewport !== "narrow" || mobile.narrowBreakpoint !== 700 ||
         !mobile.headerStatusVisible || !mobile.gateHidden || mobile.heroClipped || !mobile.heroOpen || !mobile.heroFreshness || mobile.versionPanel?.overflow
       ) throw new Error(`Mobile layout mismatch: ${JSON.stringify(mobile)}`);
