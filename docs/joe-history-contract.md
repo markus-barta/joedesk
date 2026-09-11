@@ -59,4 +59,4 @@ unknown, not a new basis: a trailing unknown row remains a visible gap after
 the last valid series, and matching known observations on both sides retain
 that gap without being joined across it.
 
-The hsb0 pusher submits observed snapshots to the authenticated cs0 inbox. The JoeDesk server appends accepted observations to `history.json`, retaining up to 10,000 points from the last 14 days. Repeated snapshot timestamps do not create new points. Publisher heartbeats must not invent financial observations.
+The hsb0 pusher submits observed snapshots to the authenticated cs0 inbox. The JoeDesk server appends accepted observations to `history.json`, retaining up to 10,000 points from the last 14 days. A repeat of the latest snapshot timestamp updates that point rather than appending another. Publisher heartbeats must not invent financial observations.

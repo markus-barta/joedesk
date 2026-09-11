@@ -2131,8 +2131,11 @@
       ? point.historyBasis[deskId]
       : null;
     var accounting = pointAccountingBasis(point, deskId);
-    return "id:" + (explicit || "untyped") +
-      "|accounting:" + (accounting ? accounting.periodStart + ":" + accounting.method : "untyped");
+    return JSON.stringify([
+      explicit,
+      accounting ? accounting.periodStart : null,
+      accounting ? accounting.method : null
+    ]);
   }
 
   function hasIdentifiedHistoryBasis(point, deskId) {
@@ -2211,11 +2214,7 @@
     var labels = excluded.map(function (entry) {
       return entry.deskId === "j" ? "J" : entry.deskId.charAt(0).toUpperCase() + entry.deskId.slice(1);
     });
-    if (excluded.every(function (entry) { return entry.identified; })) {
-      var owner = labels.length === 1 ? labels[0] + "’s calculation changed." : labels.join(" and ") + " calculations changed.";
-      return owner + " This chart shows comparable records; older records are retained in history.json.";
-    }
-    return "Some selected records do not identify the same calculation. This chart shows only comparable records; all records are retained in history.json.";
+    return "This chart shows comparable records for " + labels.join(" and ") + ". Older or unidentified records are retained in history.json.";
   }
 
   function renderHistoryBasisNotice() {

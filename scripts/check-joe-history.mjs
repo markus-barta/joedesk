@@ -395,7 +395,7 @@ if (Math.min(...visibleDomain) !== 5000 || Math.max(...visibleDomain) !== 5002) 
   throw new Error("incompatible legacy Joel values must not enter the visible y-domain");
 }
 const basisNotice = api.historyBasisNotice(syntheticJoelBasisPoints, ["j", "joe", "joel"], "all");
-if (basisNotice !== "Joel’s calculation changed. This chart shows comparable records; older records are retained in history.json.") {
+if (basisNotice !== "This chart shows comparable records for Joel. Older or unidentified records are retained in history.json.") {
   throw new Error("basis exclusion notice must explain retained older Joel observations honestly");
 }
 if (api.basisAwareSeries(syntheticJoelBasisPoints, "joe").length !== 4) {
@@ -415,11 +415,38 @@ if (missingSelection.points.length !== 1 || missingSelection.excludedCount !== 4
   throw new Error("a newest untyped observation must not be silently merged into an explicit basis");
 }
 const unidentifiedNotice = api.historyBasisNotice(missingLatestBasis, ["joel"], "all");
-if (!unidentifiedNotice.includes("do not identify the same calculation") || !unidentifiedNotice.includes("all records are retained")) {
+if (unidentifiedNotice !== "This chart shows comparable records for Joel. Older or unidentified records are retained in history.json.") {
   throw new Error("unidentified basis copy must avoid claiming whether old and new calculations match");
 }
 if (api.sharedWindowCompare(missingLatestBasis, ["j", "joel"], "all").ok) {
   throw new Error("mixed missing basis metadata must not fabricate a comparison");
+}
+
+const literalUntypedIdPoints = [
+  { t: "2026-09-10T10:00:00Z", desks: { joel: { equity: 12000 } } },
+  { t: "2026-09-10T11:00:00Z", desks: { joel: { equity: 5000 } }, historyBasis: { joel: "untyped" } }
+];
+api.validateHistoryPayload({ schema: "inspr.joe.household.history.v1", points: literalUntypedIdPoints });
+const literalUntypedIdSeries = api.basisAwareSeries(literalUntypedIdPoints, "joel");
+if (literalUntypedIdSeries.length !== 1 || literalUntypedIdSeries[0].y !== 5000) {
+  throw new Error("a valid literal untyped basis id must remain distinct from absent basis metadata");
+}
+
+const sameTagAroundUnidentified = [
+  { t: "2026-09-10T10:00:00Z", desks: { joel: { equity: 5000 } }, historyBasis: { joel: "joel.synthetic.v1" } },
+  { t: "2026-09-10T11:00:00Z", desks: { joel: { equity: null, totalPnl: 0 } } },
+  { t: "2026-09-10T12:00:00Z", desks: { joel: { equity: 5001 } }, historyBasis: { joel: "joel.synthetic.v1" } }
+];
+const sameTagSeparatedSeries = api.basisAwareSeries(sameTagAroundUnidentified, "joel");
+if (sameTagSeparatedSeries.length !== 1 || sameTagSeparatedSeries[0].y !== 5001) {
+  throw new Error("an unidentified meaningful row must prevent matching tags from being joined across it");
+}
+const neutralSeparatedNotice = api.historyBasisNotice(sameTagAroundUnidentified, ["joel"], "all");
+if (neutralSeparatedNotice !== "This chart shows comparable records for Joel. Older or unidentified records are retained in history.json.") {
+  throw new Error("same tags separated by an unidentified meaningful row must use neutral history copy");
+}
+if (/changed/i.test(neutralSeparatedNotice)) {
+  throw new Error("history notice must not claim a known calculation change across unidentified records");
 }
 
 let malformedHistoryBasisRejected = false;
@@ -497,6 +524,8 @@ console.log(JSON.stringify({
     "all-bots-shared-latest-basis",
     "mixed-missing-basis-honest",
     "unidentified-basis-copy-honest",
+    "literal-untyped-id-distinct-from-absence",
+    "same-tag-unidentified-gap-neutral-copy",
     "malformed-history-basis-rejected",
     "snapshot-history-basis-validation",
     "empty-current-one-point-honest"
