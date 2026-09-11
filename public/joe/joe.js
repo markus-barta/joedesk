@@ -247,17 +247,17 @@
     },
     secrets: {
       label: "Secret slots",
-      headline: "Labels here. Secret values elsewhere.",
-      intro: "Fleet config can point to encrypted slots, but this plane never reads, displays or stores their contents.",
+      headline: "Names on the board. Values stay in AGE.",
+      intro: "Fleet Config is a readable paper file. AGE/agenix holds the encrypted secret material. This plane lists capability and path refs only.",
       sections: [
-        ["Always redacted", "The browser receives reference names only. Secret values do not belong in previews or diffs."],
-        ["Encrypted at rest", "agenix owns encrypted configuration references; Janus references keep their existing boundary."],
-        ["No new sign-in path", "This plane inherits the same externally enforced Zitadel SSO boundary as JoeDesk."],
+        ["Plaintext policy vs AGE secrets", "Quota, desks and paths stay in plaintext so changes are easy to read. Secret values never enter this JSON, this browser, previews or diffs. AGE ciphertext lives only in the host secret store."],
+        ["Always REDACTED", "Each slot shows its agenix or Janus capability/path ref and a REDACTED marker. The UI has no field for a password, token or key value."],
+        ["Janus/agenix ops", "Rotation and injection stay in the existing host workflow. The short note under Secret slots points at Janus/agenix ops for v1."],
       ],
       fields: [
         { key: "agenixRefs", label: "agenix refs", value: "joe-board-push-token", path: "secretSlots.agenix", type: "refs", editable: false },
         { key: "janusRefs", label: "Janus refs", value: "", path: "secretSlots.janus", type: "refs", editable: false },
-        { key: "displayMode", label: "Display", value: "Redacted", editable: false },
+        { key: "displayMode", label: "Display", value: "REDACTED", editable: false },
       ],
     },
   };
@@ -4177,7 +4177,7 @@
   function updateFleetReadouts() {
     document.querySelectorAll("[data-fleet-readout]").forEach(function (readout) {
       var key = readout.dataset.fleetReadout;
-      var value = fleetDraft[key] === undefined ? "" : fleetDraft[key];
+      var value = key === "displayMode" ? "REDACTED" : fleetDraft[key] === undefined ? "" : fleetDraft[key];
       if (readout.dataset.fleetJoin) { value = value.split(",").map(function (part) { return part.trim(); }).filter(Boolean).join(readout.dataset.fleetJoin); }
       if (readout.dataset.fleetHumanize) {
         value = value.replace(/[_-]+/g, " ");
@@ -4192,6 +4192,43 @@
       var meter = document.querySelector('[data-fleet-meter="' + key + '"]');
       if (meter) { meter.style.width = value + "%"; }
     });
+    renderSecretSlots();
+  }
+
+  function fleetSecretRefName(value) {
+    return typeof value === "string" && /^[a-z][a-z0-9]*(?:[._/-][a-z0-9]+)*$/.test(value) ? value : "";
+  }
+
+  function fleetSecretSlotRefs(capability) {
+    var slots = fleetBaselineConfig && fleetBaselineConfig.secretSlots;
+    var listed = slots && Array.isArray(slots[capability]) ? slots[capability] : null;
+    if (!listed && capability === "agenix") { return ["joe-board-push-token"]; }
+    return (listed || []).map(fleetSecretRefName).filter(Boolean);
+  }
+
+  function renderSecretSlots() {
+    var list = document.getElementById("fleetSecretSlots");
+    if (!list) { return; }
+    var rows = [];
+    ["agenix", "janus"].forEach(function (capability) {
+      var refs = fleetSecretSlotRefs(capability);
+      if (!refs.length) {
+        var empty = el("li", "fleet-secret-slot");
+        empty.appendChild(el("span", "fleet-secret-capability", capability));
+        empty.appendChild(el("code", "fleet-secret-ref", "none"));
+        empty.appendChild(el("em", "fleet-redacted", "REDACTED"));
+        rows.push(empty);
+        return;
+      }
+      refs.forEach(function (ref) {
+        var item = el("li", "fleet-secret-slot");
+        item.appendChild(el("span", "fleet-secret-capability", capability));
+        item.appendChild(el("code", "fleet-secret-ref", ref));
+        item.appendChild(el("em", "fleet-redacted", "REDACTED"));
+        rows.push(item);
+      });
+    });
+    list.replaceChildren.apply(list, rows);
   }
 
   function renderFleetConfigSection(sectionId, focusHeading) {
