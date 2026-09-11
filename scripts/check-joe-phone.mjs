@@ -13,6 +13,8 @@ function extractJoeBlock(startMarker, endMarker) {
 }
 
 const viewportBlock = extractJoeBlock("  function layoutViewportWidth", "\n\n  function columnOptsFor");
+const dragScrollPolicyBlock = extractJoeBlock("  function syncGridDragScrollPolicy", "\n\n  function syncGridColumnConfig");
+const gridColumnConfigBlock = extractJoeBlock("  function syncGridColumnConfig", "\n\n  function gridColumnCount");
 
 const phoneHelpers = `${extractJoeBlock("  var DEFAULT_LAYOUT = [", "\n  var stateCopy = ")}
   var SUPPORTED_COLUMNS = [3, 6, 12];
@@ -31,6 +33,8 @@ const api = new Function(`${phoneHelpers}
     NARROW_WIDGET_DRAG_PX,
     sanitizeLayoutItems,
     sanitizeGridSettings,
+    derivePhoneOrder,
+    sanitizePhoneOrder,
     narrowGridTilePixels,
     narrowRowsForOuterPixels,
     narrowOuterPixelsForContent,
@@ -119,6 +123,16 @@ if (narrowOrder?.map((item) => item.id).join() !== narrow.map((item) => item.id)
   throw new Error("narrow layout order must follow desktop y/x, not input order");
 }
 
+const customPhoneOrder = ["hero", "desk-joe", "desk-j", "desk-joel", "history", "attribution", "positions"];
+const customNarrow = api.narrowLayoutFromItems(sample, defaultSettings, customPhoneOrder);
+if (customNarrow?.map((item) => item.id).join() !== customPhoneOrder.join()) {
+  throw new Error("valid phone order did not control narrow stacking");
+}
+const invalidNarrow = api.narrowLayoutFromItems(sample, defaultSettings, ["hero", "hero"]);
+if (invalidNarrow?.map((item) => item.id).join() !== narrow.map((item) => item.id).join()) {
+  throw new Error("invalid phone order did not derive from desktop geometry");
+}
+
 let yCursor = 0;
 for (const item of narrow) {
   if (item.y !== yCursor) throw new Error("narrow layout must stack contiguously");
@@ -166,9 +180,28 @@ if (desktopViewport.layoutViewportWidth() !== 1400) {
   throw new Error("desktop layout viewport must follow the grid container width");
 }
 
+function dragScrollAfterSync(initialValue, onNarrow) {
+  return new Function(`
+    var grid = { opts: { draggable: { scroll: ${initialValue} } } };
+    ${dragScrollPolicyBlock}
+    syncGridDragScrollPolicy(${onNarrow});
+    return grid.opts.draggable.scroll;
+  `)();
+}
+
+if (dragScrollAfterSync(true, true) !== false) {
+  throw new Error("narrow grid must disable GridStack helper autoscroll");
+}
+if (dragScrollAfterSync(false, false) !== true) {
+  throw new Error("desktop grid must retain GridStack helper autoscroll");
+}
+if (!gridColumnConfigBlock.includes("syncGridDragScrollPolicy(onNarrow);")) {
+  throw new Error("responsive grid sync must refresh the drag scroll policy");
+}
+
 console.log(JSON.stringify({
   ok: true,
-  checks: 20,
+  checks: 25,
   narrowBreakpoint: api.NARROW_BREAKPOINT,
   defaultDeskRows: defaultDesk.h,
   compactDeskRows: compactDesk.h,

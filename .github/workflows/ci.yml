@@ -48,6 +48,11 @@ jobs:
           BROWSER_PATH: /usr/bin/google-chrome
           JOE_SMOKE_VIEWPORT: mobile
         run: node scripts/smoke-joe.mjs
+      - name: Phone order smoke
+        env:
+          BROWSER_PATH: /usr/bin/google-chrome
+          JOE_SMOKE_VIEWPORT: phone-order
+        run: node scripts/smoke-joe.mjs
       - name: Privacy smoke
         env:
           BROWSER_PATH: /usr/bin/google-chrome

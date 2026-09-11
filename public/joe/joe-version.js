@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.7.6",
+    APP_VERSION: "0.7.7",
     VERSION_HISTORY: [
+      {
+        version: "0.7.7",
+        date: "2026-09-11",
+        title: "Phone layouts remember their order",
+        changes: [
+          "Keep a separate tile order on your phone while preserving your desktop arrangement.",
+          "Save and restore phone order with named layouts, including after reloads or screen-size changes.",
+          "Automatic resizing stays separate from manual edits, so it does not create unsaved-change prompts.",
+        ],
+      },
       {
         version: "0.7.6",
         date: "2026-09-11",
