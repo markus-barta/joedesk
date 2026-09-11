@@ -3485,6 +3485,10 @@
     return showPair;
   }
 
+  function historyTooltipItemVisible(item) {
+    return !(item.dataset.joeEvidence === "gap-fill" && item.raw && item.raw.observedBoundary);
+  }
+
   function historyBasisNotice(points, deskIds, range) {
     var filtered = filterPoints(points, range);
     var excluded = deskIds.map(function (deskId) {
@@ -3716,6 +3720,7 @@
             bodyColor: cssVar("--chart-tooltip-body") || "#c9c4b7",
             borderColor: cssVar("--chart-tooltip-border") || "#454641",
             borderWidth: 1,
+            filter: historyTooltipItemVisible,
             callbacks: {
             title: function (items) { return items.length ? HISTORY_TOOLTIP_TIME.format(new Date(items[0].parsed.x)) : ""; },
             label: function (item) {
@@ -4005,6 +4010,7 @@
     historyFailureMessage: historyFailureMessage,
     historyContinuitySeries: historyContinuitySeries,
     toggleHistoryDeskDatasets: toggleHistoryDeskDatasets,
+    historyTooltipItemVisible: historyTooltipItemVisible,
     sparklineSamples: sparklineSamples,
     basisAwareSeries: basisAwareSeries,
     latestCompatibleBasis: latestCompatibleBasis,

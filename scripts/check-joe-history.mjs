@@ -34,6 +34,7 @@ const api = new Function(`${historyHelpers}
     historyFailureMessage,
     historyContinuitySeries,
     toggleHistoryDeskDatasets,
+    historyTooltipItemVisible,
     historyAxisPlan,
     historyAxisLabel,
     historyCalendarBoundaries,
@@ -882,6 +883,21 @@ if (!/onClick:\s*function \(_event, item, legend\) \{ toggleHistoryDeskDatasets\
   throw new Error("the Chart.js legend click handler must use the coordinated desk-pair toggle");
 }
 
+const tooltipItems = {
+  observed: { dataset: { joeEvidence: "observed" }, raw: { observedBoundary: true } },
+  boundary: { dataset: { joeEvidence: "gap-fill" }, raw: { observedBoundary: true } },
+  interpolated: { dataset: { joeEvidence: "gap-fill" }, raw: { assumption: "interpolated" } },
+  baseline: { dataset: { joeEvidence: "gap-fill" }, raw: { assumption: "assumed-baseline", baseline: true } },
+  carried: { dataset: { joeEvidence: "gap-fill" }, raw: { assumption: "last-value-carry", carried: true } }
+};
+if (!api.historyTooltipItemVisible(tooltipItems.observed) ||
+    api.historyTooltipItemVisible(tooltipItems.boundary) ||
+    !api.historyTooltipItemVisible(tooltipItems.interpolated) ||
+    !api.historyTooltipItemVisible(tooltipItems.baseline) ||
+    !api.historyTooltipItemVisible(tooltipItems.carried)) {
+  throw new Error("history tooltips must suppress duplicate gap boundaries while retaining recorded and genuine estimate items");
+}
+
 console.log(JSON.stringify({
   ok: true,
   checks: [
@@ -958,6 +974,7 @@ console.log(JSON.stringify({
     "continuity-compare-unaffected",
     "continuity-chart-datasets-and-legend",
     "continuity-explicit-tooltip-copy",
-    "continuity-legend-pair-toggle"
+    "continuity-legend-pair-toggle",
+    "continuity-tooltip-boundary-deduplication"
   ]
 }, null, 2));
