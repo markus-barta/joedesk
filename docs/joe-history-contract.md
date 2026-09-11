@@ -22,6 +22,9 @@ Schema `inspr.joe.household.history.v1`:
           "detail": "Net of recorded fees; converted at observed FX. Earlier results unavailable."
         }
       },
+      "historyBasis": {
+        "joel": "joel.stage0-keep-excluded.v1"
+      },
       "totals": { "equity": 19040.96, "dayPnl": 0, "totalPnl": 4040.96 }
     }
   ]
@@ -35,4 +38,25 @@ changes and must calculate comparisons only inside a common compatible basis
 window; a legacy-to-verified boundary is not profit movement. Other desks'
 series remain continuous when their own basis is unchanged.
 
-Producers append a point whenever they publish `data.json` (hsb1 only). Cap retained points (~4000). Never invent points. cs0 must not serve this file as household PnL.
+`point.historyBasis` is also optional and maps a desk id to the stable
+calculation-definition identifier supplied by that desk. The compatibility
+identity is composite: an explicit id adds to (and never replaces) that desk's
+`accounting.periodStart` and `accounting.method`. Any difference in the fields
+that are present creates a boundary. For points without `historyBasis`, J's
+existing accounting period and method remain its compatibility key; fully
+untyped old-only series remain viewable as one legacy basis.
+
+The dashboard selects the newest contiguous comparable basis independently for
+each selected desk in every range, including explicit `ALL`. Older observations
+outside that run remain unchanged in `history.json` and can still be
+deliberately inspected there, but they are excluded from chart series,
+sparklines, comparisons, and the visible y-domain. The UI states that records
+were retained without claiming that an unidentified calculation was the same
+or wrong. A basis with only one current point is shown as one observation,
+never as an invented trend or comparison. No consumer may infer a cutover from
+the money value itself. All-null rows without calculation metadata are
+unknown, not a new basis: a trailing unknown row remains a visible gap after
+the last valid series, and matching known observations on both sides retain
+that gap without being joined across it.
+
+The hsb0 pusher submits observed snapshots to the authenticated cs0 inbox. The JoeDesk server appends accepted observations to `history.json`, retaining up to 10,000 points from the last 14 days. A repeat of the latest snapshot timestamp updates that point rather than appending another. Publisher heartbeats must not invent financial observations.

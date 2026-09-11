@@ -21,6 +21,8 @@ const HISTORY_FILE = path.join(DATA_DIR, "history.json");
 const HISTORY_SCHEMA = "inspr.joe.household.history.v1";
 const HISTORY_MAX_POINTS = 10000;
 const HISTORY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const HISTORY_BASIS_MAX = 96;
+const HISTORY_BASIS = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 const TOKEN_FILE = "/run/secrets/joe-board-push-token";
 const BIND_HOST = "0.0.0.0";
 const BIND_PORT = 8080;
@@ -133,15 +135,24 @@ function accountingBasis(accounting) {
   };
 }
 
+function historyBasisId(value) {
+  return typeof value === "string" && value.length <= HISTORY_BASIS_MAX && HISTORY_BASIS.test(value)
+    ? value
+    : null;
+}
+
 function historyPointFromSnapshot(snapshot) {
   const desks = {};
   const accounting = {};
+  const historyBasis = {};
   const list = Array.isArray(snapshot.desks) ? snapshot.desks : [];
   for (const desk of list) {
     if (!desk || typeof desk.id !== "string" || !desk.id) continue;
     desks[desk.id] = moneyBag(desk.money);
     const basis = accountingBasis(desk.accounting);
     if (basis) accounting[desk.id] = basis;
+    const basisId = historyBasisId(desk.historyBasis);
+    if (basisId) historyBasis[desk.id] = basisId;
   }
   // Also accept object-shaped desks (defensive; producers may evolve).
   if (!list.length && snapshot.desks && typeof snapshot.desks === "object") {
@@ -149,6 +160,8 @@ function historyPointFromSnapshot(snapshot) {
       desks[id] = moneyBag(desk && desk.money ? desk.money : desk);
       const basis = accountingBasis(desk && desk.accounting);
       if (basis) accounting[id] = basis;
+      const basisId = historyBasisId(desk && desk.historyBasis);
+      if (basisId) historyBasis[id] = basisId;
     }
   }
   const point = {
@@ -157,6 +170,7 @@ function historyPointFromSnapshot(snapshot) {
     totals: moneyBag(snapshot.totals),
   };
   if (Object.keys(accounting).length) point.accounting = accounting;
+  if (Object.keys(historyBasis).length) point.historyBasis = historyBasis;
   return point;
 }
 

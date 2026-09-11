@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { validateHouseholdSnapshot } from "../validate.mjs";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const joeSource = await readFile(resolve(repoRoot, "public/joe/joe.js"), "utf8");
@@ -32,6 +33,8 @@ const api = new Function(`${historyHelpers}
     historyFailureMessage,
     sparklineSamples,
     basisAwareSeries,
+    latestCompatibleBasis,
+    historyBasisNotice,
     compatibleAccountingBasis,
     sharedWindowCompare,
     formatPctChange
@@ -46,7 +49,9 @@ function extractServerBlock(startMarker, endMarker) {
 }
 
 const historyPointFromSnapshot = new Function(
-  `${extractServerBlock("function moneyBag(bag)", "\nfunction pruneHistoryPoints")}
+  `const HISTORY_BASIS_MAX = 96;
+   const HISTORY_BASIS = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
+   ${extractServerBlock("function moneyBag(bag)", "\nfunction pruneHistoryPoints")}
    return historyPointFromSnapshot;`,
 )();
 
@@ -80,8 +85,13 @@ const validPayload = {
   schema: "inspr.joe.household.history.v1",
   points
 };
+const retainedLegacyBytes = JSON.stringify(validPayload.points);
 const parsed = api.validateHistoryPayload(validPayload);
 if (parsed.length !== 3) throw new Error("valid history payload rejected");
+api.basisAwareSeries(parsed, "joel");
+if (JSON.stringify(validPayload.points) !== retainedLegacyBytes) {
+  throw new Error("reading legacy samples must leave their serialized bytes unchanged");
+}
 
 const emptyPayload = { schema: "inspr.joe.household.history.v1", points: [] };
 if (api.validateHistoryPayload(emptyPayload).length !== 0) {
@@ -206,6 +216,30 @@ const accounting = {
   method: "execution-fifo-net-current-fx",
   detail: "Net of recorded fees; converted at observed FX. Earlier results unavailable."
 };
+const laterAccounting = { ...accounting, periodStart: "2026-09-11T04:00:00Z" };
+const sharedHistoryBasis = { j: "j.synthetic-stable.v1" };
+const sameIdEarlierPeriod = {
+  t: "2026-09-10T12:00:00Z",
+  desks: { j: { equity: 50 } },
+  accounting: { j: accounting },
+  historyBasis: sharedHistoryBasis
+};
+const sameIdLaterPeriod = {
+  t: "2026-09-11T12:00:00Z",
+  desks: { j: { equity: 51 } },
+  accounting: { j: laterAccounting },
+  historyBasis: sharedHistoryBasis
+};
+if (api.compatibleAccountingBasis(sameIdEarlierPeriod, sameIdLaterPeriod, "j")) {
+  throw new Error("a stable history basis id must not override a changed accounting periodStart");
+}
+const sameIdDifferentMethod = {
+  ...sameIdLaterPeriod,
+  accounting: { j: { ...accounting, method: "synthetic-other-method" } }
+};
+if (api.compatibleAccountingBasis(sameIdEarlierPeriod, sameIdDifferentMethod, "j")) {
+  throw new Error("a stable history basis id must not override a changed accounting method");
+}
 const legacyServerPoint = historyPointFromSnapshot({
   generatedAt: "2026-09-09T12:00:00Z",
   desks: [{ id: "j", money: { equity: 100, dayPnl: 0, totalPnl: 0 } }],
@@ -226,15 +260,28 @@ const scopedServerPoint = historyPointFromSnapshot({
 if (JSON.stringify(scopedServerPoint.accounting) !== JSON.stringify({ j: accounting })) {
   throw new Error("server history point must preserve J accounting basis");
 }
+const explicitlyBasedServerPoint = historyPointFromSnapshot({
+  generatedAt: "2026-09-10T12:30:00Z",
+  desks: [
+    { id: "joel", historyBasis: "joel.stage0-keep-excluded.v1", money: { equity: 5000, dayPnl: null, totalPnl: 0 } }
+  ],
+  totals: { equity: 5000, dayPnl: null, totalPnl: 0 }
+});
+if (JSON.stringify(explicitlyBasedServerPoint.historyBasis) !== JSON.stringify({ joel: "joel.stage0-keep-excluded.v1" })) {
+  throw new Error("server history point must preserve the explicit per-desk history basis");
+}
 const unavailableServerPoint = historyPointFromSnapshot({
   generatedAt: "2026-09-10T13:00:00Z",
   desks: [
-    { id: "j", accounting, money: { equity: null, dayPnl: null, totalPnl: null } },
+    { id: "j", money: { equity: null, dayPnl: null, totalPnl: null } },
     { id: "joe", money: { equity: 211, dayPnl: 2, totalPnl: 11 } },
     { id: "joel", money: { equity: 311, dayPnl: 3, totalPnl: 21 } }
   ],
   totals: { equity: null, dayPnl: null, totalPnl: null }
 });
+if (Object.prototype.hasOwnProperty.call(unavailableServerPoint, "accounting")) {
+  throw new Error("an unavailable untyped J row must remain explicitly without accounting metadata");
+}
 if (
   unavailableServerPoint.desks.j.equity !== null ||
   unavailableServerPoint.desks.j.totalPnl !== null ||
@@ -254,6 +301,10 @@ const restoredServerPoint = historyPointFromSnapshot({
   totals: { equity: 579, dayPnl: 6, totalPnl: 39 }
 });
 const unavailableWindow = [scopedServerPoint, unavailableServerPoint, restoredServerPoint];
+const trailingUnavailableJSeries = api.sparklineSamples(unavailableWindow.slice(0, 2), "all", "j");
+if (JSON.stringify(trailingUnavailableJSeries.map((sample) => sample.y)) !== JSON.stringify([50, null])) {
+  throw new Error("a trailing untyped all-null J row must preserve the last valid J basis and remain a gap");
+}
 const unavailableJSeries = api.sparklineSamples(unavailableWindow, "all", "j");
 if (JSON.stringify(unavailableJSeries.map((sample) => sample.y)) !== JSON.stringify([50, null, 55])) {
   throw new Error("J series must retain the explicit unavailable gap");
@@ -280,8 +331,21 @@ if (api.validateHistoryPayload(transitionPayload).length !== 3) {
   throw new Error("history points with optional per-desk accounting must be accepted");
 }
 const brokenJ = api.sparklineSamples(transitionPoints, "all", "j");
-if (brokenJ.length !== 4 || brokenJ[1].y !== null || brokenJ[2].y !== 50) {
-  throw new Error("J sparkline must insert a gap at the legacy-to-verified boundary");
+if (brokenJ.length !== 2 || brokenJ[0].y !== 50 || brokenJ[1].y !== 60) {
+  throw new Error("J sparkline must select only the newest verified accounting basis");
+}
+const changedKnownPeriodPoints = [
+  sameIdEarlierPeriod,
+  sameIdLaterPeriod,
+  {
+    ...sameIdLaterPeriod,
+    t: "2026-09-11T13:00:00Z",
+    desks: { j: { equity: 52 } }
+  }
+];
+const changedKnownPeriodSeries = api.basisAwareSeries(changedKnownPeriodPoints, "j");
+if (JSON.stringify(changedKnownPeriodSeries.map((sample) => sample.y)) !== JSON.stringify([51, 52])) {
+  throw new Error("a true accounting-period change must select only the new known period");
 }
 const unchangedJoe = api.sparklineSamples(transitionPoints, "all", "joe");
 if (unchangedJoe.length !== 3 || unchangedJoe.some((sample) => sample.y === null)) {
@@ -316,6 +380,108 @@ if (!malformedAccountingRejected) {
   throw new Error("malformed history accounting basis must be rejected");
 }
 
+const syntheticJoelBasisPoints = [
+  { t: "2026-09-08T12:00:00Z", desks: { j: { equity: 5000 }, joe: { equity: 5000 }, joel: { equity: 12000 } } },
+  { t: "2026-09-09T12:00:00Z", desks: { j: { equity: 5001 }, joe: { equity: 5000 }, joel: { equity: 11000 } } },
+  { t: "2026-09-10T12:00:00Z", desks: { j: { equity: 5002 }, joe: { equity: 5000 }, joel: { equity: 5000 } }, historyBasis: { joel: "joel.stage0-keep-excluded.v1" } },
+  { t: "2026-09-11T12:00:00Z", desks: { j: { equity: 5003 }, joe: { equity: 5000 }, joel: { equity: 5002 } }, historyBasis: { joel: "joel.stage0-keep-excluded.v1" } }
+];
+const joelLatest = api.basisAwareSeries(syntheticJoelBasisPoints, "joel");
+if (JSON.stringify(joelLatest.map((sample) => sample.y)) !== JSON.stringify([5000, 5002])) {
+  throw new Error("explicit ALL must select only Joel's latest compatible basis");
+}
+const visibleDomain = joelLatest.filter((sample) => Number.isFinite(sample.y)).map((sample) => sample.y);
+if (Math.min(...visibleDomain) !== 5000 || Math.max(...visibleDomain) !== 5002) {
+  throw new Error("incompatible legacy Joel values must not enter the visible y-domain");
+}
+const basisNotice = api.historyBasisNotice(syntheticJoelBasisPoints, ["j", "joe", "joel"], "all");
+if (basisNotice !== "This chart shows comparable records for Joel. Older or unidentified records are retained in history.json.") {
+  throw new Error("basis exclusion notice must explain retained older Joel observations honestly");
+}
+if (api.basisAwareSeries(syntheticJoelBasisPoints, "joe").length !== 4) {
+  throw new Error("Joe's independent untyped history must remain unchanged");
+}
+const latestAllCompare = api.sharedWindowCompare(syntheticJoelBasisPoints, ["j", "joe", "joel"], "all");
+if (!latestAllCompare.ok || latestAllCompare.startAt !== syntheticJoelBasisPoints[2].t || latestAllCompare.pointCount !== 2) {
+  throw new Error("all-bots compare must use the shared suffix on the latest compatible desk bases");
+}
+
+const missingLatestBasis = syntheticJoelBasisPoints.concat({
+  t: "2026-09-11T13:00:00Z",
+  desks: { joel: { equity: 5003 } }
+});
+const missingSelection = api.latestCompatibleBasis(missingLatestBasis, "joel");
+if (missingSelection.points.length !== 1 || missingSelection.excludedCount !== 4) {
+  throw new Error("a newest untyped observation must not be silently merged into an explicit basis");
+}
+const unidentifiedNotice = api.historyBasisNotice(missingLatestBasis, ["joel"], "all");
+if (unidentifiedNotice !== "This chart shows comparable records for Joel. Older or unidentified records are retained in history.json.") {
+  throw new Error("unidentified basis copy must avoid claiming whether old and new calculations match");
+}
+if (api.sharedWindowCompare(missingLatestBasis, ["j", "joel"], "all").ok) {
+  throw new Error("mixed missing basis metadata must not fabricate a comparison");
+}
+
+const literalUntypedIdPoints = [
+  { t: "2026-09-10T10:00:00Z", desks: { joel: { equity: 12000 } } },
+  { t: "2026-09-10T11:00:00Z", desks: { joel: { equity: 5000 } }, historyBasis: { joel: "untyped" } }
+];
+api.validateHistoryPayload({ schema: "inspr.joe.household.history.v1", points: literalUntypedIdPoints });
+const literalUntypedIdSeries = api.basisAwareSeries(literalUntypedIdPoints, "joel");
+if (literalUntypedIdSeries.length !== 1 || literalUntypedIdSeries[0].y !== 5000) {
+  throw new Error("a valid literal untyped basis id must remain distinct from absent basis metadata");
+}
+
+const sameTagAroundUnidentified = [
+  { t: "2026-09-10T10:00:00Z", desks: { joel: { equity: 5000 } }, historyBasis: { joel: "joel.synthetic.v1" } },
+  { t: "2026-09-10T11:00:00Z", desks: { joel: { equity: null, totalPnl: 0 } } },
+  { t: "2026-09-10T12:00:00Z", desks: { joel: { equity: 5001 } }, historyBasis: { joel: "joel.synthetic.v1" } }
+];
+const sameTagSeparatedSeries = api.basisAwareSeries(sameTagAroundUnidentified, "joel");
+if (sameTagSeparatedSeries.length !== 1 || sameTagSeparatedSeries[0].y !== 5001) {
+  throw new Error("an unidentified meaningful row must prevent matching tags from being joined across it");
+}
+const neutralSeparatedNotice = api.historyBasisNotice(sameTagAroundUnidentified, ["joel"], "all");
+if (neutralSeparatedNotice !== "This chart shows comparable records for Joel. Older or unidentified records are retained in history.json.") {
+  throw new Error("same tags separated by an unidentified meaningful row must use neutral history copy");
+}
+if (/changed/i.test(neutralSeparatedNotice)) {
+  throw new Error("history notice must not claim a known calculation change across unidentified records");
+}
+
+let malformedHistoryBasisRejected = false;
+try {
+  api.validateHistoryPayload({
+    schema: "inspr.joe.household.history.v1",
+    points: [{ ...syntheticJoelBasisPoints[2], historyBasis: { joel: "KEEP excluded current" } }]
+  });
+} catch {
+  malformedHistoryBasisRejected = true;
+}
+if (!malformedHistoryBasisRejected) {
+  throw new Error("malformed explicit history basis must be rejected");
+}
+
+const snapshotFixture = JSON.parse(
+  await readFile(resolve(repoRoot, "docs/examples/joe-data.sample.json"), "utf8")
+);
+snapshotFixture.desks.find((desk) => desk.id === "joel").historyBasis = "joel.stage0-keep-excluded.v1";
+if (!validateHouseholdSnapshot(snapshotFixture).ok) {
+  throw new Error("snapshot validator must accept a valid explicit per-desk history basis");
+}
+snapshotFixture.desks.find((desk) => desk.id === "joel").historyBasis = "KEEP excluded current";
+if (validateHouseholdSnapshot(snapshotFixture).ok) {
+  throw new Error("snapshot validator must reject a malformed explicit per-desk history basis");
+}
+
+if (api.basisAwareSeries([], "joel").length !== 0) {
+  throw new Error("empty history must remain honestly empty");
+}
+const oneCurrentPoint = api.basisAwareSeries(syntheticJoelBasisPoints.slice(0, 3), "joel");
+if (oneCurrentPoint.length !== 1 || oneCurrentPoint[0].y !== 5000) {
+  throw new Error("a single current-basis point must be retained without inventing a trend");
+}
+
 console.log(JSON.stringify({
   ok: true,
   checks: [
@@ -333,18 +499,35 @@ console.log(JSON.stringify({
     "shared-window-percent-compare",
     "incomplete-coverage-honest",
     "zero-baseline-honest",
+    "history-basis-adds-to-accounting-period-method",
     "legacy-server-history-unchanged",
+    "legacy-samples-byte-unchanged",
     "server-history-persists-accounting",
+    "server-history-persists-explicit-basis",
     "server-history-preserves-null",
     "j-unavailable-series-gap",
+    "j-trailing-untyped-null-preserves-last-valid",
     "j-gap-compare-blocked",
     "joe-joel-gap-unaffected",
     "accounting-history-optional",
-    "j-basis-boundary-gap",
+    "j-latest-basis-selection",
+    "j-true-period-change-selects-new-period",
     "joe-series-unchanged",
     "compatible-basis-compare",
     "joe-joel-compare-unchanged",
     "legacy-vs-verified-compare-blocked",
-    "malformed-history-accounting-rejected"
+    "malformed-history-accounting-rejected",
+    "joel-all-latest-basis-selection",
+    "joel-y-domain-excludes-legacy",
+    "basis-exclusion-notice",
+    "joe-independent-history-unchanged",
+    "all-bots-shared-latest-basis",
+    "mixed-missing-basis-honest",
+    "unidentified-basis-copy-honest",
+    "literal-untyped-id-distinct-from-absence",
+    "same-tag-unidentified-gap-neutral-copy",
+    "malformed-history-basis-rejected",
+    "snapshot-history-basis-validation",
+    "empty-current-one-point-honest"
   ]
 }, null, 2));

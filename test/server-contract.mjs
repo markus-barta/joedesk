@@ -282,6 +282,8 @@ describe("server contract", () => {
     assert.ok(history.body.points.length >= 1);
     assert.equal(history.body.points.at(-1).t, sample.generatedAt);
     assert.equal(history.body.points.at(-1).accounting, undefined);
+    assert.equal(history.body.points.at(-1).historyBasis, undefined);
+    const retainedLegacyPointBytes = JSON.stringify(history.body.points.at(-1));
 
     const scoped = structuredClone(sample);
     scoped.generatedAt = new Date(Date.parse(sample.generatedAt) + 1000).toISOString();
@@ -290,6 +292,7 @@ describe("server contract", () => {
       method: "execution-fifo-net-current-fx",
       detail: "Net of recorded fees; converted at observed FX. Earlier results unavailable.",
     };
+    scoped.desks.find((desk) => desk.id === "joel").historyBasis = "joel.stage0-keep-excluded.v1";
     const scopedPush = await jsonFetch("/joe/inbox", {
       method: "POST",
       headers: {
@@ -303,11 +306,15 @@ describe("server contract", () => {
     assert.deepEqual(scopedHistory.body.points.at(-1).accounting, {
       j: scoped.desks[0].accounting,
     });
+    assert.deepEqual(scopedHistory.body.points.at(-1).historyBasis, {
+      joel: "joel.stage0-keep-excluded.v1",
+    });
 
     const unavailable = structuredClone(scoped);
     unavailable.generatedAt = new Date(Date.parse(scoped.generatedAt) + 1000).toISOString();
     unavailable.source.label = "Synthetic J-unavailable contract fixture";
     unavailable.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
+    delete unavailable.desks[0].accounting;
     delete unavailable.desks[0].positions;
     unavailable.totals = { equity: null, dayPnl: null, totalPnl: null };
     const unavailablePush = await jsonFetch("/joe/inbox", {
@@ -324,6 +331,7 @@ describe("server contract", () => {
     assert.equal(Object.prototype.hasOwnProperty.call(unavailableData.body.desks[0], "positions"), false);
     const unavailableHistory = await jsonFetch("/joe/history.json");
     const unavailablePoint = unavailableHistory.body.points.at(-1);
+    assert.equal(unavailablePoint.accounting, undefined);
     assert.deepEqual(unavailablePoint.desks.j, unavailable.desks[0].money);
     assert.deepEqual(unavailablePoint.desks.joe, unavailable.desks[1].money);
     assert.deepEqual(unavailablePoint.desks.joel, unavailable.desks[2].money);
@@ -348,10 +356,35 @@ describe("server contract", () => {
       const expected = restored.desks.find((desk) => desk.id === deskId).money.equity;
       assert.deepEqual(restoredHistory.body.points.slice(-3).map((point) => point.desks[deskId].equity), [expected, expected, expected]);
     }
+    assert.equal(JSON.stringify(restoredHistory.body.points[0]), retainedLegacyPointBytes);
+    assert.deepEqual(restoredHistory.body.points.slice(-3).map((point) => point.historyBasis), [
+      { joel: "joel.stage0-keep-excluded.v1" },
+      { joel: "joel.stage0-keep-excluded.v1" },
+      { joel: "joel.stage0-keep-excluded.v1" },
+    ]);
 
     const dirEntries = await readdir(DATA_DIR);
     assert.ok(dirEntries.includes("data.json"));
     assert.ok(dirEntries.includes("history.json"));
+  });
+
+  test("POST /joe/inbox rejects malformed explicit history basis metadata", async () => {
+    assertServerAlive();
+    const sample = JSON.parse(
+      await readFile(join(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"),
+    );
+    sample.generatedAt = new Date(Date.now() + 60_000).toISOString();
+    sample.desks.find((desk) => desk.id === "joel").historyBasis = "KEEP excluded current";
+    const res = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(sample),
+    });
+    assert.equal(res.status, 422);
+    assert.ok(res.body.errors.some((error) => error.includes("historyBasis")));
   });
 
   test("unknown routes match server 404 contract", async () => {

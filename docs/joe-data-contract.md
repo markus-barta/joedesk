@@ -36,6 +36,20 @@ York), combines J and J2–J5, deducts recorded commissions, and converts using
 explicit observed FX. Unverified 2–3 September records are excluded rather
 than described as losses or lifetime performance.
 
+A desk may independently carry a `historyBasis` string: a stable, lowercase
+calculation-definition identifier (1–96 characters; letters, digits, dots, and
+hyphens). It is not a poll, deployment, or snapshot identifier. A producer
+must change it only when that desk's money definition becomes incompatible
+with its earlier observations. The corrected Joel Stage-0 projection uses
+`joel.stage0-keep-excluded.v1`; it excludes the grandfathered KEEP SXR8 and
+TSLA×1 positions from Joel money. The tag begins on the first newly published
+observation and must never be backdated onto existing history.
+
+`historyBasis` does not replace J's `accounting` object. J continues to use its
+verified execution-FIFO period and method metadata, while Joe and Joel remain
+independent desk series. An absent `historyBasis` retains legacy/untyped
+semantics and must not be guessed from an equity value.
+
 ### Position coverage semantics
 
 Position detail is optional at every level. A missing `positions` key means

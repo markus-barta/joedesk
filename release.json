@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "legacy",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "release_channel": "stable",
-  "release_sequence": 6,
-  "note": "Adds optional verified accounting periods, visible J-family reporting scope, and history/compare boundaries. Earlier unverified results remain separate; paper-only and JoeDesk SemVer lineage are retained."
+  "release_sequence": 7,
+  "note": "Distinguishes current desk calculations from incompatible retained history, preserving J reporting periods and unavailable gaps. Additive metadata; paper-only and JoeDesk SemVer lineage are retained."
 }
