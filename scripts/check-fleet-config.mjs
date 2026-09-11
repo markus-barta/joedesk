@@ -4,12 +4,13 @@ import { resolve } from "node:path";
 import { validateFleetConfig, nextFleetRevision } from "../fleet-config.mjs";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
-const [html, css, js, packageJson, schema, example] = await Promise.all([
+const [html, css, js, packageJson, schema, actionSchema, example] = await Promise.all([
   readFile(resolve(repoRoot, "public/joe/index.html"), "utf8"),
   readFile(resolve(repoRoot, "public/joe/joe.css"), "utf8"),
   readFile(resolve(repoRoot, "public/joe/joe.js"), "utf8"),
   readFile(resolve(repoRoot, "package.json"), "utf8").then(JSON.parse),
   readFile(resolve(repoRoot, "public/joe/fleet-config.schema.json"), "utf8").then(JSON.parse),
+  readFile(resolve(repoRoot, "public/joe/fleet-config-actions.schema.json"), "utf8").then(JSON.parse),
   readFile(resolve(repoRoot, "public/joe/fleet-config.example.json"), "utf8").then(JSON.parse),
 ]);
 
@@ -32,7 +33,9 @@ required((configHtml.match(/data-fleet-action="propagate"/g) || []).length === 2
 required(/id="fleetConfigClose"/.test(configHtml), "Flip back control is missing");
 required(!/id="fleetToast"/.test(configHtml) && html.indexOf('id="fleetToast"') > configEnd, "toast must live outside every transformed card ancestor");
 required(!/Day P&amp;L|Open P&amp;L|Virtual desk equity/.test(configHtml), "config plane must not contain financial-result copy");
-required(/REDACTED/i.test(configHtml) && !/(password|api[_ -]?key|bearer)[=:][^<\s]+/i.test(configHtml), "secret slots must remain redacted references");
+required(/Refs only/i.test(configHtml) && /agenix ref:/.test(configHtml) && /Janus ref:/.test(configHtml) && !/(password|api[_ -]?key|bearer)[=:][^<\s]+/i.test(configHtml), "secret slots must visibly remain reference-only");
+required(/id="fleetActionLog"/.test(configHtml) && /Durable SSO-attributed outcomes/.test(configHtml), "visible durable action log is missing");
+required(/secret values never logged/.test(configHtml), "action log must state its redaction boundary");
 
 required(/\.board-stage\s*\{[^}]*perspective:/s.test(css), "3D scene perspective is missing");
 required(/\.board-flipper\s*\{[^}]*transition:\s*transform\s+760ms/s.test(css), "rigid card transition is missing");
@@ -55,18 +58,23 @@ for (const [id, section] of Object.entries(model)) {
   required(section.fields.every((field) => /^[A-Za-z][A-Za-z0-9.]*$/.test(field.key) && typeof field.value === "string"), `${id} has an invalid preview field`);
   required(section.fields.every((field) => configHtml.includes(`data-fleet-readout="${field.key}"`)), `${id} summary does not mirror every preview field`);
 }
-required(/\.\/fleet-config\.json/.test(js) && /\.\/fleet-config\/propagate/.test(js), "Fleet Config read/write endpoints are missing");
+required(/\.\/fleet-config\.json/.test(js) && /\.\/fleet-config\/propagate/.test(js) && /\.\/fleet-config\/actions\.json/.test(js), "Fleet Config read/write/action-log endpoints are missing");
 required(/fleetDiffFingerprint !== fleetChangeFingerprint/.test(js), "Confirm must require the current diff preview");
 required(/fleetConfirmedFingerprint !== fleetChangeFingerprint/.test(js), "Propagate must require the current confirmed diff");
 required(/must be a decimal number/.test(js), "number fields must reject implicit JavaScript coercions");
 required(/Array\.isArray\(result\.errors\)/.test(js), "server field errors must reach the operator");
 required(/field\.editable !== false/.test(js), "stored previews must not override read-only fields");
-required(/secretSlots/.test(js) && /editable: false/.test(js), "secret slots must remain read-only in HOSTD-49");
+required(/secretSlots/.test(js) && /editable: false/.test(js), "secret slots must remain reference-only and read-only");
+required(/HOSTD-52 owns rotation/.test(js) && !/data-fleet-action="rotate"/.test(configHtml), "secret rotation must remain outside this cut");
+required(/Propagation failed for/.test(js) && /Propagated " \+ result\.rev \+ ": "/.test(js), "propagation outcome toasts must name revision and changed keys");
 required(/front\.inert = showFleet/.test(js) && /back\.inert = !showFleet/.test(js), "inactive face must be removed from interaction");
 required(/dataset\.joePlane = showFleet \? "fleet-config" : "trading"/.test(js), "active plane state is missing");
 required(/rev <span id="fleetRevision">fc-000000<\/span>/.test(configHtml), "Fleet Config fallback revision is missing");
 required(schema.$id && schema.properties?.mode?.const === "paper", "Fleet Config schema must be paper-only");
 required(schema.properties?.secretSlots?.$ref || schema.properties?.secretSlots, "Fleet Config schema must define secret slots");
+required(actionSchema.properties?.schema?.const === "inspr.joe.fleet-config.actions.v1", "Fleet action-log schema id is invalid");
+required(actionSchema.properties?.entries?.maxItems === 200, "Fleet action log must be bounded");
+required(actionSchema.$defs?.action?.properties?.changedKeys && actionSchema.$defs?.action?.properties?.outcome, "Fleet action schema must expose redacted changed keys and outcomes");
 const validated = validateFleetConfig(example);
 required(validated.ok, `Fleet Config example is invalid: ${validated.errors.join("; ")}`);
 required(example.rev === "fc-000000" && nextFleetRevision(example.rev) === "fc-000001", "Fleet Config revision fixture is invalid");

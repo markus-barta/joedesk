@@ -7,11 +7,12 @@
       {
         version: "26.09.11",
         date: "2026-09-11",
-        title: "Fleet Config reaches the paper fleet",
+        title: "Fleet Config reaches the paper fleet with an audit trail",
         changes: [
           "Diff and Confirm now guard every Fleet Config propagation from the back plane.",
-          "Each propagation atomically writes a new shared revision for Amy and desks to read directly.",
-          "The v1 schema keeps the mode paper-only and accepts encrypted secret-slot reference names, never secret values.",
+          "Each propagation writes a new shared revision for Amy and desks plus a durable, SSO-attributed outcome containing changed-key names only.",
+          "The plane shows success and failure toasts and the latest propagation records without logging config values.",
+          "Secret slots show agenix and Janus references only; values and rotation remain outside JoeDesk.",
         ],
       },
       {

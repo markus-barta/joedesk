@@ -347,7 +347,7 @@
             <span class="fleet-row-main">
               <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg>
               <span class="fleet-row-copy"><strong>Secret slots</strong><small>Encrypted references</small></span>
-              <span class="fleet-row-values"><em class="fleet-redacted" data-fleet-readout="displayMode" data-fleet-display-separator=" ">Redacted</em><span><span data-fleet-readout="agenixRefs" data-fleet-prefix="agenix: ">agenix: joe-board-push-token</span> · <span data-fleet-readout="janusRefs" data-fleet-prefix="Janus: ">Janus: none</span></span></span>
+              <span class="fleet-row-values"><em class="fleet-redacted" data-fleet-readout="displayMode" data-fleet-display-separator=" ">Refs only</em><span><span data-fleet-readout="agenixRefs" data-fleet-prefix="agenix ref: ">agenix ref: joe-board-push-token</span> · <span data-fleet-readout="janusRefs" data-fleet-prefix="Janus ref: ">Janus ref: none</span></span></span>
               <span class="fleet-chevron" aria-hidden="true">›</span>
             </span>
           </button>
@@ -371,6 +371,19 @@
         </div>
       </aside>
     </div>
+
+    <section class="fleet-action-log fleet-panel" aria-labelledby="fleetActionLogTitle">
+      <header class="fleet-action-log-head">
+        <div>
+          <h2 id="fleetActionLogTitle">Propagation log</h2>
+          <p>Durable SSO-attributed outcomes · changed keys only · secret values never logged</p>
+        </div>
+        <button class="fleet-button fleet-action-refresh" id="fleetActionLogRefresh" type="button">Refresh</button>
+      </header>
+      <ol class="fleet-action-list" id="fleetActionLog" aria-live="polite">
+        <li class="fleet-action-empty">No propagation attempts recorded yet.</li>
+      </ol>
+    </section>
 
     <footer class="fleet-edit-strip">
       <strong>Edit selected values</strong>

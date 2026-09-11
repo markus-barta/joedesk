@@ -3,13 +3,13 @@
  * Joe household board service (csb0).
  * Serves static /joe/ UI + schemas + latest snapshot + history + Fleet Config.
  * Accepts POST /joe/inbox with Bearer token (machine push; no browser OAuth).
- * Accepts same-origin POST /joe/fleet-config/propagate behind external Zitadel SSO.
+ * Accepts same-origin POST /joe/fleet-config/propagate with proxy-supplied Zitadel identity.
  * Paper mutation only — never talks to IB, never places orders.
  */
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { validateHouseholdSnapshot } from "./validate.mjs";
@@ -22,7 +22,11 @@ const DATA_DIR = "/var/lib/joe-board";
 const DATA_FILE = path.join(DATA_DIR, "data.json");
 const HISTORY_FILE = path.join(DATA_DIR, "history.json");
 const FLEET_CONFIG_FILE = path.join(DATA_DIR, "fleet-config.json");
+const FLEET_ACTION_LOG_FILE = path.join(DATA_DIR, "fleet-config-actions.json");
 const FLEET_CONFIG_EXAMPLE = path.join(PUBLIC, "fleet-config.example.json");
+const FLEET_ACTION_LOG_SCHEMA = "inspr.joe.fleet-config.actions.v1";
+const FLEET_ACTION_LOG_MAX = 200;
+const FLEET_ACTOR = /^[A-Za-z0-9][A-Za-z0-9@._+-]{0,159}$/;
 const HISTORY_SCHEMA = "inspr.joe.household.history.v1";
 const HISTORY_MAX_POINTS = 10000;
 const HISTORY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
@@ -38,6 +42,7 @@ const STATIC_FILES = Object.freeze({
   "/joe/index.html": "index.html",
   "/joe/data.schema.json": "data.schema.json",
   "/joe/fleet-config.schema.json": "fleet-config.schema.json",
+  "/joe/fleet-config-actions.schema.json": "fleet-config-actions.schema.json",
   "/joe/fleet-config.example.json": "fleet-config.example.json",
   "/joe/joe.css": "joe.css",
   "/joe/joe.js": "joe.js",
@@ -86,11 +91,12 @@ function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-function atomicWriteJson(file, obj) {
+function atomicWriteJson(file, obj, mode = 0o644) {
   ensureDataDir();
   const text = JSON.stringify(obj, null, 2) + "\n";
   const tmp = `${file}.next`;
-  fs.writeFileSync(tmp, text, { mode: 0o644 });
+  fs.writeFileSync(tmp, text, { mode });
+  fs.chmodSync(tmp, mode);
   fs.renameSync(tmp, file);
 }
 
@@ -110,6 +116,112 @@ function readFleetConfig() {
     if (!err || err.code !== "ENOENT") throw err;
     return parseFleetConfig(fs.readFileSync(FLEET_CONFIG_EXAMPLE, "utf8"), FLEET_CONFIG_EXAMPLE);
   }
+}
+
+function emptyFleetActionLog() {
+  return { schema: FLEET_ACTION_LOG_SCHEMA, entries: [] };
+}
+
+function readFleetActionLog() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(FLEET_ACTION_LOG_FILE, "utf8"));
+    if (!parsed || parsed.schema !== FLEET_ACTION_LOG_SCHEMA || !Array.isArray(parsed.entries)) {
+      throw new Error("invalid Fleet Config action log");
+    }
+    return parsed;
+  } catch (err) {
+    if (err && err.code === "ENOENT") return emptyFleetActionLog();
+    throw err;
+  }
+}
+
+function writeFleetActionLog(log) {
+  atomicWriteJson(FLEET_ACTION_LOG_FILE, {
+    schema: FLEET_ACTION_LOG_SCHEMA,
+    entries: log.entries.slice(-FLEET_ACTION_LOG_MAX),
+  }, 0o600);
+}
+
+function fleetActor(req) {
+  const actor = String(req.headers["x-auth-request-user"] || "").trim();
+  return FLEET_ACTOR.test(actor) ? actor : "";
+}
+
+const FLEET_AUDIT_PATHS = Object.freeze([
+  ["mode", "mode"],
+  ["quota.grok.reservePct", "quota.grok.reservePct"],
+  ["quota.codex.reservePct", "quota.codex.reservePct"],
+  ["quota.behavior.green", "quota.behavior.green"],
+  ["quota.behavior.amber", "quota.behavior.amber"],
+  ["quota.behavior.red", "quota.behavior.red"],
+  ["desks.maxBusyDesks", "desks.maxBusyDesks"],
+  ["desks.stage0.capEur", "desks.stage0.capEur"],
+  ["desks.keep", "desks.keep"],
+  ["cadence.timeZone", "cadence.timeZone"],
+  ["cadence.usOpenArm", "cadence.usOpenArm"],
+  ["cadence.deskWatch", "cadence.deskWatch"],
+  ["cadence.darwin", "cadence.darwin"],
+  ["cadence.quotaGovernor", "cadence.quotaGovernor"],
+  ["cadence.wakeWindows", "cadence.wakeWindows"],
+  ["amy.routines.morning", "amy.routines.morning"],
+  ["amy.routines.review", "amy.routines.review"],
+  ["amy.routines.close", "amy.routines.close"],
+  ["mac.shared.configPath", "mac.shared.configPath"],
+  ["mac.shared.docsPath", "mac.shared.docsPath"],
+  ["mac.knobs.syncMode", "mac.knobs.syncMode"],
+  ["tools", "tools.[read-only]"],
+  ["secretSlots", "secretSlots.[redacted]"],
+]);
+
+function fleetPathValue(source, dottedPath) {
+  return dottedPath.split(".").reduce(
+    (value, key) => (value !== null && typeof value === "object" ? value[key] : undefined),
+    source,
+  );
+}
+
+function fleetChangedKeys(before, after) {
+  if (!after || typeof after !== "object" || Array.isArray(after)) return [];
+  return FLEET_AUDIT_PATHS
+    .filter(([pathName]) => !isDeepStrictEqual(fleetPathValue(before, pathName), fleetPathValue(after, pathName)))
+    .map(([, auditName]) => auditName);
+}
+
+function fleetAction({ actor, revBefore, revAfter, changedKeys, outcome, reason, id }) {
+  return {
+    id: id || `fa-${Date.now()}-${randomUUID().slice(0, 8)}`,
+    at: new Date().toISOString(),
+    actor,
+    revBefore: typeof revBefore === "string" ? revBefore : null,
+    revAfter: typeof revAfter === "string" ? revAfter : null,
+    changedKeys: Array.isArray(changedKeys) ? changedKeys.slice(0, FLEET_AUDIT_PATHS.length) : [],
+    outcome,
+    reason,
+  };
+}
+
+function appendFleetAction(entry) {
+  const log = readFleetActionLog();
+  log.entries.push(entry);
+  writeFleetActionLog(log);
+  return entry;
+}
+
+function sendFleetFailure(res, status, error, { actor, current = null, candidate = null, reason, extra = {} }) {
+  let action = null;
+  try {
+    action = appendFleetAction(fleetAction({
+      actor,
+      revBefore: current?.rev,
+      revAfter: current?.rev,
+      changedKeys: fleetChangedKeys(current, candidate),
+      outcome: "failure",
+      reason,
+    }));
+  } catch (auditError) {
+    console.error("fleet action log write failed", auditError);
+  }
+  sendJson(res, status, { ok: false, error, ...extra, ...(action ? { action } : { audit: { recorded: false } }) });
 }
 
 function requestIsSameOrigin(req) {
@@ -368,19 +480,35 @@ function sendFleetConfig(req, res) {
   sendJson(res, 200, config, { ETag: etag, "Cache-Control": "private, no-cache" });
 }
 
+function sendFleetActions(res) {
+  try {
+    sendJson(res, 200, readFleetActionLog(), { "Cache-Control": "private, no-cache" });
+  } catch (err) {
+    console.error("fleet action log read failed", err);
+    sendJson(res, 503, { ok: false, error: "fleet action log unavailable" });
+  }
+}
+
 async function handleFleetPropagate(req, res) {
   if (req.method !== "POST") {
     sendJson(res, 405, { ok: false, error: "method not allowed" });
     return;
   }
-  // The route inherits JoeDesk's Zitadel reverse-proxy boundary. These browser
-  // signals additionally reject cross-site and direct unauthenticated writes.
+  // Traefik strips the incoming identity header and oauth2-proxy supplies this
+  // value only after Zitadel authentication. Never accept a browser-supplied
+  // identity through the JSON envelope.
+  const actor = fleetActor(req);
+  if (!actor) {
+    sendJson(res, 403, { ok: false, error: "Zitadel-authenticated user required" });
+    return;
+  }
+  // Same-origin browser signals additionally reject cross-site writes.
   if (!requestIsSameOrigin(req)) {
-    sendJson(res, 403, { ok: false, error: "same-origin authenticated browser required" });
+    sendFleetFailure(res, 403, "same-origin authenticated browser required", { actor, reason: "origin_rejected" });
     return;
   }
   if (!String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) {
-    sendJson(res, 415, { ok: false, error: "content-type must be application/json" });
+    sendFleetFailure(res, 415, "content-type must be application/json", { actor, reason: "content_type_rejected" });
     return;
   }
 
@@ -388,7 +516,10 @@ async function handleFleetPropagate(req, res) {
   try {
     raw = await readBody(req, MAX_BODY);
   } catch (err) {
-    sendJson(res, err.code === "TOO_LARGE" ? 413 : 400, { ok: false, error: err.code === "TOO_LARGE" ? "body too large" : "bad body" });
+    sendFleetFailure(res, err.code === "TOO_LARGE" ? 413 : 400, err.code === "TOO_LARGE" ? "body too large" : "bad body", {
+      actor,
+      reason: err.code === "TOO_LARGE" ? "body_too_large" : "body_rejected",
+    });
     return;
   }
 
@@ -396,11 +527,11 @@ async function handleFleetPropagate(req, res) {
   try {
     body = JSON.parse(raw.toString("utf8"));
   } catch {
-    sendJson(res, 400, { ok: false, error: "invalid json" });
+    sendFleetFailure(res, 400, "invalid json", { actor, reason: "json_rejected" });
     return;
   }
   if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => !["baseRev", "config"].includes(key)) || !Object.hasOwn(body, "baseRev") || !Object.hasOwn(body, "config")) {
-    sendJson(res, 422, { ok: false, error: "propagate envelope is invalid" });
+    sendFleetFailure(res, 422, "propagate envelope is invalid", { actor, candidate: body?.config, reason: "envelope_rejected" });
     return;
   }
 
@@ -409,44 +540,124 @@ async function handleFleetPropagate(req, res) {
     current = readFleetConfig();
   } catch (err) {
     console.error("fleet config read failed", err);
-    sendJson(res, 503, { ok: false, error: "fleet config unavailable" });
+    sendFleetFailure(res, 503, "fleet config unavailable", { actor, candidate: body.config, reason: "config_unavailable" });
     return;
   }
   if (body.baseRev !== current.rev || body.config?.rev !== body.baseRev) {
-    sendJson(res, 409, { ok: false, error: "fleet config revision conflict", currentRev: current.rev });
+    sendFleetFailure(res, 409, "fleet config revision conflict", {
+      actor,
+      current,
+      candidate: body.config,
+      reason: "revision_conflict",
+      extra: { currentRev: current.rev },
+    });
     return;
   }
 
   const candidateResult = validateFleetConfig(body.config);
   if (!candidateResult.ok) {
-    sendJson(res, 422, { ok: false, error: "schema validation failed", errors: candidateResult.errors.slice(0, 20) });
+    sendFleetFailure(res, 422, "schema validation failed", {
+      actor,
+      current,
+      candidate: body.config,
+      reason: "schema_rejected",
+      extra: { errors: candidateResult.errors.slice(0, 20) },
+    });
     return;
   }
   if (!isDeepStrictEqual(body.config.tools, current.tools)) {
-    sendJson(res, 422, { ok: false, error: "tools are read-only" });
+    sendFleetFailure(res, 422, "tools are read-only", { actor, current, candidate: body.config, reason: "read_only_tools" });
     return;
   }
   if (!isDeepStrictEqual(body.config.secretSlots, current.secretSlots)) {
-    sendJson(res, 422, { ok: false, error: "secret slots are read-only in HOSTD-49" });
+    sendFleetFailure(res, 422, "secret slots are reference-only and read-only; rotation remains HOSTD-52", {
+      actor,
+      current,
+      candidate: body.config,
+      reason: "read_only_secret_slots",
+    });
     return;
   }
   const comparable = structuredClone(body.config);
   comparable.rev = current.rev;
   comparable.updatedAt = current.updatedAt;
   if (isDeepStrictEqual(comparable, current)) {
-    sendJson(res, 422, { ok: false, error: "fleet config has no changes" });
+    sendFleetFailure(res, 422, "fleet config has no changes", { actor, current, candidate: body.config, reason: "no_changes" });
     return;
   }
 
   let next;
+  let pendingAction;
+  let actionLog;
   try {
     next = withNextFleetRevision(body.config, current.rev);
     const nextResult = validateFleetConfig(next);
     if (!nextResult.ok) throw new Error(nextResult.errors.slice(0, 5).join("; "));
+    actionLog = readFleetActionLog();
+    pendingAction = fleetAction({
+      actor,
+      revBefore: current.rev,
+      revAfter: next.rev,
+      changedKeys: fleetChangedKeys(current, next),
+      outcome: "pending",
+      reason: "write_started",
+    });
+    actionLog.entries.push(pendingAction);
+    writeFleetActionLog(actionLog);
     atomicWriteJson(FLEET_CONFIG_FILE, next);
   } catch (err) {
     console.error("fleet config atomic write failed", err);
+    if (pendingAction && actionLog) {
+      try {
+        actionLog.entries[actionLog.entries.length - 1] = fleetAction({
+          id: pendingAction.id,
+          actor,
+          revBefore: current.rev,
+          revAfter: current.rev,
+          changedKeys: pendingAction.changedKeys,
+          outcome: "failure",
+          reason: "store_failed",
+        });
+        writeFleetActionLog(actionLog);
+      } catch (auditError) {
+        console.error("fleet action log failure update failed", auditError);
+      }
+    } else {
+      try {
+        appendFleetAction(fleetAction({
+          actor,
+          revBefore: current.rev,
+          revAfter: current.rev,
+          changedKeys: fleetChangedKeys(current, body.config),
+          outcome: "failure",
+          reason: "store_failed",
+        }));
+      } catch (auditError) {
+        console.error("fleet action log write failed", auditError);
+      }
+    }
     sendJson(res, 500, { ok: false, error: "fleet config store failed" });
+    return;
+  }
+
+  let action;
+  try {
+    action = fleetAction({
+      id: pendingAction.id,
+      actor,
+      revBefore: current.rev,
+      revAfter: next.rev,
+      changedKeys: pendingAction.changedKeys,
+      outcome: "success",
+      reason: "propagated",
+    });
+    actionLog.entries[actionLog.entries.length - 1] = action;
+    writeFleetActionLog(actionLog);
+  } catch (err) {
+    // The durable pending record is intentionally retained: it never falsely
+    // claims a completed audit outcome if finalization fails after config write.
+    console.error("fleet action log finalize failed", err);
+    sendJson(res, 500, { ok: false, error: "fleet config stored but action log finalization failed", currentRev: next.rev });
     return;
   }
 
@@ -462,9 +673,8 @@ async function handleFleetPropagate(req, res) {
       consumers: ["amy", "desks"],
       reload: "read-on-revision",
     },
+    action,
     hooks: {
-      actionLog: "HOSTD-50",
-      secretSlots: "HOSTD-51",
       rotation: "HOSTD-52",
     },
   });
@@ -473,6 +683,11 @@ async function handleFleetPropagate(req, res) {
 function handleStatic(req, res, urlPath) {
   if (urlPath === "/joe/fleet-config.json") {
     sendFleetConfig(req, res);
+    return;
+  }
+
+  if (urlPath === "/joe/fleet-config/actions.json") {
+    sendFleetActions(res);
     return;
   }
 

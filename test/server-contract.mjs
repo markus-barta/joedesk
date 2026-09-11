@@ -17,6 +17,13 @@ const DATA_DIR = "/var/lib/joe-board";
 const BIND_PORT = 8080;
 const TOKEN = "joedesk-isolated-contract-fixture";
 const BASE = `http://127.0.0.1:${BIND_PORT}`;
+const FLEET_ACTOR = "hostd-contract-user";
+const fleetWriteHeaders = () => ({
+  "content-type": "application/json",
+  origin: BASE,
+  "sec-fetch-site": "same-origin",
+  "x-auth-request-user": FLEET_ACTOR,
+});
 const repoRoot = resolve(import.meta.dirname, "..");
 
 const DOCKER_INVOCATION = [
@@ -212,7 +219,7 @@ describe("server contract", () => {
 
   test("static UI assets are served with JoeVersion from source", async () => {
     assertServerAlive();
-    for (const path of ["/joe/", "/joe/joe.js", "/joe/joe-version.js", "/joe/data.schema.json", "/joe/fleet-config.schema.json", "/joe/fleet-config.example.json"]) {
+    for (const path of ["/joe/", "/joe/joe.js", "/joe/joe-version.js", "/joe/data.schema.json", "/joe/fleet-config.schema.json", "/joe/fleet-config-actions.schema.json", "/joe/fleet-config.example.json"]) {
       const res = await fetch(`${BASE}${path}`);
       assert.equal(res.status, 200, path);
       const text = await res.text();
@@ -231,37 +238,46 @@ describe("server contract", () => {
     assert.equal(initial.body.mode, "paper");
     assert.equal(initial.body.rev, "fc-000000");
     assert.equal(initial.headers.get("etag"), '"fc-000000"');
+    const emptyActions = await jsonFetch("/joe/fleet-config/actions.json");
+    assert.equal(emptyActions.status, 200);
+    assert.deepEqual(emptyActions.body, { schema: "inspr.joe.fleet-config.actions.v1", entries: [] });
 
-    const missingBrowserBoundary = await jsonFetch("/joe/fleet-config/propagate", {
+    const anonymousWrite = await jsonFetch("/joe/fleet-config/propagate", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
       body: JSON.stringify({ baseRev: initial.body.rev, config: initial.body }),
     });
-    assert.equal(missingBrowserBoundary.status, 403);
+    assert.equal(anonymousWrite.status, 403);
+    assert.equal(anonymousWrite.body.error, "Zitadel-authenticated user required");
+    assert.deepEqual((await jsonFetch("/joe/fleet-config/actions.json")).body.entries, []);
 
     const invalid = structuredClone(initial.body);
     invalid.secretSlots.agenix = ["NOT-A-REFERENCE"];
     const rejected = await jsonFetch("/joe/fleet-config/propagate", {
       method: "POST",
-      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
+      headers: fleetWriteHeaders(),
       body: JSON.stringify({ baseRev: initial.body.rev, config: invalid }),
     });
     assert.equal(rejected.status, 422);
     assert.equal(rejected.body.error, "schema validation failed");
+    assert.equal(rejected.body.action.actor, FLEET_ACTOR);
+    assert.deepEqual(rejected.body.action.changedKeys, ["secretSlots.[redacted]"]);
+    assert.equal(rejected.body.action.outcome, "failure");
 
     const protectedSlot = structuredClone(initial.body);
     protectedSlot.secretSlots.janus = ["paper-session"];
     const protectedSlotResult = await jsonFetch("/joe/fleet-config/propagate", {
       method: "POST",
-      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
+      headers: fleetWriteHeaders(),
       body: JSON.stringify({ baseRev: initial.body.rev, config: protectedSlot }),
     });
     assert.equal(protectedSlotResult.status, 422);
-    assert.equal(protectedSlotResult.body.error, "secret slots are read-only in HOSTD-49");
+    assert.equal(protectedSlotResult.body.error, "secret slots are reference-only and read-only; rotation remains HOSTD-52");
+    assert.deepEqual(protectedSlotResult.body.action.changedKeys, ["secretSlots.[redacted]"]);
 
     const noChange = await jsonFetch("/joe/fleet-config/propagate", {
       method: "POST",
-      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
+      headers: fleetWriteHeaders(),
       body: JSON.stringify({ baseRev: initial.body.rev, config: initial.body }),
     });
     assert.equal(noChange.status, 422);
@@ -271,7 +287,7 @@ describe("server contract", () => {
     candidate.desks.maxBusyDesks = 4;
     const propagated = await jsonFetch("/joe/fleet-config/propagate", {
       method: "POST",
-      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
+      headers: fleetWriteHeaders(),
       body: JSON.stringify({ baseRev: initial.body.rev, config: candidate }),
     });
     assert.equal(propagated.status, 200);
@@ -279,6 +295,11 @@ describe("server contract", () => {
     assert.equal(propagated.body.rev, "fc-000001");
     assert.equal(propagated.body.config.mode, "paper");
     assert.equal(propagated.body.config.desks.maxBusyDesks, 4);
+    assert.deepEqual(propagated.body.action.changedKeys, ["desks.maxBusyDesks"]);
+    assert.equal(propagated.body.action.actor, FLEET_ACTOR);
+    assert.equal(propagated.body.action.revBefore, "fc-000000");
+    assert.equal(propagated.body.action.revAfter, "fc-000001");
+    assert.equal(propagated.body.action.outcome, "success");
     assert.deepEqual(propagated.body.adapter, {
       id: "shared-file",
       status: "written",
@@ -291,6 +312,15 @@ describe("server contract", () => {
     assert.deepEqual(stored, propagated.body.config);
     assert.equal((await stat(join(DATA_DIR, "fleet-config.json"))).mode & 0o777, 0o644);
     assert.equal((await readdir(DATA_DIR)).includes("fleet-config.json.next"), false);
+    const storedActionsText = await readFile(join(DATA_DIR, "fleet-config-actions.json"), "utf8");
+    const storedActions = JSON.parse(storedActionsText);
+    assert.equal((await stat(join(DATA_DIR, "fleet-config-actions.json"))).mode & 0o777, 0o600);
+    assert.equal(storedActions.schema, "inspr.joe.fleet-config.actions.v1");
+    assert.equal(storedActions.entries.at(-1).outcome, "success");
+    assert.equal(storedActions.entries.at(-1).actor, FLEET_ACTOR);
+    assert.equal(storedActions.entries.at(-1).changedKeys[0], "desks.maxBusyDesks");
+    assert.equal(storedActionsText.includes("NOT-A-REFERENCE"), false);
+    assert.equal(storedActionsText.includes("paper-session"), false);
 
     const current = await jsonFetch("/joe/fleet-config.json");
     assert.equal(current.body.rev, "fc-000001");
@@ -299,11 +329,17 @@ describe("server contract", () => {
     assert.equal(notModified.headers.get("cache-control"), "private, no-cache");
     const stale = await jsonFetch("/joe/fleet-config/propagate", {
       method: "POST",
-      headers: { "content-type": "application/json", origin: BASE, "sec-fetch-site": "same-origin" },
+      headers: fleetWriteHeaders(),
       body: JSON.stringify({ baseRev: initial.body.rev, config: candidate }),
     });
     assert.equal(stale.status, 409);
     assert.equal(stale.body.currentRev, "fc-000001");
+    assert.equal(stale.body.action.outcome, "failure");
+    const actions = await jsonFetch("/joe/fleet-config/actions.json");
+    assert.equal(actions.status, 200);
+    assert.equal(actions.body.entries.length, 5);
+    assert.deepEqual(actions.body.entries.map((entry) => entry.outcome), ["failure", "failure", "failure", "success", "failure"]);
+    assert.ok(actions.body.entries.every((entry) => entry.actor === FLEET_ACTOR));
 
     await writeFile(join(DATA_DIR, "fleet-config.json"), '{"schema":"invalid"}\n');
     const unavailable = await jsonFetch("/joe/fleet-config.json");

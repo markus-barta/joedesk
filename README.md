@@ -18,6 +18,7 @@ This repo inherits the source availability of those trees. Do not add license cl
 - Node.js 22+
 - Server data store at `/var/lib/joe-board` (fixed path; provision on the host or in a container volume)
 - Fleet Config adapter at `/var/lib/joe-board/fleet-config.json` (created atomically on first propagation; mode is fixed to `paper`)
+- Fleet Config action log at `/var/lib/joe-board/fleet-config-actions.json` (latest 200 attributed outcomes; changed-key names only)
 - Push token via `/run/secrets/joe-board-push-token` or `JOE_INBOX_TOKEN` (≥16 chars) when the secret file is absent
 
 ## Setup
@@ -92,7 +93,7 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 
 ### Read routes — external OAuth
 
-Browser GET routes (`/joe/`, `/joe/data.json`, `/joe/history.json`, static assets) have **no built-in OAuth**. Authentication for read access is **external**: configure OAuth (or another access gate) in a trusted reverse proxy in front of this service.
+Browser GET routes (`/joe/`, `/joe/data.json`, `/joe/history.json`, `/joe/fleet-config/actions.json`, static assets) have **no built-in OAuth**. Authentication for read access is **external**: configure OAuth (or another access gate) in a trusted reverse proxy in front of this service.
 
 The UI gates non-canonical hosts client-side (privacy stub). That is UX only, not a network security boundary.
 
@@ -100,9 +101,13 @@ The UI gates non-canonical hosts client-side (privacy stub). That is UX only, no
 
 `POST /joe/inbox` accepts machine pushes with `Authorization: Bearer <token>`. Configure the token via the secret file or `JOE_INBOX_TOKEN`. No browser session or OAuth on this route.
 
-`POST /joe/fleet-config/propagate` accepts the flip plane's JSON `{baseRev, config}` envelope. It requires same-origin browser headers and **must remain behind the same trusted Zitadel SSO reverse proxy as `/joe/`**. The server validates the strict paper-only v1 schema, rejects stale revisions, assigns the next `fc-NNNNNN` revision, and atomically renames it into `/var/lib/joe-board/fleet-config.json` with mode `0644`.
+`POST /joe/fleet-config/propagate` accepts the flip plane's JSON `{baseRev, config}` envelope. It requires same-origin browser headers plus the proxy-supplied `X-Auth-Request-User` identity and **must remain behind the same trusted Zitadel SSO reverse proxy as `/joe/`**. The proxy must strip any client-supplied copy of that header before oauth2-proxy supplies the authenticated Zitadel identity; never expose this route directly. The server validates the strict paper-only v1 schema, rejects stale revisions, assigns the next `fc-NNNNNN` revision, and atomically renames it into `/var/lib/joe-board/fleet-config.json` with mode `0644`.
 
-Amy and desk processes consume that JSON file directly and reload only when its top-level `rev` changes; they never scrape JoeDesk HTML. `GET /joe/fleet-config.json` exposes the same current document to the authenticated board. The checked-in `public/joe/fleet-config.example.json` is revision `fc-000000` until the first write. Secret slots contain agenix/Janus reference names only.
+Amy and desk processes consume that JSON file directly and reload only when its top-level `rev` changes; they never scrape JoeDesk HTML. `GET /joe/fleet-config.json` exposes the same current document to the authenticated board. The checked-in `public/joe/fleet-config.example.json` is revision `fc-000000` until the first write.
+
+Every authenticated propagation outcome is stored in `/var/lib/joe-board/fleet-config-actions.json` with mode `0600` and exposed to the authenticated plane at `GET /joe/fleet-config/actions.json`. Entries contain the timestamp, SSO identity, before/after revisions, approved changed-key names, outcome and a fixed reason code. They never contain before/after values; any attempted secret-slot change is recorded only as `secretSlots.[redacted]`.
+
+`secretSlots.agenix` and `secretSlots.janus` contain capability/path reference names only. The values behind those references stay in the existing AGE/agenix or Janus operator workflow and never enter Fleet Config, browser previews, diffs, toasts, or action records. Slots are read-only in this cut; HOSTD-52 remains the rotation backlog item.
 
 ### Outside this app
 
@@ -112,12 +117,12 @@ Amy and desk processes consume that JSON file directly and reload only when its 
 
 ### Preserved contracts
 
-- Storage: `/var/lib/joe-board/data.json`, `history.json`, `fleet-config.json`
+- Storage: `/var/lib/joe-board/data.json`, `history.json`, `fleet-config.json`, `fleet-config-actions.json`
 - Browser `localStorage` keys: `joe-board-layout-v1`, `joe-board-named-layouts-v1`, `joe-board-active-layout-v1`, `joe-board-grid-settings-v1`, `joe-board-phone-order-v1`, `joe-board-theme-v1`
 - Phone order is an optional field on named layouts and a separate active draft; desktop geometry retains its existing array format. Legacy layouts derive their initial phone order from desktop positions. On phones, scroll the page between tile drags; helper-edge autoscroll is disabled because tall tiles can otherwise pull against the drag direction. Desktop drag autoscroll remains enabled.
-- Fleet Config requires Diff → Confirm before Propagate. Save Preview remains browser-local; Propagate writes only a paper-mode config revision. HOSTD-50/51/52 action-log and secret-lifecycle work remains represented by response hooks, not implemented here.
-- API paths: `/healthz`, `/readyz`, `/joe/*`, `/joe/fleet-config.json`, `/joe/fleet-config/propagate`
-- Schemas: `inspr.joe.household.v1`, `inspr.joe.household.history.v1`, `inspr.joe.fleet-config.v1`
+- Fleet Config requires Diff → Confirm before Propagate. Save Preview remains browser-local; Propagate writes only a paper-mode config revision and returns its durable action record. Rotation remains a `HOSTD-52` response hook only.
+- API paths: `/healthz`, `/readyz`, `/joe/*`, `/joe/fleet-config.json`, `/joe/fleet-config/actions.json`, `/joe/fleet-config/propagate`
+- Schemas: `inspr.joe.household.v1`, `inspr.joe.household.history.v1`, `inspr.joe.fleet-config.v1`, `inspr.joe.fleet-config.actions.v1`
 - Vendor JS/CSS under `public/joe/vendor/` with bundled LICENSE files
 
 See `docs/joe-data-contract.md` and `docs/joe-history-contract.md`.

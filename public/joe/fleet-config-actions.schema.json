@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cs0.barta.cm/joe/fleet-config-actions.schema.json",
+  "title": "JoeDesk Fleet Config action log",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "entries"],
+  "properties": {
+    "schema": { "const": "inspr.joe.fleet-config.actions.v1" },
+    "entries": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/action" }
+    }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "at", "actor", "revBefore", "revAfter", "changedKeys", "outcome", "reason"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^fa-[0-9]+-[a-f0-9]{8}$" },
+        "at": { "type": "string", "format": "date-time" },
+        "actor": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9@._+\\-]{0,159}$" },
+        "revBefore": { "type": ["string", "null"], "pattern": "^fc-[0-9]{6}$" },
+        "revAfter": { "type": ["string", "null"], "pattern": "^fc-[0-9]{6}$" },
+        "changedKeys": {
+          "type": "array",
+          "maxItems": 24,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "mode",
+              "quota.grok.reservePct",
+              "quota.codex.reservePct",
+              "quota.behavior.green",
+              "quota.behavior.amber",
+              "quota.behavior.red",
+              "desks.maxBusyDesks",
+              "desks.stage0.capEur",
+              "desks.keep",
+              "cadence.timeZone",
+              "cadence.usOpenArm",
+              "cadence.deskWatch",
+              "cadence.darwin",
+              "cadence.quotaGovernor",
+              "cadence.wakeWindows",
+              "amy.routines.morning",
+              "amy.routines.review",
+              "amy.routines.close",
+              "mac.shared.configPath",
+              "mac.shared.docsPath",
+              "mac.knobs.syncMode",
+              "tools.[read-only]",
+              "secretSlots.[redacted]"
+            ]
+          }
+        },
+        "outcome": { "enum": ["pending", "success", "failure"] },
+        "reason": {
+          "enum": [
+            "write_started",
+            "propagated",
+            "origin_rejected",
+            "content_type_rejected",
+            "body_too_large",
+            "body_rejected",
+            "json_rejected",
+            "envelope_rejected",
+            "config_unavailable",
+            "revision_conflict",
+            "schema_rejected",
+            "read_only_tools",
+            "read_only_secret_slots",
+            "no_changes",
+            "store_failed"
+          ]
+        }
+      }
+    }
+  }
+}

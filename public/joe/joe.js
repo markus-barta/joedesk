@@ -248,16 +248,16 @@
     secrets: {
       label: "Secret slots",
       headline: "Labels here. Secret values elsewhere.",
-      intro: "Fleet config can point to encrypted slots, but this plane never reads, displays or stores their contents.",
+      intro: "Fleet config names capability and path references only. This plane never reads, displays or stores credential contents.",
       sections: [
-        ["Always redacted", "The browser receives reference names only. Secret values do not belong in previews or diffs."],
-        ["Encrypted at rest", "agenix owns encrypted configuration references; Janus references keep their existing boundary."],
-        ["No new sign-in path", "This plane inherits the same externally enforced Zitadel SSO boundary as JoeDesk."],
+        ["Plain config names the slot", "JoeDesk receives an agenix or Janus reference such as joe-board-push-token, never the credential stored behind it."],
+        ["AGE / Janus keeps the value elsewhere", "Encrypted material stays in the existing agenix or Janus operator workflow, outside JoeDesk and its action log."],
+        ["Rotation stays outside this cut", "Operators resolve references in the existing agenix/Janus workflow. HOSTD-52 owns rotation; there is no rotate control here."],
       ],
       fields: [
         { key: "agenixRefs", label: "agenix refs", value: "joe-board-push-token", path: "secretSlots.agenix", type: "refs", editable: false },
         { key: "janusRefs", label: "Janus refs", value: "", path: "secretSlots.janus", type: "refs", editable: false },
-        { key: "displayMode", label: "Display", value: "Redacted", editable: false },
+        { key: "displayMode", label: "Display", value: "Refs only", editable: false },
       ],
     },
   };
@@ -4259,6 +4259,61 @@
     fleetToastTimer = window.setTimeout(function () { toast.hidden = true; }, 4400);
   }
 
+  function fleetActionTime(value) {
+    var instant = new Date(value);
+    if (!Number.isFinite(instant.getTime())) { return "Unknown time"; }
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Vienna",
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(instant);
+  }
+
+  function renderFleetActions(payload) {
+    var list = document.getElementById("fleetActionLog");
+    if (!list) { return; }
+    var entries = payload && payload.schema === "inspr.joe.fleet-config.actions.v1" && Array.isArray(payload.entries)
+      ? payload.entries.slice(-5).reverse()
+      : [];
+    if (!entries.length) {
+      list.replaceChildren(el("li", "fleet-action-empty", "No propagation attempts recorded yet."));
+      return;
+    }
+    list.replaceChildren.apply(list, entries.map(function (entry) {
+      var item = el("li", "fleet-action-item fleet-action-item--" + entry.outcome);
+      var outcome = el("strong", "fleet-action-outcome", entry.outcome);
+      var identity = el("span", "fleet-action-identity", entry.actor + " · " + fleetActionTime(entry.at));
+      var revisions = el("code", "fleet-action-revisions", (entry.revBefore || "—") + " → " + (entry.revAfter || "—"));
+      var keys = Array.isArray(entry.changedKeys) && entry.changedKeys.length ? entry.changedKeys.join(", ") : "no accepted config keys";
+      var summary = el("span", "fleet-action-keys", keys);
+      item.appendChild(outcome);
+      item.appendChild(identity);
+      item.appendChild(revisions);
+      item.appendChild(summary);
+      return item;
+    }));
+  }
+
+  async function loadFleetActions(showWarning) {
+    try {
+      var response = await fetch("./fleet-config/actions.json", { cache: "no-store", credentials: "same-origin" });
+      if (!response.ok) { throw new Error("HTTP " + response.status); }
+      var payload = await response.json();
+      if (!payload || payload.schema !== "inspr.joe.fleet-config.actions.v1" || !Array.isArray(payload.entries)) {
+        throw new Error("invalid action log response");
+      }
+      renderFleetActions(payload);
+    } catch (_) {
+      var list = document.getElementById("fleetActionLog");
+      if (list) { list.replaceChildren(el("li", "fleet-action-empty fleet-action-empty--warning", "Propagation log unavailable.")); }
+      if (showWarning) { showFleetToast("Propagation log could not be refreshed.", true); }
+    }
+  }
+
   function setFleetPath(target, path, value) {
     var parts = path.split(".");
     var cursor = target;
@@ -4405,6 +4460,8 @@
       }
       var candidate;
       try { candidate = fleetCandidateConfig(); } catch (error) { showFleetToast(error.message, true); return; }
+      var attemptedRev = fleetBaselineConfig.rev;
+      var attemptedKeys = changes.slice();
       fleetBusy = true;
       updateFleetPreviewNote();
       try {
@@ -4417,7 +4474,7 @@
         var result = await propagated.json();
         if (!propagated.ok || !result.ok || !result.config) {
           var detail = Array.isArray(result.errors) && result.errors.length ? result.errors[0] : result.error;
-          throw new Error(result.currentRev ? "Revision changed to " + result.currentRev + "; reload before retrying." : detail || "Propagation failed.");
+          throw new Error(result.currentRev ? "revision changed to " + result.currentRev + "; reload before retrying" : detail || "request rejected");
         }
         fleetBaselineConfig = result.config;
         fleetBaseline = fleetValuesFromConfig(result.config);
@@ -4428,14 +4485,18 @@
         localStorage.removeItem(FLEET_PREVIEW_KEY);
         document.getElementById("fleetRevision").textContent = result.rev;
         renderFleetConfigSection(fleetSectionId, false);
-        showFleetToast("Propagated " + result.rev + ". Shared file ready for Amy and desks.", false);
+        var writtenKeys = result.action && Array.isArray(result.action.changedKeys) && result.action.changedKeys.length
+          ? result.action.changedKeys
+          : attemptedKeys;
+        showFleetToast("Propagated " + result.rev + ": " + writtenKeys.join(", ") + ". Shared file ready for Amy and desks.", false);
       } catch (error) {
         fleetConfirmed = false;
         fleetConfirmedFingerprint = "";
-        showFleetToast(error.message || "Propagation failed.", true);
+        showFleetToast("Propagation failed for " + attemptedRev + " (" + attemptedKeys.join(", ") + "): " + (error.message || "request rejected") + ".", true);
       } finally {
         fleetBusy = false;
         updateFleetPreviewNote();
+        await loadFleetActions(false);
       }
     }
   }
@@ -4483,6 +4544,7 @@
       button.addEventListener("click", function () { void runFleetAction(button.dataset.fleetAction); });
     });
     document.getElementById("fleetDiffCancel").addEventListener("click", closeFleetDiff);
+    document.getElementById("fleetActionLogRefresh").addEventListener("click", function () { void loadFleetActions(true); });
     document.getElementById("fleetDiffDialog").addEventListener("cancel", function (event) {
       event.preventDefault();
       closeFleetDiff();
@@ -4494,6 +4556,7 @@
       }
     });
     void loadFleetConfig();
+    void loadFleetActions(false);
   }
 
   function bindControls() {
@@ -4662,6 +4725,7 @@
     formatPctChange: formatPctChange,
     fleetPreviewStorageKey: FLEET_PREVIEW_KEY,
     fleetChangedEntries: fleetChangedEntries,
+    loadFleetActions: loadFleetActions,
     selectFleetConfigSection: renderFleetConfigSection,
     showFleetConfig: function () { setBoardPlane(true); },
     showTradingBoard: function () { setBoardPlane(false); }

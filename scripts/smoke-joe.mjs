@@ -19,6 +19,20 @@ const requests = [];
 await cp(join(repoRoot, "public"), site, { recursive: true });
 const sample = JSON.parse(await readFile(join(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"));
 let fleetConfig = JSON.parse(await readFile(join(repoRoot, "public/joe/fleet-config.example.json"), "utf8"));
+const fleetActions = [];
+
+function smokeFleetAction({ revBefore, revAfter, changedKeys, outcome, reason }) {
+  return {
+    id: `fa-${Date.now()}-00000000`,
+    at: new Date().toISOString(),
+    actor: "amy-smoke",
+    revBefore,
+    revAfter,
+    changedKeys,
+    outcome,
+    reason,
+  };
+}
 
 async function writeSnapshot(overrides = {}) {
   const snapshot = structuredClone(sample);
@@ -100,6 +114,11 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify(fleetConfig));
     return;
   }
+  if (request.method === "GET" && url.pathname === "/joe/fleet-config/actions.json") {
+    response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    response.end(JSON.stringify({ schema: "inspr.joe.fleet-config.actions.v1", entries: fleetActions }));
+    return;
+  }
   if (request.method === "POST" && url.pathname === "/joe/fleet-config/propagate") {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -109,10 +128,32 @@ const server = createServer(async (request, response) => {
       response.end(JSON.stringify({ ok: false, error: "fleet config revision conflict", currentRev: fleetConfig.rev }));
       return;
     }
+    if (body.config.desks.maxBusyDesks === 3) {
+      const action = smokeFleetAction({
+        revBefore: fleetConfig.rev,
+        revAfter: fleetConfig.rev,
+        changedKeys: ["desks.maxBusyDesks"],
+        outcome: "failure",
+        reason: "schema_rejected",
+      });
+      fleetActions.push(action);
+      response.writeHead(422, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ok: false, error: "smoke policy rejected", action }));
+      return;
+    }
+    const revBefore = fleetConfig.rev;
     const sequence = Number(fleetConfig.rev.slice(3)) + 1;
     fleetConfig = structuredClone(body.config);
     fleetConfig.rev = `fc-${String(sequence).padStart(6, "0")}`;
     fleetConfig.updatedAt = new Date().toISOString();
+    const action = smokeFleetAction({
+      revBefore,
+      revAfter: fleetConfig.rev,
+      changedKeys: ["desks.maxBusyDesks"],
+      outcome: "success",
+      reason: "propagated",
+    });
+    fleetActions.push(action);
     response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
     response.end(JSON.stringify({
       ok: true,
@@ -120,6 +161,7 @@ const server = createServer(async (request, response) => {
       propagatedAt: fleetConfig.updatedAt,
       config: fleetConfig,
       adapter: { id: "shared-file", status: "written", path: "/var/lib/joe-board/fleet-config.json", consumers: ["amy", "desks"], reload: "read-on-revision" },
+      action,
     }));
     return;
   }
@@ -939,6 +981,7 @@ try {
       sections: document.querySelectorAll('[data-fleet-section]').length,
       actions: [...document.querySelectorAll('[data-fleet-action]')].map(node => node.dataset.fleetAction),
       fields: [...document.querySelectorAll('#fleetEditFields input')].map(node => node.dataset.fleetField),
+      actionLogText: document.getElementById('fleetActionLog').innerText,
       configText: document.getElementById('fleetConfigBoard').innerText,
       overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     }))()`);
@@ -949,6 +992,7 @@ try {
       fleetOpen.selected !== 'Selected: Quota policy' || fleetOpen.headline !== 'Keep a little in the tank.' ||
       fleetOpen.sections !== 7 || JSON.stringify(fleetOpen.fields) !== JSON.stringify(['grok.reservePct', 'codex.reservePct', 'onRed']) ||
       !fleetOpen.actions.includes('diff') || !fleetOpen.actions.includes('confirm') || !fleetOpen.actions.includes('propagate') || !fleetOpen.actions.includes('save') ||
+      !/No propagation attempts recorded yet/.test(fleetOpen.actionLogText) ||
       /Day P&L|Open P&L|Virtual desk equity/.test(fleetOpen.configText) || fleetOpen.overflow
     ) throw new Error(`Fleet Config open mismatch: ${JSON.stringify(fleetOpen)}`);
 
@@ -1002,6 +1046,8 @@ try {
         toastInViewport: toastRect.top >= 0 && toastRect.bottom <= innerHeight,
         note: document.getElementById('fleetPreviewNote').textContent,
         revision: document.getElementById('fleetRevision').textContent,
+        actionItems: document.querySelectorAll('#fleetActionLog .fleet-action-item').length,
+        actionText: document.getElementById('fleetActionLog').innerText,
         emptyNumberToast: window.__fleetSmokeFlow.emptyNumberToast,
         coercedNumberToast: window.__fleetSmokeFlow.coercedNumberToast,
         normalizedNumberToast: window.__fleetSmokeFlow.normalizedNumberToast,
@@ -1018,8 +1064,52 @@ try {
       !/matches the current Fleet Config revision/.test(fleetBound.normalizedNumberToast) ||
       !fleetBound.diffOpen || !/maxBusyDesks/.test(fleetBound.diffText) ||
       !/1 preview change: maxBusyDesks/.test(fleetBound.diffToast) || !/Preview confirmed for fc-000000/.test(fleetBound.confirmToast) ||
-      !/Propagated fc-000001/.test(fleetBound.propagateToast) || fleetBound.revision !== 'fc-000001' || !/Current fc-000001/.test(fleetBound.note)
+      !/Propagated fc-000001: desks\.maxBusyDesks/.test(fleetBound.propagateToast) || fleetBound.revision !== 'fc-000001' || !/Current fc-000001/.test(fleetBound.note) ||
+      fleetBound.actionItems !== 1 || !/success/i.test(fleetBound.actionText) || !/amy-smoke/.test(fleetBound.actionText) || !/fc-000000 → fc-000001/.test(fleetBound.actionText) || !/desks\.maxBusyDesks/.test(fleetBound.actionText)
     ) throw new Error(`Fleet Config binding mismatch: ${JSON.stringify(fleetBound)}`);
+
+    const fleetSecrets = await value(`(() => {
+      document.querySelector('[data-fleet-section="secrets"]').click();
+      const fields = [...document.querySelectorAll('#fleetEditFields input')];
+      return {
+        headline: document.getElementById('fleetEliHeadline').textContent,
+        intro: document.getElementById('fleetEliIntro').textContent,
+        explanation: document.getElementById('fleetEliSections').innerText,
+        fields: fields.map((node) => ({ key: node.dataset.fleetField, value: node.value, readOnly: node.readOnly, type: node.type })),
+        summary: document.querySelector('[data-fleet-section="secrets"] .fleet-row-values').innerText,
+        rotationControls: [...document.querySelectorAll('#fleetConfigBoard button')].filter(node => /rotate/i.test(node.textContent)).length,
+      };
+    })()`);
+    if (
+      fleetSecrets.headline !== 'Labels here. Secret values elsewhere.' || !/capability and path references only/i.test(fleetSecrets.intro) ||
+      !/AGE \/ Janus keeps the value elsewhere/.test(fleetSecrets.explanation) || !/HOSTD-52 owns rotation/.test(fleetSecrets.explanation) ||
+      fleetSecrets.fields.some(field => !field.readOnly || field.type === 'password') ||
+      JSON.stringify(fleetSecrets.fields.map(field => field.value)) !== JSON.stringify(['joe-board-push-token', 'none', 'Refs only']) ||
+      !/agenix ref: joe-board-push-token/.test(fleetSecrets.summary) || !/Janus ref: none/.test(fleetSecrets.summary) || fleetSecrets.rotationControls !== 0
+    ) throw new Error(`Fleet Config secret-slot mismatch: ${JSON.stringify(fleetSecrets)}`);
+
+    await value(`(() => {
+      document.querySelector('[data-fleet-section="desks"]').click();
+      const first = document.querySelector('#fleetEditFields input');
+      first.value = '3';
+      first.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-action="diff"]').click();
+      document.querySelector('[data-fleet-action="confirm"]').click();
+      document.querySelector('[data-fleet-action="propagate"]').click();
+    })()`);
+    await delay(200);
+    const fleetFailure = await value(`(() => ({
+      toast: document.getElementById('fleetToast').textContent,
+      revision: document.getElementById('fleetRevision').textContent,
+      outcomes: [...document.querySelectorAll('#fleetActionLog .fleet-action-outcome')].map(node => node.textContent),
+      logText: document.getElementById('fleetActionLog').innerText,
+    }))()`);
+    if (
+      !/Propagation failed for fc-000001 \(maxBusyDesks\): smoke policy rejected/.test(fleetFailure.toast) ||
+      fleetFailure.revision !== 'fc-000001' || JSON.stringify(fleetFailure.outcomes) !== JSON.stringify(['failure', 'success']) ||
+      !/desks\.maxBusyDesks/.test(fleetFailure.logText)
+    ) throw new Error(`Fleet Config failure evidence mismatch: ${JSON.stringify(fleetFailure)}`);
+    await value(`document.querySelector('[data-fleet-section="quota"]').click()`);
 
     await value(`window.JoeBoard.showTradingBoard()`);
     await delay(850);
@@ -1055,7 +1145,7 @@ try {
       fleetClosed.backHidden !== 'true' || !fleetClosed.backInert || fleetClosed.focused !== 'fleetConfigOpen' || !fleetClosed.gridReady ||
       fleetClosed.stagePerspective !== 'none' || fleetClosed.flipperTransform !== 'none' || !fleetClosed.mobileMenuViewport.ok
     ) throw new Error(`Fleet Config close mismatch: ${JSON.stringify(fleetClosed)}`);
-    fleet = { open: fleetOpen, bound: fleetBound, closed: fleetClosed };
+    fleet = { open: fleetOpen, bound: fleetBound, secrets: fleetSecrets, failure: fleetFailure, closed: fleetClosed };
 
     const initial = await measureHistoryGeometry("initial render");
     const rangeContinuity = {};
@@ -1110,6 +1200,11 @@ try {
         await delay(850);
         const fleetBackShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
         await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-48-fleet-config-back.png"), Buffer.from(fleetBackShot.data, "base64"));
+        await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-50-action-log.png"), Buffer.from(fleetBackShot.data, "base64"));
+        await value(`document.querySelector('[data-fleet-section="secrets"]').click()`);
+        await delay(150);
+        const secretSlotsShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+        await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-51-secret-slots.png"), Buffer.from(secretSlotsShot.data, "base64"));
         await value(`window.JoeBoard.showTradingBoard()`);
         await delay(850);
         await value(`window.JoeBoard.showFleetConfig()`);

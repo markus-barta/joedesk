@@ -4,5 +4,5 @@
   "version": "26.09.11",
   "release_channel": "stable",
   "release_sequence": 15,
-  "note": "Atomic Fleet Config revisions with a shared-file adapter for Amy and desks."
+  "note": "Fleet Config propagation with durable attributed outcomes and redacted secret references."
 }
