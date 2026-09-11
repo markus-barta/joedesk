@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "0.7.4",
+    APP_VERSION: "0.7.5",
     VERSION_HISTORY: [
+      {
+        version: "0.7.5",
+        date: "2026-09-11",
+        title: "Layouts that remember your work",
+        changes: [
+          "Return to your last layout, save changes in place, or save a separate named arrangement.",
+          "Switching, resetting, deleting and overwriting layouts protect unsaved work with clear confirmations.",
+          "Layout and Settings use compact SVG controls with accessible labels and keyboard focus.",
+        ],
+      },
       {
         version: "0.7.4",
         date: "2026-09-11",

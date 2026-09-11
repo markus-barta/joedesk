@@ -51,16 +51,27 @@
     <div class="toolbar" role="toolbar" aria-label="Board tools">
       <span class="paper-mark">Paper only</span>
       <details class="header-menu" id="layoutMenu" data-dismissable>
-        <summary class="header-menu-trigger" aria-haspopup="dialog">Layout</summary>
+        <summary class="header-menu-trigger header-icon-trigger" aria-haspopup="dialog" aria-label="Layout" title="Layout">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3.5" y="3.5" width="7" height="7" rx="1"/>
+            <rect x="13.5" y="3.5" width="7" height="4" rx="1"/>
+            <rect x="13.5" y="10.5" width="7" height="10" rx="1"/>
+            <rect x="3.5" y="13.5" width="7" height="7" rx="1"/>
+          </svg>
+        </summary>
         <div class="header-menu-panel" role="dialog" aria-label="Saved layouts">
           <div class="layout-toolbar" id="layoutToolbar" aria-label="Saved layouts">
             <label class="visually-hidden" for="layoutSelect">Saved layout</label>
             <select class="layout-select" id="layoutSelect" aria-describedby="layoutStatus"></select>
-            <button class="quiet-button" id="loadLayout" type="button">Load</button>
-            <button class="quiet-button" id="renameLayout" type="button">Rename</button>
-            <button class="quiet-button" id="deleteLayout" type="button">Delete</button>
-            <button class="quiet-button" id="saveLayout" type="button">Save layout</button>
-            <button class="quiet-button" id="resetLayout" type="button">Reset layout</button>
+            <div class="layout-action-row layout-primary-actions">
+              <button class="quiet-button" id="saveLayout" type="button">Save</button>
+              <button class="quiet-button" id="saveAsLayout" type="button">Save as…</button>
+            </div>
+            <div class="layout-action-row layout-secondary-actions">
+              <button class="quiet-button" id="renameLayout" type="button">Rename</button>
+              <button class="quiet-button" id="deleteLayout" type="button">Delete</button>
+              <button class="quiet-button" id="resetLayout" type="button">Reset</button>
+            </div>
             <div class="layout-inline-form" id="layoutInlineForm" hidden>
               <label class="visually-hidden" for="layoutNameInput">Layout name</label>
               <input class="layout-name-input" id="layoutNameInput" type="text" maxlength="48" autocomplete="off" placeholder="Layout name">
@@ -71,7 +82,13 @@
         </div>
       </details>
       <details class="header-menu" id="settingsMenu" data-dismissable data-settings-menu>
-        <summary class="header-menu-trigger" aria-haspopup="dialog">Settings</summary>
+        <summary class="header-menu-trigger header-icon-trigger" aria-haspopup="dialog" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 7h5m6 0h5M4 17h9m4 0h3"/>
+            <circle cx="12" cy="7" r="2.5"/>
+            <circle cx="15" cy="17" r="2.5"/>
+          </svg>
+        </summary>
         <div class="header-menu-panel settings-panel" role="dialog" aria-label="Board settings">
           <fieldset class="settings-group">
             <legend>Grid</legend>
@@ -210,12 +227,24 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">0.7.4</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">0.7.5</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>
   </footer>
 </main>
+
+<dialog class="layout-unsaved-dialog" id="layoutUnsavedDialog" aria-label="Unsaved layout changes" aria-describedby="layoutUnsavedMessage">
+  <form method="dialog" class="layout-unsaved-card">
+    <strong>Unsaved layout changes</strong>
+    <p id="layoutUnsavedMessage">Save your changes before switching layouts?</p>
+    <div class="layout-unsaved-actions">
+      <button class="quiet-button" id="layoutUnsavedSave" type="button">Save</button>
+      <button class="quiet-button" id="layoutUnsavedDiscard" type="button">Discard</button>
+      <button class="quiet-button" id="layoutUnsavedCancel" type="button">Cancel</button>
+    </div>
+  </form>
+</dialog>
 
 <noscript><div class="gate"><div class="gate-card"><h1>JavaScript is off.</h1><p>The household board needs JavaScript to read its local data snapshot.</p></div></div></noscript>
 <script src="./vendor/gridstack-13.2.0-all.js"></script>

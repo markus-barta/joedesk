@@ -2,7 +2,7 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Version:** `0.7.4` (package and UI share `JoeVersion.APP_VERSION` in `public/joe/joe-version.js`).
+**Version:** `0.7.5` (package and UI share `JoeVersion.APP_VERSION` in `public/joe/joe-version.js`).
 
 ## Provenance
 
@@ -32,7 +32,7 @@ Provision the data directory and inbox token on your deployment host (not shown 
 **Docker (recommended):**
 
 ```bash
-docker build -t joedesk:0.7.4 .
+docker build -t joedesk:0.7.5 .
 ```
 
 Image copies `public/` unchanged. No sample or synthetic `data.json` is baked in — an empty store shows `NO DATA`.
@@ -83,7 +83,7 @@ node server.mjs
 docker run --rm -p 127.0.0.1:8080:8080 \
   -v joe-board-data:/var/lib/joe-board \
   -v /path/to/push-token:/run/secrets/joe-board-push-token:ro \
-  joedesk:0.7.4
+  joedesk:0.7.5
 ```
 
 ## Deploy notes
@@ -107,7 +107,7 @@ The UI gates non-canonical hosts client-side (privacy stub). That is UX only, no
 ### Preserved contracts
 
 - Storage: `/var/lib/joe-board/data.json`, `history.json`
-- Browser `localStorage` keys: `joe-board-layout-v1`, `joe-board-named-layouts-v1`, `joe-board-grid-settings-v1`, `joe-board-theme-v1`
+- Browser `localStorage` keys: `joe-board-layout-v1`, `joe-board-named-layouts-v1`, `joe-board-active-layout-v1`, `joe-board-grid-settings-v1`, `joe-board-theme-v1`
 - API paths: `/healthz`, `/readyz`, `/joe/*` as served today
 - Schemas: `inspr.joe.household.v1`, `inspr.joe.household.history.v1`
 - Vendor JS/CSS under `public/joe/vendor/` with bundled LICENSE files

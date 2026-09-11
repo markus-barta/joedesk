@@ -165,9 +165,16 @@ try {
   let nextId = 0;
   const pending = new Map();
   const exceptions = [];
+  const javascriptDialogDecisions = [];
+  const javascriptDialogs = [];
   ws.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.method === "Runtime.exceptionThrown") exceptions.push(message.params.exceptionDetails.text || "runtime exception");
+    if (message.method === "Page.javascriptDialogOpening") {
+      javascriptDialogs.push({ type: message.params.type, message: message.params.message });
+      const accept = javascriptDialogDecisions.length ? javascriptDialogDecisions.shift() : false;
+      send("Page.handleJavaScriptDialog", { accept }).catch(error => exceptions.push(`dialog handling failed: ${error.message}`));
+    }
     if (message.id && pending.has(message.id)) {
       const promise = pending.get(message.id);
       pending.delete(message.id);
@@ -185,6 +192,9 @@ try {
     const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
     if (result.exceptionDetails) throw new Error(result.exceptionDetails.text || "evaluation failed");
     return result.result.value;
+  }
+  function answerNextJavaScriptDialog(accept) {
+    javascriptDialogDecisions.push(Boolean(accept));
   }
   async function navigate(url, readyExpression) {
     await send("Page.navigate", { url });
@@ -320,6 +330,23 @@ try {
     layoutSelectOptions: document.getElementById('layoutSelect')?.options?.length,
     layoutMenu: Boolean(document.getElementById('layoutMenu')),
     settingsMenu: Boolean(document.getElementById('settingsMenu')),
+    loadLayoutAbsent: !document.getElementById('loadLayout'),
+    layoutActions: ['saveLayout', 'saveAsLayout', 'renameLayout', 'deleteLayout', 'resetLayout'].map(id => document.getElementById(id)?.textContent.trim()),
+    unsavedDialog: (() => {
+      const dialog = document.getElementById('layoutUnsavedDialog');
+      return {
+        native: dialog instanceof HTMLDialogElement,
+        label: dialog?.getAttribute('aria-label'),
+        describedBy: dialog?.getAttribute('aria-describedby'),
+        controls: ['layoutUnsavedSave', 'layoutUnsavedDiscard', 'layoutUnsavedCancel'].map(id => ({ text: document.getElementById(id)?.textContent.trim(), type: document.getElementById(id)?.type })),
+      };
+    })(),
+    headerTriggers: [...document.querySelectorAll('.header-menu-trigger')].map(node => ({
+      classed: node.classList.contains('header-icon-trigger'),
+      label: node.getAttribute('aria-label'),
+      title: node.getAttribute('title'),
+      svgHidden: node.querySelector('svg')?.getAttribute('aria-hidden'),
+    })),
     brandLogo: Boolean(document.querySelector('.brand-logo')),
     marketingCopy: /Three bots|quiet answer/i.test(document.body.innerText),
     heroId: document.querySelector('[gs-id="hero"]')?.getAttribute('gs-id'),
@@ -346,7 +373,15 @@ try {
       healthy.deskLabel !== "Desks" || healthy.rangeLabel !== "Range" ||
       healthy.versionSummary?.trim() !== `v${packageVersion}` || healthy.versionEntries < 4 ||
       !healthy.layoutSelectOptions || healthy.layoutSelectOptions < 1 ||
-      !healthy.layoutMenu || !healthy.settingsMenu || !healthy.brandLogo || healthy.marketingCopy ||
+      !healthy.layoutMenu || !healthy.settingsMenu || !healthy.loadLayoutAbsent ||
+      JSON.stringify(healthy.layoutActions) !== JSON.stringify(['Save', 'Save as…', 'Rename', 'Delete', 'Reset']) ||
+      !healthy.unsavedDialog.native || healthy.unsavedDialog.label !== 'Unsaved layout changes' || healthy.unsavedDialog.describedBy !== 'layoutUnsavedMessage' ||
+      JSON.stringify(healthy.unsavedDialog.controls) !== JSON.stringify([{ text: 'Save', type: 'button' }, { text: 'Discard', type: 'button' }, { text: 'Cancel', type: 'button' }]) ||
+      JSON.stringify(healthy.headerTriggers) !== JSON.stringify([
+        { classed: true, label: 'Layout', title: 'Layout', svgHidden: 'true' },
+        { classed: true, label: 'Settings', title: 'Settings', svgHidden: 'true' },
+      ]) ||
+      !healthy.brandLogo || healthy.marketingCopy ||
       healthy.heroId !== "hero" ||
       healthy.baseHref !== "/joe/" || healthy.baseUrl !== hsb1Url ||
       !/not present/i.test(healthy.positionFallback || "") || !healthy.zoomPlugin || healthy.externalScripts || healthy.overflow
@@ -465,7 +500,7 @@ try {
         document.getElementById('settingsApply').click();
         await new Promise((resolve) => setTimeout(resolve, 60));
         document.getElementById('layoutMenu').setAttribute('open', '');
-        document.getElementById('saveLayout').click();
+        document.getElementById('saveAsLayout').click();
         document.getElementById('layoutNameInput').value = 'Custom grid';
         document.getElementById('layoutFormConfirm').click();
         await new Promise((resolve) => setTimeout(resolve, 60));
@@ -501,11 +536,10 @@ try {
       await navigate(hsb1Url, "document.getElementById('joeGrid')?.gridstack");
       const mobileReloaded = await value(`(() => {
         const renamed = window.JoeBoard.readLayoutsCatalog().layouts.find((entry) => entry.name === 'Renamed grid');
-        document.getElementById('layoutMenu').setAttribute('open', '');
-        if (renamed) document.getElementById('layoutSelect').value = renamed.id;
-        document.getElementById('loadLayout').click();
         return {
           catalogCount: window.JoeBoard.readLayoutsCatalog().layouts.length,
+          selected: document.getElementById('layoutSelect').value,
+          expectedSelected: renamed?.id,
           settings: window.JoeBoard.readActiveGridSettings(),
           gridColumns: window.JoeBoard.gridColumnCount(),
           desktopColumns: window.JoeBoard.desktopColumnCount(),
@@ -522,6 +556,7 @@ try {
       }))()`);
       if (
         mobileReloaded.catalogCount < 2 || mobileReloaded.settings.columns !== 6 ||
+        !mobileReloaded.expectedSelected || mobileReloaded.selected !== mobileReloaded.expectedSelected ||
         mobileReloaded.gridColumns !== 1 || mobileReloaded.desktopColumns !== 6 || mobileReloaded.heroW !== 1 ||
         mobileWidened.gridColumns !== 6 || mobileWidened.desktopColumns !== 6 || mobileWidened.heroW !== 6
       ) throw new Error(`Mobile save reload mismatch: ${JSON.stringify({ mobileReloaded, mobileWidened })}`);
@@ -633,87 +668,296 @@ try {
         throw new Error(`Captured history interaction mismatch: ${JSON.stringify(backfillSnapshot)}`);
       }
 
+      answerNextJavaScriptDialog(true);
+      answerNextJavaScriptDialog(false);
+      answerNextJavaScriptDialog(false);
+      answerNextJavaScriptDialog(true);
+      answerNextJavaScriptDialog(true);
       const layout = await value(`(async () => {
+        const pause = () => new Promise(resolve => setTimeout(resolve, 60));
+        const selectLayout = async (id) => {
+          const select = document.getElementById('layoutSelect');
+          select.value = id;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          await pause();
+        };
         document.getElementById('layoutMenu').setAttribute('open', '');
         const board = document.getElementById('joeGrid');
         const grid = board.gridstack;
         const hero = document.querySelector('[gs-id="hero"]');
         grid.update(hero, { h: 4 });
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await pause();
         const saved = JSON.parse(localStorage.getItem('joe-board-layout-v1'));
         const savedHero = saved && saved.find(item => item.id === 'hero');
         document.getElementById('resetLayout').click();
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await pause();
         const resetResult = {
           savedHeight: savedHero?.h,
           resetHeight: hero.gridstackNode.h,
           defaultHeight: window.JoeBoard.readLayoutsCatalog().layouts.find((entry) => entry.id === 'default')?.items.find((item) => item.id === 'hero')?.h,
-          storageRepersisted: localStorage.getItem('joe-board-layout-v1') !== null
+          selected: document.getElementById('layoutSelect').value,
         };
+
         grid.update(hero, { h: 4 });
-        await new Promise(resolve => setTimeout(resolve, 50));
-        document.getElementById('saveLayout').click();
+        await pause();
+        document.getElementById('saveAsLayout').click();
         document.getElementById('layoutNameInput').value = 'Night layout';
         document.getElementById('layoutFormConfirm').click();
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await pause();
+        const night = window.JoeBoard.readLayoutsCatalog().layouts.find((entry) => entry.name === 'Night layout');
         const afterSave = {
           renameDisabled: document.getElementById('renameLayout').disabled,
-          selectedName: document.getElementById('layoutSelect').selectedOptions[0]?.textContent
+          saveDisabled: document.getElementById('saveLayout').disabled,
+          selectedName: document.getElementById('layoutSelect').selectedOptions[0]?.textContent,
+          count: window.JoeBoard.readLayoutsCatalog().layouts.length,
         };
-        document.getElementById('renameLayout').click();
+
+        grid.update(hero, { h: 2 });
+        await pause();
+        const dirtySaveEnabled = !document.getElementById('saveLayout').disabled;
+        document.getElementById('saveLayout').click();
+        await pause();
+        const afterOverwrite = {
+          count: window.JoeBoard.readLayoutsCatalog().layouts.length,
+          savedHeight: window.JoeBoard.readLayoutsCatalog().layouts.find((entry) => entry.id === night?.id)?.items.find((item) => item.id === 'hero')?.h,
+          saveDisabled: document.getElementById('saveLayout').disabled,
+        };
+
+        const beforeCollision = JSON.stringify(window.JoeBoard.readLayoutsCatalog());
+        document.getElementById('saveAsLayout').click();
+        document.getElementById('layoutNameInput').value = 'Night layout';
+        document.getElementById('layoutFormConfirm').click();
+        await pause();
+        const saveAsCollisionCancelled = JSON.stringify(window.JoeBoard.readLayoutsCatalog()) === beforeCollision;
+        document.getElementById('layoutFormCancel').click();
+
+        grid.update(hero, { h: 4 });
+        await pause();
+        document.getElementById('saveAsLayout').click();
         document.getElementById('layoutNameInput').value = 'Morning layout';
         document.getElementById('layoutFormConfirm').click();
-        await new Promise(resolve => setTimeout(resolve, 50));
-        const afterRename = document.getElementById('layoutSelect').selectedOptions[0]?.textContent;
-        grid.update(hero, { h: 2 });
-        await new Promise(resolve => setTimeout(resolve, 50));
-        const heightBeforeLoad = hero.gridstackNode.h;
-        document.getElementById('loadLayout').click();
-        await new Promise(resolve => setTimeout(resolve, 50));
-        const loadedHeight = hero.gridstackNode.h;
-        document.getElementById('deleteLayout').click();
-        await new Promise(resolve => setTimeout(resolve, 50));
-        const afterDelete = {
-          selectedName: document.getElementById('layoutSelect').selectedOptions[0]?.textContent,
-          renameDisabled: document.getElementById('renameLayout').disabled,
-          deleteDisabled: document.getElementById('deleteLayout').disabled
+        await pause();
+        const morning = window.JoeBoard.readLayoutsCatalog().layouts.find((entry) => entry.name === 'Morning layout');
+
+        document.getElementById('renameLayout').click();
+        document.getElementById('layoutNameInput').value = 'Night layout';
+        document.getElementById('layoutFormConfirm').click();
+        await pause();
+        const renameCollisionCancelled = window.JoeBoard.readLayoutsCatalog().layouts.find((entry) => entry.id === morning?.id)?.name === 'Morning layout';
+        document.getElementById('layoutFormCancel').click();
+
+        grid.update(hero, { h: 6 });
+        await pause();
+        await selectLayout(night.id);
+        const savePromptOpen = document.getElementById('layoutUnsavedDialog').open;
+        document.getElementById('layoutUnsavedSave').click();
+        await pause();
+        const dirtySaveSelect = {
+          promptOpened: savePromptOpen,
+          selected: document.getElementById('layoutSelect').value,
+          loadedHeight: hero.gridstackNode.h,
+          savedMorningHeight: window.JoeBoard.readLayoutsCatalog().layouts.find((entry) => entry.id === morning.id)?.items.find((item) => item.id === 'hero')?.h,
         };
+
+        grid.update(hero, { h: 5 });
+        await pause();
+        await selectLayout(morning.id);
+        const cancelPromptOpen = document.getElementById('layoutUnsavedDialog').open;
+        document.getElementById('layoutUnsavedCancel').click();
+        await pause();
+        const dirtyCancel = {
+          promptOpened: cancelPromptOpen,
+          selected: document.getElementById('layoutSelect').value,
+          height: hero.gridstackNode.h,
+        };
+
+        await selectLayout(morning.id);
+        return {
+          resetResult,
+          afterSave,
+          dirtySaveEnabled,
+          afterOverwrite,
+          saveAsCollisionCancelled,
+          renameCollisionCancelled,
+          dirtySaveSelect,
+          dirtyCancel,
+          escapePromptOpen: document.getElementById('layoutUnsavedDialog').open,
+          nightId: night.id,
+          morningId: morning.id,
+        };
+      })()`);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+      await delay(60);
+      const afterEscape = await value(`(() => ({
+        open: document.getElementById('layoutUnsavedDialog').open,
+        selected: document.getElementById('layoutSelect').value,
+        height: document.querySelector('[gs-id="hero"]')?.gridstackNode?.h,
+      }))()`);
+
+      const destructiveLayout = await value(`(async () => {
+        const pause = () => new Promise(resolve => setTimeout(resolve, 60));
+        const select = document.getElementById('layoutSelect');
+        const hero = document.querySelector('[gs-id="hero"]');
+        select.value = ${JSON.stringify(layout.morningId)};
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await pause();
+        const discardPromptOpen = document.getElementById('layoutUnsavedDialog').open;
+        document.getElementById('layoutUnsavedDiscard').click();
+        await pause();
+        const afterDiscard = { selected: select.value, height: hero.gridstackNode.h };
+
+        document.getElementById('deleteLayout').click();
+        await pause();
+        const afterDelete = {
+          selectedName: select.selectedOptions[0]?.textContent,
+          renameDisabled: document.getElementById('renameLayout').disabled,
+          deleteDisabled: document.getElementById('deleteLayout').disabled,
+          removed: !window.JoeBoard.readLayoutsCatalog().layouts.some(entry => entry.id === ${JSON.stringify(layout.morningId)}),
+        };
+
+        document.getElementById('joeGrid').gridstack.update(hero, { h: 4 });
+        await pause();
+        document.getElementById('resetLayout').click();
+        await pause();
+        const afterReset = { selected: select.value, height: hero.gridstackNode.h };
+
+        select.value = ${JSON.stringify(layout.nightId)};
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await pause();
+        const catalog = window.JoeBoard.readLayoutsCatalog();
+        const names = catalog.layouts.map(entry => entry.name);
+        const lastUsed = { selected: select.value, height: hero.gridstackNode.h };
+
         document.getElementById('seriesAll').click();
-        await new Promise(resolve => setTimeout(resolve, 25));
+        await pause();
         const cleared = {
           selected: document.querySelectorAll('button[data-series][aria-pressed="true"]').length,
           empty: document.getElementById('historyEmpty')?.hidden === false,
           capturedHidden: document.getElementById('historyCaptured')?.hidden === true,
         };
         document.getElementById('seriesAll').click();
-        await new Promise(resolve => setTimeout(resolve, 25));
+        await pause();
         const restored = document.querySelectorAll('button[data-series][aria-pressed="true"]').length;
         const restoredCapturedVisible = document.getElementById('historyCaptured')?.hidden === false;
-        return { resetResult, afterSave, afterRename, heightBeforeLoad, loadedHeight, afterDelete, cleared, restored, restoredCapturedVisible };
+        return { discardPromptOpen, afterDiscard, afterDelete, afterReset, noDuplicateNames: new Set(names).size === names.length, lastUsed, cleared, restored, restoredCapturedVisible };
       })()`);
-      if (layout.resetResult.savedHeight !== 4 || layout.resetResult.resetHeight !== 3 || layout.resetResult.defaultHeight !== 3 || !layout.resetResult.storageRepersisted) {
+      if (layout.resetResult.savedHeight !== 4 || layout.resetResult.resetHeight !== 3 || layout.resetResult.defaultHeight !== 3 || layout.resetResult.selected !== 'default') {
         throw new Error(`Layout persistence mismatch: ${JSON.stringify(layout.resetResult)}`);
       }
-      if (layout.afterSave.renameDisabled || layout.afterSave.selectedName !== 'Night layout') {
+      if (layout.afterSave.renameDisabled || !layout.afterSave.saveDisabled || layout.afterSave.selectedName !== 'Night layout') {
         throw new Error(`Save layout control state mismatch: ${JSON.stringify(layout.afterSave)}`);
       }
-      if (layout.afterRename !== 'Morning layout' || layout.heightBeforeLoad !== 2 || layout.loadedHeight !== 4) {
-        throw new Error(`Rename/load layout mismatch: ${JSON.stringify({ afterRename: layout.afterRename, heightBeforeLoad: layout.heightBeforeLoad, loadedHeight: layout.loadedHeight })}`);
+      if (!layout.dirtySaveEnabled || layout.afterOverwrite.count !== layout.afterSave.count || layout.afterOverwrite.savedHeight !== 2 || !layout.afterOverwrite.saveDisabled) {
+        throw new Error(`Named layout overwrite mismatch: ${JSON.stringify(layout.afterOverwrite)}`);
       }
-      if (layout.afterDelete.selectedName !== 'Default' || !layout.afterDelete.renameDisabled || !layout.afterDelete.deleteDisabled) {
-        throw new Error(`Delete layout control state mismatch: ${JSON.stringify(layout.afterDelete)}`);
+      if (!layout.saveAsCollisionCancelled || !layout.renameCollisionCancelled) {
+        throw new Error(`Layout collision cancellation mismatch: ${JSON.stringify(layout)}`);
       }
-      if (layout.cleared.selected !== 0 || !layout.cleared.empty || !layout.cleared.capturedHidden || layout.restored !== 3 || !layout.restoredCapturedVisible) {
-        throw new Error(`History UX mismatch: ${JSON.stringify({ cleared: layout.cleared, restored: layout.restored })}`);
+      if (!layout.dirtySaveSelect.promptOpened || layout.dirtySaveSelect.selected !== layout.nightId || layout.dirtySaveSelect.loadedHeight !== 2 || layout.dirtySaveSelect.savedMorningHeight !== 6) {
+        throw new Error(`Dirty save/select mismatch: ${JSON.stringify(layout.dirtySaveSelect)}`);
+      }
+      if (!layout.dirtyCancel.promptOpened || layout.dirtyCancel.selected !== layout.nightId || layout.dirtyCancel.height !== 5 || !layout.escapePromptOpen || afterEscape.open || afterEscape.selected !== layout.nightId || afterEscape.height !== 5) {
+        throw new Error(`Dirty cancel mismatch: ${JSON.stringify({ button: layout.dirtyCancel, escapePromptOpen: layout.escapePromptOpen, afterEscape })}`);
+      }
+      if (!destructiveLayout.discardPromptOpen || destructiveLayout.afterDiscard.selected !== layout.morningId || destructiveLayout.afterDiscard.height !== 6 ||
+          destructiveLayout.afterDelete.selectedName !== 'Default' || !destructiveLayout.afterDelete.renameDisabled || !destructiveLayout.afterDelete.deleteDisabled || !destructiveLayout.afterDelete.removed ||
+          destructiveLayout.afterReset.selected !== 'default' || destructiveLayout.afterReset.height !== 3 || !destructiveLayout.noDuplicateNames ||
+          destructiveLayout.lastUsed.selected !== layout.nightId || destructiveLayout.lastUsed.height !== 2) {
+        throw new Error(`Discard/delete/reset layout mismatch: ${JSON.stringify(destructiveLayout)}`);
+      }
+      if (destructiveLayout.cleared.selected !== 0 || !destructiveLayout.cleared.empty || !destructiveLayout.cleared.capturedHidden || destructiveLayout.restored !== 3 || !destructiveLayout.restoredCapturedVisible) {
+        throw new Error(`History UX mismatch: ${JSON.stringify({ cleared: destructiveLayout.cleared, restored: destructiveLayout.restored })}`);
+      }
+
+      const cancelledDefaultSaveAs = await value(`(async () => {
+        const pause = () => new Promise(resolve => setTimeout(resolve, 60));
+        const select = document.getElementById('layoutSelect');
+        const hero = document.querySelector('[gs-id="hero"]');
+        select.value = 'default';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await pause();
+        const defaultLoadedClean = select.value === 'default' && hero.gridstackNode.h === 3;
+
+        document.getElementById('joeGrid').gridstack.update(hero, { h: 4 });
+        await pause();
+        select.value = ${JSON.stringify(layout.nightId)};
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await pause();
+        const dirtyPromptOpen = document.getElementById('layoutUnsavedDialog').open;
+        document.getElementById('layoutUnsavedSave').click();
+        await pause();
+        const layoutMenu = document.getElementById('layoutMenu');
+        const layoutForm = document.getElementById('layoutInlineForm');
+        const nameInput = document.getElementById('layoutNameInput');
+        const nameInputStyle = getComputedStyle(nameInput);
+        const nameInputRect = nameInput.getBoundingClientRect();
+        const defaultSaveAsPrompt = {
+          formOpen: !layoutForm.hidden,
+          menuOpen: layoutMenu.open,
+          nameFieldVisible: nameInput.getClientRects().length > 0 && nameInputRect.width > 0 && nameInputRect.height > 0 && nameInputStyle.display !== 'none' && nameInputStyle.visibility !== 'hidden',
+          nameFieldFocused: document.activeElement === nameInput,
+        };
+        document.getElementById('layoutFormCancel').click();
+        await pause();
+
+        document.getElementById('saveAsLayout').click();
+        document.getElementById('layoutNameInput').value = 'Fresh after cancel';
+        document.getElementById('layoutFormConfirm').click();
+        await pause();
+        const fresh = window.JoeBoard.readLayoutsCatalog().layouts.find(entry => entry.name === 'Fresh after cancel');
+        const afterFreshSave = {
+          selectedId: select.value,
+          selectedName: select.selectedOptions[0]?.textContent,
+          freshId: fresh?.id,
+          savedHeight: fresh?.items.find(item => item.id === 'hero')?.h,
+        };
+
+        select.value = ${JSON.stringify(layout.nightId)};
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await pause();
+        return {
+          defaultLoadedClean,
+          dirtyPromptOpen,
+          defaultSaveAsPrompt,
+          afterFreshSave,
+          pendingTargetId: ${JSON.stringify(layout.nightId)},
+          restored: { selectedId: select.value, heroHeight: hero.gridstackNode.h },
+        };
+      })()`);
+      if (!cancelledDefaultSaveAs.defaultLoadedClean || !cancelledDefaultSaveAs.dirtyPromptOpen || !cancelledDefaultSaveAs.defaultSaveAsPrompt.formOpen ||
+          !cancelledDefaultSaveAs.defaultSaveAsPrompt.menuOpen || !cancelledDefaultSaveAs.defaultSaveAsPrompt.nameFieldVisible || !cancelledDefaultSaveAs.defaultSaveAsPrompt.nameFieldFocused ||
+          !cancelledDefaultSaveAs.afterFreshSave.freshId || cancelledDefaultSaveAs.afterFreshSave.selectedId !== cancelledDefaultSaveAs.afterFreshSave.freshId ||
+          cancelledDefaultSaveAs.afterFreshSave.selectedId === cancelledDefaultSaveAs.pendingTargetId || cancelledDefaultSaveAs.afterFreshSave.selectedName !== 'Fresh after cancel' ||
+          cancelledDefaultSaveAs.afterFreshSave.savedHeight !== 4 || cancelledDefaultSaveAs.restored.selectedId !== layout.nightId || cancelledDefaultSaveAs.restored.heroHeight !== 2) {
+        throw new Error(`Cancelled Default Save As resumed pending navigation: ${JSON.stringify(cancelledDefaultSaveAs)}`);
+      }
+
+      await send("Page.reload", { ignoreCache: true });
+      await delay(600);
+      await navigate(hsb1Url, "document.getElementById('joeGrid')?.gridstack");
+      const lastUsedReload = await value(`(() => ({
+        selected: document.getElementById('layoutSelect').value,
+        expected: ${JSON.stringify(layout.nightId)},
+        heroHeight: document.querySelector('[gs-id="hero"]')?.gridstackNode?.h,
+      }))()`);
+      if (lastUsedReload.selected !== lastUsedReload.expected || lastUsedReload.heroHeight !== 2) {
+        throw new Error(`Last-used layout reload mismatch: ${JSON.stringify(lastUsedReload)}`);
       }
 
       const preferences = await value(`(async () => {
+        const pause = () => new Promise(resolve => setTimeout(resolve, 60));
         const layoutItems = JSON.parse(localStorage.getItem('joe-board-layout-v1'));
+        const alternateItems = layoutItems.map(item => item.id === 'hero' ? { ...item, h: item.h + 1 } : item);
         const legacyWrite = window.JoeBoard.writeLayoutsCatalog({
           schema: 'inspr.joe.layouts.v1',
-          layouts: [{ id: 'legacy-layout', name: 'Legacy layout', items: layoutItems }]
+          layouts: [
+            { id: 'legacy-layout', name: 'Legacy layout', items: layoutItems },
+            { id: 'legacy-layout-2', name: 'Legacy layout', items: alternateItems },
+          ]
         });
-        const legacyEntry = window.JoeBoard.readLayoutsCatalog().layouts.find((entry) => entry.id === 'legacy-layout');
+        const legacyEntries = window.JoeBoard.readLayoutsCatalog().layouts.filter((entry) => entry.id.startsWith('legacy-layout'));
+        const legacyEntry = legacyEntries.find((entry) => entry.id === 'legacy-layout');
         document.getElementById('settingsMenu').setAttribute('open', '');
         document.getElementById('settingsColumns').value = '6';
         document.getElementById('settingsCellHeight').value = '96';
@@ -731,15 +975,22 @@ try {
         const applied = window.JoeBoard.readActiveGridSettings();
         const appliedGridColumns = window.JoeBoard.gridColumnCount();
         document.getElementById('layoutMenu').setAttribute('open', '');
-        document.getElementById('saveLayout').click();
+        document.getElementById('saveAsLayout').click();
         document.getElementById('layoutNameInput').value = 'Wide six';
         document.getElementById('layoutFormConfirm').click();
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await pause();
         const savedEntry = window.JoeBoard.readLayoutsCatalog().layouts.find((entry) => entry.name === 'Wide six');
         window.JoeBoard.applyGridSettings({ columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 });
-        await new Promise((resolve) => setTimeout(resolve, 50));
-        document.getElementById('loadLayout').click();
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await pause();
+        const select = document.getElementById('layoutSelect');
+        select.value = 'legacy-layout';
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await pause();
+        document.getElementById('layoutUnsavedDiscard').click();
+        await pause();
+        select.value = savedEntry.id;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        await pause();
         const loadedSettings = window.JoeBoard.readActiveGridSettings();
         const loadedGridColumns = window.JoeBoard.gridColumnCount();
         document.getElementById('renameLayout').click();
@@ -750,6 +1001,8 @@ try {
         return {
           legacyWrite,
           legacySettings: legacyEntry?.settings,
+          legacyNames: legacyEntries.map(entry => entry.name),
+          legacyHeroHeights: legacyEntries.map(entry => entry.items.find(item => item.id === 'hero')?.h),
           cancelledColumns: cancelled.columns,
           applied,
           appliedGridColumns,
@@ -760,7 +1013,8 @@ try {
           historyPointCount: ${historyPoints.length}
         };
       })()`);
-      if (!preferences.legacyWrite || preferences.legacySettings?.columns !== 12) {
+      if (!preferences.legacyWrite || preferences.legacySettings?.columns !== 12 || preferences.legacyNames.length !== 2 ||
+          new Set(preferences.legacyNames).size !== 2 || new Set(preferences.legacyHeroHeights).size !== 2) {
         throw new Error(`Legacy layout migration mismatch: ${JSON.stringify(preferences)}`);
       }
       if (preferences.cancelledColumns === 6 || preferences.applied.columns !== 6 || preferences.applied.cellHeight !== 96 || preferences.appliedGridColumns !== 6) {
@@ -771,6 +1025,9 @@ try {
       }
       if (preferences.historyPointCount !== historyPoints.length) {
         throw new Error(`History point count changed: ${JSON.stringify(preferences)}`);
+      }
+      if (javascriptDialogDecisions.length || javascriptDialogs.length < 5 || javascriptDialogs.some(dialog => dialog.type !== 'confirm')) {
+        throw new Error(`Native confirmation coverage mismatch: ${JSON.stringify({ pending: javascriptDialogDecisions, dialogs: javascriptDialogs })}`);
       }
 
       await send("Page.reload", { ignoreCache: true });
