@@ -2,8 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "26.09.12.12.54",
+    APP_VERSION: "26.09.12.20.36",
     VERSION_HISTORY: [
+      {
+        version: "26.09.12.20.36",
+        date: "2026-09-12",
+        title: "Valuation age stays visible",
+        changes: [
+          "Show the age of retained valuation inputs separately from a healthy Gateway or a fresh producer heartbeat.",
+          "Keep Gateway and accounting warnings visible; missing DAY and OPEN values remain explicitly unavailable.",
+        ],
+      },
       {
         version: "26.09.12.12.54",
         date: "2026-09-12",

@@ -1,6 +1,6 @@
 {
   "name": "joedesk",
-  "version": "26.09.12.12.54",
+  "version": "26.09.12.20.36",
   "description": "JoeDesk paper-trading dashboard and inbox server",
   "type": "module",
   "private": true,
