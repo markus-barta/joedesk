@@ -8,6 +8,8 @@ const SIDES = new Set(["Long", "Short", "long", "short"]);
 const ACCOUNTING_METHOD = "execution-fifo-net-current-fx";
 const ACCOUNTING_DETAIL_MAX = 240;
 const ACCOUNTING_KEYS = new Set(["periodStart", "method", "detail"]);
+const MONEY_EVIDENCE_KEYS = new Set(["status", "observedAt"]);
+const MONEY_EVIDENCE_STATUSES = new Set(["observed", "carried"]);
 const HISTORY_BASIS_MAX = 96;
 const HISTORY_BASIS = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 const BROKER_ACCOUNT_KEYS = new Set(["equity", "currency", "observedAt", "scope", "status"]);
@@ -132,6 +134,12 @@ function moneyOk(m, path, errors) {
   for (const k of Object.keys(m)) {
     if (!["equity", "dayPnl", "totalPnl", "openPnl"].includes(k)) errors.push(`${path} unknown key ${k}`);
   }
+}
+
+function moneyEvidenceOk(evidence, path, errors) {
+  if (!exactKeys(evidence, MONEY_EVIDENCE_KEYS, path, errors)) return;
+  if (!MONEY_EVIDENCE_STATUSES.has(evidence.status)) errors.push(`${path}.status invalid`);
+  if (!validIsoTimestamp(evidence.observedAt)) errors.push(`${path}.observedAt invalid`);
 }
 
 function brokerAccountOk(account, path, errors) {
@@ -516,6 +524,9 @@ export function validateHouseholdSnapshot(raw) {
       if (typeof d.action !== "string" || !d.action) errors.push(`${p}.action`);
       if (!isObj(d.learning) || !LEARNING.has(d.learning.status)) errors.push(`${p}.learning`);
       moneyOk(d.money, `${p}.money`, errors);
+      if (Object.prototype.hasOwnProperty.call(d, "moneyEvidence")) {
+        moneyEvidenceOk(d.moneyEvidence, `${p}.moneyEvidence`, errors);
+      }
       if (Object.prototype.hasOwnProperty.call(d, "accounting")) {
         accountingOk(d.accounting, `${p}.accounting`, errors);
       }
