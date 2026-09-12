@@ -299,10 +299,17 @@ function historyPointFromSnapshot(snapshot) {
   const desks = {};
   const accounting = {};
   const historyBasis = {};
+  let hasCarriedMoney = false;
   const list = Array.isArray(snapshot.desks) ? snapshot.desks : [];
   for (const desk of list) {
     if (!desk || typeof desk.id !== "string" || !desk.id) continue;
-    desks[desk.id] = moneyBag(desk.money);
+    const money = moneyBag(desk.money);
+    if (desk.moneyEvidence?.status === "carried") {
+      money.equity = null;
+      money.totalPnl = null;
+      hasCarriedMoney = true;
+    }
+    desks[desk.id] = money;
     const basis = accountingBasis(desk.accounting);
     if (basis) accounting[desk.id] = basis;
     const basisId = historyBasisId(desk.historyBasis);
@@ -311,17 +318,28 @@ function historyPointFromSnapshot(snapshot) {
   // Also accept object-shaped desks (defensive; producers may evolve).
   if (!list.length && snapshot.desks && typeof snapshot.desks === "object") {
     for (const [id, desk] of Object.entries(snapshot.desks)) {
-      desks[id] = moneyBag(desk && desk.money ? desk.money : desk);
+      const money = moneyBag(desk && desk.money ? desk.money : desk);
+      if (desk?.moneyEvidence?.status === "carried") {
+        money.equity = null;
+        money.totalPnl = null;
+        hasCarriedMoney = true;
+      }
+      desks[id] = money;
       const basis = accountingBasis(desk && desk.accounting);
       if (basis) accounting[id] = basis;
       const basisId = historyBasisId(desk && desk.historyBasis);
       if (basisId) historyBasis[id] = basisId;
     }
   }
+  const totals = moneyBag(snapshot.totals);
+  if (hasCarriedMoney) {
+    totals.equity = null;
+    totals.totalPnl = null;
+  }
   const point = {
     t: snapshot.generatedAt,
     desks,
-    totals: moneyBag(snapshot.totals),
+    totals,
   };
   if (Object.keys(accounting).length) point.accounting = accounting;
   if (Object.keys(historyBasis).length) point.historyBasis = historyBasis;

@@ -246,6 +246,15 @@
         "openPnl": { "type": ["number", "null"] }
       }
     },
+    "moneyEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "observedAt"],
+      "properties": {
+        "status": { "enum": ["observed", "carried"] },
+        "observedAt": { "type": "string", "format": "date-time" }
+      }
+    },
     "accounting": {
       "type": "object",
       "additionalProperties": false,
@@ -301,6 +310,7 @@
           }
         },
         "money": { "$ref": "#/$defs/money" },
+        "moneyEvidence": { "$ref": "#/$defs/moneyEvidence" },
         "accounting": { "$ref": "#/$defs/accounting" },
         "backfill": { "$ref": "#/$defs/backfill" },
         "historyBasis": {

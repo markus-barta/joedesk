@@ -557,6 +557,94 @@ describe("server contract", () => {
     assert.ok(dirEntries.includes("history.json"));
   });
 
+  test("POST /joe/inbox records carried money as a history gap while retaining current values", async () => {
+    assertServerAlive();
+    const sample = JSON.parse(
+      await readFile(join(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"),
+    );
+    sample.generatedAt = new Date(Date.now() + 30_000).toISOString();
+    const desk = sample.desks.find(({ id }) => id === "j");
+    desk.moneyEvidence = {
+      status: "carried",
+      observedAt: new Date(Date.parse(sample.generatedAt) - 60_000).toISOString(),
+    };
+
+    const carriedPush = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(sample),
+    });
+    assert.equal(carriedPush.status, 200);
+    const carriedData = await jsonFetch("/joe/data.json");
+    assert.deepEqual(carriedData.body.desks.find(({ id }) => id === "j").money, desk.money);
+    assert.deepEqual(carriedData.body.desks.find(({ id }) => id === "j").moneyEvidence, desk.moneyEvidence);
+    const carriedPoint = (await jsonFetch("/joe/history.json")).body.points.at(-1);
+    assert.deepEqual(carriedPoint.desks.j, {
+      equity: null,
+      dayPnl: desk.money.dayPnl,
+      totalPnl: null,
+    });
+    assert.deepEqual(carriedPoint.totals, {
+      equity: null,
+      dayPnl: sample.totals.dayPnl,
+      totalPnl: null,
+    });
+
+    const observed = structuredClone(sample);
+    observed.generatedAt = new Date(Date.parse(sample.generatedAt) + 1000).toISOString();
+    observed.desks.find(({ id }) => id === "j").moneyEvidence = {
+      status: "observed",
+      observedAt: observed.generatedAt,
+    };
+    const observedPush = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(observed),
+    });
+    assert.equal(observedPush.status, 200);
+    const observedPoint = (await jsonFetch("/joe/history.json")).body.points.at(-1);
+    const observedMoney = observed.desks.find(({ id }) => id === "j").money;
+    assert.deepEqual(observedPoint.desks.j, {
+      equity: observedMoney.equity,
+      dayPnl: observedMoney.dayPnl,
+      totalPnl: observedMoney.totalPnl,
+    });
+    assert.deepEqual(observedPoint.totals, {
+      equity: observed.totals.equity,
+      dayPnl: observed.totals.dayPnl,
+      totalPnl: observed.totals.totalPnl,
+    });
+  });
+
+  test("POST /joe/inbox rejects malformed money evidence", async () => {
+    assertServerAlive();
+    const sample = JSON.parse(
+      await readFile(join(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"),
+    );
+    sample.generatedAt = new Date(Date.now() + 45_000).toISOString();
+    sample.desks.find(({ id }) => id === "j").moneyEvidence = {
+      status: "guessed",
+      observedAt: "not-a-timestamp",
+    };
+    const res = await jsonFetch("/joe/inbox", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${TOKEN}`,
+      },
+      body: JSON.stringify(sample),
+    });
+    assert.equal(res.status, 422);
+    assert.ok(res.body.errors.some((error) => error.includes("moneyEvidence.status")));
+    assert.ok(res.body.errors.some((error) => error.includes("moneyEvidence.observedAt")));
+  });
+
   test("POST /joe/inbox rejects malformed explicit history basis metadata", async () => {
     assertServerAlive();
     const sample = JSON.parse(

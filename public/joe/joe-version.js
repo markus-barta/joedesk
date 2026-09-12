@@ -2,8 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "26.09.12.12.03",
+    APP_VERSION: "26.09.12.12.54",
     VERSION_HISTORY: [
+      {
+        version: "26.09.12.12.54",
+        date: "2026-09-12",
+        title: "Carried balances stay distinct from observations",
+        changes: [
+          "Keep the last verified desk balances visible while current valuation inputs are unavailable.",
+          "History leaves carried spans to the gray dotted gap display instead of recording them as fresh observations.",
+        ],
+      },
       {
         version: "26.09.12.12.03",
         date: "2026-09-12",

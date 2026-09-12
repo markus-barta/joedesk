@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "calendar",
-  "version": "26.09.12.12.03",
+  "version": "26.09.12.12.54",
   "release_channel": "stable",
-  "release_sequence": 17,
-  "note": "Accept proven execution-owned OPEN values with current marks and explicit EUR conversion."
+  "release_sequence": 18,
+  "note": "Keep carried desk balances visible without recording them as observed History points."
 }
