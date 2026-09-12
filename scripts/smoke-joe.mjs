@@ -39,6 +39,9 @@ async function writeSnapshot(overrides = {}) {
   snapshot.generatedAt = new Date().toISOString();
   if (overrides.generatedAt) snapshot.generatedAt = overrides.generatedAt;
   snapshot.brokerAccount.observedAt = overrides.brokerObservedAt || snapshot.generatedAt;
+  for (const source of Object.values(snapshot.pnlSources || {})) {
+    if (source?.status === "available") source.observedAt = snapshot.generatedAt;
+  }
   if (overrides.halt !== undefined) snapshot.safety.halt = overrides.halt;
   if (overrides.haltReason !== undefined) snapshot.safety.haltReason = overrides.haltReason;
   if (overrides.gatewayStatus) snapshot.safety.gateway.status = overrides.gatewayStatus;
@@ -47,7 +50,33 @@ async function writeSnapshot(overrides = {}) {
   return snapshot;
 }
 
-await writeSnapshot();
+const initialSnapshot = await writeSnapshot();
+const honestPnlSnapshot = structuredClone(initialSnapshot);
+honestPnlSnapshot.desks.forEach((desk) => {
+  desk.money.dayPnl = null;
+  desk.money.openPnl = null;
+});
+honestPnlSnapshot.totals.dayPnl = null;
+honestPnlSnapshot.totals.openPnl = null;
+honestPnlSnapshot.pnlSources = {
+  day: {
+    status: "unavailable",
+    method: null,
+    currency: "EUR",
+    scope: "virtual-desks",
+    observedAt: null,
+    periodStart: null,
+    detail: "SOD baseline pending - HOSTD-33",
+  },
+  open: {
+    status: "unavailable",
+    method: null,
+    currency: "EUR",
+    scope: "virtual-desks",
+    observedAt: null,
+    detail: "IB unrealized feed not wired yet - HOSTD-33",
+  },
+};
 
 function extractIsCanonicalJoeHost(source) {
   const start = source.indexOf("function isCanonicalJoeHost");
@@ -901,6 +930,29 @@ try {
     rangeLabel: document.getElementById('rangeControlsLabel')?.textContent,
     totalDay: document.getElementById('totalDay')?.textContent,
     totalDayTitle: document.getElementById('totalDay')?.title,
+    totalDayNote: document.getElementById('totalDayNote')?.textContent,
+    totalOpen: document.getElementById('totalOpen')?.textContent,
+    totalOpenTitle: document.getElementById('totalOpen')?.title,
+    totalOpenNote: document.getElementById('totalOpenNote')?.textContent,
+    deskMoney: [...document.querySelectorAll('.desk-widget')].map(node => ({
+      id: node.dataset.desk,
+      day: node.querySelector('.desk-money-cell:nth-child(2) strong')?.textContent,
+      open: node.querySelector('.desk-money-cell:nth-child(4) strong')?.textContent,
+    })),
+    attributionRows: [...document.querySelectorAll('#attribution .attribution-row')].map(node => node.textContent),
+    attributionGeometry: [...document.querySelectorAll('#attribution .attribution-row')].map(node => {
+      const track = node.querySelector('.attribution-track').getBoundingClientRect();
+      const fill = node.querySelector('.attribution-fill').getBoundingClientRect();
+      const value = node.querySelector('.attribution-value');
+      const valueRect = value.getBoundingClientRect();
+      return {
+        ratio: fill.width / track.width,
+        fillHeight: fill.height,
+        valueHeight: valueRect.height,
+        valueLineHeight: parseFloat(getComputedStyle(value).lineHeight),
+        whiteSpace: getComputedStyle(value).whiteSpace,
+      };
+    }),
     attributionDay: document.querySelector('#attribution .widget-note')?.textContent,
     versionSummary: document.querySelector('.version > summary')?.textContent,
     versionEntries: document.querySelectorAll('#versionPanel .version__entry').length,
@@ -942,8 +994,17 @@ try {
       !/31[\.\s]482,75/.test(healthy.brokerEquity || "") || !/including KEEP/.test(healthy.brokerMeta || "") ||
       healthy.primaryHeroLabel !== "Virtual desk equity" || !/15[\.\s]000/.test(healthy.startingCapital || "") || !/not virtual desk capital/.test(healthy.brokerMeta || "") ||
       !/virtual books/i.test(healthy.deskTotalsMeta || "") ||
-      healthy.totalDay !== "—" || !/not available yet/i.test(healthy.totalDayTitle || "") ||
-      !/Day P&L is not available yet/i.test(healthy.attributionDay || "") ||
+      !/15,75/.test(healthy.totalDay || "") || healthy.totalDayNote !== "SOD · virtual desks" || !/Synthetic SOD/.test(healthy.totalDayTitle || "") ||
+      !/17,25/.test(healthy.totalOpen || "") || healthy.totalOpenNote !== "IB unrealized · virtual desks" || !/Synthetic IB unrealized/.test(healthy.totalOpenTitle || "") ||
+      JSON.stringify(healthy.deskMoney) !== JSON.stringify([
+        { id: "j", day: "+€ 24,50", open: "+€ 12,50" },
+        { id: "joe", day: "€ 0,00", open: "€ 0,00" },
+        { id: "joel", day: "−€ 8,75", open: "+€ 4,75" },
+      ]) || healthy.attributionRows.length !== 3 || healthy.attributionDay !== undefined ||
+      healthy.attributionGeometry.length !== 3 ||
+      !(healthy.attributionGeometry[0].ratio > 0.95) || !(healthy.attributionGeometry[1].ratio > 0 && healthy.attributionGeometry[1].ratio < 0.05) ||
+      !(healthy.attributionGeometry[2].ratio > 0.3 && healthy.attributionGeometry[2].ratio < 0.4) ||
+      healthy.attributionGeometry.some(item => item.fillHeight < 7 || item.whiteSpace !== 'nowrap' || item.valueHeight > item.valueLineHeight * 1.2) ||
       !healthy.halt.startsWith("Off") || !healthy.alarmHidden || !healthy.gridReady || healthy.widgets !== 7 ||
       healthy.selectedSeries !== 3 || healthy.allBotsPressed !== "true" ||
       healthy.historyTitle !== "History" || /drag here|compare up to two/i.test(healthy.historyHelp || "") ||
@@ -963,6 +1024,34 @@ try {
       healthy.baseHref !== "/joe/" || healthy.baseUrl !== hsb1Url ||
       !/not present/i.test(healthy.positionFallback || "") || !healthy.zoomPlugin || healthy.externalScripts || healthy.overflow
     ) throw new Error(`Healthy board mismatch: ${JSON.stringify(healthy)}`);
+
+    if (process.env.JOE_SCREENSHOT_DIR && !mobileViewport) {
+      const sourcedPnlShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+      await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-33-day-open-sourced.png"), Buffer.from(sourcedPnlShot.data, "base64"));
+      const honestPnl = await value(`(() => {
+        window.JoeBoard.ingest(${JSON.stringify(honestPnlSnapshot)});
+        return {
+          state: document.documentElement.dataset.joeState,
+          gateway: document.getElementById('gatewayValue')?.textContent,
+          day: document.getElementById('totalDay')?.textContent,
+          dayNote: document.getElementById('totalDayNote')?.textContent,
+          open: document.getElementById('totalOpen')?.textContent,
+          openNote: document.getElementById('totalOpenNote')?.textContent,
+          attribution: document.querySelector('#attribution .widget-note')?.textContent,
+        };
+      })()`);
+      if (
+        honestPnl.state !== 'ok' || !/^OK · connected/.test(honestPnl.gateway || '') ||
+        honestPnl.day !== '—' || honestPnl.dayNote !== 'SOD baseline pending - HOSTD-33' ||
+        honestPnl.open !== '—' || honestPnl.openNote !== 'IB unrealized feed not wired yet - HOSTD-33' ||
+        !/SOD baseline pending - HOSTD-33/.test(honestPnl.attribution || '')
+      ) throw new Error(`Honest P&L state mismatch: ${JSON.stringify(honestPnl)}`);
+      await delay(100);
+      const honestPnlShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+      await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-33-day-open-honest.png"), Buffer.from(honestPnlShot.data, "base64"));
+      await value(`window.JoeBoard.ingest(${JSON.stringify(initialSnapshot)})`);
+      await delay(100);
+    }
 
     await value(`document.getElementById('fleetConfigOpen').click()`);
     await delay(850);
@@ -1404,11 +1493,11 @@ try {
           freshness: document.getElementById('freshValue')?.textContent,
           alarm: document.getElementById('alarmText')?.textContent,
           equityRetained: document.getElementById('totalEquity')?.textContent === equityBefore,
-          dayUnavailable: document.getElementById('totalDay')?.textContent === '—',
+          dayRetained: document.getElementById('totalDay')?.textContent === dayBefore,
           dayBefore,
         };
       })()`);
-      if (stale.state !== "attention" || !stale.freshness.startsWith("STALE") || !/stale/i.test(stale.alarm || "") || !stale.equityRetained || !stale.dayUnavailable || stale.dayBefore !== "—") throw new Error(`Stale state mismatch: ${JSON.stringify(stale)}`);
+      if (stale.state !== "attention" || !stale.freshness.startsWith("STALE") || !/stale/i.test(stale.alarm || "") || !stale.equityRetained || !stale.dayRetained || !/15,75/.test(stale.dayBefore || "")) throw new Error(`Stale state mismatch: ${JSON.stringify(stale)}`);
 
       const brokenSnapshot = structuredClone(sample);
       brokenSnapshot.generatedAt = new Date().toISOString();
@@ -1425,13 +1514,14 @@ try {
       positionsSnapshot.desks[0].money.openPnl = 12.5;
       positionsSnapshot.desks[0].tradeCount = 4;
       positionsSnapshot.positions = [
-        { desk: "j", symbol: "DEMO1", side: "Long", quantity: 2, mark: 101, marketValue: 202, dayPnl: 4.5, openPnl: 12.5, updatedAt: new Date().toISOString() },
-        { desk: "joel", symbol: "DEMO2", side: "Short", quantity: -1, mark: 88, marketValue: -88, dayPnl: -1, openPnl: 4.75, updatedAt: new Date().toISOString() },
+        { desk: "j", symbol: "DEMO1", side: "Long", quantity: 2, mark: 101, marketValue: 202, dayPnl: 4.5, openPnl: 12.5, updatedAt: new Date().toISOString(), currency: "EUR" },
+        { desk: "joel", symbol: "DEMO2", side: "Short", quantity: -1, mark: 88, marketValue: -88, dayPnl: -1, openPnl: 4.75, updatedAt: new Date().toISOString(), currency: "EUR" },
       ];
-      richSnapshot = await value(`(() => { window.JoeBoard.ingest(${JSON.stringify(positionsSnapshot)}); return { rows: document.querySelectorAll('#positionsBody tr').length, symbols: document.getElementById('positionsBody')?.innerText, open: document.getElementById('totalOpen')?.textContent, totalDay: document.getElementById('totalDay')?.textContent, positionDayCells: [...document.querySelectorAll('#positionsBody td.number.neutral')].map((node) => node.textContent), tradeCount: document.querySelector('[data-desk-slot="j"] .desk-money-row')?.innerText }; })()`);
-      if (richSnapshot.rows !== 2 || !/DEMO1/.test(richSnapshot.symbols || "") || !/17,25/.test(richSnapshot.open || "") || richSnapshot.totalDay !== "—" || !richSnapshot.positionDayCells?.every((value) => value === "—") || !/4/.test(richSnapshot.tradeCount || "")) throw new Error(`Rich snapshot mismatch: ${JSON.stringify(richSnapshot)}`);
+      richSnapshot = await value(`(() => { window.JoeBoard.ingest(${JSON.stringify(positionsSnapshot)}); return { rows: document.querySelectorAll('#positionsBody tr').length, symbols: document.getElementById('positionsBody')?.innerText, open: document.getElementById('totalOpen')?.textContent, totalDay: document.getElementById('totalDay')?.textContent, positionDayCells: [...document.querySelectorAll('#positionsBody tr')].map((row) => row.children[6]?.textContent), tradeCount: document.querySelector('[data-desk-slot="j"] .desk-money-row')?.innerText }; })()`);
+      if (richSnapshot.rows !== 2 || !/DEMO1/.test(richSnapshot.symbols || "") || !/17,25/.test(richSnapshot.open || "") || !/15,75/.test(richSnapshot.totalDay || "") || JSON.stringify(richSnapshot.positionDayCells) !== JSON.stringify(["+€ 4,50", "−€ 1,00"]) || !/4/.test(richSnapshot.tradeCount || "")) throw new Error(`Rich snapshot mismatch: ${JSON.stringify(richSnapshot)}`);
 
       const partialBackfill = structuredClone(sample);
+      delete partialBackfill.pnlSources;
       partialBackfill.generatedAt = new Date().toISOString();
       partialBackfill.brokerAccount.observedAt = partialBackfill.generatedAt;
       partialBackfill.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };

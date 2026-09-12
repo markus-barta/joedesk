@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "26.09.11",
+    APP_VERSION: "26.09.12",
     VERSION_HISTORY: [
+      {
+        version: "26.09.12",
+        date: "2026-09-12",
+        title: "DAY and OPEN say what they know",
+        changes: [
+          "DAY appears only with explicit EUR source evidence from IB DailyPnL or a durable start-of-day virtual-equity baseline.",
+          "OPEN uses complete desk-level IB unrealized P&L and a matching household rollup when the producer supplies it.",
+          "Healthy-Gateway gaps are labelled as not wired or baseline-pending; Gateway outages remain visibly distinct.",
+        ],
+      },
       {
         version: "26.09.11",
         date: "2026-09-11",

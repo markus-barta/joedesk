@@ -59,6 +59,28 @@ configured EUR 15,000 virtual starting capital separately, and presents the IB
 paper account NAV only as secondary whole-account detail: including KEEP and
 not virtual desk capital.
 
+### DAY and OPEN evidence
+
+Numeric DAY values are displayed only when the snapshot carries matching
+`pnlSources.day` evidence. This prevents an older producer's placeholder zero
+from looking measured. The supported methods are IB `DailyPnL` or a durable
+start-of-day virtual-equity baseline. Both must prove EUR and the
+`virtual-desks` scope; a SOD source also names its exact `periodStart`.
+Position-level `dayPnl` is likewise accepted and rendered only while that DAY
+source is available; an unproved position zero is not a substitute.
+
+OPEN uses IB unrealized P&L attributed to J, Joe, and Joel. A complete rollup
+publishes `money.openPnl` for every desk, `totals.openPnl` as their sum, and an
+available `pnlSources.open` record with method `ib-unrealized-pnl`. Joel's
+grandfathered KEEP holdings remain outside the virtual Stage-0 desk scope.
+Position-level `openPnl` follows the same evidence gate.
+
+Each source record includes an availability status, method, EUR currency,
+scope, observation time, and short detail. When the Gateway is healthy but a
+verified source or SOD baseline is still missing, money stays `null`; the board
+labels the dash as not wired or baseline-pending instead of presenting an
+outage. A down/degraded Gateway gets a distinct unavailable label.
+
 ### J backfill summary
 
 The producer may receive an optional `familyHistory` result from the ledger

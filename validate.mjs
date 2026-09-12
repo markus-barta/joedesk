@@ -11,6 +11,10 @@ const ACCOUNTING_KEYS = new Set(["periodStart", "method", "detail"]);
 const HISTORY_BASIS_MAX = 96;
 const HISTORY_BASIS = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 const BROKER_ACCOUNT_KEYS = new Set(["equity", "currency", "observedAt", "scope", "status"]);
+const PNL_SOURCE_GROUP_KEYS = new Set(["day", "open"]);
+const DAY_PNL_SOURCE_KEYS = new Set(["status", "method", "currency", "scope", "observedAt", "periodStart", "detail"]);
+const OPEN_PNL_SOURCE_KEYS = new Set(["status", "method", "currency", "scope", "observedAt", "detail"]);
+const DAY_PNL_METHODS = new Set(["ib-daily-pnl", "sod-virtual-equity", null]);
 const BACKFILL_KEYS = new Set([
   "status",
   "fullTotalAvailable",
@@ -149,6 +153,70 @@ function brokerAccountOk(account, path, errors) {
   }
   if (account.status === "available" && !Number.isFinite(account.equity)) {
     errors.push(`${path}.equity must be finite when available`);
+  }
+}
+
+function pnlSourceOk(source, kind, path, errors) {
+  const keys = kind === "day" ? DAY_PNL_SOURCE_KEYS : OPEN_PNL_SOURCE_KEYS;
+  if (!exactKeys(source, keys, path, errors)) return;
+  if (source.status !== "available" && source.status !== "unavailable") {
+    errors.push(`${path}.status invalid`);
+  }
+  if (kind === "day") {
+    if (!DAY_PNL_METHODS.has(source.method)) errors.push(`${path}.method invalid`);
+    if (!(source.periodStart === null || validIsoTimestamp(source.periodStart))) {
+      errors.push(`${path}.periodStart invalid`);
+    }
+    if (source.method === "sod-virtual-equity" && !validIsoTimestamp(source.periodStart)) {
+      errors.push(`${path}.periodStart required for SOD method`);
+    }
+  } else if (source.method !== "ib-unrealized-pnl" && source.method !== null) {
+    errors.push(`${path}.method invalid`);
+  }
+  if (source.currency !== "EUR") errors.push(`${path}.currency must be EUR`);
+  if (source.scope !== "virtual-desks") errors.push(`${path}.scope invalid`);
+  if (!(source.observedAt === null || validIsoTimestamp(source.observedAt))) {
+    errors.push(`${path}.observedAt invalid`);
+  }
+  if (source.status === "available") {
+    if (source.method === null) errors.push(`${path}.method required when available`);
+    if (!validIsoTimestamp(source.observedAt)) errors.push(`${path}.observedAt required when available`);
+  }
+  if (typeof source.detail !== "string" || source.detail.length < 1 || source.detail.length > 160 || !/^[ -~]+$/.test(source.detail)) {
+    errors.push(`${path}.detail must be 1-160 printable English characters`);
+  }
+}
+
+function pnlSourcesOk(sources, path, errors) {
+  if (!exactKeys(sources, PNL_SOURCE_GROUP_KEYS, path, errors, new Set())) return;
+  if (Object.prototype.hasOwnProperty.call(sources, "day")) pnlSourceOk(sources.day, "day", `${path}.day`, errors);
+  if (Object.prototype.hasOwnProperty.call(sources, "open")) pnlSourceOk(sources.open, "open", `${path}.open`, errors);
+}
+
+function pnlEvidenceValuesOk(raw, errors) {
+  if (!Array.isArray(raw.desks) || !isObj(raw.totals)) return;
+  const positions = [
+    ...(Array.isArray(raw.positions) ? raw.positions : []),
+    ...raw.desks.flatMap((desk) => Array.isArray(desk?.positions) ? desk.positions : []),
+  ];
+  for (const [kind, field] of [["day", "dayPnl"], ["open", "openPnl"]]) {
+    const source = isObj(raw.pnlSources) ? raw.pnlSources[kind] : null;
+    if ((!isObj(source) || source.status !== "available") &&
+        positions.some((position) => Number.isFinite(position?.[field]))) {
+      errors.push(`position ${field} requires available pnlSources.${kind}`);
+    }
+    if (!isObj(source)) continue;
+    const values = raw.desks.map((desk) => desk?.money?.[field]);
+    const total = raw.totals[field];
+    if (source.status === "available") {
+      if (!values.every(Number.isFinite) || !Number.isFinite(total)) {
+        errors.push(`pnlSources.${kind} available requires finite ${field} for every desk and totals`);
+      }
+    } else if (source.status === "unavailable") {
+      if (!values.every((value) => value === null) || total !== null) {
+        errors.push(`pnlSources.${kind} unavailable requires null ${field} for every desk and totals`);
+      }
+    }
   }
 }
 
@@ -423,6 +491,9 @@ export function validateHouseholdSnapshot(raw) {
   if (Object.prototype.hasOwnProperty.call(raw, "brokerAccount")) {
     brokerAccountOk(raw.brokerAccount, "brokerAccount", errors);
   }
+  if (Object.prototype.hasOwnProperty.call(raw, "pnlSources")) {
+    pnlSourcesOk(raw.pnlSources, "pnlSources", errors);
+  }
 
   if (!Array.isArray(raw.desks) || raw.desks.length !== 3) {
     errors.push("desks must have length 3");
@@ -465,10 +536,11 @@ export function validateHouseholdSnapshot(raw) {
   }
 
   moneyOk(raw.totals, "totals", errors);
+  pnlEvidenceValuesOk(raw, errors);
 
   // Soft consistency: when all money fields are numbers, totals should match sums.
   if (Array.isArray(raw.desks) && raw.desks.length === 3 && isObj(raw.totals)) {
-    for (const field of ["equity", "dayPnl", "totalPnl"]) {
+    for (const field of ["equity", "dayPnl", "totalPnl", "openPnl"]) {
       const parts = raw.desks.map((d) => d?.money?.[field]);
       if (parts.every((v) => typeof v === "number") && typeof raw.totals[field] === "number") {
         const sum = parts.reduce((a, b) => a + b, 0);

@@ -143,6 +143,8 @@ button { color: inherit; }
 .hero-values { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 12px; align-items: stretch; padding: 12px 14px 9px; }
 .hero-stat { display: flex; min-width: 0; flex-direction: column; justify-content: center; padding: 10px 12px; border: 1px solid var(--line); background: var(--flap); }
 .hero-stat strong { overflow: hidden; margin-top: 5px; font: 700 clamp(14px, 1.45vw, 23px) var(--mono); text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pnl-note { display: block; overflow: hidden; margin-top: 4px; color: var(--quiet); font: 8px/1.25 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.pnl-note--missing { color: var(--amber); }
 .hero-meta, .hero-secondary { overflow: hidden; margin-top: 4px; color: var(--quiet); font: 9px var(--mono); line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
 .hero-secondary { color: var(--muted); }
 .hero-secondary b { color: var(--quiet); font-weight: 500; text-transform: uppercase; letter-spacing: .05em; }
@@ -175,6 +177,7 @@ button { color: inherit; }
 .desk-money-row { display: grid; grid-template-columns: 1.2fr repeat(3, 1fr); gap: 6px; }
 .desk-money-cell { min-width: 0; padding: 8px; border: 1px solid var(--line); background: var(--flap); }
 .desk-money-cell strong { display: block; overflow: hidden; margin-top: 4px; font: 700 12px var(--mono); text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.desk-money-cell .pnl-note { font-size: 7.5px; }
 .desk-accounting { margin: 8px 0 0; padding-left: 8px; border-left: 2px solid color-mix(in srgb, var(--desk-j) 55%, var(--line)); }
 .desk-accounting-basis, .desk-accounting-detail { margin: 0; font-size: 10px; line-height: 1.35; }
 .desk-accounting-basis { color: var(--muted); font-family: var(--mono); }
@@ -214,11 +217,11 @@ button { color: inherit; }
 .desk-heartbeat.stale, .desk-heartbeat.offline { color: var(--red); }
 .widget-body { padding: 13px 14px; }
 .attribution { display: grid; gap: 14px; margin-top: 15px; }
-.attribution-row { display: grid; grid-template-columns: 36px 1fr 50px; gap: 8px; align-items: center; font: 11px var(--mono); }
+.attribution-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) max-content; gap: 8px; align-items: center; font: 11px var(--mono); }
 .attribution-track { height: 10px; overflow: hidden; border: 1px solid var(--line); background: var(--ink-2); }
-.attribution-fill { height: 100%; min-width: 2px; background: var(--green); }
+.attribution-fill { display: block; height: 100%; min-width: 2px; background: var(--green); }
 .attribution-fill.negative { background: var(--red); }
-.attribution-value { text-align: right; }
+.attribution-value { line-height: 1.2; text-align: right; white-space: nowrap; }
 .history-widget, .positions-widget { display: flex; min-width: 0; flex-direction: column; }
 .grid-stack-item-content.widget.history-widget { overflow-x: hidden; overflow-y: auto; scrollbar-color: var(--line) transparent; }
 .history-widget > :not(.history-canvas-wrap) { flex: 0 0 auto; }
