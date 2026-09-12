@@ -69,11 +69,15 @@ start-of-day virtual-equity baseline. Both must prove EUR and the
 Position-level `dayPnl` is likewise accepted and rendered only while that DAY
 source is available; an unproved position zero is not a substitute.
 
-OPEN uses IB unrealized P&L attributed to J, Joe, and Joel. A complete rollup
-publishes `money.openPnl` for every desk, `totals.openPnl` as their sum, and an
-available `pnlSources.open` record with method `ib-unrealized-pnl`. Joel's
-grandfathered KEEP holdings remain outside the virtual Stage-0 desk scope.
-Position-level `openPnl` follows the same evidence gate.
+OPEN uses IB unrealized P&L attributed to J, Joe, and Joel, or a producer
+calculation from fresh complete execution-owned lots, current marks, and
+explicit FX using method `owned-lots-current-mark-fx`. The owned-lots method
+excludes KEEP holdings and unowned or netted residuals; it must not fill gaps
+with estimates. A complete rollup publishes `money.openPnl` for every desk,
+`totals.openPnl` as their sum, and an available `pnlSources.open` record with
+one of those methods. Joel's grandfathered KEEP holdings remain outside the
+virtual Stage-0 desk scope. Position-level `openPnl` follows the same evidence
+gate and the same EUR `virtual-desks` scope.
 
 Each source record includes an availability status, method, EUR currency,
 scope, observation time, and short detail. When the Gateway is healthy but a

@@ -2,7 +2,7 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Version:** `26.09.12` (calendar `yy.mm.dd[.hh.mm]`; package and UI share `JoeVersion.APP_VERSION` in `public/joe/joe-version.js`).
+**Version:** `26.09.12.12.03` (calendar `yy.mm.dd[.hh.mm]`; package and UI share `JoeVersion.APP_VERSION` in `public/joe/joe-version.js`).
 
 ## Provenance
 
@@ -34,7 +34,7 @@ Provision the data directory and inbox token on your deployment host (not shown 
 **Docker (recommended):**
 
 ```bash
-docker build -t joedesk:26.09.12 .
+docker build -t joedesk:26.09.12.12.03 .
 ```
 
 Image copies `public/` unchanged. No sample or synthetic `data.json` is baked in — an empty store shows `NO DATA`.
@@ -86,7 +86,7 @@ node server.mjs
 docker run --rm -p 127.0.0.1:8080:8080 \
   -v joe-board-data:/var/lib/joe-board \
   -v /path/to/push-token:/run/secrets/joe-board-push-token:ro \
-  joedesk:26.09.12
+  joedesk:26.09.12.12.03
 ```
 
 ## Deploy notes

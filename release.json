@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "calendar",
-  "version": "26.09.12",
+  "version": "26.09.12.12.03",
   "release_channel": "stable",
-  "release_sequence": 16,
-  "note": "Honest DAY source evidence, complete OPEN rollups, and explicit unavailable labels."
+  "release_sequence": 17,
+  "note": "Accept proven execution-owned OPEN values with current marks and explicit EUR conversion."
 }

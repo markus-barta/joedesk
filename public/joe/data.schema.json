@@ -97,7 +97,7 @@
       "required": ["status", "method", "currency", "scope", "observedAt", "detail"],
       "properties": {
         "status": { "enum": ["available", "unavailable"] },
-        "method": { "enum": ["ib-unrealized-pnl", null] },
+        "method": { "enum": ["ib-unrealized-pnl", "owned-lots-current-mark-fx", null] },
         "currency": { "const": "EUR" },
         "scope": { "const": "virtual-desks" },
         "observedAt": { "type": ["string", "null"], "format": "date-time" },
@@ -108,7 +108,7 @@
           "if": { "properties": { "status": { "const": "available" } }, "required": ["status"] },
           "then": {
             "properties": {
-              "method": { "const": "ib-unrealized-pnl" },
+              "method": { "enum": ["ib-unrealized-pnl", "owned-lots-current-mark-fx"] },
               "observedAt": { "type": "string" }
             }
           }

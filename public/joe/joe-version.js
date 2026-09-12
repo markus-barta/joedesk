@@ -2,8 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "26.09.12",
+    APP_VERSION: "26.09.12.12.03",
     VERSION_HISTORY: [
+      {
+        version: "26.09.12.12.03",
+        date: "2026-09-12",
+        title: "OPEN follows the owned trading lots",
+        changes: [
+          "Accept verified OPEN values calculated from execution-owned lots, current broker marks, and explicit EUR conversion.",
+          "KEEP holdings and unproved ownership remain excluded; incomplete data stays clearly unavailable.",
+        ],
+      },
       {
         version: "26.09.12",
         date: "2026-09-12",

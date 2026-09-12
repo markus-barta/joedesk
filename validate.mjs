@@ -15,6 +15,7 @@ const PNL_SOURCE_GROUP_KEYS = new Set(["day", "open"]);
 const DAY_PNL_SOURCE_KEYS = new Set(["status", "method", "currency", "scope", "observedAt", "periodStart", "detail"]);
 const OPEN_PNL_SOURCE_KEYS = new Set(["status", "method", "currency", "scope", "observedAt", "detail"]);
 const DAY_PNL_METHODS = new Set(["ib-daily-pnl", "sod-virtual-equity", null]);
+const OPEN_PNL_METHODS = new Set(["ib-unrealized-pnl", "owned-lots-current-mark-fx", null]);
 const BACKFILL_KEYS = new Set([
   "status",
   "fullTotalAvailable",
@@ -170,7 +171,7 @@ function pnlSourceOk(source, kind, path, errors) {
     if (source.method === "sod-virtual-equity" && !validIsoTimestamp(source.periodStart)) {
       errors.push(`${path}.periodStart required for SOD method`);
     }
-  } else if (source.method !== "ib-unrealized-pnl" && source.method !== null) {
+  } else if (!OPEN_PNL_METHODS.has(source.method)) {
     errors.push(`${path}.method invalid`);
   }
   if (source.currency !== "EUR") errors.push(`${path}.currency must be EUR`);
