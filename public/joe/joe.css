@@ -161,6 +161,7 @@ button { color: inherit; }
 .status-badge[data-tone="good"] { border-color: #53664b; color: var(--green); }
 .status-badge[data-tone="warn"] { border-color: #73633d; color: var(--amber); }
 .status-badge[data-tone="bad"], .status-badge.offline, .status-badge.stale { border-color: #78514b; color: var(--red); }
+.status-badge.valuation-stale { border-color: #73633d; color: var(--amber); }
 .source-line { min-width: 0; margin-left: auto; overflow: hidden; color: var(--quiet); font: 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .positive { color: var(--green) !important; }
 .negative { color: var(--red) !important; }
@@ -169,10 +170,12 @@ button { color: inherit; }
 .desk-content { width: 100%; min-width: 0; min-height: 100%; padding: 12px 14px 14px; }
 .desk-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .desk-name { margin: 0; font-size: 23px; letter-spacing: -.04em; }
+.desk-states { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
 .state, .desk-heartbeat { border-radius: 999px; padding: 4px 7px; font: 9px var(--mono); letter-spacing: .07em; text-transform: uppercase; }
 .state-working { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
 .state-sit-out { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
 .state-stuck { color: var(--red); background: color-mix(in srgb, var(--red) 14%, transparent); }
+.state.valuation-stale { color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, transparent); }
 .desk-now { min-height: 32px; margin: 8px 0 9px; color: var(--muted); font-size: 12px; line-height: 1.35; }
 .desk-money-row { display: grid; grid-template-columns: 1.2fr repeat(3, 1fr); gap: 6px; }
 .desk-money-cell { min-width: 0; padding: 8px; border: 1px solid var(--line); background: var(--flap); }
@@ -212,8 +215,8 @@ button { color: inherit; }
 .desk-timeline-item:last-child { border-bottom: 0; }
 .desk-timeline-summary { color: var(--muted); font-size: 10px; line-height: 1.35; }
 .desk-timeline-meta { color: var(--quiet); font: 9px var(--mono); line-height: 1.35; }
-.desk-footer { display: flex; justify-content: space-between; gap: 6px; align-items: center; margin-top: 8px; }
-.desk-heartbeat { padding-left: 0; color: var(--quiet); }
+.desk-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; align-items: center; margin-top: 8px; }
+.desk-heartbeat { flex: 1 1 150px; padding-left: 0; color: var(--quiet); }
 .desk-heartbeat.stale, .desk-heartbeat.offline { color: var(--red); }
 .widget-body { padding: 13px 14px; }
 .attribution { display: grid; gap: 14px; margin-top: 15px; }

@@ -18,6 +18,7 @@ function extractJoeBlock(startMarker, endMarker) {
 const trustHelpers = `${extractJoeBlock("  var DESK_IDS = [", "\n  var DEFAULT_LAYOUT = [")}
   var accountingDate = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "numeric", timeZone: "America/New_York" });
   var shortTime = new Intl.DateTimeFormat("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
+  var dateTime = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium", timeZone: "Europe/Vienna" });
   var money = new Intl.NumberFormat("de-AT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
   var moneyFormatters = { EUR: money };
 ${extractJoeBlock("  function required(condition, message)", "\n\n  function amount(value, signed)")}
@@ -77,6 +78,8 @@ const api = new Function("document", `${trustHelpers}
     positionsAvailability,
     positionsEmptyMessage,
     deskFreshnessFooter,
+    deskFreshnessBadge,
+    moneyEvidencePresentation,
     snapshotProblems,
     brokerAccountPresentation,
     backfillPresentation,
@@ -530,6 +533,73 @@ const heartbeatDesk = api.deskFreshnessFooter(
 );
 if (!/Heartbeat/.test(heartbeatDesk.text)) {
   throw new Error("heartbeatAt must label the desk footer as heartbeat");
+}
+
+const carried = structuredClone(sample);
+carried.generatedAt = new Date().toISOString();
+carried.safety.gateway.lastSeenAt = carried.generatedAt;
+carried.desks.forEach((entry) => {
+  entry.state = "stuck";
+  entry.action = "Waiting for a current valuation input.";
+  entry.moneyEvidence = { status: "carried", observedAt: new Date(Date.now() - 900_000).toISOString() };
+});
+const carriedValidated = api.validate(carried);
+const carriedView = api.moneyEvidencePresentation(carriedValidated.desks[0]);
+const carriedFooter = api.deskFreshnessFooter(carriedValidated.desks[0], 1, false, false, 300);
+const carriedBadge = api.deskFreshnessBadge(carriedFooter);
+if (!carriedView.carried || carriedView.status !== "carried" || !/Valuation input 15m ago/.test(carriedFooter.text) ||
+    !/Retained value; valuation input observed/.test(carriedFooter.title) || carriedFooter.offline || carriedFooter.stale ||
+    carriedBadge?.text !== "Valuation stale" || carriedBadge?.className !== "valuation-stale") {
+  throw new Error("carried money with a fresh snapshot and Gateway must show retained valuation age without claiming an outage");
+}
+const carriedProblems = api.snapshotProblems(carriedValidated, 1);
+if (!carriedProblems.some((problem) => /J valuation is stale; retained value uses input observed 15m ago/.test(problem)) ||
+    !carriedProblems.some((problem) => /Producer state remains stuck/.test(problem)) ||
+    carriedProblems.some((problem) => /Gateway is/.test(problem))) {
+  throw new Error("carried valuation banner must remain distinct from the underlying producer state and healthy Gateway");
+}
+
+const offlineCarriedFooter = api.deskFreshnessFooter(carriedValidated.desks[0], 1, false, true, 300);
+const offlineCarriedBadge = api.deskFreshnessBadge(offlineCarriedFooter);
+if (!offlineCarriedFooter.valuationStale || !offlineCarriedFooter.offline ||
+    offlineCarriedBadge?.text !== "Offline" || !/Valuation input 15m ago/.test(offlineCarriedFooter.text)) {
+  throw new Error("Gateway loss must stay primary while retained valuation age remains visible");
+}
+const offlineCarried = structuredClone(carriedValidated);
+offlineCarried.safety.gateway.status = "down";
+offlineCarried.safety.gateway.detail = "Connection unavailable";
+const offlineCarriedProblems = api.snapshotProblems(offlineCarried, 1);
+if (!offlineCarriedProblems.some((problem) => /Gateway is down/.test(problem)) ||
+    !offlineCarriedProblems.some((problem) => /valuation is stale/.test(problem))) {
+  throw new Error("carried valuation and an independent Gateway outage must both remain in the alarm");
+}
+
+const observed = structuredClone(sample);
+observed.generatedAt = new Date().toISOString();
+observed.desks[0].moneyEvidence = { status: "observed", observedAt: observed.generatedAt };
+const observedDesk = api.validate(observed).desks[0];
+const observedFooter = api.deskFreshnessFooter(observedDesk, 1, false, false, 300);
+if (api.moneyEvidencePresentation(observedDesk).carried || observedFooter.valuationStale ||
+    api.deskFreshnessBadge(observedFooter) !== null || !/^Snapshot /.test(observedFooter.text)) {
+  throw new Error("current observed valuation must keep the normal freshness presentation");
+}
+const legacyFooter = api.deskFreshnessFooter(validated.desks[0], 1, false, false, 300);
+if (api.moneyEvidencePresentation(validated.desks[0]).status !== "legacy" || legacyFooter.valuationStale ||
+    api.deskFreshnessBadge(legacyFooter) !== null) {
+  throw new Error("legacy snapshots without moneyEvidence must remain compatible");
+}
+
+for (const mutate of [
+  function (evidence) { evidence.status = "guessed"; },
+  function (evidence) { evidence.observedAt = "2026-09-12"; },
+  function (evidence) { evidence.source = "publisher-clock"; },
+  function (evidence) { delete evidence.observedAt; },
+]) {
+  const malformed = structuredClone(observed);
+  mutate(malformed.desks[0].moneyEvidence);
+  let rejected = false;
+  try { api.validate(malformed); } catch (_) { rejected = true; }
+  if (!rejected) { throw new Error("client validator accepted malformed moneyEvidence"); }
 }
 
 const gatewaySeen = api.gatewayHeartbeatAge(validated);

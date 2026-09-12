@@ -78,6 +78,7 @@
   var PNL_SOURCE_GROUP_KEYS = ["day", "open"];
   var DAY_PNL_SOURCE_KEYS = ["status", "method", "currency", "scope", "observedAt", "periodStart", "detail"];
   var OPEN_PNL_SOURCE_KEYS = ["status", "method", "currency", "scope", "observedAt", "detail"];
+  var MONEY_EVIDENCE_KEYS = ["status", "observedAt"];
   var BACKFILL_KEYS = ["status", "fullTotalAvailable", "capturedSubtotal", "coverage", "missingOpeningLotCount", "orphanCommissionCount"];
   var BACKFILL_CAPTURE_KEYS = ["realizedPnl", "currency", "method", "executionCount", "commissionCount", "fromInclusive", "throughInclusive", "points", "pointsTruncated"];
   var BACKFILL_CAPTURE_REQUIRED_KEYS = ["realizedPnl", "currency", "executionCount", "commissionCount", "fromInclusive", "throughInclusive"];
@@ -375,6 +376,13 @@
     validateExactKeys(sources, PNL_SOURCE_GROUP_KEYS, "pnlSources", []);
     if (Object.prototype.hasOwnProperty.call(sources, "day")) validatePnlSource(sources.day, "day", "pnlSources.day");
     if (Object.prototype.hasOwnProperty.call(sources, "open")) validatePnlSource(sources.open, "open", "pnlSources.open");
+  }
+
+  function validateMoneyEvidence(evidence, path) {
+    validateExactKeys(evidence, MONEY_EVIDENCE_KEYS, path);
+    required(["observed", "carried"].includes(evidence.status), path + ".status is invalid");
+    required(validIsoTimestamp(evidence.observedAt), path + ".observedAt is invalid");
+    return evidence;
   }
 
   function validatePnlEvidenceValues(data) {
@@ -714,6 +722,7 @@
       required(desk.money && typeof desk.money === "object", path + ".money is required");
       ["equity", "dayPnl", "totalPnl"].forEach(function (key) { finiteOrNull(desk.money[key], path + ".money." + key); });
       if (Object.prototype.hasOwnProperty.call(desk.money, "openPnl")) { finiteOrNull(desk.money.openPnl, path + ".money.openPnl"); }
+      if (Object.prototype.hasOwnProperty.call(desk, "moneyEvidence")) { validateMoneyEvidence(desk.moneyEvidence, path + ".moneyEvidence"); }
       if (Object.prototype.hasOwnProperty.call(desk, "accounting")) { validateAccounting(desk.accounting, path + ".accounting"); }
       if (Object.prototype.hasOwnProperty.call(desk, "historyBasis")) { validateHistoryBasis(desk.historyBasis, path + ".historyBasis"); }
       if (Object.prototype.hasOwnProperty.call(desk, "backfill")) {
@@ -2266,6 +2275,23 @@
     return Math.floor(seconds / 3600) + "h";
   }
 
+  function moneyEvidencePresentation(desk) {
+    var evidence = desk && desk.moneyEvidence;
+    if (!evidence) { return { status: "legacy", carried: false, age: null, text: null, title: "" }; }
+    var age = ageInSeconds(evidence.observedAt);
+    if (evidence.status !== "carried") {
+      return { status: "observed", carried: false, age: age, text: null, title: "" };
+    }
+    var observed = dateTime.format(new Date(evidence.observedAt));
+    return {
+      status: "carried",
+      carried: true,
+      age: age,
+      text: "Valuation input " + ageLabel(age) + " ago",
+      title: "Retained value; valuation input observed " + observed
+    };
+  }
+
   function pnlSource(data, kind) {
     var source = data && data.pnlSources && data.pnlSources[kind];
     return source && source.status === "available" ? source : null;
@@ -2417,6 +2443,15 @@
     var brokerProblem = brokerAccountPresentation(data).problem;
     if (brokerProblem) { problems.push(brokerProblem); }
     data.desks.forEach(function (desk) {
+      var valuation = moneyEvidencePresentation(desk);
+      if (valuation.carried && desk.state === "stuck" && !hasCapturedJResults(desk)) {
+        problems.push(desk.label + " valuation is stale; retained value uses input observed " + ageLabel(valuation.age) +
+          " ago. Producer state remains stuck: " + desk.action);
+        return;
+      }
+      if (valuation.carried) {
+        problems.push(desk.label + " valuation is stale; retained value uses input observed " + ageLabel(valuation.age) + " ago.");
+      }
       if (desk.state !== "stuck") { return; }
       if (hasCapturedJResults(desk)) {
         problems.push(hasIncompleteJAccounting(desk)
@@ -2466,13 +2501,24 @@
     var heartbeatAge = validIsoTimestamp(heartbeatIso) ? ageInSeconds(heartbeatIso) : null;
     var offline = gatewayDown || (heartbeatIso && Number.isFinite(heartbeatAge) && heartbeatAge > staleAfterSeconds);
     var stale = !offline && snapshotStale;
+    var valuation = moneyEvidencePresentation(desk);
+    var activityText = heartbeatIso
+      ? "Heartbeat " + ageLabel(heartbeatAge) + " ago"
+      : "Snapshot " + ageLabel(snapshotAge) + " ago";
     return {
-      text: heartbeatIso
-        ? "Heartbeat " + ageLabel(heartbeatAge) + " ago"
-        : "Snapshot " + ageLabel(snapshotAge) + " ago",
+      text: valuation.carried ? valuation.text + " · " + activityText : activityText,
+      title: valuation.title,
       offline: offline,
-      stale: stale
+      stale: stale,
+      valuationStale: valuation.carried
     };
+  }
+
+  function deskFreshnessBadge(footer) {
+    if (footer.offline) { return { text: "Offline", className: "offline" }; }
+    if (footer.valuationStale) { return { text: "Valuation stale", className: "valuation-stale" }; }
+    if (footer.stale) { return { text: "Stale", className: "stale" }; }
+    return null;
   }
 
   function updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale) {
@@ -2502,20 +2548,20 @@
       if (!heartbeatEl) { return; }
       var footer = deskFreshnessFooter(desk, snapshotAge, snapshotStale, gatewayDown, data.safety.staleAfterSeconds);
       heartbeatEl.textContent = footer.text;
+      heartbeatEl.title = footer.title;
       heartbeatEl.className = "desk-heartbeat" + (footer.offline ? " offline" : footer.stale ? " stale" : "");
-      var offline = footer.offline;
-      var stale = footer.stale;
+      var badge = deskFreshnessBadge(footer);
       if (badgeEl) {
-        if (offline || stale) {
-          badgeEl.textContent = offline ? "Offline" : "Stale";
-          badgeEl.className = "status-badge " + (offline ? "offline" : "stale");
+        if (badge) {
+          badgeEl.textContent = badge.text;
+          badgeEl.className = "status-badge " + badge.className;
         } else {
           badgeEl.remove();
         }
-      } else if (offline || stale) {
+      } else if (badge) {
         var footerSlot = slot.querySelector(".desk-footer");
         if (footerSlot) {
-          footerSlot.appendChild(el("span", "status-badge " + (offline ? "offline" : "stale"), offline ? "Offline" : "Stale"));
+          footerSlot.appendChild(el("span", "status-badge " + badge.className, badge.text));
         }
       }
     });
@@ -2845,7 +2891,12 @@
     var content = el("div", "desk-content");
     var top = el("div", "desk-top");
     top.appendChild(el("h2", "desk-name", desk.label));
-    top.appendChild(el("span", "state state-" + desk.state, stateCopy[desk.state]));
+    var states = el("div", "desk-states");
+    if (moneyEvidencePresentation(desk).carried) {
+      states.appendChild(el("span", "state valuation-stale", "Valuation stale"));
+    }
+    states.appendChild(el("span", "state state-" + desk.state, stateCopy[desk.state]));
+    top.appendChild(states);
     content.appendChild(top);
 
     var moneyRow = el("div", "desk-money-row");
@@ -2909,8 +2960,10 @@
     var footer = el("div", "desk-footer");
     var deskFooter = deskFreshnessFooter(desk, snapshotAge, snapshotStale, gatewayDown, data.safety.staleAfterSeconds);
     var heartbeat = el("span", "desk-heartbeat" + (deskFooter.offline ? " offline" : deskFooter.stale ? " stale" : ""), deskFooter.text);
+    heartbeat.title = deskFooter.title;
     footer.appendChild(heartbeat);
-    if (deskFooter.offline || deskFooter.stale) { footer.appendChild(el("span", "status-badge " + (deskFooter.offline ? "offline" : "stale"), deskFooter.offline ? "Offline" : "Stale")); }
+    var freshnessBadge = deskFreshnessBadge(deskFooter);
+    if (freshnessBadge) { footer.appendChild(el("span", "status-badge " + freshnessBadge.className, freshnessBadge.text)); }
     content.appendChild(footer);
     slot.replaceChildren(content);
   }
@@ -4804,6 +4857,8 @@
     positionsAvailability: positionsAvailability,
     positionsEmptyMessage: positionsEmptyMessage,
     deskFreshnessFooter: deskFreshnessFooter,
+    deskFreshnessBadge: deskFreshnessBadge,
+    moneyEvidencePresentation: moneyEvidencePresentation,
     snapshotProblems: snapshotProblems,
     brokerAccountPresentation: brokerAccountPresentation,
     backfillPresentation: backfillPresentation,
