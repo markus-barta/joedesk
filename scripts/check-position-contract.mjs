@@ -111,6 +111,10 @@ assertFail(unknownMoneyKey, /money unknown key accountValue/, "unknown money key
 
 assertOk(structuredClone(sample), "snapshot with scoped broker account observation");
 
+const ownedLotsOpen = structuredClone(sample);
+ownedLotsOpen.pnlSources.open.method = "owned-lots-current-mark-fx";
+assertOk(ownedLotsOpen, "OPEN evidence from owned lots with current marks and explicit FX");
+
 const olderPnlPayload = structuredClone(sample);
 delete olderPnlPayload.pnlSources;
 assertOk(olderPnlPayload, "older snapshot without P&L source evidence");
