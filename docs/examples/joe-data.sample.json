@@ -10,6 +10,25 @@
     "scope": "paper-account-including-keep",
     "status": "available"
   },
+  "pnlSources": {
+    "day": {
+      "status": "available",
+      "method": "sod-virtual-equity",
+      "currency": "EUR",
+      "scope": "virtual-desks",
+      "observedAt": "2026-09-08T08:00:00+02:00",
+      "periodStart": "2026-09-08T00:00:00-04:00",
+      "detail": "Synthetic SOD virtual-equity fixture; not live broker evidence."
+    },
+    "open": {
+      "status": "available",
+      "method": "ib-unrealized-pnl",
+      "currency": "EUR",
+      "scope": "virtual-desks",
+      "observedAt": "2026-09-08T08:00:00+02:00",
+      "detail": "Synthetic IB unrealized-PnL fixture; not live broker evidence."
+    }
+  },
   "source": {
     "label": "Synthetic book.json projection",
     "revision": "sample-only"
@@ -40,7 +59,8 @@
       "money": {
         "equity": 10000,
         "dayPnl": 24.5,
-        "totalPnl": 134.25
+        "totalPnl": 134.25,
+        "openPnl": 12.5
       },
       "issues": []
     },
@@ -59,7 +79,8 @@
       "money": {
         "equity": 10000,
         "dayPnl": 0,
-        "totalPnl": -42
+        "totalPnl": -42,
+        "openPnl": 0
       },
       "issues": []
     },
@@ -78,7 +99,8 @@
       "money": {
         "equity": 10000,
         "dayPnl": -8.75,
-        "totalPnl": 251.5
+        "totalPnl": 251.5,
+        "openPnl": 4.75
       },
       "issues": []
     }
@@ -86,6 +108,7 @@
   "totals": {
     "equity": 30000,
     "dayPnl": 15.75,
-    "totalPnl": 343.75
+    "totalPnl": 343.75,
+    "openPnl": 17.25
   }
 }

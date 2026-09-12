@@ -442,6 +442,7 @@ describe("server contract", () => {
     const unavailable = structuredClone(scoped);
     unavailable.generatedAt = new Date(Date.parse(scoped.generatedAt) + 1000).toISOString();
     unavailable.source.label = "Synthetic J-unavailable contract fixture";
+    delete unavailable.pnlSources;
     unavailable.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
     unavailable.desks[0].backfill = {
       status: "BEST_AVAILABLE",
@@ -493,8 +494,16 @@ describe("server contract", () => {
     assert.equal(unavailablePoint.accounting, undefined);
     assert.deepEqual(unavailablePoint.desks.j, unavailable.desks[0].money);
     assert.equal(unavailablePoint.desks.j.backfill, undefined);
-    assert.deepEqual(unavailablePoint.desks.joe, unavailable.desks[1].money);
-    assert.deepEqual(unavailablePoint.desks.joel, unavailable.desks[2].money);
+    assert.deepEqual(unavailablePoint.desks.joe, {
+      equity: unavailable.desks[1].money.equity,
+      dayPnl: unavailable.desks[1].money.dayPnl,
+      totalPnl: unavailable.desks[1].money.totalPnl,
+    });
+    assert.deepEqual(unavailablePoint.desks.joel, {
+      equity: unavailable.desks[2].money.equity,
+      dayPnl: unavailable.desks[2].money.dayPnl,
+      totalPnl: unavailable.desks[2].money.totalPnl,
+    });
     assert.deepEqual(unavailablePoint.totals, unavailable.totals);
     assert.equal(unavailablePoint.brokerAccount, undefined);
     assert.equal(JSON.stringify(unavailablePoint).includes("-37.125"), false);

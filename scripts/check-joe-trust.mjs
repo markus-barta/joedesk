@@ -26,7 +26,7 @@ ${extractJoeBlock("  function moneyForCurrency(currencyCode)", "\n\n  function p
 ${extractJoeBlock("  function el(tag, className, text)", "\n\n  function endpoint")}
 ${extractJoeBlock("  function ageInSeconds(iso)", "\n\n  function openPnl(data)")}
 ${extractJoeBlock("  function openPnl(data)", "\n\n  function nonEmptyString(value)")}
-${extractJoeBlock("  // HOSTD-33 / Wave D: Day P&L stays unavailable", "\n\n  function labelPaperCapital()")}
+${extractJoeBlock("  function pnlSource(data, kind)", "\n\n  function labelPaperCapital()")}
 ${extractJoeBlock("  function deskFreshnessFooter(desk, snapshotAge", "\n\n  function updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale)")}
 ${extractJoeBlock("  function collectPositions(data)", "\n\n  function deskPositionsCoverage(deskId, data)")}
 ${extractJoeBlock("  function deskPositionsCoverage(deskId, data)", "\n\n  function positionsAvailability(data)")}
@@ -72,6 +72,7 @@ const api = new Function("document", `${trustHelpers}
     renderAccountingBasis,
     amount,
     dayPnlDisplayValue,
+    pnlMetricPresentation,
     deskPositionsCoverage,
     positionsAvailability,
     positionsEmptyMessage,
@@ -113,6 +114,7 @@ const syntheticBackfill = {
   orphanCommissionCount: 1,
 };
 const partialJBackfill = structuredClone(sample);
+delete partialJBackfill.pnlSources;
 partialJBackfill.desks[0].backfill = syntheticBackfill;
 partialJBackfill.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
 partialJBackfill.totals = { equity: null, dayPnl: null, totalPnl: null };
@@ -299,6 +301,7 @@ if (
 }
 
 const incompleteJAccount = structuredClone(freshAccount);
+delete incompleteJAccount.pnlSources;
 incompleteJAccount.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
 incompleteJAccount.totals = { equity: null, dayPnl: null, totalPnl: null };
 const incompleteJValidated = api.validate(incompleteJAccount);
@@ -330,8 +333,10 @@ if (missingAccountView.value !== null || missingAccountView.state !== "unavailab
 
 const partialOpenPnl = structuredClone(incompleteJAccount);
 partialOpenPnl.positions = [{ desk: "joel", symbol: "DEMO", openPnl: 9 }];
-if (api.openPnl(api.validate(partialOpenPnl)) !== null) {
-  throw new Error("partial position P&L must not fabricate a household total");
+let partialOpenRejected = false;
+try { api.validate(partialOpenPnl); } catch (_) { partialOpenRejected = true; }
+if (!partialOpenRejected) {
+  throw new Error("partial position P&L without OPEN evidence must be rejected");
 }
 
 for (const [field, value] of [
@@ -347,8 +352,48 @@ for (const [field, value] of [
   try { api.validate(malformed); } catch (_) { rejected = true; }
   if (!rejected) { throw new Error("client validator accepted invalid brokerAccount." + field); }
 }
-if (api.dayPnlDisplayValue(validated, validated.totals.dayPnl) !== null) {
-  throw new Error("day P&L must stay unavailable until producer contract lands");
+if (api.dayPnlDisplayValue(validated, validated.totals.dayPnl) !== 15.75) {
+  throw new Error("DAY must display a finite value backed by available source evidence");
+}
+const unwiredPnl = structuredClone(sample);
+delete unwiredPnl.pnlSources;
+if (api.dayPnlDisplayValue(api.validate(unwiredPnl), 0) !== null ||
+    api.pnlMetricPresentation(unwiredPnl, "day", 0).note !== "Not wired yet · HOSTD-33") {
+  throw new Error("legacy or placeholder DAY must stay unavailable with an honest healthy-Gateway label");
+}
+unwiredPnl.safety.gateway.status = "down";
+if (!/Gateway down/.test(api.pnlMetricPresentation(unwiredPnl, "day", null).note)) {
+  throw new Error("DAY must distinguish a Gateway outage from an unwired feed");
+}
+const unavailableDay = structuredClone(sample);
+unavailableDay.desks.forEach((desk) => { desk.money.dayPnl = null; });
+unavailableDay.totals.dayPnl = null;
+unavailableDay.pnlSources.day = {
+  status: "unavailable",
+  method: "sod-virtual-equity",
+  currency: "EUR",
+  scope: "virtual-desks",
+  observedAt: null,
+  periodStart: "2026-09-12T04:00:00Z",
+  detail: "SOD baseline pending until the next New York rollover.",
+};
+if (api.pnlMetricPresentation(api.validate(unavailableDay), "day", null).note !== unavailableDay.pnlSources.day.detail) {
+  throw new Error("declared DAY unavailability must render the producer detail instead of a bare dash");
+}
+const malformedPnlSource = structuredClone(sample);
+malformedPnlSource.pnlSources.open.currency = "USD";
+let malformedPnlRejected = false;
+try { api.validate(malformedPnlSource); } catch (_) { malformedPnlRejected = true; }
+if (!malformedPnlRejected) {
+  throw new Error("client validator accepted foreign-currency OPEN evidence");
+}
+const positionPnlWithoutEvidence = structuredClone(sample);
+delete positionPnlWithoutEvidence.pnlSources;
+positionPnlWithoutEvidence.positions = [{ desk: "j", symbol: "SYNTH-ZERO", dayPnl: 0, openPnl: 0 }];
+let positionPnlRejected = false;
+try { api.validate(positionPnlWithoutEvidence); } catch (_) { positionPnlRejected = true; }
+if (!positionPnlRejected) {
+  throw new Error("client validator accepted position P&L without matching available source evidence");
 }
 if (api.positionsAvailability(validated) !== "absent") {
   throw new Error("sample without positions keys must be absent");
@@ -389,6 +434,7 @@ if (!malformedAccountingRejected) {
 }
 
 const unavailableJ = structuredClone(accountingSnapshot);
+delete unavailableJ.pnlSources;
 unavailableJ.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
 delete unavailableJ.desks[0].positions;
 unavailableJ.totals = { equity: null, dayPnl: null, totalPnl: null };
@@ -546,7 +592,7 @@ if (!/\.history-captured\s*\{[^}]*min-width:\s*0[^}]*overflow:\s*hidden/.test(cs
 
 console.log(JSON.stringify({
   ok: true,
-  checks: 62,
+  checks: 68,
   positionsPartial: api.positionsAvailability(oneDeskEmptyValidated),
-  dayPnl: api.dayPnlDisplayValue(validated, 0),
+  dayPnl: api.dayPnlDisplayValue(validated, validated.totals.dayPnl),
 }, null, 2));

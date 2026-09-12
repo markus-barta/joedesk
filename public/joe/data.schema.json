@@ -11,6 +11,15 @@
     "mode": { "const": "PAPER" },
     "currency": { "const": "EUR" },
     "brokerAccount": { "$ref": "#/$defs/brokerAccount" },
+    "pnlSources": {
+      "type": "object",
+      "description": "Evidence for DAY and OPEN. An available source requires finite values for every desk and totals; an unavailable source requires null values.",
+      "additionalProperties": false,
+      "properties": {
+        "day": { "$ref": "#/$defs/dayPnlSource" },
+        "open": { "$ref": "#/$defs/openPnlSource" }
+      }
+    },
     "source": {
       "type": "object",
       "additionalProperties": false,
@@ -53,6 +62,59 @@
     }
   },
   "$defs": {
+    "dayPnlSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "method", "currency", "scope", "observedAt", "periodStart", "detail"],
+      "properties": {
+        "status": { "enum": ["available", "unavailable"] },
+        "method": { "enum": ["ib-daily-pnl", "sod-virtual-equity", null] },
+        "currency": { "const": "EUR" },
+        "scope": { "const": "virtual-desks" },
+        "observedAt": { "type": ["string", "null"], "format": "date-time" },
+        "periodStart": { "type": ["string", "null"], "format": "date-time" },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[ -~]+$" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "available" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "method": { "enum": ["ib-daily-pnl", "sod-virtual-equity"] },
+              "observedAt": { "type": "string" }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "method": { "const": "sod-virtual-equity" } }, "required": ["method"] },
+          "then": { "properties": { "periodStart": { "type": "string" } } }
+        }
+      ]
+    },
+    "openPnlSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "method", "currency", "scope", "observedAt", "detail"],
+      "properties": {
+        "status": { "enum": ["available", "unavailable"] },
+        "method": { "enum": ["ib-unrealized-pnl", null] },
+        "currency": { "const": "EUR" },
+        "scope": { "const": "virtual-desks" },
+        "observedAt": { "type": ["string", "null"], "format": "date-time" },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[ -~]+$" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "available" } }, "required": ["status"] },
+          "then": {
+            "properties": {
+              "method": { "const": "ib-unrealized-pnl" },
+              "observedAt": { "type": "string" }
+            }
+          }
+        }
+      ]
+    },
     "brokerAccount": {
       "type": "object",
       "additionalProperties": false,

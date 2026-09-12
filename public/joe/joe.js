@@ -75,6 +75,9 @@
   var HISTORY_BASIS_MAX = 96;
   var HISTORY_BASIS = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
   var BROKER_ACCOUNT_KEYS = ["equity", "currency", "observedAt", "scope", "status"];
+  var PNL_SOURCE_GROUP_KEYS = ["day", "open"];
+  var DAY_PNL_SOURCE_KEYS = ["status", "method", "currency", "scope", "observedAt", "periodStart", "detail"];
+  var OPEN_PNL_SOURCE_KEYS = ["status", "method", "currency", "scope", "observedAt", "detail"];
   var BACKFILL_KEYS = ["status", "fullTotalAvailable", "capturedSubtotal", "coverage", "missingOpeningLotCount", "orphanCommissionCount"];
   var BACKFILL_CAPTURE_KEYS = ["realizedPnl", "currency", "method", "executionCount", "commissionCount", "fromInclusive", "throughInclusive", "points", "pointsTruncated"];
   var BACKFILL_CAPTURE_REQUIRED_KEYS = ["realizedPnl", "currency", "executionCount", "commissionCount", "fromInclusive", "throughInclusive"];
@@ -344,6 +347,63 @@
     });
     (requiredKeys || keys).forEach(function (key) {
       required(Object.prototype.hasOwnProperty.call(value, key), path + "." + key + " is required");
+    });
+  }
+
+  function validatePnlSource(source, kind, path) {
+    var keys = kind === "day" ? DAY_PNL_SOURCE_KEYS : OPEN_PNL_SOURCE_KEYS;
+    validateExactKeys(source, keys, path);
+    required(["available", "unavailable"].includes(source.status), path + ".status is invalid");
+    required(source.currency === "EUR", path + ".currency must be EUR");
+    required(source.scope === "virtual-desks", path + ".scope is invalid");
+    required(source.observedAt === null || validIsoTimestamp(source.observedAt), path + ".observedAt is invalid");
+    required(typeof source.detail === "string" && source.detail.length >= 1 && source.detail.length <= 160 && /^[ -~]+$/.test(source.detail), path + ".detail is invalid");
+    if (kind === "day") {
+      required(["ib-daily-pnl", "sod-virtual-equity", null].includes(source.method), path + ".method is invalid");
+      required(source.periodStart === null || validIsoTimestamp(source.periodStart), path + ".periodStart is invalid");
+      required(source.method !== "sod-virtual-equity" || validIsoTimestamp(source.periodStart), path + ".periodStart is required for SOD method");
+    } else {
+      required(["ib-unrealized-pnl", null].includes(source.method), path + ".method is invalid");
+    }
+    if (source.status === "available") {
+      required(source.method !== null, path + ".method is required when available");
+      required(validIsoTimestamp(source.observedAt), path + ".observedAt is required when available");
+    }
+  }
+
+  function validatePnlSources(sources) {
+    validateExactKeys(sources, PNL_SOURCE_GROUP_KEYS, "pnlSources", []);
+    if (Object.prototype.hasOwnProperty.call(sources, "day")) validatePnlSource(sources.day, "day", "pnlSources.day");
+    if (Object.prototype.hasOwnProperty.call(sources, "open")) validatePnlSource(sources.open, "open", "pnlSources.open");
+  }
+
+  function validatePnlEvidenceValues(data) {
+    if (!Array.isArray(data.desks) || !data.totals) { return; }
+    var positions = Array.isArray(data.positions) ? data.positions.slice() : [];
+    data.desks.forEach(function (desk) {
+      if (Array.isArray(desk && desk.positions)) {
+        positions = positions.concat(desk.positions);
+      }
+    });
+    [["day", "dayPnl"], ["open", "openPnl"]].forEach(function (entry) {
+      var kind = entry[0];
+      var field = entry[1];
+      var source = data.pnlSources && data.pnlSources[kind];
+      required(
+        !positions.some(function (position) { return Number.isFinite(position && position[field]); }) || (source && source.status === "available"),
+        "position " + field + " requires available pnlSources." + kind
+      );
+      if (!source) { return; }
+      var values = data.desks.map(function (desk) { return desk && desk.money && desk.money[field]; });
+      var total = data.totals[field];
+      if (source.status === "available") {
+        required(values.every(Number.isFinite) && Number.isFinite(total), "pnlSources." + kind + " available requires finite " + field + " for every desk and totals");
+        if (values.every(Number.isFinite) && Number.isFinite(total)) {
+          required(Math.abs(values.reduce(function (sum, value) { return sum + value; }, 0) - total) < 0.01, "totals." + field + " must equal all desk " + field + " values");
+        }
+      } else if (source.status === "unavailable") {
+        required(values.every(function (value) { return value === null; }) && total === null, "pnlSources." + kind + " unavailable requires null " + field + " for every desk and totals");
+      }
     });
   }
 
@@ -641,6 +701,7 @@
     required(["ok", "degraded", "down"].includes(data.safety.gateway && data.safety.gateway.status), "gateway status is invalid");
     required(Number.isFinite(data.safety.staleAfterSeconds) && data.safety.staleAfterSeconds > 0, "staleAfterSeconds is invalid");
     if (Object.prototype.hasOwnProperty.call(data, "brokerAccount")) { validateBrokerAccount(data.brokerAccount); }
+    if (Object.prototype.hasOwnProperty.call(data, "pnlSources")) { validatePnlSources(data.pnlSources); }
     required(Array.isArray(data.desks) && data.desks.length === 3, "exactly three desks are required");
     required(new Set(data.desks.map(function (desk) { return desk.id; })).size === 3, "desk ids must be unique");
     data.desks.forEach(function (desk, index) {
@@ -664,6 +725,7 @@
     required(data.totals && typeof data.totals === "object", "totals are required");
     ["equity", "dayPnl", "totalPnl"].forEach(function (key) { finiteOrNull(data.totals[key], "totals." + key); });
     if (Object.prototype.hasOwnProperty.call(data.totals, "openPnl")) { finiteOrNull(data.totals.openPnl, "totals.openPnl"); }
+    validatePnlEvidenceValues(data);
     return data;
   }
 
@@ -2204,9 +2266,39 @@
     return Math.floor(seconds / 3600) + "h";
   }
 
-  // HOSTD-33 / Wave D: Day P&L stays unavailable in Stage 0 until producer contract lands.
-  function dayPnlDisplayValue() {
+  function pnlSource(data, kind) {
+    var source = data && data.pnlSources && data.pnlSources[kind];
+    return source && source.status === "available" ? source : null;
+  }
+
+  function pnlSourceLabel(source) {
+    if (!source) { return null; }
+    if (source.method === "sod-virtual-equity") { return "SOD · virtual desks"; }
+    if (source.method === "ib-daily-pnl") { return "IB DailyPnL · virtual desks"; }
+    if (source.method === "ib-unrealized-pnl") { return "IB unrealized · virtual desks"; }
     return null;
+  }
+
+  function pnlUnavailableCopy(data, kind) {
+    var declared = data && data.pnlSources && data.pnlSources[kind];
+    if (declared && declared.status === "unavailable") { return declared.detail; }
+    var gatewayStatus = data && data.safety && data.safety.gateway && data.safety.gateway.status;
+    if (gatewayStatus === "down") { return "Unavailable · Gateway down"; }
+    if (gatewayStatus === "degraded") { return "Unavailable · Gateway degraded"; }
+    return kind === "day" ? "Not wired yet · HOSTD-33" : "Not wired yet · IB unrealized";
+  }
+
+  function pnlMetricPresentation(data, kind, value) {
+    var source = pnlSource(data, kind);
+    if (source && Number.isFinite(value)) {
+      return { value: value, note: pnlSourceLabel(source), title: source.detail, available: true };
+    }
+    var note = pnlUnavailableCopy(data, kind);
+    return { value: null, note: note, title: note, available: false };
+  }
+
+  function dayPnlDisplayValue(data, value) {
+    return pnlMetricPresentation(data, "day", value).value;
   }
 
   function daysInMonth(year, month) {
@@ -2344,16 +2436,21 @@
     document.documentElement.dataset.joeState = problems.length ? "attention" : "ok";
   }
 
-  function setMoneyField(node, value, signed, fieldKind) {
-    if (fieldKind === "day") {
-      node.textContent = "—";
-      node.classList.remove("positive", "negative");
-      node.classList.add("neutral");
-      node.title = "Day P&L is not available yet.";
-      return;
+  function setMoneyField(node, value, signed, fieldKind, data, noteNode) {
+    if (fieldKind === "day" || fieldKind === "open") {
+      var view = pnlMetricPresentation(data, fieldKind, value);
+      setMoney(node, view.value, signed);
+      node.title = view.title;
+      if (noteNode) {
+        noteNode.textContent = view.note;
+        noteNode.title = view.title;
+        noteNode.classList.toggle("pnl-note--missing", !view.available);
+      }
+      return view;
     }
     node.title = "";
     setMoney(node, value, signed);
+    return { value: value, note: "", title: "", available: Number.isFinite(value) };
   }
 
   function labelPaperCapital() {
@@ -2762,14 +2859,16 @@
       var cellNode = el("div", "desk-money-cell");
       cellNode.appendChild(el("span", "label", item[0]));
       var value = el("strong");
+      var metricNote = item[3] === "day" || item[3] === "open" ? el("small", "pnl-note") : null;
       if (item[3] === "trades") {
         value.textContent = Number.isFinite(item[1]) ? number.format(item[1]) : "—";
-      } else if (item[3] === "day") {
-        setMoneyField(value, item[1], item[2], "day");
+      } else if (metricNote) {
+        setMoneyField(value, item[1], item[2], item[3], data, metricNote);
       } else {
         setMoney(value, item[1], item[2]);
       }
       cellNode.appendChild(value);
+      if (metricNote) { cellNode.appendChild(metricNote); }
       moneyRow.appendChild(cellNode);
     });
     content.appendChild(moneyRow);
@@ -2816,9 +2915,28 @@
     slot.replaceChildren(content);
   }
 
-  function renderAttribution() {
+  function renderAttribution(data) {
     var root = document.getElementById("attribution");
-    root.replaceChildren(el("p", "widget-note empty-attribution", "Day P&L is not available yet; attribution will appear when it is."));
+    var rows = data.desks.map(function (desk) {
+      return { desk: desk, value: dayPnlDisplayValue(data, desk.money.dayPnl) };
+    });
+    if (!rows.every(function (row) { return Number.isFinite(row.value); })) {
+      var missing = pnlMetricPresentation(data, "day", null);
+      root.replaceChildren(el("p", "widget-note empty-attribution", missing.note + ". Attribution waits for complete desk DAY values."));
+      return;
+    }
+    var max = Math.max.apply(null, rows.map(function (row) { return Math.abs(row.value); }).concat([1]));
+    root.replaceChildren.apply(root, rows.map(function (row) {
+      var item = el("div", "attribution-row");
+      item.appendChild(el("span", "", row.desk.label));
+      var track = el("span", "attribution-track");
+      var fill = el("span", "attribution-fill" + (row.value < 0 ? " negative" : ""));
+      fill.style.width = Math.max(2, Math.abs(row.value) / max * 100) + "%";
+      track.appendChild(fill);
+      item.appendChild(track);
+      item.appendChild(el("strong", "attribution-value " + tone(row.value), amount(row.value, true)));
+      return item;
+    }));
   }
 
   function collectPositions(data) {
@@ -2945,6 +3063,8 @@
       var currencyCode = positionCurrencyCode(position);
       var marketValue = positionMarketValue(position);
       var scopeLabel = positionAccountingScopeLabel(position);
+      var dayView = pnlMetricPresentation(data, "day", position.dayPnl);
+      var openView = pnlMetricPresentation(data, "open", position.openPnl);
       row.appendChild(cell(String(position.desk).toUpperCase()));
       var symbolCell = el("td");
       symbolCell.appendChild(document.createTextNode(positionSymbolText(position)));
@@ -2956,8 +3076,12 @@
       row.appendChild(cell(Number.isFinite(quantity) ? number.format(quantity) : "—", "number"));
       row.appendChild(cell(formatPositionMoney(position.mark, false, currencyCode), "number"));
       row.appendChild(cell(formatPositionMoney(marketValue, false, currencyCode), "number"));
-      row.appendChild(cell("—", "number neutral"));
-      row.appendChild(cell(formatPositionMoney(position.openPnl, true, currencyCode), "number " + tone(position.openPnl)));
+      var dayCell = cell(formatPositionMoney(dayView.value, true, currencyCode), "number " + tone(dayView.value));
+      dayCell.title = dayView.title;
+      row.appendChild(dayCell);
+      var openCell = cell(formatPositionMoney(openView.value, true, currencyCode), "number " + tone(openView.value));
+      openCell.title = openView.title;
+      row.appendChild(openCell);
       row.appendChild(cell(position.updatedAt && Number.isFinite(Date.parse(position.updatedAt)) ? shortTime.format(new Date(position.updatedAt)) : "—"));
       return row;
     }));
@@ -2978,14 +3102,14 @@
     setMoney(document.getElementById("totalEquity"), data.totals.equity, false);
     document.getElementById("virtualStartingCapital").textContent = amount(VIRTUAL_STARTING_CAPITAL_EUR, false);
     renderDeskTotalsSummary(data);
-    setMoneyField(document.getElementById("totalDay"), data.totals.dayPnl, true, "day");
-    setMoney(document.getElementById("totalOpen"), openPnl(data), true);
+    setMoneyField(document.getElementById("totalDay"), data.totals.dayPnl, true, "day", data, document.getElementById("totalDayNote"));
+    setMoneyField(document.getElementById("totalOpen"), openPnl(data), true, "open", data, document.getElementById("totalOpenNote"));
     updateSnapshotFreshnessUI(data, snapshotAge, stale);
     setSignal("haltSignal", "haltValue", data.safety.halt ? "ON" : "Off", data.safety.halt ? "bad" : "good");
     applyAttentionState(problems);
     observeSnapshotChanges(data);
     data.desks.forEach(function (desk) { renderDesk(desk, data, snapshotAge, stale, gatewayDown); });
-    renderAttribution();
+    renderAttribution(data);
     renderPositions(data);
     labelPaperCapital();
     document.getElementById("sourceLine").textContent = "Source: " + (data.source && data.source.label ? data.source.label : "book.json projection") + " · paper projection";
@@ -3009,6 +3133,10 @@
     document.getElementById("deskTotalsMeta").className = "hero-meta attention";
     document.getElementById("totalDay").textContent = "—";
     document.getElementById("totalOpen").textContent = "—";
+    document.getElementById("totalDayNote").textContent = "Unavailable · no snapshot";
+    document.getElementById("totalOpenNote").textContent = "Unavailable · no snapshot";
+    document.getElementById("totalDayNote").classList.add("pnl-note--missing");
+    document.getElementById("totalOpenNote").classList.add("pnl-note--missing");
     ["brokerEquity", "totalEquity", "totalDay", "totalOpen"].forEach(function (id) {
       document.getElementById(id).classList.remove("positive", "negative");
       document.getElementById(id).classList.add("neutral");
@@ -3024,7 +3152,7 @@
       var slot = document.querySelector('[data-desk-slot="' + deskId + '"]');
       if (slot) { slot.replaceChildren(el("p", "empty-cell", "Waiting for the first valid snapshot.")); }
     });
-    document.getElementById("attribution").replaceChildren(el("p", "widget-note", "Day P&L is not available yet; attribution will appear when it is."));
+    document.getElementById("attribution").replaceChildren(el("p", "widget-note", "Unavailable · no snapshot. Attribution waits for complete desk DAY values."));
     document.getElementById("positionsSummary").textContent = "Position detail not supplied in this snapshot";
     var emptyPositionsRow = el("tr");
     var emptyPositionsCell = cell("Position detail is not present in this snapshot.", "empty-cell");

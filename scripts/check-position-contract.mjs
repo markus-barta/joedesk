@@ -91,6 +91,7 @@ assertOk(
 );
 
 const openPnlTotals = structuredClone(sample);
+delete openPnlTotals.pnlSources;
 openPnlTotals.totals.openPnl = 12.5;
 openPnlTotals.desks[0].money.openPnl = 0;
 openPnlTotals.desks[1].money.openPnl = null;
@@ -109,6 +110,48 @@ unknownMoneyKey.desks[0].money.accountValue = 1;
 assertFail(unknownMoneyKey, /money unknown key accountValue/, "unknown money keys remain rejected");
 
 assertOk(structuredClone(sample), "snapshot with scoped broker account observation");
+
+const olderPnlPayload = structuredClone(sample);
+delete olderPnlPayload.pnlSources;
+assertOk(olderPnlPayload, "older snapshot without P&L source evidence");
+
+for (const [path, mutate, pattern] of [
+  ["day currency", (snapshot) => { snapshot.pnlSources.day.currency = "USD"; }, /pnlSources\.day\.currency must be EUR/],
+  ["day method", (snapshot) => { snapshot.pnlSources.day.method = "calculated-somehow"; }, /pnlSources\.day\.method invalid/],
+  ["SOD period", (snapshot) => { snapshot.pnlSources.day.periodStart = null; }, /periodStart required for SOD method/],
+  ["open method", (snapshot) => { snapshot.pnlSources.open.method = "portfolio-guess"; }, /pnlSources\.open\.method invalid/],
+  ["open observedAt", (snapshot) => { snapshot.pnlSources.open.observedAt = null; }, /observedAt required when available/],
+]) {
+  const malformedSource = structuredClone(sample);
+  mutate(malformedSource);
+  assertFail(malformedSource, pattern, `P&L source ${path} rejected`);
+}
+
+const inconsistentOpenRollup = structuredClone(sample);
+inconsistentOpenRollup.totals.openPnl = 999;
+assertFail(inconsistentOpenRollup, /totals\.openPnl must equal sum/, "OPEN household rollup must equal all desk values");
+
+const incompleteAvailableOpen = structuredClone(sample);
+incompleteAvailableOpen.desks[1].money.openPnl = null;
+incompleteAvailableOpen.totals.openPnl = null;
+assertFail(incompleteAvailableOpen, /open available requires finite openPnl/, "available OPEN evidence requires complete desk and household values");
+
+const numericUnavailableDay = structuredClone(sample);
+numericUnavailableDay.pnlSources.day = {
+  status: "unavailable",
+  method: null,
+  currency: "EUR",
+  scope: "virtual-desks",
+  observedAt: null,
+  periodStart: null,
+  detail: "SOD baseline pending - HOSTD-33",
+};
+assertFail(numericUnavailableDay, /day unavailable requires null dayPnl/, "unavailable DAY evidence cannot carry placeholder numbers");
+
+const positionPnlWithoutEvidence = structuredClone(sample);
+delete positionPnlWithoutEvidence.pnlSources;
+positionPnlWithoutEvidence.positions = [{ desk: "j", symbol: "SYNTH-ZERO", dayPnl: 0, openPnl: 0 }];
+assertFail(positionPnlWithoutEvidence, /position dayPnl requires available pnlSources\.day/, "position placeholder P&L requires matching source evidence");
 
 const olderPayload = structuredClone(sample);
 delete olderPayload.brokerAccount;
@@ -179,6 +222,7 @@ const syntheticBackfill = {
   orphanCommissionCount: 1,
 };
 const partialJBackfill = structuredClone(sample);
+delete partialJBackfill.pnlSources;
 partialJBackfill.desks[0].backfill = syntheticBackfill;
 partialJBackfill.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
 partialJBackfill.totals = { equity: null, dayPnl: null, totalPnl: null };
@@ -428,7 +472,7 @@ console.log(
   JSON.stringify(
     {
       ok: true,
-      checks: 75,
+      checks: 84,
       note: "Synthetic fixtures only — not live broker evidence",
       accepted: {
         legacy: true,
