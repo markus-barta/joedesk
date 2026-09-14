@@ -18,6 +18,7 @@
         "retained_values",
         "gateway_degraded",
         "open_unavailable_rth",
+        "day_pending",
         "halt_on",
         "gateway_down",
         "equity_unavailable",
@@ -86,7 +87,7 @@
       "then": {
         "oneOf": [
           { "properties": { "boardHealth": { "const": "green" }, "shortReason": { "const": "board_ok" } } },
-          { "properties": { "boardHealth": { "const": "yellow" }, "shortReason": { "enum": ["snapshot_stale", "retained_values", "gateway_degraded", "open_unavailable_rth"] } } },
+          { "properties": { "boardHealth": { "const": "yellow" }, "shortReason": { "enum": ["snapshot_stale", "retained_values", "gateway_degraded", "open_unavailable_rth", "day_pending"] } } },
           { "properties": { "boardHealth": { "const": "red" }, "shortReason": { "enum": ["halt_on", "gateway_down", "equity_unavailable", "producer_stuck", "day_unavailable_rth"] } } }
         ]
       }

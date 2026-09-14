@@ -2,8 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "26.09.14.17.08",
+    APP_VERSION: "26.09.14.17.40",
     VERSION_HISTORY: [
+      {
+        version: "26.09.14.17.40",
+        date: "2026-09-14",
+        title: "Clear reasons and steadier accounting status",
+        changes: [
+          "Explain each status light in one short line; read more expands diagnostics in place.",
+          "Keep carried balances and pending DAY data yellow when equity remains usable.",
+        ],
+      },
       {
         version: "26.09.14.17.08",
         date: "2026-09-14",

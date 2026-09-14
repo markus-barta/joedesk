@@ -11,6 +11,7 @@ const BOARD_HEALTH_REASONS = new Map([
   ["retained_values", "yellow"],
   ["gateway_degraded", "yellow"],
   ["open_unavailable_rth", "yellow"],
+  ["day_pending", "yellow"],
   ["halt_on", "red"],
   ["gateway_down", "red"],
   ["equity_unavailable", "red"],

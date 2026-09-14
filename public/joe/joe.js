@@ -77,6 +77,7 @@
     retained_values: "yellow",
     gateway_degraded: "yellow",
     open_unavailable_rth: "yellow",
+    day_pending: "yellow",
     halt_on: "red",
     gateway_down: "red",
     equity_unavailable: "red",
@@ -2507,7 +2508,6 @@
     if (gateway.status === "down") { return { tone: "red", reason: "gateway_down" }; }
     if (stuckWithoutEquity) { return { tone: "red", reason: "producer_stuck" }; }
     if (!equityUsable) { return { tone: "red", reason: "equity_unavailable" }; }
-    if (rth && !pnlMetricAvailable(data, "day")) { return { tone: "red", reason: "day_unavailable_rth" }; }
     if (gateway.status === "degraded") { return { tone: "yellow", reason: "gateway_degraded" }; }
     if (data.desks.some(function (desk) { return moneyEvidencePresentation(desk).carried; })) {
       return { tone: "yellow", reason: "retained_values" };
@@ -2515,6 +2515,7 @@
     if (data.desks.some(function (desk) { return desk.state === "stuck"; })) {
       return { tone: "yellow", reason: "retained_values" };
     }
+    if (rth && !pnlMetricAvailable(data, "day")) { return { tone: "yellow", reason: "day_pending" }; }
     if (rth && !pnlMetricAvailable(data, "open")) { return { tone: "yellow", reason: "open_unavailable_rth" }; }
     if (snapshotAge > data.safety.staleAfterSeconds || hasStaleBoardSource(data, at)) {
       return { tone: "yellow", reason: "snapshot_stale" };
@@ -2536,7 +2537,21 @@
       : health.reason === "snapshot_stale"
       ? "Stale " + ageLabel(snapshotAge)
       : "Data delayed";
-    return { tone: health.tone, reason: health.reason, label: label };
+    var reasonCopy = {
+      board_ok: "numbers are up to date",
+      snapshot_stale: "numbers a bit old — still usable",
+      retained_values: "numbers a bit old — carrying last good equity",
+      gateway_degraded: "waiting on IB — recovery is automatic",
+      open_unavailable_rth: "waiting on IB prices — equity is still available",
+      day_pending: "DAY is waiting on data — equity is still available",
+      halt_on: "paper trading is paused — the operator must check",
+      gateway_down: "IB is offline — automatic recovery will retry",
+      equity_unavailable: "board numbers are missing — the operator must check",
+      producer_stuck: "board updates are stuck — the operator must check",
+      day_unavailable_rth: "DAY is waiting on data — the operator must check",
+      refresh_failed: "update failed — keeping the last good numbers"
+    };
+    return { tone: health.tone, reason: health.reason, label: label, explanation: reasonCopy[health.reason] || "the operator must check the details" };
   }
 
   function boardDiagnostics(data, snapshotAge, at, refreshFailed, health) {
@@ -2589,6 +2604,7 @@
     var alarm = document.getElementById("alarm");
     alarm.dataset.tone = health.tone;
     document.getElementById("alarmLabel").textContent = health.label;
+    document.getElementById("alarmReason").textContent = health.explanation;
     document.getElementById("alarmText").textContent = problems.length ? problems.join(" ") : "No current diagnostic issues.";
     document.documentElement.dataset.joeState = health.tone === "green" ? "ok" : health.tone === "yellow" ? "attention" : "broken";
   }
