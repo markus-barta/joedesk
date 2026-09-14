@@ -3,6 +3,8 @@
   "generatedAt": "2026-09-08T08:00:00+02:00",
   "mode": "PAPER",
   "currency": "EUR",
+  "boardHealth": "green",
+  "shortReason": "board_ok",
   "brokerAccount": {
     "equity": 31482.75,
     "currency": "EUR",

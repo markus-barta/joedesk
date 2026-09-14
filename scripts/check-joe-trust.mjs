@@ -17,6 +17,7 @@ function extractJoeBlock(startMarker, endMarker) {
 
 const trustHelpers = `${extractJoeBlock("  var DESK_IDS = [", "\n  var DEFAULT_LAYOUT = [")}
   var accountingDate = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "numeric", timeZone: "America/New_York" });
+  var newYorkClock = new Intl.DateTimeFormat("en-US", { weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "America/New_York" });
   var shortTime = new Intl.DateTimeFormat("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
   var dateTime = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium", timeZone: "Europe/Vienna" });
   var money = new Intl.NumberFormat("de-AT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
@@ -81,6 +82,9 @@ const api = new Function("document", `${trustHelpers}
     deskFreshnessBadge,
     moneyEvidencePresentation,
     snapshotProblems,
+    isNewYorkRegularHours,
+    boardHealthPresentation,
+    boardDiagnostics,
     brokerAccountPresentation,
     backfillPresentation,
     capturedHistorySeries,
@@ -95,6 +99,86 @@ const api = new Function("document", `${trustHelpers}
 `)(fakeDocument);
 
 const validated = api.validate(structuredClone(sample));
+
+function setSourceTimes(snapshot, iso) {
+  snapshot.generatedAt = iso;
+  snapshot.safety.gateway.lastSeenAt = iso;
+  if (snapshot.brokerAccount) snapshot.brokerAccount.observedAt = iso;
+  for (const source of Object.values(snapshot.pnlSources || {})) {
+    if (source.status === "available") source.observedAt = iso;
+  }
+  for (const desk of snapshot.desks) {
+    if (desk.moneyEvidence) desk.moneyEvidence.observedAt = iso;
+  }
+  return snapshot;
+}
+
+const outsideRth = setSourceTimes(structuredClone(sample), "2026-09-13T14:00:00.000Z");
+delete outsideRth.pnlSources;
+if (api.boardHealthPresentation(api.validate(outsideRth), 0, "2026-09-13T14:00:00.000Z", false).tone !== "green") {
+  throw new Error("known missing DAY and OPEN outside weekday New York RTH must remain green when otherwise healthy");
+}
+
+const missingDayRth = setSourceTimes(structuredClone(outsideRth), "2026-09-14T14:00:00.000Z");
+const missingDayHealth = api.boardHealthPresentation(api.validate(missingDayRth), 0, "2026-09-14T14:00:00.000Z", false);
+if (missingDayHealth.tone !== "red" || missingDayHealth.reason !== "day_unavailable_rth" || missingDayHealth.label !== "Needs fix") {
+  throw new Error("missing DAY during weekday New York RTH must be one red Needs fix signal");
+}
+
+const missingOpenRth = setSourceTimes(structuredClone(sample), "2026-09-14T14:00:00.000Z");
+delete missingOpenRth.pnlSources.open;
+const missingOpenHealth = api.boardHealthPresentation(api.validate(missingOpenRth), 0, "2026-09-14T14:00:00.000Z", false);
+if (missingOpenHealth.tone !== "yellow" || missingOpenHealth.reason !== "open_unavailable_rth") {
+  throw new Error("missing OPEN during weekday New York RTH must be yellow when equity and DAY remain usable");
+}
+
+const staleProducerGreen = setSourceTimes(structuredClone(sample), "2026-09-14T14:00:00.000Z");
+const staleHealth = api.boardHealthPresentation(api.validate(staleProducerGreen), 301, "2026-09-14T14:05:01.000Z", false);
+if (staleHealth.tone !== "yellow" || staleHealth.reason !== "snapshot_stale" || staleHealth.label !== "Stale 5m") {
+  throw new Error("client time must age a producer-green snapshot into one concise yellow stale signal");
+}
+
+const producerRed = setSourceTimes(structuredClone(sample), "2026-09-14T14:00:00.000Z");
+producerRed.boardHealth = "red";
+producerRed.shortReason = "gateway_down";
+const producerRedHealth = api.boardHealthPresentation(api.validate(producerRed), 0, "2026-09-14T14:00:00.000Z", false);
+if (producerRedHealth.tone !== "red" || producerRedHealth.reason !== "gateway_down") {
+  throw new Error("a producer health field may worsen a locally green state");
+}
+
+const proxyDay = structuredClone(sample);
+proxyDay.pnlSources.day.detail = "session_open_proxy 2026-09-14T13:30:00.000Z; estimated since first usable session equity";
+const proxyView = api.pnlMetricPresentation(api.validate(proxyDay), "day", proxyDay.totals.dayPnl);
+if (proxyView.note !== "Session estimate" || proxyView.title !== proxyDay.pnlSources.day.detail) {
+  throw new Error("session_open_proxy DAY must be labelled as an estimate while preserving producer detail in the tooltip");
+}
+
+for (const mutate of [
+  function (snapshot) { delete snapshot.shortReason; },
+  function (snapshot) { snapshot.boardHealth = "blue"; },
+  function (snapshot) { snapshot.shortReason = "gateway_down"; },
+  function (snapshot) { snapshot.shortReason = "unknown_reason"; },
+]) {
+  const malformed = structuredClone(sample);
+  mutate(malformed);
+  let rejected = false;
+  try { api.validate(malformed); } catch (_) { rejected = true; }
+  if (!rejected) { throw new Error("client validator accepted malformed board health fields"); }
+}
+
+const legacyHealth = structuredClone(sample);
+delete legacyHealth.boardHealth;
+delete legacyHealth.shortReason;
+api.validate(legacyHealth);
+
+if (!/class="board-health-light"/.test(htmlSource) || !/<details class="board-health-info"/.test(htmlSource) ||
+    !/aria-label="Show board diagnostics"/.test(htmlSource) || !/href="#desk-j">Accounting diagnostic/.test(htmlSource) ||
+    /Something needs attention/.test(htmlSource)) {
+  throw new Error("default health banner must be one light and short label with diagnostics behind an accessible information disclosure");
+}
+if (!/\.board-health-info:not\(\[open\]\):hover/.test(cssSource) || !/\.board-health-info:not\(\[open\]\):focus-within/.test(cssSource)) {
+  throw new Error("health diagnostics must open from hover and keyboard focus while native details supports click and mobile tap");
+}
 const syntheticBackfill = {
   status: "BEST_AVAILABLE",
   fullTotalAvailable: false,

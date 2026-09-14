@@ -10,6 +10,21 @@
     "generatedAt": { "type": "string", "format": "date-time" },
     "mode": { "const": "PAPER" },
     "currency": { "const": "EUR" },
+    "boardHealth": { "enum": ["green", "yellow", "red"] },
+    "shortReason": {
+      "enum": [
+        "board_ok",
+        "snapshot_stale",
+        "retained_values",
+        "gateway_degraded",
+        "open_unavailable_rth",
+        "halt_on",
+        "gateway_down",
+        "equity_unavailable",
+        "producer_stuck",
+        "day_unavailable_rth"
+      ]
+    },
     "brokerAccount": { "$ref": "#/$defs/brokerAccount" },
     "pnlSources": {
       "type": "object",
@@ -61,6 +76,22 @@
       "items": { "$ref": "#/$defs/position" }
     }
   },
+  "dependentRequired": {
+    "boardHealth": ["shortReason"],
+    "shortReason": ["boardHealth"]
+  },
+  "allOf": [
+    {
+      "if": { "required": ["boardHealth", "shortReason"] },
+      "then": {
+        "oneOf": [
+          { "properties": { "boardHealth": { "const": "green" }, "shortReason": { "const": "board_ok" } } },
+          { "properties": { "boardHealth": { "const": "yellow" }, "shortReason": { "enum": ["snapshot_stale", "retained_values", "gateway_degraded", "open_unavailable_rth"] } } },
+          { "properties": { "boardHealth": { "const": "red" }, "shortReason": { "enum": ["halt_on", "gateway_down", "equity_unavailable", "producer_stuck", "day_unavailable_rth"] } } }
+        ]
+      }
+    }
+  ],
   "$defs": {
     "dayPnlSource": {
       "type": "object",

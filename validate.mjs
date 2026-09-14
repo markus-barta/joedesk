@@ -4,6 +4,19 @@ const DESK_IDS = ["j", "joe", "joel"];
 const STATES = new Set(["working", "sit-out", "stuck"]);
 const LEARNING = new Set(["learning", "iterating", "steady", "blocked"]);
 const GW = new Set(["ok", "degraded", "down"]);
+const BOARD_HEALTH = new Set(["green", "yellow", "red"]);
+const BOARD_HEALTH_REASONS = new Map([
+  ["board_ok", "green"],
+  ["snapshot_stale", "yellow"],
+  ["retained_values", "yellow"],
+  ["gateway_degraded", "yellow"],
+  ["open_unavailable_rth", "yellow"],
+  ["halt_on", "red"],
+  ["gateway_down", "red"],
+  ["equity_unavailable", "red"],
+  ["producer_stuck", "red"],
+  ["day_unavailable_rth", "red"],
+]);
 const SIDES = new Set(["Long", "Short", "long", "short"]);
 const ACCOUNTING_METHOD = "execution-fifo-net-current-fx";
 const ACCOUNTING_DETAIL_MAX = 240;
@@ -475,6 +488,18 @@ export function validateHouseholdSnapshot(raw) {
   if (raw.mode !== "PAPER") errors.push("mode must be PAPER");
   if (raw.currency !== "EUR") errors.push("currency must be EUR");
   if (typeof raw.generatedAt !== "string" || !raw.generatedAt) errors.push("generatedAt required");
+
+  const hasBoardHealth = Object.prototype.hasOwnProperty.call(raw, "boardHealth");
+  const hasShortReason = Object.prototype.hasOwnProperty.call(raw, "shortReason");
+  if (hasBoardHealth !== hasShortReason) {
+    errors.push("boardHealth and shortReason must appear together");
+  } else if (hasBoardHealth) {
+    if (!BOARD_HEALTH.has(raw.boardHealth)) errors.push("boardHealth invalid");
+    if (!BOARD_HEALTH_REASONS.has(raw.shortReason)) errors.push("shortReason invalid");
+    else if (BOARD_HEALTH_REASONS.get(raw.shortReason) !== raw.boardHealth) {
+      errors.push("shortReason does not match boardHealth");
+    }
+  }
 
   if (!isObj(raw.source) || typeof raw.source.label !== "string" || !raw.source.label) {
     errors.push("source.label required");
