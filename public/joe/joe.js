@@ -378,7 +378,7 @@
       required(source.periodStart === null || validIsoTimestamp(source.periodStart), path + ".periodStart is invalid");
       required(source.method !== "sod-virtual-equity" || validIsoTimestamp(source.periodStart), path + ".periodStart is required for SOD method");
     } else {
-      required(["ib-unrealized-pnl", null].includes(source.method), path + ".method is invalid");
+      required(["ib-unrealized-pnl", "owned-lots-current-mark-fx", null].includes(source.method), path + ".method is invalid");
     }
     if (source.status === "available") {
       required(source.method !== null, path + ".method is required when available");
@@ -2325,6 +2325,7 @@
     if (source.method === "sod-virtual-equity") { return "SOD · virtual desks"; }
     if (source.method === "ib-daily-pnl") { return "IB DailyPnL · virtual desks"; }
     if (source.method === "ib-unrealized-pnl") { return "IB unrealized · virtual desks"; }
+    if (source.method === "owned-lots-current-mark-fx") { return "Owned lots · current marks"; }
     return null;
   }
 

@@ -153,6 +153,20 @@ if (proxyView.note !== "Session estimate" || proxyView.title !== proxyDay.pnlSou
   throw new Error("session_open_proxy DAY must be labelled as an estimate while preserving producer detail in the tooltip");
 }
 
+const ownedLotsOpen = structuredClone(sample);
+ownedLotsOpen.pnlSources.open = {
+  status: "available",
+  method: "owned-lots-current-mark-fx",
+  currency: "EUR",
+  scope: "virtual-desks",
+  observedAt: "2026-09-14T15:00:00.000Z",
+  detail: "J owned lots use current broker marks and explicit quote-to-EUR FX; Joe and Joel are proven flat outside exact KEEP.",
+};
+const ownedLotsView = api.pnlMetricPresentation(api.validate(ownedLotsOpen), "open", ownedLotsOpen.totals.openPnl);
+if (ownedLotsView.note !== "Owned lots · current marks" || ownedLotsView.title !== ownedLotsOpen.pnlSources.open.detail) {
+  throw new Error("actual producer owned-lots OPEN evidence must validate with a concise label and full tooltip detail");
+}
+
 for (const mutate of [
   function (snapshot) { delete snapshot.shortReason; },
   function (snapshot) { snapshot.boardHealth = "blue"; },
