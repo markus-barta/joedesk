@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "calendar",
-  "version": "26.09.14.16.32",
+  "version": "26.09.14.17.08",
   "release_channel": "stable",
-  "release_sequence": 20,
-  "note": "Compact accounting traffic light with details on demand and explicit session DAY estimates."
+  "release_sequence": 21,
+  "note": "Accept the existing execution-owned OPEN method in browser validation."
 }

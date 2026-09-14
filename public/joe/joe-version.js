@@ -2,8 +2,14 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "26.09.14.16.32",
+    APP_VERSION: "26.09.14.17.08",
     VERSION_HISTORY: [
+      {
+        version: "26.09.14.17.08",
+        date: "2026-09-14",
+        title: "Keep the board available when OPEN marks recover",
+        changes: ["Accept the existing producer method for execution-owned OPEN values in the browser.", "Keep traffic lights and session DAY estimates available as current marks recover."]
+      },
       {
         version: "26.09.14.16.32",
         date: "2026-09-14",
