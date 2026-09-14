@@ -129,22 +129,21 @@ button { color: inherit; }
 .layout-unsaved-card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.45; }
 .layout-unsaved-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 4px; }
 .layout-unsaved-actions #layoutUnsavedSave { border-color: var(--green); color: var(--paper); }
-.board-health { position: relative; display: flex; align-items: center; gap: 8px; min-height: 42px; margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--paper); background: var(--panel); }
-.board-health-summary { display: inline-flex; align-items: center; gap: 8px; }
-.board-health-summary strong { font: 600 11px var(--mono); letter-spacing: .04em; white-space: nowrap; }
-.board-health-light { width: 10px; height: 10px; border-radius: 50%; background: var(--quiet); box-shadow: 0 0 0 3px color-mix(in srgb, var(--quiet) 16%, transparent); }
+.board-health { min-height: 42px; margin: 0 0 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--paper); background: var(--panel); }
+.board-health-summary { display: flex; align-items: baseline; gap: 10px; min-height: 24px; cursor: pointer; list-style: none; font: 12px/1.5 var(--sans); }
+.board-health-summary::-webkit-details-marker { display: none; }
+.board-health-summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; border-radius: 3px; }
+.board-health-copy { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.board-health-copy strong { font-weight: 600; }
+.board-health-light { flex: 0 0 10px; width: 10px; height: 10px; border-radius: 50%; background: var(--quiet); box-shadow: 0 0 0 3px color-mix(in srgb, var(--quiet) 16%, transparent); }
 .board-health[data-tone="green"] .board-health-light { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 18%, transparent); }
 .board-health[data-tone="yellow"] .board-health-light { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 18%, transparent); }
 .board-health[data-tone="red"] .board-health-light { background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 18%, transparent); }
-.board-health-info { position: relative; }
-.board-health-info > summary { display: grid; width: 20px; height: 20px; box-sizing: border-box; place-items: center; border: 1px solid var(--quiet); border-radius: 50%; color: var(--muted); cursor: pointer; font: 600 11px/1 var(--sans); list-style: none; }
-.board-health-info > summary::-webkit-details-marker { display: none; }
-.board-health-info > summary:hover, .board-health-info > summary:focus-visible { border-color: var(--paper); color: var(--paper); outline: none; }
-.board-health-diagnostics { position: absolute; z-index: 60; top: calc(100% + 7px); left: -4px; width: min(34rem, calc(100vw - 32px)); padding: 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--panel); box-shadow: 0 16px 36px rgba(0, 0, 0, .24); font-size: 12px; line-height: 1.45; }
+.board-health-more { flex: 0 0 auto; color: var(--muted); font-size: 11px; text-decoration: underline; text-underline-offset: 3px; }
+.board-health-summary:hover .board-health-more { color: var(--paper); }
+.board-health-diagnostics { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; line-height: 1.45; }
 .board-health-diagnostics p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .board-health-diagnostics a { color: var(--blue); font: 10px var(--mono); }
-.board-health-info:not([open]):hover > .board-health-diagnostics,
-.board-health-info:not([open]):focus-within > .board-health-diagnostics { display: block; }
 .grid-stack { min-height: 680px; }
 .grid-stack.gs-1 > .grid-stack-item { left: 0 !important; width: 100% !important; }
 .grid-stack-item-content.widget { inset: var(--joe-tile-padding); overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: linear-gradient(180deg, var(--widget-bg-top), var(--widget-bg-bottom)); box-shadow: 0 12px 28px rgba(0, 0, 0, .12); }
@@ -557,8 +556,7 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
   }
   .layout-select, .layout-name-input { max-width: 100%; }
   .board-health { min-height: 44px; }
-  .board-health-info > summary { width: 28px; height: 28px; }
-  .board-health-diagnostics { position: fixed; top: var(--joe-header-bottom, 64px); right: 16px; left: 16px; width: auto; }
+  .board-health-summary { min-height: 28px; gap: 8px; }
   .header-menu > summary,
   .quiet-button,
   .control-group button,

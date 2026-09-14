@@ -14,6 +14,13 @@ delete legacyBoardHealth.boardHealth;
 delete legacyBoardHealth.shortReason;
 assertOk(legacyBoardHealth, "older snapshots without board health remain valid");
 
+for (const [tone, reason] of [["yellow", "day_pending"], ["yellow", "retained_values"], ["red", "day_unavailable_rth"]]) {
+  const snapshot = structuredClone(sample);
+  snapshot.boardHealth = tone;
+  snapshot.shortReason = reason;
+  assertOk(snapshot, `compatible health ${tone}/${reason}`);
+}
+
 for (const [label, mutate, expected] of [
   ["missing reason", (snapshot) => { delete snapshot.shortReason; }, /must appear together/],
   ["unknown health", (snapshot) => { snapshot.boardHealth = "blue"; }, /boardHealth invalid/],

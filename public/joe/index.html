@@ -146,9 +146,12 @@
     </div>
   </header>
   <div class="board-health" id="alarm" data-tone="checking" role="status" aria-live="polite">
-    <span class="board-health-summary"><span class="board-health-light" aria-hidden="true"></span><strong id="alarmLabel">Checking</strong></span>
     <details class="board-health-info" id="boardHealthInfo">
-      <summary aria-label="Show board diagnostics" title="Show board diagnostics">i</summary>
+      <summary class="board-health-summary" aria-label="Read more about board status">
+        <span class="board-health-light" aria-hidden="true"></span>
+        <span class="board-health-copy"><strong id="alarmLabel">Checking</strong><span>: </span><span id="alarmReason">waiting for the first update</span></span>
+        <span class="board-health-more">read more</span>
+      </summary>
       <div class="board-health-diagnostics">
         <p id="alarmText">Waiting for the first snapshot.</p>
         <a href="#desk-j">Accounting diagnostic</a>
@@ -246,7 +249,7 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">26.09.14.17.08</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">26.09.14.17.40</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>

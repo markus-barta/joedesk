@@ -121,8 +121,8 @@ if (api.boardHealthPresentation(api.validate(outsideRth), 0, "2026-09-13T14:00:0
 
 const missingDayRth = setSourceTimes(structuredClone(outsideRth), "2026-09-14T14:00:00.000Z");
 const missingDayHealth = api.boardHealthPresentation(api.validate(missingDayRth), 0, "2026-09-14T14:00:00.000Z", false);
-if (missingDayHealth.tone !== "red" || missingDayHealth.reason !== "day_unavailable_rth" || missingDayHealth.label !== "Needs fix") {
-  throw new Error("missing DAY during weekday New York RTH must be one red Needs fix signal");
+if (missingDayHealth.tone !== "yellow" || missingDayHealth.reason !== "day_pending" || !missingDayHealth.explanation.includes("equity is still available")) {
+  throw new Error("missing DAY with usable equity during weekday New York RTH must be yellow with an honest short reason");
 }
 
 const missingOpenRth = setSourceTimes(structuredClone(sample), "2026-09-14T14:00:00.000Z");
@@ -186,12 +186,37 @@ delete legacyHealth.shortReason;
 api.validate(legacyHealth);
 
 if (!/class="board-health-light"/.test(htmlSource) || !/<details class="board-health-info"/.test(htmlSource) ||
-    !/aria-label="Show board diagnostics"/.test(htmlSource) || !/href="#desk-j">Accounting diagnostic/.test(htmlSource) ||
-    /Something needs attention/.test(htmlSource)) {
-  throw new Error("default health banner must be one light and short label with diagnostics behind an accessible information disclosure");
+    !/aria-label="Read more about board status"/.test(htmlSource) || !/id="alarmReason"/.test(htmlSource) ||
+    !/class="board-health-more">read more/.test(htmlSource) || !/href="#desk-j">Accounting diagnostic/.test(htmlSource)) {
+  throw new Error("health banner must have light, label, plain-language reason and accessible read more");
 }
-if (!/\.board-health-info:not\(\[open\]\):hover/.test(cssSource) || !/\.board-health-info:not\(\[open\]\):focus-within/.test(cssSource)) {
-  throw new Error("health diagnostics must open from hover and keyboard focus while native details supports click and mobile tap");
+if (/board-health-info[^\n]*not\(\[open\]\)/.test(cssSource) ||
+    /\.board-health-diagnostics\s*\{[^}]*position:\s*(absolute|fixed)/.test(cssSource)) {
+  throw new Error("diagnostics must expand the header only on activation, never hover or overlay the board");
+}
+const yellowProducer = setSourceTimes(structuredClone(sample), "2026-09-14T14:00:00.000Z");
+yellowProducer.boardHealth = "yellow";
+yellowProducer.shortReason = "day_pending";
+if (api.boardHealthPresentation(api.validate(yellowProducer), 0, "2026-09-14T14:00:00.000Z", false).tone !== "yellow") {
+  throw new Error("new yellow producer DAY state must be accepted");
+}
+const oldDayProducer = structuredClone(yellowProducer);
+oldDayProducer.boardHealth = "red";
+oldDayProducer.shortReason = "day_unavailable_rth";
+if (api.boardHealthPresentation(api.validate(oldDayProducer), 0, "2026-09-14T14:00:00.000Z", false).tone !== "red") {
+  throw new Error("legacy producer red DAY reason must remain backward compatible");
+}
+const retainedFamily = setSourceTimes(structuredClone(sample), "2026-09-14T14:00:00.000Z");
+retainedFamily.desks[0].state = "stuck";
+retainedFamily.desks[0].moneyEvidence = { status: "carried", observedAt: "2026-09-14T13:59:00.000Z" };
+delete retainedFamily.pnlSources;
+const retainedHealth = api.boardHealthPresentation(api.validate(retainedFamily), 0, "2026-09-14T14:00:00.000Z", false);
+if (retainedHealth.tone !== "yellow" || retainedHealth.reason !== "retained_values" || !retainedHealth.explanation.includes("last good equity")) {
+  throw new Error("incomplete family with retained usable equity must remain yellow even while DAY is pending");
+}
+retainedFamily.safety.gateway.status = "down";
+if (api.boardHealthPresentation(api.validate(retainedFamily), 0, "2026-09-14T14:00:00.000Z", false).tone !== "red") {
+  throw new Error("retained values must not hide a down Gateway");
 }
 const syntheticBackfill = {
   status: "BEST_AVAILABLE",

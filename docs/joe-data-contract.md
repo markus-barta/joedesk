@@ -34,7 +34,7 @@ without either field remain valid. `boardHealth` is `green`, `yellow`, or
 
 - green: `board_ok`;
 - yellow: `snapshot_stale`, `retained_values`, `gateway_degraded`, or
-  `open_unavailable_rth`;
+  `open_unavailable_rth`, or `day_pending`;
 - red: `halt_on`, `gateway_down`, `equity_unavailable`, `producer_stuck`, or
   `day_unavailable_rth`.
 
@@ -42,13 +42,15 @@ The browser treats this pair as advisory. It derives health again from the
 current payload and current time, and accepts the producer result only when it
 is worse. This prevents an old producer `green` from surviving after source
 timestamps cross `safety.staleAfterSeconds`. Weekday New York regular trading
-hours are 09:30 inclusive through 16:00 exclusive. Missing DAY is red then;
-missing OPEN is yellow. Outside those hours a known unavailable or not-wired
+hours are 09:30 inclusive through 16:00 exclusive. Missing DAY or OPEN is
+yellow when equity remains usable. The old red `day_unavailable_rth` code
+remains accepted for compatibility; current producers use yellow `day_pending`. Outside those hours a known unavailable or not-wired
 DAY/OPEN source does not prevent green when the rest of the board is healthy.
 
-The default board banner contains only one coloured light and a short label.
-Full diagnostic text and the Accounting diagnostic link stay collapsed behind
-the adjacent information control.
+The default board banner contains one coloured light, a short label, a colon,
+and a plain-language reason. The subtle “read more” control expands the header
+in place to show full diagnostics and the Accounting diagnostic link. It stays
+closed by default and supports keyboard and touch.
 
 Producers may also emit the additive top-level account observation:
 
