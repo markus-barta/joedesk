@@ -2,8 +2,18 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "26.09.12.20.36",
+    APP_VERSION: "26.09.14.16.32",
     VERSION_HISTORY: [
+      {
+        version: "26.09.14.16.32",
+        date: "2026-09-14",
+        title: "One accounting light, details when needed",
+        changes: [
+          "Show one compact accounting traffic light; open the information control for diagnostics.",
+          "Keep stale and unavailable data distinct as snapshots age, including during the trading session.",
+          "Label fallback DAY values as session estimates with their actual reference time.",
+        ],
+      },
       {
         version: "26.09.12.20.36",
         date: "2026-09-12",

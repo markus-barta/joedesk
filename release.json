@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "calendar",
-  "version": "26.09.12.20.36",
+  "version": "26.09.14.16.32",
   "release_channel": "stable",
-  "release_sequence": 19,
-  "note": "Distinguish retained valuation age from Gateway and accounting status."
+  "release_sequence": 20,
+  "note": "Compact accounting traffic light with details on demand and explicit session DAY estimates."
 }

@@ -145,7 +145,16 @@
       <p class="layout-status header-status" id="layoutStatus" role="status" aria-live="polite"></p>
     </div>
   </header>
-  <div class="alarm" id="alarm" hidden role="alert"><strong>Something needs attention</strong><span id="alarmText"></span></div>
+  <div class="board-health" id="alarm" data-tone="checking" role="status" aria-live="polite">
+    <span class="board-health-summary"><span class="board-health-light" aria-hidden="true"></span><strong id="alarmLabel">Checking</strong></span>
+    <details class="board-health-info" id="boardHealthInfo">
+      <summary aria-label="Show board diagnostics" title="Show board diagnostics">i</summary>
+      <div class="board-health-diagnostics">
+        <p id="alarmText">Waiting for the first snapshot.</p>
+        <a href="#desk-j">Accounting diagnostic</a>
+      </div>
+    </details>
+  </div>
 
   <section class="grid-stack" id="joeGrid" aria-label="Configurable household desk widgets">
     <article class="grid-stack-item" gs-id="hero" gs-x="0" gs-y="0" gs-w="12" gs-h="3">
@@ -172,7 +181,7 @@
       </div>
     </article>
 
-    <article class="grid-stack-item" gs-id="desk-j" gs-x="0" gs-y="3" gs-w="4" gs-h="9"><div class="grid-stack-item-content widget desk-widget" data-desk="j"><div class="widget-drag"><span>Desk J</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="j"></div></div></article>
+    <article class="grid-stack-item" id="desk-j" gs-id="desk-j" gs-x="0" gs-y="3" gs-w="4" gs-h="9"><div class="grid-stack-item-content widget desk-widget" data-desk="j"><div class="widget-drag"><span>Desk J</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="j"></div></div></article>
     <article class="grid-stack-item" gs-id="desk-joe" gs-x="4" gs-y="3" gs-w="4" gs-h="9"><div class="grid-stack-item-content widget desk-widget" data-desk="joe"><div class="widget-drag"><span>Desk Joe</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="joe"></div></div></article>
     <article class="grid-stack-item" gs-id="desk-joel" gs-x="8" gs-y="3" gs-w="4" gs-h="9"><div class="grid-stack-item-content widget desk-widget" data-desk="joel"><div class="widget-drag"><span>Desk Joel</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="joel"></div></div></article>
 
@@ -237,7 +246,7 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">26.09.12.20.36</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">26.09.14.16.32</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>

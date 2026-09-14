@@ -70,6 +70,19 @@
   var THEME_MODES = ["light", "dark", "system"];
   var DEFAULT_GRID_SETTINGS = { columns: 12, cellHeight: 82, tilePadding: 10, tileGap: 10 };
   var DESK_IDS = ["j", "joe", "joel"];
+  var BOARD_HEALTH_TONES = ["green", "yellow", "red"];
+  var BOARD_HEALTH_REASON_TONES = {
+    board_ok: "green",
+    snapshot_stale: "yellow",
+    retained_values: "yellow",
+    gateway_degraded: "yellow",
+    open_unavailable_rth: "yellow",
+    halt_on: "red",
+    gateway_down: "red",
+    equity_unavailable: "red",
+    producer_stuck: "red",
+    day_unavailable_rth: "red"
+  };
   var ACCOUNTING_METHOD = "execution-fifo-net-current-fx";
   var ACCOUNTING_DETAIL_MAX = 240;
   var HISTORY_BASIS_MAX = 96;
@@ -129,6 +142,7 @@
   var dateTime = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium", timeZone: "Europe/Vienna" });
   var shortTime = new Intl.DateTimeFormat("de-AT", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Vienna" });
   var accountingDate = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "numeric", timeZone: "America/New_York" });
+  var newYorkClock = new Intl.DateTimeFormat("en-US", { weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "America/New_York" });
   var grid = null;
   var restoringLayout = false;
   var narrowGridActive = false;
@@ -704,6 +718,14 @@
     required(data.mode === "PAPER", "mode must be PAPER");
     required(data.currency === "EUR", "currency must be EUR");
     required(!Number.isNaN(Date.parse(data.generatedAt)), "generatedAt must be an ISO timestamp");
+    var hasBoardHealth = Object.prototype.hasOwnProperty.call(data, "boardHealth");
+    var hasShortReason = Object.prototype.hasOwnProperty.call(data, "shortReason");
+    required(hasBoardHealth === hasShortReason, "boardHealth and shortReason must appear together");
+    if (hasBoardHealth && hasShortReason) {
+      required(BOARD_HEALTH_TONES.includes(data.boardHealth), "boardHealth is invalid");
+      required(Object.prototype.hasOwnProperty.call(BOARD_HEALTH_REASON_TONES, data.shortReason), "shortReason is invalid");
+      required(BOARD_HEALTH_REASON_TONES[data.shortReason] === data.boardHealth, "shortReason does not match boardHealth");
+    }
     required(data.safety && typeof data.safety === "object", "safety is required");
     required(typeof data.safety.halt === "boolean", "safety.halt must be boolean");
     required(["ok", "degraded", "down"].includes(data.safety.gateway && data.safety.gateway.status), "gateway status is invalid");
@@ -2299,6 +2321,7 @@
 
   function pnlSourceLabel(source) {
     if (!source) { return null; }
+    if (source.method === "sod-virtual-equity" && /^session_open_proxy(?:\b|[: _-])/.test(source.detail)) { return "Session estimate"; }
     if (source.method === "sod-virtual-equity") { return "SOD · virtual desks"; }
     if (source.method === "ib-daily-pnl") { return "IB DailyPnL · virtual desks"; }
     if (source.method === "ib-unrealized-pnl") { return "IB unrealized · virtual desks"; }
@@ -2433,6 +2456,103 @@
       (!desk.money || !Number.isFinite(desk.money.equity) || !Number.isFinite(desk.money.totalPnl)));
   }
 
+  function isNewYorkRegularHours(at) {
+    var date = at instanceof Date ? at : new Date(at === undefined ? Date.now() : at);
+    if (!Number.isFinite(date.getTime())) { return false; }
+    var parts = {};
+    newYorkClock.formatToParts(date).forEach(function (part) {
+      if (part.type !== "literal") { parts[part.type] = part.value; }
+    });
+    if (!["Mon", "Tue", "Wed", "Thu", "Fri"].includes(parts.weekday)) { return false; }
+    var minutes = Number(parts.hour) * 60 + Number(parts.minute);
+    return minutes >= 570 && minutes < 960;
+  }
+
+  function pnlMetricAvailable(data, kind) {
+    var source = data && data.pnlSources && data.pnlSources[kind];
+    var field = kind === "day" ? "dayPnl" : "openPnl";
+    return Boolean(source && source.status === "available" && data.totals && Number.isFinite(data.totals[field]));
+  }
+
+  function hasStaleBoardSource(data, at) {
+    var now = at instanceof Date ? at.getTime() : typeof at === "number" ? at : new Date(at).getTime();
+    if (!Number.isFinite(now)) { now = Date.now(); }
+    var sources = [data.generatedAt];
+    if (data.brokerAccount) { sources.push(data.brokerAccount.observedAt); }
+    data.desks.forEach(function (desk) {
+      if (desk.moneyEvidence) { sources.push(desk.moneyEvidence.observedAt); }
+    });
+    ["day", "open"].forEach(function (kind) {
+      var source = data.pnlSources && data.pnlSources[kind];
+      if (source && source.status === "available") { sources.push(source.observedAt); }
+    });
+    return sources.some(function (iso) {
+      var observed = Date.parse(iso || "");
+      var age = now - observed;
+      return !Number.isFinite(observed) || age < 0 || age > data.safety.staleAfterSeconds * 1000;
+    });
+  }
+
+  function localBoardHealth(data, snapshotAge, at, refreshFailed) {
+    var gateway = data.safety.gateway;
+    var rth = isNewYorkRegularHours(at);
+    var stuckWithoutEquity = data.desks.some(function (desk) {
+      return desk.state === "stuck" && !Number.isFinite(desk.money && desk.money.equity);
+    });
+    var equityUsable = Number.isFinite(data.totals.equity) && data.desks.every(function (desk) {
+      return Number.isFinite(desk.money && desk.money.equity);
+    });
+    if (data.safety.halt) { return { tone: "red", reason: "halt_on" }; }
+    if (gateway.status === "down") { return { tone: "red", reason: "gateway_down" }; }
+    if (stuckWithoutEquity) { return { tone: "red", reason: "producer_stuck" }; }
+    if (!equityUsable) { return { tone: "red", reason: "equity_unavailable" }; }
+    if (rth && !pnlMetricAvailable(data, "day")) { return { tone: "red", reason: "day_unavailable_rth" }; }
+    if (gateway.status === "degraded") { return { tone: "yellow", reason: "gateway_degraded" }; }
+    if (data.desks.some(function (desk) { return moneyEvidencePresentation(desk).carried; })) {
+      return { tone: "yellow", reason: "retained_values" };
+    }
+    if (data.desks.some(function (desk) { return desk.state === "stuck"; })) {
+      return { tone: "yellow", reason: "retained_values" };
+    }
+    if (rth && !pnlMetricAvailable(data, "open")) { return { tone: "yellow", reason: "open_unavailable_rth" }; }
+    if (snapshotAge > data.safety.staleAfterSeconds || hasStaleBoardSource(data, at)) {
+      return { tone: "yellow", reason: "snapshot_stale" };
+    }
+    if (refreshFailed) { return { tone: "yellow", reason: "refresh_failed" }; }
+    return { tone: "green", reason: "board_ok" };
+  }
+
+  function boardHealthPresentation(data, snapshotAge, at, refreshFailed) {
+    var health = localBoardHealth(data, snapshotAge, at, refreshFailed);
+    var producerTone = data.boardHealth;
+    if (producerTone && BOARD_HEALTH_TONES.indexOf(producerTone) > BOARD_HEALTH_TONES.indexOf(health.tone)) {
+      health = { tone: producerTone, reason: data.shortReason };
+    }
+    var label = health.tone === "green"
+      ? "Board OK"
+      : health.tone === "red"
+      ? "Needs fix"
+      : health.reason === "snapshot_stale"
+      ? "Stale " + ageLabel(snapshotAge)
+      : "Data delayed";
+    return { tone: health.tone, reason: health.reason, label: label };
+  }
+
+  function boardDiagnostics(data, snapshotAge, at, refreshFailed, health) {
+    var problems = snapshotProblems(data, snapshotAge);
+    if (isNewYorkRegularHours(at) && !pnlMetricAvailable(data, "day")) {
+      problems.push("DAY is unavailable during New York regular trading hours: " + pnlUnavailableCopy(data, "day") + ".");
+    }
+    if (isNewYorkRegularHours(at) && !pnlMetricAvailable(data, "open")) {
+      problems.push("OPEN is unavailable during New York regular trading hours: " + pnlUnavailableCopy(data, "open") + ".");
+    }
+    if (refreshFailed) { problems.push(refreshFailureMessage(refreshError)); }
+    if (!problems.length && health.reason !== "board_ok") {
+      problems.push("Producer status: " + health.reason.replaceAll("_", " ") + ".");
+    }
+    return problems;
+  }
+
   function snapshotProblems(data, snapshotAge) {
     var problems = [];
     if (!data) { return problems; }
@@ -2464,11 +2584,12 @@
     return problems;
   }
 
-  function applyAttentionState(problems) {
+  function applyBoardHealth(health, problems) {
     var alarm = document.getElementById("alarm");
-    alarm.hidden = problems.length === 0;
-    document.getElementById("alarmText").textContent = problems.join(" ");
-    document.documentElement.dataset.joeState = problems.length ? "attention" : "ok";
+    alarm.dataset.tone = health.tone;
+    document.getElementById("alarmLabel").textContent = health.label;
+    document.getElementById("alarmText").textContent = problems.length ? problems.join(" ") : "No current diagnostic issues.";
+    document.documentElement.dataset.joeState = health.tone === "green" ? "ok" : health.tone === "yellow" ? "attention" : "broken";
   }
 
   function setMoneyField(node, value, signed, fieldKind, data, noteNode) {
@@ -2576,9 +2697,9 @@
     updateSnapshotFreshnessUI(data, snapshotAge, snapshotStale);
     renderBrokerAccountSummary(data);
     updateDeskFreshnessFooters(data, snapshotAge, snapshotStale, gatewayDown);
-    var problems = snapshotProblems(data, snapshotAge);
-    if (refreshError) { problems.push(refreshFailureMessage(refreshError)); }
-    applyAttentionState(problems);
+    var at = Date.now();
+    var health = boardHealthPresentation(data, snapshotAge, at, Boolean(refreshError));
+    applyBoardHealth(health, boardDiagnostics(data, snapshotAge, at, Boolean(refreshError), health));
   }
 
   function refreshFailureMessage(error) {
@@ -3149,7 +3270,8 @@
     var stale = snapshotAge > data.safety.staleAfterSeconds;
     var gateway = data.safety.gateway;
     var gatewayDown = gateway.status === "down";
-    var problems = snapshotProblems(data, snapshotAge);
+    var at = Date.now();
+    var health = boardHealthPresentation(data, snapshotAge, at, false);
 
     renderBrokerAccountSummary(data);
     setMoney(document.getElementById("totalEquity"), data.totals.equity, false);
@@ -3159,7 +3281,7 @@
     setMoneyField(document.getElementById("totalOpen"), openPnl(data), true, "open", data, document.getElementById("totalOpenNote"));
     updateSnapshotFreshnessUI(data, snapshotAge, stale);
     setSignal("haltSignal", "haltValue", data.safety.halt ? "ON" : "Off", data.safety.halt ? "bad" : "good");
-    applyAttentionState(problems);
+    applyBoardHealth(health, boardDiagnostics(data, snapshotAge, at, false, health));
     observeSnapshotChanges(data);
     data.desks.forEach(function (desk) { renderDesk(desk, data, snapshotAge, stale, gatewayDown); });
     renderAttribution(data);
@@ -3196,9 +3318,10 @@
     });
     document.getElementById("freshValue").textContent = "NO DATA";
     document.getElementById("freshValue").className = "negative";
-    var alarm = document.getElementById("alarm");
-    alarm.hidden = false;
-    document.getElementById("alarmText").textContent = "No household snapshot is available yet. " + error.message;
+    applyBoardHealth(
+      { tone: "red", reason: "no_snapshot", label: "Needs fix" },
+      ["No household snapshot is available yet. " + error.message]
+    );
     document.getElementById("updatedAt").textContent = "data.json unavailable";
     document.getElementById("sourceLine").textContent = "Source: unavailable · paper projection";
     DESK_IDS.forEach(function (deskId) {
@@ -4867,6 +4990,9 @@
     primaryCapturedHistoryModel: primaryCapturedHistoryModel,
     renderBackfill: renderBackfill,
     gatewayHeartbeatAge: gatewayHeartbeatAge,
+    isNewYorkRegularHours: isNewYorkRegularHours,
+    boardHealthPresentation: boardHealthPresentation,
+    boardDiagnostics: boardDiagnostics,
     validIsoTimestamp: validIsoTimestamp,
     collectPositions: collectPositions,
     positionCurrencyCode: positionCurrencyCode,

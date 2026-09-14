@@ -26,6 +26,30 @@ position detail. Position rows accept desk, symbol, side, quantity, mark,
 market value, day/open PnL, update time, and the frozen optional extensions
 `currency` and `accountingScope`.
 
+### Board health
+
+Producers may emit `boardHealth` and `shortReason` together. Older snapshots
+without either field remain valid. `boardHealth` is `green`, `yellow`, or
+`red`; `shortReason` is one of these stable codes:
+
+- green: `board_ok`;
+- yellow: `snapshot_stale`, `retained_values`, `gateway_degraded`, or
+  `open_unavailable_rth`;
+- red: `halt_on`, `gateway_down`, `equity_unavailable`, `producer_stuck`, or
+  `day_unavailable_rth`.
+
+The browser treats this pair as advisory. It derives health again from the
+current payload and current time, and accepts the producer result only when it
+is worse. This prevents an old producer `green` from surviving after source
+timestamps cross `safety.staleAfterSeconds`. Weekday New York regular trading
+hours are 09:30 inclusive through 16:00 exclusive. Missing DAY is red then;
+missing OPEN is yellow. Outside those hours a known unavailable or not-wired
+DAY/OPEN source does not prevent green when the rest of the board is healthy.
+
+The default board banner contains only one coloured light and a short label.
+Full diagnostic text and the Accounting diagnostic link stay collapsed behind
+the adjacent information control.
+
 Producers may also emit the additive top-level account observation:
 
 ```json
@@ -84,6 +108,11 @@ scope, observation time, and short detail. When the Gateway is healthy but a
 verified source or SOD baseline is still missing, money stays `null`; the board
 labels the dash as not wired or baseline-pending instead of presenting an
 outage. A down/degraded Gateway gets a distinct unavailable label.
+
+For a DAY source whose `detail` starts with `session_open_proxy`, the board
+labels the value `Session estimate` and retains the full producer detail as its
+tooltip. The value is an estimate since the ISO timestamp named by the
+producer, rather than an exact start-of-day result.
 
 ### J backfill summary
 
@@ -242,8 +271,9 @@ Chart.js, Hammer.js, and the Chart.js zoom plug-in, so hsb1 does not depend on a
 public CDN.
 
 Use `null`, not zero, when a money value is unknown. Set `stuck` and add a short
-entry to `issues` when a desk cannot continue. A down gateway, HALT, stale file,
-or stuck desk becomes the prominent broken-state banner.
+entry to `issues` when a desk cannot continue. The combined board signal keeps
+the underlying detail available without placing per-desk diagnostic prose in
+the default banner.
 
 Do not copy raw account identifiers, order payloads, credentials, or the whole
 book into this file. `data.json` is a small projection, not an archive.

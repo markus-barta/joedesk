@@ -21,6 +21,19 @@ const sample = JSON.parse(await readFile(join(repoRoot, "docs/examples/joe-data.
 let fleetConfig = JSON.parse(await readFile(join(repoRoot, "public/joe/fleet-config.example.json"), "utf8"));
 const fleetActions = [];
 
+function refreshSnapshotObservationTimes(snapshot, generatedAt = new Date().toISOString()) {
+  snapshot.generatedAt = generatedAt;
+  snapshot.safety.gateway.lastSeenAt = generatedAt;
+  if (snapshot.brokerAccount) snapshot.brokerAccount.observedAt = generatedAt;
+  for (const source of Object.values(snapshot.pnlSources || {})) {
+    if (source?.status === "available") source.observedAt = generatedAt;
+  }
+  for (const desk of snapshot.desks || []) {
+    if (desk.moneyEvidence) desk.moneyEvidence.observedAt = generatedAt;
+  }
+  return snapshot;
+}
+
 function smokeFleetAction({ revBefore, revAfter, changedKeys, outcome, reason }) {
   return {
     id: `fa-${Date.now()}-00000000`,
@@ -35,13 +48,8 @@ function smokeFleetAction({ revBefore, revAfter, changedKeys, outcome, reason })
 }
 
 async function writeSnapshot(overrides = {}) {
-  const snapshot = structuredClone(sample);
-  snapshot.generatedAt = new Date().toISOString();
-  if (overrides.generatedAt) snapshot.generatedAt = overrides.generatedAt;
+  const snapshot = refreshSnapshotObservationTimes(structuredClone(sample), overrides.generatedAt || new Date().toISOString());
   snapshot.brokerAccount.observedAt = overrides.brokerObservedAt || snapshot.generatedAt;
-  for (const source of Object.values(snapshot.pnlSources || {})) {
-    if (source?.status === "available") source.observedAt = snapshot.generatedAt;
-  }
   if (overrides.halt !== undefined) snapshot.safety.halt = overrides.halt;
   if (overrides.haltReason !== undefined) snapshot.safety.haltReason = overrides.haltReason;
   if (overrides.gatewayStatus) snapshot.safety.gateway.status = overrides.gatewayStatus;
@@ -919,7 +927,12 @@ try {
     deskTotalsMeta: document.getElementById('deskTotalsMeta')?.textContent,
     gateway: document.getElementById('gatewayValue')?.textContent,
     halt: document.getElementById('haltValue')?.textContent,
-    alarmHidden: document.getElementById('alarm')?.hidden,
+    healthSummary: {
+      visible: !document.getElementById('alarm')?.hidden,
+      tone: document.getElementById('alarm')?.dataset.tone,
+      label: document.getElementById('alarmLabel')?.textContent,
+      detailOpen: document.getElementById('boardHealthInfo')?.open,
+    },
     gridReady: Boolean(document.getElementById('joeGrid')?.gridstack),
     widgets: document.querySelectorAll('#joeGrid > .grid-stack-item').length,
     selectedSeries: document.querySelectorAll('button[data-series][aria-pressed="true"]').length,
@@ -1005,7 +1018,8 @@ try {
       !(healthy.attributionGeometry[0].ratio > 0.95) || !(healthy.attributionGeometry[1].ratio > 0 && healthy.attributionGeometry[1].ratio < 0.05) ||
       !(healthy.attributionGeometry[2].ratio > 0.3 && healthy.attributionGeometry[2].ratio < 0.4) ||
       healthy.attributionGeometry.some(item => item.fillHeight < 7 || item.whiteSpace !== 'nowrap' || item.valueHeight > item.valueLineHeight * 1.2) ||
-      !healthy.halt.startsWith("Off") || !healthy.alarmHidden || !healthy.gridReady || healthy.widgets !== 7 ||
+      !healthy.halt.startsWith("Off") || !healthy.healthSummary.visible || healthy.healthSummary.tone !== "green" ||
+      healthy.healthSummary.label !== "Board OK" || healthy.healthSummary.detailOpen || !healthy.gridReady || healthy.widgets !== 7 ||
       healthy.selectedSeries !== 3 || healthy.allBotsPressed !== "true" ||
       healthy.historyTitle !== "History" || /drag here|compare up to two/i.test(healthy.historyHelp || "") ||
       healthy.deskLabel !== "Desks" || healthy.rangeLabel !== "Range" ||
@@ -1482,8 +1496,7 @@ try {
         mobileWidened.gridColumns !== 6 || mobileWidened.desktopColumns !== 6 || mobileWidened.heroW !== 6
       ) throw new Error(`Mobile save reload mismatch: ${JSON.stringify({ mobileReloaded, mobileWidened })}`);
     } else {
-      const staleSnapshot = structuredClone(sample);
-      staleSnapshot.generatedAt = new Date(Date.now() - 3600_000).toISOString();
+      const staleSnapshot = refreshSnapshotObservationTimes(structuredClone(sample), new Date(Date.now() - 3600_000).toISOString());
       stale = await value(`(() => {
         const equityBefore = document.getElementById('totalEquity')?.textContent;
         const dayBefore = document.getElementById('totalDay')?.textContent;
@@ -1491,25 +1504,26 @@ try {
         return {
           state: document.documentElement.dataset.joeState,
           freshness: document.getElementById('freshValue')?.textContent,
+          healthTone: document.getElementById('alarm')?.dataset.tone,
+          healthLabel: document.getElementById('alarmLabel')?.textContent,
+          detailOpen: document.getElementById('boardHealthInfo')?.open,
           alarm: document.getElementById('alarmText')?.textContent,
           equityRetained: document.getElementById('totalEquity')?.textContent === equityBefore,
           dayRetained: document.getElementById('totalDay')?.textContent === dayBefore,
           dayBefore,
         };
       })()`);
-      if (stale.state !== "attention" || !stale.freshness.startsWith("STALE") || !/stale/i.test(stale.alarm || "") || !stale.equityRetained || !stale.dayRetained || !/15,75/.test(stale.dayBefore || "")) throw new Error(`Stale state mismatch: ${JSON.stringify(stale)}`);
+      if (stale.state !== "attention" || stale.healthTone !== "yellow" || !/^Stale /.test(stale.healthLabel || "") || stale.detailOpen || !stale.freshness.startsWith("STALE") || !/stale/i.test(stale.alarm || "") || !stale.equityRetained || !stale.dayRetained || !/15,75/.test(stale.dayBefore || "")) throw new Error(`Stale state mismatch: ${JSON.stringify(stale)}`);
 
-      const brokenSnapshot = structuredClone(sample);
-      brokenSnapshot.generatedAt = new Date().toISOString();
+      const brokenSnapshot = refreshSnapshotObservationTimes(structuredClone(sample));
       brokenSnapshot.safety.halt = true;
       brokenSnapshot.safety.haltReason = "Operator check";
       brokenSnapshot.safety.gateway.status = "down";
       brokenSnapshot.safety.gateway.detail = "No heartbeat";
-      broken = await value(`(() => { window.JoeBoard.ingest(${JSON.stringify(brokenSnapshot)}); return { state: document.documentElement.dataset.joeState, alarm: document.getElementById('alarmText')?.textContent }; })()`);
-      if (broken.state !== "attention" || !/HALT is on/.test(broken.alarm || "") || !/Gateway is down/.test(broken.alarm || "")) throw new Error(`Broken state mismatch: ${JSON.stringify(broken)}`);
+      broken = await value(`(() => { window.JoeBoard.ingest(${JSON.stringify(brokenSnapshot)}); return { state: document.documentElement.dataset.joeState, tone: document.getElementById('alarm')?.dataset.tone, label: document.getElementById('alarmLabel')?.textContent, detailOpen: document.getElementById('boardHealthInfo')?.open, alarm: document.getElementById('alarmText')?.textContent }; })()`);
+      if (broken.state !== "broken" || broken.tone !== "red" || broken.label !== "Needs fix" || broken.detailOpen || !/HALT is on/.test(broken.alarm || "") || !/Gateway is down/.test(broken.alarm || "")) throw new Error(`Broken state mismatch: ${JSON.stringify(broken)}`);
 
-      const positionsSnapshot = structuredClone(sample);
-      positionsSnapshot.generatedAt = new Date().toISOString();
+      const positionsSnapshot = refreshSnapshotObservationTimes(structuredClone(sample));
       positionsSnapshot.totals.openPnl = 17.25;
       positionsSnapshot.desks[0].money.openPnl = 12.5;
       positionsSnapshot.desks[0].tradeCount = 4;
@@ -1522,8 +1536,7 @@ try {
 
       const partialBackfill = structuredClone(sample);
       delete partialBackfill.pnlSources;
-      partialBackfill.generatedAt = new Date().toISOString();
-      partialBackfill.brokerAccount.observedAt = partialBackfill.generatedAt;
+      refreshSnapshotObservationTimes(partialBackfill);
       partialBackfill.desks[0].money = { equity: null, dayPnl: null, totalPnl: null };
       partialBackfill.totals = { equity: null, dayPnl: null, totalPnl: null };
       const capturedStart = Date.now() - 6 * 3600_000;

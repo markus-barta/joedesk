@@ -9,6 +9,22 @@ const sample = JSON.parse(
   await readFile(resolve(repoRoot, "docs/examples/joe-data.sample.json"), "utf8"),
 );
 
+const legacyBoardHealth = structuredClone(sample);
+delete legacyBoardHealth.boardHealth;
+delete legacyBoardHealth.shortReason;
+assertOk(legacyBoardHealth, "older snapshots without board health remain valid");
+
+for (const [label, mutate, expected] of [
+  ["missing reason", (snapshot) => { delete snapshot.shortReason; }, /must appear together/],
+  ["unknown health", (snapshot) => { snapshot.boardHealth = "blue"; }, /boardHealth invalid/],
+  ["unknown reason", (snapshot) => { snapshot.shortReason = "not_a_reason"; }, /shortReason invalid/],
+  ["mismatched reason", (snapshot) => { snapshot.shortReason = "gateway_down"; }, /does not match/],
+]) {
+  const malformed = structuredClone(sample);
+  mutate(malformed);
+  assertFail(malformed, expected, `board health ${label}`);
+}
+
 function assertOk(snapshot, label) {
   const { ok, errors } = validateHouseholdSnapshot(snapshot);
   if (!ok) {
