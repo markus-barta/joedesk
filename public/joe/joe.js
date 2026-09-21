@@ -213,15 +213,15 @@
       intro: "A timed arm, desk watcher and quota governor keep routine work predictable.",
       sections: [
         ["US-open arm", "Use the US-open start time below. All configured times use Europe/Vienna, including daylight-saving changes."],
-        ["Watch before work", "desk-watch checks fleet state before scheduled routines continue."],
+        ["Watch before work", "The desk watcher is the configured routine for checking fleet state."],
         ["Capacity has the last word", "The quota governor can slow or park nonessential work."],
       ],
       fields: [
         { key: "usOpenArm", label: "Earliest US-open arm (Vienna time)", help: "24-hour time, for example 15:35.", value: "15:35", path: "cadence.usOpenArm", type: "time" },
+        { key: "wakeWindows", label: "Desk wake windows", value: "[]", path: "cadence.wakeWindows", type: "windows", maxLength: 131072 },
         { key: "watcher", label: "Desk check routine ID", help: "Lowercase routine name that checks the desks.", value: "desk-watch", path: "cadence.deskWatch", type: "routine", maxLength: 64 },
         { key: "darwin", label: "Darwin routine ID", help: "Lowercase routine name for Darwin.", value: "darwin", path: "cadence.darwin", type: "routine", maxLength: 64 },
         { key: "governor", label: "Quota capacity routine ID", help: "Lowercase routine name that slows or parks extra work.", value: "quota-governor", path: "cadence.quotaGovernor", type: "routine", maxLength: 64 },
-        { key: "wakeWindows", label: "Desk wake windows", value: "[]", path: "cadence.wakeWindows", type: "windows", maxLength: 131072 },
       ],
     },
     paths: {
@@ -229,8 +229,8 @@
       headline: "One shelf for settings. One for explanations.",
       intro: "Shared paths keep the fleet config and its human-readable docs easy to find.",
       sections: [
-        ["Fleet config", "~/trading-team/shared/fleet-config.json is the declared Mac-side mirror of the plain configuration source."],
-        ["Fleet docs", "~/trading-team/shared/docs holds the matching operator explanations."],
+        ["Fleet config", "The config path below declares the Mac-side mirror. The source strip shows the separate file this board actually reads."],
+        ["Fleet docs", "The docs path below declares the folder for matching operator explanations."],
         ["References, not secret values", "Shared files may name encrypted slots but never contain the secret material."],
       ],
       fields: [
@@ -255,12 +255,12 @@
     },
     tools: {
       label: "Tools",
-      headline: "Connections report health, not credentials.",
+      headline: "See which connections are declared.",
       intro: "These are declared connection names. Current health comes from /joe/data.json; this list does not prove connectivity.",
       sections: [
-        ["IB Gateway", "The paper gateway connection is represented as an availability signal only."],
-        ["joel-ib", "The declared integration stays separately named so its boundary is visible."],
-        ["codexbar@hsb0", "The host tool is addressed by its declared service name; authentication stays outside this UI."],
+        ["Connection names", "The saved tool entries name the expected connections. Technical shows the complete list of IDs and labels."],
+        ["Connection health", "Read current availability on the trading board. A tool listed here may still be unavailable."],
+        ["Host setup", "Authentication and host connection settings stay in their existing host workflow."],
       ],
       fields: [
         { key: "gateway", label: "Gateway", value: "IB Gateway", path: "tools.entries.0.label", editable: false },
@@ -4587,9 +4587,9 @@
       "amy.routines.close": ["Closing check-in name", "Name Amy’s closing recap. This label does not set a run time.", "Amy close routine"],
       "mac.shared.configPath": ["Mac config mirror path", "Declare where the Mac should read its mirror; this does not move the board’s source file.", "Mac-side consumer declaration"],
       "mac.shared.docsPath": ["Mac explanations folder", "Declare where matching operator notes belong on the Mac.", "Mac-side documentation"],
-      "tools.entries.0.label": ["Gateway connection name", "Read the first declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
-      "tools.entries.1.label": ["Integration name", "Read the second declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
-      "tools.entries.2.label": ["Host tool name", "Read the third declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
+      "tools.entries.0.label": ["First declared tool", "Read the first declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
+      "tools.entries.1.label": ["Second declared tool", "Read the second declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
+      "tools.entries.2.label": ["Third declared tool", "Read the third declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
       "secretSlots.agenix": ["agenix secret references", "Names of encrypted secret slots. Their values never enter this screen.", "Host secret store · read-only"],
       "secretSlots.janus": ["Janus secret references", "Names of secret capabilities. Their values never enter this screen.", "Janus secret workflow · read-only"],
     };
@@ -4724,7 +4724,6 @@
       label.appendChild(scope);
       return label;
     }));
-    renderFleetSectionDetails();
     updateFleetPreviewNote();
     updateFleetReadouts();
     if (focusHeading) { headline.focus({ preventScroll: true }); }
@@ -5088,7 +5087,7 @@
         fleetConfirmedFingerprint = "";
         fleetConfirmed = false;
         localStorage.removeItem(FLEET_PREVIEW_KEY);
-        fleetLastOutcome = "Success · " + result.rev + " is shared with Amy and desks.";
+        fleetLastOutcome = "Success · " + result.rev + " saved to the shared file. Consumer reload is not confirmed.";
         document.getElementById("fleetRevision").textContent = result.rev;
         renderFleetConfigSection(fleetSectionId, false);
         var writtenKeys = result.action && Array.isArray(result.action.changedKeys) && result.action.changedKeys.length

@@ -143,9 +143,16 @@ await writeFile(join(site, "joe", "history.json"), JSON.stringify({
 }));
 
 let historyUnavailable = false;
+let fleetUnavailable = false;
+let fleetActionsUnavailable = false;
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", "http://local.test");
   requests.push({ host: request.headers.host || "", path: url.pathname });
+  if (request.method === "GET" && ((fleetUnavailable && url.pathname === "/joe/fleet-config.json") || (fleetActionsUnavailable && url.pathname === "/joe/fleet-config/actions.json"))) {
+    response.writeHead(503, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: "synthetic unavailable fixture" }));
+    return;
+  }
   if (request.method === "GET" && url.pathname === "/joe/fleet-config.json") {
     response.writeHead(200, {
       "content-type": "application/json", "cache-control": "no-store",
@@ -1189,7 +1196,7 @@ try {
       !fleetBound.diffOpen || !/Maximum busy J desks at once/.test(fleetBound.diffText) ||
       !/Before: 5 busy J desks/.test(fleetBound.diffText) || !/After: 4 busy J desks/.test(fleetBound.diffText) ||
       !/1 preview change: maxBusyDesks/.test(fleetBound.diffToast) || !/Preview confirmed for fc-000000/.test(fleetBound.confirmToast) ||
-      !/Propagated fc-000001: desks\.maxBusyDesks/.test(fleetBound.propagateToast) || fleetBound.revision !== 'fc-000001' || !/Success · fc-000001 is shared/.test(fleetBound.note) ||
+      !/Propagated fc-000001: desks\.maxBusyDesks/.test(fleetBound.propagateToast) || fleetBound.revision !== 'fc-000001' || !/Success · fc-000001 saved to the shared file/.test(fleetBound.note) ||
       fleetBound.actionItems !== 1 || !/success/i.test(fleetBound.actionText) || !/amy-smoke/.test(fleetBound.actionText) || !/fc-000000 → fc-000001/.test(fleetBound.actionText) || !/desks\.maxBusyDesks/.test(fleetBound.actionText)
     ) throw new Error(`Fleet Config binding mismatch: ${JSON.stringify(fleetBound)}`);
 
@@ -1310,7 +1317,7 @@ try {
     })()`);
     if (fleetEdited.rev !== 'fc-000002' || fleetEdited.amber !== 'park_nonessential' ||
         fleetEdited.windows.length !== 1 || fleetEdited.windows[0].id !== 'us-open' ||
-        !/Success · fc-000002 is shared/.test(fleetEdited.note)) {
+        !/Success · fc-000002 saved to the shared file/.test(fleetEdited.note)) {
       throw new Error(`Fleet Config edited revision mismatch: ${JSON.stringify(fleetEdited)}`);
     }
     await value(`document.querySelector('[data-fleet-section="quota"]').click()`);
@@ -1399,13 +1406,27 @@ try {
     if (process.env.JOE_SCREENSHOT_DIR) {
       const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
       await writeFile(join(process.env.JOE_SCREENSHOT_DIR, mobileViewport ? "joe-dash-mobile.png" : "joe-dash-desktop.png"), Buffer.from(shot.data, "base64"));
+      if (mobileViewport) {
+        await value(`window.JoeBoard.showFleetConfig()`);
+        await delay(850);
+        await value(`window.scrollTo(0, 0)`);
+        const settingsNavShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+        await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "settings-mobile-navigation.png"), Buffer.from(settingsNavShot.data, "base64"));
+        await value(`document.querySelector('[data-fleet-section="desks"]').click()`);
+        await delay(150);
+        const settingsEditorShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+        await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "settings-mobile-limits.png"), Buffer.from(settingsEditorShot.data, "base64"));
+        await value(`window.JoeBoard.showTradingBoard()`);
+        await delay(850);
+      }
       if (!mobileViewport) {
         await value(`window.JoeBoard.showFleetConfig()`);
         await delay(850);
         for (const section of ["desks", "quota", "cadence"]) {
           await value(`document.querySelector('[data-fleet-section="${section}"]').click(); document.querySelector('.fleet-explanation').open = false; window.scrollTo(0, 0)`);
           await delay(150);
-          const settingsShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+          const settingsClip = await value(`(() => { const box = document.querySelector('.fleet-frame').getBoundingClientRect(); return { x: box.x + scrollX, y: box.y + scrollY, width: box.width, height: box.height, scale: 1 }; })()`);
+          const settingsShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: settingsClip });
           await writeFile(join(process.env.JOE_SCREENSHOT_DIR, `settings-${section}.png`), Buffer.from(settingsShot.data, "base64"));
         }
         const fleetBackShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
@@ -2108,6 +2129,42 @@ try {
         throw new Error(`Theme preference mismatch: ${JSON.stringify({ theme, systemDark })}`);
       }
     }
+  }
+
+  if (fleet && !mobileViewport) {
+    fleetUnavailable = true;
+    fleetActionsUnavailable = true;
+    await send("Page.navigate", { url: hsb1Url });
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      if (await value(`document.getElementById('fleetRevision')?.textContent === 'unavailable'`).catch(() => false)) break;
+      await delay(100);
+    }
+    await value(`document.getElementById('settingsMenu').open = true; document.getElementById('settingsFleetConfig').click()`);
+    await delay(850);
+    const unavailable = await value(`({
+      plane: document.documentElement.dataset.joePlane,
+      source: document.getElementById('fleetSourcePath').textContent,
+      last: document.getElementById('fleetLastPropagate').textContent,
+      fields: [...document.querySelectorAll('#fleetEditFields input')].map(node => ({ value: node.value, disabled: node.disabled })),
+      readouts: [...document.querySelectorAll('[data-fleet-readout]')].map(node => node.textContent),
+      explanation: document.getElementById('fleetLoadStatus').textContent,
+      disabled: document.querySelector('[data-fleet-action="propagate"]').disabled,
+    })`);
+    if (unavailable.plane !== 'fleet-config' || unavailable.source !== 'Unavailable' || unavailable.last !== 'Unknown · log unavailable' ||
+        !unavailable.fields.length || !unavailable.fields.every(field => field.disabled && field.value === '') ||
+        !unavailable.readouts.every(value => value === '—') || !unavailable.disabled || !/unavailable/.test(unavailable.explanation)) {
+      throw new Error(`Fleet unavailable state mismatch: ${JSON.stringify(unavailable)}`);
+    }
+    fleetUnavailable = false;
+    fleetActionsUnavailable = false;
+    await value(`window.JoeBoard.showTradingBoard()`);
+    await delay(850);
+    await value(`window.JoeBoard.showFleetConfig()`);
+    await delay(850);
+    const recovered = await value(`document.getElementById('fleetSourceRevision').textContent`);
+    if (recovered !== fleetConfig.rev) throw new Error(`Fleet retry did not recover: ${recovered}`);
+    fleet.unavailable = unavailable;
+    fleet.recovered = recovered;
   }
 
   const source = await readFile(join(repoRoot, "public", "joe", "index.html"), "utf8");
