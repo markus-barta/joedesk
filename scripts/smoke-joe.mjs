@@ -942,6 +942,13 @@ try {
     brokerMeta: document.getElementById('brokerAccountMeta')?.textContent,
     deskTotalsMeta: document.getElementById('deskTotalsMeta')?.textContent,
     gateway: document.getElementById('gatewayValue')?.textContent,
+    decisionPulse: {
+      label: document.querySelector('#learningStrip .label')?.textContent,
+      summary: document.getElementById('learningStripSummary')?.textContent,
+      scope: document.getElementById('learningStripScope')?.textContent,
+      desks: [...document.querySelectorAll('#learningStrip .learning-strip-desk')].map(node => node.textContent),
+      lines: document.getElementById('learningStrip')?.innerText || '',
+    },
     halt: document.getElementById('haltValue')?.textContent,
     healthSummary: {
       visible: !document.getElementById('alarm')?.hidden,
@@ -1023,6 +1030,14 @@ try {
       !/31[\.\s]482,75/.test(healthy.brokerEquity || "") || !/including KEEP/.test(healthy.brokerMeta || "") ||
       healthy.primaryHeroLabel !== "Virtual desk equity" || !/15[\.\s]000/.test(healthy.startingCapital || "") || !/not virtual desk capital/.test(healthy.brokerMeta || "") ||
       !/virtual books/i.test(healthy.deskTotalsMeta || "") ||
+      healthy.decisionPulse?.label !== "Decision pulse" ||
+      !/Busy \d\/3 virtual desks/.test(healthy.decisionPulse?.summary || "") ||
+      !/evidence-gated/.test(healthy.decisionPulse?.summary || "") ||
+      !/KEEP stays outside/.test(healthy.decisionPulse?.scope || "") ||
+      JSON.stringify(healthy.decisionPulse?.desks) !== JSON.stringify(["J", "Joe", "Joel"]) ||
+      !/Happened ·/.test(healthy.decisionPulse?.lines || "") ||
+      !/Next ·/.test(healthy.decisionPulse?.lines || "") ||
+      /Day P&L|Open P&L/.test(healthy.decisionPulse?.lines || "") ||
       !/15,75/.test(healthy.totalDay || "") || healthy.totalDayNote !== "SOD · virtual desks" || !/Synthetic SOD/.test(healthy.totalDayTitle || "") ||
       !/17,25/.test(healthy.totalOpen || "") || healthy.totalOpenNote !== "IB unrealized · virtual desks" || !/Synthetic IB unrealized/.test(healthy.totalOpenTitle || "") ||
       JSON.stringify(healthy.deskMoney) !== JSON.stringify([
