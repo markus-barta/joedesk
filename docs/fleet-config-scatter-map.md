@@ -1,9 +1,11 @@
 # Fleet Config scatter map
 
 This is the inventory for the 2026-09-21 Amy-box review. Its rule is simple:
-if Markus can change it on the board, its single source of truth is the current
-`/var/lib/joe-board/fleet-config.json` revision. The UI exposes the same map
-under **Fleet Config → Sources**.
+if Markus can change it on the board, its single source of truth is the document
+reported by **Where is this defined?**. The default saved path is
+`/var/lib/joe-board/fleet-config.json`; before first propagation the board can
+read its starter example. Expand **Sources — one home per knob** below the
+ELI10 editor for the matching file and schema keys.
 
 ## One source for board knobs
 
