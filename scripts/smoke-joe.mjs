@@ -2157,12 +2157,21 @@ try {
     }
     fleetUnavailable = false;
     fleetActionsUnavailable = false;
+    // v1 permits one declared tool. Missing slots must not become example tools.
+    fleetConfig.tools.entries = fleetConfig.tools.entries.slice(0, 1);
     await value(`window.JoeBoard.showTradingBoard()`);
     await delay(850);
     await value(`window.JoeBoard.showFleetConfig()`);
     await delay(850);
     const recovered = await value(`document.getElementById('fleetSourceRevision').textContent`);
     if (recovered !== fleetConfig.rev) throw new Error(`Fleet retry did not recover: ${recovered}`);
+    const sparseTools = await value(`(() => {
+      document.querySelector('[data-fleet-section="tools"]').click();
+      return [...document.querySelectorAll('#fleetEditFields input')].map(node => node.value);
+    })()`);
+    if (sparseTools[1] !== 'Not declared' || sparseTools[2] !== 'Not declared') {
+      throw new Error(`Missing tool slots displayed example values: ${JSON.stringify(sparseTools)}`);
+    }
     fleet.unavailable = unavailable;
     fleet.recovered = recovered;
   }

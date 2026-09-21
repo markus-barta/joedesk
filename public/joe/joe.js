@@ -4441,7 +4441,7 @@
       if (field.type === "windows") { return JSON.stringify(value); }
       return field.type === "refs" && !value.length ? "none" : value.join(",");
     }
-    return value === null || value === undefined ? field.value : String(value);
+    return value === null || value === undefined ? (field.editable === false ? "Not declared" : "") : String(value);
   }
 
   function fleetValuesFromConfig(config) {
