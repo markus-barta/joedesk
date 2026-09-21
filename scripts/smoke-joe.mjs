@@ -1740,9 +1740,19 @@ try {
           mainHistoryPath: document.querySelector('#historyCapturedPlot path')?.getAttribute('d'),
           mainHistoryBounded: document.getElementById('historyCaptured')?.scrollWidth <= document.getElementById('historyCaptured')?.clientWidth + 1,
           rangePressed: document.querySelector('button[data-range="1d"]')?.getAttribute('aria-pressed'),
+          healthTone: document.getElementById('alarm')?.dataset.tone,
+          healthLabel: document.getElementById('alarmLabel')?.textContent,
+          healthReason: document.getElementById('alarmReason')?.textContent,
+          healthDetail: document.getElementById('alarmText')?.textContent,
+          state: document.documentElement.dataset.joeState,
         };
       })()`);
-      if (!/Captured results \(partial\)/i.test(backfillSnapshot.text || "") || !/USD/.test(backfillSnapshot.text || "") || !/43 fills/.test(backfillSnapshot.text || "") || !/Coverage gap/.test(backfillSnapshot.text || "") || !/Historical EUR FX is not evidenced/.test(backfillSnapshot.text || "") || backfillSnapshot.total !== "—") {
+      // Incomplete J equity within staleAfterSeconds keeps the last-good total and stays yellow retained_values.
+      if (!/Captured results \(partial\)/i.test(backfillSnapshot.text || "") || !/USD/.test(backfillSnapshot.text || "") || !/43 fills/.test(backfillSnapshot.text || "") || !/Historical capture gap/.test(backfillSnapshot.text || "") || !/Historical EUR FX is not evidenced/.test(backfillSnapshot.text || "") ||
+          backfillSnapshot.total === "—" || !/30[\.\s]000/.test(backfillSnapshot.total || "") ||
+          backfillSnapshot.healthTone !== "yellow" || backfillSnapshot.state !== "attention" ||
+          backfillSnapshot.healthLabel !== "Data delayed" || !/carrying last good equity/.test(backfillSnapshot.healthReason || "") ||
+          !/retained value/.test(backfillSnapshot.healthDetail || "")) {
         throw new Error(`Backfill snapshot mismatch: ${JSON.stringify(backfillSnapshot)}`);
       }
       if (backfillSnapshot.title !== "Captured J history · USD · partial" || !backfillSnapshot.open ||
