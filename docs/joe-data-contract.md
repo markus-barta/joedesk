@@ -59,6 +59,82 @@ recent; a snapshot older than three freshness thresholds is red as a stopped
 board feed. The banner gives the reader a reload or Amy escalation action.
 See [Gateway flap recovery](gateway-flap-recovery.md) for the operator checklist.
 
+### Proposed harness reliability signals (JOED-18; not implemented)
+
+JoeDesk currently receives no observed status for Joe's `us-a-click` routine
+or the paper flatten-arm schedules. Fleet Config declares cadence and routine
+names, but those declarations do not prove a wake ran or a cron is armed.
+`lastRunAt: null` alone is not a failure: it may be normal before a routine's
+first due time. The proposed optional top-level `harnessSignals` array is a
+**future contract**, not a field accepted by today's strict schema or shown
+by today's UI. Producer and consumer must adopt and test it together.
+
+Each entry would require `kind` (`joe-us-a-click` or `flatten-arm`), stable
+`routineId`, `owner` (Joe or the owning paper flatten desk, including J2/J5),
+`state` (`ok`, `at-risk`, `broken`, or `unknown`), `reasonCode`, `observedAt`,
+`lastRunAt` (ISO time or null), `nextFireAt` (ISO time or null), and a short
+`source` identifier. `observedAt` must record a direct harness/scheduler
+observation, never the board snapshot generation time. `reasonCode` should be
+an enum such as `none`, `paused`, `disabled`, `missed-window`,
+`last-run-missing-after-due`, `rearm-failed`, or `source-unavailable`; no
+free-form logs, commands, tokens, or account details belong in this field.
+Only one current entry per `(kind, routineId, owner)` is allowed.
+
+Illustrative proposed fragment (synthetic, not a current `/joe/data.json`
+payload):
+
+```json
+{
+  "harnessSignals": [
+    {
+      "kind": "joe-us-a-click",
+      "routineId": "us-a-click",
+      "owner": "joe",
+      "state": "broken",
+      "reasonCode": "last-run-missing-after-due",
+      "observedAt": "2026-09-21T20:00:00Z",
+      "lastRunAt": null,
+      "nextFireAt": "2026-09-22T14:20:00Z",
+      "source": "example-harness-observer"
+    },
+    {
+      "kind": "flatten-arm",
+      "routineId": "j2-1550-flatten",
+      "owner": "j2",
+      "state": "broken",
+      "reasonCode": "rearm-failed",
+      "observedAt": "2026-09-21T20:00:00Z",
+      "lastRunAt": null,
+      "nextFireAt": null,
+      "source": "example-harness-observer"
+    }
+  ]
+}
+```
+
+The producer must decide `broken` from observed scheduler state and the
+routine's actual due window, not from `lastRunAt` alone. `flatten-arm` means
+the wake is armed; it does **not** attest that positions were flattened or
+that a placeOrder call succeeded. A source older than
+`safety.staleAfterSeconds`, a missing observation, or a future timestamp becomes
+`unknown` in the consumer and must never show green. If the optional array is
+absent, JoeDesk makes no claim about routine health. A fresh explicit
+`broken` flatten arm should make board health red; a broken click routine or
+fresh `at-risk`/`unknown` signal should make it yellow, while preserving any
+higher-priority HALT, Gateway, or accounting alarm. One short reason should
+name the affected routine and tell the reader to notify Amy; full evidence
+stays behind the existing board-health details.
+
+Place a read-only **Routine health** line beside the Fleet Config Cadence and
+Amy routines sections. It should show each observed routine's state and age,
+with `Not reported` when no signal is supplied, clearly separate from editable
+schedule settings. In plain words: **settings say when a routine should run;
+health reports what the scheduler saw**. No pause, re-arm, restart, or flatten
+control belongs on that line. Before implementation, agree on the producer owner and observation
+frequency, add the optional field to `data.schema.json`, both validators,
+synthetic examples and tests, and confirm the producer can supply the exact
+status without leaking private harness logs.
+
 Producers may also emit the additive top-level account observation:
 
 ```json
