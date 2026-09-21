@@ -790,3 +790,6 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
 #fleetLimitsHome .fleet-limits-links button { text-align: left; }
 .fleet-sources summary { cursor: pointer; font-size: 13px; font-weight: 650; }
 .fleet-quota-example { border-left: 3px solid var(--fleet-green); padding: 10px 12px; background: rgba(13, 79, 54, .18); }
+
+.fleet-source-edit { justify-self: start; min-height: 36px; }
+.fleet-sources-help { color: var(--fleet-muted); font-size: 12px; }

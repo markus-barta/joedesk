@@ -1130,7 +1130,8 @@ try {
       const sourceRows = [...document.querySelectorAll('#fleetSourcesList .fleet-source-path')].map(node => node.textContent);
       const sourcesCollapsed = !document.getElementById('fleetSources').open;
       const sourceStatus = document.getElementById('fleetSourcesStatus').textContent;
-      document.querySelector('[data-fleet-jump="quota"]').click();
+      document.querySelector('[data-fleet-source-edit="grok.reservePct"]').click();
+      const sourceJumpFocused = document.activeElement.dataset.fleetField === 'grok.reservePct';
       const reserve = document.querySelector('[data-fleet-field="grok.reservePct"]');
       const original = reserve.value;
       reserve.value = '20';
@@ -1140,9 +1141,9 @@ try {
       reserve.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector('[data-fleet-section="desks"]').click();
       const humanFields = [...document.querySelectorAll('#fleetEditFields label')].map(node => ({ label: node.querySelector('span').textContent, help: node.querySelector('.fleet-field-help').textContent, scope: node.querySelector('.fleet-field-scope').textContent }));
-      return { sourceRows, sourcesCollapsed, sourceStatus, reserveExample, humanFields, homeHidden: document.getElementById('fleetLimitsHome').hidden };
+      return { sourceRows, sourcesCollapsed, sourceStatus, sourceJumpFocused, reserveExample, humanFields, homeHidden: document.getElementById('fleetLimitsHome').hidden };
     })()`);
-    if (!fleetClarity.sourcesCollapsed || !/Starter example/.test(fleetClarity.sourceStatus) ||
+    if (!fleetClarity.sourceJumpFocused || !fleetClarity.sourcesCollapsed || !/Starter example/.test(fleetClarity.sourceStatus) ||
         fleetClarity.sourceRows.length !== 13 || !fleetClarity.sourceRows.every(path => path.startsWith('/app/public/joe/fleet-config.example.json#')) ||
         !fleetClarity.reserveExample.includes('Grok: 20% means keep 20 of every 100 units for essential work.') ||
         fleetClarity.humanFields.length !== 3 || fleetClarity.humanFields[0].label !== 'Maximum busy desks' ||

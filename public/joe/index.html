@@ -364,17 +364,17 @@
             <p><b class="fleet-status fleet-status--amber">AMBER</b><span id="fleetAmberBehavior">Loading…</span></p>
             <p><b class="fleet-status fleet-status--red">RED</b><span id="fleetRedBehavior">Loading…</span></p>
           </div>
-    <section class="fleet-limits" id="fleetLimitsHome" aria-labelledby="fleetLimitsTitle">
-      <div class="fleet-limits-intro">
-        <div><span class="fleet-limits-kicker">PAPER ONLY · PREVIEW VALUES</span><h2 id="fleetLimitsTitle">Limits home</h2></div>
-        <p>Choose what to change. Edits stay in your preview until you review, confirm and propagate them.</p>
-      </div>
-      <div class="fleet-limits-links" role="group" aria-label="Edit fleet limits">
-        <button type="button" data-fleet-jump="quota" aria-controls="fleetEditFields"><strong>Capacity kept free</strong><span>Grok <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">10%</b> · Codex <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">10%</b></span><span>GREEN: <b data-fleet-readout="onGreen" data-fleet-humanize="true">—</b> · AMBER: <b data-fleet-readout="onAmber" data-fleet-humanize="true">—</b> · RED: <b data-fleet-readout="onRed" data-fleet-humanize="true">—</b></span><em>Edit quota →</em></button>
-        <button type="button" data-fleet-jump="desks" aria-controls="fleetEditFields"><strong>Desk limits</strong><span><b data-fleet-readout="maxBusyDesks">5</b> busy desks · Stage-0 €<b data-fleet-readout="stage0CapEur">250</b></span><em>Edit desks →</em></button>
-        <button type="button" data-fleet-jump="cadence" aria-controls="fleetEditFields"><strong>Wake schedule</strong><span>US-open <b data-fleet-readout="usOpenArm">15:35</b> Vienna · <b data-fleet-readout="wakeWindows" data-fleet-window-count="true">0 wake windows</b></span><em>Edit cadence →</em></button>
-      </div>
-    </section>
+          <section class="fleet-limits" id="fleetLimitsHome" aria-labelledby="fleetLimitsTitle">
+            <div class="fleet-limits-intro">
+              <div><span class="fleet-limits-kicker">PAPER ONLY · PREVIEW VALUES</span><h2 id="fleetLimitsTitle">Limits home</h2></div>
+              <p>Choose what to change. Edits stay in your preview until you review, confirm and propagate them.</p>
+            </div>
+            <div class="fleet-limits-links" role="group" aria-label="Edit fleet limits">
+              <button type="button" data-fleet-jump="quota" aria-controls="fleetEditFields"><strong>Capacity kept free</strong><span>Grok <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">10%</b> · Codex <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">10%</b></span><span>GREEN: <b data-fleet-readout="onGreen" data-fleet-humanize="true">—</b> · AMBER: <b data-fleet-readout="onAmber" data-fleet-humanize="true">—</b> · RED: <b data-fleet-readout="onRed" data-fleet-humanize="true">—</b></span><em>Edit quota →</em></button>
+              <button type="button" data-fleet-jump="desks" aria-controls="fleetEditFields"><strong>Desk limits</strong><span><b data-fleet-readout="maxBusyDesks">5</b> busy desks · Stage-0 €<b data-fleet-readout="stage0CapEur">250</b></span><em>Edit desks →</em></button>
+              <button type="button" data-fleet-jump="cadence" aria-controls="fleetEditFields"><strong>Wake schedule</strong><span>US-open <b data-fleet-readout="usOpenArm">15:35</b> Vienna · <b data-fleet-readout="wakeWindows" data-fleet-window-count="true">0 wake windows</b></span><em>Edit cadence →</em></button>
+            </div>
+          </section>
 
           <p id="fleetQuotaExample" class="fleet-quota-example" hidden></p>
           <div id="fleetSectionCoverage" class="fleet-section-coverage"></div>
@@ -402,8 +402,8 @@
             <summary id="fleetSourcesTitle">Sources — one home per knob</summary>
             <header>
               <div>
-
                 <p id="fleetSourcesStatus">Loading the current Fleet Config revision…</p>
+                <p class="fleet-sources-help">Each row names a setting, its source file and key, and a button to reach its field.</p>
               </div>
               <span class="fleet-source-live">DEFINITIONS</span>
             </header>

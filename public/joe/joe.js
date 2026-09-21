@@ -210,7 +210,7 @@
     cadence: {
       label: "Wake times & cadence",
       headline: "The fleet wakes up on a schedule.",
-      intro: "A timed arm, desk watcher and quota governor keep routine work predictable.",
+      intro: "These settings say when routines should run. They do not show whether a wake actually happened.",
       sections: [
         ["US-open arm", "Use the US-open start time below. All configured times use Europe/Vienna, including daylight-saving changes."],
         ["Watch before work", "The desk watcher is the configured routine for checking fleet state."],
@@ -4762,13 +4762,25 @@
       var sourceMap = FLEET_SOURCES[id] || {};
       return FLEET_CONFIG[id].fields.map(function (field) {
         var entry = sourceMap[field.key] || [field.path || "(display only)", "outside the board writer"];
-        return [fleetFieldGuide(field).label, entry[0], entry[1]];
+        return [fleetFieldGuide(field).label, entry[0], entry[1], field, id];
       });
     });
     list.replaceChildren.apply(list, rows.map(function (entry) {
       var item = el("li", "fleet-source-row");
       item.appendChild(el("strong", "fleet-source-knob", entry[0]));
       item.appendChild(el("code", "fleet-source-path", entry[1].startsWith("/") ? entry[1] : root + "#" + entry[1]));
+      var jump = el("button", "fleet-button fleet-source-edit", entry[3].editable === false ? "View field" : "Edit field");
+      jump.type = "button";
+      jump.dataset.fleetSourceEdit = entry[3].key;
+      jump.setAttribute("aria-label", jump.textContent + ": " + entry[0]);
+      jump.addEventListener("click", function () {
+        renderFleetConfigSection(entry[4], false);
+        var target = entry[3].type === "windows"
+          ? document.querySelector(".fleet-window-editor input, .fleet-window-editor > button")
+          : Array.from(document.querySelectorAll("[data-fleet-field]")).find(function (input) { return input.dataset.fleetField === entry[3].key; });
+        if (target) { target.scrollIntoView({ block: "center", behavior: "auto" }); target.focus({ preventScroll: true }); }
+      });
+      item.appendChild(jump);
       var legacy = el("span", "fleet-source-legacy");
       legacy.appendChild(el("b", "fleet-source-deprecated", "DEPRECATED / OUTSIDE"));
       legacy.appendChild(document.createTextNode(" " + entry[2]));
