@@ -1,8 +1,8 @@
 {
   "product": "JoeDesk",
   "version_scheme": "calendar",
-  "version": "26.09.14.17.40",
+  "version": "26.09.21.12.00",
   "release_channel": "stable",
-  "release_sequence": 22,
-  "note": "Explain board status briefly and keep usable delayed accounting yellow."
+  "release_sequence": 23,
+  "note": "Put the household decision pulse, KEEP scope, and short learning next steps above the detail cards."
 }
