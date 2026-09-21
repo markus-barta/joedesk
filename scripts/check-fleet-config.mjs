@@ -31,6 +31,7 @@ required((configHtml.match(/data-fleet-section=/g) || []).length === 7, "Fleet C
 required(/id="fleetLimitsTitle">Limits/.test(configHtml) && (configHtml.match(/data-fleet-jump=/g) || []).length === 3, "top Limits entry must link to quota, desks, and cadence editors");
 required(/Technical/.test(configHtml) && /ELI10/.test(configHtml) && /Edit selected values/.test(configHtml), "two-column docs plane IA is incomplete");
 required(/data-fleet-action="diff"/.test(configHtml) && /data-fleet-action="confirm"/.test(configHtml), "preview actions are missing");
+required(/Diff · see changes/.test(configHtml) && /Confirm review/.test(configHtml) && /Nothing is shared until you select Propagate/.test(html), "Diff and Confirm need plain-language labels");
 required((configHtml.match(/data-fleet-action="propagate"/g) || []).length === 2, "both Propagate affordances are required");
 required(/id="fleetConfigClose"/.test(configHtml), "Flip back control is missing");
 required(!/id="fleetToast"/.test(configHtml) && html.indexOf('id="fleetToast"') > configEnd, "toast must live outside every transformed card ancestor");
