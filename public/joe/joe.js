@@ -284,10 +284,24 @@
       ],
     },
   };
+  var FLEET_LIMITS_HOME = {
+    label: "Limits home",
+    headline: "See the paper fleet’s limits in one place.",
+    intro: "Set desk risk caps, the busy-desk maximum, quota behavior and wake times here. These settings apply to paper learning only.",
+    sections: [
+      ["Quota", "Reserve capacity for essential work and choose how AMBER handles nonessential work. GREEN and RED are fixed by v1."],
+      ["Desk limits", "Set simultaneous busy desks, the Stage-0 capital ceiling and protected KEEP symbols."],
+      ["Wake times", "Set wake windows and the US-open start in Vienna time. Routine names identify the work; they do not set repeat intervals."],
+      ["Saved means written", "Propagate writes a shared-file revision. The board does not confirm that each consumer has reloaded it."],
+    ],
+    fields: [],
+  };
   var FLEET_SOURCES = {
     quota: {
       "grok.reservePct": ["quota.grok.reservePct", "quota-state.json is a live capacity reading, not a setting"],
       "codex.reservePct": ["quota.codex.reservePct", "quota-state.json is a live capacity reading, not a setting"],
+      onGreen: ["quota.behavior.green", "fixed by the v1 schema; journals do not set policy"],
+      onAmber: ["quota.behavior.amber", "quota-state.json reports capacity; choose the response here"],
       onRed: ["quota.behavior.red", "desk journals may record a quota state; they never set policy"],
     },
     desks: {
@@ -297,6 +311,8 @@
     },
     cadence: {
       usOpenArm: ["cadence.usOpenArm", "Amy and desk schedulers must consume this revision; wiring is outside JoeDesk"],
+      wakeWindows: ["cadence.wakeWindows", "external schedulers must adopt these windows; an empty list does not prove desks are asleep"],
+      darwin: ["cadence.darwin", "routine name only; repeat intervals live in the scheduler"],
       watcher: ["cadence.deskWatch", "routine names in journals are historical, not configuration"],
       governor: ["cadence.quotaGovernor", "routine names in journals are historical, not configuration"],
     },
@@ -320,7 +336,7 @@
       displayMode: ["secretSlots", "JoeDesk inbox credential is at /run/secrets/joe-board-push-token; JOE_INBOX_TOKEN is dev-only fallback"],
     },
   };
-  var fleetSectionId = "desks";
+  var fleetSectionId = "limits";
   var fleetLoadState = "loading";
   var fleetDraft = {};
   var fleetBaseline = {};
@@ -4566,6 +4582,15 @@
     });
     renderSecretSlots();
     renderFleetSectionDetails();
+    var examples = ["grok", "codex"].map(function (provider) {
+      var raw = fleetDraft[provider + ".reservePct"];
+      var amount = Number(raw);
+      var label = provider === "grok" ? "Grok" : "Codex";
+      return fleetBaselineConfig && /^\d+$/.test(raw) && amount >= 0 && amount <= 100
+        ? label + ": " + amount + "% means keep " + amount + " of every 100 units for essential work."
+        : label + ": enter a whole percentage from 0 to 100.";
+    });
+    document.getElementById("fleetQuotaExample").textContent = examples.join(" ");
   }
 
   function fleetSecretRefName(value) {
@@ -4621,8 +4646,8 @@
       "amy.routines.morning": ["Morning check-in name", "Name Amy’s morning brief. This label does not set a run time.", "Amy morning routine"],
       "amy.routines.review": ["Desk-review name", "Name Amy’s review. This label does not set a run time.", "Amy review routine"],
       "amy.routines.close": ["Closing check-in name", "Name Amy’s closing recap. This label does not set a run time.", "Amy close routine"],
-      "mac.shared.configPath": ["Mac config mirror path", "Declare where the Mac should read its mirror; this does not move the board’s source file.", "Mac-side consumer declaration"],
-      "mac.shared.docsPath": ["Mac explanations folder", "Declare where matching operator notes belong on the Mac.", "Mac-side documentation"],
+      "mac.shared.configPath": ["Mac config mirror path", "Historical mirror location, kept for reference. The board reads the file in the definition strip.", "Mac-side consumer declaration"],
+      "mac.shared.docsPath": ["Mac explanations folder", "Historical documentation location, kept for reference. It does not control the board.", "Mac-side documentation"],
       "tools.entries.0.label": ["First declared tool", "Read the first declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
       "tools.entries.1.label": ["Second declared tool", "Read the second declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
       "tools.entries.2.label": ["Third declared tool", "Read the third declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
@@ -4683,22 +4708,26 @@
       row.appendChild(el("dd", "", Array.isArray(value) ? (value.length ? JSON.stringify(value, null, 2) : "[] · none declared") : String(value)));
       fields.appendChild(row);
     }
-    append(config[root], root);
+    if (fleetSectionId === "limits") { ["quota", "desks", "cadence"].forEach(function (key) { append(config[key], key); }); }
+    else { append(config[root], root); }
   }
 
   function renderFleetSources(sectionId) {
     var list = document.getElementById("fleetSourcesList");
     var status = document.getElementById("fleetSourcesStatus");
     if (!list || !status) { return; }
-    var root = "/var/lib/joe-board/fleet-config.json";
+    var root = document.getElementById("fleetSourcePath").textContent;
     var revision = fleetBaselineConfig && fleetBaselineConfig.rev ? fleetBaselineConfig.rev : "unavailable";
     status.textContent = fleetBaselineConfig
-      ? "Live revision " + revision + " · authoritative board file"
-      : "Live revision unavailable · showing the safe map only";
-    var sourceMap = FLEET_SOURCES[sectionId] || {};
-    var rows = (FLEET_CONFIG[sectionId] ? FLEET_CONFIG[sectionId].fields : []).map(function (field) {
-      var entry = sourceMap[field.key] || [field.path || "(display only)", "outside the board writer"];
-      return [field.label, entry[0], entry[1]];
+      ? "Read revision " + revision + " · " + document.getElementById("fleetSourceKind").textContent
+      : "Source unavailable · keys below are the schema map only";
+    var sections = sectionId === "limits" ? ["quota", "desks", "cadence"] : [sectionId];
+    var rows = sections.flatMap(function (id) {
+      var sourceMap = FLEET_SOURCES[id] || {};
+      return FLEET_CONFIG[id].fields.map(function (field) {
+        var entry = sourceMap[field.key] || [field.path || "(display only)", "outside the board writer"];
+        return [fleetFieldGuide(field).label, entry[0], entry[1]];
+      });
     });
     list.replaceChildren.apply(list, rows.map(function (entry) {
       var item = el("li", "fleet-source-row");
@@ -4713,9 +4742,12 @@
   }
 
   function renderFleetConfigSection(sectionId, focusHeading) {
-    var section = FLEET_CONFIG[sectionId];
+    var section = sectionId === "limits" ? FLEET_LIMITS_HOME : FLEET_CONFIG[sectionId];
     if (!section) { return false; }
     fleetSectionId = sectionId;
+    document.getElementById("fleetLimitsHome").hidden = sectionId !== "limits";
+    document.getElementById("fleetEditStrip").hidden = sectionId === "limits";
+    document.getElementById("fleetQuotaExample").hidden = sectionId !== "quota";
     document.querySelectorAll("[data-fleet-section]").forEach(function (button) {
       var selected = button.dataset.fleetSection === sectionId;
       button.classList.toggle("is-selected", selected);

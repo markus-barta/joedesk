@@ -1116,15 +1116,39 @@ try {
       fleetOpen.plane !== 'fleet-config' || !fleetOpen.flipped || fleetOpen.transform === 'none' ||
       fleetOpen.frontHidden !== 'true' || !fleetOpen.frontInert || fleetOpen.backHidden !== 'false' || fleetOpen.backInert ||
       !/Fleet Config/.test(fleetOpen.title) || fleetOpen.revision !== 'fc-000000' ||
-      fleetOpen.selected !== 'Selected: Desk limits' || fleetOpen.headline !== 'Set the paper desks’ boundaries.' ||
-      fleetOpen.sections !== 7 || JSON.stringify(fleetOpen.fields) !== JSON.stringify(['maxBusyDesks', 'stage0CapEur', 'keepSymbols']) ||
+      fleetOpen.selected !== 'Selected: Limits home' || fleetOpen.headline !== 'See the paper fleet’s limits in one place.' ||
+      fleetOpen.sections !== 8 || fleetOpen.fields.length !== 0 ||
       !fleetOpen.actions.includes('diff') || !fleetOpen.actions.includes('confirm') || !fleetOpen.actions.includes('propagate') || !fleetOpen.actions.includes('save') ||
       !/No propagation attempts recorded yet/.test(fleetOpen.actionLogText) ||
       fleetOpen.source !== '/app/public/joe/fleet-config.example.json' || !/Starter example/.test(fleetOpen.sourceKind) || fleetOpen.lastPropagate !== 'None recorded' ||
       fleetOpen.technicalOpen || !fleetOpen.humanFields.every(field => field.help && field.scope.startsWith('Applies to:')) ||
-      fleetOpen.humanFields[0].label !== 'Maximum busy desks' ||
+      fleetOpen.limitsTitle !== 'Limits home' || JSON.stringify(fleetOpen.limitJumps) !== JSON.stringify(['quota', 'desks', 'cadence']) ||
       /Day P&L|Open P&L|Virtual desk equity/.test(fleetOpen.configText) || fleetOpen.overflow
     ) throw new Error(`Fleet Config open mismatch: ${JSON.stringify(fleetOpen)}`);
+
+    const fleetClarity = await value(`(() => {
+      const sourceRows = [...document.querySelectorAll('#fleetSourcesList .fleet-source-path')].map(node => node.textContent);
+      const sourcesCollapsed = !document.getElementById('fleetSources').open;
+      const sourceStatus = document.getElementById('fleetSourcesStatus').textContent;
+      document.querySelector('[data-fleet-jump="quota"]').click();
+      const reserve = document.querySelector('[data-fleet-field="grok.reservePct"]');
+      const original = reserve.value;
+      reserve.value = '20';
+      reserve.dispatchEvent(new Event('input', { bubbles: true }));
+      const reserveExample = document.getElementById('fleetQuotaExample').textContent;
+      reserve.value = original;
+      reserve.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-section="desks"]').click();
+      const humanFields = [...document.querySelectorAll('#fleetEditFields label')].map(node => ({ label: node.querySelector('span').textContent, help: node.querySelector('.fleet-field-help').textContent, scope: node.querySelector('.fleet-field-scope').textContent }));
+      return { sourceRows, sourcesCollapsed, sourceStatus, reserveExample, humanFields, homeHidden: document.getElementById('fleetLimitsHome').hidden };
+    })()`);
+    if (!fleetClarity.sourcesCollapsed || !/Starter example/.test(fleetClarity.sourceStatus) ||
+        fleetClarity.sourceRows.length !== 13 || !fleetClarity.sourceRows.every(path => path.startsWith('/app/public/joe/fleet-config.example.json#')) ||
+        !fleetClarity.reserveExample.includes('Grok: 20% means keep 20 of every 100 units for essential work.') ||
+        fleetClarity.humanFields.length !== 3 || fleetClarity.humanFields[0].label !== 'Maximum busy desks' ||
+        !fleetClarity.humanFields.every(field => field.help && field.scope.startsWith('Applies to:')) || !fleetClarity.homeHidden) {
+      throw new Error(`Fleet clarity mismatch: ${JSON.stringify(fleetClarity)}`);
+    }
 
     await value(`(() => {
       document.querySelector('[data-fleet-jump="desks"]').click();
@@ -1422,7 +1446,7 @@ try {
       if (!mobileViewport) {
         await value(`window.JoeBoard.showFleetConfig()`);
         await delay(850);
-        for (const section of ["desks", "quota", "cadence"]) {
+        for (const section of ["limits", "desks", "quota", "cadence"]) {
           await value(`document.querySelector('[data-fleet-section="${section}"]').click(); document.querySelector('.fleet-explanation').open = false; window.scrollTo(0, 0)`);
           await delay(150);
           const settingsClip = await value(`(() => { const box = document.querySelector('.fleet-frame').getBoundingClientRect(); return { x: box.x + scrollX, y: box.y + scrollY, width: box.width, height: box.height, scale: 1 }; })()`);
@@ -2139,7 +2163,7 @@ try {
       if (await value(`document.getElementById('fleetRevision')?.textContent === 'unavailable'`).catch(() => false)) break;
       await delay(100);
     }
-    await value(`document.getElementById('settingsMenu').open = true; document.getElementById('settingsFleetConfig').click()`);
+    await value(`document.getElementById('settingsMenu').open = true; document.getElementById('settingsFleetConfig').click(); document.querySelector('[data-fleet-section="desks"]').click()`);
     await delay(850);
     const unavailable = await value(`({
       plane: document.documentElement.dataset.joePlane,

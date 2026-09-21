@@ -758,3 +758,10 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
   .fleet-config .fleet-nav-note { margin-top: 12px; }
   .fleet-advanced dl > div { grid-template-columns: 1fr; gap: 3px; }
 }
+
+/* One home for the settings editors; source details remain secondary. */
+#fleetLimitsHome .fleet-limits-links { grid-template-columns: 1fr; }
+#fleetLimitsHome .fleet-limits-intro { display: block; }
+#fleetLimitsHome .fleet-limits-links button { text-align: left; }
+.fleet-sources summary { cursor: pointer; font-size: 13px; font-weight: 650; }
+.fleet-quota-example { border-left: 3px solid var(--fleet-green); padding: 10px 12px; background: rgba(13, 79, 54, .18); }

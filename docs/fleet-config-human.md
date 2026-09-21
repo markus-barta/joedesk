@@ -3,20 +3,22 @@
 Fleet Config is the one place to change a board-controlled setting. It is
 paper-only; it cannot place a trade.
 
-1. Open JoeDesk and click **Fleet Config** in the top bar.
-2. Click the row for what you want to change: **Quota policy**, **Desk fleet**,
-   **Cadence**, or **Amy Grok routines**.
-3. Change the value in **Edit selected values** at the bottom.
-4. Click **Diff**, read the change, then click **Confirm**.
-5. Click **Propagate**. The green message names the new `fc-…` revision.
+1. Open JoeDesk and click **Fleet Config** in the **Settings · Fleet Config** top-bar button (or use the limits link in board settings).
+2. **Limits home** opens first. Choose **Edit desks**, **Edit quota**, or **Edit cadence**; Amy’s check-ins are in the navigation.
+3. Change the value under its plain-English explanation. Each field says where it applies. For example, a 20% quota reserve keeps 20 of every 100 capacity units for essential work.
+4. Click **Review changes (Diff)**, read every change, tick the review box, then click **Confirm changes**.
+5. Click **Propagate**. The success message names the new `fc-…` revision written to the shared file. Consumer reload is not confirmed here.
 
-Use **Sources — one home per knob** on the right to see the live file and any
-old location. Anything labelled **DEPRECATED / OUTSIDE** must not be used to
-change a board knob.
+**Save preview** keeps a draft in this browser. Navigation values show that preview;
+**Technical · exact keys & saved values** shows the last loaded document.
 
-Do not use Fleet Config for passwords, tokens, broker access, or HALT. Those
-stay in the host secret workflow or the separate safety workflow.
+**Where is this defined?** stays above the settings navigation. It shows the schema,
+revision, actual file read, and last propagation attempt. Before the first save,
+the board may read its starter example; the strip says so.
 
-The old `~/trading-team/shared/fleet-config.json` path is a deprecated mirror;
-JoeDesk does not read it. The live file is
-`/var/lib/joe-board/fleet-config.json` and consumers reload it by revision.
+Expand **Sources — one home per knob** below the editor for each schema key and
+its older locations. Anything labelled **DEPRECATED / OUTSIDE** is not an input
+for that board knob. Legacy Mac mirror paths are read-only references.
+
+Passwords, tokens, broker access and HALT stay in the host secret workflow or the
+separate safety workflow. Fleet Config displays secret reference names only.

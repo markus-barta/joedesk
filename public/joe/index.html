@@ -291,18 +291,6 @@
       </div>
     </header>
 
-    <section class="fleet-limits" aria-labelledby="fleetLimitsTitle">
-      <div class="fleet-limits-intro">
-        <div><span class="fleet-limits-kicker">START HERE · PAPER FLEET</span><h2 id="fleetLimitsTitle">Limits</h2></div>
-        <p>These numbers decide how much work the fleet can take. Choose a group to edit it, then use Diff → Confirm → Propagate.</p>
-      </div>
-      <div class="fleet-limits-links" role="group" aria-label="Edit fleet limits">
-        <button type="button" data-fleet-jump="quota" aria-controls="fleetEditFields"><strong>Capacity kept free</strong><span>Grok <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">10%</b> · Codex <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">10%</b></span><em>Edit quota →</em></button>
-        <button type="button" data-fleet-jump="desks" aria-controls="fleetEditFields"><strong>Desk limits</strong><span><b data-fleet-readout="maxBusyDesks">5</b> busy desks · Stage-0 €<b data-fleet-readout="stage0CapEur">250</b></span><em>Edit desks →</em></button>
-        <button type="button" data-fleet-jump="cadence" aria-controls="fleetEditFields"><strong>Wake schedule</strong><span>US-open <b data-fleet-readout="usOpenArm">15:35</b> Vienna · <b data-fleet-readout="wakeWindows" data-fleet-window-count="true">0 wake windows</b></span><em>Edit cadence →</em></button>
-      </div>
-    </section>
-
     <p class="fleet-kicker">Paper fleet settings · ELI10 first</p>
     <section class="fleet-definition" aria-labelledby="fleetDefinitionTitle">
       <h2 id="fleetDefinitionTitle">Where is this defined?</h2>
@@ -318,7 +306,8 @@
       <nav class="fleet-panel fleet-navigation" aria-label="Fleet Config sections">
         <h2>What do you want to change?</h2>
         <div class="fleet-section-list">
-          <button class="fleet-section is-selected" type="button" data-fleet-section="desks" aria-pressed="true" aria-controls="fleetEliBody">
+          <button class="fleet-section is-selected" type="button" data-fleet-section="limits" aria-pressed="true" aria-controls="fleetEliBody"><strong>Limits home</strong><small>Quota · desk caps · wake times</small></button>
+          <button class="fleet-section" type="button" data-fleet-section="desks" aria-pressed="false" aria-controls="fleetEliBody">
             <strong>Desk limits</strong><small>Risk cap · busy-desk maximum · KEEP</small>
             <span class="fleet-nav-value">€<b data-fleet-readout="stage0CapEur">—</b> cap · <b data-fleet-readout="maxBusyDesks">—</b> busy desks</span>
             <span class="fleet-nav-detail" data-fleet-readout="keepSymbols" data-fleet-prefix="KEEP " data-fleet-join=" + ">KEEP —</span>
@@ -340,7 +329,7 @@
         <details class="fleet-more">
           <summary>Connections &amp; advanced settings</summary>
           <div class="fleet-section-list">
-            <button class="fleet-section" type="button" data-fleet-section="paths" aria-pressed="false" aria-controls="fleetEliBody"><strong>Mac file locations</strong><small>Declared mirror &amp; documentation paths</small></button>
+            <button class="fleet-section" type="button" data-fleet-section="paths" aria-pressed="false" aria-controls="fleetEliBody"><strong>Legacy Mac locations</strong><small>Historical mirrors · read-only</small></button>
             <button class="fleet-section" type="button" data-fleet-section="tools" aria-pressed="false" aria-controls="fleetEliBody"><strong>Tools</strong><small>Declared connections, read-only</small></button>
             <button class="fleet-section" type="button" data-fleet-section="secrets" aria-pressed="false" aria-controls="fleetEliBody"><strong>Secret slots</strong><small>Reference names only · REDACTED</small></button>
           </div>
@@ -351,10 +340,10 @@
       <section class="fleet-panel fleet-eli" aria-labelledby="fleetEliTitle">
         <header class="fleet-eli-head">
           <div><h2 id="fleetEliTitle">ELI10 · plain English</h2><p>Choose a setting. See what it does. Change it here.</p></div>
-          <span class="fleet-selected-label" id="fleetSelectedLabel">Selected: Desk limits</span>
+          <span class="fleet-selected-label" id="fleetSelectedLabel">Selected: Limits home</span>
         </header>
         <div class="fleet-eli-body" id="fleetEliBody">
-          <h3 id="fleetEliHeadline" tabindex="-1">Set the paper desks’ boundaries.</h3>
+          <h3 id="fleetEliHeadline" tabindex="-1">See the paper fleet’s limits in one place.</h3>
           <p id="fleetEliIntro">Loading the saved configuration…</p>
           <p class="fleet-load-status" id="fleetLoadStatus" role="status">Loading current Fleet Config…</p>
           <div class="fleet-eli-status" id="fleetEliStatus" hidden>
@@ -362,9 +351,22 @@
             <p><b class="fleet-status fleet-status--amber">AMBER</b><span id="fleetAmberBehavior">Loading…</span></p>
             <p><b class="fleet-status fleet-status--red">RED</b><span id="fleetRedBehavior">Loading…</span></p>
           </div>
+    <section class="fleet-limits" id="fleetLimitsHome" aria-labelledby="fleetLimitsTitle">
+      <div class="fleet-limits-intro">
+        <div><span class="fleet-limits-kicker">PAPER ONLY · PREVIEW VALUES</span><h2 id="fleetLimitsTitle">Limits home</h2></div>
+        <p>Choose what to change. Edits stay in your preview until you review, confirm and propagate them.</p>
+      </div>
+      <div class="fleet-limits-links" role="group" aria-label="Edit fleet limits">
+        <button type="button" data-fleet-jump="quota" aria-controls="fleetEditFields"><strong>Capacity kept free</strong><span>Grok <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">10%</b> · Codex <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">10%</b></span><span>GREEN: <b data-fleet-readout="onGreen" data-fleet-humanize="true">—</b> · AMBER: <b data-fleet-readout="onAmber" data-fleet-humanize="true">—</b> · RED: <b data-fleet-readout="onRed" data-fleet-humanize="true">—</b></span><em>Edit quota →</em></button>
+        <button type="button" data-fleet-jump="desks" aria-controls="fleetEditFields"><strong>Desk limits</strong><span><b data-fleet-readout="maxBusyDesks">5</b> busy desks · Stage-0 €<b data-fleet-readout="stage0CapEur">250</b></span><em>Edit desks →</em></button>
+        <button type="button" data-fleet-jump="cadence" aria-controls="fleetEditFields"><strong>Wake schedule</strong><span>US-open <b data-fleet-readout="usOpenArm">15:35</b> Vienna · <b data-fleet-readout="wakeWindows" data-fleet-window-count="true">0 wake windows</b></span><em>Edit cadence →</em></button>
+      </div>
+    </section>
+
+          <p id="fleetQuotaExample" class="fleet-quota-example" hidden></p>
           <div id="fleetSectionCoverage" class="fleet-section-coverage"></div>
           <div class="fleet-edit-fields" id="fleetEditFields" aria-label="Selected config values"></div>
-          <div class="fleet-edit-strip">
+          <div class="fleet-edit-strip" id="fleetEditStrip">
             <div class="fleet-edit-actions">
               <button class="fleet-button" type="button" data-fleet-action="diff">Review changes (Diff)</button>
               <button class="fleet-button" type="button" data-fleet-action="save">Save preview</button>
@@ -387,7 +389,7 @@
             <summary id="fleetSourcesTitle">Sources — one home per knob</summary>
             <header>
               <div>
-                
+
                 <p id="fleetSourcesStatus">Loading the current Fleet Config revision…</p>
               </div>
               <span class="fleet-source-live">DEFINITIONS</span>
