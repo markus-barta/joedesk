@@ -59,6 +59,12 @@ recent; a snapshot older than three freshness thresholds is red as a stopped
 board feed. The banner gives the reader a reload or Amy escalation action.
 See [Gateway flap recovery](gateway-flap-recovery.md) for the operator checklist.
 
+For an intermittent incomplete-family snapshot, the browser retains the last
+complete desk equity, desk total PnL, and household equity for at most
+`safety.staleAfterSeconds` (300 seconds when absent). Retained values carry their
+original observation time and make board health yellow; once that grace expires,
+missing equity makes the board red. This consumer behavior requires no schema change.
+
 ### Proposed harness reliability signals (JOED-18; not implemented)
 
 JoeDesk currently receives no observed status for Joe's `us-a-click` routine
