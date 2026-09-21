@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { validateFleetConfig, nextFleetRevision } from "../fleet-config.mjs";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
-const [html, css, js, packageJson, schema, actionSchema, example, secretsDoc] = await Promise.all([
+const [html, css, js, packageJson, schema, actionSchema, example, secretsDoc, humanDoc, scatterMap] = await Promise.all([
   readFile(resolve(repoRoot, "public/joe/index.html"), "utf8"),
   readFile(resolve(repoRoot, "public/joe/joe.css"), "utf8"),
   readFile(resolve(repoRoot, "public/joe/joe.js"), "utf8"),
@@ -13,6 +13,8 @@ const [html, css, js, packageJson, schema, actionSchema, example, secretsDoc] = 
   readFile(resolve(repoRoot, "public/joe/fleet-config-actions.schema.json"), "utf8").then(JSON.parse),
   readFile(resolve(repoRoot, "public/joe/fleet-config.example.json"), "utf8").then(JSON.parse),
   readFile(resolve(repoRoot, "docs/joe-fleet-config-secrets.md"), "utf8"),
+  readFile(resolve(repoRoot, "docs/fleet-config-human.md"), "utf8"),
+  readFile(resolve(repoRoot, "docs/fleet-config-scatter-map.md"), "utf8"),
 ]);
 
 function required(condition, message) {
@@ -41,6 +43,7 @@ required(/REDACTED/.test(configHtml) && !/(password|api[_ -]?key|bearer)[=:][^<\
 required(!/(?:ghp_|xox[baprs]-|BEGIN [A-Z ]+PRIVATE KEY|api[_-]?key\s*[:=])/i.test(configHtml), "secret slots UI must not embed credential material");
 required(/id="fleetActionLog"/.test(configHtml) && /Durable SSO-attributed outcomes/.test(configHtml), "visible durable action log is missing");
 required(/secret values never logged/.test(configHtml), "action log must state its redaction boundary");
+required(/id="fleetSourcesList"/.test(configHtml) && /one home per knob/.test(configHtml), "visible Fleet Config sources map is missing");
 
 required(/\.board-stage\s*\{[^}]*perspective:/s.test(css), "3D scene perspective is missing");
 required(/\.board-flipper\s*\{[^}]*transition:\s*transform\s+760ms/s.test(css), "rigid card transition is missing");
@@ -76,6 +79,8 @@ required(/field\.editable !== false/.test(js), "stored previews must not overrid
 required(/secretSlots/.test(js) && /editable: false/.test(js), "secret slots must remain read-only");
 required(/Plaintext policy vs AGE secrets/.test(js) && /AGE\/agenix holds the encrypted secret material/.test(js), "ELI10 must explain plaintext policy vs AGE secrets");
 required(/renderSecretSlots/.test(js) && /fleet-redacted/.test(js) && /REDACTED/.test(js), "secret slot renderer must paint refs with REDACTED only");
+required(/FLEET_SOURCES/.test(js) && /renderFleetSources/.test(js) && /DEPRECATED \/ OUTSIDE/.test(js), "live source map must mark legacy locations");
+required(/editable: false/.test(js.slice(modelStart, modelEnd)) && /Deprecated config mirror/.test(js), "legacy shared config path must not be editable");
 required(!/type:\s*"password"/.test(js) && model.secrets.fields.every((field) => field.editable === false), "UI must not bind plaintext credential inputs");
 required(/Propagation failed for/.test(js) && /Propagated " \+ result\.rev \+ ": "/.test(js), "propagation outcome toasts must name revision and changed keys");
 required(/front\.inert = showFleet/.test(js) && /back\.inert = !showFleet/.test(js), "inactive face must be removed from interaction");
@@ -99,6 +104,8 @@ required(!/(?:password|apiKey|tokenValue|secretValue)/i.test(JSON.stringify(exam
 required(Array.isArray(example.secretSlots?.agenix) && example.secretSlots.agenix.every((ref) => typeof ref === "string"), "example secret slots must be reference names");
 required(schema.properties?.secretSlots?.description && /plaintext/i.test(schema.properties.secretSlots.description), "schema must forbid plaintext credentials on secret slots");
 required(/Plaintext policy vs AGE secrets/.test(secretsDoc) && /Janus\/agenix ops/.test(secretsDoc), "secrets doc must explain AGE vs plaintext and point at ops");
+required(/click \*\*Fleet Config\*\*/.test(humanDoc) && /\*\*Propagate\*\*/.test(humanDoc), "human Fleet Config guide is incomplete");
+required(/single source of truth/.test(scatterMap) && /quota-state\.json/.test(scatterMap) && /trading-team\/CONFIG\.md/.test(scatterMap) && /nixcfg/.test(scatterMap), "scatter map lacks required surfaces");
 
 console.log(JSON.stringify({
   ok: true,

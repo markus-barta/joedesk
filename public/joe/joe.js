@@ -225,17 +225,17 @@
       ],
     },
     paths: {
-      label: "Mac shared paths",
-      headline: "One shelf for settings. One for explanations.",
-      intro: "Shared paths keep the fleet config and its human-readable docs easy to find.",
+      label: "Legacy shared paths",
+      headline: "Old shelves are labels, not steering wheels.",
+      intro: "The live fleet file is on the board host. These old Mac paths are kept visible only so nobody mistakes a mirror for a control input.",
       sections: [
-        ["Fleet config", "The config path below declares the Mac-side mirror. The source strip shows the separate file this board actually reads."],
-        ["Fleet docs", "The docs path below declares the folder for matching operator explanations."],
+        ["Board source", "The definition strip above shows the actual file this board reads."],
+        ["Deprecated mirrors", "~/trading-team/shared/fleet-config.json and its docs folder are historical locations. JoeDesk does not read them."],
         ["References, not secret values", "Shared files may name encrypted slots but never contain the secret material."],
       ],
       fields: [
-        { key: "configPath", label: "Config path", value: "~/trading-team/shared/fleet-config.json", path: "mac.shared.configPath", type: "path", maxLength: 160 },
-        { key: "docsPath", label: "Docs path", value: "~/trading-team/shared/docs", path: "mac.shared.docsPath", type: "path", maxLength: 160 },
+        { key: "configPath", label: "Deprecated config mirror", value: "~/trading-team/shared/fleet-config.json", path: "mac.shared.configPath", type: "path", maxLength: 160, editable: false },
+        { key: "docsPath", label: "Deprecated docs mirror", value: "~/trading-team/shared/docs", path: "mac.shared.docsPath", type: "path", maxLength: 160, editable: false },
       ],
     },
     routines: {
@@ -282,6 +282,42 @@
         { key: "janusRefs", label: "Janus refs", value: "", path: "secretSlots.janus", type: "refs", editable: false },
         { key: "displayMode", label: "Display", value: "REDACTED", editable: false },
       ],
+    },
+  };
+  var FLEET_SOURCES = {
+    quota: {
+      "grok.reservePct": ["quota.grok.reservePct", "quota-state.json is a live capacity reading, not a setting"],
+      "codex.reservePct": ["quota.codex.reservePct", "quota-state.json is a live capacity reading, not a setting"],
+      onRed: ["quota.behavior.red", "desk journals may record a quota state; they never set policy"],
+    },
+    desks: {
+      maxBusyDesks: ["desks.maxBusyDesks", "trading-team/CONFIG.md is a historical policy note; it is not read by JoeDesk"],
+      stage0CapEur: ["desks.stage0.capEur", "trading-team/CONFIG.md has stage-cap context; do not use it for this board knob"],
+      keepSymbols: ["desks.keep", "desk journals are evidence only; they do not change KEEP"],
+    },
+    cadence: {
+      usOpenArm: ["cadence.usOpenArm", "Amy and desk schedulers must consume this revision; wiring is outside JoeDesk"],
+      watcher: ["cadence.deskWatch", "routine names in journals are historical, not configuration"],
+      governor: ["cadence.quotaGovernor", "routine names in journals are historical, not configuration"],
+    },
+    paths: {
+      configPath: ["mac.shared.configPath", "~/trading-team/shared/fleet-config.json is DEPRECATED; JoeDesk never reads it"],
+      docsPath: ["mac.shared.docsPath", "~/trading-team/shared/docs is DEPRECATED as a control path"],
+    },
+    routines: {
+      morningRoutine: ["amy.routines.morning", "Amy routine definitions outside this repo must adopt the revision; journals are history"],
+      reviewRoutine: ["amy.routines.review", "Amy routine definitions outside this repo must adopt the revision; journals are history"],
+      closeRoutine: ["amy.routines.close", "Amy routine definitions outside this repo must adopt the revision; journals are history"],
+    },
+    tools: {
+      gateway: ["tools.entries.0.label", "host connection settings and credentials stay outside Fleet Config"],
+      joelAdapter: ["tools.entries.1.label", "host connection settings and credentials stay outside Fleet Config"],
+      hostTool: ["tools.entries.2.label", "host connection settings and credentials stay outside Fleet Config"],
+    },
+    secrets: {
+      agenixRefs: ["secretSlots.agenix", "credentials stay in the host secret store — never a board setting"],
+      janusRefs: ["secretSlots.janus", "credentials stay in the host secret store — never a board setting"],
+      displayMode: ["secretSlots", "JoeDesk inbox credential is at /run/secrets/joe-board-push-token; JOE_INBOX_TOKEN is dev-only fallback"],
     },
   };
   var fleetSectionId = "desks";
@@ -4650,6 +4686,32 @@
     append(config[root], root);
   }
 
+  function renderFleetSources(sectionId) {
+    var list = document.getElementById("fleetSourcesList");
+    var status = document.getElementById("fleetSourcesStatus");
+    if (!list || !status) { return; }
+    var root = "/var/lib/joe-board/fleet-config.json";
+    var revision = fleetBaselineConfig && fleetBaselineConfig.rev ? fleetBaselineConfig.rev : "unavailable";
+    status.textContent = fleetBaselineConfig
+      ? "Live revision " + revision + " · authoritative board file"
+      : "Live revision unavailable · showing the safe map only";
+    var sourceMap = FLEET_SOURCES[sectionId] || {};
+    var rows = (FLEET_CONFIG[sectionId] ? FLEET_CONFIG[sectionId].fields : []).map(function (field) {
+      var entry = sourceMap[field.key] || [field.path || "(display only)", "outside the board writer"];
+      return [field.label, entry[0], entry[1]];
+    });
+    list.replaceChildren.apply(list, rows.map(function (entry) {
+      var item = el("li", "fleet-source-row");
+      item.appendChild(el("strong", "fleet-source-knob", entry[0]));
+      item.appendChild(el("code", "fleet-source-path", entry[1].startsWith("/") ? entry[1] : root + "#" + entry[1]));
+      var legacy = el("span", "fleet-source-legacy");
+      legacy.appendChild(el("b", "fleet-source-deprecated", "DEPRECATED / OUTSIDE"));
+      legacy.appendChild(document.createTextNode(" " + entry[2]));
+      item.appendChild(legacy);
+      return item;
+    }));
+  }
+
   function renderFleetConfigSection(sectionId, focusHeading) {
     var section = FLEET_CONFIG[sectionId];
     if (!section) { return false; }
@@ -4726,6 +4788,7 @@
     }));
     updateFleetPreviewNote();
     updateFleetReadouts();
+    renderFleetSources(sectionId);
     if (focusHeading) { headline.focus({ preventScroll: true }); }
     return true;
   }
