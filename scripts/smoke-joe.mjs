@@ -1176,6 +1176,7 @@ try {
       !/must be a decimal number/.test(fleetBound.emptyNumberToast) || !/must be a decimal number/.test(fleetBound.coercedNumberToast) ||
       !/matches the current Fleet Config revision/.test(fleetBound.normalizedNumberToast) ||
       !fleetBound.diffOpen || !/Maximum busy J desks at once/.test(fleetBound.diffText) ||
+      !/Before: 5 busy J desks/.test(fleetBound.diffText) || !/After: 4 busy J desks/.test(fleetBound.diffText) ||
       !/1 preview change: maxBusyDesks/.test(fleetBound.diffToast) || !/Preview confirmed for fc-000000/.test(fleetBound.confirmToast) ||
       !/Propagated fc-000001: desks\.maxBusyDesks/.test(fleetBound.propagateToast) || fleetBound.revision !== 'fc-000001' || !/Success · fc-000001 is shared/.test(fleetBound.note) ||
       fleetBound.actionItems !== 1 || !/success/i.test(fleetBound.actionText) || !/amy-smoke/.test(fleetBound.actionText) || !/fc-000000 → fc-000001/.test(fleetBound.actionText) || !/desks\.maxBusyDesks/.test(fleetBound.actionText)

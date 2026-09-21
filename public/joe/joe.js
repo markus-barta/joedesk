@@ -4853,6 +4853,10 @@
 
   function fleetDiffDisplay(field, raw) {
     if (!raw) { return "(empty)"; }
+    if (field && /\.reservePct$/.test(field.path || "")) { return raw + "% kept free"; }
+    if (field && field.path === "desks.maxBusyDesks") { return raw + " busy J desks"; }
+    if (field && field.path === "desks.stage0.capEur") { return "€" + raw + " Stage-0 ceiling"; }
+    if (field && field.path === "cadence.usOpenArm") { return raw + " Vienna time"; }
     if (field && field.type === "windows") {
       try {
         var windows = JSON.parse(raw);
