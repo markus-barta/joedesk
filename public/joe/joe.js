@@ -152,6 +152,7 @@
   var cachedDesktopLayout = null;
   var latestSnapshot = null;
   var lastValidSnapshot = null;
+  var lastGoodEquitySnapshot = null;
   var refreshError = null;
   var positionFilter = "all";
   var historyState = { selected: DESK_IDS.slice(), range: "all", points: [], chart: null };
@@ -2356,6 +2357,64 @@
     return Math.floor(seconds / 3600) + "h";
   }
 
+  function hasUsableEquity(data) {
+    return Boolean(data && data.totals && Number.isFinite(data.totals.equity) &&
+      Array.isArray(data.desks) && data.desks.every(function (desk) {
+        return Number.isFinite(desk.money && desk.money.equity);
+      }));
+  }
+
+  function retainedEquityView(data, lastGood, at) {
+    if (hasUsableEquity(data) || !hasUsableEquity(lastGood)) { return data; }
+    var staleAfter = Number.isFinite(data && data.safety && data.safety.staleAfterSeconds)
+      ? data.safety.staleAfterSeconds
+      : 300;
+    var now = at instanceof Date ? at.getTime() : typeof at === "number" ? at : new Date(at).getTime();
+    if (!Number.isFinite(now)) { now = Date.now(); }
+    var lastGoodAt = Date.parse(lastGood.generatedAt || "");
+    if (!Number.isFinite(lastGoodAt) || Math.max(0, now - lastGoodAt) > staleAfter * 1000) { return data; }
+
+    var retainedDesks = data.desks.map(function (desk) {
+      var previous = lastGood.desks.find(function (candidate) { return candidate.id === desk.id; });
+      if (!previous || !previous.money) { return desk; }
+      var retainEquity = !Number.isFinite(desk.money && desk.money.equity) && Number.isFinite(previous.money.equity);
+      var retainTotalPnl = !Number.isFinite(desk.money && desk.money.totalPnl) && Number.isFinite(previous.money.totalPnl);
+      if (!retainEquity && !retainTotalPnl) { return desk; }
+      var observedAt = previous.moneyEvidence && validIsoTimestamp(previous.moneyEvidence.observedAt)
+        ? previous.moneyEvidence.observedAt
+        : lastGood.generatedAt;
+      return Object.assign({}, desk, {
+        money: Object.assign({}, desk.money, {
+          equity: retainEquity ? previous.money.equity : desk.money.equity,
+          totalPnl: retainTotalPnl ? previous.money.totalPnl : desk.money.totalPnl
+        }),
+        moneyEvidence: { status: "carried", observedAt: observedAt }
+      });
+    });
+    return Object.assign({}, data, {
+      desks: retainedDesks,
+      totals: Object.assign({}, data.totals, { equity: lastGood.totals.equity }),
+      _retainedEquityGeneratedAt: lastGood.generatedAt
+    });
+  }
+
+  function hasRetainedEquityWithinGrace(data, at) {
+    if (!hasUsableEquity(data)) { return false; }
+    var staleAfter = Number.isFinite(data && data.safety && data.safety.staleAfterSeconds)
+      ? data.safety.staleAfterSeconds
+      : 300;
+    var now = at instanceof Date ? at.getTime() : typeof at === "number" ? at : new Date(at).getTime();
+    if (!Number.isFinite(now)) { now = Date.now(); }
+    var retainedAt = Date.parse(data._retainedEquityGeneratedAt || "");
+    if (Number.isFinite(retainedAt)) { return Math.max(0, now - retainedAt) <= staleAfter * 1000; }
+    return data.desks.some(function (desk) {
+      var evidence = desk.moneyEvidence;
+      var observedAt = evidence && Date.parse(evidence.observedAt || "");
+      return evidence && evidence.status === "carried" && Number.isFinite(observedAt) &&
+        Math.max(0, now - observedAt) <= staleAfter * 1000;
+    });
+  }
+
   function moneyEvidencePresentation(desk) {
     var evidence = desk && desk.moneyEvidence;
     if (!evidence) { return { status: "legacy", carried: false, age: null, text: null, title: "" }; }
@@ -2559,16 +2618,10 @@
     var gatewayAge = gatewayHeartbeatAge(data, at);
     var staleAfter = data.safety.staleAfterSeconds;
     var rth = isNewYorkRegularHours(at);
-    var stuckWithoutEquity = data.desks.some(function (desk) {
-      return desk.state === "stuck" && !Number.isFinite(desk.money && desk.money.equity);
-    });
-    var equityUsable = Number.isFinite(data.totals.equity) && data.desks.every(function (desk) {
-      return Number.isFinite(desk.money && desk.money.equity);
-    });
+    var equityUsable = hasUsableEquity(data);
     if (data.safety.halt) { return { tone: "red", reason: "halt_on" }; }
     if (gateway.status === "down") { return { tone: "red", reason: "gateway_down" }; }
     if (snapshotAge > staleAfter * 3) { return { tone: "red", reason: "feed_disconnected" }; }
-    if (stuckWithoutEquity) { return { tone: "red", reason: "producer_stuck" }; }
     if (!equityUsable) { return { tone: "red", reason: "equity_unavailable" }; }
     if (gateway.status === "degraded") { return { tone: "yellow", reason: "gateway_degraded" }; }
     if (refreshFailed) { return { tone: "yellow", reason: "refresh_failed" }; }
@@ -2578,10 +2631,10 @@
     if (gateway.status === "ok" && (gatewayAge === null || gatewayAge > staleAfter)) {
       return { tone: "yellow", reason: "gateway_unconfirmed" };
     }
-    if (hasStaleBoardSource(data, at)) { return { tone: "yellow", reason: "snapshot_stale" }; }
     if (data.desks.some(function (desk) { return moneyEvidencePresentation(desk).carried; })) {
       return { tone: "yellow", reason: "retained_values" };
     }
+    if (hasStaleBoardSource(data, at)) { return { tone: "yellow", reason: "snapshot_stale" }; }
     if (data.desks.some(function (desk) { return desk.state === "stuck"; })) {
       return { tone: "yellow", reason: "retained_values" };
     }
@@ -2593,7 +2646,11 @@
   function boardHealthPresentation(data, snapshotAge, at, refreshFailed) {
     var health = localBoardHealth(data, snapshotAge, at, refreshFailed);
     var producerTone = data.boardHealth;
-    if (producerTone && BOARD_HEALTH_TONES.indexOf(producerTone) > BOARD_HEALTH_TONES.indexOf(health.tone)) {
+    var retainedLocally = health.tone === "yellow" && health.reason === "retained_values" &&
+      hasRetainedEquityWithinGrace(data, at);
+    var incompleteProducerRed = data.shortReason === "equity_unavailable" || data.shortReason === "producer_stuck";
+    if (producerTone && BOARD_HEALTH_TONES.indexOf(producerTone) > BOARD_HEALTH_TONES.indexOf(health.tone) &&
+        !(retainedLocally && incompleteProducerRed)) {
       health = { tone: producerTone, reason: data.shortReason };
     }
     var label = health.tone === "green"
@@ -2784,7 +2841,7 @@
 
   function updateFreshnessTick() {
     if (!lastValidSnapshot) { return; }
-    var data = lastValidSnapshot;
+    var data = retainedEquityView(lastValidSnapshot, lastGoodEquitySnapshot, Date.now());
     var snapshotAge = ageInSeconds(data.generatedAt);
     var snapshotStale = snapshotAge > data.safety.staleAfterSeconds;
     var gatewayDown = data.safety.gateway.status === "down";
@@ -3390,9 +3447,11 @@
     syncPositionsTableLayout();
   }
 
-  function render(data) {
+  function render(snapshot) {
+    if (hasUsableEquity(snapshot)) { lastGoodEquitySnapshot = snapshot; }
+    var data = retainedEquityView(snapshot, lastGoodEquitySnapshot, Date.now());
     latestSnapshot = data;
-    lastValidSnapshot = data;
+    lastValidSnapshot = snapshot;
     refreshError = null;
     var snapshotAge = ageInSeconds(data.generatedAt);
     var stale = snapshotAge > data.safety.staleAfterSeconds;
@@ -5428,6 +5487,9 @@
     deskFreshnessFooter: deskFreshnessFooter,
     deskFreshnessBadge: deskFreshnessBadge,
     moneyEvidencePresentation: moneyEvidencePresentation,
+    hasUsableEquity: hasUsableEquity,
+    retainedEquityView: retainedEquityView,
+    hasRetainedEquityWithinGrace: hasRetainedEquityWithinGrace,
     snapshotProblems: snapshotProblems,
     brokerAccountPresentation: brokerAccountPresentation,
     backfillPresentation: backfillPresentation,

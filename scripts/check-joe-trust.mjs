@@ -81,6 +81,9 @@ const api = new Function("document", `${trustHelpers}
     deskFreshnessFooter,
     deskFreshnessBadge,
     moneyEvidencePresentation,
+    hasUsableEquity,
+    retainedEquityView,
+    hasRetainedEquityWithinGrace,
     snapshotProblems,
     isNewYorkRegularHours,
     boardHealthPresentation,
@@ -240,14 +243,42 @@ if (api.boardHealthPresentation(api.validate(oldDayProducer), 0, "2026-09-14T14:
 }
 const retainedFamily = setSourceTimes(structuredClone(sample), "2026-09-14T14:00:00.000Z");
 retainedFamily.desks[0].state = "stuck";
-retainedFamily.desks[0].moneyEvidence = { status: "carried", observedAt: "2026-09-14T13:59:00.000Z" };
-delete retainedFamily.pnlSources;
-const retainedHealth = api.boardHealthPresentation(api.validate(retainedFamily), 0, "2026-09-14T14:00:00.000Z", false);
-if (retainedHealth.tone !== "yellow" || retainedHealth.reason !== "retained_values" || !retainedHealth.explanation.includes("last good equity")) {
-  throw new Error("incomplete family with retained usable equity must remain yellow even while DAY is pending");
+retainedFamily.desks[0].money.equity = null;
+retainedFamily.desks[0].money.totalPnl = null;
+delete retainedFamily.desks[0].moneyEvidence;
+retainedFamily.totals.equity = null;
+retainedFamily.boardHealth = "red";
+retainedFamily.shortReason = "producer_stuck";
+const retainedEquitySnapshot = api.retainedEquityView(
+  api.validate(retainedFamily),
+  api.validate(setSourceTimes(structuredClone(sample), "2026-09-14T13:59:00.000Z")),
+  "2026-09-14T14:00:00.000Z"
+);
+if (retainedEquitySnapshot.desks[0].money.equity !== sample.desks[0].money.equity ||
+    retainedEquitySnapshot.desks[0].money.totalPnl !== sample.desks[0].money.totalPnl ||
+    retainedEquitySnapshot.totals.equity !== sample.totals.equity || retainedEquitySnapshot.desks[0].moneyEvidence.status !== "carried") {
+  throw new Error("incomplete family must retain last-good desk equity, total PnL, and total equity within grace");
 }
-retainedFamily.safety.gateway.status = "down";
-if (api.boardHealthPresentation(api.validate(retainedFamily), 0, "2026-09-14T14:00:00.000Z", false).tone !== "red") {
+const retainedHealth = api.boardHealthPresentation(retainedEquitySnapshot, 0, "2026-09-14T14:00:00.000Z", false);
+if (retainedHealth.tone !== "yellow" || retainedHealth.reason !== "retained_values" || !retainedHealth.explanation.includes("last good equity")) {
+  throw new Error("an incomplete-family blip with retained equity must override producer stuck red with yellow retained values");
+}
+const producerEquityUnavailable = Object.assign({}, retainedEquitySnapshot, { shortReason: "equity_unavailable" });
+const unavailableHealth = api.boardHealthPresentation(producerEquityUnavailable, 0, "2026-09-14T14:00:00.000Z", false);
+if (unavailableHealth.tone !== "yellow" || unavailableHealth.reason !== "retained_values") {
+  throw new Error("retained equity must override producer equity unavailable red within grace");
+}
+const expiredView = api.retainedEquityView(
+  api.validate(structuredClone(retainedFamily)),
+  api.validate(setSourceTimes(structuredClone(sample), "2026-09-14T13:54:59.000Z")),
+  "2026-09-14T14:00:00.000Z"
+);
+const expiredHealth = api.boardHealthPresentation(expiredView, 0, "2026-09-14T14:00:00.000Z", false);
+if (expiredHealth.tone !== "red" || expiredHealth.reason !== "equity_unavailable") {
+  throw new Error("incomplete-family equity must become red equity unavailable after last-good grace expires");
+}
+retainedEquitySnapshot.safety.gateway.status = "down";
+if (api.boardHealthPresentation(retainedEquitySnapshot, 0, "2026-09-14T14:00:00.000Z", false).tone !== "red") {
   throw new Error("retained values must not hide a down Gateway");
 }
 const syntheticBackfill = {
