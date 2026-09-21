@@ -128,6 +128,10 @@ Every authenticated propagation outcome is stored in `/var/lib/joe-board/fleet-c
 - The pusher / producer that maps `book.json` → household snapshot
 - Broker, gateway, and HALT machinery
 
+For a reported paper Gateway outage or stopped board updates, use the
+[Gateway flap recovery checklist](docs/gateway-flap-recovery.md). JoeDesk shows
+the health signal and next action but does not restart the Gateway or pusher.
+
 ### Preserved contracts
 
 - Storage: `/var/lib/joe-board/data.json`, `history.json`, `fleet-config.json`, `fleet-config-actions.json`

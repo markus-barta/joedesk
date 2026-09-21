@@ -1646,7 +1646,12 @@ try {
           dayBefore,
         };
       })()`);
-      if (stale.state !== "attention" || stale.healthTone !== "yellow" || !/^Stale /.test(stale.healthLabel || "") || stale.detailOpen || !stale.freshness.startsWith("STALE") || !/stale/i.test(stale.alarm || "") || !stale.equityRetained || !stale.dayRetained || !/15,75/.test(stale.dayBefore || "")) throw new Error(`Stale state mismatch: ${JSON.stringify(stale)}`);
+      if (stale.state !== "broken" || stale.healthTone !== "red" || stale.healthLabel !== "Needs fix" || stale.detailOpen || !stale.freshness.startsWith("STALE") || !/stale/i.test(stale.alarm || "") || !stale.equityRetained || !stale.dayRetained || !/15,75/.test(stale.dayBefore || "")) throw new Error(`Stopped-feed state mismatch: ${JSON.stringify(stale)}`);
+
+      const lateGatewaySnapshot = refreshSnapshotObservationTimes(structuredClone(sample));
+      lateGatewaySnapshot.safety.gateway.lastSeenAt = new Date(Date.now() - 3600_000).toISOString();
+      const lateGatewayUI = await value(`(() => { window.JoeBoard.ingest(${JSON.stringify(lateGatewaySnapshot)}); return { tone: document.getElementById('alarm')?.dataset.tone, reason: document.getElementById('alarmReason')?.textContent, gateway: document.getElementById('gatewayValue')?.textContent, gatewayTone: document.getElementById('gatewaySignal')?.dataset.tone }; })()`);
+      if (lateGatewayUI.tone !== "yellow" || !/reload.*tell Amy/.test(lateGatewayUI.reason || "") || !/^CHECKING/.test(lateGatewayUI.gateway || "") || lateGatewayUI.gatewayTone !== "warn") throw new Error(`Late-Gateway UI mismatch: ${JSON.stringify(lateGatewayUI)}`);
 
       const brokenSnapshot = refreshSnapshotObservationTimes(structuredClone(sample));
       brokenSnapshot.safety.halt = true;

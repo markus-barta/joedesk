@@ -2494,11 +2494,12 @@
     meta.className = "hero-meta" + (incompleteJ ? " attention" : "");
   }
 
-  function gatewayHeartbeatAge(data) {
+  function gatewayHeartbeatAge(data, at) {
     var gateway = data && data.safety && data.safety.gateway;
     var lastSeen = gateway && gateway.lastSeenAt;
     if (!validIsoTimestamp(lastSeen)) { return null; }
-    return ageInSeconds(lastSeen);
+    var now = at === undefined ? Date.now() : new Date(at).getTime();
+    return Number.isFinite(now) ? Math.max(0, Math.floor((now - Date.parse(lastSeen)) / 1000)) : null;
   }
 
   function hasCapturedJResults(desk) {
@@ -2555,6 +2556,8 @@
 
   function localBoardHealth(data, snapshotAge, at, refreshFailed) {
     var gateway = data.safety.gateway;
+    var gatewayAge = gatewayHeartbeatAge(data, at);
+    var staleAfter = data.safety.staleAfterSeconds;
     var rth = isNewYorkRegularHours(at);
     var stuckWithoutEquity = data.desks.some(function (desk) {
       return desk.state === "stuck" && !Number.isFinite(desk.money && desk.money.equity);
@@ -2564,9 +2567,18 @@
     });
     if (data.safety.halt) { return { tone: "red", reason: "halt_on" }; }
     if (gateway.status === "down") { return { tone: "red", reason: "gateway_down" }; }
+    if (snapshotAge > staleAfter * 3) { return { tone: "red", reason: "feed_disconnected" }; }
     if (stuckWithoutEquity) { return { tone: "red", reason: "producer_stuck" }; }
     if (!equityUsable) { return { tone: "red", reason: "equity_unavailable" }; }
     if (gateway.status === "degraded") { return { tone: "yellow", reason: "gateway_degraded" }; }
+    if (refreshFailed) { return { tone: "yellow", reason: "refresh_failed" }; }
+    if (snapshotAge > staleAfter) {
+      return { tone: "yellow", reason: "snapshot_stale" };
+    }
+    if (gateway.status === "ok" && (gatewayAge === null || gatewayAge > staleAfter)) {
+      return { tone: "yellow", reason: "gateway_unconfirmed" };
+    }
+    if (hasStaleBoardSource(data, at)) { return { tone: "yellow", reason: "snapshot_stale" }; }
     if (data.desks.some(function (desk) { return moneyEvidencePresentation(desk).carried; })) {
       return { tone: "yellow", reason: "retained_values" };
     }
@@ -2575,10 +2587,6 @@
     }
     if (rth && !pnlMetricAvailable(data, "day")) { return { tone: "yellow", reason: "day_pending" }; }
     if (rth && !pnlMetricAvailable(data, "open")) { return { tone: "yellow", reason: "open_unavailable_rth" }; }
-    if (snapshotAge > data.safety.staleAfterSeconds || hasStaleBoardSource(data, at)) {
-      return { tone: "yellow", reason: "snapshot_stale" };
-    }
-    if (refreshFailed) { return { tone: "yellow", reason: "refresh_failed" }; }
     return { tone: "green", reason: "board_ok" };
   }
 
@@ -2594,20 +2602,24 @@
       ? "Needs fix"
       : health.reason === "snapshot_stale"
       ? "Stale " + ageLabel(snapshotAge)
+      : health.reason === "gateway_unconfirmed"
+      ? "Gateway unsure"
       : "Data delayed";
     var reasonCopy = {
       board_ok: "numbers are up to date",
-      snapshot_stale: "numbers a bit old — still usable",
+      snapshot_stale: "updates are late — reload; if still late, tell Amy",
       retained_values: "numbers a bit old — carrying last good equity",
-      gateway_degraded: "waiting on IB — recovery is automatic",
+      gateway_degraded: "IB connection is unstable — reload; if it persists, tell Amy",
+      gateway_unconfirmed: "Gateway has not checked in — reload; if still old, tell Amy",
       open_unavailable_rth: "waiting on IB prices — equity is still available",
       day_pending: "DAY is waiting on data — equity is still available",
       halt_on: "paper trading is paused — the operator must check",
-      gateway_down: "IB is offline — automatic recovery will retry",
+      gateway_down: "IB is offline — tell Amy to check the paper Gateway",
+      feed_disconnected: "board updates stopped — tell Amy to check the feed",
       equity_unavailable: "board numbers are missing — the operator must check",
       producer_stuck: "board updates are stuck — the operator must check",
       day_unavailable_rth: "DAY is waiting on data — the operator must check",
-      refresh_failed: "update failed — keeping the last good numbers"
+      refresh_failed: "update failed — reload; if it repeats, tell Amy"
     };
     return { tone: health.tone, reason: health.reason, label: label, explanation: reasonCopy[health.reason] || "the operator must check the details" };
   }
@@ -2633,6 +2645,12 @@
     var gateway = data.safety.gateway;
     if (data.safety.halt) { problems.push("HALT is on" + (data.safety.haltReason ? ": " + data.safety.haltReason : ".")); }
     if (gateway.status !== "ok") { problems.push("Gateway is " + gateway.status + (gateway.detail ? ": " + gateway.detail : ".")); }
+    var gatewayAge = gatewayHeartbeatAge(data);
+    if (gateway.status === "ok" && (gatewayAge === null || gatewayAge > data.safety.staleAfterSeconds)) {
+      problems.push(gatewayAge === null
+        ? "Gateway check-in time is unknown; current connection is unconfirmed."
+        : "Gateway last checked in " + ageLabel(gatewayAge) + " ago; current connection is unconfirmed.");
+    }
     if (snapshotAge > data.safety.staleAfterSeconds) { problems.push("The snapshot is stale (" + snapshotAge + " seconds old)."); }
     var brokerProblem = brokerAccountPresentation(data).problem;
     if (brokerProblem) { problems.push(brokerProblem); }
@@ -2723,13 +2741,14 @@
     freshValue.className = snapshotStale ? "negative" : "positive";
     var gateway = data.safety.gateway;
     var gatewayAge = gatewayHeartbeatAge(data);
-    var gatewayText = gateway.status === "ok" ? "OK · connected" : gateway.status.toUpperCase();
+    var gatewayStale = gateway.status === "ok" && (gatewayAge === null || gatewayAge > data.safety.staleAfterSeconds);
+    var gatewayText = gateway.status === "ok" ? gatewayStale ? "CHECKING · heartbeat missing/late" : "OK · connected" : gateway.status.toUpperCase();
     if (Number.isFinite(gatewayAge)) {
       gatewayText += " · gateway seen " + ageLabel(gatewayAge) + " ago";
     } else if (gateway.lastSeenAt) {
       gatewayText += " · gateway seen unknown";
     }
-    setSignal("gatewaySignal", "gatewayValue", gatewayText, gateway.status === "ok" ? "good" : gateway.status === "degraded" ? "warn" : "bad");
+    setSignal("gatewaySignal", "gatewayValue", gatewayText, gateway.status === "ok" && !gatewayStale ? "good" : gateway.status === "down" ? "bad" : "warn");
     var updatedAt = document.getElementById("updatedAt");
     var suffix = refreshError ? " · refresh failed" : " · refreshes every 15 seconds";
     updatedAt.textContent = "Snapshot " + dateTime.format(new Date(data.generatedAt)) + " · " + ageLabel(snapshotAge) + " old" + suffix;
@@ -3430,7 +3449,7 @@
     document.getElementById("freshValue").textContent = "NO DATA";
     document.getElementById("freshValue").className = "negative";
     applyBoardHealth(
-      { tone: "red", reason: "no_snapshot", label: "Needs fix" },
+      { tone: "red", reason: "no_snapshot", label: "Needs fix", explanation: "no board data — reload; if still empty, tell Amy" },
       ["No household snapshot is available yet. " + error.message]
     );
     document.getElementById("updatedAt").textContent = "data.json unavailable";
