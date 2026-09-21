@@ -292,7 +292,7 @@
       ["Quota", "Reserve capacity for essential work and choose how AMBER handles nonessential work. GREEN and RED are fixed by v1."],
       ["Desk limits", "Set simultaneous busy desks, the Stage-0 capital ceiling and protected KEEP symbols."],
       ["Wake times", "Set wake windows and the US-open start in Vienna time. Routine names identify the work; they do not set repeat intervals."],
-      ["Saved means written", "Propagate writes a shared-file revision. The board does not confirm that each consumer has reloaded it."],
+      ["Saved means written", "Edit a named setting, review Diff, Confirm it, then Propagate a shared-file revision. This changes paper settings only; it does not place a trade, and the board cannot confirm consumer reload."],
     ],
     fields: [],
   };

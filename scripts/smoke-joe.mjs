@@ -1108,6 +1108,7 @@ try {
       limitJumps: [...document.querySelectorAll('[data-fleet-jump]')].map(node => node.dataset.fleetJump),
       actions: [...document.querySelectorAll('[data-fleet-action]')].map(node => node.dataset.fleetAction),
       fields: [...document.querySelectorAll('#fleetEditFields input, #fleetEditFields select')].map(node => node.dataset.fleetField),
+      limitsHome: document.getElementById('fleetLimitsHome')?.innerText || '',
       actionLogText: document.getElementById('fleetActionLog').innerText,
       configText: document.getElementById('fleetConfigBoard').innerText,
       overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
