@@ -180,13 +180,18 @@ const server = createServer(async (request, response) => {
     }
     const revBefore = fleetConfig.rev;
     const sequence = Number(fleetConfig.rev.slice(3)) + 1;
+    const changedKeys = [
+      ["desks.maxBusyDesks", fleetConfig.desks.maxBusyDesks, body.config.desks.maxBusyDesks],
+      ["quota.behavior.amber", fleetConfig.quota.behavior.amber, body.config.quota.behavior.amber],
+      ["cadence.wakeWindows", fleetConfig.cadence.wakeWindows, body.config.cadence.wakeWindows],
+    ].filter(([, before, after]) => JSON.stringify(before) !== JSON.stringify(after)).map(([key]) => key);
     fleetConfig = structuredClone(body.config);
     fleetConfig.rev = `fc-${String(sequence).padStart(6, "0")}`;
     fleetConfig.updatedAt = new Date().toISOString();
     const action = smokeFleetAction({
       revBefore,
       revAfter: fleetConfig.rev,
-      changedKeys: ["desks.maxBusyDesks"],
+      changedKeys,
       outcome: "success",
       reason: "propagated",
     });
@@ -1083,7 +1088,7 @@ try {
       headline: document.getElementById('fleetEliHeadline').textContent,
       sections: document.querySelectorAll('[data-fleet-section]').length,
       actions: [...document.querySelectorAll('[data-fleet-action]')].map(node => node.dataset.fleetAction),
-      fields: [...document.querySelectorAll('#fleetEditFields input')].map(node => node.dataset.fleetField),
+      fields: [...document.querySelectorAll('#fleetEditFields input, #fleetEditFields select')].map(node => node.dataset.fleetField),
       actionLogText: document.getElementById('fleetActionLog').innerText,
       configText: document.getElementById('fleetConfigBoard').innerText,
       overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -1093,7 +1098,7 @@ try {
       fleetOpen.frontHidden !== 'true' || !fleetOpen.frontInert || fleetOpen.backHidden !== 'false' || fleetOpen.backInert ||
       !/Fleet Config/.test(fleetOpen.title) || fleetOpen.revision !== 'fc-000000' ||
       fleetOpen.selected !== 'Selected: Quota policy' || fleetOpen.headline !== 'Keep a little in the tank.' ||
-      fleetOpen.sections !== 7 || JSON.stringify(fleetOpen.fields) !== JSON.stringify(['grok.reservePct', 'codex.reservePct', 'onRed']) ||
+      fleetOpen.sections !== 7 || JSON.stringify(fleetOpen.fields) !== JSON.stringify(['grok.reservePct', 'codex.reservePct', 'onGreen', 'onAmber', 'onRed']) ||
       !fleetOpen.actions.includes('diff') || !fleetOpen.actions.includes('confirm') || !fleetOpen.actions.includes('propagate') || !fleetOpen.actions.includes('save') ||
       !/No propagation attempts recorded yet/.test(fleetOpen.actionLogText) ||
       /Day P&L|Open P&L|Virtual desk equity/.test(fleetOpen.configText) || fleetOpen.overflow
@@ -1127,6 +1132,7 @@ try {
         diffOpen: document.getElementById('fleetDiffDialog').open,
         diffText: document.getElementById('fleetDiffList').innerText,
       };
+      document.getElementById('fleetDiffReviewed').click();
       document.querySelector('[data-fleet-action="confirm"]').click();
       window.__fleetSmokeFlow.confirmToast = document.getElementById('fleetToast').textContent;
       document.querySelector('[data-fleet-action="propagate"]').click();
@@ -1165,9 +1171,9 @@ try {
       fleetBound.summaryValue !== '4' || fleetBound.toastPosition !== 'fixed' || !fleetBound.toastInViewport ||
       !/must be a decimal number/.test(fleetBound.emptyNumberToast) || !/must be a decimal number/.test(fleetBound.coercedNumberToast) ||
       !/matches the current Fleet Config revision/.test(fleetBound.normalizedNumberToast) ||
-      !fleetBound.diffOpen || !/maxBusyDesks/.test(fleetBound.diffText) ||
+      !fleetBound.diffOpen || !/Busy J desks/.test(fleetBound.diffText) ||
       !/1 preview change: maxBusyDesks/.test(fleetBound.diffToast) || !/Preview confirmed for fc-000000/.test(fleetBound.confirmToast) ||
-      !/Propagated fc-000001: desks\.maxBusyDesks/.test(fleetBound.propagateToast) || fleetBound.revision !== 'fc-000001' || !/Current fc-000001/.test(fleetBound.note) ||
+      !/Propagated fc-000001: desks\.maxBusyDesks/.test(fleetBound.propagateToast) || fleetBound.revision !== 'fc-000001' || !/Success · fc-000001 is shared/.test(fleetBound.note) ||
       fleetBound.actionItems !== 1 || !/success/i.test(fleetBound.actionText) || !/amy-smoke/.test(fleetBound.actionText) || !/fc-000000 → fc-000001/.test(fleetBound.actionText) || !/desks\.maxBusyDesks/.test(fleetBound.actionText)
     ) throw new Error(`Fleet Config binding mismatch: ${JSON.stringify(fleetBound)}`);
 
@@ -1219,6 +1225,7 @@ try {
       first.value = '3';
       first.dispatchEvent(new Event('input', { bubbles: true }));
       document.querySelector('[data-fleet-action="diff"]').click();
+      document.getElementById('fleetDiffReviewed').click();
       document.querySelector('[data-fleet-action="confirm"]').click();
       document.querySelector('[data-fleet-action="propagate"]').click();
     })()`);
@@ -1234,6 +1241,59 @@ try {
       fleetFailure.revision !== 'fc-000001' || JSON.stringify(fleetFailure.outcomes) !== JSON.stringify(['failure', 'success']) ||
       !/desks\.maxBusyDesks/.test(fleetFailure.logText)
     ) throw new Error(`Fleet Config failure evidence mismatch: ${JSON.stringify(fleetFailure)}`);
+
+    const fleetEditors = await value(`(() => {
+      document.querySelector('[data-fleet-section="quota"]').click();
+      const amber = document.querySelector('[data-fleet-field="onAmber"]');
+      amber.value = 'park_nonessential';
+      amber.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-action="diff"]').click();
+      const amberDiff = document.getElementById('fleetDiffList').innerText;
+      const confirmBlocked = document.querySelector('[data-fleet-action="confirm"]').disabled;
+      document.getElementById('fleetDiffCancel').click();
+      amber.value = 'slow_nonessential';
+      amber.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-section="cadence"]').click();
+      document.querySelector('.fleet-window-editor > button').click();
+      const windowInputs = [...document.querySelectorAll('.fleet-window-row input')];
+      windowInputs[0].value = 'us-open';
+      windowInputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-action="diff"]').click();
+      const windowDiff = document.getElementById('fleetDiffList').innerText;
+      const windowCount = document.querySelector('[data-fleet-readout="wakeWindows"]').textContent;
+      document.getElementById('fleetDiffCancel').click();
+      return { amberDiff, confirmBlocked, windowDiff, windowCount };
+    })()`);
+    if (!fleetEditors.confirmBlocked || !/Amber: low capacity/.test(fleetEditors.amberDiff) ||
+        !/Before: Slow nonessential work/.test(fleetEditors.amberDiff) || !/After: Park nonessential work/.test(fleetEditors.amberDiff) ||
+        !/Desk wake windows/.test(fleetEditors.windowDiff) || !/us-open: mon 09:00–17:00 → desk-a/.test(fleetEditors.windowDiff) ||
+        /\{"id"/.test(fleetEditors.windowDiff) || fleetEditors.windowCount !== '1 wake window') {
+      throw new Error(`Fleet Config editor mismatch: ${JSON.stringify(fleetEditors)}`);
+    }
+    await value(`(() => {
+      document.querySelector('[data-fleet-section="desks"]').click();
+      const busy = document.querySelector('[data-fleet-field="maxBusyDesks"]');
+      busy.value = '4';
+      busy.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-section="quota"]').click();
+      const amber = document.querySelector('[data-fleet-field="onAmber"]');
+      amber.value = 'park_nonessential';
+      amber.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector('[data-fleet-action="diff"]').click();
+      document.getElementById('fleetDiffReviewed').click();
+      document.querySelector('[data-fleet-action="confirm"]').click();
+      document.querySelector('[data-fleet-action="propagate"]').click();
+    })()`);
+    await delay(200);
+    const fleetEdited = await value(`(async () => {
+      const config = await (await fetch('./fleet-config.json', { cache: 'no-store' })).json();
+      return { rev: config.rev, amber: config.quota.behavior.amber, windows: config.cadence.wakeWindows, note: document.getElementById('fleetPreviewNote').textContent };
+    })()`);
+    if (fleetEdited.rev !== 'fc-000002' || fleetEdited.amber !== 'park_nonessential' ||
+        fleetEdited.windows.length !== 1 || fleetEdited.windows[0].id !== 'us-open' ||
+        !/Success · fc-000002 is shared/.test(fleetEdited.note)) {
+      throw new Error(`Fleet Config edited revision mismatch: ${JSON.stringify(fleetEdited)}`);
+    }
     await value(`document.querySelector('[data-fleet-section="quota"]').click()`);
 
     await value(`window.JoeBoard.showTradingBoard()`);

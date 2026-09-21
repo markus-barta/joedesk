@@ -58,10 +58,14 @@ for (const [id, section] of Object.entries(model)) {
   required(typeof section.label === "string" && section.label.length > 0, `${id} label is missing`);
   required(typeof section.headline === "string" && typeof section.intro === "string", `${id} ELI10 copy is missing`);
   required(Array.isArray(section.sections) && section.sections.length >= 3, `${id} needs durable ELI10 sections`);
-  required(Array.isArray(section.fields) && section.fields.length >= 2 && section.fields.length <= 3, `${id} edit fields are out of bounds`);
+  required(Array.isArray(section.fields) && section.fields.length >= 2 && section.fields.length <= 6, `${id} edit fields are out of bounds`);
   required(section.fields.every((field) => /^[A-Za-z][A-Za-z0-9.]*$/.test(field.key) && typeof field.value === "string"), `${id} has an invalid preview field`);
   required(section.fields.every((field) => configHtml.includes(`data-fleet-readout="${field.key}"`)), `${id} summary does not mirror every preview field`);
 }
+required(model.quota.fields.find((field) => field.key === "onAmber")?.choices?.length === 2, "amber behavior must be selectable");
+required(model.cadence.fields.some((field) => field.key === "darwin"), "Darwin routine must be editable");
+required(model.cadence.fields.some((field) => field.key === "wakeWindows" && field.type === "windows"), "wake windows need a form editor");
+required(/id="fleetDiffReviewed"/.test(html) && /fleetDiffReviewed.*checked/.test(js), "Confirm needs an explicit review acknowledgement");
 required(/\.\/fleet-config\.json/.test(js) && /\.\/fleet-config\/propagate/.test(js) && /\.\/fleet-config\/actions\.json/.test(js), "Fleet Config read/write/action-log endpoints are missing");
 required(/fleetDiffFingerprint !== fleetChangeFingerprint/.test(js), "Confirm must require the current diff preview");
 required(/fleetConfirmedFingerprint !== fleetChangeFingerprint/.test(js), "Propagate must require the current confirmed diff");
