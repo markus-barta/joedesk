@@ -185,9 +185,11 @@
         ["Preview → Confirm → Propagate", "Review the change before the fleet receives it."],
       ],
       fields: [
-        { key: "grok.reservePct", label: "Grok reserve", value: "10", path: "quota.grok.reservePct", type: "integer", min: 0, max: 100 },
-        { key: "codex.reservePct", label: "Codex reserve", value: "10", path: "quota.codex.reservePct", type: "integer", min: 0, max: 100 },
-        { key: "onRed", label: "Red policy", value: "park_nonessential", path: "quota.behavior.red", editable: false },
+        { key: "grok.reservePct", label: "Keep this much Grok capacity free (%)", help: "0–100%. Reserved capacity stays available for watch and recovery.", value: "10", path: "quota.grok.reservePct", type: "integer", min: 0, max: 100 },
+        { key: "codex.reservePct", label: "Keep this much Codex capacity free (%)", help: "0–100%. Reserved capacity stays available for watch and recovery.", value: "10", path: "quota.codex.reservePct", type: "integer", min: 0, max: 100 },
+        { key: "onGreen", label: "When capacity is healthy (fixed)", help: "Normal work runs. The v1 safety rule fixes this value.", value: "run_normally", path: "quota.behavior.green", editable: false },
+        { key: "onAmber", label: "When capacity is getting low", help: "Choose whether nonessential work slows or parks.", value: "slow_nonessential", path: "quota.behavior.amber", choices: [{ value: "slow_nonessential", label: "Slow nonessential work" }, { value: "park_nonessential", label: "Park nonessential work" }] },
+        { key: "onRed", label: "When capacity is critical (fixed)", help: "Nonessential work parks. The v1 safety rule fixes this value.", value: "park_nonessential", path: "quota.behavior.red", editable: false },
       ],
     },
     desks: {
@@ -200,9 +202,9 @@
         ["Small, reversible steps", "Preview and confirm limit changes before the propagation workflow is connected."],
       ],
       fields: [
-        { key: "maxBusyDesks", label: "Busy J desks", value: "5", path: "desks.maxBusyDesks", type: "integer", min: 1, max: 32 },
-        { key: "stage0CapEur", label: "Stage-0 cap", value: "250", path: "desks.stage0.capEur", type: "number", min: 0, max: 1000000 },
-        { key: "keepSymbols", label: "Keep symbols", value: "SXR8,TSLA", path: "desks.keep", type: "symbols", maxLength: 160 },
+        { key: "maxBusyDesks", label: "Maximum busy J desks at once", help: "A whole number from 1 to 32.", value: "5", path: "desks.maxBusyDesks", type: "integer", min: 1, max: 32 },
+        { key: "stage0CapEur", label: "Stage-0 euro ceiling", help: "Paper Stage-0 limit in euros; 0 to 1,000,000.", value: "250", path: "desks.stage0.capEur", type: "number", min: 0, max: 1000000 },
+        { key: "keepSymbols", label: "Protected KEEP symbols", help: "Uppercase symbols separated by commas, for example SXR8,TSLA.", value: "SXR8,TSLA", path: "desks.keep", type: "symbols", maxLength: 160 },
       ],
     },
     cadence: {
@@ -215,9 +217,11 @@
         ["Capacity has the last word", "The quota governor can slow or park nonessential work."],
       ],
       fields: [
-        { key: "usOpenArm", label: "US-open arm", value: "15:35", path: "cadence.usOpenArm", type: "time" },
-        { key: "watcher", label: "Watcher", value: "desk-watch", path: "cadence.deskWatch", type: "routine", maxLength: 64 },
-        { key: "governor", label: "Governor", value: "quota-governor", path: "cadence.quotaGovernor", type: "routine", maxLength: 64 },
+        { key: "usOpenArm", label: "Earliest US-open arm (Vienna time)", help: "24-hour time, for example 15:35.", value: "15:35", path: "cadence.usOpenArm", type: "time" },
+        { key: "watcher", label: "Desk check routine ID", help: "Lowercase routine name that checks the desks.", value: "desk-watch", path: "cadence.deskWatch", type: "routine", maxLength: 64 },
+        { key: "darwin", label: "Darwin routine ID", help: "Lowercase routine name for Darwin.", value: "darwin", path: "cadence.darwin", type: "routine", maxLength: 64 },
+        { key: "governor", label: "Quota capacity routine ID", help: "Lowercase routine name that slows or parks extra work.", value: "quota-governor", path: "cadence.quotaGovernor", type: "routine", maxLength: 64 },
+        { key: "wakeWindows", label: "Desk wake windows", value: "[]", path: "cadence.wakeWindows", type: "windows", maxLength: 131072 },
       ],
     },
     paths: {
@@ -283,6 +287,7 @@
   var fleetSectionId = "quota";
   var fleetDraft = {};
   var fleetBaseline = {};
+  var fleetLastOutcome = "";
   var fleetBaselineConfig = null;
   var fleetDiffFingerprint = "";
   var fleetConfirmedFingerprint = "";
@@ -4431,7 +4436,10 @@
     var value = field.path.split(".").reduce(function (current, key) {
       return current === null || current === undefined ? undefined : current[key];
     }, source);
-    if (Array.isArray(value)) { return field.type === "refs" && !value.length ? "none" : value.join(","); }
+    if (Array.isArray(value)) {
+      if (field.type === "windows") { return JSON.stringify(value); }
+      return field.type === "refs" && !value.length ? "none" : value.join(",");
+    }
     return value === null || value === undefined ? field.value : String(value);
   }
 
@@ -4472,7 +4480,7 @@
       button.disabled = fleetBusy || !fleetBaselineConfig || !changes.length;
     });
     document.querySelectorAll('[data-fleet-action="confirm"]').forEach(function (button) {
-      button.disabled = fleetBusy || !changes.length || fleetDiffFingerprint !== fingerprint;
+      button.disabled = fleetBusy || !changes.length || fleetDiffFingerprint !== fingerprint || !document.getElementById("fleetDiffReviewed").checked;
     });
     document.querySelectorAll('[data-fleet-action="propagate"]').forEach(function (button) {
       button.disabled = fleetBusy || !changes.length || !fleetConfirmed || fleetConfirmedFingerprint !== fingerprint;
@@ -4487,6 +4495,8 @@
       ? "Writing a new revision…"
       : !fleetBaselineConfig
         ? "Loading current Fleet Config…"
+        : fleetLastOutcome
+          ? fleetLastOutcome
         : fleetConfirmed && count
           ? count + " change" + (count === 1 ? "" : "s") + " confirmed for " + fleetBaselineConfig.rev
       : count
@@ -4499,6 +4509,10 @@
     document.querySelectorAll("[data-fleet-readout]").forEach(function (readout) {
       var key = readout.dataset.fleetReadout;
       var value = key === "displayMode" ? "REDACTED" : fleetDraft[key] === undefined ? "" : fleetDraft[key];
+      if (readout.dataset.fleetWindowCount) {
+        var count = fleetWindows().length;
+        value = count + " wake window" + (count === 1 ? "" : "s");
+      }
       if (readout.dataset.fleetJoin) { value = value.split(",").map(function (part) { return part.trim(); }).filter(Boolean).join(readout.dataset.fleetJoin); }
       if (readout.dataset.fleetHumanize) {
         value = value.replace(/[_-]+/g, " ");
@@ -4574,19 +4588,27 @@
     }));
     var fields = document.getElementById("fleetEditFields");
     fields.replaceChildren.apply(fields, section.fields.map(function (field, index) {
+      if (field.type === "windows") { return renderFleetWindowEditor(field); }
       var label = el("label", "fleet-edit-field");
       var inputId = "fleetField" + sectionId.charAt(0).toUpperCase() + sectionId.slice(1) + index;
-      var caption = el("span", "", field.key);
-      var input = el("input");
+      var caption = el("span", "", field.label);
+      var input = field.choices ? el("select") : el("input");
       input.id = inputId;
-      input.type = "text";
+      if (!field.choices) { input.type = "text"; }
       input.maxLength = field.maxLength || 80;
       input.autocomplete = "off";
       input.spellcheck = false;
+      if (field.choices) {
+        field.choices.forEach(function (choice) {
+          var option = el("option", "", choice.label);
+          option.value = choice.value;
+          input.appendChild(option);
+        });
+      }
       input.value = fleetDraft[field.key];
-      input.readOnly = field.editable === false;
-      if (input.readOnly) { input.setAttribute("aria-readonly", "true"); }
+      if (field.editable === false) { input.readOnly = true; input.setAttribute("aria-readonly", "true"); }
       input.setAttribute("aria-label", field.label);
+      if (field.help) { input.setAttribute("aria-describedby", inputId + "Help"); }
       input.dataset.fleetField = field.key;
       input.addEventListener("input", function () {
         if (field.editable === false) { return; }
@@ -4594,17 +4616,90 @@
         fleetConfirmed = false;
         fleetDiffFingerprint = "";
         fleetConfirmedFingerprint = "";
+        fleetLastOutcome = "";
         updateFleetPreviewNote();
         updateFleetReadouts();
       });
       label.appendChild(caption);
       label.appendChild(input);
+      if (field.help) {
+        var help = el("small", "fleet-edit-help", field.help);
+        help.id = inputId + "Help";
+        label.appendChild(help);
+      }
       return label;
     }));
     updateFleetPreviewNote();
     updateFleetReadouts();
     if (focusHeading) { headline.focus({ preventScroll: true }); }
     return true;
+  }
+
+  function fleetWindows() {
+    try {
+      var windows = JSON.parse(fleetDraft.wakeWindows || "[]");
+      return Array.isArray(windows) ? windows : [];
+    } catch (_) { return []; }
+  }
+
+  function renderFleetWindowEditor(field) {
+    var editor = el("div", "fleet-window-editor");
+    var heading = el("div", "fleet-window-heading");
+    heading.appendChild(el("strong", "", "Desk wake windows"));
+    heading.appendChild(el("small", "", "Add a row for each wake time. Use short lowercase desk IDs and days such as mon,tue."));
+    editor.appendChild(heading);
+    var windows = fleetWindows();
+    function commit() {
+      fleetDraft.wakeWindows = JSON.stringify(windows);
+      fleetConfirmed = false;
+      fleetDiffFingerprint = "";
+      fleetConfirmedFingerprint = "";
+      fleetLastOutcome = "";
+      updateFleetPreviewNote();
+      updateFleetReadouts();
+    }
+    windows.forEach(function (windowValue, index) {
+      var row = el("div", "fleet-window-row");
+      [
+        ["id", "Window name", "e.g. us-open"],
+        ["days", "Days to wake", "mon,tue,wed"],
+        ["from", "Start (Vienna)", "09:00"],
+        ["until", "End (Vienna)", "17:00"],
+        ["desks", "Wake these desk IDs", "desk-a,desk-b"],
+      ].forEach(function (definition) {
+        var label = el("label", "fleet-window-field");
+        label.appendChild(el("span", "", definition[1]));
+        var input = el("input");
+        input.type = "text";
+        input.value = Array.isArray(windowValue[definition[0]]) ? windowValue[definition[0]].join(",") : windowValue[definition[0]] || "";
+        input.placeholder = definition[2];
+        input.setAttribute("aria-label", "Wake window " + (index + 1) + " " + definition[1]);
+        input.addEventListener("input", function () {
+          windowValue[definition[0]] = definition[0] === "days" || definition[0] === "desks"
+            ? input.value.split(",").map(function (part) { return part.trim(); }).filter(Boolean)
+            : input.value.trim();
+          commit();
+        });
+        label.appendChild(input);
+        row.appendChild(label);
+      });
+      var remove = el("button", "fleet-button", "Remove");
+      remove.type = "button";
+      remove.setAttribute("aria-label", "Remove wake window " + (index + 1));
+      remove.addEventListener("click", function () { windows.splice(index, 1); commit(); renderFleetConfigSection(fleetSectionId, false); });
+      row.appendChild(remove);
+      editor.appendChild(row);
+    });
+    var add = el("button", "fleet-button", "+ Add wake window");
+    add.type = "button";
+    add.disabled = windows.length >= 32;
+    add.addEventListener("click", function () {
+      windows.push({ id: "new-window", days: ["mon"], from: "09:00", until: "17:00", desks: ["desk-a"] });
+      commit();
+      renderFleetConfigSection(fleetSectionId, false);
+    });
+    editor.appendChild(add);
+    return editor;
   }
 
   function showFleetToast(message, warning) {
@@ -4680,6 +4775,23 @@
 
   function parsedFleetFieldValue(field, raw) {
     var value = raw.trim();
+    if (field.type === "windows") {
+      var windows;
+      try { windows = JSON.parse(value); } catch (_) { throw new Error("Desk wake windows could not be read. Reopen Cadence and retry."); }
+      if (!Array.isArray(windows) || windows.length > 32) { throw new Error("Use at most 32 desk wake windows."); }
+      windows.forEach(function (entry, index) {
+        var name = "Wake window " + (index + 1);
+        if (!entry || typeof entry !== "object" || Array.isArray(entry) || typeof entry.id !== "string" || !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(entry.id) || entry.id.length > 64) { throw new Error(name + " needs a lowercase window ID."); }
+        if (!Array.isArray(entry.days) || !entry.days.length || entry.days.length > 7 || new Set(entry.days).size !== entry.days.length || entry.days.some(function (day) { return !["mon", "tue", "wed", "thu", "fri", "sat", "sun"].includes(day); })) { throw new Error(name + " needs unique days like mon,tue,wed."); }
+        if (!/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(entry.from || "") || !/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(entry.until || "")) { throw new Error(name + " times must use HH:mm."); }
+        if (!Array.isArray(entry.desks) || !entry.desks.length || entry.desks.length > 32 || new Set(entry.desks).size !== entry.desks.length || entry.desks.some(function (desk) { return typeof desk !== "string" || desk.length > 64 || !/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/.test(desk); })) { throw new Error(name + " needs unique lowercase desk IDs."); }
+      });
+      return windows;
+    }
+    if (field.choices) {
+      if (!field.choices.some(function (choice) { return choice.value === value; })) { throw new Error(field.label + " is invalid."); }
+      return value;
+    }
     if (field.type === "integer") {
       if (!/^-?[0-9]+$/.test(value)) { throw new Error(field.label + " must be a whole number."); }
       var integer = Number(value);
@@ -4724,16 +4836,40 @@
   function showFleetDiff(changes) {
     var list = document.getElementById("fleetDiffList");
     list.replaceChildren.apply(list, changes.map(function (key) {
+      var field = fleetFieldDefinitions().find(function (entry) { return entry.key === key; });
       var row = el("li", "fleet-diff-row");
-      row.appendChild(el("code", "", key));
-      row.appendChild(el("span", "fleet-diff-old", fleetBaseline[key] || "(empty)"));
+      row.appendChild(el("strong", "fleet-diff-label", field ? field.label : key));
+      row.appendChild(el("span", "fleet-diff-old", "Before: " + fleetDiffDisplay(field, fleetBaseline[key])));
       row.appendChild(el("span", "fleet-diff-arrow", "→"));
-      row.appendChild(el("span", "fleet-diff-new", fleetDraft[key] || "(empty)"));
+      row.appendChild(el("span", "fleet-diff-new", "After: " + fleetDiffDisplay(field, fleetDraft[key])));
       return row;
     }));
     document.getElementById("fleetDiffBase").textContent = fleetBaselineConfig.rev;
+    document.getElementById("fleetDiffReviewed").checked = false;
+    updateFleetActionStates();
     var dialog = document.getElementById("fleetDiffDialog");
     if (!dialog.open) { dialog.showModal(); }
+  }
+
+  function fleetDiffDisplay(field, raw) {
+    if (!raw) { return "(empty)"; }
+    if (field && /\.reservePct$/.test(field.path || "")) { return raw + "% kept free"; }
+    if (field && field.path === "desks.maxBusyDesks") { return raw + " busy J desks"; }
+    if (field && field.path === "desks.stage0.capEur") { return "€" + raw + " Stage-0 ceiling"; }
+    if (field && field.path === "cadence.usOpenArm") { return raw + " Vienna time"; }
+    if (field && field.type === "windows") {
+      try {
+        var windows = JSON.parse(raw);
+        return windows.length ? windows.map(function (entry) {
+          return entry.id + ": " + entry.days.join(", ") + " " + entry.from + "–" + entry.until + " → " + entry.desks.join(", ");
+        }).join("\n") : "No wake windows";
+      } catch (_) { return "Invalid wake windows"; }
+    }
+    if (field && field.choices) {
+      var option = field.choices.find(function (choice) { return choice.value === raw; });
+      return option ? option.label : raw;
+    }
+    return raw;
   }
 
   async function loadFleetConfig() {
@@ -4803,6 +4939,10 @@
         showFleetToast("Preview the current diff before confirming.", true);
         return;
       }
+      if (!document.getElementById("fleetDiffDialog").open || !document.getElementById("fleetDiffReviewed").checked) {
+        showFleetToast("Read the diff and tick the review box before confirming.", true);
+        return;
+      }
       fleetConfirmed = true;
       fleetConfirmedFingerprint = fleetDiffFingerprint;
       updateFleetPreviewNote();
@@ -4840,6 +4980,7 @@
         fleetConfirmedFingerprint = "";
         fleetConfirmed = false;
         localStorage.removeItem(FLEET_PREVIEW_KEY);
+        fleetLastOutcome = "Success · " + result.rev + " is shared with Amy and desks.";
         document.getElementById("fleetRevision").textContent = result.rev;
         renderFleetConfigSection(fleetSectionId, false);
         var writtenKeys = result.action && Array.isArray(result.action.changedKeys) && result.action.changedKeys.length
@@ -4849,6 +4990,7 @@
       } catch (error) {
         fleetConfirmed = false;
         fleetConfirmedFingerprint = "";
+        fleetLastOutcome = "Failed · " + attemptedRev + " was not confirmed as written. " + (error.message || "Request rejected") + ".";
         showFleetToast("Propagation failed for " + attemptedRev + " (" + attemptedKeys.join(", ") + "): " + (error.message || "request rejected") + ".", true);
       } finally {
         fleetBusy = false;
@@ -4897,10 +5039,19 @@
     document.querySelectorAll("[data-fleet-section]").forEach(function (button) {
       button.addEventListener("click", function () { renderFleetConfigSection(button.dataset.fleetSection, false); });
     });
+    document.querySelectorAll("[data-fleet-jump]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        renderFleetConfigSection(button.dataset.fleetJump, false);
+        document.getElementById("fleetEditFields").scrollIntoView({ behavior: "smooth", block: "center" });
+        var first = document.querySelector("#fleetEditFields input:not([readonly]), #fleetEditFields select");
+        if (first) { first.focus({ preventScroll: true }); }
+      });
+    });
     document.querySelectorAll("[data-fleet-action]").forEach(function (button) {
       button.addEventListener("click", function () { void runFleetAction(button.dataset.fleetAction); });
     });
     document.getElementById("fleetDiffCancel").addEventListener("click", closeFleetDiff);
+    document.getElementById("fleetDiffReviewed").addEventListener("change", updateFleetActionStates);
     document.getElementById("fleetActionLogRefresh").addEventListener("click", function () { void loadFleetActions(true); });
     document.getElementById("fleetDiffDialog").addEventListener("cancel", function (event) {
       event.preventDefault();

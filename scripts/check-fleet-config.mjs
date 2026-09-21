@@ -28,8 +28,10 @@ required(/class="board-flipper" id="boardFlipper"/.test(html), "whole-board flip
 required(/id="tradingBoard"[^>]*aria-label="Household paper-trading board"/.test(html), "trading front face is missing");
 required(/id="fleetConfigBoard"[^>]*aria-hidden="true" inert/.test(configHtml), "config back must start hidden and inert");
 required((configHtml.match(/data-fleet-section=/g) || []).length === 7, "Fleet Config must expose seven technical sections");
+required(/id="fleetLimitsTitle">Limits/.test(configHtml) && (configHtml.match(/data-fleet-jump=/g) || []).length === 3, "top Limits entry must link to quota, desks, and cadence editors");
 required(/Technical/.test(configHtml) && /ELI10/.test(configHtml) && /Edit selected values/.test(configHtml), "two-column docs plane IA is incomplete");
 required(/data-fleet-action="diff"/.test(configHtml) && /data-fleet-action="confirm"/.test(configHtml), "preview actions are missing");
+required(/Diff · see changes/.test(configHtml) && /Confirm review/.test(configHtml) && /Nothing is shared until you select Propagate/.test(html), "Diff and Confirm need plain-language labels");
 required((configHtml.match(/data-fleet-action="propagate"/g) || []).length === 2, "both Propagate affordances are required");
 required(/id="fleetConfigClose"/.test(configHtml), "Flip back control is missing");
 required(!/id="fleetToast"/.test(configHtml) && html.indexOf('id="fleetToast"') > configEnd, "toast must live outside every transformed card ancestor");
@@ -58,10 +60,14 @@ for (const [id, section] of Object.entries(model)) {
   required(typeof section.label === "string" && section.label.length > 0, `${id} label is missing`);
   required(typeof section.headline === "string" && typeof section.intro === "string", `${id} ELI10 copy is missing`);
   required(Array.isArray(section.sections) && section.sections.length >= 3, `${id} needs durable ELI10 sections`);
-  required(Array.isArray(section.fields) && section.fields.length >= 2 && section.fields.length <= 3, `${id} edit fields are out of bounds`);
+  required(Array.isArray(section.fields) && section.fields.length >= 2 && section.fields.length <= 6, `${id} edit fields are out of bounds`);
   required(section.fields.every((field) => /^[A-Za-z][A-Za-z0-9.]*$/.test(field.key) && typeof field.value === "string"), `${id} has an invalid preview field`);
   required(section.fields.every((field) => configHtml.includes(`data-fleet-readout="${field.key}"`)), `${id} summary does not mirror every preview field`);
 }
+required(model.quota.fields.find((field) => field.key === "onAmber")?.choices?.length === 2, "amber behavior must be selectable");
+required(model.cadence.fields.some((field) => field.key === "darwin"), "Darwin routine must be editable");
+required(model.cadence.fields.some((field) => field.key === "wakeWindows" && field.type === "windows"), "wake windows need a form editor");
+required(/id="fleetDiffReviewed"/.test(html) && /fleetDiffReviewed.*checked/.test(js), "Confirm needs an explicit review acknowledgement");
 required(/\.\/fleet-config\.json/.test(js) && /\.\/fleet-config\/propagate/.test(js) && /\.\/fleet-config\/actions\.json/.test(js), "Fleet Config read/write/action-log endpoints are missing");
 required(/fleetDiffFingerprint !== fleetChangeFingerprint/.test(js), "Confirm must require the current diff preview");
 required(/fleetConfirmedFingerprint !== fleetChangeFingerprint/.test(js), "Propagate must require the current confirmed diff");

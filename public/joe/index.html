@@ -272,11 +272,11 @@
       <div class="fleet-actions" role="toolbar" aria-label="Fleet Config actions">
         <button class="fleet-button" type="button" data-fleet-action="diff">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l4 4v14H7zM14 3v5h5"/></svg>
-          Diff
+          Diff · see changes
         </button>
         <button class="fleet-button" type="button" data-fleet-action="confirm">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
-          Confirm
+          Confirm review
         </button>
         <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="propagate">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7z"/></svg>
@@ -288,6 +288,18 @@
         </button>
       </div>
     </header>
+
+    <section class="fleet-limits" aria-labelledby="fleetLimitsTitle">
+      <div class="fleet-limits-intro">
+        <div><span class="fleet-limits-kicker">START HERE · PAPER FLEET</span><h2 id="fleetLimitsTitle">Limits</h2></div>
+        <p>These numbers decide how much work the fleet can take. Choose a group to edit it, then use Diff → Confirm → Propagate.</p>
+      </div>
+      <div class="fleet-limits-links" role="group" aria-label="Edit fleet limits">
+        <button type="button" data-fleet-jump="quota" aria-controls="fleetEditFields"><strong>Capacity kept free</strong><span>Grok <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">10%</b> · Codex <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">10%</b></span><em>Edit quota →</em></button>
+        <button type="button" data-fleet-jump="desks" aria-controls="fleetEditFields"><strong>Desk limits</strong><span><b data-fleet-readout="maxBusyDesks">5</b> busy desks · Stage-0 €<b data-fleet-readout="stage0CapEur">250</b></span><em>Edit desks →</em></button>
+        <button type="button" data-fleet-jump="cadence" aria-controls="fleetEditFields"><strong>Wake schedule</strong><span>US-open <b data-fleet-readout="usOpenArm">15:35</b> Vienna · <b data-fleet-readout="wakeWindows" data-fleet-window-count="true">0 wake windows</b></span><em>Edit cadence →</em></button>
+      </div>
+    </section>
 
     <p class="fleet-kicker">Docs + control plane</p>
 
@@ -304,8 +316,8 @@
             <span class="fleet-quota-detail" aria-hidden="true">
               <span class="fleet-meter-block"><span>Grok reserve <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">10%</b></span><span class="fleet-meter"><i data-fleet-meter="grok.reservePct" style="width:10%"></i></span></span>
               <span class="fleet-meter-block"><span>Codex reserve <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">10%</b></span><span class="fleet-meter"><i data-fleet-meter="codex.reservePct" style="width:10%"></i></span></span>
-              <span class="fleet-threshold fleet-threshold--green"><b><i></i>Green</b><small>Run normally</small></span>
-              <span class="fleet-threshold fleet-threshold--amber"><b><i></i>Amber</b><small>Slow down</small></span>
+              <span class="fleet-threshold fleet-threshold--green"><b><i></i>Green</b><small data-fleet-readout="onGreen" data-fleet-humanize="true">Run normally</small></span>
+              <span class="fleet-threshold fleet-threshold--amber"><b><i></i>Amber</b><small data-fleet-readout="onAmber" data-fleet-humanize="true">Slow nonessential</small></span>
               <span class="fleet-threshold fleet-threshold--red"><b><i></i>Red</b><small data-fleet-readout="onRed" data-fleet-humanize="true">Park nonessential</small></span>
             </span>
           </button>
@@ -314,7 +326,7 @@
             <span class="fleet-row-main">
               <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2"/><path d="M3 20c0-4 2-7 6-7s6 3 6 7M14 14c4 0 7 2 7 6"/></svg>
               <span class="fleet-row-copy"><strong>Desk fleet</strong><small>Desks and capital limits</small></span>
-              <span class="fleet-row-values"><span>max busy Js <b data-fleet-readout="maxBusyDesks">5</b></span><span>Stage-0 € cap <b data-fleet-readout="stage0CapEur">250</b></span><em data-fleet-readout="keepSymbols" data-fleet-prefix="✓ KEEP " data-fleet-join="+">✓ KEEP SXR8+TSLA</em></span>
+              <span class="fleet-row-values"><span>Busy J desks <b data-fleet-readout="maxBusyDesks">5</b></span><span>Stage-0 ceiling €<b data-fleet-readout="stage0CapEur">250</b></span><em data-fleet-readout="keepSymbols" data-fleet-prefix="✓ KEEP " data-fleet-join="+">✓ KEEP SXR8+TSLA</em></span>
               <span class="fleet-chevron" aria-hidden="true">›</span>
             </span>
           </button>
@@ -323,7 +335,7 @@
             <span class="fleet-row-main">
               <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/></svg>
               <span class="fleet-row-copy"><strong>Cadence</strong><small>Schedules and governors</small></span>
-              <span class="fleet-row-values"><span>US-open arm <b data-fleet-readout="usOpenArm">15:35</b></span><span data-fleet-readout="watcher">desk-watch</span><span>Darwin</span><span data-fleet-readout="governor" data-fleet-display-separator=" ">quota governor</span></span>
+              <span class="fleet-row-values"><span>US-open arm <b data-fleet-readout="usOpenArm">15:35</b></span><span data-fleet-readout="watcher">desk-watch</span><span data-fleet-readout="darwin">darwin</span><span data-fleet-readout="governor" data-fleet-display-separator=" ">quota governor</span><span data-fleet-readout="wakeWindows" data-fleet-window-count="true">0 wake windows</span></span>
               <span class="fleet-chevron" aria-hidden="true">›</span>
             </span>
           </button>
@@ -387,9 +399,9 @@
           <h3 id="fleetEliHeadline">Keep a little in the tank.</h3>
           <p id="fleetEliIntro">Grok and Codex keep 10% in reserve so the fleet can still watch, report and recover.</p>
           <div class="fleet-eli-status" id="fleetEliStatus">
-            <p><b class="fleet-status fleet-status--green"><i></i>Green</b><span>Desks can work.</span></p>
-            <p><b class="fleet-status fleet-status--amber"><i></i>Amber</b><span>Ease off and save capacity.</span></p>
-            <p><b class="fleet-status fleet-status--red"><i></i>Red</b><span>Park nonessential work.</span></p>
+            <p><b class="fleet-status fleet-status--green"><i></i>Green</b><span>Desks can work. Fixed for safety.</span></p>
+            <p><b class="fleet-status fleet-status--amber"><i></i>Amber</b><span data-fleet-readout="onAmber" data-fleet-humanize="true">Slow nonessential</span></p>
+            <p><b class="fleet-status fleet-status--red"><i></i>Red</b><span>Park nonessential work. Fixed for safety.</span></p>
           </div>
           <div class="fleet-eli-sections" id="fleetEliSections"></div>
         </div>
@@ -418,7 +430,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7z"/></svg>
           Propagate
         </button>
-        <small id="fleetPreviewNote">Preview only · No changes propagated</small>
+        <small id="fleetPreviewNote" role="status" aria-live="polite">Preview only · No changes propagated</small>
       </div>
     </footer>
   </div>
@@ -431,12 +443,13 @@
 <dialog class="fleet-diff-dialog" id="fleetDiffDialog" aria-labelledby="fleetDiffTitle" aria-describedby="fleetDiffHelp">
   <div class="fleet-diff-card">
     <p class="fleet-kicker">Revision <span id="fleetDiffBase">fc-000000</span></p>
-    <h2 id="fleetDiffTitle">Review Fleet Config diff</h2>
-    <p id="fleetDiffHelp">Only these paper-fleet values will be written. Amy and desks read the resulting shared revision.</p>
+    <h2 id="fleetDiffTitle">Check what will change</h2>
+    <p id="fleetDiffHelp">Compare each Before and After value. Confirm marks this exact paper revision as reviewed. Nothing is shared until you select Propagate.</p>
     <ul class="fleet-diff-list" id="fleetDiffList"></ul>
+    <label class="fleet-diff-review"><input id="fleetDiffReviewed" type="checkbox"> I checked every Before and After value above.</label>
     <div class="fleet-diff-actions">
       <button class="fleet-button" id="fleetDiffCancel" type="button">Keep editing</button>
-      <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="confirm">Confirm changes</button>
+      <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="confirm">Confirm this review</button>
     </div>
   </div>
 </dialog>
