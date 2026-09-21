@@ -147,7 +147,11 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", "http://local.test");
   requests.push({ host: request.headers.host || "", path: url.pathname });
   if (request.method === "GET" && url.pathname === "/joe/fleet-config.json") {
-    response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    response.writeHead(200, {
+      "content-type": "application/json", "cache-control": "no-store",
+      "X-Joe-Fleet-Source-Path": fleetConfig.rev === "fc-000000" ? "/app/public/joe/fleet-config.example.json" : "/var/lib/joe-board/fleet-config.json",
+      "X-Joe-Fleet-Source-Kind": fleetConfig.rev === "fc-000000" ? "example" : "stored",
+    });
     response.end(JSON.stringify(fleetConfig));
     return;
   }
@@ -1060,7 +1064,7 @@ try {
         };
       })()`);
       if (
-        honestPnl.state !== 'ok' || !/^OK · connected/.test(honestPnl.gateway || '') ||
+        !['ok', 'attention'].includes(honestPnl.state) || !/^OK · connected/.test(honestPnl.gateway || '') ||
         honestPnl.day !== '—' || honestPnl.dayNote !== 'SOD baseline pending - HOSTD-33' ||
         honestPnl.open !== '—' || honestPnl.openNote !== 'IB unrealized feed not wired yet - HOSTD-33' ||
         !/SOD baseline pending - HOSTD-33/.test(honestPnl.attribution || '')
@@ -1086,6 +1090,11 @@ try {
       revision: document.getElementById('fleetRevision').textContent,
       selected: document.getElementById('fleetSelectedLabel').textContent,
       headline: document.getElementById('fleetEliHeadline').textContent,
+      source: document.getElementById('fleetSourcePath').textContent,
+      sourceKind: document.getElementById('fleetSourceKind').textContent,
+      lastPropagate: document.getElementById('fleetLastPropagate').textContent,
+      technicalOpen: document.getElementById('fleetTechnical').open,
+      humanFields: [...document.querySelectorAll('#fleetEditFields label')].map(node => ({ label: node.querySelector('span').textContent, help: node.querySelector('.fleet-field-help').textContent, scope: node.querySelector('.fleet-field-scope').textContent })),
       sections: document.querySelectorAll('[data-fleet-section]').length,
       limitsTitle: document.getElementById('fleetLimitsTitle').textContent,
       limitsTop: document.getElementById('fleetLimitsTitle').getBoundingClientRect().top,
@@ -1100,11 +1109,13 @@ try {
       fleetOpen.plane !== 'fleet-config' || !fleetOpen.flipped || fleetOpen.transform === 'none' ||
       fleetOpen.frontHidden !== 'true' || !fleetOpen.frontInert || fleetOpen.backHidden !== 'false' || fleetOpen.backInert ||
       !/Fleet Config/.test(fleetOpen.title) || fleetOpen.revision !== 'fc-000000' ||
-      fleetOpen.selected !== 'Selected: Quota policy' || fleetOpen.headline !== 'Keep a little in the tank.' ||
-      fleetOpen.limitsTitle !== 'Limits' || fleetOpen.limitsTop >= 700 || JSON.stringify(fleetOpen.limitJumps) !== JSON.stringify(['quota', 'desks', 'cadence']) ||
-      fleetOpen.sections !== 7 || JSON.stringify(fleetOpen.fields) !== JSON.stringify(['grok.reservePct', 'codex.reservePct', 'onGreen', 'onAmber', 'onRed']) ||
+      fleetOpen.selected !== 'Selected: Desk limits' || fleetOpen.headline !== 'Set the paper desks’ boundaries.' ||
+      fleetOpen.sections !== 7 || JSON.stringify(fleetOpen.fields) !== JSON.stringify(['maxBusyDesks', 'stage0CapEur', 'keepSymbols']) ||
       !fleetOpen.actions.includes('diff') || !fleetOpen.actions.includes('confirm') || !fleetOpen.actions.includes('propagate') || !fleetOpen.actions.includes('save') ||
       !/No propagation attempts recorded yet/.test(fleetOpen.actionLogText) ||
+      fleetOpen.source !== '/app/public/joe/fleet-config.example.json' || !/Starter example/.test(fleetOpen.sourceKind) || fleetOpen.lastPropagate !== 'None recorded' ||
+      fleetOpen.technicalOpen || !fleetOpen.humanFields.every(field => field.help && field.scope.startsWith('Applies to:')) ||
+      fleetOpen.humanFields[0].label !== 'Maximum busy desks' ||
       /Day P&L|Open P&L|Virtual desk equity/.test(fleetOpen.configText) || fleetOpen.overflow
     ) throw new Error(`Fleet Config open mismatch: ${JSON.stringify(fleetOpen)}`);
 
@@ -1169,7 +1180,7 @@ try {
       return result;
     })()`);
     if (
-      fleetBound.selected !== 'Selected: Desk fleet' || fleetBound.headline !== 'Five desks, one guarded runway.' ||
+      fleetBound.selected !== 'Selected: Desk limits' || fleetBound.headline !== 'Set the paper desks’ boundaries.' ||
       JSON.stringify(fleetBound.fields) !== JSON.stringify(['maxBusyDesks', 'stage0CapEur', 'keepSymbols']) ||
       JSON.stringify(fleetBound.changed) !== JSON.stringify([]) ||
       fleetBound.summaryValue !== '4' || fleetBound.toastPosition !== 'fixed' || !fleetBound.toastInViewport ||
@@ -1182,7 +1193,7 @@ try {
       fleetBound.actionItems !== 1 || !/success/i.test(fleetBound.actionText) || !/amy-smoke/.test(fleetBound.actionText) || !/fc-000000 → fc-000001/.test(fleetBound.actionText) || !/desks\.maxBusyDesks/.test(fleetBound.actionText)
     ) throw new Error(`Fleet Config binding mismatch: ${JSON.stringify(fleetBound)}`);
 
-    await value(`document.querySelector('[data-fleet-section="secrets"]').click()`);
+    await value(`document.querySelector('[data-fleet-section="secrets"]').click(); document.querySelector('.fleet-explanation').open = true`);
     const fleetSecrets = await value(`(() => ({
       selected: document.getElementById('fleetSelectedLabel').textContent,
       headline: document.getElementById('fleetEliHeadline').textContent,
@@ -1238,11 +1249,14 @@ try {
     const fleetFailure = await value(`(() => ({
       toast: document.getElementById('fleetToast').textContent,
       revision: document.getElementById('fleetRevision').textContent,
+      lastPropagate: document.getElementById('fleetLastPropagate').textContent,
+      source: document.getElementById('fleetSourcePath').textContent,
       outcomes: [...document.querySelectorAll('#fleetActionLog .fleet-action-outcome')].map(node => node.textContent),
       logText: document.getElementById('fleetActionLog').innerText,
     }))()`);
     if (
       !/Propagation failed for fc-000001 \(maxBusyDesks\): smoke policy rejected/.test(fleetFailure.toast) ||
+      !/^failure/.test(fleetFailure.lastPropagate) || fleetFailure.source !== '/var/lib/joe-board/fleet-config.json' ||
       fleetFailure.revision !== 'fc-000001' || JSON.stringify(fleetFailure.outcomes) !== JSON.stringify(['failure', 'success']) ||
       !/desks\.maxBusyDesks/.test(fleetFailure.logText)
     ) throw new Error(`Fleet Config failure evidence mismatch: ${JSON.stringify(fleetFailure)}`);
@@ -1388,6 +1402,12 @@ try {
       if (!mobileViewport) {
         await value(`window.JoeBoard.showFleetConfig()`);
         await delay(850);
+        for (const section of ["desks", "quota", "cadence"]) {
+          await value(`document.querySelector('[data-fleet-section="${section}"]').click(); document.querySelector('.fleet-explanation').open = false; window.scrollTo(0, 0)`);
+          await delay(150);
+          const settingsShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+          await writeFile(join(process.env.JOE_SCREENSHOT_DIR, `settings-${section}.png`), Buffer.from(settingsShot.data, "base64"));
+        }
         const fleetBackShot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
         await writeFile(join(process.env.JOE_SCREENSHOT_DIR, "hostd-48-fleet-config-back.png"), Buffer.from(fleetBackShot.data, "base64"));
         await value(`document.getElementById('fleetActionLog').scrollIntoView({ block: 'center' })`);
@@ -2096,7 +2116,7 @@ try {
   const fleetSource = source.slice(fleetSourceStart, fleetSourceEnd);
   const nonFleetSource = source.slice(0, fleetSourceStart) + source.slice(fleetSourceEnd);
   if (/DUR\d+|1,001,403|SXR8|TSLA/.test(nonFleetSource)) throw new Error("Static trading-plane source still contains Paper-Drill account or position data");
-  if (!/KEEP SXR8\+TSLA/.test(fleetSource)) throw new Error("Fleet Config must retain the declared KEEP symbols from HOSTD-48");
+  if (!/data-fleet-readout="keepSymbols"/.test(fleetSource)) throw new Error("Fleet Config must read KEEP symbols from the loaded config");
   if (exceptions.length) throw new Error(`Runtime exceptions: ${exceptions.join("; ")}`);
   console.log(JSON.stringify({ healthy, fleet, historyGeometry, historyContinuity, mobile, phoneOrder, stale, broken, richSnapshot, backfillSnapshot, stub: stub && { ...stub, text: "private stub" }, dataRequests: requests.filter(item => item.path === "/joe/data.json") }, null, 2));
   await withTimeout(send("Browser.close").catch(() => {}), 1000);

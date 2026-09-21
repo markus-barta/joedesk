@@ -28,15 +28,14 @@ required(/class="board-flipper" id="boardFlipper"/.test(html), "whole-board flip
 required(/id="tradingBoard"[^>]*aria-label="Household paper-trading board"/.test(html), "trading front face is missing");
 required(/id="fleetConfigBoard"[^>]*aria-hidden="true" inert/.test(configHtml), "config back must start hidden and inert");
 required((configHtml.match(/data-fleet-section=/g) || []).length === 7, "Fleet Config must expose seven technical sections");
-required(/id="fleetLimitsTitle">Limits/.test(configHtml) && (configHtml.match(/data-fleet-jump=/g) || []).length === 3, "top Limits entry must link to quota, desks, and cadence editors");
-required(/Technical/.test(configHtml) && /ELI10/.test(configHtml) && /Edit selected values/.test(configHtml), "two-column docs plane IA is incomplete");
+required(/Technical/.test(configHtml) && /ELI10/.test(configHtml) && /What do you want to change/.test(configHtml), "human-first settings navigation is incomplete");
 required(/data-fleet-action="diff"/.test(configHtml) && /data-fleet-action="confirm"/.test(configHtml), "preview actions are missing");
 required(/Diff · see changes/.test(configHtml) && /Confirm review/.test(configHtml) && /Nothing is shared until you select Propagate/.test(html), "Diff and Confirm need plain-language labels");
 required((configHtml.match(/data-fleet-action="propagate"/g) || []).length === 2, "both Propagate affordances are required");
 required(/id="fleetConfigClose"/.test(configHtml), "Flip back control is missing");
 required(!/id="fleetToast"/.test(configHtml) && html.indexOf('id="fleetToast"') > configEnd, "toast must live outside every transformed card ancestor");
 required(!/Day P&amp;L|Open P&amp;L|Virtual desk equity/.test(configHtml), "config plane must not contain financial-result copy");
-required(/id="fleetSecretSlots"/.test(configHtml) && /fleet-secret-capability/.test(configHtml) && /fleet-secret-ref/.test(configHtml), "secret slots must list capability and path refs");
+required(/id="fleetSecretSlots"/.test(configHtml) && /fleet-secret-capability/.test(js) && /fleet-secret-ref/.test(js), "secret slots must list capability and path refs");
 required(/id="fleetSecretOps"/.test(configHtml) && /joe-fleet-config-secrets\.md/.test(configHtml), "Janus/agenix ops note must deep-link to the secrets doc");
 required(/REDACTED/.test(configHtml) && !/(password|api[_ -]?key|bearer)[=:][^<\s]+/i.test(configHtml), "secret slots must remain redacted references");
 required(!/(?:ghp_|xox[baprs]-|BEGIN [A-Z ]+PRIVATE KEY|api[_-]?key\s*[:=])/i.test(configHtml), "secret slots UI must not embed credential material");
@@ -62,7 +61,7 @@ for (const [id, section] of Object.entries(model)) {
   required(Array.isArray(section.sections) && section.sections.length >= 3, `${id} needs durable ELI10 sections`);
   required(Array.isArray(section.fields) && section.fields.length >= 2 && section.fields.length <= 6, `${id} edit fields are out of bounds`);
   required(section.fields.every((field) => /^[A-Za-z][A-Za-z0-9.]*$/.test(field.key) && typeof field.value === "string"), `${id} has an invalid preview field`);
-  required(section.fields.every((field) => configHtml.includes(`data-fleet-readout="${field.key}"`)), `${id} summary does not mirror every preview field`);
+  required(section.fields.every((field) => field.path || field.editable === false), `${id} editable fields need schema paths`);
 }
 required(model.quota.fields.find((field) => field.key === "onAmber")?.choices?.length === 2, "amber behavior must be selectable");
 required(model.cadence.fields.some((field) => field.key === "darwin"), "Darwin routine must be editable");
@@ -77,11 +76,16 @@ required(/field\.editable !== false/.test(js), "stored previews must not overrid
 required(/secretSlots/.test(js) && /editable: false/.test(js), "secret slots must remain read-only");
 required(/Plaintext policy vs AGE secrets/.test(js) && /AGE\/agenix holds the encrypted secret material/.test(js), "ELI10 must explain plaintext policy vs AGE secrets");
 required(/renderSecretSlots/.test(js) && /fleet-redacted/.test(js) && /REDACTED/.test(js), "secret slot renderer must paint refs with REDACTED only");
-required(!/type:\s*"password"/.test(js) && !/secretSlots\.(agenix|janus).*value/.test(js), "UI must not bind plaintext credential inputs");
+required(!/type:\s*"password"/.test(js) && model.secrets.fields.every((field) => field.editable === false), "UI must not bind plaintext credential inputs");
 required(/Propagation failed for/.test(js) && /Propagated " \+ result\.rev \+ ": "/.test(js), "propagation outcome toasts must name revision and changed keys");
 required(/front\.inert = showFleet/.test(js) && /back\.inert = !showFleet/.test(js), "inactive face must be removed from interaction");
 required(/dataset\.joePlane = showFleet \? "fleet-config" : "trading"/.test(js), "active plane state is missing");
-required(/rev <span id="fleetRevision">fc-000000<\/span>/.test(configHtml), "Fleet Config fallback revision is missing");
+required(/id="fleetRevision">Loading/.test(configHtml), "Fleet Config must not claim an example revision before loading");
+required(/id="fleetTechnical"/.test(configHtml) && !/id="fleetTechnical"[^>]*\bopen/.test(configHtml), "Technical detail must start collapsed");
+for (const id of ["fleetSchemaId", "fleetSourceRevision", "fleetSourcePath", "fleetLastPropagate", "settingsFleetConfig"]) {
+  required(html.includes(`id="${id}"`), `${id} findability control is missing`);
+}
+required(/guide\.label/.test(js) && /guide\.help/.test(js) && /guide\.scope/.test(js), "fields need a human label, help and scope");
 required(schema.$id && schema.properties?.mode?.const === "paper", "Fleet Config schema must be paper-only");
 required(schema.properties?.secretSlots?.$ref || schema.properties?.secretSlots, "Fleet Config schema must define secret slots");
 required(actionSchema.properties?.schema?.const === "inspr.joe.fleet-config.actions.v1", "Fleet action-log schema id is invalid");

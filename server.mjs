@@ -109,11 +109,16 @@ function parseFleetConfig(raw, source) {
   return parsed;
 }
 
-function readFleetConfig() {
+function readFleetConfig(source = {}) {
   try {
-    return parseFleetConfig(fs.readFileSync(FLEET_CONFIG_FILE, "utf8"), FLEET_CONFIG_FILE);
+    const config = parseFleetConfig(fs.readFileSync(FLEET_CONFIG_FILE, "utf8"), FLEET_CONFIG_FILE);
+    source.path = FLEET_CONFIG_FILE;
+    source.kind = "stored";
+    return config;
   } catch (err) {
     if (!err || err.code !== "ENOENT") throw err;
+    source.path = FLEET_CONFIG_EXAMPLE;
+    source.kind = "example";
     return parseFleetConfig(fs.readFileSync(FLEET_CONFIG_EXAMPLE, "utf8"), FLEET_CONFIG_EXAMPLE);
   }
 }
@@ -483,19 +488,26 @@ async function handleInbox(req, res) {
 
 function sendFleetConfig(req, res) {
   let config;
+  const source = {};
   try {
-    config = readFleetConfig();
+    config = readFleetConfig(source);
   } catch (err) {
     console.error("fleet config read failed", err);
     sendJson(res, 503, { ok: false, error: "fleet config unavailable" });
     return;
   }
   const etag = `"${config.rev}"`;
+  const headers = {
+    ETag: etag,
+    "Cache-Control": "private, no-cache",
+    "X-Joe-Fleet-Source-Path": source.path,
+    "X-Joe-Fleet-Source-Kind": source.kind,
+  };
   if (req.headers["if-none-match"] === etag) {
-    send(res, 304, "", { ETag: etag, "Cache-Control": "private, no-cache" });
+    send(res, 304, "", headers);
     return;
   }
-  sendJson(res, 200, config, { ETag: etag, "Cache-Control": "private, no-cache" });
+  sendJson(res, 200, config, headers);
 }
 
 function sendFleetActions(res) {

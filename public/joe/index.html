@@ -54,7 +54,7 @@
       <span class="paper-mark">Paper only</span>
       <button class="quiet-button fleet-open" id="fleetConfigOpen" type="button" aria-controls="fleetConfigBoard">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M9 17h6"/></svg>
-        Fleet Config
+        Settings · Fleet Config
       </button>
       <details class="header-menu" id="layoutMenu" data-dismissable>
         <summary class="header-menu-trigger header-icon-trigger" aria-haspopup="dialog" aria-label="Layout" title="Layout">
@@ -96,6 +96,8 @@
           </svg>
         </summary>
         <div class="header-menu-panel settings-panel" role="dialog" aria-label="Board settings">
+          <button class="quiet-button settings-fleet-link" id="settingsFleetConfig" type="button">Limits, quota &amp; wake times → Fleet Config</button>
+          <p class="settings-scope">Appearance below is saved in this browser.</p>
           <fieldset class="settings-group">
             <legend>Grid</legend>
             <label class="settings-field" for="settingsColumns">
@@ -267,7 +269,7 @@
           <path d="M1 14h26" stroke="currentColor" stroke-width="1.2" opacity=".35"/>
         </svg>
         <h1 id="fleetConfigTitle">JoeDesk <span>·</span> Fleet Config</h1>
-        <span class="fleet-revision">rev <span id="fleetRevision">fc-000000</span></span>
+        <span class="fleet-revision">rev <span id="fleetRevision">Loading…</span></span>
       </div>
       <div class="fleet-actions" role="toolbar" aria-label="Fleet Config actions">
         <button class="fleet-button" type="button" data-fleet-action="diff">
@@ -301,111 +303,87 @@
       </div>
     </section>
 
-    <p class="fleet-kicker">Docs + control plane</p>
+    <p class="fleet-kicker">Paper fleet settings · ELI10 first</p>
+    <section class="fleet-definition" aria-labelledby="fleetDefinitionTitle">
+      <h2 id="fleetDefinitionTitle">Where is this defined?</h2>
+      <dl>
+        <div><dt>Schema ID</dt><dd><a id="fleetSchemaId" href="./fleet-config.schema.json">Loading…</a></dd></div>
+        <div><dt>Saved revision</dt><dd id="fleetSourceRevision">Loading…</dd></div>
+        <div class="fleet-definition-path"><dt>File the board reads</dt><dd><code id="fleetSourcePath">Loading…</code><small>via /joe/fleet-config.json · <span id="fleetSourceKind">Checking source</span></small></dd></div>
+        <div><dt>Last propagate attempt</dt><dd id="fleetLastPropagate" role="status">Checking log…</dd></div>
+      </dl>
+    </section>
 
     <div class="fleet-columns">
-      <section class="fleet-panel fleet-technical" aria-labelledby="fleetTechnicalTitle">
-        <h2 id="fleetTechnicalTitle">Technical</h2>
-        <div class="fleet-section-list" role="group" aria-label="Fleet Config sections">
-          <button class="fleet-section is-selected" type="button" data-fleet-section="quota" aria-pressed="true">
-            <span class="fleet-row-main">
-              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="7" ry="3"/><path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"/></svg>
-              <span class="fleet-row-copy"><strong>Quota policy</strong><small>Keep capacity in reserve</small></span>
-              <span class="fleet-radio" aria-hidden="true"></span>
-            </span>
-            <span class="fleet-quota-detail" aria-hidden="true">
-              <span class="fleet-meter-block"><span>Grok reserve <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">10%</b></span><span class="fleet-meter"><i data-fleet-meter="grok.reservePct" style="width:10%"></i></span></span>
-              <span class="fleet-meter-block"><span>Codex reserve <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">10%</b></span><span class="fleet-meter"><i data-fleet-meter="codex.reservePct" style="width:10%"></i></span></span>
-              <span class="fleet-threshold fleet-threshold--green"><b><i></i>Green</b><small data-fleet-readout="onGreen" data-fleet-humanize="true">Run normally</small></span>
-              <span class="fleet-threshold fleet-threshold--amber"><b><i></i>Amber</b><small data-fleet-readout="onAmber" data-fleet-humanize="true">Slow nonessential</small></span>
-              <span class="fleet-threshold fleet-threshold--red"><b><i></i>Red</b><small data-fleet-readout="onRed" data-fleet-humanize="true">Park nonessential</small></span>
-            </span>
+      <nav class="fleet-panel fleet-navigation" aria-label="Fleet Config sections">
+        <h2>What do you want to change?</h2>
+        <div class="fleet-section-list">
+          <button class="fleet-section is-selected" type="button" data-fleet-section="desks" aria-pressed="true" aria-controls="fleetEliBody">
+            <strong>Desk limits</strong><small>Risk cap · busy-desk maximum · KEEP</small>
+            <span class="fleet-nav-value">€<b data-fleet-readout="stage0CapEur">—</b> cap · <b data-fleet-readout="maxBusyDesks">—</b> busy desks</span>
+            <span class="fleet-nav-detail" data-fleet-readout="keepSymbols" data-fleet-prefix="KEEP " data-fleet-join=" + ">KEEP —</span>
           </button>
-
-          <button class="fleet-section" type="button" data-fleet-section="desks" aria-pressed="false">
-            <span class="fleet-row-main">
-              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2"/><path d="M3 20c0-4 2-7 6-7s6 3 6 7M14 14c4 0 7 2 7 6"/></svg>
-              <span class="fleet-row-copy"><strong>Desk fleet</strong><small>Desks and capital limits</small></span>
-              <span class="fleet-row-values"><span>Busy J desks <b data-fleet-readout="maxBusyDesks">5</b></span><span>Stage-0 ceiling €<b data-fleet-readout="stage0CapEur">250</b></span><em data-fleet-readout="keepSymbols" data-fleet-prefix="✓ KEEP " data-fleet-join="+">✓ KEEP SXR8+TSLA</em></span>
-              <span class="fleet-chevron" aria-hidden="true">›</span>
-            </span>
+          <button class="fleet-section" type="button" data-fleet-section="quota" aria-pressed="false" aria-controls="fleetEliBody">
+            <strong>Quota &amp; low-capacity behavior</strong><small>Reserves · GREEN / AMBER / RED</small>
+            <span class="fleet-nav-value">Grok <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">—</b> · Codex <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">—</b> reserved</span>
           </button>
-
-          <button class="fleet-section" type="button" data-fleet-section="cadence" aria-pressed="false">
-            <span class="fleet-row-main">
-              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/></svg>
-              <span class="fleet-row-copy"><strong>Cadence</strong><small>Schedules and governors</small></span>
-              <span class="fleet-row-values"><span>US-open arm <b data-fleet-readout="usOpenArm">15:35</b></span><span data-fleet-readout="watcher">desk-watch</span><span data-fleet-readout="darwin">darwin</span><span data-fleet-readout="governor" data-fleet-display-separator=" ">quota governor</span><span data-fleet-readout="wakeWindows" data-fleet-window-count="true">0 wake windows</span></span>
-              <span class="fleet-chevron" aria-hidden="true">›</span>
-            </span>
+          <button class="fleet-section" type="button" data-fleet-section="cadence" aria-pressed="false" aria-controls="fleetEliBody">
+            <strong>Wake times &amp; cadence</strong><small>Wake windows · US-open start · routine links</small>
+            <span class="fleet-nav-value">US-open <b data-fleet-readout="usOpenArm">—</b> · Vienna time</span>
+            <span class="fleet-nav-detail" id="fleetWakeSummary">Checking wake windows…</span>
+            <span class="fleet-nav-detail">Preview: <span data-fleet-readout="wakeWindows" data-fleet-window-count="true">—</span></span>
           </button>
-
-          <button class="fleet-section" type="button" data-fleet-section="paths" aria-pressed="false">
-            <span class="fleet-row-main">
-              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3z"/></svg>
-              <span class="fleet-row-copy"><strong>Mac shared paths</strong><small>Where things live</small></span>
-              <span class="fleet-row-values fleet-row-values--paths"><code data-fleet-readout="configPath">~/trading-team/shared/fleet-config.json</code><code data-fleet-readout="docsPath">~/trading-team/shared/docs</code></span>
-              <span class="fleet-chevron" aria-hidden="true">›</span>
-            </span>
-          </button>
-
-          <button class="fleet-section" type="button" data-fleet-section="routines" aria-pressed="false">
-            <span class="fleet-row-main">
-              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
-              <span class="fleet-row-copy"><strong>Amy Grok routines</strong><small>Daily routines</small></span>
-              <span class="fleet-row-values"><span data-fleet-readout="morningRoutine" data-fleet-display-separator=" ">Morning brief</span><span data-fleet-readout="reviewRoutine" data-fleet-display-separator=" ">Desk review</span><span data-fleet-readout="closeRoutine" data-fleet-display-separator=" ">Close recap</span></span>
-              <span class="fleet-chevron" aria-hidden="true">›</span>
-            </span>
-          </button>
-
-          <button class="fleet-section" type="button" data-fleet-section="tools" aria-pressed="false">
-            <span class="fleet-row-main">
-              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6a5 5 0 0 0-6 6L3 17l4 4 5-5a5 5 0 0 0 6-6l-3 3-3-3z"/></svg>
-              <span class="fleet-row-copy"><strong>Tools</strong><small>Declared connections</small></span>
-              <span class="fleet-row-values"><span class="fleet-declared" data-fleet-readout="gateway">IB Gateway</span><span class="fleet-declared" data-fleet-readout="joelAdapter">joel-ib</span><span class="fleet-declared" data-fleet-readout="hostTool">codexbar@hsb0</span></span>
-              <span class="fleet-chevron" aria-hidden="true">›</span>
-            </span>
-          </button>
-
-          <button class="fleet-section" type="button" data-fleet-section="secrets" aria-pressed="false">
-            <span class="fleet-row-main">
-              <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg>
-              <span class="fleet-row-copy"><strong>Secret slots</strong><small>Capability and path refs only</small></span>
-              <span class="fleet-row-values"><em class="fleet-redacted" data-fleet-readout="displayMode">REDACTED</em><span><span data-fleet-readout="agenixRefs" data-fleet-prefix="agenix: ">agenix: joe-board-push-token</span> · <span data-fleet-readout="janusRefs" data-fleet-prefix="Janus: ">Janus: none</span></span></span>
-              <span class="fleet-chevron" aria-hidden="true">›</span>
-            </span>
-            <span class="fleet-secret-slots" id="fleetSecretSlots" aria-hidden="true">
-              <span class="fleet-secret-slot">
-                <span class="fleet-secret-capability">agenix</span>
-                <code class="fleet-secret-ref">joe-board-push-token</code>
-                <em class="fleet-redacted">REDACTED</em>
-              </span>
-              <span class="fleet-secret-slot fleet-secret-slot--empty">
-                <span class="fleet-secret-capability">janus</span>
-                <span class="fleet-secret-empty">No slots declared</span>
-              </span>
-            </span>
+          <button class="fleet-section" type="button" data-fleet-section="routines" aria-pressed="false" aria-controls="fleetEliBody">
+            <strong>Amy’s check-ins</strong><small>Morning, review &amp; close labels</small>
           </button>
         </div>
-        <p class="fleet-secret-ops" id="fleetSecretOps">Janus/agenix ops stay off this plane. Rotate and inject AGE secrets in the host secret workflow; JoeDesk lists capability/path refs only. See <span>docs/joe-fleet-config-secrets.md</span>.</p>
-      </section>
+        <details class="fleet-more">
+          <summary>Connections &amp; advanced settings</summary>
+          <div class="fleet-section-list">
+            <button class="fleet-section" type="button" data-fleet-section="paths" aria-pressed="false" aria-controls="fleetEliBody"><strong>Mac file locations</strong><small>Declared mirror &amp; documentation paths</small></button>
+            <button class="fleet-section" type="button" data-fleet-section="tools" aria-pressed="false" aria-controls="fleetEliBody"><strong>Tools</strong><small>Declared connections, read-only</small></button>
+            <button class="fleet-section" type="button" data-fleet-section="secrets" aria-pressed="false" aria-controls="fleetEliBody"><strong>Secret slots</strong><small>Reference names only · REDACTED</small></button>
+          </div>
+        </details>
+        <p class="fleet-nav-note">Values show your preview. Technical shows saved values. Board colors and layout stay in this browser.</p>
+      </nav>
 
-      <aside class="fleet-panel fleet-eli" aria-labelledby="fleetEliTitle">
+      <section class="fleet-panel fleet-eli" aria-labelledby="fleetEliTitle">
         <header class="fleet-eli-head">
-          <div><h2 id="fleetEliTitle">ELI10</h2><p>How the magic works</p></div>
-          <span class="fleet-selected-label">▣ <span id="fleetSelectedLabel">Selected: Quota policy</span></span>
+          <div><h2 id="fleetEliTitle">ELI10 · plain English</h2><p>Choose a setting. See what it does. Change it here.</p></div>
+          <span class="fleet-selected-label" id="fleetSelectedLabel">Selected: Desk limits</span>
         </header>
         <div class="fleet-eli-body" id="fleetEliBody">
-          <h3 id="fleetEliHeadline">Keep a little in the tank.</h3>
-          <p id="fleetEliIntro">Grok and Codex keep 10% in reserve so the fleet can still watch, report and recover.</p>
-          <div class="fleet-eli-status" id="fleetEliStatus">
-            <p><b class="fleet-status fleet-status--green"><i></i>Green</b><span>Desks can work. Fixed for safety.</span></p>
-            <p><b class="fleet-status fleet-status--amber"><i></i>Amber</b><span data-fleet-readout="onAmber" data-fleet-humanize="true">Slow nonessential</span></p>
-            <p><b class="fleet-status fleet-status--red"><i></i>Red</b><span>Park nonessential work. Fixed for safety.</span></p>
+          <h3 id="fleetEliHeadline" tabindex="-1">Set the paper desks’ boundaries.</h3>
+          <p id="fleetEliIntro">Loading the saved configuration…</p>
+          <p class="fleet-load-status" id="fleetLoadStatus" role="status">Loading current Fleet Config…</p>
+          <div class="fleet-eli-status" id="fleetEliStatus" hidden>
+            <p><b class="fleet-status fleet-status--green">GREEN</b><span id="fleetGreenBehavior">Loading…</span></p>
+            <p><b class="fleet-status fleet-status--amber">AMBER</b><span id="fleetAmberBehavior">Loading…</span></p>
+            <p><b class="fleet-status fleet-status--red">RED</b><span id="fleetRedBehavior">Loading…</span></p>
           </div>
-          <div class="fleet-eli-sections" id="fleetEliSections"></div>
+          <div id="fleetSectionCoverage" class="fleet-section-coverage"></div>
+          <div class="fleet-edit-fields" id="fleetEditFields" aria-label="Selected config values"></div>
+          <div class="fleet-edit-strip">
+            <div class="fleet-edit-actions">
+              <button class="fleet-button" type="button" data-fleet-action="save">Save preview</button>
+              <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="propagate">Propagate</button>
+            </div>
+            <p id="fleetPreviewNote" role="status">Preview only · No changes propagated</p>
+            <p class="fleet-flow-help">1. Edit → 2. Diff → 3. Confirm → 4. Propagate. Save preview keeps a draft in this browser; Propagate writes the shared file.</p>
+          </div>
+          <details class="fleet-explanation"><summary>How these settings apply</summary><div class="fleet-eli-sections" id="fleetEliSections"></div></details>
+          <details class="fleet-advanced" id="fleetTechnical">
+            <summary>Technical · exact keys &amp; saved values</summary>
+            <p>These are saved values. Edits above stay in your preview until propagated. Consumer reload is not confirmed by this board.</p>
+            <dl id="fleetTechnicalFields"></dl>
+          </details>
+          <div id="fleetSecretsDetail" hidden>
+            <div class="fleet-secret-slots" id="fleetSecretSlots" aria-hidden="true"></div>
+            <p class="fleet-secret-ops" id="fleetSecretOps">Janus/agenix ops stay off this plane. Rotate and inject AGE secrets in the host secret workflow; JoeDesk lists capability/path refs only. See <span>docs/joe-fleet-config-secrets.md</span>.</p>
+          </div>
         </div>
-      </aside>
+      </section>
     </div>
 
     <section class="fleet-action-log fleet-panel" aria-labelledby="fleetActionLogTitle">
@@ -421,18 +399,7 @@
       </ol>
     </section>
 
-    <footer class="fleet-edit-strip">
-      <strong>Edit selected values</strong>
-      <div class="fleet-edit-fields" id="fleetEditFields" aria-label="Selected config values"></div>
-      <div class="fleet-edit-actions">
-        <button class="fleet-button" type="button" data-fleet-action="save">Save preview</button>
-        <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="propagate">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7z"/></svg>
-          Propagate
-        </button>
-        <small id="fleetPreviewNote" role="status" aria-live="polite">Preview only · No changes propagated</small>
-      </div>
-    </footer>
+
   </div>
 </section>
 </div>
