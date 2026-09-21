@@ -128,12 +128,17 @@ Every authenticated propagation outcome is stored in `/var/lib/joe-board/fleet-c
 - The pusher / producer that maps `book.json` → household snapshot
 - Broker, gateway, and HALT machinery
 
+For a reported paper Gateway outage or stopped board updates, use the
+[Gateway flap recovery checklist](docs/gateway-flap-recovery.md). JoeDesk shows
+the health signal and next action but does not restart the Gateway or pusher.
+
 ### Preserved contracts
 
 - Storage: `/var/lib/joe-board/data.json`, `history.json`, `fleet-config.json`, `fleet-config-actions.json`
 - Browser `localStorage` keys: `joe-board-layout-v1`, `joe-board-named-layouts-v1`, `joe-board-active-layout-v1`, `joe-board-grid-settings-v1`, `joe-board-phone-order-v1`, `joe-board-theme-v1`
 - Phone order is an optional field on named layouts and a separate active draft; desktop geometry retains its existing array format. Legacy layouts derive their initial phone order from desktop positions. On phones, scroll the page between tile drags; helper-edge autoscroll is disabled because tall tiles can otherwise pull against the drag direction. Desktop drag autoscroll remains enabled.
 - Fleet Config requires Diff → Confirm before Propagate. Save Preview remains browser-local; Propagate writes only a paper-mode config revision and its durable action record. Secret slots list agenix/Janus capability and path refs only and always show REDACTED; they never display plaintext credentials. HOSTD-52 rotation remains a response hook. See `docs/joe-fleet-config-secrets.md`.
+- Gateway light: yellow means the paper connection is unstable or its check-in is late; red means the Gateway reports down. These are health readings, not settings that Fleet Config can fix.
 - API paths: `/healthz`, `/readyz`, `/joe/*`, `/joe/fleet-config.json`, `/joe/fleet-config/actions.json`, `/joe/fleet-config/propagate`
 - Schemas: `inspr.joe.household.v1`, `inspr.joe.household.history.v1`, `inspr.joe.fleet-config.v1`, `inspr.joe.fleet-config.actions.v1`
 - Vendor JS/CSS under `public/joe/vendor/` with bundled LICENSE files

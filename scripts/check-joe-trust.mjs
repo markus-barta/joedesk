@@ -138,6 +138,38 @@ if (staleHealth.tone !== "yellow" || staleHealth.reason !== "snapshot_stale" || 
   throw new Error("client time must age a producer-green snapshot into one concise yellow stale signal");
 }
 
+const lateGateway = setSourceTimes(structuredClone(sample), "2026-09-14T14:00:00.000Z");
+lateGateway.safety.gateway.lastSeenAt = "2026-09-14T13:54:00.000Z";
+const lateGatewayHealth = api.boardHealthPresentation(api.validate(lateGateway), 0, "2026-09-14T14:00:00.000Z", false);
+if (lateGatewayHealth.tone !== "yellow" || lateGatewayHealth.reason !== "gateway_unconfirmed" ||
+    !/reload.*tell Amy/.test(lateGatewayHealth.explanation)) {
+  throw new Error("an old Gateway heartbeat must override reported ok with a useful yellow action");
+}
+const missingGatewayHeartbeat = structuredClone(lateGateway);
+missingGatewayHeartbeat.safety.gateway.lastSeenAt = null;
+if (api.boardHealthPresentation(api.validate(missingGatewayHeartbeat), 0, "2026-09-14T14:00:00.000Z", false).reason !== "gateway_unconfirmed") {
+  throw new Error("a missing Gateway heartbeat must not appear connected");
+}
+
+const reportedDown = structuredClone(lateGateway);
+reportedDown.safety.gateway.status = "down";
+const downHealth = api.boardHealthPresentation(api.validate(reportedDown), 0, "2026-09-14T14:00:00.000Z", false);
+if (downHealth.tone !== "red" || downHealth.reason !== "gateway_down" || !/tell Amy/.test(downHealth.explanation)) {
+  throw new Error("a reported Gateway outage must explain who should check it");
+}
+
+const failedFetchHealth = api.boardHealthPresentation(api.validate(sample), 0, sample.generatedAt, true);
+if (failedFetchHealth.tone !== "yellow" || failedFetchHealth.reason !== "refresh_failed" ||
+    !/reload.*tell Amy/.test(failedFetchHealth.explanation)) {
+  throw new Error("a failed board fetch must stay visible while last data is recent");
+}
+
+const stoppedFeed = api.boardHealthPresentation(api.validate(staleProducerGreen), 901, "2026-09-14T14:15:01.000Z", true);
+if (stoppedFeed.tone !== "red" || stoppedFeed.reason !== "feed_disconnected" ||
+    !/tell Amy.*feed/.test(stoppedFeed.explanation)) {
+  throw new Error("a long-stopped board feed must turn red with a feed-check action");
+}
+
 const producerRed = setSourceTimes(structuredClone(sample), "2026-09-14T14:00:00.000Z");
 producerRed.boardHealth = "red";
 producerRed.shortReason = "gateway_down";

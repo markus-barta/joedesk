@@ -52,6 +52,13 @@ and a plain-language reason. The subtle “read more” control expands the head
 in place to show full diagnostics and the Accounting diagnostic link. It stays
 closed by default and supports keyboard and touch.
 
+Consumer-only health reasons do not change the producer schema: a late or
+absent `safety.gateway.lastSeenAt` makes a reported `ok` Gateway yellow and
+unconfirmed; a failed browser fetch is yellow while the last snapshot is
+recent; a snapshot older than three freshness thresholds is red as a stopped
+board feed. The banner gives the reader a reload or Amy escalation action.
+See [Gateway flap recovery](gateway-flap-recovery.md) for the operator checklist.
+
 Producers may also emit the additive top-level account observation:
 
 ```json
