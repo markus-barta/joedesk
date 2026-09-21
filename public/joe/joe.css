@@ -176,6 +176,19 @@ button { color: inherit; }
 .status-badge[data-tone="bad"], .status-badge.offline, .status-badge.stale { border-color: #78514b; color: var(--red); }
 .status-badge.valuation-stale { border-color: #73633d; color: var(--amber); }
 .source-line { min-width: 0; margin-left: auto; overflow: hidden; color: var(--quiet); font: 10px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+.learning-strip { margin: 0 14px 12px; padding: 10px; border: 1px solid color-mix(in srgb, var(--blue) 34%, var(--line)); background: color-mix(in srgb, var(--blue) 5%, var(--ink-2)); }
+.learning-strip-head { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 10px; }
+.learning-strip-head > div { display: grid; min-width: 0; gap: 3px; }
+.learning-strip-head strong { overflow: hidden; color: var(--paper); font: 600 12px var(--sans); text-overflow: ellipsis; white-space: nowrap; }
+.learning-strip-scope { overflow: hidden; color: var(--quiet); font: 9px var(--mono); text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.learning-strip-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.learning-strip-item { min-width: 0; padding: 7px 8px; border: 1px solid var(--line); background: color-mix(in srgb, var(--flap) 70%, transparent); }
+.learning-strip-item-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 6px; }
+.learning-strip-desk { color: var(--paper); font: 600 11px var(--sans); }
+.learning-strip-state { flex: 0 0 auto; padding: 3px 5px; font-size: 8px; }
+.learning-strip-item p { overflow: hidden; margin: 5px 0 0; color: var(--muted); font-size: 9px; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.learning-strip-item .learning-strip-next { margin-top: 3px; color: var(--quiet); }
+.learning-strip-empty { margin: 0; color: var(--quiet); font-size: 10px; }
 .positive { color: var(--green) !important; }
 .negative { color: var(--red) !important; }
 .neutral { color: var(--muted) !important; }
@@ -457,6 +470,17 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
 .fleet-secret-ref { min-width: 0; overflow-wrap: anywhere; color: var(--fleet-paper); font: 12px var(--mono); }
 .fleet-secret-empty { color: var(--fleet-muted); font: 12px var(--mono); }
 .fleet-secret-ops { margin: 12px 2px 0; color: var(--fleet-muted); font-size: 12px; line-height: 1.45; }
+.fleet-sources { margin-top: 14px; border-top: 1px solid var(--fleet-line); padding-top: 14px; }
+.fleet-sources header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.fleet-sources h4 { margin: 0; color: var(--fleet-paper); font-size: 13px; }
+.fleet-sources header p, .fleet-sources-boundary { margin: 4px 0 0; color: var(--fleet-muted); font: 11px/1.4 var(--mono); }
+.fleet-source-live { border: 1px solid #168d68; border-radius: 999px; padding: 3px 7px; color: #7ef7c8; font: 700 10px var(--mono); letter-spacing: .08em; }
+.fleet-sources-list { display: grid; gap: 7px; margin: 11px 0 0; padding: 0; list-style: none; }
+.fleet-source-row { display: grid; grid-template-columns: minmax(110px, .7fr) minmax(145px, 1fr); gap: 4px 10px; border: 1px solid var(--fleet-line); border-radius: 6px; padding: 8px 9px; background: rgba(7, 15, 19, .52); }
+.fleet-source-knob { font-size: 12px; }
+.fleet-source-path { min-width: 0; overflow-wrap: anywhere; color: #98f4ed; font-size: 10px; }
+.fleet-source-legacy { grid-column: 1 / -1; color: var(--fleet-muted); font-size: 11px; line-height: 1.35; }
+.fleet-source-deprecated { color: #ffb25b; font: 700 10px var(--mono); letter-spacing: .03em; }
 .fleet-secret-ops span { color: var(--fleet-cyan); font-family: var(--mono); }
 .fleet-chevron { margin-left: auto; color: #c5d6de; font-size: 27px; font-weight: 300; }
 .fleet-radio { width: 18px; height: 18px; margin-left: auto; border: 2px solid var(--fleet-cyan); border-radius: 50%; box-shadow: inset 0 0 0 4px var(--fleet-panel), inset 0 0 0 8px var(--fleet-cyan); }
@@ -526,6 +550,13 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
 .fleet-window-field input { width: 100%; min-width: 0; height: 34px; padding: 6px; border: 1px solid var(--fleet-line-strong); border-radius: 5px; color: var(--fleet-paper); background: #0a1419; font: 11px var(--mono); }
 .fleet-window-editor > .fleet-button { justify-self: start; }
 .fleet-edit-field input[readonly] { border-style: dashed; color: var(--fleet-muted); cursor: default; }
+.fleet-window-editor { grid-column: 1 / -1; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--fleet-line); border-radius: 7px; }
+.fleet-window-heading { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.fleet-window-heading small { color: var(--fleet-muted); }
+.fleet-window-row { display: grid; grid-template-columns: 1fr 1.4fr .7fr .7fr 1.5fr auto; gap: 6px; align-items: end; }
+.fleet-window-field { display: grid; gap: 4px; min-width: 0; font: 10px var(--mono); color: var(--fleet-muted); }
+.fleet-window-field input { width: 100%; min-width: 0; height: 34px; padding: 6px; border: 1px solid var(--fleet-line-strong); border-radius: 5px; color: var(--fleet-paper); background: #0a1419; font: 11px var(--mono); }
+.fleet-window-editor > .fleet-button { justify-self: start; }
 .fleet-button:disabled { opacity: .42; cursor: not-allowed; }
 .fleet-edit-actions { width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 9px; }
 .fleet-edit-actions small { flex: 1 0 100%; color: var(--fleet-muted); font: 9px var(--mono); text-align: right; }
@@ -547,6 +578,8 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
 .fleet-diff-review { display: flex; align-items: center; gap: 9px; margin-top: 16px; color: var(--fleet-paper); font-size: 12px; }
 .fleet-diff-review input { width: 18px; height: 18px; accent-color: var(--fleet-cyan); }
 .fleet-diff-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.fleet-diff-review { display: flex; align-items: center; gap: 9px; margin-top: 16px; color: var(--fleet-paper); font-size: 12px; }
+.fleet-diff-review input { width: 18px; height: 18px; accent-color: var(--fleet-cyan); }
 
 @media (max-width: 1000px) {
   .hero-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -598,6 +631,9 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
   .system-strip .status-badge { padding: 5px 8px; font-size: 9px; }
   .system-strip .source-line { flex: 1 1 100%; margin-left: 0; white-space: normal; }
   .desk-name { font-size: 20px; }
+  .learning-strip-head { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .learning-strip-scope { max-width: 100%; text-align: left; }
+  .learning-strip-grid { grid-template-columns: 1fr; }
   .desk-money-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .history-canvas-wrap { flex-basis: 190px; min-height: 190px; margin-inline: 10px; }
   .history-captured { margin-inline: 10px; }
@@ -668,3 +704,92 @@ tr[data-desk="joel"] td:first-child { color: var(--desk-joel); }
 @media (prefers-reduced-motion: reduce) {
   .board-flipper { transition-duration: .01ms; }
 }
+
+/* Fleet settings: everyday controls first, saved technical detail on demand. */
+.settings-fleet-link { width: 100%; text-align: left; white-space: normal; line-height: 1.4; }
+.settings-scope { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.fleet-definition { margin: 0 0 16px; padding: 14px 16px; border: 1px solid var(--fleet-line); border-radius: 8px; background: #101d24; }
+.fleet-definition h2 { margin: 0 0 10px; font-size: 14px; }
+.fleet-definition dl { display: grid; grid-template-columns: 1.15fr .55fr 1.8fr 1fr; gap: 16px; margin: 0; }
+.fleet-definition dl > div { min-width: 0; }
+.fleet-definition dt { margin-bottom: 5px; color: var(--fleet-muted); font-size: 11px; }
+.fleet-definition dd { margin: 0; overflow-wrap: anywhere; font: 11px/1.6 var(--mono); }
+.fleet-definition a { color: var(--fleet-cyan); text-underline-offset: 3px; }
+.fleet-definition small { display: block; color: var(--fleet-muted); font: 11px/1.5 var(--sans); }
+.fleet-config .fleet-columns { grid-template-columns: minmax(240px, .75fr) minmax(0, 1.65fr); gap: 16px; align-items: start; }
+.fleet-navigation { padding: 16px; }
+.fleet-navigation h2 { font-size: 17px; line-height: 1.3; letter-spacing: -.015em; }
+.fleet-navigation .fleet-section { display: block; padding: 14px; min-height: 64px; }
+.fleet-navigation .fleet-section > strong { display: block; font-size: 15px; line-height: 1.35; }
+.fleet-navigation .fleet-section > small { display: block; margin-top: 4px; color: var(--fleet-muted); font: 12px/1.5 var(--sans); }
+.fleet-nav-value { display: block; margin-top: 12px; font-size: 13px; }
+.fleet-nav-value b { color: var(--fleet-cyan); }
+.fleet-nav-detail { display: block; margin-top: 5px; color: var(--fleet-muted); font-size: 11px; overflow-wrap: anywhere; }
+.fleet-nav-note { margin: 18px 0 0; color: var(--fleet-muted); font-size: 12px; line-height: 1.6; }
+.fleet-more { margin-top: 18px; }
+.fleet-more > summary, .fleet-explanation > summary, .fleet-advanced > summary { padding: 10px 0; font-size: 13px; cursor: pointer; color: var(--fleet-paper); }
+.fleet-more > summary:focus-visible, .fleet-explanation > summary:focus-visible, .fleet-advanced > summary:focus-visible { outline: 2px solid var(--fleet-cyan); outline-offset: 3px; }
+.fleet-config .fleet-eli { min-height: 0; }
+.fleet-config .fleet-eli-head { flex-wrap: wrap; }
+.fleet-config .fleet-eli-head h2 { font-size: 17px; letter-spacing: -.015em; }
+.fleet-config .fleet-selected-label { padding: 6px 8px; font-size: 10px; white-space: normal; }
+.fleet-config .fleet-eli-body { padding: 20px; min-width: 0; }
+.fleet-config .fleet-eli-body h3 { font-size: 24px; line-height: 1.2; }
+.fleet-config .fleet-eli-body > p { font-size: 13px; line-height: 1.6; }
+.fleet-config .fleet-load-status { padding: 12px; border: 1px solid var(--fleet-amber); border-radius: 6px; color: var(--fleet-amber); }
+.fleet-config .fleet-edit-fields { grid-template-columns: 1fr; gap: 12px; margin: 18px 0 0; }
+.fleet-config .fleet-edit-field { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, .6fr); column-gap: 20px; row-gap: 4px; padding: 14px; border: 1px solid var(--fleet-line); border-radius: 8px; background: rgba(19, 35, 43, .65); }
+.fleet-config .fleet-edit-field span { position: static; font: 600 14px/1.45 var(--sans); color: var(--fleet-paper); letter-spacing: normal; }
+.fleet-config .fleet-edit-field input, .fleet-config .fleet-edit-field select { grid-column: 2; grid-row: 1 / span 3; align-self: center; height: 44px; width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--fleet-line-strong); border-radius: 6px; color: var(--fleet-paper); background: #09141b; font: 14px var(--mono); }
+.fleet-config .fleet-edit-field input:disabled { opacity: .5; }
+.fleet-config .fleet-edit-field .fleet-field-help { grid-column: 1; color: var(--fleet-paper); font: 12px/1.5 var(--sans); }
+.fleet-config .fleet-edit-field .fleet-field-scope { grid-column: 1; color: var(--fleet-muted); font: 11px/1.5 var(--sans); }
+.fleet-config .fleet-edit-strip { display: block; padding: 14px 0 4px; margin-top: 0; border: 0; background: none; }
+.fleet-config .fleet-edit-actions { justify-content: flex-start; }
+.fleet-config #fleetPreviewNote { color: var(--fleet-cyan); font-size: 12px; }
+.fleet-flow-help { color: var(--fleet-muted); font-size: 12px; line-height: 1.6; }
+.fleet-section-coverage { color: var(--fleet-paper); font-size: 12px; line-height: 1.6; }
+.fleet-section-coverage:empty { display: none; }
+.fleet-section-coverage p { margin: 8px 0; }
+.fleet-section-coverage ul { padding-left: 20px; }
+.fleet-explanation, .fleet-advanced { border-top: 1px solid var(--fleet-line); margin-top: 12px; }
+.fleet-config .fleet-eli-sections { border: 0; padding: 8px 0; }
+.fleet-config .fleet-eli-section h4 { font-size: 14px; }
+.fleet-advanced > p { color: var(--fleet-muted); font-size: 12px; line-height: 1.5; }
+.fleet-advanced dl { margin: 10px 0 0; }
+.fleet-advanced dl > div { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 9px 0; border-top: 1px solid var(--fleet-line); font: 11px/1.6 var(--mono); overflow-wrap: anywhere; }
+.fleet-advanced dt { color: var(--fleet-cyan); }
+.fleet-advanced dd { margin: 0; white-space: pre-wrap; }
+.fleet-config .fleet-action-log { margin-top: 16px; }
+@media (max-width: 1000px) {
+  .fleet-definition dl { grid-template-columns: 1fr 1fr; }
+  .fleet-config .fleet-columns { grid-template-columns: minmax(215px, .75fr) minmax(0, 1.65fr); }
+  .fleet-config .fleet-edit-field { grid-template-columns: 1fr; }
+  .fleet-config .fleet-edit-field input, .fleet-config .fleet-edit-field select { grid-column: 1; grid-row: auto; margin-top: 8px; }
+}
+@media (max-width: 700px) {
+  .fleet-config .fleet-columns { grid-template-columns: 1fr; }
+  .fleet-definition { padding: 12px; }
+  .fleet-definition dl { gap: 12px; }
+  .fleet-definition .fleet-definition-path { grid-column: 1 / -1; }
+  .fleet-config .fleet-title-lockup h1 { white-space: normal; line-height: 1.2; }
+  .fleet-config .fleet-navigation { padding: 12px; }
+  .fleet-config .fleet-section-list { grid-template-columns: 1fr 1fr; }
+  .fleet-navigation .fleet-section { padding: 10px; }
+  .fleet-navigation .fleet-section > strong { font-size: 13px; }
+  .fleet-config .fleet-eli-body { padding: 14px; }
+  .fleet-config .fleet-eli-head { padding: 12px 14px; }
+  .fleet-config .fleet-eli-head p { line-height: 1.5; }
+  .fleet-config .fleet-nav-note { margin-top: 12px; }
+  .fleet-advanced dl > div { grid-template-columns: 1fr; gap: 3px; }
+}
+
+/* One home for the settings editors; source details remain secondary. */
+#fleetLimitsHome .fleet-limits-links { grid-template-columns: 1fr; }
+#fleetLimitsHome .fleet-limits-intro { display: block; }
+#fleetLimitsHome .fleet-limits-links button { text-align: left; }
+.fleet-sources summary { cursor: pointer; font-size: 13px; font-weight: 650; }
+.fleet-quota-example { border-left: 3px solid var(--fleet-green); padding: 10px 12px; background: rgba(13, 79, 54, .18); }
+
+.fleet-source-edit { justify-self: start; min-height: 36px; }
+.fleet-sources-help { color: var(--fleet-muted); font-size: 12px; }

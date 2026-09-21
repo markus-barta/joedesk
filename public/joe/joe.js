@@ -176,11 +176,11 @@
     quota: {
       label: "Quota policy",
       headline: "Keep a little in the tank.",
-      intro: "Grok and Codex keep 10% in reserve so the fleet can still watch, report and recover.",
+      intro: "Keep some AI capacity for essential work. Choose the reserve below and see what each quota color asks the fleet to do.",
       status: true,
       sections: [
-        ["Learning desks", "Desks learn with paper trades. Only five can be busy at once. Stage-0 stays within its euro cap."],
-        ["Failsafe arms", "The US-open arm waits until 15:35. Watchers check the desks. If capacity runs low, nonessential work parks."],
+        ["Learning desks", "Reserves apply to Grok and Codex usage. Desk limits and capital caps are in Desk limits."],
+        ["Failsafe arms", "GREEN runs normally. AMBER follows the selected policy. RED parks nonessential work. These are configured policies, not a live quota reading."],
         ["Plain files. Locked secrets.", "Fleet settings stay in plaintext so changes are easy to read and compare. Only references point to encrypted values; secret material never appears here."],
         ["Preview → Confirm → Propagate", "Review the change before the fleet receives it."],
       ],
@@ -193,13 +193,13 @@
       ],
     },
     desks: {
-      label: "Desk fleet",
-      headline: "Five desks, one guarded runway.",
-      intro: "The J desk family may use up to five active desks while Stage-0 stays inside its configured capital ceiling.",
+      label: "Desk limits",
+      headline: "Set the paper desks’ boundaries.",
+      intro: "Set the Stage-0 capital cap, how many desks may be busy, and which holdings learning desks must leave alone.",
       sections: [
-        ["Keep means keep", "SXR8 and TSLA remain outside learning-desk changes."],
+        ["Keep means keep", "Symbols in the KEEP list are excluded from learning-desk changes."],
         ["Paper first", "Desk learning stays in the paper environment. Nothing on this plane can place a trade."],
-        ["Small, reversible steps", "Preview and confirm limit changes before the propagation workflow is connected."],
+        ["Small, reversible steps", "Diff shows your changes. Confirm approves that preview. Propagate writes a new shared-file revision; it does not confirm consumer reload."],
       ],
       fields: [
         { key: "maxBusyDesks", label: "Maximum busy J desks at once", help: "A whole number from 1 to 32.", value: "5", path: "desks.maxBusyDesks", type: "integer", min: 1, max: 32 },
@@ -208,40 +208,40 @@
       ],
     },
     cadence: {
-      label: "Cadence",
+      label: "Wake times & cadence",
       headline: "The fleet wakes up on a schedule.",
-      intro: "A timed arm, desk watcher and quota governor keep routine work predictable.",
+      intro: "These settings say when routines should run. They do not show whether a wake actually happened.",
       sections: [
-        ["US-open arm", "The arm waits until 15:35 before the session workflow can proceed."],
-        ["Watch before work", "desk-watch checks fleet state before scheduled routines continue."],
+        ["US-open arm", "Use the US-open start time below. All configured times use Europe/Vienna, including daylight-saving changes."],
+        ["Watch before work", "The desk watcher is the configured routine for checking fleet state."],
         ["Capacity has the last word", "The quota governor can slow or park nonessential work."],
       ],
       fields: [
         { key: "usOpenArm", label: "Earliest US-open arm (Vienna time)", help: "24-hour time, for example 15:35.", value: "15:35", path: "cadence.usOpenArm", type: "time" },
+        { key: "wakeWindows", label: "Desk wake windows", value: "[]", path: "cadence.wakeWindows", type: "windows", maxLength: 131072 },
         { key: "watcher", label: "Desk check routine ID", help: "Lowercase routine name that checks the desks.", value: "desk-watch", path: "cadence.deskWatch", type: "routine", maxLength: 64 },
         { key: "darwin", label: "Darwin routine ID", help: "Lowercase routine name for Darwin.", value: "darwin", path: "cadence.darwin", type: "routine", maxLength: 64 },
         { key: "governor", label: "Quota capacity routine ID", help: "Lowercase routine name that slows or parks extra work.", value: "quota-governor", path: "cadence.quotaGovernor", type: "routine", maxLength: 64 },
-        { key: "wakeWindows", label: "Desk wake windows", value: "[]", path: "cadence.wakeWindows", type: "windows", maxLength: 131072 },
       ],
     },
     paths: {
-      label: "Mac shared paths",
-      headline: "One shelf for settings. One for explanations.",
-      intro: "Shared paths keep the fleet config and its human-readable docs easy to find.",
+      label: "Legacy shared paths",
+      headline: "Old shelves are labels, not steering wheels.",
+      intro: "The live fleet file is on the board host. These old Mac paths are kept visible only so nobody mistakes a mirror for a control input.",
       sections: [
-        ["Fleet config", "~/trading-team/shared/fleet-config.json is the declared Mac-side mirror of the plain configuration source."],
-        ["Fleet docs", "~/trading-team/shared/docs holds the matching operator explanations."],
+        ["Board source", "The definition strip above shows the actual file this board reads."],
+        ["Deprecated mirrors", "~/trading-team/shared/fleet-config.json and its docs folder are historical locations. JoeDesk does not read them."],
         ["References, not secret values", "Shared files may name encrypted slots but never contain the secret material."],
       ],
       fields: [
-        { key: "configPath", label: "Config path", value: "~/trading-team/shared/fleet-config.json", path: "mac.shared.configPath", type: "path", maxLength: 160 },
-        { key: "docsPath", label: "Docs path", value: "~/trading-team/shared/docs", path: "mac.shared.docsPath", type: "path", maxLength: 160 },
+        { key: "configPath", label: "Deprecated config mirror", value: "~/trading-team/shared/fleet-config.json", path: "mac.shared.configPath", type: "path", maxLength: 160, editable: false },
+        { key: "docsPath", label: "Deprecated docs mirror", value: "~/trading-team/shared/docs", path: "mac.shared.docsPath", type: "path", maxLength: 160, editable: false },
       ],
     },
     routines: {
-      label: "Amy Grok routines",
-      headline: "Three calm check-ins each day.",
-      intro: "The daily routine opens with context, reviews desk work, then closes with a short recap.",
+      label: "Amy’s check-ins",
+      headline: "Name Amy’s three check-ins.",
+      intro: "These are names for morning, review and close. Fleet Config v1 does not store Amy’s run times or prove that a routine ran.",
       sections: [
         ["Morning brief", "Start with the current constraints and the work that matters today."],
         ["Desk review", "Check what each desk learned and whether any guardrail needs attention."],
@@ -255,12 +255,12 @@
     },
     tools: {
       label: "Tools",
-      headline: "Connections report health, not credentials.",
-      intro: "The plane shows which external tools are expected without exposing their authentication material.",
+      headline: "See which connections are declared.",
+      intro: "These are declared connection names. Current health comes from /joe/data.json; this list does not prove connectivity.",
       sections: [
-        ["IB Gateway", "The paper gateway connection is represented as an availability signal only."],
-        ["joel-ib", "The declared integration stays separately named so its boundary is visible."],
-        ["codexbar@hsb0", "The host tool is addressed by its declared service name; authentication stays outside this UI."],
+        ["Connection names", "The saved tool entries name the expected connections. Technical shows the complete list of IDs and labels."],
+        ["Connection health", "Read current availability on the trading board. A tool listed here may still be unavailable."],
+        ["Host setup", "Authentication and host connection settings stay in their existing host workflow."],
       ],
       fields: [
         { key: "gateway", label: "Gateway", value: "IB Gateway", path: "tools.entries.0.label", editable: false },
@@ -284,7 +284,60 @@
       ],
     },
   };
-  var fleetSectionId = "quota";
+  var FLEET_LIMITS_HOME = {
+    label: "Limits home",
+    headline: "See the paper fleet’s limits in one place.",
+    intro: "Set desk risk caps, the busy-desk maximum, quota behavior and wake times here. These settings apply to paper learning only.",
+    sections: [
+      ["Quota", "Reserve capacity for essential work and choose how AMBER handles nonessential work. GREEN and RED are fixed by v1."],
+      ["Desk limits", "Set simultaneous busy desks, the Stage-0 capital ceiling and protected KEEP symbols."],
+      ["Wake times", "Set wake windows and the US-open start in Vienna time. Routine names identify the work; they do not set repeat intervals."],
+      ["Saved means written", "Propagate writes a shared-file revision. The board does not confirm that each consumer has reloaded it."],
+    ],
+    fields: [],
+  };
+  var FLEET_SOURCES = {
+    quota: {
+      "grok.reservePct": ["quota.grok.reservePct", "quota-state.json is a live capacity reading, not a setting"],
+      "codex.reservePct": ["quota.codex.reservePct", "quota-state.json is a live capacity reading, not a setting"],
+      onGreen: ["quota.behavior.green", "fixed by the v1 schema; journals do not set policy"],
+      onAmber: ["quota.behavior.amber", "quota-state.json reports capacity; choose the response here"],
+      onRed: ["quota.behavior.red", "desk journals may record a quota state; they never set policy"],
+    },
+    desks: {
+      maxBusyDesks: ["desks.maxBusyDesks", "trading-team/CONFIG.md is a historical policy note; it is not read by JoeDesk"],
+      stage0CapEur: ["desks.stage0.capEur", "trading-team/CONFIG.md has stage-cap context; do not use it for this board knob"],
+      keepSymbols: ["desks.keep", "desk journals are evidence only; they do not change KEEP"],
+    },
+    cadence: {
+      usOpenArm: ["cadence.usOpenArm", "Amy and desk schedulers must consume this revision; wiring is outside JoeDesk"],
+      wakeWindows: ["cadence.wakeWindows", "external schedulers must adopt these windows; an empty list does not prove desks are asleep"],
+      darwin: ["cadence.darwin", "routine name only; repeat intervals live in the scheduler"],
+      watcher: ["cadence.deskWatch", "routine names in journals are historical, not configuration"],
+      governor: ["cadence.quotaGovernor", "routine names in journals are historical, not configuration"],
+    },
+    paths: {
+      configPath: ["mac.shared.configPath", "~/trading-team/shared/fleet-config.json is DEPRECATED; JoeDesk never reads it"],
+      docsPath: ["mac.shared.docsPath", "~/trading-team/shared/docs is DEPRECATED as a control path"],
+    },
+    routines: {
+      morningRoutine: ["amy.routines.morning", "Amy routine definitions outside this repo must adopt the revision; journals are history"],
+      reviewRoutine: ["amy.routines.review", "Amy routine definitions outside this repo must adopt the revision; journals are history"],
+      closeRoutine: ["amy.routines.close", "Amy routine definitions outside this repo must adopt the revision; journals are history"],
+    },
+    tools: {
+      gateway: ["tools.entries.0.label", "host connection settings and credentials stay outside Fleet Config"],
+      joelAdapter: ["tools.entries.1.label", "host connection settings and credentials stay outside Fleet Config"],
+      hostTool: ["tools.entries.2.label", "host connection settings and credentials stay outside Fleet Config"],
+    },
+    secrets: {
+      agenixRefs: ["secretSlots.agenix", "credentials stay in the host secret store — never a board setting"],
+      janusRefs: ["secretSlots.janus", "credentials stay in the host secret store — never a board setting"],
+      displayMode: ["secretSlots", "JoeDesk inbox credential is at /run/secrets/joe-board-push-token; JOE_INBOX_TOKEN is dev-only fallback"],
+    },
+  };
+  var fleetSectionId = "desks";
+  var fleetLoadState = "loading";
   var fleetDraft = {};
   var fleetBaseline = {};
   var fleetLastOutcome = "";
@@ -2778,6 +2831,40 @@
     };
   }
 
+  function compactLearningText(value, maxLength) {
+    var text = nonEmptyString(value) || "Not supplied";
+    if (text.length <= maxLength) { return text; }
+    return text.slice(0, maxLength - 1).trimEnd() + "…";
+  }
+
+  function renderDecisionStrip(data) {
+    var summary = document.getElementById("learningStripSummary");
+    var scope = document.getElementById("learningStripScope");
+    var gridNode = document.getElementById("learningStripGrid");
+    if (!summary || !scope || !gridNode) { return; }
+    if (!data || !Array.isArray(data.desks)) {
+      summary.textContent = "Waiting for the first snapshot";
+      scope.textContent = "Paper · virtual desks only";
+      gridNode.replaceChildren(el("p", "learning-strip-empty", "The household rollup will appear when the paper snapshot arrives."));
+      return;
+    }
+    var busy = data.desks.filter(function (desk) { return desk.state === "working"; }).length;
+    var rollup = data.desks.map(function (desk) { return desk.label; }).join(" + ");
+    summary.textContent = "Busy " + busy + "/" + data.desks.length + " virtual desks · DAY/OPEN stay evidence-gated";
+    scope.textContent = "KEEP stays outside virtual desk rollup · " + rollup;
+    gridNode.replaceChildren.apply(gridNode, data.desks.map(function (desk) {
+      var copy = formatDeskLearningCopy(desk);
+      var item = el("article", "learning-strip-item");
+      var itemHead = el("div", "learning-strip-item-head");
+      itemHead.appendChild(el("strong", "learning-strip-desk", desk.label));
+      itemHead.appendChild(el("span", "learning-strip-state state state-" + desk.state, stateCopy[desk.state]));
+      item.appendChild(itemHead);
+      item.appendChild(el("p", "learning-strip-happened", "Happened · " + compactLearningText(copy.whatHappened, 82)));
+      item.appendChild(el("p", "learning-strip-next", "Next · " + compactLearningText(copy.whatNext, 82)));
+      return item;
+    }));
+  }
+
   function deskTrackFields(desk) {
     return {
       state: desk.state,
@@ -3304,6 +3391,7 @@
     updateSnapshotFreshnessUI(data, snapshotAge, stale);
     setSignal("haltSignal", "haltValue", data.safety.halt ? "ON" : "Off", data.safety.halt ? "bad" : "good");
     applyBoardHealth(health, boardDiagnostics(data, snapshotAge, at, false, health));
+    renderDecisionStrip(data);
     observeSnapshotChanges(data);
     data.desks.forEach(function (desk) { renderDesk(desk, data, snapshotAge, stale, gatewayDown); });
     renderAttribution(data);
@@ -3319,6 +3407,7 @@
     latestSnapshot = null;
     lastValidSnapshot = null;
     refreshError = error;
+    renderDecisionStrip(null);
     setSignal("gatewaySignal", "gatewayValue", "Unknown", "bad");
     setSignal("haltSignal", "haltValue", "Unknown", "bad");
     document.getElementById("totalEquity").textContent = "—";
@@ -4440,7 +4529,7 @@
       if (field.type === "windows") { return JSON.stringify(value); }
       return field.type === "refs" && !value.length ? "none" : value.join(",");
     }
-    return value === null || value === undefined ? field.value : String(value);
+    return value === null || value === undefined ? (field.editable === false ? "Not declared" : "") : String(value);
   }
 
   function fleetValuesFromConfig(config) {
@@ -4494,7 +4583,7 @@
     note.textContent = fleetBusy
       ? "Writing a new revision…"
       : !fleetBaselineConfig
-        ? "Loading current Fleet Config…"
+        ? (fleetLoadState === "failed" ? "Unavailable · propagation disabled" : "Loading current Fleet Config…")
         : fleetLastOutcome
           ? fleetLastOutcome
         : fleetConfirmed && count
@@ -4518,7 +4607,7 @@
         value = value.replace(/[_-]+/g, " ");
         value = value ? value.charAt(0).toUpperCase() + value.slice(1) : value;
       }
-      readout.textContent = (readout.dataset.fleetPrefix || "") + value + (readout.dataset.fleetSuffix || "");
+      readout.textContent = fleetBaselineConfig ? (readout.dataset.fleetPrefix || "") + value + (readout.dataset.fleetSuffix || "") : "—";
     });
     ["grok.reservePct", "codex.reservePct"].forEach(function (key) {
       var raw = fleetDraft[key];
@@ -4528,6 +4617,16 @@
       if (meter) { meter.style.width = value + "%"; }
     });
     renderSecretSlots();
+    renderFleetSectionDetails();
+    var examples = ["grok", "codex"].map(function (provider) {
+      var raw = fleetDraft[provider + ".reservePct"];
+      var amount = Number(raw);
+      var label = provider === "grok" ? "Grok" : "Codex";
+      return fleetBaselineConfig && /^\d+$/.test(raw) && amount >= 0 && amount <= 100
+        ? label + ": " + amount + "% means keep " + amount + " of every 100 units for essential work."
+        : label + ": enter a whole percentage from 0 to 100.";
+    });
+    document.getElementById("fleetQuotaExample").textContent = examples.join(" ");
   }
 
   function fleetSecretRefName(value) {
@@ -4565,10 +4664,138 @@
     list.replaceChildren.apply(list, rows);
   }
 
+  function fleetFieldGuide(field) {
+    var guides = {
+      "quota.grok.reservePct": ["Grok capacity to keep (%)", "Leave this much Grok capacity for essential work.", "Grok quota policy"],
+      "quota.codex.reservePct": ["Codex capacity to keep (%)", "Leave this much Codex capacity for essential work.", "Codex quota policy"],
+      "quota.behavior.green": ["GREEN · plenty of capacity", "Let work continue normally. Fixed by the v1 schema.", "Fleet quota policy"],
+      "quota.behavior.amber": ["AMBER · capacity getting low", "Slow down or pause nonessential work to save capacity.", "Fleet quota policy"],
+      "quota.behavior.red": ["RED · capacity too low", "Pause nonessential work. Fixed by the v1 schema.", "Fleet quota policy"],
+      "desks.maxBusyDesks": ["Maximum busy desks", "Limit how many learning desks may work at the same time.", "Paper learning-desk fleet"],
+      "desks.stage0.capEur": ["Stage-0 risk cap (€)", "Set the capital ceiling for Stage-0 paper work; this is not a daily-loss limit.", "Stage-0 paper desks"],
+      "desks.keep": ["Holdings to leave alone (KEEP)", "Keep these symbols outside learning-desk changes. Separate symbols with commas.", "Holdings named in this list"],
+      "cadence.usOpenArm": ["US-open start time", "Set when the US-open workflow may arm, in Vienna time.", "US-open paper workflow · Europe/Vienna"],
+      "cadence.deskWatch": ["Desk watcher routine", "Name the routine that checks desks; this is not its repeat interval.", "Desk monitoring"],
+      "cadence.darwin": ["Learning review routine", "Name the learning-review routine; this is not its repeat interval.", "Darwin learning review"],
+      "cadence.quotaGovernor": ["Capacity-check routine", "Name the routine that applies the quota policy; this is not a timer.", "Fleet quota governor"],
+      "cadence.wakeWindows": ["When desks may wake", "Choose days, start/end times and desks for each wake window.", "Named paper desks · Europe/Vienna"],
+      "amy.routines.morning": ["Morning check-in name", "Name Amy’s morning brief. This label does not set a run time.", "Amy morning routine"],
+      "amy.routines.review": ["Desk-review name", "Name Amy’s review. This label does not set a run time.", "Amy review routine"],
+      "amy.routines.close": ["Closing check-in name", "Name Amy’s closing recap. This label does not set a run time.", "Amy close routine"],
+      "mac.shared.configPath": ["Mac config mirror path", "Historical mirror location, kept for reference. The board reads the file in the definition strip.", "Mac-side consumer declaration"],
+      "mac.shared.docsPath": ["Mac explanations folder", "Historical documentation location, kept for reference. It does not control the board.", "Mac-side documentation"],
+      "tools.entries.0.label": ["First declared tool", "Read the first declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
+      "tools.entries.1.label": ["Second declared tool", "Read the second declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
+      "tools.entries.2.label": ["Third declared tool", "Read the third declared tool label. Health is shown on the board.", "Declared tool entry · read-only"],
+      "secretSlots.agenix": ["agenix secret references", "Names of encrypted secret slots. Their values never enter this screen.", "Host secret store · read-only"],
+      "secretSlots.janus": ["Janus secret references", "Names of secret capabilities. Their values never enter this screen.", "Janus secret workflow · read-only"],
+    };
+    var guide = guides[field.path] || [field.label, "Reference display only; secret values stay outside this screen.", "This board · read-only"];
+    return { label: guide[0], help: guide[1], scope: guide[2] };
+  }
+
+  function fleetPolicyLabel(value) {
+    return { run_normally: "Run normally", slow_nonessential: "Slow nonessential work", park_nonessential: "Pause nonessential work" }[value] || "Unavailable";
+  }
+
+  function renderFleetDefinition(path, kind) {
+    var config = fleetBaselineConfig;
+    document.getElementById("fleetSchemaId").textContent = config ? config.schema : "Unavailable";
+    document.getElementById("fleetSourceRevision").textContent = config ? config.rev : "Unavailable";
+    document.getElementById("fleetSourcePath").textContent = path || "Server did not report the file path";
+    document.getElementById("fleetSourceKind").textContent = kind === "example" ? "Starter example · not propagated" : kind === "stored" ? "Saved shared file" : "Source not reported";
+  }
+
+  function renderFleetSectionDetails() {
+    var config = fleetBaselineConfig;
+    var coverage = document.getElementById("fleetSectionCoverage");
+    coverage.replaceChildren();
+    document.getElementById("fleetSecretsDetail").hidden = fleetSectionId !== "secrets";
+    var fields = document.getElementById("fleetTechnicalFields");
+    fields.replaceChildren();
+    if (!config) {
+      ["Green", "Amber", "Red"].forEach(function (color) { document.getElementById("fleet" + color + "Behavior").textContent = "Unavailable"; });
+      return;
+    }
+    var behavior = config.quota.behavior;
+    ["green", "amber", "red"].forEach(function (color) {
+      var definition = fleetFieldDefinitions().find(function (field) { return field.path === "quota.behavior." + color; });
+      var policy = definition ? fleetDraft[definition.key] : behavior[color];
+      document.getElementById("fleet" + color.charAt(0).toUpperCase() + color.slice(1) + "Behavior").textContent = fleetPolicyLabel(policy) + (color === "amber" ? " · configured policy" : " · fixed in v1");
+    });
+    var windows = config.cadence.wakeWindows;
+    document.getElementById("fleetWakeSummary").textContent = windows.length ? windows.length + " saved wake window" + (windows.length === 1 ? "" : "s") : "No wake windows saved";
+    if (fleetSectionId === "cadence") {
+      coverage.appendChild(el("p", "", windows.length ? "Saved wake windows · Europe/Vienna" : "No wake windows are saved. An empty list does not prove the desks are asleep; their scheduler may be configured elsewhere."));
+      var list = el("ul");
+      windows.forEach(function (window) {
+        list.appendChild(el("li", "", window.days.join(", ") + " · " + window.from + "–" + window.until + " · desks: " + window.desks.join(", ")));
+      });
+      if (windows.length) { coverage.appendChild(list); }
+    }
+    var root = { paths: "mac", routines: "amy", secrets: "secretSlots" }[fleetSectionId] || fleetSectionId;
+    function append(value, path) {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        Object.keys(value).forEach(function (key) { append(value[key], path + "." + key); });
+        return;
+      }
+      var row = el("div");
+      row.appendChild(el("dt", "", path));
+      row.appendChild(el("dd", "", Array.isArray(value) ? (value.length ? JSON.stringify(value, null, 2) : "[] · none declared") : String(value)));
+      fields.appendChild(row);
+    }
+    if (fleetSectionId === "limits") { ["quota", "desks", "cadence"].forEach(function (key) { append(config[key], key); }); }
+    else { append(config[root], root); }
+  }
+
+  function renderFleetSources(sectionId) {
+    var list = document.getElementById("fleetSourcesList");
+    var status = document.getElementById("fleetSourcesStatus");
+    if (!list || !status) { return; }
+    var root = document.getElementById("fleetSourcePath").textContent;
+    var revision = fleetBaselineConfig && fleetBaselineConfig.rev ? fleetBaselineConfig.rev : "unavailable";
+    status.textContent = fleetBaselineConfig
+      ? "Read revision " + revision + " · " + document.getElementById("fleetSourceKind").textContent
+      : "Source unavailable · keys below are the schema map only";
+    var sections = sectionId === "limits" ? ["quota", "desks", "cadence"] : [sectionId];
+    var rows = sections.flatMap(function (id) {
+      var sourceMap = FLEET_SOURCES[id] || {};
+      return FLEET_CONFIG[id].fields.map(function (field) {
+        var entry = sourceMap[field.key] || [field.path || "(display only)", "outside the board writer"];
+        return [fleetFieldGuide(field).label, entry[0], entry[1], field, id];
+      });
+    });
+    list.replaceChildren.apply(list, rows.map(function (entry) {
+      var item = el("li", "fleet-source-row");
+      item.appendChild(el("strong", "fleet-source-knob", entry[0]));
+      item.appendChild(el("code", "fleet-source-path", entry[1].startsWith("/") ? entry[1] : root + "#" + entry[1]));
+      var jump = el("button", "fleet-button fleet-source-edit", entry[3].editable === false ? "View field" : "Edit field");
+      jump.type = "button";
+      jump.dataset.fleetSourceEdit = entry[3].key;
+      jump.setAttribute("aria-label", jump.textContent + ": " + entry[0]);
+      jump.addEventListener("click", function () {
+        renderFleetConfigSection(entry[4], false);
+        var target = entry[3].type === "windows"
+          ? document.querySelector(".fleet-window-editor input, .fleet-window-editor > button")
+          : Array.from(document.querySelectorAll("[data-fleet-field]")).find(function (input) { return input.dataset.fleetField === entry[3].key; });
+        if (target) { target.scrollIntoView({ block: "center", behavior: "auto" }); target.focus({ preventScroll: true }); }
+      });
+      item.appendChild(jump);
+      var legacy = el("span", "fleet-source-legacy");
+      legacy.appendChild(el("b", "fleet-source-deprecated", "DEPRECATED / OUTSIDE"));
+      legacy.appendChild(document.createTextNode(" " + entry[2]));
+      item.appendChild(legacy);
+      return item;
+    }));
+  }
+
   function renderFleetConfigSection(sectionId, focusHeading) {
-    var section = FLEET_CONFIG[sectionId];
+    var section = sectionId === "limits" ? FLEET_LIMITS_HOME : FLEET_CONFIG[sectionId];
     if (!section) { return false; }
     fleetSectionId = sectionId;
+    document.getElementById("fleetLimitsHome").hidden = sectionId !== "limits";
+    document.getElementById("fleetEditStrip").hidden = sectionId === "limits";
+    document.getElementById("fleetQuotaExample").hidden = sectionId !== "quota";
     document.querySelectorAll("[data-fleet-section]").forEach(function (button) {
       var selected = button.dataset.fleetSection === sectionId;
       button.classList.toggle("is-selected", selected);
@@ -4586,12 +4813,16 @@
       item.appendChild(el("p", "", entry[1]));
       return item;
     }));
+    var status = document.getElementById("fleetLoadStatus");
+    status.hidden = Boolean(fleetBaselineConfig);
+    status.textContent = fleetLoadState === "failed" ? "Fleet Config is unavailable. Values are hidden and editing is disabled. Reopen settings to retry." : "Loading current Fleet Config…";
     var fields = document.getElementById("fleetEditFields");
     fields.replaceChildren.apply(fields, section.fields.map(function (field, index) {
       if (field.type === "windows") { return renderFleetWindowEditor(field); }
       var label = el("label", "fleet-edit-field");
       var inputId = "fleetField" + sectionId.charAt(0).toUpperCase() + sectionId.slice(1) + index;
-      var caption = el("span", "", field.label);
+      var guide = fleetFieldGuide(field);
+      var caption = el("span", "", guide.label);
       var input = field.choices ? el("select") : el("input");
       input.id = inputId;
       if (!field.choices) { input.type = "text"; }
@@ -4605,10 +4836,15 @@
           input.appendChild(option);
         });
       }
-      input.value = fleetDraft[field.key];
-      if (field.editable === false) { input.readOnly = true; input.setAttribute("aria-readonly", "true"); }
-      input.setAttribute("aria-label", field.label);
-      if (field.help) { input.setAttribute("aria-describedby", inputId + "Help"); }
+      input.value = fleetBaselineConfig ? fleetDraft[field.key] : "";
+      input.disabled = !fleetBaselineConfig;
+      input.setAttribute("aria-describedby", inputId + "Help " + inputId + "Scope");
+      input.readOnly = field.editable === false;
+      if (input.readOnly) {
+        input.setAttribute("aria-readonly", "true");
+        if (fleetBaselineConfig && field.path && field.path.indexOf("quota.behavior.") === 0) { input.value = fleetPolicyLabel(fleetDraft[field.key]); }
+      }
+      input.setAttribute("aria-label", guide.label);
       input.dataset.fleetField = field.key;
       input.addEventListener("input", function () {
         if (field.editable === false) { return; }
@@ -4622,15 +4858,17 @@
       });
       label.appendChild(caption);
       label.appendChild(input);
-      if (field.help) {
-        var help = el("small", "fleet-edit-help", field.help);
-        help.id = inputId + "Help";
-        label.appendChild(help);
-      }
+      var help = el("small", "fleet-field-help", guide.help);
+      help.id = inputId + "Help";
+      var scope = el("small", "fleet-field-scope", "Applies to: " + guide.scope);
+      scope.id = inputId + "Scope";
+      label.appendChild(help);
+      label.appendChild(scope);
       return label;
     }));
     updateFleetPreviewNote();
     updateFleetReadouts();
+    renderFleetSources(sectionId);
     if (focusHeading) { headline.focus({ preventScroll: true }); }
     return true;
   }
@@ -4645,10 +4883,12 @@
   function renderFleetWindowEditor(field) {
     var editor = el("div", "fleet-window-editor");
     var heading = el("div", "fleet-window-heading");
-    heading.appendChild(el("strong", "", "Desk wake windows"));
-    heading.appendChild(el("small", "", "Add a row for each wake time. Use short lowercase desk IDs and days such as mon,tue."));
+    var guide = fleetFieldGuide(field);
+    heading.appendChild(el("strong", "", guide.label));
+    heading.appendChild(el("small", "", guide.help));
+    heading.appendChild(el("small", "", "Applies to: " + guide.scope));
     editor.appendChild(heading);
-    var windows = fleetWindows();
+    var windows = fleetBaselineConfig ? fleetWindows() : [];
     function commit() {
       fleetDraft.wakeWindows = JSON.stringify(windows);
       fleetConfirmed = false;
@@ -4692,7 +4932,7 @@
     });
     var add = el("button", "fleet-button", "+ Add wake window");
     add.type = "button";
-    add.disabled = windows.length >= 32;
+    add.disabled = !fleetBaselineConfig || windows.length >= 32;
     add.addEventListener("click", function () {
       windows.push({ id: "new-window", days: ["mon"], from: "09:00", until: "17:00", desks: ["desk-a"] });
       commit();
@@ -4731,6 +4971,9 @@
     var entries = payload && payload.schema === "inspr.joe.fleet-config.actions.v1" && Array.isArray(payload.entries)
       ? payload.entries.slice(-5).reverse()
       : [];
+    var last = entries[0];
+    document.getElementById("fleetLastPropagate").textContent = last ? last.outcome + " · " + fleetActionTime(last.at) + " Vienna · " + (last.revAfter || last.revBefore || "unknown revision") : "None recorded";
+    document.getElementById("fleetLastPropagate").title = last ? last.at : "";
     if (!entries.length) {
       list.replaceChildren(el("li", "fleet-action-empty", "No propagation attempts recorded yet."));
       return;
@@ -4762,6 +5005,7 @@
     } catch (_) {
       var list = document.getElementById("fleetActionLog");
       if (list) { list.replaceChildren(el("li", "fleet-action-empty fleet-action-empty--warning", "Propagation log unavailable.")); }
+      document.getElementById("fleetLastPropagate").textContent = "Unknown · log unavailable";
       if (showWarning) { showFleetToast("Propagation log could not be refreshed.", true); }
     }
   }
@@ -4881,6 +5125,8 @@
         throw new Error("invalid Fleet Config response");
       }
       fleetBaselineConfig = config;
+      fleetLoadState = "ready";
+      renderFleetDefinition(response.headers.get("X-Joe-Fleet-Source-Path"), response.headers.get("X-Joe-Fleet-Source-Kind"));
       fleetBaseline = fleetValuesFromConfig(config);
       fleetDraft = readFleetPreview(config.rev, fleetBaseline);
       fleetDiffFingerprint = "";
@@ -4890,6 +5136,9 @@
       renderFleetConfigSection(fleetSectionId, false);
     } catch (error) {
       fleetBaselineConfig = null;
+      fleetLoadState = "failed";
+      renderFleetDefinition("Unavailable", "unavailable");
+      document.getElementById("fleetWakeSummary").textContent = "Wake windows unavailable";
       fleetBaseline = fleetDefaultValues();
       fleetDraft = Object.assign({}, fleetBaseline);
       document.getElementById("fleetRevision").textContent = "unavailable";
@@ -4974,13 +5223,14 @@
           throw new Error(result.currentRev ? "revision changed to " + result.currentRev + "; reload before retrying" : detail || "request rejected");
         }
         fleetBaselineConfig = result.config;
+        renderFleetDefinition(result.adapter && result.adapter.path, "stored");
         fleetBaseline = fleetValuesFromConfig(result.config);
         fleetDraft = Object.assign({}, fleetBaseline);
         fleetDiffFingerprint = "";
         fleetConfirmedFingerprint = "";
         fleetConfirmed = false;
         localStorage.removeItem(FLEET_PREVIEW_KEY);
-        fleetLastOutcome = "Success · " + result.rev + " is shared with Amy and desks.";
+        fleetLastOutcome = "Success · " + result.rev + " saved to the shared file. Consumer reload is not confirmed.";
         document.getElementById("fleetRevision").textContent = result.rev;
         renderFleetConfigSection(fleetSectionId, false);
         var writtenKeys = result.action && Array.isArray(result.action.changedKeys) && result.action.changedKeys.length
@@ -5014,7 +5264,10 @@
     back.setAttribute("aria-hidden", String(!showFleet));
     document.documentElement.dataset.joePlane = showFleet ? "fleet-config" : "trading";
     stage.classList.add("is-flipping");
-    if (showFleet) { stage.classList.add("is-fleet"); }
+    if (showFleet) {
+      stage.classList.add("is-fleet");
+      if (fleetLoadState === "failed") { void loadFleetConfig(); }
+    }
     if (showFleet) { window.scrollTo(0, 0); }
     window.requestAnimationFrame(function () { flipper.classList.toggle("is-flipped", showFleet); });
     fleetFlipTimer = window.setTimeout(function () {
@@ -5035,9 +5288,15 @@
     fleetDraft = Object.assign({}, fleetBaseline);
     renderFleetConfigSection(fleetSectionId, false);
     document.getElementById("fleetConfigOpen").addEventListener("click", function () { setBoardPlane(true); });
+    document.getElementById("settingsFleetConfig").addEventListener("click", function () {
+      document.getElementById("settingsMenu").open = false;
+      setBoardPlane(true);
+    });
     document.getElementById("fleetConfigClose").addEventListener("click", function () { setBoardPlane(false); });
     document.querySelectorAll("[data-fleet-section]").forEach(function (button) {
-      button.addEventListener("click", function () { renderFleetConfigSection(button.dataset.fleetSection, false); });
+      button.addEventListener("click", function () { renderFleetConfigSection(button.dataset.fleetSection, true);
+        if (window.matchMedia("(max-width: 700px)").matches) { document.getElementById("fleetEliHeadline").scrollIntoView({ block: "start", behavior: "instant" }); }
+      });
     });
     document.querySelectorAll("[data-fleet-jump]").forEach(function (button) {
       button.addEventListener("click", function () {

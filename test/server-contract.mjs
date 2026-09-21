@@ -238,6 +238,8 @@ describe("server contract", () => {
     assert.equal(initial.body.mode, "paper");
     assert.equal(initial.body.rev, "fc-000000");
     assert.equal(initial.headers.get("etag"), '"fc-000000"');
+    assert.equal(initial.headers.get("x-joe-fleet-source-kind"), "example");
+    assert.match(initial.headers.get("x-joe-fleet-source-path"), /\/public\/joe\/fleet-config\.example\.json$/);
     const emptyActions = await jsonFetch("/joe/fleet-config/actions.json");
     assert.equal(emptyActions.status, 200);
     assert.deepEqual(emptyActions.body, { schema: "inspr.joe.fleet-config.actions.v1", entries: [] });
@@ -323,6 +325,8 @@ describe("server contract", () => {
     assert.equal(storedActionsText.includes("paper-session"), false);
 
     const current = await jsonFetch("/joe/fleet-config.json");
+    assert.equal(current.headers.get("x-joe-fleet-source-kind"), "stored");
+    assert.equal(current.headers.get("x-joe-fleet-source-path"), "/var/lib/joe-board/fleet-config.json");
     assert.equal(current.body.rev, "fc-000001");
     const notModified = await fetch(`${BASE}/joe/fleet-config.json`, { headers: { "if-none-match": '"fc-000001"' } });
     assert.equal(notModified.status, 304);
