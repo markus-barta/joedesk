@@ -92,6 +92,7 @@ for (const id of ["fleetSchemaId", "fleetSourceRevision", "fleetSourcePath", "fl
   required(html.includes(`id="${id}"`), `${id} findability control is missing`);
 }
 required(/guide\.label/.test(js) && /guide\.help/.test(js) && /guide\.scope/.test(js), "fields need a human label, help and scope");
+required(/does not place a trade/.test(js), "Limits home must explain that settings edits do not place trades");
 required(schema.$id && schema.properties?.mode?.const === "paper", "Fleet Config schema must be paper-only");
 required(schema.properties?.secretSlots?.$ref || schema.properties?.secretSlots, "Fleet Config schema must define secret slots");
 required(actionSchema.properties?.schema?.const === "inspr.joe.fleet-config.actions.v1", "Fleet action-log schema id is invalid");
