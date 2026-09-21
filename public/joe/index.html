@@ -159,6 +159,19 @@
     </details>
   </div>
 
+  <section class="learning-strip" id="learningStrip" aria-label="Household decision summary">
+    <div class="learning-strip-head">
+      <div>
+        <span class="label">Decision pulse</span>
+        <strong id="learningStripSummary">Waiting for the first snapshot</strong>
+      </div>
+      <span class="learning-strip-scope" id="learningStripScope">Paper · virtual desks only</span>
+    </div>
+    <div class="learning-strip-grid" id="learningStripGrid">
+      <p class="learning-strip-empty">The household rollup will appear when the paper snapshot arrives.</p>
+    </div>
+  </section>
+
   <section class="grid-stack" id="joeGrid" aria-label="Configurable household desk widgets">
     <article class="grid-stack-item" gs-id="hero" gs-x="0" gs-y="0" gs-w="12" gs-h="3">
       <div class="grid-stack-item-content widget hero-widget">
@@ -249,7 +262,7 @@
     <div class="footer-meta">
       <span id="updatedAt">Waiting for data.json</span>
       <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">26.09.14.17.40</span></span></summary>
+        <summary><span class="version__label">v<span id="appVersion">26.09.21.12.00</span></span></summary>
         <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
       </details>
     </div>
@@ -304,8 +317,8 @@
             <span class="fleet-quota-detail" aria-hidden="true">
               <span class="fleet-meter-block"><span>Grok reserve <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">10%</b></span><span class="fleet-meter"><i data-fleet-meter="grok.reservePct" style="width:10%"></i></span></span>
               <span class="fleet-meter-block"><span>Codex reserve <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">10%</b></span><span class="fleet-meter"><i data-fleet-meter="codex.reservePct" style="width:10%"></i></span></span>
-              <span class="fleet-threshold fleet-threshold--green"><b><i></i>Green</b><small>Run normally</small></span>
-              <span class="fleet-threshold fleet-threshold--amber"><b><i></i>Amber</b><small>Slow down</small></span>
+              <span class="fleet-threshold fleet-threshold--green"><b><i></i>Green</b><small data-fleet-readout="onGreen" data-fleet-humanize="true">Run normally</small></span>
+              <span class="fleet-threshold fleet-threshold--amber"><b><i></i>Amber</b><small data-fleet-readout="onAmber" data-fleet-humanize="true">Slow nonessential</small></span>
               <span class="fleet-threshold fleet-threshold--red"><b><i></i>Red</b><small data-fleet-readout="onRed" data-fleet-humanize="true">Park nonessential</small></span>
             </span>
           </button>
@@ -323,7 +336,7 @@
             <span class="fleet-row-main">
               <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/></svg>
               <span class="fleet-row-copy"><strong>Cadence</strong><small>Schedules and governors</small></span>
-              <span class="fleet-row-values"><span>US-open arm <b data-fleet-readout="usOpenArm">15:35</b></span><span data-fleet-readout="watcher">desk-watch</span><span>Darwin</span><span data-fleet-readout="governor" data-fleet-display-separator=" ">quota governor</span></span>
+              <span class="fleet-row-values"><span>US-open arm <b data-fleet-readout="usOpenArm">15:35</b></span><span data-fleet-readout="watcher">desk-watch</span><span data-fleet-readout="darwin">darwin</span><span data-fleet-readout="governor" data-fleet-display-separator=" ">quota governor</span><span data-fleet-readout="wakeWindows" data-fleet-window-count="true">0 wake windows</span></span>
               <span class="fleet-chevron" aria-hidden="true">›</span>
             </span>
           </button>
@@ -331,7 +344,7 @@
           <button class="fleet-section" type="button" data-fleet-section="paths" aria-pressed="false">
             <span class="fleet-row-main">
               <svg class="fleet-section-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3z"/></svg>
-              <span class="fleet-row-copy"><strong>Mac shared paths</strong><small>Where things live</small></span>
+              <span class="fleet-row-copy"><strong>Legacy shared paths</strong><small>Old mirrors, not control inputs</small></span>
               <span class="fleet-row-values fleet-row-values--paths"><code data-fleet-readout="configPath">~/trading-team/shared/fleet-config.json</code><code data-fleet-readout="docsPath">~/trading-team/shared/docs</code></span>
               <span class="fleet-chevron" aria-hidden="true">›</span>
             </span>
@@ -392,6 +405,17 @@
             <p><b class="fleet-status fleet-status--red"><i></i>Red</b><span>Park nonessential work.</span></p>
           </div>
           <div class="fleet-eli-sections" id="fleetEliSections"></div>
+          <section class="fleet-sources" aria-labelledby="fleetSourcesTitle">
+            <header>
+              <div>
+                <h4 id="fleetSourcesTitle">Sources — one home per knob</h4>
+                <p id="fleetSourcesStatus">Loading the current Fleet Config revision…</p>
+              </div>
+              <span class="fleet-source-live">LIVE</span>
+            </header>
+            <ul id="fleetSourcesList" class="fleet-sources-list" aria-live="polite"></ul>
+            <p class="fleet-sources-boundary">Status files, desk journals and host secrets are evidence or safety boundaries, not board settings.</p>
+          </section>
         </div>
       </aside>
     </div>
@@ -432,8 +456,9 @@
   <div class="fleet-diff-card">
     <p class="fleet-kicker">Revision <span id="fleetDiffBase">fc-000000</span></p>
     <h2 id="fleetDiffTitle">Review Fleet Config diff</h2>
-    <p id="fleetDiffHelp">Only these paper-fleet values will be written. Amy and desks read the resulting shared revision.</p>
+    <p id="fleetDiffHelp">Review each before and after value. Confirm unlocks Propagate for this exact paper revision; Amy and desks read the resulting shared file.</p>
     <ul class="fleet-diff-list" id="fleetDiffList"></ul>
+    <label class="fleet-diff-review"><input id="fleetDiffReviewed" type="checkbox"> I reviewed every change above for the paper fleet.</label>
     <div class="fleet-diff-actions">
       <button class="fleet-button" id="fleetDiffCancel" type="button">Keep editing</button>
       <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="confirm">Confirm changes</button>

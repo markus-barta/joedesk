@@ -2773,6 +2773,40 @@
     };
   }
 
+  function compactLearningText(value, maxLength) {
+    var text = nonEmptyString(value) || "Not supplied";
+    if (text.length <= maxLength) { return text; }
+    return text.slice(0, maxLength - 1).trimEnd() + "…";
+  }
+
+  function renderDecisionStrip(data) {
+    var summary = document.getElementById("learningStripSummary");
+    var scope = document.getElementById("learningStripScope");
+    var gridNode = document.getElementById("learningStripGrid");
+    if (!summary || !scope || !gridNode) { return; }
+    if (!data || !Array.isArray(data.desks)) {
+      summary.textContent = "Waiting for the first snapshot";
+      scope.textContent = "Paper · virtual desks only";
+      gridNode.replaceChildren(el("p", "learning-strip-empty", "The household rollup will appear when the paper snapshot arrives."));
+      return;
+    }
+    var busy = data.desks.filter(function (desk) { return desk.state === "working"; }).length;
+    var rollup = data.desks.map(function (desk) { return desk.label; }).join(" + ");
+    summary.textContent = "Busy " + busy + "/" + data.desks.length + " virtual desks · DAY/OPEN stay evidence-gated";
+    scope.textContent = "KEEP stays outside virtual desk rollup · " + rollup;
+    gridNode.replaceChildren.apply(gridNode, data.desks.map(function (desk) {
+      var copy = formatDeskLearningCopy(desk);
+      var item = el("article", "learning-strip-item");
+      var itemHead = el("div", "learning-strip-item-head");
+      itemHead.appendChild(el("strong", "learning-strip-desk", desk.label));
+      itemHead.appendChild(el("span", "learning-strip-state state state-" + desk.state, stateCopy[desk.state]));
+      item.appendChild(itemHead);
+      item.appendChild(el("p", "learning-strip-happened", "Happened · " + compactLearningText(copy.whatHappened, 82)));
+      item.appendChild(el("p", "learning-strip-next", "Next · " + compactLearningText(copy.whatNext, 82)));
+      return item;
+    }));
+  }
+
   function deskTrackFields(desk) {
     return {
       state: desk.state,
@@ -3299,6 +3333,7 @@
     updateSnapshotFreshnessUI(data, snapshotAge, stale);
     setSignal("haltSignal", "haltValue", data.safety.halt ? "ON" : "Off", data.safety.halt ? "bad" : "good");
     applyBoardHealth(health, boardDiagnostics(data, snapshotAge, at, false, health));
+    renderDecisionStrip(data);
     observeSnapshotChanges(data);
     data.desks.forEach(function (desk) { renderDesk(desk, data, snapshotAge, stale, gatewayDown); });
     renderAttribution(data);
@@ -3314,6 +3349,7 @@
     latestSnapshot = null;
     lastValidSnapshot = null;
     refreshError = error;
+    renderDecisionStrip(null);
     setSignal("gatewaySignal", "gatewayValue", "Unknown", "bad");
     setSignal("haltSignal", "haltValue", "Unknown", "bad");
     document.getElementById("totalEquity").textContent = "—";

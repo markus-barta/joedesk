@@ -2,8 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "26.09.14.17.40",
+    APP_VERSION: "26.09.21.12.00",
     VERSION_HISTORY: [
+      {
+        version: "26.09.21.12.00",
+        date: "2026-09-21",
+        title: "Decision pulse makes the household legible",
+        changes: [
+          "Add a compact household strip for virtual busy count, KEEP scope, and the J + Joe + Joel rollup.",
+          "Surface each desk's short happened/next learning line before the detailed card timeline.",
+        ],
+      },
       {
         version: "26.09.14.17.40",
         date: "2026-09-14",
