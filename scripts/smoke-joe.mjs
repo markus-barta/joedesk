@@ -1087,6 +1087,9 @@ try {
       selected: document.getElementById('fleetSelectedLabel').textContent,
       headline: document.getElementById('fleetEliHeadline').textContent,
       sections: document.querySelectorAll('[data-fleet-section]').length,
+      limitsTitle: document.getElementById('fleetLimitsTitle').textContent,
+      limitsTop: document.getElementById('fleetLimitsTitle').getBoundingClientRect().top,
+      limitJumps: [...document.querySelectorAll('[data-fleet-jump]')].map(node => node.dataset.fleetJump),
       actions: [...document.querySelectorAll('[data-fleet-action]')].map(node => node.dataset.fleetAction),
       fields: [...document.querySelectorAll('#fleetEditFields input, #fleetEditFields select')].map(node => node.dataset.fleetField),
       actionLogText: document.getElementById('fleetActionLog').innerText,
@@ -1098,6 +1101,7 @@ try {
       fleetOpen.frontHidden !== 'true' || !fleetOpen.frontInert || fleetOpen.backHidden !== 'false' || fleetOpen.backInert ||
       !/Fleet Config/.test(fleetOpen.title) || fleetOpen.revision !== 'fc-000000' ||
       fleetOpen.selected !== 'Selected: Quota policy' || fleetOpen.headline !== 'Keep a little in the tank.' ||
+      fleetOpen.limitsTitle !== 'Limits' || fleetOpen.limitsTop >= 700 || JSON.stringify(fleetOpen.limitJumps) !== JSON.stringify(['quota', 'desks', 'cadence']) ||
       fleetOpen.sections !== 7 || JSON.stringify(fleetOpen.fields) !== JSON.stringify(['grok.reservePct', 'codex.reservePct', 'onGreen', 'onAmber', 'onRed']) ||
       !fleetOpen.actions.includes('diff') || !fleetOpen.actions.includes('confirm') || !fleetOpen.actions.includes('propagate') || !fleetOpen.actions.includes('save') ||
       !/No propagation attempts recorded yet/.test(fleetOpen.actionLogText) ||
@@ -1105,7 +1109,7 @@ try {
     ) throw new Error(`Fleet Config open mismatch: ${JSON.stringify(fleetOpen)}`);
 
     await value(`(() => {
-      document.querySelector('[data-fleet-section="desks"]').click();
+      document.querySelector('[data-fleet-jump="desks"]').click();
       let inputs = [...document.querySelectorAll('#fleetEditFields input')];
       inputs[1].value = '';
       inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
@@ -1171,7 +1175,7 @@ try {
       fleetBound.summaryValue !== '4' || fleetBound.toastPosition !== 'fixed' || !fleetBound.toastInViewport ||
       !/must be a decimal number/.test(fleetBound.emptyNumberToast) || !/must be a decimal number/.test(fleetBound.coercedNumberToast) ||
       !/matches the current Fleet Config revision/.test(fleetBound.normalizedNumberToast) ||
-      !fleetBound.diffOpen || !/Busy J desks/.test(fleetBound.diffText) ||
+      !fleetBound.diffOpen || !/Maximum busy J desks at once/.test(fleetBound.diffText) ||
       !/1 preview change: maxBusyDesks/.test(fleetBound.diffToast) || !/Preview confirmed for fc-000000/.test(fleetBound.confirmToast) ||
       !/Propagated fc-000001: desks\.maxBusyDesks/.test(fleetBound.propagateToast) || fleetBound.revision !== 'fc-000001' || !/Success · fc-000001 is shared/.test(fleetBound.note) ||
       fleetBound.actionItems !== 1 || !/success/i.test(fleetBound.actionText) || !/amy-smoke/.test(fleetBound.actionText) || !/fc-000000 → fc-000001/.test(fleetBound.actionText) || !/desks\.maxBusyDesks/.test(fleetBound.actionText)
@@ -1264,7 +1268,7 @@ try {
       document.getElementById('fleetDiffCancel').click();
       return { amberDiff, confirmBlocked, windowDiff, windowCount };
     })()`);
-    if (!fleetEditors.confirmBlocked || !/Amber: low capacity/.test(fleetEditors.amberDiff) ||
+    if (!fleetEditors.confirmBlocked || !/When capacity is getting low/.test(fleetEditors.amberDiff) ||
         !/Before: Slow nonessential work/.test(fleetEditors.amberDiff) || !/After: Park nonessential work/.test(fleetEditors.amberDiff) ||
         !/Desk wake windows/.test(fleetEditors.windowDiff) || !/us-open: mon 09:00–17:00 → desk-a/.test(fleetEditors.windowDiff) ||
         /\{"id"/.test(fleetEditors.windowDiff) || fleetEditors.windowCount !== '1 wake window') {

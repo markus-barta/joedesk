@@ -185,11 +185,11 @@
         ["Preview → Confirm → Propagate", "Review the change before the fleet receives it."],
       ],
       fields: [
-        { key: "grok.reservePct", label: "Grok reserve", value: "10", path: "quota.grok.reservePct", type: "integer", min: 0, max: 100 },
-        { key: "codex.reservePct", label: "Codex reserve", value: "10", path: "quota.codex.reservePct", type: "integer", min: 0, max: 100 },
-        { key: "onGreen", label: "Green: normal work (fixed)", value: "run_normally", path: "quota.behavior.green", editable: false },
-        { key: "onAmber", label: "Amber: low capacity", value: "slow_nonessential", path: "quota.behavior.amber", choices: [{ value: "slow_nonessential", label: "Slow nonessential work" }, { value: "park_nonessential", label: "Park nonessential work" }] },
-        { key: "onRed", label: "Red: stop extras (fixed)", value: "park_nonessential", path: "quota.behavior.red", editable: false },
+        { key: "grok.reservePct", label: "Keep this much Grok capacity free (%)", help: "0–100%. Reserved capacity stays available for watch and recovery.", value: "10", path: "quota.grok.reservePct", type: "integer", min: 0, max: 100 },
+        { key: "codex.reservePct", label: "Keep this much Codex capacity free (%)", help: "0–100%. Reserved capacity stays available for watch and recovery.", value: "10", path: "quota.codex.reservePct", type: "integer", min: 0, max: 100 },
+        { key: "onGreen", label: "When capacity is healthy (fixed)", help: "Normal work runs. The v1 safety rule fixes this value.", value: "run_normally", path: "quota.behavior.green", editable: false },
+        { key: "onAmber", label: "When capacity is getting low", help: "Choose whether nonessential work slows or parks.", value: "slow_nonessential", path: "quota.behavior.amber", choices: [{ value: "slow_nonessential", label: "Slow nonessential work" }, { value: "park_nonessential", label: "Park nonessential work" }] },
+        { key: "onRed", label: "When capacity is critical (fixed)", help: "Nonessential work parks. The v1 safety rule fixes this value.", value: "park_nonessential", path: "quota.behavior.red", editable: false },
       ],
     },
     desks: {
@@ -202,9 +202,9 @@
         ["Small, reversible steps", "Preview and confirm limit changes before the propagation workflow is connected."],
       ],
       fields: [
-        { key: "maxBusyDesks", label: "Busy J desks", value: "5", path: "desks.maxBusyDesks", type: "integer", min: 1, max: 32 },
-        { key: "stage0CapEur", label: "Stage-0 cap", value: "250", path: "desks.stage0.capEur", type: "number", min: 0, max: 1000000 },
-        { key: "keepSymbols", label: "Keep symbols", value: "SXR8,TSLA", path: "desks.keep", type: "symbols", maxLength: 160 },
+        { key: "maxBusyDesks", label: "Maximum busy J desks at once", help: "A whole number from 1 to 32.", value: "5", path: "desks.maxBusyDesks", type: "integer", min: 1, max: 32 },
+        { key: "stage0CapEur", label: "Stage-0 euro ceiling", help: "Paper Stage-0 limit in euros; 0 to 1,000,000.", value: "250", path: "desks.stage0.capEur", type: "number", min: 0, max: 1000000 },
+        { key: "keepSymbols", label: "Protected KEEP symbols", help: "Uppercase symbols separated by commas, for example SXR8,TSLA.", value: "SXR8,TSLA", path: "desks.keep", type: "symbols", maxLength: 160 },
       ],
     },
     cadence: {
@@ -217,10 +217,10 @@
         ["Capacity has the last word", "The quota governor can slow or park nonessential work."],
       ],
       fields: [
-        { key: "usOpenArm", label: "US-open arm", value: "15:35", path: "cadence.usOpenArm", type: "time" },
-        { key: "watcher", label: "Watcher", value: "desk-watch", path: "cadence.deskWatch", type: "routine", maxLength: 64 },
-        { key: "darwin", label: "Darwin routine", value: "darwin", path: "cadence.darwin", type: "routine", maxLength: 64 },
-        { key: "governor", label: "Governor", value: "quota-governor", path: "cadence.quotaGovernor", type: "routine", maxLength: 64 },
+        { key: "usOpenArm", label: "Earliest US-open arm (Vienna time)", help: "24-hour time, for example 15:35.", value: "15:35", path: "cadence.usOpenArm", type: "time" },
+        { key: "watcher", label: "Desk check routine ID", help: "Lowercase routine name that checks the desks.", value: "desk-watch", path: "cadence.deskWatch", type: "routine", maxLength: 64 },
+        { key: "darwin", label: "Darwin routine ID", help: "Lowercase routine name for Darwin.", value: "darwin", path: "cadence.darwin", type: "routine", maxLength: 64 },
+        { key: "governor", label: "Quota capacity routine ID", help: "Lowercase routine name that slows or parks extra work.", value: "quota-governor", path: "cadence.quotaGovernor", type: "routine", maxLength: 64 },
         { key: "wakeWindows", label: "Desk wake windows", value: "[]", path: "cadence.wakeWindows", type: "windows", maxLength: 131072 },
       ],
     },
@@ -4608,6 +4608,7 @@
       input.value = fleetDraft[field.key];
       if (field.editable === false) { input.readOnly = true; input.setAttribute("aria-readonly", "true"); }
       input.setAttribute("aria-label", field.label);
+      if (field.help) { input.setAttribute("aria-describedby", inputId + "Help"); }
       input.dataset.fleetField = field.key;
       input.addEventListener("input", function () {
         if (field.editable === false) { return; }
@@ -4621,6 +4622,11 @@
       });
       label.appendChild(caption);
       label.appendChild(input);
+      if (field.help) {
+        var help = el("small", "fleet-edit-help", field.help);
+        help.id = inputId + "Help";
+        label.appendChild(help);
+      }
       return label;
     }));
     updateFleetPreviewNote();
@@ -4640,7 +4646,7 @@
     var editor = el("div", "fleet-window-editor");
     var heading = el("div", "fleet-window-heading");
     heading.appendChild(el("strong", "", "Desk wake windows"));
-    heading.appendChild(el("small", "", "Vienna time · one row per scheduled wake window"));
+    heading.appendChild(el("small", "", "Add a row for each wake time. Use short lowercase desk IDs and days such as mon,tue."));
     editor.appendChild(heading);
     var windows = fleetWindows();
     function commit() {
@@ -4655,11 +4661,11 @@
     windows.forEach(function (windowValue, index) {
       var row = el("div", "fleet-window-row");
       [
-        ["id", "Window ID", "e.g. us-open"],
-        ["days", "Days", "mon,tue,wed"],
-        ["from", "From", "09:00"],
-        ["until", "Until", "17:00"],
-        ["desks", "Desk IDs", "desk-a,desk-b"],
+        ["id", "Window name", "e.g. us-open"],
+        ["days", "Days to wake", "mon,tue,wed"],
+        ["from", "Start (Vienna)", "09:00"],
+        ["until", "End (Vienna)", "17:00"],
+        ["desks", "Wake these desk IDs", "desk-a,desk-b"],
       ].forEach(function (definition) {
         var label = el("label", "fleet-window-field");
         label.appendChild(el("span", "", definition[1]));
@@ -5028,6 +5034,14 @@
     document.getElementById("fleetConfigClose").addEventListener("click", function () { setBoardPlane(false); });
     document.querySelectorAll("[data-fleet-section]").forEach(function (button) {
       button.addEventListener("click", function () { renderFleetConfigSection(button.dataset.fleetSection, false); });
+    });
+    document.querySelectorAll("[data-fleet-jump]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        renderFleetConfigSection(button.dataset.fleetJump, false);
+        document.getElementById("fleetEditFields").scrollIntoView({ behavior: "smooth", block: "center" });
+        var first = document.querySelector("#fleetEditFields input:not([readonly]), #fleetEditFields select");
+        if (first) { first.focus({ preventScroll: true }); }
+      });
     });
     document.querySelectorAll("[data-fleet-action]").forEach(function (button) {
       button.addEventListener("click", function () { void runFleetAction(button.dataset.fleetAction); });

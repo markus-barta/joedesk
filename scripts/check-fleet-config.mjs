@@ -28,6 +28,7 @@ required(/class="board-flipper" id="boardFlipper"/.test(html), "whole-board flip
 required(/id="tradingBoard"[^>]*aria-label="Household paper-trading board"/.test(html), "trading front face is missing");
 required(/id="fleetConfigBoard"[^>]*aria-hidden="true" inert/.test(configHtml), "config back must start hidden and inert");
 required((configHtml.match(/data-fleet-section=/g) || []).length === 7, "Fleet Config must expose seven technical sections");
+required(/id="fleetLimitsTitle">Limits/.test(configHtml) && (configHtml.match(/data-fleet-jump=/g) || []).length === 3, "top Limits entry must link to quota, desks, and cadence editors");
 required(/Technical/.test(configHtml) && /ELI10/.test(configHtml) && /Edit selected values/.test(configHtml), "two-column docs plane IA is incomplete");
 required(/data-fleet-action="diff"/.test(configHtml) && /data-fleet-action="confirm"/.test(configHtml), "preview actions are missing");
 required((configHtml.match(/data-fleet-action="propagate"/g) || []).length === 2, "both Propagate affordances are required");
