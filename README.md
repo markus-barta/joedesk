@@ -142,7 +142,7 @@ See `docs/joe-data-contract.md` and `docs/joe-history-contract.md`.
 
 ### Fleet settings: human path and schema inventory (HOSTD-48)
 
-Open **Settings · Fleet Config** on the board, or **Limits, quota & wake times** in the board-settings menu. Limits home is the default destination, with direct links to desk caps, quota behavior and wake times. Each input explains what it changes and where it applies. **Technical · exact keys & saved values** is collapsed until requested; it shows the saved document, while inputs and navigation values show the current preview. Board layout and theme remain browser-local.
+Open **Settings · Fleet Config** on the board, or **Limits, quota & wake times** in the board-settings menu. Desk limits opens first, with risk cap, busy-desk maximum and KEEP ready to edit. Quota behavior, wake times and the Limits home overview are in the same navigation. Each input explains what it changes and where it applies. **Technical · exact keys & saved values** is collapsed until requested; it shows the saved document, while inputs and navigation values show the current preview. Board layout and theme remain browser-local.
 
 | Find it under | Stored v1 definition | Meaning and current boundary |
 | --- | --- | --- |

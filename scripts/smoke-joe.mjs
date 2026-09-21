@@ -1116,17 +1116,18 @@ try {
       fleetOpen.plane !== 'fleet-config' || !fleetOpen.flipped || fleetOpen.transform === 'none' ||
       fleetOpen.frontHidden !== 'true' || !fleetOpen.frontInert || fleetOpen.backHidden !== 'false' || fleetOpen.backInert ||
       !/Fleet Config/.test(fleetOpen.title) || fleetOpen.revision !== 'fc-000000' ||
-      fleetOpen.selected !== 'Selected: Limits home' || fleetOpen.headline !== 'See the paper fleet’s limits in one place.' ||
-      fleetOpen.sections !== 8 || fleetOpen.fields.length !== 0 ||
+      fleetOpen.selected !== 'Selected: Desk limits' || fleetOpen.headline !== 'Set the paper desks’ boundaries.' ||
+      fleetOpen.sections !== 8 || JSON.stringify(fleetOpen.fields) !== JSON.stringify(['maxBusyDesks', 'stage0CapEur', 'keepSymbols']) ||
       !fleetOpen.actions.includes('diff') || !fleetOpen.actions.includes('confirm') || !fleetOpen.actions.includes('propagate') || !fleetOpen.actions.includes('save') ||
       !/No propagation attempts recorded yet/.test(fleetOpen.actionLogText) ||
       fleetOpen.source !== '/app/public/joe/fleet-config.example.json' || !/Starter example/.test(fleetOpen.sourceKind) || fleetOpen.lastPropagate !== 'None recorded' ||
-      fleetOpen.technicalOpen || !fleetOpen.humanFields.every(field => field.help && field.scope.startsWith('Applies to:')) ||
+      fleetOpen.technicalOpen || fleetOpen.humanFields[0]?.label !== 'Maximum busy desks' || !fleetOpen.humanFields.every(field => field.help && field.scope.startsWith('Applies to:')) ||
       fleetOpen.limitsTitle !== 'Limits home' || JSON.stringify(fleetOpen.limitJumps) !== JSON.stringify(['quota', 'desks', 'cadence']) ||
       /Day P&L|Open P&L|Virtual desk equity/.test(fleetOpen.configText) || fleetOpen.overflow
     ) throw new Error(`Fleet Config open mismatch: ${JSON.stringify(fleetOpen)}`);
 
     const fleetClarity = await value(`(() => {
+      document.querySelector('[data-fleet-section="limits"]').click();
       const sourceRows = [...document.querySelectorAll('#fleetSourcesList .fleet-source-path')].map(node => node.textContent);
       const sourcesCollapsed = !document.getElementById('fleetSources').open;
       const sourceStatus = document.getElementById('fleetSourcesStatus').textContent;

@@ -319,8 +319,7 @@
       <nav class="fleet-panel fleet-navigation" aria-label="Fleet Config sections">
         <h2>What do you want to change?</h2>
         <div class="fleet-section-list">
-          <button class="fleet-section is-selected" type="button" data-fleet-section="limits" aria-pressed="true" aria-controls="fleetEliBody"><strong>Limits home</strong><small>Quota · desk caps · wake times</small></button>
-          <button class="fleet-section" type="button" data-fleet-section="desks" aria-pressed="false" aria-controls="fleetEliBody">
+          <button class="fleet-section is-selected" type="button" data-fleet-section="desks" aria-pressed="true" aria-controls="fleetEliBody">
             <strong>Desk limits</strong><small>Risk cap · busy-desk maximum · KEEP</small>
             <span class="fleet-nav-value">€<b data-fleet-readout="stage0CapEur">—</b> cap · <b data-fleet-readout="maxBusyDesks">—</b> busy desks</span>
             <span class="fleet-nav-detail" data-fleet-readout="keepSymbols" data-fleet-prefix="KEEP " data-fleet-join=" + ">KEEP —</span>
@@ -335,6 +334,7 @@
             <span class="fleet-nav-detail" id="fleetWakeSummary">Checking wake windows…</span>
             <span class="fleet-nav-detail">Preview: <span data-fleet-readout="wakeWindows" data-fleet-window-count="true">—</span></span>
           </button>
+          <button class="fleet-section" type="button" data-fleet-section="limits" aria-pressed="false" aria-controls="fleetEliBody"><strong>Limits home</strong><small>Quota · desk caps · wake times</small></button>
           <button class="fleet-section" type="button" data-fleet-section="routines" aria-pressed="false" aria-controls="fleetEliBody">
             <strong>Amy’s check-ins</strong><small>Morning, review &amp; close labels</small>
           </button>
@@ -353,10 +353,10 @@
       <section class="fleet-panel fleet-eli" aria-labelledby="fleetEliTitle">
         <header class="fleet-eli-head">
           <div><h2 id="fleetEliTitle">ELI10 · plain English</h2><p>Choose a setting. See what it does. Change it here.</p></div>
-          <span class="fleet-selected-label" id="fleetSelectedLabel">Selected: Limits home</span>
+          <span class="fleet-selected-label" id="fleetSelectedLabel">Selected: Desk limits</span>
         </header>
         <div class="fleet-eli-body" id="fleetEliBody">
-          <h3 id="fleetEliHeadline" tabindex="-1">See the paper fleet’s limits in one place.</h3>
+          <h3 id="fleetEliHeadline" tabindex="-1">Set the paper desks’ boundaries.</h3>
           <p id="fleetEliIntro">Loading the saved configuration…</p>
           <p class="fleet-load-status" id="fleetLoadStatus" role="status">Loading current Fleet Config…</p>
           <div class="fleet-eli-status" id="fleetEliStatus" hidden>
@@ -364,7 +364,7 @@
             <p><b class="fleet-status fleet-status--amber">AMBER</b><span id="fleetAmberBehavior">Loading…</span></p>
             <p><b class="fleet-status fleet-status--red">RED</b><span id="fleetRedBehavior">Loading…</span></p>
           </div>
-          <section class="fleet-limits" id="fleetLimitsHome" aria-labelledby="fleetLimitsTitle">
+          <section class="fleet-limits" id="fleetLimitsHome" hidden aria-labelledby="fleetLimitsTitle">
             <div class="fleet-limits-intro">
               <div><span class="fleet-limits-kicker">PAPER ONLY · PREVIEW VALUES</span><h2 id="fleetLimitsTitle">Limits home</h2></div>
               <p>Choose what to change. Edits stay in your preview until you review, confirm and propagate them.</p>

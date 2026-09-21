@@ -4,7 +4,7 @@ Fleet Config is the one place to change a board-controlled setting. It is
 paper-only; it cannot place a trade.
 
 1. Open JoeDesk and click **Fleet Config** in the **Settings · Fleet Config** top-bar button (or use the limits link in board settings).
-2. **Limits home** opens first. Choose **Edit desks**, **Edit quota**, or **Edit cadence**; Amy’s check-ins are in the navigation.
+2. **Desk limits** opens first: set the risk cap, busy-desk maximum or KEEP. Choose **Quota & low-capacity behavior** or **Wake times & cadence** in the same navigation. **Limits home** remains an overview; Amy’s check-ins are also in the navigation.
 3. Change the value under its plain-English explanation. Each field says where it applies. For example, a 20% quota reserve keeps 20 of every 100 capacity units for essential work.
 4. Click **Review changes (Diff)**, read every change, tick the review box, then click **Confirm changes**.
 5. Click **Propagate**. The success message names the new `fc-…` revision written to the shared file. Consumer reload is not confirmed here.

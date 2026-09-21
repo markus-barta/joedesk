@@ -336,7 +336,7 @@
       displayMode: ["secretSlots", "JoeDesk inbox credential is at /run/secrets/joe-board-push-token; JOE_INBOX_TOKEN is dev-only fallback"],
     },
   };
-  var fleetSectionId = "limits";
+  var fleetSectionId = "desks";
   var fleetLoadState = "loading";
   var fleetDraft = {};
   var fleetBaseline = {};
