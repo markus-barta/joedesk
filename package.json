@@ -9,7 +9,9 @@
   },
   "scripts": {
     "check": "node scripts/check-package.mjs && node scripts/check-joe-layout.mjs && node scripts/check-fleet-config.mjs && node scripts/check-joe-trust.mjs && node scripts/check-joe-phone.mjs && node scripts/check-joe-history.mjs && node scripts/check-joe-learning.mjs && node scripts/check-position-contract.mjs && node scripts/check-position-display.mjs",
-    "test": "node scripts/run-server-contract.mjs",
+    "test": "npm run test:contracts && node scripts/run-server-contract.mjs",
+    "test:contracts": "node --test test/contracts.mjs test/failure-fixtures.mjs test/time-vectors.mjs",
+    "test:contracts:browser": "node scripts/smoke-contracts-browser.mjs",
     "start": "node server.mjs"
   }
 }

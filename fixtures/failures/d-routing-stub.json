@@ -1,0 +1,139 @@
+{
+  "id": "d-routing-stub",
+  "failureClass": "d",
+  "provenance": "Synthetic reconstruction of Amy failure history; no production payload or identifiers.",
+  "incident": "Host/path override serves the landing page instead of JSON.",
+  "feed": "data",
+  "payload": null,
+  "receivedAt": "2026-10-14T17:42:22.000Z",
+  "now": "2026-10-14T17:42:31.000Z",
+  "transportReason": "route_not_found",
+  "expectedStatus": null,
+  "expected": {
+    "today.equity": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "today.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "today.openPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "today.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "paperAccount": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.j.equity": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.j.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.j.openPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.j.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.joe.equity": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.joe.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.joe.openPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.joe.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.joel.equity": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.joel.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.joel.openPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "desks.joel.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "positions": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "kept": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "gateway": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "halt": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "executor": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "route_not_found"
+    },
+    "history": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null
+    },
+    "results": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null
+    },
+    "fleet-config": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null
+    }
+  }
+}

@@ -19,6 +19,8 @@ jobs:
         with:
           node-version: "22"
       - run: npm run check
+      - name: Rebuild contracts, incident fixtures and time vectors
+        run: npm run test:contracts
       - name: Server contract tests (disposable tmpfs container)
         run: |
           docker run --rm --network none --tmpfs /var/lib/joe-board \

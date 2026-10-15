@@ -1,0 +1,127 @@
+{
+  "schema": "joedesk.fixture-table.v1",
+  "panels": [
+    "today.equity",
+    "today.dayPnl",
+    "today.openPnl",
+    "today.totalPnl",
+    "paperAccount",
+    "desks.j.equity",
+    "desks.j.dayPnl",
+    "desks.j.openPnl",
+    "desks.j.totalPnl",
+    "desks.joe.equity",
+    "desks.joe.dayPnl",
+    "desks.joe.openPnl",
+    "desks.joe.totalPnl",
+    "desks.joel.equity",
+    "desks.joel.dayPnl",
+    "desks.joel.openPnl",
+    "desks.joel.totalPnl",
+    "positions",
+    "kept",
+    "gateway",
+    "halt",
+    "executor",
+    "history",
+    "results",
+    "fleet-config"
+  ],
+  "cases": [
+    {
+      "id": "a-gateway-up-but-dead",
+      "failureClass": "a",
+      "file": "failures/a-gateway-up-but-dead.json"
+    },
+    {
+      "id": "b-equity-null-gateway-ready",
+      "failureClass": "b",
+      "file": "failures/b-equity-null-gateway-ready.json"
+    },
+    {
+      "id": "b-weekend-no-sod",
+      "failureClass": "b",
+      "file": "failures/b-weekend-no-sod.json"
+    },
+    {
+      "id": "b-incomplete-family",
+      "failureClass": "b",
+      "file": "failures/b-incomplete-family.json"
+    },
+    {
+      "id": "c-old-producer-image",
+      "failureClass": "c",
+      "file": "failures/c-old-producer-image.json"
+    },
+    {
+      "id": "c-frozen-producer",
+      "failureClass": "c",
+      "file": "failures/c-frozen-producer.json"
+    },
+    {
+      "id": "d-routing-stub",
+      "failureClass": "d",
+      "file": "failures/d-routing-stub.json"
+    },
+    {
+      "id": "e-layout-storage-unavailable",
+      "failureClass": "e",
+      "file": "failures/e-layout-storage-unavailable.json"
+    },
+    {
+      "id": "f-history-partial-projection",
+      "failureClass": "f",
+      "file": "failures/f-history-partial-projection.json"
+    },
+    {
+      "id": "f-history-gap",
+      "failureClass": "f",
+      "file": "failures/f-history-gap.json"
+    },
+    {
+      "id": "g-expired-sso",
+      "failureClass": "g",
+      "file": "failures/g-expired-sso.json"
+    },
+    {
+      "id": "h-secondary-position-source",
+      "failureClass": "h",
+      "file": "failures/h-secondary-position-source.json"
+    },
+    {
+      "id": "i-executor-ledger-cap",
+      "failureClass": "i",
+      "file": "failures/i-executor-ledger-cap.json"
+    },
+    {
+      "id": "i-history-size-alarm",
+      "failureClass": "i",
+      "file": "failures/i-history-size-alarm.json"
+    },
+    {
+      "id": "i-oversize-data",
+      "failureClass": "i",
+      "file": "failures/i-oversize-data.json"
+    },
+    {
+      "id": "j-ny-midnight-gap",
+      "failureClass": "j",
+      "file": "failures/j-ny-midnight-gap.json"
+    },
+    {
+      "id": "missing-runtime-and-results",
+      "failureClass": "b",
+      "file": "failures/missing-runtime-and-results.json"
+    },
+    {
+      "id": "stale-receive-age",
+      "failureClass": "c",
+      "file": "failures/stale-receive-age.json"
+    },
+    {
+      "id": "unknown-schema",
+      "failureClass": "c",
+      "file": "failures/unknown-schema.json"
+    }
+  ]
+}

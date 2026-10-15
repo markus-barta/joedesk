@@ -1,0 +1,139 @@
+{
+  "id": "g-expired-sso",
+  "failureClass": "g",
+  "provenance": "Synthetic reconstruction of Amy failure history; no production payload or identifiers.",
+  "incident": "Browser receives SSO redirect; the data last-good remains available.",
+  "feed": "data",
+  "payload": null,
+  "receivedAt": "2026-10-14T17:42:22.000Z",
+  "now": "2026-10-14T17:42:31.000Z",
+  "transportReason": "auth_required",
+  "expectedStatus": null,
+  "expected": {
+    "today.equity": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "today.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "today.openPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "today.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "paperAccount": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.j.equity": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.j.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.j.openPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.j.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.joe.equity": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.joe.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.joe.openPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.joe.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.joel.equity": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.joel.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.joel.openPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "desks.joel.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "positions": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "kept": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "gateway": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "halt": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "executor": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "auth_required"
+    },
+    "history": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null
+    },
+    "results": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null
+    },
+    "fleet-config": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null
+    }
+  }
+}

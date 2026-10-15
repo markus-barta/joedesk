@@ -49,6 +49,29 @@ nix-build -E 'with import <nixpkgs> {}; callPackage ./default.nix {}'
 
 ## Test
 
+The JOED-21 rebuild foundation lives in
+[ADR 0001](docs/adr/0001-joedesk-architecture.md). `contracts/` is an offline,
+versioned candidate shared by the future server, browser and producer CI; the
+current runtime still uses its legacy validators. P1 adds no UI or deployment.
+Synthetic incident payloads and their complete panel-state table are in
+`fixtures/`; time acceptance vectors cover both 2026 DST mismatch periods.
+
+```bash
+npm run test:contracts   # pure local contracts, fixtures and time vectors
+npm run test:contracts:browser  # installed Chrome + trash; BROWSER_PATH override
+npm test                # includes the isolated existing HTTP server suite
+npm run check           # existing package and UI checks
+```
+
+Import `validateContract` from `./contracts/index.mjs` on Node 22+ or in a
+browser with JSON module import attributes. Use `stage: "ingress"` for a
+producer payload (receivedAt forbidden) and the default served stage after the
+server stamps it. The pure `acceptSnapshot` helper returns 422 and retains
+last-good on rejection; HTTP/persistence wiring belongs to P2. The schemas and
+shared semantic validator must travel together when pinned in producer CI.
+`validateAndRetain` applies the same last-good rule to all five contracts,
+including browser reads and server-controlled Fleet Config/health projections.
+
 ```bash
 node scripts/check-package.mjs
 node scripts/check-joe-layout.mjs
