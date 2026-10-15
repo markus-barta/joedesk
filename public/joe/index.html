@@ -26,6 +26,7 @@
     "/joe/history-worker.js": "/joe/history-worker.js?v=26.09.21.12.00",
     "/joe/chart.js": "/joe/chart.js?v=26.09.21.12.00",
     "/joe/results.js": "/joe/results.js?v=26.09.21.12.00",
+    "/joe/results-model.js": "/joe/results-model.js?v=26.09.21.12.00",
     "/joe/theme.js": "/joe/theme.js?v=26.09.21.12.00",
     "/joe/time.mjs": "/joe/time.mjs?v=26.09.21.12.00",
     "/joe/market-calendar.json": "/joe/market-calendar.json?v=26.09.21.12.00",
@@ -194,7 +195,7 @@
       <div class="rhero-l" id="rheroL"></div>
       <div class="rhero-r">
         <div class="legend" id="curveLegend"></div>
-        <div class="chart rchart" id="curve"><div class="ctip" role="tooltip"></div></div>
+        <div class="chart rchart" id="curve"><div class="res-status" id="resStatus"></div><div class="ctip" role="tooltip"></div></div>
       </div>
     </section>
     <div class="tiles" id="tiles" role="list"></div>
@@ -265,6 +266,14 @@
   <button type="button" data-go="history"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>History</button>
   <button type="button" data-go="settings"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
 </nav>
+
+<!-- Phone: a day's trades -->
+<dialog class="dlg sheet" id="daySheet" aria-labelledby="sheetTitle">
+  <div class="dlg-in">
+    <div class="dlg-h"><h2 id="sheetTitle"></h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <div class="dlg-b" id="sheetBody"></div>
+  </div>
+</dialog>
 </div>
 
 <div class="tip" id="tip" role="tooltip"></div>

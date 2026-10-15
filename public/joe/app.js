@@ -7,7 +7,7 @@ import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, forgetCharts } from './desk.js';
 import { renderHistory, historyChart, HS } from './history.js';
-import { renderResults, RS, stepPeriod, resultsToday } from './results.js';
+import { renderResults, RS, stepPeriod, resultsView, openDaySheet, forgetResults } from './results.js';
 import { boardHealthPresentation, dataAge, cellReason } from './health.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { dateTimeFull, age, NB, joinUnits } from './format.js';
@@ -76,7 +76,7 @@ function start() {
     if (screen === 'desk') guard('desk', () => renderDesk(ctx));
     if (screen === 'history') {
       const moved = guard('history', () => renderHistory(ctx))?.redraw;
-      if (moved || dirtyHistory || reason !== 'tick') { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }
+      if (moved || dirtyHistory || !['tick', 'results'].includes(reason)) { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }
     }
     if (screen === 'results') guard('results', () => renderResults(ctx));
     window.__joedesk.renders++;
@@ -100,8 +100,9 @@ function start() {
     document.body.dataset.screen = next;
     $$('.nav button, .bottom-nav button').forEach(b => { if (b.dataset.go === next) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     closePop();
+    if ($('#daySheet')?.open) $('#daySheet').close();
     try { history.replaceState(null, '', `#${next}`); } catch { /* file or sandboxed context */ }
-    dirtyHistory = true; forgetCharts();
+    dirtyHistory = true; forgetCharts(); forgetResults();
     render('screen');
     if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0);
   }
@@ -229,31 +230,39 @@ function start() {
   chartEl.addEventListener('pointerup', endTouch);
   chartEl.addEventListener('pointercancel', endTouch);
 
-  // Results stays in its not-wired state; the switches and the calendar still move.
+  // Results: the period and desk switches, the stepper, the month arrows and
+  // a day drive every number; on a phone a day opens its trades in a sheet.
+  const view = () => resultsView(context());
   $('#periodSeg').addEventListener('click', e => {
     const b = e.target.closest('[data-period]');
     if (!b) return;
     RS.period = b.dataset.period;
-    if (RS.period === 'ytd' || RS.period === 'all') RS.anchor = today();
+    if (RS.period === 'ytd' || RS.period === 'all') RS.anchor = view().today;
     render('results-period');
   });
   $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { RS.desk = b.dataset.desk; render('results-desk'); } });
-  const today = () => resultsToday(feed.now());
-  $('#prevPer').addEventListener('click', () => { stepPeriod(-1, today()); render('results-step'); });
-  $('#nextPer').addEventListener('click', () => { stepPeriod(1, today()); render('results-step'); });
-  $('#prevMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m ? [y, m - 1] : [y - 1, 11]; render('results-month'); });
-  $('#nextMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m === 11 ? [y + 1, 0] : [y, m + 1]; render('results-month'); });
+  $('#prevPer').addEventListener('click', () => { stepPeriod(-1, view()); render('results-step'); });
+  $('#nextPer').addEventListener('click', () => { stepPeriod(1, view()); render('results-step'); });
+  $('#prevMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m ? [y, m - 1] : [y - 1, 11]; RS.moved = true; render('results-month'); });
+  $('#nextMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m === 11 ? [y + 1, 0] : [y, m + 1]; RS.moved = true; render('results-month'); });
+  let sheetFrom = null;
   $('#cal').addEventListener('click', e => {
     const c = e.target.closest('[data-day]');
     if (!c) return;
-    RS.sel = c.dataset.day;
-    if (['day', 'week', 'month'].includes(RS.period) && RS.sel <= today()) RS.anchor = RS.sel;
+    const v = view();
+    RS.sel = c.dataset.day; RS.moved = true;
+    if (['day', 'week', 'month'].includes(RS.period) && RS.sel <= v.today) RS.anchor = RS.sel;
     render('results-day');
+    if (isPhone()) { sheetFrom = RS.sel; openDaySheet(v, RS.sel); }
   });
+  // The sheet closes with its × button, Escape or a tap outside; focus goes back to the day.
+  const sheet = $('#daySheet');
+  sheet.addEventListener('click', e => { if (e.target.closest('[data-close]') || e.target === sheet) sheet.close(); });
+  sheet.addEventListener('close', () => { if (sheetFrom) document.querySelector(`#cal [data-day="${sheetFrom}"]`)?.focus({ preventScroll: true }); sheetFrom = null; });
 
   addEventListener('hashchange', () => { const next = location.hash.slice(1).split('/')[0]; if (next !== screen) go(next); });
   let resize = 0;
-  addEventListener('resize', () => { cancelAnimationFrame(resize); resize = requestAnimationFrame(() => { forgetCharts(); dirtyHistory = true; render('resize'); }); });
+  addEventListener('resize', () => { cancelAnimationFrame(resize); resize = requestAnimationFrame(() => { forgetCharts(); forgetResults(); dirtyHistory = true; render('resize'); }); });
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncThemeButton);
 
   // Numbers never part from their units, in static and rendered text alike.

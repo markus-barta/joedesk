@@ -51,7 +51,7 @@ function feedHeaders(kind) {
 
 // The UI is plain ES modules; every served asset is listed here explicitly.
 const UI_MODULES = ["app.js", "host.js", "ui.js", "terms.js", "format.js", "health.js", "feed.js", "events.js",
-  "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "theme.js"];
+  "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js"];
 const STATIC_FILES = Object.freeze({
   "/joe/": "index.html",
   "/joe/index.html": "index.html",
@@ -582,7 +582,8 @@ function handleStatic(req, res, urlPath) {
     return;
   }
   if (urlPath === "/joe/results.json") {
-    sendJson(res, 503, { ok: false, schema: CONTRACTS.contracts.results, reason: "results_not_wired" });
+    // Until the closed-trade record is wired (JOED-20) every read says so, with the server's clock.
+    sendJson(res, 503, { ok: false, schema: CONTRACTS.contracts.results, reason: "results_not_wired" }, { "X-Joe-Server-Now": clock() });
     return;
   }
   if (urlPath === "/joe/state.json") {

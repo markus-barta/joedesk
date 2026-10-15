@@ -404,7 +404,8 @@ test('P2 auth: all four protected reads retain independent last-good ages on SSO
   const expectedAges = { data: 608, history: 609, results: 610, 'fleet-config': 607 };
   for (const kind of ['data', 'history', 'results', 'fleet-config']) {
     const good = await s.request(`/joe/${kind}.json`);
-    assert.equal(good.headers.get('x-joe-server-now'), kind === 'results' ? null : at(2000));
+    // P4: the not-wired results answer carries the server's clock too, like every other read.
+    assert.equal(good.headers.get('x-joe-server-now'), at(2000));
     let retained;
     if (kind === 'results') {
       assert.equal(good.status, 503); assert.equal(good.body.reason, 'results_not_wired');

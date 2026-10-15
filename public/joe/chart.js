@@ -80,7 +80,8 @@ export function drawChart(el, o) {
   if (o.marker) g += `<line x1="${X(o.marker.x).toFixed(1)}" x2="${X(o.marker.x).toFixed(1)}" y1="${pad.t}" y2="${pad.t + ph}" stroke="var(--line-2)"/><text x="${(X(o.marker.x) + 6).toFixed(1)}" y="${pad.t + 11}" text-anchor="start">${esc(o.marker.text)}</text>`;
   const hits = o.series.map((s, i) => (s.dotted || s.noHit ? null : i)).filter(i => i !== null);
   g += `<line class="xh" x1="0" x2="0" y1="${pad.t}" y2="${pad.t + ph}" stroke="var(--ink-3)" stroke-dasharray="2 3" visibility="hidden"/>${hits.map(i => `<circle class="xd" r="4" fill="var(--surface)" stroke="${o.series[i].color}" stroke-width="2" visibility="hidden"/>`).join('')}`;
-  const attrs = o.zero ? `data-zero="1" data-ylo="${ax.lo}" data-yhi="${ax.hi}"` : `data-ylo="${ax.lo}" data-yhi="${ax.hi}" data-base="${o.base}"`;
+  // A result chart is zero-based; given a base it also keeps the money chart's minimum span.
+  const attrs = o.zero ? `data-zero="1" data-ylo="${ax.lo}" data-yhi="${ax.hi}"${o.base ? ` data-base="${o.base}"` : ''}` : `data-ylo="${ax.lo}" data-yhi="${ax.hi}" data-base="${o.base}"`;
   el.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 ${W} ${H}" ${attrs} role="img" aria-label="${esc(o.label)}">${g}</svg>`);
   if (first) for (const p of el.querySelectorAll('[data-draw]')) { const len = Math.ceil(p.getTotalLength()); p.style.setProperty('--len', len); p.setAttribute('stroke-dasharray', `${len} ${len}`); }
   const scale = { X, Y, pad, pw, ph, W, H, x0, x1, ax };
