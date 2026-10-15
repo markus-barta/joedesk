@@ -1,6 +1,6 @@
 import { REASONS } from './index.mjs';
 import { validInstant } from './schema-validator.mjs';
-import { gatewayReason } from './gateway.mjs';
+import { gatewayReason, gatewayCheckAgeMs, GATEWAY_CHECK_MAX_AGE_MS } from './gateway.mjs';
 
 export const MONEY_FIELDS = Object.freeze(['equity', 'dayPnl', 'openPnl', 'totalPnl']);
 export const DATA_PANELS = Object.freeze([
@@ -52,9 +52,15 @@ export function panelStates(feeds, now, previousValues = {}, keepSymbols = feeds
   const affectedDesks = new Set(mismatched.flatMap(p => p.desk ? [p.desk] : ['j', 'joe', 'joel']));
   const scopeReason = mismatched.length ? 'source_not_authoritative' : null;
   const sourceReason = field => data?.pnlSources?.[field === 'dayPnl' ? 'day' : field === 'openPnl' ? 'open' : '']?.reason;
-  // A rejected/unreachable feed already exposes its original accepted values
-  // as retained. Accepted data needs an independent broker-session check.
-  const sessionReason = data && !feeds.data.reason ? gatewayReason(data.safety.gateway, now) : null;
+  const receiptAge = feedAge(feeds.data, now);
+  const generationElapsedMs = data ? Math.max(0, Date.parse(now) -
+    Date.parse(feeds.data.generatedAdvancedAt ?? data.receivedAt)) : 0;
+  // Only an otherwise fresh feed needs independent expiry between receipts.
+  // Stale/frozen feeds keep their values and freshness reasons; explicit
+  // upstream and transport failures still take precedence in panelState.
+  const freshFeed = receiptAge !== null && receiptAge < 60 && generationElapsedMs < GATEWAY_CHECK_MAX_AGE_MS;
+  const sessionReason = data && !feeds.data.reason && freshFeed ?
+    gatewayReason(data.safety.gateway, data.generatedAt, generationElapsedMs) : null;
   const select = (name, feed, value, reason) => {
     output[name] = panelState(feed, value, reason, now, previousValues[name]?.value, previousValues[name]?.valueReceivedAt);
   };
@@ -72,6 +78,10 @@ export function panelStates(feeds, now, previousValues = {}, keepSymbols = feeds
   select('positions', feeds.data, rows?.filter(p => !keep.has(p.symbol)), positionReason);
   select('kept', feeds.data, rows?.filter(p => keep.has(p.symbol)), positionReason);
   select('gateway', feeds.data, data?.safety.gateway, sessionReason || data?.safety.gateway?.reason);
+  if (data?.safety.gateway) {
+    const checkAgeMs = gatewayCheckAgeMs(data.safety.gateway, data.generatedAt, generationElapsedMs);
+    output.gateway.ageSeconds = checkAgeMs === null ? null : checkAgeMs / 1000;
+  }
   select('halt', feeds.data, data?.safety.halt, data?.safety.halt ? data.safety.haltReason : null);
   select('executor', feeds.data, data?.safety.executor, data?.safety.executor?.reason);
   for (const name of ['history', 'results', 'fleet-config']) {

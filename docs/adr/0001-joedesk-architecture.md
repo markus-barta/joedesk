@@ -96,8 +96,8 @@ restarts. Exact/replayed or decreasing sequence returns 422
 last-good file. No wall-clock-derived sequence or guessed producer identity.
 
 Ingress forbids `receivedAt`; the server stamps it after validation. Served
-snapshots require it. Age is server now minus server receipt, never producer
-clock minus browser clock. P2 serves its clock so the browser can anchor an
+snapshots require it. Receipt age is server now minus server receipt, never
+producer clock minus browser clock. P2 serves its clock so the browser can anchor an
 elapsed monotonic timer; a client clock error cannot make old data fresh.
 Future producer clocks do not make receipt age negative or extend freshness.
 Server clock regressions require an operator diagnostic, not a freshness reset.
@@ -108,6 +108,11 @@ is stale. The 30-second producer cadence gives this two-cadence threshold.
 New sequences with unchanged `generatedAt` do not advance it. After 60 seconds
 without generation progress, data is stale with `producer_frozen`, displaying
 the progress age. Otherwise stale displays receipt age and `snapshot_stale`.
+Gateway check expiry applies only while receipt age is below 60 seconds and
+generation is not frozen. At and after the stale boundary, otherwise valid
+money/account/position values stay visible as stale, including on a cold load
+without prior selector state; expiry never replaces this with a broken or empty
+cell. Explicit upstream/field reasons and rejected feeds still take precedence.
 This metadata stays outside producer JSON. All error codes come from the one
 closed enum, including transport and storage failures.
 
@@ -118,9 +123,17 @@ unconfirmed**, rather than treating a new envelope as a new valuation. A missing
 `safety.gateway`, or a ready check aged 60 seconds or more, is
 `gateway_unconfirmed` (the freeze's “Gateway unsure” for absent/late checks).
 The bound is two 30-second cadences; exactly 60 seconds is no longer fresh.
-Future checks also cannot confirm current money. The shared validator compares
-`checkedAt` with `generatedAt`; selectors independently compare with anchored
-server now, so a check expiring between receipts also invalidates the cells.
+Checks later than their producer's `generatedAt` cannot confirm current money.
+The shared validator compares `checkedAt` with `generatedAt`. Selectors use
+`(generatedAt - checkedAt) + (now - generatedAdvancedAt)`: the first difference
+uses only the producer clock, the second only the anchored server clock.
+Without progress metadata, the accepted receipt is the fallback anchor.
+A producer clock 5 seconds ahead or 61 seconds behind cannot cause flicker or
+premature expiry. A frozen generation keeps ageing from its original progress
+anchor. The Gateway panel displays this check age, rather than receipt age;
+an invalid/future check has unknown age. An otherwise fresh feed whose check
+expires between receipts invalidates its money/account/position cells with
+`gateway_unconfirmed`; a stale/frozen feed keeps its freshness state as above.
 When `apiSessionReady` is false, or confirmation is missing/expired, every
 supplied desk/total money field (including total P&L, which depends
 on marks) and broker equity must be null with a closed per-field/account reason.
@@ -152,10 +165,13 @@ P2 must also track advancement of the Gateway's check timestamp; a repeatedly
 relayed old ready check must become unconfirmed even if other data advances.
 That persisted tracker must un-freshen **all desk/family money, paper-account
 equity and both position panels**, as well as the Gateway panel, using nulls
-plus `gateway_unconfirmed` and original last-good receipt metadata. Persistent
-check-progress integration remains P2, including restart and clock-skew tests;
-P1 already bounds reported check age. Broker observation times never reset a
-cell's receipt age. Missing retained `valueReceivedAt` means unknown age, never
+plus `gateway_unconfirmed` and original last-good receipt metadata while the
+feed is otherwise fresh. Stale/frozen feeds keep their stale state unless an
+explicit upstream/field or transport error applies. Persistent check-progress
+integration remains P2, including restart and clock-skew integration tests;
+P1 bounds reported check age and tests both producer-skew directions in memory.
+Broker observation times never reset a cell's receipt age. Missing retained
+`valueReceivedAt` means unknown age, never
 the newest envelope's age; P2 persistence must always carry that metadata.
 
 ## 3. Panel isolation and approved UI mapping
@@ -166,8 +182,12 @@ each incident records the expected state, age, reason and retained flag for all
 25 entries. Fixtures for rejected/unreachable feeds fail ten minutes after the
 last accepted receipt, so resetting age on failure cannot pass the table test.
 State precedence is rejected feed/explicit reason → broken, missing/null without
-reason → not reported, then stale/fresh. False HALT and a known-empty position
-list are reported values. Missing rows are never known-empty. Independent
+reason → not reported, then stale/fresh. Computed gateway expiry adds a broken
+reason only for an otherwise fresh feed; it cannot mask `snapshot_stale` or
+`producer_frozen`. Gateway `ageSeconds` is the generation-relative check age
+plus server elapsed time; other cells keep their receipt/progress/retention ages.
+False HALT and a known-empty position list are reported values. Missing rows
+are never known-empty. Independent
 history, results and Fleet Config continue when data fails. An explicit null
 with a field error may display a separately retained prior value, labeled as
 last-good; it cannot enter current totals or observed history as fresh data.
@@ -451,7 +471,9 @@ no hsb0 files, pins, secrets, executor or infrastructure are edited by P1.
    an accepting socket with a failed, absent or frozen-ready session check.
    Coordinate P2's durable check-progress tracker: unconfirmed checks must also
    un-freshen every desk/family money cell, paper-account equity and both position
-   panels with nulls plus `gateway_unconfirmed`, not only Gateway. Persist original
+   panels with nulls plus `gateway_unconfirmed`, not only Gateway, while the feed
+   is otherwise fresh; preserve stale/frozen precedence and compute check age
+   using producer-relative age plus server progress elapsed time. Persist original
    retained-field receipt metadata and provide compatible rollback.
 2. **OPS proposal: shared contracts in producer CI.** Vendor this exact complete
    contract set/digest in the producer repo and JOED-20, test ingress fixtures
@@ -539,3 +561,29 @@ suite and optional browser smoke were not rerun in this round; the prior fix2
 HTTP evidence above is historical, and browser verification stays BLOCKED for
 the coordinator. No push, deployment, production-host access, review gate,
 delegation or other model CLI was run.
+
+Fix4 evidence: all five new A/B regressions first failed against the unchanged
+`e19b0ef` implementation. After the fixes, `npm run test:contracts` passes
+**82 tests, 0 failures** on native Node 24.20.0, including all fix2/fix3 tests.
+Receipt and generation-freeze cases cover 59.999, 60.000, 60.001 and 90 seconds
+across all 20 gated cells. Cold loads at 60 and 609 seconds keep all 17 money
+cells visible as stale. The no-push check-expiry test uses a 30-second-old
+receipt, so an expired check still cannot show fresh money before feed staleness.
+The three rewritten fixtures again expect `producer_frozen`/`snapshot_stale`;
+other changed fixture expectations correct only Gateway check age (including
+609 seconds in `a-frozen-ready-gateway` and 129 in `c-frozen-producer`).
+
+A separate read-only, in-memory replay loaded the original modules directly
+from `e19b0ef` without a checkout or proof files. At 60 seconds, old code gave
+broken money, a cold-load null and `gateway_unconfirmed` for frozen generation;
+new code gives stale money and `producer_frozen` respectively. For each skew
+(+5 seconds / −61 seconds), 20 advancing pushes with five probes per receipt
+produce 100/100 fresh, valued observations across all gated cells. Old code
+gave 60/100 broken probes for +5 seconds and 100/100 for −61 seconds. A check
+already 20 seconds old at generation displays 29 seconds after 9 elapsed,
+instead of the old 9-second receipt age. The tests also prove its frozen
+check age reaches 149 seconds while money's generation-progress age is 129.
+`npm run check` and `git diff --check` pass. The unchanged legacy HTTP suite and
+optional browser smoke were not rerun; browser smoke remains coordinator-owned
+and BLOCKED as recorded above. No push, deploy, production-host access, review
+gate, delegation or other model CLI was run.

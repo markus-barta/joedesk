@@ -68,7 +68,8 @@ export function checkSemantics(kind, payload, stage, errors) {
     if (gateway && !gateway.apiSessionReady && !gateway.reason) fail('$.safety.gateway.reason', 'reasonRequired');
     if (gateway?.apiSessionReady && gateway.reason) fail('$.safety.gateway', 'contradictorySession');
     // An advancing envelope cannot confirm an absent or relayed old check.
-    // Validate against generation here; selectors also check the current clock.
+    // Validate producer-relative age here; selectors add server elapsed time
+    // since the last advancing generation without mixing the two clocks.
     if (gatewayReason(gateway, payload.generatedAt)) {
       payload.desks.forEach((desk, i) => {
         if (desk.moneyEvidence) fail(`$.desks[${i}].moneyEvidence`, 'sessionUnavailable');

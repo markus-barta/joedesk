@@ -214,123 +214,123 @@
   "expectedStatus": 200,
   "expected": {
     "today.equity": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "today.dayPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "today.openPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "today.totalPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "paperAccount": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.j.equity": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.j.dayPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.j.openPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.j.totalPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.joe.equity": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.joe.dayPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.joe.openPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.joe.totalPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.joel.equity": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.joel.dayPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.joel.openPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "desks.joel.totalPnl": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "positions": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "kept": {
-      "state": "broken",
+      "state": "stale",
       "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
-      "retained": true
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "gateway": {
-      "state": "broken",
-      "ageSeconds": 60,
-      "reason": "gateway_unconfirmed",
+      "state": "stale",
+      "ageSeconds": 61,
+      "reason": "snapshot_stale",
       "retained": false
     },
     "halt": {

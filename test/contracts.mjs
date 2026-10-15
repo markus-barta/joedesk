@@ -494,19 +494,108 @@ for (const scenario of ['missing', 'frozen-ready']) {
 }
 
 test('fix3 finding 1: check age is bounded at 60s and future checks cannot confirm money', () => {
-  const feed = { value: copy(samples.data) };
+  // The check expires while this receipt is still only 30 seconds old.
+  const payload = ingress(samples.data);
+  payload.generatedAt = later;
+  const feed = acceptSnapshot('data', payload, null, later);
+  assert.equal(feed.status, 200);
   assert.equal(panelStates({ data: feed }, '2026-10-14T17:43:21.999Z')['today.equity'].state, 'fresh');
-  const previous = panelStates({ data: feed }, at);
+  const previous = panelStates({ data: feed }, later);
   const expired = panelStates({ data: feed }, '2026-10-14T17:43:22.000Z', previous);
   for (const name of gatedPanels) assert.equal(expired[name].reason, 'gateway_unconfirmed', name);
   assert.equal(expired.positions.retained, true);
-  assert.equal(expired.positions.valueReceivedAt, at);
+  assert.equal(expired.positions.valueReceivedAt, later);
   for (const offset of [59999, 60000, -1]) {
     const payload = copy(samples.data);
     payload.generatedAt = new Date(Date.parse(at) + offset).toISOString();
     if (offset === 59999) assert.equal(validateContract('data', payload).ok, true);
     else rejects(validateContract('data', payload), 'sessionUnavailable', '$.totals.equity');
   }
+});
+
+test('fix4 A: receipt and frozen-generation boundaries stay stale instead of becoming gateway failures', () => {
+  const initial = acceptSnapshot('data', ingress(samples.data), null, at);
+  const repeat = ingress(samples.data); repeat.seq++;
+  const frozen = acceptSnapshot('data', repeat, initial, later);
+  assert.equal(frozen.status, 200);
+  for (const [feed, staleReason] of [[initial, 'snapshot_stale'], [frozen, 'producer_frozen']]) {
+    let previous = panelStates({ data: feed }, later);
+    for (const elapsed of [59999, 60000, 60001, 90000]) {
+      const now = new Date(Date.parse(at) + elapsed).toISOString();
+      const states = panelStates({ data: feed }, now, previous);
+      for (const name of gatedPanels) {
+        assert.equal(states[name].state, elapsed < 60000 ? 'fresh' : 'stale', name);
+        assert.equal(states[name].reason, elapsed < 60000 ? null : staleReason, name);
+        const age = (feed === frozen && elapsed < 60000 && name !== 'gateway' ? elapsed - 30000 : elapsed) / 1000;
+        assert.equal(states[name].ageSeconds, age, name);
+        assert.deepEqual(states[name].value, previous[name].value, name);
+        assert.equal(states[name].retained, false, name);
+      }
+      previous = states;
+    }
+  }
+});
+
+test('fix4 A: cold loads at and after 60 seconds show stale money without prior selector state', () => {
+  const feed = acceptSnapshot('data', ingress(samples.data), null, at);
+  const original = panelStates({ data: feed }, at);
+  for (const elapsed of [60000, 609000]) {
+    const now = new Date(Date.parse(at) + elapsed).toISOString();
+    const states = panelStates({ data: feed }, now);
+    for (const name of moneyPanels) {
+      assert.equal(states[name].state, 'stale', name);
+      assert.equal(states[name].reason, 'snapshot_stale', name);
+      assert.equal(states[name].ageSeconds, elapsed / 1000, name);
+      assert.deepEqual(states[name].value, original[name].value, name);
+      assert.notEqual(states[name].value, null, name);
+    }
+  }
+});
+
+for (const skewMs of [5000, -61000]) {
+  test(`fix4 B: producer clock skew ${skewMs}ms confirms generation-time checks without flicker`, () => {
+    let feed = null;
+    for (let tick = 0; tick < 20; tick++) {
+      const receivedAt = new Date(Date.parse(at) + tick * 30000).toISOString();
+      const payload = ingress(samples.data);
+      payload.seq += tick;
+      payload.generatedAt = payload.safety.gateway.checkedAt = new Date(Date.parse(receivedAt) + skewMs).toISOString();
+      feed = acceptSnapshot('data', payload, feed, receivedAt);
+      assert.equal(feed.status, 200);
+      for (const elapsed of [0, 1000, 4999, 5000, 29999]) {
+        const now = new Date(Date.parse(receivedAt) + elapsed).toISOString();
+        const states = panelStates({ data: feed }, now);
+        for (const name of gatedPanels) assert.equal(states[name].state, 'fresh', name);
+        assert.equal(states.gateway.ageSeconds, elapsed / 1000);
+        assert.deepEqual(states['today.equity'].value, samples.data.totals.equity);
+      }
+    }
+  });
+}
+
+test('fix4 B: gateway displays check age, including its initial age and frozen-generation elapsed time', () => {
+  const payload = ingress(samples.data);
+  payload.safety.gateway.checkedAt = '2026-10-14T17:42:02.000Z'; // 20 seconds before generation.
+  const initial = acceptSnapshot('data', payload, null, at);
+  assert.equal(initial.status, 200);
+  for (const [elapsed, state, reason] of [
+    [9000, 'fresh', null], [45000, 'broken', 'gateway_unconfirmed'], [60000, 'stale', 'snapshot_stale'],
+  ]) {
+    const now = new Date(Date.parse(at) + elapsed).toISOString();
+    const gateway = panelStates({ data: initial }, now).gateway;
+    assert.equal(gateway.state, state);
+    assert.equal(gateway.reason, reason);
+    assert.equal(gateway.ageSeconds, 20 + elapsed / 1000);
+  }
+  payload.seq++;
+  const frozen = acceptSnapshot('data', payload, initial, '2026-10-14T17:44:22.000Z');
+  assert.equal(frozen.status, 200);
+  const states = panelStates({ data: frozen }, '2026-10-14T17:44:31.000Z');
+  assert.equal(states.gateway.ageSeconds, 149);
+  assert.equal(states.gateway.state, 'stale');
+  assert.equal(states.gateway.reason, 'producer_frozen');
+  assert.equal(states['today.equity'].ageSeconds, 129);
+  assert.equal(states['today.equity'].state, 'stale');
 });
 
 test('fix3 low 4: unavailable or unconfirmed sessions reject observed money evidence even with null money', () => {

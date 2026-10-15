@@ -295,7 +295,7 @@
     },
     "gateway": {
       "state": "broken",
-      "ageSeconds": 9,
+      "ageSeconds": 609,
       "reason": "upstream_lost",
       "retained": false
     },
