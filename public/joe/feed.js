@@ -144,7 +144,9 @@ export function createFeed(onChange, measure = () => {}, version = '') {
     const undated = Object.fromEntries(Object.entries(input).map(([key, feed]) => [key, feed.value == null ? feed : { value: null, reason: feed.reason ?? null }]));
     return { now: null, feeds: undated, states: panelStates(undated, NO_CLOCK, {}) };
   }
-  const settled = () => Object.values(feeds).some(feed => feed && feed !== feeds.results && (feed.value != null || feed.reason));
+  // Every first read (state, history, fleet settings) has answered, with a
+  // value or a reason; the page then marks itself ready.
+  const settled = () => ['data', 'history', 'fleet-config'].every(key => feeds[key] && (feeds[key].value != null || feeds[key].reason));
 
   let timers = [];
   function start() {

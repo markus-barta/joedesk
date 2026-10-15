@@ -3,7 +3,7 @@
 // fresh, stale with age, not reported, or broken with its reason, on its own.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, NB } from './format.js';
-import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, STALE_AFTER_S } from './health.js';
+import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, STALE_AFTER_S, HEALTH_LINES, CELL_REASON } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { drawChart, eurAxis } from './chart.js';
@@ -28,10 +28,15 @@ export function cellView(cell, key, { signed = true, caption = '' } = {}) {
   return { html: bn(n, value?.currency ?? 'EUR', signed), caption: stateCaption(cell, key, caption), state: cell?.state ?? 'not reported', n };
 }
 
+// Up to 900 px the reason has its own row, as tall as the longest reason in
+// this browser's font: every other reason sits hidden in the same cell, so a
+// change of reason never moves the page (app.css).
+const REASON_ROOM = HEALTH_LINES.map(line => `<span class="st ghost" aria-hidden="true">${icon('ring')}<span>${esc(line)}</span></span>`).join('');
+
 function healthStrip(ctx, health) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
-  const facts = [st(health.statusTone, esc(capital(health.reason === 'board_ok' ? 'numbers up to date' : health.explanation)))];
+  const facts = [`<span class="why">${st(health.statusTone, esc(capital(health.reason === 'board_ok' ? 'numbers up to date' : health.explanation)))}${REASON_ROOM}</span>`];
   if (data) {
     const broker = brokerState(states, data);
     const words = { OK: `checked ${ageSpan('strip.broker', `${age(states.gateway?.ageSeconds)} ago`)}`, degraded: 'unstable', down: 'down', unsure: 'has not checked in' };
@@ -134,6 +139,13 @@ function sessionRing(now) {
   return `${svg}<div><b>${title}</b><span>${line}</span><span>${session}</span></div>`;
 }
 
+// Today's sentence keeps room for its longest forms (largest amount, age and
+// reason) in this browser's font, hidden in the same cell (app.css).
+const LONGEST_REASON = Object.values(CELL_REASON).reduce((a, b) => (b.length > a.length ? b : a));
+const SAY_ROOM = [`Down ${eur(88888.88)} today. Last good value, ${age(86399)} ago · ${LONGEST_REASON}.`,
+  `Down ${eur(88888.88)} today across J, Joe and Joel. Estimated from the session open at 15:30.`]
+  .map(text => `<span class="ghost" aria-hidden="true">${esc(text)}</span>`).join('');
+
 function heroLeft(ctx) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
@@ -160,7 +172,7 @@ function heroLeft(ctx) {
   }
   return `<div class="hero-k">${icon('clock')}<span>${term('today')}${now ? ` · ${dayDDM(now, NY)}` : ''}</span></div>
     <div class="display" data-cell="hero.day" data-state="${day.state}">${day.html}</div>
-    <p class="say">${say}</p>
+    <p class="say"><span>${say}</span>${SAY_ROOM}</p>
     <dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
       ${kpi('since', sinceLabel(data), 'today.totalPnl', 'hero.since', { caption: 'after fees' })}

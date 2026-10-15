@@ -66,6 +66,10 @@ export const CELL_REASON = Object.freeze({
 });
 export const cellReason = reason => CELL_REASON[reason] ?? 'not available';
 export const capital = text => text.charAt(0).toUpperCase() + text.slice(1);
+const FALLBACK_COPY = 'the operator must check the details';
+// Every sentence the Desk health line can start with, so the line can keep
+// room for the longest one in whatever font the browser has.
+export const HEALTH_LINES = Object.freeze([...new Set(['numbers up to date', ...Object.values(REASON_COPY), FALLBACK_COPY].map(capital))]);
 
 const DESKS = ['j', 'joe', 'joel'];
 const TRANSPORT = ['refresh_failed', 'auth_required', 'route_not_found'];
@@ -132,7 +136,7 @@ export function boardHealthPresentation(states, feeds, now) {
       : health.reason === 'snapshot_stale' ? `Stale ${age(frozen)}`
         : health.reason === 'gateway_unconfirmed' ? 'Broker unsure'
           : 'Data delayed';
-  return { ...health, label, explanation: REASON_COPY[health.reason] ?? 'the operator must check the details',
+  return { ...health, label, explanation: REASON_COPY[health.reason] ?? FALLBACK_COPY,
     statusTone: health.tone === 'green' ? 'ok' : health.tone === 'red' ? 'bad' : 'warn' };
 }
 

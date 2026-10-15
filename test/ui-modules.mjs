@@ -319,6 +319,10 @@ test('history: basis breaks exclude older records and compare stays on observed,
   const pair = hm.toColumns([pt(iso(0), { j: 5000 }), pt(iso(1), { j: 5000 })]);
   assert.equal(hm.sharedWindowCompare(pair, ['j', 'joe'], hm.rangeWindow(pair, 'all', T0 + 60000), T0 + 60000).reason, 'incomplete-coverage');
   assert.equal(hm.sharedWindowCompare(cols, ['j'], all, end).reason, 'insufficient-selection');
+  // Before the history arrives every desk is still chosen: there is just nothing to compare yet.
+  const none = hm.toColumns([]);
+  assert.equal(hm.sharedWindowCompare(none, ['j', 'joe', 'joel'], hm.rangeWindow(none, '1w', end), end).reason, 'insufficient-points');
+  assert.equal(hm.sharedWindowCompare(none, ['j'], hm.rangeWindow(none, '1w', end), end).reason, 'insufficient-selection');
 });
 
 // The chart's points for a desk: the observed values it draws, by time.

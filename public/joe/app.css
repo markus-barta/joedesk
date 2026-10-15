@@ -493,9 +493,15 @@ span.dbar, span.vbar { display: block; }
 .facts-dl .cap { color: var(--ink-3); font-size: 12px; }
 /* Freshness changes never move the page: texts that carry a state are sized
    for their longer, not-fresh wording. */
-.hero-l .say { min-height: 2lh; }
+.hero-l .say { min-height: 2lh; display: grid; }
+/* Today's sentence: hidden twins of its longest forms share its cell, so the
+   room is measured in this browser's own font, never assumed. */
+.hero-l .say > * { grid-area: 1 / 1; }
+.hero-l .say .ghost { visibility: hidden; }
 .kpi .c { min-height: 2lh; }
 .hstrip { min-height: 61px; align-content: flex-start; }
+.hstrip .why { display: contents; }
+.hstrip .ghost { display: none; }
 .facts-dl .jtotal { min-height: calc(2lh + 22px); }
 .icon-btn { flex: none; }
 .pop:focus-visible { border-radius: 14px; }
@@ -527,11 +533,25 @@ span.dbar, span.vbar { display: block; }
 .private-card p { color: var(--ink-2); }
 .private-card .btn { text-decoration: none; }
 [hidden] { display: none !important; }
+/* Up to 900 px the health line has fixed rows: the reason (as tall as the
+   longest one), the broker, the emergency stop, then the data age beside
+   Details, whose 44 px on phones hold two lines. Wider, it is one or two
+   reserved rows. Its height never depends on the words or the font. */
+@media (max-width: 900px) {
+  .hstrip { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .hstrip > * { grid-column: 1 / -1; }
+  .hstrip > .st:nth-last-child(2) { grid-column: 1; }
+  .hstrip > .btn { grid-column: 2; margin-left: 0; }
+  .hstrip .why { display: grid; align-self: start; }
+  .hstrip .why > .st { grid-area: 1 / 1; align-self: start; }
+  .hstrip .ghost { display: inline-flex; visibility: hidden; }
+  .hstrip .st { white-space: normal; align-items: flex-start; }
+  .hstrip .st .i { margin-top: 2.5px; }
+}
 @media (max-width: 700px) {
   .dcard header { grid-template-columns: 34px minmax(0, 1fr); }
   .dcard .hb { grid-column: 2; margin-left: 0; }
   .hist-compare { min-height: 42px; }
-  .hstrip .st { white-space: normal; }
   .hist-state .btn { height: 44px; }
   .kpi .c { min-height: 3lh; }
   .positions .pstate { min-height: 48px; }

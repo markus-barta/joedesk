@@ -159,7 +159,8 @@ export function continuitySeries(cols, id, range, endAt) {
 // (observed, latest comparable basis), inside its window [from, to] in
 // milliseconds; endAt is the board's current time, as for the chart.
 export function sharedWindowCompare(cols, ids, bounds, endAt) {
-  if (ids.length < 2 || !cols.n) return { ok: false, reason: 'insufficient-selection' };
+  if (ids.length < 2) return { ok: false, reason: 'insufficient-selection' };
+  if (!cols.n) return { ok: false, reason: 'insufficient-points' };
   const [from, to] = windowRows(cols, bounds);
   if (to - from < 2) return { ok: false, reason: 'insufficient-points' };
   const kept = ids.map(id => chartRows(cols, id, endAt));
