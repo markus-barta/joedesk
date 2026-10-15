@@ -820,3 +820,67 @@ in fix2. Integration still targets `rebuild/v2` with a coordinator squash merge;
 the ignored status file stays out of the product index. No push, deployment,
 review gate, delegation or other model CLI ran. The coordinator owns the
 cross-family gate after worker exit; the ticket remains QA.
+
+## P3 UI candidate — JOED-23
+
+P3 replaces the legacy GridStack board with plain ES modules under
+`public/joe/` that follow the approved freeze (r3.1) and read only the P2
+server: `/joe/state.json` every 15 s, `/joe/history.json` every 30 s and
+`/joe/fleet-config.json`, each through `acceptRead`, then `panelStates` at the
+server's clock anchored to a monotonic timer. No freshness rule is
+re-implemented: the health light ranks the shared panel states with today's
+`localBoardHealth` order, labels and plain-word copy (A1 renames "Gateway
+unsure" to "Broker unsure"). Constants for sign-off: stale at the contract's
+60 s; red "board updates stopped" at 3 × 60 s without a receipt, or "stuck"
+at 3 × 60 s without generation progress; carried equity stays yellow for
+today's five-minute grace, then red. A rejected push or failed read keeps
+the last good snapshot with its original receipt and says why.
+
+**Copy sign-off, check already 20 s old at generation** (fresh → broken →
+stale): until +40 s money reads normally and the light is "Board OK"; from
++40 s to just before +60 s each money cell keeps its last good value with
+"Last good value, {age} ago · broker connection not confirmed" (a dash with
+"Unavailable · broker connection not confirmed" on a cold load) and the
+light is "Broker unsure · the broker connection has not checked in — reload;
+if still old, tell Amy"; from +60 s the values read "… · as of {age} ago"
+and the light is "Stale 1 min". `test/ui-modules.mjs` pins all three.
+
+History is fetched, parsed and validated in a module worker
+(`history-worker.js`) and handed to the page as typed columns by transfer, so
+the 8 MiB read never blocks the page: 9,000 points (the contract maximum for
+this point shape) render in 11 ms per poll, with 230 ms of validation off the
+main thread. Continuity (dotted € 5.000 lead-in, gaps, carry), basis breaks,
+compare and session closes run on those columns; estimates never enter
+compare, sparklines or totals.
+
+Named server changes (minimal): the static allowlist lists the UI modules and
+drops the vendored GridStack, Chart.js, Hammer and zoom assets;
+`/joe/state.json` omits history points from `feeds.history` and
+`panels.history` (they were the whole history every 15 s). Shared module
+addition: `time.mjs` gains `zonedInstant`, `sessionBounds` and `nextOpen` for
+the session ring and today's chart. Packaging: `index.html` pins every module
+to the release version through an import map; no service worker. The history
+worker's own imports are not versioned (workers ignore import maps); every
+asset is served `no-store`.
+
+| P3 obligation | Proof |
+| --- | --- |
+| §3 panel isolation; each panel fresh / stale with age / not reported / broken with reason; one null never blanks a panel or the page | `scripts/browser-p3.mjs` fixture run: 20 P1 fixtures plus two derived cases through the real server, every money cell's UI state equals the panel state, no blank panel, light per case |
+| Deferred: `b-incomplete-family` single missing desk; `b-equity-null-gateway-ready` coupled equity/total P&L | `isolation: a single missing desk…`, `isolation: equity and total result unavailable together…` (`test/ui-modules.mjs`) and the `p3-*` browser cases |
+| Deferred: `e-layout-storage-unavailable` renderer at three widths | browser fixture run with storage and layout globals throwing at 390/1024/1440 |
+| Deferred: copy sign-off fresh → broken → stale | `health: the 20-second-old check reads fresh, then broken, then stale` |
+| §6 display continuity, gaps, outage-only range, basis breaks, observed-only compare/sparklines | `history: …` tests (`test/ui-modules.mjs`); browser AC-20/AC-21 |
+| §8 host gate on the replacement module | `production host remains inside the current canonical host gate` now imports `public/joe/host.js` |
+| §9 render budget | browser `budget` checks; render 11 ms, state acceptance < 1 ms |
+| P1 browser smoke (was BLOCKED) | `npm run test:contracts:browser` passes locally |
+
+Retired with GridStack, as AC-35 asks: `check-joe-layout`, `check-joe-phone`
+and `smoke-joe` (CI runs `scripts/browser-p3.mjs` instead), plus
+`check-joe-history`, `check-joe-trust`, `check-joe-learning` and
+`check-position-display`, which extracted code from the deleted `joe.js`;
+their v2 equivalents live in `test/ui-modules.mjs` and the browser gate.
+`check-fleet-config` keeps its schema, example and docs half; its flip-plane
+UI half returns with P5's Settings. Results shows only its designed not-wired
+state (P4); Settings shows its nav entry and a not-wired line (P5), so the
+Appearance Light / Dark / System control also waits for P5 (the theme module
+already supports system).

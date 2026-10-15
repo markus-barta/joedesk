@@ -139,4 +139,24 @@ export function scenario(now = NOW, { historyFrom = '2026-10-07T00:00:00.000Z', 
 export function largeScenario(now = NOW) {
   return scenario(now, { historyFrom: at(now, -8999 * 60 - 60), stepMinutes: 1, outage: ['2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z'], compact: true });
 }
+// ADR deferred P3 rows: one missing desk beside two observed siblings, and
+// equity with total result both unavailable when they depend on missing marks.
+export function singleMissingDesk() {
+  const payload = ingress(valid.data);
+  payload.seq = 102; payload.generatedAt = at(valid.data.receivedAt, 30); payload.safety.gateway.checkedAt = payload.generatedAt;
+  for (const source of Object.values(payload.pnlSources)) source.observedAt = payload.generatedAt;
+  payload.desks[0].money.equity = null; payload.desks[0].money.reasons = { equity: 'retained_values' };
+  payload.totals.equity = null; payload.totals.reasons = { equity: 'family_projection_unavailable' };
+  return { feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) };
+}
+export function coupledUnavailable() {
+  const payload = ingress(valid.data);
+  payload.seq = 102; payload.generatedAt = at(valid.data.receivedAt, 30); payload.safety.gateway.checkedAt = payload.generatedAt;
+  for (const source of Object.values(payload.pnlSources)) source.observedAt = payload.generatedAt;
+  for (const bag of [payload.totals, ...payload.desks.map(d => d.money)]) {
+    bag.equity = null; bag.totalPnl = null; bag.reasons = { equity: 'all_desk_equity_unavailable', totalPnl: 'all_desk_equity_unavailable' };
+  }
+  return { feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) };
+}
+
 export { panelStates, acceptSnapshot, historyPoint };

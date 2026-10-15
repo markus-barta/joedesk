@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { launch, openPage } from './browser/cdp.mjs';
-import { startBoard, scenario, largeScenario, NOW, at, ACTOR, valid, fixture, ingress } from './browser/board.mjs';
+import { startBoard, scenario, largeScenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load, go, screenshot, settle, waitFor } from './browser/shots.mjs';
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
@@ -53,6 +53,8 @@ async function auditScreen(page, viewport, theme, screen) {
   if (viewport.mobile) {
     const targets = await page.evaluate('__audit.targets()');
     check('AC-30', `${tag}: 44 px targets`, !targets.length, targets.slice(0, 6));
+    const termCount = await page.evaluate(`[...document.querySelectorAll('.term, .learn')].filter(__audit.visible).length`);
+    check('AC-43', `${tag}: ${termCount} term and Learn hit areas are 44 px or more`, !targets.some(t => /term|learn/.test(t.el)), targets.filter(t => /term|learn/.test(t.el)));
   }
   const gui = await page.evaluate('__audit.gui27()');
   check('AC-32', `${tag}: no italics, one-sided borders, pills or uppercase eyebrows`, !gui.italics.length && !gui.borders.length && !gui.pills.length && !gui.uppercase.length, { italics: gui.italics, borders: gui.borders, pills: gui.pills.slice(0, 4), upper: gui.uppercase });
@@ -348,12 +350,23 @@ try {
     ['h-keep-policy-mismatch', 'broken', 'Needs fix'], ['c-old-producer-image', 'broken', 'Needs fix'], ['unknown-schema', 'broken', 'Needs fix'],
     ['a-dead-session-current-money', 'broken', 'Needs fix'], ['h-secondary-position-source', 'broken', 'Needs fix'], ['i-oversize-data', 'broken', 'Needs fix'],
     ['g-expired-sso', 'broken', 'Data delayed'], ['d-routing-stub', 'broken', 'Data delayed'],
+    ['p3-single-missing-desk', 'broken', 'Data delayed'], ['p3-coupled-unavailable', 'broken', 'Data delayed'],
   ];
+  // ADR deferred P3 rows, derived from valid.json; expected states come from
+  // the shared selector exactly as the P1 fixture runner computes them.
+  const DERIVED = { 'p3-single-missing-desk': singleMissingDesk, 'p3-coupled-unavailable': coupledUnavailable };
+  const derive = id => {
+    const f = DERIVED[id]();
+    const feeds = { 'fleet-config': { value: valid['fleet-config'], receivedAt: valid.data.receivedAt }, data: acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt) };
+    const previous = panelStates(feeds, valid.data.receivedAt);
+    feeds.data = acceptSnapshot('data', f.payload, feeds.data, f.receivedAt);
+    return { ...f, id, expectedStatus: 200, expected: panelStates(feeds, f.now, previous) };
+  };
   const STORAGE_OFF = `Object.defineProperty(window, 'localStorage', { get() { throw new Error('storage unavailable'); } });
     Object.defineProperty(window, 'sessionStorage', { get() { throw new Error('storage unavailable'); } });
     Object.defineProperty(window, 'GridStack', { get() { throw new Error('no layout manager'); } });`;
   for (const [id, kind, label] of CASES) {
-    const f = fixture(id);
+    const f = DERIVED[id] ? derive(id) : fixture(id);
     const b = await newBoard({ fleetConfig: f.fleetConfig ?? null });
     b.setNow(valid.data.receivedAt);
     await b.push(ingress(valid.data));
@@ -396,7 +409,7 @@ try {
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age`, /as of \d+ (s|min) ago/.test(caps), caps);
       if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.cells['hero.account'].cap === 'Not reported', caps);
       if (kind === 'broken') check('fixtures', `${tag}: broken shows its reason`, /Last good value, .* · |Unavailable · /.test(caps), caps);
-      if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso'].includes(id) && (viewport.name !== '390' || id === 'e-layout-storage-unavailable')) {
+      if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso', 'p3-single-missing-desk'].includes(id) && (viewport.name !== '390' || id === 'e-layout-storage-unavailable')) {
         await shot(page, viewport, `${viewport.name}-${theme}-desk-state-${id}`, `Desk, P1 fixture ${id} (${kind})`);
       }
       if (storageScript) await page.s('Page.removeScriptToEvaluateOnNewDocument', { identifier: storageScript });
