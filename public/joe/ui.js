@@ -1,7 +1,8 @@
 // Shared pieces: icons from the inline sprite, terms, big numbers, desk marks
 // and the one opaque tip. Everything returns escaped HTML strings.
 import { TERMS } from './terms.js';
-import { esc, money, digits, tone, arrowOf, isZero, MINUS, currencySymbol } from './format.js';
+import { esc, money, digits, tone, arrowOf, isZero, age, MINUS, currencySymbol } from './format.js';
+import { cellReason, capital } from './health.js';
 
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -38,6 +39,14 @@ export const isPhone = () => matchMedia('(max-width: 700px)').matches;
 export function initTips() {
   const tip = $('#tip');
   let anchor = null, pinned = false, quiet = false, at = null;
+  function place(el) {
+    const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    let y = r.bottom + 8;
+    if (y + h > innerHeight - 10) y = Math.max(10, r.top - h - 8);
+    tip.style.left = `${Math.max(10, Math.min(innerWidth - w - 10, el.dataset.learn ? r.right - w : r.left))}px`;
+    tip.style.top = `${y}px`;
+    at = { x: r.left, y: r.top };
+  }
   function show(el, pin) {
     const entry = TERMS[el.dataset.term];
     if (!entry) return;
@@ -45,12 +54,8 @@ export function initTips() {
     anchor = el; pinned = Boolean(pin);
     tip.innerHTML = `<b>${esc(entry[0])}</b>${esc(entry[1])}<span class="t2">${el.dataset.learn ? 'Term' : 'Also called'}: ${esc(entry[2])}</span>`;
     tip.classList.toggle('pinned', pinned);
-    const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
-    let y = r.bottom + 8;
-    if (y + h > innerHeight - 10) y = Math.max(10, r.top - h - 8);
-    tip.style.left = `${Math.max(10, Math.min(innerWidth - w - 10, el.dataset.learn ? r.right - w : r.left))}px`;
-    tip.style.top = `${y}px`;
-    tip.classList.add('on'); at = { x: r.left, y: r.top };
+    place(el);
+    tip.classList.add('on');
     el.setAttribute('aria-expanded', 'true'); el.setAttribute('aria-describedby', 'tip');
   }
   function hide(force) {
@@ -59,9 +64,21 @@ export function initTips() {
     if (anchor) { anchor.setAttribute('aria-expanded', 'false'); anchor.removeAttribute('aria-describedby'); }
     anchor = null; pinned = false;
   }
+  // A rebuilt section hands an open tip to the same term in the new markup.
+  rebuilt.tip = {
+    anchor: () => anchor,
+    // Focus handed back by a rebuild is not a new focus: it leaves the tip as it was.
+    quiet() { quiet = true; },
+    moved(el) {
+      if (!el || el.dataset.term !== anchor?.dataset.term) { hide(true); return; }
+      anchor = el;
+      el.setAttribute('aria-expanded', 'true'); el.setAttribute('aria-describedby', 'tip');
+      place(el);
+    },
+  };
   document.addEventListener('pointerover', e => {
     const el = e.target.closest?.('[data-term]');
-    if (el && e.pointerType !== 'touch' && !(pinned && anchor !== el)) show(el, false);
+    if (el && e.pointerType !== 'touch' && !(pinned && anchor !== el) && el !== anchor) show(el, false);
   });
   document.addEventListener('pointerout', e => {
     const el = e.target.closest?.('[data-term]');
@@ -70,9 +87,11 @@ export function initTips() {
   document.addEventListener('focusin', e => {
     const el = e.target.closest?.('[data-term]');
     if (quiet) { quiet = false; return; }
-    if (el) show(el, false);
+    if (el && el !== anchor) show(el, false);
   });
   document.addEventListener('focusout', e => {
+    // A rebuild removing the focused term is not the user leaving it.
+    if (rebuilt.busy) return;
     const el = e.target.closest?.('[data-term]');
     if (el && el === anchor) hide(false);
   });
@@ -98,15 +117,33 @@ export function initTips() {
 
 // Ages tick every second without rebuilding a section: structure changes
 // replace the section, otherwise only the age texts are patched in place.
+// A rebuild keeps keyboard focus and an open tip on the same control.
 export const ageSpan = (key, text) => `<span class="age" data-age="${key}">${esc(text)}</span>`;
 const AGE_RE = /<span class="age" data-age="([^"]+)">([^<]*)<\/span>/g;
 const structure = new WeakMap();
+const rebuilt = { tip: null, busy: false };
+const KEYS = ['data-term', 'data-go', 'data-hdesk', 'data-range', 'data-desk', 'data-day', 'data-period'];
+function identity(node, root) {
+  if (node.id) return { sel: `#${CSS.escape(node.id)}`, index: 0 };
+  const attr = KEYS.find(k => node.hasAttribute(k));
+  const sel = attr ? `[${attr}="${CSS.escape(node.getAttribute(attr))}"]` : node.tagName.toLowerCase();
+  return { sel, index: [...root.querySelectorAll(sel)].indexOf(node) };
+}
+const find = (root, id) => (id ? root.querySelectorAll(id.sel)[id.index] ?? null : null);
 export function patch(el, html) {
   if (!el) return false;
   const key = html.replace(AGE_RE, '<span class="age" data-age="$1"></span>');
   if (structure.get(el) !== key) {
-    el.innerHTML = html;
+    const active = document.activeElement;
+    const focused = active && active !== el && el.contains(active) ? identity(active, el) : null;
+    const tipAnchor = rebuilt.tip?.anchor();
+    const tipped = tipAnchor && el.contains(tipAnchor) ? identity(tipAnchor, el) : null;
+    rebuilt.busy = true;
+    try { el.innerHTML = html; } finally { rebuilt.busy = false; }
     structure.set(el, key);
+    if (tipped) rebuilt.tip.moved(find(el, tipped));
+    const again = find(el, focused);
+    if (again) { rebuilt.tip?.quiet(); again.focus({ preventScroll: true }); }
     return true;
   }
   for (const [, name, text] of html.matchAll(AGE_RE)) {
@@ -115,4 +152,24 @@ export function patch(el, html) {
     if (node && node.textContent !== plain) node.textContent = plain;
   }
   return false;
+}
+
+// The words for one panel state exactly as the shared selector gave it, with
+// that panel's own age and reason; never re-ranked or borrowed from another.
+// `held` names a retained value ("last good value", "last good positions").
+export function statePhrase(cell, key, held = 'last good value') {
+  const state = cell?.state ?? 'not reported';
+  const why = cell?.reason ? cellReason(cell.reason) : null;
+  const ago = () => ageSpan(key, cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`);
+  if (state === 'fresh') return { tone: 'ok', text: '', state };
+  if (state === 'not reported') return { tone: 'none', text: `not reported${why ? ` · ${esc(why)}` : ''}`, state };
+  if (cell.value == null) return { tone: 'bad', text: `unavailable · ${esc(why ?? 'not available')}`, state };
+  if (cell.retained) return { tone: 'warn', text: `${held}, ${ago()}${why ? ` · ${esc(why)}` : ''}`, state };
+  if (state === 'stale') return { tone: 'warn', text: `as of ${ago()}${why ? ` · ${esc(why)}` : ''}`, state };
+  return { tone: 'bad', text: `${esc(why ?? 'not available')} · as of ${ago()}`, state };
+}
+// A caption: the designed one when fresh, otherwise the state's own words.
+export function stateCaption(cell, key, fresh = '', held) {
+  const p = statePhrase(cell, key, held);
+  return p.state === 'fresh' ? fresh : capital(p.text);
 }

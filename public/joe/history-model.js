@@ -71,11 +71,15 @@ export function rowAt(cols, at) {
   while (lo < hi) { const mid = (lo + hi) >> 1; if (cols.t[mid] < at) lo = mid + 1; else hi = mid; }
   return lo;
 }
-function rangeRows(cols, range) {
-  if (!cols.n || range === 'all') return [0, cols.n];
+// The window a range shows, ending at the board's current time: Day, Week and
+// Month are fixed spans; All starts at the first kept observation. The chart
+// and the comparison both use exactly this window (or its zoom).
+export function rangeWindow(cols, range, endAt) {
   const span = rangeSpanMs(range);
-  return span ? [rowAt(cols, cols.t[cols.n - 1] - span), cols.n] : [0, cols.n];
+  if (span) return [endAt - span, endAt];
+  return [rowAt(cols, endAt + 1) ? cols.t[0] : endAt - 864e5, endAt];
 }
+const windowRows = (cols, [from, to]) => [rowAt(cols, from), rowAt(cols, to + 1)];
 
 const gapPoint = (x, y, assumption, extra = {}) => ({ x, y, estimated: true, assumption, ...extra });
 function valueAt(samples, x) {
@@ -102,9 +106,8 @@ function clipGap(samples, startAt, endAt) {
 // one desk, clipped to the visible range ending at the board's current time.
 export function continuitySeries(cols, id, range, endAt) {
   const last = rowAt(cols, endAt + 1);
-  const span = rangeSpanMs(range);
   const earliest = last ? cols.t[0] : null;
-  const startAt = span ? endAt - span : earliest === null ? endAt - 864e5 : earliest;
+  const [startAt] = rangeWindow(cols, range, endAt);
   const { start } = latestCompatibleBasis(cols, id, 0, last);
   const eq = cols.desks[id].equity;
   const inside = rowAt(cols, startAt);
@@ -146,10 +149,11 @@ export function continuitySeries(cols, id, range, endAt) {
   return { observed: observed.filter(p => p.x <= endAt), gaps: groups.map(g => clipGap(g, startAt, endAt)).filter(g => g.length > 1), startAt, endAt };
 }
 
-// Same-timestamp comparison of the selected desks on observed, compatible rows only.
-export function sharedWindowCompare(cols, ids, range) {
+// Same-timestamp comparison of the selected desks on observed, compatible
+// rows only, inside the chart's window [from, to] (milliseconds).
+export function sharedWindowCompare(cols, ids, bounds) {
   if (ids.length < 2 || !cols.n) return { ok: false, reason: 'insufficient-selection' };
-  const [from, to] = rangeRows(cols, range);
+  const [from, to] = windowRows(cols, bounds);
   if (to - from < 2) return { ok: false, reason: 'insufficient-points' };
   let runStart = -1, runEnd = -1, lastBreak = 'incomplete-coverage';
   for (let i = from; i < to; i++) {
@@ -165,8 +169,8 @@ export function sharedWindowCompare(cols, ids, range) {
   }) };
 }
 
-export function basisNotice(cols, ids, range) {
-  const [from, to] = rangeRows(cols, range);
+export function basisNotice(cols, ids, bounds) {
+  const [from, to] = windowRows(cols, bounds);
   return ids.filter(id => latestCompatibleBasis(cols, id, from, to).excludedCount > 0);
 }
 

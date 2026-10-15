@@ -1,10 +1,10 @@
 // History: each desk's money as observed, with dotted estimated gaps, J's
 // bookkeeping with its captured results, and the desk changes this browser saw.
-import { $, $$, icon, term, pl, inlineMark, swatch, ageSpan, patch, isPhone } from './ui.js';
+import { $, $$, icon, term, st, pl, inlineMark, swatch, ageSpan, patch, isPhone, statePhrase, stateCaption } from './ui.js';
 import { esc, amountOf, eur, pct, age, dayDDM, dayDM, timeHM, money, NB } from './format.js';
 import { cellReason } from './health.js';
 import { drawChart, eurAxis } from './chart.js';
-import { DESK_IDS, ASSUMED_BASELINE, continuitySeries, sharedWindowCompare, basisNotice, toColumns } from './history-model.js';
+import { DESK_IDS, ASSUMED_BASELINE, continuitySeries, sharedWindowCompare, basisNotice, toColumns, rangeWindow } from './history-model.js';
 import { viennaDay, zonedInstant, VIENNA, NY } from './time.mjs';
 
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -18,21 +18,34 @@ function toolsHtml() {
   };
 }
 
+// History's own state, with its age and reason. It sits inside the chart's
+// fixed box and the plot starts below it, so a change of state moves nothing.
 function statusLine(cell) {
-  if (!cell || cell.state === 'fresh') return '';
-  if (cell.state === 'not reported') return `<p class="hist-status">${icon('ring')}<span>History has not arrived yet.</span></p>`;
-  if (cell.state === 'stale') return `<p class="hist-status">${icon('half')}<span>History as of ${ageSpan('hist', `${age(cell.ageSeconds)} ago`)} · ${esc(cellReason(cell.reason))}</span></p>`;
-  const kept = cell.value ? `Showing the last good history from ${ageSpan('hist', cell.ageSeconds == null ? 'an unknown time' : `${age(cell.ageSeconds)} ago`)}.` : 'Nothing to show yet.';
-  return `<p class="hist-status">${icon('stop')}<span>History refresh failed: ${esc(cellReason(cell.reason))}. ${kept}</span><button type="button" class="btn quiet" id="histRetry">Retry</button></p>`;
+  const p = statePhrase(cell, 'hist', 'last good history');
+  if (p.state === 'fresh') return '';
+  const why = cell?.reason ? esc(cellReason(cell.reason)) : null;
+  const ago = () => ageSpan('hist', cell.ageSeconds == null ? 'an unknown time' : `${age(cell.ageSeconds)} ago`);
+  const text = p.state === 'not reported' ? `History has not arrived yet${why && cell.reason !== 'feed_not_received' ? `: ${why}` : ''}.`
+    : cell.value == null ? `History refresh failed: ${why ?? 'not available'}. Nothing to show yet.`
+      : cell.retained ? `${p.state === 'broken' ? 'History refresh failed' : 'History update not used'}: ${why ?? 'not available'}. Showing the last good history from ${ago()}.`
+        : p.state === 'stale' ? `History as of ${ago()}${why ? ` · ${why}` : ''}.` : `History: ${why ?? 'not available'} · as of ${ago()}.`;
+  const retry = p.state === 'broken' || p.state === 'not reported' ? '<button type="button" class="btn quiet" id="histRetry">Retry</button>' : '';
+  return `<div class="hist-state" data-state="${p.state}">${st(p.tone, text)}${retry}</div>`;
 }
 
-function compareLine(cols) {
+// The window the chart shows and the comparison uses: the range ending at the
+// board's current time, or its zoom.
+export function historyWindow(cols, endAt) {
+  return HS.zoom ?? rangeWindow(cols, HS.range, endAt);
+}
+
+function compareLine(cols, bounds) {
   if (HS.desks.length < 2) return 'Choose two or more desks to compare them over the same window.';
-  const result = sharedWindowCompare(cols, HS.desks, HS.range);
+  const result = sharedWindowCompare(cols, HS.desks, bounds);
   if (!result.ok) {
-    return result.reason === 'incomplete-coverage' ? 'Comparing needs the same moments for every chosen desk in this range.'
+    return result.reason === 'incomplete-coverage' ? 'Comparing needs the same moments for every chosen desk in this window.'
       : result.reason === 'incompatible-basis' ? 'Comparing needs two moments on the same bookkeeping basis.'
-        : result.reason === 'insufficient-points' ? 'Not enough history in this range to compare.' : 'Choose two or more desks to compare them over the same window.';
+        : result.reason === 'insufficient-points' ? 'Not enough history in this window to compare.' : 'Choose two or more desks to compare them over the same window.';
   }
   const when = iso => `${dayDDM(iso)}, ${timeHM(iso)}`;
   return `From ${when(result.startAt)} to ${when(result.endAt)}: ${result.desks.map(d => `${LABEL[d.id]} ${pct(d.pct, 2, true)}`).join(' · ')}`;
@@ -74,13 +87,17 @@ function midnightLines(from, to) {
 
 export function historyChart(ctx) {
   const el = $('#histChart');
+  const top = Math.ceil($('#histStatus')?.offsetHeight ?? 0);
+  if (!ctx.now) {
+    HS.full = null;
+    return drawChart(el, { series: [], xDomain: [0, 1], empty: true, pad: { t: 12 + top }, emptyText: 'Waiting for the board server’s clock', label: 'Each desk’s money: the board server’s time is not known yet' });
+  }
   const cell = ctx.states.history;
   const cols = cell?.value?.columns ?? EMPTY;
   const endAt = Date.parse(ctx.now);
   const model = HS.desks.map(id => ({ id, ...continuitySeries(cols, id, HS.range, endAt) }));
-  const startAt = model[0]?.startAt ?? endAt - 864e5;
-  HS.full = [startAt, endAt];
-  const [x0, x1] = HS.zoom ?? [startAt, endAt];
+  HS.full = rangeWindow(cols, HS.range, endAt);
+  const [x0, x1] = historyWindow(cols, endAt);
   const inView = p => p.x >= x0 && p.x <= x1;
   const series = [];
   const firsts = [];
@@ -115,8 +132,8 @@ export function historyChart(ctx) {
     for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) if (x < x1 - span * 0.06) xLabels.push({ x, text: timeHM(new Date(x).toISOString()), anchor: 'start' });
   }
   const lineIdx = visible.map((s, i) => (s.dotted ? null : i)).filter(i => i !== null);
-  return drawChart(el, {
-    series: visible, xDomain: [x0, x1], base, yValues, yFmt: eurAxis, ticks: 5,
+  const scale = drawChart(el, {
+    series: visible, xDomain: [x0, x1], base, yValues, yFmt: eurAxis, ticks: 5, pad: { t: 12 + top },
     vlines: midnightLines(x0, x1).map(x => ({ x })), xLabels,
     empty: !HS.desks.length, emptyText: 'Choose a desk to draw its line',
     label: `Each desk’s money, ${RANGE_WORD[HS.range]}${HS.zoom ? ', zoomed' : ''}`,
@@ -137,6 +154,10 @@ export function historyChart(ctx) {
       }).join('')}`;
     },
   });
+  // The drawn window, for the zoom and pan checks.
+  const svg = el.querySelector(':scope > svg');
+  if (svg) { svg.dataset.x0 = String(Math.round(x0)); svg.dataset.x1 = String(Math.round(x1)); }
+  return scale;
 }
 
 function capturedHtml(desk) {
@@ -176,12 +197,13 @@ function bookkeepingHtml(ctx) {
   const acc = desk.accounting;
   const cell = ctx.states['desks.j.totalPnl'];
   const since = acc ? dayDM(acc.periodStart, NY) : null;
-  const value = cell?.value ? pl(amountOf(cell.value)) : `<span class="muted">—</span> ${esc(cell?.reason ? cellReason(cell.reason) : 'not reported')}`;
+  const caption = stateCaption(cell, 'jacct', '');
+  const value = `${cell?.value ? pl(amountOf(cell.value)) : '<span class="muted">—</span>'}${caption ? ` <span class="cap" data-state="${cell?.state ?? 'not reported'}">· ${caption}</span>` : ''}`;
   return `<dl class="facts-dl">
       <dt>Counted from</dt><dd>${since ? `${since} (New York date)` : 'Not reported'}</dd>
       <dt>How it is counted</dt><dd>${acc ? `${term('bookkeeping')}: oldest purchase first, after fees, dollars turned into euros at the rate seen at the time` : 'Not reported'}</dd>
       <dt>Note</dt><dd>${acc ? esc(acc.detail) : 'No bookkeeping detail in this snapshot.'}</dd>
-      <dt>J ${since ? `since ${since}` : 'since start'}</dt><dd>${value}</dd>
+      <dt>J ${since ? `since ${since}` : 'since start'}</dt><dd class="jtotal">${value}</dd>
     </dl>${capturedHtml(desk)}`;
 }
 
@@ -201,12 +223,19 @@ export function renderHistory(ctx) {
   patch($('#histLegend'), `${DESK_IDS.map(id => `<span class="lg">${swatch(`var(--desk-${id})`, '', 2.4)}${LABEL[id]}</span>`).join('')}<span class="lg">${swatch('var(--est)', '1.5 3.5', 1.6)}${term('estimate')} (starts from an assumed ${eur(ASSUMED_BASELINE, false, 0)})</span>`);
   const cell = ctx.states.history;
   const cols = cell?.value?.columns ?? EMPTY;
-  patch($('#histStatus'), statusLine(cell));
-  const excluded = basisNotice(cols, HS.desks, HS.range);
-  $('#histCompare').textContent = compareLine(cols);
-  $('#histBasis').textContent = excluded.length ? `This chart shows comparable records for ${excluded.map(id => LABEL[id]).join(' and ')}. Older records on another bookkeeping basis stay in the history file.` : '';
+  const moved = patch($('#histStatus'), statusLine(cell));
+  if (ctx.now) {
+    const bounds = historyWindow(cols, Date.parse(ctx.now));
+    const excluded = basisNotice(cols, HS.desks, bounds);
+    $('#histCompare').textContent = compareLine(cols, bounds);
+    $('#histBasis').textContent = excluded.length ? `This chart shows comparable records for ${excluded.map(id => LABEL[id]).join(' and ')}. Older records on another bookkeeping basis stay in the history file.` : '';
+  } else {
+    $('#histCompare').textContent = 'Comparing waits for the board server’s clock.';
+    $('#histBasis').textContent = '';
+  }
   patch($('#jAcct'), bookkeepingHtml(ctx));
   patch($('#events'), eventsHtml(ctx));
+  return { redraw: moved };
 }
 
 export const zoomable = () => !isPhone();

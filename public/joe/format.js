@@ -49,11 +49,21 @@ export function quantity(value) {
   return Number.isInteger(n) ? digits(n, 0) : String(value).replace('.', ',');
 }
 
+// Wall-clock parts per instant and zone. A position list repeats the same few
+// instants hundreds of times, so the last ones are kept (display only).
+const seen = new Map();
 const parts = (instant, zone = VIENNA) => {
+  const key = `${zone}|${instant}`;
+  const hit = seen.get(key);
+  if (hit) return hit;
   const w = wall(instant, zone);
   const date = new Date(`${w.slice(0, 10)}T12:00:00Z`);
-  return { w, day: w.slice(0, 10), dow: DOW[date.getUTCDay()], d: date.getUTCDate(), mon: MON[date.getUTCMonth()], y: w.slice(0, 4), hm: w.slice(11, 16), hms: w.slice(11, 19) };
+  const p = { w, day: w.slice(0, 10), dow: DOW[date.getUTCDay()], d: date.getUTCDate(), mon: MON[date.getUTCMonth()], y: w.slice(0, 4), hm: w.slice(11, 16), hms: w.slice(11, 19) };
+  if (seen.size >= 512) seen.clear();
+  seen.set(key, p);
+  return p;
 };
+export const localDay = (instant, zone = VIENNA) => parts(instant, zone).day;
 export const timeHM = (instant, zone) => parts(instant, zone).hm;
 export const timeHMS = (instant, zone) => parts(instant, zone).hms;
 export const dayDM = (instant, zone) => { const p = parts(instant, zone); return `${p.d}${NB}${p.mon}`; };

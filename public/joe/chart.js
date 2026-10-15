@@ -31,7 +31,7 @@ export function drawChart(el, o) {
   const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
   const values = (o.yValues ?? o.series.flatMap(s => s.pts.map(p => p.v)).concat(o.include || [])).filter(Number.isFinite);
   const tip = el.querySelector('.ctip');
-  el.querySelector('svg')?.remove();
+  el.querySelector(':scope > svg')?.remove();
   if (!values.length || o.empty) {
     el.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.emptyText || 'No data')}"><text x="${pad.l + pw / 2}" y="${pad.t + ph / 2}" text-anchor="middle">${esc(o.emptyText || 'No data')}</text></svg>`);
     el.onpointermove = null; el.onpointerleave = null;
@@ -88,6 +88,7 @@ export function drawChart(el, o) {
   const xh = el.querySelector('.xh'), xds = [...el.querySelectorAll('.xd')];
   el.onpointermove = e => {
     if (o.isPanning?.()) return;
+    if (e.target.closest?.('.hist-status, .mini-label')) { el.onpointerleave(); return; }
     const r = el.getBoundingClientRect(), mx = e.clientX - r.left, xv = x0 + (mx - pad.l) / pw * (x1 - x0);
     if (mx < pad.l - 4 || mx > pad.l + pw + 4) { el.onpointerleave(); return; }
     const near = hits.map(i => {

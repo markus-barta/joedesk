@@ -24,7 +24,10 @@ const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView } = await import('../public/joe/desk.js');
+const { cellView, cardStatus } = await import('../public/joe/desk.js');
+const { createFeed } = await import('../public/joe/feed.js');
+const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
+const { readdirSync } = await import('node:fs');
 const { periodOf } = await import('../public/joe/results.js');
 const { TERMS } = await import('../public/joe/terms.js');
 const { singleMissingDesk, coupledUnavailable } = await import('../scripts/browser/board.mjs');
@@ -133,7 +136,7 @@ test('health: the 20-second-old check reads fresh, then broken, then stale (P3 c
   const stale = view(61);
   assert.equal(stale.b.states['today.equity'].state, 'stale');
   assert.deepEqual([stale.p.label, stale.p.reason], ['Stale 1 min', 'snapshot_stale']);
-  assert.match(cellView(stale.b.states['today.equity'], 'k', { caption: 'after fees' }).caption, /^after fees · as of .*1 min ago/);
+  assert.match(cellView(stale.b.states['today.equity'], 'k', { caption: 'after fees' }).caption, /^As of <span class="age" data-age="k">1\smin ago<\/span> · updates are late$/);
 });
 
 test('isolation: a single missing desk keeps its siblings fresh with their own ages; the light stays yellow', () => {
@@ -181,6 +184,102 @@ test('KEEP: kept symbols leave the desk positions; a policy mismatch withholds d
   assert.ok(!mismatch.states.positions.value?.some(r => mismatch.feeds['fleet-config'].value.desks.keep.includes(r.symbol)));
 });
 
+test('cells: every P1 panel state reaches the screen unchanged, with its own age and reason', () => {
+  const ids = readdirSync(new URL('../fixtures/failures/', import.meta.url)).map(f => f.replace(/\.json$/, ''));
+  let checked = 0;
+  for (const id of ids) {
+    const f = fixture(id);
+    if (f.feed !== 'data') continue;
+    for (const cold of [false, true]) {
+      const b = board(f, { cold });
+      for (const name of DATA_PANELS.filter(n => /^(today|desks)\.|^paperAccount$/.test(n))) {
+        const cell = b.states[name], v = cellView(cell, 'k', { caption: 'designed' });
+        assert.equal(v.state, cell.state, `${id}${cold ? ' cold' : ''} ${name}`);
+        if (cell.state === 'fresh') assert.equal(v.caption, 'designed');
+        else if (cell.state === 'not reported') assert.match(v.caption, /^Not reported/);
+        else {
+          assert.ok(v.caption.includes(health.cellReason(cell.reason)), `${id} ${name} shows its reason`);
+          if (cell.value != null) assert.match(v.caption, /data-age="k"/, `${id} ${name} shows its age`);
+        }
+        checked++;
+      }
+    }
+  }
+  assert.ok(checked > 400, `${checked} cells`);
+  // A feed that has not arrived stays "not reported"; it is never shown as broken.
+  const none = panelStates({ data: { value: null, reason: 'feed_not_received' } }, valid.data.receivedAt);
+  for (const name of ['today.equity', 'desks.j.dayPnl', 'paperAccount']) {
+    assert.deepEqual([none[name].state, cellView(none[name], 'k').state, cellView(none[name], 'k').caption], ['not reported', 'not reported', 'Not reported · no data received yet']);
+  }
+  assert.match(cardStatus('j', [['Today', none['desks.j.dayPnl']], ['Open positions', none['desks.j.openPnl']], ['Since start', none['desks.j.totalPnl']]]), /Numbers: not reported · no data received yet/);
+  // A replayed push keeps the last good values: stale with their age, not broken.
+  const first = acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt);
+  const feeds = { data: first, 'fleet-config': { value: valid['fleet-config'], receivedAt: valid.data.receivedAt } };
+  const previous = panelStates(feeds, valid.data.receivedAt);
+  const replay = ingress(valid.data); replay.desks[0].action = 'Changed without a new sequence number';
+  feeds.data = acceptSnapshot('data', replay, first, at(valid.data.receivedAt, 20));
+  const replayed = panelStates(feeds, at(valid.data.receivedAt, 30), previous);
+  const eq = replayed['today.equity'];
+  assert.deepEqual([eq.state, eq.retained, eq.reason], ['stale', true, 'sequence_replayed']);
+  const view = cellView(eq, 'k', { caption: 'designed' });
+  assert.equal(view.state, 'stale');
+  assert.match(view.caption, /^Last good value, <span class="age" data-age="k">30\ss ago<\/span> · last update repeated an old one$/);
+});
+
+test('desk cards: every affected number keeps its own state, age and reason', () => {
+  const now = '2026-10-14T17:45:00.000Z';
+  const cell = (state, reason, value, receivedAt, retained = value != null && state !== 'fresh') => ({ state, reason, value: value == null ? null : { amount: value, currency: 'EUR' }, retained,
+    valueReceivedAt: receivedAt, ageSeconds: receivedAt ? (Date.parse(now) - Date.parse(receivedAt)) / 1000 : null });
+  const lines = cardStatus('joe', [
+    ['Today', cell('broken', 'day_pnl_unavailable', null, null)],
+    ['Open positions', cell('broken', 'gateway_down', '1.5', '2026-10-14T17:43:00.000Z')],
+    ['Since 10 Sep', cell('broken', 'gateway_down', '4.5', '2026-10-14T17:40:00.000Z')],
+  ]);
+  const text = lines.replace(/<[^>]+>/g, '');
+  assert.match(text, /Today: unavailable · today’s result not available/);
+  assert.match(text, /Open positions: last good, 2\smin ago · broker connection down/);
+  assert.match(text, /Since 10 Sep: last good, 5\smin ago · broker connection down/);
+  const same = cardStatus('j', [['Today', cell('stale', 'snapshot_stale', '1', '2026-10-14T17:43:30.000Z', false)], ['Open positions', cell('stale', 'snapshot_stale', '1', '2026-10-14T17:43:30.000Z', false)],
+    ['Since start', cell('fresh', null, '1', '2026-10-14T17:44:50.000Z')]]);
+  assert.match(same.replace(/<[^>]+>/g, ''), /^Today and Open positions: as of 1\smin ago · updates are late$/);
+  assert.equal(cardStatus('j', [['Today', cell('fresh', null, '1', now)], ['Open positions', cell('fresh', null, '1', now)], ['Since start', cell('fresh', null, '1', now)]]), '');
+});
+
+test('cold start: without the server clock every panel still shows its own state and reason', async () => {
+  const realFetch = globalThis.fetch;
+  const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
+  try {
+    for (const [answer, reason] of [[() => json(401, { ok: false, reason: 'auth_required' }), 'auth_required'], [() => json(404, { ok: false, error: 'not found' }), 'route_not_found'],
+      [() => json(503, { ok: false }), 'refresh_failed'], [() => { throw new TypeError('offline'); }, 'refresh_failed'], [() => new Response('<html>', { status: 200 }), 'refresh_failed']]) {
+      globalThis.fetch = async () => answer();
+      const feed = createFeed(() => {});
+      await feed.refresh();
+      const s = feed.select();
+      assert.equal(s.now, null, reason);
+      assert.ok(feed.settled());
+      for (const name of DATA_PANELS) assert.deepEqual([s.states[name].state, s.states[name].reason, s.states[name].ageSeconds], ['broken', reason, null], `${reason} ${name}`);
+      assert.deepEqual([s.states.history.state, s.states.history.reason], ['broken', reason]);
+      assert.deepEqual([s.states.results.state, s.states.results.reason], ['broken', 'results_not_wired']);
+    }
+    // State is unreachable, History answers: History keeps its own value and age at the server's stamp.
+    const stamp = at(valid.history.receivedAt, 7);
+    globalThis.fetch = async url => (String(url).includes('history.json') ? json(200, valid.history, { 'X-Joe-Server-Now': stamp })
+      : String(url).includes('fleet-config') ? json(200, valid['fleet-config'], { 'X-Joe-Server-Now': stamp, 'X-Joe-Received-At': valid.data.receivedAt, ETag: '"1"' })
+        : json(404, { ok: false, error: 'not found' }));
+    const feed = createFeed(() => {});
+    await feed.refresh();
+    const s = feed.select();
+    assert.ok(Math.abs(Date.parse(s.now) - Date.parse(stamp)) < 1000);
+    assert.deepEqual([s.states.history.state, Math.round(s.states.history.ageSeconds)], ['fresh', 7]);
+    assert.deepEqual([s.states['today.equity'].state, s.states['today.equity'].reason], ['broken', 'route_not_found']);
+    // Only the HTTP date: the clock is known to the second, still the server's.
+    globalThis.fetch = async () => json(401, { ok: false, reason: 'auth_required' }, { Date: 'Wed, 14 Oct 2026 17:42:22 GMT' });
+    const dated = createFeed(() => {});
+    await dated.refresh();
+    assert.ok(Math.abs(Date.parse(dated.select().now) - Date.parse('2026-10-14T17:42:22.000Z')) < 1000);
+  } finally { globalThis.fetch = realFetch; }
+});
+
 const pt = (t, values, basis = {}) => ({ t, desks: Object.fromEntries(hm.DESK_IDS.map(id => [id, {
   money: values[id] === undefined ? {} : { equity: values[id] === null ? null : { amount: String(values[id]), currency: 'EUR' } },
   ...(basis[id] ? { historyBasis: basis[id] } : {}) }])), totals: {} });
@@ -209,14 +308,36 @@ test('history: basis breaks exclude older records and compare stays on observed,
   const points = [pt(iso(0), { j: 4000, joe: 5000 }, { j: 'j.old' }), pt(iso(1), { j: 5000, joe: 5000 }, { j: 'j.paper.v2' }),
     pt(iso(2), { j: 5010, joe: 4990 }, { j: 'j.paper.v2' })];
   const cols = hm.toColumns(points);
+  const all = hm.rangeWindow(cols, 'all', T0 + 10 * 60000);
   assert.equal(hm.latestCompatibleBasis(cols, 'j').start, 1);
-  assert.deepEqual(hm.basisNotice(cols, ['j', 'joe'], 'all'), ['j']);
-  const compare = hm.sharedWindowCompare(cols, ['j', 'joe'], 'all');
+  assert.deepEqual(hm.basisNotice(cols, ['j', 'joe'], all), ['j']);
+  const compare = hm.sharedWindowCompare(cols, ['j', 'joe'], all);
   assert.equal(compare.ok, true);
   assert.equal(compare.startAt, iso(1));
   assert.deepEqual(compare.desks.map(d => Number(d.pct.toFixed(2))), [0.2, -0.2]);
-  assert.equal(hm.sharedWindowCompare(hm.toColumns([pt(iso(0), { j: 5000 }), pt(iso(1), { j: 5000 })]), ['j', 'joe'], 'all').reason, 'incomplete-coverage');
-  assert.equal(hm.sharedWindowCompare(cols, ['j'], 'all').reason, 'insufficient-selection');
+  const pair = hm.toColumns([pt(iso(0), { j: 5000 }), pt(iso(1), { j: 5000 })]);
+  assert.equal(hm.sharedWindowCompare(pair, ['j', 'joe'], hm.rangeWindow(pair, 'all', T0 + 60000)).reason, 'incomplete-coverage');
+  assert.equal(hm.sharedWindowCompare(cols, ['j'], all).reason, 'insufficient-selection');
+});
+
+test('history: compare uses exactly the chart window, anchored to the board time, not the last observation', () => {
+  // Observations end on 14 Oct; the board's time is 17 Oct.
+  const points = [];
+  for (let m = 0; m < 3 * 24 * 60; m += 30) points.push(pt(new Date(Date.parse('2026-10-12T00:00:00.000Z') + m * 60000).toISOString(), { j: 5000 + m / 30, joe: 5000 - m / 60, joel: 5000 }));
+  const cols = hm.toColumns(points);
+  const now = Date.parse('2026-10-17T12:00:00.000Z');
+  const day = hm.rangeWindow(cols, '1d', now);
+  assert.deepEqual(day, [now - 864e5, now]);
+  assert.deepEqual([hm.continuitySeries(cols, 'j', '1d', now).startAt, hm.continuitySeries(cols, 'j', '1d', now).endAt], day, 'chart and compare share the window');
+  assert.equal(hm.continuitySeries(cols, 'j', '1d', now).observed.filter(p => p.y !== null).length, 0, 'the Day chart has no observed point');
+  assert.deepEqual([hm.sharedWindowCompare(cols, ['j', 'joe'], day).ok, hm.sharedWindowCompare(cols, ['j', 'joe'], day).reason], [false, 'insufficient-points']);
+  const week = hm.rangeWindow(cols, '1w', now);
+  const compare = hm.sharedWindowCompare(cols, ['j', 'joe'], week);
+  assert.equal(compare.ok, true);
+  assert.ok(Date.parse(compare.startAt) >= week[0] && Date.parse(compare.endAt) <= week[1]);
+  const zoom = [Date.parse('2026-10-13T00:00:00.000Z'), Date.parse('2026-10-13T06:00:00.000Z')];
+  const zoomed = hm.sharedWindowCompare(cols, ['j', 'joe'], zoom);
+  assert.deepEqual([zoomed.startAt, zoomed.endAt], ['2026-10-13T00:00:00.000Z', '2026-10-13T06:00:00.000Z'], 'a zoom narrows the comparison with the chart');
 });
 
 test('history: the real gap fixture keeps observed siblings and a null J gap', () => {

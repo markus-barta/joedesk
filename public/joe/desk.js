@@ -1,8 +1,8 @@
 // Desk: health line and details, Today, the three desks, positions and the
 // kept holdings. Every number comes from one panel-state cell; each cell shows
 // fresh, stale with age, not reported, or broken with its reason, on its own.
-import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch } from './ui.js';
-import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, NB } from './format.js';
+import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption } from './ui.js';
+import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, STALE_AFTER_S } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
@@ -19,17 +19,13 @@ const STATE = {
   stuck: { tone: 'bad', icon: 'stop', word: 'Stuck' },
 };
 
-// One money cell: the value (or a dash) plus a caption that says what state
-// it is in. Fresh values keep the designed caption.
+// One money cell: the value (or a dash) and a caption for exactly the state
+// the shared selector gave it, with this cell's own age and reason. A fresh
+// value keeps the designed caption.
 export function cellView(cell, key, { signed = true, caption = '' } = {}) {
   const value = cell?.value ?? null;
   const n = amountOf(value);
-  const html = bn(n, value?.currency ?? 'EUR', signed);
-  if (!cell || (value == null && !cell.reason)) return { html, caption: 'Not reported', state: 'not reported', n: null };
-  if (value == null) return { html, caption: `Unavailable · ${cellReason(cell.reason)}`, state: 'broken', n: null };
-  if (cell.retained) return { html, caption: `Last good value, ${ageSpan(key, cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`)} · ${cellReason(cell.reason)}`, state: 'broken', n };
-  if (cell.state === 'stale') return { html, caption: `${caption ? `${caption} · ` : ''}as of ${ageSpan(key, `${age(cell.ageSeconds)} ago`)}`, state: 'stale', n };
-  return { html, caption, state: cell.state, n };
+  return { html: bn(n, value?.currency ?? 'EUR', signed), caption: stateCaption(cell, key, caption), state: cell?.state ?? 'not reported', n };
 }
 
 function healthStrip(ctx, health) {
@@ -45,9 +41,11 @@ function healthStrip(ctx, health) {
     const dataTone = feeds.data.reason || frozen >= STALE_AFTER_S ? 'warn' : 'ok';
     facts.push(st(dataTone, `${term('datafrom', `Data from ${timeHMS(data.generatedAt)}`)}${receipt >= STALE_AFTER_S ? ` · ${ageSpan('strip.data', `${age(receipt)} old`)}` : ''}`));
   } else {
-    facts.push(st('none', 'No data yet'));
+    const why = feeds.data?.reason && feeds.data.reason !== 'feed_not_received' ? feeds.data.reason : null;
+    facts.push(why ? st('bad', `No data · ${esc(cellReason(why))}`) : st('none', 'No data yet'));
   }
-  return `${facts.join('')}<button type="button" class="btn quiet" id="healthMore" aria-expanded="false" aria-controls="healthPop">Details${icon('chev-d')}</button>`;
+  const open = $('#healthPop')?.classList.contains('on') ? 'true' : 'false';
+  return `${facts.join('')}<button type="button" class="btn quiet" id="healthMore" aria-expanded="${open}" aria-controls="healthPop">Details${icon('chev-d')}</button>`;
 }
 
 function dayMethodLabel(source) {
@@ -100,6 +98,10 @@ function sinceLabel(data) {
 }
 
 function sessionRing(now) {
+  if (!now) {
+    const svg = `<svg viewBox="0 0 64 64" role="img" aria-label="Market session ring: the board server’s time is not known yet"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--line)" stroke-width="5"/></svg>`;
+    return `${svg}<div><b>Time not known</b><span>Waiting for the board server’s clock</span><span>${term('session')}</span></div>`;
+  }
   const b = sessionBounds(now);
   const R = 26, C = 32, minutes = iso => { const w = wall(iso, VIENNA); return Number(w.slice(11, 13)) * 60 + Number(w.slice(14, 16)); };
   const a = m => (m / 1440) * 2 * Math.PI - Math.PI / 2;
@@ -135,35 +137,35 @@ function sessionRing(now) {
 function heroLeft(ctx) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
-  const day = cellView(states['today.dayPnl'], 'hero.day');
-  const kpi = (termKey, label, cell, key, opts) => {
-    const v = cellView(cell, key, opts);
+  const dayCell = states['today.dayPnl'];
+  const day = cellView(dayCell, 'hero.day');
+  const kpi = (termKey, label, name, key, opts) => {
+    const v = cellView(states[name], key, opts);
     return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}</dt><dd>${v.html}<span class="c">${v.caption}</span></dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
+  const why = dayCell?.reason ? cellReason(dayCell.reason) : null;
   let say;
-  if (!data) say = 'No numbers yet: no board data has arrived.';
-  else if (day.n == null) say = `Today’s result is not available: ${esc(day.caption.replace(/^Unavailable · /, ''))}.`;
-  else {
+  if (day.n == null) {
+    say = data ? `Today’s result is not available: ${esc(why ?? 'not reported')}.`
+      : day.state === 'not reported' ? 'No numbers yet: no board data has arrived.' : `No numbers: ${esc(why ?? 'not available')}.`;
+  } else if (day.state === 'fresh') {
     const who = 'J, Joe and Joel';
     say = isZero(day.n) ? `Flat today for ${who}.` : `${day.n > 0 ? 'Up' : 'Down'} ${eur(Math.abs(day.n))} today across ${who}.`;
-    const method = data.pnlSources?.day?.method === 'session-open-estimate' ? dayMethodLabel(data.pnlSources.day) : null;
+    const method = data?.pnlSources?.day?.method === 'session-open-estimate' ? dayMethodLabel(data.pnlSources.day) : null;
     if (method) say += ` ${method}.`;
-    if (day.state !== 'fresh') say += ` ${day.caption.charAt(0).toUpperCase()}${day.caption.slice(1)}.`;
+  } else {
+    // Not fresh: the amount, then this value's own state, age and reason.
+    say = `${isZero(day.n) ? 'Flat' : `${day.n > 0 ? 'Up' : 'Down'} ${eur(Math.abs(day.n))}`} today. ${day.caption}.`;
   }
-  const noData = !data ? { caption: 'Unavailable · no snapshot' } : null;
-  const fallback = cell => (noData ? { value: null, reason: 'feed_not_received', state: 'not reported' } : cell);
-  const k = (termKey, label, name, key, opts) => (noData
-    ? `<div class="kpi" data-cell="${key}" data-state="not reported"><dt>${term(termKey, label)}</dt><dd>${bn(null)}<span class="c">Unavailable · no snapshot</span></dd></div>`
-    : kpi(termKey, label, fallback(states[name]), key, opts));
-  return `<div class="hero-k">${icon('clock')}<span>${term('today')} · ${dayDDM(now, NY)}</span></div>
-    <div class="display" data-cell="hero.day" data-state="${noData ? 'not reported' : day.state}">${noData ? bn(null) : day.html}</div>
+  return `<div class="hero-k">${icon('clock')}<span>${term('today')}${now ? ` · ${dayDDM(now, NY)}` : ''}</span></div>
+    <div class="display" data-cell="hero.day" data-state="${day.state}">${day.html}</div>
     <p class="say">${say}</p>
     <dl class="kpis">
-      ${k('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
-      ${k('since', sinceLabel(data), 'today.totalPnl', 'hero.since', { caption: 'after fees' })}
-      ${k('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: jIncomplete ? 'J’s bookkeeping incomplete · desk total unavailable' : `started with ${eur(15000, false, 0)}` })}
-      ${k('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}
+      ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
+      ${kpi('since', sinceLabel(data), 'today.totalPnl', 'hero.since', { caption: 'after fees' })}
+      ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: jIncomplete ? 'J’s bookkeeping incomplete · desk total unavailable' : `started with ${eur(15000, false, 0)}` })}
+      ${kpi('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}
     </dl>`;
 }
 
@@ -184,7 +186,7 @@ function deskCard(ctx, id, maxDay, showBars) {
   const bar = showBars && dayV.n != null && !isZero(dayV.n)
     ? `<i data-v="${dayV.n}" style="${dayV.n > 0 ? 'left' : 'right'}:50%;width:${(Math.abs(dayV.n) / maxDay * 50).toFixed(3)}%;background:var(--${dayV.n > 0 ? 'gain' : 'loss'})"></i>` : '';
   const num = (label, v, extra = '') => `<div data-state="${v.state}"><span class="k">${label}</span><span class="v">${v.html}</span>${extra}</div>`;
-  const status = cardStatus(id, [['Today', dayV, states[`desks.${id}.dayPnl`]], ['Open positions', openV, states[`desks.${id}.openPnl`]], [sinceText, sinceV, states[`desks.${id}.totalPnl`]]]);
+  const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]]);
   const learning = learningLine(desk?.learning);
   return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span>${info.word}${since}</span></div></div><span class="hb">${hb}</span></header>
       <p class="now">${desk ? esc(desk.action) : 'Waiting for the first valid snapshot.'}</p>
@@ -193,46 +195,60 @@ function deskCard(ctx, id, maxDay, showBars) {
         ${num(term('open'), openV)}
         ${num(term('since', sinceText), sinceV)}
       </div>
-      <div class="chart mini" id="mini-${id}"><div class="mini-label">${status || 'since start · last sessions'}</div></div>
+      <div class="chart mini" id="mini-${id}"><div class="mini-label${status ? ' off' : ''}">${status || 'since start · last sessions'}</div></div>
       <footer>${icon('learning')}<span>${term('learning')}: ${learning ? esc(learning) : 'not reported'}${desk?.learning?.status === 'blocked' ? ' · blocked' : ''}</span></footer>`;
 }
 
-// One line for the card's numbers when any is not fresh; it takes the chart
-// label's place, so a fresh card keeps the approved spacing.
-function cardStatus(id, cells) {
-  const off = cells.filter(([, v]) => v.state !== 'fresh');
-  if (!off.length) return '';
-  const describe = cell => (cell?.value != null && cell.retained ? `last good, ${ageSpan(`card.${id}`, `${age(cell.ageSeconds)} old`)}`
-    : cell?.value != null ? `${ageSpan(`card.${id}`, `${age(cell.ageSeconds)} old`)}`
-      : cell?.reason ? 'unavailable' : 'not reported');
-  const kind = cell => (cell?.value != null ? (cell.retained ? 'retained' : 'stale') : cell?.reason ? 'broken' : 'none');
-  const same = off.length === cells.length && off.every(([, , c]) => kind(c) === kind(off[0][2]));
-  const [label, , cell] = off[0];
-  const tone = { retained: 'warn', stale: 'warn', broken: 'bad', none: 'none' }[kind(cell)];
-  return st(tone, `${same ? 'Numbers' : esc(label)} ${describe(cell)}`);
+// The card's numbers that are not fresh, each with its own state, age and
+// reason. Numbers that share all three share a line. The lines sit in the
+// chart's own fixed box, so a fresh card keeps the approved spacing and a
+// change of state moves nothing.
+export function cardStatus(id, cells) {
+  const groups = [];
+  for (const [label, cell] of cells) {
+    if ((cell?.state ?? 'not reported') === 'fresh') continue;
+    const key = JSON.stringify([cell?.state, cell?.reason, cell?.retained, cell?.value == null, cell?.retained ? cell.valueReceivedAt : null]);
+    const group = groups.find(g => g.key === key);
+    if (group) group.labels.push(label); else groups.push({ key, labels: [label], cell });
+  }
+  if (!groups.length) return '';
+  return groups.map((g, i) => {
+    const p = statePhrase(g.cell, `card.${id}.${i}`, 'last good');
+    const who = g.labels.length === cells.length ? 'Numbers' : g.labels.length === 2 ? `${g.labels[0]} and ${g.labels[1]}` : g.labels[0];
+    return st(p.tone, `${esc(who)}: ${p.text}`);
+  }).join('');
+}
+
+// One reserved line per section for its own panel state: fresh says so, any
+// other state gives its age and reason. It never appears or disappears, so a
+// change of state moves nothing below it.
+function sectionState(cell, key, { fresh, held, missing, absent }) {
+  const p = statePhrase(cell, key, held);
+  const text = p.state === 'fresh' ? fresh
+    : cell?.value == null ? (p.state === 'not reported' ? absent : `${missing}: ${esc(cellReason(cell?.reason ?? 'feed_not_received'))}.`)
+      : capital(p.text);
+  return `<p class="pstate" data-state="${p.state}">${st(p.tone, text)}</p>`;
 }
 
 function positionsHtml(ctx) {
   const { states } = ctx;
   const cell = states.positions;
   const rows = cell?.value;
+  const data = ctx.feeds.data?.value;
   const header = `<div class="prow hd"><span></span><span class="sub">Holding</span><span class="sub c-side">${term('side')}</span><span class="sub r c-px">${term('lastprice')}</span><span class="sub c-worth">${term('worth')}</span><span class="sub r">${term('open', 'Open result')}</span><span class="sub r c-opened">Updated</span></div>`;
-  let note = '';
-  if (rows && cell.retained) note = `<p class="pnote">${icon('info')}<span>Last good positions, ${ageSpan('pos', cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`)} · ${esc(cellReason(cell.reason))}</span></p>`;
-  else if (rows && cell.state === 'stale') note = `<p class="pnote">${icon('info')}<span>Positions as of ${ageSpan('pos', `${age(cell.ageSeconds)} ago`)}</span></p>`;
-  else if (rows && cell.state === 'broken') note = `<p class="pnote">${icon('info')}<span>Prices and results are held back: ${esc(cellReason(cell.reason))}.</span></p>`;
-  if (!rows) {
-    const text = !ctx.feeds.data?.value || !cell || cell.state === 'not reported' ? 'Position detail is not present in this snapshot.' : `Position detail is unavailable: ${cellReason(cell.reason)}.`;
-    return { sub: 'Desk positions only · each in its own currency', html: `<p class="empty-line">${icon('info')}<span>${esc(text)}</span></p>` };
-  }
-  if (!rows.length) return { sub: '0 open · desk positions only · each in its own currency', html: `${note}<p class="empty-line">${icon('info')}<span>No open positions.</span></p>` };
+  const observed = data?.positions?.observedAt ?? data?.generatedAt;
+  const state = sectionState(cell, 'pos', { fresh: `Up to date · prices from ${observed ? timeHMS(observed) : 'the last snapshot'}`, held: 'last good positions',
+    missing: 'Position detail is unavailable', absent: 'Position detail is not present in this snapshot.' });
+  if (!rows) return { sub: 'Desk positions only · each in its own currency', html: state };
+  if (!rows.length) return { sub: '0 open · desk positions only · each in its own currency', html: `${state}<p class="empty-line">${icon('info')}<span>No open positions.</span></p>` };
   const sorted = [...rows].sort((a, b) => DESKS.indexOf(a.desk) - DESKS.indexOf(b.desk) || a.symbol.localeCompare(b.symbol));
   const maxByCurrency = new Map();
   for (const r of sorted) { const v = Math.abs(amountOf(r.marketValue) ?? 0); const c = r.marketValue?.currency; if (c) maxByCurrency.set(c, Math.max(maxByCurrency.get(c) ?? 0, v)); }
+  const today = ctx.now ? localDay(ctx.now, NY) : null;
   const body = sorted.map(r => {
     const cur = r.mark?.currency ?? r.marketValue?.currency ?? 'USD';
     const value = amountOf(r.marketValue), max = maxByCurrency.get(r.marketValue?.currency) || 0;
-    const opened = r.openedAt ? ` · opened ${nyDay(r.openedAt) === nyDay(ctx.now) ? `today ${timeHM(r.openedAt)}` : dayDDM(r.openedAt)}` : '';
+    const opened = r.openedAt ? ` · opened ${localDay(r.openedAt, NY) === today ? `today ${timeHM(r.openedAt)}` : dayDDM(r.openedAt)}` : '';
     const legacy = r.scope === 'legacy' ? ` · older holding, outside the ${term('stage0', 'first stage')}` : '';
     return `<div class="prow" data-desk="${esc(r.desk ?? '')}">
       ${symBadge(r.symbol, r.desk)}
@@ -244,24 +260,26 @@ function positionsHtml(ctx) {
       <div class="r c-opened num">${r.updatedAt ? timeHM(r.updatedAt) : '—'}</div>
     </div>`;
   }).join('');
-  return { sub: `${rows.length} open · desk positions only · each in its own currency`, html: `${note}${header}${body}` };
+  return { sub: `${rows.length} open · desk positions only · each in its own currency`, html: `${state}${header}${body}` };
 }
 
+// Kept holdings: the read-only caption, then the section's own state line with
+// what they are worth (in the past tense of their age when not fresh).
 function keptHtml(ctx) {
   const { states } = ctx;
   const cell = states.kept;
   const rows = cell?.value;
   const nav = states.paperAccount?.value ? eur(amountOf(states.paperAccount.value)) : '—';
   const worth = rows?.length ? sumByCurrency(rows.map(r => r.marketValue)).map(s => money(s.amount, s.currency)).join(' and ') : null;
-  const caption = `<p class="keep-cap">${icon('keep')}<span>Read-only. Left out of every desk result and of Results; counted in the ${term('paperacct', 'paper account')} (${nav}).${worth ? ` Worth ${worth} now, each in its own currency.` : ''}</span></p>`;
-  if (!rows) {
-    const text = !ctx.feeds.data?.value || !cell || cell.state === 'not reported' ? 'Kept holdings are not present in this snapshot.' : `Kept holdings are unavailable: ${cellReason(cell.reason)}.`;
-    return `${caption}<p class="empty-line">${icon('info')}<span>${esc(text)}</span></p>`;
-  }
-  if (!rows.length) return `${caption}<p class="empty-line">${icon('info')}<span>No kept holdings in this snapshot.</span></p>`;
-  const note = cell.retained ? `<p class="pnote">${icon('info')}<span>Last good values, ${ageSpan('kept', cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`)} · ${esc(cellReason(cell.reason))}</span></p>`
-    : cell.state === 'broken' ? `<p class="pnote">${icon('info')}<span>Prices are held back: ${esc(cellReason(cell.reason))}.</span></p>` : '';
-  return `${caption}${note}${[...rows].sort((a, b) => a.symbol.localeCompare(b.symbol)).map(r => {
+  const caption = `<p class="keep-cap">${icon('keep')}<span>Read-only. Left out of every desk result and of Results; counted in the ${term('paperacct', 'paper account')} (${nav}).</span></p>`;
+  const p = statePhrase(cell, 'kept', 'last good values');
+  const fresh = worth ? `Worth ${worth} now, each in its own currency.` : 'Up to date.';
+  const state = rows && worth && p.state !== 'fresh'
+    ? `<p class="pstate" data-state="${p.state}">${st(p.tone, `${capital(p.text)} · worth ${worth}, each in its own currency`)}</p>`
+    : sectionState(cell, 'kept', { fresh, held: 'last good values', missing: 'Kept holdings are unavailable', absent: 'Kept holdings are not present in this snapshot.' });
+  if (!rows) return `${caption}${state}`;
+  if (!rows.length) return `${caption}${state}<p class="empty-line">${icon('info')}<span>No kept holdings in this snapshot.</span></p>`;
+  return `${caption}${state}${[...rows].sort((a, b) => a.symbol.localeCompare(b.symbol)).map(r => {
     const cur = r.mark?.currency ?? r.marketValue?.currency ?? 'EUR';
     return `<div class="prow" data-keep="${esc(r.symbol)}">
       ${symBadge(r.symbol)}
@@ -277,7 +295,7 @@ function keptHtml(ctx) {
 const chartKeys = new Map();
 function chartOnce(el, key, draw) {
   if (!el) return;
-  if (chartKeys.get(el.id) === key && el.querySelector('svg')) return;
+  if (chartKeys.get(el.id) === key && el.querySelector(':scope > svg')) return;
   chartKeys.set(el.id, key);
   draw();
 }
@@ -285,11 +303,15 @@ export const forgetCharts = () => chartKeys.clear();
 
 function drawHeroChart(ctx, history) {
   const el = $('#heroChart');
+  if (!ctx.now) {
+    chartOnce(el, JSON.stringify(['no-clock', el?.clientWidth, el?.clientHeight]), () => drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: 'Waiting for the board server’s clock', label: 'Today’s result: the board server’s time is not known yet' }));
+    return;
+  }
   const b = sessionBounds(ctx.now);
   const nowMs = Date.parse(ctx.now);
   const minuteKey = Math.floor(nowMs / 60000);
   const key = JSON.stringify([b.openAt, minuteKey, history?.seq, history?.receivedAt, el?.clientWidth, el?.clientHeight]);
-  if (chartKeys.get(el?.id) === key && el?.querySelector('svg')) return;
+  if (chartKeys.get(el?.id) === key && el?.querySelector(':scope > svg')) return;
   const series = b.openAt && history ? intraday(history.columns, 'dayPnl', b.openAt, b.closeAt) : [];
   chartOnce(el, key, () => {
     if (!b.openAt) { drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: 'Market closed today', label: 'Market closed today' }); return; }
@@ -314,13 +336,21 @@ function drawMiniCharts(ctx, history) {
     series[id] = [...closes.map((c, i) => ({ x: i, v: c.v })), ...(nowValue != null ? [{ x: closes.length, v: nowValue }] : [])];
   }
   const shared = Object.values(series).flat().map(p => p.v);
+  // With no closes to draw, the empty chart says what History's own state is.
+  const hist = ctx.states.history;
+  const emptyText = hist?.state === 'not reported' ? 'History has not arrived yet' : hist?.value == null && hist?.state === 'broken' ? 'History unavailable' : 'History fills as sessions pass';
   for (const id of DESKS) {
     const el = $(`#mini-${id}`);
     const pts = series[id];
-    chartOnce(el, JSON.stringify([pts, shared, el?.clientWidth]), () => {
+    // The chart draws below the label or state lines, inside its fixed box.
+    const top = Math.max(14, Math.ceil(el?.querySelector('.mini-label')?.offsetHeight ?? 0) + 2);
+    chartOnce(el, JSON.stringify([pts, shared, el?.clientWidth, top, emptyText]), () => {
       drawChart(el, { series: [{ pts, color: `var(--desk-${id})` }], xDomain: [0, Math.max(1, pts.length - 1)], zero: true, include: shared, ticks: 2, noY: true,
-        pad: { l: 2, r: 6, t: 14, b: 4 }, empty: pts.length < 2, emptyText: 'History fills as sessions pass',
+        pad: { l: 2, r: 6, t: top, b: 4 }, empty: pts.length < 2 || top > (el?.clientHeight ?? 84) - 18, emptyText: top > (el?.clientHeight ?? 84) - 18 ? ' ' : emptyText,
         label: `${LABEL[id]}: result since start over the last ${pts.length} sessions` });
+      // The plotted inputs, observed values only, for the browser checks.
+      const svg = el?.querySelector(':scope > svg');
+      if (svg) svg.dataset.values = pts.map(p => p.v).join(' ');
     });
   }
 }
@@ -342,12 +372,14 @@ export function renderDesk(ctx) {
     const changed = patch($(`#desk-${id}`), deskCard(ctx, id, maxDay, showBars));
     if (changed) { chartKeys.delete(`mini-${id}`); redraw = true; }
   }
+  // Charts measure their boxes before the long sections below change, so an
+  // update never forces a layout of the whole position list mid-render.
+  const history = ctx.states.history?.value?.columns ? ctx.states.history.value : null;
+  drawHeroChart(ctx, history);
+  drawMiniCharts(ctx, history);
   const pos = positionsHtml(ctx);
   $('#posSub').textContent = pos.sub;
   patch($('#positions'), pos.html);
   patch($('#kept'), keptHtml(ctx));
-  const history = ctx.states.history?.value?.columns ? ctx.states.history.value : null;
-  drawHeroChart(ctx, history);
-  drawMiniCharts(ctx, history);
   return { health, redraw };
 }

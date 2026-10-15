@@ -63,6 +63,14 @@ const STATIC_FILES = Object.freeze({
   "/joe/fleet-config.example.json": "fleet-config.example.json",
   "/joe/joe-version.js": "joe-version.js",
 });
+// Workers ignore the page's import map, so the history worker and its imports
+// load under this release's own path; another release's path is not found.
+const RELEASE_PREFIX = `/joe/v/${release.version}/`;
+const VERSIONED_FILES = Object.freeze({
+  ...Object.fromEntries(UI_MODULES.map(name => [`${RELEASE_PREFIX}${name}`, path.join(PUBLIC, name)])),
+  ...Object.fromEntries(Object.entries(CONTRACT_FILES).map(([route, name]) => [route.replace("/joe/", RELEASE_PREFIX), path.join(__dirname, "contracts", name)])),
+  ...Object.fromEntries(Object.entries(SHARED_FILES).map(([route, name]) => [route.replace("/joe/", RELEASE_PREFIX), path.join(__dirname, name)])),
+});
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -591,6 +599,11 @@ function handleStatic(req, res, urlPath) {
   if (contractFile) {
     const file = path.join(__dirname, "contracts", contractFile);
     send(res, 200, fs.readFileSync(file), { "Content-Type": MIME[path.extname(file)] });
+    return;
+  }
+  const versionedFile = VERSIONED_FILES[urlPath];
+  if (versionedFile) {
+    send(res, 200, fs.readFileSync(versionedFile), { "Content-Type": MIME[path.extname(versionedFile)] });
     return;
   }
   const sharedFile = SHARED_FILES[urlPath];

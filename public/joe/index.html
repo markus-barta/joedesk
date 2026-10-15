@@ -151,7 +151,7 @@
     <h1 class="vh" id="deskTitle">Desk</h1>
     <div class="health-wrap">
       <div class="hstrip" id="health"></div>
-      <div class="pop" id="healthPop" role="dialog" aria-label="Board status details"></div>
+      <div class="pop" id="healthPop" role="dialog" aria-label="Board status details" tabindex="-1"></div>
     </div>
     <section class="card hero" id="deskHero" aria-label="Today">
       <div class="hero-l" id="heroL"></div>
@@ -232,8 +232,8 @@
     </div>
     <section class="card hcard" aria-label="Desk money over time">
       <div class="legend" id="histLegend"></div>
-      <div class="hist-compare"><p id="histCompare"></p><div id="histStatus"></div></div>
-      <div class="chart hist-chart" id="histChart"><div class="ctip" id="histTip" role="tooltip"></div></div>
+      <div class="hist-compare"><p id="histCompare"></p></div>
+      <div class="chart hist-chart" id="histChart"><div class="hist-status" id="histStatus"></div><div class="ctip" id="histTip" role="tooltip"></div></div>
       <p class="hist-help"><span id="histBasis"></span> Vienna time · thin lines mark midnight · wheel or pinch to zoom · shift-drag to pan · JoeDesk keeps the last 14 days</p>
     </section>
     <div class="hist-cols">

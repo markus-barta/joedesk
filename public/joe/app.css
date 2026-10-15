@@ -476,17 +476,39 @@ span.dbar, span.vbar { display: block; }
 .mini-label { position: absolute; left: 2px; right: 6px; top: -2px; display: flex; align-items: center; gap: 6px; font: 500 10.5px/14px var(--mono); color: var(--ink-3); white-space: nowrap; pointer-events: none; }
 .mini-label .st { font: 500 11.5px/14px var(--font); color: var(--ink-2); gap: 5px; }
 .mini-label .st .i { width: 13px; height: 13px; }
+/* Each number that is not fresh gets its own line, inside the chart's box. */
+.mini-label.off { flex-direction: column; align-items: flex-start; gap: 1px; white-space: normal; }
+.mini-label.off .st { white-space: normal; align-items: flex-start; line-height: 13px; }
+.mini-label.off .st .i { margin-top: 1px; }
 .dnums .k .term { white-space: nowrap; }
-.chart.mini { height: 72px; }
+/* Room for one line per not-fresh number (up to three, wrapped) above the sparkline. */
+.chart.mini { height: 84px; }
 .positions .pnote, .kept .pnote, .empty-line { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); font-size: 13px; padding: 10px 0; margin: 0; }
 .pnote .i, .empty-line .i { color: var(--ink-3); margin-top: 2px; }
+/* A section's own state line is always there, sized for its longest state. */
+.pstate { margin: 0; padding: 4px 0 8px; font-size: 13px; line-height: 18px; color: var(--ink-2); min-height: 30px; }
+.pstate .st { white-space: normal; align-items: flex-start; }
+.pstate .st .i { margin-top: 1px; }
+.kept .pstate { padding-top: 0; }
+.facts-dl .cap { color: var(--ink-3); font-size: 12px; }
+/* Freshness changes never move the page: texts that carry a state are sized
+   for their longer, not-fresh wording. */
+.hero-l .say { min-height: 2lh; }
+.kpi .c { min-height: 2lh; }
+.hstrip { min-height: 61px; align-content: flex-start; }
+.facts-dl .jtotal { min-height: calc(2lh + 22px); }
+.icon-btn { flex: none; }
+.pop:focus-visible { border-radius: 14px; }
 .prow .side .i { width: 15px; height: 15px; }
 .prow .name .i.im { margin-right: 2px; }
 .hist-compare { min-height: 21px; margin-top: 4px; }
 .hist-compare p { font-size: 13.5px; color: var(--ink-2); }
-.hist-status { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; font-size: 13px; color: var(--ink-2); }
-.hist-status .i { color: var(--warn); width: 15px; height: 15px; }
-.hist-status .btn { height: 30px; }
+/* History's own state sits in the chart's fixed box; the plot starts below it. */
+.hist-status { position: absolute; left: 0; right: 0; top: 0; z-index: 2; font-size: 13px; color: var(--ink-2); }
+.hist-state { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 10px; padding-bottom: 4px; }
+.hist-state .st { white-space: normal; align-items: flex-start; }
+.hist-state .st .i { margin-top: 2px; }
+.hist-state .btn { height: 30px; }
 .hist-chart { touch-action: pan-y; }
 .sec-h.small { margin: 22px 0 6px; }
 .sec-h.small h2 { font-size: 14px; }
@@ -510,4 +532,12 @@ span.dbar, span.vbar { display: block; }
   .dcard .hb { grid-column: 2; margin-left: 0; }
   .hist-compare { min-height: 42px; }
   .hstrip .st { white-space: normal; }
+  .hist-state .btn { height: 44px; }
+  .kpi .c { min-height: 3lh; }
+  .positions .pstate { min-height: 48px; }
+  .kept .pstate { min-height: 62px; }
+  /* A longer light label wraps inside the header button rather than pushing the theme button out. */
+  .top-in { gap: 6px; }
+  .hdr-health { padding: 0 6px; gap: 5px; min-width: 0; white-space: normal; line-height: 1.1; text-align: left; }
+  .brand, .theme-btn { flex: none; }
 }

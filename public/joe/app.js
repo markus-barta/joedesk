@@ -8,7 +8,7 @@ import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, forgetCharts } from './desk.js';
 import { renderHistory, historyChart, HS } from './history.js';
 import { renderResults, RS, stepPeriod } from './results.js';
-import { boardHealthPresentation, dataAge } from './health.js';
+import { boardHealthPresentation, dataAge, cellReason } from './health.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { dateTimeFull, age, NB, joinUnits } from './format.js';
 import { viennaDay } from './time.mjs';
@@ -34,15 +34,14 @@ function start() {
   const feed = createFeed(kind => {
     if (kind === 'history') dirtyHistory = true;
     schedule(kind);
-  }, (reason, ms) => { timings.push({ reason, ms }); if (timings.length > 200) timings.shift(); }, $('#appVersion').textContent.trim());
+  }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, $('#appVersion').textContent.trim());
   // Read-only: fetches the same three reads now instead of at the next poll.
   window.__joedesk.refresh = () => feed.refresh();
+  window.__joedesk.worker = () => feed.usesWorker();
 
-  function context() {
-    const selected = feed.select();
-    if (!selected) return null;
-    return { ...selected, events, panning: () => panning };
-  }
+  // Every render has a selection: before the server's clock is known, each
+  // panel still shows its own state and reason, and nothing needs an age.
+  const context = () => ({ ...feed.select(), events, panning: () => panning });
 
   function guard(name, fn) {
     try { return fn(); } catch (error) {
@@ -59,10 +58,11 @@ function start() {
     btn.setAttribute('aria-label', head.label);
     root.dataset.joeState = health.statusTone;
     const data = ctx.feeds.data?.value;
-    const failed = ['refresh_failed', 'auth_required'].includes(ctx.feeds.data?.reason);
+    const reason = ctx.feeds.data?.reason;
+    const failed = ['refresh_failed', 'auth_required', 'route_not_found'].includes(reason);
     const meta = data
       ? `Data from ${dateTimeFull(data.generatedAt)} · ${age(dataAge(ctx.feeds, ctx.now).receipt)} old · ${failed ? 'refresh failed' : `refreshes every 15${NB}s`}`
-      : failed ? 'No data · refresh failed' : 'No data yet';
+      : reason && reason !== 'feed_not_received' ? `No data · ${cellReason(reason)}` : 'No data yet';
     const node = $('#footData');
     if (node.textContent !== meta) node.textContent = meta;
   }
@@ -71,22 +71,21 @@ function start() {
     frame = 0;
     const started = performance.now();
     const ctx = context();
-    if (!ctx) return;
     const data = ctx.feeds.data?.value ?? null;
     if (data && data !== lastData) { guard('events', () => events.observe(data)); lastData = data; }
     guard('header', () => renderHeader(ctx));
     if (screen === 'desk') guard('desk', () => renderDesk(ctx));
     if (screen === 'history') {
-      guard('history', () => renderHistory(ctx));
-      if (dirtyHistory || reason !== 'tick') { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }
+      const moved = guard('history', () => renderHistory(ctx))?.redraw;
+      if (moved || dirtyHistory || reason !== 'tick') { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }
     }
     if (screen === 'results') guard('results', () => renderResults(ctx));
     window.__joedesk.renders++;
     if (reason !== 'tick') {
-      timings.push({ reason, ms: performance.now() - started });
+      timings.push({ reason, ms: performance.now() - started, at: started });
       if (timings.length > 200) timings.shift();
     }
-    if (data || ctx.feeds.data?.reason) root.dataset.ready = '1';
+    if (feed.settled()) root.dataset.ready = '1';
   }
 
   function schedule(reason = 'tick') {
@@ -108,28 +107,50 @@ function start() {
     if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0);
   }
 
-  function closePop() {
+  // The board details are a dialog: opening moves focus into it, Tab stays
+  // inside, Escape (or a click outside) closes it and focus returns to Details.
+  function openPop() {
     const pop = $('#healthPop');
-    pop.classList.remove('on');
-    $('#healthMore')?.setAttribute('aria-expanded', 'false');
+    pop.classList.add('on');
+    pop.setAttribute('aria-modal', 'true');
+    $('#healthMore')?.setAttribute('aria-expanded', 'true');
+    pop.focus({ preventScroll: true });
   }
+  function closePop(returnFocus = false) {
+    const pop = $('#healthPop');
+    const wasOpen = pop.classList.contains('on');
+    pop.classList.remove('on');
+    pop.removeAttribute('aria-modal');
+    $('#healthMore')?.setAttribute('aria-expanded', 'false');
+    if (wasOpen && returnFocus) $('#healthMore')?.focus({ preventScroll: true });
+  }
+  const focusables = el => $$('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])', el).filter(n => !n.disabled && n.getClientRects().length);
 
   document.addEventListener('click', e => {
     const goEl = e.target.closest('[data-go]');
     if (goEl) { go(goEl.dataset.go, goEl.dataset.anchor); return; }
     const pop = $('#healthPop');
     if (e.target.closest('#healthMore')) {
-      const on = !pop.classList.contains('on');
-      pop.classList.toggle('on', on);
-      $('#healthMore').setAttribute('aria-expanded', String(on));
+      if (pop.classList.contains('on')) closePop(true); else openPop();
       return;
     }
     if (pop.classList.contains('on') && !e.target.closest('#healthPop')) closePop();
     if (e.target.closest('#histRetry')) feed.refreshHistory();
   });
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && $('#healthPop').classList.contains('on')) { closePop(); $('#healthMore')?.focus(); }
+    const pop = $('#healthPop');
+    if (!pop.classList.contains('on')) return;
+    if (e.key === 'Escape') { e.preventDefault(); closePop(true); return; }
+    if (e.key !== 'Tab') return;
+    const items = focusables(pop);
+    const active = document.activeElement;
+    if (!items.length) { e.preventDefault(); pop.focus(); return; }
+    const first = items[0], last = items[items.length - 1];
+    if (!pop.contains(active)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+    else if (e.shiftKey && (active === first || active === pop)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
   });
+
   $('#themeBtn').addEventListener('click', () => { toggleTheme(); schedule('theme'); });
   window.__joedesk.setTheme = setTheme;
 
@@ -214,12 +235,13 @@ function start() {
     const b = e.target.closest('[data-period]');
     if (!b) return;
     RS.period = b.dataset.period;
-    const ctx = context();
-    if (ctx && (RS.period === 'ytd' || RS.period === 'all')) RS.anchor = viennaDay(ctx.now);
+    if (RS.period === 'ytd' || RS.period === 'all') RS.anchor = today();
     render('results-period');
   });
   $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { RS.desk = b.dataset.desk; render('results-desk'); } });
-  const today = () => viennaDay(context()?.now ?? new Date().toISOString());
+  // Results is not wired (P4): its calendar only needs a date to label. Before
+  // the server's clock is known it labels by this browser's date.
+  const today = () => viennaDay(feed.now() ?? new Date().toISOString());
   $('#prevPer').addEventListener('click', () => { stepPeriod(-1, today()); render('results-step'); });
   $('#nextPer').addEventListener('click', () => { stepPeriod(1, today()); render('results-step'); });
   $('#prevMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m ? [y, m - 1] : [y - 1, 11]; render('results-month'); });

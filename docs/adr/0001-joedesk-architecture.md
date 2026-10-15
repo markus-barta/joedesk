@@ -842,14 +842,14 @@ stale): until +40 s money reads normally and the light is "Board OK"; from
 "Last good value, {age} ago · broker connection not confirmed" (a dash with
 "Unavailable · broker connection not confirmed" on a cold load) and the
 light is "Broker unsure · the broker connection has not checked in — reload;
-if still old, tell Amy"; from +60 s the values read "… · as of {age} ago"
-and the light is "Stale 1 min". `test/ui-modules.mjs` pins all three.
+if still old, tell Amy"; from +60 s the values read "As of {age} ago ·
+updates are late" and the light is "Stale 1 min". `test/ui-modules.mjs` pins
+all three. (Fix round 1: a stale caption no longer keeps the designed caption
+in front; it states its own age and reason, as every not-fresh state does.)
 
 History is fetched, parsed and validated in a module worker
 (`history-worker.js`) and handed to the page as typed columns by transfer, so
-the 8 MiB read never blocks the page: 9,000 points (the contract maximum for
-this point shape) render in 11 ms per poll, with 230 ms of validation off the
-main thread. Continuity (dotted € 5.000 lead-in, gaps, carry), basis breaks,
+the 8 MiB read never blocks the page (measured figures: fix round 1 below). Continuity (dotted € 5.000 lead-in, gaps, carry), basis breaks,
 compare and session closes run on those columns; estimates never enter
 compare, sparklines or totals.
 
@@ -859,9 +859,11 @@ drops the vendored GridStack, Chart.js, Hammer and zoom assets;
 `panels.history` (they were the whole history every 15 s). Shared module
 addition: `time.mjs` gains `zonedInstant`, `sessionBounds` and `nextOpen` for
 the session ring and today's chart. Packaging: `index.html` pins every module
-to the release version through an import map; no service worker. The history
-worker's own imports are not versioned (workers ignore import maps); every
-asset is served `no-store`.
+to the release version through an import map; no service worker. Workers
+ignore import maps, so the history worker starts at
+`/joe/v/<release>/history-worker.js` and every module it imports resolves
+under that path; the server serves only the current release's path (an old
+page's worker gets 404 and the page falls back to its own, versioned modules).
 
 | P3 obligation | Proof |
 | --- | --- |
@@ -871,7 +873,7 @@ asset is served `no-store`.
 | Deferred: copy sign-off fresh → broken → stale | `health: the 20-second-old check reads fresh, then broken, then stale` |
 | §6 display continuity, gaps, outage-only range, basis breaks, observed-only compare/sparklines | `history: …` tests (`test/ui-modules.mjs`); browser AC-20/AC-21 |
 | §8 host gate on the replacement module | `production host remains inside the current canonical host gate` now imports `public/joe/host.js` |
-| §9 render budget | browser `budget` checks; render 11 ms, state acceptance < 1 ms |
+| §9 render budget | browser `budget` checks on the 8 MiB history and on live 256-position pushes at every width (fix round 1) |
 | P1 browser smoke (was BLOCKED) | `npm run test:contracts:browser` passes locally |
 
 Retired with GridStack, as AC-35 asks: `check-joe-layout`, `check-joe-phone`
@@ -884,3 +886,33 @@ UI half returns with P5's Settings. Results shows only its designed not-wired
 state (P4); Settings shows its nav entry and a not-wired line (P5), so the
 Appearance Light / Dark / System control also waits for P5 (the theme module
 already supports system).
+
+### P3 fix round 1 — JOED-23
+
+Codex review r1 (changes) found three High and six Medium issues. All are
+fixed; each High has a browser regression at 390/1024/1440 in light and dark.
+
+| Finding | Fix | Proof |
+| --- | --- | --- |
+| High: a cold failure blanked every panel until `state.json` supplied a clock | The page always renders. The clock is state.json's `serverNow`, else any other read's `X-Joe-Server-Now`, else its HTTP `Date`; before any clock every panel still gets `panelStates` (no feed holds a value, so no state depends on the instant) and says "Time not known". A value can never be shown undated. | `cold start:` (ui-modules); browser `cold` at six combos for 401, and 302, 404, 503, connection refused; History answering while state.json is 404 keeps its own fresh value |
+| High: the renderer re-mapped P1 states (`feed_not_received` → broken, retained replay → broken) | Every cell, card line, section line and History shows `cell.state` as given; captions are derived from it (`statePhrase`). NO DATA now reads "Not reported · no data received yet" (spec §9 said "Unavailable · no snapshot"; changed so the words match the state) | `cells: every P1 panel state…` over all fixtures; browser `passthrough` (replayed push stays stale at six combos), NO DATA at six combos |
+| High: surfaces omitted their own age/reason | Desk cards list every not-fresh number with its own age and reason (one line per distinct state); Kept says "As of …" with its reason and drops "now"; J's result in History carries its age and reason; positions and kept have their own state line | browser `journey` (Today 1 min, open result 35 s, J's total 35 s, each with its reason) at six combos; fixture run checks every card names every affected reason |
+| Medium: History compare used a different window from the chart | `rangeWindow` gives one window ending at the board's time (or the zoom); chart and compare both use it | `history: compare uses exactly the chart window…` (observations end 14 Oct, time 17 Oct → Day compares nothing) |
+| Medium: freshness transitions shifted layout | State texts have reserved space: health line two rows, Today's sentence two lines, captions two (phone three), card state lines inside the sparkline's fixed box, a state line per section, History's state inside the chart's fixed box | browser `journey`: fresh → stale → broken → recovered moves nothing (±0.5 px) on Desk and History at six combos |
+| Medium: dialog focus, rebuilt sections | Details is a focus-trapping dialog: focus moves in, Tab stays inside, Escape returns focus to Details. A rebuilt section keeps keyboard focus and an open or pinned tip on the same control | browser: keyboard dialog flow at six combos; focus, pinned tip and focus inside the dialog survive data updates |
+| Medium: phone Retry 30 px; target scan only on healthy History | Retry is 44 px on phones; the full craft scan (targets, contrast, clipping, scroll) runs on degraded Desk and History states in both themes | browser `auditScreen` on cold, NO DATA, broken and refresh-failed states |
+| Medium: performance evidence lacked the workload | Two phases at every width: the 9,000-point (8 MiB) history read cold, and five live pushes of 256 positions plus three History updates over 7,200+ points (the server compacts at its 6.4 MiB warning once pushes arrive). Every update must render and be measured; Desk patch < 16 ms, History < 50 ms, no long task, history only in the worker. Charts now measure before the long sections change (a forced full layout made the 256-row patch 23 ms; now 7–8 ms) | browser `budget`; trace and reference in the QA index |
+| Medium: worker imports not version-bound | Release path `/joe/v/<release>/` (named server change below) | `P3 UI: the history worker graph is served only under this release path` |
+
+Named server change (minimal): `server.mjs` serves the UI modules, contracts
+and shared modules also under `/joe/v/<release.version>/`, from the same
+allowlists; any other version, the index and the data reads are 404 there.
+
+Performance reference: the headless Chromium shell the gate launches on the
+local Apple Silicon workstation (exact build, CPU and Node version are written
+into the QA index with every trace). The Linux CI run, with its own fonts, is
+the merge gate for both the budget and the font-dependent layout checks.
+
+Still open, with owner: the Appearance Light / Dark / System control (P5),
+Results numbers and AC-46 (P4), and the Linux CI browser run before merge.
+

@@ -679,6 +679,26 @@ test('P3 UI: every shipped module is served, legacy layout assets are not, and t
   assert.equal((await fetch(s.base + '/joe/state.json')).status, 401);
 });
 
+test('P3 UI: the history worker graph is served only under this release path', async t => {
+  const s = await setup(t);
+  const release = JSON.parse(readFileSync(new URL('../release.json', import.meta.url)));
+  const prefix = `/joe/v/${release.version}/`;
+  // The worker and every module it imports, resolved under the release path.
+  const graph = ['history-worker.js', 'history-model.js', 'time.mjs', 'market-calendar.json', 'contracts/read.mjs', 'contracts/index.mjs',
+    'contracts/schema-validator.mjs', 'contracts/semantics.mjs', 'contracts/decimal.mjs', 'contracts/gateway.mjs', 'contracts/data.schema.json',
+    'contracts/history.schema.json', 'contracts/results.schema.json', 'contracts/fleet-config.schema.json', 'contracts/healthz.schema.json',
+    'contracts/common.schema.json', 'contracts/reason.schema.json', 'contracts/manifest.json'];
+  for (const name of graph) {
+    const response = await fetch(s.base + prefix + name);
+    assert.equal(response.status, 200, name);
+    assert.equal(await response.text(), readFileSync(new URL(name.startsWith('contracts/') ? `../${name}` : ['time.mjs', 'market-calendar.json'].includes(name) ? `../${name}` : `../public/joe/${name}`, import.meta.url), 'utf8'), name);
+  }
+  for (const route of ['/joe/v/00.00.00.00.00/history-worker.js', `${prefix}index.html`, prefix, `${prefix}state.json`, `${prefix}history.json`,
+    `${prefix}app.css`, `${prefix}../server.mjs`, `${prefix}contracts/../../server.mjs`, `${prefix}fleet-config.example.json`]) {
+    assert.equal((await s.request(route)).status, 404, route);
+  }
+});
+
 function historySeries(count = 10000) {
   const base = samples.history.points[0];
   return { schema: CONTRACTS.contracts.history, seq: 1, generatedAt: at(0), receivedAt: at(0), sizeBytes: 0,
