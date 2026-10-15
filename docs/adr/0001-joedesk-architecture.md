@@ -101,6 +101,10 @@ producer clock minus browser clock. P2 serves its clock so the browser can ancho
 elapsed monotonic timer; a client clock error cannot make old data fresh.
 Future producer clocks do not make receipt age negative or extend freshness.
 Server clock regressions require an operator diagnostic, not a freshness reset.
+Selectors take only validated served snapshots; missing/invalid data `receivedAt`
+or invalid supplied `generatedAdvancedAt` fails closed with `contract_invalid`
+for money/account/position and Gateway panels, while absent progress metadata
+still falls back to the valid receipt anchor.
 
 At receipt age below 60 seconds a reported value is fresh; exactly 60 seconds
 is stale. The 30-second producer cadence gives this two-cadence threshold.
@@ -134,6 +138,8 @@ anchor. The Gateway panel displays this check age, rather than receipt age;
 an invalid/future check has unknown age. An otherwise fresh feed whose check
 expires between receipts invalidates its money/account/position cells with
 `gateway_unconfirmed`; a stale/frozen feed keeps its freshness state as above.
+That stale exemption covers only expiry between receipts; a gateway already
+unconfirmed at generation stays broken with `gateway_unconfirmed` at every feed age.
 When `apiSessionReady` is false, or confirmation is missing/expired, every
 supplied desk/total money field (including total P&L, which depends
 on marks) and broker equity must be null with a closed per-field/account reason.
@@ -185,7 +191,9 @@ State precedence is rejected feed/explicit reason → broken, missing/null witho
 reason → not reported, then stale/fresh. Computed gateway expiry adds a broken
 reason only for an otherwise fresh feed; it cannot mask `snapshot_stale` or
 `producer_frozen`. Gateway `ageSeconds` is the generation-relative check age
-plus server elapsed time; other cells keep their receipt/progress/retention ages.
+plus server elapsed time; the stale exemption covers only expiry between receipts,
+so generation-time gateway failures still make the Gateway panel broken.
+Other cells keep their receipt/progress/retention ages.
 False HALT and a known-empty position list are reported values. Missing rows
 are never known-empty. Independent
 history, results and Fleet Config continue when data fails. An explicit null
@@ -522,6 +530,7 @@ an integration obligation, not a claim of runtime completion in P1.
 | Low 5: carried → null lacked a named reason | **Fixed here:** §3 and OPS proposal 3 name the closed `retained_values` code; dead/unconfirmed-session reasons take precedence. P3 owns the approved yellow retained-value presentation. |
 | Low 6: retained value without receipt metadata reset its age | **Fixed here:** age stays null/unknown; it never borrows a newer feed receipt. **P2:** persist `valueReceivedAt` for every retained cell and prove restart behavior. |
 | Low 7: baseline error path always named DAY | **Fixed here:** `baselineRequired` reports `$.pnlSources.{day,open}.periodStart` for the actual failing period. |
+| Check already 20s old at generation: fresh → broken → stale | **P3 copy sign-off:** money is fresh until +40s, broken with `gateway_unconfirmed` from +40s to just before +60s (empty money on a cold load), then stale with its value from +60s; elapsed times are from the advancing receipt. |
 
 ## P1 verification boundary
 
@@ -587,3 +596,25 @@ check age reaches 149 seconds while money's generation-progress age is 129.
 optional browser smoke were not rerun; browser smoke remains coordinator-owned
 and BLOCKED as recorded above. No push, deploy, production-host access, review
 gate, delegation or other model CLI was run.
+
+Fix5 evidence: all three new C/D regressions first failed against the unchanged
+`498d53b` selector. After the fixes, `npm run test:contracts` passes **85 tests,
+0 failures** on native Node 24.20.0. Missing and already-600-second-old ready
+checks stay broken with `gateway_unconfirmed` at +60 and +300 seconds, with
+cold loads and retained prior money covered. Missing/invalid receipt and invalid
+progress metadata fail closed with `contract_invalid` across all 20 gated cells;
+retained money keeps its original receipt and age. All fixtures are byte-identical
+to `498d53b`, preserving the earlier stale/frozen, skew and session-null regressions.
+
+A separate read-only in-memory import of the `498d53b` selector proves C in
+4/4 probes: old ready checks previously became stale and missing gateways became
+not reported, while the fixed Gateway panel stays broken consistently with money.
+D's 4/4 probes at +9/+600 seconds show missing receipt/progress previously made
+all 17 money cells fresh even at ten minutes; invalid progress made them fresh
+at +9 seconds and stale at +600. Both now stay broken with `contract_invalid`
+and zero fresh money cells. No checkout or proof files were written.
+`npm run check` and `git diff --check` pass. The deferred notes record P3 copy
+sign-off for the 20-second-old check's fresh → broken → stale transition.
+The unchanged legacy HTTP suite and coordinator-owned browser smoke were not
+rerun. No push, deployment, production-host call, review gate, delegation or
+other model CLI was run.

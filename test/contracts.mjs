@@ -598,6 +598,71 @@ test('fix4 B: gateway displays check age, including its initial age and frozen-g
   assert.equal(states['today.equity'].state, 'stale');
 });
 
+for (const scenario of ['missing', 'frozen-ready']) {
+  test(`fix5 C: ${scenario} gateway stays unconfirmed at 60s and 300s after receipt`, () => {
+    const initial = acceptSnapshot('data', ingress(samples.data), null, at);
+    const previous = panelStates({ data: initial }, at);
+    const payload = unconfirmedSession(ingress(samples.data), scenario);
+    payload.seq++;
+    payload.generatedAt = '2026-10-14T17:52:22.000Z'; // Ready check already 600s old at generation.
+    const feed = acceptSnapshot('data', payload, initial, payload.generatedAt);
+    assert.equal(feed.status, 200);
+    for (const elapsed of [60000, 300000]) {
+      const now = new Date(Date.parse(feed.value.receivedAt) + elapsed).toISOString();
+      for (const prior of [{}, previous]) {
+        const states = panelStates({ data: feed }, now, prior);
+        for (const name of gatedPanels) {
+          assert.equal(states[name].state, 'broken', name);
+          assert.equal(states[name].reason, 'gateway_unconfirmed', name);
+        }
+        if (scenario === 'frozen-ready') assert.equal(states.gateway.ageSeconds, 600 + elapsed / 1000);
+        for (const name of moneyPanels) {
+          assert.deepEqual(states[name].value, prior[name]?.value ?? null, name);
+          assert.equal(states[name].retained, Boolean(prior[name]), name);
+          assert.equal(states[name].valueReceivedAt, prior[name]?.valueReceivedAt ?? feed.value.receivedAt, name);
+          assert.equal(states[name].ageSeconds, prior[name] ? 600 + elapsed / 1000 : elapsed / 1000, name);
+        }
+      }
+    }
+  });
+}
+
+test('fix5 D: missing receipt or invalid receipt/progress timing fails closed before selecting money', () => {
+  const initial = acceptSnapshot('data', ingress(samples.data), null, at);
+  const previous = panelStates({ data: initial }, at);
+  for (const corrupt of [
+    feed => { delete feed.value.receivedAt; },
+    feed => { delete feed.value.receivedAt; delete feed.generatedAdvancedAt; },
+    feed => { delete feed.value.receivedAt; feed.receivedAt = at; },
+    feed => { feed.value.receivedAt = 'invalid'; },
+    ...['invalid', '2026-02-29T00:00:00.000Z', null, 0].map(value =>
+      feed => { feed.generatedAdvancedAt = value; }),
+  ]) {
+    const feed = copy(initial);
+    corrupt(feed);
+    for (const elapsed of [0, 60000, 600000]) {
+      const now = new Date(Date.parse(at) + elapsed).toISOString();
+      for (const prior of [{}, previous]) {
+        const states = panelStates({ data: feed }, now, prior);
+        for (const name of gatedPanels) {
+          assert.equal(states[name].state, 'broken', name);
+          assert.equal(states[name].reason, 'contract_invalid', name);
+          assert.ok(REASONS.includes(states[name].reason), name);
+        }
+        for (const name of moneyPanels) {
+          assert.deepEqual(states[name].value, prior[name]?.value ?? null, name);
+          assert.equal(states[name].retained, Boolean(prior[name]), name);
+          assert.ok(states[name].ageSeconds === null || Number.isFinite(states[name].ageSeconds), name);
+          if (prior[name]) {
+            assert.equal(states[name].valueReceivedAt, prior[name].valueReceivedAt, name);
+            assert.equal(states[name].ageSeconds, elapsed / 1000, name);
+          }
+        }
+      }
+    }
+  }
+});
+
 test('fix3 low 4: unavailable or unconfirmed sessions reject observed money evidence even with null money', () => {
   for (const scenario of ['dead', 'missing', 'frozen-ready']) for (let i = 0; i < 3; i++) {
     const payload = scenario === 'dead' ? unavailableSession(copy(samples.data)) : unconfirmedSession(copy(samples.data), scenario);

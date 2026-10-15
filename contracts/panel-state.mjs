@@ -11,7 +11,7 @@ export const DATA_PANELS = Object.freeze([
 export const PANELS = Object.freeze([...DATA_PANELS, 'history', 'results', 'fleet-config']);
 export function feedAge(feed, now) {
   const receivedAt = feed?.value?.receivedAt ?? feed?.receivedAt;
-  if (!receivedAt) return null;
+  if (!validInstant(receivedAt)) return null;
   return Math.max(0, (Date.parse(now) - Date.parse(receivedAt)) / 1000);
 }
 
@@ -53,14 +53,18 @@ export function panelStates(feeds, now, previousValues = {}, keepSymbols = feeds
   const scopeReason = mismatched.length ? 'source_not_authoritative' : null;
   const sourceReason = field => data?.pnlSources?.[field === 'dayPnl' ? 'day' : field === 'openPnl' ? 'open' : '']?.reason;
   const receiptAge = feedAge(feeds.data, now);
+  const generationAnchor = feeds.data?.generatedAdvancedAt === undefined ? data?.receivedAt : feeds.data.generatedAdvancedAt;
   const generationElapsedMs = data ? Math.max(0, Date.parse(now) -
-    Date.parse(feeds.data.generatedAdvancedAt ?? data.receivedAt)) : 0;
+    Date.parse(generationAnchor)) : 0;
+  const invalidTiming = data && (!validInstant(data.receivedAt) || !validInstant(generationAnchor));
   // Only an otherwise fresh feed needs independent expiry between receipts.
-  // Stale/frozen feeds keep their values and freshness reasons; explicit
-  // upstream and transport failures still take precedence in panelState.
+  // Generation-time gateway failures apply at every feed age; stale/frozen
+  // feeds otherwise keep their values and freshness reasons.
   const freshFeed = receiptAge !== null && receiptAge < 60 && generationElapsedMs < GATEWAY_CHECK_MAX_AGE_MS;
-  const sessionReason = data && !feeds.data.reason && freshFeed ?
-    gatewayReason(data.safety.gateway, data.generatedAt, generationElapsedMs) : null;
+  const sessionReason = data && !feeds.data.reason ? (
+    invalidTiming ? 'contract_invalid' : gatewayReason(data.safety.gateway, data.generatedAt) ||
+      (freshFeed ? gatewayReason(data.safety.gateway, data.generatedAt, generationElapsedMs) : null)
+  ) : null;
   const select = (name, feed, value, reason) => {
     output[name] = panelState(feed, value, reason, now, previousValues[name]?.value, previousValues[name]?.valueReceivedAt);
   };
