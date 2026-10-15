@@ -9,7 +9,7 @@ import { homedir, cpus } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
-import { startBoard, scenario, NOW, at, ACTOR, valid } from './browser/board.mjs';
+import { startBoard, scenario, NOW, at, ACTOR, valid, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './browser/shots.mjs';
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
@@ -30,7 +30,7 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 const M = await import('../public/joe/results-model.js');
 const hm = await import('../public/joe/history-model.js');
 const fmt = await import('../public/joe/format.js');
-const { decimalUnits } = await import('../contracts/decimal.mjs');
+const { decimalUnits, unitsDecimal } = await import('../contracts/decimal.mjs');
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p4');
 mkdirSync(QA_DIR, { recursive: true });
@@ -41,6 +41,7 @@ const ONLY = (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean);
 const run = name => !ONLY.length || ONLY.includes(name);
 
 const N = text => String(text ?? '').replace(/[\s ]+/g, '');
+const NB = '\u00a0';
 const money = n => (n === null || n === undefined ? '—' : fmt.money(n, 'EUR', true));
 const two = (a, b) => `${a === null || a === undefined ? '—' : money(a)}/${b === null || b === undefined ? '—' : money(b)}`;
 const DESKS = ['j', 'joe', 'joel'];
@@ -66,7 +67,8 @@ const RES = `(() => {
     curve: svg ? { aria: svg.getAttribute('aria-label'), zero: svg.hasAttribute('data-zero'), lo: Number(svg.dataset.ylo), hi: Number(svg.dataset.yhi), base: svg.dataset.base === undefined ? null : Number(svg.dataset.base),
       ticks: [...svg.querySelectorAll('text[text-anchor="end"]')].filter(x => Number(x.getAttribute('x')) < 64).map(x => ({ text: x.textContent, y: Number(x.getAttribute('y')) })), strong: svg.querySelectorAll('line[stroke-width="1.4"]').length,
       marker: [...svg.querySelectorAll('text[text-anchor="start"]')].map(x => x.textContent).find(x => x.startsWith('tracking')) ?? null, estimate: svg.querySelectorAll('[data-estimate]').length,
-      lines: svg.querySelectorAll('path[fill="none"]').length, empty: svg.querySelectorAll('path').length === 0 } : null,
+      lines: svg.querySelectorAll('path[fill="none"]').length, empty: svg.querySelectorAll('path').length === 0, width: svg.viewBox.baseVal.width,
+      paths: [...svg.querySelectorAll('path[fill="none"]')].map(p => p.getAttribute('d')) } : null,
     status: t(document.getElementById('resStatus')),
   };
 })()`;
@@ -75,10 +77,7 @@ const RES = `(() => {
 function expected(ix, inputs, period, anchor, desk) {
   const desks = desk === 'all' ? DESKS : [desk];
   const per = M.periodOf(period, anchor, inputs.today, ix.meta.trackingStart);
-  const ctx = desksOf => {
-    const end = per.end > inputs.today ? inputs.today : per.end;
-    return { today: inputs.today, todayUnits: inputs.todayUnits, nowMs: inputs.nowMs, intraday: per.start === end ? M.intraday(inputs.cols, per.start, desksOf) : null };
-  };
+  const ctx = desksOf => M.moneyContext(ix, inputs, per, desksOf);
   const R = M.rollup(ix, per, desks, ctx(desks));
   return { per, R, rows: [...DESKS.map(d => M.rollup(ix, per, [d], ctx([d]))), M.rollup(ix, per, DESKS, ctx(DESKS))] };
 }
@@ -189,17 +188,27 @@ const serve = async next => { answer = next; await page.setFetch(next ? [{ urlPa
 // A served record: the contract's served form, received shortly before now.
 const served = (payload, board, receivedAgo = 18) => () => ({ body: { ...payload, receivedAt: at(board.clock(), -receivedAgo) }, clock: board.clock });
 
-// One board with the design scenario at a given time.
-async function designBoard(now = NOW, fleetConfig = null) {
+// What the page reads besides the record, as the page derives it: today's
+// money from the snapshot, History's columns and the basis cuts of both.
+function viewInputs(snapshot, servedHistory, nowMs) {
+  const todayUnits = DESKS.map(id => { const e = snapshot.desks.find(d => d.id === id).money.equity; return e ? decimalUnits(e.amount) : null; });
+  const cols = hm.toColumns(servedHistory.points);
+  const current = Object.fromEntries(DESKS.map((id, i) => [id, todayUnits[i] === null ? null : snapshot.desks.find(d => d.id === id)]));
+  return { today: M.viennaDate(nowMs), todayUnits, nowMs, cols, cuts: M.basisCuts(cols, current, nowMs) };
+}
+
+// One board with the design scenario at a given time (edit: changes to its
+// snapshot or history before they reach the board).
+async function designBoard(now = NOW, fleetConfig = null, edit = null) {
   const { snapshot, history } = scenario(now, now === NOW ? {} : { historyFrom: at(now, -7 * 86400) });
+  if (edit) { edit({ snapshot, history }); measureHistory(history); }
   const board = await newBoard({ history, fleetConfig });
   board.setNow(now);
   const r = await board.push(snapshot);
   if (r.status !== 200) throw new Error(`scenario push failed: ${JSON.stringify(r.body)}`);
   board.setNow(at(now, 9));
   const servedHistory = await (await fetch(`${board.url}history.json`, { headers: { 'x-auth-request-user': ACTOR } })).json();
-  const inputs = { today: M.viennaDate(Date.parse(at(now, 9))), todayUnits: DESKS.map(id => decimalUnits(snapshot.desks.find(d => d.id === id).money.equity.amount)),
-    nowMs: Date.parse(at(now, 9)), cols: hm.toColumns(servedHistory.points) };
+  const inputs = viewInputs(snapshot, servedHistory, Date.parse(at(now, 9)));
   return { board, snapshot, inputs };
 }
 const reset = async () => { for (const s of ['#periodSeg [data-period="week"]', '#deskSeg [data-desk="all"]']) await click(page, s); };
@@ -554,8 +563,142 @@ try {
     }
   }
 
+  if (run('r1')) {
+    // 6 · Fix round 1 (Codex review r1) in the page, at 1440 light and 390 dark.
+    const pair = [[VIEWPORTS[0], 'light'], [VIEWPORTS[2], 'dark']];
+    const open = async (board, period, desk) => {
+      await click(page, `#periodSeg [data-period="${period}"]`);
+      await click(page, `#deskSeg [data-desk="${desk}"]`);
+      return page.evaluate(RES);
+    };
+    const tileOf = (r, k) => r.tiles.find(x => x.k === k);
+    // (a) High: J changes its bookkeeping basis at 13:00 UTC today. Across
+    // the change there is no result, dip or line; the change is said as such.
+    {
+      const CHANGE = Date.parse('2026-10-14T13:00:00.000Z');
+      const { board, inputs } = await designBoard(NOW, null, ({ history }) => { for (const p of history.points) if (Date.parse(p.t) < CHANGE) p.desks.j.historyBasis = 'j.paper.v1'; });
+      const record = designResults(NOW), ix = M.indexResults(record);
+      check('r1-basis', 'the page\'s inputs carry J\'s change of basis', inputs.cuts.length === 1 && inputs.cuts[0].desk === 'j' && inputs.cuts[0].at >= CHANGE && inputs.cuts[0].at < CHANGE + 300000, inputs.cuts);
+      await serve(served(record, board));
+      for (const [viewport, theme] of pair) {
+        const tag = `basis @${viewport.name} ${theme}`;
+        await configure(page, viewport, theme);
+        await load(page, board.url, 'results');
+        await waitFor(page, `document.querySelector('#tiles .tile .tval .num')`);
+        for (const period of PERIODS) for (const desk of DESK_CHOICES) {
+          const r = await open(board, period, desk), e = expected(ix, inputs, period, inputs.today, desk);
+          compare(`${tag} ${period} ${desk}`, r, e);
+          const crosses = desk === 'all' || desk === 'j';
+          const said = `No result ${e.per.phrase}: J’s bookkeeping basis changed on Wed 14${NB}Oct, and a change of basis is not a gain or a loss.`;
+          check('r1-basis', `${tag} ${period} ${desk}: ${crosses ? 'no result, dip or line across J’s change; the change is said as such' : 'its own numbers stand'}`, crosses
+            ? Boolean(e.R.cut) && r.display === '—' && N(r.say) === N(said) && r.split[1] === '—' && N(tileOf(r, 'dip').val) === '—' && tileOf(r, 'dip').mean === 'Bookkeeping basis changed' &&
+              r.curve?.empty && N(r.curve.aria) === N(`J’s bookkeeping basis changed on Wed 14${NB}Oct`) && r.rows[0].val.trim() === '—' && r.rows[3].val.trim() === '—' && r.rows[1].val.trim() !== '—'
+            : !e.R.cut && r.display !== '—' && !r.curve?.empty,
+          { display: r.display, say: r.say, dip: tileOf(r, 'dip'), curve: r.curve?.aria, rows: r.rows.map(x => x.val) });
+        }
+        await auditScreen(page, viewport, theme, 'results (basis change)');
+        await click(page, '#periodSeg [data-period="week"]'); await click(page, '#deskSeg [data-desk="all"]');
+        await shot(page, viewport, `${viewport.name}-${theme}-results-basis-change`, 'Results across J’s change of bookkeeping basis: no result, dip or line; the change said as such; Joe and Joel stand');
+      }
+      await serve(null);
+    }
+    // (b) Medium: no current money for J. The record even has a close for
+    // today; it never stands in for the money now.
+    {
+      const { board, inputs, snapshot } = await designBoard(NOW, null, ({ snapshot }) => {
+        snapshot.desks[0].money.equity = null; snapshot.desks[0].money.reasons = { equity: 'retained_values' };
+        snapshot.totals.equity = null; snapshot.totals.reasons = { equity: 'family_projection_unavailable' };
+      });
+      const record = designResults(NOW);
+      const close = d => ({ equityClose: { amount: d === 'j' ? '4990' : snapshot.desks.find(x => x.id === d).money.equity.amount, currency: 'EUR' }, realisedNet: { amount: '0', currency: 'EUR' }, fees: { amount: '0', currency: 'EUR' }, trades: 0 });
+      record.days.push({ date: inputs.today, desks: Object.fromEntries(DESKS.map(d => [d, close(d)])) });
+      const ix = M.indexResults(record);
+      check('r1-money-now', 'J has no money now; the record has a close for today', inputs.todayUnits[0] === null && ix.dates.at(-1) === inputs.today, inputs.todayUnits);
+      await serve(served(record, board));
+      for (const [viewport, theme] of pair) {
+        const tag = `no money now @${viewport.name} ${theme}`;
+        await configure(page, viewport, theme);
+        await load(page, board.url, 'results');
+        await waitFor(page, `document.querySelector('#tiles .tile .tval .num')`);
+        for (const period of PERIODS) for (const desk of DESK_CHOICES) {
+          const r = await open(board, period, desk), e = expected(ix, inputs, period, inputs.today, desk);
+          compare(`${tag} ${period} ${desk}`, r, e);
+          const blind = desk === 'all' || desk === 'j';
+          check('r1-money-now', `${tag} ${period} ${desk}: ${blind ? 'Net, Still open and the dip stay unknown; today’s close never stands in' : 'its own numbers stand'}`, blind
+            ? e.R.net === null && r.display === '—' && N(r.say) === N(`The result ${e.per.phrase} is not known yet: the desks’ money now is not available.`) && r.split[1] === '—' && N(tileOf(r, 'dip').val) === '—'
+            : e.R.net !== null && r.display !== '—', { display: r.display, say: r.say, split: r.split });
+        }
+        await auditScreen(page, viewport, theme, 'results (no money now)');
+      }
+      await serve(null);
+    }
+    // (c) Medium: the hero chart's x axis is real time. Every drawn point
+    // sits at its own time; 16 Sep → 13 Oct is 27 days wide and, with its
+    // sessions missing from the record, a break in the line.
+    {
+      const { board, inputs } = await designBoard();
+      const payload = fixture('drawdown'), ix = M.indexResults(payload);
+      await serve(served(payload, board));
+      for (const [viewport, theme] of pair) {
+        const tag = `time axis @${viewport.name} ${theme}`;
+        await configure(page, viewport, theme);
+        await load(page, board.url, 'results');
+        for (const [period, desk] of [['all', 'j'], ['ytd', 'all'], ['week', 'joel'], ['month', 'j']]) {
+          const r = await open(board, period, desk), e = expected(ix, inputs, period, inputs.today, desk);
+          const c = M.curve(ix, e.per, desk === 'all' ? DESKS : [desk], M.moneyContext(ix, inputs, e.per, desk === 'all' ? DESKS : [desk]));
+          const [d0, d1] = c.domain, pw = r.curve.width - 64 - 14;
+          const segs = [[]];
+          for (const p of c.pts) { if (p.v === null) segs.push([]); else segs[segs.length - 1].push(p); }
+          const want = segs.filter(g => g.length > 1).map(g => g.map(p => 64 + (p.x - d0) / (d1 - d0) * pw));
+          const got = r.curve.paths.map(d => [...d.matchAll(/[ML](-?[\d.]+) /g)].map(m => Number(m[1])));
+          const ok = got.length === want.length && got.every((xs, i) => xs.length === want[i].length && xs.every((x, j) => Math.abs(x - want[i][j]) <= 0.11));
+          check('r1-time-axis', `${tag} ${period} ${desk}: each point at its own time on the period's real time axis${want.length > 1 ? ', the missing sessions a break' : ''}`, ok, { got, want });
+        }
+        await click(page, '#periodSeg [data-period="all"]'); await click(page, '#deskSeg [data-desk="j"]');
+        await shot(page, viewport, `${viewport.name}-${theme}-results-time-axis`, 'Results, all time for J on the drawdown fixture: real time axis; 16 Sep → 13 Oct keeps its 27 days and breaks the line');
+      }
+      await serve(null);
+    }
+    // (d) Medium: large amounts are exact on the page (≥ € 100.000, full
+    // precision), and (e) two equal days are two days, never "only day".
+    {
+      const { board, inputs } = await designBoard();
+      const eurOf = amount => ({ amount, currency: 'EUR' });
+      const trade = (id, desk, closedAt, net, fees) => ({ id, desk, symbol: 'KO', company: 'Coca-Cola', side: 'long', quantity: '1', openedAt: at(closedAt, -600), closedAt,
+        entryPrice: { amount: '70.12', currency: 'USD' }, exitPrice: { amount: '70.48', currency: 'USD' }, grossEur: eurOf(unitsDecimal(decimalUnits(net) + decimalUnits(fees))), feesEur: eurOf(fees), netEur: eurOf(net),
+        fx: { base: 'USD', quote: 'EUR', rate: '0.9', source: 'test-close-rate', observedAt: closedAt }, method: 'execution-fifo-net-current-fx' });
+      const record = { ...fixture('empty'), trades: [trade('rt-big-1', 'j', '2026-10-12T15:00:00.000Z', '100000.12345678', '0.35'), trade('rt-big-2', 'joe', '2026-10-13T15:00:00.000Z', '-99999.98765432', '0.35'),
+        trade('rt-eq-1', 'joel', '2026-10-12T16:00:00.000Z', '1', '0.35'), trade('rt-eq-2', 'joel', '2026-10-13T16:00:00.000Z', '1', '0.35')] };
+      const ix = M.indexResults(record);
+      await serve(served(record, board));
+      for (const [viewport, theme] of pair) {
+        const tag = `large amounts @${viewport.name} ${theme}`;
+        await configure(page, viewport, theme);
+        await load(page, board.url, 'results');
+        await waitFor(page, `document.querySelector('#tiles .tile .tval .num')`);
+        const j = await open(board, 'week', 'j');
+        compare(`${tag} week j`, j, expected(ix, inputs, 'week', inputs.today, 'j'));
+        check('r1-exact', `${tag}: J's € 100.000,12345678 trade reads +€ 100.000,12 everywhere, rounded once`, N(j.split[0]) === N('+€ 100.000,12') && N(tileOf(j, 'besttrade').val) === N('+€ 100.000,12/—') &&
+          N(tileOf(j, 'bestday').val) === N('+€ 100.000,12') && N(tileOf(j, 'avgtrade').val) === N('+€ 100.000,12'), { split: j.split, tiles: j.tiles.map(x => [x.k, x.val]) });
+        const all = await open(board, 'week', 'all');
+        compare(`${tag} week all`, all, expected(ix, inputs, 'week', inputs.today, 'all'));
+        check('r1-exact', `${tag}: the week's closed trades are their exact sum (100.000,12345678 − 99.999,98765432 + 2), rounded once`, N(all.split[0]) === N('+€ 2,14') && N(tileOf(all, 'besttrade').val) === N('+€ 100.000,12/−€ 99.999,99'), { split: all.split });
+        const cal = Object.fromEntries(all.cal.cells.map(c => [c.day, c]));
+        check('r1-exact', `${tag}: the calendar shows the days in their cells' room (${viewport.mobile ? 'phones: 0,1M' : '100k'}), the label says them exactly`,
+          N(cal['2026-10-12'].v) === '+100k' && N(cal['2026-10-13'].v) === '−100k' && N(cal['2026-10-12'].aria).includes(N('+€ 100.001,12 from 2 trades')) && N(cal['2026-10-13'].aria).includes(N('−€ 99.998,99 from 2 trades')) &&
+          (await page.evaluate(`[...document.querySelectorAll('#cal [data-day="2026-10-12"] .vs, #cal [data-day="2026-10-13"] .vs')].map(e => e.textContent).join('|')`)) === '+0,1M|−0,1M', { d12: cal['2026-10-12'], d13: cal['2026-10-13'] });
+        const joel = await open(board, 'week', 'joel');
+        check('r1-days', `${tag}: two equal days are two days, never "only day"`, N(tileOf(joel, 'bestday').val) === N('+€ 1,00/+€ 1,00') && tileOf(joel, 'bestday').mean === `Mon 12${NB}Oct · Tue 13${NB}Oct`, tileOf(joel, 'bestday'));
+        await click(page, '#deskSeg [data-desk="all"]');
+        await auditScreen(page, viewport, theme, 'results (large amounts)');
+        await shot(page, viewport, `${viewport.name}-${theme}-results-large-amounts`, 'Results with a € 100.000,12345678 trade: exact, rounded once, nothing clipped');
+      }
+      await serve(null);
+    }
+  }
+
   if (run('budget')) {
-    // 6 · The Results render budget's CI guard (ADR §9; the reference budget is
+    // 7 · The Results render budget's CI guard (ADR §9; the reference budget is
     // measured on a reference device by scripts/budget-reference.mjs).
     budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
   }
@@ -593,7 +736,20 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 - **Best and worst trade** name each trade by symbol and desk ("UBER (Joel)")
   rather than the company, so a long company name can never clip the tile.
 - **Calendar.** US market holidays read "closed", like weekends. Weeks still
-  ahead show no sum. A day before tracking shows only its date.
+  ahead show no sum. A day before tracking shows only its date. A day's
+  amount always fits its cell, rounded once: desktop "4,10", "123", "12k",
+  "1,2M"; phones "4,1", "123", "1,2k", "0,1M" (scaled forms a step smaller).
+  The cell's label and the day's trades give the exact amount
+  (\`*-results-large-amounts.png\`).
+- **Hero chart time axis** (fix round 1). The x axis is real time: each close
+  sits at the end of its Vienna date, today's money at now; missing dates keep
+  their width, and a session without a close in the record breaks the line
+  (\`*-results-time-axis.png\`). Before tracking the line is zero by definition.
+- **A change of bookkeeping basis** (fix round 1) is said as such: across it
+  there is no result, dip or line, only the sentence "No result this week:
+  J’s bookkeeping basis changed on Wed 14 Oct, and a change of basis is not a
+  gain or a loss." Closed-trade numbers and the other desks stand
+  (\`*-results-basis-change.png\`).
 - **Desk card at 390** (P3 follow-up): "Checked in … ago" sits right-aligned on
   the name row; the state has the row below. The same holds for any card
   narrower than 340 px (two-column widths).
@@ -616,6 +772,12 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 | Part A craft on Results | AC-1, 2, 5, 28–30, 32, 33, 36, 38, 40, 42–44, 47 (\`auditScreen\`) | — |
 | P3 follow-up: desk card at 390 | \`P3-follow-up\`, \`AC-30\` | — |
 | ADR §9 budget | \`budget\` (CI guard) | — |
+| Fix round 1 · High: a change of bookkeeping basis is never a result | \`r1-basis\` (every period × desk: no result, dip or line across J's change, the change said; Joe and Joel stand) | \`basis: …\` |
+| Fix round 1 · today's money only from the snapshot | \`r1-money-now\` (J without money now; the record's close for today never stands in) | \`today’s money: …\` |
+| Fix round 1 · Week/Month by period kind | \`AC-10\` (the model's period kind, on every switch) | \`period kind decides: …\` |
+| Fix round 1 · real time axis | \`r1-time-axis\` (every drawn point at its own time; the missing sessions a break) | \`hero chart: a real time axis …\`, \`hero chart\` |
+| Fix round 1 · exact money at any size | \`r1-exact\` (€ 100.000,12345678 trades: tiles, split, calendar, labels) | \`money: exact …\`, \`calendar amounts: …\` |
+| Fix round 1 · equal days are two days | \`r1-days\` | \`best and worst day: …\` |
 
 ## Checks
 
