@@ -24,6 +24,7 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 }
 const hm = await import('../public/joe/history-model.js');
 const { cellReason } = await import('../public/joe/health.js');
+const fmt = await import('../public/joe/format.js');
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
 mkdirSync(QA_DIR, { recursive: true });
@@ -391,6 +392,13 @@ const DESK_TEXT = `(() => ({
 const HIST_TEXT = `(() => ({ status: document.querySelector('#histStatus .st')?.innerText.trim() ?? '', state: document.querySelector('#histStatus .hist-state')?.dataset.state ?? 'fresh',
   retry: Boolean(document.getElementById('histRetry')), j: document.querySelector('#jAcct .facts-dl')?.innerText ?? '', lines: document.querySelectorAll('#histChart > svg path[stroke^="var(--desk-"]').length,
   estimates: document.querySelectorAll('#histChart > svg [data-estimate]').length, chart: document.querySelector('#histChart > svg')?.getAttribute('aria-label') }))()`;
+const RES_TEXT = `(() => ({ on: document.getElementById('scr-results').classList.contains('on'), hero: document.getElementById('rheroL').innerText,
+  tiles: [...document.querySelectorAll('#tiles .tile .tval')].map(t => t.innerText.trim()), label: document.getElementById('perLabel').innerText, days: document.querySelectorAll('#cal [data-day]').length,
+  rows: document.querySelectorAll('#breakdown .brow').length, curve: document.querySelector('#curve > svg')?.getAttribute('aria-label') ?? null, day: document.getElementById('daypanel').innerText }))()`;
+// Results' designed not-wired state: dashes, never zeros, with its switches, calendar and day sheet.
+const notWired = r => r.on && /Results are not wired yet\. The board has no closed-trade record for this period\./.test(r.hero) && !/€\s0,00/.test(r.hero) && r.tiles.length === 8 && r.tiles.every(t => t === '—') &&
+  /^This week · /.test(r.label) && r.days >= 28 && r.rows === 4 && r.curve === 'Results are not wired yet' && /results are not wired\.$/.test(r.day.trim());
+const norm = text => text?.replace(/\s+/g, ' ').trim();
 const moves = (a, b) => shifted(a, b, ['top', 'left', 'height']);
 try {
   if (run('design')) {
@@ -640,6 +648,18 @@ try {
           await auditScreen(page, viewport, theme, 'history (cold, no clock)');
           if (viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-history-state-cold-no-clock`, 'History, cold start without a clock');
         }
+        // r2: Results is never blank without a clock, reached from the nav or opened directly.
+        await go(page, 'results');
+        const r = await page.evaluate(RES_TEXT);
+        check('cold', `${tag}: Results, reached from the nav, shows its not-wired state`, notWired(r) && !page.errors.length, { r, errors: page.errors.slice(0, 3) });
+        page.errors.length = 0;
+        await load(page, cold.url, 'results');
+        const direct = await page.evaluate(RES_TEXT);
+        check('cold', `${tag}: Results, opened directly at #results, shows its not-wired state`, notWired(direct) && !page.errors.length, { direct, errors: page.errors.slice(0, 3) });
+        if (name === 'auth') {
+          await auditScreen(page, viewport, theme, 'results (cold, no clock)');
+          if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-state-cold-no-clock`, 'Results, cold start without a clock: the not-wired state');
+        }
         await unroute();
         page.errors.length = 0;
       }
@@ -823,6 +843,71 @@ try {
       check('history-states', `${id} @${viewport.name} ${theme}: History shows the selector's ${want.state}${words ? ` (${words})` : ''}`, h.state === want.state &&
         (want.state === 'fresh' ? !h.status && h.lines >= 1 : h.status.includes(words ?? 'History')), { h, want });
       if (viewport.name === '1024') await shot(page, viewport, `${viewport.name}-${theme}-history-state-${id}`, `History, P1 fixture ${id} (${want.state})`);
+    }
+  }
+  }
+
+  if (run('basis')) {
+  // 8b · MEDIUM regression (r2): J changes its bookkeeping basis at 13:00 UTC
+  // on 14 Oct. The comparison reads exactly the rows the chart draws: zoomed
+  // before the change the chart has no J observation, so no J number is
+  // compared and the notice names J; otherwise its numbers are the chart's points.
+  {
+    const CHANGE = Date.parse('2026-10-14T13:00:00.000Z');
+    const { snapshot, history } = scenario(NOW);
+    for (const p of history.points) if (Date.parse(p.t) < CHANGE) p.desks.j.historyBasis = 'j.paper.v1';
+    measureHistory(history);
+    const b = await newBoard({ history });
+    b.setNow(NOW);
+    check('basis', 'design snapshot accepted on a history with a J basis change', (await b.push(snapshot)).status === 200);
+    b.setNow(at(NOW, 9));
+    const served = await (await fetch(`${b.url}history.json`, { headers: { 'x-auth-request-user': ACTOR } })).json();
+    const cols = hm.toColumns(served.points), endAt = Date.parse(at(NOW, 9)), ids = ['j', 'joe', 'joel'];
+    const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
+    const drawn = Object.fromEntries(ids.map(id => [id, hm.continuitySeries(cols, id, '1w', endAt).observed.filter(p => p.y !== null)]));
+    // The comparison line the chart's own points give for a window, and whether its numbers are those points.
+    const expected = ([x0, x1]) => {
+      const r = hm.sharedWindowCompare(cols, ids, [x0, x1], endAt);
+      if (!r.ok) return { r, text: null, onChart: false };
+      const point = (id, iso) => drawn[id].find(p => p.x === Date.parse(iso))?.y;
+      return { r, onChart: r.desks.every(d => d.start === point(d.id, r.startAt) && d.end === point(d.id, r.endAt)),
+        text: `From ${fmt.dayDDM(r.startAt)}, ${fmt.timeHM(r.startAt)} to ${fmt.dayDDM(r.endAt)}, ${fmt.timeHM(r.endAt)}: ${r.desks.map(d => `${LABEL[d.id]} ${fmt.pct(d.pct, 2, true)}`).join(' · ')}` };
+    };
+    const view = `(() => { const s = document.querySelector('#histChart > svg'); return { x0: Number(s.dataset.x0), x1: Number(s.dataset.x1), label: s.getAttribute('aria-label'),
+      compare: document.getElementById('histCompare').innerText, basis: document.getElementById('histBasis').innerText }; })()`;
+    const zoomAt = async (fraction, notches) => {
+      const box = await page.evaluate(`(() => { const r = document.getElementById('histChart').getBoundingClientRect(); return { x: r.left + 64 + (r.width - 78) * ${fraction}, y: r.top + r.height / 2 }; })()`);
+      for (let i = 0; i < notches; i++) { await page.s('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240 }); await settle(page); }
+      await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
+      await settle(page);
+      return page.evaluate(view);
+    };
+    const NOTICE = /^This chart shows comparable records for J\. Older records on another bookkeeping basis stay in the history file\.$/;
+    for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      const tag = `basis change @${viewport.name} ${theme}`;
+      await configure(page, viewport, theme);
+      await load(page, b.url, 'history');
+      const week = await page.evaluate(view);
+      const w = expected([week.x0, week.x1]);
+      check('basis', `${tag}: the week compares the chart's own points and names J's older records`, w.r.ok && Date.parse(w.r.startAt) >= CHANGE && w.onChart && norm(week.compare) === norm(w.text) &&
+        NOTICE.test(week.basis.trim()), { week, expected: w });
+      if (viewport.mobile) { page.errors.length = 0; continue; }
+      const early = await zoomAt(0.15, 2);
+      const e = expected([early.x0, early.x1]);
+      const jDrawn = drawn.j.filter(p => p.x >= early.x0 && p.x <= early.x1).length;
+      check('basis', `${tag}: zoomed before J's change, the chart draws no J point, so none is compared and the notice names J`, /zoomed/.test(early.label) && early.x1 < CHANGE && jDrawn === 0 &&
+        !e.r.ok && e.r.reason === 'incompatible-basis' && early.compare === 'Comparing needs two moments on every chosen desk’s current bookkeeping basis.' && NOTICE.test(early.basis.trim()) && !page.errors.length, { early, expected: e, jDrawn });
+      if (viewport.name === '1440') {
+        await auditScreen(page, viewport, theme, 'history (zoomed before a basis change)');
+        await shot(page, viewport, `${viewport.name}-${theme}-history-basis-zoomed-before`, 'History zoomed before J’s bookkeeping change: no J comparison, the notice names J');
+      }
+      await page.evaluate(`document.getElementById('resetZoom').click()`);
+      await settle(page);
+      const across = await zoomAt(0.97, 3);
+      const x = expected([across.x0, across.x1]);
+      check('basis', `${tag}: zoomed across J's change, the comparison's numbers are the chart's own points`, /zoomed/.test(across.label) && across.x0 < CHANGE && across.x1 > CHANGE &&
+        x.r.ok && Date.parse(x.r.startAt) >= CHANGE && x.onChart && norm(across.compare) === norm(x.text) && NOTICE.test(across.basis.trim()) && !page.errors.length, { across, expected: x });
+      page.errors.length = 0;
     }
   }
   }
