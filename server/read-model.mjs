@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { CONTRACTS, REASONS, validateContract } from '../contracts/index.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
 import { panelStates, DATA_PANELS, MONEY_FIELDS } from '../contracts/panel-state.mjs';
@@ -11,6 +12,11 @@ const STATE_CAP = 2 * 1024 * 1024;
 const FORMAT = 'joedesk.data-store.v2';
 const isMissing = error => error.code === 'ENOENT';
 const failed = (status, reason) => ({ ok: false, status, reason });
+// JSON object order is immaterial. Hash only the validated ingress payload;
+// the server's receipt is deliberately excluded when comparing a stored value.
+const payloadDigest = value => createHash('sha256').update(JSON.stringify(value, (_key, entry) =>
+  entry && typeof entry === 'object' && !Array.isArray(entry) ?
+    Object.fromEntries(Object.keys(entry).sort().map(key => [key, entry[key]])) : entry)).digest('hex');
 
 export function createReadModel({ dataDir, clock = () => new Date().toISOString(), write = atomicWrite }) {
   const stateFile = path.join(dataDir, 'data-state.json');
@@ -70,9 +76,15 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   function accept(candidate) {
     const now = clock();
     if (storageInvalid) return failed(503, 'contract_invalid');
-    if (historyStorageInvalid) return failed(503, 'history_write_failed');
     const accepted = acceptSnapshot('data', candidate, state?.feed ?? null, now);
-    if (accepted.status !== 200) return { ...reject(accepted.reason), errors: accepted.errors.slice(0, 20).map(({ path, rule }) => ({ path, rule })) };
+    if (accepted.status !== 200) {
+      const errors = accepted.errors.slice(0, 20).map(({ path, rule }) => ({ path, rule }));
+      if (accepted.reason === 'sequence_replayed' && candidate.seq === state?.feed.value.seq) {
+        const { receivedAt, ...previous } = state.feed.value;
+        if (payloadDigest(candidate) === payloadDigest(previous)) return { ...failed(422, accepted.reason), errors };
+      }
+      return { ...reject(accepted.reason), errors };
+    }
     const check = candidate.safety.gateway;
     let gatewayProgress = state?.gatewayProgress ?? null;
     const checkAge = gatewayCheckAgeMs(check, candidate.generatedAt);
@@ -104,8 +116,10 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     }
     state = next; delete rejections.data;
     // Snapshot is durable even if the independent history store fails.
-    let historyReason = null;
-    try {
+    let historyReason = rejections.history ?? null;
+    // An unreadable history store stays untouched until operator recovery.
+    // Its independent alarm must not prevent the money board from advancing.
+    if (!historyStorageInvalid) try {
       const nextHistory = appendHistory(history, accepted.value, selected, now);
       if (nextHistory !== history) {
         try { write(historyFile, historyEnvelope(nextHistory), HISTORY_CAP); }

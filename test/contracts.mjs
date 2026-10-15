@@ -79,6 +79,28 @@ test('one closed reason enum is used everywhere, including field errors', () => 
   rejects(validateContract('data', data), 'enum', '$.totals.reasons.equity');
 });
 
+test('missing feed retains false HALT with its original receipt rather than treating it as absent', () => {
+  const value = copy(samples.data); value.safety.halt = false;
+  const cell = panelStates({ data: { value, reason: 'feed_not_received' } }, later).halt;
+  assert.deepEqual(cell, { state: 'broken', ageSeconds: 30, reason: 'feed_not_received', value: false,
+    retained: true, valueReceivedAt: at });
+});
+
+test('history compaction metadata is valid without a reason; legacy compaction reasons still follow receipt age', () => {
+  const value = { ...copy(samples.history), compactedThrough: samples.history.points.at(-1).t };
+  assert.equal(validateContract('history', value).ok, true);
+  for (const legacy of [false, true]) {
+    if (legacy) value.reason = 'history_compacted';
+    for (const [elapsed, state, reason] of [[30000, 'fresh', null], [60000, 'stale', 'snapshot_stale']]) {
+      const now = new Date(Date.parse(value.receivedAt) + elapsed).toISOString();
+      const cell = panelStates({ history: { value } }, now).history;
+      assert.equal(cell.state, state); assert.equal(cell.reason, reason); assert.equal(cell.ageSeconds, elapsed / 1000);
+    }
+  }
+  delete value.compactedThrough;
+  rejects(validateContract('history', value), 'required', '$.compactedThrough');
+});
+
 test('paper is fixed, KEEP is excluded from results and cannot be removed from fleet policy', () => {
   const data = { ...samples.data, mode: 'LIVE' };
   rejects(validateContract('data', data), 'const', '$.mode');

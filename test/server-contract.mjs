@@ -161,6 +161,47 @@ test('P2 inbox diagnostics: schema, field and replay rejections expose only boun
   }
 });
 
+test('P2 exact replay: same sequence and payload digest leave display, receipts and stores unchanged', async t => {
+  const writes = [];
+  const s = await setup(t, { write: (file, ...args) => { writes.push(basename(file)); atomicWrite(file, ...args); } });
+  const original = snapshot();
+  await s.push(original); s.time.ms = 9000;
+  const files = ['data-state.json', 'history-state.json'];
+  const before = files.map(file => readFileSync(join(s.dataDir, file), 'utf8'));
+  const state = (await s.request('/joe/state.json')).body;
+  const health = (await s.request('/joe/healthz')).body;
+  // Object ordering is not part of the payload identity.
+  const reordered = Object.fromEntries(Object.entries(original).reverse());
+  for (const replay of [original, reordered]) {
+    writes.length = 0;
+    const result = await s.push(replay);
+    assert.equal(result.status, 422); assert.equal(result.body.reason, 'sequence_replayed');
+    assert.deepEqual(result.body.errors, [{ path: '$.seq', rule: 'sequenceReplayed' }]);
+    assert.deepEqual(writes, []);
+    assert.deepEqual((await s.request('/joe/state.json')).body, state);
+    assert.deepEqual((await s.request('/joe/healthz')).body, health);
+    assert.equal((await s.request('/joe/data.json')).headers.get('x-joe-feed-reason'), null);
+    assert.deepEqual(files.map(file => readFileSync(join(s.dataDir, file), 'utf8')), before);
+  }
+  assert.equal(health.feeds.data.state, 'fresh'); assert.equal(health.gateway.confirmed, true);
+  const restarted = await setup(t, { dataDir: s.dataDir }); restarted.time.ms = 60000;
+  assert.equal((await restarted.push(original)).body.reason, 'sequence_replayed');
+  const stalled = (await restarted.request('/joe/healthz')).body;
+  assert.deepEqual(stalled.feeds.data, { state: 'stale', ageSeconds: 60, reason: 'snapshot_stale' });
+  assert.equal(restarted.model.panels()['today.equity'].valueReceivedAt, at(0));
+  assert.deepEqual(files.map(file => readFileSync(join(s.dataDir, file), 'utf8')), before);
+  restarted.time.ms = 9000;
+  const changed = snapshot(101, 0, -1000);
+  assert.equal((await restarted.push(changed)).body.reason, 'sequence_replayed');
+  const rejected = (await restarted.request('/joe/state.json')).body.panels['today.equity'];
+  assert.equal(rejected.state, 'stale'); assert.equal(rejected.reason, 'sequence_replayed');
+  assert.equal(rejected.retained, true); assert.equal(rejected.ageSeconds, 9);
+  // An exact retry cannot clear an unrelated existing rejection either.
+  const rejectedHealth = (await restarted.request('/joe/healthz')).body;
+  await restarted.push(original);
+  assert.deepEqual((await restarted.request('/joe/healthz')).body, rejectedHealth);
+});
+
 test('P2 empty feeds: 503 is not reported with feed_not_received, never route_not_found', async t => {
   const s = await setup(t);
   for (const kind of ['data', 'history']) {
@@ -543,7 +584,7 @@ test('P2 durability: a post-rename sync failure cannot roll sequence back in mem
   assert.deepEqual(restart.feeds().history.value.points.map(p => p.t), [at(0), at(30000), at(31000)]);
 });
 
-test('P2 corrupt history: malformed, invalid and oversized stores fail closed without overwriting or resetting sequence', async t => {
+test('P2 corrupt history: snapshots advance while malformed, invalid and oversized history stays untouched and broken', async t => {
   for (const damage of ['json', 'contract', 'bytes', 'oversize']) {
     const s = await setup(t); await s.push(snapshot());
     s.time.ms = 1000; await s.push(snapshot(102, 1000));
@@ -552,16 +593,33 @@ test('P2 corrupt history: malformed, invalid and oversized stores fail closed wi
     const body = damage === 'json' ? '{' : damage === 'contract' ? JSON.stringify({ format: 'joedesk.history-store.v2', value: { schema: 'old' } }) :
       damage === 'bytes' ? JSON.stringify(invalidBytes) : ' '.repeat(HISTORY_CAP + 1);
     await writeFile(file, body);
-    const snapshotBefore = readFileSync(join(s.dataDir, 'data-state.json'), 'utf8');
     for (let attempt = 0; attempt < 2; attempt++) {
-      const restarted = await setup(t, { dataDir: s.dataDir }); restarted.time.ms = 2000 + attempt * 1000;
+      const writes = [];
+      const restarted = await setup(t, { dataDir: s.dataDir,
+        write: (file, ...args) => { writes.push(basename(file)); atomicWrite(file, ...args); } });
+      restarted.time.ms = 2000 + attempt * 1000;
+      assert.equal(restarted.model.feeds().data.value.seq, 102 + attempt);
       const pushed = await restarted.push(snapshot(103 + attempt, restarted.time.ms));
-      assert.equal(pushed.status, 503); assert.equal(pushed.body.reason, 'history_write_failed');
+      assert.equal(pushed.status, 200); assert.equal(pushed.body.historyReason, 'history_write_failed');
+      assert.equal(pushed.body.reason, null);
       assert.equal(readFileSync(file, 'utf8'), body);
-      assert.equal(readFileSync(join(s.dataDir, 'data-state.json'), 'utf8'), snapshotBefore);
-      assert.equal(restarted.model.feeds().data.value.seq, 102);
+      assert.ok(!writes.includes('history-state.json'));
+      assert.equal(restarted.model.feeds().data.value.seq, 103 + attempt);
+      const data = (await restarted.request('/joe/data.json')).body;
+      assert.equal(data.seq, 103 + attempt); assert.equal(data.receivedAt, at(restarted.time.ms));
+      assert.deepEqual(data.totals, samples.data.totals);
+      assert.equal(restarted.model.panels()['today.equity'].state, 'fresh');
       assert.equal(restarted.model.feeds().history.value, null);
-      assert.equal((await restarted.request('/joe/healthz')).body.feeds.history.reason, 'history_write_failed');
+      const health = (await restarted.request('/joe/healthz')).body;
+      assert.deepEqual(health.feeds.history, { state: 'broken', ageSeconds: null, reason: 'history_write_failed' });
+      assert.deepEqual(health.feeds.data, { state: 'fresh', ageSeconds: 0, reason: null });
+      assert.equal(health.gateway.confirmed, true);
+      const unavailable = await restarted.request('/joe/history.json');
+      assert.equal(unavailable.status, 503); assert.equal(unavailable.body.reason, 'history_write_failed');
+      const durable = readFileSync(join(s.dataDir, 'data-state.json'), 'utf8');
+      assert.equal((await restarted.push(snapshot(1, restarted.time.ms))).body.reason, 'sequence_replayed');
+      assert.equal(readFileSync(join(s.dataDir, 'data-state.json'), 'utf8'), durable);
+      assert.equal(readFileSync(file, 'utf8'), body);
     }
   }
 });
@@ -614,7 +672,8 @@ test('P2 compaction: UTF-8 envelope warning compacts before 6.4MiB and preserves
   assert.ok(measureHistory(value) >= HISTORY_WARNING);
   const original = structuredClone(value.points);
   boundHistory(value);
-  assert.ok(value.sizeBytes < HISTORY_WARNING); assert.equal(value.reason, 'history_compacted');
+  assert.ok(value.sizeBytes < HISTORY_WARNING); assert.equal(value.reason, undefined);
+  assert.equal(value.compactedThrough, original.at(-1).t);
   assert.ok(value.points.length < original.length);
   for (const i of [0, 31, 32, 46, 47, 48, 49, 50, 51, 52, original.length - 1]) {
     assert.deepEqual(value.points.find(p => p.t === original[i].t), original[i], String(i));
@@ -653,8 +712,8 @@ function atCap(target, metadata = {}) {
 
 test('P2 hard cap: exact 8MiB complete envelope writes; +1 byte fails explicitly before persistence', async t => {
   const s = await setup(t);
-  // Include the alarm before measuring to account for every envelope byte.
-  const exact = atCap(HISTORY_CAP, { reason: 'history_compacted', compactedThrough: at(9999000) });
+  // Include compaction metadata when measuring every envelope byte.
+  const exact = atCap(HISTORY_CAP, { compactedThrough: at(9999000) });
   boundHistory(exact);
   assert.equal(exact.sizeBytes, HISTORY_CAP); assert.equal(exact.points.length, 10000);
   atomicWrite(join(s.dataDir, 'history-state.json'), historyEnvelope(exact), HISTORY_CAP);
@@ -680,24 +739,36 @@ test('P2 hard cap: exact 8MiB complete envelope writes; +1 byte fails explicitly
   assert.equal((await recovery.request('/joe/healthz')).body.feeds.history.state, 'fresh');
 });
 
-test('P2 history alarm: successful near-cap compaction is visible through history and anonymous health', async t => {
+test('P2 history metadata: compacted history stays fresh across restart and turns snapshot_stale at 60 seconds', async t => {
   const dataDir = mkdtempSync(join(ROOT, 'p2-'));
   const history = historySeries(); measureHistory(history);
   assert.ok(history.sizeBytes >= HISTORY_WARNING && history.sizeBytes < HISTORY_CAP);
   atomicWrite(join(dataDir, 'history-state.json'), historyEnvelope(history), HISTORY_CAP);
   const s = await setup(t, { dataDir, clock: () => at(10000000) });
   const result = await s.push(snapshot(101, 10000000));
-  assert.equal(result.body.historyReason, 'history_compacted');
+  assert.equal(result.body.historyReason, null);
   const stored = (await s.request('/joe/history.json')).body;
-  assert.ok(stored.sizeBytes < HISTORY_WARNING); assert.equal(stored.reason, 'history_compacted');
+  assert.ok(stored.sizeBytes < HISTORY_WARNING); assert.equal(stored.reason, undefined);
+  assert.equal(stored.compactedThrough, at(10000000));
   const health = (await s.request('/joe/healthz', { headers: { 'x-auth-request-user': '' } })).body;
-  assert.equal(health.feeds.history.reason, 'history_compacted'); assert.equal(health.feeds.history.state, 'stale');
+  assert.equal(health.feeds.history.reason, null); assert.equal(health.feeds.history.state, 'fresh');
   assert.equal(health.feeds.data.state, 'fresh');
-  assert.equal(s.model.panels().history.state, 'stale');
+  assert.equal(s.model.panels().history.state, 'fresh');
   const restart = await setup(t, { dataDir }); restart.time.ms = 10001000;
   await restart.push(snapshot(102, restart.time.ms));
-  assert.equal(restart.model.feeds().history.value.reason, 'history_compacted');
-  assert.equal((await restart.request('/joe/healthz')).body.feeds.history.state, 'stale');
+  assert.equal(restart.model.feeds().history.value.reason, undefined);
+  assert.equal(restart.model.feeds().history.value.compactedThrough, stored.compactedThrough);
+  assert.equal((await restart.request('/joe/healthz')).body.feeds.history.state, 'fresh');
+  for (const elapsed of [59999, 60000, 60001, 86400000]) {
+    restart.time.ms = 10001000 + elapsed;
+    const expected = { state: elapsed < 60000 ? 'fresh' : 'stale', ageSeconds: elapsed / 1000,
+      reason: elapsed < 60000 ? null : 'snapshot_stale' };
+    assert.deepEqual((await restart.request('/joe/healthz')).body.feeds.history, expected);
+    const panel = restart.model.panels().history;
+    for (const key of Object.keys(expected)) assert.equal(panel[key], expected[key]);
+    const cold = createReadModel({ dataDir, clock: () => at(restart.time.ms) });
+    assert.equal(cold.panels().history.reason, expected.reason);
+  }
   // The compacted range ages out while one later, uncompacted point remains.
   restart.time.ms = 10000000 + 14 * 86400000 + 1;
   assert.equal((await restart.push(snapshot(103, restart.time.ms))).status, 200);
@@ -705,6 +776,32 @@ test('P2 history alarm: successful near-cap compaction is visible through histor
   assert.equal(restart.model.feeds().history.value.compactedThrough, undefined);
   assert.deepEqual(restart.model.feeds().history.value.points.map(p => p.t), [at(10001000), at(restart.time.ms)]);
   assert.equal((await restart.request('/joe/healthz')).body.feeds.history.state, 'fresh');
+});
+
+test('P2 history cadence: 16 days of 30-second observations remain fresh through repeated compactions', () => {
+  const cadence = 30000, batch = 240, duration = 16 * 86400000;
+  const point = samples.history.points[0];
+  let history = null;
+  const compactedRanges = new Set();
+  // Replay the complete cadence in two-hour batches to bound test CPU cost.
+  // appendHistory owns pruning, compaction, metadata and each final receipt.
+  for (let start = 0; start < duration / cadence; start += batch) {
+    const pending = history ? { ...history, points: [...history.points] } : historySeries(0);
+    for (let n = start; n < start + batch - 1; n++) pending.points.push({ ...point, t: at(n * cadence) });
+    const ms = (start + batch - 1) * cadence;
+    const accepted = { ...snapshot(start + batch, ms), receivedAt: at(ms) };
+    history = appendHistory(pending, accepted, panelStates({ data: { value: accepted } }, at(ms)), at(ms));
+    if (history.compactedThrough) compactedRanges.add(history.compactedThrough);
+    assert.equal(history.reason, undefined);
+    assert.ok(history.points.length <= 10000 && history.sizeBytes <= HISTORY_CAP);
+    assert.ok(Date.parse(history.points[0].t) >= BASE_TIME + ms - 14 * 86400000);
+    for (const elapsed of [0, cadence]) {
+      const cell = panelState({ value: history }, history, history.reason, at(ms + elapsed));
+      assert.equal(cell.state, 'fresh'); assert.equal(cell.reason, null); assert.equal(cell.ageSeconds, elapsed / 1000);
+    }
+  }
+  assert.ok(compactedRanges.size >= 3, `Expected repeated compactions, got ${compactedRanges.size}`);
+  assert.equal(history.points.at(-1).t, at(duration - cadence));
 });
 
 test('P2 history retention: server time prunes old points even with a slow producer clock', () => {
@@ -721,7 +818,9 @@ test('P2 history: J backfill is never accepted or copied into observed v2 histor
   const s = await setup(t); await s.push(snapshot());
   const original = readFileSync(join(s.dataDir, 'history-state.json'), 'utf8');
   const extra = snapshot(102, 1000); extra.desks[0].equityBackfill = [{ t: at(-3600000), equity: 5000 }];
-  assert.equal((await s.push(extra)).status, 422);
+  const rejected = await s.push(extra);
+  assert.equal(rejected.status, 422); assert.equal(rejected.body.reason, 'contract_invalid');
+  assert.deepEqual(rejected.body.errors, [{ path: '$.desks[0]', rule: 'additionalProperties' }]);
   assert.equal(readFileSync(join(s.dataDir, 'history-state.json'), 'utf8'), original);
   s.time.ms = 1000; assert.equal((await s.push(snapshot(103, 1000))).status, 200);
   const history = (await s.request('/joe/history.json')).body;

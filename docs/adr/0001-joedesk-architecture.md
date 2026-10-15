@@ -102,6 +102,11 @@ snapshots require it. Receipt age is server now minus server receipt, never
 producer clock minus browser clock. P2 serves its clock so the browser can anchor an
 elapsed monotonic timer; a client clock error cannot make old data fresh.
 Future producer clocks do not make receipt age negative or extend freshness.
+The ingress clock tolerance is exactly 5 seconds: `generatedAt` at receipt
++5000 ms is accepted; anything later is rejected as `clock_ahead` before a
+snapshot/history write. A producer more than 5 seconds fast will have every
+push rejected. Restore its clock synchronization (NTP), then send a higher
+valid sequence; do not clear the board stores or reset sequence to recover.
 Server clock regressions require an operator diagnostic, not a freshness reset.
 Selectors take only validated served snapshots; missing/invalid data `receivedAt`
 or invalid supplied `generatedAdvancedAt` fails closed with `contract_invalid`
@@ -634,8 +639,41 @@ CalVer3; it rejects mismatched schemes and invalid dates. LEAD accepts the
 `market-calendar.json` and `release.json` beyond the original contracts-only
 packaging wording; the existing Docker base/CMD and deployment/compose stay
 unchanged. Closed reasons and selector handling are tested together. Contract
-manifest revision 2 adds `clock_ahead`, `feed_not_received`, `market_closed`,
-`calendar_unavailable` and `history_compacted`; identifiers remain exact v2.
+manifest revision 2 retains the exact v2 identifiers and adds candidate revision
+metadata. Its complete shared-package delta from P1 needs coordinator
+compatibility review before activation:
+
+- The closed reason enum adds `executor_broker_disagreement` and
+  `results_not_wired`, plus the five fix1 codes `clock_ahead`,
+  `feed_not_received`, `market_closed`, `calendar_unavailable` and
+  `history_compacted`. Executor selection retains P1 behavior; actual
+  order/fill/brake reconciliation remains P5/producer work with Amy's sign-off.
+- `acceptSnapshot` rejects generation beyond receipt +5000 ms as `clock_ahead`
+  with the safe `$.generatedAt` / `clockAhead` diagnostic, before persistence.
+- Shared selectors accept durable gateway check-progress metadata, validate its
+  receipt/clock anchors, use its age for Gateway and current money expiry, and
+  run the session check even when the data feed has a rejection. A rejection
+  cannot bypass session or KEEP constraints. Never-received null values map to
+  `not reported` / `feed_not_received`; false HALT stays a reported retained
+  value. Non-identical replay rejections map to advisory `stale`; exact duplicate
+  payload digests leave the server's display state and receipts unchanged.
+- History adds optional server-owned `compactedThrough`. Fix2 makes it metadata
+  without a required reason: successful compaction follows ordinary receipt
+  freshness and becomes `snapshot_stale` at 60 seconds without updates. Earlier
+  P2 `history_compacted` envelopes remain readable and follow the same age rules;
+  that legacy reason still requires `compactedThrough`. The enum code remains
+  compatible, but new successful compactions emit metadata alone.
+- Health requires server-owned `serverNow` and the closed nested Gateway
+  projection (`confirmed`, `checkAgeSeconds`, `reason`). The version schema
+  accepts the declared legacy `calendar` coordinate alongside `inspr-calver-3`;
+  semantics validate the scheme/coordinate pair, real date and confirmation
+  consistency. These changes do not adopt CalVer or widen the data schema IDs.
+- The new shared `acceptRead` boundary handles SSO redirects/status failures,
+  validates served contracts and closed reasons, requires Fleet receipt time,
+  and carries server generation/check progress. A validated HTTP 200 can retain
+  the server's last-good snapshot plus its rejection reason on a cold load,
+  preserving original receipts rather than discarding it.
+
 Integration targets `rebuild/v2`, not `main`. Producer/UI activation and any
 nixcfg deployment-pin movement remain P6/coordinator work after compatibility
 approval; this worker does not push or deploy.
@@ -649,6 +687,12 @@ silently converted or overwritten. A valid stored Fleet Config is loaded before
 first ingress and its receipt survives reads/restarts. Corrupt sequence or
 retained-receipt metadata fails closed. Each store has at most one retry file;
 a post-rename sync error cannot roll the in-memory sequence watermark backward.
+An unreadable, invalid, byte-count-invalid or oversized history store disables
+history writes until operator recovery/restart and is never overwritten.
+Valid snapshots continue advancing their durable sequence and money-board
+receipts; only History stays broken with `history_write_failed`. Its alarm
+survives every accepted snapshot and restart. Restore a compatible valid
+history backup through the owning operations workflow before restarting.
 
 The protected `/joe/state.json` serves serverNow, feeds/progress and selectors
 for P3. `/joe/data.json` withholds current money/marks with closed reasons while
@@ -675,7 +719,7 @@ All `P2 …` names below are `test/server-contract.mjs`; time cases are
 | P1 executor behavior: reachability never implies API readiness or order/fill/brake disagreement; Amy/P5 owns real reconciliation | `P2 executor: reachability and API readiness remain independent in both directions` |
 | ADR §4 / class j / deferred extra time cases: NY/Vienna day, ISO week, RTH, all 24 literal P1 vectors, pinned holidays/early closes, 2027 spring, Vienna midnight, repeated NY hour and extended hours | `time vector: <all 24 fixture ids in fixtures/time-vectors.json>`; `time: pinned holidays and early closes are closed at the exact boundary`; `time: 2027 spring mismatch spans US 14 March through EU 28 March`; `time: Vienna midnight and ISO week are independent of NY accounting day`; `time: repeated NY 01:xx instants remain distinct; extended hours after 18 NY stay outside RTH` |
 | ADR §6 / class f: observed-only history, generation dedupe, per-point complete exact three-desk sums, null gaps and independent composite basis identity | `P2 history: dedupe generation, null gaps and composite per-desk bases survive restart`; `P2 history sums: every field rejects missing/null desks or fields and unequal family sums`; `P2 gap storage: empty, leading/internal/trailing and outage-only windows remain null observations`; `P2 daily closes: compaction retains every Vienna day final observed equity before null gaps` |
-| ADR §6 / class i / deferred byte sizing: UTF-8 bytes including envelope, 80% warning compaction, extrema/endpoints/gap/basis edges, exact 8MiB and +1 failure; explicit size/write alarms | `P2 compaction: UTF-8 envelope warning compacts before 6.4MiB and preserves extrema and gap/basis edges`; `P2 hard cap: exact 8MiB complete envelope writes; +1 byte fails explicitly before persistence`; `P2 storage: data and history write failures are explicit and preserve independent last-good`; `P2 history alarm: successful near-cap compaction is visible through history and anonymous health` |
+| ADR §6 / class i / deferred byte sizing: UTF-8 bytes including envelope, 80% warning compaction, extrema/endpoints/gap/basis edges, exact 8MiB and +1 failure; explicit size/write alarms | `P2 compaction: UTF-8 envelope warning compacts before 6.4MiB and preserves extrema and gap/basis edges`; `P2 hard cap: exact 8MiB complete envelope writes; +1 byte fails explicitly before persistence`; `P2 storage: data and history write failures are explicit and preserve independent last-good`; `P2 history metadata: compacted history stays fresh across restart and turns snapshot_stale at 60 seconds`; `P2 history cadence: 16 days of 30-second observations remain fresh through repeated compactions` |
 | ADR §7 / class g / deferred gateway and not-reported health notes: anonymous exact nested allowlist, actual version/scheme, contract-set version, server clock, four receipt-aged feeds and gateway check confirmation/age/reason | `P2 health: anonymous exact allowlist, never-received null ages and failed-refresh distinctions` |
 | ADR §7 / deferred g-expired-sso: auth failures and original independent last-good ages for data, history, results and Fleet Config, anonymous health usable | `P2 auth: all four protected reads retain independent last-good ages on SSO failures`; `P2 Fleet receipt: stored policy constrains first ingress; unchanged reads and restart preserve its age` |
 | ADR §3/§9 / JOED-20 dependency: Results v2 not-wired error envelope only; no synthetic executor facts or results producer/write path | `P2 results: only v2 not-wired state; no executor producer fields or write route` |
@@ -718,12 +762,12 @@ describe the original candidate, not this fix round.
 | --- | --- |
 | H1 | History retention uses server `now`. Ingress rejects producer generation beyond receipt +5000 ms as `clock_ahead`, before snapshot/history writes. `P2 clock ahead: five good observations survive a one-year jump and the next valid sequence` proves byte-identical stores and recovery across restart; `clock-ahead tolerance: exactly five seconds is valid; one more millisecond retains last-good` checks all snapshot contracts; `P2 history retention: server time prunes old points even with a slow producer clock` checks the cutoff. |
 | M1 | Rejections keep the last snapshot, money, P&L-source evidence, API readiness and original receipts. Only session/KEEP constraints withhold values; headers/state carry feed rejection. A cold `acceptRead` accepts the validated retained snapshot with its rejection reason. `P2 cold retention: bad and replayed pushes preserve the last snapshot, ownership and original receipts` covers malformed-schema/replay cold loads, restart and independent check expiry. |
-| M2 | Malformed, contract-invalid, byte-count-invalid and oversized history stores block ingress with 503 `history_write_failed`; neither store is overwritten and sequence never restarts at 1. `P2 corrupt history: malformed, invalid and oversized stores fail closed without overwriting or resetting sequence` repeats ingress/restart probes and checks file bytes. |
+| M2 | **Superseded by LEAD's fix2 decision:** malformed, contract-invalid, byte-count-invalid and oversized history stores disable history writes without blocking valid snapshots. History bytes remain untouched, its alarm persists, and the data sequence never restarts at 1. `P2 corrupt history: snapshots advance while malformed, invalid and oversized history stays untouched and broken` proves live money, independent History failure and byte preservation through repeated restarts. |
 | M3 | P1 executor behavior and the original `a-gateway-up-but-dead` fixture are restored. `P2 executor: reachability and API readiness remain independent in both directions` covers both boolean directions; the deferred note assigns order/fill/brake disagreement to P5/producer with Amy's sign-off. |
 | M4 | `P2 inbox auth: missing and wrong bearer return 401; unconfigured token returns 503 before writes` proves all three cases precede parsing and every store write. |
 | L1 | Time reasons are in the closed enum. `time: every market-session reason is closed and accepted by browser selectors` covers open, weekend, holiday, early-close and unavailable-calendar branches; `one closed reason enum is used everywhere, including field errors` exercises selector handling for every code. |
 | L2 | Never-received feeds use `feed_not_received`, null age and `not reported`; data/history return 503 rather than route 404. `P2 empty feeds: 503 is not reported with feed_not_received, never route_not_found` and the exact health assertions cover these distinctions. |
-| L3 | Successful compaction is advisory `history_compacted` (`stale` in the existing closed state set), with server-owned `compactedThrough` persisting its affected range. The warning survives pushes/restart until that range ages out, even while newer raw points remain. Real size/write failures stay broken until an actual successful history write; dedupe cannot clear them. `P2 history alarm: successful near-cap compaction is visible through history and anonymous health`, `P2 hard cap: exact 8MiB complete envelope writes; +1 byte fails explicitly before persistence` and `P2 storage: data and history write failures are explicit and preserve independent last-good` prove warning/failure persistence and resolution. Cold retention also proves replay is advisory and cannot turn healthy cells broken. |
+| L3 | **Corrected in fix2:** successful compaction is server-owned `compactedThrough` metadata; it never forces a stale state or hides a stopped feed. `P2 history metadata: compacted history stays fresh across restart and turns snapshot_stale at 60 seconds` and the 16-day cadence test prove age-based freshness. Real size/write failures stay broken until an actual successful history write; dedupe cannot clear them. The hard-cap/storage regressions retain failure persistence and recovery. Exact duplicate replays are display no-ops; non-identical replays retain the advisory stale mapping. |
 | L4 | Inbox 422 responses include at most 20 safe `path`/`rule` pairs, without rejected values. `P2 inbox diagnostics: schema, field and replay rejections expose only bounded safe path/rule pairs` plus the gateway-check regression test cover schema, field, sequence and timing diagnostics. |
 | L5 | A committed snapshot rename followed by directory-sync failure continues through history recording before returning failure. `P2 durability: a post-rename sync failure cannot roll sequence back in memory or after restart` now asserts both original points survive retries/restart; the storage regression also covers history's own post-rename error. |
 | L6 | Packaging assertions name exact Docker COPY/Nix install sources; HTTP assertions check `X-Joe-Server-Now`; auth ages come from real data/history/Fleet receipts (only the explicitly unwired Results client cache is synthetic). Time tests use production consumers; `P2 repeated NY hour: distinct UTC receipts and history points survive compaction and restart` proves repeated-hour storage behavior. The executor regression covers both directions, and `P2 history: J backfill is never accepted or copied into observed v2 history` restores the v2 observation-only check. |
@@ -739,3 +783,40 @@ SXR8/TSLA remain covered by the existing contract tests. No Docker/default.nix,
 compose, deployment, legacy UI or release-identity changes were made in fix1.
 No review gate, other model CLI, delegation, push or deployment was run; the
 coordinator owns the cross-family gate after this worker exits.
+
+### P2 fix round 2 — JOED-22
+
+This round addresses all seven adopted items from the Opus r2 review against
+`af92602`, preserving the other fix1 safeguards. Exact duplicate ingress keeps
+HTTP 422 `sequence_replayed` and its safe diagnostic; it performs no writes,
+leaves any existing alarm alone and never refreshes receipt/check progress.
+Identity requires the same sequence and SHA-256 of canonical JSON ingress
+(object keys sorted, array order preserved, server `receivedAt` excluded).
+Non-identical and lower-sequence replays retain the rejection behavior.
+
+| Fix2 item | Result and executable evidence |
+| --- | --- |
+| 1: compaction is metadata | `P2 history metadata: compacted history stays fresh across restart and turns snapshot_stale at 60 seconds` checks `compactedThrough` on history.json, fresh health/panels, restart, 59.999/60.000/60.001-second and one-day stalls, then metadata expiry with retained raw observations. `P2 history cadence: 16 days of 30-second observations remain fresh through repeated compactions` replays all 46,080 observations in two-hour batches through production append/prune/compaction, checking every resulting receipt and its next 30-second probe; it requires at least three distinct compaction watermarks. The shared-contract test also proves metadata without a reason and age-based handling of legacy compaction reasons. |
+| 2: corrupt history does not block ingress | `P2 corrupt history: snapshots advance while malformed, invalid and oversized history stays untouched and broken` covers malformed JSON, invalid schema, wrong byte count and oversize, each across two restarts. Snapshots advance sequence/receipts and fresh money/Gateway; history never writes, stays byte-identical and returns 503 with its independent broken alarm. A sequence-1 push still fails. The fix1 M2 row above records the revised decision. |
+| 3: false HALT is retained | `missing feed retains false HALT with its original receipt rather than treating it as absent` exercises the shared selector with a last-good snapshot and `feed_not_received`: false remains visible, retained, with its original 30-second receipt age. |
+| 4: exact replay is a display no-op | `P2 exact replay: same sequence and payload digest leave display, receipts and stores unchanged` checks identical and reordered-object payloads, no writes/headers/state/health changes, byte-identical stores, restart and a genuine 60-second stall. A different payload at the same sequence still warns, and an exact retry cannot clear that existing rejection. |
+| 5: J-backfill rejection names the rule | `P2 history: J backfill is never accepted or copied into observed v2 history` now requires `contract_invalid` with exactly `$.desks[0]` / `additionalProperties`, in addition to 422, byte-identical history and later observation-only recovery. The path names the closed enclosing object, never the untrusted extra key. |
+| 6: complete compatibility inventory | The revision-2 note above lists every shared-package change from P1, including rejected-feed session checks, state mappings, `compactedThrough`, both original P2 reason additions, all five fix1 codes, clock acceptance, health schema/semantics and `acceptRead`. Coordinator compatibility review remains required. |
+| 7: clock recovery guidance | §2 records the exact +5000 ms boundary, all-push `clock_ahead` failure for a faster producer, NTP correction and recovery with a higher valid sequence. The existing clock-ahead boundary and five-good-push/restart regressions remain green. |
+
+Fix2 validation on native Node 24.20.0: `npm test` passed **93 contract,
+fixture and time tests + 38 isolated HTTP/storage tests (131 total), zero
+failures**. `npm run check` passed **all 9 check scripts** and `git diff --check`
+passed. The existing 256-position/10000-point CPU trace was **117.8 ms** against
+the provisional 5000 ms guard. Four read-only in-memory negative controls loaded
+`af92602` implementations via Git, reproduced the false-HALT, compaction-age,
+corrupt-history-ingress and exact-replay defects, and verified the fixed behavior;
+these probes wrote no store or checkout files. The HTTP runner used only its
+guarded private temporary root and trashed that root afterward.
+
+Paper-only, LIVE rejection and KEEP SXR8/TSLA remain covered. P1 failure fixtures,
+deployment/compose/packaging files, legacy UI and release identity are unchanged
+in fix2. Integration still targets `rebuild/v2` with a coordinator squash merge;
+the ignored status file stays out of the product index. No push, deployment,
+review gate, delegation or other model CLI ran. The coordinator owns the
+cross-family gate after worker exit; the ticket remains QA.

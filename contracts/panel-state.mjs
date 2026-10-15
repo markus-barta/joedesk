@@ -1,4 +1,4 @@
-import { REASONS } from './index.mjs';
+import { CONTRACTS, REASONS } from './index.mjs';
 import { validInstant } from './schema-validator.mjs';
 import { gatewayReason, gatewayCheckAgeMs, GATEWAY_CHECK_MAX_AGE_MS } from './gateway.mjs';
 
@@ -20,9 +20,12 @@ export function feedAge(feed, now) {
 export function panelState(feed, value, reason, now, lastGood = null, lastGoodReceivedAt = null) {
   if (!validInstant(now)) throw new TypeError('A current instant is required');
   if (reason && !REASONS.includes(reason)) throw new TypeError('Unknown panel reason');
+  // Older P2 history envelopes used a reason for successful compaction.
+  // Compaction is metadata; its presence cannot hide receipt age or a stall.
+  if (reason === 'history_compacted' && feed?.value?.schema === CONTRACTS.contracts.history) reason = null;
   const age = feedAge(feed, now);
   const receivedAt = feed?.value?.receivedAt ?? feed?.receivedAt ?? null;
-  if (!value && feed?.reason === 'feed_not_received') return {
+  if (value == null && feed?.reason === 'feed_not_received') return {
     state: 'not reported', ageSeconds: null, reason: 'feed_not_received', value: null, retained: false, valueReceivedAt: null,
   };
   if (feed?.reason || reason) {
@@ -30,10 +33,9 @@ export function panelState(feed, value, reason, now, lastGood = null, lastGoodRe
     const valueReceivedAt = value == null && lastGood != null ? lastGoodReceivedAt : receivedAt;
     const retained = shown != null && (Boolean(feed?.reason) || value == null);
     return {
-      // A duplicate delivery and successful history compaction are advisory.
-      // Explicit field/session failures and failed history writes stay broken.
-      state: (feed?.reason === 'sequence_replayed' && !reason && shown != null) ||
-        (!feed?.reason && reason === 'history_compacted' && shown != null) ? 'stale' : 'broken',
+      // Non-identical replays are advisory; exact duplicates never set a feed
+      // rejection. Explicit field/session failures and failed writes are broken.
+      state: feed?.reason === 'sequence_replayed' && !reason && shown != null ? 'stale' : 'broken',
       ageSeconds: retained ? (valueReceivedAt ? Math.max(0, (Date.parse(now) - Date.parse(valueReceivedAt)) / 1000) : null) : age,
       reason: feed?.reason || reason, value: shown, retained, valueReceivedAt,
     };
