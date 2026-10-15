@@ -11,7 +11,7 @@ const browser = process.env.BROWSER_PATH || (process.platform === 'darwin'
 await access(browser);
 const profile = await mkdtemp(join(tmpdir(), 'joed-contract-browser-'));
 const files = new Map();
-for (const name of ['index.mjs', 'schema-validator.mjs', 'semantics.mjs', 'decimal.mjs', 'accept.mjs', 'panel-state.mjs',
+for (const name of ['index.mjs', 'schema-validator.mjs', 'semantics.mjs', 'decimal.mjs', 'gateway.mjs', 'accept.mjs', 'panel-state.mjs',
   'manifest.json', 'data.schema.json', 'history.schema.json', 'results.schema.json',
   'fleet-config.schema.json', 'healthz.schema.json', 'common.schema.json', 'reason.schema.json']) {
   files.set(`/contracts/${name}`, await readFile(new URL(`../contracts/${name}`, import.meta.url)));
@@ -27,12 +27,14 @@ try {
   const samples = await (await fetch('/fixtures/valid.json')).json();
   for (const [kind, payload] of Object.entries(samples)) {
     if (!validateContract(kind, payload).ok) throw new Error(kind + ' rejected in browser');
-    if (validateContract(kind, {...payload, schema:'old.v0'}).status !== 422) throw new Error('old accepted');
+    const old = validateContract(kind, {...payload, schema:'old.v0'});
+    if (old.status !== 422 || !old.errors.some(e => e.rule === 'const' && e.path === '$.schema')) throw new Error('old schema rule missing');
   }
   const payload = structuredClone(samples.data); delete payload.receivedAt;
   const feed = acceptSnapshot('data', payload, null, samples.data.receivedAt);
   const rejected = acceptSnapshot('data', {...payload, schema:'old.v0'}, feed, samples.data.receivedAt);
-  if (rejected.status !== 422 || rejected.value !== feed.value) throw new Error('last-good lost');
+  if (rejected.status !== 422 || rejected.value !== feed.value ||
+      !rejected.errors.some(e => e.rule === 'const' && e.path === '$.schema')) throw new Error('last-good/schema rule lost');
   if (panelStates({data:feed}, samples.data.receivedAt).gateway.state !== 'fresh') throw new Error('panel failed');
   document.body.textContent = 'contract-browser-ok';
 } catch (error) { document.body.textContent = 'FAILED: ' + error.message; }

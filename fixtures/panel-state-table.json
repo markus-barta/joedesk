@@ -137,6 +137,16 @@
       "id": "b-session-open-estimate",
       "failureClass": "b",
       "file": "failures/b-session-open-estimate.json"
+    },
+    {
+      "id": "a-missing-gateway",
+      "failureClass": "a",
+      "file": "failures/a-missing-gateway.json"
+    },
+    {
+      "id": "a-frozen-ready-gateway",
+      "failureClass": "a",
+      "file": "failures/a-frozen-ready-gateway.json"
     }
   ]
 }

@@ -1,5 +1,6 @@
 import { REASONS } from './index.mjs';
 import { validInstant } from './schema-validator.mjs';
+import { gatewayReason } from './gateway.mjs';
 
 export const MONEY_FIELDS = Object.freeze(['equity', 'dayPnl', 'openPnl', 'totalPnl']);
 export const DATA_PANELS = Object.freeze([
@@ -26,7 +27,7 @@ export function panelState(feed, value, reason, now, lastGood = null, lastGoodRe
     const valueReceivedAt = value == null && lastGood != null ? lastGoodReceivedAt : receivedAt;
     const retained = shown != null && (Boolean(feed?.reason) || value == null);
     return {
-      state: 'broken', ageSeconds: retained && valueReceivedAt ? Math.max(0, (Date.parse(now) - Date.parse(valueReceivedAt)) / 1000) : age,
+      state: 'broken', ageSeconds: retained ? (valueReceivedAt ? Math.max(0, (Date.parse(now) - Date.parse(valueReceivedAt)) / 1000) : null) : age,
       reason: feed?.reason || reason, value: shown, retained, valueReceivedAt,
     };
   }
@@ -51,21 +52,26 @@ export function panelStates(feeds, now, previousValues = {}, keepSymbols = feeds
   const affectedDesks = new Set(mismatched.flatMap(p => p.desk ? [p.desk] : ['j', 'joe', 'joel']));
   const scopeReason = mismatched.length ? 'source_not_authoritative' : null;
   const sourceReason = field => data?.pnlSources?.[field === 'dayPnl' ? 'day' : field === 'openPnl' ? 'open' : '']?.reason;
+  // A rejected/unreachable feed already exposes its original accepted values
+  // as retained. Accepted data needs an independent broker-session check.
+  const sessionReason = data && !feeds.data.reason ? gatewayReason(data.safety.gateway, now) : null;
   const select = (name, feed, value, reason) => {
     output[name] = panelState(feed, value, reason, now, previousValues[name]?.value, previousValues[name]?.valueReceivedAt);
   };
-  for (const field of MONEY_FIELDS) select(`today.${field}`, feeds.data, scopeReason ? null : data?.totals[field],
-    scopeReason || data?.totals.reasons?.[field] || sourceReason(field));
-  select('paperAccount', feeds.data, data?.brokerAccount?.equity, data?.brokerAccount?.reason);
+  for (const field of MONEY_FIELDS) select(`today.${field}`, feeds.data, sessionReason || scopeReason ? null : data?.totals[field],
+    sessionReason || scopeReason || data?.totals.reasons?.[field] || sourceReason(field));
+  select('paperAccount', feeds.data, sessionReason ? null : data?.brokerAccount?.equity, sessionReason || data?.brokerAccount?.reason);
   for (const id of ['j', 'joe', 'joel']) {
     const desk = data?.desks.find(d => d.id === id);
-    for (const field of MONEY_FIELDS) select(`desks.${id}.${field}`, feeds.data, affectedDesks.has(id) ? null : desk?.money[field],
-      affectedDesks.has(id) ? scopeReason : desk?.money.reasons?.[field] || sourceReason(field));
+    for (const field of MONEY_FIELDS) select(`desks.${id}.${field}`, feeds.data, sessionReason || affectedDesks.has(id) ? null : desk?.money[field],
+      sessionReason || (affectedDesks.has(id) ? scopeReason : desk?.money.reasons?.[field] || sourceReason(field)));
   }
-  const positionReason = data?.positions?.reason || scopeReason;
-  select('positions', feeds.data, data?.positions?.rows.filter(p => !keep.has(p.symbol)), positionReason);
-  select('kept', feeds.data, data?.positions?.rows.filter(p => keep.has(p.symbol)), positionReason);
-  select('gateway', feeds.data, data?.safety.gateway, data?.safety.gateway?.reason);
+  const positionReason = sessionReason || data?.positions?.reason || scopeReason;
+  const rows = sessionReason && data?.positions?.rows.some(p =>
+    ['mark', 'marketValue', 'dayPnl', 'openPnl'].some(field => p[field] != null)) ? null : data?.positions?.rows;
+  select('positions', feeds.data, rows?.filter(p => !keep.has(p.symbol)), positionReason);
+  select('kept', feeds.data, rows?.filter(p => keep.has(p.symbol)), positionReason);
+  select('gateway', feeds.data, data?.safety.gateway, sessionReason || data?.safety.gateway?.reason);
   select('halt', feeds.data, data?.safety.halt, data?.safety.halt ? data.safety.haltReason : null);
   select('executor', feeds.data, data?.safety.executor, data?.safety.executor?.reason);
   for (const name of ['history', 'results', 'fleet-config']) {

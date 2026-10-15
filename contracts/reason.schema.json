@@ -8,6 +8,7 @@
     "upstream_lost",
     "gateway_degraded",
     "gateway_unconfirmed",
+    "retained_values",
     "family_projection_unavailable",
     "day_pnl_unavailable",
     "all_desk_equity_unavailable",

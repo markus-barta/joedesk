@@ -1,4 +1,5 @@
 import { decimalUnits } from './decimal.mjs';
+import { gatewayReason } from './gateway.mjs';
 
 const FIELDS = ['equity', 'dayPnl', 'openPnl', 'totalPnl'];
 const KEEP = ['SXR8', 'TSLA'];
@@ -54,7 +55,7 @@ export function checkSemantics(kind, payload, stage, errors) {
       if (source?.status === 'available' && kind === 'day' && !['ib-daily-pnl', 'sod-virtual-equity', 'session-open-estimate'].includes(source.method)) fail('$.pnlSources.day', 'dayMethod');
       if (kind === 'day' && /^session_open_proxy(?:\b|[: _-])/.test(source?.detail ?? '') && source.method !== 'session-open-estimate') fail('$.pnlSources.day.method', 'estimateMethodRequired');
       if (source?.status === 'available' && kind === 'open' && !['ib-unrealized-pnl', 'owned-lots-current-mark-fx'].includes(source.method)) fail('$.pnlSources.open', 'openMethod');
-      if (['sod-virtual-equity', 'session-open-estimate'].includes(source?.method) && !source.periodStart) fail('$.pnlSources.day.periodStart', 'baselineRequired');
+      if (['sod-virtual-equity', 'session-open-estimate'].includes(source?.method) && !source.periodStart) fail(`$.pnlSources.${kind}.periodStart`, 'baselineRequired');
     }
     payload.positions?.rows.forEach((p, i) => {
       if ((KEEP.includes(p.symbol) && p.scope !== 'keep') || (p.scope === 'keep' && p.desk !== null)) fail(`$.positions.rows[${i}]`, 'keepExcluded');
@@ -66,9 +67,12 @@ export function checkSemantics(kind, payload, stage, errors) {
     const gateway = payload.safety.gateway;
     if (gateway && !gateway.apiSessionReady && !gateway.reason) fail('$.safety.gateway.reason', 'reasonRequired');
     if (gateway?.apiSessionReady && gateway.reason) fail('$.safety.gateway', 'contradictorySession');
-    // A newly delivered envelope is not a new broker observation. During a
-    // known dead session only null + reason is current; retention is board-owned.
-    if (gateway?.apiSessionReady === false) {
+    // An advancing envelope cannot confirm an absent or relayed old check.
+    // Validate against generation here; selectors also check the current clock.
+    if (gatewayReason(gateway, payload.generatedAt)) {
+      payload.desks.forEach((desk, i) => {
+        if (desk.moneyEvidence) fail(`$.desks[${i}].moneyEvidence`, 'sessionUnavailable');
+      });
       const unavailable = (value, path, reason) => {
         if (value != null) fail(path, 'sessionUnavailable');
         if (!reason) fail(path, 'reasonRequired');

@@ -363,5 +363,11 @@
       "reason": "snapshot_stale",
       "retained": false
     }
-  }
+  },
+  "expectedErrors": [
+    {
+      "path": "$.positions.source",
+      "rule": "const"
+    }
+  ]
 }

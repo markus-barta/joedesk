@@ -5,27 +5,33 @@ import { CONTRACTS, SCHEMAS, SCHEMA_FILES, REASONS, validateContract, validateAn
 import { resolveRef } from '../contracts/schema-validator.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
 import { decimalUnits } from '../contracts/decimal.mjs';
-import { panelStates } from '../contracts/panel-state.mjs';
+import { panelState, panelStates, MONEY_FIELDS } from '../contracts/panel-state.mjs';
 
 const samples = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const at = '2026-10-14T17:42:22.000Z';
 const later = '2026-10-14T17:42:52.000Z';
 const copy = v => structuredClone(v);
 const ingress = v => { const next = copy(v); delete next.receivedAt; return next; };
+const rejects = (result, rule, path, reason = 'contract_invalid') => {
+  assert.equal(result.status, 422);
+  assert.equal(result.reason, reason);
+  assert.ok(result.errors.some(e => e.rule === rule && e.path === path),
+    `Expected ${rule}@${path}: ${JSON.stringify(result.errors)}`);
+};
 
 for (const kind of Object.keys(SCHEMAS)) {
   test(`contract ${kind}: valid, invalid, old and unknown return explicit outcomes`, () => {
     assert.equal(validateContract(kind, samples[kind]).ok, true);
     const bad = { ...samples[kind], unexpected: 'synthetic' };
-    assert.equal(validateContract(kind, bad).status, 422);
+    rejects(validateContract(kind, bad), 'additionalProperties', '$');
     assert.strictEqual(validateAndRetain(kind, bad, samples[kind]).value, samples[kind]);
     for (const schema of ['legacy.v0', 'unknown.v99', null]) {
       const result = validateContract(kind, { ...samples[kind], schema });
-      assert.equal(result.status, 422);
-      assert.equal(result.reason, 'schema_unsupported');
+      rejects(result, 'const', '$.schema', 'schema_unsupported');
       assert.strictEqual(validateAndRetain(kind, { ...samples[kind], schema }, samples[kind]).value, samples[kind]);
     }
-    assert.equal(validateContract(kind, { schema: CONTRACTS.contracts[kind] }).status, 422);
+    rejects(validateContract(kind, { schema: CONTRACTS.contracts[kind] }), 'required',
+      `$.${SCHEMAS[kind].required.find(key => key !== 'schema')}`);
   });
 }
 
@@ -69,24 +75,24 @@ test('one closed reason enum is used everywhere, including field errors', () => 
   }
   const data = copy(samples.data);
   data.totals.reasons = { equity: 'new-unreviewed-reason' };
-  assert.equal(validateContract('data', data).status, 422);
+  rejects(validateContract('data', data), 'enum', '$.totals.reasons.equity');
 });
 
 test('paper is fixed, KEEP is excluded from results and cannot be removed from fleet policy', () => {
   const data = { ...samples.data, mode: 'LIVE' };
-  assert.equal(validateContract('data', data).status, 422);
+  rejects(validateContract('data', data), 'const', '$.mode');
   for (const symbol of ['SXR8', 'TSLA']) {
     const results = copy(samples.results);
     results.trades[0].symbol = symbol;
-    assert.equal(validateContract('results', results).status, 422);
+    rejects(validateContract('results', results), 'keepExcluded', '$.trades[0].symbol');
     const fleet = copy(samples['fleet-config']);
     fleet.desks.keep = fleet.desks.keep.filter(s => s !== symbol);
-    assert.equal(validateContract('fleet-config', fleet).status, 422);
+    rejects(validateContract('fleet-config', fleet), 'contains', '$.desks.keep');
     const data = copy(samples.data);
     data.positions.rows[0].symbol = symbol;
-    assert.equal(validateContract('data', data).status, 422);
+    rejects(validateContract('data', data), 'keepExcluded', '$.positions.rows[0]');
   }
-  assert.equal(validateContract('fleet-config', { ...samples['fleet-config'], mode: 'live' }).status, 422);
+  rejects(validateContract('fleet-config', { ...samples['fleet-config'], mode: 'live' }), 'const', '$.mode');
 });
 
 test('accepted receive time belongs to the server; old, unknown, invalid and replayed input keep last-good', () => {
@@ -94,35 +100,45 @@ test('accepted receive time belongs to the server; old, unknown, invalid and rep
     const initial = acceptSnapshot(kind, ingress(samples[kind]), null, at);
     assert.equal(initial.status, 200);
     assert.equal(initial.value.receivedAt, at);
-    for (const change of [
-      p => { p.schema = 'legacy.v0'; }, p => { p.schema = 'future.v99'; },
-      p => { p.extra = true; }, p => { p.receivedAt = later; },
-      p => { p.seq = 0; }, p => { p.seq -= 1; },
-      p => { p.generatedAt = '2026-10-14T17:40:00.000Z'; p.seq += 1; },
+    for (const [change, rule, path, reason] of [
+      [p => { p.schema = 'legacy.v0'; }, 'const', '$.schema', 'schema_unsupported'],
+      [p => { p.schema = 'future.v99'; }, 'const', '$.schema', 'schema_unsupported'],
+      [p => { p.extra = true; }, 'additionalProperties', '$'],
+      [p => { p.receivedAt = later; }, 'serverOwned', '$.receivedAt'],
+      [p => { p.seq = 0; }, 'minimum', '$.seq'],
+      [p => { p.seq -= 1; }, 'sequenceReplayed', '$.seq', 'sequence_replayed'],
+      [p => {
+        p.generatedAt = '2026-10-14T17:40:00.000Z'; p.seq += 1;
+        if (p.safety?.gateway) p.safety.gateway.checkedAt = p.generatedAt;
+      }, 'clockRegressed', '$.generatedAt', 'clock_regressed'],
     ]) {
       const candidate = ingress(samples[kind]); change(candidate);
       const rejected = acceptSnapshot(kind, candidate, initial, later);
-      assert.equal(rejected.status, 422, kind);
+      rejects(rejected, rule, path, reason);
       assert.strictEqual(rejected.value, initial.value, kind);
       assert.deepEqual(initial.value, samples[kind]);
     }
-    assert.equal(acceptSnapshot(kind, ingress(samples[kind]), initial, later).reason, 'sequence_replayed');
+    rejects(acceptSnapshot(kind, ingress(samples[kind]), initial, later), 'sequenceReplayed', '$.seq', 'sequence_replayed');
     const candidate = ingress(samples[kind]); candidate.seq++;
-    assert.equal(acceptSnapshot(kind, candidate, initial, '2026-10-14T17:42:21.000Z').reason, 'clock_regressed');
-    assert.equal(acceptSnapshot(kind, { schema: 'future.v99' }, null, later).value, null);
+    rejects(acceptSnapshot(kind, candidate, initial, '2026-10-14T17:42:21.000Z'), 'clockRegressed', '$.receivedAt', 'clock_regressed');
+    const unknown = acceptSnapshot(kind, { schema: 'future.v99' }, null, later);
+    rejects(unknown, 'const', '$.schema', 'schema_unsupported');
+    assert.equal(unknown.value, null);
   }
 });
 
 test('freshness is <60 seconds from receipt; frozen pushes stay stale until generation advances', () => {
   let data = acceptSnapshot('data', ingress(samples.data), null, at);
-  assert.equal(panelStates({ data }, '2026-10-14T17:43:21.999Z')['today.equity'].state, 'fresh');
-  assert.equal(panelStates({ data }, '2026-10-14T17:43:22.000Z')['today.equity'].state, 'stale');
+  const equity = now => panelState(data, data.value.totals.equity, null, now);
+  assert.equal(equity('2026-10-14T17:43:21.999Z').state, 'fresh');
+  assert.equal(equity('2026-10-14T17:43:22.000Z').state, 'stale');
   const candidate = ingress(samples.data); candidate.seq++;
   data = acceptSnapshot('data', candidate, data, '2026-10-14T17:44:22.000Z');
-  const frozen = panelStates({ data }, '2026-10-14T17:44:31.000Z')['today.equity'];
+  const frozen = equity('2026-10-14T17:44:31.000Z');
   assert.equal(frozen.reason, 'producer_frozen');
   assert.equal(frozen.ageSeconds, 129);
   candidate.seq++; candidate.generatedAt = '2026-10-14T17:44:30.000Z';
+  candidate.safety.gateway.checkedAt = candidate.generatedAt;
   data = acceptSnapshot('data', candidate, data, '2026-10-14T17:44:32.000Z');
   assert.equal(panelStates({ data }, '2026-10-14T17:44:33.000Z')['today.equity'].state, 'fresh');
 });
@@ -169,50 +185,53 @@ test('money stays decimal-safe and currency/evidence errors are rejected', () =>
   assert.equal(decimalUnits('0.1') + decimalUnits('0.2'), decimalUnits('0.3'));
   assert.equal(decimalUnits('-0.005'), -500000n);
   assert.throws(() => decimalUnits('0.000000001'));
-  for (const modify of [
-    p => { p.totals.equity.amount = 14999; },
-    p => { p.totals.equity.amount = '14999.00000001'; },
-    p => { p.totals.equity.currency = 'USD'; },
-    p => { delete p.pnlSources; },
-    p => { delete p.pnlSources.day.periodStart; },
-    p => { p.positions.source = 'book-sidefile'; },
-    p => { p.safety.gateway.apiSessionReady = false; },
+  for (const [modify, rule, path] of [
+    [p => { p.totals.equity.amount = 14999; }, 'anyOf', '$.totals.equity'],
+    [p => { p.totals.equity.amount = '14999.00000001'; }, 'deskSum', '$.totals.equity'],
+    [p => { p.totals.equity.currency = 'USD'; }, 'EUR', '$.totals.equity'],
+    [p => { delete p.pnlSources; }, 'evidenceRequired', '$.pnlSources.day'],
+    [p => { delete p.pnlSources.day.periodStart; }, 'baselineRequired', '$.pnlSources.day.periodStart'],
+    [p => { p.positions.source = 'book-sidefile'; }, 'const', '$.positions.source'],
+    [p => { p.safety.gateway.apiSessionReady = false; }, 'reasonRequired', '$.safety.gateway.reason'],
   ]) {
     const payload = copy(samples.data); modify(payload);
-    assert.equal(validateContract('data', payload).status, 422);
+    rejects(validateContract('data', payload), rule, path);
   }
   const results = copy(samples.results); results.trades[0].netEur.amount = '0';
-  assert.equal(validateContract('results', results).status, 422);
+  rejects(validateContract('results', results), 'netAfterFees', '$.trades[0]');
   const converted = copy(samples.data);
   converted.totals.equity.fx = copy(samples.results.trades[0].fx);
   assert.equal(validateContract('data', converted).ok, true);
   converted.totals.equity.fx.rate = '0.000';
-  assert.equal(validateContract('data', converted).status, 422);
+  rejects(validateContract('data', converted), 'positiveFxRate', '$.totals.equity.fx');
 });
 
 test('calendar-invalid instants, duplicate desks, unbounded arrays and unordered history are rejected', () => {
   for (const value of ['2026-02-29T00:00:00.000Z', '2026-10-14T24:00:00.000Z', '2026-10-14T17:42:22Z']) {
-    assert.equal(validateContract('data', { ...samples.data, generatedAt: value }).status, 422);
+    rejects(validateContract('data', { ...samples.data, generatedAt: value }), 'date-time', '$.generatedAt');
   }
   const duplicate = copy(samples.data); duplicate.desks[1].id = 'j';
-  assert.equal(validateContract('data', duplicate).status, 422);
+  rejects(validateContract('data', duplicate), 'uniqueDesk', '$.desks');
   const history = copy(samples.history); history.points.reverse();
-  assert.equal(validateContract('history', history).status, 422);
+  rejects(validateContract('history', history), 'strictOrder', '$.points[1].t');
   history.points = Array(10001).fill(samples.history.points[0]);
-  assert.equal(validateContract('history', history).status, 422);
+  rejects(validateContract('history', history), 'maxItems', '$.points');
   const oversized = copy(samples.data); oversized.source.label = 'x'.repeat(262145);
-  assert.ok(validateContract('data', oversized).errors.some(e => e.rule === 'maxBytes'));
+  rejects(validateContract('data', oversized), 'maxBytes', '$');
 });
 
 test('healthz is an exact allowlist: nested money, identifiers, arbitrary text and missing feeds fail closed', () => {
-  for (const modify of [
-    p => { p.accountHint = 'synthetic'; }, p => { p.money = { amount: '1', currency: 'EUR' }; },
-    p => { p.feeds.data.detail = 'synthetic diagnostic'; }, p => { p.feeds.data.id = 'synthetic'; },
-    p => { delete p.feeds.results; }, p => { p.feeds.data.state = 'stale'; },
-    p => { p.version = '260229120000.0.0'; },
+  for (const [modify, rule, path] of [
+    [p => { p.accountHint = 'synthetic'; }, 'additionalProperties', '$'],
+    [p => { p.money = { amount: '1', currency: 'EUR' }; }, 'additionalProperties', '$'],
+    [p => { p.feeds.data.detail = 'synthetic diagnostic'; }, 'additionalProperties', '$.feeds.data'],
+    [p => { p.feeds.data.id = 'synthetic'; }, 'additionalProperties', '$.feeds.data'],
+    [p => { delete p.feeds.results; }, 'required', '$.feeds.results'],
+    [p => { p.feeds.data.state = 'stale'; }, 'reasonRequired', '$.feeds.data.reason'],
+    [p => { p.version = '260229120000.0.0'; }, 'calendarCoordinate', '$.version'],
   ]) {
     const health = copy(samples.healthz); modify(health);
-    assert.equal(validateContract('healthz', health).status, 422);
+    rejects(validateContract('healthz', health), rule, path);
   }
 });
 
@@ -255,8 +274,7 @@ test('fix2 finding 1: dead sessions cannot publish current money or marks throug
   contradictory.safety.gateway.apiSessionReady = false;
   contradictory.safety.gateway.reason = 'upstream_lost';
   const rejected = validateContract('data', contradictory);
-  assert.equal(rejected.status, 422);
-  assert.ok(rejected.errors.some(e => e.rule === 'sessionUnavailable'));
+  rejects(rejected, 'sessionUnavailable', '$.totals.equity');
 
   let feed = acceptSnapshot('data', ingress(samples.data), null, at);
   let previous = panelStates({ data: feed }, at);
@@ -283,18 +301,18 @@ test('fix2 finding 1: dead sessions cannot publish current money or marks throug
     assert.equal(states.positions.value[0].mark, null);
     previous = states;
   }
-  for (const mutate of [
-    p => { p.totals.equity = copy(samples.data.totals.equity); },
-    p => { p.desks[0].money.totalPnl = copy(samples.data.desks[0].money.totalPnl); },
-    p => { p.brokerAccount.equity = copy(samples.data.brokerAccount.equity); },
-    p => { p.positions.rows[0].mark = copy(samples.data.positions.rows[0].mark); },
+  for (const [mutate, path] of [
+    [p => { p.totals.equity = copy(samples.data.totals.equity); }, '$.totals.equity'],
+    [p => { p.desks[0].money.totalPnl = copy(samples.data.desks[0].money.totalPnl); }, '$.desks[0].money.totalPnl'],
+    [p => { p.brokerAccount.equity = copy(samples.data.brokerAccount.equity); }, '$.brokerAccount.equity'],
+    [p => { p.positions.rows[0].mark = copy(samples.data.positions.rows[0].mark); }, '$.positions.rows[0].mark'],
   ]) {
     const candidate = unavailableSession(copy(samples.data)); mutate(candidate);
-    assert.ok(validateContract('data', candidate).errors.some(e => e.rule === 'sessionUnavailable'));
+    rejects(validateContract('data', candidate), 'sessionUnavailable', path);
   }
   const missingReason = unavailableSession(copy(samples.data));
   delete missingReason.totals.reasons.equity;
-  assert.ok(validateContract('data', missingReason).errors.some(e => e.rule === 'reasonRequired'));
+  rejects(validateContract('data', missingReason), 'reasonRequired', '$.totals.equity');
 });
 
 test('fix2 finding 2: every history field requires all three desks and their exact sum', () => {
@@ -307,9 +325,7 @@ test('fix2 finding 2: every history field requires all three desks and their exa
       if (missing === 'desk') delete point.desks.j;
       if (missing === 'sum') point.totals[field].amount = '12345';
       const result = validateContract('history', history);
-      assert.equal(result.status, 422, `${field}: ${missing}`);
-      assert.ok(result.errors.some(e => e.path === `$.points[1].totals.${field}` &&
-        e.rule === (missing === 'sum' ? 'deskSum' : 'incompleteDeskSum')));
+      rejects(result, missing === 'sum' ? 'deskSum' : 'incompleteDeskSum', `$.points[1].totals.${field}`);
     }
     const gap = copy(samples.history);
     gap.points[1].desks.j.money[field] = null;
@@ -324,25 +340,25 @@ test('fix2 finding 3: legacy observation, estimate and unavailable semantics hav
   observed.desks[0].moneyEvidence = { status: 'observed', observedAt: at };
   assert.equal(validateContract('data', observed).ok, true);
   observed.desks[0].moneyEvidence.status = 'carried';
-  assert.equal(validateContract('data', observed).status, 422);
+  rejects(validateContract('data', observed), 'const', '$.desks[0].moneyEvidence.status');
 
   const estimate = copy(samples.data);
   estimate.pnlSources.day.detail = 'session_open_proxy: synthetic session observation';
-  assert.ok(validateContract('data', estimate).errors.some(e => e.rule === 'estimateMethodRequired'));
+  rejects(validateContract('data', estimate), 'estimateMethodRequired', '$.pnlSources.day.method');
   estimate.pnlSources.day.method = 'session-open-estimate';
   estimate.pnlSources.open.detail = 'Synthetic owned-lot valuation';
   assert.equal(validateContract('data', estimate).ok, true);
   delete estimate.pnlSources.day.periodStart;
-  assert.ok(validateContract('data', estimate).errors.some(e => e.rule === 'baselineRequired'));
+  rejects(validateContract('data', estimate), 'baselineRequired', '$.pnlSources.day.periodStart');
   estimate.pnlSources.day.periodStart = at;
   estimate.pnlSources.day.method = 'unreviewed-estimate';
-  assert.equal(validateContract('data', estimate).status, 422);
+  rejects(validateContract('data', estimate), 'anyOf', '$.pnlSources.day.method');
 
   const unavailable = unavailableSession(copy(samples.data));
   unavailable.pnlSources.day.detail = 'Synthetic source unavailable';
   assert.equal(validateContract('data', unavailable).ok, true);
   unavailable.pnlSources.day.reason = 'arbitrary producer wording';
-  assert.equal(validateContract('data', unavailable).status, 422);
+  rejects(validateContract('data', unavailable), 'enum', '$.pnlSources.day.reason');
   const pending = copy(samples.data);
   pending.pnlSources.day.status = 'unavailable';
   pending.pnlSources.day.reason = 'baseline_pending';
@@ -394,4 +410,153 @@ test('fix2 finding 5: fleet KEEP policy routes rows regardless of producer scope
   states = panelStates(feeds, later);
   assert.deepEqual(states.positions.value.map(p => p.symbol), ['DEMO']);
   assert.equal(states.positions.reason, 'source_not_authoritative');
+});
+
+const moneyPanels = [
+  ...MONEY_FIELDS.map(field => `today.${field}`), 'paperAccount',
+  ...['j', 'joe', 'joel'].flatMap(id => MONEY_FIELDS.map(field => `desks.${id}.${field}`)),
+];
+const gatedPanels = [...moneyPanels, 'positions', 'kept', 'gateway'];
+function unconfirmedSession(payload, scenario) {
+  payload.safety.gateway ??= { apiSessionReady: false, checkedAt: at };
+  unavailableSession(payload);
+  if (scenario === 'missing') delete payload.safety.gateway;
+  else payload.safety.gateway = { apiSessionReady: true, checkedAt: at };
+  for (const bag of [payload.totals, ...payload.desks.map(d => d.money)]) {
+    for (const field of MONEY_FIELDS) bag.reasons[field] = 'gateway_unconfirmed';
+  }
+  for (const source of Object.values(payload.pnlSources)) source.reason = 'gateway_unconfirmed';
+  payload.brokerAccount.reason = payload.positions.reason = 'gateway_unconfirmed';
+  return payload;
+}
+
+for (const scenario of ['missing', 'frozen-ready']) {
+  test(`fix3 finding 1: ${scenario} gateway cannot freshen money over 20 advancing pushes`, () => {
+    let feed = acceptSnapshot('data', ingress(samples.data), null, at);
+    let previous = panelStates({ data: feed }, at);
+    let lastGoodAt = at;
+    for (let tick = 1; tick <= 20; tick++) {
+      const now = new Date(Date.parse(at) + tick * 30000).toISOString();
+      const current = ingress(samples.data);
+      current.seq += tick;
+      current.generatedAt = now;
+      if (scenario === 'missing') delete current.safety.gateway;
+      const unconfirmed = scenario === 'missing' || tick >= 2;
+      const attempt = acceptSnapshot('data', current, feed, now);
+      if (!unconfirmed) {
+        assert.equal(attempt.status, 200);
+        feed = attempt;
+        previous = panelStates({ data: feed }, now, previous);
+        assert.equal(previous['today.equity'].state, 'fresh');
+        lastGoodAt = now;
+        continue;
+      }
+      rejects(attempt, 'sessionUnavailable', '$.totals.equity');
+      assert.strictEqual(attempt.value, feed.value);
+      const withoutPush = panelStates({ data: feed }, now, previous);
+      // In the frozen case the last accepted ready check expires independently
+      // of receipt/generation progress, even without another acceptance call.
+      if (scenario === 'frozen-ready') for (const name of gatedPanels) {
+        assert.equal(withoutPush[name].state, 'broken', name);
+        assert.equal(withoutPush[name].reason, 'gateway_unconfirmed', name);
+      }
+      const candidate = unconfirmedSession(current, scenario);
+      const missingReason = copy(candidate);
+      delete missingReason.totals.reasons.equity;
+      rejects(validateContract('data', missingReason, { stage: 'ingress' }), 'reasonRequired', '$.totals.equity');
+      feed = acceptSnapshot('data', candidate, feed, now);
+      assert.equal(feed.status, 200);
+      assert.equal(feed.value.generatedAt, now);
+      const states = panelStates({ data: feed }, now, previous);
+      for (const name of gatedPanels) {
+        assert.equal(states[name].state, 'broken', name);
+        assert.equal(states[name].reason, 'gateway_unconfirmed', name);
+      }
+      for (const name of moneyPanels) {
+        assert.equal(states[name].retained, true, name);
+        assert.equal(states[name].valueReceivedAt, lastGoodAt, name);
+        assert.equal(states[name].ageSeconds, (Date.parse(now) - Date.parse(lastGoodAt)) / 1000, name);
+      }
+      for (const name of ['positions', 'kept']) for (const row of states[name].value) {
+        for (const field of ['mark', 'marketValue', 'dayPnl', 'openPnl']) assert.equal(row[field], null);
+      }
+      assert.equal(states.halt.state, 'fresh');
+      assert.equal(panelStates({ data: feed }, now)['today.equity'].value, null);
+      previous = states;
+    }
+    const recovered = ingress(samples.data);
+    recovered.seq += 21;
+    recovered.generatedAt = recovered.safety.gateway.checkedAt = '2026-10-14T17:52:52.000Z';
+    feed = acceptSnapshot('data', recovered, feed, recovered.generatedAt);
+    assert.equal(feed.status, 200);
+    for (const name of gatedPanels) assert.equal(panelStates({ data: feed }, recovered.generatedAt, previous)[name].state, 'fresh', name);
+  });
+}
+
+test('fix3 finding 1: check age is bounded at 60s and future checks cannot confirm money', () => {
+  const feed = { value: copy(samples.data) };
+  assert.equal(panelStates({ data: feed }, '2026-10-14T17:43:21.999Z')['today.equity'].state, 'fresh');
+  const previous = panelStates({ data: feed }, at);
+  const expired = panelStates({ data: feed }, '2026-10-14T17:43:22.000Z', previous);
+  for (const name of gatedPanels) assert.equal(expired[name].reason, 'gateway_unconfirmed', name);
+  assert.equal(expired.positions.retained, true);
+  assert.equal(expired.positions.valueReceivedAt, at);
+  for (const offset of [59999, 60000, -1]) {
+    const payload = copy(samples.data);
+    payload.generatedAt = new Date(Date.parse(at) + offset).toISOString();
+    if (offset === 59999) assert.equal(validateContract('data', payload).ok, true);
+    else rejects(validateContract('data', payload), 'sessionUnavailable', '$.totals.equity');
+  }
+});
+
+test('fix3 low 4: unavailable or unconfirmed sessions reject observed money evidence even with null money', () => {
+  for (const scenario of ['dead', 'missing', 'frozen-ready']) for (let i = 0; i < 3; i++) {
+    const payload = scenario === 'dead' ? unavailableSession(copy(samples.data)) : unconfirmedSession(copy(samples.data), scenario);
+    payload.generatedAt = '2026-10-14T17:52:22.000Z';
+    payload.desks[i].moneyEvidence = { status: 'observed', observedAt: at };
+    rejects(validateContract('data', payload), 'sessionUnavailable', `$.desks[${i}].moneyEvidence`);
+    delete payload.desks[i].moneyEvidence;
+    assert.equal(validateContract('data', payload).ok, true);
+  }
+});
+
+test('fix3 low 6: a retained value without its receipt time keeps unknown age across newer feeds', () => {
+  for (const receivedAt of [at, later, '2026-10-14T17:52:22.000Z']) {
+    const retained = panelState({ value: { receivedAt } }, null, 'gateway_unconfirmed',
+      '2026-10-14T17:52:31.000Z', samples.data.totals.equity);
+    assert.equal(retained.retained, true);
+    assert.equal(retained.valueReceivedAt, null);
+    assert.equal(retained.ageSeconds, null);
+  }
+});
+
+test('fix3 low 7: baselineRequired names the source period that lacks its start', () => {
+  for (const period of ['day', 'open']) {
+    const payload = copy(samples.data);
+    payload.pnlSources[period].method = 'sod-virtual-equity';
+    payload.pnlSources[period].status = 'unavailable';
+    for (const bag of [payload.totals, ...payload.desks.map(d => d.money)]) bag[`${period}Pnl`] = null;
+    delete payload.pnlSources[period].periodStart;
+    rejects(validateContract('data', payload), 'baselineRequired', `$.pnlSources.${period}.periodStart`);
+  }
+});
+
+test('fix3 low 5: carried valuation maps to null plus retained_values with its original receipt age', () => {
+  const initial = { value: copy(samples.data) };
+  const previous = panelStates({ data: initial }, at);
+  const payload = copy(samples.data);
+  payload.receivedAt = later;
+  for (const bag of [payload.totals, ...payload.desks.map(d => d.money)]) {
+    bag.equity = bag.totalPnl = null;
+    bag.reasons = { equity: 'retained_values', totalPnl: 'retained_values' };
+  }
+  assert.equal(validateContract('data', payload).ok, true);
+  const states = panelStates({ data: { value: payload } }, later, previous);
+  for (const name of ['today.equity', 'today.totalPnl', 'desks.j.equity', 'desks.joe.totalPnl']) {
+    assert.equal(states[name].reason, 'retained_values');
+    assert.equal(states[name].retained, true);
+    assert.equal(states[name].valueReceivedAt, at);
+    assert.equal(states[name].ageSeconds, 30);
+  }
+  assert.equal(states['today.dayPnl'].state, 'fresh');
 });

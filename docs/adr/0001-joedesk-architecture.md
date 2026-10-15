@@ -72,9 +72,12 @@ changed in P1. The numeric v1 policy cap remains a bounded config value; it is
 not valuation data and must be parsed into decimal units before calculations.
 
 Schema IDs are protocol revisions, not release coordinates. Release identity
-will use INSPR-CalVer3 (§8). Compatibility is an exact allowlist in the manifest,
-never inferred from version ordering. Old/unknown schemas and invalid payloads
-return a transport-neutral `status: 422`; `validateAndRetain` retains the identical
+will use INSPR-CalVer3 (§8). Validation accepts exactly `manifest.contracts[kind]`
+and the matching schema const; it does not read `manifest.compatibility`. That
+list documents the current singleton IDs, not an implemented multi-version
+allowlist. Compatibility is never inferred from version ordering. Old/unknown
+schemas and invalid payloads return a transport-neutral `status: 422`;
+`validateAndRetain` retains the identical
 last-good value for all five contracts, and `acceptSnapshot` adds snapshot sequence
 and receipt handling. P2 must map rejection to HTTP 422 before any atomic write,
 and persist a separate safe rejection reason. Transport oversize remains HTTP
@@ -110,12 +113,21 @@ closed enum, including transport and storage failures.
 
 The Gateway signal is exclusively `apiSessionReady` plus `checkedAt` and a
 reason when false. A port, container status or executor `gatewayReachable`
-cannot set it true. **Choose explicit nulls during a known dead session**, rather
-than treating a new envelope as a new valuation. When `apiSessionReady` is
-false, every supplied desk/total money field (including total P&L, which depends
+cannot set it true. **Choose explicit nulls while the session is dead or
+unconfirmed**, rather than treating a new envelope as a new valuation. A missing
+`safety.gateway`, or a ready check aged 60 seconds or more, is
+`gateway_unconfirmed` (the freeze's “Gateway unsure” for absent/late checks).
+The bound is two 30-second cadences; exactly 60 seconds is no longer fresh.
+Future checks also cannot confirm current money. The shared validator compares
+`checkedAt` with `generatedAt`; selectors independently compare with anchored
+server now, so a check expiring between receipts also invalidates the cells.
+When `apiSessionReady` is false, or confirmation is missing/expired, every
+supplied desk/total money field (including total P&L, which depends
 on marks) and broker equity must be null with a closed per-field/account reason.
 Position marks, market values and DAY/OPEN must be null; the position set must
 carry a reason even when its rows are empty. DAY/OPEN sources become unavailable.
+Omit `desks[].moneyEvidence` while the session is dead or unconfirmed;
+`observed` evidence alongside null money is rejected with `sessionUnavailable`.
 Static position identity/quantity and the original observedAt may remain for
 diagnosis; they cannot make the position panel fresh. A violation returns 422
 `contract_invalid` with `sessionUnavailable`/`reasonRequired`, keeping last-good.
@@ -126,14 +138,25 @@ is separately retained with its original board receipt, never relabelled as a
 current observation. The ten-minute `a-gateway-up-but-dead` fixture freezes all
 source observations while sequence/generation advance; the counterpart
 `a-dead-session-current-money` rejects a contradictory non-null valuation.
-`test/contracts.mjs` repeats 20 pushes and checks both outcomes. Independently
+`a-missing-gateway` and `a-frozen-ready-gateway` cover the two unconfirmed cases
+with nulls and `gateway_unconfirmed`; each has its own 20-push regression over
+ten minutes with frozen observations and advancing seq/generatedAt. Each test
+also rejects contradictory current money, checks original retained ages and
+proves recovery on a genuinely newer ready check. Static rows with null marks
+can remain diagnostic; selectors withhold a still-valued row set when its check
+expires, retaining prior rows only with their original receipt metadata.
+`test/contracts.mjs` repeats 20 dead-session pushes as well. Independently
 complete history/results remain available with their own receipt ages.
 
 P2 must also track advancement of the Gateway's check timestamp; a repeatedly
 relayed old ready check must become unconfirmed even if other data advances.
-Persistent check-progress integration remains P2. The chosen P1 mechanism for
-known dead sessions is enforced by the shared validator now; no comparison
-between producer observation clocks and the board clock is used for freshness.
+That persisted tracker must un-freshen **all desk/family money, paper-account
+equity and both position panels**, as well as the Gateway panel, using nulls
+plus `gateway_unconfirmed` and original last-good receipt metadata. Persistent
+check-progress integration remains P2, including restart and clock-skew tests;
+P1 already bounds reported check age. Broker observation times never reset a
+cell's receipt age. Missing retained `valueReceivedAt` means unknown age, never
+the newest envelope's age; P2 persistence must always carry that metadata.
 
 ## 3. Panel isolation and approved UI mapping
 
@@ -183,7 +206,7 @@ the closed reason, never by parsing arbitrary diagnostic detail.
 | --- | --- | --- |
 | `desks[].moneyEvidence.status = observed` | Preserve optional `moneyEvidence.status` as const `observed` | Distinguish actual producer observation from board retention |
 | `desks[].moneyEvidence.observedAt` | Preserve `moneyEvidence.observedAt` with observed evidence; producer diagnostic time, not a substitute for server receipt | Observation detail; retained age uses the original server receipt |
-| `moneyEvidence.status = carried` | Do not send `carried` as current evidence: publish null equity/total P&L with per-field reasons; DAY/OPEN follow their own evidence. Omit `moneyEvidence` until observed again. Board retains prior cells with `retained: true` and original `valueReceivedAt` | `Valuation input {age} ago` and retained-values yellow presentation, using retained receipt age; never current totals/history |
+| `moneyEvidence.status = carried` | Do not send `carried` as current evidence: publish null equity/total P&L with closed per-field reason `retained_values`; DAY/OPEN follow their own evidence. A known dead/unconfirmed session takes its upstream/`gateway_unconfirmed` reason for all money instead. Omit `moneyEvidence` until observed again. Board retains prior cells with `retained: true` and original `valueReceivedAt` | `Valuation input {age} ago` and retained-values yellow presentation, using retained receipt age; unknown if receipt metadata is absent; never current totals/history |
 | `pnlSources.day.method = sod-virtual-equity`, genuine SOD | Preserve method plus required `periodStart` | `SOD · virtual desks · since …` |
 | `pnlSources.day.detail` starts `session_open_proxy` | Explicit method `session-open-estimate`, required `periodStart` naming the actual estimate start; preserve bounded `detail` | `Session estimate`, distinguishable from genuine SOD without parsing text |
 | Other available DAY method | Preserve `ib-daily-pnl`, `observedAt`, EUR and virtual-desk scope | `IB DailyPnL · virtual desks` |
@@ -400,7 +423,7 @@ payloads. Amy-owned recordings can replace them after safe anonymization.
 
 | Class | Preventive mechanism | P1 proof | Later integration proof required |
 | --- | --- | --- | --- |
-| a Gateway up but dead | API-session readiness; known-dead session requires null current money/marks plus reasons; board retention never current | Ten-minute `a-gateway-up-but-dead`, rejected `a-dead-session-current-money`; finding 1's 20-push/null/mark regression | P2 relayed-check freeze and durable retention; OPS real session probe, never TCP-only |
+| a Gateway up but dead | API-session readiness and check-age bound; dead/missing/old check requires null current money/marks plus reasons; board retention never current | `a-gateway-up-but-dead`, `a-dead-session-current-money`, `a-missing-gateway`, `a-frozen-ready-gateway`; three 20-push regressions and the exact 60-second boundary | P2 persisted check progress invalidates all money/account/position cells as well as Gateway; OPS real session probe, never TCP-only |
 | b Null accounting / DAY | Per-field reasons, evidence gates, complete exact sums, last-good display | `b-equity-null-gateway-ready`, `b-weekend-no-sod`, `b-incomplete-family`; null sibling/retention test | P3 hero and desk render with one null, no red flash on brief retention |
 | c Image regression / CPU | Exact contract allowlist, persistent sequence/progress, bounded linear work, immutable compatible pins | `c-old-producer-image`, `c-frozen-producer`, `unknown-schema`, `stale-receive-age`; replay/size tests | OPS image-pin recreation and CPU benchmark; P2 restart persistence |
 | d Routing/deploy | Declarative routing, canonical-host inclusion, version-bound live smoke/rollback | `d-routing-stub`; production-host function test | P6 proxy path smoke and rehearsed rollback with previous pin |
@@ -420,12 +443,16 @@ no hsb0 files, pins, secrets, executor or infrastructure are edited by P1.
 1. **OPS proposal: pusher sequence and receive protocol.** Persist monotonic
    seq across recreate, advance generatedAt only for actual new generation,
    never send receivedAt, accept safe server receipt/rejection responses and
-   publish API-session check progress. When the session is not ready, publish
+   publish API-session check progress. When the session is not ready, absent or
+   unconfirmed by a ready check younger than 60 seconds, publish
    null current money/marks plus closed per-field/account/position reasons;
    advancing seq/generatedAt must never turn relayed old observations current.
    Test frozen generation, retry, restart, clock regression and ten minutes of
-   an accepting socket with a failed session. Coordinate P2's durable check
-   progress and original retained-field receipt metadata and compatible rollback.
+   an accepting socket with a failed, absent or frozen-ready session check.
+   Coordinate P2's durable check-progress tracker: unconfirmed checks must also
+   un-freshen every desk/family money cell, paper-account equity and both position
+   panels with nulls plus `gateway_unconfirmed`, not only Gateway. Persist original
+   retained-field receipt metadata and provide compatible rollback.
 2. **OPS proposal: shared contracts in producer CI.** Vendor this exact complete
    contract set/digest in the producer repo and JOED-20, test ingress fixtures
    with the shared JS semantics, agree v2/decimal/evidence/owner mappings with
@@ -435,7 +462,7 @@ no hsb0 files, pins, secrets, executor or infrastructure are edited by P1.
    baseline and store failures to the shared enum per field; preserve unknown
    data as absent/null, never invent zeros, never emit arbitrary reason strings.
    Adopt the field-by-field legacy mapping in §3: carried valuation becomes null
-   plus reason and board retention with original receipt age; session-open proxy
+   plus `retained_values` and board retention with original receipt age; session-open proxy
    becomes explicit `session-open-estimate` with its actual start; unavailable
    wording becomes a closed reason with approved copy, preserving bounded
    diagnostics. Preserve observed evidence and DAY/OPEN detail fields. Use the
@@ -450,6 +477,29 @@ no hsb0 files, pins, secrets, executor or infrastructure are edited by P1.
 JOED-20 already owns the results producer; its executor-ledger compaction and
 bounded retention remain OPS-owned, not an excuse for a board-side trade path.
 The worker marker and version-adoption outcome are recorded on JOED-21.
+
+## Deferred review notes
+
+These notes preserve the round-1/round-2 review follow-ups. Phase ownership is
+an integration obligation, not a claim of runtime completion in P1.
+
+| Review note | Disposition / owner |
+| --- | --- |
+| Compatibility text claimed a manifest allowlist that validation did not read | **Fixed here:** §1 states the exact `manifest.contracts[kind]`/schema-const behavior. `compatibility` is descriptive; P2/P6 must agree and test any broader compatibility before activation. |
+| History sizing by points/items underestimates v2 bytes | **P2:** measure serialized UTF-8 bytes, including envelope/metadata, before persistence; compact before the 6.4 MiB warning (80% of 8 MiB) and enforce the 8 MiB hard cap. The valid v2 point measures about 791 B: 10,000 such points are about 7.5 MiB before envelope overhead. Count limits are secondary, not a byte budget. Results paging/retention stays P4 with JOED-20. |
+| Three additional time cases | **P2/P4:** add Vienna-midnight bucket behavior independently of the NY accounting day; distinguish both occurrences of New York's repeated 01:xx hour by UTC instant; cover extended-hours events after 18:00 New York. Existing boundary vectors do not prove these consumer behaviors. P2 owns clock/calendar vectors; P4 owns Results bucketing. Amy's 2027 spring mismatch vectors (US 14 March, EU 28 March) also belong to P2. |
+| Gateway signal absent from healthz | **P2:** add an allowlisted gateway confirmation/check-age/reason projection, separate from feed freshness; no money, identifiers or diagnostic text. **P6:** verify the anonymous endpoint and SSO exception. |
+| healthz `not reported` with a closed reason | **P2:** preserve and explicitly test this accepted combination when no feed has been received; retain null age and a safe closed reason. Test missing-feed and failed-refresh distinctions through the endpoint. |
+| `e-layout-storage-unavailable.clientContext` is never consumed | **P3:** exercise the actual renderer with unavailable storage and layout globals at all three reference widths. P1's separate throwing-global import/selector test is the executable proof; fixture metadata alone is descriptive. |
+| `g-expired-sso` covers data only | **P2/P6:** exercise auth failure and last-good age independently for data, history, results and Fleet Config through protected reads; anonymous health remains usable. |
+| `b-incomplete-family` nulls all three desks | **P2/P3:** add a single missing desk with two observed sibling desks, no family sum, and unchanged sibling ages. Preserve per-field isolation and the approved yellow/no-red-flash grace. |
+| `b-equity-null-gateway-ready` has fresh total P&L alongside null equity | **P2/P3:** confirm producer evidence for independently observed total P&L; add the coupled unavailable-equity/total-P&L recording when both depend on missing marks. Never infer profit from carried equity. |
+| Results proposal renamed v1 → v2 | **P4 / JOED-20:** coordinate `inspr.joe.household.results.v2`, decimal money, seq/receipt ownership and shared validation before producer activation; no silent v1 widening. Coordinator must include JOED-20 in cutover/pin compatibility evidence. |
+| Browser smoke | **P3 / coordinator:** **BLOCKED** by the installed NIX-445 browser guard in the prior native attempt. Saved runner includes the new gateway module and exact schema-error assertions; it still needs a supported browser run after worker exit. **P3/P6:** full signed-in design/live smoke remains separate. No bypass or browser-pass claim. |
+| Low 4: observed money evidence during a dead session | **Fixed here:** `sessionUnavailable` rejects `desks[].moneyEvidence` during dead, absent or expired-check sessions, even with all money null. |
+| Low 5: carried → null lacked a named reason | **Fixed here:** §3 and OPS proposal 3 name the closed `retained_values` code; dead/unconfirmed-session reasons take precedence. P3 owns the approved yellow retained-value presentation. |
+| Low 6: retained value without receipt metadata reset its age | **Fixed here:** age stays null/unknown; it never borrows a newer feed receipt. **P2:** persist `valueReceivedAt` for every retained cell and prove restart behavior. |
+| Low 7: baseline error path always named DAY | **Fixed here:** `baselineRequired` reports `$.pnlSources.{day,open}.periodStart` for the actual failing period. |
 
 ## P1 verification boundary
 
@@ -472,3 +522,20 @@ an empty tmpfs; `npm run check` and `git diff --check` pass. The local Colima
 instance was started solely for those isolated tests and returned to its prior
 stopped state. No push, deployment, production-host probe, review gate or other
 model CLI was run. Coordinator review remains pending.
+
+Fix3 evidence: `npm run test:contracts` passes **77 tests, 0 failures** on native
+Node 24.20.0, including the five fix2 regressions, two 20-push unconfirmed-session
+regressions, the 60-second boundary/recovery checks and low 4–7 regressions.
+A separate read-only in-memory replay loaded the original contracts directly
+from `7b3eec2` without a checkout: both missing and frozen-ready gateway signals
+left money, account and positions fresh after 20 pushes. The same contradictory
+pushes now return 422 and retain last-good as broken; conforming fixtures accept
+null money/account/marks with `gateway_unconfirmed` and 609-second retained
+money age. Compact sample history points measure 787/791 bytes.
+All 422 contract tests and rejection fixtures name their exact rule and path;
+sequence/clock rejections now provide those structured diagnostics too.
+`npm run check` and `git diff --check` pass. The unchanged legacy HTTP server
+suite and optional browser smoke were not rerun in this round; the prior fix2
+HTTP evidence above is historical, and browser verification stays BLOCKED for
+the coordinator. No push, deployment, production-host access, review gate,
+delegation or other model CLI was run.

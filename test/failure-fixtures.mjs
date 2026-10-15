@@ -25,13 +25,14 @@ for (const entry of table.cases) test(`fixture ${entry.failureClass}: ${entry.id
   assert.equal(fixture.failureClass, entry.failureClass);
   assert.deepEqual(Object.keys(fixture.expected).sort(), [...PANELS].sort());
   const feeds = baseline();
-  const previous = panelStates(feeds, fixture.now);
+  const previous = panelStates(feeds, valid.data.receivedAt);
   if (fixture.transportReason) {
     feeds[fixture.feed].reason = fixture.transportReason;
   } else {
     const accepted = acceptSnapshot(fixture.feed, fixture.payload, feeds[fixture.feed], fixture.receivedAt);
     assert.equal(accepted.status, fixture.expectedStatus);
     if (accepted.status === 422) {
+      assert.ok(fixture.expectedErrors?.length, 'every 422 fixture names its failing rules and paths');
       assert.strictEqual(accepted.value, feeds[fixture.feed].value);
       assert.equal(accepted.value.receivedAt, valid[fixture.feed].receivedAt);
       assert.ok(Date.parse(fixture.receivedAt) > Date.parse(accepted.value.receivedAt), 'rejection must be later than last-good');

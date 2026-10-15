@@ -363,5 +363,11 @@
       "reason": "snapshot_stale",
       "retained": false
     }
-  }
+  },
+  "expectedErrors": [
+    {
+      "path": "$.schema",
+      "rule": "const"
+    }
+  ]
 }
