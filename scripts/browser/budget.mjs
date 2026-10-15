@@ -86,7 +86,8 @@ export async function runBudget({ page, newBoard, check, limits }) {
     }
     const histPhase = await page.evaluate('window.__joedesk.timings.splice(0)');
     const trace = await page.evaluate(`({ long: window.__long.slice(), worker: window.__joedesk.worker() })`);
-    const renders = list => list.filter(x => !['data-accept', 'history-accept', 'history-worker'].includes(x.reason)).map(x => x.ms);
+    // Reads and their worker time are not renders (P4 adds the closed-trade record's).
+    const renders = list => list.filter(x => !/-(accept|worker)$/.test(x.reason)).map(x => x.ms);
     const deskRenders = renders(deskPhase), histRenders = renders(histPhase);
     const work = [...deskPhase, ...histPhase].filter(x => x.reason === 'history-worker').map(x => x.ms);
     const mainAccept = [...deskPhase, ...histPhase].filter(x => x.reason === 'history-accept').length;

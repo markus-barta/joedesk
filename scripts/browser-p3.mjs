@@ -11,6 +11,7 @@ import { startBoard, scenario, NOW, at, ACTOR, valid, fixture, ingress, singleMi
 import { VIEWPORTS, THEMES, configure, load, go, screenshot, settle, waitFor } from './browser/shots.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
+import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
 
 // The page's own history model, for the values its sparklines must plot. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -30,103 +31,8 @@ const fmt = await import('../public/joe/format.js');
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
 mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
-const results = [];
-const shots = [];
-function check(ac, name, ok, detail) {
-  results.push({ ac, name, ok: Boolean(ok), detail });
-  if (!ok) console.error(`FAIL ${ac} ${name}${detail === undefined ? '' : `: ${JSON.stringify(detail).slice(0, 2400)}`}`);
-}
-const shot = async (page, viewport, name, what) => {
-  const file = join(QA_DIR, `${name}.png`);
-  await screenshot(page, viewport, file);
-  shots.push({ file: `${name}.png`, what });
-};
-
-const TERM_PATTERN = /\b(P&L|IB|HALT|FIFO|FX|KEEP|Stage 0|NAV|Gateway|Snapshot|Expectancy|Profit factor|drawdown|Realised|Unrealised|Heartbeat|agenix|Janus|Quota|OPS-\d+|Propagate|Fleet Config|SOD|YTD|Wk \d+)\b/;
-const GLYPHS = /[▲▼►◄✓✔✕✖★☆⚠ⓘ◷⏸⛔→←↑↓↗↘•›‹»«÷]/;
-const SPLIT_UNIT = /\d (s|min|h|%|desks?|trades?|days?|sessions?)(?![\w])|[€$] [−+\-]?\d/;
-const IMPLEMENTER = /\b(TODO|FIXME|HOSTD-\d+|JOED-\d+|NIX-\d+|undefined|NaN|lorem|\[object)\b/i;
-const GERMAN = /\b(und|nicht|oder|Konto|Ergebnis|Gewinn|Verlust|heute|gestern)\b/;
-const ACTION = /\b(place|cancel|flatten|pause|restart|buy|sell|liquidate|close position|halt|switch to live)\b/i;
+const { results, shots, check, shot, auditScreen } = createGate(QA_DIR);
 const SHIFT_SELECTORS = ['header.top', '#health', '#deskHero', '#heroL .kpi', '#heroL .display', '.dcard', '.dcard .dnums > div', '.dcard .chart', '#positions', '.prow', '#kept', 'footer.foot'];
-
-async function auditScreen(page, viewport, theme, screen) {
-  const tag = `${viewport.name} ${theme} ${screen}`;
-  const label = await page.evaluate(`(() => { const m = document.getElementById('modeLabel'), r = m.getBoundingClientRect(), cs = getComputedStyle(m);
-    const probe = document.createElement('i'); probe.style.color = 'var(--paper-bg)'; document.body.append(probe); const want = getComputedStyle(probe).color; probe.remove();
-    return { text: m.textContent.trim(), icon: Boolean(m.querySelector('use[href="#i-paper"]')), bg: cs.backgroundColor, want, inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth }; })()`);
-  check('AC-1', `${tag}: PAPER label at the top`, label.text === 'PAPER' && label.icon && label.bg === label.want && label.inView, label);
-  await page.evaluate('window.scrollTo(0, document.documentElement.scrollHeight)');
-  await settle(page);
-  const bottom = await page.evaluate(`(() => { const r = document.getElementById('modeLabel').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()`);
-  check('AC-1', `${tag}: PAPER label after scrolling to the end`, bottom);
-  await page.evaluate('window.scrollTo(0, 0)');
-  await settle(page);
-  const live = await page.evaluate(`({ live: document.querySelectorAll('.mode-label.live').length, header: document.querySelector('header.top').innerText })`);
-  check('AC-2', `${tag}: no LIVE treatment`, live.live === 0 && !/LIVE/.test(live.header), live);
-  const h = await page.evaluate('__audit.horizontal()');
-  check('AC-28', `${tag}: no horizontal scroll`, h.scroll <= h.inner && (!viewport.mobile || (h.inner === 390 && h.gutter === 16)), h);
-  const contrast = await page.evaluate('__audit.contrast()');
-  check('AC-29', `${tag}: text contrast ≥ 4.5:1`, !contrast.length, contrast.slice(0, 6));
-  if (viewport.mobile) {
-    const targets = await page.evaluate('__audit.targets()');
-    check('AC-30', `${tag}: 44 px targets`, !targets.length, targets.slice(0, 6));
-    const termCount = await page.evaluate(`[...document.querySelectorAll('.term, .learn')].filter(__audit.visible).length`);
-    check('AC-43', `${tag}: ${termCount} term and Learn hit areas are 44 px or more`, !targets.some(t => /term|learn/.test(t.el)), targets.filter(t => /term|learn/.test(t.el)));
-  }
-  const gui = await page.evaluate('__audit.gui27()');
-  check('AC-32', `${tag}: no italics, one-sided borders, pills or uppercase eyebrows`, !gui.italics.length && !gui.borders.length && !gui.pills.length && !gui.uppercase.length, { italics: gui.italics, borders: gui.borders, pills: gui.pills.slice(0, 4), upper: gui.uppercase });
-  check('AC-44', `${tag}: cards only for primary objects, at most two other boxes`, gui.cards.every(c => !c.startsWith('OTHER')) && gui.boxes.length <= 2, { cards: [...new Set(gui.cards)], boxes: gui.boxes });
-  const clipping = await page.evaluate('__audit.clipping()');
-  check('AC-36', `${tag}: nothing clips or ellipsises (the two clamped state lines aside)`, !clipping.length, clipping.slice(0, 6));
-  // The health reason (one line) and Today's sentence (two lines) are the only
-  // clamps: whole lines, an ellipsis when longer, the full text given.
-  const clamps = await page.evaluate('__audit.clamps()');
-  if (screen.startsWith('desk')) check('clamp', `${tag}: the health reason and Today's sentence show whole lines, end in an ellipsis and give their full text`, clamps.length === 2 && clamps.every(c => c.ok), clamps);
-  else check('clamp', `${tag}: no clamp outside Desk`, !clamps.length, clamps);
-  const text = await page.evaluate('__audit.text()');
-  const plain = text.filter(t => !t.term).map(t => t.text).join(' ');
-  const all = text.map(t => t.text).join(' ');
-  const termHit = plain.match(TERM_PATTERN);
-  check('AC-38', `${tag}: trade terms only inside Term or Learn`, !termHit, termHit?.[0]);
-  check('AC-40', `${tag}: no text glyph used as an icon`, !GLYPHS.test(all), all.match(GLYPHS)?.[0]);
-  const rendered = text.map(t => t.text).join('');
-  check('AC-47', `${tag}: numbers never part from their units`, !SPLIT_UNIT.test(rendered), rendered.match(SPLIT_UNIT)?.[0]);
-  check('AC-32', `${tag}: English only, no implementer strings`, !IMPLEMENTER.test(all) && !GERMAN.test(all), all.match(IMPLEMENTER)?.[0] ?? all.match(GERMAN)?.[0]);
-  const terms = await page.evaluate('__audit.terms()');
-  const badTerm = terms.find(t => t.style !== 'dotted' || t.thickness !== '1px' || t.offset !== '3px' || !(t.alpha >= 0.3 && t.alpha <= 0.6));
-  check('AC-47', `${tag}: term underlines are faint, dotted, 1 px, offset 3 px`, (terms.length > 0 || screen === 'settings') && !badTerm, badTerm);
-  const charts = await page.evaluate('__audit.charts()');
-  const badChart = charts.find(c => (c.zero ? !(c.lo <= 0 && c.hi >= 0) : c.base !== null && !((c.hi - c.lo) >= Math.abs(c.base) * 0.01 - 1e-6)));
-  check('AC-42', `${tag}: charts are to scale`, !badChart, badChart ?? charts.length);
-  const icons = await page.evaluate(`[...document.querySelectorAll('button')].filter(b => __audit.visible(b) && !b.textContent.trim() && !b.getAttribute('aria-label')).map(b => b.outerHTML.slice(0, 80))`);
-  check('AC-33', `${tag}: every icon-only button has a label`, !icons.length, icons);
-  const actions = await page.evaluate(`[...document.querySelectorAll('button, a[href], input, select')].filter(b => __audit.visible(b) && !b.closest('.term, .learn') && !b.matches('.term, .learn')).map(b => (b.textContent + ' ' + (b.getAttribute('aria-label') ?? '')).trim())`);
-  const acting = actions.filter(t => ACTION.test(t));
-  check('AC-5', `${tag}: no control acts on money, orders or the desks`, !acting.length, acting);
-}
-
-const proportional = (bars, label) => {
-  const groups = new Map();
-  for (const b of bars) if (b.v) { const key = b.cur; groups.set(key, [...(groups.get(key) ?? []), b.w / Math.abs(b.v)]); }
-  for (const [cur, ratios] of groups) {
-    if (ratios.length < 2) continue;
-    const spread = (Math.max(...ratios) - Math.min(...ratios)) / Math.max(...ratios);
-    if (spread > 0.03) return { label, cur, spread };
-  }
-  return null;
-};
-const shifted = (a, b, keys = ['top', 'left', 'height', 'width']) => {
-  const byKey = new Map(b.map(r => [r.key, r]));
-  const moved = [];
-  for (const r of a) {
-    const o = byKey.get(r.key);
-    if (!o) { moved.push({ key: r.key, gone: true }); continue; }
-    for (const k of keys) if (Math.abs(r[k] - o[k]) > 0.5) moved.push({ key: r.key, k, from: r[k], to: o[k] });
-  }
-  if (a.length !== b.length) moved.push({ count: [a.length, b.length] });
-  return moved;
-};
 
 async function deskChecks(page, viewport, theme, expectedMini) {
   const tag = `${viewport.name} ${theme} desk`;
@@ -419,7 +325,6 @@ async function route(rules) {
 }
 // The two state lines that clamp, and the wide font that stands in for Linux's.
 const STATE_BOXES = ['#health', '#heroL .say'];
-const WIDE_FONT = 'Verdana, "DejaVu Sans", sans-serif';
 // The widest window with the compact header (app.css).
 const COMPACT = 960;
 const DESK_SHIFT = [...SHIFT_SELECTORS, '.hstrip', '#heroL .say', '#heroL .kpi .c', '#positions .pstate', '#kept .keep-cap', '#kept .pstate', '#kept .prow'];
@@ -441,6 +346,9 @@ const RES_TEXT = `(() => ({ on: document.getElementById('scr-results').classList
 // Results' designed not-wired state: dashes, never zeros, with its switches, calendar and day sheet.
 const notWired = r => r.on && /Results are not wired yet\. The board has no closed-trade record for this period\./.test(r.hero) && !/€\s0,00/.test(r.hero) && r.tiles.length === 8 && r.tiles.every(t => t === '—') &&
   /^This week · /.test(r.label) && r.days >= 28 && r.rows === 4 && r.curve === 'Results are not wired yet' && /results are not wired\.$/.test(r.day.trim());
+// Results without a record because its own read failed: the reason, dashes, no zeros.
+const unavailable = (r, words) => r.on && r.hero.includes(`Results are unavailable: ${words}.`) && !/€\s0,00/.test(r.hero) && r.tiles.length === 8 && r.tiles.every(t => t === '—') &&
+  /^This week · /.test(r.label) && r.days >= 28 && r.rows === 4 && r.curve === 'Results are unavailable' && r.day.trim().endsWith(`${words}.`);
 const norm = text => text?.replace(/\s+/g, ' ').trim();
 const moves = (a, b) => shifted(a, b, ['top', 'left', 'height']);
 try {
@@ -659,12 +567,14 @@ try {
     const cold = await newBoard();
     cold.setNow(NOW);
     const jsonRule = (path, status, body) => ({ path, status, body: JSON.stringify(body) });
+    const READS = ['state.json', 'history.json', 'results.json', 'fleet-config.json'];
     const CASES = [
-      ['auth', 'auth_required', ['state.json', 'history.json', 'fleet-config.json'].map(p => jsonRule(p, 401, { ok: false, reason: 'auth_required' }))],
-      ['redirect', 'auth_required', ['state.json', 'history.json', 'fleet-config.json'].map(p => ({ path: p, status: 302, headers: [{ name: 'Location', value: '/oauth2/start' }] }))],
-      ['routing', 'route_not_found', ['state.json', 'history.json', 'fleet-config.json'].map(p => jsonRule(p, 404, { ok: false, error: 'not found' }))],
-      ['proxy', 'refresh_failed', ['state.json', 'history.json', 'fleet-config.json'].map(p => ({ path: p, status: 503, headers: [{ name: 'Content-Type', value: 'text/html' }], body: '<h1>Bad gateway</h1>' }))],
-      ['offline', 'refresh_failed', ['state.json', 'history.json', 'fleet-config.json'].map(p => ({ path: p, fail: 'ConnectionRefused' }))],
+      // P4: the closed-trade record is read too (results.json), so it fails with the rest.
+      ['auth', 'auth_required', READS.map(p => jsonRule(p, 401, { ok: false, reason: 'auth_required' }))],
+      ['redirect', 'auth_required', READS.map(p => ({ path: p, status: 302, headers: [{ name: 'Location', value: '/oauth2/start' }] }))],
+      ['routing', 'route_not_found', READS.map(p => jsonRule(p, 404, { ok: false, error: 'not found' }))],
+      ['proxy', 'refresh_failed', READS.map(p => ({ path: p, status: 503, headers: [{ name: 'Content-Type', value: 'text/html' }], body: '<h1>Bad gateway</h1>' }))],
+      ['offline', 'refresh_failed', READS.map(p => ({ path: p, fail: 'ConnectionRefused' }))],
     ];
     for (const [name, reason, rules] of CASES) {
       const combos = name === 'auth' ? VIEWPORTS.flatMap(v => THEMES.map(t => [v, t])) : [[VIEWPORTS[1], 'light'], [VIEWPORTS[2], 'dark']];
@@ -692,16 +602,17 @@ try {
           if (viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-history-state-cold-no-clock`, 'History, cold start without a clock');
         }
         // r2: Results is never blank without a clock, reached from the nav or opened directly.
+        // P4: it reads the closed-trade record itself, so it says why that read failed.
         await go(page, 'results');
         const r = await page.evaluate(RES_TEXT);
-        check('cold', `${tag}: Results, reached from the nav, shows its not-wired state`, notWired(r) && !page.errors.length, { r, errors: page.errors.slice(0, 3) });
+        check('cold', `${tag}: Results, reached from the nav, shows its own failure, dashes and no zeros`, unavailable(r, words) && !page.errors.length, { r, errors: page.errors.slice(0, 3) });
         page.errors.length = 0;
         await load(page, cold.url, 'results');
         const direct = await page.evaluate(RES_TEXT);
-        check('cold', `${tag}: Results, opened directly at #results, shows its not-wired state`, notWired(direct) && !page.errors.length, { direct, errors: page.errors.slice(0, 3) });
+        check('cold', `${tag}: Results, opened directly at #results, shows its own failure, dashes and no zeros`, unavailable(direct, words) && !page.errors.length, { direct, errors: page.errors.slice(0, 3) });
         if (name === 'auth') {
           await auditScreen(page, viewport, theme, 'results (cold, no clock)');
-          if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-state-cold-no-clock`, 'Results, cold start without a clock: the not-wired state');
+          if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-state-cold-no-clock`, 'Results, cold start without a clock: its own failure (sign-in expired)');
         }
         await unroute();
         page.errors.length = 0;
