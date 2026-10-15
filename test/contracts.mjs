@@ -273,12 +273,9 @@ test('healthz is an exact allowlist: nested money, identifiers, arbitrary text a
   }
 });
 
-test('production host remains inside the current canonical host gate', () => {
-  const source = readFileSync(new URL('../public/joe/joe.js', import.meta.url), 'utf8');
-  const start = source.indexOf('function isCanonicalJoeHost');
-  const end = source.indexOf('\n  var LAYOUT_KEY', start);
-  assert.ok(start >= 0 && end > start);
-  const isCanonical = new Function(`${source.slice(start, end)}; return isCanonicalJoeHost;`)();
+test('production host remains inside the current canonical host gate', async () => {
+  // P3 replaced the legacy board script with public/joe/host.js (ADR §8).
+  const { isCanonicalJoeHost: isCanonical } = await import('../public/joe/host.js');
   assert.equal(isCanonical('cs0.barta.cm'), true);
   assert.equal(isCanonical('CS0.BARTA.CM'), true);
   assert.equal(isCanonical('example.invalid'), false);

@@ -49,21 +49,27 @@ function feedHeaders(kind) {
     ...(feed.receivedAt ? { "X-Joe-Received-At": feed.receivedAt } : {}) };
 }
 
+// The UI is plain ES modules; every served asset is listed here explicitly.
+const UI_MODULES = ["app.js", "host.js", "ui.js", "terms.js", "format.js", "health.js", "feed.js", "events.js",
+  "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "theme.js"];
 const STATIC_FILES = Object.freeze({
   "/joe/": "index.html",
   "/joe/index.html": "index.html",
+  "/joe/app.css": "app.css",
+  ...Object.fromEntries(UI_MODULES.map(name => [`/joe/${name}`, name])),
   "/joe/data.schema.json": "data.schema.json",
   "/joe/fleet-config.schema.json": "fleet-config.schema.json",
   "/joe/fleet-config-actions.schema.json": "fleet-config-actions.schema.json",
   "/joe/fleet-config.example.json": "fleet-config.example.json",
-  "/joe/joe.css": "joe.css",
-  "/joe/joe.js": "joe.js",
   "/joe/joe-version.js": "joe-version.js",
-  "/joe/vendor/chart-4.4.8.umd.js": "vendor/chart-4.4.8.umd.js",
-  "/joe/vendor/chartjs-plugin-zoom-2.2.0.min.js": "vendor/chartjs-plugin-zoom-2.2.0.min.js",
-  "/joe/vendor/gridstack-13.2.0-all.js": "vendor/gridstack-13.2.0-all.js",
-  "/joe/vendor/gridstack-13.2.0.min.css": "vendor/gridstack-13.2.0.min.css",
-  "/joe/vendor/hammer-2.0.8.min.js": "vendor/hammer-2.0.8.min.js",
+});
+// Workers ignore the page's import map, so the history worker and its imports
+// load under this release's own path; another release's path is not found.
+const RELEASE_PREFIX = `/joe/v/${release.version}/`;
+const VERSIONED_FILES = Object.freeze({
+  ...Object.fromEntries(UI_MODULES.map(name => [`${RELEASE_PREFIX}${name}`, path.join(PUBLIC, name)])),
+  ...Object.fromEntries(Object.entries(CONTRACT_FILES).map(([route, name]) => [route.replace("/joe/", RELEASE_PREFIX), path.join(__dirname, "contracts", name)])),
+  ...Object.fromEntries(Object.entries(SHARED_FILES).map(([route, name]) => [route.replace("/joe/", RELEASE_PREFIX), path.join(__dirname, name)])),
 });
 
 const MIME = {
@@ -579,11 +585,25 @@ function handleStatic(req, res, urlPath) {
     sendJson(res, 503, { ok: false, schema: CONTRACTS.contracts.results, reason: "results_not_wired" });
     return;
   }
-  if (urlPath === "/joe/state.json") { sendJson(res, 200, model.view()); return; }
+  if (urlPath === "/joe/state.json") {
+    // The 15 s state poll carries no history points; /joe/history.json serves
+    // them on their own 30 s cadence, so this response stays small.
+    const view = model.view();
+    const { value, ...history } = view.feeds.history;
+    const { value: _points, ...historyPanel } = view.panels.history;
+    sendJson(res, 200, { ...view, panels: { ...view.panels, history: historyPanel }, feeds: { ...view.feeds, history: { ...history,
+      ...(value ? { receivedAt: value.receivedAt, pointCount: value.points.length } : {}) } } });
+    return;
+  }
   const contractFile = CONTRACT_FILES[urlPath];
   if (contractFile) {
     const file = path.join(__dirname, "contracts", contractFile);
     send(res, 200, fs.readFileSync(file), { "Content-Type": MIME[path.extname(file)] });
+    return;
+  }
+  const versionedFile = VERSIONED_FILES[urlPath];
+  if (versionedFile) {
+    send(res, 200, fs.readFileSync(versionedFile), { "Content-Type": MIME[path.extname(versionedFile)] });
     return;
   }
   const sharedFile = SHARED_FILES[urlPath];

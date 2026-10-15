@@ -444,6 +444,18 @@ worst-case 256-position/10,000-point traces and fail an agreed CI budget.
 The fixed 6-row calendar, reserved values/heights, opaque overlays, honest
 scales and reduced-motion behavior remain the freeze's AC-1…AC-47 obligations.
 
+Where the budget is measured (LEAD decision, JOED-23 fix round 3): the
+budget above (a normal patch under 16 ms, no task reaching 50 ms) is
+measured on a named reference device, mbp2606 or mbp2607, by
+`scripts/budget-reference.mjs` (`npm run budget:reference`); each record
+names the device. CI runners are slower and vary from run to run, so CI
+enforces a regression guard of 2.5 × the reference budget on the same
+workload (`scripts/browser/budget.mjs`): a normal patch at most 40 ms, a
+History draw at most 125 ms, no task reaching 125 ms. Recorded reference:
+mbp2607 (Apple M5 Max, 18 cores, HeadlessChrome 153.0.8010.12, Node
+v26.11.1) on 2026-10-15: Desk patch worst 7.7 ms, History draw worst
+11.3 ms (8 MiB cold) and 5.7 ms (live), no long task at 390, 1024 or 1440.
+
 Packages after P1: P2 server acceptance/health/time/history; P3 shell/Desk/History;
 P4 Results and JOED-20 wiring; P5 Settings/mode; P6 CalVer3/build/deploy/rollback.
 Their runtime tests are not substituted by P1 fixture tests. The coordinator
@@ -820,3 +832,207 @@ in fix2. Integration still targets `rebuild/v2` with a coordinator squash merge;
 the ignored status file stays out of the product index. No push, deployment,
 review gate, delegation or other model CLI ran. The coordinator owns the
 cross-family gate after worker exit; the ticket remains QA.
+
+## P3 UI candidate — JOED-23
+
+P3 replaces the legacy GridStack board with plain ES modules under
+`public/joe/` that follow the approved freeze (r3.1) and read only the P2
+server: `/joe/state.json` every 15 s, `/joe/history.json` every 30 s and
+`/joe/fleet-config.json`, each through `acceptRead`, then `panelStates` at the
+server's clock anchored to a monotonic timer. No freshness rule is
+re-implemented: the health light ranks the shared panel states with today's
+`localBoardHealth` order, labels and plain-word copy (A1 renames "Gateway
+unsure" to "Broker unsure"). Constants for sign-off: stale at the contract's
+60 s; red "board updates stopped" at 3 × 60 s without a receipt, or "stuck"
+at 3 × 60 s without generation progress; carried equity stays yellow for
+today's five-minute grace, then red. A rejected push or failed read keeps
+the last good snapshot with its original receipt and says why.
+
+**Copy sign-off, check already 20 s old at generation** (fresh → broken →
+stale): until +40 s money reads normally and the light is "Board OK"; from
++40 s to just before +60 s each money cell keeps its last good value with
+"Last good value, {age} ago · broker connection not confirmed" (a dash with
+"Unavailable · broker connection not confirmed" on a cold load) and the
+light is "Broker unsure · the broker connection has not checked in — reload;
+if still old, tell Amy"; from +60 s the values read "As of {age} ago ·
+updates are late" and the light is "Stale 1 min". `test/ui-modules.mjs` pins
+all three. (Fix round 1: a stale caption no longer keeps the designed caption
+in front; it states its own age and reason, as every not-fresh state does.)
+
+History is fetched, parsed and validated in a module worker
+(`history-worker.js`) and handed to the page as typed columns by transfer, so
+the 8 MiB read never blocks the page (measured figures: fix round 1 below). Continuity (dotted € 5.000 lead-in, gaps, carry), basis breaks,
+compare and session closes run on those columns; estimates never enter
+compare, sparklines or totals.
+
+Named server changes (minimal): the static allowlist lists the UI modules and
+drops the vendored GridStack, Chart.js, Hammer and zoom assets;
+`/joe/state.json` omits history points from `feeds.history` and
+`panels.history` (they were the whole history every 15 s). Shared module
+addition: `time.mjs` gains `zonedInstant`, `sessionBounds` and `nextOpen` for
+the session ring and today's chart. Packaging: `index.html` pins every module
+to the release version through an import map; no service worker. Workers
+ignore import maps, so the history worker starts at
+`/joe/v/<release>/history-worker.js` and every module it imports resolves
+under that path; the server serves only the current release's path (an old
+page's worker gets 404 and the page falls back to its own, versioned modules).
+
+| P3 obligation | Proof |
+| --- | --- |
+| §3 panel isolation; each panel fresh / stale with age / not reported / broken with reason; one null never blanks a panel or the page | `scripts/browser-p3.mjs` fixture run: 20 P1 fixtures plus two derived cases through the real server, every money cell's UI state equals the panel state, no blank panel, light per case |
+| Deferred: `b-incomplete-family` single missing desk; `b-equity-null-gateway-ready` coupled equity/total P&L | `isolation: a single missing desk…`, `isolation: equity and total result unavailable together…` (`test/ui-modules.mjs`) and the `p3-*` browser cases |
+| Deferred: `e-layout-storage-unavailable` renderer at three widths | browser fixture run with storage and layout globals throwing at 390/1024/1440 |
+| Deferred: copy sign-off fresh → broken → stale | `health: the 20-second-old check reads fresh, then broken, then stale` |
+| §6 display continuity, gaps, outage-only range, basis breaks, observed-only compare/sparklines | `history: …` tests (`test/ui-modules.mjs`); browser AC-20/AC-21 |
+| §8 host gate on the replacement module | `production host remains inside the current canonical host gate` now imports `public/joe/host.js` |
+| §9 render budget | browser `budget` checks on the 8 MiB history and on live 256-position pushes at every width (fix round 1) |
+| P1 browser smoke (was BLOCKED) | `npm run test:contracts:browser` passes locally |
+
+Retired with GridStack, as AC-35 asks: `check-joe-layout`, `check-joe-phone`
+and `smoke-joe` (CI runs `scripts/browser-p3.mjs` instead), plus
+`check-joe-history`, `check-joe-trust`, `check-joe-learning` and
+`check-position-display`, which extracted code from the deleted `joe.js`;
+their v2 equivalents live in `test/ui-modules.mjs` and the browser gate.
+`check-fleet-config` keeps its schema, example and docs half; its flip-plane
+UI half returns with P5's Settings. Results shows only its designed not-wired
+state (P4); Settings shows its nav entry and a not-wired line (P5), so the
+Appearance Light / Dark / System control also waits for P5 (the theme module
+already supports system).
+
+### P3 fix round 1 — JOED-23
+
+Codex review r1 (changes) found three High and six Medium issues. All are
+fixed; each High has a browser regression at 390/1024/1440 in light and dark.
+
+| Finding | Fix | Proof |
+| --- | --- | --- |
+| High: a cold failure blanked every panel until `state.json` supplied a clock | The page always renders. The clock is state.json's `serverNow`, else any other read's `X-Joe-Server-Now`, else its HTTP `Date`; before any clock every panel still gets `panelStates` (no feed holds a value, so no state depends on the instant) and says "Time not known". A value can never be shown undated. | `cold start:` (ui-modules); browser `cold` at six combos for 401, and 302, 404, 503, connection refused; History answering while state.json is 404 keeps its own fresh value |
+| High: the renderer re-mapped P1 states (`feed_not_received` → broken, retained replay → broken) | Every cell, card line, section line and History shows `cell.state` as given; captions are derived from it (`statePhrase`). NO DATA now reads "Not reported · no data received yet" (spec §9 said "Unavailable · no snapshot"; changed so the words match the state) | `cells: every P1 panel state…` over all fixtures; browser `passthrough` (replayed push stays stale at six combos), NO DATA at six combos |
+| High: surfaces omitted their own age/reason | Desk cards list every not-fresh number with its own age and reason (one line per distinct state); Kept says "As of …" with its reason and drops "now"; J's result in History carries its age and reason; positions and kept have their own state line | browser `journey` (Today 1 min, open result 35 s, J's total 35 s, each with its reason) at six combos; fixture run checks every card names every affected reason |
+| Medium: History compare used a different window from the chart | `rangeWindow` gives one window ending at the board's time (or the zoom); chart and compare both use it | `history: compare uses exactly the chart window…` (observations end 14 Oct, time 17 Oct → Day compares nothing) |
+| Medium: freshness transitions shifted layout | State texts have reserved space: health line two rows, Today's sentence two lines, captions two (phone three), card state lines inside the sparkline's fixed box, a state line per section, History's state inside the chart's fixed box | browser `journey`: fresh → stale → broken → recovered moves nothing (±0.5 px) on Desk and History at six combos |
+| Medium: dialog focus, rebuilt sections | Details is a focus-trapping dialog: focus moves in, Tab stays inside, Escape returns focus to Details. A rebuilt section keeps keyboard focus and an open or pinned tip on the same control | browser: keyboard dialog flow at six combos; focus, pinned tip and focus inside the dialog survive data updates |
+| Medium: phone Retry 30 px; target scan only on healthy History | Retry is 44 px on phones; the full craft scan (targets, contrast, clipping, scroll) runs on degraded Desk and History states in both themes | browser `auditScreen` on cold, NO DATA, broken and refresh-failed states |
+| Medium: performance evidence lacked the workload | Two phases at every width: the 9,000-point (8 MiB) history read cold, and five live pushes of 256 positions plus three History updates over 7,200+ points (the server compacts at its 6.4 MiB warning once pushes arrive). Every update must render and be measured; Desk patch < 16 ms, History < 50 ms, no long task, history only in the worker. Charts now measure before the long sections change (a forced full layout made the 256-row patch 23 ms; now 7–8 ms) | browser `budget`; trace and reference in the QA index |
+| Medium: worker imports not version-bound | Release path `/joe/v/<release>/` (named server change below) | `P3 UI: the history worker graph is served only under this release path` |
+
+Named server change (minimal): `server.mjs` serves the UI modules, contracts
+and shared modules also under `/joe/v/<release.version>/`, from the same
+allowlists; any other version, the index and the data reads are 404 there.
+
+Performance reference: the headless Chromium shell the gate launches on the
+local Apple Silicon workstation (exact build, CPU and Node version are written
+into the QA index with every trace). The Linux CI run, with its own fonts, is
+the merge gate for both the budget and the font-dependent layout checks.
+
+Still open, with owner: the Appearance Light / Dark / System control (P5),
+Results numbers and AC-46 (P4), and the Linux CI browser run before merge.
+
+### P3 fix round 2 — JOED-23
+
+Codex review r2 (changes) confirmed seven r1 findings fixed and found two
+Medium gaps. Both are fixed with regressions.
+
+| Finding | Fix | Proof |
+| --- | --- | --- |
+| Medium: a cold start without a clock still blanked Results | Results labels its calendar by this browser's date until the server's clock is known (`resultsToday`, shared by the renderer and its controls); it is not wired, so no state depends on that date. It shows its designed not-wired state | browser `cold`: Results reached from the nav and opened directly at `#results`, for 401 at six combos and 302, 404, 503, connection refused; `results:` (ui-modules) |
+| Medium: the zoomed comparison used observations the chart left out | `chartRows` gives each desk's kept rows (up to the board's time, latest comparable bookkeeping basis); the chart, the comparison and the basis notice all read exactly those rows | `history: a zoom compares exactly the points the chart draws…` (ui-modules); browser `basis`: J changes basis at 13:00 on 14 Oct; zoomed before it, nothing about J is compared and the notice names J; the week and a zoom across it compare the chart's own points, at six combos (zoom on desktop) |
+
+
+### P3 fix round 3 — JOED-23
+
+The first Linux CI run on PR #37 (job 116624253606, 1752/1767) failed in
+three groups and left its scratch directories behind. Each cause is fixed,
+and the local gate now reproduces what the Linux runner saw.
+
+| CI failure | Root cause | Fix | Proof |
+| --- | --- | --- | --- |
+| No-shift at 390, light and dark: stale → broken grew the health line from 122.75 to 143 px and Today's sentence by a line, moving the hero and its numbers | Product: the room kept for state texts fitted this Mac's font. In Linux's wider fonts the reason wrapped onto a second line in the free-wrapping health line, and Today's not-fresh sentence needed a third line | Up to 900 px the health line has fixed rows: reason; broker; emergency stop; data age beside Details (whose 44 px on phones hold two lines). The reason's cell and Today's sentence hold hidden twins (`aria-hidden`, `visibility: hidden`) of their longest forms (every health reason; the largest amount with the longest age and reason), so the browser lays out their room in its own font. No clamp, no ellipsis; the full text is always shown. Wider, the line keeps its two reserved rows | The browser `journey` also runs in a wide font (Verdana, else DejaVu Sans) at 390 light and 1024 dark; before the fix it failed exactly as on CI (143 px), now nothing moves. All 17 health reasons with the longest broker and data wordings give one height per width (390 to 1440) in both fonts |
+| `basis`, every width and theme: the week and the zoom compared nothing ("Choose two or more desks…") and named no desk | Test race, not time zone: the page marked itself ready once any first read had answered, and the gate read History before its worker delivered (about 650 ms on CI, 80 ms locally). The History model computes only through `time.mjs` in explicit zones; no local-time API is used in `public/joe` or the gate, and the browser follows the runner's zone. Product side-finding: before History arrived, the compare line asked for desks that were already chosen | `ready` waits until every first read (state, history, fleet settings) has answered with a value or a reason. With no history rows, `sharedWindowCompare` gives `insufficient-points` ("Not enough history in this window to compare.") | browser `basis`: History's read held back 1.5 s. The page is not ready before History answers and never asks for desks; once ready it compares the chart's own points. This fails on the previous code with CI's exact output. Empty-history case in `ui-modules`. `npm test` and the full gate pass under TZ=UTC, Europe/Vienna and America/New_York |
+| `budget`, every width: Desk patch 22–25 ms, tasks 53–86 ms on the runner | Measurement place, not a regression: 16 ms / 50 ms is a reference-device budget, and CI runners are slower | §9 decision: the budget is measured on the reference device; CI holds the 2.5 × guard on the same workload | Reference run on mbp2607: 22/22, figures in §9. Guard: 22/22 locally; the CI run's figures are within it |
+| "trash failed": 41 directories left in `/tmp` | Test: CI runners have no `trash` | Scratch directories come from `scripts/browser/scratch.mjs`. With `CI=true` they are removed with `fs.rm`; elsewhere they go to the Trash. Only directories this run made are ever removed | A run with `CI=true` leaves no `joed-p3-*` directory and prints no "trash failed" |
+
+Visible change for the visual check: up to 900 px the health line keeps a
+second line under a short reason. On phones, Today's sentence keeps three
+lines. So the phone Desk is about 43 px taller in every state; at 1024 and
+1440 nothing changes. The gate now has 1871 checks (1767 plus the
+wide-font journeys and the slow-History case). All pass locally
+(Europe/Vienna) and under TZ=UTC and America/New_York.
+
+### P3 fix round 4 — JOED-23
+
+Tick's visual check of f3bee55: use the calmer alternative, not blank
+reserved lines; empty bands are an anti-pattern (GUI 1316). Round 3's hidden
+twins are replaced by clamps. Everything else from round 3 stays: ready after
+every first read, the budget split, the CI scratch cleanup.
+
+| Surface | Round 3 | Now | Proof |
+| --- | --- | --- | --- |
+| Health line reason | Up to 900 px a row as tall as the longest reason, so a short reason had a blank line under it; wider, two reserved rows, a blank band at 1440 | One line at every width, with an ellipsis when it is longer; the full reason is its `title` and the Details heading. No other fact wraps, so the rows are fixed per width: one row from 1181 px (34 px); from 901 to 1180 px the reason beside Details, the other facts on a row below (60.25 px); up to 900 px one row per fact, the data age beside Details. With no data the line keeps its four facts (the broker and the emergency stop say "not reported"), so the first snapshot moves nothing | `lines`: all 17 health reasons with the longest broker, emergency-stop and data wordings at 1440, 1181, 1180, 1024, 901, 900, 701, 700 and 390 px, in this machine's font and the wide one: one box, nothing overflows the line, whole lines with an ellipsis |
+| Today's sentence | Hidden twins of its longest forms: three lines on phones in every state | Two lines at every width, a box of twice its line height (45 px). A longer sentence ends in an ellipsis. The sentence is a button: a click, tap or keyboard focus shows it whole in the explanation tip (hover does not, as its words are in view). A pinned tip follows the sentence through a rebuild, and its ages tick | `clamp`: on every Desk audit the two clamps show only whole lines (none cut through), end in an ellipsis and give their full text; a tap shows the sentence whole at six combos and in the journey; `lines`: 32 sentence forms |
+| Today's number | Not measured | A missing value's dash had a shorter box than a number, because the € sign's leading adds 9 px (7 to 8 px on phones). So the first snapshot moved Today's sentence. The number now keeps the approved box with or without a value (61 px; 53 px on phones) | `journey` from "not reported" |
+
+The browser `journey` now starts with no snapshot ("not reported") and
+asserts that the health line and Today's sentence keep one box (position and
+size, ±0.5 px) through not reported, fresh, stale, broken and recovered. It
+runs at six combos and in the wide font at 390 light and 1024 dark, so the
+Linux CI run asserts the same in its own fonts. AC-36 still scans everything
+else; the two clamps are its only exemption, and `clamp` checks them. The
+gate now has 2049 checks (1871 plus `lines`, `clamp` and the journey's
+not-reported step). All pass locally (Europe/Vienna) and under TZ=UTC with
+CI=true.
+
+Visible change for the visual check: no blank line or band remains. At 1440
+the health line is one row (34 px instead of 61). At 1024 its height is
+unchanged, and Details sits beside the reason. On phones the reason is one
+line and Today's sentence two, so the phone Desk is about as tall as before
+round 3. From 901 to 1180 px, Details is visually on the reason's row but
+stays last in the Tab order, after the facts it details.
+
+Found, not in this round's scope: from 701 to about 860 px (about 910 px in
+a wide font) the desktop header (brand, navigation, light, theme button) is
+wider than the window and scrolls sideways. It predates this round; the
+gate's widths are 390, 1024 and 1440.
+
+### P3 fix round 5 — JOED-23
+
+The horizontal page scroll found in round 4 (AC-28: never a horizontal page
+scroll). A sweep of every width in 10 px steps found two more defects of the
+same kind between the gate's widths; this round fixes them too.
+
+| Surface | Before | Now | Proof |
+| --- | --- | --- | --- |
+| Header | From 701 px the desktop header (brand, PAPER, nav, light, theme button) needed 855 px in this machine's font, 937 px in the wide font and up to 1,056 px with the longest light label ("Stale 23 h 59 min · Broker unstable"). The page scrolled sideways from 701 to about 860 px (910 px in the wide font), and in the wide font with that label at 1024 px too | Up to 960 px the approved phone header: brand, PAPER, the light (above 700 px still with its broker word, as §1 asks) and a 44 px theme button; the nav is the bottom bar. Above 960 px the desktop header, unchanged. When it is short of room (the wide font with a long label, 961 to about 1,060 px), the light's broker word moves under its label, inside the 34 px button. Its widest case needs 928 px | `sweep`: page scroll, the header's row, one nav, 44 px targets, centred icons; 6 light labels × 4 broker words at every width |
+| Kept holdings | Up to 1180 px a kept row's columns need about 730 px plus gutters: the page scrolled from 701 to about 730 px, and up to about 850 px the holding's name had no room and was cut | Up to 900 px a kept row has two lines: the holding and its worth, then the kept label under the holding. Side and last price are already in the holding's second line, as on phones | `sweep`: page scroll and nothing past the right edge, on every screen |
+| Desk card header | The state ("Sitting out since 16:02") never wraps, but the heartbeat line ("Checked in 18 s ago") took its room. With the design data the two overlapped at 710–780 and 1110–1150 px (to 820 and 1200 px in the wide font); with the longest heartbeat ("Checked in 23 h 59 min ago") at 710–870 px (910 px in the wide font) and 1110–1440 px | The state keeps its width. The heartbeat line may take two lines, inside the name and state's height (36 of 41 px, so nothing moves). A card narrower than 340 px puts it under the state, as on phones (710–830 and 1110–1230 px). At 1024 and 1440 the design state looks as approved | `sweep`: no text overlaps other text on any screen; each card header keeps one box with its longest state and heartbeat texts |
+
+The sweep (`sweep`, 121 checks) resizes the live page to every width from
+390 to 1440 px in 10 px steps (106), light and dark, in this machine's font
+and the wide one, on all four screens. It asserts:
+
+- no horizontal page scroll (`scrollWidth ≤ innerWidth`), and nothing reaches past the page's right edge, where a scrollbar sits;
+- the header's items stay in one row and never overlap;
+- one nav: the bottom bar up to 960 px, the header's above, with all four screens in view;
+- 44 px targets in the compact header and the bottom bar;
+- the header's and the bottom bar's icons centred (±0.5 px);
+- no text overlaps other text.
+
+On Desk it also puts every light label with every broker word through the
+header, and the longest state and heartbeat texts through each desk card. The
+same sweep against 44d1532 fails 108 of its 121 checks. The gate now has 2170
+checks (2049 plus the sweep). All pass locally (Europe/Vienna) and under
+TZ=UTC with CI=true.
+
+Deferred, a copy decision: on phones the light has about 72 to 84 px for its
+words. "Stale 23 h 59 min" (an age in hours and minutes) runs 2 px into the
+button's padding at 390 px in this machine's font, and up to 30 px over the
+theme button from 390 to 410 px in the wide font. Spacing cannot absorb
+30 px without dropping something §1 asks for. Proposal: once the age is an
+hour or more, the light says "Stale 23 h"; the Desk line keeps the exact age.
+The sweep exempts only this label on phones. It must still move nothing, and
+index.md lists every exempted width.
+
+Visible change for the visual check: the compact header and bottom bar from
+701 to 960 px, two-line kept rows up to 900 px, and the card heartbeat under
+the state at 710–830 and 1110–1230 px. At 390, 1024 and 1440 the design state
+is unchanged.

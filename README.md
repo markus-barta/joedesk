@@ -87,9 +87,8 @@ the accepted Fleet Config feed (or the fourth `panelStates` argument, its KEEP s
 policy-based row routing; scope disagreement withholds affected desk totals.
 
 ```bash
-node scripts/check-package.mjs
-node scripts/check-joe-layout.mjs
-node scripts/check-fleet-config.mjs
+npm run check                          # package, board UI source, Fleet Config, position contract
+npm run test:ui                        # board UI modules under Node
 node scripts/run-server-contract.mjs   # private macOS temp root or disposable Linux tmpfs
 ```
 
@@ -107,12 +106,27 @@ docker run --rm --network none --tmpfs /var/lib/joe-board \
   node --test test/server-contract.mjs
 ```
 
-Linux browser smoke (desktop, mobile, privacy) uses `scripts/smoke-joe.mjs` with Chrome — CI/Linux only:
+The board UI gate (`scripts/browser-p3.mjs`, JOED-23) runs the real board
+server with an injected clock, the P1 failure fixtures and one headless
+browser at 390, 1024 and 1440 px in light and dark. It checks the approved
+design's acceptance criteria (mode label, KEEP inertness, health light and
+copy, panel states, honest chart scales, contrast, 44 px targets, clipping
+and the two clamped state lines, layout shift in this machine's font and a
+wide one, terms, privacy stub) and writes screenshots plus an
+`index.md` to `~/.local/share/joedesk-qa/p3` (`JOED_QA_DIR` overrides it).
+It uses `BROWSER_PATH`, a Playwright headless shell or Google Chrome:
 
 ```bash
-BROWSER_PATH=/usr/bin/google-chrome node scripts/smoke-joe.mjs
-JOE_SMOKE_VIEWPORT=mobile BROWSER_PATH=/usr/bin/google-chrome node scripts/smoke-joe.mjs
-JOE_SMOKE_VIEWPORT=privacy BROWSER_PATH=/usr/bin/google-chrome node scripts/smoke-joe.mjs
+npm run test:browser
+BROWSER_PATH=/usr/bin/google-chrome node scripts/browser-p3.mjs
+```
+
+The gate holds the render budget's CI guard (2.5 × the reference budget,
+ADR §9). The budget itself is measured on a reference device (mbp2606 or
+mbp2607) with the same workload:
+
+```bash
+npm run budget:reference
 ```
 
 ## Run
@@ -228,17 +242,18 @@ the health signal and next action but does not restart the Gateway or pusher.
 ### Preserved contracts
 
 - Storage: `/var/lib/joe-board/data.json`, `history.json`, `fleet-config.json`, `fleet-config-actions.json`
-- Browser `localStorage` keys: `joe-board-layout-v1`, `joe-board-named-layouts-v1`, `joe-board-active-layout-v1`, `joe-board-grid-settings-v1`, `joe-board-phone-order-v1`, `joe-board-theme-v1`
-- Phone order is an optional field on named layouts and a separate active draft; desktop geometry retains its existing array format. Legacy layouts derive their initial phone order from desktop positions. On phones, scroll the page between tile drags; helper-edge autoscroll is disabled because tall tiles can otherwise pull against the drag direction. Desktop drag autoscroll remains enabled.
+- Browser `localStorage` keys: `joe-board-theme-v1` (light, dark or system) and `joe-board-observed-events-v1` (desk changes this browser saw). The GridStack layout keys of the old board are left untouched and unread; the rebuilt board has no layout manager or layout storage.
 - Fleet Config requires Diff → Confirm before Propagate. Save Preview remains browser-local; Propagate writes only a paper-mode config revision and its durable action record. Secret slots list agenix/Janus capability and path refs only and always show REDACTED; they never display plaintext credentials. HOSTD-52 rotation remains a response hook. See `docs/joe-fleet-config-secrets.md`.
 - Gateway light: yellow means the paper connection is unstable or its check-in is late; red means the Gateway reports down. These are health readings, not settings that Fleet Config can fix.
 - API paths: `/healthz`, `/readyz`, `/joe/*`, `/joe/fleet-config.json`, `/joe/fleet-config/actions.json`, `/joe/fleet-config/propagate`
 - Schemas: `inspr.joe.household.v1`, `inspr.joe.household.history.v1`, `inspr.joe.fleet-config.v1`, `inspr.joe.fleet-config.actions.v1`
-- Vendor JS/CSS under `public/joe/vendor/` with bundled LICENSE files
+- The board is plain ES modules under `public/joe/` with no vendored libraries; `index.html` pins every module to the release version through an import map, and nothing installs a service worker.
 
 See `docs/joe-data-contract.md` and `docs/joe-history-contract.md`.
 
 ### Fleet settings: human path and schema inventory (HOSTD-48)
+
+The rebuilt board (JOED-19) moves this editor into **Settings**, which returns with P5; until then the Settings screen says it is not wired yet. The propagate API, schema and audit log below are unchanged.
 
 Open **Settings · Fleet Config** on the board, or **Limits, quota & wake times** in the board-settings menu. Desk limits opens first, with risk cap, busy-desk maximum and KEEP ready to edit. Quota behavior, wake times and the Limits home overview are in the same navigation. Each input explains what it changes and where it applies. **Technical · exact keys & saved values** is collapsed until requested; it shows the saved document, while inputs and navigation values show the current preview. Board layout and theme remain browser-local.
 
