@@ -5,7 +5,6 @@ import { validateHouseholdSnapshot } from "../validate.mjs";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 const joeSource = await readFile(resolve(repoRoot, "public/joe/joe.js"), "utf8");
-const serverSource = await readFile(resolve(repoRoot, "server.mjs"), "utf8");
 
 function extractJoeBlock(startMarker, endMarker) {
   const start = joeSource.indexOf(startMarker);
@@ -48,20 +47,6 @@ const api = new Function(`${historyHelpers}
     formatPctChange
   };
 `)();
-
-function extractServerBlock(startMarker, endMarker) {
-  const start = serverSource.indexOf(startMarker);
-  const end = serverSource.indexOf(endMarker, start);
-  if (start < 0 || end < 0) throw new Error(`${startMarker} missing from server.mjs`);
-  return serverSource.slice(start, end);
-}
-
-const historyPointFromSnapshot = new Function(
-  `const HISTORY_BASIS_MAX = 96;
-   const HISTORY_BASIS = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
-   ${extractServerBlock("function moneyBag(bag)", "\nfunction pruneHistoryPoints")}
-   return historyPointFromSnapshot;`,
-)();
 
 const points = [
   {
@@ -471,85 +456,23 @@ const sameIdDifferentMethod = {
 if (api.compatibleAccountingBasis(sameIdEarlierPeriod, sameIdDifferentMethod, "j")) {
   throw new Error("a stable history basis id must not override a changed accounting method");
 }
-const legacyServerPoint = historyPointFromSnapshot({
-  generatedAt: "2026-09-09T12:00:00Z",
-  desks: [{ id: "j", money: { equity: 100, dayPnl: 0, totalPnl: 0 } }],
-  totals: { equity: 100, dayPnl: 0, totalPnl: 0 }
-});
-if (Object.prototype.hasOwnProperty.call(legacyServerPoint, "accounting")) {
-  throw new Error("server must not add accounting to legacy history points");
-}
-const scopedServerPoint = historyPointFromSnapshot({
-  generatedAt: "2026-09-10T12:00:00Z",
-  desks: [
-    { id: "j", accounting, money: { equity: 50, dayPnl: 0, totalPnl: 0 } },
-    { id: "joe", money: { equity: 210, dayPnl: 2, totalPnl: 10 } },
-    { id: "joel", money: { equity: 310, dayPnl: 3, totalPnl: 20 } }
-  ],
-  totals: { equity: 570, dayPnl: 5, totalPnl: 30 }
-});
-if (JSON.stringify(scopedServerPoint.accounting) !== JSON.stringify({ j: accounting })) {
-  throw new Error("server history point must preserve J accounting basis");
-}
-const explicitlyBasedServerPoint = historyPointFromSnapshot({
-  generatedAt: "2026-09-10T12:30:00Z",
-  desks: [
-    { id: "joel", historyBasis: "joel.stage0-keep-excluded.v1", money: { equity: 5000, dayPnl: null, totalPnl: 0 } }
-  ],
-  totals: { equity: 5000, dayPnl: null, totalPnl: 0 }
-});
-if (JSON.stringify(explicitlyBasedServerPoint.historyBasis) !== JSON.stringify({ joel: "joel.stage0-keep-excluded.v1" })) {
-  throw new Error("server history point must preserve the explicit per-desk history basis");
-}
-const unavailableServerPoint = historyPointFromSnapshot({
-  generatedAt: "2026-09-10T13:00:00Z",
-  desks: [
-    {
-      id: "j",
-      money: { equity: null, dayPnl: null, totalPnl: null },
-      backfill: {
-        capturedSubtotal: {
-          realizedPnl: -37.125,
-          currency: "USD",
-          points: [
-            { at: "2026-09-10T08:01:00.000Z", realizedPnl: 6.5 },
-            { at: "2026-09-10T08:05:00.000Z", realizedPnl: -37.125 },
-          ],
-          pointsTruncated: false,
-        },
-      }
-    },
-    { id: "joe", money: { equity: 211, dayPnl: 2, totalPnl: 11 } },
-    { id: "joel", money: { equity: 311, dayPnl: 3, totalPnl: 21 } }
-  ],
-  totals: { equity: null, dayPnl: null, totalPnl: null }
-});
-if (Object.prototype.hasOwnProperty.call(unavailableServerPoint, "accounting")) {
-  throw new Error("an unavailable untyped J row must remain explicitly without accounting metadata");
-}
-if (Object.prototype.hasOwnProperty.call(unavailableServerPoint.desks.j, "backfill") ||
-    JSON.stringify(unavailableServerPoint).includes("-37.125") ||
-    JSON.stringify(unavailableServerPoint).includes("2026-09-10T08:01:00.000Z")) {
-  throw new Error("server history must not copy partial J backfill metadata, subtotal, or curve");
-}
-if (
-  unavailableServerPoint.desks.j.equity !== null ||
-  unavailableServerPoint.desks.j.totalPnl !== null ||
-  unavailableServerPoint.totals.equity !== null ||
-  unavailableServerPoint.desks.joe.equity !== 211 ||
-  unavailableServerPoint.desks.joel.equity !== 311
-) {
-  throw new Error("server history must retain J/totals null without altering Joe or Joel");
-}
-const restoredServerPoint = historyPointFromSnapshot({
-  generatedAt: "2026-09-10T14:00:00Z",
-  desks: [
-    { id: "j", accounting, money: { equity: 55, dayPnl: 1, totalPnl: 5 } },
-    { id: "joe", money: { equity: 212, dayPnl: 2, totalPnl: 12 } },
-    { id: "joel", money: { equity: 312, dayPnl: 3, totalPnl: 22 } }
-  ],
-  totals: { equity: 579, dayPnl: 6, totalPnl: 39 }
-});
+// Captured legacy shapes keep the unchanged P3 browser checks meaningful.
+// P2 runtime projection, completeness, retention and basis tests live in
+// test/server-contract.mjs against the imported v2 history module.
+const scopedServerPoint = {
+  t: "2026-09-10T12:00:00Z",
+  desks: { j: { equity: 50 }, joe: { equity: 210 }, joel: { equity: 310 } },
+  accounting: { j: accounting }
+};
+const unavailableServerPoint = {
+  t: "2026-09-10T13:00:00Z",
+  desks: { j: { equity: null }, joe: { equity: 211 }, joel: { equity: 311 } }
+};
+const restoredServerPoint = {
+  t: "2026-09-10T14:00:00Z",
+  desks: { j: { equity: 55 }, joe: { equity: 212 }, joel: { equity: 312 } },
+  accounting: { j: accounting }
+};
 const unavailableWindow = [scopedServerPoint, unavailableServerPoint, restoredServerPoint];
 const trailingUnavailableJSeries = api.sparklineSamples(unavailableWindow.slice(0, 2), "all", "j");
 if (JSON.stringify(trailingUnavailableJSeries.map((sample) => sample.y)) !== JSON.stringify([50, null])) {

@@ -49,17 +49,19 @@ nix-build -E 'with import <nixpkgs> {}; callPackage ./default.nix {}'
 
 ## Test
 
-The JOED-21 rebuild foundation lives in
-[ADR 0001](docs/adr/0001-joedesk-architecture.md). `contracts/` is an offline,
-versioned candidate shared by the future server, browser and producer CI; the
-current runtime still uses its legacy validators. P1 adds no UI or deployment.
-Synthetic incident payloads and their complete panel-state table are in
-`fixtures/`; time acceptance vectors cover both 2026 DST mismatch periods.
+The JOED-21/JOED-22 rebuild lives in
+[ADR 0001](docs/adr/0001-joedesk-architecture.md). The P2 server uses the offline
+`contracts/` package for v2 data/history and v1 Fleet Config. The existing UI
+remains legacy until P3; this branch requires coordinated producer/UI cutover
+and is not a deployable compatibility upgrade on its own. Synthetic incident
+payloads are in `fixtures/`. `time.mjs` runs all 24 P1 vectors plus 2027 spring,
+Vienna week/midnight, repeated NY hours, extended-hours and pinned NYSE calendar
+tests. The full per-item P2 test mapping is at the end of the ADR.
 
 ```bash
 npm run test:contracts   # pure local contracts, fixtures and time vectors
 npm run test:contracts:browser  # installed Chrome + trash; BROWSER_PATH override
-npm test                # includes the isolated existing HTTP server suite
+npm test                # contracts plus isolated P2 HTTP/restart/storage tests
 npm run check           # existing package and UI checks
 ```
 
@@ -67,7 +69,8 @@ Import `validateContract` from `./contracts/index.mjs` on Node 22+ or in a
 browser with JSON module import attributes. Use `stage: "ingress"` for a
 producer payload (receivedAt forbidden) and the default served stage after the
 server stamps it. The pure `acceptSnapshot` helper returns 422 and retains
-last-good on rejection; HTTP/persistence wiring belongs to P2. The schemas and
+last-good on rejection; `server/read-model.mjs` connects it to durable receipt,
+sequence, gateway-check progress and per-cell retention. The schemas and
 shared semantic validator must travel together when pinned in producer CI.
 `validateAndRetain` applies the same last-good rule to all five contracts,
 including browser reads and server-controlled Fleet Config/health projections.
@@ -87,10 +90,15 @@ policy-based row routing; scope disagreement withholds affected desk totals.
 node scripts/check-package.mjs
 node scripts/check-joe-layout.mjs
 node scripts/check-fleet-config.mjs
-node scripts/run-server-contract.mjs   # disposable Docker tmpfs; never touches host /var/lib/joe-board
+node scripts/run-server-contract.mjs   # private macOS temp root or disposable Linux tmpfs
 ```
 
-Server contract tests refuse to run unless `/var/lib/joe-board` is an empty tmpfs mount (see `test/server-contract.mjs`). CI and the runner script use:
+The factory `createJoeServer` injects storage, clock and fixture authentication;
+importing it does not start a listener or read a credential. On macOS the runner
+creates an empty mode-0700 temporary root, validates its owner/location and
+trashes only that root afterward. On Linux the tests still require an empty
+`/var/lib/joe-board` tmpfs. Neither path touches the host production store.
+CI uses:
 
 ```bash
 docker run --rm --network none --tmpfs /var/lib/joe-board \
@@ -125,9 +133,60 @@ docker run --rm -p 127.0.0.1:8080:8080 \
 
 ## Deploy notes
 
-### Read routes — external OAuth
+### Read routes — trusted external OAuth
 
-Browser GET routes (`/joe/`, `/joe/data.json`, `/joe/history.json`, `/joe/fleet-config/actions.json`, static assets) have **no built-in OAuth**. Authentication for read access is **external**: configure OAuth (or another access gate) in a trusted reverse proxy in front of this service.
+OAuth remains external. Dynamic reads of data, history, results, state, Fleet
+Config and its audit log require the trusted proxy's `X-Auth-Request-User`;
+missing/invalid identity receives 401 `auth_required`. The proxy must strip
+client identity headers and keep the service private. P6 owns that integration.
+Only `/joe/healthz` is the new anonymous health route; `/healthz` and `/readyz`
+retain their legacy probe responses. Static UI/assets remain behind external SSO.
+
+`/joe/healthz` reports the actual `release.json` version/scheme, server clock,
+contract-set identifier, four feed states/receipt ages and gateway confirmation,
+check age and closed reason. Never-received feeds have null age and
+`feed_not_received`; unwired Results uses `results_not_wired`. Data/history
+without observations return HTTP 503 with that reason, distinct from a missing
+route. Health has no money, identifiers, paths or diagnostic text. The legacy
+`calendar` scheme remains truthful until P6 completes CalVer3 adoption.
+
+`/joe/state.json` is the protected read model for P3: serverNow, four feeds with
+progress metadata, safe data projection and panel states. Anchor serverNow to
+the browser's monotonic timer; pass feed metadata and prior cells to the shared
+selectors. `valueReceivedAt` is the original retained-cell receipt. Data/history
+responses also send `X-Joe-Server-Now`, data generation progress and any closed
+feed rejection reason as headers. A rejected push leaves the last good snapshot
+and its original receipts available, including to cold clients. Feed-level
+rejection reasons live in headers/state; only actual session or KEEP-policy
+constraints withhold current values. The server never rewrites producer-owned
+API readiness. `contracts/read.mjs` handles SSO redirects, 401/403 and invalid
+refreshes with retention. Replayed deliveries show retained/advisory state,
+preserve the original age and cannot freshen data or turn healthy cells red.
+
+`/joe/results.json` returns HTTP 503 with the v2 schema identifier and
+`results_not_wired`. It contains no fabricated executor sequence, days or trades;
+there is no results ingress until JOED-20/P4. History stores only observations
+and null gaps, never the UI's assumed/interpolated continuity values.
+
+P2 persists `data-state.json` (snapshot plus progress and retained-cell receipts)
+and `history-state.json` as independent atomic/fsynced envelopes. Closed rejection
+reasons have a separate bounded file. Fleet Config keeps its audited v1 file and
+a server-owned `fleet-receipt.json` for last-good/receipt retention. Refreshes of
+an unchanged revision never reset its age. Corrupt sequence/retention metadata
+or a corrupt/oversized history store fails closed without overwriting either
+store or restarting sequences; restore a compatible backup. Producer generation
+more than 5 seconds ahead of server receipt is rejected with `clock_ahead`
+before snapshot/history writes, so a higher valid sequence can recover normally.
+Legacy data/history files are neither migrated nor overwritten automatically;
+P6 owns the compatible backup and cutover. History's `sizeBytes` measures its
+complete UTF-8 storage envelope; compaction begins at 80% of 8 MiB, preserves
+endpoints/extrema/gap edges/per-desk basis transitions, and prunes its 14-day
+window by server time. Successful compaction reports the advisory
+`history_compacted` state until the compacted range (`compactedThrough`) leaves
+retention; it does not mark history broken. Actual `history_size_limit` and
+`history_write_failed` alarms remain broken until a successful history write
+resolves them; deduplication alone cannot clear one. A snapshot rename followed
+by a directory-sync failure still records its history point before replying.
 
 The UI gates non-canonical hosts client-side (privacy stub). That is UX only, not a network security boundary.
 

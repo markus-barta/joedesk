@@ -17,6 +17,8 @@ pkgs.stdenv.mkDerivation {
   installPhase = ''
     mkdir -p $out/share/joedesk/public
     cp -r $src/public/. $out/share/joedesk/public/
+    cp -r $src/contracts $src/server $out/share/joedesk/
+    install -m 644 $src/release.json $src/time.mjs $src/market-calendar.json $out/share/joedesk/
 
     mkdir -p $out/bin
     cat > $out/bin/joedesk-server <<EOF

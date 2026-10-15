@@ -4,13 +4,27 @@
  * user/mount/network namespace when needed.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 
 const DATA_DIR = "/var/lib/joe-board";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const token = "joedesk-isolated-contract-fixture";
+
+// The P2 factory injects every storage path and fixture credential. macOS can
+// exercise it without a daemon or touching the fixed production store. Direct
+// test invocation still fails closed unless this private empty root is given.
+if (process.platform === "darwin") {
+  const root = mkdtempSync(resolve(tmpdir(), "joedesk-contract-"));
+  const native = spawnSync(process.execPath, ["--test", "test/server-contract.mjs"], {
+    cwd: repoRoot, stdio: "inherit", env: { ...process.env, JOED_TEST_ROOT: root },
+  });
+  const cleanup = spawnSync("/usr/bin/trash", [root], { stdio: "inherit" });
+  if (cleanup.status !== 0) console.error("Test scratch retained: trash cleanup failed");
+  process.exit(native.status ?? 1);
+}
 
 function isDisposableJoeBoardEnv() {
   if (process.platform !== "linux") return false;

@@ -97,6 +97,7 @@ export function checkSemantics(kind, payload, stage, errors) {
     if (payload.safety.halt && !payload.safety.haltReason) fail('$.safety.haltReason', 'reasonRequired');
   }
   if (kind === 'history') {
+    if (payload.reason === 'history_compacted' && !payload.compactedThrough) fail('$.compactedThrough', 'required');
     let previous = -Infinity;
     payload.points.forEach((p, i) => {
       if (Date.parse(p.t) <= previous) fail(`$.points[${i}].t`, 'strictOrder');
@@ -130,8 +131,12 @@ export function checkSemantics(kind, payload, stage, errors) {
       if (feed.state === 'fresh' && feed.reason) fail(`$.feeds.${key}`, 'freshWithReason');
       if (feed.state !== 'not reported' && feed.ageSeconds === null && feed.state !== 'broken') fail(`$.feeds.${key}.ageSeconds`, 'ageRequired');
     }
-    const coordinate = payload.version.slice(0, 12);
+    const coordinate = payload.versionScheme === 'calendar' ? payload.version.replaceAll('.', '').padEnd(12, '0') : payload.version.slice(0, 12);
+    const schemeShape = payload.versionScheme === 'calendar' ? /^\d{2}\.\d{2}\.\d{2}(?:\.\d{2}\.\d{2})?$/ : /^[1-9]\d{11}\.0\.0$/;
+    if (!schemeShape.test(payload.version)) fail('$.version', 'versionScheme');
     const instant = `20${coordinate.slice(0, 2)}-${coordinate.slice(2, 4)}-${coordinate.slice(4, 6)}T${coordinate.slice(6, 8)}:${coordinate.slice(8, 10)}:${coordinate.slice(10, 12)}.000Z`;
     if (!Number.isFinite(Date.parse(instant)) || new Date(instant).toISOString() !== instant) fail('$.version', 'calendarCoordinate');
+    if (payload.gateway?.confirmed && (payload.gateway.reason || payload.gateway.checkAgeSeconds === null || payload.gateway.checkAgeSeconds >= 60)) fail('$.gateway', 'contradictorySession');
+    if (payload.gateway && !payload.gateway.confirmed && !payload.gateway.reason) fail('$.gateway.reason', 'reasonRequired');
   }
 }

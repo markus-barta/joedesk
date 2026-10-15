@@ -1,6 +1,10 @@
 import { validateContract } from './index.mjs';
 import { validInstant } from './schema-validator.mjs';
 
+// Preserve the ADR's small producer skew while rejecting clocks that could
+// poison durable generation progress. Receipt time remains server-owned.
+export const MAX_CLOCK_AHEAD_MS = 5000;
+
 // A transport-neutral acceptance boundary. P2 will connect this to atomic disk
 // writes and HTTP. Rejection never replaces the last validated value.
 export function acceptSnapshot(kind, candidate, previous = null, receivedAt) {
@@ -12,6 +16,9 @@ export function acceptSnapshot(kind, candidate, previous = null, receivedAt) {
     errors, rejectedAt: receivedAt,
   });
   if (!checked.ok) return reject(checked.reason);
+  if (Date.parse(candidate.generatedAt) > Date.parse(receivedAt) + MAX_CLOCK_AHEAD_MS) {
+    return reject('clock_ahead', [{ path: '$.generatedAt', rule: 'clockAhead' }]);
+  }
   if (previous?.value) {
     if (candidate.seq <= previous.value.seq) return reject('sequence_replayed', [{ path: '$.seq', rule: 'sequenceReplayed' }]);
     if (Date.parse(candidate.generatedAt) < Date.parse(previous.value.generatedAt)) return reject('clock_regressed', [{ path: '$.generatedAt', rule: 'clockRegressed' }]);
