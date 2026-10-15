@@ -1,0 +1,164 @@
+{
+  "id": "g-expired-sso",
+  "failureClass": "g",
+  "provenance": "Synthetic reconstruction of Amy failure history; no production payload or identifiers.",
+  "incident": "Browser receives SSO redirect; the data last-good remains available.",
+  "feed": "data",
+  "payload": null,
+  "receivedAt": "2026-10-14T17:52:22.000Z",
+  "now": "2026-10-14T17:52:31.000Z",
+  "transportReason": "auth_required",
+  "expectedStatus": null,
+  "expected": {
+    "today.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "today.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "today.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "today.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "paperAccount": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.j.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.j.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.j.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.j.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.joe.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.joe.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.joe.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.joe.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.joel.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.joel.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.joel.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "desks.joel.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "positions": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "kept": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "gateway": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "halt": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "executor": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": true
+    },
+    "history": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "results": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "fleet-config": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    }
+  }
+}

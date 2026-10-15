@@ -1,0 +1,332 @@
+{
+  "id": "a-frozen-ready-gateway",
+  "failureClass": "a",
+  "provenance": "Synthetic reconstruction of Amy failure history; no production payload or identifiers.",
+  "incident": "Ten minutes of advancing envelopes with apiSessionReady:true and a frozen checkedAt; current money/marks are null and last-good money retains its original age.",
+  "feed": "data",
+  "payload": {
+    "schema": "inspr.joe.household.v2",
+    "seq": 121,
+    "generatedAt": "2026-10-14T17:52:22.000Z",
+    "mode": "PAPER",
+    "currency": "EUR",
+    "source": {
+      "kind": "live-ib-api",
+      "label": "Synthetic paper API projection"
+    },
+    "safety": {
+      "halt": false,
+      "haltReason": null,
+      "gateway": {
+        "apiSessionReady": true,
+        "checkedAt": "2026-10-14T17:42:22.000Z"
+      },
+      "executor": {
+        "status": "running",
+        "halt": false,
+        "brakes": false,
+        "gatewayReachable": true,
+        "checkedAt": "2026-10-14T17:42:22.000Z"
+      }
+    },
+    "desks": [
+      {
+        "id": "j",
+        "label": "J",
+        "state": "working",
+        "action": "Synthetic paper observation; no action requested.",
+        "heartbeatAt": "2026-10-14T17:42:22.000Z",
+        "money": {
+          "equity": null,
+          "dayPnl": null,
+          "openPnl": null,
+          "totalPnl": null,
+          "reasons": {
+            "equity": "gateway_unconfirmed",
+            "dayPnl": "gateway_unconfirmed",
+            "openPnl": "gateway_unconfirmed",
+            "totalPnl": "gateway_unconfirmed"
+          }
+        },
+        "historyBasis": "j.paper.v2"
+      },
+      {
+        "id": "joe",
+        "label": "Joe",
+        "state": "sit-out",
+        "action": "Synthetic paper observation; no action requested.",
+        "heartbeatAt": "2026-10-14T17:42:22.000Z",
+        "money": {
+          "equity": null,
+          "dayPnl": null,
+          "openPnl": null,
+          "totalPnl": null,
+          "reasons": {
+            "equity": "gateway_unconfirmed",
+            "dayPnl": "gateway_unconfirmed",
+            "openPnl": "gateway_unconfirmed",
+            "totalPnl": "gateway_unconfirmed"
+          }
+        },
+        "historyBasis": "joe.paper.v2"
+      },
+      {
+        "id": "joel",
+        "label": "Joel",
+        "state": "sit-out",
+        "action": "Synthetic paper observation; no action requested.",
+        "heartbeatAt": "2026-10-14T17:42:22.000Z",
+        "money": {
+          "equity": null,
+          "dayPnl": null,
+          "openPnl": null,
+          "totalPnl": null,
+          "reasons": {
+            "equity": "gateway_unconfirmed",
+            "dayPnl": "gateway_unconfirmed",
+            "openPnl": "gateway_unconfirmed",
+            "totalPnl": "gateway_unconfirmed"
+          }
+        },
+        "historyBasis": "joel.paper.v2"
+      }
+    ],
+    "totals": {
+      "equity": null,
+      "dayPnl": null,
+      "openPnl": null,
+      "totalPnl": null,
+      "reasons": {
+        "equity": "gateway_unconfirmed",
+        "dayPnl": "gateway_unconfirmed",
+        "openPnl": "gateway_unconfirmed",
+        "totalPnl": "gateway_unconfirmed"
+      }
+    },
+    "pnlSources": {
+      "day": {
+        "status": "unavailable",
+        "method": "sod-virtual-equity",
+        "currency": "EUR",
+        "scope": "virtual-desks",
+        "observedAt": "2026-10-14T17:42:22.000Z",
+        "periodStart": "2026-10-14T04:00:00.000Z",
+        "reason": "gateway_unconfirmed"
+      },
+      "open": {
+        "status": "unavailable",
+        "method": "owned-lots-current-mark-fx",
+        "currency": "EUR",
+        "scope": "virtual-desks",
+        "observedAt": "2026-10-14T17:42:22.000Z",
+        "reason": "gateway_unconfirmed"
+      }
+    },
+    "brokerAccount": {
+      "equity": null,
+      "scope": "paper-account-including-keep",
+      "observedAt": "2026-10-14T17:42:22.000Z",
+      "reason": "gateway_unconfirmed"
+    },
+    "positions": {
+      "source": "live-ib-api",
+      "observedAt": "2026-10-14T17:42:22.000Z",
+      "rows": [
+        {
+          "desk": "j",
+          "symbol": "DEMO",
+          "company": "Synthetic instrument",
+          "side": "long",
+          "quantity": "2",
+          "mark": null,
+          "marketValue": null,
+          "scope": "stage0",
+          "updatedAt": "2026-10-14T17:42:22.000Z",
+          "dayPnl": null,
+          "openPnl": null
+        },
+        {
+          "desk": null,
+          "symbol": "SXR8",
+          "side": "long",
+          "quantity": "1",
+          "mark": null,
+          "marketValue": null,
+          "scope": "keep",
+          "updatedAt": "2026-10-14T17:42:22.000Z",
+          "dayPnl": null,
+          "openPnl": null
+        },
+        {
+          "desk": null,
+          "symbol": "TSLA",
+          "side": "long",
+          "quantity": "1",
+          "mark": null,
+          "marketValue": null,
+          "scope": "keep",
+          "updatedAt": "2026-10-14T17:42:22.000Z",
+          "dayPnl": null,
+          "openPnl": null
+        }
+      ],
+      "reason": "gateway_unconfirmed"
+    }
+  },
+  "receivedAt": "2026-10-14T17:52:22.000Z",
+  "now": "2026-10-14T17:52:31.000Z",
+  "transportReason": null,
+  "expectedStatus": 200,
+  "expected": {
+    "today.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "today.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "today.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "today.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "paperAccount": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.j.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.j.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.j.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.j.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.joe.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.joe.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.joe.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.joe.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.joel.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.joel.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.joel.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "desks.joel.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": true
+    },
+    "positions": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "gateway_unconfirmed",
+      "retained": false
+    },
+    "kept": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "gateway_unconfirmed",
+      "retained": false
+    },
+    "gateway": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "gateway_unconfirmed",
+      "retained": false
+    },
+    "halt": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "executor": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "history": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "results": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "fleet-config": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    }
+  }
+}

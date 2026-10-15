@@ -1,0 +1,164 @@
+{
+  "id": "d-routing-stub",
+  "failureClass": "d",
+  "provenance": "Synthetic reconstruction of Amy failure history; no production payload or identifiers.",
+  "incident": "Host/path override serves the landing page instead of JSON.",
+  "feed": "data",
+  "payload": null,
+  "receivedAt": "2026-10-14T17:52:22.000Z",
+  "now": "2026-10-14T17:52:31.000Z",
+  "transportReason": "route_not_found",
+  "expectedStatus": null,
+  "expected": {
+    "today.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "today.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "today.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "today.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "paperAccount": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.j.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.j.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.j.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.j.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.joe.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.joe.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.joe.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.joe.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.joel.equity": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.joel.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.joel.openPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "desks.joel.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "positions": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "kept": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "gateway": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "halt": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "executor": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": true
+    },
+    "history": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "results": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "fleet-config": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    }
+  }
+}

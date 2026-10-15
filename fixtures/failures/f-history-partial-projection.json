@@ -1,0 +1,340 @@
+{
+  "id": "f-history-partial-projection",
+  "failureClass": "f",
+  "provenance": "Synthetic reconstruction of Amy failure history; no production payload or identifiers.",
+  "incident": "An actual partial family point supplies a total despite missing J equity; contract rejection preserves last-good history.",
+  "feed": "history",
+  "payload": {
+    "schema": "inspr.joe.household.history.v2",
+    "seq": 102,
+    "generatedAt": "2026-10-14T17:42:23.000Z",
+    "sizeBytes": 2048,
+    "points": [
+      {
+        "t": "2026-10-14T17:40:00.000Z",
+        "desks": {
+          "j": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joe": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joel": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          }
+        },
+        "totals": {
+          "equity": {
+            "amount": "15000",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          }
+        }
+      },
+      {
+        "t": "2026-10-14T17:42:22.000Z",
+        "desks": {
+          "j": {
+            "money": {
+              "equity": null,
+              "dayPnl": {
+                "amount": "-1",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "-1",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joe": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joel": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          }
+        },
+        "totals": {
+          "equity": {
+            "amount": "14999",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "-1",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "-1",
+            "currency": "EUR"
+          }
+        }
+      }
+    ]
+  },
+  "receivedAt": "2026-10-14T17:52:22.000Z",
+  "now": "2026-10-14T17:52:31.000Z",
+  "transportReason": null,
+  "expectedStatus": 422,
+  "expected": {
+    "today.equity": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "today.dayPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "today.openPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "today.totalPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "paperAccount": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.j.equity": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.j.dayPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.j.openPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.j.totalPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.joe.equity": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.joe.dayPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.joe.openPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.joe.totalPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.joel.equity": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.joel.dayPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.joel.openPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "desks.joel.totalPnl": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "positions": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "kept": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "gateway": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "halt": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "executor": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "history": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
+    },
+    "results": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    },
+    "fleet-config": {
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
+    }
+  },
+  "expectedErrors": [
+    {
+      "path": "$.points[1].totals.equity",
+      "rule": "incompleteDeskSum"
+    }
+  ]
+}

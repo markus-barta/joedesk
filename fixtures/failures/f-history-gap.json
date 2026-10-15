@@ -1,0 +1,337 @@
+{
+  "id": "f-history-gap",
+  "failureClass": "f",
+  "provenance": "Synthetic reconstruction of Amy failure history; no production payload or identifiers.",
+  "incident": "A null observation is preserved as a gap for the later dotted display layer.",
+  "feed": "history",
+  "payload": {
+    "schema": "inspr.joe.household.history.v2",
+    "seq": 102,
+    "generatedAt": "2026-10-14T17:42:23.000Z",
+    "sizeBytes": 2048,
+    "points": [
+      {
+        "t": "2026-10-14T17:40:00.000Z",
+        "desks": {
+          "j": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joe": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joel": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          }
+        },
+        "totals": {
+          "equity": {
+            "amount": "15000",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          }
+        }
+      },
+      {
+        "t": "2026-10-14T17:42:22.000Z",
+        "desks": {
+          "j": {
+            "money": {
+              "equity": null,
+              "dayPnl": {
+                "amount": "-1",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "-1",
+                "currency": "EUR"
+              },
+              "reasons": {
+                "equity": "family_projection_unavailable"
+              }
+            }
+          },
+          "joe": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joel": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          }
+        },
+        "totals": {
+          "equity": null,
+          "dayPnl": {
+            "amount": "-1",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "-1",
+            "currency": "EUR"
+          },
+          "reasons": {
+            "equity": "family_projection_unavailable"
+          }
+        }
+      }
+    ]
+  },
+  "receivedAt": "2026-10-14T17:42:22.000Z",
+  "now": "2026-10-14T17:42:31.000Z",
+  "transportReason": null,
+  "expectedStatus": 200,
+  "expected": {
+    "today.equity": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "today.dayPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "today.openPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "today.totalPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "paperAccount": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.j.equity": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.j.dayPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.j.openPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.j.totalPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joe.equity": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joe.dayPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joe.openPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joe.totalPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joel.equity": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joel.dayPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joel.openPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joel.totalPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "positions": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "kept": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "gateway": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "halt": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "executor": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "history": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "results": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "fleet-config": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    }
+  }
+}

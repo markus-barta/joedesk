@@ -1,0 +1,587 @@
+{
+  "data": {
+    "schema": "inspr.joe.household.v2",
+    "seq": 101,
+    "generatedAt": "2026-10-14T17:42:22.000Z",
+    "receivedAt": "2026-10-14T17:42:22.000Z",
+    "mode": "PAPER",
+    "currency": "EUR",
+    "source": {
+      "kind": "live-ib-api",
+      "label": "Synthetic paper API projection"
+    },
+    "safety": {
+      "halt": false,
+      "haltReason": null,
+      "gateway": {
+        "apiSessionReady": true,
+        "checkedAt": "2026-10-14T17:42:22.000Z"
+      },
+      "executor": {
+        "status": "running",
+        "halt": false,
+        "brakes": false,
+        "gatewayReachable": true,
+        "checkedAt": "2026-10-14T17:42:22.000Z"
+      }
+    },
+    "desks": [
+      {
+        "id": "j",
+        "label": "J",
+        "state": "working",
+        "action": "Synthetic paper observation; no action requested.",
+        "heartbeatAt": "2026-10-14T17:42:22.000Z",
+        "money": {
+          "equity": {
+            "amount": "4999",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "-1",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "-1",
+            "currency": "EUR"
+          }
+        },
+        "historyBasis": "j.paper.v2"
+      },
+      {
+        "id": "joe",
+        "label": "Joe",
+        "state": "sit-out",
+        "action": "Synthetic paper observation; no action requested.",
+        "heartbeatAt": "2026-10-14T17:42:22.000Z",
+        "money": {
+          "equity": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          }
+        },
+        "historyBasis": "joe.paper.v2"
+      },
+      {
+        "id": "joel",
+        "label": "Joel",
+        "state": "sit-out",
+        "action": "Synthetic paper observation; no action requested.",
+        "heartbeatAt": "2026-10-14T17:42:22.000Z",
+        "money": {
+          "equity": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          }
+        },
+        "historyBasis": "joel.paper.v2"
+      }
+    ],
+    "totals": {
+      "equity": {
+        "amount": "14999",
+        "currency": "EUR"
+      },
+      "dayPnl": {
+        "amount": "-1",
+        "currency": "EUR"
+      },
+      "openPnl": {
+        "amount": "0",
+        "currency": "EUR"
+      },
+      "totalPnl": {
+        "amount": "-1",
+        "currency": "EUR"
+      }
+    },
+    "pnlSources": {
+      "day": {
+        "status": "available",
+        "method": "sod-virtual-equity",
+        "currency": "EUR",
+        "scope": "virtual-desks",
+        "observedAt": "2026-10-14T17:42:22.000Z",
+        "periodStart": "2026-10-14T04:00:00.000Z"
+      },
+      "open": {
+        "status": "available",
+        "method": "owned-lots-current-mark-fx",
+        "currency": "EUR",
+        "scope": "virtual-desks",
+        "observedAt": "2026-10-14T17:42:22.000Z"
+      }
+    },
+    "brokerAccount": {
+      "equity": {
+        "amount": "28000",
+        "currency": "EUR"
+      },
+      "scope": "paper-account-including-keep",
+      "observedAt": "2026-10-14T17:42:22.000Z"
+    },
+    "positions": {
+      "source": "live-ib-api",
+      "observedAt": "2026-10-14T17:42:22.000Z",
+      "rows": [
+        {
+          "desk": "j",
+          "symbol": "DEMO",
+          "company": "Synthetic instrument",
+          "side": "long",
+          "quantity": "2",
+          "mark": {
+            "amount": "20",
+            "currency": "USD"
+          },
+          "marketValue": {
+            "amount": "40",
+            "currency": "USD"
+          },
+          "scope": "stage0",
+          "updatedAt": "2026-10-14T17:42:22.000Z"
+        },
+        {
+          "desk": null,
+          "symbol": "SXR8",
+          "side": "long",
+          "quantity": "1",
+          "mark": {
+            "amount": "600",
+            "currency": "EUR"
+          },
+          "marketValue": {
+            "amount": "600",
+            "currency": "EUR"
+          },
+          "scope": "keep",
+          "updatedAt": "2026-10-14T17:42:22.000Z"
+        },
+        {
+          "desk": null,
+          "symbol": "TSLA",
+          "side": "long",
+          "quantity": "1",
+          "mark": {
+            "amount": "200",
+            "currency": "USD"
+          },
+          "marketValue": {
+            "amount": "200",
+            "currency": "USD"
+          },
+          "scope": "keep",
+          "updatedAt": "2026-10-14T17:42:22.000Z"
+        }
+      ]
+    }
+  },
+  "history": {
+    "schema": "inspr.joe.household.history.v2",
+    "seq": 101,
+    "generatedAt": "2026-10-14T17:42:22.000Z",
+    "receivedAt": "2026-10-14T17:42:22.000Z",
+    "sizeBytes": 2048,
+    "points": [
+      {
+        "t": "2026-10-14T17:40:00.000Z",
+        "desks": {
+          "j": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joe": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joel": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          }
+        },
+        "totals": {
+          "equity": {
+            "amount": "15000",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          }
+        }
+      },
+      {
+        "t": "2026-10-14T17:42:22.000Z",
+        "desks": {
+          "j": {
+            "money": {
+              "equity": {
+                "amount": "4999",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "-1",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "-1",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joe": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          },
+          "joel": {
+            "money": {
+              "equity": {
+                "amount": "5000",
+                "currency": "EUR"
+              },
+              "dayPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "openPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              },
+              "totalPnl": {
+                "amount": "0",
+                "currency": "EUR"
+              }
+            }
+          }
+        },
+        "totals": {
+          "equity": {
+            "amount": "14999",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "-1",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "-1",
+            "currency": "EUR"
+          }
+        }
+      }
+    ]
+  },
+  "results": {
+    "schema": "inspr.joe.household.results.v2",
+    "seq": 8,
+    "generatedAt": "2026-10-14T17:42:22.000Z",
+    "receivedAt": "2026-10-14T17:42:22.000Z",
+    "currency": "EUR",
+    "timeZone": "Europe/Vienna",
+    "trackingStart": "2026-09-10",
+    "days": [
+      {
+        "date": "2026-10-14",
+        "desks": {
+          "j": {
+            "equityClose": {
+              "amount": "4999",
+              "currency": "EUR"
+            },
+            "realisedNet": {
+              "amount": "-1",
+              "currency": "EUR"
+            },
+            "fees": {
+              "amount": "0.64",
+              "currency": "EUR"
+            },
+            "trades": 1
+          },
+          "joe": {
+            "equityClose": {
+              "amount": "5000",
+              "currency": "EUR"
+            },
+            "realisedNet": {
+              "amount": "0",
+              "currency": "EUR"
+            },
+            "fees": {
+              "amount": "0",
+              "currency": "EUR"
+            },
+            "trades": 0
+          },
+          "joel": {
+            "equityClose": {
+              "amount": "5000",
+              "currency": "EUR"
+            },
+            "realisedNet": {
+              "amount": "0",
+              "currency": "EUR"
+            },
+            "fees": {
+              "amount": "0",
+              "currency": "EUR"
+            },
+            "trades": 0
+          }
+        }
+      }
+    ],
+    "trades": [
+      {
+        "id": "rt-synthetic-001",
+        "desk": "j",
+        "symbol": "DEMO",
+        "side": "long",
+        "quantity": "2",
+        "openedAt": "2026-10-14T15:00:00.000Z",
+        "closedAt": "2026-10-14T17:39:00.000Z",
+        "entryPrice": {
+          "amount": "20",
+          "currency": "USD"
+        },
+        "exitPrice": {
+          "amount": "19.8",
+          "currency": "USD"
+        },
+        "grossEur": {
+          "amount": "-0.36",
+          "currency": "EUR"
+        },
+        "feesEur": {
+          "amount": "0.64",
+          "currency": "EUR"
+        },
+        "netEur": {
+          "amount": "-1",
+          "currency": "EUR"
+        },
+        "fx": {
+          "base": "USD",
+          "quote": "EUR",
+          "rate": "0.9",
+          "source": "synthetic-close-rate",
+          "observedAt": "2026-10-14T17:39:00.000Z"
+        },
+        "method": "execution-fifo-net-current-fx"
+      }
+    ],
+    "benchmark": null
+  },
+  "fleet-config": {
+    "$schema": "/joe/fleet-config.schema.json",
+    "schema": "inspr.joe.fleet-config.v1",
+    "rev": "fc-000000",
+    "updatedAt": "2026-09-11T00:00:00.000Z",
+    "mode": "paper",
+    "quota": {
+      "grok": {
+        "reservePct": 10
+      },
+      "codex": {
+        "reservePct": 10
+      },
+      "behavior": {
+        "green": "run_normally",
+        "amber": "slow_nonessential",
+        "red": "park_nonessential"
+      }
+    },
+    "desks": {
+      "maxBusyDesks": 5,
+      "stage0": {
+        "capEur": 250
+      },
+      "keep": [
+        "SXR8",
+        "TSLA"
+      ]
+    },
+    "cadence": {
+      "timeZone": "Europe/Vienna",
+      "usOpenArm": "15:35",
+      "deskWatch": "desk-watch",
+      "darwin": "darwin",
+      "quotaGovernor": "quota-governor",
+      "wakeWindows": []
+    },
+    "amy": {
+      "routines": {
+        "morning": "Morning brief",
+        "review": "Desk review",
+        "close": "Close recap"
+      }
+    },
+    "mac": {
+      "shared": {
+        "configPath": "~/trading-team/shared/fleet-config.json",
+        "docsPath": "~/trading-team/shared/docs"
+      },
+      "knobs": {
+        "syncMode": "read_on_revision"
+      }
+    },
+    "tools": {
+      "statusSource": "/joe/data.json",
+      "entries": [
+        {
+          "id": "ib-gateway",
+          "label": "IB Gateway"
+        },
+        {
+          "id": "joel-ib",
+          "label": "joel-ib"
+        },
+        {
+          "id": "codexbar-hsb0",
+          "label": "codexbar@hsb0"
+        }
+      ]
+    },
+    "secretSlots": {
+      "agenix": [],
+      "janus": []
+    }
+  },
+  "healthz": {
+    "schema": "inspr.joe.healthz.v2",
+    "version": "261014174222.0.0",
+    "versionScheme": "inspr-calver-3",
+    "schemaVersion": "joedesk.contracts.v2",
+    "snapshotAgeSeconds": 9,
+    "feeds": {
+      "data": {
+        "state": "fresh",
+        "ageSeconds": 9,
+        "reason": null
+      },
+      "history": {
+        "state": "fresh",
+        "ageSeconds": 9,
+        "reason": null
+      },
+      "results": {
+        "state": "fresh",
+        "ageSeconds": 9,
+        "reason": null
+      },
+      "fleet-config": {
+        "state": "fresh",
+        "ageSeconds": 9,
+        "reason": null
+      }
+    }
+  }
+}
