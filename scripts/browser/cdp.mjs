@@ -75,14 +75,20 @@ export async function openPage(browser, { headers = {} } = {}) {
   const page = { headers };
   if (Object.keys(headers).length) await s('Network.setExtraHTTPHeaders', { headers });
   const errors = [], requests = [];
-  // Workers are their own targets: give them the same request headers.
+  // Workers are their own targets: give them the same request headers and
+  // the same request routing before they run.
+  const children = new Set();
+  let fetchPatterns = null;
   await s('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
   browser.on(async m => {
+    if (m.method === 'Target.detachedFromTarget' && m.sessionId === sessionId) children.delete(m.params.sessionId);
     if (m.method !== 'Target.attachedToTarget' || m.sessionId !== sessionId) return;
     const child = m.params.sessionId;
+    children.add(child);
     try {
       await browser.send('Network.enable', {}, child);
       if (Object.keys(page.headers).length) await browser.send('Network.setExtraHTTPHeaders', { headers: page.headers }, child);
+      if (fetchPatterns) await browser.send('Fetch.enable', { patterns: fetchPatterns }, child);
     } catch { /* not a network-capable target */ }
     browser.send('Runtime.runIfWaitingForDebugger', {}, child).catch(() => {});
   });
@@ -99,5 +105,13 @@ export async function openPage(browser, { headers = {} } = {}) {
     return r.result.value;
   };
   const setHeaders = async next => { page.headers = next; await s('Network.setExtraHTTPHeaders', { headers: next }); };
-  return { s, evaluate, errors, requests, targetId, setHeaders };
+  // Pause matching requests of the page and of every worker it starts.
+  const setFetch = async patterns => {
+    fetchPatterns = patterns;
+    for (const target of [sessionId, ...children]) {
+      try { await browser.send(patterns ? 'Fetch.enable' : 'Fetch.disable', patterns ? { patterns } : {}, target); } catch { /* the worker has gone */ }
+    }
+  };
+  const owns = id => id === sessionId || children.has(id);
+  return { s, evaluate, errors, requests, targetId, setHeaders, setFetch, owns };
 }

@@ -135,10 +135,47 @@ export function scenario(now = NOW, { historyFrom = '2026-10-07T00:00:00.000Z', 
 }
 
 // The largest history the 8 MiB contract allows for this point shape (about
-// 908 bytes each): 9,000 one-minute points for the render budget trace.
-export function largeScenario(now = NOW) {
-  return scenario(now, { historyFrom: at(now, -8999 * 60 - 60), stepMinutes: 1, outage: ['2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z'], compact: true });
+// 908 bytes each): 9,000 one-minute points for the render budget trace. With
+// live pushes the server compacts at its 6.4 MiB warning, so the live trace
+// uses the largest history that stays below it (7,200 points).
+export function largeScenario(now = NOW, points = 9000) {
+  return scenario(now, { historyFrom: at(now, -(points - 1) * 60 - 60), stepMinutes: 1, outage: ['2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z'], compact: true });
 }
+// The next snapshot from the same producer: a new sequence and generation
+// time, every check and observation just before it, money moved by cents.
+export function advance(snapshot, when, seq, { cents = [37, -12, 5] } = {}) {
+  const next = structuredClone(snapshot);
+  const before = at(when, -3);
+  next.seq = seq; next.generatedAt = when;
+  next.safety.gateway.checkedAt = before; next.safety.executor.checkedAt = before;
+  for (const d of next.desks) { d.heartbeatAt = before; d.moneyEvidence.observedAt = before; }
+  for (const s of Object.values(next.pnlSources)) s.observedAt = before;
+  next.brokerAccount.observedAt = before; next.positions.observedAt = before;
+  const bump = (m, c) => (m ? { ...m, amount: (Math.round(Number(m.amount) * 100 + c) / 100).toFixed(2) } : m);
+  let total = 0;
+  next.desks.forEach((d, i) => { const c = cents[i] ?? 0; total += c; for (const f of ['equity', 'dayPnl', 'totalPnl']) d.money[f] = bump(d.money[f], c); });
+  for (const f of ['equity', 'dayPnl', 'totalPnl']) next.totals[f] = bump(next.totals[f], total);
+  return next;
+}
+
+// The contract's largest position list: 256 rows (254 desk positions and the
+// two kept holdings), for the render budget with live pushes.
+export function wideSnapshot(snapshot, when, seq, shift = 0) {
+  const next = advance(snapshot, when, seq);
+  const kept = next.positions.rows.filter(r => r.scope === 'keep');
+  const rows = Array.from({ length: 254 }, (_, i) => {
+    const desk = ['j', 'joe', 'joel'][i % 3];
+    const mark = (20 + ((i * 7.31 + shift) % 480)).toFixed(2), qty = String(1 + (i % 9));
+    const value = (Number(mark) * Number(qty)).toFixed(2), open = (((i * 13 + shift) % 41) - 20) / 10;
+    return { desk, symbol: `P${String(i).padStart(3, '0')}`, company: `Practice holding ${i + 1}`, side: i % 7 === 3 ? 'short' : 'long', quantity: qty,
+      mark: usd(mark), marketValue: usd(value), dayPnl: usd(open.toFixed(2)), openPnl: usd(open.toFixed(2)), openedAt: '2026-10-14T14:05:00.000Z', updatedAt: at(when, -3), scope: 'stage0' };
+  });
+  next.positions.rows = [...rows, ...kept.map(r => ({ ...r, updatedAt: at(when, -3) }))];
+  const checked = validateContract('data', next, { stage: 'ingress' });
+  if (!checked.ok) throw new Error(`wide snapshot invalid: ${JSON.stringify(checked.errors.slice(0, 5))}`);
+  return next;
+}
+
 // ADR deferred P3 rows: one missing desk beside two observed siblings, and
 // equity with total result both unavailable when they depend on missing marks.
 export function singleMissingDesk() {
@@ -159,4 +196,4 @@ export function coupledUnavailable() {
   return { feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) };
 }
 
-export { panelStates, acceptSnapshot, historyPoint };
+export { panelStates, acceptSnapshot, historyPoint, measureHistory };

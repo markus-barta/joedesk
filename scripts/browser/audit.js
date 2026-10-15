@@ -62,6 +62,15 @@
         if (cs.textOverflow === 'ellipsis' && el.textContent.trim()) failures.push({ el: el.className || el.tagName, why: 'ellipsis' });
         const clips = /(hidden|clip|auto|scroll)/.test(cs.overflowX) && !el.classList.contains('vh') && el.id !== 'tip';
         if (clips && el.scrollWidth > el.clientWidth + 1 && el.textContent.trim()) failures.push({ el: `${el.tagName}.${el.className}`, why: `scroll ${el.scrollWidth} > ${el.clientWidth}`, text: el.textContent.trim().slice(0, 40) });
+        // Visible overflow clips too: text wider than its own cell spills
+        // under its neighbour. Only boxes with their own text are measured.
+        else if (!clips && cs.display !== 'inline' && el.clientWidth > 0 && ownText(el) && !el.closest('.ctip, #tip, .vh')) {
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const box = el.getBoundingClientRect(), text = range.getBoundingClientRect();
+          const inner = { left: box.left + (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.borderLeftWidth) || 0) - 1, right: box.right - (parseFloat(cs.paddingRight) || 0) - (parseFloat(cs.borderRightWidth) || 0) + 1 };
+          if (text.width > 0 && (text.left < inner.left || text.right > inner.right)) failures.push({ el: `${el.tagName}.${el.className}`, why: `text ${Math.round(text.left)}–${Math.round(text.right)} outside ${Math.round(inner.left)}–${Math.round(inner.right)}`, text: el.textContent.trim().slice(0, 40) });
+        }
       }
       return failures;
     },
