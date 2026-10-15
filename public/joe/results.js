@@ -5,11 +5,12 @@
 // designed "not wired" state: dashes, never a zero or an estimate.
 import { $, $$, icon, term, learnBtn, deskMark, inlineMark, swatch, patch, bn, pl, st, symBadge, ageSpan, statePhrase } from './ui.js';
 import { TERMS } from './terms.js';
-import { esc, eur, digits, pct, money, MINUS, NB, timeHM, age } from './format.js';
+import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age } from './format.js';
 import { cellReason } from './health.js';
 import { drawChart, eurAxis } from './chart.js';
 import { viennaDay } from './time.mjs';
-import { decimalUnits } from './contracts/decimal.mjs';
+import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
+import { basisKey } from './history-model.js';
 import * as M from './results-model.js';
 
 export { periodOf } from './results-model.js';
@@ -24,7 +25,9 @@ export const RS = { period: 'week', anchor: null, sel: null, desk: 'all', cal: n
 // browser's date; no number is shown without a clock, so none depends on it.
 export const resultsToday = now => viennaDay(now ?? new Date().toISOString());
 
-// The record, its state and everything the numbers need from the snapshot.
+// The record, its state and everything the numbers need from the snapshot:
+// each desk's money now (only a current value, never a retained one), the
+// basis it is on, and History's observations with their bases.
 export function resultsView(ctx) {
   const today = resultsToday(ctx.now);
   const cell = ctx.states.results;
@@ -37,8 +40,11 @@ export function resultsView(ctx) {
     const c = ctx.states[`desks.${id}.equity`];
     return c?.value && !c.retained ? decimalUnits(c.value.amount) : null;
   });
-  return { today, cell, ix, reason, trackingStart: ix?.meta.trackingStart ?? null, todayUnits, nowMs: ctx.now ? Date.parse(ctx.now) : null,
-    cols: ctx.feeds.history?.value?.columns ?? null, positions: ctx.states.positions?.value ?? [] };
+  const desksNow = ctx.feeds.data?.value?.desks ?? [];
+  const current = Object.fromEntries(DESKS.map((id, i) => [id, todayUnits[i] === null ? null : desksNow.find(d => d.id === id) ?? null]));
+  const nowMs = ctx.now ? Date.parse(ctx.now) : null, cols = ctx.feeds.history?.value?.columns ?? null;
+  return { today, cell, ix, reason, trackingStart: ix?.meta.trackingStart ?? null, todayUnits, nowMs, cols,
+    cuts: M.basisCuts(cols, current, nowMs), basis: DESKS.map(id => (current[id] ? basisKey(current[id]) : '')).join('|'), positions: ctx.states.positions?.value ?? [] };
 }
 
 export function stepPeriod(dir, view) {
@@ -50,19 +56,46 @@ export function stepPeriod(dir, view) {
 const D = '<span class="bn muted">—</span>';
 const deskSet = () => (RS.desk === 'all' ? DESKS.slice() : [RS.desk]);
 const whoOf = desks => (desks.length === 3 ? 'J, Joe and Joel' : LABEL[desks[0]]);
-const plain = n => (Math.abs(n) < 0.005 ? '<span class="pl">0,00</span>' : `<span class="pl">${icon(n > 0 ? 'up' : 'down')}${n < 0 ? MINUS : '+'}${digits(n)}</span>`);
-const compact = n => (Math.abs(n) < 0.005 ? '<span class="pl">0</span>' : `<span class="pl">${icon(n > 0 ? 'up' : 'down')}${n < 0 ? MINUS : '+'}${digits(n, Math.abs(n) >= 9.95 ? 0 : 1)}</span>`);
-const plural = (n, word) => `${n}${NB}${word}${n === 1 ? '' : 's'}`;
-const signedWord = n => (Math.abs(n) < 0.005 ? 'Flat' : n > 0 ? `Up ${eur(Math.abs(n))}` : `Down ${eur(Math.abs(n))}`);
-const startText = ts => (ts ? `${M.fmtDM(ts)} ${ts.slice(0, 4)}` : 'their first trading day');
+const names = ids => (ids.length === 1 ? LABEL[ids[0]] : `${ids.slice(0, -1).map(d => LABEL[d]).join(', ')} and ${LABEL[ids[ids.length - 1]]}`);
+// Money text is formatted from exact units (BigInt), never from a Number.
+const absUnits = u => (u < 0n ? -u : u);
 
-// The context every number of one render shares.
-function numbers(view, per, desks) {
-  const ctx = { today: view.today, todayUnits: view.todayUnits, nowMs: view.nowMs, intraday: null };
-  const end = per.end > view.today ? view.today : per.end;
-  if (per.start === end) ctx.intraday = M.intraday(view.cols, per.start, desks);
-  return ctx;
+// A calendar amount in its cell's room, from exact units and rounded once.
+// Desktop (also the week column): "4,10", "123", "12k", "1,2M" … "9e15";
+// phones: "4,1", "123", "1,2k", "12k", "0,1M" … "9e15", the scaled forms a
+// step smaller. The exact amount is in the cell's label and its trades.
+const SCALES = [['k', 3], ['M', 6], ['B', 9], ['T', 12]];
+export function calAmount(u, phone = false) {
+  const a = absUnits(u), at = (exp, d) => divRound(a * 10n ** BigInt(d), 10n ** BigInt(exp) * UNIT);
+  const one = m => `${m / 10n},${m % 10n}`;
+  if (phone ? at(0, 1) < 100n : at(0, 2) < 10000n) return { text: phone ? one(at(0, 1)) : digits(u), cls: '' };
+  if (at(0, 0) < (phone ? 1000n : 10000n)) return { text: digits(at(0, 0) * UNIT, 0), cls: '' };
+  // From here on: a unit with at most two (phones) or three digits, one decimal below 10.
+  for (const [unit, exp] of SCALES) {
+    if (!phone && exp === 3) { if (at(3, 0) < 1000n) return { text: `${at(3, 0)}k`, cls: '' }; continue; }
+    if (at(exp, 1) < 100n) return { text: `${one(at(exp, 1))}${unit}`, cls: phone ? (exp === 3 ? 'sc' : 'sx') : '' };
+    if (at(exp, 0) < (phone ? 100n : 1000n)) return { text: `${at(exp, 0)}${unit}`, cls: phone ? (exp === 3 ? 'sc' : 'sx') : '' };
+  }
+  // Past a thousand (phones: a hundred) trillion: its leading digit and power of ten.
+  let e = String(a / UNIT).length - 1, n = at(e, 0);
+  if (n >= 10n) n = at(++e, 0);
+  return { text: `${n}e${e}`, cls: phone ? 'sx' : '' };
 }
+const calHtml = (u, phone) => {
+  if (isZero(u)) return `<span class="pl">${phone ? '0' : '0,00'}</span>`;
+  const { text, cls } = calAmount(u, phone);
+  return `<span class="pl${cls ? ` ${cls}` : ''}">${icon(u > 0n ? 'up' : 'down')}${u < 0n ? MINUS : '+'}${text}</span>`;
+};
+const plain = u => calHtml(u, false);
+const compact = u => calHtml(u, true);
+const plural = (n, word) => `${n}${NB}${word}${n === 1 ? '' : 's'}`;
+const signedWord = u => (isZero(u) ? 'Flat' : u > 0n ? `Up ${eur(absUnits(u))}` : `Down ${eur(absUnits(u))}`);
+const startText = ts => (ts ? `${M.fmtDM(ts)} ${ts.slice(0, 4)}` : 'their first trading day');
+// A change of bookkeeping basis, said as such.
+const cutText = cut => `${names(cut.desks)}’s bookkeeping basis changed on ${M.fmtDDM(M.viennaDate(cut.at))}`;
+
+// The context every number of one render shares (the model builds it).
+const numbers = (view, per, desks) => M.moneyContext(view.ix, view, per, desks);
 
 // The 1 s tick changes nothing here but ages: Results is rebuilt only when
 // its inputs change (record, snapshot money, History, the controls, the width).
@@ -73,7 +106,7 @@ export function renderResults(ctx) {
   const view = resultsView(ctx);
   const { today, ix } = view;
   if (!RS.moved || !RS.anchor) { RS.anchor = RS.sel = today; RS.cal = M.ymOf(today); }
-  const sig = [ix, view.cols, view.reason, view.cell?.state, today, view.todayUnits.join(), view.positions.map(p => `${p.desk}|${p.symbol}|${p.company}|${p.openedAt}`).join(),
+  const sig = [ix, view.cols, view.reason, view.cell?.state, today, view.todayUnits.join(), view.basis, view.positions.map(p => `${p.desk}|${p.symbol}|${p.company}|${p.openedAt}`).join(),
     JSON.stringify(RS), $('#curve').clientWidth, $('#daySheet')?.open];
   if (last && sig.every((v, i) => v === last[i])) { renderStatus(view); return; }
   last = sig;
@@ -99,22 +132,23 @@ export function renderResults(ctx) {
 
 function heroSentence(view, per, R) {
   if (!view.ix) return view.reason === 'results_not_wired' ? 'Results are not wired yet. The board has no closed-trade record for this period.' : `Results are unavailable: ${cellReason(view.reason)}.`;
+  if (R.cut) return `No result ${per.phrase}: ${cutText(R.cut)}, and a change of basis is not a gain or a loss.`;
   if (R.empty) return `No trades ${per.phrase}. Paper results start on ${startText(view.trackingStart)}.`;
   if (R.net === null) return `The result ${per.phrase} is not known yet: the desks’ money ${R.end === view.today ? 'now' : `on ${M.fmtDDM(R.end)}`} is not available.`;
-  return `${signedWord(R.net)} ${per.phrase}.`;
+  return `${signedWord(R.units.net)} ${per.phrase}.`;
 }
 
 function renderHero(view, per, desks, R) {
   const none = !R || R.empty;
   patch($('#rheroL'), `
     <div class="hero-k">${icon('results')}<span>${term('result')} · ${esc(whoOf(desks))}</span></div>
-    <div class="display">${none || R.net === null ? D : bn(R.net)}</div>
+    <div class="display">${none || R.net === null ? D : bn(R.units.net)}</div>
     <p class="say">${esc(heroSentence(view, per, R))}</p>
     <dl class="split">
-      <dt>${term('closed')}</dt><dd>${none ? '—' : pl(R.realised)}</dd>
-      <dt>${term('stillopen')}</dt><dd>${none || R.unreal === null ? '—' : pl(R.unreal)}</dd>
-      <dt>${term('beforefees')}</dt><dd>${none ? '—' : pl(R.gross)}</dd>
-      <dt>${term('fees')}</dt><dd class="num">${none ? '—' : eur(R.fees ? -R.fees : 0)}</dd>
+      <dt>${term('closed')}</dt><dd>${none ? '—' : pl(R.units.realised)}</dd>
+      <dt>${term('stillopen')}</dt><dd>${none || R.unreal === null ? '—' : pl(R.units.unreal)}</dd>
+      <dt>${term('beforefees')}</dt><dd>${none ? '—' : pl(R.units.gross)}</dd>
+      <dt>${term('fees')}</dt><dd class="num">${none ? '—' : eur(-R.units.fees)}</dd>
     </dl>
     <div class="bench"><span>${term('benchmark')}</span><span class="muted">No index chosen</span></div>`);
 }
@@ -126,29 +160,36 @@ const two = (a, b) => `${a}<span class="sl">/</span>${b}`;
 const tightPair = (...values) => values.filter(v => v != null).reduce((n, v) => n + eur(v, true).length, 0) > 17;
 const tradeName = t => `${esc(t.symbol)} (${LABEL[t.desk]})`;
 
+// Best and worst day: one value and "only day" for a period with one trading
+// day; else both, with their dates (equal days are two days, never one).
+export function dayTile(R) {
+  if (!R?.bestDay) return { val: D, mean: 'No trading day', tight: false };
+  if (R.days === 1) return { val: bn(R.bestDay.units), mean: `${M.fmtDDM(R.bestDay.date)} · only day`, tight: false };
+  return { val: two(bn(R.bestDay.units), bn(R.worstDay.units)), mean: `${M.fmtDDM(R.bestDay.date)} · ${M.fmtDDM(R.worstDay.date)}`, tight: tightPair(R.bestDay.units, R.worstDay.units) };
+}
+
 function renderTiles(R, view) {
   if (!R) {
     const why = view.reason === 'results_not_wired' ? 'Not wired yet' : 'Unavailable';
     patch($('#tiles'), Object.keys(TILE_ICON).map(k => tile(k, D, why, k === 'dip' ? 'From the desks’ money' : undefined)).join(''));
     return;
   }
-  const n = R.trades, decided = R.won + R.lost;
-  const typical = R.avgWin === null && R.avgLoss === null ? D : two(R.avgWin === null ? '—' : bn(R.avgWin), R.avgLoss === null ? '—' : bn(R.avgLoss));
-  const extremes = R.best || R.worst ? two(R.best ? bn(R.best.net) : '—', R.worst ? bn(R.worst.net) : '—') : D;
-  const oneDay = R.bestDay && R.bestDay.date === R.worstDay.date;
+  const n = R.trades, decided = R.won + R.lost, u = R.units;
+  const typical = R.avgWin === null && R.avgLoss === null ? D : two(R.avgWin === null ? '—' : bn(u.avgWin), R.avgLoss === null ? '—' : bn(u.avgLoss));
+  const extremes = R.best || R.worst ? two(R.best ? bn(R.best.units.net) : '—', R.worst ? bn(R.worst.units.net) : '—') : D;
+  const days = dayTile(R);
   patch($('#tiles'), [
     tile('trades', n ? `<span class="num">${n}</span>` : D, n ? `${R.won} won · ${R.lost} lost · ${R.flat} flat` : 'No finished trades'),
     tile('won', R.winRate === null ? D : `<span class="num">${digits(R.winRate, 0)}</span><small>%</small>`, R.winRate === null ? 'Needs a won or lost trade' : `${R.won} of ${decided}${R.small ? ' · small sample' : ''}`),
-    tile('avgtrade', R.expectancy === null ? D : bn(R.expectancy), R.expectancy === null ? 'No finished trades'
-      : Math.abs(R.expectancy) < 0.005 ? 'A typical trade breaks even' : R.expectancy > 0 ? 'A typical trade earns' : 'A typical trade loses, after fees'),
+    tile('avgtrade', R.expectancy === null ? D : bn(u.expectancy), R.expectancy === null ? 'No finished trades'
+      : isZero(u.expectancy) ? 'A typical trade breaks even' : u.expectancy > 0n ? 'A typical trade earns' : 'A typical trade loses, after fees'),
     tile('pf', R.pf === null ? D : `<span class="num">${digits(R.pf)}</span>`, R.pf === null ? 'Needs a losing trade' : R.pf > 1 ? 'Above 1: won more than lost' : R.pf < 1 ? 'Below 1: lost more than won' : 'Exactly 1: won as much as lost'),
-    tile('typical', typical, R.sizeRatio !== null ? `A win is ${digits(R.sizeRatio)} times a loss` : 'Needs a win and a loss', undefined, tightPair(R.avgWin, R.avgLoss)),
+    tile('typical', typical, R.sizeRatio !== null ? `A win is ${digits(R.sizeRatio)} times a loss` : 'Needs a win and a loss', undefined, tightPair(u.avgWin, u.avgLoss)),
     tile('besttrade', extremes, R.best && R.worst ? `${tradeName(R.best)} · ${tradeName(R.worst)}` : R.best ? `${tradeName(R.best)} · no losing trade` : R.worst ? `No winning trade · ${tradeName(R.worst)}` : 'No finished trades',
-      undefined, tightPair(R.best?.net, R.worst?.net)),
-    tile('dip', R.empty || R.dd === null ? D : bn(R.dd), R.empty ? 'No change in this period' : R.dd === null ? 'The desks’ money is not available'
+      undefined, tightPair(R.best?.units.net, R.worst?.units.net)),
+    tile('dip', R.empty || R.dd === null ? D : bn(u.dd), R.empty ? 'No change in this period' : R.cut ? 'Bookkeeping basis changed' : R.dd === null ? 'The desks’ money is not available'
       : R.dd === 0 ? 'Never below its high point' : `${pct(-R.ddPct, 2)} below the high point`, 'From the desks’ money'),
-    tile('bestday', !R.bestDay ? D : oneDay ? bn(R.bestDay.net) : two(bn(R.bestDay.net), bn(R.worstDay.net)), !R.bestDay ? 'No trading day'
-      : oneDay ? `${M.fmtDDM(R.bestDay.date)} · only day` : `${M.fmtDDM(R.bestDay.date)} · ${M.fmtDDM(R.worstDay.date)}`, undefined, !oneDay && R.bestDay && tightPair(R.bestDay.net, R.worstDay.net)),
+    tile('bestday', days.val, days.mean, undefined, days.tight),
   ].join(''));
 }
 
@@ -171,9 +212,9 @@ function renderBreakdown(view, per, desks, rows) {
     return `
     <div class="brow${r.id === 'all' ? ' total' : ''}${RS.desk === r.id ? ' sel' : ''}" data-row="${r.id}">
       <div class="who">${r.id === 'all' ? '<span class="dmark" aria-hidden="true"><svg viewBox="0 0 28 28"><use href="#i-logo"/></svg></span>' : deskMark(r.id)}${r.name}</div>
-      <div class="track" role="img" aria-label="${r.name}: ${x.empty ? 'no change' : x.net === null ? 'not known yet' : eur(x.net, true)}"><span class="z"></span>${bar}</div>
-      <div class="val">${shown ? pl(x.net) : '<span class="muted">—</span>'}</div>
-      <div class="facts">${x.trades ? `${plural(x.trades, 'trade')} · ${x.winRate === null ? 'none decided' : `${x.winRate}${NB}% won`} · fees ${eur(x.fees)}` : 'No trades'}</div>
+      <div class="track" role="img" aria-label="${r.name}: ${x.empty ? 'no change' : x.cut ? 'bookkeeping basis changed' : x.net === null ? 'not known yet' : eur(x.units.net, true)}"><span class="z"></span>${bar}</div>
+      <div class="val">${shown ? pl(x.units.net) : '<span class="muted">—</span>'}</div>
+      <div class="facts">${x.trades ? `${plural(x.trades, 'trade')} · ${x.winRate === null ? 'none decided' : `${x.winRate}${NB}% won`} · fees ${eur(x.units.fees)}` : 'No trades'}</div>
     </div>`;
   }).join(''));
 }
@@ -196,8 +237,8 @@ function dayState(view, k, desks, max) {
   const r = ix ? M.dayResult(ix, k, desks) : { count: 0 };
   if (r.count) {
     const note = plural(r.count, 'trade');
-    if (Math.abs(r.net) < 0.005) return { cls: 'flat', r, note, aria: `${money(0)} from ${note}` };
-    return { cls: `${r.units > 0n ? 'g' : 'l'}${M.tintStep(r.units, max)}`, r, note, aria: `${eur(r.net, true)} from ${note}` };
+    if (isZero(r.units)) return { cls: 'flat', r, note, aria: `${money(0)} from ${note}` };
+    return { cls: `${r.units > 0n ? 'g' : 'l'}${M.tintStep(r.units, max)}`, r, note, aria: `${eur(r.units, true)} from ${note}` };
   }
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   if (closed) return { cls: 'we', note: 'closed', aria: M.isWeekend(k) ? 'weekend, markets closed' : 'US market holiday, markets closed' };
@@ -220,7 +261,7 @@ function renderCalendar(view, per, desks) {
     if (r.count) { monthCount += r.count; monthUnits += r.units; monthDays++; }
   }
   $('#calSum').textContent = !ix ? (view.reason === 'results_not_wired' ? 'Not wired yet' : 'Unavailable')
-    : monthCount ? `${signedWord(M.unitsCents(monthUnits))} over ${plural(monthDays, 'trading day')}` : 'No trades this month';
+    : monthCount ? `${signedWord(monthUnits)} over ${plural(monthDays, 'trading day')}` : 'No trades this month';
   const start = M.monday(first);
   const inPer = k => (RS.period === 'day' || RS.period === 'week') && k >= per.start && k <= per.end;
   let html = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow" role="columnheader">${d}</div>`).join('') + '<div class="dow wkh" role="columnheader">Week</div>';
@@ -234,19 +275,19 @@ function renderCalendar(view, per, desks) {
       inMonth = true;
       const s = dayState(view, k, desks, max);
       const cls = ['cell', s.cls, k === today ? 'today' : '', k === RS.sel ? 'sel' : '', inPer(k) ? 'inper' : ''].filter(Boolean).join(' ');
-      const value = s.r ? `<span class="vl">${plain(s.r.net)}</span><span class="vs">${compact(s.r.net)}</span>` : s.dash ? '<span class="muted">—</span>' : '';
+      const value = s.r ? `<span class="vl">${plain(s.r.units)}</span><span class="vs">${compact(s.r.units)}</span>` : s.dash ? '<span class="muted">—</span>' : '';
       html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}"><span class="d">${Number(k.slice(8))}</span><span class="v">${value}</span><span class="n">${s.note}</span></button>`;
     }
     // A week still ahead has nothing to sum yet.
     const ahead = wk > today;
-    const wkValue = ahead ? '<span class="v"></span>' : !ix ? '<span class="v muted">—</span>' : `<span class="v">${wkCount ? plain(M.unitsCents(wkUnits)) : '—'}</span>`;
+    const wkValue = ahead ? '<span class="v"></span>' : !ix ? '<span class="v muted">—</span>' : `<span class="v">${wkCount ? plain(wkUnits) : '—'}</span>`;
     html += inMonth ? `<div class="wk"><span>${!ix || ahead ? '' : wkDays ? plural(wkDays, 'day') : 'no trades'}</span>${wkValue}</div>` : '<div class="wk" style="visibility:hidden" aria-hidden="true"></div>';
   }
   patch($('#cal'), html);
   patch($('#calLegend'), `<span class="nowrap">Loss <span class="ramp"><i style="background:var(--l4)"></i><i style="background:var(--l3)"></i><i style="background:var(--l2)"></i><i style="background:var(--l1)"></i></span></span>
     <span class="nowrap"><span class="ramp"><i style="background:var(--flat)"></i></span> Flat</span>
     <span class="nowrap"><span class="ramp"><i style="background:var(--g1)"></i><i style="background:var(--g2)"></i><i style="background:var(--g3)"></i><i style="background:var(--g4)"></i></span> Gain</span>
-    <span>${!ix ? 'Tints appear once results are wired' : max > 0n ? `Darkest: ${eur(M.unitsCents(max * 3n / 4n))} to ${eur(M.unitsCents(max))} in a day` : 'No trading day yet'}</span>`);
+    <span>${!ix ? 'Tints appear once results are wired' : max > 0n ? `Darkest: ${eur(max * 3n / 4n)} to ${eur(max)} in a day` : 'No trading day yet'}</span>`);
   const day = dayContent(view, RS.sel, desks);
   patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}</div>`);
   const sheet = $('#daySheet');
@@ -263,13 +304,14 @@ function held(t) {
   const min = Math.max(0, Math.round((t.closedAt - t.openedAt) / 60000));
   return `held ${min >= 60 ? `${Math.floor(min / 60)}${NB}h ${min % 60}${NB}min` : `${min}${NB}min`}`;
 }
-const price = p => money(Number(p.amount), p.currency, false, Math.max(2, (p.amount.split('.')[1] ?? '').length));
+// A price in full, exactly as recorded (at least two decimals).
+const price = p => money(decimalUnits(p.amount), p.currency, false, Math.max(2, (p.amount.split('.')[1] ?? '').length));
 function tradeRows(ts) {
   return ts.map(t => `<div class="trow" data-trade="${esc(t.id)}">
     ${symBadge(t.symbol, t.desk)}
     <div class="name"><b>${esc(t.symbol)}</b>${t.company ? ` · ${esc(t.company)}` : ''}<span>${inlineMark(t.desk)} ${LABEL[t.desk]} · ${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(t.quantity.replace('.', ','))} · closed ${timeHM(new Date(t.closedAt).toISOString())}, ${held(t)}</span></div>
-    <div class="px"><span class="ln"><span>${price(t.entry)}</span><span>${icon('arrow')}${price(t.exit)}</span></span><span class="fee">fees ${eur(t.fees)}</span></div>
-    <div class="net">${pl(t.net)}</div>
+    <div class="px"><span class="ln"><span>${price(t.entry)}</span><span>${icon('arrow')}${price(t.exit)}</span></span><span class="fee">fees ${eur(t.units.fees)}</span></div>
+    <div class="net">${pl(t.units.net)}</div>
   </div>`).join('');
 }
 
@@ -281,7 +323,7 @@ function dayContent(view, k, desks) {
       : view.reason === 'results_not_wired' ? `No closed-trade record for ${M.fmtDDM(k)} yet: results are not wired.` : `No closed-trade record for ${M.fmtDDM(k)}: ${esc(cellReason(view.reason))}.`}</span></p>`, note: '' };
   }
   const r = M.dayResult(ix, k, desks);
-  const sum = ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.net, true)}` : 'No trades';
+  const sum = ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   const why = k > today ? `${M.fmtDDM(k)} is still ahead.` : closed ? `No trades on ${M.fmtDDM(k)}: ${M.isWeekend(k) ? 'weekend' : 'US market holiday'}, markets closed.`
     : k < view.trackingStart ? `No trades on ${M.fmtDDM(k)}: paper results start on ${startText(view.trackingStart)}.` : `No trades on ${M.fmtDDM(k)}: the desks sat out.`;
@@ -325,6 +367,10 @@ function renderCurve(view, per, desks, R, mctx) {
   }
   const c = M.curve(view.ix, per, desks, mctx);
   const pts = c.pts, known = pts.filter(p => p.v !== null);
+  if (c.cut) {
+    drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: cutText(c.cut), label: `Result so far, ${per.lab}: not shown, ${cutText(c.cut)}`, pad: { t: top } });
+    return;
+  }
   if (R.empty || known.length < 2) {
     drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: R.net === null && !R.empty ? 'The desks’ money is not available' : 'No change in this period', label: `Result so far, ${per.lab}: ${R.empty ? 'no change' : 'not known yet'}`, pad: { t: top } });
     return;
@@ -337,20 +383,25 @@ function renderCurve(view, per, desks, R, mctx) {
       const prev = i > 0 ? pts[i - 1].at : -Infinity, sym = closes.filter(t => t.closedAt > prev && t.closedAt <= p.at).map(t => t.symbol);
       return `${timeHM(new Date(p.at).toISOString())}${p.now ? ', now' : ''}${sym.length ? ` · ${sym.join(', ')} closed` : ''}`;
     }
-    return p.edge === 'start' ? 'Start of period' : p.now ? 'Today, now' : M.fmtDDM(p.k);
+    return p.gap ? '' : p.edge === 'start' ? 'Start of period' : p.edge === 'tracking' ? `Tracking from ${M.fmtDM(p.k)}` : p.now ? 'Today, now' : M.fmtDDM(p.k);
   };
   pts.forEach((p, i) => { p.lab = lab(p, i); });
   const axisText = p => (c.day ? (p.edge ? (p.edge === 'start' ? 'start' : p.edge) : timeHM(new Date(p.at).toISOString())) : p.edge === 'start' ? 'start' : M.fmtDM(p.k));
-  const x0 = pts[0].x, x1 = pts[pts.length - 1].x;
-  const marks = [pts[0], pts[Math.floor((pts.length - 1) / 2)], pts[pts.length - 1]];
+  // The axis is real time: the period's own span (Day: its points), labelled at
+  // the first and last points and the point nearest the middle, if it is clear of both.
+  const [x0, x1] = c.domain, span = x1 - x0 || 1;
+  const first = known[0], last = known[known.length - 1];
+  const middle = known.reduce((a, p) => (Math.abs(p.x - (x0 + x1) / 2) < Math.abs(a.x - (x0 + x1) / 2) ? p : a));
+  const marks = [first, ...(middle.x - first.x > span / 5 && last.x - middle.x > span / 5 ? [middle] : []), last];
+  const trackAt = c.day ? (view.trackingStart && per.start <= view.trackingStart ? x0 : null) : c.tracking;
   drawChart(el, {
     series: [{ pts, color, live: per.end >= view.today }], xDomain: [x0, x1], zero: true, strongZero: true, yFmt: eurAxis, ticks: 4,
     // Honest scale: zero is always in view, and the span is at least ±0,5 % of the
     // desks' money at the period start, so a few euros never look like a crash.
     base: M.unitsCents(c.startE), pad: { t: top },
-    xLabels: marks.filter((p, i) => i !== 1 || (p !== marks[0] && p !== marks[2])).map((p, i, list) => ({ x: p.x, text: axisText(p), anchor: i === 0 ? 'start' : i === list.length - 1 ? 'end' : 'middle' })),
-    marker: view.trackingStart && per.start <= view.trackingStart ? { x: x0, text: `tracking from ${M.fmtDM(view.trackingStart)}` } : null,
-    label: `Result so far, ${per.lab}: ${R.net === null ? 'not known yet' : eur(R.net, true)}`,
-    tipFmt: n => `<b>${esc(n[0].lab)}</b> · result so far ${eur(n[0].v, true)}`,
+    xLabels: marks.map((p, i, list) => ({ x: p.x, text: axisText(p), anchor: i === 0 ? 'start' : i === list.length - 1 ? 'end' : 'middle' })),
+    marker: trackAt !== null && trackAt !== undefined ? { x: trackAt, text: `tracking from ${M.fmtDM(view.trackingStart)}` } : null,
+    label: `Result so far, ${per.lab}: ${R.net === null ? 'not known yet' : eur(R.units.net, true)}`,
+    tipFmt: n => `<b>${esc(n[0].lab)}</b> · result so far ${eur(n[0].u ?? n[0].v, true)}`,
   });
 }

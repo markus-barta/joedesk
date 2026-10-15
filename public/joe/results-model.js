@@ -1,10 +1,12 @@
 // Results model (pure; shared by the page, the read worker and the tests). The
-// validated closed-trade record (results v2) is indexed once into typed
-// columns, then every Results number is derived from that index exactly as
-// spec r3 §4.2 defines it. Money stays in exact 10⁻⁸ units (BigInt) and is
-// rounded once, for display. A trade's day is the Vienna date of closedAt.
+// validated closed-trade record (results v2) is indexed once into columns,
+// then every Results number is derived from that index exactly as spec r3
+// §4.2 defines it. Money stays in exact 10⁻⁸ units as BigInt, at any size the
+// contract accepts (never a 64-bit or floating-point stand-in), and is rounded
+// once, for display. A trade's day is the Vienna date of closedAt.
 import { wall, marketSession, sessionBounds, zonedInstant, VIENNA, NY } from './time.mjs';
 import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
+import { basisKey, meaningful, rowAt } from './history-model.js';
 
 export const DESK_IDS = Object.freeze(['j', 'joe', 'joel']);
 const DESK_INDEX = Object.freeze({ j: 0, joe: 1, joel: 2 });
@@ -28,6 +30,17 @@ export function viennaDate(ms) {
     hourDays.set(hour, day);
   }
   return day;
+}
+// The instant a Vienna date begins (its midnight is never inside a DST change).
+const midnights = new Map();
+export function viennaMidnight(k) {
+  let ms = midnights.get(k);
+  if (ms === undefined) {
+    ms = Date.parse(zonedInstant(k, '00:00:00', VIENNA));
+    if (midnights.size >= 8192) midnights.clear();
+    midnights.set(k, ms);
+  }
+  return ms;
 }
 
 const pad = n => String(n).padStart(2, '0');
@@ -108,6 +121,9 @@ export function stepAnchor(period, anchor, dir, today, trackingStart = null) {
 // ---------- Index ----------
 const FIELD = '\u001f';
 const cmpTrade = (ms, ids) => (a, b) => ms[a] - ms[b] || (ids[a] < ids[b] ? -1 : ids[a] > ids[b] ? 1 : 0);
+// Exact money columns: BigInt has no fixed width, so no amount or sum the
+// contract accepts can wrap (a BigInt64Array would, past € 92 billion).
+const exact = n => new Array(n).fill(0n);
 
 // One pass over a validated results v2 payload. Trades are sorted by closedAt;
 // every (Vienna date, desk) cell carries its counts and exact sums, and each
@@ -121,10 +137,10 @@ export function indexResults(value) {
   const dates = [...new Set([...value.days.map(d => d.date), ...tradeDates])].sort();
   const di = new Map(dates.map((d, i) => [d, i]));
   const cells = dates.length * 3;
-  const agg = { count: new Int32Array(cells), won: new Int32Array(cells), lost: new Int32Array(cells), net: new BigInt64Array(cells), gross: new BigInt64Array(cells),
-    fees: new BigInt64Array(cells), winSum: new BigInt64Array(cells), lossSum: new BigInt64Array(cells), best: new Int32Array(cells).fill(-1), worst: new Int32Array(cells).fill(-1) };
+  const agg = { count: new Int32Array(cells), won: new Int32Array(cells), lost: new Int32Array(cells), net: exact(cells), gross: exact(cells),
+    fees: exact(cells), winSum: exact(cells), lossSum: exact(cells), best: new Int32Array(cells).fill(-1), worst: new Int32Array(cells).fill(-1) };
   const trades = { n, desk: new Uint8Array(n), date: new Int32Array(n), closedAt: new Float64Array(n), openedAt: new Float64Array(n),
-    net: new BigInt64Array(n), gross: new BigInt64Array(n), fees: new BigInt64Array(n), offsets: new Uint32Array(n + 1), blob: '' };
+    net: exact(n), gross: exact(n), fees: exact(n), offsets: new Uint32Array(n + 1), blob: '' };
   const text = [], symbols = new Map();
   let length = 0;
   for (let k = 0; k < n; k++) {
@@ -146,7 +162,7 @@ export function indexResults(value) {
   }
   trades.offsets[n] = length;
   trades.blob = text.join('');
-  const close = { amount: new BigInt64Array(cells), state: new Uint8Array(cells), entry: new Int32Array(cells).fill(-1) };
+  const close = { amount: exact(cells), state: new Uint8Array(cells), entry: new Int32Array(cells).fill(-1) };
   for (const day of value.days) {
     const i = di.get(day.date);
     for (const [id, d] of Object.entries(day.desks)) {
@@ -167,8 +183,9 @@ export function indexResults(value) {
   };
 }
 
-export const transferables = ix => [...Object.values(ix.agg), ...Object.values(ix.close),
-  ix.trades.desk, ix.trades.date, ix.trades.closedAt, ix.trades.openedAt, ix.trades.net, ix.trades.gross, ix.trades.fees, ix.trades.offsets, ix.symbolDesks].map(a => a.buffer);
+// The typed columns move by transfer; the exact money columns are cloned.
+export const transferables = ix => [...Object.values(ix.agg), ...Object.values(ix.close), ...Object.values(ix.trades), ix.symbolDesks]
+  .filter(a => ArrayBuffer.isView(a)).map(a => a.buffer);
 
 // Symbols the accepted kept-holdings policy protects that the record still
 // trades: the record is then not authoritative and no number is derived.
@@ -179,6 +196,15 @@ function upper(dates, k) {
   let lo = 0, hi = dates.length;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (dates[mid] <= k) lo = mid + 1; else hi = mid; }
   return lo;
+}
+
+// The date of a desk's latest close on or before a Vienna date (null before
+// tracking starts or before its first close).
+function closeDate(ix, desk, k) {
+  if (k < ix.meta.trackingStart) return null;
+  const i = upper(ix.dates, k) - 1;
+  const at = i < 0 ? -1 : ix.close.entry[i * 3 + desk];
+  return at < 0 ? null : ix.dates[at];
 }
 
 // A desk's equity close on a Vienna date: its latest close on or before it;
@@ -195,40 +221,107 @@ export function closeUnits(ix, desk, k) {
 const deskIdx = desks => desks.map(d => DESK_INDEX[d]);
 
 // E(d) of the selected desks. Today it is now: the snapshot's current desk
-// equity (ctx.todayUnits), else today's close in the record, else unknown.
+// equity (ctx.todayUnits) and nothing else. Without it, or with only a
+// retained one (the page passes null), E(today) is unknown: a close in the
+// record never stands in for the money now.
 export function equityAt(ix, desks, k, ctx) {
   let sum = 0n;
   for (const desk of deskIdx(desks)) {
-    let v = k === ctx.today ? ctx.todayUnits?.[desk] ?? null : null;
-    if (v === null) {
-      if (k === ctx.today) {
-        const i = upper(ix.dates, k) - 1;
-        v = i >= 0 && ix.dates[i] === k && ix.close.state[i * 3 + desk] === 1 ? ix.close.amount[i * 3 + desk] : null;
-      } else v = closeUnits(ix, desk, k);
-    }
+    const v = k === ctx.today ? ctx.todayUnits?.[desk] ?? null : closeUnits(ix, desk, k);
     if (v === null) return null;
     sum += v;
   }
   return sum;
 }
 
-// Observed intraday equity of the selected desks on one Vienna date, from the
-// History columns (observed rows only; estimates never enter Results). The
-// columns carry display Numbers; their decimals are recovered exactly.
-export function intraday(cols, k, desks) {
-  if (!cols?.n) return [];
-  const ids = desks.slice(), out = [];
-  for (let i = 0; i < cols.n; i++) {
-    if (viennaDate(cols.t[i]) !== k) continue;
-    let sum = 0n, ok = true;
-    for (const id of ids) {
-      const v = cols.desks[id].equity[i];
-      if (!Number.isFinite(v)) { ok = false; break; }
-      sum += BigInt(Math.round(v * 1e8));
+// ---------- Bookkeeping basis ----------
+// A change of a desk's bookkeeping basis is not a profit or loss (History
+// contract), so no Results number is derived across one. The bases come from
+// History (every observation carries its desk's basis) and from the snapshot
+// (the basis of the money now); the record carries none, so each of its
+// closes is on the basis of that date's last observation. A cut is one desk's
+// change between two observations: rows up to `from` are on the old basis,
+// rows from `at` on the new one.
+function cutsIn(cols, ids, r0, r1) {
+  const cuts = [];
+  for (const id of ids) {
+    const b = cols.desks[id].basis;
+    let prev = -1;
+    for (let i = r0 - 1; i >= 0 && prev < 0; i--) if (meaningful(cols, id, i)) prev = i;
+    for (let i = r0; i < r1; i++) {
+      if (!meaningful(cols, id, i)) continue;
+      if (prev >= 0 && b[i] !== b[prev]) cuts.push({ desk: id, from: cols.t[prev], at: cols.t[i] });
+      prev = i;
     }
-    if (ok) out.push({ t: cols.t[i], units: sum });
   }
-  return out;
+  return cuts;
+}
+const cutOf = cuts => ({ desks: DESK_IDS.filter(d => cuts.some(c => c.desk === d)), at: Math.min(...cuts.map(c => c.at)) });
+
+// Every cut in History (once per accepted History), plus one at now for each
+// desk whose current snapshot (`current[id]`, given only while its money now
+// is known) is on another basis than its last observation.
+const historyCuts = new WeakMap();
+export function basisCuts(cols, current = {}, nowMs = null) {
+  if (!cols?.n) return [];
+  let h = historyCuts.get(cols);
+  if (!h) {
+    h = { cuts: cutsIn(cols, DESK_IDS, 0, cols.n), last: {} };
+    for (const id of DESK_IDS) for (let i = cols.n - 1; i >= 0; i--) if (meaningful(cols, id, i)) { h.last[id] = i; break; }
+    historyCuts.set(cols, h);
+  }
+  const cuts = h.cuts.slice();
+  for (const id of DESK_IDS) {
+    const i = h.last[id], now = current?.[id];
+    if (i === undefined || !now || nowMs === null || nowMs <= cols.t[i]) continue;
+    if (cols.basisKeys[cols.desks[id].basis[i]] !== basisKey(now)) cuts.push({ desk: id, from: cols.t[i], at: nowMs, now: true });
+  }
+  return cuts.sort((a, b) => a.at - b.at);
+}
+
+// Observed intraday equity of the selected desks on one Vienna date, from the
+// History columns' exact equity (observed rows only; estimates never enter
+// Results). Every observation's basis is checked: across a change of basis
+// (from the last observation before the date on) there are no points, only the cut.
+export function intraday(cols, k, desks) {
+  if (!cols?.n) return { pts: [], cut: null };
+  const r0 = rowAt(cols, viennaMidnight(k)), r1 = rowAt(cols, viennaMidnight(addDays(k, 1)));
+  const cuts = cutsIn(cols, desks, r0, r1);
+  if (cuts.length) return { pts: [], cut: cutOf(cuts) };
+  const pts = [];
+  for (let i = r0; i < r1; i++) {
+    let sum = 0n, ok = true;
+    for (const id of desks) {
+      const v = cols.desks[id].equityUnits[i];
+      if (v === null) { ok = false; break; }
+      sum += v;
+    }
+    if (ok) pts.push({ t: cols.t[i], units: sum });
+  }
+  return { pts, cut: null };
+}
+
+// Everything one period's money needs beyond the record: today's money now,
+// the board's time, History's intraday points (the Day period only, by its
+// kind) and the change of bookkeeping basis its money would cross, if any:
+// for each desk, after the close E(S−1) stands on and up to the close E(end)
+// stands on, or now. The page and the browser gate both build it here.
+export function moneyContext(ix, inputs, per, desks) {
+  const ctx = { today: inputs.today, todayUnits: inputs.todayUnits, nowMs: inputs.nowMs ?? null, intraday: null, cut: null };
+  const end = per.end > ctx.today ? ctx.today : per.end;
+  if (per.start > end) return ctx;
+  const hits = [];
+  for (const desk of desks) {
+    const d0 = closeDate(ix, DESK_INDEX[desk], addDays(per.start, -1));
+    const from = viennaMidnight(d0 ? addDays(d0, 1) : per.start);
+    let to = from;
+    if (end === ctx.today) to = ctx.nowMs === null ? Infinity : ctx.nowMs + 1;
+    else { const d1 = closeDate(ix, DESK_INDEX[desk], end); if (d1) to = viennaMidnight(addDays(d1, 1)); }
+    for (const c of inputs.cuts ?? []) if (c.desk === desk && c.at >= from && c.at < to) hits.push(c);
+  }
+  if (hits.length) ctx.cut = cutOf(hits);
+  else if (per.p === 'day') ({ pts: ctx.intraday, cut: ctx.cut } = intraday(inputs.cols, per.start, desks));
+  return ctx;
 }
 
 const cents = units => Number(divRound(units, CENT)) / 100;
@@ -236,9 +329,11 @@ const centsOf = (units, count) => Number(divRound(units, BigInt(count) * CENT)) 
 const hundredths = (num, den) => Number(divRound(num * 100n, den)) / 100;
 
 // Every §4.2 number for one period and desk set. Display values are rounded
-// once from exact sums; the exact sums ride along as units.
+// once from exact sums; the exact sums ride along as units. Day uses the
+// observed intraday points; every other period (also a Week on its Monday,
+// a Month on its first) uses session closes.
 export function rollup(ix, per, desks, ctx) {
-  const end = per.end > ctx.today ? ctx.today : per.end;
+  const end = per.end > ctx.today ? ctx.today : per.end, day = per.p === 'day', cut = ctx.cut ?? null;
   const sel = deskIdx(desks);
   const i0 = upper(ix.dates, addDays(per.start, -1)), i1 = upper(ix.dates, end);
   let trades = 0, won = 0, lost = 0, realised = 0n, gross = 0n, fees = 0n, winSum = 0n, lossSum = 0n, best = -1, worst = -1, days = 0;
@@ -258,33 +353,42 @@ export function rollup(ix, per, desks, ctx) {
     }
     if (!dayCount) continue;
     days++;
-    const day = { date: ix.dates[i], units: dayNet, net: cents(dayNet) };
-    if (!bestDay || dayNet > bestDay.units) bestDay = day;
-    if (!worstDay || dayNet < worstDay.units) worstDay = day;
+    const result = { date: ix.dates[i], units: dayNet, net: cents(dayNet) };
+    // Ties: the best day is the first, the worst the last, so equal days name two dates.
+    if (!bestDay || dayNet > bestDay.units) bestDay = result;
+    if (!worstDay || dayNet <= worstDay.units) worstDay = result;
   }
-  const startE = equityAt(ix, desks, addDays(per.start, -1), ctx);
-  const endE = per.start > end ? startE : equityAt(ix, desks, end, ctx);
+  // The money: E(S−1) and E(end). Across a change of bookkeeping basis no
+  // result is derived (cut); a value that is not known stays unknown.
+  const startE = cut ? null : equityAt(ix, desks, addDays(per.start, -1), ctx);
+  const endE = cut ? null : per.start > end ? startE : equityAt(ix, desks, end, ctx);
   const net = startE !== null && endE !== null ? endE - startE : null;
-  // Drawdown path: the equity before the period, then each session's close
-  // (Day: every observed intraday point), then today's equity now.
-  const path = startE === null ? [] : [startE];
-  if (per.start === end) for (const p of ctx.intraday ?? []) path.push(p.units);
-  else for (let i = i0; i < i1; i++) {
+  // Drawdown path: E(S−1), each session's close (Day: every observed intraday
+  // point), then E(end). One unknown value on it leaves the drawdown unknown.
+  let known = net !== null;
+  const path = known ? [startE] : [];
+  if (known && day) for (const p of ctx.intraday ?? []) path.push(p.units);
+  else if (known) for (let i = i0; i < i1; i++) {
     if (ix.dates[i] === ctx.today || !sel.some(desk => ix.close.state[i * 3 + desk])) continue;
     const e = equityAt(ix, desks, ix.dates[i], ctx);
-    if (e !== null) path.push(e);
+    if (e === null) { known = false; break; }
+    path.push(e);
   }
-  if (endE !== null && per.start <= end) path.push(endE);
+  if (known && per.start <= end) path.push(endE);
   let peak = null, dd = 0n, ddPeak = null;
   for (const v of path) {
     if (peak === null || v > peak) peak = v;
     if (v - peak < dd) { dd = v - peak; ddPeak = peak; }
   }
+  const drawn = known && path.length > 1;
   const decided = won + lost;
   const empty = trades === 0 && net !== null && (net < SCRATCH && net > -SCRATCH);
+  // Means are rounded once, to the cent, and kept in units for exact display.
+  const mean = (units, count) => (count ? divRound(units, BigInt(count) * CENT) * CENT : null);
   return {
-    start: per.start, end, empty, days, trades, won, lost, flat: trades - won - lost,
-    units: { net, realised, gross, fees, winSum, lossSum, startE, endE, dd },
+    start: per.start, end, empty, days, trades, won, lost, flat: trades - won - lost, cut,
+    units: { net, realised, gross, fees, winSum, lossSum, startE, endE, dd: drawn ? dd : null, unreal: net === null ? null : net - realised,
+      expectancy: mean(realised, trades), avgWin: mean(winSum, won), avgLoss: mean(lossSum, lost) },
     net: net === null ? null : cents(net), realised: cents(realised), unreal: net === null ? null : cents(net - realised),
     gross: cents(gross), fees: cents(fees),
     winRate: decided ? Number(divRound(BigInt(won) * 100n, BigInt(decided))) : null, small: decided > 0 && decided < SMALL_SAMPLE,
@@ -293,7 +397,7 @@ export function rollup(ix, per, desks, ctx) {
     avgWin: won ? centsOf(winSum, won) : null, avgLoss: lost ? centsOf(lossSum, lost) : null,
     sizeRatio: won && lost ? hundredths(winSum * BigInt(lost), -lossSum * BigInt(won)) : null,
     best: best >= 0 ? trade(ix, best) : null, worst: worst >= 0 ? trade(ix, worst) : null,
-    dd: path.length > 1 ? cents(dd) : null, ddPct: path.length > 1 && ddPeak ? Number(divRound(dd * 10000n, ddPeak)) / 100 : path.length > 1 ? 0 : null,
+    dd: drawn ? cents(dd) : null, ddPct: drawn && ddPeak ? Number(divRound(dd * 10000n, ddPeak)) / 100 : drawn ? 0 : null,
     bestDay, worstDay,
   };
 }
@@ -349,32 +453,49 @@ export function tintStep(units, max) {
 }
 export const unitsCents = cents;
 
-// The hero chart: the period's result so far from € 0, one point per session
-// close (Day: per observed intraday point), ending with today's money now.
+// The hero chart: the period's result so far from € 0 (v for drawing, u in
+// exact units for the text), on a real time axis. Day draws every observed
+// intraday point and now. Other periods put each session close at the end of
+// its Vienna date and today's money at now, over the period's own dates
+// (domain): missing dates keep their width, a session the record has no close
+// for breaks the line, and before tracking the line is zero by definition.
+// Across a change of bookkeeping basis nothing is drawn (cut).
 export function curve(ix, per, desks, ctx) {
-  const end = per.end > ctx.today ? ctx.today : per.end;
+  const end = per.end > ctx.today ? ctx.today : per.end, day = per.p === 'day';
+  if (ctx.cut) return { pts: [], startE: null, day, cut: ctx.cut };
   const startE = equityAt(ix, desks, addDays(per.start, -1), ctx);
-  if (startE === null || per.start > end) return { pts: [], startE, day: per.start === end };
-  if (per.start === end) {
-    const pts = dayWindow((ctx.intraday ?? []).map(p => ({ x: p.t, v: cents(p.units - startE), at: p.t })), per.start);
+  if (startE === null || per.start > end) return { pts: [], startE, day };
+  if (day) {
+    const pts = dayWindow((ctx.intraday ?? []).map(p => ({ x: p.t, v: cents(p.units - startE), u: p.units - startE, at: p.t })), per.start);
     const endE = equityAt(ix, desks, end, ctx);
-    if (end === ctx.today && endE !== null && ctx.nowMs && (!pts.length || ctx.nowMs > pts[pts.length - 1].x)) pts.push({ x: ctx.nowMs, v: cents(endE - startE), at: ctx.nowMs, now: true });
-    if (pts.length < 2 && endE !== null) return { pts: [{ x: 0, v: 0, edge: 'start' }, { x: 1, v: cents(endE - startE), edge: end === ctx.today ? 'now' : 'close' }], startE, day: true, edges: true };
-    return { pts, startE, day: true };
+    if (end === ctx.today && endE !== null && ctx.nowMs && (!pts.length || ctx.nowMs > pts[pts.length - 1].x)) pts.push({ x: ctx.nowMs, v: cents(endE - startE), u: endE - startE, at: ctx.nowMs, now: true });
+    if (pts.length < 2 && endE !== null) {
+      return { pts: [{ x: 0, v: 0, u: 0n, edge: 'start' }, { x: 1, v: cents(endE - startE), u: endE - startE, edge: end === ctx.today ? 'now' : 'close' }], startE, day: true, edges: true, domain: [0, 1] };
+    }
+    return { pts, startE, day: true, domain: pts.length ? [pts[0].x, pts[pts.length - 1].x] : [0, 1] };
   }
-  const pts = [{ x: 0, v: 0, edge: 'start' }];
-  const i0 = upper(ix.dates, addDays(per.start, -1)), i1 = upper(ix.dates, end), sel = deskIdx(desks);
+  const live = end === ctx.today, ts = ix.meta.trackingStart, sel = deskIdx(desks);
+  const x0 = viennaMidnight(per.start);
+  const x1 = live && ctx.nowMs !== null ? Math.max(ctx.nowMs, x0 + 1) : viennaMidnight(addDays(end, 1));
+  const tracking = per.start <= ts && ts <= end ? viennaMidnight(ts) : null;
+  const pts = [{ x: x0, v: 0, u: 0n, edge: 'start', k: per.start }];
+  let prev = addDays(per.start, -1);
+  if (per.start < ts && ts <= end) { pts.push({ x: tracking, v: 0, u: 0n, edge: 'tracking', k: ts }); prev = addDays(ts, -1); }
+  // A regular session after tracking starts, strictly between two dates.
+  const missing = (a, b) => { for (let k = addDays(a, 1); k < b; k = addDays(k, 1)) if (k >= ts && !isWeekend(k) && !marketHoliday(k)) return true; return false; };
+  const point = (k, x, e, extra) => {
+    if (missing(prev, k)) pts.push({ x: (pts[pts.length - 1].x + x) / 2, v: null, gap: true });
+    pts.push({ x, v: e === null ? null : cents(e - startE), u: e === null ? null : e - startE, k, ...extra });
+    prev = k;
+  };
+  const i0 = upper(ix.dates, addDays(per.start, -1)), i1 = upper(ix.dates, end);
   for (let i = i0; i < i1; i++) {
     const k = ix.dates[i];
     if (k === ctx.today || !sel.some(desk => ix.close.state[i * 3 + desk])) continue;
-    const e = equityAt(ix, desks, k, ctx);
-    pts.push({ x: pts.length, v: e === null ? null : cents(e - startE), k });
+    point(k, viennaMidnight(addDays(k, 1)), equityAt(ix, desks, k, ctx));
   }
-  if (end === ctx.today) {
-    const e = equityAt(ix, desks, end, ctx);
-    pts.push({ x: pts.length, v: e === null ? null : cents(e - startE), k: end, now: true });
-  }
-  return { pts, startE, day: false };
+  if (live) point(end, x1, equityAt(ix, desks, end, ctx), { now: true });
+  return { pts, startE, day: false, domain: [x0, x1], tracking };
 }
 
 // A day's chart shows its regular New York session (in Vienna time), widened

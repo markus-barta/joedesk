@@ -1,7 +1,9 @@
 // Display formatting only: English words, Austrian digits, Vienna time, true
-// minus. Money arrives as exact decimal strings; Number is used for display.
+// minus. Money arrives as exact decimal strings; Number is used for display,
+// or exact BigInt units (10⁻⁸, contracts/decimal.mjs) where no Number may
+// stand in: those are rounded once, half away from zero, and never converted.
 import { wall, VIENNA, NY } from './time.mjs';
-import { decimalUnits } from './contracts/decimal.mjs';
+import { decimalUnits, roundUnits, UNIT } from './contracts/decimal.mjs';
 
 export const MINUS = '−';
 export const NB = ' ';
@@ -14,19 +16,26 @@ export const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp
 export const amountOf = money => (money && typeof money.amount === 'string' ? Number(money.amount) : null);
 export const currencySymbol = currency => SYMBOL[currency] ?? currency;
 
+function exactParts(units, d) {
+  const abs = roundUnits(units < 0n ? -units : units, d);
+  return [String(abs / UNIT), String(abs % UNIT).padStart(8, '0').slice(0, d)];
+}
 export function digits(n, d = 2) {
-  const [whole, fraction] = Math.abs(n).toFixed(d).split('.');
+  const [whole, fraction] = typeof n === 'bigint' ? exactParts(n, d) : Math.abs(n).toFixed(d).split('.');
   return whole.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (d ? `,${fraction}` : '');
 }
 
+// A value to show: a finite Number or exact units.
+export const known = n => typeof n === 'bigint' || Number.isFinite(n);
 // Zero has no sign and no arrow; a half cent rounds to zero for display.
-export const isZero = n => Math.abs(n) < 0.005;
-export const tone = n => (n == null || !Number.isFinite(n) || isZero(n) ? '' : n > 0 ? 'gain' : 'loss');
+const HALF_CENT = UNIT / 200n;
+export const isZero = n => (typeof n === 'bigint' ? n > -HALF_CENT && n < HALF_CENT : Math.abs(n) < 0.005);
+export const tone = n => (n == null || !known(n) || isZero(n) ? '' : n > 0 ? 'gain' : 'loss');
 export const arrowOf = n => (isZero(n) ? 'flat' : n > 0 ? 'up' : 'down');
 
 export function money(n, currency = 'EUR', signed = false, d = 2) {
-  if (n == null || !Number.isFinite(n)) return '—';
-  if (isZero(n)) n = 0;
+  if (n == null || !known(n)) return '—';
+  if (isZero(n)) n = typeof n === 'bigint' ? 0n : 0;
   const sign = n < 0 ? MINUS : signed && n > 0 ? '+' : '';
   return `${sign}${currencySymbol(currency)}${NB}${digits(n, d)}`;
 }

@@ -5,6 +5,7 @@
 // typed columns (one row per point, NaN for a missing value) so a 10,000-point
 // file never costs the page more than a few milliseconds.
 import { nyDay, marketSession, zonedInstant, NY } from './time.mjs';
+import { decimalUnits } from './contracts/decimal.mjs';
 
 export const DESK_IDS = Object.freeze(['j', 'joe', 'joel']);
 export const FIELDS = Object.freeze(['equity', 'dayPnl', 'openPnl', 'totalPnl']);
@@ -15,13 +16,20 @@ export const rangeSpanMs = range => RANGE_MS[range] ?? null;
 
 const number = money => (money && typeof money.amount === 'string' ? Number(money.amount) : NaN);
 
+// A desk's bookkeeping basis identity (contract: an explicit historyBasis adds
+// to, never replaces, its accounting period and method). History rows and the
+// snapshot's desks are keyed the same way.
+export const basisKey = d => JSON.stringify([d?.historyBasis ?? null, d?.accounting?.periodStart ?? null, d?.accounting?.method ?? null]);
+
 // One pass over the validated points: times, every money field per desk and
 // for the family, and each desk's bookkeeping basis as an index into a table.
+// Each desk's equity also rides along exactly (BigInt units, null when not
+// observed) for Results, which never takes money from a Number.
 export function toColumns(points) {
   const n = points.length, basisKeys = [], basisIndex = new Map();
   const t = new Float64Array(n);
   const col = () => Object.fromEntries(FIELDS.map(f => [f, new Float64Array(n)]));
-  const desks = Object.fromEntries(DESK_IDS.map(id => [id, { ...col(), basis: new Int32Array(n), identified: new Uint8Array(n) }]));
+  const desks = Object.fromEntries(DESK_IDS.map(id => [id, { ...col(), equityUnits: new Array(n).fill(null), basis: new Int32Array(n), identified: new Uint8Array(n) }]));
   const totals = col();
   for (let i = 0; i < n; i++) {
     const p = points[i];
@@ -30,7 +38,8 @@ export function toColumns(points) {
     for (const id of DESK_IDS) {
       const d = p.desks?.[id], c = desks[id];
       for (const f of FIELDS) c[f][i] = number(d?.money?.[f]);
-      const key = JSON.stringify([d?.historyBasis ?? null, d?.accounting?.periodStart ?? null, d?.accounting?.method ?? null]);
+      if (typeof d?.money?.equity?.amount === 'string') c.equityUnits[i] = decimalUnits(d.money.equity.amount);
+      const key = basisKey(d);
       if (!basisIndex.has(key)) { basisIndex.set(key, basisKeys.length); basisKeys.push(key); }
       c.basis[i] = basisIndex.get(key);
       c.identified[i] = d?.historyBasis || d?.accounting ? 1 : 0;
@@ -42,7 +51,9 @@ export function toColumns(points) {
 export const transferables = cols => [cols.t.buffer, ...Object.values(cols.totals).map(a => a.buffer),
   ...DESK_IDS.flatMap(id => [...FIELDS.map(f => cols.desks[id][f].buffer), cols.desks[id].basis.buffer, cols.desks[id].identified.buffer])];
 
-const meaningful = (cols, id, i) => {
+// A row that says something about a desk: an identified basis or a value.
+// All-null rows without calculation metadata are unknown, not a new basis.
+export const meaningful = (cols, id, i) => {
   const d = cols.desks[id];
   return d.identified[i] === 1 || !Number.isNaN(d.equity[i]) || !Number.isNaN(d.dayPnl[i]) || !Number.isNaN(d.totalPnl[i]);
 };
