@@ -993,3 +993,46 @@ Found, not in this round's scope: from 701 to about 860 px (about 910 px in
 a wide font) the desktop header (brand, navigation, light, theme button) is
 wider than the window and scrolls sideways. It predates this round; the
 gate's widths are 390, 1024 and 1440.
+
+### P3 fix round 5 — JOED-23
+
+The horizontal page scroll found in round 4 (AC-28: never a horizontal page
+scroll). A sweep of every width in 10 px steps found two more defects of the
+same kind between the gate's widths; this round fixes them too.
+
+| Surface | Before | Now | Proof |
+| --- | --- | --- | --- |
+| Header | From 701 px the desktop header (brand, PAPER, nav, light, theme button) needed 855 px in this machine's font, 937 px in the wide font and up to 1,056 px with the longest light label ("Stale 23 h 59 min · Broker unstable"). The page scrolled sideways from 701 to about 860 px (910 px in the wide font), and in the wide font with that label at 1024 px too | Up to 960 px the approved phone header: brand, PAPER, the light (above 700 px still with its broker word, as §1 asks) and a 44 px theme button; the nav is the bottom bar. Above 960 px the desktop header, unchanged. When it is short of room (the wide font with a long label, 961 to about 1,060 px), the light's broker word moves under its label, inside the 34 px button. Its widest case needs 928 px | `sweep`: page scroll, the header's row, one nav, 44 px targets, centred icons; 6 light labels × 4 broker words at every width |
+| Kept holdings | Up to 1180 px a kept row's columns need about 730 px plus gutters: the page scrolled from 701 to about 730 px, and up to about 850 px the holding's name had no room and was cut | Up to 900 px a kept row has two lines: the holding and its worth, then the kept label under the holding. Side and last price are already in the holding's second line, as on phones | `sweep`: page scroll and nothing past the right edge, on every screen |
+| Desk card header | The state ("Sitting out since 16:02") never wraps, but the heartbeat line ("Checked in 18 s ago") took its room. With the design data the two overlapped at 710–780 and 1110–1150 px (to 820 and 1200 px in the wide font); with the longest heartbeat ("Checked in 23 h 59 min ago") at 710–870 px (910 px in the wide font) and 1110–1440 px | The state keeps its width. The heartbeat line may take two lines, inside the name and state's height (36 of 41 px, so nothing moves). A card narrower than 340 px puts it under the state, as on phones (710–830 and 1110–1230 px). At 1024 and 1440 the design state looks as approved | `sweep`: no text overlaps other text on any screen; each card header keeps one box with its longest state and heartbeat texts |
+
+The sweep (`sweep`, 121 checks) resizes the live page to every width from
+390 to 1440 px in 10 px steps (106), light and dark, in this machine's font
+and the wide one, on all four screens. It asserts:
+
+- no horizontal page scroll (`scrollWidth ≤ innerWidth`), and nothing reaches past the page's right edge, where a scrollbar sits;
+- the header's items stay in one row and never overlap;
+- one nav: the bottom bar up to 960 px, the header's above, with all four screens in view;
+- 44 px targets in the compact header and the bottom bar;
+- the header's and the bottom bar's icons centred (±0.5 px);
+- no text overlaps other text.
+
+On Desk it also puts every light label with every broker word through the
+header, and the longest state and heartbeat texts through each desk card. The
+same sweep against 44d1532 fails 108 of its 121 checks. The gate now has 2170
+checks (2049 plus the sweep). All pass locally (Europe/Vienna) and under
+TZ=UTC with CI=true.
+
+Deferred, a copy decision: on phones the light has about 72 to 84 px for its
+words. "Stale 23 h 59 min" (an age in hours and minutes) runs 2 px into the
+button's padding at 390 px in this machine's font, and up to 30 px over the
+theme button from 390 to 410 px in the wide font. Spacing cannot absorb
+30 px without dropping something §1 asks for. Proposal: once the age is an
+hour or more, the light says "Stale 23 h"; the Desk line keeps the exact age.
+The sweep exempts only this label on phones. It must still move nothing, and
+index.md lists every exempted width.
+
+Visible change for the visual check: the compact header and bottom bar from
+701 to 960 px, two-line kept rows up to 900 px, and the card heartbeat under
+the state at 710–830 and 1110–1230 px. At 390, 1024 and 1440 the design state
+is unchanged.

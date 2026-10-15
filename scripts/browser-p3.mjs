@@ -395,6 +395,7 @@ const reference = `${engine.product} (headless, ${process.platform} ${process.ar
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
 await page.s('Page.addScriptToEvaluateOnNewDocument', { source: AUDIT });
 let board = null, current = null, budgetTrace = null;
+const deferredLight = [];
 const boards = [];
 async function newBoard(options) { const b = await startBoard(options); boards.push(b); return b; }
 const rects = selectors => page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
@@ -419,6 +420,8 @@ async function route(rules) {
 // The two state lines that clamp, and the wide font that stands in for Linux's.
 const STATE_BOXES = ['#health', '#heroL .say'];
 const WIDE_FONT = 'Verdana, "DejaVu Sans", sans-serif';
+// The widest window with the compact header (app.css).
+const COMPACT = 960;
 const DESK_SHIFT = [...SHIFT_SELECTORS, '.hstrip', '#heroL .say', '#heroL .kpi .c', '#positions .pstate', '#kept .keep-cap', '#kept .pstate', '#kept .prow'];
 const HIST_SHIFT = ['.hist-tools', '.hcard', '#histChart', '#histCompare', '.hist-help', '.hist-cols', '#jAcct', '#jAcct .facts-dl', '#events', 'footer.foot'];
 const DESK_TEXT = `(() => ({
@@ -952,6 +955,91 @@ try {
   await leaveSay(page);
   }
 
+  if (run('sweep')) {
+  // 7c · AC-28 at every width: from 390 to 1440 px in 10 px steps, light and
+  // dark, in this machine's font and the wide one, every screen, resizing the
+  // live page. The page never scrolls sideways, nothing reaches past its
+  // right edge and no text overlaps other text. Up to COMPACT px the header
+  // is the phone's (the nav in the bottom bar, 44 px buttons, icons
+  // centred); above, the desktop one. On Desk every light label, with every
+  // broker word, keeps the header in its row: nothing leaves it or overlaps,
+  // nothing else moves, and the label stays inside its button. Each desk
+  // card's header keeps one box with its longest state and heartbeat texts.
+  const { snapshot, history } = scenario(NOW);
+  const b = await newBoard({ history });
+  b.setNow(NOW);
+  check('sweep', 'design snapshot accepted', (await b.push(snapshot)).status === 200);
+  b.setNow(at(NOW, 9));
+  const widths = Array.from({ length: (1440 - 390) / 10 + 1 }, (_, i) => 390 + i * 10);
+  // The header light's labels (health.js) and broker words (desk.js), and the
+  // desk cards' longest state and heartbeat texts (desk.js).
+  const light = { labels: ['Loading', 'Board OK', 'Needs fix', `Stale ${fmt.age(86399)}`, 'Broker unsure', 'Data delayed'],
+    brokers: ['Broker OK', 'Broker unstable', 'Broker unsure', 'Broker down'],
+    cards: [['Sitting out since 16:02', `${fmt.age(86399)} ago`], ['Not reported', `${fmt.age(86399)} old`], ['Working', `${fmt.age(5)} ago`]] };
+  for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
+    await configure(page, VIEWPORTS[0], theme);
+    await load(page, b.url, 'desk');
+    if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
+    for (const screen of ['desk', 'results', 'history', 'settings']) {
+      await go(page, screen);
+      const tag = `${theme}${font ? ' wide font' : ''} ${screen}`;
+      const fail = { scroll: [], past: [], header: [], nav: [], targets: [], icons: [], overlaps: [], labels: [], cards: [] };
+      for (const width of widths) {
+        await configure(page, { name: String(width), width, height: 900, mobile: width <= 700 }, theme);
+        await settle(page);
+        const r = await page.evaluate(`__audit.sweep(${COMPACT}, ${screen === 'desk' ? JSON.stringify(light) : 'null'})`);
+        if (r.scroll > r.inner) fail.scroll.push({ width, scroll: r.scroll });
+        if (r.past.length) fail.past.push({ width, past: r.past.slice(0, 3) });
+        if (r.header.length) fail.header.push({ width, header: r.header });
+        if (!r.nav) fail.nav.push(width);
+        if (r.targets.length) fail.targets.push({ width, targets: r.targets });
+        if (r.icons.length) fail.icons.push({ width, icons: r.icons });
+        if (r.overlaps.length) fail.overlaps.push({ width, overlaps: r.overlaps.slice(0, 3) });
+        if (r.cards.length) fail.cards.push({ width, cards: r.cards.slice(0, 3) });
+        // Deferred (copy decision): on phones the longest stale label, with
+        // hours and minutes, is wider than the light's room; it is listed in
+        // index.md, and must not move or push anything else.
+        const labels = r.labels.filter(l => !(width <= 700 && l.light.startsWith(light.labels[3]) && l.faults.every(f => f === 'label leaves the button')));
+        if (labels.length < r.labels.length) deferredLight.push(`${tag} ${width}`);
+        if (labels.length) fail.labels.push({ width, labels: labels.slice(0, 3) });
+      }
+      const n = `${widths.length} widths from 390 to 1440 px`;
+      check('AC-28', `sweep ${tag}: no horizontal page scroll at any of ${n}`, !fail.scroll.length, fail.scroll.slice(0, 8));
+      check('AC-28', `sweep ${tag}: nothing reaches past the page's right edge at any of ${n}`, !fail.past.length, fail.past.slice(0, 4));
+      check('header', `sweep ${tag}: the header's items stay in its row and never overlap at any of ${n}`, !fail.header.length, fail.header.slice(0, 4));
+      check('header', `sweep ${tag}: one nav at every width, the bottom bar up to ${COMPACT} px and the header's above, all four screens in view`, !fail.nav.length, fail.nav.slice(0, 8));
+      check('AC-30', `sweep ${tag}: the compact header's buttons and the bottom bar are 44 px targets up to ${COMPACT} px`, !fail.targets.length, fail.targets.slice(0, 4));
+      check('header', `sweep ${tag}: the header's and bottom bar's icons are centred at every width`, !fail.icons.length, fail.icons.slice(0, 4));
+      check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
+      if (screen === 'desk') check('no-shift', `sweep ${tag}: each desk card's header keeps one box with its longest state and heartbeat texts, which never overlap (two heartbeat lines at most, under the state below 340 px)`, !fail.cards.length, fail.cards.slice(0, 4));
+      if (screen === 'desk') check('no-shift', `sweep ${tag}: ${light.labels.length} light labels × ${light.brokers.length} broker words at every width: the label stays inside its button (the deferred one aside), nothing else in the header or the page moves`, !fail.labels.length, fail.labels.slice(0, 4));
+    }
+  }
+  // For the visual check: the compact header (720, 800, 880) and, just above
+  // it, the desktop header with the longest light label in the wide font;
+  // the three-column desk cards with the heartbeat under the state (1120).
+  for (const [width, theme, screen] of [[720, 'light', 'desk'], [800, 'dark', 'desk'], [880, 'light', 'desk'], [880, 'dark', 'history']]) {
+    const viewport = { name: String(width), width, height: 900, mobile: false };
+    await configure(page, viewport, theme);
+    await load(page, b.url, screen);
+    await shot(page, viewport, `${width}-${theme}-${screen}-header`, `${screen[0].toUpperCase()}${screen.slice(1)} at ${width} px: the compact header (brand, PAPER, the light with its broker word, 44 px theme button) and the nav in the bottom bar${screen === 'desk' && width < 840 ? '; the two-column desk cards put the heartbeat under the state' : ''}`);
+  }
+  const cards = { name: '1120', width: 1120, height: 900, mobile: false };
+  await configure(page, cards, 'light');
+  await load(page, b.url, 'desk');
+  await shot(page, cards, '1120-light-desk-cards', 'Desk at 1120 px: the desktop header, and the three desk cards (under 340 px wide) with the heartbeat under the state');
+  const edge = { name: String(COMPACT + 10), width: COMPACT + 10, height: 900, mobile: false };
+  await configure(page, edge, 'light');
+  await load(page, b.url, 'desk');
+  await page.evaluate(`(() => { document.documentElement.style.setProperty('--font', ${JSON.stringify(WIDE_FONT)}); const h = document.getElementById('hdrHealth');
+    h.querySelector('b').textContent = ${JSON.stringify(light.labels[3])}; h.querySelector('.lbl-long').textContent = '· Broker unstable';
+    h.querySelector('svg').setAttribute('class', 'i tone-warn'); h.querySelector('svg use').setAttribute('href', '#i-half');
+    // Staged for the picture: the resize and clock renders keep these words.
+    const html = h.innerHTML; Object.defineProperty(h, 'innerHTML', { configurable: true, get: () => html, set: () => {} }); })()`);
+  await settle(page);
+  await shot(page, edge, `${edge.name}-light-desk-header-longest-wide`, `Desk at ${edge.name} px in the wide font, the longest light label put in: the desktop header keeps its row and the broker word moves under the label, inside the button`);
+  }
+
   if (run('history')) {
   // 8 · History in each P1 history fixture through the real server's store.
   for (const id of ['f-history-gap', 'i-history-size-alarm', 'f-history-partial-projection']) {
@@ -1121,6 +1209,31 @@ reported, fresh, stale, broken and recovered, in this machine's font and a wide
 one (\`no-shift\`, \`lines\`, \`clamp\`). See \`390-light-desk-clamps.png\`,
 \`390-light-desk-say-tip.png\` and \`390-dark-desk-state-a-gateway-up-but-dead.png\`.
 
+## Header at every width (AC-28)
+
+Up to ${COMPACT} px the header is the phone's: brand, PAPER, the light (with its
+broker word above 700 px) and a 44 px theme button; the nav is the bottom bar.
+Above ${COMPACT} px it is the desktop header; when that is short of room, the
+light's broker word moves under its label, inside the button. Up to 900 px a
+kept holding has two lines. The sweep (\`sweep\`) walks every width from 390 to
+1440 px in 10 px steps, light and dark, in this machine's font and the wide
+one, on every screen: no horizontal page scroll, nothing past the page's right
+edge, no text over other text, the header in one row with one nav, 44 px
+targets and centred icons; on Desk every light label with every broker word
+moves nothing. A desk card's state never runs under its heartbeat line: short
+of room the heartbeat takes two lines in the same height, and a card under
+340 px wide puts it under the state, as on phones. See
+\`720-light-desk-header.png\`, \`800-dark-desk-header.png\`,
+\`880-light-desk-header.png\`, \`880-dark-history-header.png\`,
+\`${COMPACT + 10}-light-desk-header-longest-wide.png\` and
+\`1120-light-desk-cards.png\`.
+${deferredLight.length ? `
+Deferred, a copy decision: on phones the longest stale label ("Stale ${fmt.age(86399)}")
+is wider than the light's room and leaves its button (it still moves nothing
+and the page does not scroll): ${[...deferredLight.reduce((m, t) => { const [k, w] = [t.slice(0, t.lastIndexOf(' ')), t.slice(t.lastIndexOf(' ') + 1)]; m.set(k, [...(m.get(k) ?? []), w]); return m; }, new Map())].map(([k, ws]) => `${k} at ${ws.join(', ')} px`).join('; ')}.
+A shorter header form, for example "Stale 23${fmt.NB}h" once the age is an hour or
+more (the Desk line keeps the exact age), would fit.
+` : ''}
 ## Checks
 
 | Criterion | Passed | Failed |

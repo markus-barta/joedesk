@@ -170,5 +170,115 @@
       const cs = getComputedStyle(el);
       return { bgAlpha: parseColor(cs.backgroundColor)?.a, opacity: Number(cs.opacity), visible: cs.visibility };
     },
+    // One width of the width sweep: the page's right edge, the header's row,
+    // the one nav, 44 px targets and centred icons in the compact header, and
+    // (light given) every light label put through the header.
+    sweep(compactMax, light) {
+      const box = el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
+      const name = el => el.id || String(el.className?.baseVal ?? el.className).split(' ')[0] || el.tagName.toLowerCase();
+      const inFixed = el => { for (let n = el; n; n = n.parentElement) if (getComputedStyle(n).position === 'fixed') return true; return false; };
+      const edge = document.body.clientWidth + 0.5;
+      const past = [...document.querySelectorAll('body *')].filter(el => {
+        if (el.closest('svg') && el.tagName.toLowerCase() !== 'svg') return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.right > edge && !el.closest('.vh') && visible(el) && !inFixed(el);
+      }).map(el => `${name(el)} ${Math.round(el.getBoundingClientRect().right)} > ${Math.round(edge)}`);
+      const top = document.querySelector('.top-in'), cs = getComputedStyle(top), t = box(top);
+      const row = { left: t.left + parseFloat(cs.paddingLeft) - 0.5, right: t.right - parseFloat(cs.paddingRight) + 0.5, top: t.top - 0.5, bottom: t.bottom + 0.5 };
+      const items = [...top.children].filter(visible);
+      const headerFaults = () => {
+        const rs = items.map(el => ({ id: name(el), ...box(el) }));
+        return rs.filter(r => r.left < row.left || r.right > row.right || r.top < row.top || r.bottom > row.bottom).map(r => `${r.id} leaves the row`)
+          .concat(rs.slice(1).filter((r, i) => r.left < rs[i].right - 0.5).map((r, i) => `${r.id} overlaps ${rs[i].id}`));
+      };
+      const compact = innerWidth <= compactMax;
+      const nav = document.querySelector('.top .nav'), bar = document.querySelector('.bottom-nav');
+      const shown = compact ? bar : nav, hidden = compact ? nav : bar;
+      const buttons = [...shown.querySelectorAll('button')];
+      const navOk = visible(shown) && !visible(hidden) && buttons.length === 4 && buttons.every(b => { const r = box(b); return visible(b) && r.left >= -0.5 && r.right <= innerWidth + 0.5 && r.top >= -0.5 && r.bottom <= innerHeight + 0.5; });
+      const health = document.getElementById('hdrHealth'), theme = document.getElementById('themeBtn');
+      const targets = compact ? [health, theme, ...bar.querySelectorAll('button')].filter(visible).map(b => ({ id: name(b), ...box(b) })).filter(b => b.width < 43.5 || b.height < 43.5)
+        .map(b => `${b.id} ${Math.round(b.width)}×${Math.round(b.height)}`) : [];
+      const icons = [];
+      const centred = (el, axes, what) => {
+        const icon = [...el.querySelectorAll(':scope > svg')].find(visible);
+        if (!icon) { icons.push(`${what}: no icon`); return; }
+        const a = box(el), i = box(icon);
+        const dx = (i.left + i.right) / 2 - (a.left + a.right) / 2, dy = (i.top + i.bottom) / 2 - (a.top + a.bottom) / 2;
+        if ((axes.includes('x') && Math.abs(dx) > 0.5) || (axes.includes('y') && Math.abs(dy) > 0.5)) icons.push(`${what} off by ${dx.toFixed(2)}, ${dy.toFixed(2)}`);
+      };
+      centred(theme, 'xy', 'theme');
+      centred(health, 'y', 'light');
+      centred(document.getElementById('modeLabel'), 'y', 'PAPER');
+      buttons.forEach(b => centred(b, compact ? 'x' : 'y', `${compact ? 'bar' : 'nav'} ${b.dataset.go}`));
+      // Text on text: any two visible text boxes of the same layer (the page,
+      // or the header and bottom bar above it) that overlap.
+      const texts = () => {
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, { acceptNode: n => (n.nodeValue.trim() && !n.parentElement.closest('svg, .vh, #tip, .ctip, .pop') && visible(n.parentElement) ? 1 : 2) });
+        const boxes = [];
+        for (let n; (n = walker.nextNode());) {
+          const range = document.createRange();
+          range.selectNodeContents(n);
+          const layer = Boolean(n.parentElement.closest('header.top, .bottom-nav'));
+          for (const q of range.getClientRects()) if (q.width > 0.5 && q.height > 0.5) boxes.push({ text: n.nodeValue.trim().slice(0, 30), layer, q });
+        }
+        const hits = [];
+        for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i], c = boxes[j];
+          if (a.layer !== c.layer) continue;
+          if (Math.min(a.q.right, c.q.right) - Math.max(a.q.left, c.q.left) > 1 && Math.min(a.q.bottom, c.q.bottom) - Math.max(a.q.top, c.q.top) > 2) hits.push(`${a.text} × ${c.text}`);
+        }
+        return hits;
+      };
+      const out = { scroll: document.documentElement.scrollWidth, inner: innerWidth, past, header: headerFaults(), nav: navOk, targets, icons, overlaps: texts(), labels: [], cards: [] };
+      if (!light) return out;
+      // Each desk card's header with the longest state and heartbeat texts:
+      // no overlap, inside the card, at most two heartbeat lines, one height.
+      for (const [state, ago] of light.cards) {
+        const heads = [...document.querySelectorAll('.dcard header')];
+        const keep = heads.map(h => [h.querySelector('.state > span').textContent, h.querySelector('.hb .age')?.textContent]);
+        const before = heads.map(h => box(h).height);
+        heads.forEach(h => { h.querySelector('.state > span').textContent = state; const a = h.querySelector('.hb .age'); if (a) a.textContent = ago; });
+        heads.forEach((h, i) => {
+          const card = box(h.closest('.dcard')), hb = h.querySelector('.hb'), lines = Math.round(box(hb).height / parseFloat(getComputedStyle(hb).lineHeight));
+          const range = document.createRange();
+          range.selectNodeContents(h.querySelector('.state'));
+          const s = range.getBoundingClientRect(), b = box(hb), faults = [];
+          if (Math.min(s.right, b.right) - Math.max(s.left, b.left) > 0.5 && Math.min(s.bottom, b.bottom) - Math.max(s.top, b.top) > 0.5) faults.push('state × heartbeat');
+          if (s.right > card.right - 17.5 || b.right > card.right - 17.5) faults.push('leaves the card');
+          if (lines > 2) faults.push(`${lines} heartbeat lines`);
+          if (getComputedStyle(hb).gridColumnStart === '2') {
+            const t = document.createRange();
+            t.selectNodeContents(hb);
+            if (Math.abs(t.getBoundingClientRect().left - box(h.querySelector('.state')).left) > 0.5) faults.push('heartbeat not under the state');
+          }
+          if (Math.abs(box(h).height - before[i]) > 0.5) faults.push(`height ${before[i]} → ${box(h).height}`);
+          if (faults.length) out.cards.push({ card: h.closest('.dcard').id, texts: `${state} · ${ago}`, faults });
+        });
+        heads.forEach((h, i) => { h.querySelector('.state > span').textContent = keep[i][0]; const a = h.querySelector('.hb .age'); if (a) a.textContent = keep[i][1]; });
+      }
+      const b = health.querySelector('b'), long = health.querySelector('.lbl-long'), lbl = health.querySelector('.lbl') ?? b;
+      const keep = [b.textContent, long.textContent];
+      const main = document.getElementById('main'), header = document.querySelector('header.top');
+      const still = () => [header, ...items.filter(el => el !== health), main].map(el => ({ id: name(el), ...box(el) }));
+      const base = still();
+      for (const label of light.labels) for (const word of light.brokers) {
+        b.textContent = label; long.textContent = `· ${word}`;
+        const faults = headerFaults();
+        still().forEach((r, i) => { if (['left', 'top', 'width', 'height'].some(k => Math.abs(r[k] - base[i][k]) > 0.5)) faults.push(`${r.id} moved`); });
+        const h = box(health), hs = getComputedStyle(health);
+        const lines = Math.round(lbl.getBoundingClientRect().height / parseFloat(getComputedStyle(lbl).lineHeight));
+        for (const part of [b, long].filter(visible)) {
+          const range = document.createRange();
+          range.selectNodeContents(part);
+          const r = range.getBoundingClientRect();
+          if (r.left < h.left + parseFloat(hs.paddingLeft) - 1 || r.right > h.right - parseFloat(hs.paddingRight) + 1 || r.top < h.top - 0.5 || r.bottom > h.bottom + 0.5) faults.push(`${part === b ? 'label' : 'broker word'} leaves the button`);
+        }
+        if (lines > 2) faults.push(`${lines} lines`);
+        if (faults.length) out.labels.push({ light: `${label} · ${word}`, faults });
+      }
+      b.textContent = keep[0]; long.textContent = keep[1];
+      return out;
+    },
   };
 })();
