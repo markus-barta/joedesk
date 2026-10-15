@@ -1,8 +1,10 @@
 # ADR 0001: JoeDesk contracts and resilient read model
 
-Status: P1 implementation candidate for JOED-21, under JOED-19. Coordinator
+Status: P1 foundation merged; P2 server integration candidate for JOED-22 (mapping
+below), under JOED-19. Coordinator
 review remains outstanding. No runtime cutover, producer edit, push or deployment
-is part of P1. The existing server and browser still use their legacy contracts.
+is part of P1. P1 left the existing server and browser on legacy contracts;
+the P2 candidate below connects the server, while browser integration stays P3.
 
 Evidence: JOED-19 approved HTML/spec r3.1, decisions, research, art direction,
 inventory, build handover §§1–9 and Amy's failure history a–j. The HTML is a
@@ -618,3 +620,82 @@ sign-off for the 20-second-old check's fresh → broken → stale transition.
 The unchanged legacy HTTP suite and coordinator-owned browser smoke were not
 rerun. No push, deployment, production-host call, review gate, delegation or
 other model CLI was run.
+
+
+## P2 server candidate — JOED-22
+
+This branch connects the merged shared package to the server; it is not a
+producer/UI cutover. P2 adds no trading action, LIVE path, deployment or release
+coordinate. `calendar` remains the actual release scheme until P6, so the health
+schema now accepts the explicitly tagged current legacy identity as well as
+CalVer3; it rejects mismatched schemes and invalid dates. The new required
+serverNow/gateway health fields and the closed `executor_broker_disagreement`
+and `results_not_wired` codes are candidate package additions for coordinator
+compatibility review before activation.
+
+`data-state.json` atomically combines the accepted v2 snapshot, generation
+progress, gateway check-progress watermark and per-cell valueReceivedAt.
+History has an independent byte-bounded envelope; compaction also reserves each
+Vienna day's final observed values. Rejection reasons stay in a
+separate safe bounded file. The original legacy data/history files are not
+silently converted or overwritten. A valid stored Fleet Config is loaded before
+first ingress and its receipt survives reads/restarts. Corrupt sequence or
+retained-receipt metadata fails closed. Each store has at most one retry file;
+a post-rename sync error cannot roll the in-memory sequence watermark backward.
+
+The protected `/joe/state.json` serves serverNow, feeds/progress and selectors
+for P3. `/joe/data.json` withholds current money/marks with closed reasons while
+its otherwise fresh gateway check is unconfirmed; prior observations remain in
+separate retained cells with original receipts. Stale/frozen precedence stays
+as specified above. Health checks current confirmation independently of a
+stale feed. Future/unconfirmed checks cannot poison the valid-check watermark.
+Results is an HTTP 503 v2 error envelope with results_not_wired, without invented
+executor sequence, receipt, days or trades. The executor owns any future producer.
+
+The exact item-to-test mapping also lives in `.agent-status.json` (`adrCoverage`).
+All `P2 …` names below are `test/server-contract.mjs`; time cases are
+`test/time-vectors.mjs`, run against the production module as well as the oracle.
+
+| P2 obligation | Exact test names |
+| --- | --- |
+| ADR §1/§9: bound bytes before parse; malformed 400; unknown/invalid 422 before snapshot/history writes; keep last-good and serve closed rejection | `P2 acceptance: 400 malformed, 413 streamed bound, 422 contract failure precede snapshot writes`; `P2 transport: chunked oversized input responds 413 without resetting the connection` |
+| ADR §2 / class c: server receivedAt; monotonic seq, generation/receive regression and frozen-generation progress across restart | `P2 restart: seq, generation progress and receive regressions stay durable`; `P2 durability: a post-rename sync failure cannot roll sequence back in memory or after restart` |
+| ADR §2/§3 / deferred Low 6: retained valueReceivedAt for every cell across repeated null/error states and restart | `P2 retention: every retained cell keeps valueReceivedAt through nulls, rejection and restart`; `P2 outages: 20 dead, missing and frozen-ready pushes retain original money through restart and recover` |
+| ADR §2 / class a / OPS proposal 1: durable gateway check advancement gates all 17 money/account cells and both position panels; two producer-skew directions, stale/frozen precedence, future check recovery | `P2 gateway: persisted old-check progress invalidates every money, account and both position panels`; `P2 gateway: stale/frozen precedence, initial check age and check regressions`; `P2 gateway: a future unconfirmed check cannot poison the valid-check recovery watermark`; `P2 outages: 20 dead, missing and frozen-ready pushes retain original money through restart and recover` |
+| ADR §3 / class b / deferred single-desk and coupled-PnL notes: isolated unavailable desk, observed siblings, no incomplete family sums or carried equity profit | `P2 isolation: single unavailable desk and coupled equity/total P&L keep sibling receipts`; `P2 history sums: every field rejects missing/null desks or fields and unequal family sums` |
+| ADR §3 / class h: accepted full Fleet Config KEEP policy before first ingress, mandatory SXR8/TSLA floor and untrusted-rollup withholding | `P2 KEEP: accepted Fleet Config policy withholds affected money and measured history`; `P2 Fleet receipt: stored policy constrains first ingress; unchanged reads and restart preserve its age`; `paper is fixed, KEEP is excluded from results and cannot be removed from fleet policy` |
+| Amy P2 scope: executor-vs-broker disagreement gets its own closed reason, never confirms gateway readiness | `P2 executor: broker disagreement has its own reason and cannot confirm a gateway` |
+| ADR §4 / class j / deferred extra time cases: NY/Vienna day, ISO week, RTH, all 24 literal P1 vectors, pinned holidays/early closes, 2027 spring, Vienna midnight, repeated NY hour and extended hours | `time vector: <all 24 fixture ids in fixtures/time-vectors.json>`; `time: pinned holidays and early closes are closed at the exact boundary`; `time: 2027 spring mismatch spans US 14 March through EU 28 March`; `time: Vienna midnight and ISO week are independent of NY accounting day`; `time: repeated NY 01:xx instants remain distinct; extended hours after 18 NY stay outside RTH` |
+| ADR §6 / class f: observed-only history, generation dedupe, per-point complete exact three-desk sums, null gaps and independent composite basis identity | `P2 history: dedupe generation, null gaps and composite per-desk bases survive restart`; `P2 history sums: every field rejects missing/null desks or fields and unequal family sums`; `P2 gap storage: empty, leading/internal/trailing and outage-only windows remain null observations`; `P2 daily closes: compaction retains every Vienna day final observed equity before null gaps` |
+| ADR §6 / class i / deferred byte sizing: UTF-8 bytes including envelope, 80% warning compaction, extrema/endpoints/gap/basis edges, exact 8MiB and +1 failure; explicit size/write alarms | `P2 compaction: UTF-8 envelope warning compacts before 6.4MiB and preserves extrema and gap/basis edges`; `P2 hard cap: exact 8MiB complete envelope writes; +1 byte fails explicitly before persistence`; `P2 storage: data and history write failures are explicit and preserve independent last-good`; `P2 history alarm: successful near-cap compaction is visible through history and anonymous health` |
+| ADR §7 / class g / deferred gateway and not-reported health notes: anonymous exact nested allowlist, actual version/scheme, contract-set version, server clock, four receipt-aged feeds and gateway check confirmation/age/reason | `P2 health: anonymous exact allowlist, never-received null ages and failed-refresh distinctions` |
+| ADR §7 / deferred g-expired-sso: auth failures and original independent last-good ages for data, history, results and Fleet Config, anonymous health usable | `P2 auth: all four protected reads retain independent last-good ages on SSO failures`; `P2 Fleet receipt: stored policy constrains first ingress; unchanged reads and restart preserve its age` |
+| ADR §3/§9 / JOED-20 dependency: Results v2 not-wired error envelope only; no synthetic executor facts or results producer/write path | `P2 results: only v2 not-wired state; no executor producer fields or write route` |
+| ADR §8 / deferred compatibility note: exact v2 allowlist, shared contract/module/schema allowlist and Docker/Nix artifact packaging; retain legacy release identity until P6 | `P2 packaging: offline allowlist serves shared contracts and rejects arbitrary source paths`; `P2 acceptance: 400 malformed, 413 streamed bound, 422 contract failure precede snapshot writes`; `P2 health: anonymous exact allowlist, never-received null ages and failed-refresh distinctions` |
+| ADR §9: bounded 256-position/10000-point trace and provisional local CPU regression guard | `P2 performance: 256 positions and 10000 history points fit the local 5s CPU budget` |
+| Preserve P5 write ownership: paper-only shared-schema Fleet Config with revision conflict, immutable references and bounded attributed audit | `Fleet Config propagates one atomic paper revision to the shared adapter` |
+
+Re-deferred ownership remains explicit: Amy/OPS supplies safely anonymized real
+recordings, independent total-PnL evidence, producer CI and broker/executor
+reconciliation. The isolated/coupled null regressions here are synthetic.
+P3/Tick owns approved yellow off-hours/class-b grace, dotted display continuity,
+range clipping, reference-width rendering and browser smoke. P4/JOED-20 owns
+realised results/FX and trade bucketing; the clock primitives alone do not prove
+consumer math. P6 owns CalVer3/presentation adoption, immutable artifact pins,
+proxy header stripping and anonymous health exception, compatible backups and
+v2 migration, deployment/rollback/live smoke. A 5000ms local CPU guard is
+provisional; the coordinator/P3 still owns an agreed reference-device CI budget.
+
+The native macOS test runner uses only an empty private mode-0700 temporary root
+with injected paths/clock/fixture credentials and loopback listeners, then
+trashes its own root. Linux CI retains its empty tmpfs gate and Node22 runner.
+No browser, production host, push, deployment, review gate, delegation or other
+model CLI is part of this worker. Coordinator review happens after worker exit.
+
+P2 builder validation: native Node 24.20.0, `npm test` **89 contract/fixture/time
++ 27 HTTP/storage tests passed**, `npm run check` passed. The final 256-position
+acceptance plus 10000-point compaction/validation trace was 125.4ms against the
+provisional 5000ms local CPU guard. Direct unguarded HTTP test invocation was
+refused before any storage/listener creation. Docker/Colima were stopped, so no
+local Node22 container or artifact build is claimed; CI keeps those checks.
+The worker did not run a review gate, other model CLI, push or deployment.

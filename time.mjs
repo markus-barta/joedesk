@@ -1,0 +1,45 @@
+import calendar from './market-calendar.json' with { type: 'json' };
+import { validDate, validInstant } from './contracts/schema-validator.mjs';
+
+export const NY = 'America/New_York';
+export const VIENNA = 'Europe/Vienna';
+Object.freeze(calendar.years); Object.freeze(calendar.holidays); Object.freeze(calendar.earlyCloses);
+export const MARKET_CALENDAR = Object.freeze(calendar);
+const formatters = new Map([NY, VIENNA].map(timeZone => [timeZone,
+  new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit',
+    day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })]));
+
+export function wall(instant, zone) {
+  if (!validInstant(instant) || !formatters.has(zone)) throw new TypeError('Explicit supported zone and UTC instant required');
+  const p = Object.fromEntries(formatters.get(zone).formatToParts(new Date(instant)).map(p => [p.type, p.value]));
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
+}
+export const nyDay = instant => wall(instant, NY).slice(0, 10);
+export const viennaDay = instant => wall(instant, VIENNA).slice(0, 10);
+
+export function viennaISOWeek(instant) {
+  const d = new Date(`${viennaDay(instant)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const year = d.getUTCFullYear();
+  const week = Math.ceil(((d - Date.UTC(year, 0, 1)) / 86400000 + 1) / 7);
+  return `${year}-W${String(week).padStart(2, '0')}`;
+}
+
+// Calendar labels are iterated as dates, never as 24h elapsed in a DST zone.
+export function* calendarDays(from, through) {
+  if (!validDate(from) || !validDate(through) || through < from ||
+      Date.parse(through) - Date.parse(from) > 3660 * 86400000) throw new TypeError('Bounded calendar range required');
+  for (let ms = Date.parse(from); ms <= Date.parse(through); ms += 86400000) yield new Date(ms).toISOString().slice(0, 10);
+}
+
+export function marketSession(instant) {
+  const local = wall(instant, NY);
+  const day = local.slice(0, 10);
+  if (!calendar.years.includes(Number(day.slice(0, 4)))) return { day, rth: false, reason: 'calendar_unavailable', close: null };
+  const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
+  const closed = weekday === 0 || weekday === 6 || calendar.holidays.includes(day);
+  const close = calendar.earlyCloses[day] ?? '16:00:00';
+  return { day, rth: !closed && local.slice(11) >= '09:30:00' && local.slice(11) < close,
+    reason: closed ? 'market_closed' : null, close: closed ? null : close };
+}
+export const isRTH = instant => marketSession(instant).rth;

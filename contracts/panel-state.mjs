@@ -61,9 +61,17 @@ export function panelStates(feeds, now, previousValues = {}, keepSymbols = feeds
   // Generation-time gateway failures apply at every feed age; stale/frozen
   // feeds otherwise keep their values and freshness reasons.
   const freshFeed = receiptAge !== null && receiptAge < 60 && generationElapsedMs < GATEWAY_CHECK_MAX_AGE_MS;
+  const progress = feeds.data?.gatewayProgress;
+  const checkElapsedMs = progress ? Math.max(0, Date.parse(now) - Date.parse(progress.advancedAt)) : null;
+  const trackedAgeMs = progress ? progress.initialAgeMs + checkElapsedMs : null;
+  const invalidProgress = progress && (!validInstant(progress.advancedAt) || !validInstant(progress.checkedAt) ||
+    !Number.isFinite(progress.initialAgeMs) || progress.initialAgeMs < 0);
+  const regressed = data && (Date.parse(now) < Date.parse(data.receivedAt) ||
+    (progress && Date.parse(now) < Date.parse(progress.advancedAt)));
   const sessionReason = data && !feeds.data.reason ? (
-    invalidTiming ? 'contract_invalid' : gatewayReason(data.safety.gateway, data.generatedAt) ||
-      (freshFeed ? gatewayReason(data.safety.gateway, data.generatedAt, generationElapsedMs) : null)
+    invalidTiming || invalidProgress ? 'contract_invalid' : regressed ? 'clock_regressed' : gatewayReason(data.safety.gateway, data.generatedAt) ||
+      (freshFeed ? gatewayReason(data.safety.gateway, data.generatedAt, generationElapsedMs) ||
+        (trackedAgeMs !== null && trackedAgeMs >= GATEWAY_CHECK_MAX_AGE_MS ? 'gateway_unconfirmed' : null) : null)
   ) : null;
   const select = (name, feed, value, reason) => {
     output[name] = panelState(feed, value, reason, now, previousValues[name]?.value, previousValues[name]?.valueReceivedAt);
@@ -84,10 +92,13 @@ export function panelStates(feeds, now, previousValues = {}, keepSymbols = feeds
   select('gateway', feeds.data, data?.safety.gateway, sessionReason || data?.safety.gateway?.reason);
   if (data?.safety.gateway) {
     const checkAgeMs = gatewayCheckAgeMs(data.safety.gateway, data.generatedAt, generationElapsedMs);
-    output.gateway.ageSeconds = checkAgeMs === null ? null : checkAgeMs / 1000;
+    output.gateway.ageSeconds = invalidProgress || checkAgeMs === null ? null : Math.max(checkAgeMs, trackedAgeMs ?? 0) / 1000;
   }
   select('halt', feeds.data, data?.safety.halt, data?.safety.halt ? data.safety.haltReason : null);
-  select('executor', feeds.data, data?.safety.executor, data?.safety.executor?.reason);
+  const executor = data?.safety.executor;
+  const disagreement = typeof executor?.gatewayReachable === 'boolean' && typeof data?.safety.gateway?.apiSessionReady === 'boolean' &&
+    executor.gatewayReachable !== data.safety.gateway.apiSessionReady;
+  select('executor', feeds.data, executor, executor?.reason || (disagreement ? 'executor_broker_disagreement' : null));
   for (const name of ['history', 'results', 'fleet-config']) {
     select(name, feeds[name], feeds[name]?.value, feeds[name]?.value?.reason);
   }

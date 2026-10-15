@@ -9,7 +9,9 @@
     "versionScheme",
     "schemaVersion",
     "snapshotAgeSeconds",
-    "feeds"
+    "feeds",
+    "serverNow",
+    "gateway"
   ],
   "properties": {
     "schema": {
@@ -20,11 +22,14 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 18,
-      "pattern": "^[1-9][0-9]{11}\\.0\\.0$",
+      "pattern": "^(?:[1-9][0-9]{11}\\.0\\.0|[0-9]{2}\\.[0-9]{2}\\.[0-9]{2}(?:\\.[0-9]{2}\\.[0-9]{2})?)$",
       "x-owner": "server"
     },
     "versionScheme": {
-      "const": "inspr-calver-3",
+      "enum": [
+        "calendar",
+        "inspr-calver-3"
+      ],
       "x-owner": "server"
     },
     "schemaVersion": {
@@ -231,6 +236,46 @@
         }
       },
       "x-owner": "server"
+    },
+    "serverNow": {
+      "$ref": "urn:joedesk:common:v2#/$defs/instant",
+      "x-owner": "server"
+    },
+    "gateway": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "confirmed",
+        "checkAgeSeconds",
+        "reason"
+      ],
+      "x-owner": "server",
+      "properties": {
+        "confirmed": {
+          "type": "boolean"
+        },
+        "checkAgeSeconds": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "urn:joedesk:reason:v2"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     }
   },
   "x-owner": "server"

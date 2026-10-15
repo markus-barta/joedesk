@@ -12,30 +12,42 @@ import path from "node:path";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
-import { validateHouseholdSnapshot } from "./validate.mjs";
-import { validateFleetConfig, withNextFleetRevision } from "./fleet-config.mjs";
+import release from "./release.json" with { type: "json" };
+import { CONTRACTS, validateContract } from "./contracts/index.mjs";
+import { createReadModel } from "./server/read-model.mjs";
+import { healthProjection } from "./server/health.mjs";
+import { withNextFleetRevision } from "./fleet-config.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public", "joe");
+
+export function createJoeServer({ dataDir = "/var/lib/joe-board", clock = () => new Date().toISOString(), inboxToken = null, write } = {}) {
 // Fixed container paths (not taken from request or free-form env paths).
-const DATA_DIR = "/var/lib/joe-board";
-const DATA_FILE = path.join(DATA_DIR, "data.json");
-const HISTORY_FILE = path.join(DATA_DIR, "history.json");
+const DATA_DIR = dataDir;
+const model = createReadModel({ dataDir, clock, ...(write ? { write } : {}) });
 const FLEET_CONFIG_FILE = path.join(DATA_DIR, "fleet-config.json");
 const FLEET_ACTION_LOG_FILE = path.join(DATA_DIR, "fleet-config-actions.json");
 const FLEET_CONFIG_EXAMPLE = path.join(PUBLIC, "fleet-config.example.json");
 const FLEET_ACTION_LOG_SCHEMA = "inspr.joe.fleet-config.actions.v1";
 const FLEET_ACTION_LOG_MAX = 200;
 const FLEET_ACTOR = /^[A-Za-z0-9][A-Za-z0-9@._+-]{0,159}$/;
-const HISTORY_SCHEMA = "inspr.joe.household.history.v1";
-const HISTORY_MAX_POINTS = 10000;
-const HISTORY_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
-const HISTORY_BASIS_MAX = 96;
-const HISTORY_BASIS = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 const TOKEN_FILE = "/run/secrets/joe-board-push-token";
-const BIND_HOST = "0.0.0.0";
-const BIND_PORT = 8080;
 const MAX_BODY = 262144;
+
+const PROTECTED_READS = new Set(["/joe/data.json", "/joe/history.json", "/joe/results.json", "/joe/state.json", "/joe/fleet-config.json", "/joe/fleet-config/actions.json"]);
+// Offline native imports share this exact package with server acceptance.
+const CONTRACT_FILES = Object.freeze(Object.fromEntries([
+  "index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "accept.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
+  "manifest.json", "common.schema.json", "reason.schema.json", "data.schema.json", "history.schema.json", "results.schema.json", "fleet-config.schema.json", "healthz.schema.json",
+].map(name => [`/joe/contracts/${name}`, name])));
+const SHARED_FILES = Object.freeze({ "/joe/time.mjs": "time.mjs", "/joe/market-calendar.json": "market-calendar.json" });
+function feedHeaders(kind) {
+  const feed = model.feeds()[kind];
+  return { "X-Joe-Server-Now": clock(),
+    ...(feed.reason ? { "X-Joe-Feed-Reason": feed.reason } : {}),
+    ...(feed.generatedAdvancedAt ? { "X-Joe-Generated-Advanced-At": feed.generatedAdvancedAt } : {}),
+    ...(feed.receivedAt ? { "X-Joe-Received-At": feed.receivedAt } : {}) };
+}
 
 const STATIC_FILES = Object.freeze({
   "/joe/": "index.html",
@@ -58,6 +70,7 @@ const MIME = {
   ".html": "text/html; charset=utf-8",
   ".json": "application/json; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
@@ -102,9 +115,9 @@ function atomicWriteJson(file, obj, mode = 0o644) {
 
 function parseFleetConfig(raw, source) {
   const parsed = JSON.parse(raw);
-  const result = validateFleetConfig(parsed);
+  const result = validateContract("fleet-config", parsed);
   if (!result.ok) {
-    throw new Error(`${source} failed Fleet Config validation: ${result.errors.slice(0, 5).join("; ")}`);
+    throw new Error("Fleet Config contract_invalid");
   }
   return parsed;
 }
@@ -247,141 +260,6 @@ function requestIsSameOrigin(req) {
 }
 
 
-function emptyHistory() {
-  return { schema: HISTORY_SCHEMA, points: [] };
-}
-
-function readHistory() {
-  try {
-    const raw = fs.readFileSync(HISTORY_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!parsed || parsed.schema !== HISTORY_SCHEMA || !Array.isArray(parsed.points)) {
-      return emptyHistory();
-    }
-    return { schema: HISTORY_SCHEMA, points: parsed.points };
-  } catch (err) {
-    if (err && err.code === "ENOENT") return emptyHistory();
-    console.error("history read failed", err && err.code ? err.code : err);
-    return emptyHistory();
-  }
-}
-
-function moneyBag(bag) {
-  if (!bag || typeof bag !== "object") {
-    return { equity: null, dayPnl: null, totalPnl: null };
-  }
-  const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
-  return {
-    equity: num(bag.equity),
-    dayPnl: num(bag.dayPnl),
-    totalPnl: num(bag.totalPnl),
-  };
-}
-
-function accountingBasis(accounting) {
-  if (!accounting || typeof accounting !== "object") return null;
-  if (
-    typeof accounting.periodStart !== "string" ||
-    accounting.method !== "execution-fifo-net-current-fx" ||
-    typeof accounting.detail !== "string"
-  ) {
-    return null;
-  }
-  return {
-    periodStart: accounting.periodStart,
-    method: accounting.method,
-    detail: accounting.detail,
-  };
-}
-
-function historyBasisId(value) {
-  return typeof value === "string" && value.length <= HISTORY_BASIS_MAX && HISTORY_BASIS.test(value)
-    ? value
-    : null;
-}
-
-function historyPointFromSnapshot(snapshot) {
-  const desks = {};
-  const accounting = {};
-  const historyBasis = {};
-  let hasCarriedMoney = false;
-  const list = Array.isArray(snapshot.desks) ? snapshot.desks : [];
-  for (const desk of list) {
-    if (!desk || typeof desk.id !== "string" || !desk.id) continue;
-    const money = moneyBag(desk.money);
-    if (desk.moneyEvidence?.status === "carried") {
-      money.equity = null;
-      money.totalPnl = null;
-      hasCarriedMoney = true;
-    }
-    desks[desk.id] = money;
-    const basis = accountingBasis(desk.accounting);
-    if (basis) accounting[desk.id] = basis;
-    const basisId = historyBasisId(desk.historyBasis);
-    if (basisId) historyBasis[desk.id] = basisId;
-  }
-  // Also accept object-shaped desks (defensive; producers may evolve).
-  if (!list.length && snapshot.desks && typeof snapshot.desks === "object") {
-    for (const [id, desk] of Object.entries(snapshot.desks)) {
-      const money = moneyBag(desk && desk.money ? desk.money : desk);
-      if (desk?.moneyEvidence?.status === "carried") {
-        money.equity = null;
-        money.totalPnl = null;
-        hasCarriedMoney = true;
-      }
-      desks[id] = money;
-      const basis = accountingBasis(desk && desk.accounting);
-      if (basis) accounting[id] = basis;
-      const basisId = historyBasisId(desk && desk.historyBasis);
-      if (basisId) historyBasis[id] = basisId;
-    }
-  }
-  const totals = moneyBag(snapshot.totals);
-  if (hasCarriedMoney) {
-    totals.equity = null;
-    totals.totalPnl = null;
-  }
-  const point = {
-    t: snapshot.generatedAt,
-    desks,
-    totals,
-  };
-  if (Object.keys(accounting).length) point.accounting = accounting;
-  if (Object.keys(historyBasis).length) point.historyBasis = historyBasis;
-  return point;
-}
-
-function pruneHistoryPoints(points, nowMs = Date.now()) {
-  const cutoff = nowMs - HISTORY_MAX_AGE_MS;
-  let next = points.filter((p) => {
-    if (!p || typeof p.t !== "string") return false;
-    const ms = Date.parse(p.t);
-    return Number.isFinite(ms) && ms >= cutoff;
-  });
-  if (next.length > HISTORY_MAX_POINTS) {
-    next = next.slice(next.length - HISTORY_MAX_POINTS);
-  }
-  return next;
-}
-
-function appendHistoryPoint(snapshot) {
-  const point = historyPointFromSnapshot(snapshot);
-  if (!point.t || typeof point.t !== "string") {
-    throw new Error("history point missing t");
-  }
-  const hist = readHistory();
-  const last = hist.points.length ? hist.points[hist.points.length - 1] : null;
-  // Dedupe identical timestamp (pusher retries / same generatedAt).
-  if (last && last.t === point.t) {
-    hist.points[hist.points.length - 1] = point;
-  } else {
-    hist.points.push(point);
-  }
-  hist.points = pruneHistoryPoints(hist.points);
-  atomicWriteJson(HISTORY_FILE, hist);
-  return hist.points.length;
-}
-
 function send(res, status, body, headers = {}) {
   const payload = typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body);
   res.writeHead(status, {
@@ -400,18 +278,18 @@ function sendJson(res, status, obj, headers = {}) {
 function readBody(req, limit) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    let size = 0;
-    req.on("data", (chunk) => {
+    let size = 0, oversized = false;
+    req.on("data", chunk => {
       size += chunk.length;
       if (size > limit) {
-        reject(Object.assign(new Error("body too large"), { code: "TOO_LARGE" }));
-        req.destroy();
+        if (!oversized) { oversized = true; chunks.length = 0; reject(Object.assign(new Error("body too large"), { code: "TOO_LARGE" })); }
         return;
       }
-      chunks.push(chunk);
+      if (!oversized) chunks.push(chunk);
     });
-    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("end", () => { if (!oversized) resolve(Buffer.concat(chunks)); });
     req.on("error", reject);
+    req.on("aborted", () => reject(new Error("body aborted")));
   });
 }
 
@@ -426,64 +304,25 @@ function bearerToken(req) {
 }
 
 async function handleInbox(req, res) {
-  if (req.method !== "POST") {
-    sendJson(res, 405, { ok: false, error: "method not allowed" });
-    return;
-  }
-  const expected = readToken();
-  if (!expected) {
-    sendJson(res, 503, { ok: false, error: "inbox token not configured" });
-    return;
-  }
-  const got = bearerToken(req);
-  if (!got || !safeEqualStr(got, expected)) {
-    sendJson(res, 401, { ok: false, error: "unauthorized" });
-    return;
-  }
+  if (req.method !== "POST") return sendJson(res, 405, { ok: false, reason: "route_not_found" });
+  const expected = inboxToken ?? readToken();
+  if (!expected) return sendJson(res, 503, { ok: false, reason: "auth_required" });
+  if (!safeEqualStr(bearerToken(req), expected)) return sendJson(res, 401, { ok: false, reason: "auth_required" });
   let raw;
-  try {
-    raw = await readBody(req, MAX_BODY);
-  } catch (err) {
-    if (err.code === "TOO_LARGE") {
-      sendJson(res, 413, { ok: false, error: "body too large" });
-      return;
-    }
-    sendJson(res, 400, { ok: false, error: "bad body" });
-    return;
+  try { raw = await readBody(req, CONTRACTS.limits.data); }
+  catch (error) {
+    const status = error.code === "TOO_LARGE" ? 413 : 400;
+    const rejected = model.reject("contract_invalid", status);
+    return sendJson(res, rejected.status, rejected);
   }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw.toString("utf8"));
-  } catch {
-    sendJson(res, 400, { ok: false, error: "invalid json" });
-    return;
+  let candidate;
+  try { candidate = JSON.parse(raw.toString("utf8")); }
+  catch {
+    const rejected = model.reject("contract_invalid", 400);
+    return sendJson(res, rejected.status, rejected);
   }
-  const { ok, errors } = validateHouseholdSnapshot(parsed);
-  if (!ok) {
-    sendJson(res, 422, { ok: false, error: "schema validation failed", errors: errors.slice(0, 20) });
-    return;
-  }
-  try {
-    atomicWriteJson(DATA_FILE, parsed);
-  } catch (err) {
-    console.error("atomic write failed", err);
-    sendJson(res, 500, { ok: false, error: "store failed" });
-    return;
-  }
-  let historyPoints = null;
-  try {
-    historyPoints = appendHistoryPoint(parsed);
-  } catch (err) {
-    // Snapshot already stored — do not fail the push if history append breaks.
-    console.error("history append failed", err);
-  }
-  sendJson(res, 200, {
-    ok: true,
-    storedAt: new Date().toISOString(),
-    generatedAt: parsed.generatedAt,
-    equity: parsed.totals?.equity ?? null,
-    historyPoints,
-  });
+  const result = model.accept(candidate);
+  sendJson(res, result.status, result);
 }
 
 function sendFleetConfig(req, res) {
@@ -491,13 +330,16 @@ function sendFleetConfig(req, res) {
   const source = {};
   try {
     config = readFleetConfig(source);
+    const checked = model.observeFleet(config);
+    if (!checked.ok) throw new Error("contract_invalid");
   } catch (err) {
-    console.error("fleet config read failed", err);
-    sendJson(res, 503, { ok: false, error: "fleet config unavailable" });
+    model.fleetFailure();
+    sendJson(res, 503, { ok: false, error: "fleet config unavailable", reason: "refresh_failed" });
     return;
   }
   const etag = `"${config.rev}"`;
   const headers = {
+    ...feedHeaders("fleet-config"),
     ETag: etag,
     "Cache-Control": "private, no-cache",
     "X-Joe-Fleet-Source-Path": source.path,
@@ -584,7 +426,7 @@ async function handleFleetPropagate(req, res) {
     return;
   }
 
-  const candidateResult = validateFleetConfig(body.config);
+  const candidateResult = validateContract("fleet-config", body.config);
   if (!candidateResult.ok) {
     sendFleetFailure(res, 422, "schema validation failed", {
       actor,
@@ -621,7 +463,7 @@ async function handleFleetPropagate(req, res) {
   let actionLog;
   try {
     next = withNextFleetRevision(body.config, current.rev);
-    const nextResult = validateFleetConfig(next);
+    const nextResult = validateContract("fleet-config", next);
     if (!nextResult.ok) throw new Error(nextResult.errors.slice(0, 5).join("; "));
     actionLog = readFleetActionLog();
     pendingAction = fleetAction({
@@ -691,6 +533,7 @@ async function handleFleetPropagate(req, res) {
     return;
   }
 
+  model.observeFleet(next);
   sendJson(res, 200, {
     ok: true,
     rev: next.rev,
@@ -723,32 +566,30 @@ function handleStatic(req, res, urlPath) {
   }
 
   if (urlPath === "/joe/data.json") {
-    let body;
-    try {
-      body = fs.readFileSync(DATA_FILE);
-    } catch (err) {
-      if (err && err.code === "ENOENT") {
-        sendJson(res, 404, { ok: false, error: "NO DATA" });
-        return;
-      }
-      throw err;
-    }
-    send(res, 200, body, { "Content-Type": "application/json; charset=utf-8" });
+    const value = model.view().data;
+    sendJson(res, value ? 200 : 404, value ?? { ok: false, reason: model.feeds().data.reason ?? "refresh_failed" }, feedHeaders("data"));
     return;
   }
-
   if (urlPath === "/joe/history.json") {
-    let body;
-    try {
-      body = fs.readFileSync(HISTORY_FILE);
-    } catch (err) {
-      if (err && err.code === "ENOENT") {
-        sendJson(res, 404, emptyHistory());
-        return;
-      }
-      throw err;
-    }
-    send(res, 200, body, { "Content-Type": "application/json; charset=utf-8" });
+    const feed = model.feeds().history;
+    sendJson(res, feed.value ? 200 : 404, feed.value ?? { ok: false, schema: CONTRACTS.contracts.history, reason: feed.reason ?? "refresh_failed" }, feedHeaders("history"));
+    return;
+  }
+  if (urlPath === "/joe/results.json") {
+    sendJson(res, 503, { ok: false, schema: CONTRACTS.contracts.results, reason: "results_not_wired" });
+    return;
+  }
+  if (urlPath === "/joe/state.json") { sendJson(res, 200, model.view()); return; }
+  const contractFile = CONTRACT_FILES[urlPath];
+  if (contractFile) {
+    const file = path.join(__dirname, "contracts", contractFile);
+    send(res, 200, fs.readFileSync(file), { "Content-Type": MIME[path.extname(file)] });
+    return;
+  }
+  const sharedFile = SHARED_FILES[urlPath];
+  if (sharedFile) {
+    const file = path.join(__dirname, sharedFile);
+    send(res, 200, fs.readFileSync(file), { "Content-Type": MIME[path.extname(file)] });
     return;
   }
 
@@ -763,6 +604,14 @@ function handleStatic(req, res, urlPath) {
   send(res, 200, body, { "Content-Type": MIME[ext] || "application/octet-stream" });
 }
 
+// An existing accepted policy must constrain the very first ingress after a
+// restart, even before any browser requests Fleet Config.
+if (fs.existsSync(FLEET_CONFIG_FILE)) {
+  try {
+    if (!model.observeFleet(readFleetConfig()).ok) model.fleetFailure();
+  } catch { model.fleetFailure(); }
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const host = req.headers.host || "localhost";
@@ -775,14 +624,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (urlPath === "/healthz" || urlPath === "/readyz") {
-      let hasData = false;
-      try {
-        fs.accessSync(DATA_FILE, fs.constants.R_OK);
-        hasData = true;
-      } catch {
-        hasData = false;
-      }
-      sendJson(res, 200, { ok: true, service: "joe-board", hasData });
+      sendJson(res, 200, { ok: true, service: "joe-board", hasData: model.hasData() });
+      return;
+    }
+
+    if (urlPath === "/joe/healthz") {
+      if (!["GET", "HEAD"].includes(req.method)) return sendJson(res, 405, { ok: false, reason: "route_not_found" });
+      sendJson(res, 200, healthProjection(model, release, clock()));
+      return;
+    }
+
+    if (PROTECTED_READS.has(urlPath) && !fleetActor(req)) {
+      sendJson(res, 401, { ok: false, reason: "auth_required" });
       return;
     }
 
@@ -807,18 +660,16 @@ const server = http.createServer(async (req, res) => {
 
     sendJson(res, 404, { ok: false, error: "not found" });
   } catch (err) {
-    console.error("request error", err);
-    sendJson(res, 500, { ok: false, error: "internal" });
+    console.error("request failed");
+    sendJson(res, 500, { ok: false, reason: "refresh_failed" });
   }
 });
 
-ensureDataDir();
-try {
-  readFleetConfig();
-} catch (err) {
-  // Keep the household board available; Fleet Config routes fail closed with 503.
-  console.error("fleet config unavailable at startup", err);
+server.readModel = model;
+return server;
 }
-server.listen(BIND_PORT, BIND_HOST, () => {
-  console.log(`joe-board listening on ${BIND_HOST}:${BIND_PORT} data=${DATA_DIR}`);
-});
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const server = createJoeServer();
+  server.listen(8080, "0.0.0.0", () => console.log("joe-board listening"));
+}
