@@ -8,10 +8,12 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node scripts/check-package.mjs && node scripts/check-joe-layout.mjs && node scripts/check-fleet-config.mjs && node scripts/check-joe-trust.mjs && node scripts/check-joe-phone.mjs && node scripts/check-joe-history.mjs && node scripts/check-joe-learning.mjs && node scripts/check-position-contract.mjs && node scripts/check-position-display.mjs",
-    "test": "npm run test:contracts && node scripts/run-server-contract.mjs",
+    "check": "node scripts/check-package.mjs && node scripts/check-joe-ui.mjs && node scripts/check-fleet-config.mjs && node scripts/check-position-contract.mjs",
+    "test": "npm run test:contracts && npm run test:ui && node scripts/run-server-contract.mjs",
     "test:contracts": "node --test test/contracts.mjs test/failure-fixtures.mjs test/time-vectors.mjs",
+    "test:ui": "node --test test/ui-modules.mjs",
     "test:contracts:browser": "node scripts/smoke-contracts-browser.mjs",
+    "test:browser": "node scripts/browser-p3.mjs",
     "start": "node server.mjs"
   }
 }

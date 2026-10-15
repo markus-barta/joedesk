@@ -652,6 +652,33 @@ test('P2 packaging: offline allowlist serves shared contracts and rejects arbitr
   assert.deepEqual((await s.request('/healthz')).body, { ok: true, service: 'joe-board', hasData: false });
 });
 
+test('P3 UI: every shipped module is served, legacy layout assets are not, and the state poll carries no history points', async t => {
+  const s = await setup(t);
+  const shipped = readdirSync(new URL('../public/joe/', import.meta.url)).filter(name => /\.(js|css|html)$/.test(name));
+  for (const name of shipped) {
+    const response = await fetch(s.base + '/joe/' + name + '?v=26.09.21.12.00');
+    assert.equal(response.status, 200, name);
+    assert.match(response.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : name.endsWith('.html') ? /text\/html/ : /text\/javascript/);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+  }
+  for (const route of ['/joe/joe.js', '/joe/joe.css', '/joe/vendor/gridstack-13.2.0-all.js', '/joe/vendor/chart-4.4.8.umd.js']) {
+    assert.equal((await s.request(route)).status, 404, route);
+  }
+  assert.equal((await s.push(snapshot(101, 0))).status, 200);
+  s.time.ms = 30000;
+  assert.equal((await s.push(snapshot(102, 30000))).status, 200);
+  const state = await s.request('/joe/state.json');
+  assert.equal(state.status, 200);
+  assert.equal(state.body.feeds.history.value, undefined);
+  assert.equal(state.body.feeds.history.pointCount, 2);
+  assert.equal(state.body.feeds.history.receivedAt, at(30000));
+  assert.equal(state.body.panels.history.value, undefined);
+  assert.equal(state.body.panels.history.state, 'fresh');
+  assert.equal(state.body.feeds.data.value.seq, 102);
+  assert.equal((await s.request('/joe/history.json')).body.points.length, 2);
+  assert.equal((await fetch(s.base + '/joe/state.json')).status, 401);
+});
+
 function historySeries(count = 10000) {
   const base = samples.history.points[0];
   return { schema: CONTRACTS.contracts.history, seq: 1, generatedAt: at(0), receivedAt: at(0), sizeBytes: 0,

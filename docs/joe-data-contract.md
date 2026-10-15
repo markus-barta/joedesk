@@ -348,18 +348,19 @@ When optional position fields are not present, the board shows an explicit dash
 or empty-table message; it never invents a zero position, a currency, an
 accounting label, or a healthy heartbeat.
 
-The browser endpoint is isolated behind `window.JOE_DATA_URL` (or the
-`joe-data-endpoint` meta value), and validated snapshots can be pushed with
-`window.JoeBoard.ingest(snapshot)`. That adapter boundary is ready for a future
-inbox-backed reader without coupling this static board to an inbox transport.
+The rebuilt board (JOED-23) reads only the board server: `/joe/state.json`
+every 15 s, `/joe/history.json` every 30 s (parsed and validated in a worker)
+and `/joe/fleet-config.json`, each through the shared `acceptRead` boundary and
+ranked by the shared `panelStates` selector at the server's anchored clock.
+There is no browser-side ingest and no `window.JoeBoard` helper surface; the
+v1 helpers it exposed do not apply to the v2 contracts.
 
 ## Local layout
 
-Grid geometry is browser-local and contains no trading data. GridStack saves it
-under `localStorage` key `joe-board-layout-v1`; **Reset layout** removes that key
-and restores the checked-in arrangement. The dashboard vendors GridStack,
-Chart.js, Hammer.js, and the Chart.js zoom plug-in, so hsb1 does not depend on a
-public CDN.
+The rebuilt board (JOED-23) has a fixed layout: no GridStack, no layout menu
+and no layout storage. The old `joe-board-layout-v1` key is left untouched and
+unread. Charts are plain SVG drawn by the board's own modules, so no vendored
+library or public CDN is involved.
 
 Use `null`, not zero, when a money value is unknown. Set `stuck` and add a short
 entry to `issues` when a desk cannot continue. The combined board signal keeps
@@ -402,7 +403,7 @@ After this repository PR lands:
 4. deploy hsb1 through the normal HIL-gated host path if the change requires it;
 5. verify `http://hsb1.lan/joe/` (legacy) and/or Tailscale IP render three desks if still mounted;
 6. verify unauthenticated `https://cs0.barta.cm/joe/` redirects to login via oauth2-proxy;
-7. verify authenticated `https://cs0.barta.cm/joe/` renders the GridStack household desk from inbox data;
+7. verify authenticated `https://cs0.barta.cm/joe/` renders the household Desk from inbox data;
 8. verify `POST /joe/inbox` without token is rejected and with token updates within ≤35s.
 
 This repository change does not perform the nixcfg bump or live deployment.
