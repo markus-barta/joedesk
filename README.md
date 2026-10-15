@@ -110,8 +110,9 @@ The board UI gate (`scripts/browser-p3.mjs`, JOED-23) runs the real board
 server with an injected clock, the P1 failure fixtures and one headless
 browser at 390, 1024 and 1440 px in light and dark. It checks the approved
 design's acceptance criteria (mode label, KEEP inertness, health light and
-copy, panel states, honest chart scales, contrast, 44 px targets, clipping,
-layout shift, terms, privacy stub) and writes screenshots plus an
+copy, panel states, honest chart scales, contrast, 44 px targets, clipping
+and the two clamped state lines, layout shift in this machine's font and a
+wide one, terms, privacy stub) and writes screenshots plus an
 `index.md` to `~/.local/share/joedesk-qa/p3` (`JOED_QA_DIR` overrides it).
 It uses `BROWSER_PATH`, a Playwright headless shell or Google Chrome:
 

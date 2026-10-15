@@ -57,7 +57,8 @@
     clipping() {
       const failures = [];
       for (const el of document.querySelectorAll('body *')) {
-        if (el.closest('svg') || !visible(el)) continue;
+        // The two clamped state lines (data-clamp) are measured by clamps().
+        if (el.closest('svg') || !visible(el) || el.closest('[data-clamp]')) continue;
         const cs = getComputedStyle(el);
         if (cs.textOverflow === 'ellipsis' && el.textContent.trim()) failures.push({ el: el.className || el.tagName, why: 'ellipsis' });
         const clips = /(hidden|clip|auto|scroll)/.test(cs.overflowX) && !el.classList.contains('vh') && el.id !== 'tip';
@@ -73,6 +74,25 @@
         }
       }
       return failures;
+    },
+    // A clamped line shows only whole lines (none is cut through), ends in an
+    // ellipsis when it is longer, and its full text is given elsewhere: the
+    // title for one line, the explanation tip (data-say) for two.
+    clamps() {
+      return [...document.querySelectorAll('[data-clamp]')].filter(visible).map(el => {
+        const lines = Number(el.dataset.clamp), cs = getComputedStyle(el), lh = parseFloat(cs.lineHeight);
+        const box = el.getBoundingClientRect(), shown = box.height / lh;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const cut = [...range.getClientRects()].filter(r => r.width > 0 && r.top < box.bottom - 0.5 && r.bottom > box.bottom + 0.5).length;
+        const whole = Math.abs(shown - Math.round(shown)) < 0.02 && Math.round(shown) >= 1 && Math.round(shown) <= lines;
+        const ellipsis = lines === 1 ? cs.textOverflow === 'ellipsis' && cs.whiteSpace === 'nowrap' && cs.overflowX === 'hidden'
+          : cs.webkitLineClamp === String(lines) && cs.overflowY === 'hidden';
+        const full = el.textContent.trim();
+        const given = lines === 1 ? el.closest('[title]')?.title === full : Boolean(el.closest('[data-say]'));
+        const truncated = lines === 1 ? el.scrollWidth > el.clientWidth + 0.5 : el.scrollHeight > el.clientHeight + 0.5;
+        return { ok: !cut && whole && ellipsis && given, text: full.slice(0, 60), lines, shown: Number(shown.toFixed(3)), cut, ellipsis, given, truncated };
+      });
     },
     horizontal() {
       return { scroll: document.documentElement.scrollWidth, inner: innerWidth, client: document.documentElement.clientWidth,

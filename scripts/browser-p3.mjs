@@ -24,7 +24,7 @@ if (nodeModule.registerHooks) {
 export async function resolve(specifier, context, next) { return next(mapped(specifier, context.parentURL), context); }`)}`, import.meta.url);
 }
 const hm = await import('../public/joe/history-model.js');
-const { cellReason } = await import('../public/joe/health.js');
+const { cellReason, CELL_REASON, HEALTH_LINES } = await import('../public/joe/health.js');
 const fmt = await import('../public/joe/format.js');
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
@@ -78,7 +78,12 @@ async function auditScreen(page, viewport, theme, screen) {
   check('AC-32', `${tag}: no italics, one-sided borders, pills or uppercase eyebrows`, !gui.italics.length && !gui.borders.length && !gui.pills.length && !gui.uppercase.length, { italics: gui.italics, borders: gui.borders, pills: gui.pills.slice(0, 4), upper: gui.uppercase });
   check('AC-44', `${tag}: cards only for primary objects, at most two other boxes`, gui.cards.every(c => !c.startsWith('OTHER')) && gui.boxes.length <= 2, { cards: [...new Set(gui.cards)], boxes: gui.boxes });
   const clipping = await page.evaluate('__audit.clipping()');
-  check('AC-36', `${tag}: nothing clips or ellipsises`, !clipping.length, clipping.slice(0, 6));
+  check('AC-36', `${tag}: nothing clips or ellipsises (the two clamped state lines aside)`, !clipping.length, clipping.slice(0, 6));
+  // The health reason (one line) and Today's sentence (two lines) are the only
+  // clamps: whole lines, an ellipsis when longer, the full text given.
+  const clamps = await page.evaluate('__audit.clamps()');
+  if (screen.startsWith('desk')) check('clamp', `${tag}: the health reason and Today's sentence show whole lines, end in an ellipsis and give their full text`, clamps.length === 2 && clamps.every(c => c.ok), clamps);
+  else check('clamp', `${tag}: no clamp outside Desk`, !clamps.length, clamps);
   const text = await page.evaluate('__audit.text()');
   const plain = text.filter(t => !t.term).map(t => t.text).join(' ');
   const all = text.map(t => t.text).join(' ');
@@ -216,6 +221,15 @@ async function deskChecks(page, viewport, theme, expectedMini) {
   await settle(page);
   await everyTerm(page, viewport, tag);
 
+  // Today's sentence: a click or tap shows it whole in the explanation tip;
+  // Escape closes it and keeps focus on the sentence.
+  const said = await clickSay(page);
+  check('clamp', `${tag}: a click or tap on Today's sentence shows it whole in the tip`, sayWhole(said), said);
+  await key(page, 'Escape');
+  await settle(page);
+  check('clamp', `${tag}: Escape closes the sentence's tip and keeps focus`, await page.evaluate(`!document.getElementById('tip').classList.contains('on') && document.activeElement?.dataset.say === 'today' && document.activeElement.getAttribute('aria-expanded') === 'false'`));
+  await leaveSay(page);
+
   // Hero chart crosshair tip is opaque.
   if (!viewport.mobile) {
     const box = await page.evaluate(`(() => { const r = document.querySelector('#heroChart > svg').getBoundingClientRect(); return { x: r.left + r.width * 0.35, y: r.top + r.height / 2 }; })()`);
@@ -238,6 +252,26 @@ async function deskChecks(page, viewport, theme, expectedMini) {
   await page.evaluate(`localStorage.removeItem('joe-board-theme-v1'); delete document.documentElement.dataset.theme; window.__joedesk.setTheme('system')`);
   await settle(page);
 }
+
+// Today's sentence clicked (a tap on phones), and what the tip then shows.
+const SAY_TIP = `(() => { const tip = document.getElementById('tip'), say = document.querySelector('#heroL .say'), n = t => t.replace(/\\s+/g, ' ').trim();
+  return { on: tip.classList.contains('on'), pinned: tip.classList.contains('pinned'), head: tip.querySelector('b')?.textContent, tip: n(tip.innerText), say: n(say.innerText), expanded: say.getAttribute('aria-expanded'),
+    clamped: say.firstElementChild.scrollHeight > say.firstElementChild.clientHeight + 0.5 }; })()`;
+async function clickSay(page) {
+  const p = await page.evaluate(`(() => { const s = document.querySelector('#heroL .say'); s.scrollIntoView({ block: 'center' }); const r = s.getBoundingClientRect(); return { x: r.left + Math.min(40, r.width / 2), y: r.top + r.height / 2 }; })()`);
+  await settle(page);
+  await page.s('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+  await page.s('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+  await settle(page);
+  return page.evaluate(SAY_TIP);
+}
+// Focus and the pointer leave the sentence, so no later check sees a hover.
+async function leaveSay(page) {
+  await page.evaluate('document.activeElement?.blur(); window.scrollTo(0, 0)');
+  await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 });
+  await settle(page);
+}
+const sayWhole = t => t.on && t.pinned && t.head === 'Today' && t.expanded === 'true' && t.say.length > 10 && t.tip === `Today ${t.say}`;
 
 async function key(page, name, modifiers = 0) {
   const code = { Enter: 13, Tab: 9, Escape: 27 }[name];
@@ -382,6 +416,9 @@ async function route(rules) {
   await page.setFetch(rules.map(r => ({ urlPattern: `*${r.path}*` })));
   return async () => { await page.setFetch(null); browser.off(handler); };
 }
+// The two state lines that clamp, and the wide font that stands in for Linux's.
+const STATE_BOXES = ['#health', '#heroL .say'];
+const WIDE_FONT = 'Verdana, "DejaVu Sans", sans-serif';
 const DESK_SHIFT = [...SHIFT_SELECTORS, '.hstrip', '#heroL .say', '#heroL .kpi .c', '#positions .pstate', '#kept .keep-cap', '#kept .pstate', '#kept .prow'];
 const HIST_SHIFT = ['.hist-tools', '.hcard', '#histChart', '#histCompare', '.hist-help', '.hist-cols', '#jAcct', '#jAcct .facts-dl', '#events', 'footer.foot'];
 const DESK_TEXT = `(() => ({
@@ -530,7 +567,7 @@ try {
     b.setNow(valid.data.receivedAt);
     await b.push(ingress(valid.data));
     if (!f.transportReason && f.feed === 'data') { b.setNow(f.receivedAt); const r = await b.push(f.payload); check('fixtures', `${id}: server status ${f.expectedStatus}`, r.status === f.expectedStatus, r.body); }
-    const viewports = id === 'e-layout-storage-unavailable' ? VIEWPORTS : [VIEWPORTS[1]];
+    const viewports = id === 'e-layout-storage-unavailable' ? VIEWPORTS : id === 'a-gateway-up-but-dead' ? [VIEWPORTS[1], VIEWPORTS[2]] : [VIEWPORTS[1]];
     for (const viewport of viewports) {
       const theme = viewport.mobile ? 'dark' : 'light';
       await configure(page, viewport, theme);
@@ -570,7 +607,7 @@ try {
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age and reason`, /[Aa]s of \d+\s(s|min) ago · updates are (late|stuck)/.test(caps), caps);
       if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.cells['hero.account'].cap === 'Not reported', caps);
       if (kind === 'broken') check('fixtures', `${tag}: broken shows its reason`, /Last good value, .* · |Unavailable · /.test(caps), caps);
-      if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso', 'p3-single-missing-desk'].includes(id) && (viewport.name !== '390' || id === 'e-layout-storage-unavailable')) {
+      if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso', 'p3-single-missing-desk'].includes(id) && (viewport.name !== '390' || ['e-layout-storage-unavailable', 'a-gateway-up-but-dead'].includes(id))) {
         await shot(page, viewport, `${viewport.name}-${theme}-desk-state-${id}`, `Desk, P1 fixture ${id} (${kind})`);
       }
       if (storageScript) await page.s('Page.removeScriptToEvaluateOnNewDocument', { identifier: storageScript });
@@ -726,45 +763,58 @@ try {
   }
 
   if (run('journey')) {
-  // 7 · HIGH regression and no-shift: one board walks fresh → stale → broken
-  // with different reasons and ages per number → recovered, at every viewport
-  // and theme. Each affected number names its own age and reason; nothing on
-  // Desk or History moves (±0.5 px) at any transition. Linux lays text out in
-  // wider fonts than macOS, so it runs once more in a wide font at 390 and
-  // 1024: room kept only for this machine's font fails here, not first on CI.
-  const WIDE_FONT = 'Verdana, "DejaVu Sans", sans-serif';
+  // 7 · HIGH regression and no-shift: one board walks not reported → fresh →
+  // stale → broken with different reasons and ages per number → recovered, at
+  // every viewport and theme. Each affected number names its own age and
+  // reason; nothing on Desk or History moves (±0.5 px) at any transition, and
+  // the health line and Today's sentence keep one box in every state. Linux
+  // lays text out in wider fonts than macOS, so it runs once more in a wide
+  // font at 390 and 1024: a box that fits only this machine's font fails
+  // here, not first on CI.
   const journeys = [...VIEWPORTS.flatMap(v => THEMES.map(t => [v, t, null])), [VIEWPORTS[2], 'light', WIDE_FONT], [VIEWPORTS[1], 'dark', WIDE_FONT]];
   for (const [viewport, theme, font] of journeys) {
     const tag = `${viewport.name} ${theme}${font ? ' wide font' : ''}`;
     const { snapshot: base, history } = scenario(NOW);
     const b = await newBoard({ history });
     b.setNow(NOW);
-    check('journey', `${tag}: fresh snapshot accepted`, (await b.push(base)).status === 200);
-    b.setNow(at(NOW, 9));
     await configure(page, viewport, theme);
+    const refresh = async until => { await page.evaluate('window.__joedesk.refresh()'); await waitFor(page, until); await settle(page); };
+    // Not reported: no snapshot has arrived yet.
     await load(page, b.url, 'desk');
     if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
+    let ui = await page.evaluate(DESK_TEXT);
+    check('journey', `${tag} not reported: the health line and Today say that no data has arrived`, ui.label === 'Needs fix' && ui.cells['hero.day'].state === 'not reported' &&
+      /^No board data — reload; if still empty, tell Amy\s+Broker connection not reported\s+Emergency stop not reported\s+No data yet\s+Details$/.test(ui.strip.trim()) && ui.say === 'No numbers yet: no board data has arrived.', ui);
+    const boxes = [['not reported', await rects(STATE_BOXES)]];
+    check('journey', `${tag}: fresh snapshot accepted`, (await b.push(base)).status === 200);
+    b.setNow(at(NOW, 9));
+    await refresh(`document.querySelector('#hdrHealth b').innerText === 'Board OK' && [...document.querySelectorAll('#heroL [data-cell]')].every(c => c.dataset.state === 'fresh')`);
+    boxes.push(['fresh', await rects(STATE_BOXES)]);
     const desk0 = await rects(DESK_SHIFT);
     await go(page, 'history');
     const hist0 = await rects(HIST_SHIFT);
     await go(page, 'desk');
-    const refresh = async until => { await page.evaluate('window.__joedesk.refresh()'); await waitFor(page, until); await settle(page); };
 
     // Stale: no update for 75 s. Every panel says "as of" with its age and why.
     b.setNow(at(NOW, 75));
     await refresh(`/^Stale/.test(document.querySelector('#hdrHealth b').innerText)`);
-    let ui = await page.evaluate(DESK_TEXT);
+    ui = await page.evaluate(DESK_TEXT);
     const late = /^As of 1\smin ago · updates are late\.?$/;
     check('journey', `${tag} stale: every number, card and section says as of 1 min and why`, Object.values(ui.cells).every(c => c.state === 'stale') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => late.test(c.cap)) &&
       / today\. As of 1\smin ago · updates are late\.$/.test(ui.say) && ui.cards.every(c => /^Numbers: as of 1\smin ago · updates are late$/.test(c.label)) && /^As of 1\smin ago · updates are late$/.test(ui.positions) &&
       /^As of 1\smin ago · updates are late · worth €\s12\.248,00 and \$\s441,20, each in its own currency$/.test(ui.kept), ui);
     check('no-shift', `${tag}: fresh → stale moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
+    boxes.push(['stale', await rects(STATE_BOXES)]);
     if (!font && viewport.name !== '1024') await shot(page, viewport, `${viewport.name}-${theme}-desk-state-stale`, 'Desk, stale: every panel with its age and reason');
     await go(page, 'history');
     let h = await page.evaluate(HIST_TEXT);
     check('journey', `${tag} stale: History and J's result say as of 1 min and why`, h.state === 'stale' && /^History as of 1\smin ago · updates are late\.$/.test(h.status) && !h.retry && /J since 10\sSep\s+[+−]?€\s[\d.,]+\s·\sAs of 1\smin ago · updates are late/.test(h.j), h);
     check('no-shift', `${tag}: fresh → stale moves nothing on History`, !moves(hist0, await rects(HIST_SHIFT)).length, moves(hist0, await rects(HIST_SHIFT)).slice(0, 5));
     await go(page, 'desk');
+    // Today's sentence pinned whole in the tip stays pinned through the
+    // rebuild and then shows the new sentence.
+    const pinnedSay = await clickSay(page);
+    check('clamp', `${tag} stale: a click or tap shows Today's sentence whole`, sayWhole(pinnedSay), pinnedSay);
 
     // Broken, field by field: Joe's Today stops at +80 s, Joe's open result
     // and J's total at +110 s, so each keeps a different age and reason.
@@ -796,6 +846,12 @@ try {
       /^Last good value, 3\d\ss ago · open result not available$/.test(ui.cells['hero.open'].cap) && /^Last good value, 3\d\ss ago · desk total incomplete$/.test(ui.cells['hero.since'].cap) &&
       ui.cells['hero.equity'].state === 'fresh' && ui.cells['hero.account'].state === 'fresh', { cells: ui.cells, say: ui.say });
     check('no-shift', `${tag}: stale → broken moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
+    boxes.push(['broken', await rects(STATE_BOXES)]);
+    const rebuiltSay = await page.evaluate(SAY_TIP);
+    check('clamp', `${tag} broken: the pinned tip follows Today's rebuilt sentence`, sayWhole(rebuiltSay) && /waiting on the start-of-day value\.$/.test(rebuiltSay.say), { pinnedSay, rebuiltSay });
+    if (!font && viewport.name === '390' && theme === 'light') await shot(page, viewport, '390-light-desk-say-tip', `Desk, broken: Today's sentence at two lines${rebuiltSay.clamped ? ' with its ellipsis' : ''}, a tap shows it whole in the explanation tip`);
+    await key(page, 'Escape');
+    await leaveSay(page);
     await auditScreen(page, viewport, theme, 'desk (broken numbers)');
     if (!font && (viewport.name !== '1024' || theme === 'light')) await shot(page, viewport, `${viewport.name}-${theme}-desk-state-per-field`, 'Desk, numbers broken field by field: each with its own age and reason');
     await go(page, 'history');
@@ -823,6 +879,10 @@ try {
     check('journey', `${tag} recovered: every panel is fresh again`, ui.label === 'Board OK' && ui.cards.every(c => !c.lines.length && c.nums.every(x => x === 'fresh')) && ui.posState === 'fresh' &&
       /^Worth €\s12\.248,00 and \$\s441,20 now, each in its own currency\.$/.test(ui.kept), ui);
     check('no-shift', `${tag}: broken → recovered moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
+    boxes.push(['recovered', await rects(STATE_BOXES)]);
+    // The same boxes, compared directly: position and size, never a pixel value.
+    const changed = boxes.slice(1).flatMap(([state, r]) => shifted(boxes[0][1], r).map(m => ({ state, ...m })));
+    check('no-shift', `${tag}: the health line and Today's sentence keep one box through not reported, fresh, stale, broken and recovered`, boxes[0][1].length === STATE_BOXES.length && !changed.length, changed.slice(0, 6));
     await go(page, 'history');
     await waitFor(page, `!document.getElementById('histRetry')`);
     await settle(page);
@@ -830,6 +890,66 @@ try {
     check('no-shift', `${tag}: History broken → recovered moves nothing`, h.state === 'fresh' && !moves(hist0, await rects(HIST_SHIFT)).length, { h, moved: moves(hist0, await rects(HIST_SHIFT)).slice(0, 5) });
     page.errors.length = 0;
   }
+  }
+
+  if (run('lines')) {
+  // 7b · The health line and Today's sentence at the edges of each layout
+  // (one row from 1181 px; from 901 px the reason beside Details, the other
+  // facts below; a row per fact below that), in this machine's font and the
+  // wide one. Every
+  // health reason with the longest broker, emergency-stop and data wordings,
+  // and Today's longest sentences, keep the boxes of the design state, show
+  // whole lines with an ellipsis, and never overflow the line.
+  const { snapshot, history } = scenario(NOW);
+  const b = await newBoard({ history });
+  b.setNow(NOW);
+  check('lines', 'design snapshot accepted', (await b.push(snapshot)).status === 200);
+  b.setNow(at(NOW, 9));
+  const longest = fmt.age(86399);
+  const widest = ['Broker connection has not checked in', 'Emergency stop not reported', `Data from 19:42:22 · ${longest} old`];
+  const sentences = [...new Set(Object.values(CELL_REASON))].map(why => `Down ${fmt.eur(88888.88)} today. Last good value, ${longest} ago · ${why}.`)
+    .concat([`Down ${fmt.eur(88888.88)} today across J, Joe and Joel. Estimated from the session open at 15:30.`, 'Flat today for J, Joe and Joel.']);
+  for (const width of [1440, 1181, 1180, 1024, 901, 900, 701, 700, 390]) for (const font of [null, WIDE_FONT]) {
+    const viewport = { name: String(width), width, height: 900, mobile: width <= 700 };
+    const tag = `${width}${font ? ' wide font' : ''}`;
+    await configure(page, viewport, 'light');
+    await load(page, b.url, 'desk');
+    if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
+    const r = await page.evaluate(`(() => {
+      const strip = document.getElementById('health'), why = strip.querySelector('.why'), say = document.querySelector('#heroL .say [data-clamp]');
+      const boxes = () => __audit.rects(${JSON.stringify(STATE_BOXES)});
+      const base = boxes();
+      strip.querySelectorAll(':scope > .st:not(.why) > span').forEach((fact, i) => { fact.textContent = ${JSON.stringify(widest)}[i]; });
+      const out = [];
+      const probe = what => {
+        const edge = strip.getBoundingClientRect().right + 0.5;
+        out.push({ what: what.slice(0, 50), rects: boxes(), clamps: __audit.clamps(), over: [...strip.children].some(c => c.getBoundingClientRect().right > edge) || strip.scrollWidth > strip.clientWidth + 0.5 });
+      };
+      for (const line of ${JSON.stringify(HEALTH_LINES)}) { why.lastElementChild.textContent = line; why.title = line; probe(line); }
+      for (const text of ${JSON.stringify(sentences)}) { say.textContent = text; probe(text); }
+      return { base, out };
+    })()`);
+    const moved = r.out.flatMap(o => shifted(r.base, o.rects).map(m => ({ what: o.what, ...m })));
+    const bad = r.out.flatMap(o => o.clamps.filter(c => !c.ok).map(c => ({ what: o.what, ...c })));
+    const cut = r.out.map(o => o.clamps.filter(c => c.truncated).length).reduce((a, n) => a + n, 0);
+    check('lines', `${tag}: ${HEALTH_LINES.length} health reasons and ${sentences.length} sentences keep the design boxes of the health line and Today's sentence`, r.base.length === STATE_BOXES.length && r.out.length === HEALTH_LINES.length + sentences.length && !moved.length, moved.slice(0, 6));
+    check('lines', `${tag}: each shows whole lines with an ellipsis and gives its full text (${cut} clamped)`, r.out.every(o => o.clamps.length === 2) && !bad.length, bad.slice(0, 4));
+    check('lines', `${tag}: nothing overflows the health line`, !r.out.some(o => o.over), r.out.filter(o => o.over).map(o => o.what).slice(0, 4));
+  }
+  // For the visual check: the longest health reason and Today's longest
+  // sentence put into the design state on a phone. Each ends in its ellipsis,
+  // and a tap shows the sentence whole.
+  const longReason = HEALTH_LINES.reduce((a, b) => (b.length > a.length ? b : a));
+  const longSay = sentences.reduce((a, b) => (b.length > a.length ? b : a));
+  await configure(page, VIEWPORTS[2], 'light');
+  await load(page, b.url, 'desk');
+  await page.evaluate(`(() => { const why = document.querySelector('#health .why'); why.lastElementChild.textContent = ${JSON.stringify(longReason)}; why.title = ${JSON.stringify(longReason)};
+    document.querySelector('#heroL .say [data-clamp]').textContent = ${JSON.stringify(longSay)}; })()`);
+  const clamped = await page.evaluate('__audit.clamps()');
+  const longTip = await clickSay(page);
+  check('lines', '390: the longest reason and sentence end in an ellipsis, and a tap shows the sentence whole', clamped.length === 2 && clamped.every(c => c.ok && c.truncated) && sayWhole(longTip) && longTip.say === norm(longSay), { clamped, longTip });
+  await shot(page, VIEWPORTS[2], '390-light-desk-clamps', 'Desk on a phone with the longest health reason and Today’s longest sentence put in: one line and two lines, each with its ellipsis; the tap shows the sentence whole (the reason is whole in its title and Details)');
+  await leaveSay(page);
   }
 
   if (run('history')) {
@@ -989,6 +1109,17 @@ an injected clock (Wed 14 Oct 2026, 19:42:31 Vienna), a synthetic test-only
 scenario for the design views and the P1 failure fixtures for the panel
 states. One headless browser, run sequentially; reduced motion for stable
 geometry. Compare with \`joed-19-joedesk-approved.html\`.
+
+## State lines: clamps, no blank lines
+
+The health line's reason is one line at every width. A longer one ends in an
+ellipsis; its title and Details give it whole. Today's sentence is two lines at
+every width (one box, twice its line height). A longer one ends in an ellipsis,
+and a click, tap or keyboard focus shows it whole in the explanation tip. No
+blank lines are kept for longer states. Both boxes stay the same through not
+reported, fresh, stale, broken and recovered, in this machine's font and a wide
+one (\`no-shift\`, \`lines\`, \`clamp\`). See \`390-light-desk-clamps.png\`,
+\`390-light-desk-say-tip.png\` and \`390-dark-desk-state-a-gateway-up-but-dead.png\`.
 
 ## Checks
 

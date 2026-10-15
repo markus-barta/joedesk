@@ -958,3 +958,38 @@ lines. So the phone Desk is about 43 px taller in every state; at 1024 and
 1440 nothing changes. The gate now has 1871 checks (1767 plus the
 wide-font journeys and the slow-History case). All pass locally
 (Europe/Vienna) and under TZ=UTC and America/New_York.
+
+### P3 fix round 4 — JOED-23
+
+Tick's visual check of f3bee55: use the calmer alternative, not blank
+reserved lines; empty bands are an anti-pattern (GUI 1316). Round 3's hidden
+twins are replaced by clamps. Everything else from round 3 stays: ready after
+every first read, the budget split, the CI scratch cleanup.
+
+| Surface | Round 3 | Now | Proof |
+| --- | --- | --- | --- |
+| Health line reason | Up to 900 px a row as tall as the longest reason, so a short reason had a blank line under it; wider, two reserved rows, a blank band at 1440 | One line at every width, with an ellipsis when it is longer; the full reason is its `title` and the Details heading. No other fact wraps, so the rows are fixed per width: one row from 1181 px (34 px); from 901 to 1180 px the reason beside Details, the other facts on a row below (60.25 px); up to 900 px one row per fact, the data age beside Details. With no data the line keeps its four facts (the broker and the emergency stop say "not reported"), so the first snapshot moves nothing | `lines`: all 17 health reasons with the longest broker, emergency-stop and data wordings at 1440, 1181, 1180, 1024, 901, 900, 701, 700 and 390 px, in this machine's font and the wide one: one box, nothing overflows the line, whole lines with an ellipsis |
+| Today's sentence | Hidden twins of its longest forms: three lines on phones in every state | Two lines at every width, a box of twice its line height (45 px). A longer sentence ends in an ellipsis. The sentence is a button: a click, tap or keyboard focus shows it whole in the explanation tip (hover does not, as its words are in view). A pinned tip follows the sentence through a rebuild, and its ages tick | `clamp`: on every Desk audit the two clamps show only whole lines (none cut through), end in an ellipsis and give their full text; a tap shows the sentence whole at six combos and in the journey; `lines`: 32 sentence forms |
+| Today's number | Not measured | A missing value's dash had a shorter box than a number, because the € sign's leading adds 9 px (7 to 8 px on phones). So the first snapshot moved Today's sentence. The number now keeps the approved box with or without a value (61 px; 53 px on phones) | `journey` from "not reported" |
+
+The browser `journey` now starts with no snapshot ("not reported") and
+asserts that the health line and Today's sentence keep one box (position and
+size, ±0.5 px) through not reported, fresh, stale, broken and recovered. It
+runs at six combos and in the wide font at 390 light and 1024 dark, so the
+Linux CI run asserts the same in its own fonts. AC-36 still scans everything
+else; the two clamps are its only exemption, and `clamp` checks them. The
+gate now has 2049 checks (1871 plus `lines`, `clamp` and the journey's
+not-reported step). All pass locally (Europe/Vienna) and under TZ=UTC with
+CI=true.
+
+Visible change for the visual check: no blank line or band remains. At 1440
+the health line is one row (34 px instead of 61). At 1024 its height is
+unchanged, and Details sits beside the reason. On phones the reason is one
+line and Today's sentence two, so the phone Desk is about as tall as before
+round 3. From 901 to 1180 px, Details is visually on the reason's row but
+stays last in the Tab order, after the facts it details.
+
+Found, not in this round's scope: from 701 to about 860 px (about 910 px in
+a wide font) the desktop header (brand, navigation, light, theme button) is
+wider than the window and scrolls sideways. It predates this round; the
+gate's widths are 390, 1024 and 1440.
