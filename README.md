@@ -72,6 +72,14 @@ shared semantic validator must travel together when pinned in producer CI.
 `validateAndRetain` applies the same last-good rule to all five contracts,
 including browser reads and server-controlled Fleet Config/health projections.
 
+The candidate rejects non-null current money/marks during a known dead API
+session and incomplete or unequal family totals at any history point. Source
+detail and observed valuation evidence have explicit v2 homes; session-open
+estimates use a distinct method (see the ADR's legacy mapping table). Panel
+states expose retained values with their original receipt age. Pass the accepted
+Fleet Config feed (or the fourth `panelStates` argument, its KEEP symbols) for
+policy-based row routing; scope disagreement withholds affected desk totals.
+
 ```bash
 node scripts/check-package.mjs
 node scripts/check-joe-layout.mjs

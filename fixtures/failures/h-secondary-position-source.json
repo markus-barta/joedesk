@@ -208,135 +208,160 @@
       ]
     }
   },
-  "receivedAt": "2026-10-14T17:42:22.000Z",
-  "now": "2026-10-14T17:42:31.000Z",
+  "receivedAt": "2026-10-14T17:52:22.000Z",
+  "now": "2026-10-14T17:52:31.000Z",
   "transportReason": null,
   "expectedStatus": 422,
   "expected": {
     "today.equity": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "today.dayPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "today.openPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "today.totalPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "paperAccount": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.j.equity": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.j.dayPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.j.openPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.j.totalPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.joe.equity": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.joe.dayPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.joe.openPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.joe.totalPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.joel.equity": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.joel.dayPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.joel.openPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "desks.joel.totalPnl": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "positions": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "kept": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "gateway": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "halt": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "executor": {
       "state": "broken",
-      "ageSeconds": 9,
-      "reason": "contract_invalid"
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": true
     },
     "history": {
-      "state": "fresh",
-      "ageSeconds": 9,
-      "reason": null
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "results": {
-      "state": "fresh",
-      "ageSeconds": 9,
-      "reason": null
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "fleet-config": {
-      "state": "fresh",
-      "ageSeconds": 9,
-      "reason": null
+      "state": "stale",
+      "ageSeconds": 609,
+      "reason": "snapshot_stale",
+      "retained": false
     }
   }
 }

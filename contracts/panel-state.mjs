@@ -16,38 +16,55 @@ export function feedAge(feed, now) {
 
 // Per-field pure selector, with optional prior accepted value for null/error
 // retention. Presence, errors and freshness stay independent for every cell.
-export function panelState(feed, value, reason, now, lastGood = null) {
+export function panelState(feed, value, reason, now, lastGood = null, lastGoodReceivedAt = null) {
   if (!validInstant(now)) throw new TypeError('A current instant is required');
   if (reason && !REASONS.includes(reason)) throw new TypeError('Unknown panel reason');
   const age = feedAge(feed, now);
-  if (feed?.reason || reason) return {
-    state: 'broken', ageSeconds: age, reason: feed?.reason || reason,
-    value: value ?? lastGood, retained: value == null && lastGood != null,
-  };
-  if (value == null) return { state: 'not reported', ageSeconds: null, reason: null, value: null, retained: false };
+  const receivedAt = feed?.value?.receivedAt ?? feed?.receivedAt ?? null;
+  if (feed?.reason || reason) {
+    const shown = value ?? lastGood;
+    const valueReceivedAt = value == null && lastGood != null ? lastGoodReceivedAt : receivedAt;
+    const retained = shown != null && (Boolean(feed?.reason) || value == null);
+    return {
+      state: 'broken', ageSeconds: retained && valueReceivedAt ? Math.max(0, (Date.parse(now) - Date.parse(valueReceivedAt)) / 1000) : age,
+      reason: feed?.reason || reason, value: shown, retained, valueReceivedAt,
+    };
+  }
+  if (value == null) return { state: 'not reported', ageSeconds: null, reason: null, value: null, retained: false, valueReceivedAt: null };
   const frozenAge = feed?.generatedAdvancedAt ? Math.max(0, (Date.parse(now) - Date.parse(feed.generatedAdvancedAt)) / 1000) : age;
   const frozen = frozenAge >= 60 && frozenAge > age;
   return {
     state: frozen || age >= 60 ? 'stale' : 'fresh', ageSeconds: frozen ? frozenAge : age,
     reason: frozen ? 'producer_frozen' : age >= 60 ? 'snapshot_stale' : null,
-    value, retained: false,
+    value, retained: false, valueReceivedAt: receivedAt,
   };
 }
 
-export function panelStates(feeds, now, previousValues = {}) {
+export function panelStates(feeds, now, previousValues = {}, keepSymbols = feeds['fleet-config']?.value?.desks.keep ?? []) {
   const data = feeds.data?.value;
   const output = {};
+  // Fleet policy owns routing. The mandatory safety floor also applies before
+  // policy is available. Producer scope is evidence to check, not authority.
+  const keep = new Set(['SXR8', 'TSLA', ...keepSymbols]);
+  const mismatched = data?.positions?.rows.filter(p => keep.has(p.symbol) !== (p.scope === 'keep') ||
+    (keep.has(p.symbol) && p.desk !== null)) ?? [];
+  const affectedDesks = new Set(mismatched.flatMap(p => p.desk ? [p.desk] : ['j', 'joe', 'joel']));
+  const scopeReason = mismatched.length ? 'source_not_authoritative' : null;
+  const sourceReason = field => data?.pnlSources?.[field === 'dayPnl' ? 'day' : field === 'openPnl' ? 'open' : '']?.reason;
   const select = (name, feed, value, reason) => {
-    output[name] = panelState(feed, value, reason, now, previousValues[name]?.value);
+    output[name] = panelState(feed, value, reason, now, previousValues[name]?.value, previousValues[name]?.valueReceivedAt);
   };
-  for (const field of MONEY_FIELDS) select(`today.${field}`, feeds.data, data?.totals[field], data?.totals.reasons?.[field]);
-  select('paperAccount', feeds.data, data?.brokerAccount?.equity);
+  for (const field of MONEY_FIELDS) select(`today.${field}`, feeds.data, scopeReason ? null : data?.totals[field],
+    scopeReason || data?.totals.reasons?.[field] || sourceReason(field));
+  select('paperAccount', feeds.data, data?.brokerAccount?.equity, data?.brokerAccount?.reason);
   for (const id of ['j', 'joe', 'joel']) {
     const desk = data?.desks.find(d => d.id === id);
-    for (const field of MONEY_FIELDS) select(`desks.${id}.${field}`, feeds.data, desk?.money[field], desk?.money.reasons?.[field]);
+    for (const field of MONEY_FIELDS) select(`desks.${id}.${field}`, feeds.data, affectedDesks.has(id) ? null : desk?.money[field],
+      affectedDesks.has(id) ? scopeReason : desk?.money.reasons?.[field] || sourceReason(field));
   }
-  select('positions', feeds.data, data?.positions?.rows.filter(p => p.scope !== 'keep'), data?.positions?.reason);
-  select('kept', feeds.data, data?.positions?.rows.filter(p => p.scope === 'keep'), data?.positions?.reason);
+  const positionReason = data?.positions?.reason || scopeReason;
+  select('positions', feeds.data, data?.positions?.rows.filter(p => !keep.has(p.symbol)), positionReason);
+  select('kept', feeds.data, data?.positions?.rows.filter(p => keep.has(p.symbol)), positionReason);
   select('gateway', feeds.data, data?.safety.gateway, data?.safety.gateway?.reason);
   select('halt', feeds.data, data?.safety.halt, data?.safety.halt ? data.safety.haltReason : null);
   select('executor', feeds.data, data?.safety.executor, data?.safety.executor?.reason);
@@ -58,5 +75,5 @@ export function panelStates(feeds, now, previousValues = {}) {
 }
 
 export function stateTable(states) {
-  return Object.fromEntries(Object.entries(states).map(([k, { state, ageSeconds, reason }]) => [k, { state, ageSeconds, reason }]));
+  return Object.fromEntries(Object.entries(states).map(([k, { state, ageSeconds, reason, retained }]) => [k, { state, ageSeconds, reason, retained }]));
 }

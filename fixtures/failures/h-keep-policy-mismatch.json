@@ -1,0 +1,451 @@
+{
+  "id": "h-keep-policy-mismatch",
+  "failureClass": "h",
+  "provenance": "Synthetic reconstruction; no production payload or identifiers.",
+  "incident": "Fleet-config protects DEMO; pusher still calls it a J stage0 position. Policy wins and both row panels flag the disagreement.",
+  "feed": "data",
+  "payload": {
+    "schema": "inspr.joe.household.v2",
+    "seq": 102,
+    "generatedAt": "2026-10-14T17:42:23.000Z",
+    "mode": "PAPER",
+    "currency": "EUR",
+    "source": {
+      "kind": "live-ib-api",
+      "label": "Synthetic paper API projection"
+    },
+    "safety": {
+      "halt": false,
+      "haltReason": null,
+      "gateway": {
+        "apiSessionReady": true,
+        "checkedAt": "2026-10-14T17:42:22.000Z"
+      },
+      "executor": {
+        "status": "running",
+        "halt": false,
+        "brakes": false,
+        "gatewayReachable": true,
+        "checkedAt": "2026-10-14T17:42:22.000Z"
+      }
+    },
+    "desks": [
+      {
+        "id": "j",
+        "label": "J",
+        "state": "working",
+        "action": "Synthetic paper observation; no action requested.",
+        "heartbeatAt": "2026-10-14T17:42:22.000Z",
+        "money": {
+          "equity": {
+            "amount": "4999",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "-1",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "-1",
+            "currency": "EUR"
+          }
+        },
+        "historyBasis": "j.paper.v2"
+      },
+      {
+        "id": "joe",
+        "label": "Joe",
+        "state": "sit-out",
+        "action": "Synthetic paper observation; no action requested.",
+        "heartbeatAt": "2026-10-14T17:42:22.000Z",
+        "money": {
+          "equity": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          }
+        },
+        "historyBasis": "joe.paper.v2"
+      },
+      {
+        "id": "joel",
+        "label": "Joel",
+        "state": "sit-out",
+        "action": "Synthetic paper observation; no action requested.",
+        "heartbeatAt": "2026-10-14T17:42:22.000Z",
+        "money": {
+          "equity": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "dayPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "openPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "totalPnl": {
+            "amount": "0",
+            "currency": "EUR"
+          }
+        },
+        "historyBasis": "joel.paper.v2"
+      }
+    ],
+    "totals": {
+      "equity": {
+        "amount": "14999",
+        "currency": "EUR"
+      },
+      "dayPnl": {
+        "amount": "-1",
+        "currency": "EUR"
+      },
+      "openPnl": {
+        "amount": "0",
+        "currency": "EUR"
+      },
+      "totalPnl": {
+        "amount": "-1",
+        "currency": "EUR"
+      }
+    },
+    "pnlSources": {
+      "day": {
+        "status": "available",
+        "method": "sod-virtual-equity",
+        "currency": "EUR",
+        "scope": "virtual-desks",
+        "observedAt": "2026-10-14T17:42:22.000Z",
+        "periodStart": "2026-10-14T04:00:00.000Z"
+      },
+      "open": {
+        "status": "available",
+        "method": "owned-lots-current-mark-fx",
+        "currency": "EUR",
+        "scope": "virtual-desks",
+        "observedAt": "2026-10-14T17:42:22.000Z"
+      }
+    },
+    "brokerAccount": {
+      "equity": {
+        "amount": "28000",
+        "currency": "EUR"
+      },
+      "scope": "paper-account-including-keep",
+      "observedAt": "2026-10-14T17:42:22.000Z"
+    },
+    "positions": {
+      "source": "live-ib-api",
+      "observedAt": "2026-10-14T17:42:22.000Z",
+      "rows": [
+        {
+          "desk": "j",
+          "symbol": "DEMO",
+          "company": "Synthetic instrument",
+          "side": "long",
+          "quantity": "2",
+          "mark": {
+            "amount": "20",
+            "currency": "USD"
+          },
+          "marketValue": {
+            "amount": "40",
+            "currency": "USD"
+          },
+          "scope": "stage0",
+          "updatedAt": "2026-10-14T17:42:22.000Z"
+        },
+        {
+          "desk": null,
+          "symbol": "SXR8",
+          "side": "long",
+          "quantity": "1",
+          "mark": {
+            "amount": "600",
+            "currency": "EUR"
+          },
+          "marketValue": {
+            "amount": "600",
+            "currency": "EUR"
+          },
+          "scope": "keep",
+          "updatedAt": "2026-10-14T17:42:22.000Z"
+        },
+        {
+          "desk": null,
+          "symbol": "TSLA",
+          "side": "long",
+          "quantity": "1",
+          "mark": {
+            "amount": "200",
+            "currency": "USD"
+          },
+          "marketValue": {
+            "amount": "200",
+            "currency": "USD"
+          },
+          "scope": "keep",
+          "updatedAt": "2026-10-14T17:42:22.000Z"
+        }
+      ]
+    }
+  },
+  "receivedAt": "2026-10-14T17:42:22.000Z",
+  "now": "2026-10-14T17:42:31.000Z",
+  "transportReason": null,
+  "expectedStatus": 200,
+  "expected": {
+    "today.equity": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "source_not_authoritative",
+      "retained": true
+    },
+    "today.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "source_not_authoritative",
+      "retained": true
+    },
+    "today.openPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "source_not_authoritative",
+      "retained": true
+    },
+    "today.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "source_not_authoritative",
+      "retained": true
+    },
+    "paperAccount": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.j.equity": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "source_not_authoritative",
+      "retained": true
+    },
+    "desks.j.dayPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "source_not_authoritative",
+      "retained": true
+    },
+    "desks.j.openPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "source_not_authoritative",
+      "retained": true
+    },
+    "desks.j.totalPnl": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "source_not_authoritative",
+      "retained": true
+    },
+    "desks.joe.equity": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joe.dayPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joe.openPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joe.totalPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joel.equity": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joel.dayPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joel.openPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "desks.joel.totalPnl": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "positions": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "source_not_authoritative",
+      "retained": false
+    },
+    "kept": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "source_not_authoritative",
+      "retained": false
+    },
+    "gateway": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "halt": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "executor": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "history": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "results": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    },
+    "fleet-config": {
+      "state": "fresh",
+      "ageSeconds": 9,
+      "reason": null,
+      "retained": false
+    }
+  },
+  "fleetConfig": {
+    "$schema": "/joe/fleet-config.schema.json",
+    "schema": "inspr.joe.fleet-config.v1",
+    "rev": "fc-000000",
+    "updatedAt": "2026-09-11T00:00:00.000Z",
+    "mode": "paper",
+    "quota": {
+      "grok": {
+        "reservePct": 10
+      },
+      "codex": {
+        "reservePct": 10
+      },
+      "behavior": {
+        "green": "run_normally",
+        "amber": "slow_nonessential",
+        "red": "park_nonessential"
+      }
+    },
+    "desks": {
+      "maxBusyDesks": 5,
+      "stage0": {
+        "capEur": 250
+      },
+      "keep": [
+        "SXR8",
+        "TSLA",
+        "DEMO"
+      ]
+    },
+    "cadence": {
+      "timeZone": "Europe/Vienna",
+      "usOpenArm": "15:35",
+      "deskWatch": "desk-watch",
+      "darwin": "darwin",
+      "quotaGovernor": "quota-governor",
+      "wakeWindows": []
+    },
+    "amy": {
+      "routines": {
+        "morning": "Morning brief",
+        "review": "Desk review",
+        "close": "Close recap"
+      }
+    },
+    "mac": {
+      "shared": {
+        "configPath": "~/trading-team/shared/fleet-config.json",
+        "docsPath": "~/trading-team/shared/docs"
+      },
+      "knobs": {
+        "syncMode": "read_on_revision"
+      }
+    },
+    "tools": {
+      "statusSource": "/joe/data.json",
+      "entries": [
+        {
+          "id": "ib-gateway",
+          "label": "IB Gateway"
+        },
+        {
+          "id": "joel-ib",
+          "label": "joel-ib"
+        },
+        {
+          "id": "codexbar-hsb0",
+          "label": "codexbar@hsb0"
+        }
+      ]
+    },
+    "secretSlots": {
+      "agenix": [],
+      "janus": []
+    }
+  },
+  "expectedRows": {
+    "positions": [],
+    "kept": [
+      "DEMO",
+      "SXR8",
+      "TSLA"
+    ]
+  }
+}

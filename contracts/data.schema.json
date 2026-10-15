@@ -517,6 +517,25 @@
             },
             "maxItems": 32,
             "x-owner": "pusher"
+          },
+          "moneyEvidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "observedAt"
+            ],
+            "properties": {
+              "status": {
+                "const": "observed",
+                "x-owner": "pusher"
+              },
+              "observedAt": {
+                "$ref": "urn:joedesk:common:v2#/$defs/instant",
+                "x-owner": "pusher"
+              }
+            },
+            "x-owner": "pusher"
           }
         }
       },
@@ -630,7 +649,8 @@
                     "ib-daily-pnl",
                     "sod-virtual-equity",
                     "ib-unrealized-pnl",
-                    "owned-lots-current-mark-fx"
+                    "owned-lots-current-mark-fx",
+                    "session-open-estimate"
                   ]
                 },
                 {
@@ -667,6 +687,16 @@
                   "type": "null"
                 }
               ],
+              "x-owner": "pusher"
+            },
+            "detail": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240,
+              "x-owner": "pusher"
+            },
+            "reason": {
+              "$ref": "urn:joedesk:reason:v2",
               "x-owner": "pusher"
             }
           },
@@ -735,6 +765,16 @@
                 }
               ],
               "x-owner": "pusher"
+            },
+            "detail": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240,
+              "x-owner": "pusher"
+            },
+            "reason": {
+              "$ref": "urn:joedesk:reason:v2",
+              "x-owner": "pusher"
             }
           },
           "x-owner": "pusher"
@@ -774,6 +814,10 @@
         },
         "observedAt": {
           "$ref": "urn:joedesk:common:v2#/$defs/instant",
+          "x-owner": "pusher"
+        },
+        "reason": {
+          "$ref": "urn:joedesk:reason:v2",
           "x-owner": "pusher"
         }
       },

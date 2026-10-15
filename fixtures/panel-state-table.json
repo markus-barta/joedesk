@@ -122,6 +122,21 @@
       "id": "unknown-schema",
       "failureClass": "c",
       "file": "failures/unknown-schema.json"
+    },
+    {
+      "id": "a-dead-session-current-money",
+      "failureClass": "a",
+      "file": "failures/a-dead-session-current-money.json"
+    },
+    {
+      "id": "h-keep-policy-mismatch",
+      "failureClass": "h",
+      "file": "failures/h-keep-policy-mismatch.json"
+    },
+    {
+      "id": "b-session-open-estimate",
+      "failureClass": "b",
+      "file": "failures/b-session-open-estimate.json"
     }
   ]
 }

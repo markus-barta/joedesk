@@ -216,127 +216,152 @@
     "today.equity": {
       "state": "broken",
       "ageSeconds": 9,
-      "reason": "family_projection_unavailable"
+      "reason": "family_projection_unavailable",
+      "retained": true
     },
     "today.dayPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "today.openPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "today.totalPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "paperAccount": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "desks.j.equity": {
       "state": "broken",
       "ageSeconds": 9,
-      "reason": "family_projection_unavailable"
+      "reason": "family_projection_unavailable",
+      "retained": true
     },
     "desks.j.dayPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "desks.j.openPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "desks.j.totalPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "desks.joe.equity": {
       "state": "broken",
       "ageSeconds": 9,
-      "reason": "family_projection_unavailable"
+      "reason": "family_projection_unavailable",
+      "retained": true
     },
     "desks.joe.dayPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "desks.joe.openPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "desks.joe.totalPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "desks.joel.equity": {
       "state": "broken",
       "ageSeconds": 9,
-      "reason": "family_projection_unavailable"
+      "reason": "family_projection_unavailable",
+      "retained": true
     },
     "desks.joel.dayPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "desks.joel.openPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "desks.joel.totalPnl": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "positions": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "kept": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "gateway": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "halt": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "executor": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "history": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "results": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     },
     "fleet-config": {
       "state": "fresh",
       "ageSeconds": 9,
-      "reason": null
+      "reason": null,
+      "retained": false
     }
   }
 }

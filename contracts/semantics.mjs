@@ -23,6 +23,16 @@ export function checkSemantics(kind, payload, stage, errors) {
     if (stage === 'ingress' && Object.hasOwn(payload, 'receivedAt')) fail('$.receivedAt', 'serverOwned');
   }
   const checkBag = (bag, path) => FIELDS.forEach(f => eur(bag?.[f], `${path}.${f}`));
+  const checkDeskSum = (desks, totals, path) => {
+    for (const field of FIELDS) {
+      const parts = desks.map(d => d?.money[field]);
+      const total = totals[field];
+      if (parts.every(Boolean) && total && parts.reduce((sum, v) => sum + decimalUnits(v.amount), 0n) !== decimalUnits(total.amount)) {
+        fail(`${path}.${field}`, 'deskSum');
+      }
+      if (parts.some(v => !v) && total) fail(`${path}.${field}`, 'incompleteDeskSum');
+    }
+  };
   if (kind === 'data') {
     if (new Set(payload.desks.map(d => d.id)).size !== 3) fail('$.desks', 'uniqueDesk');
     checkBag(payload.totals, '$.totals');
@@ -35,22 +45,16 @@ export function checkSemantics(kind, payload, stage, errors) {
       }
     });
     eur(payload.brokerAccount?.equity, '$.brokerAccount.equity');
-    for (const field of FIELDS) {
-      const parts = payload.desks.map(d => d.money[field]);
-      const total = payload.totals[field];
-      if (parts.every(Boolean) && total && parts.reduce((sum, v) => sum + decimalUnits(v.amount), 0n) !== decimalUnits(total.amount)) {
-        fail(`$.totals.${field}`, 'deskSum');
-      }
-      if (parts.some(v => !v) && total) fail(`$.totals.${field}`, 'incompleteDeskSum');
-    }
+    checkDeskSum(payload.desks, payload.totals, '$.totals');
     for (const [kind, field] of [['day', 'dayPnl'], ['open', 'openPnl']]) {
       const source = payload.pnlSources?.[kind];
       const values = [payload.totals[field], ...payload.desks.map(d => d.money[field])];
       if (values.some(Boolean) && (source?.status !== 'available' || !source.method || !source.observedAt)) fail(`$.pnlSources.${kind}`, 'evidenceRequired');
       if (source?.status === 'available' && !values.every(Boolean)) fail(`$.pnlSources.${kind}`, 'completeEvidenceRequired');
-      if (source?.status === 'available' && kind === 'day' && !['ib-daily-pnl', 'sod-virtual-equity'].includes(source.method)) fail('$.pnlSources.day', 'dayMethod');
+      if (source?.status === 'available' && kind === 'day' && !['ib-daily-pnl', 'sod-virtual-equity', 'session-open-estimate'].includes(source.method)) fail('$.pnlSources.day', 'dayMethod');
+      if (kind === 'day' && /^session_open_proxy(?:\b|[: _-])/.test(source?.detail ?? '') && source.method !== 'session-open-estimate') fail('$.pnlSources.day.method', 'estimateMethodRequired');
       if (source?.status === 'available' && kind === 'open' && !['ib-unrealized-pnl', 'owned-lots-current-mark-fx'].includes(source.method)) fail('$.pnlSources.open', 'openMethod');
-      if (source?.method === 'sod-virtual-equity' && !source.periodStart) fail('$.pnlSources.day.periodStart', 'baselineRequired');
+      if (['sod-virtual-equity', 'session-open-estimate'].includes(source?.method) && !source.periodStart) fail('$.pnlSources.day.periodStart', 'baselineRequired');
     }
     payload.positions?.rows.forEach((p, i) => {
       if ((KEEP.includes(p.symbol) && p.scope !== 'keep') || (p.scope === 'keep' && p.desk !== null)) fail(`$.positions.rows[${i}]`, 'keepExcluded');
@@ -62,6 +66,29 @@ export function checkSemantics(kind, payload, stage, errors) {
     const gateway = payload.safety.gateway;
     if (gateway && !gateway.apiSessionReady && !gateway.reason) fail('$.safety.gateway.reason', 'reasonRequired');
     if (gateway?.apiSessionReady && gateway.reason) fail('$.safety.gateway', 'contradictorySession');
+    // A newly delivered envelope is not a new broker observation. During a
+    // known dead session only null + reason is current; retention is board-owned.
+    if (gateway?.apiSessionReady === false) {
+      const unavailable = (value, path, reason) => {
+        if (value != null) fail(path, 'sessionUnavailable');
+        if (!reason) fail(path, 'reasonRequired');
+      };
+      for (const [bag, path] of [[payload.totals, '$.totals'],
+        ...payload.desks.map((d, i) => [d.money, `$.desks[${i}].money`])]) {
+        for (const field of FIELDS) if (Object.hasOwn(bag, field)) {
+          unavailable(bag[field], `${path}.${field}`, bag.reasons?.[field]);
+        }
+      }
+      if (payload.brokerAccount) unavailable(payload.brokerAccount.equity, '$.brokerAccount.equity', payload.brokerAccount.reason);
+      if (payload.positions) {
+        if (!payload.positions.reason) fail('$.positions.reason', 'reasonRequired');
+        payload.positions.rows.forEach((row, i) => {
+          for (const field of ['mark', 'marketValue', 'dayPnl', 'openPnl']) {
+            if (row[field] != null) fail(`$.positions.rows[${i}].${field}`, 'sessionUnavailable');
+          }
+        });
+      }
+    }
     if (payload.safety.halt && !payload.safety.haltReason) fail('$.safety.haltReason', 'reasonRequired');
   }
   if (kind === 'history') {
@@ -71,6 +98,7 @@ export function checkSemantics(kind, payload, stage, errors) {
       previous = Date.parse(p.t);
       checkBag(p.totals, `$.points[${i}].totals`);
       Object.entries(p.desks).forEach(([id, d]) => checkBag(d.money, `$.points[${i}].desks.${id}.money`));
+      checkDeskSum(DESKS.map(id => p.desks[id]), p.totals, `$.points[${i}].totals`);
     });
   }
   if (kind === 'results') {

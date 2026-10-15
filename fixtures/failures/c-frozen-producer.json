@@ -216,127 +216,152 @@
     "today.equity": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "today.dayPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "today.openPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "today.totalPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "paperAccount": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.j.equity": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.j.dayPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.j.openPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.j.totalPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.joe.equity": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.joe.dayPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.joe.openPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.joe.totalPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.joel.equity": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.joel.dayPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.joel.openPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "desks.joel.totalPnl": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "positions": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "kept": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "gateway": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "halt": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "executor": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "producer_frozen"
+      "reason": "producer_frozen",
+      "retained": false
     },
     "history": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "snapshot_stale"
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "results": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "snapshot_stale"
+      "reason": "snapshot_stale",
+      "retained": false
     },
     "fleet-config": {
       "state": "stale",
       "ageSeconds": 129,
-      "reason": "snapshot_stale"
+      "reason": "snapshot_stale",
+      "retained": false
     }
   }
 }
