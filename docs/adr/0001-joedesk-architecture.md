@@ -1052,8 +1052,9 @@ last good record with its original receipt. An accepted record is indexed once
 (`results-model.js`, `indexResults`): trades sorted by `closedAt`, and per
 (Vienna date, desk) cell the counts and exact sums (net, gross, fees, winners,
 losers, best and worst trade), plus each desk's equity close with carry. The
-index travels to the page as typed columns by transfer (money as `BigInt64Array`
-in 10⁻⁸ units, trade text as one string with offsets). Every Results number is
+index travels to the page as typed columns by transfer (trade text as one
+string with offsets) and exact money columns of BigInt in 10⁻⁸ units, by copy
+(fix round 1: a `BigInt64Array` wrapped past € 92 billion). Every Results number is
 then a pure selector over the index, the snapshot's current desk equity (today's
 E) and, for Day, History's observed intraday rows. `panelStates` gives the
 record its own state; a not-fresh record says so inside the hero chart's box
@@ -1064,9 +1065,10 @@ Results is rebuilt when its inputs change.
 Vienna's midnight is always a whole UTC hour). E(d) is the selected desks' last
 equity close on or before d, € 5.000 per desk before tracking or before a desk's
 first close, null when the record says unknown; today E is the snapshot's
-current (non-retained) desk equity, else today's close in the record, else
-unknown, in which case Net and Still open are "—" with a sentence, never a
-zero. Won ≥ € 0,005, lost ≤ −€ 0,005, flat otherwise; win rate over decided
+current (non-retained) desk equity and nothing else (fix round 1: a close in
+the record never stands in), else unknown, in which case Net, Still open and
+the dip are "—" with a sentence, never a zero. Won ≥ € 0,005, lost ≤ −€ 0,005,
+flat otherwise; win rate over decided
 trades with "small sample" under 30; expectancy over all trades; profit factor
 without a loser is "—"; drawdown over [E(S−1), each session close (Day: each
 observed intraday point), E now]; best and worst day by realised net per Vienna
@@ -1102,6 +1104,10 @@ symbol on the accepted Fleet Config KEEP list is held back as a whole
    written decision.
 5. Every configured KEEP symbol stays out of the record (the board holds back a
    record that trades one).
+6. (Fix round 1.) The record's closes carry no bookkeeping basis, so the board
+   can detect a change of basis only inside History's 14 days or against the
+   snapshot now. A basis id per desk close in `days[]` (or a restated record
+   after a change) would let the board check every period.
 
 **Changed P3 expectations (deliberate).** Results now reads its own record, so
 P3's cold-start checks route `results.json` with the other reads and expect
@@ -1131,3 +1137,30 @@ UI 38 incl. 16 Results, server contract 40); `node scripts/browser-p4.mjs`
 1323/1323 under Europe/Vienna and under TZ=UTC; `node scripts/browser-p3.mjs`
 2170/2170; reference budget 31/31 on mbp2607. Screenshots and the AC → test
 map: `~/.local/share/joedesk-qa/p4/index.md`. No push, deploy or review gate.
+
+### P4 fix round 1 — JOED-24
+
+Codex review r1 (changes) found one High and five Medium issues. All are fixed
+at the root; each has a unit test in `test/results-model.mjs` that fails on
+7009b62, and a browser regression at 1440 light and 390 dark.
+
+| Finding | Fix | Proof |
+| --- | --- | --- |
+| High: incompatible bookkeeping bases became losses (intraday observations used without their basis) | No Results number is derived across a change of a desk's bookkeeping basis (History contract: a cutover is not profit). `basisCuts` finds every change between two of a desk's meaningful History observations (all-null rows without metadata are unknown, not a new basis) and one at now when the snapshot's basis differs from History's last row; `basisKey`/`meaningful` are shared with History. `moneyContext` checks, per desk, from the close E(S−1) stands on to the close E(end) stands on (or now); `intraday` itself returns no points across a change. Across one, Net, Still open, the dip and the chart are "—"/empty and the change is said ("No result this week: J’s bookkeeping basis changed on Wed 14 Oct, and a change of basis is not a gain or a loss."); closed-trade numbers and unaffected desks stand. The record carries no basis, so a change older than History's 14 days is not visible to the board (JOED-20 item 6 above) | `basis: …`; browser `r1-basis` (J changes at 13:00 on 14 Oct: every period × desk) |
+| Medium: missing current equity was replaced with today's close | E(today) is the snapshot's current desk equity only; a retained or missing value stays unknown. The dip is unknown when any value on its path is (an unknown session close included), never computed over the known part | `today’s money: …`; browser `r1-money-now` (J without money now, the record holding a close for today) |
+| Medium: Week/Month used Day's calculations when start = end | Intraday points and Day's chart follow the period kind (`per.p === 'day'`), never `start === end`; `moneyContext` fetches History's points for Day only | `period kind decides: …` (Week on Monday, Month on the 1st, the year on 1 Jan, All on day one); browser `AC-10` on every switch |
+| Medium: sparse dates distorted the chart's time scale | The x axis is real time over the period: each close at the end of its Vienna date (`viennaMidnight`, via `time.mjs`), today at now, before tracking zero by definition up to the tracking start; missing dates keep their width and a session without a close breaks the line. Labels at the first and last point and the point nearest the middle | `hero chart: a real time axis …`; browser `r1-time-axis` (drawn x of every point against its time) |
+| Medium: accepted money could overflow (`BigInt64Array`) | Money columns and every sum are BigInt (arbitrary precision); History's columns also carry each desk's equity exactly (`equityUnits`, parsed in the worker), so Day's intraday points no longer go through a Number; text is formatted from exact units (`format.js` and `bn`/`pl` accept BigInt units: rounded once, never through a Number), prices included. Found with it: calendar cells clipped any day from about € 100 (desktop) or € 1.000 (phones); a day's amount now always fits its cell (`calAmount`: "4,10", "123", "12k", "1,2M" … "9e15"; phones "4,1", "123", "1,2k", "0,1M", scaled forms a step smaller), exact in the label and the day's trades | `money: exact …` (€ 100.000,12345678, € 100 billion, a 64-bit-overflowing sum, the longest amount the contract allows); `calendar amounts: …`; browser `r1-exact` (tiles, split, calendar and labels, audit clean at 390 and 1440) |
+| Medium: equal daily results implied one trading day | "only day" follows the count of trading days (`R.days === 1`, `dayTile`); ties: the first equal day is the best, the last the worst | `best and worst day: …`; browser `r1-days` |
+
+The review listed no Low findings.
+
+**Verification (fix round 1).** `npm run check`; `npm test` (contracts 95,
+UI 45 incl. 23 Results, server contract 40) under Europe/Vienna, UTC and
+America/New_York; `node scripts/browser-p4.mjs` 1613/1613 under Europe/Vienna
+and under TZ=UTC (new section `r1`); `node scripts/browser-p3.mjs` 2170/2170;
+reference budget 31/31 on mbp2607 (Apple M5 Max, HeadlessChrome 153.0.8010.12,
+Node v26.11.1), 2026-10-15: Results render worst 7.3 ms, no long task at 390,
+1024 or 1440; Desk patch 7.4 ms, History draw 8.7 ms. Exact money adds about
+1 ms to receiving a record or a History on the page (BigInt columns are
+copied, not transferred). No push, deploy or review gate.
