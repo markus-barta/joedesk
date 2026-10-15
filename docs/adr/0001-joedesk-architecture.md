@@ -916,3 +916,13 @@ the merge gate for both the budget and the font-dependent layout checks.
 Still open, with owner: the Appearance Light / Dark / System control (P5),
 Results numbers and AC-46 (P4), and the Linux CI browser run before merge.
 
+### P3 fix round 2 — JOED-23
+
+Codex review r2 (changes) confirmed seven r1 findings fixed and found two
+Medium gaps. Both are fixed with regressions.
+
+| Finding | Fix | Proof |
+| --- | --- | --- |
+| Medium: a cold start without a clock still blanked Results | Results labels its calendar by this browser's date until the server's clock is known (`resultsToday`, shared by the renderer and its controls); it is not wired, so no state depends on that date. It shows its designed not-wired state | browser `cold`: Results reached from the nav and opened directly at `#results`, for 401 at six combos and 302, 404, 503, connection refused; `results:` (ui-modules) |
+| Medium: the zoomed comparison used observations the chart left out | `chartRows` gives each desk's kept rows (up to the board's time, latest comparable bookkeeping basis); the chart, the comparison and the basis notice all read exactly those rows | `history: a zoom compares exactly the points the chart draws…` (ui-modules); browser `basis`: J changes basis at 13:00 on 14 Oct; zoomed before it, nothing about J is compared and the notice names J; the week and a zoom across it compare the chart's own points, at six combos (zoom on desktop) |
+

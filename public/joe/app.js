@@ -7,11 +7,10 @@ import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, forgetCharts } from './desk.js';
 import { renderHistory, historyChart, HS } from './history.js';
-import { renderResults, RS, stepPeriod } from './results.js';
+import { renderResults, RS, stepPeriod, resultsToday } from './results.js';
 import { boardHealthPresentation, dataAge, cellReason } from './health.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { dateTimeFull, age, NB, joinUnits } from './format.js';
-import { viennaDay } from './time.mjs';
 
 const SCREENS = ['desk', 'results', 'history', 'settings'];
 const root = document.documentElement;
@@ -239,9 +238,7 @@ function start() {
     render('results-period');
   });
   $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { RS.desk = b.dataset.desk; render('results-desk'); } });
-  // Results is not wired (P4): its calendar only needs a date to label. Before
-  // the server's clock is known it labels by this browser's date.
-  const today = () => viennaDay(feed.now() ?? new Date().toISOString());
+  const today = () => resultsToday(feed.now());
   $('#prevPer').addEventListener('click', () => { stepPeriod(-1, today()); render('results-step'); });
   $('#nextPer').addEventListener('click', () => { stepPeriod(1, today()); render('results-step'); });
   $('#prevMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m ? [y, m - 1] : [y - 1, 11]; render('results-month'); });

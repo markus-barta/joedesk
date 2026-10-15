@@ -28,7 +28,7 @@ const { cellView, cardStatus } = await import('../public/joe/desk.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
 const { readdirSync } = await import('node:fs');
-const { periodOf } = await import('../public/joe/results.js');
+const { periodOf, resultsToday } = await import('../public/joe/results.js');
 const { TERMS } = await import('../public/joe/terms.js');
 const { singleMissingDesk, coupledUnavailable } = await import('../scripts/browser/board.mjs');
 
@@ -308,16 +308,54 @@ test('history: basis breaks exclude older records and compare stays on observed,
   const points = [pt(iso(0), { j: 4000, joe: 5000 }, { j: 'j.old' }), pt(iso(1), { j: 5000, joe: 5000 }, { j: 'j.paper.v2' }),
     pt(iso(2), { j: 5010, joe: 4990 }, { j: 'j.paper.v2' })];
   const cols = hm.toColumns(points);
-  const all = hm.rangeWindow(cols, 'all', T0 + 10 * 60000);
+  const end = T0 + 10 * 60000;
+  const all = hm.rangeWindow(cols, 'all', end);
   assert.equal(hm.latestCompatibleBasis(cols, 'j').start, 1);
-  assert.deepEqual(hm.basisNotice(cols, ['j', 'joe'], all), ['j']);
-  const compare = hm.sharedWindowCompare(cols, ['j', 'joe'], all);
+  assert.deepEqual(hm.basisNotice(cols, ['j', 'joe'], all, end), ['j']);
+  const compare = hm.sharedWindowCompare(cols, ['j', 'joe'], all, end);
   assert.equal(compare.ok, true);
   assert.equal(compare.startAt, iso(1));
   assert.deepEqual(compare.desks.map(d => Number(d.pct.toFixed(2))), [0.2, -0.2]);
   const pair = hm.toColumns([pt(iso(0), { j: 5000 }), pt(iso(1), { j: 5000 })]);
-  assert.equal(hm.sharedWindowCompare(pair, ['j', 'joe'], hm.rangeWindow(pair, 'all', T0 + 60000)).reason, 'incomplete-coverage');
-  assert.equal(hm.sharedWindowCompare(cols, ['j'], all).reason, 'insufficient-selection');
+  assert.equal(hm.sharedWindowCompare(pair, ['j', 'joe'], hm.rangeWindow(pair, 'all', T0 + 60000), T0 + 60000).reason, 'incomplete-coverage');
+  assert.equal(hm.sharedWindowCompare(cols, ['j'], all, end).reason, 'insufficient-selection');
+});
+
+// The chart's points for a desk: the observed values it draws, by time.
+const drawn = (cols, id, range, end) => new Map(hm.continuitySeries(cols, id, range, end).observed.filter(p => p.y !== null).map(p => [p.x, p.y]));
+
+test('history: a zoom compares exactly the points the chart draws, never a record it leaves out', () => {
+  // J changes its bookkeeping basis at 12:00; Joe never does. Every point is observed.
+  const points = [];
+  for (let m = 0; m <= 8 * 60; m += 5) {
+    const t = Date.parse('2026-10-13T08:00:00.000Z') + m * 60000, before = t < Date.parse('2026-10-13T12:00:00.000Z');
+    points.push(pt(new Date(t).toISOString(), { j: before ? 4000 + m / 5 : 5000 + m / 5, joe: 5000 - m / 10 }, { j: before ? 'j.paper.v1' : 'j.paper.v2', joe: 'joe.paper.v2' }));
+  }
+  const cols = hm.toColumns(points);
+  const now = Date.parse('2026-10-13T16:30:00.000Z');
+  // Zoomed wholly before J's change: the chart draws no J observation there,
+  // so nothing about J is compared and the basis notice names J.
+  const early = [Date.parse('2026-10-13T09:00:00.000Z'), Date.parse('2026-10-13T11:00:00.000Z')];
+  const inView = ([a, b]) => [...drawn(cols, 'j', '1d', now).keys()].filter(x => x >= a && x <= b);
+  assert.equal(inView(early).length, 0, 'the chart plots no J observation before the change');
+  const before = hm.sharedWindowCompare(cols, ['j', 'joe'], early, now);
+  assert.deepEqual([before.ok, before.reason], [false, 'incompatible-basis'], 'no J number from records the chart left out');
+  assert.deepEqual(hm.basisNotice(cols, ['j', 'joe'], early, now), ['j']);
+  // The same window without J compares Joe, whose records are all drawn.
+  assert.equal(hm.sharedWindowCompare(cols, ['joe', 'joel'], early, now).ok, false, 'Joel has no records');
+  // Zoomed across the change: the comparison starts at J's first drawn point
+  // and its numbers are the chart's own points at both ends.
+  for (const zoom of [[Date.parse('2026-10-13T11:00:00.000Z'), Date.parse('2026-10-13T13:00:00.000Z')], [Date.parse('2026-10-13T13:10:00.000Z'), Date.parse('2026-10-13T15:50:00.000Z')]]) {
+    const result = hm.sharedWindowCompare(cols, ['j', 'joe'], zoom, now);
+    assert.equal(result.ok, true);
+    assert.ok(Date.parse(result.startAt) >= Date.parse('2026-10-13T12:00:00.000Z') && Date.parse(result.startAt) >= zoom[0] && Date.parse(result.endAt) <= zoom[1]);
+    for (const d of result.desks) {
+      const chart = drawn(cols, d.id, '1d', now);
+      assert.deepEqual([d.start, d.end], [chart.get(Date.parse(result.startAt)), chart.get(Date.parse(result.endAt))], `${d.id} compares the chart's points`);
+      assert.equal(d.pct, (d.end - d.start) / d.start * 100);
+    }
+    assert.deepEqual(hm.basisNotice(cols, ['j', 'joe'], zoom, now), zoom[0] < Date.parse('2026-10-13T12:00:00.000Z') ? ['j'] : []);
+  }
 });
 
 test('history: compare uses exactly the chart window, anchored to the board time, not the last observation', () => {
@@ -330,14 +368,16 @@ test('history: compare uses exactly the chart window, anchored to the board time
   assert.deepEqual(day, [now - 864e5, now]);
   assert.deepEqual([hm.continuitySeries(cols, 'j', '1d', now).startAt, hm.continuitySeries(cols, 'j', '1d', now).endAt], day, 'chart and compare share the window');
   assert.equal(hm.continuitySeries(cols, 'j', '1d', now).observed.filter(p => p.y !== null).length, 0, 'the Day chart has no observed point');
-  assert.deepEqual([hm.sharedWindowCompare(cols, ['j', 'joe'], day).ok, hm.sharedWindowCompare(cols, ['j', 'joe'], day).reason], [false, 'insufficient-points']);
+  assert.deepEqual([hm.sharedWindowCompare(cols, ['j', 'joe'], day, now).ok, hm.sharedWindowCompare(cols, ['j', 'joe'], day, now).reason], [false, 'insufficient-points']);
   const week = hm.rangeWindow(cols, '1w', now);
-  const compare = hm.sharedWindowCompare(cols, ['j', 'joe'], week);
+  const compare = hm.sharedWindowCompare(cols, ['j', 'joe'], week, now);
   assert.equal(compare.ok, true);
   assert.ok(Date.parse(compare.startAt) >= week[0] && Date.parse(compare.endAt) <= week[1]);
   const zoom = [Date.parse('2026-10-13T00:00:00.000Z'), Date.parse('2026-10-13T06:00:00.000Z')];
-  const zoomed = hm.sharedWindowCompare(cols, ['j', 'joe'], zoom);
+  const zoomed = hm.sharedWindowCompare(cols, ['j', 'joe'], zoom, now);
   assert.deepEqual([zoomed.startAt, zoomed.endAt], ['2026-10-13T00:00:00.000Z', '2026-10-13T06:00:00.000Z'], 'a zoom narrows the comparison with the chart');
+  const chart = drawn(cols, 'j', '1w', now);
+  assert.deepEqual([zoomed.desks[0].start, zoomed.desks[0].end], [chart.get(zoom[0]), chart.get(zoom[1])], 'the zoomed numbers are the chart\'s points');
 });
 
 test('history: the real gap fixture keeps observed siblings and a null J gap', () => {
@@ -393,6 +433,10 @@ test('results: period labels use plain words; no YTD or week-number shorthand', 
   assert.equal(periodOf('ytd', today, today).lab, 'This year · since 1 Jan');
   assert.equal(periodOf('day', '2026-10-13', today).lab, 'Yesterday · Tue 13 Oct');
   assert.equal(periodOf('month', '2026-09-30', today).lab, 'Last month · September');
+  // Before the server's clock is known Results still has a date to label: this browser's.
+  assert.equal(resultsToday('2026-10-14T22:30:00.000Z'), '2026-10-15', 'the server clock, as a Vienna date');
+  assert.match(resultsToday(null), /^\d{4}-\d{2}-\d{2}$/, 'no clock: no throw, a date to label');
+  assert.equal(periodOf('week', resultsToday(null), resultsToday(null)).lab.startsWith('This week · '), true);
 });
 
 test('terms: every entry has a plain label, a meaning and the trade term', () => {

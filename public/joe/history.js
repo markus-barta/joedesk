@@ -39,12 +39,12 @@ export function historyWindow(cols, endAt) {
   return HS.zoom ?? rangeWindow(cols, HS.range, endAt);
 }
 
-function compareLine(cols, bounds) {
+function compareLine(cols, bounds, endAt) {
   if (HS.desks.length < 2) return 'Choose two or more desks to compare them over the same window.';
-  const result = sharedWindowCompare(cols, HS.desks, bounds);
+  const result = sharedWindowCompare(cols, HS.desks, bounds, endAt);
   if (!result.ok) {
     return result.reason === 'incomplete-coverage' ? 'Comparing needs the same moments for every chosen desk in this window.'
-      : result.reason === 'incompatible-basis' ? 'Comparing needs two moments on the same bookkeeping basis.'
+      : result.reason === 'incompatible-basis' ? 'Comparing needs two moments on every chosen desk’s current bookkeeping basis.'
         : result.reason === 'insufficient-points' ? 'Not enough history in this window to compare.' : 'Choose two or more desks to compare them over the same window.';
   }
   const when = iso => `${dayDDM(iso)}, ${timeHM(iso)}`;
@@ -225,9 +225,9 @@ export function renderHistory(ctx) {
   const cols = cell?.value?.columns ?? EMPTY;
   const moved = patch($('#histStatus'), statusLine(cell));
   if (ctx.now) {
-    const bounds = historyWindow(cols, Date.parse(ctx.now));
-    const excluded = basisNotice(cols, HS.desks, bounds);
-    $('#histCompare').textContent = compareLine(cols, bounds);
+    const endAt = Date.parse(ctx.now), bounds = historyWindow(cols, endAt);
+    const excluded = basisNotice(cols, HS.desks, bounds, endAt);
+    $('#histCompare').textContent = compareLine(cols, bounds, endAt);
     $('#histBasis').textContent = excluded.length ? `This chart shows comparable records for ${excluded.map(id => LABEL[id]).join(' and ')}. Older records on another bookkeeping basis stay in the history file.` : '';
   } else {
     $('#histCompare').textContent = 'Comparing waits for the board server’s clock.';

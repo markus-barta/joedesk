@@ -53,16 +53,14 @@ export const compatibleBasis = (cols, id, a, b) => cols.desks[id].basis[a] === c
 export function latestCompatibleBasis(cols, id, from = 0, to = cols.n) {
   let anchor = -1;
   for (let i = to - 1; i >= from; i--) if (meaningful(cols, id, i)) { anchor = i; break; }
-  if (anchor < 0) return { start: from, excludedCount: 0, identified: false };
+  if (anchor < 0) return { start: from, identified: false };
   let start = anchor;
   for (let i = anchor - 1; i >= from; i--) {
     if (!meaningful(cols, id, i)) continue;
     if (!compatibleBasis(cols, id, i, anchor)) break;
     start = i;
   }
-  let excludedCount = 0;
-  for (let i = from; i < start; i++) if (!Number.isNaN(cols.desks[id].equity[i])) excludedCount++;
-  return { start, excludedCount, identified: cols.desks[id].identified[anchor] === 1 };
+  return { start, identified: cols.desks[id].identified[anchor] === 1 };
 }
 
 // First row at or after a time (binary search; times are strictly ordered).
@@ -80,6 +78,15 @@ export function rangeWindow(cols, range, endAt) {
   return [rowAt(cols, endAt + 1) ? cols.t[0] : endAt - 864e5, endAt];
 }
 const windowRows = (cols, [from, to]) => [rowAt(cols, from), rowAt(cols, to + 1)];
+
+// The rows the chart keeps for one desk, [start, last): every row up to the
+// board's current time on the desk's latest comparable bookkeeping basis. The
+// chart, the comparison and the basis notice all read exactly these rows, so
+// a zoom never compares an observation the chart left out.
+export function chartRows(cols, id, endAt) {
+  const last = rowAt(cols, endAt + 1);
+  return { start: latestCompatibleBasis(cols, id, 0, last).start, last };
+}
 
 const gapPoint = (x, y, assumption, extra = {}) => ({ x, y, estimated: true, assumption, ...extra });
 function valueAt(samples, x) {
@@ -105,10 +112,9 @@ function clipGap(samples, startAt, endAt) {
 // Observed samples (null y marks a gap) plus the dotted continuity groups for
 // one desk, clipped to the visible range ending at the board's current time.
 export function continuitySeries(cols, id, range, endAt) {
-  const last = rowAt(cols, endAt + 1);
+  const { start, last } = chartRows(cols, id, endAt);
   const earliest = last ? cols.t[0] : null;
   const [startAt] = rangeWindow(cols, range, endAt);
-  const { start } = latestCompatibleBasis(cols, id, 0, last);
   const eq = cols.desks[id].equity;
   const inside = rowAt(cols, startAt);
   const from = Math.max(start, inside - 1), seenRows = [];
@@ -149,16 +155,18 @@ export function continuitySeries(cols, id, range, endAt) {
   return { observed: observed.filter(p => p.x <= endAt), gaps: groups.map(g => clipGap(g, startAt, endAt)).filter(g => g.length > 1), startAt, endAt };
 }
 
-// Same-timestamp comparison of the selected desks on observed, compatible
-// rows only, inside the chart's window [from, to] (milliseconds).
-export function sharedWindowCompare(cols, ids, bounds) {
+// Same-timestamp comparison of the selected desks on the rows the chart draws
+// (observed, latest comparable basis), inside its window [from, to] in
+// milliseconds; endAt is the board's current time, as for the chart.
+export function sharedWindowCompare(cols, ids, bounds, endAt) {
   if (ids.length < 2 || !cols.n) return { ok: false, reason: 'insufficient-selection' };
   const [from, to] = windowRows(cols, bounds);
   if (to - from < 2) return { ok: false, reason: 'insufficient-points' };
+  const kept = ids.map(id => chartRows(cols, id, endAt));
   let runStart = -1, runEnd = -1, lastBreak = 'incomplete-coverage';
   for (let i = from; i < to; i++) {
     if (!ids.every(id => !Number.isNaN(cols.desks[id].equity[i]))) { runStart = -1; lastBreak = 'incomplete-coverage'; continue; }
-    if (runStart >= 0 && ids.some(id => !compatibleBasis(cols, id, runEnd, i))) { runStart = i; runEnd = i; lastBreak = 'incompatible-basis'; continue; }
+    if (kept.some(k => i < k.start || i >= k.last)) { runStart = -1; lastBreak = 'incompatible-basis'; continue; }
     if (runStart < 0) runStart = i;
     runEnd = i;
   }
@@ -169,9 +177,15 @@ export function sharedWindowCompare(cols, ids, bounds) {
   }) };
 }
 
-export function basisNotice(cols, ids, bounds) {
+// The desks with observations inside the window that the chart leaves out
+// because they sit on an older bookkeeping basis.
+export function basisNotice(cols, ids, bounds, endAt) {
   const [from, to] = windowRows(cols, bounds);
-  return ids.filter(id => latestCompatibleBasis(cols, id, from, to).excludedCount > 0);
+  return ids.filter(id => {
+    const { start } = chartRows(cols, id, endAt), eq = cols.desks[id].equity;
+    for (let i = from; i < Math.min(to, start); i++) if (!Number.isNaN(eq[i])) return true;
+    return false;
+  });
 }
 
 // The last observed value of each New York session, for the desk cards'

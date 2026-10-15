@@ -55,11 +55,16 @@ export function stepPeriod(dir, today) {
   RS.anchor = RS.sel = k; RS.cal = ymOf(k);
 }
 
+// Results is not wired (P4): its calendar only needs a date to label. Before
+// the server's clock is known it labels by this browser's date, so a cold
+// start without a clock still shows the not-wired state, never a blank page.
+export const resultsToday = now => viennaDay(now ?? new Date().toISOString());
+
 const D = '<span class="bn muted">—</span>';
 const TILES = [['trades', 'repeat'], ['won', 'target'], ['avgtrade', 'equal'], ['pf', 'scale'], ['typical', 'updown'], ['besttrade', 'award'], ['dip', 'dip'], ['bestday', 'days']];
 
 export function renderResults(ctx) {
-  const today = viennaDay(ctx.now);
+  const today = resultsToday(ctx.now);
   RS.anchor ??= today; RS.sel ??= today; RS.cal ??= ymOf(today);
   const per = periodOf(RS.period, RS.anchor, today);
   const reason = ctx.states.results?.reason ?? 'results_not_wired';
