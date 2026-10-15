@@ -135,6 +135,9 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .hdr-health { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); white-space: nowrap; font-weight: 500; }
 .hdr-health:hover { background: var(--row-hover); color: var(--ink); }
 .hdr-health b { font-weight: 600; color: var(--ink); }
+/* When the header is short of room, the broker word moves under the label,
+   inside the button, instead of pushing the page wider. */
+.hdr-health .lbl { display: inline-flex; flex-wrap: wrap; column-gap: 7px; line-height: 1.1; text-align: left; }
 .icon-btn { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); }
 .icon-btn:hover { background: var(--row-hover); color: var(--ink); }
 .icon-btn:disabled { color: var(--line-2); box-shadow: none; cursor: default; }
@@ -376,20 +379,37 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .desk-grid .dcard:last-child { grid-column: 1 / 3; }
 }
 
-/* ---------- Phone ---------- */
-@media (max-width: 700px) {
-  :root { --gutter: 16px; }
-  body { font-size: 15px; }
+/* ---------- Compact header (phones and narrow windows) ----------
+   The desktop header needs up to about 930 px in a wide font. Up to 960 px the
+   header is the phone's: the nav moves to the bottom bar and the header's
+   buttons are 44 px. Above 700 px the light keeps its broker word. */
+@media (max-width: 960px) {
   .top-in { height: 54px; gap: 8px; }
   .nav { display: none; }
   .hdr-health { padding: 0 8px; height: 44px; }
-  .hdr-health .lbl-long { display: none; }
-  .icon-btn { width: 44px; height: 44px; }
+  .top .icon-btn { width: 44px; height: 44px; }
   .bottom-nav { display: flex; position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 30; padding: 4px; border-radius: 22px; background: color-mix(in srgb, var(--surface) 90%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow-pop); }
   .bottom-nav button { flex: 1; height: 56px; border: 0; background: transparent; color: var(--ink-3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 600; border-radius: 18px; }
   .bottom-nav button .i { width: 20px; height: 20px; }
   .bottom-nav button[aria-current="page"] { color: var(--ink); background: var(--accent-tint); }
   .foot { margin-bottom: 84px; }
+}
+/* Up to 900 px a kept row has two lines: the holding and its worth, then the
+   kept label under the holding. Its side and last price are already in the
+   holding's second line. */
+@media (max-width: 900px) {
+  .kept .prow { grid-template-columns: 38px minmax(0, 1fr) auto; }
+  .kept .prow .c-side, .kept .prow .c-px { display: none; }
+  .kept .prow .r { grid-column: 2 / -1; text-align: left; }
+  .kept .kept-label { justify-content: flex-start; }
+}
+
+/* ---------- Phone ---------- */
+@media (max-width: 700px) {
+  :root { --gutter: 16px; }
+  body { font-size: 15px; }
+  .hdr-health .lbl-long { display: none; }
+  .icon-btn { width: 44px; height: 44px; }
   .seg button { height: 44px; min-width: 44px; padding: 0 10px; }
   .btn { height: 44px; }
   .learn { height: 44px; padding: 0 13px; }
@@ -466,8 +486,18 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .session > div { min-width: 0; }
 .ring-t { font: 650 11px var(--font); fill: var(--ink); }
 .ring-s { font: 500 8.5px var(--font); fill: var(--ink-3); }
-.dcard header { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 2px 11px; }
+/* A desk card's header: the state never runs under the heartbeat line. Short
+   of room, the heartbeat line takes two lines, inside the name and state's
+   height; a card narrower than 340 px puts it under the state, as on phones. */
+.dcard { container-type: inline-size; }
+.dcard header { display: grid; grid-template-columns: 34px minmax(min-content, 1fr) auto; align-items: center; gap: 2px 11px; }
 .dcard .who { min-width: 0; }
+.dcard .hb { white-space: normal; text-align: right; }
+.dcard .hb .term, .dcard .hb .age { white-space: nowrap; }
+@container (max-width: 339.98px) {
+  .dcard header { grid-template-columns: 34px minmax(0, 1fr); }
+  .dcard .hb { grid-column: 2; margin-left: 0; text-align: left; }
+}
 .dcard .state .i { width: 15px; height: 15px; }
 .dnums > div { min-width: 0; }
 span.dbar, span.vbar { display: block; }
@@ -565,7 +595,7 @@ span.dbar, span.vbar { display: block; }
 @media (max-width: 700px) {
   .hero-l .display { height: 53px; }
   .dcard header { grid-template-columns: 34px minmax(0, 1fr); }
-  .dcard .hb { grid-column: 2; margin-left: 0; }
+  .dcard .hb { grid-column: 2; margin-left: 0; text-align: left; }
   .hist-compare { min-height: 42px; }
   .hist-state .btn { height: 44px; }
   .kpi .c { min-height: 3lh; }

@@ -93,7 +93,7 @@ export function headerHealth(ctx, health) {
   const data = ctx.feeds.data?.value;
   const broker = data ? brokerState(ctx.states, data) : { word: 'unsure', tone: 'warn' };
   const words = { OK: 'Broker OK', degraded: 'Broker unstable', down: 'Broker down', unsure: 'Broker unsure' };
-  return { html: `${icon(TONE_ICON[health.statusTone], `i tone-${health.statusTone}`)}<b>${esc(health.label)}</b><span class="lbl-long">· ${words[broker.word]}</span>`,
+  return { html: `${icon(TONE_ICON[health.statusTone], `i tone-${health.statusTone}`)}<span class="lbl"><b>${esc(health.label)}</b><span class="lbl-long">· ${words[broker.word]}</span></span>`,
     label: `${health.label}, broker connection ${broker.word === 'OK' ? 'OK' : broker.word}. Open Desk.` };
 }
 
