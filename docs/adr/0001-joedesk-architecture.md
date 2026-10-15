@@ -1,7 +1,8 @@
 # ADR 0001: JoeDesk contracts and resilient read model
 
-Status: P1 foundation merged; P2 server integration candidate for JOED-22 (mapping
-below), under JOED-19. Coordinator
+Status: P1 foundation, P2 server and P3 UI merged into rebuild/v2; P4 Results
+candidate for JOED-24 (last section). Earlier text: P2 server integration
+candidate for JOED-22 (mapping below), under JOED-19. Coordinator
 review remains outstanding. No runtime cutover, producer edit, push or deployment
 is part of P1. P1 left the existing server and browser on legacy contracts;
 the P2 candidate below connects the server, while browser integration stays P3.
@@ -1036,3 +1037,130 @@ Visible change for the visual check: the compact header and bottom bar from
 701 to 960 px, two-line kept rows up to 900 px, and the card heartbeat under
 the state at 710–830 and 1110–1230 px. At 390, 1024 and 1440 the design state
 is unchanged.
+
+## P4 Results candidate — JOED-24
+
+P4 builds Results on the results v2 contract, exactly per the approved freeze
+(r3.1) and spec §4 / Part A. The live board still shows the designed not-wired
+state: the server answers `/joe/results.json` with 503 `results_not_wired`
+until JOED-20 delivers the record; P4 proves everything against v2 fixtures.
+
+**Data path.** The page reads `/joe/results.json` every 30 s in the read worker
+(`history-worker.js`, which now serves both large reads) through the shared
+`acceptRead`, so SSO redirects, failed refreshes and invalid records keep the
+last good record with its original receipt. An accepted record is indexed once
+(`results-model.js`, `indexResults`): trades sorted by `closedAt`, and per
+(Vienna date, desk) cell the counts and exact sums (net, gross, fees, winners,
+losers, best and worst trade), plus each desk's equity close with carry. The
+index travels to the page as typed columns by transfer (trade text as one
+string with offsets) and exact money columns of BigInt in 10⁻⁸ units, by copy
+(fix round 1: a `BigInt64Array` wrapped past € 92 billion). Every Results number is
+then a pure selector over the index, the snapshot's current desk equity (today's
+E) and, for Day, History's observed intraday rows. `panelStates` gives the
+record its own state; a not-fresh record says so inside the hero chart's box
+(same pattern as History), so no state moves the page. Ticks only refresh ages:
+Results is rebuilt when its inputs change.
+
+**§4.2 exactly.** Vienna dates of `closedAt` (one Intl call per UTC hour, since
+Vienna's midnight is always a whole UTC hour). E(d) is the selected desks' last
+equity close on or before d, € 5.000 per desk before tracking or before a desk's
+first close, null when the record says unknown; today E is the snapshot's
+current (non-retained) desk equity and nothing else (fix round 1: a close in
+the record never stands in), else unknown, in which case Net, Still open and
+the dip are "—" with a sentence, never a zero. Won ≥ € 0,005, lost ≤ −€ 0,005,
+flat otherwise; win rate over decided
+trades with "small sample" under 30; expectancy over all trades; profit factor
+without a loser is "—"; drawdown over [E(S−1), each session close (Day: each
+observed intraday point), E now]; best and worst day by realised net per Vienna
+date with "only day". Display values are rounded once, half away from zero
+(`contracts/decimal.mjs` gains exact `divRound`, `roundUnits`, `mulUnits`,
+`divUnits`, `unitsDecimal`, `unitsNumber`); FX arithmetic is proven exact per
+trade (`grossFromFx`: quantity × price move × close rate = `grossEur`).
+
+**KEEP.** The contract rejects SXR8/TSLA trades. A record that still trades any
+symbol on the accepted Fleet Config KEEP list is held back as a whole
+(`source_not_authoritative`), never partially subtracted (§3's rule).
+
+| P4 obligation (deferred notes) | Proof |
+| --- | --- |
+| Vienna-midnight buckets independent of the NY day; both NY 01:xx occurrences by UTC instant; extended hours after 18:00 NY | `fixtures/results/dst-weeks.json`; `vienna dates: …` (`test/results-model.mjs`); browser `vienna` at a 2027 today (the five-hour week, 1 Nov's two 01:30s, Vienna midnight on 25 Oct, the spring twin) |
+| Results v1 → v2 | P4 consumes only `inspr.joe.household.results.v2` through `validateContract`; no v1 path or widening. JOED-20 coordination items below |
+| Results paging/retention | The board reads the whole record (≤ 8 MiB) in the worker; the budget trace uses 14,000 trades (7.8 MiB). Paging before the limit stays with JOED-20 |
+| §4.2 math, scratches, small sample, no loser, drawdown incl. Day intraday, empty period (AC-12) | `test/results-model.mjs` on hand-checkable fixtures (`scratches`, `no-losers`, `drawdown`, `empty`); browser `AC-12`/`AC-16` show the same numbers |
+| §9 budget | Workload: the 14,000-trade record (7.77 MiB) read, validated and indexed in the worker, then 11 period, desk, step and day changes at each width. Reference on mbp2607 (Apple M5 Max, HeadlessChrome 153.0.8010.12, Node v26.11.1), 2026-10-15: Results render worst 7.0 ms, no long task at 390, 1024 or 1440; the P3 workload unchanged (Desk patch 7.7 ms, History draw 9.3 ms). CI guard (2.5 ×): browser `budget` |
+
+**For JOED-20 (coordination, not filed or implemented here).**
+1. Freshness: the shared selector marks a record stale after 60 s. The producer
+   should re-send (or the server re-stamp) at least every 30 s, or the
+   freshness rule for results must be agreed separately.
+2. Ingress: no results route exists; the server keeps answering not wired.
+   Who builds the server side (acceptance through `acceptSnapshot('results')`,
+   persistence, `X-Joe-Received-At`) is JOED-20's call with this repo.
+3. `days[].realisedNet/fees/trades` are not cross-checked against `trades[]`;
+   the board uses the trades (spec §7). A semantic check could be added to the
+   contract once the producer agrees.
+4. Gross rounding: the board proves `grossEur` = quantity × move × rate exactly
+   on fixtures; the producer's rounding rule (exact or to cents) needs one
+   written decision.
+5. Every configured KEEP symbol stays out of the record (the board holds back a
+   record that trades one).
+6. (Fix round 1.) The record's closes carry no bookkeeping basis, so the board
+   can detect a change of basis only inside History's 14 days or against the
+   snapshot now. A basis id per desk close in `days[]` (or a restated record
+   after a change) would let the board check every period.
+
+**Changed P3 expectations (deliberate).** Results now reads its own record, so
+P3's cold-start checks route `results.json` with the other reads and expect
+Results to show its own failure reason ("Results are unavailable: sign-in
+expired — reload."), and the unit cold-start test expects the record's own
+reason. The not-wired 503 now carries `X-Joe-Server-Now` like every other read
+(server-contract test updated). The P3 audit moved unchanged to
+`scripts/browser/gate.mjs`, shared by both gates. Budget renders exclude every
+read's accept/worker timing.
+
+**Tick's P3 follow-up.** At 390 (and in any card narrower than 340 px) the desk
+card keeps "Checked in … ago" right-aligned on the name row, the state on the
+row below; its term has an invisible 44 px hit area. Browser `P3-follow-up`.
+
+**Decisions for the visual check.** (1) The hero chart is zero-based (AC-46)
+and keeps §4.7's minimum span of ±0,5 % of the period-start money (AC-17), so
+a small week uses part of the height; the zero line is the period-start
+line. (2) The split and the benchmark line sit at the hero's bottom, so a
+longer sentence never moves a number. (3) Best and worst trade are named by
+symbol and desk, never clipped by a long company name. (4) US market holidays
+read "closed"; weeks still ahead show no sum. (5) In a wide font a By-desk
+row's facts take a second line inside the row. (6) A day's chart spans the
+regular session in Vienna time, widened to any change outside it.
+
+**Verification (this candidate).** `npm run check`; `npm test` (contracts 95,
+UI 38 incl. 16 Results, server contract 40); `node scripts/browser-p4.mjs`
+1323/1323 under Europe/Vienna and under TZ=UTC; `node scripts/browser-p3.mjs`
+2170/2170; reference budget 31/31 on mbp2607. Screenshots and the AC → test
+map: `~/.local/share/joedesk-qa/p4/index.md`. No push, deploy or review gate.
+
+### P4 fix round 1 — JOED-24
+
+Codex review r1 (changes) found one High and five Medium issues. All are fixed
+at the root; each has a unit test in `test/results-model.mjs` that fails on
+7009b62, and a browser regression at 1440 light and 390 dark.
+
+| Finding | Fix | Proof |
+| --- | --- | --- |
+| High: incompatible bookkeeping bases became losses (intraday observations used without their basis) | No Results number is derived across a change of a desk's bookkeeping basis (History contract: a cutover is not profit). `basisCuts` finds every change between two of a desk's meaningful History observations (all-null rows without metadata are unknown, not a new basis) and one at now when the snapshot's basis differs from History's last row; `basisKey`/`meaningful` are shared with History. `moneyContext` checks, per desk, from the close E(S−1) stands on to the close E(end) stands on (or now); `intraday` itself returns no points across a change. Across one, Net, Still open, the dip and the chart are "—"/empty and the change is said ("No result this week: J’s bookkeeping basis changed on Wed 14 Oct, and a change of basis is not a gain or a loss."); closed-trade numbers and unaffected desks stand. The record carries no basis, so a change older than History's 14 days is not visible to the board (JOED-20 item 6 above) | `basis: …`; browser `r1-basis` (J changes at 13:00 on 14 Oct: every period × desk) |
+| Medium: missing current equity was replaced with today's close | E(today) is the snapshot's current desk equity only; a retained or missing value stays unknown. The dip is unknown when any value on its path is (an unknown session close included), never computed over the known part | `today’s money: …`; browser `r1-money-now` (J without money now, the record holding a close for today) |
+| Medium: Week/Month used Day's calculations when start = end | Intraday points and Day's chart follow the period kind (`per.p === 'day'`), never `start === end`; `moneyContext` fetches History's points for Day only | `period kind decides: …` (Week on Monday, Month on the 1st, the year on 1 Jan, All on day one); browser `AC-10` on every switch |
+| Medium: sparse dates distorted the chart's time scale | The x axis is real time over the period: each close at the end of its Vienna date (`viennaMidnight`, via `time.mjs`), today at now, before tracking zero by definition up to the tracking start; missing dates keep their width and a session without a close breaks the line. Labels at the first and last point and the point nearest the middle | `hero chart: a real time axis …`; browser `r1-time-axis` (drawn x of every point against its time) |
+| Medium: accepted money could overflow (`BigInt64Array`) | Money columns and every sum are BigInt (arbitrary precision); History's columns also carry each desk's equity exactly (`equityUnits`, parsed in the worker), so Day's intraday points no longer go through a Number; text is formatted from exact units (`format.js` and `bn`/`pl` accept BigInt units: rounded once, never through a Number), prices included. Found with it: calendar cells clipped any day from about € 100 (desktop) or € 1.000 (phones); a day's amount now always fits its cell (`calAmount`: "4,10", "123", "12k", "1,2M" … "9e15"; phones "4,1", "123", "1,2k", "0,1M", scaled forms a step smaller), exact in the label and the day's trades | `money: exact …` (€ 100.000,12345678, € 100 billion, a 64-bit-overflowing sum, the longest amount the contract allows); `calendar amounts: …`; browser `r1-exact` (tiles, split, calendar and labels, audit clean at 390 and 1440) |
+| Medium: equal daily results implied one trading day | "only day" follows the count of trading days (`R.days === 1`, `dayTile`); ties: the first equal day is the best, the last the worst | `best and worst day: …`; browser `r1-days` |
+
+The review listed no Low findings.
+
+**Verification (fix round 1).** `npm run check`; `npm test` (contracts 95,
+UI 45 incl. 23 Results, server contract 40) under Europe/Vienna, UTC and
+America/New_York; `node scripts/browser-p4.mjs` 1613/1613 under Europe/Vienna
+and under TZ=UTC (new section `r1`); `node scripts/browser-p3.mjs` 2170/2170;
+reference budget 31/31 on mbp2607 (Apple M5 Max, HeadlessChrome 153.0.8010.12,
+Node v26.11.1), 2026-10-15: Results render worst 7.3 ms, no long task at 390,
+1024 or 1440; Desk patch 7.4 ms, History draw 8.7 ms. Exact money adds about
+1 ms to receiving a record or a History on the page (BigInt columns are
+copied, not transferred). No push, deploy or review gate.

@@ -1,0 +1,418 @@
+{
+  "schema": "inspr.joe.household.results.v2",
+  "seq": 2,
+  "generatedAt": "2026-10-14T17:40:00.000Z",
+  "receivedAt": "2026-10-14T17:40:00.000Z",
+  "currency": "EUR",
+  "timeZone": "Europe/Vienna",
+  "trackingStart": "2026-09-10",
+  "days": [
+    {
+      "date": "2026-10-12",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    },
+    {
+      "date": "2026-10-13",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "5001.995",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "1.995",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "2.8",
+            "currency": "EUR"
+          },
+          "trades": 8
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    }
+  ],
+  "trades": [
+    {
+      "id": "rt-fixture-001",
+      "desk": "j",
+      "symbol": "F",
+      "company": "Ford",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-13T14:00:00.000Z",
+      "closedAt": "2026-10-13T15:00:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "10.71",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.355",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "0.005",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-13T15:00:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-002",
+      "desk": "j",
+      "symbol": "F",
+      "company": "Ford",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-13T14:05:00.000Z",
+      "closedAt": "2026-10-13T15:05:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "10.7098",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.3549",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "0.0049",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-13T15:05:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-003",
+      "desk": "j",
+      "symbol": "F",
+      "company": "Ford",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-13T14:10:00.000Z",
+      "closedAt": "2026-10-13T15:10:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "10.7",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "0",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-13T15:10:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-004",
+      "desk": "j",
+      "symbol": "F",
+      "company": "Ford",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-13T14:15:00.000Z",
+      "closedAt": "2026-10-13T15:15:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "10.6902",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.3451",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "-0.0049",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-13T15:15:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-005",
+      "desk": "j",
+      "symbol": "F",
+      "company": "Ford",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-13T14:20:00.000Z",
+      "closedAt": "2026-10-13T15:20:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "10.69",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.345",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "-0.005",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-13T15:20:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-006",
+      "desk": "j",
+      "symbol": "F",
+      "company": "Ford",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-13T14:25:00.000Z",
+      "closedAt": "2026-10-13T15:25:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "14.7",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "2.35",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "2",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-13T15:25:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-007",
+      "desk": "j",
+      "symbol": "F",
+      "company": "Ford",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-13T14:30:00.000Z",
+      "closedAt": "2026-10-13T15:30:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "8.7",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "-0.65",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "-1",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-13T15:30:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-008",
+      "desk": "j",
+      "symbol": "F",
+      "company": "Ford",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-13T14:35:00.000Z",
+      "closedAt": "2026-10-13T15:35:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "12.69",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "1.345",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "0.995",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-13T15:35:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    }
+  ],
+  "benchmark": null
+}

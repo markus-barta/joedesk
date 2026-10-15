@@ -1,7 +1,7 @@
 // Shared pieces: icons from the inline sprite, terms, big numbers, desk marks
 // and the one opaque tip. Everything returns escaped HTML strings.
 import { TERMS } from './terms.js';
-import { esc, money, digits, tone, arrowOf, isZero, age, MINUS, currencySymbol } from './format.js';
+import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol } from './format.js';
 import { cellReason, capital } from './health.js';
 
 export const $ = (selector, root = document) => root.querySelector(selector);
@@ -14,14 +14,14 @@ const ST_ICON = { ok: 'ok', warn: 'half', bad: 'stop', none: 'ring' };
 export const st = (tone, html) => `<span class="st ${tone}">${icon(ST_ICON[tone])}<span>${html}</span></span>`;
 
 // A signed result: arrow icon, sign, small unit, tabular digits. Zero has no
-// sign or arrow; an unavailable value is a dash.
+// sign or arrow; an unavailable value is a dash. Exact units (BigInt) format exactly.
 export function bn(n, currency = 'EUR', signed = true, d = 2) {
-  if (n == null || !Number.isFinite(n)) return '<span class="bn muted">—</span>';
-  if (isZero(n)) n = 0;
+  if (n == null || !known(n)) return '<span class="bn muted">—</span>';
+  if (isZero(n)) n = typeof n === 'bigint' ? 0n : 0;
   const sign = n < 0 ? MINUS : signed && n > 0 ? '+' : '';
   return `<span class="bn ${signed ? tone(n) : ''}">${signed && n ? icon(arrowOf(n), 'i ar') : ''}${sign}<span class="u">${esc(currencySymbol(currency))}</span>${digits(n, d)}</span>`;
 }
-export const pl = (n, currency = 'EUR') => (n == null || !Number.isFinite(n) ? '<span class="muted">—</span>'
+export const pl = (n, currency = 'EUR') => (n == null || !known(n) ? '<span class="muted">—</span>'
   : isZero(n) ? `<span class="pl">${money(0, currency)}</span>`
     : `<span class="pl ${tone(n)}">${icon(arrowOf(n))}${money(n, currency, true)}</span>`);
 

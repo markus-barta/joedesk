@@ -177,9 +177,12 @@ API readiness. `contracts/read.mjs` handles SSO redirects, 401/403 and invalid
 refreshes with retention. Replayed deliveries show retained/advisory state,
 preserve the original age and cannot freshen data or turn healthy cells red.
 
-`/joe/results.json` returns HTTP 503 with the v2 schema identifier and
-`results_not_wired`. It contains no fabricated executor sequence, days or trades;
-there is no results ingress until JOED-20/P4. History stores only observations
+`/joe/results.json` returns HTTP 503 with the v2 schema identifier,
+`results_not_wired` and `X-Joe-Server-Now`. It contains no fabricated executor
+sequence, days or trades; there is no results ingress until JOED-20. The P4
+board reads it every 30 s in its read worker (shared `acceptRead`, then indexed
+once) and shows Results' designed not-wired state until a valid v2 record with
+its server `receivedAt` arrives. History stores only observations
 and null gaps, never the UI's assumed/interpolated continuity values.
 
 P2 persists `data-state.json` (snapshot plus progress and retained-cell receipts)

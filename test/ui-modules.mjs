@@ -259,7 +259,8 @@ test('cold start: without the server clock every panel still shows its own state
       assert.ok(feed.settled());
       for (const name of DATA_PANELS) assert.deepEqual([s.states[name].state, s.states[name].reason, s.states[name].ageSeconds], ['broken', reason, null], `${reason} ${name}`);
       assert.deepEqual([s.states.history.state, s.states.history.reason], ['broken', reason]);
-      assert.deepEqual([s.states.results.state, s.states.results.reason], ['broken', 'results_not_wired']);
+      // P4: the closed-trade record has its own read, so a cold failure gives it its own reason too.
+      assert.deepEqual([s.states.results.state, s.states.results.reason], ['broken', reason]);
     }
     // State is unreachable, History answers: History keeps its own value and age at the server's stamp.
     const stamp = at(valid.history.receivedAt, 7);

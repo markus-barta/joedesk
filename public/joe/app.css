@@ -462,6 +462,8 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .cell .v { font-size: 11.5px; } .cell .n { display: none; }
   .cell .pl { gap: 2px; } .cell .pl .i { width: 7px; height: 7px; }
   .cell .vl { display: none; } .cell .vs { display: inline; }
+  /* A scaled amount (≥ € 1.000 in a day) steps down to keep its cell's room. */
+  .cell .vs .pl.sc { font-size: 10px; } .cell .vs .pl.sx { font-size: 9.5px; }
   .cell.today::before { top: 5px; right: 5px; }
   .daypanel { display: none; }
   .cal-head .icon-btn { width: 44px; height: 44px; }
@@ -488,15 +490,20 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .ring-s { font: 500 8.5px var(--font); fill: var(--ink-3); }
 /* A desk card's header: the state never runs under the heartbeat line. Short
    of room, the heartbeat line takes two lines, inside the name and state's
-   height; a card narrower than 340 px puts it under the state, as on phones. */
+   height. A card narrower than 340 px (phones too) keeps "Checked in … ago"
+   right-aligned on the name row and gives the state the row below. */
 .dcard { container-type: inline-size; }
 .dcard header { display: grid; grid-template-columns: 34px minmax(min-content, 1fr) auto; align-items: center; gap: 2px 11px; }
 .dcard .who { min-width: 0; }
 .dcard .hb { white-space: normal; text-align: right; }
 .dcard .hb .term, .dcard .hb .age { white-space: nowrap; }
 @container (max-width: 339.98px) {
-  .dcard header { grid-template-columns: 34px minmax(0, 1fr); }
-  .dcard .hb { grid-column: 2; margin-left: 0; text-align: left; }
+  .dcard header { grid-template-columns: 34px minmax(0, 1fr) auto; }
+  .dcard .who { display: contents; }
+  .dcard header .dmark { grid-row: 1 / 3; }
+  .dcard header h3 { grid-column: 2; grid-row: 1; }
+  .dcard header .state { grid-column: 2 / 4; grid-row: 2; }
+  .dcard .hb { grid-column: 3; grid-row: 1; margin-left: 0; text-align: right; white-space: nowrap; }
 }
 .dcard .state .i { width: 15px; height: 15px; }
 .dnums > div { min-width: 0; }
@@ -594,8 +601,8 @@ span.dbar, span.vbar { display: block; }
 }
 @media (max-width: 700px) {
   .hero-l .display { height: 53px; }
-  .dcard header { grid-template-columns: 34px minmax(0, 1fr); }
-  .dcard .hb { grid-column: 2; margin-left: 0; text-align: left; }
+  /* The heartbeat's term keeps its row's height and gets an invisible 44 px hit area. */
+  .dcard .hb .term::after { inset: calc(50% - 22px) -12px; }
   .hist-compare { min-height: 42px; }
   .hist-state .btn { height: 44px; }
   .kpi .c { min-height: 3lh; }
@@ -605,4 +612,57 @@ span.dbar, span.vbar { display: block; }
   .top-in { gap: 6px; }
   .hdr-health { padding: 0 6px; gap: 5px; min-width: 0; white-space: normal; line-height: 1.1; text-align: left; }
   .brand, .theme-btn { flex: none; }
+}
+
+/* ---------- Results (P4) ---------- */
+/* The stepper label and the month title keep one width: their widest forms
+   sit invisibly in the same grid cell, in whatever font the browser has. */
+.step-label, .cal-head h3 { display: inline-grid; justify-items: center; }
+.step-label > span, .cal-head h3 > span { grid-area: 1 / 1; }
+.step-label > [aria-hidden], .cal-head h3 > [aria-hidden] { visibility: hidden; }
+.step-label { min-width: 210px; width: auto; }
+.cal-head h3 { min-width: 136px; width: auto; }
+/* The hero: label, number and sentence on top; the split and the benchmark
+   line at the bottom, so a longer sentence never moves the numbers. */
+.rhero-l .split { margin-top: auto; }
+.rhero-l .bench { margin-top: 12px !important; }
+.rhero-l .say { margin-top: 2px; }
+/* The record's own state sits in the chart's fixed box; the plot starts below it. */
+.res-status { position: absolute; left: 0; right: 0; top: 0; z-index: 2; font-size: 12.5px; color: var(--ink-2); pointer-events: none; }
+.res-state .st { white-space: normal; align-items: flex-start; }
+.res-state .st .i { margin-top: 2px; }
+/* A value keeps the box of its line, with or without a sign, unit or arrow:
+   the smaller € and slash never add leading, so a dash and a number match. */
+.rhero .bn .u, .tval .bn .u, .tval .sl, .tval small { line-height: 1; }
+.rhero-l .split dd { height: 1lh; }
+.brow .val { height: 24px; display: flex; align-items: center; justify-content: flex-end; }
+/* A row's facts take a second line in a wide font rather than run past their cell. */
+.brow .facts { white-space: normal; line-height: 16px; }
+.tval.tight { font-size: 23px; }
+.tval .bn .ar { width: 12px; height: 12px; }
+.trow { grid-template-columns: 38px minmax(0, 1fr) fit-content(44%) 92px; }
+.trow .name { min-width: 0; }
+.trow .name .i.side { width: 12px; height: 12px; display: inline; vertical-align: -1px; }
+.trow .name .i.im { width: 13px; height: 13px; vertical-align: -2px; }
+.trow .px .ln { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 5px; white-space: normal; }
+.trow .px .ln > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.cell.pre .d { color: var(--ink-3); }
+.wk > span:first-child:empty::before { content: "\00a0"; }
+/* Phones: a day's trades open in a bottom sheet. */
+dialog.dlg { padding: 0; border: 0; border-radius: 18px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-pop); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
+dialog.dlg::backdrop { background: var(--scrim); }
+.dlg-in { display: flex; flex-direction: column; max-height: inherit; }
+.dlg-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 22px 0; }
+.dlg-h h2 { font-size: 17px; font-weight: 650; }
+.dlg-b { padding: 14px 22px 18px; flex: 1; overflow-y: auto; min-height: 0; }
+.sheet .dp-sum { margin: 0 0 8px; }
+@media (max-width: 700px) {
+  dialog.dlg { margin: auto 0 0; width: 100vw; max-width: 100vw; border-radius: 18px 18px 0 0; max-height: 80vh; }
+  .dlg-h { padding: 14px 16px 0; }
+  .dlg-b { padding: 10px 16px 20px; }
+  .tval.tight { font-size: 20px; }
+  .trow { grid-template-columns: 38px minmax(0, 1fr) auto; }
+  .trow .px { grid-column: 2 / 3; text-align: left; }
+  .trow .px .ln { justify-content: flex-start; }
+  .trow .net { grid-column: 3; grid-row: 1; }
 }
