@@ -120,6 +120,14 @@ npm run test:browser
 BROWSER_PATH=/usr/bin/google-chrome node scripts/browser-p3.mjs
 ```
 
+The gate holds the render budget's CI guard (2.5 × the reference budget,
+ADR §9). The budget itself is measured on a reference device (mbp2606 or
+mbp2607) with the same workload:
+
+```bash
+npm run budget:reference
+```
+
 ## Run
 
 ```bash

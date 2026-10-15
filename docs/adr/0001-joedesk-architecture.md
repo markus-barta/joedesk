@@ -444,6 +444,18 @@ worst-case 256-position/10,000-point traces and fail an agreed CI budget.
 The fixed 6-row calendar, reserved values/heights, opaque overlays, honest
 scales and reduced-motion behavior remain the freeze's AC-1…AC-47 obligations.
 
+Where the budget is measured (LEAD decision, JOED-23 fix round 3): the
+budget above (a normal patch under 16 ms, no task reaching 50 ms) is
+measured on a named reference device, mbp2606 or mbp2607, by
+`scripts/budget-reference.mjs` (`npm run budget:reference`); each record
+names the device. CI runners are slower and vary from run to run, so CI
+enforces a regression guard of 2.5 × the reference budget on the same
+workload (`scripts/browser/budget.mjs`): a normal patch at most 40 ms, a
+History draw at most 125 ms, no task reaching 125 ms. Recorded reference:
+mbp2607 (Apple M5 Max, 18 cores, HeadlessChrome 153.0.8010.12, Node
+v26.11.1) on 2026-10-15: Desk patch worst 7.7 ms, History draw worst
+11.3 ms (8 MiB cold) and 5.7 ms (live), no long task at 390, 1024 or 1440.
+
 Packages after P1: P2 server acceptance/health/time/history; P3 shell/Desk/History;
 P4 Results and JOED-20 wiring; P5 Settings/mode; P6 CalVer3/build/deploy/rollback.
 Their runtime tests are not substituted by P1 fixture tests. The coordinator
@@ -926,3 +938,23 @@ Medium gaps. Both are fixed with regressions.
 | Medium: a cold start without a clock still blanked Results | Results labels its calendar by this browser's date until the server's clock is known (`resultsToday`, shared by the renderer and its controls); it is not wired, so no state depends on that date. It shows its designed not-wired state | browser `cold`: Results reached from the nav and opened directly at `#results`, for 401 at six combos and 302, 404, 503, connection refused; `results:` (ui-modules) |
 | Medium: the zoomed comparison used observations the chart left out | `chartRows` gives each desk's kept rows (up to the board's time, latest comparable bookkeeping basis); the chart, the comparison and the basis notice all read exactly those rows | `history: a zoom compares exactly the points the chart draws…` (ui-modules); browser `basis`: J changes basis at 13:00 on 14 Oct; zoomed before it, nothing about J is compared and the notice names J; the week and a zoom across it compare the chart's own points, at six combos (zoom on desktop) |
 
+
+### P3 fix round 3 — JOED-23
+
+The first Linux CI run on PR #37 (job 116624253606, 1752/1767) failed in
+three groups and left its scratch directories behind. Each cause is fixed,
+and the local gate now reproduces what the Linux runner saw.
+
+| CI failure | Root cause | Fix | Proof |
+| --- | --- | --- | --- |
+| No-shift at 390, light and dark: stale → broken grew the health line from 122.75 to 143 px and Today's sentence by a line, moving the hero and its numbers | Product: the room kept for state texts fitted this Mac's font. In Linux's wider fonts the reason wrapped onto a second line in the free-wrapping health line, and Today's not-fresh sentence needed a third line | Up to 900 px the health line has fixed rows: reason; broker; emergency stop; data age beside Details (whose 44 px on phones hold two lines). The reason's cell and Today's sentence hold hidden twins (`aria-hidden`, `visibility: hidden`) of their longest forms (every health reason; the largest amount with the longest age and reason), so the browser lays out their room in its own font. No clamp, no ellipsis; the full text is always shown. Wider, the line keeps its two reserved rows | The browser `journey` also runs in a wide font (Verdana, else DejaVu Sans) at 390 light and 1024 dark; before the fix it failed exactly as on CI (143 px), now nothing moves. All 17 health reasons with the longest broker and data wordings give one height per width (390 to 1440) in both fonts |
+| `basis`, every width and theme: the week and the zoom compared nothing ("Choose two or more desks…") and named no desk | Test race, not time zone: the page marked itself ready once any first read had answered, and the gate read History before its worker delivered (about 650 ms on CI, 80 ms locally). The History model computes only through `time.mjs` in explicit zones; no local-time API is used in `public/joe` or the gate, and the browser follows the runner's zone. Product side-finding: before History arrived, the compare line asked for desks that were already chosen | `ready` waits until every first read (state, history, fleet settings) has answered with a value or a reason. With no history rows, `sharedWindowCompare` gives `insufficient-points` ("Not enough history in this window to compare.") | browser `basis`: History's read held back 1.5 s. The page is not ready before History answers and never asks for desks; once ready it compares the chart's own points. This fails on the previous code with CI's exact output. Empty-history case in `ui-modules`. `npm test` and the full gate pass under TZ=UTC, Europe/Vienna and America/New_York |
+| `budget`, every width: Desk patch 22–25 ms, tasks 53–86 ms on the runner | Measurement place, not a regression: 16 ms / 50 ms is a reference-device budget, and CI runners are slower | §9 decision: the budget is measured on the reference device; CI holds the 2.5 × guard on the same workload | Reference run on mbp2607: 22/22, figures in §9. Guard: 22/22 locally; the CI run's figures are within it |
+| "trash failed": 41 directories left in `/tmp` | Test: CI runners have no `trash` | Scratch directories come from `scripts/browser/scratch.mjs`. With `CI=true` they are removed with `fs.rm`; elsewhere they go to the Trash. Only directories this run made are ever removed | A run with `CI=true` leaves no `joed-p3-*` directory and prints no "trash failed" |
+
+Visible change for the visual check: up to 900 px the health line keeps a
+second line under a short reason. On phones, Today's sentence keeps three
+lines. So the phone Desk is about 43 px taller in every state; at 1024 and
+1440 nothing changes. The gate now has 1871 checks (1767 plus the
+wide-font journeys and the slow-History case). All pass locally
+(Europe/Vienna) and under TZ=UTC and America/New_York.

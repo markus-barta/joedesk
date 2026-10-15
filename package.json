@@ -14,6 +14,7 @@
     "test:ui": "node --test test/ui-modules.mjs",
     "test:contracts:browser": "node scripts/smoke-contracts-browser.mjs",
     "test:browser": "node scripts/browser-p3.mjs",
+    "budget:reference": "node scripts/budget-reference.mjs",
     "start": "node server.mjs"
   }
 }

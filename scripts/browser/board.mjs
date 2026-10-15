@@ -1,10 +1,9 @@
 // Test-only: the real P2 board server in a private temporary store with an
 // injected clock, fed through its inbox. The synthetic scenario lives here,
 // never under public/; P1 fixtures drive the panel states.
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { scratch, discard } from './scratch.mjs';
 import { createJoeServer } from '../../server.mjs';
 import { panelStates } from '../../contracts/panel-state.mjs';
 import { validateContract } from '../../contracts/index.mjs';
@@ -24,7 +23,7 @@ export const at = (base, seconds) => new Date(Date.parse(base) + seconds * 1000)
 export const ingress = value => { const copy = structuredClone(value); delete copy.receivedAt; return copy; };
 
 export async function startBoard({ fleetConfig = null, history = null } = {}) {
-  const dataDir = mkdtempSync(join(tmpdir(), 'joed-p3-board-'));
+  const dataDir = scratch('joed-p3-board-');
   if (fleetConfig) writeFileSync(join(dataDir, 'fleet-config.json'), JSON.stringify(fleetConfig));
   if (history) atomicWrite(join(dataDir, 'history-state.json'), historyEnvelope(history), HISTORY_CAP);
   let base = Date.parse(NOW), real = performance.now(), frozen = false;
@@ -42,8 +41,7 @@ export async function startBoard({ fleetConfig = null, history = null } = {}) {
     async close() {
       server.closeAllConnections();
       await new Promise(resolve => server.close(resolve));
-      const cleanup = spawnSync('trash', [dataDir], { stdio: 'ignore' });
-      if (cleanup.status !== 0) console.error(`board store kept at ${dataDir}: trash failed`);
+      discard(dataDir, 'board store');
     },
   };
 }

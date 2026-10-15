@@ -1,9 +1,10 @@
 // A small Chrome DevTools Protocol client over --remote-debugging-pipe. No
 // dependencies; one browser, one page, used sequentially by the P3 tests.
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, mkdtempSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { existsSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { scratch, discard } from './scratch.mjs';
 
 export function findBrowser() {
   if (process.env.BROWSER_PATH) return process.env.BROWSER_PATH;
@@ -26,7 +27,7 @@ export function findBrowser() {
 }
 
 export async function launch({ hostRules = '' } = {}) {
-  const profile = mkdtempSync(join(tmpdir(), 'joed-p3-browser-'));
+  const profile = scratch('joed-p3-browser-');
   const args = ['--headless=new', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--disable-background-networking', '--disable-extensions', '--disable-sync', '--mute-audio', '--hide-scrollbars',
     '--disable-renderer-backgrounding', '--disable-background-timer-throttling', '--js-flags=--max-old-space-size=256',
@@ -61,8 +62,7 @@ export async function launch({ hostRules = '' } = {}) {
       try { await Promise.race([send('Browser.close'), new Promise(r => setTimeout(r, 3000))]); } catch { /* already closing */ }
       if (proc.exitCode === null) proc.kill('SIGTERM');
       await Promise.race([exited, new Promise(r => setTimeout(r, 3000))]);
-      const cleanup = spawnSync('trash', [profile], { stdio: 'ignore' });
-      if (cleanup.status !== 0) console.error(`browser profile kept at ${profile}: trash failed`);
+      discard(profile, 'browser profile');
     },
   };
 }
