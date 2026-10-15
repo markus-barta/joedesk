@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { wall as productionWall, NY, VIENNA, isRTH, marketSession, nyDay, viennaDay, viennaISOWeek, calendarDays, MARKET_CALENDAR } from '../time.mjs';
+import { wall as productionWall, NY, VIENNA, isRTH, marketSession, nyDay, viennaDay, viennaISOWeek, calendarDays, MARKET_CALENDAR,
+  zonedInstant, sessionBounds, nextOpen } from '../time.mjs';
 import { REASONS } from '../contracts/index.mjs';
 import { panelState, feedAge } from '../contracts/panel-state.mjs';
 
@@ -87,4 +88,30 @@ test('time: every market-session reason is closed and accepted by browser select
     if (session.reason) assert.ok(REASONS.includes(session.reason));
     assert.doesNotThrow(() => panelState({ receivedAt: instant }, session, session.reason, instant));
   }
+});
+
+test('time: session bounds follow both zones through the five-hour week and early closes', () => {
+  for (const [instant, open, close, openVienna, closeVienna] of [
+    ['2026-10-14T17:42:22.000Z', '2026-10-14T13:30:00.000Z', '2026-10-14T20:00:00.000Z', '15:30:00', '22:00:00'],
+    ['2026-10-28T15:00:00.000Z', '2026-10-28T13:30:00.000Z', '2026-10-28T20:00:00.000Z', '14:30:00', '21:00:00'],
+    ['2026-11-04T15:00:00.000Z', '2026-11-04T14:30:00.000Z', '2026-11-04T21:00:00.000Z', '15:30:00', '22:00:00'],
+    ['2026-11-27T15:00:00.000Z', '2026-11-27T14:30:00.000Z', '2026-11-27T18:00:00.000Z', '15:30:00', '19:00:00'],
+    ['2027-03-15T15:00:00.000Z', '2027-03-15T13:30:00.000Z', '2027-03-15T20:00:00.000Z', '14:30:00', '21:00:00'],
+  ]) {
+    const bounds = sessionBounds(instant);
+    assert.equal(bounds.openAt, open); assert.equal(bounds.closeAt, close);
+    assert.equal(productionWall(bounds.openAt, VIENNA).slice(11), openVienna);
+    assert.equal(productionWall(bounds.closeAt, VIENNA).slice(11), closeVienna);
+  }
+  assert.deepEqual(sessionBounds('2026-10-17T15:00:00.000Z'), { day: '2026-10-17', rth: false, reason: 'market_closed', close: null, openAt: null, closeAt: null });
+  assert.equal(zonedInstant('2026-11-01', '09:30:00', NY), '2026-11-01T14:30:00.000Z');
+  assert.equal(zonedInstant('2026-10-25', '06:00:00', VIENNA), '2026-10-25T05:00:00.000Z');
+});
+
+test('time: next regular open skips weekends, holidays and a finished session', () => {
+  assert.equal(nextOpen('2026-10-17T15:00:00.000Z'), '2026-10-19T13:30:00.000Z');
+  assert.equal(nextOpen('2026-10-14T12:00:00.000Z'), '2026-10-14T13:30:00.000Z');
+  assert.equal(nextOpen('2026-10-14T20:30:00.000Z'), '2026-10-15T13:30:00.000Z');
+  assert.equal(nextOpen('2026-11-25T22:00:00.000Z'), '2026-11-27T14:30:00.000Z');
+  assert.equal(nextOpen('2028-12-30T12:00:00.000Z'), null);
 });

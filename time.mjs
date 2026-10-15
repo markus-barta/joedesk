@@ -43,3 +43,34 @@ export function marketSession(instant) {
     reason: closed ? 'market_closed' : null, close: closed ? null : close };
 }
 export const isRTH = instant => marketSession(instant).rth;
+
+// A wall-clock date and time in an explicit zone, as a UTC instant. Converges on
+// the zone's own offset rather than assuming one; the session's 09:30 and close
+// are never inside a DST gap or a repeated hour.
+export function zonedInstant(day, time, zone) {
+  if (!validDate(day) || !/^\d{2}:\d{2}:\d{2}$/.test(time) || !formatters.has(zone)) throw new TypeError('Explicit zone, date and time required');
+  const target = Date.parse(`${day}T${time}.000Z`);
+  let guess = target;
+  for (let pass = 0; pass < 3; pass++) {
+    guess += target - Date.parse(`${wall(new Date(guess).toISOString(), zone).replace(' ', 'T')}.000Z`);
+  }
+  return new Date(guess).toISOString();
+}
+
+// The New York regular session of the instant's NY day, with its UTC bounds.
+export function sessionBounds(instant) {
+  const session = marketSession(instant);
+  if (!session.close) return { ...session, openAt: null, closeAt: null };
+  return { ...session, openAt: zonedInstant(session.day, '09:30:00', NY), closeAt: zonedInstant(session.day, session.close, NY) };
+}
+
+// The next regular open strictly after the instant, from the pinned calendar.
+export function nextOpen(instant) {
+  const first = nyDay(instant);
+  for (let offset = 0; offset < 12; offset++) {
+    const day = new Date(Date.parse(`${first}T12:00:00.000Z`) + offset * 86400000).toISOString().slice(0, 10);
+    const { openAt } = sessionBounds(zonedInstant(day, '12:00:00', NY));
+    if (openAt && Date.parse(openAt) > Date.parse(instant)) return openAt;
+  }
+  return null;
+}
