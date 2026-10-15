@@ -17,7 +17,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   const historyFile = path.join(dataDir, 'history-state.json');
   const rejectionFile = path.join(dataDir, 'feed-rejections.json');
   const fleetFile = path.join(dataDir, 'fleet-receipt.json');
-  let state = null, history = null, rejections = {}, fleet = null, storageInvalid = false;
+  let state = null, history = null, rejections = {}, fleet = null, storageInvalid = false, historyStorageInvalid = false;
   try {
     state = readJson(stateFile, STATE_CAP);
     if (state.format !== FORMAT || !validateContract('data', state.feed?.value).ok ||
@@ -36,7 +36,10 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     history = stored.value;
     if (stored.format !== 'joedesk.history-store.v2' || !validateContract('history', history).ok ||
         measureHistory(structuredClone(history)) !== history.sizeBytes) throw new Error('contract_invalid');
-  } catch (error) { history = null; if (!isMissing(error)) rejections.history = 'history_write_failed'; }
+  } catch (error) {
+    history = null;
+    if (!isMissing(error)) { historyStorageInvalid = true; rejections.history = 'history_write_failed'; }
+  }
   try {
     const stored = readJson(rejectionFile, 16384);
     if (Object.keys(stored).some(k => !['data', 'history'].includes(k)) || Object.values(stored).some(r => !REASONS.includes(r))) throw new Error('contract_invalid');
@@ -48,10 +51,10 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   } catch (error) { fleet = null; if (!isMissing(error)) rejections['fleet-config'] = 'contract_invalid'; }
   let savedReasons = JSON.stringify(Object.fromEntries(Object.entries(rejections).filter(([k]) => ['data', 'history'].includes(k))));
 
-  const feeds = () => ({ data: { ...state?.feed, gatewayProgress: state?.gatewayProgress, reason: rejections.data ?? null },
-    history: { value: history, reason: rejections.history ?? null },
+  const feeds = () => ({ data: { ...state?.feed, gatewayProgress: state?.gatewayProgress, reason: rejections.data ?? (state ? null : 'feed_not_received') },
+    history: { value: history, reason: rejections.history ?? (history ? null : 'feed_not_received') },
     results: { value: null, reason: 'results_not_wired' },
-    'fleet-config': { value: fleet?.value, receivedAt: fleet?.receivedAt, reason: rejections['fleet-config'] ?? null } });
+    'fleet-config': { value: fleet?.value, receivedAt: fleet?.receivedAt, reason: rejections['fleet-config'] ?? (fleet ? null : 'feed_not_received') } });
   const panels = (now = clock()) => panelStates(feeds(), now, state?.cells ?? {});
   function persistReasons() {
     const reasons = Object.fromEntries(Object.entries(rejections).filter(([k]) => ['data', 'history'].includes(k)));
@@ -67,14 +70,17 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   function accept(candidate) {
     const now = clock();
     if (storageInvalid) return failed(503, 'contract_invalid');
+    if (historyStorageInvalid) return failed(503, 'history_write_failed');
     const accepted = acceptSnapshot('data', candidate, state?.feed ?? null, now);
-    if (accepted.status !== 200) return reject(accepted.reason);
+    if (accepted.status !== 200) return { ...reject(accepted.reason), errors: accepted.errors.slice(0, 20).map(({ path, rule }) => ({ path, rule })) };
     const check = candidate.safety.gateway;
     let gatewayProgress = state?.gatewayProgress ?? null;
     const checkAge = gatewayCheckAgeMs(check, candidate.generatedAt);
     // A future check can describe an unconfirmed outage, but cannot poison the
     // durable advancement watermark and prevent a genuine later recovery.
-    if (checkAge !== null && gatewayProgress && Date.parse(check.checkedAt) < Date.parse(gatewayProgress.checkedAt)) return reject('clock_regressed');
+    if (checkAge !== null && gatewayProgress && Date.parse(check.checkedAt) < Date.parse(gatewayProgress.checkedAt)) return {
+      ...reject('clock_regressed'), errors: [{ path: '$.safety.gateway.checkedAt', rule: 'clockRegressed' }],
+    };
     if (checkAge !== null && check.checkedAt !== gatewayProgress?.checkedAt) {
       gatewayProgress = { checkedAt: check.checkedAt, advancedAt: now,
         initialAgeMs: checkAge };
@@ -88,8 +94,14 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       return [name, { value: cell.value ?? null, valueReceivedAt: cell.valueReceivedAt ?? null }];
     }));
     const next = { format: FORMAT, feed: { value: accepted.value, generatedAdvancedAt: accepted.generatedAdvancedAt }, gatewayProgress, cells };
+    let stateSyncFailed = false;
     try { write(stateFile, next, STATE_CAP); }
-    catch (error) { if (error.committed) state = next; return reject('refresh_failed', 500); }
+    catch (error) {
+      if (!error.committed) return reject('refresh_failed', 500);
+      // Rename already advanced the durable sequence. Record its history point
+      // before replying, since the producer's retry will be a replay.
+      stateSyncFailed = true;
+    }
     state = next; delete rejections.data;
     // Snapshot is durable even if the independent history store fails.
     let historyReason = null;
@@ -98,13 +110,15 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       if (nextHistory !== history) {
         try { write(historyFile, historyEnvelope(nextHistory), HISTORY_CAP); }
         catch (error) { if (error.committed) history = nextHistory; throw error; }
+        delete rejections.history;
       }
-      history = nextHistory; delete rejections.history;
-      historyReason = history.reason ?? null;
+      history = nextHistory;
+      historyReason = rejections.history ?? history.reason ?? null;
     } catch (error) {
       historyReason = error.message === 'history_size_limit' ? error.message : 'history_write_failed';
       rejections.history = historyReason;
     }
+    if (stateSyncFailed) return reject('refresh_failed', 500);
     try { persistReasons(); } catch { rejections.data = 'refresh_failed'; return failed(500, 'refresh_failed'); }
     return { ok: true, status: 200, reason: null, receivedAt: now, historyPoints: history?.points.length ?? 0, historyReason };
   }
@@ -124,26 +138,31 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   }
   function view(now = clock()) {
     const selected = panels(now);
+    const source = feeds();
+    // Feed rejection is a separate header/state diagnostic. Only actual
+    // session or KEEP-policy constraints may withhold snapshot values.
+    const projection = panelStates({ ...source, data: { ...source.data, reason: null } }, now, state?.cells ?? {});
     let value = state?.feed.value ? structuredClone(state.feed.value) : null;
     if (value) {
       const setBag = (bag, prefix) => {
-        for (const field of MONEY_FIELDS) if (selected[`${prefix}.${field}`].state === 'broken') {
-          bag[field] = null; (bag.reasons ??= {})[field] = selected[`${prefix}.${field}`].reason;
+        for (const field of MONEY_FIELDS) if (projection[`${prefix}.${field}`].state === 'broken' &&
+            (projection[`${prefix}.${field}`].retained || projection[`${prefix}.${field}`].value == null)) {
+          bag[field] = null; (bag.reasons ??= {})[field] = projection[`${prefix}.${field}`].reason;
         }
       };
       setBag(value.totals, 'today');
       for (const desk of value.desks) { setBag(desk.money, `desks.${desk.id}`); if (MONEY_FIELDS.every(f => desk.money[f] == null)) delete desk.moneyEvidence; }
-      if (value.brokerAccount && selected.paperAccount.state === 'broken') {
-        value.brokerAccount.equity = null; value.brokerAccount.reason = selected.paperAccount.reason;
+      if (value.brokerAccount && projection.paperAccount.state === 'broken' &&
+          (projection.paperAccount.retained || projection.paperAccount.value == null)) {
+        value.brokerAccount.equity = null; value.brokerAccount.reason = projection.paperAccount.reason;
       }
       for (const [period, field] of [['day', 'dayPnl'], ['open', 'openPnl']]) {
-        if (value.pnlSources?.[period] && value.totals[field] == null) value.pnlSources[period] = {
+        if (value.pnlSources?.[period] && state.feed.value.totals[field] != null && value.totals[field] == null) value.pnlSources[period] = {
           ...value.pnlSources[period], status: 'unavailable', reason: value.totals.reasons?.[field] ?? 'family_projection_unavailable' };
       }
-      if (value.safety.gateway && selected.gateway.reason === 'gateway_unconfirmed') value.safety.gateway = {
-        apiSessionReady: false, ...(value.safety.gateway?.checkedAt ? { checkedAt: value.safety.gateway.checkedAt } : {}), reason: 'gateway_unconfirmed' };
-      if (value.positions && (selected.positions.state === 'broken' || selected.kept.state === 'broken')) {
-        value.positions.reason = selected.positions.reason ?? selected.kept.reason;
+      if (value.positions && projection.positions.state === 'broken' &&
+          (projection.positions.retained || projection.positions.value == null || projection.positions.reason === 'source_not_authoritative')) {
+        value.positions.reason = projection.positions.reason;
         value.positions.rows = value.positions.rows.map(row => ({ ...row,
           ...Object.fromEntries(['mark', 'marketValue', 'dayPnl', 'openPnl'].filter(f => Object.hasOwn(row, f)).map(f => [f, null])) }));
       }

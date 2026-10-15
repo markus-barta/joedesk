@@ -9,7 +9,7 @@ import { createJoeServer } from '../server.mjs';
 import { viennaDay } from '../time.mjs';
 import { createReadModel } from '../server/read-model.mjs';
 import { atomicWrite } from '../server/storage.mjs';
-import { historyEnvelope, boundHistory, compactPoints, measureHistory, HISTORY_CAP, HISTORY_WARNING } from '../server/history.mjs';
+import { historyEnvelope, appendHistory, boundHistory, compactPoints, measureHistory, HISTORY_CAP, HISTORY_WARNING } from '../server/history.mjs';
 import { validateContract, CONTRACTS } from '../contracts/index.mjs';
 import { acceptRead } from '../contracts/read.mjs';
 import { panelStates, panelState, MONEY_FIELDS } from '../contracts/panel-state.mjs';
@@ -77,11 +77,104 @@ test('P2 acceptance: 400 malformed, 413 streamed bound, 422 contract failure pre
   assert.equal(rejected.body.panels.halt.retained, true);
   const read = await s.request('/joe/data.json');
   const client = acceptRead('data', { status: read.status, payload: read.body, reason: read.headers.get('x-joe-feed-reason') }, { value: samples.data });
-  assert.equal(client.value, samples.data); assert.equal(client.reason, 'contract_invalid');
+  assert.deepEqual(client.value, read.body); assert.equal(client.reason, 'contract_invalid');
   const restart = createReadModel({ dataDir: s.dataDir, clock: () => at(9000) });
   assert.equal(restart.panels().halt.reason, 'contract_invalid'); assert.equal(restart.panels().halt.ageSeconds, 9);
   assert.equal((await s.push(snapshot(102, 1000))).status, 200);
   assert.equal((await s.request('/joe/data.json')).headers.get('x-joe-feed-reason'), null);
+});
+
+test('P2 inbox auth: missing and wrong bearer return 401; unconfigured token returns 503 before writes', async t => {
+  for (const [inboxToken, authorization, expected] of [[TOKEN, '', 401], [TOKEN, 'Bearer wrong-fixture', 401], ['', `Bearer ${TOKEN}`, 503]]) {
+    const s = await setup(t, { inboxToken });
+    const result = await s.request('/joe/inbox', { method: 'POST', headers: { authorization }, body: '{' });
+    assert.equal(result.status, expected); assert.equal(result.body.reason, 'auth_required');
+    assert.deepEqual(readdirSync(s.dataDir), []);
+    assert.equal((await s.request('/joe/healthz')).body.feeds.data.reason, 'feed_not_received');
+  }
+});
+
+test('P2 clock ahead: five good observations survive a one-year jump and the next valid sequence', async t => {
+  const writes = [];
+  const s = await setup(t, { write: (file, ...args) => { writes.push(basename(file)); atomicWrite(file, ...args); } });
+  for (let n = 0; n < 5; n++) {
+    s.time.ms = n * 1000;
+    assert.equal((await s.push(snapshot(101 + n, s.time.ms))).status, 200);
+  }
+  const before = ['data-state.json', 'history-state.json'].map(file => readFileSync(join(s.dataDir, file), 'utf8'));
+  writes.length = 0;
+  const rejected = await s.push(snapshot(106, 365 * 86400000));
+  assert.equal(rejected.status, 422); assert.equal(rejected.body.reason, 'clock_ahead');
+  assert.deepEqual(rejected.body.errors, [{ path: '$.generatedAt', rule: 'clockAhead' }]);
+  assert.deepEqual(writes, ['feed-rejections.json']);
+  assert.deepEqual(['data-state.json', 'history-state.json'].map(file => readFileSync(join(s.dataDir, file), 'utf8')), before);
+  const restarted = await setup(t, { dataDir: s.dataDir }); restarted.time.ms = 5000;
+  assert.equal((await restarted.push(snapshot(107, 5000))).status, 200);
+  assert.equal(restarted.model.feeds().history.value.points.length, 6);
+  assert.equal(restarted.model.feeds().data.value.seq, 107);
+});
+
+test('P2 cold retention: bad and replayed pushes preserve the last snapshot, ownership and original receipts', async t => {
+  const s = await setup(t); await s.push(snapshot(101, 0, -20000));
+  const original = (await s.request('/joe/data.json')).body;
+  s.time.ms = 9000;
+  for (const [candidate, reason] of [[{ schema: 'unknown' }, 'schema_unsupported'], [snapshot(), 'sequence_replayed']]) {
+    await s.push(candidate);
+    const read = await s.request('/joe/data.json');
+    assert.equal(read.headers.get('x-joe-server-now'), at(9000));
+    assert.equal(read.headers.get('x-joe-feed-reason'), reason);
+    assert.deepEqual(read.body, original);
+    assert.deepEqual(read.body.safety.gateway, original.safety.gateway);
+    const cold = acceptRead('data', { status: read.status, payload: read.body,
+      reason: read.headers.get('x-joe-feed-reason'), generatedAdvancedAt: read.headers.get('x-joe-generated-advanced-at') });
+    const cell = panelStates({ data: cold }, at(9000))['today.equity'];
+    assert.deepEqual(cell.value, original.totals.equity); assert.equal(cell.retained, true);
+    assert.equal(cell.valueReceivedAt, at(0)); assert.equal(cell.ageSeconds, 9);
+    const restarted = createReadModel({ dataDir: s.dataDir, clock: () => at(9000) });
+    assert.deepEqual(restarted.view().data, original);
+    assert.equal(restarted.panels()['today.equity'].valueReceivedAt, at(0));
+    if (reason === 'sequence_replayed') {
+      assert.ok(Object.values(restarted.panels()).filter(p => p.value != null).every(p => p.state !== 'broken'));
+      const health = (await s.request('/joe/healthz')).body;
+      assert.equal(health.feeds.data.state, 'stale'); assert.equal(health.feeds.data.reason, reason);
+      assert.equal(health.gateway.confirmed, false);
+    }
+  }
+  // A feed-level rejection must never bypass an independently expired check.
+  s.time.ms = 59000;
+  const aged = createReadModel({ dataDir: s.dataDir, clock: () => at(59000) });
+  assert.deepEqual(aged.view().data.safety.gateway, original.safety.gateway);
+  assert.equal(aged.view().data.totals.equity, null);
+  assert.equal(validateContract('data', aged.view().data).ok, true);
+});
+
+test('P2 inbox diagnostics: schema, field and replay rejections expose only bounded safe path/rule pairs', async t => {
+  const s = await setup(t); await s.push(snapshot());
+  for (const [candidate, path, rule] of [[{ schema: 'unknown' }, '$.schema', 'const'],
+    [{ ...snapshot(102), mode: 'LIVE' }, '$.mode', 'const'], [snapshot(), '$.seq', 'sequenceReplayed']]) {
+    const response = await s.push(candidate);
+    assert.equal(response.status, 422);
+    assert.ok(response.body.errors.some(e => e.path === path && e.rule === rule));
+    assert.ok(response.body.errors.length <= 20);
+    assert.ok(response.body.errors.every(e => Object.keys(e).sort().join(',') === 'path,rule'));
+    assert.equal(JSON.stringify(response.body).includes('LIVE'), false);
+  }
+});
+
+test('P2 empty feeds: 503 is not reported with feed_not_received, never route_not_found', async t => {
+  const s = await setup(t);
+  for (const kind of ['data', 'history']) {
+    const response = await s.request(`/joe/${kind}.json`);
+    assert.equal(response.status, 503); assert.equal(response.body.reason, 'feed_not_received');
+    assert.equal(response.headers.get('x-joe-server-now'), at(0));
+    const cold = acceptRead(kind, { status: response.status, payload: response.body, reason: response.headers.get('x-joe-feed-reason') });
+    assert.equal(cold.reason, 'feed_not_received');
+    assert.equal(panelState(cold, cold.value, null, at(0)).state, 'not reported');
+  }
+  const state = (await s.request('/joe/state.json')).body;
+  assert.deepEqual(state.panels['today.equity'], { state: 'not reported', ageSeconds: null, reason: 'feed_not_received',
+    value: null, retained: false, valueReceivedAt: null });
+  assert.equal((await s.request('/joe/missing.json')).status, 404);
 });
 
 test('P2 transport: chunked oversized input responds 413 without resetting the connection', async t => {
@@ -158,6 +251,8 @@ test('P2 gateway: persisted old-check progress invalidates every money, account 
     }
     assert.equal(selected.gateway.ageSeconds, 60);
     const wire = restart.view().data;
+    assert.equal(wire.safety.gateway.apiSessionReady, true);
+    assert.deepEqual(wire.safety.gateway, restart.feeds().data.value.safety.gateway);
     assert.equal(wire.brokerAccount.equity, null);
     for (const d of wire.desks) for (const f of MONEY_FIELDS) assert.equal(d.money[f], null);
     assert.ok(wire.positions.rows.every(row => row.mark === null && row.marketValue === null));
@@ -178,7 +273,9 @@ test('P2 gateway: stale/frozen precedence, initial check age and check regressio
   s.time.ms = 60000; assert.equal(s.model.panels()['today.equity'].reason, 'snapshot_stale');
   assert.equal((await s.push(snapshot(102, 0, -20000))).status, 200);
   assert.equal(s.model.panels()['today.equity'].reason, 'producer_frozen');
-  assert.equal((await s.push(snapshot(103, 1000, -21000))).body.reason, 'clock_regressed');
+  const regression = await s.push(snapshot(103, 1000, -21000));
+  assert.equal(regression.body.reason, 'clock_regressed');
+  assert.deepEqual(regression.body.errors, [{ path: '$.safety.gateway.checkedAt', rule: 'clockRegressed' }]);
 });
 
 test('P2 outages: 20 dead, missing and frozen-ready pushes retain original money through restart and recover', async t => {
@@ -232,8 +329,9 @@ test('P2 health: anonymous exact allowlist, never-received null ages and failed-
     const missing = structuredClone(first); delete missing[property];
     assert.equal(validateContract('healthz', missing).ok, false);
   }
-  for (const feed of Object.values(first.feeds)) {
-    assert.equal(feed.state, 'not reported'); assert.equal(feed.ageSeconds, null); assert.equal(typeof feed.reason, 'string');
+  for (const [name, feed] of Object.entries(first.feeds)) {
+    assert.equal(feed.state, 'not reported'); assert.equal(feed.ageSeconds, null);
+    assert.equal(feed.reason, name === 'results' ? 'results_not_wired' : 'feed_not_received');
   }
   assert.deepEqual(first.gateway, { confirmed: false, checkAgeSeconds: null, reason: 'gateway_unconfirmed' });
   await s.push({ schema: 'unknown' });
@@ -259,18 +357,32 @@ test('P2 health: anonymous exact allowlist, never-received null ages and failed-
 
 test('P2 auth: all four protected reads retain independent last-good ages on SSO failures', async t => {
   const s = await setup(t);
-  await s.push(snapshot()); await s.request('/joe/fleet-config.json');
-  for (const [index, kind] of ['data', 'history', 'results', 'fleet-config'].entries()) {
-    const value = structuredClone(samples[kind]);
-    if (kind !== 'fleet-config') value.receivedAt = at(-index * 1000);
-    let retained = { value, receivedAt: at(-index * 1000), generatedAdvancedAt: at(-index * 1000) };
+  await s.push(snapshot());
+  s.time.ms = 1000; await s.push(snapshot(102)); // data receipt advances; history deduplicates
+  s.time.ms = 2000; await s.request('/joe/fleet-config.json');
+  const expectedAges = { data: 608, history: 609, results: 610, 'fleet-config': 607 };
+  for (const kind of ['data', 'history', 'results', 'fleet-config']) {
+    const good = await s.request(`/joe/${kind}.json`);
+    assert.equal(good.headers.get('x-joe-server-now'), kind === 'results' ? null : at(2000));
+    let retained;
+    if (kind === 'results') {
+      assert.equal(good.status, 503); assert.equal(good.body.reason, 'results_not_wired');
+      // P4 owns the real Results producer. This one cache is explicitly synthetic;
+      // the other three receipt ages come from the production HTTP responses.
+      retained = { value: { ...structuredClone(samples.results), receivedAt: at(-1000) } };
+    } else {
+      assert.equal(good.status, 200);
+      retained = acceptRead(kind, { status: good.status, payload: good.body,
+        receivedAt: good.headers.get('x-joe-received-at'), generatedAdvancedAt: good.headers.get('x-joe-generated-advanced-at') });
+    }
+    const value = retained.value;
     const response = await s.request(`/joe/${kind}.json`, { headers: { 'x-auth-request-user': '' } });
     assert.equal(response.status, 401); assert.equal(response.body.reason, 'auth_required');
     for (const status of [302, 401, 403]) {
       retained = acceptRead(kind, { status, payload: response.body }, retained);
       const cell = panelState(retained, retained.value, null, at(609000));
       assert.equal(cell.reason, 'auth_required'); assert.equal(cell.retained, true);
-      assert.equal(cell.ageSeconds, 609 + index); assert.equal(retained.value, value);
+      assert.equal(cell.ageSeconds, expectedAges[kind]); assert.equal(retained.value, value);
     }
   }
   assert.equal((await s.request('/joe/healthz', { headers: { 'x-auth-request-user': '' } })).status, 200);
@@ -349,11 +461,18 @@ test('P2 isolation: single unavailable desk and coupled equity/total P&L keep si
   assert.equal(s.model.panels()['desks.j.totalPnl'].retained, false);
 });
 
-test('P2 executor: broker disagreement has its own reason and cannot confirm a gateway', async t => {
-  const s = await setup(t); const value = snapshot(); value.safety.executor.gatewayReachable = false;
-  await s.push(value);
-  assert.equal(s.model.panels().executor.reason, 'executor_broker_disagreement');
-  assert.equal(s.model.panels().gateway.reason, null); assert.equal(s.model.panels()['today.equity'].state, 'fresh');
+test('P2 executor: reachability and API readiness remain independent in both directions', async t => {
+  for (const ready of [true, false]) {
+    const s = await setup(t);
+    const value = ready ? snapshot() : fixture('a-gateway-up-but-dead');
+    if (!ready) { delete value.receivedAt; value.generatedAt = at(0); value.safety.gateway.checkedAt = at(0); }
+    value.safety.executor.gatewayReachable = !ready;
+    assert.equal((await s.push(value)).status, 200);
+    assert.equal(s.model.panels().executor.reason, null);
+    assert.equal(s.model.panels().executor.state, 'fresh');
+    assert.equal(s.model.panels().gateway.reason, ready ? null : 'upstream_lost');
+    assert.equal((await s.request('/joe/healthz')).body.gateway.confirmed, ready);
+  }
 });
 
 test('P2 history: dedupe generation, null gaps and composite per-desk bases survive restart', async t => {
@@ -377,7 +496,11 @@ test('P2 history: dedupe generation, null gaps and composite per-desk bases surv
 
 test('P2 storage: data and history write failures are explicit and preserve independent last-good', async t => {
   let failing = '';
-  const s = await setup(t, { write: (file, ...args) => { if (file.endsWith(failing) && failing) throw new Error('synthetic write failure'); atomicWrite(file, ...args); } });
+  const s = await setup(t, { write: (file, ...args) => {
+    if (file.endsWith(failing) && failing) throw new Error('synthetic write failure');
+    atomicWrite(file, ...args);
+    if (failing === 'history-sync' && file.endsWith('history-state.json')) throw Object.assign(new Error('synthetic directory sync failure'), { committed: true });
+  } });
   await s.push(snapshot());
   const original = readFileSync(join(s.dataDir, 'data-state.json'), 'utf8');
   failing = 'data-state.json'; s.time.ms = 30000;
@@ -390,7 +513,15 @@ test('P2 storage: data and history write failures are explicit and preserve inde
   assert.equal((await s.request('/joe/healthz')).body.feeds.history.reason, 'history_write_failed');
   const restart = createReadModel({ dataDir: s.dataDir, clock: () => at(40000) });
   assert.equal(restart.feeds().history.reason, 'history_write_failed');
-  failing = ''; s.time.ms = 60000; await s.push(snapshot(103, 60000));
+  failing = 'history-sync'; s.time.ms = 45000;
+  assert.equal((await s.push(snapshot(103, 45000))).body.historyReason, 'history_write_failed');
+  assert.equal(s.model.feeds().history.value.points.at(-1).t, at(45000));
+  // Dedupe cannot resolve a directory-sync failure; a successful write can.
+  failing = ''; s.time.ms = 46000;
+  assert.equal((await s.push(snapshot(104, 45000))).status, 200);
+  assert.equal(s.model.feeds().history.reason, 'history_write_failed');
+  assert.equal(createReadModel({ dataDir: s.dataDir }).feeds().history.reason, 'history_write_failed');
+  s.time.ms = 60000; await s.push(snapshot(105, 60000));
   assert.equal(s.model.feeds().history.reason, null);
 });
 
@@ -403,10 +534,36 @@ test('P2 durability: a post-rename sync failure cannot roll sequence back in mem
   await s.push(snapshot()); failAfterRename = true; s.time.ms = 30000;
   assert.equal((await s.push(snapshot(102, 30000))).body.reason, 'refresh_failed');
   assert.equal(s.model.feeds().data.value.seq, 102);
+  assert.deepEqual(s.model.feeds().history.value.points.map(p => p.t), [at(0), at(30000)]);
   assert.equal((await s.push(snapshot(102, 30000))).body.reason, 'sequence_replayed');
   const restart = createReadModel({ dataDir: s.dataDir, clock: () => at(30000) });
+  assert.deepEqual(restart.feeds().history.value.points.map(p => p.t), [at(0), at(30000)]);
   assert.equal(restart.accept(snapshot(102, 30000)).reason, 'sequence_replayed');
   assert.equal(restart.accept(snapshot(103, 31000)).ok, true);
+  assert.deepEqual(restart.feeds().history.value.points.map(p => p.t), [at(0), at(30000), at(31000)]);
+});
+
+test('P2 corrupt history: malformed, invalid and oversized stores fail closed without overwriting or resetting sequence', async t => {
+  for (const damage of ['json', 'contract', 'bytes', 'oversize']) {
+    const s = await setup(t); await s.push(snapshot());
+    s.time.ms = 1000; await s.push(snapshot(102, 1000));
+    const file = join(s.dataDir, 'history-state.json');
+    const invalidBytes = JSON.parse(readFileSync(file)); invalidBytes.value.sizeBytes++;
+    const body = damage === 'json' ? '{' : damage === 'contract' ? JSON.stringify({ format: 'joedesk.history-store.v2', value: { schema: 'old' } }) :
+      damage === 'bytes' ? JSON.stringify(invalidBytes) : ' '.repeat(HISTORY_CAP + 1);
+    await writeFile(file, body);
+    const snapshotBefore = readFileSync(join(s.dataDir, 'data-state.json'), 'utf8');
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const restarted = await setup(t, { dataDir: s.dataDir }); restarted.time.ms = 2000 + attempt * 1000;
+      const pushed = await restarted.push(snapshot(103 + attempt, restarted.time.ms));
+      assert.equal(pushed.status, 503); assert.equal(pushed.body.reason, 'history_write_failed');
+      assert.equal(readFileSync(file, 'utf8'), body);
+      assert.equal(readFileSync(join(s.dataDir, 'data-state.json'), 'utf8'), snapshotBefore);
+      assert.equal(restarted.model.feeds().data.value.seq, 102);
+      assert.equal(restarted.model.feeds().history.value, null);
+      assert.equal((await restarted.request('/joe/healthz')).body.feeds.history.reason, 'history_write_failed');
+    }
+  }
 });
 
 test('P2 packaging: offline allowlist serves shared contracts and rejects arbitrary source paths', async t => {
@@ -424,10 +581,13 @@ test('P2 packaging: offline allowlist serves shared contracts and rejects arbitr
   for (const route of ['/joe/contracts/server.mjs', '/joe/contracts/no-such-file.json', '/joe/server/read-model.mjs', '/joe/release.json']) {
     assert.equal((await s.request(route)).status, 404);
   }
-  for (const file of ['Dockerfile', 'default.nix']) {
-    const source = readFileSync(new URL('../' + file, import.meta.url), 'utf8');
-    for (const name of ['contracts', 'server', 'release.json', 'time.mjs', 'market-calendar.json']) assert.ok(source.includes(name), `${file}: ${name}`);
-  }
+  const docker = readFileSync(new URL('../Dockerfile', import.meta.url), 'utf8');
+  assert.match(docker, /^COPY server \.\/server$/m);
+  assert.match(docker, /^COPY contracts \.\/contracts$/m);
+  assert.match(docker, /^COPY release\.json time\.mjs market-calendar\.json \.\/$/m);
+  const nix = readFileSync(new URL('../default.nix', import.meta.url), 'utf8');
+  assert.match(nix, /cp -r \$src\/contracts \$src\/server \$out\/share\/joedesk\//);
+  assert.match(nix, /install -m 644 \$src\/release\.json \$src\/time\.mjs \$src\/market-calendar\.json \$out\/share\/joedesk\//);
   const redirect = await fetch(s.base + '/joe?desk=j', { redirect: 'manual' });
   assert.equal(redirect.status, 308); assert.equal(redirect.headers.get('location'), '/joe/?desk=j');
   const page = await fetch(s.base + '/joe/'); assert.equal(page.status, 200); assert.match(await page.text(), /<base href="\/joe\/">/);
@@ -454,7 +614,7 @@ test('P2 compaction: UTF-8 envelope warning compacts before 6.4MiB and preserves
   assert.ok(measureHistory(value) >= HISTORY_WARNING);
   const original = structuredClone(value.points);
   boundHistory(value);
-  assert.ok(value.sizeBytes < HISTORY_WARNING); assert.equal(value.reason, 'history_size_limit');
+  assert.ok(value.sizeBytes < HISTORY_WARNING); assert.equal(value.reason, 'history_compacted');
   assert.ok(value.points.length < original.length);
   for (const i of [0, 31, 32, 46, 47, 48, 49, 50, 51, 52, original.length - 1]) {
     assert.deepEqual(value.points.find(p => p.t === original[i].t), original[i], String(i));
@@ -476,8 +636,8 @@ test('P2 daily closes: compaction retains every Vienna day final observed equity
   assert.ok(compacted.some(p => p.t === value.points.at(-1).t));
 });
 
-function atCap(target) {
-  const value = historySeries();
+function atCap(target, metadata = {}) {
+  const value = { ...historySeries(), ...metadata };
   // Every point is a real basis boundary; compaction cannot drop it to fit.
   value.points.forEach((p, i) => { p.desks.j.historyBasis = `j.${i % 2}`; });
   let delta = target - measureHistory(value);
@@ -494,7 +654,7 @@ function atCap(target) {
 test('P2 hard cap: exact 8MiB complete envelope writes; +1 byte fails explicitly before persistence', async t => {
   const s = await setup(t);
   // Include the alarm before measuring to account for every envelope byte.
-  const exact = atCap(HISTORY_CAP - Buffer.byteLength(',"reason":"history_size_limit"'));
+  const exact = atCap(HISTORY_CAP, { reason: 'history_compacted', compactedThrough: at(9999000) });
   boundHistory(exact);
   assert.equal(exact.sizeBytes, HISTORY_CAP); assert.equal(exact.points.length, 10000);
   atomicWrite(join(s.dataDir, 'history-state.json'), historyEnvelope(exact), HISTORY_CAP);
@@ -504,12 +664,20 @@ test('P2 hard cap: exact 8MiB complete envelope writes; +1 byte fails explicitly
   assert.throws(() => boundHistory(over), /history_size_limit/);
   assert.deepEqual(readFileSync(join(s.dataDir, 'history-state.json')), original);
   assert.equal(validateContract('history', exact).ok, true);
-  const restarted = await setup(t, { dataDir: s.dataDir });
+  const restarted = await setup(t, { dataDir: s.dataDir, clock: () => at(10000000) });
   const pushed = await restarted.push(snapshot(101, 10000000));
   assert.equal(pushed.status, 200); assert.equal(pushed.body.historyReason, 'history_size_limit');
   assert.deepEqual(readFileSync(join(s.dataDir, 'history-state.json')), original);
   const health = (await restarted.request('/joe/healthz')).body;
   assert.equal(health.feeds.data.state, 'fresh'); assert.equal(health.feeds.history.reason, 'history_size_limit');
+  const recovery = await setup(t, { dataDir: s.dataDir }); recovery.time.ms = 10001000;
+  assert.equal((await recovery.request('/joe/healthz')).body.feeds.history.reason, 'history_size_limit');
+  const stillFull = await recovery.push(snapshot(102, 10001000));
+  assert.equal(stillFull.body.historyReason, 'history_size_limit');
+  assert.deepEqual(readFileSync(join(s.dataDir, 'history-state.json')), original);
+  recovery.time.ms += 15 * 86400000;
+  assert.equal((await recovery.push(snapshot(103, recovery.time.ms))).body.historyReason, null);
+  assert.equal((await recovery.request('/joe/healthz')).body.feeds.history.state, 'fresh');
 });
 
 test('P2 history alarm: successful near-cap compaction is visible through history and anonymous health', async t => {
@@ -517,13 +685,64 @@ test('P2 history alarm: successful near-cap compaction is visible through histor
   const history = historySeries(); measureHistory(history);
   assert.ok(history.sizeBytes >= HISTORY_WARNING && history.sizeBytes < HISTORY_CAP);
   atomicWrite(join(dataDir, 'history-state.json'), historyEnvelope(history), HISTORY_CAP);
-  const s = await setup(t, { dataDir });
+  const s = await setup(t, { dataDir, clock: () => at(10000000) });
   const result = await s.push(snapshot(101, 10000000));
-  assert.equal(result.body.historyReason, 'history_size_limit');
+  assert.equal(result.body.historyReason, 'history_compacted');
   const stored = (await s.request('/joe/history.json')).body;
-  assert.ok(stored.sizeBytes < HISTORY_WARNING); assert.equal(stored.reason, 'history_size_limit');
+  assert.ok(stored.sizeBytes < HISTORY_WARNING); assert.equal(stored.reason, 'history_compacted');
   const health = (await s.request('/joe/healthz', { headers: { 'x-auth-request-user': '' } })).body;
-  assert.equal(health.feeds.history.reason, 'history_size_limit'); assert.equal(health.feeds.data.state, 'fresh');
+  assert.equal(health.feeds.history.reason, 'history_compacted'); assert.equal(health.feeds.history.state, 'stale');
+  assert.equal(health.feeds.data.state, 'fresh');
+  assert.equal(s.model.panels().history.state, 'stale');
+  const restart = await setup(t, { dataDir }); restart.time.ms = 10001000;
+  await restart.push(snapshot(102, restart.time.ms));
+  assert.equal(restart.model.feeds().history.value.reason, 'history_compacted');
+  assert.equal((await restart.request('/joe/healthz')).body.feeds.history.state, 'stale');
+  // The compacted range ages out while one later, uncompacted point remains.
+  restart.time.ms = 10000000 + 14 * 86400000 + 1;
+  assert.equal((await restart.push(snapshot(103, restart.time.ms))).status, 200);
+  assert.equal(restart.model.feeds().history.value.reason, undefined);
+  assert.equal(restart.model.feeds().history.value.compactedThrough, undefined);
+  assert.deepEqual(restart.model.feeds().history.value.points.map(p => p.t), [at(10001000), at(restart.time.ms)]);
+  assert.equal((await restart.request('/joe/healthz')).body.feeds.history.state, 'fresh');
+});
+
+test('P2 history retention: server time prunes old points even with a slow producer clock', () => {
+  const previous = historySeries(2);
+  previous.points[0].t = at(-14 * 86400000 - 1);
+  previous.points[1].t = at(-14 * 86400000);
+  const accepted = { ...snapshot(101, -1000), receivedAt: at(0) };
+  const states = panelStates({ data: { value: accepted } }, at(0));
+  const history = appendHistory(previous, accepted, states, at(0));
+  assert.deepEqual(history.points.map(p => p.t), [at(-14 * 86400000), at(-1000)]);
+});
+
+test('P2 history: J backfill is never accepted or copied into observed v2 history', async t => {
+  const s = await setup(t); await s.push(snapshot());
+  const original = readFileSync(join(s.dataDir, 'history-state.json'), 'utf8');
+  const extra = snapshot(102, 1000); extra.desks[0].equityBackfill = [{ t: at(-3600000), equity: 5000 }];
+  assert.equal((await s.push(extra)).status, 422);
+  assert.equal(readFileSync(join(s.dataDir, 'history-state.json'), 'utf8'), original);
+  s.time.ms = 1000; assert.equal((await s.push(snapshot(103, 1000))).status, 200);
+  const history = (await s.request('/joe/history.json')).body;
+  assert.deepEqual(history.points.map(p => p.t), [at(0), at(1000)]);
+  assert.equal(JSON.stringify(history).includes('Backfill'), false);
+});
+
+test('P2 repeated NY hour: distinct UTC receipts and history points survive compaction and restart', async t => {
+  const first = '2026-11-01T05:30:00.000Z', second = '2026-11-01T06:30:00.000Z';
+  let now = first;
+  const s = await setup(t, { clock: () => now });
+  for (const [seq, instant] of [[101, first], [102, second]]) {
+    now = instant;
+    const value = snapshot(seq); value.generatedAt = instant; value.safety.gateway.checkedAt = instant;
+    assert.equal((await s.push(value)).status, 200);
+  }
+  const restarted = createReadModel({ dataDir: s.dataDir, clock: () => second });
+  const points = compactPoints(restarted.feeds().history.value.points);
+  assert.deepEqual(points.map(p => p.t), [first, second]);
+  assert.equal(restarted.panels()['today.equity'].valueReceivedAt, second);
+  assert.equal(restarted.panels()['today.equity'].ageSeconds, 0);
 });
 
 test('P2 history sums: every field rejects missing/null desks or fields and unequal family sums', () => {

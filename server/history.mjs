@@ -84,7 +84,8 @@ export function boundHistory(value) {
   const bytes = measureHistory(value);
   if (bytes >= HISTORY_WARNING || value.points.length > 10000) {
     value.points = compactPoints(value.points);
-    value.reason = 'history_size_limit';
+    value.reason = 'history_compacted';
+    value.compactedThrough = value.points.at(-1)?.t ?? value.generatedAt;
     measureHistory(value);
   }
   if (value.sizeBytes > HISTORY_CAP || value.points.length > 10000) throw new Error('history_size_limit');
@@ -95,9 +96,14 @@ export function boundHistory(value) {
 
 export function appendHistory(previous, snapshot, states, now) {
   if (previous && Date.parse(snapshot.generatedAt) <= Date.parse(previous.points.at(-1)?.t)) return previous;
-  const cutoff = Date.parse(snapshot.generatedAt) - MAX_AGE;
+  const cutoff = Date.parse(now) - MAX_AGE;
   const points = (previous?.points ?? []).filter(p => Date.parse(p.t) >= cutoff);
+  // The compaction warning describes retained, compacted records. Keep it
+  // through appends/restarts until that entire window leaves retention.
+  const compacted = previous?.reason === 'history_compacted' &&
+    points.some(p => Date.parse(p.t) <= Date.parse(previous.compactedThrough));
   points.push(historyPoint(snapshot, states));
   return boundHistory({ schema: CONTRACTS.contracts.history, seq: (previous?.seq ?? 0) + 1,
-    generatedAt: now, receivedAt: now, points, sizeBytes: 0 });
+    generatedAt: now, receivedAt: now, points, sizeBytes: 0,
+    ...(compacted ? { reason: 'history_compacted', compactedThrough: previous.compactedThrough } : {}) });
 }

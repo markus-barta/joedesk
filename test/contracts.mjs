@@ -72,6 +72,7 @@ test('one closed reason enum is used everywhere, including field errors', () => 
     const data = copy(samples.data);
     data.totals.reasons = { equity: reason };
     assert.equal(validateContract('data', data).ok, true, reason);
+    assert.doesNotThrow(() => panelState({ value: data }, data.totals.equity, reason, at));
   }
   const data = copy(samples.data);
   data.totals.reasons = { equity: 'new-unreviewed-reason' };
@@ -124,6 +125,21 @@ test('accepted receive time belongs to the server; old, unknown, invalid and rep
     const unknown = acceptSnapshot(kind, { schema: 'future.v99' }, null, later);
     rejects(unknown, 'const', '$.schema', 'schema_unsupported');
     assert.equal(unknown.value, null);
+  }
+});
+
+test('clock-ahead tolerance: exactly five seconds is valid; one more millisecond retains last-good', () => {
+  for (const kind of ['data', 'history', 'results']) {
+    const original = ingress(samples[kind]);
+    const accepted = acceptSnapshot(kind, original, null, at);
+    const candidate = ingress(samples[kind]); candidate.seq++;
+    candidate.generatedAt = '2026-10-14T17:42:27.000Z';
+    assert.equal(acceptSnapshot(kind, candidate, accepted, at).status, 200, kind);
+    candidate.generatedAt = '2026-10-14T17:42:27.001Z';
+    const rejected = acceptSnapshot(kind, candidate, accepted, at);
+    rejects(rejected, 'clockAhead', '$.generatedAt', 'clock_ahead');
+    assert.strictEqual(rejected.value, accepted.value);
+    assert.equal(rejected.generatedAdvancedAt, accepted.generatedAdvancedAt);
   }
 });
 

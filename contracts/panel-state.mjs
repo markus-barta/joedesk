@@ -22,12 +22,19 @@ export function panelState(feed, value, reason, now, lastGood = null, lastGoodRe
   if (reason && !REASONS.includes(reason)) throw new TypeError('Unknown panel reason');
   const age = feedAge(feed, now);
   const receivedAt = feed?.value?.receivedAt ?? feed?.receivedAt ?? null;
+  if (!value && feed?.reason === 'feed_not_received') return {
+    state: 'not reported', ageSeconds: null, reason: 'feed_not_received', value: null, retained: false, valueReceivedAt: null,
+  };
   if (feed?.reason || reason) {
     const shown = value ?? lastGood;
     const valueReceivedAt = value == null && lastGood != null ? lastGoodReceivedAt : receivedAt;
     const retained = shown != null && (Boolean(feed?.reason) || value == null);
     return {
-      state: 'broken', ageSeconds: retained ? (valueReceivedAt ? Math.max(0, (Date.parse(now) - Date.parse(valueReceivedAt)) / 1000) : null) : age,
+      // A duplicate delivery and successful history compaction are advisory.
+      // Explicit field/session failures and failed history writes stay broken.
+      state: (feed?.reason === 'sequence_replayed' && !reason && shown != null) ||
+        (!feed?.reason && reason === 'history_compacted' && shown != null) ? 'stale' : 'broken',
+      ageSeconds: retained ? (valueReceivedAt ? Math.max(0, (Date.parse(now) - Date.parse(valueReceivedAt)) / 1000) : null) : age,
       reason: feed?.reason || reason, value: shown, retained, valueReceivedAt,
     };
   }
@@ -68,7 +75,7 @@ export function panelStates(feeds, now, previousValues = {}, keepSymbols = feeds
     !Number.isFinite(progress.initialAgeMs) || progress.initialAgeMs < 0);
   const regressed = data && (Date.parse(now) < Date.parse(data.receivedAt) ||
     (progress && Date.parse(now) < Date.parse(progress.advancedAt)));
-  const sessionReason = data && !feeds.data.reason ? (
+  const sessionReason = data ? (
     invalidTiming || invalidProgress ? 'contract_invalid' : regressed ? 'clock_regressed' : gatewayReason(data.safety.gateway, data.generatedAt) ||
       (freshFeed ? gatewayReason(data.safety.gateway, data.generatedAt, generationElapsedMs) ||
         (trackedAgeMs !== null && trackedAgeMs >= GATEWAY_CHECK_MAX_AGE_MS ? 'gateway_unconfirmed' : null) : null)
@@ -96,9 +103,7 @@ export function panelStates(feeds, now, previousValues = {}, keepSymbols = feeds
   }
   select('halt', feeds.data, data?.safety.halt, data?.safety.halt ? data.safety.haltReason : null);
   const executor = data?.safety.executor;
-  const disagreement = typeof executor?.gatewayReachable === 'boolean' && typeof data?.safety.gateway?.apiSessionReady === 'boolean' &&
-    executor.gatewayReachable !== data.safety.gateway.apiSessionReady;
-  select('executor', feeds.data, executor, executor?.reason || (disagreement ? 'executor_broker_disagreement' : null));
+  select('executor', feeds.data, executor, executor?.reason);
   for (const name of ['history', 'results', 'fleet-config']) {
     select(name, feeds[name], feeds[name]?.value, feeds[name]?.value?.reason);
   }

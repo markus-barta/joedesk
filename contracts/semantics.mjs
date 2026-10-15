@@ -97,6 +97,8 @@ export function checkSemantics(kind, payload, stage, errors) {
     if (payload.safety.halt && !payload.safety.haltReason) fail('$.safety.haltReason', 'reasonRequired');
   }
   if (kind === 'history') {
+    if (payload.reason === 'history_compacted' && !payload.compactedThrough) fail('$.compactedThrough', 'required');
+    if (payload.compactedThrough && payload.reason !== 'history_compacted') fail('$.compactedThrough', 'compactionReasonRequired');
     let previous = -Infinity;
     payload.points.forEach((p, i) => {
       if (Date.parse(p.t) <= previous) fail(`$.points[${i}].t`, 'strictOrder');

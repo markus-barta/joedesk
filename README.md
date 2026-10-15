@@ -144,8 +144,10 @@ retain their legacy probe responses. Static UI/assets remain behind external SSO
 
 `/joe/healthz` reports the actual `release.json` version/scheme, server clock,
 contract-set identifier, four feed states/receipt ages and gateway confirmation,
-check age and closed reason. Never-received feeds have null age and a closed
-reason. It has no money, identifiers, paths or diagnostic text. The legacy
+check age and closed reason. Never-received feeds have null age and
+`feed_not_received`; unwired Results uses `results_not_wired`. Data/history
+without observations return HTTP 503 with that reason, distinct from a missing
+route. Health has no money, identifiers, paths or diagnostic text. The legacy
 `calendar` scheme remains truthful until P6 completes CalVer3 adoption.
 
 `/joe/state.json` is the protected read model for P3: serverNow, four feeds with
@@ -153,8 +155,13 @@ progress metadata, safe data projection and panel states. Anchor serverNow to
 the browser's monotonic timer; pass feed metadata and prior cells to the shared
 selectors. `valueReceivedAt` is the original retained-cell receipt. Data/history
 responses also send `X-Joe-Server-Now`, data generation progress and any closed
-feed rejection reason as headers. `contracts/read.mjs` handles SSO redirects,
-401/403 and invalid refreshes without replacing the client's last-good value.
+feed rejection reason as headers. A rejected push leaves the last good snapshot
+and its original receipts available, including to cold clients. Feed-level
+rejection reasons live in headers/state; only actual session or KEEP-policy
+constraints withhold current values. The server never rewrites producer-owned
+API readiness. `contracts/read.mjs` handles SSO redirects, 401/403 and invalid
+refreshes with retention. Replayed deliveries show retained/advisory state,
+preserve the original age and cannot freshen data or turn healthy cells red.
 
 `/joe/results.json` returns HTTP 503 with the v2 schema identifier and
 `results_not_wired`. It contains no fabricated executor sequence, days or trades;
@@ -166,12 +173,20 @@ and `history-state.json` as independent atomic/fsynced envelopes. Closed rejecti
 reasons have a separate bounded file. Fleet Config keeps its audited v1 file and
 a server-owned `fleet-receipt.json` for last-good/receipt retention. Refreshes of
 an unchanged revision never reset its age. Corrupt sequence/retention metadata
-fails closed; restore a compatible backup instead of resetting sequence state.
+or a corrupt/oversized history store fails closed without overwriting either
+store or restarting sequences; restore a compatible backup. Producer generation
+more than 5 seconds ahead of server receipt is rejected with `clock_ahead`
+before snapshot/history writes, so a higher valid sequence can recover normally.
 Legacy data/history files are neither migrated nor overwritten automatically;
 P6 owns the compatible backup and cutover. History's `sizeBytes` measures its
 complete UTF-8 storage envelope; compaction begins at 80% of 8 MiB, preserves
-endpoints/extrema/gap edges/per-desk basis transitions, and reports an explicit
-alarm if the hard cap or a write cannot be satisfied.
+endpoints/extrema/gap edges/per-desk basis transitions, and prunes its 14-day
+window by server time. Successful compaction reports the advisory
+`history_compacted` state until the compacted range (`compactedThrough`) leaves
+retention; it does not mark history broken. Actual `history_size_limit` and
+`history_write_failed` alarms remain broken until a successful history write
+resolves them; deduplication alone cannot clear one. A snapshot rename followed
+by a directory-sync failure still records its history point before replying.
 
 The UI gates non-canonical hosts client-side (privacy stub). That is UX only, not a network security boundary.
 

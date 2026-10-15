@@ -306,9 +306,9 @@
       "retained": false
     },
     "executor": {
-      "state": "broken",
+      "state": "fresh",
       "ageSeconds": 9,
-      "reason": "executor_broker_disagreement",
+      "reason": null,
       "retained": false
     },
     "history": {

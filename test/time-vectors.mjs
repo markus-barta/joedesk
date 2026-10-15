@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { wall as productionWall, NY, VIENNA, isRTH, nyDay, viennaDay, viennaISOWeek, calendarDays, MARKET_CALENDAR } from '../time.mjs';
+import { wall as productionWall, NY, VIENNA, isRTH, marketSession, nyDay, viennaDay, viennaISOWeek, calendarDays, MARKET_CALENDAR } from '../time.mjs';
+import { REASONS } from '../contracts/index.mjs';
+import { panelState, feedAge } from '../contracts/panel-state.mjs';
 
 const { vectors } = JSON.parse(readFileSync(new URL('../fixtures/time-vectors.json', import.meta.url)));
 
@@ -66,8 +68,23 @@ test('time: repeated NY 01:xx instants remain distinct; extended hours after 18 
   const a = '2026-11-01T05:30:00.000Z', b = '2026-11-01T06:30:00.000Z';
   assert.equal(productionWall(a, NY), productionWall(b, NY));
   assert.notEqual(productionWall(a, VIENNA), productionWall(b, VIENNA));
-  assert.equal(Date.parse(b) - Date.parse(a), 3600000);
+  assert.equal(feedAge({ receivedAt: a }, b), 3600);
   const late = '2026-10-27T23:30:00.000Z';
   assert.equal(productionWall(late, NY), '2026-10-27 19:30:00');
   assert.equal(nyDay(late), '2026-10-27'); assert.equal(viennaDay(late), '2026-10-28'); assert.equal(isRTH(late), false);
+});
+
+test('time: every market-session reason is closed and accepted by browser selectors', () => {
+  for (const [instant, expected] of [
+    ['2026-10-14T15:00:00.000Z', { day: '2026-10-14', rth: true, reason: null, close: '16:00:00' }],
+    ['2026-10-17T15:00:00.000Z', { day: '2026-10-17', rth: false, reason: 'market_closed', close: null }],
+    ['2026-12-25T15:00:00.000Z', { day: '2026-12-25', rth: false, reason: 'market_closed', close: null }],
+    ['2026-11-27T18:00:00.000Z', { day: '2026-11-27', rth: false, reason: null, close: '13:00:00' }],
+    ['2029-01-02T16:00:00.000Z', { day: '2029-01-02', rth: false, reason: 'calendar_unavailable', close: null }],
+  ]) {
+    const session = marketSession(instant);
+    assert.deepEqual(session, expected);
+    if (session.reason) assert.ok(REASONS.includes(session.reason));
+    assert.doesNotThrow(() => panelState({ receivedAt: instant }, session, session.reason, instant));
+  }
 });

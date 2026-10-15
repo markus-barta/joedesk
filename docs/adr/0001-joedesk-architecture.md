@@ -533,6 +533,7 @@ an integration obligation, not a claim of runtime completion in P1.
 | Low 6: retained value without receipt metadata reset its age | **Fixed here:** age stays null/unknown; it never borrows a newer feed receipt. **P2:** persist `valueReceivedAt` for every retained cell and prove restart behavior. |
 | Low 7: baseline error path always named DAY | **Fixed here:** `baselineRequired` reports `$.pnlSources.{day,open}.periodStart` for the actual failing period. |
 | Check already 20s old at generation: fresh → broken → stale | **P3 copy sign-off:** money is fresh until +40s, broken with `gateway_unconfirmed` from +40s to just before +60s (empty money on a cold load), then stale with its value from +60s; elapsed times are from the advancing receipt. |
+| Amy's executor-vs-broker disagreement (orders, fills, brakes) | **P5 / producer; Amy sign-off required:** real disagreement needs executor order/fill/brake evidence. Gateway reachability and API-session readiness are independent signals, so P2 restores P1 executor selection and the original dead-gateway fixture. The closed reason remains available for actual producer evidence; P2 does not infer it from reachability. |
 
 ## P1 verification boundary
 
@@ -627,11 +628,17 @@ other model CLI was run.
 This branch connects the merged shared package to the server; it is not a
 producer/UI cutover. P2 adds no trading action, LIVE path, deployment or release
 coordinate. `calendar` remains the actual release scheme until P6, so the health
-schema now accepts the explicitly tagged current legacy identity as well as
-CalVer3; it rejects mismatched schemes and invalid dates. The new required
-serverNow/gateway health fields and the closed `executor_broker_disagreement`
-and `results_not_wired` codes are candidate package additions for coordinator
-compatibility review before activation.
+schema accepts the explicitly tagged current legacy identity as well as
+CalVer3; it rejects mismatched schemes and invalid dates. LEAD accepts the
+`calendar` health scheme and packaging of `server/`, `time.mjs`,
+`market-calendar.json` and `release.json` beyond the original contracts-only
+packaging wording; the existing Docker base/CMD and deployment/compose stay
+unchanged. Closed reasons and selector handling are tested together. Contract
+manifest revision 2 adds `clock_ahead`, `feed_not_received`, `market_closed`,
+`calendar_unavailable` and `history_compacted`; identifiers remain exact v2.
+Integration targets `rebuild/v2`, not `main`. Producer/UI activation and any
+nixcfg deployment-pin movement remain P6/coordinator work after compatibility
+approval; this worker does not push or deploy.
 
 `data-state.json` atomically combines the accepted v2 snapshot, generation
 progress, gateway check-progress watermark and per-cell valueReceivedAt.
@@ -652,7 +659,8 @@ stale feed. Future/unconfirmed checks cannot poison the valid-check watermark.
 Results is an HTTP 503 v2 error envelope with results_not_wired, without invented
 executor sequence, receipt, days or trades. The executor owns any future producer.
 
-The exact item-to-test mapping also lives in `.agent-status.json` (`adrCoverage`).
+The worker's ignored local status file is coordination state, never a product
+artifact. This ADR and the JOED-22 tracker retain the item-to-test mapping.
 All `P2 …` names below are `test/server-contract.mjs`; time cases are
 `test/time-vectors.mjs`, run against the production module as well as the oracle.
 
@@ -664,7 +672,7 @@ All `P2 …` names below are `test/server-contract.mjs`; time cases are
 | ADR §2 / class a / OPS proposal 1: durable gateway check advancement gates all 17 money/account cells and both position panels; two producer-skew directions, stale/frozen precedence, future check recovery | `P2 gateway: persisted old-check progress invalidates every money, account and both position panels`; `P2 gateway: stale/frozen precedence, initial check age and check regressions`; `P2 gateway: a future unconfirmed check cannot poison the valid-check recovery watermark`; `P2 outages: 20 dead, missing and frozen-ready pushes retain original money through restart and recover` |
 | ADR §3 / class b / deferred single-desk and coupled-PnL notes: isolated unavailable desk, observed siblings, no incomplete family sums or carried equity profit | `P2 isolation: single unavailable desk and coupled equity/total P&L keep sibling receipts`; `P2 history sums: every field rejects missing/null desks or fields and unequal family sums` |
 | ADR §3 / class h: accepted full Fleet Config KEEP policy before first ingress, mandatory SXR8/TSLA floor and untrusted-rollup withholding | `P2 KEEP: accepted Fleet Config policy withholds affected money and measured history`; `P2 Fleet receipt: stored policy constrains first ingress; unchanged reads and restart preserve its age`; `paper is fixed, KEEP is excluded from results and cannot be removed from fleet policy` |
-| Amy P2 scope: executor-vs-broker disagreement gets its own closed reason, never confirms gateway readiness | `P2 executor: broker disagreement has its own reason and cannot confirm a gateway` |
+| P1 executor behavior: reachability never implies API readiness or order/fill/brake disagreement; Amy/P5 owns real reconciliation | `P2 executor: reachability and API readiness remain independent in both directions` |
 | ADR §4 / class j / deferred extra time cases: NY/Vienna day, ISO week, RTH, all 24 literal P1 vectors, pinned holidays/early closes, 2027 spring, Vienna midnight, repeated NY hour and extended hours | `time vector: <all 24 fixture ids in fixtures/time-vectors.json>`; `time: pinned holidays and early closes are closed at the exact boundary`; `time: 2027 spring mismatch spans US 14 March through EU 28 March`; `time: Vienna midnight and ISO week are independent of NY accounting day`; `time: repeated NY 01:xx instants remain distinct; extended hours after 18 NY stay outside RTH` |
 | ADR §6 / class f: observed-only history, generation dedupe, per-point complete exact three-desk sums, null gaps and independent composite basis identity | `P2 history: dedupe generation, null gaps and composite per-desk bases survive restart`; `P2 history sums: every field rejects missing/null desks or fields and unequal family sums`; `P2 gap storage: empty, leading/internal/trailing and outage-only windows remain null observations`; `P2 daily closes: compaction retains every Vienna day final observed equity before null gaps` |
 | ADR §6 / class i / deferred byte sizing: UTF-8 bytes including envelope, 80% warning compaction, extrema/endpoints/gap/basis edges, exact 8MiB and +1 failure; explicit size/write alarms | `P2 compaction: UTF-8 envelope warning compacts before 6.4MiB and preserves extrema and gap/basis edges`; `P2 hard cap: exact 8MiB complete envelope writes; +1 byte fails explicitly before persistence`; `P2 storage: data and history write failures are explicit and preserve independent last-good`; `P2 history alarm: successful near-cap compaction is visible through history and anonymous health` |
@@ -699,3 +707,35 @@ provisional 5000ms local CPU guard. Direct unguarded HTTP test invocation was
 refused before any storage/listener creation. Docker/Colima were stopped, so no
 local Node22 container or artifact build is claimed; CI keeps those checks.
 The worker did not run a review gate, other model CLI, push or deployment.
+
+### P2 fix round 1 — JOED-22
+
+The fix1 brief addresses the Opus r1 findings against `f8f55f32e`. The table
+below is the durable per-item evidence; earlier P2 validation counts above
+describe the original candidate, not this fix round.
+
+| Finding | Result and executable evidence |
+| --- | --- |
+| H1 | History retention uses server `now`. Ingress rejects producer generation beyond receipt +5000 ms as `clock_ahead`, before snapshot/history writes. `P2 clock ahead: five good observations survive a one-year jump and the next valid sequence` proves byte-identical stores and recovery across restart; `clock-ahead tolerance: exactly five seconds is valid; one more millisecond retains last-good` checks all snapshot contracts; `P2 history retention: server time prunes old points even with a slow producer clock` checks the cutoff. |
+| M1 | Rejections keep the last snapshot, money, P&L-source evidence, API readiness and original receipts. Only session/KEEP constraints withhold values; headers/state carry feed rejection. A cold `acceptRead` accepts the validated retained snapshot with its rejection reason. `P2 cold retention: bad and replayed pushes preserve the last snapshot, ownership and original receipts` covers malformed-schema/replay cold loads, restart and independent check expiry. |
+| M2 | Malformed, contract-invalid, byte-count-invalid and oversized history stores block ingress with 503 `history_write_failed`; neither store is overwritten and sequence never restarts at 1. `P2 corrupt history: malformed, invalid and oversized stores fail closed without overwriting or resetting sequence` repeats ingress/restart probes and checks file bytes. |
+| M3 | P1 executor behavior and the original `a-gateway-up-but-dead` fixture are restored. `P2 executor: reachability and API readiness remain independent in both directions` covers both boolean directions; the deferred note assigns order/fill/brake disagreement to P5/producer with Amy's sign-off. |
+| M4 | `P2 inbox auth: missing and wrong bearer return 401; unconfigured token returns 503 before writes` proves all three cases precede parsing and every store write. |
+| L1 | Time reasons are in the closed enum. `time: every market-session reason is closed and accepted by browser selectors` covers open, weekend, holiday, early-close and unavailable-calendar branches; `one closed reason enum is used everywhere, including field errors` exercises selector handling for every code. |
+| L2 | Never-received feeds use `feed_not_received`, null age and `not reported`; data/history return 503 rather than route 404. `P2 empty feeds: 503 is not reported with feed_not_received, never route_not_found` and the exact health assertions cover these distinctions. |
+| L3 | Successful compaction is advisory `history_compacted` (`stale` in the existing closed state set), with server-owned `compactedThrough` persisting its affected range. The warning survives pushes/restart until that range ages out, even while newer raw points remain. Real size/write failures stay broken until an actual successful history write; dedupe cannot clear them. `P2 history alarm: successful near-cap compaction is visible through history and anonymous health`, `P2 hard cap: exact 8MiB complete envelope writes; +1 byte fails explicitly before persistence` and `P2 storage: data and history write failures are explicit and preserve independent last-good` prove warning/failure persistence and resolution. Cold retention also proves replay is advisory and cannot turn healthy cells broken. |
+| L4 | Inbox 422 responses include at most 20 safe `path`/`rule` pairs, without rejected values. `P2 inbox diagnostics: schema, field and replay rejections expose only bounded safe path/rule pairs` plus the gateway-check regression test cover schema, field, sequence and timing diagnostics. |
+| L5 | A committed snapshot rename followed by directory-sync failure continues through history recording before returning failure. `P2 durability: a post-rename sync failure cannot roll sequence back in memory or after restart` now asserts both original points survive retries/restart; the storage regression also covers history's own post-rename error. |
+| L6 | Packaging assertions name exact Docker COPY/Nix install sources; HTTP assertions check `X-Joe-Server-Now`; auth ages come from real data/history/Fleet receipts (only the explicitly unwired Results client cache is synthetic). Time tests use production consumers; `P2 repeated NY hour: distinct UTC receipts and history points survive compaction and restart` proves repeated-hour storage behavior. The executor regression covers both directions, and `P2 history: J backfill is never accepted or copied into observed v2 history` restores the v2 observation-only check. |
+| L7 | The previously committed worker status file is removed from the product index and `.gitignore` excludes it. Local coordination status can remain ignored. Verified with an empty `git ls-files -- .agent-status.json` result and a successful `git check-ignore .agent-status.json`. |
+| INFO / M5 | LEAD's accepted packaging expansion and `calendar` scheme are recorded above. Closed reasons/selector handling are tested. Integration target is `rebuild/v2`; P6/coordinator owns activation and deployment pins. |
+
+Fix1 validation on native Node 24.20.0: `npm test` passed **91 contract,
+fixture and time tests + 36 isolated HTTP/storage tests (127 total), zero
+failures**. `npm run check` passed **all 9 check scripts**; `git diff --check`
+passed. The 256-position/10000-point trace was **120.0 ms**, below the existing
+provisional 5000 ms CPU guard. Paper-only/LIVE rejection and mandatory KEEP
+SXR8/TSLA remain covered by the existing contract tests. No Docker/default.nix,
+compose, deployment, legacy UI or release-identity changes were made in fix1.
+No review gate, other model CLI, delegation, push or deployment was run; the
+coordinator owns the cross-family gate after this worker exits.

@@ -567,12 +567,12 @@ function handleStatic(req, res, urlPath) {
 
   if (urlPath === "/joe/data.json") {
     const value = model.view().data;
-    sendJson(res, value ? 200 : 404, value ?? { ok: false, reason: model.feeds().data.reason ?? "refresh_failed" }, feedHeaders("data"));
+    sendJson(res, value ? 200 : 503, value ?? { ok: false, reason: model.feeds().data.reason }, feedHeaders("data"));
     return;
   }
   if (urlPath === "/joe/history.json") {
     const feed = model.feeds().history;
-    sendJson(res, feed.value ? 200 : 404, feed.value ?? { ok: false, schema: CONTRACTS.contracts.history, reason: feed.reason ?? "refresh_failed" }, feedHeaders("history"));
+    sendJson(res, feed.value ? 200 : 503, feed.value ?? { ok: false, schema: CONTRACTS.contracts.history, reason: feed.reason }, feedHeaders("history"));
     return;
   }
   if (urlPath === "/joe/results.json") {
