@@ -36,6 +36,9 @@ export const isPhone = () => matchMedia('(max-width: 700px)').matches;
 
 // One shared, opaque tip. Hover or focus shows it, a click or tap pins it,
 // Escape closes it and keeps focus; scrolling closes it only if the anchor moved.
+// A clamped sentence (data-say) shows itself whole there on a click, tap or
+// keyboard focus; hovering it shows nothing, as its words are already in view.
+const TRIGGER = '[data-term], [data-say]';
 export function initTips() {
   const tip = $('#tip');
   let anchor = null, pinned = false, quiet = false, at = null;
@@ -47,12 +50,21 @@ export function initTips() {
     tip.style.top = `${y}px`;
     at = { x: r.left, y: r.top };
   }
-  function show(el, pin) {
+  function fill(el) {
+    if (el.dataset.say) {
+      if (!TERMS[el.dataset.say]) return false;
+      tip.innerHTML = `<b>${esc(TERMS[el.dataset.say][0])}</b>${el.querySelector('[data-clamp]')?.innerHTML ?? ''}`;
+      return true;
+    }
     const entry = TERMS[el.dataset.term];
-    if (!entry) return;
+    if (!entry) return false;
+    tip.innerHTML = `<b>${esc(entry[0])}</b>${esc(entry[1])}<span class="t2">${el.dataset.learn ? 'Term' : 'Also called'}: ${esc(entry[2])}</span>`;
+    return true;
+  }
+  function show(el, pin) {
+    if (!fill(el)) return;
     if (anchor && anchor !== el) anchor.setAttribute('aria-expanded', 'false');
     anchor = el; pinned = Boolean(pin);
-    tip.innerHTML = `<b>${esc(entry[0])}</b>${esc(entry[1])}<span class="t2">${el.dataset.learn ? 'Term' : 'Also called'}: ${esc(entry[2])}</span>`;
     tip.classList.toggle('pinned', pinned);
     place(el);
     tip.classList.add('on');
@@ -70,8 +82,9 @@ export function initTips() {
     // Focus handed back by a rebuild is not a new focus: it leaves the tip as it was.
     quiet() { quiet = true; },
     moved(el) {
-      if (!el || el.dataset.term !== anchor?.dataset.term) { hide(true); return; }
+      if (!el || el.dataset.term !== anchor?.dataset.term || el.dataset.say !== anchor?.dataset.say) { hide(true); return; }
       anchor = el;
+      if (el.dataset.say) fill(el);
       el.setAttribute('aria-expanded', 'true'); el.setAttribute('aria-describedby', 'tip');
       place(el);
     },
@@ -85,14 +98,14 @@ export function initTips() {
     if (el && el === anchor && !el.contains(e.relatedTarget)) hide(false);
   });
   document.addEventListener('focusin', e => {
-    const el = e.target.closest?.('[data-term]');
+    const el = e.target.closest?.(TRIGGER);
     if (quiet) { quiet = false; return; }
     if (el && el !== anchor) show(el, false);
   });
   document.addEventListener('focusout', e => {
     // A rebuild removing the focused term is not the user leaving it.
     if (rebuilt.busy) return;
-    const el = e.target.closest?.('[data-term]');
+    const el = e.target.closest?.(TRIGGER);
     if (el && el === anchor) hide(false);
   });
   addEventListener('scroll', () => {
@@ -101,7 +114,7 @@ export function initTips() {
     if (Math.abs(r.left - at.x) > 1 || Math.abs(r.top - at.y) > 1) hide(true);
   }, { passive: true, capture: true });
   document.addEventListener('click', e => {
-    const el = e.target.closest('[data-term]');
+    const el = e.target.closest(TRIGGER);
     if (el) { if (anchor === el && pinned) hide(true); else show(el, true); e.preventDefault(); return; }
     if (pinned && !e.target.closest('#tip')) hide(true);
   }, true);
@@ -122,7 +135,7 @@ export const ageSpan = (key, text) => `<span class="age" data-age="${key}">${esc
 const AGE_RE = /<span class="age" data-age="([^"]+)">([^<]*)<\/span>/g;
 const structure = new WeakMap();
 const rebuilt = { tip: null, busy: false };
-const KEYS = ['data-term', 'data-go', 'data-hdesk', 'data-range', 'data-desk', 'data-day', 'data-period'];
+const KEYS = ['data-term', 'data-say', 'data-go', 'data-hdesk', 'data-range', 'data-desk', 'data-day', 'data-period'];
 function identity(node, root) {
   if (node.id) return { sel: `#${CSS.escape(node.id)}`, index: 0 };
   const attr = KEYS.find(k => node.hasAttribute(k));
@@ -146,10 +159,14 @@ export function patch(el, html) {
     if (again) { rebuilt.tip?.quiet(); again.focus({ preventScroll: true }); }
     return true;
   }
+  // A sentence shown whole in the tip ticks there too.
+  const tipAnchor = rebuilt.tip?.anchor();
+  const copy = tipAnchor?.dataset.say && el.contains(tipAnchor) ? $('#tip') : null;
   for (const [, name, text] of html.matchAll(AGE_RE)) {
-    const node = el.querySelector(`[data-age="${name}"]`);
     const plain = text.replace(/&amp;/g, '&');
-    if (node && node.textContent !== plain) node.textContent = plain;
+    for (const node of [el.querySelector(`[data-age="${name}"]`), copy?.querySelector(`[data-age="${name}"]`)]) {
+      if (node && node.textContent !== plain) node.textContent = plain;
+    }
   }
   return false;
 }

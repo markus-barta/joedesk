@@ -67,8 +67,8 @@ export const CELL_REASON = Object.freeze({
 export const cellReason = reason => CELL_REASON[reason] ?? 'not available';
 export const capital = text => text.charAt(0).toUpperCase() + text.slice(1);
 const FALLBACK_COPY = 'the operator must check the details';
-// Every sentence the Desk health line can start with, so the line can keep
-// room for the longest one in whatever font the browser has.
+// Every sentence the Desk health line can start with; the browser gate puts
+// each through the line to prove that none of them moves the page.
 export const HEALTH_LINES = Object.freeze([...new Set(['numbers up to date', ...Object.values(REASON_COPY), FALLBACK_COPY].map(capital))]);
 
 const DESKS = ['j', 'joe', 'joel'];
