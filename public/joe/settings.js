@@ -141,7 +141,7 @@ function aboutSection() {
   const when = date => (/^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ? `${Number(date.slice(8))}${NB}${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}` : '');
   return `<section class="set-sec" id="set-about" aria-labelledby="h-about">
     ${secHead('about', 'h-about', 'About', 'JoeDesk is a read-only paper board: no broker access, no order placement.')}
-    <ul class="ver">${history.length ? history.map(v => `<li><span class="t">${esc(v.version)}</span>${when(v.date) ? ` <span class="m">${when(v.date)}</span>` : ''}<p>${versionTitle(v.title)}</p></li>`).join('')
+    <ul class="ver">${history.length ? history.map(v => `<li><span class="t${v.versionScheme ? ' product-version' : ''}"${v.versionScheme ? ` data-product-version="${esc(v.version)}" data-version-scheme="${esc(v.versionScheme)}"` : ''}>${esc(v.version)}</span>${when(v.date) ? ` <span class="m">${when(v.date)}</span>` : ''}<p>${versionTitle(v.title)}</p></li>`).join('')
       : '<li><p>The version history is not available.</p></li>'}</ul>
   </section>`;
 }
@@ -161,6 +161,7 @@ function fixedValue(f, v) {
   return `<span class="mono">${breakable(v)}</span>`;
 }
 const phoneValue = html => `<div class="ro phone-only"><span data-value>${html}</span></div>`;
+const savedHtml = f => `<div class="f-saved dsk" data-saved="${f.key}" aria-hidden="true"></div><span class="vh dsk" id="${fieldId(f.key)}-saved" hidden></span>`;
 
 function keepControl(f) {
   const floor = `<p class="kfloor">${icon('keep')}<span><span class="mono">SXR8</span> and <span class="mono">TSLA</span> are always kept</span></p>`;
@@ -168,7 +169,7 @@ function keepControl(f) {
   const shown = esc(M.display(f, state.base[f.key]));
   return `${floor}<label class="sub dsk f-sub" for="${fieldId(f.key)}">Other kept symbols, separated by commas</label>
     <input class="inp mono dsk" id="${fieldId(f.key)}" data-field="${f.key}" value="${esc(state.draft[f.key])}" autocomplete="off" spellcheck="false">
-    ${phoneValue(shown)}<div class="f-saved dsk" data-saved="${f.key}"></div>`;
+    ${phoneValue(shown)}${savedHtml(f)}`;
 }
 
 function controlHtml(f) {
@@ -176,7 +177,7 @@ function controlHtml(f) {
   if (!loaded()) return readOnly('Not available', '', 'ring');
   const v = state.draft[f.key], id = fieldId(f.key), label = esc(f.label);
   const phone = phoneValue(esc(M.display(f, state.base[f.key])));
-  const saved = `<div class="f-saved dsk" data-saved="${f.key}"></div>`;
+  const saved = savedHtml(f);
   if (f.type === 'int' || f.type === 'pct') {
     const unit = f.type === 'pct' ? '%' : esc(f.x.unit);
     const meter = f.type === 'pct' ? `<div class="meter dsk" role="img" aria-label="${esc(v)}${NB}% kept free" data-meter-box="${f.key}"><i data-meter="${f.key}" style="width:${Math.max(0, Math.min(100, Number(v) || 0))}%"></i></div>` : '';
@@ -232,11 +233,11 @@ function windowsHtml(f) {
   const saved = M.windowsOf(state.base[f.key]) ?? [];
   const shown = saved.length ? `<div class="phone-only ww-ph">${saved.map(w => { const l = M.windowLines(w); return `<p class="wph" data-value><span><b>${esc(l.id)}</b> · ${esc(l.times)}</span><span class="wph-2">${esc(l.rest)}</span></p>`; }).join('')}</div>`
     : phoneValue('No wake windows');
-  return `<div class="field ww" data-row="${f.key}">${left}<div class="f-in ww-in">
+  return `<div class="field ww" data-row="${f.key}">${left}<div class="f-in ww-in" id="${fieldId(f.key)}" role="group" aria-label="${esc(f.label)}">
     ${shown}
     <div class="ww-list dsk">${rows || '<p class="ww-none">No wake windows yet.</p>'}</div>
     <div class="ww-add dsk"><button type="button" class="btn" id="wwAdd"${ws.length >= M.MAX_WINDOWS ? ' disabled' : ''}>${icon('plus')}Add wake window</button></div>
-    <div class="f-saved dsk" data-saved="${f.key}"></div>
+    ${savedHtml(f)}
   </div></div>`;
 }
 
@@ -265,28 +266,26 @@ function renderFields(force = false) {
   return true;
 }
 
-// The wake windows' Saved line gives their count; Review changes lists every
-// difference.
-function savedText(f, raw) {
-  if (f.type !== 'windows') return M.display(f, raw);
-  const n = M.windowsOf(raw)?.length ?? 0;
-  return `${n} wake window${n === 1 ? '' : 's'} · Review changes lists every difference`;
-}
 // The draft's own marks: the Saved line, the reserve meters, the
 // controls' values when they changed by a button, never under the caret.
 // The Saved line always holds the saved value and is only shown when the
 // draft differs, so its box is sized before any edit and showing it moves
-// nothing; past three lines it scrolls (and takes focus to be read).
+// nothing. One line; the control describes the complete saved text to assistive tech.
 function syncDraft() {
   if (!state.base) return;
   const ch = new Set(M.changes(state));
   for (const el of $$('#setMain [data-saved]')) {
     const k = el.dataset.saved, on = ch.has(k);
-    const text = `Saved: ${savedText(M.FIELD[k], state.base[k])}`;
+    const text = `Saved: ${M.savedText(M.FIELD[k], state.base[k])}`;
     if (el.textContent !== text) el.textContent = text;
+    el.title = text;
     if (el.classList.contains('on') !== on) el.classList.toggle('on', on);
-    const scrolls = on && el.scrollHeight > el.clientHeight + 1;
-    if (el.hasAttribute('tabindex') !== scrolls) { if (scrolls) el.tabIndex = 0; else el.removeAttribute('tabindex'); }
+    const description = document.getElementById(`${fieldId(k)}-saved`);
+    if (description.textContent !== text) description.textContent = text;
+    description.hidden = !on;
+    const control = document.getElementById(fieldId(k));
+    if (on) control.setAttribute('aria-describedby', description.id);
+    else control.removeAttribute('aria-describedby');
   }
   for (const el of $$('#setMain [data-field]')) {
     if (el !== document.activeElement && el.value !== state.draft[el.dataset.field]) el.value = state.draft[el.dataset.field];

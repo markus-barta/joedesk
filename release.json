@@ -1,8 +1,9 @@
 {
   "product": "JoeDesk",
-  "version_scheme": "calendar",
-  "version": "26.09.21.12.00",
+  "version_scheme": "inspr-calver-3",
+  "version": "261016151218.0.0",
   "release_channel": "stable",
-  "release_sequence": 23,
-  "note": "Put the household decision pulse, KEEP scope, and short learning next steps above the detail cards."
+  "release_sequence": 24,
+  "status": "candidate",
+  "note": "JOED-26 rebuild candidate; publication, producer, OPS, review and live adoption gates remain."
 }

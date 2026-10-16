@@ -52,7 +52,9 @@ function feedHeaders(kind) {
 // The UI is plain ES modules; every served asset is listed here explicitly.
 const UI_MODULES = ["app.js", "host.js", "ui.js", "terms.js", "format.js", "health.js", "feed.js", "events.js",
   "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js",
-  "settings.js", "settings-model.js", "fleet-write.js"];
+  "settings.js", "settings-model.js", "fleet-write.js", "version-display.js"];
+const VENDOR_FILES = Object.freeze(Object.fromEntries(['display.json', 'version.js', 'presentation.js', 'version-interaction.js', 'schemes.json', 'package.json', 'manifest.json']
+  .map(name => [`/joe/vendor/calver/${name}`, `vendor/calver/${name}`])));
 const STATIC_FILES = Object.freeze({
   "/joe/": "index.html",
   "/joe/index.html": "index.html",
@@ -68,6 +70,7 @@ const STATIC_FILES = Object.freeze({
 // load under this release's own path; another release's path is not found.
 const RELEASE_PREFIX = `/joe/v/${release.version}/`;
 const VERSIONED_FILES = Object.freeze({
+  ...Object.fromEntries(Object.entries(VENDOR_FILES).map(([route, name]) => [route.replace('/joe/', RELEASE_PREFIX), path.join(PUBLIC, name)])),
   ...Object.fromEntries(UI_MODULES.map(name => [`${RELEASE_PREFIX}${name}`, path.join(PUBLIC, name)])),
   ...Object.fromEntries(Object.entries(CONTRACT_FILES).map(([route, name]) => [route.replace("/joe/", RELEASE_PREFIX), path.join(__dirname, "contracts", name)])),
   ...Object.fromEntries(Object.entries(SHARED_FILES).map(([route, name]) => [route.replace("/joe/", RELEASE_PREFIX), path.join(__dirname, name)])),
@@ -273,6 +276,8 @@ function send(res, status, body, headers = {}) {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     ...headers,
+    // The deploy smoke distinguishes app responses from edge SSO denials.
+    "X-JoeDesk-Origin": "app",
     "Content-Length": Buffer.byteLength(payload),
   });
   res.end(payload);
@@ -615,7 +620,7 @@ function handleStatic(req, res, urlPath) {
     return;
   }
 
-  const name = STATIC_FILES[urlPath];
+  const name = STATIC_FILES[urlPath] ?? VENDOR_FILES[urlPath];
   if (!name) {
     sendJson(res, 404, { ok: false, error: "not found" });
     return;
@@ -674,6 +679,12 @@ const server = http.createServer(async (req, res) => {
     if (urlPath.startsWith("/joe/")) {
       if (req.method !== "GET" && req.method !== "HEAD") {
         sendJson(res, 405, { ok: false, error: "method not allowed" });
+        return;
+      }
+      // A surviving tab must not receive another release's bytes under its
+      // cached module coordinates. Unversioned API reads are unaffected.
+      if (u.searchParams.has('v') && (u.searchParams.getAll('v').length !== 1 || u.searchParams.get('v') !== release.version)) {
+        sendJson(res, 404, { ok: false, reason: 'route_not_found' });
         return;
       }
       handleStatic(req, res, urlPath);

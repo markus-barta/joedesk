@@ -11,7 +11,8 @@ const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const UI_MODULES = ["app.js", "host.js", "ui.js", "terms.js", "format.js", "health.js", "feed.js", "events.js",
   "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js",
-  "settings.js", "settings-model.js", "fleet-write.js"];
+  "settings.js", "settings-model.js", "fleet-write.js", "version-display.js"];
+const VENDOR_FILES = ['display.json', 'version.js', 'presentation.js', 'version-interaction.js', 'schemes.json', 'package.json', 'manifest.json'].map(n => `vendor/calver/${n}`);
 const CONTRACT_MODULES = ["index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
   "manifest.json", "common.schema.json", "reason.schema.json", "data.schema.json", "history.schema.json", "results.schema.json",
   "fleet-config.schema.json", "healthz.schema.json"];
@@ -43,6 +44,7 @@ const STATIC_ROUTES = [
   "fleet-config-actions.schema.json",
   "fleet-config.example.json",
   "joe-version.js",
+  ...VENDOR_FILES,
 ];
 
 function fail(message) {
@@ -77,11 +79,16 @@ if (htmlFallbackVersion !== joeVersion.APP_VERSION || htmlFallbackVersion !== pk
 }
 
 const release = JSON.parse(await readFile(join(repoRoot, "release.json"), "utf8"));
-if (release.version !== joeVersion.APP_VERSION || release.version_scheme !== "calendar") {
-  fail("release metadata must match the calendar product version scheme and UI version");
+const prep = JSON.parse(await readFile(join(repoRoot, 'release/preparation.json'), 'utf8'));
+const docker = await readFile(join(repoRoot, 'Dockerfile'), 'utf8');
+if (!docker.includes(`FROM ${prep.runtime.image}\n`) || !docker.includes('RUN node scripts/check-release.mjs')) fail('Docker must verify the offline closure with the pinned runtime');
+const nix = await readFile(join(repoRoot, 'default.nix'), 'utf8');
+if (!nix.includes(prep.runtime.nixpkgs_revision) || !nix.includes(prep.runtime.nixpkgs_nar_hash) || !nix.includes('node scripts/check-release.mjs') || nix.includes('<nixpkgs>')) fail('Nix must pin its default input and verify the offline closure');
+if (release.version !== joeVersion.APP_VERSION || release.version_scheme !== 'inspr-calver-3' || joeVersion.VERSION_SCHEME !== release.version_scheme) {
+  fail("release metadata must match the CalVer3 candidate and UI version");
 }
-if (!/^\d{2}\.\d{2}\.\d{2}(?:\.\d{2}\.\d{2})?$/.test(joeVersion.APP_VERSION)) {
-  fail("JoeVersion.APP_VERSION must use calendar yy.mm.dd[.hh.mm]");
+if (!/^[1-9]\d{11}\.0\.0$/.test(joeVersion.APP_VERSION)) {
+  fail("JoeVersion.APP_VERSION must use canonical CalVer3");
 }
 if (!Number.isSafeInteger(release.release_sequence) || release.release_sequence < 1) {
   fail("release metadata must have a positive integer release_sequence");
@@ -114,7 +121,7 @@ const unlisted = shipped.filter(name => !STATIC_ROUTES.includes(name));
 if (unlisted.length) fail(`public/joe files without a route or check: ${unlisted.join(", ")}`);
 const importMap = JSON.parse(indexHtml.match(/<script type="importmap">([\s\S]*?)<\/script>/)?.[1] ?? "null");
 if (!importMap?.imports) fail("index.html needs an import map");
-const versioned = [...UI_MODULES, "time.mjs", "market-calendar.json", ...CONTRACT_MODULES.map(name => `contracts/${name}`)];
+const versioned = [...UI_MODULES, ...VENDOR_FILES, "time.mjs", "market-calendar.json", ...CONTRACT_MODULES.map(name => `contracts/${name}`)];
 for (const name of versioned) {
   if (importMap.imports[`/joe/${name}`] !== `/joe/${name}?v=${pkg.version}`) fail(`import map must pin /joe/${name} to version ${pkg.version}`);
 }

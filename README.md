@@ -2,7 +2,165 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Version:** `26.09.14.17.08` (calendar `yy.mm.dd[.hh.mm]`; package and UI share `JoeVersion.APP_VERSION` in `public/joe/joe-version.js`).
+**Candidate version:** `261016151218.0.0` (`inspr-calver-3`, stable sequence 24). `release.json` is authoritative for this candidate's builds; package and UI match it. The last published legacy anchor is `calendar` / `26.09.21.12.00` / sequence 23. No publication, deployment or authoritative live adoption is claimed by this branch.
+
+## P6a release preparation (JOED-26)
+
+This branch is paper-only preparation on `rebuild/v2`. It is **not ready for
+cutover**. No source, image or tag was published. The candidate reservation and
+legacy anchor live in `release/preparation.json`; historical tags, releases and
+version-history entries are unchanged. The old CalVer2 proposal JOED-13 is
+superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
+
+The shared presentation uses INSPR-486's merged and reviewed **bundle pin for
+consumers**, under JOED-19's choice of the global defaults (no named template):
+source `01b3080948c21899cbbacbfa3447da6799af1b56`, config SHA256
+`bf6aa144cd73dc97dc941f0f0914138b04ae0a28fbead5123465b15b1f2a2fd9`, manifest SHA256
+`d4dcb8c05d0fcad7d60183156166c5a30f21e6abc1ac0c274ee3e0791e5ea912`.
+The complete bundle lives under `public/joe/vendor/calver/`; its manifest is
+byte-identical to that saved record. `version-display.js` is the only product
+adapter. The shared renderer owns six-segment Pretty geometry, reduced SemVer,
+reveal/reduced motion and canonical copy. The footer and current About entry
+use it; legacy history remains plain. The SemVer/Pretty switch is session-only;
+auto colors follow the actual product accent. Tooltip and accessible name
+carry the complete coordinate and UTC timestamp; English copy feedback uses
+the shared interaction helper. No runtime settings are fetched.
+`node scripts/check-release.mjs --require-adoption` still fails until the
+coordinator's immutable-publication and live gates are met.
+
+Every `npm run check`, Docker build and Nix package build verifies the committed
+runtime closure offline: exact file set, regular files, byte counts and SHA256.
+Working-tree checks also reject untracked payloads. `release/contracts.json`
+binds the complete shared validator/schema set and exact compatibility IDs for
+board, pusher and executor; fixture compatibility is a rehearsal, not Amy's
+producer approval. Health readers now accept the deprecated `inspr-calendar-v2`
+identifier as well as CalVer3 and the published legacy `calendar` declaration.
+The Docker base and disposable test runner use immutable OCI index digests;
+the default Nix input uses a full revision and NAR hash. A caller injecting
+`pkgs` must retain its own immutable deployment lock. No JS dependency was added.
+Stale `?v=` asset coordinates return 404 instead of another release's bytes;
+the worker already uses the matching release path. No service worker is used.
+
+`npm run release:evidence -- VALIDATION_RUN_ID` emits source commit/tree,
+runtime-closure and contract-set digests, dependency pins, candidate metadata
+and pending gates from a clean committed source. It emits candidate evidence;
+the coordinator still supplies the immutable output artifact coordinates and
+digests, signatures/SBOM/provenance and reviewed downstream compatibility.
+
+### Offline data preparation and rollback
+
+`scripts/prepare-data.mjs` requires explicit `--offline`, source and **new**
+destination paths. OPS must stop writers first. Backups copy only the known
+board data/config/audit files, retain exact bytes, use directory mode 0700 and
+file mode 0600, and record sizes/SHA256 in `backup-manifest.json`. Unknown files,
+symlinks, oversized input, incomplete backups and existing destinations fail
+closed; nothing is deleted or overwritten.
+
+The command forms are:
+
+```sh
+node scripts/prepare-data.mjs backup --offline SOURCE NEW_BACKUP v1
+node scripts/prepare-data.mjs verify --offline BACKUP
+node scripts/prepare-data.mjs migrate-v2 --offline V1_BACKUP NEW_V2_STORE V2_SNAPSHOT UTC_RECEIPT
+node scripts/prepare-data.mjs restore --offline BACKUP NEW_RESTORE v1
+```
+
+Migration accepts a real, validated v2 producer snapshot and an explicit UTC
+receipt (ISO form with milliseconds). It creates a separate v2 store, preserving
+compatible Fleet Config and its validated change log (`fleet-config-actions.json`)
+byte-for-byte, including pending/failed audit entries, and establishing durable sequence/receipt state through
+the real server acceptance path. Legacy money/history cannot prove the v2
+decimal/evidence/basis contract: their original bytes remain in the v1 backup;
+they are never relabelled or used to fabricate historical observations. The v2
+board refuses to start in a directory containing legacy data/history. A v2
+backup can be restored only with `v2`; a v1 board rollback selects its previous
+producer **and v1 backup**, never the current v2 data directory. The CLI does not
+stop services, select deployment pins or switch a host.
+
+`V2_SNAPSHOT` is Amy's JOED-20 approved staged **ingress** snapshot (no
+`receivedAt`), not a copied v1 file or a served response. `UTC_RECEIPT` is the
+actual UTC time that this snapshot was received for staging, recorded as
+`YYYY-MM-DDTHH:mm:ss.sssZ`; never substitute cutover time to make old evidence
+look fresh. The next pusher sequence must exceed the snapshot's `seq`, with
+non-regressing generation/evidence times. If staging has aged before cutover,
+require a new accepted producer observation before the fresh-feed smoke passes.
+
+### OPS-354 / P6b handoff
+
+OPS owns these exact nixcfg items through its existing review path:
+
+1. An exact `/joe/healthz` anonymous GET/HEAD SSO exception, tested without a
+   cookie; keep UI/assets and all six protected reads behind SSO. Strip incoming
+   identity headers (including `X-Auth-Request-User`, the app's actual identity,
+   and `X-Forwarded-User`) before SSO, and inject `X-Auth-Request-User` only from
+   the authenticated SSO result over the private app connection. Keep the app
+   port unreachable from the public network. Neither inbox credentials nor auth policy change here.
+   Do not add, strip or rewrite `X-JoeDesk-Origin` at the edge. Protected requests
+   with spoofed identity must hit SSO before reaching the app. The exact health router
+   must not match `/joe/healthz/` or `/joe/healthz-extra`.
+2. Board/pusher/executor immutable deployment pins, the contract-set SHA256 and
+   exact IDs in `release/contracts.json`, with Amy's JOED-20 staging and
+   reconciliation approval. Retain previous compatible pins/image/generation.
+   The previous board source pin is `db621bf` (legacy `calendar` version
+   `26.09.21.12.00`, sequence 23); it was deployed without a corresponding tag.
+   Existing tags end at `v26.09.14.17.40` (sequence 22); preserve that history.
+   Do not pin `rebuild/v2` before the separate approved cutover.
+3. A private verified v1 backup, a separately staged v2 directory, and one
+   `just rollback-joedesk` command selecting the previous compatible pins **and
+   v1 data backup** through the normal human-controlled switch, followed by
+   health smoke. Rehearse on a workstation/CI lab, never on a production host.
+   A rollback to the original v1 board uses its retained private `/healthz` /
+   `/readyz` probe and original authenticated version/data checks; it has no v2
+   `/joe/healthz` contract. Do not broaden the public SSO exception or treat a
+   404 from the new smoke as success. OPS must bind that legacy smoke to the
+   exact previous image and its matching v1 backup in the rollback rehearsal.
+   The board's fixed store is `/var/lib/joe-board`, uid 1000. While the board
+   and all writers are stopped, prepare the new directory on the same filesystem,
+   chown the staged directory and every staged file to uid 1000 and the board's
+   configured gid, and preserve 0700/0600 modes. Rename the current store to a
+   retained, unique sibling, then rename the staged directory to the fixed path;
+   never overwrite a directory. Restore the retained directory if the second
+   rename fails. For rollback, restore the verified v1 backup into a new sibling,
+   apply the same ownership/modes and stopped-service swap, then start the
+   compatible v1 pins. Chown is required even when no NixOS activation occurs.
+4. The production host gate including `cs0.barta.cm`; no other route exemption
+   beyond the existing token-only `/joe/inbox` router.
+5. After the gates and Markus's cutover decision, run
+   `node scripts/smoke-release.mjs BASE_JOE_URL VERSION_SCHEME CANONICAL_VERSION`.
+   `BASE_JOE_URL` is the public SSO route ending **exactly** in `/joe/`, with no
+   credentials, query or fragment (for example `https://board.example.invalid/joe/`).
+   It sends no cookies or authorization, follows no redirect, validates the exact health
+   allowlist and expected version/schema, requires fresh data/history/config
+   and a confirmed gateway. It probes all six reads, `/joe/`,
+   `/joe/app.js?v=CANONICAL_VERSION`, and both near-health paths, first anonymously
+   and again with well-formed synthetic `X-Auth-Request-User` and `X-Forwarded-User`.
+   Every protected probe must lack `X-JoeDesk-Origin` and receive a 30x with a
+   nonempty `Location`, or 401/403. The app stamps every response with
+   `X-JoeDesk-Origin: app`, including its own 401; a bare app, an exposed UI/asset,
+   a broad exemption or a spoof bypass fails. Health must return 200 with that
+   app stamp. Health 302 is `auth_required`.
+   Exit 0 emits one JSON record with `ok: true`, canonical version/schema, feed
+   ages/states, `protectedReads`, `protectedUI` and `spoofedIdentity` all
+   `sso-rejected`, `healthException: exact-path`, and Results state. Exit 1 emits
+   one value-free stderr reason: `auth_required`, `release_mismatch`,
+   `feeds_not_ready`, `protected_read_exposed`, `protected_ui_exposed`,
+   `spoofed_identity_exposed`, `sso_not_proven`, `app_origin_not_proven`, or
+   `release_smoke_failed` for malformed input/health, transport or other errors.
+   Bodies, identities and credentials are never printed. Unwired Results remains explicitly reported;
+   this smoke does not substitute for Amy's results sign-off or Tick/Markus's
+   signed-in UI verification.
+6. Post-deploy, send one signed-in request with a spoofed identity header and
+   verify that its Fleet Config audit actor is the authenticated SSO identity.
+   cs0's `authResponseHeaders` must replace the client-supplied
+   `X-Auth-Request-User` with the SSO result. Use a paper-only edit through the
+   trusted proxy, verify the attributed audit entry, and restore the setting.
+   This complements the anonymous spoof probes; no live check ran during P6a.
+
+Tests and acceptance mapping: ADR's JOED-26 addendum, `test/release.mjs` and
+`scripts/browser-p6.mjs`. Local Tick evidence goes to
+`~/.local/share/joedesk-qa/p6a/index.md`. The version shots cover the
+Pretty rest/reveal, canonical copy/UTC accessibility, reduced SemVer, keyboard,
+touch and reduced motion. Tick/coordinator approval remains outstanding.
 
 ## Provenance
 
@@ -42,7 +200,7 @@ Image copies `public/` unchanged. No sample or synthetic `data.json` is baked in
 **Nix (static + server install):**
 
 ```bash
-nix-build -E 'with import <nixpkgs> {}; callPackage ./default.nix {}'
+nix-build --no-out-link
 # UI assets: $out/share/joedesk/public/joe/
 # server:     $out/bin/joedesk-server
 ```
@@ -102,7 +260,7 @@ CI uses:
 ```bash
 docker run --rm --network none --tmpfs /var/lib/joe-board \
   -e JOE_INBOX_TOKEN="$JOE_INBOX_TOKEN" \
-  -v "$PWD:/repo:ro" -w /repo node:22 \
+  -v "$PWD:/repo:ro" -w /repo node:22@sha256:0e5f906573693feaa1e21057ebdcfdb5bd5021f050b2dc7c9deceb629c7da2a8 \
   node --test test/server-contract.mjs
 ```
 
@@ -161,8 +319,9 @@ contract-set identifier, four feed states/receipt ages and gateway confirmation,
 check age and closed reason. Never-received feeds have null age and
 `feed_not_received`; unwired Results uses `results_not_wired`. Data/history
 without observations return HTTP 503 with that reason, distinct from a missing
-route. Health has no money, identifiers, paths or diagnostic text. The legacy
-`calendar` scheme remains truthful until P6 completes CalVer3 adoption.
+route. Health has no money, identifiers, paths or diagnostic text. The historical
+`calendar` scheme remains readable; this branch reports its CalVer3 candidate.
+Authoritative live adoption still requires the P6b and coordinator gates.
 
 `/joe/state.json` is the protected read model for P3: serverNow, four feeds with
 progress metadata, safe data projection and panel states. Anchor serverNow to
@@ -250,13 +409,13 @@ the health signal and next action but does not restart the Gateway or pusher.
 - Gateway light: yellow means the paper connection is unstable or its check-in is late; red means the Gateway reports down. These are health readings, not settings that Fleet Config can fix.
 - API paths: `/healthz`, `/readyz`, `/joe/*`, `/joe/fleet-config.json`, `/joe/fleet-config/actions.json`, `/joe/fleet-config/propagate`
 - Schemas: `inspr.joe.household.v1`, `inspr.joe.household.history.v1`, `inspr.joe.fleet-config.v1`, `inspr.joe.fleet-config.actions.v1`
-- The board is plain ES modules under `public/joe/` with no vendored libraries; `index.html` pins every module to the release version through an import map, and nothing installs a service worker.
+- The board is plain ES modules under `public/joe/` plus the pinned shared version bundle; `index.html` pins every module to the release version through an import map, and nothing installs a service worker.
 
 See `docs/joe-data-contract.md` and `docs/joe-history-contract.md`.
 
 ### Fleet settings: human path and schema inventory (HOSTD-48)
 
-The rebuilt board (JOED-19) moves this editor into **Settings**, which returns with P5; until then the Settings screen says it is not wired yet. The propagate API, schema and audit log below are unchanged.
+The rebuilt board (JOED-19) moves this editor into **Settings**, implemented in P5. The propagate API, schema and audit log below are unchanged.
 
 Open **Settings · Fleet Config** on the board, or **Limits, quota & wake times** in the board-settings menu. Desk limits opens first, with risk cap, busy-desk maximum and KEEP ready to edit. Quota behavior, wake times and the Limits home overview are in the same navigation. Each input explains what it changes and where it applies. **Technical · exact keys & saved values** is collapsed until requested; it shows the saved document, while inputs and navigation values show the current preview. Board layout and theme remain browser-local.
 

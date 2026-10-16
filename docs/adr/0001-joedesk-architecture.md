@@ -385,8 +385,10 @@ health is sufficient for deployment smoke even if this option is deferred.
 
 JOED-19 explicitly chooses **INSPR-CalVer3**, machine `inspr-calver-3`, canonical
 `YYMMDDhhmmss.0.0`. This supersedes JOED-13's v2 plan; P6 must rescope/close that
-ticket with the recorded owner decision. The current release source remains
-legacy `calendar` until P6 completes the migration inventory/gates. P1 does
+ticket with the recorded owner decision. Published/live release authority remains
+legacy `calendar` until P6 completes the migration inventory/gates. P6a may set
+`release.json` to its reserved CalVer3 candidate for local builds while keeping
+adoption closed; this does not change the deployed version. P1 does
 not relabel package.json, existing releases or tags. Reserve one UTC coordinate
 for an immutable release set; preserve release_sequence continuity and record
 the legacy anchor. Protocol schema IDs remain independent.
@@ -1276,3 +1278,59 @@ Apple Silicon workstation (HeadlessChrome 153); the Linux CI run (now with a
 P5 step and a 45-minute browser job) is the merge gate for the font-dependent
 checks. Screenshots and the AC → test map: `~/.local/share/joedesk-qa/p5/index.md`.
 No push, deploy or review gate.
+
+
+## JOED-26 / P6a repository preparation
+
+This addendum records a repository candidate, not an authoritative live adoption
+or cutover. The candidate is `inspr-calver-3` / `261016151218.0.0`, reserved once
+at `2026-10-16T15:12:18Z`, stable sequence 24. `release/preparation.json` records
+the previous release (`calendar` / `26.09.21.12.00` / sequence 23) and the
+explicit migration anchor. The custom legacy scheme is not relabelled as
+INSPR-CalVer1. JOED-19's owner decision supersedes JOED-13, whose v2 proposal is
+cancelled and consolidated into JOED-26. Published history stays intact.
+
+The shared global-default pin is the merged/live, independently reviewed
+consumer bundle record on INSPR-486: source
+`01b3080948c21899cbbacbfa3447da6799af1b56`, config
+`bf6aa144cd73dc97dc941f0f0914138b04ae0a28fbead5123465b15b1f2a2fd9`, manifest
+`d4dcb8c05d0fcad7d60183156166c5a30f21e6abc1ac0c274ee3e0791e5ea912`.
+No product-specific template selection exists; JOED-19 chooses the shared
+default. The complete unchanged bundle is vendored and verified offline on
+normal builds. The one thin product adapter serves footer/current About,
+resolves auto tint from product branding and supplies English interaction text.
+The source is a candidate until publication, review, producer/OPS compatibility,
+Markus's cutover and live behavior gates pass.
+
+| JOED-26 acceptance / P6 deferred scope | Implementation and executable evidence | Remaining owner gate |
+| --- | --- | --- |
+| Migration inventory, UTC reservation, sequence and legacy anchor | `release/preparation.json`; `release/versioning.mjs`; `P6 version: …` and `P6 reservation: …` in `test/release.mjs` cover dates, aliases, 32-bit overflow, suffixes, scheme rejection, collisions, ordering and anchors | Candidate is not authoritative; immutable publication and live behavior remain coordinator/OPS/Markus work |
+| Complete shared presentation bundle, saved pin and thin Pretty adapter | `public/joe/vendor/calver/` pins the recorded source/config/manifest; normal offline build checks enforce exact closure/regular files/sizes/hashes/tracking. `version-display.js` uses the shared renderer/helper; P6 browser asserts six segments, no v/tail, Pretty/SemVer, zero-width seconds, reveal/copy, keyboard/touch, UTC labels, reduced motion and English confirmation at 390/1440 in light/dark | Tick visual approval and coordinator gate; `--require-adoption` stays closed until publication/live evidence |
+| Runtime and Nix pins; no new dependencies; release asset graph | Docker/test OCI index digests and immutable nixpkgs revision/NAR hash in preparation; Docker and Nix run `scripts/check-release.mjs` offline; `P6 normal build …` mutates bytes, extras, missing files and manifest; P3 worker closure test; `P6 staged ingress …` rejects stale/duplicate asset versions | OPS records exact built board image/source and its own immutable nixcfg lock; no published artifact was replaced |
+| Board/pusher/executor compatibility | `release/contracts.json` records exact IDs, participant requirements and complete sorted path/size/hash contract-set digest; `P6 staged ingress …` proves real HTTP v2 accept, v1/unknown reject and durable sequence; full P1/P2 tests remain required | Amy's actual producer and executor evidence + JOED-20; fixtures do not establish deployed compatibility |
+| Data backup, migration and exact compatible rollback (class d, §8) | `release/data-migration.mjs`, explicit offline `scripts/prepare-data.mjs`; `P6 backup and v2 staging …` proves byte-exact restore, private modes, new v2 receipt and restart/replay continuity, no fabricated legacy history, wrong-board rollback rejection; `P6 backup refuses …` proves corruption/extra/missing/symlink/size rejection; server refuses legacy stores | OPS supplies real quiesced backup, compatible pins and rehearsed `just rollback-joedesk`; preserve old artifacts |
+| Anonymous health, protected reads, auth redirects (class g, §7/§8) | Existing exact health allowlist remains; the app stamps every response `X-JoeDesk-Origin: app`. `scripts/smoke-release.mjs` checks canonical metadata/feed ages, stamped health and unstamped SSO denials on anonymous and spoofed-identity reads, UI/assets and near-health paths. `P6 staged ingress …` proves the bare app fails and the local proxy/CLI passes with oauth2-proxy-style bare JSON 401s and browser redirects; `P6 SSO smoke …` rejects missing health proof, stamped denials, exposed surfaces, broad exemptions and per-read spoof bypasses. Health 302 remains auth_required; size/privacy checks retained | OPS exact-path SSO exception + preserve app origin stamp + edge identity-header stripping + production-host gate incl. cs0; signed-in spoof check verifies audit actor replacement; Markus/Tick signed-in UI; no production smoke performed |
+| Tick: Saved line always one line; count long lists; accessible full string | `settings-model.savedText`, CSS width/height/ellipsis and hover title in Settings; a visually hidden full-text span describes only the primary control (or the named wake-window group) through aria-describedby, with no Saved tab stop. P5 no-shift and P6 accessibility-tree checks cover long strings and one description owner per field | Tick review of local P6a shots; phone remains read-only |
+| Tick: phone no-break space before middle dot | `format.joinUnits` with phone option in app text observer; unit regression and direct P6 raw DOM checks; copy-only browser assertions accept NBSP-dot | Tick visual review; no data/accounting semantics change |
+
+The release evidence command requires a clean committed tree and a validation
+run identifier, binds source commit/tree, runtime closure and exact contract-set
+digests, and explicitly emits `candidate-awaiting-coordinator-gates` with no published
+artifacts. The coordinator adds actual artifact coordinates/digests,
+SBOM/signatures/provenance and review evidence before any immutable release set
+is published. The candidate is never labelled an authoritative live release by these
+local build checks.
+
+The exact OPS-354 handoff and CLI forms live in README's P6a section. No nixcfg,
+producer, secret, broker, production host or infrastructure was changed. No push,
+deployment, cross-family gate or product/taste approval is part of this worker.
+
+Fix round 1 also carries the compatible Fleet Config change log byte-for-byte
+into v2 after schema validation. `P6 backup and v2 staging …` checks success,
+failure and pending entries, exact v1 rollback and v2 backup/restore;
+`P6 migration refuses …` checks invalid audit data fails before staging begins.
+`release/preparation.json` records the deployed legacy `db621bf` anchor without
+inventing a sequence-23 tag. The evidence CLI uses its own repository root and
+names the preparation manifest digest `preparation_sha256`. README records
+directory ownership/swap/rollback, the existing inbox exception, staging receipt
+and pusher-sequence rules, and the public smoke's exact route/outputs/exit codes.

@@ -1,0 +1,151 @@
+{
+  "schema": "joedesk.release-preparation.v1",
+  "ticket": "JOED-26",
+  "status": "candidate",
+  "reservation": {
+    "version_scheme": "inspr-calver-3",
+    "version": "261016151218.0.0",
+    "release_channel": "stable",
+    "release_sequence": 24,
+    "reserved_at": "2026-10-16T15:12:18Z"
+  },
+  "anchor": {
+    "legacy_scheme": "calendar",
+    "last_legacy_version": "26.09.21.12.00",
+    "last_legacy_sequence": 23,
+    "first_calendar_version": "261016151218.0.0",
+    "first_calendar_sequence": 24
+  },
+  "presentation": {
+    "status": "integrated",
+    "source_commit": "01b3080948c21899cbbacbfa3447da6799af1b56",
+    "config_sha256": "bf6aa144cd73dc97dc941f0f0914138b04ae0a28fbead5123465b15b1f2a2fd9",
+    "manifest_sha256": "d4dcb8c05d0fcad7d60183156166c5a30f21e6abc1ac0c274ee3e0791e5ea912",
+    "template": null,
+    "source_record": "INSPR-486 merged/live consumer bundle pin; JOED-19 chooses shared global defaults",
+    "surfaces": [
+      "footer",
+      "current release in About"
+    ],
+    "authority": "candidate only; coordinator gates remain"
+  },
+  "runtime": {
+    "image": "node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402",
+    "test_image": "node:22@sha256:0e5f906573693feaa1e21057ebdcfdb5bd5021f050b2dc7c9deceb629c7da2a8",
+    "resolved_from": "Docker Hub library/node OCI index, 2026-10-16",
+    "nixpkgs_revision": "f5c082a40f7571c266e74e80ae2e68aadd8a9fc7",
+    "nixpkgs_nar_hash": "sha256-cRrWlIjVRJ6BHDr9caUdXsZ3owzWIKYHpNmGPHBInIU="
+  },
+  "gates": {
+    "presentation": "Approved global pin integrated; P6 executable behavior tests; coordinator and Tick approval remain",
+    "repo_validation": "Executable checks: npm run check/test (also TZ=UTC), P3-P6 browser suites and Linux builds; validation_run in release evidence binds the recorded outcome",
+    "immutable_candidate": "coordinator: source commit, built image digest, release-set manifest, SBOM/signature/provenance and validation run",
+    "producer": "Amy: JOED-20 real staged producer/executor compatibility and reconciliation sign-off; repository fixtures are rehearsal only",
+    "deployment": "OPS-354: exact compatible pins, backup, SSO exception, header stripping, rollback command/rehearsal and host gate",
+    "review": "coordinator: cross-family approval and Tick visual approval",
+    "cutover": "Markus: explicit decision after gates and signed-in UI/live verification"
+  },
+  "compatibility_window": "Keep legacy release history/readers and previous board/producer/data artifacts. No v2 data directory is ever restored into a v1 board. Removing older parsers requires separate owner approval.",
+  "inventory": [
+    {
+      "surface": "product/service/package",
+      "visibility": "private",
+      "current_scheme": "calendar",
+      "version_source": "release.json",
+      "consumers": [
+        "package check",
+        "health API",
+        "UI/footer/history",
+        "support"
+      ],
+      "deployment_boundary": "production",
+      "status": "candidate",
+      "rollback": "test/release.mjs: exact backup restore and schema boundary"
+    },
+    {
+      "surface": "tag/forge release/archive",
+      "current_scheme": "calendar",
+      "consumers": [
+        "release automation",
+        "source pins"
+      ],
+      "status": "candidate",
+      "gate": "Preserve every published tag and archive; create only after review; candidate reservation is not a published release"
+    },
+    {
+      "surface": "OCI image/Nix derivation/dependency lock",
+      "current_scheme": "calendar",
+      "version_source": "release.json + release/preparation.json",
+      "consumers": [
+        "build",
+        "deployment pin",
+        "rollback"
+      ],
+      "status": "candidate",
+      "gate": "Pinned runtime index and nixpkgs; exact board output digest and reviewed downstream lock still required"
+    },
+    {
+      "surface": "SBOM/signature/provenance/release-set manifest",
+      "current_scheme": "calendar",
+      "consumers": [
+        "supply-chain verifier",
+        "rollback"
+      ],
+      "status": "candidate",
+      "gate": "Coordinator enumerates artifact coordinates/digests at immutable source; never publish this pending candidate as complete"
+    },
+    {
+      "surface": "schema/protocol",
+      "current_scheme": "explicit schema IDs",
+      "version_source": "contracts/manifest.json",
+      "consumers": [
+        "board",
+        "pusher",
+        "paper executor"
+      ],
+      "status": "candidate",
+      "gate": "Exact IDs and complete contract closure digest in release/contracts.json; no compatibility inferred from version ordering"
+    },
+    {
+      "surface": "UI/asset URLs/clipboard",
+      "current_scheme": "calendar",
+      "version_source": "public/joe/joe-version.js",
+      "consumers": [
+        "browser",
+        "history worker",
+        "assistive technology"
+      ],
+      "status": "candidate",
+      "gate": "Pinned shared global bundle is active in candidate footer/About; canonical clipboard, UTC labels, Pretty/SemVer and reveal tests; coordinator/Tick approval before publication"
+    },
+    {
+      "surface": "CI/sorting/ranges/update/telemetry/backup labels",
+      "current_scheme": "calendar",
+      "consumers": [
+        "CI",
+        "operator scripts",
+        "diagnostics"
+      ],
+      "status": "candidate",
+      "external_constraints": "none; timestamp major exceeds 32 bits; no new JavaScript dependencies",
+      "gate": "Explicit scheme parser and sequence anchor tests; no SemVer ranges or sort -V; existing health allowlist retained; no updater or telemetry agent shipped"
+    }
+  ],
+  "previous_release": {
+    "product": "JoeDesk",
+    "version_scheme": "calendar",
+    "version": "26.09.21.12.00",
+    "release_channel": "stable",
+    "release_sequence": 23,
+    "note": "Put the household decision pulse, KEEP scope, and short learning next steps above the detail cards."
+  },
+  "legacy_deployment_inventory": {
+    "board_source_pin": "db621bf",
+    "version": "26.09.21.12.00",
+    "release_sequence": 23,
+    "tag": null,
+    "last_tag": "v26.09.14.17.40",
+    "last_tag_release_sequence": 22,
+    "evidence": "Review r1: deployed nixcfg/flake.nix pin; the sequence-23 deployment has no matching tag. Preserve existing published history."
+  }
+}

@@ -101,8 +101,8 @@ const UNIT_FIX = [
   [/([€$])[ ](?=[−+\-]?\d)/g, `$1${NB}`],
   [/(\d) h (\d)/g, `$1${NB}h${NB}$2`],
 ];
-export function joinUnits(text) {
+export function joinUnits(text, { joinDot = false } = {}) {
   let out = text;
   for (const [pattern, replacement] of UNIT_FIX) out = out.replace(pattern, replacement);
-  return out;
+  return joinDot ? out.replace(/ (?=·)/g, NB) : out;
 }

@@ -9,6 +9,15 @@ export const VIEWPORTS = [
 ];
 export const THEMES = ['light', 'dark'];
 
+// Word comparisons accept the product's phone NBSP before a middle dot.
+// Preserve unit/date whitespace. P6 checks the raw DOM's separator characters.
+export function copyText(value) {
+  if (typeof value === 'string') return value.replace(/\u00a0(?=·)/g, ' ');
+  if (Array.isArray(value)) return value.map(copyText);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, copyText(v)]));
+  return value;
+}
+
 export async function configure(page, viewport, theme, { scale = 1 } = {}) {
   await page.s('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: scale, mobile: viewport.mobile });
   await setPointer(page, viewport.mobile);

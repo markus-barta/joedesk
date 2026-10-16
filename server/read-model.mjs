@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { CONTRACTS, REASONS, validateContract } from '../contracts/index.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
@@ -19,6 +20,7 @@ const payloadDigest = value => createHash('sha256').update(JSON.stringify(value,
     Object.fromEntries(Object.keys(entry).sort().map(key => [key, entry[key]])) : entry)).digest('hex');
 
 export function createReadModel({ dataDir, clock = () => new Date().toISOString(), write = atomicWrite }) {
+  if (['data.json', 'history.json'].some(name => existsSync(path.join(dataDir, name)))) throw new Error('data_migration_required');
   const stateFile = path.join(dataDir, 'data-state.json');
   const historyFile = path.join(dataDir, 'history-state.json');
   const rejectionFile = path.join(dataDir, 'feed-rejections.json');

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
-import { VIEWPORTS, THEMES, configure, load, go, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH } from './browser/shots.mjs';
+import { VIEWPORTS, THEMES, configure, load, go, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
@@ -45,7 +45,7 @@ async function deskChecks(page, viewport, theme, expectedMini) {
       display: t('#heroL .display'), kpis: [...document.querySelectorAll('#heroL .kpi')].map(k => ({ cell: k.dataset.cell, state: k.dataset.state, dt: k.querySelector('dt').innerText, value: k.querySelector('dd .bn')?.innerText, cap: k.querySelector('.c').innerText })),
       states: [...document.querySelectorAll('.dcard .state')].map(s => ({ icon: Boolean(s.querySelector('svg use')), text: s.innerText.trim() })),
       positions: [...document.querySelectorAll('#positions .prow:not(.hd) .name b')].map(b => b.textContent),
-      kept: [...document.querySelectorAll('#kept [data-keep]')].map(r => ({ sym: r.dataset.keep, label: r.innerText.includes('Kept · not traded by any desk'), interactive: r.querySelectorAll('a, button, input, select, textarea, summary, details, label, [tabindex], [onclick], [role=button], [role=link], [title], [href]:not(use)').length,
+      kept: [...document.querySelectorAll('#kept [data-keep]')].map(r => ({ sym: r.dataset.keep, label: /Kept\\s· not traded by any desk/.test(r.innerText), interactive: r.querySelectorAll('a, button, input, select, textarea, summary, details, label, [tabindex], [onclick], [role=button], [role=link], [title], [href]:not(use)').length,
         pointer: [r, ...r.querySelectorAll('*')].some(n => getComputedStyle(n).cursor === 'pointer'), hover: r.matches(':hover') })),
       keptCap: t('#kept .keep-cap'), keptState: t('#kept .pstate'), notJoe: document.body.innerText.includes('not traded by Joe'),
       mini: [...document.querySelectorAll('.chart.mini > svg')].map(s => ({ estimates: s.querySelectorAll('[data-estimate]').length, values: (s.dataset.values ?? '').split(' ').filter(Boolean).map(Number) })),
@@ -74,7 +74,7 @@ async function deskChecks(page, viewport, theme, expectedMini) {
   await settle(page);
   const pop = await page.evaluate(`({ ...__audit.opaque(document.getElementById('healthPop')), text: document.getElementById('healthPop').innerText })`);
   check('AC-41', `${tag}: health details are opaque`, pop.bgAlpha === 1 && pop.opacity === 1 && pop.visible === 'visible', pop);
-  check('AC-18', `${tag}: details use today's copy`, /Board OK · numbers are up to date/.test(pop.text) && /If a light turns yellow or red: reload once/.test(pop.text), pop.text.slice(0, 200));
+  check('AC-18', `${tag}: details use today's copy`, /Board OK\s· numbers are up to date/.test(pop.text) && /If a light turns yellow or red: reload once/.test(pop.text), pop.text.slice(0, 200));
   if (viewport.name !== '390' || theme === 'light') await shot(page, viewport, `${viewport.name}-${theme}-desk-details`, 'Desk with the health details open');
   const during = await page.evaluate(`__audit.rects(${JSON.stringify(SHIFT_SELECTORS)})`);
   check('AC-18', `${tag}: opening the details moves nothing`, !shifted(before, during).length, shifted(before, during).slice(0, 4));
@@ -329,20 +329,23 @@ const STATE_BOXES = ['#health', '#heroL .say'];
 const COMPACT = 960;
 const DESK_SHIFT = [...SHIFT_SELECTORS, '.hstrip', '#heroL .say', '#heroL .kpi .c', '#positions .pstate', '#kept .keep-cap', '#kept .pstate', '#kept .prow'];
 const HIST_SHIFT = ['.hist-tools', '.hcard', '#histChart', '#histCompare', '.hist-help', '.hist-cols', '#jAcct', '#jAcct .facts-dl', '#events', 'footer.foot'];
-const DESK_TEXT = `(() => ({
+// Copy assertions treat phone NBSP-dot and desktop space-dot as the same
+// words. P6 separately asserts the actual nonbreaking DOM characters.
+const copyExpression = expression => `(${copyText.toString()})(${expression})`;
+const DESK_TEXT = copyExpression(`(() => ({
   label: document.querySelector('#hdrHealth b').innerText, ring: document.querySelector('#heroSession b')?.innerText,
   cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(c => [c.dataset.cell, { state: c.dataset.state, cap: c.querySelector('.c')?.innerText ?? null }])),
   cards: [...document.querySelectorAll('.dcard')].map(c => ({ lines: [...c.querySelectorAll('.mini-label .st')].map(n => n.innerText), label: c.querySelector('.mini-label').innerText, nums: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state) })),
   positions: document.querySelector('#positions .pstate')?.innerText, posState: document.querySelector('#positions .pstate')?.dataset.state,
   kept: document.querySelector('#kept .pstate')?.innerText, keptState: document.querySelector('#kept .pstate')?.dataset.state,
   strip: document.getElementById('health').innerText, foot: document.getElementById('footData').innerText, say: document.querySelector('#heroL .say').innerText,
-}))()`;
-const HIST_TEXT = `(() => ({ status: document.querySelector('#histStatus .st')?.innerText.trim() ?? '', state: document.querySelector('#histStatus .hist-state')?.dataset.state ?? 'fresh',
+}))()`);
+const HIST_TEXT = copyExpression(`(() => ({ status: document.querySelector('#histStatus .st')?.innerText.trim() ?? '', state: document.querySelector('#histStatus .hist-state')?.dataset.state ?? 'fresh',
   retry: Boolean(document.getElementById('histRetry')), j: document.querySelector('#jAcct .facts-dl')?.innerText ?? '', lines: document.querySelectorAll('#histChart > svg path[stroke^="var(--desk-"]').length,
-  estimates: document.querySelectorAll('#histChart > svg [data-estimate]').length, chart: document.querySelector('#histChart > svg')?.getAttribute('aria-label') }))()`;
-const RES_TEXT = `(() => ({ on: document.getElementById('scr-results').classList.contains('on'), hero: document.getElementById('rheroL').innerText,
+  estimates: document.querySelectorAll('#histChart > svg [data-estimate]').length, chart: document.querySelector('#histChart > svg')?.getAttribute('aria-label') }))()`);
+const RES_TEXT = copyExpression(`(() => ({ on: document.getElementById('scr-results').classList.contains('on'), hero: document.getElementById('rheroL').innerText,
   tiles: [...document.querySelectorAll('#tiles .tile .tval')].map(t => t.innerText.trim()), label: document.getElementById('perLabel').innerText, days: document.querySelectorAll('#cal [data-day]').length,
-  rows: document.querySelectorAll('#breakdown .brow').length, curve: document.querySelector('#curve > svg')?.getAttribute('aria-label') ?? null, day: document.getElementById('daypanel').innerText }))()`;
+  rows: document.querySelectorAll('#breakdown .brow').length, curve: document.querySelector('#curve > svg')?.getAttribute('aria-label') ?? null, day: document.getElementById('daypanel').innerText }))()`);
 // Results' designed not-wired state: dashes, never zeros, with its switches, calendar and day sheet.
 const notWired = r => r.on && /Results are not wired yet\. The board has no closed-trade record for this period\./.test(r.hero) && !/€\s0,00/.test(r.hero) && r.tiles.length === 8 && r.tiles.every(t => t === '—') &&
   /^This week · /.test(r.label) && r.days >= 28 && r.rows === 4 && r.curve === 'Results are not wired yet' && /results are not wired\.$/.test(r.day.trim());
@@ -514,7 +517,7 @@ try {
       const missingReasons = ui.desks.flatMap((d, i) => ['dayPnl', 'openPnl', 'totalPnl'].map(field => expected[`desks.${['j', 'joe', 'joel'][i]}.${field}`])
         .filter(cell => cell.state !== 'fresh').map(cell => (cell.reason ? cellReason(cell.reason) : 'not reported')).filter(words => !d.status.includes(words)).map(words => ({ desk: d.name, words, status: d.status })));
       check('fixtures', `${tag}: each desk card names every affected number's reason`, !missingReasons.length, missingReasons.slice(0, 3));
-      const caps = [ui.say, ...Object.values(ui.cells).map(c => c.cap)].join(' | ');
+      const caps = norm([ui.say, ...Object.values(ui.cells).map(c => c.cap)].join(' | '));
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age and reason`, /[Aa]s of \d+\s(s|min) ago · updates are (late|stuck)/.test(caps), caps);
       if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.cells['hero.account'].cap === 'Not reported', caps);
       if (kind === 'broken') check('fixtures', `${tag}: broken shows its reason`, /Last good value, .* · |Unavailable · /.test(caps), caps);
@@ -546,7 +549,7 @@ try {
         ? ['broken', 'Unavailable · last update was rejected', 'Numbers: unavailable · last update was rejected', 'Position detail is unavailable: last update was rejected.', 'Kept holdings are unavailable: last update was rejected.']
         : ['not reported', 'Not reported · no data received yet', 'Numbers: not reported · no data received yet', 'Position detail is not present in this snapshot.', 'Kept holdings are not present in this snapshot.'];
       check(live ? 'AC-6' : 'nodata', `${tag}: NO DATA everywhere, in the selector's own state`, ui.label === 'Needs fix' && ui.display === '—' && ui.states.every(x => x === state) && ui.nums.every(x => x === state) &&
-        ui.caps.every(c => c === caption) && ui.cards.every(c => c === cardLine) && ui.now.every(n => n === 'Waiting for the first valid snapshot.') && ui.positions.includes(posLine) && ui.kept === keptLine &&
+        ui.caps.every(c => norm(c) === caption) && ui.cards.every(c => norm(c) === cardLine) && ui.now.every(n => n === 'Waiting for the first valid snapshot.') && ui.positions.includes(posLine) && ui.kept === keptLine &&
         /no board data — reload; if still empty, tell Amy/.test(ui.pop), ui);
       if (!live && (viewport.name === '1440' || viewport.mobile)) await shot(page, viewport, `${viewport.name}-${theme}-desk-state-no-data`, 'Desk, NO DATA (no snapshot yet)');
       if (live) continue;
