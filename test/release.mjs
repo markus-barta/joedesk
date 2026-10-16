@@ -129,7 +129,12 @@ test('P6 staged ingress: v1 and incompatible producer IDs rejected; v2 restart c
   assert.equal((await fetch(base + `app.js?v=${active.version}&v=${active.version}`)).status, 404);
   assert.equal((await fetch(base + `app.js?v=${active.version}`)).status, 200);
 });
-test('P6 smoke: SSO redirects are auth_required; wrong release, stale feeds, exposed reads and oversized health fail', async () => {
+test('P6 smoke: SSO redirects are auth_required; wrong release, stale feeds, exposed reads and oversized health fail', async t => {
+  const alias = join(temporary(t), 'smoke.mjs');
+  fs.symlinkSync(fs.realpathSync(new URL('../scripts/smoke-release.mjs', import.meta.url)), alias);
+  const cli = spawnSync(process.execPath, [alias, 'not-a-url', active.version_scheme, active.version], { encoding: 'utf8' });
+  assert.equal(cli.status, 1, 'a symlinked CLI must run and fail closed, not silently skip its entry point');
+  assert.match(cli.stderr, /release_smoke_failed/);
   const health = structuredClone(samples.healthz);
   assert.ok(health, 'health fixture');
   Object.assign(health, { version: active.version, versionScheme: active.version_scheme });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { pathToFileURL } from 'node:url';
-import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 import { validateContract, CONTRACTS } from '../contracts/index.mjs';
 import { parseVersion } from '../release/versioning.mjs';
 
@@ -39,7 +39,7 @@ export async function smokeRelease(baseURL, expected, { fetcher = fetch, maxSnap
   return { ok: true, version: health.version, versionScheme: health.versionScheme, schemaVersion: health.schemaVersion,
     snapshotAgeSeconds: health.snapshotAgeSeconds, feeds: health.feeds, protectedReads: 'anonymous-rejected', results: health.feeds.results.state };
 }
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [base, version_scheme, version] = process.argv.slice(2);
   try { console.log(JSON.stringify(await smokeRelease(base, { version_scheme, version }))); }
   catch (error) { console.error(['auth_required', 'release_mismatch', 'feeds_not_ready', 'protected_read_exposed'].includes(error.message) ? error.message : 'release_smoke_failed'); process.exitCode = 1; }
