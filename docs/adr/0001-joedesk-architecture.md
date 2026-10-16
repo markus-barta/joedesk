@@ -1100,9 +1100,11 @@ symbol on the accepted Fleet Config KEEP list is held back as a whole
    sharing the existing machine token. OPS must add the second exact-path
    token-only edge router without SSO; no prefix exemption. README is the
    producer/edge handoff. Nothing is deployed by this worker.
-3. Amy's 2026-10-16 contract decision: for each full Vienna day and reported
-   desk, count, realised net and fees reconcile exactly with trades closed on
-   that day. Per-day mismatch paths return 422 and retain last good. Optional
+3. Amy's 2026-10-16 contract decision (LEAD day-level clarification): each full
+   Vienna day covers every trade closed on that day, including every desk that
+   traded. An omitted trading desk returns a per-day 422 (`dayDeskRequired`);
+   count, realised net and fees reconcile exactly. Per-day mismatches retain
+   last good. Dates with no `days[]` entry are skipped. Optional
    day-level `coverage: "full" | "partial"` defaults to full; only explicit
    partial days skip reconciliation. The board still derives trade P&L from
    trades, never from day summaries (spec §7).

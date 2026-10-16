@@ -13,7 +13,7 @@ const UI_MODULES = ["app.js", "host.js", "ui.js", "terms.js", "format.js", "heal
   "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js",
   "settings.js", "settings-model.js", "fleet-write.js", "version-display.js"];
 const VENDOR_FILES = ['display.json', 'version.js', 'presentation.js', 'version-interaction.js', 'schemes.json', 'package.json', 'manifest.json'].map(n => `vendor/calver/${n}`);
-const CONTRACT_MODULES = ["index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
+const CONTRACT_MODULES = ["index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "vienna-date.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
   "manifest.json", "common.schema.json", "reason.schema.json", "data.schema.json", "history.schema.json", "results.schema.json",
   "fleet-config.schema.json", "healthz.schema.json"];
 
@@ -113,6 +113,17 @@ for (const rel of STATIC_ROUTES) {
 }
 
 // Versioned asset URLs: one release closure, every module mapped to this version.
+// Producers vendor contracts/ alone. Include ingress-only modules in this
+// boundary check too, even though the browser import map does not use them.
+for (const name of (await readdir(join(repoRoot, "contracts"))).filter(name => name.endsWith('.mjs'))) {
+  const source = await readFile(join(repoRoot, "contracts", name), "utf8");
+  for (const match of source.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)(['"])([^'"]+)\1/g)) {
+    const specifier = match[2];
+    if (!specifier.startsWith('./') || specifier.split('/').includes('..')) {
+      fail(`contracts/${name} must import only ./ paths: ${specifier}`);
+    }
+  }
+}
 const server = await readFile(join(repoRoot, "server.mjs"), "utf8");
 const serverModules = JSON.parse(server.match(/const UI_MODULES = (\[[^\]]+\]);/)[1]);
 if (JSON.stringify([...serverModules].sort()) !== JSON.stringify([...UI_MODULES].sort())) fail("server UI_MODULES must list exactly the UI modules");

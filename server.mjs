@@ -37,7 +37,7 @@ const MAX_BODY = 262144;
 const PROTECTED_READS = new Set(["/joe/data.json", "/joe/history.json", "/joe/results.json", "/joe/state.json", "/joe/fleet-config.json", "/joe/fleet-config/actions.json"]);
 // Offline native imports share this exact package with server acceptance.
 const CONTRACT_FILES = Object.freeze(Object.fromEntries([
-  "index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "accept.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
+  "index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "vienna-date.mjs", "accept.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
   "manifest.json", "common.schema.json", "reason.schema.json", "data.schema.json", "history.schema.json", "results.schema.json", "fleet-config.schema.json", "healthz.schema.json",
 ].map(name => [`/joe/contracts/${name}`, name])));
 const SHARED_FILES = Object.freeze({ "/joe/time.mjs": "time.mjs", "/joe/market-calendar.json": "market-calendar.json" });

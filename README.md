@@ -398,19 +398,36 @@ strings (up to eight fractional digits) through validation, storage and reads.
 Never round before summing; only the board display rounds to cents. Each trade's
 `netEur` equals its exact `grossEur` minus `feesEur`.
 
-For each fully covered Vienna date in `days[]` and each reported desk,
+For each fully covered Vienna date in `days[]`, **every trade closed that day**
+must be covered by its desk summary. A desk with closed trades cannot be omitted:
+that returns 422 with path `$.days[i].desks.id` and rule `dayDeskRequired`.
+Desks without closed trades may be omitted. For each included desk,
 `days[i].desks[id].trades` must equal the count of that desk's `trades[]` whose
 `closedAt` falls on that date in `Europe/Vienna`; `realisedNet` and `fees` must
 equal their exact `netEur` and `feesEur` sums. A zero-trade day requires zero
 totals; null totals do not reconcile. A mismatch returns 422 with the per-day
 path (`$.days[i].desks.id.trades`, `.realisedNet` or `.fees`) and rule
 (`dayTradeCount`, `dayNetSum` or `dayFeeSum`), retaining the last good snapshot.
+Trades on dates with no `days[]` entry (for example today before daily close)
+are skipped by this cross-check; their schema and trade checks still apply.
 Day-level `coverage` is optional: `"full"` (the default when omitted) or
 `"partial"`. Use `"partial"` only when a windowed `trades[]` covers part of that
 day; its day/trade cross-check is skipped. Schema and trade checks still apply.
 KEEP holdings **SXR8 and TSLA are excluded from both `trades[]` and all `days[]`
 totals**, including partial days. Results derives trade P&L from `trades[]`;
 day summaries are validated, never substituted for the trade record.
+
+**Producer contract pin — manifest revision 3.** Compared with revision 2,
+revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds
+optional day-level `coverage` (`"full"` by default, or `"partial"`), the exact
+day/trade cross-check across every desk described above, and explicit KEEP
+exclusion from both trade records and day totals. It also removes
+`results_not_wired` from the closed reason enum. JOED-20 producers must re-vendor
+the complete self-contained `contracts/` directory, including `vienna-date.mjs`,
+and re-pin to `release/contracts.json`'s `contract_set_sha256`; a revision-2 digest does not
+cover revision-3 acceptance. The release manifest's pusher/executor requirements
+carry that same digest. This remains a coordinated cutover candidate, pending
+producer rehearsal and sign-off.
 
 Re-send at least every 30 s with a strictly higher `seq` and non-regressing
 `generatedAt`. Generation may be at most 5 s ahead of the server clock; server

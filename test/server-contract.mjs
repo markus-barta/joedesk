@@ -583,6 +583,34 @@ test('JOED-27 results: exact decimals survive HTTP/storage; per-day 422 keeps la
   assert.equal((await restarted.request('/joe/results.json')).body.seq, partial.seq);
 });
 
+test('JOED-27 results: omitted trading desk returns a per-day 422 and retains last-good through restart', async t => {
+  const s = await setup(t);
+  const good = resultsSnapshot();
+  assert.equal((await s.pushResults(good)).status, 200);
+  const original = readFileSync(join(s.dataDir, 'results-state.json'));
+  s.time.ms = 30000;
+  for (const coverage of [undefined, 'full']) {
+    const bad = resultsSnapshot(102); delete bad.days[0].desks.j;
+    if (coverage) bad.days[0].coverage = coverage;
+    const rejected = await s.pushResults(bad);
+    assert.equal(rejected.status, 422); assert.equal(rejected.body.reason, 'contract_invalid');
+    assert.deepEqual(rejected.body.errors, [{ path: '$.days[0].desks.j', rule: 'dayDeskRequired' }]);
+    assert.deepEqual(readFileSync(join(s.dataDir, 'results-state.json')), original);
+  }
+  await s.close();
+  const restarted = await setup(t, { dataDir: s.dataDir }); restarted.time.ms = 60000;
+  const read = await restarted.request('/joe/results.json');
+  assert.deepEqual(read.body, { ...good, receivedAt: at(0) });
+  assert.equal(read.headers.get('x-joe-feed-reason'), 'contract_invalid');
+  assert.equal(read.headers.get('x-joe-received-at'), at(0));
+  assert.equal(restarted.model.panels().results.retained, true);
+  const beforeClose = resultsSnapshot(102, 60000); beforeClose.days = [];
+  assert.equal((await restarted.pushResults(beforeClose)).status, 200);
+  assert.deepEqual((await restarted.request('/joe/results.json')).body, { ...beforeClose, receivedAt: at(60000) });
+  const partial = resultsSnapshot(103, 60000); partial.days[0].coverage = 'partial'; partial.days[0].desks = {};
+  assert.equal((await restarted.pushResults(partial)).status, 200);
+});
+
 test('JOED-27 results: KEEP trades and KEEP-only daily totals are rejected without replacing last-good', async t => {
   const s = await setup(t); await s.pushResults(resultsSnapshot());
   const { sourceTrades } = JSON.parse(readFileSync(new URL('../fixtures/results-keep-exclusion.json', import.meta.url)));
@@ -971,7 +999,7 @@ test('P3 UI: the history worker graph is served only under this release path', a
   const prefix = `/joe/v/${release.version}/`;
   // The worker and every module it imports, resolved under the release path.
   const graph = ['history-worker.js', 'history-model.js', 'time.mjs', 'market-calendar.json', 'contracts/read.mjs', 'contracts/index.mjs',
-    'contracts/schema-validator.mjs', 'contracts/semantics.mjs', 'contracts/decimal.mjs', 'contracts/gateway.mjs', 'contracts/data.schema.json',
+    'contracts/schema-validator.mjs', 'contracts/semantics.mjs', 'contracts/vienna-date.mjs', 'contracts/decimal.mjs', 'contracts/gateway.mjs', 'contracts/data.schema.json',
     'contracts/history.schema.json', 'contracts/results.schema.json', 'contracts/fleet-config.schema.json', 'contracts/healthz.schema.json',
     'contracts/common.schema.json', 'contracts/reason.schema.json', 'contracts/manifest.json'];
   for (const name of graph) {

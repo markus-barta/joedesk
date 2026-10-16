@@ -154,6 +154,45 @@ test('results: gross and day sums keep sub-cent decimals without rounding in acc
   rejects(validateContract('results', roundedGross), 'netAfterFees', '$.trades[0]');
 });
 
+test('results: full days require every desk with closed trades, even when all desks are omitted', () => {
+  const accepted = acceptSnapshot('results', ingress(samples.results), null, at);
+  for (const coverage of [undefined, 'full']) for (const desk of ['j', 'joe', 'joel']) {
+    const good = ingress(samples.results); good.seq++;
+    if (coverage) good.days[0].coverage = coverage;
+    good.trades[0].desk = desk;
+    good.days[0].desks[desk] = copy(samples.results.days[0].desks.j);
+    if (desk !== 'j') delete good.days[0].desks.j;
+    assert.equal(validateContract('results', good, { stage: 'ingress' }).ok, true);
+    for (const omitAll of [false, true]) {
+      const bad = copy(good);
+      if (omitAll) bad.days[0].desks = {}; else delete bad.days[0].desks[desk];
+      const rejected = acceptSnapshot('results', bad, accepted, later);
+      rejects(rejected, 'dayDeskRequired', `$.days[0].desks.${desk}`);
+      assert.strictEqual(rejected.value, accepted.value);
+      bad.days[0].coverage = 'partial';
+      assert.equal(acceptSnapshot('results', bad, accepted, later).status, 200);
+    }
+  }
+  const noTrades = copy(samples.results); noTrades.trades = []; noTrades.days[0].desks = {};
+  assert.equal(validateContract('results', noTrades).ok, true);
+});
+
+test('results: trades without a days entry are skipped, while reported days still reconcile', () => {
+  const r = copy(samples.results);
+  const today = { ...copy(r.trades[0]), id: 'rt-before-daily-close', desk: 'joel',
+    openedAt: '2026-10-14T22:00:00.000Z', closedAt: '2026-10-14T22:00:00.000Z' };
+  r.trades.push(today);
+  assert.equal(validateContract('results', r).ok, true);
+  r.days.push({ date: '2026-10-15', desks: {} });
+  rejects(validateContract('results', r), 'dayDeskRequired', '$.days[1].desks.joel');
+  r.days[1].coverage = 'partial';
+  assert.equal(validateContract('results', r).ok, true);
+  r.days[0].desks.j.trades++;
+  rejects(validateContract('results', r), 'dayTradeCount', '$.days[0].desks.j.trades');
+  r.days = [];
+  assert.equal(validateContract('results', r).ok, true);
+});
+
 test('results: explicit partial days skip reconciliation only for that day; coverage is a closed optional enum', () => {
   const partial = JSON.parse(readFileSync(new URL('../fixtures/results/partial-day.json', import.meta.url)));
   assert.equal(validateContract('results', partial).ok, true);
