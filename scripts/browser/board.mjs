@@ -44,7 +44,7 @@ export async function startBoard({ fleetConfig = null, history = null, fleetConf
     async close() {
       server.closeAllConnections();
       await new Promise(resolve => server.close(resolve));
-      discard(dataDir, 'board store');
+      await discard(dataDir, 'board store');
     },
   };
 }

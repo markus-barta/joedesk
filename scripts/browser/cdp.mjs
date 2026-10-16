@@ -26,6 +26,29 @@ export function findBrowser() {
   throw new Error('No Chrome found; set BROWSER_PATH');
 }
 
+export async function closeBrowserProcess(proc, requestClose, timeout = 3000) {
+  const hasExited = () => proc.exitCode !== null || proc.signalCode !== null;
+  if (hasExited()) return;
+  let onExit;
+  const exited = new Promise(resolve => { onExit = () => resolve(true); proc.once('exit', onExit); });
+  const waitForExit = async () => {
+    let timer;
+    try {
+      return await Promise.race([exited, new Promise(resolve => { timer = setTimeout(() => resolve(false), timeout); })]);
+    } finally { clearTimeout(timer); }
+  };
+  try {
+    // A CDP acknowledgement (or a disconnected pipe) is not process exit.
+    // Keep the exit listener installed before asking Chrome to close.
+    Promise.resolve().then(requestClose).catch(() => { /* pipe may close with Chrome */ });
+    if (await waitForExit()) return;
+    if (!hasExited()) proc.kill('SIGTERM');
+    if (await waitForExit()) return;
+    if (!hasExited()) proc.kill('SIGKILL');
+    if (!await waitForExit()) throw new Error('Browser did not exit; profile retained');
+  } finally { proc.off('exit', onExit); }
+}
+
 export async function launch({ hostRules = '' } = {}) {
   const profile = scratch('joed-p3-browser-');
   const args = ['--headless=new', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', '--disable-gpu',
@@ -62,14 +85,11 @@ export async function launch({ hostRules = '' } = {}) {
     pending.set(n, { resolve, reject, method });
     proc.stdio[3].write(`${JSON.stringify({ id: n, method, params, ...(sessionId ? { sessionId } : {}) })}\0`);
   });
-  const exited = new Promise(resolve => proc.on('exit', resolve));
   return {
     send, on: fn => listeners.add(fn), off: fn => listeners.delete(fn),
     async close() {
-      try { await Promise.race([send('Browser.close'), new Promise(r => setTimeout(r, 3000))]); } catch { /* already closing */ }
-      if (proc.exitCode === null) proc.kill('SIGTERM');
-      await Promise.race([exited, new Promise(r => setTimeout(r, 3000))]);
-      discard(profile, 'browser profile');
+      await closeBrowserProcess(proc, () => send('Browser.close'));
+      await discard(profile, 'browser profile');
     },
   };
 }

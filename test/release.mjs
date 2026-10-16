@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:http';
+import { EventEmitter } from 'node:events';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
+import { closeBrowserProcess } from '../scripts/browser/cdp.mjs';
 import { parseVersion, reserveVersion, compareReleases } from '../release/versioning.mjs';
 import { backupStore, restoreStore, migrateToV2, verifyBackup } from '../release/data-migration.mjs';
 import { createReadModel } from '../server/read-model.mjs';
@@ -29,6 +31,60 @@ async function listen(t, server) {
   t.after(() => new Promise(r => { server.closeAllConnections(); server.close(r); }));
   return `http://127.0.0.1:${server.address().port}/joe/`;
 }
+
+function browserProcess() {
+  return Object.assign(new EventEmitter(), {
+    exitCode: null, signalCode: null, signals: [],
+    kill(signal) { this.signals.push(signal); return true; },
+    exit(code = 0, signal = null) { this.exitCode = code; this.signalCode = signal; this.emit('exit', code, signal); },
+  });
+}
+test('browser teardown: close acknowledgement does not permit profile cleanup before exit', async () => {
+  const proc = browserProcess();
+  let requested = false, cleaned = false;
+  const closing = closeBrowserProcess(proc, async () => { requested = true; }).then(() => { cleaned = true; });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(requested, true);
+    assert.equal(cleaned, false, 'Chrome can still be writing after acknowledging Browser.close');
+  } finally { proc.exit(); }
+  await closing;
+  assert.equal(cleaned, true);
+  assert.deepEqual(proc.signals, [], 'graceful exit needs no signal');
+  assert.equal(proc.listenerCount('exit'), 0);
+});
+test('browser teardown: exit succeeds even if the CDP close reply never arrives', async () => {
+  const proc = browserProcess();
+  await closeBrowserProcess(proc, () => { queueMicrotask(() => proc.exit()); return new Promise(() => {}); });
+  assert.deepEqual(proc.signals, []);
+  for (const [code, signal] of [[0, null], [null, 'SIGTERM']]) {
+    const gone = browserProcess(); gone.exit(code, signal);
+    await closeBrowserProcess(gone, () => assert.fail('already exited'));
+    assert.deepEqual(gone.signals, []);
+  }
+});
+test('browser teardown: signal fallbacks still wait for exit; a stuck process retains its profile', async () => {
+  for (const exitOn of ['SIGTERM', 'SIGKILL', null]) {
+    const proc = browserProcess();
+    proc.kill = signal => {
+      proc.signals.push(signal);
+      if (signal === exitOn) setImmediate(() => proc.exit(null, signal));
+      return true;
+    };
+    let cleaned = false;
+    const closing = closeBrowserProcess(proc, () => Promise.reject(new Error('CDP disconnected')), 10)
+      .then(() => { assert.notEqual(proc.signalCode, null); cleaned = true; });
+    if (exitOn) {
+      await closing;
+      assert.equal(cleaned, true);
+    } else {
+      await assert.rejects(closing, /Browser did not exit; profile retained/);
+      assert.equal(cleaned, false);
+    }
+    assert.deepEqual(proc.signals, exitOn === 'SIGTERM' ? ['SIGTERM'] : ['SIGTERM', 'SIGKILL']);
+    assert.equal(proc.listenerCount('exit'), 0);
+  }
+});
 
 test('P6 version: explicit schemes, real UTC dates, no suffixes or 32-bit assumptions', () => {
   for (const version of ['280229120000.0.0', '991231235959.0.0', next.version]) {

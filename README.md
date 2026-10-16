@@ -299,6 +299,12 @@ Reports stay separate under `~/.local/share/joedesk-qa/p4/<zone>/index.md`
 Use an approved browser test host; an installed browser guard refusal is a
 blocked check and must be handed to the coordinator without bypassing it.
 
+P3–P6 share browser teardown: request a graceful close, wait for process exit,
+then remove the profile. A stuck browser gets SIGTERM and then SIGKILL with
+bounded exit waits; if it still has not exited, cleanup fails and retains the
+profile. CI scratch removal retries filesystem contention up to five times
+(100 ms delay); workstation scratch still goes to Trash.
+
 Vienna day keys always come from the explicit `Europe/Vienna` zone in
 `contracts/vienna-date.mjs` and `time.mjs`; Results uses that same zone for its
 instant-to-day index. UTC date getters serve calendar arithmetic only. The DST
