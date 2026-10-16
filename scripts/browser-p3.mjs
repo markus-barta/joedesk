@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
-import { VIEWPORTS, THEMES, configure, load, go, screenshot, settle, waitFor } from './browser/shots.mjs';
+import { VIEWPORTS, THEMES, configure, load, go, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH } from './browser/shots.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
@@ -894,9 +894,12 @@ try {
     for (const screen of ['desk', 'results', 'history', 'settings']) {
       await go(page, screen);
       const tag = `${theme}${font ? ' wide font' : ''} ${screen}`;
-      const fail = { scroll: [], past: [], header: [], nav: [], targets: [], icons: [], overlaps: [], labels: [], cards: [] };
+      const fail = { scroll: [], past: [], header: [], nav: [], targets: [], icons: [], overlaps: [], labels: [], cards: [], pointer: [] };
       for (const width of widths) {
         await configure(page, { name: String(width), width, height: 900, mobile: width <= 700 }, theme);
+        // The pointer right after the resize, the phone↔desktop changes included.
+        const media = await pointerMedia(page);
+        if (media !== (width <= 700 ? TOUCH : MOUSE)) fail.pointer.push({ width, media });
         await settle(page);
         const r = await page.evaluate(`__audit.sweep(${COMPACT}, ${screen === 'desk' ? JSON.stringify(light) : 'null'})`);
         if (r.scroll > r.inner) fail.scroll.push({ width, scroll: r.scroll });
@@ -924,6 +927,7 @@ try {
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: each desk card's header keeps one box with its longest state and heartbeat texts, which never overlap (two heartbeat lines at most, under the state below 340 px)`, !fail.cards.length, fail.cards.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: ${light.labels.length} light labels × ${light.brokers.length} broker words at every width: the label stays inside its button (the deferred one aside), nothing else in the header or the page moves`, !fail.labels.length, fail.labels.slice(0, 4));
+      check('touch', `sweep ${tag}: read right after each resize, the pointer is touch up to 700 px (no hover, coarse) and a mouse above (hover, fine) at every one of ${n}`, !fail.pointer.length, fail.pointer.slice(0, 8));
     }
   }
   // For the visual check: the compact header (720, 800, 880) and, just above
@@ -1131,9 +1135,11 @@ kept holding has two lines. The sweep (\`sweep\`) walks every width from 390 to
 one, on every screen: no horizontal page scroll, nothing past the page's right
 edge, no text over other text, the header in one row with one nav, 44 px
 targets and centred icons; on Desk every light label with every broker word
-moves nothing. A desk card's state never runs under its heartbeat line: short
-of room the heartbeat takes two lines in the same height, and a card under
-340 px wide puts it under the state, as on phones. See
+moves nothing. Read right after each resize, the pointer is touch up to
+700 px and a mouse above, whatever pointer the host has (\`touch\`). A desk
+card's state never runs under its heartbeat line: short of room the heartbeat
+takes two lines in the same height, and a card under 340 px wide puts it
+under the state, as on phones. See
 \`720-light-desk-header.png\`, \`800-dark-desk-header.png\`,
 \`880-light-desk-header.png\`, \`880-dark-history-header.png\`,
 \`${COMPACT + 10}-light-desk-header-longest-wide.png\` and
