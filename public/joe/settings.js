@@ -205,8 +205,7 @@ const fieldLeft = f => {
 function windowsHtml(f) {
   const left = fieldLeft(f);
   if (!loaded()) return `<div class="field ww" data-row="${f.key}">${left}<div class="f-in">${readOnly('Not available', '', 'ring')}</div></div>`;
-  let ws = [];
-  try { ws = JSON.parse(state.draft[f.key]); } catch { ws = []; }
+  const ws = M.windowsOf(state.draft[f.key]) ?? [];
   const desks = [...M.DESK_IDS, ...new Set(ws.flatMap(w => w.desks).filter(d => !M.DESK_IDS.includes(d)))];
   const rows = ws.map((w, i) => {
     const n = i + 1;
@@ -223,8 +222,7 @@ function windowsHtml(f) {
       <button type="button" class="btn quiet" data-wwdel="${i}" aria-label="Remove wake window ${n}">${icon('trash')}Remove</button>
     </div>`;
   }).join('');
-  let saved = [];
-  try { saved = JSON.parse(state.base[f.key]); } catch { saved = []; }
+  const saved = M.windowsOf(state.base[f.key]) ?? [];
   const shown = saved.length ? saved.map(w => `<span class="wline">${esc(M.display(f, JSON.stringify([w])))}</span>`).join('') : 'No wake windows';
   return `<div class="field ww" data-row="${f.key}">${left}<div class="f-in ww-in">
     ${phoneValue(shown)}
@@ -243,8 +241,8 @@ const routineHealth = () => `<div class="field" data-row="routine-health"><div c
   <div class="f-in">${readOnly('Not reported yet', 'No scheduler signal reaches the board', 'ring')}</div></div>`;
 
 function windowsShape() {
-  if (!state.draft) return null;
-  try { const ws = JSON.parse(state.draft['cadence.wakeWindows']); return [ws.length, [...new Set(ws.flatMap(w => w.desks))].sort().join()]; } catch { return null; }
+  const ws = state.draft ? M.windowsOf(state.draft['cadence.wakeWindows']) : null;
+  return ws && [ws.length, [...new Set(ws.flatMap(w => w.desks))].sort().join()];
 }
 function renderFields(force = false) {
   const config = state.config;
@@ -259,23 +257,28 @@ function renderFields(force = false) {
   return true;
 }
 
-// The Saved line stays one short line: the wake windows give their count, and
-// Review changes lists every difference.
+// The wake windows' Saved line gives their count; Review changes lists every
+// difference.
 function savedText(f, raw) {
   if (f.type !== 'windows') return M.display(f, raw);
-  let n = 0;
-  try { n = JSON.parse(raw).length; } catch { /* unreadable: counted as none */ }
+  const n = M.windowsOf(raw)?.length ?? 0;
   return `${n} wake window${n === 1 ? '' : 's'} · Review changes lists every difference`;
 }
 // The draft's own marks: the Saved line, the reserve meters and examples, the
 // controls' values when they changed by a button, never under the caret.
+// The Saved line always holds the saved value and is only shown when the
+// draft differs, so its box is sized before any edit and showing it moves
+// nothing; past three lines it scrolls (and takes focus to be read).
 function syncDraft() {
   if (!state.base) return;
   const ch = new Set(M.changes(state));
   for (const el of $$('#setMain [data-saved]')) {
-    const k = el.dataset.saved;
-    const text = ch.has(k) ? `Saved: ${savedText(M.FIELD[k], state.base[k])}` : '';
+    const k = el.dataset.saved, on = ch.has(k);
+    const text = `Saved: ${savedText(M.FIELD[k], state.base[k])}`;
     if (el.textContent !== text) el.textContent = text;
+    if (el.classList.contains('on') !== on) el.classList.toggle('on', on);
+    const scrolls = on && el.scrollHeight > el.clientHeight + 1;
+    if (el.hasAttribute('tabindex') !== scrolls) { if (scrolls) el.tabIndex = 0; else el.removeAttribute('tabindex'); }
   }
   for (const el of $$('#setMain [data-field]')) {
     if (el !== document.activeElement && el.value !== state.draft[el.dataset.field]) el.value = state.draft[el.dataset.field];
@@ -287,8 +290,7 @@ function syncDraft() {
     el.parentElement.setAttribute('aria-label', `${String(v).trim()}${NB}% kept free`);
   }
   for (const el of $$('#setMain [data-example]')) { const t = M.reserveExample(state.draft[el.dataset.example]); if (el.textContent !== t) el.textContent = t; }
-  let ws = [];
-  try { ws = JSON.parse(state.draft['cadence.wakeWindows']); } catch { /* shown as it is */ }
+  const ws = M.windowsOf(state.draft['cadence.wakeWindows']) ?? [];
   for (const el of $$('#setMain [data-ww]')) { const w = ws[Number(el.dataset.ww)]; if (w && el !== document.activeElement && el.value !== w[el.dataset.wk]) el.value = w[el.dataset.wk]; }
   for (const el of $$('#setMain [data-wday]')) { const w = ws[Number(el.dataset.wday)]; if (w) el.setAttribute('aria-pressed', String(w.days.includes(el.dataset.d))); }
   for (const el of $$('#setMain [data-wdesk]')) { const w = ws[Number(el.dataset.wdesk)]; if (w) el.setAttribute('aria-pressed', String(w.desks.includes(el.dataset.d))); }
@@ -412,7 +414,14 @@ export function renderSettings(ctx) {
   state = M.adopt(state, config);
   if (!restored && state.config) {
     restored = true;
-    try { state = M.readPreview(localStorage.getItem(M.PREVIEW_KEY), state); } catch { /* storage unavailable: no draft */ }
+    let text = null;
+    try { text = localStorage.getItem(M.PREVIEW_KEY); } catch { /* storage unavailable: no draft */ }
+    const r = M.readPreview(text, state);
+    state = r.s;
+    if (r.dropped) {
+      try { localStorage.removeItem(M.PREVIEW_KEY); } catch { /* nothing stored */ }
+      toast('Draft discarded. The fields show the saved settings again.');
+    }
   }
   const rebuilt = renderFields(state.config !== before.config);
   if (!rebuilt && state !== before) syncDraft();
@@ -462,8 +471,8 @@ export function showSection(id) {
 const editing = () => state.config && !state.busy && !isPhone();
 function update(next) { if (next === state) return; state = next; syncDraft(); renderBar(lastCtx); }
 function editWindows(fn) {
-  let ws;
-  try { ws = JSON.parse(state.draft['cadence.wakeWindows']); } catch { return; }
+  const ws = M.windowsOf(state.draft['cadence.wakeWindows']);
+  if (!ws) return;
   fn(ws);
   update(M.edit(state, 'cadence.wakeWindows', JSON.stringify(ws)));
   renderFields();
@@ -501,9 +510,10 @@ async function send() {
   state = M.finish(state, outcome);
   renderFields(true);
   renderBar(lastCtx);
-  if (outcome.ok) {
+  if (outcome.ok || outcome.stored) {
     try { localStorage.removeItem(M.PREVIEW_KEY); } catch { /* nothing stored */ }
-    toast(`Sent version ${M.vnum(outcome.rev)} to the desks: ${outcome.keys.join(', ')}. Amy and the desks pick it up on their next read; this board cannot confirm that.`);
+    toast(outcome.ok ? `Sent version ${M.vnum(outcome.rev)} to the desks: ${outcome.keys.join(', ')}. Amy and the desks pick it up on their next read; this board cannot confirm that.`
+      : `Sent version ${M.vnum(outcome.rev)} to the desks: ${outcome.keys.join(', ')}. The change log could not record it and shows it as pending. Amy and the desks pick it up on their next read; this board cannot confirm that.`);
   } else toast(`Sending failed for version ${M.vnum(baseRev)} (${keys.join(', ')}): ${outcome.reason}.`);
   feed?.refreshFleet();
   feed?.refreshActions();
@@ -549,9 +559,8 @@ export function initSettings(options) {
     if (t.dataset.field) update(M.edit(state, t.dataset.field, t.value));
     else if (t.dataset.ww != null) {
       const i = Number(t.dataset.ww), k = t.dataset.wk, value = t.value.trim();
-      let ws;
-      try { ws = JSON.parse(state.draft['cadence.wakeWindows']); } catch { return; }
-      if (!ws[i]) return;
+      const ws = M.windowsOf(state.draft['cadence.wakeWindows']);
+      if (!ws?.[i]) return;
       ws[i][k] = value;
       update(M.edit(state, 'cadence.wakeWindows', JSON.stringify(ws)));
     }
@@ -581,9 +590,8 @@ export function initSettings(options) {
     const tog = e.target.closest('[data-wday], [data-wdesk]');
     if (tog) {
       const days = tog.dataset.wday != null, i = Number(days ? tog.dataset.wday : tog.dataset.wdesk), d = tog.dataset.d;
-      let ws;
-      try { ws = JSON.parse(state.draft['cadence.wakeWindows']); } catch { return; }
-      if (!ws[i]) return;
+      const ws = M.windowsOf(state.draft['cadence.wakeWindows']);
+      if (!ws?.[i]) return;
       const list = days ? 'days' : 'desks', order = days ? M.DAYS : [...M.DESK_IDS, ...ws[i].desks.filter(x => !M.DESK_IDS.includes(x))];
       ws[i][list] = ws[i][list].includes(d) ? ws[i][list].filter(x => x !== d) : order.filter(x => x === d || ws[i][list].includes(x));
       update(M.edit(state, 'cadence.wakeWindows', JSON.stringify(ws)));

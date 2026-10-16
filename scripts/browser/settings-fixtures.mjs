@@ -18,6 +18,21 @@ export function designFleet() {
   return c;
 }
 
+// The longest values the settings format accepts (test-only): 64 kept
+// holdings of 16 characters (a 1.133-character Saved line), 64-character
+// routine names and 80-character check-in names.
+export function longFleet() {
+  const c = designFleet();
+  c.desks.keep = ['SXR8', 'TSLA', ...Array.from({ length: 62 }, (_, i) => `LONGSYMBOL${String(i).padStart(2, '0')}.XYZ`)];
+  c.cadence.deskWatch = 'desk-watch-routine-for-the-paper-learning-desks-on-the-host-zero';
+  c.cadence.darwin = 'learning-review-routine-for-what-the-paper-desks-learned-in-day';
+  c.amy.routines.morning = 'Morning check-in: the limits for today, the work that matters and any guardrails';
+  c.amy.routines.close = 'Close of day: the useful result of each desk, without a noisy activity feed here';
+  const checked = validateContract('fleet-config', c);
+  if (!checked.ok) throw new Error(`long fleet settings invalid: ${JSON.stringify(checked.errors.slice(0, 3))}`);
+  return c;
+}
+
 // The log the design shows: two sends, a conflict that was not sent, an older send.
 export function designActions() {
   return [

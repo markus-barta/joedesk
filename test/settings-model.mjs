@@ -38,7 +38,18 @@ function design() {
 
 test('schema keys: Settings shows every leaf key of fleet-config.schema.json, and only those', () => {
   const leaves = M.schemaLeafKeys(schema);
-  assert.equal(leaves.length, 36, 'the schema file has 36 leaf keys (34 leaves, plus the two arrays of objects listed with their item keys)');
+  // Derived from the schema file, never counted by hand: the leaves are exactly
+  // the value paths of a valid settings file (an array of objects is listed
+  // with its item keys). The spec's "39" adds three rows that have no schema
+  // key: Routine health, File the board reads and Last sent.
+  const paths = new Set();
+  const walk = (v, path) => {
+    if (Array.isArray(v)) { paths.add(path); for (const item of v) if (item && typeof item === 'object') for (const k of Object.keys(item)) paths.add(`${path}[].${k}`); return; }
+    if (v && typeof v === 'object') { for (const [k, x] of Object.entries(v)) walk(x, path ? `${path}.${k}` : k); return; }
+    paths.add(path);
+  };
+  walk(design(), '');
+  assert.deepEqual([...paths].sort(), [...leaves].sort(), 'each leaf names one value of a valid settings file, and every value sits under a leaf');
   assert.deepEqual([...M.SHOWN_KEYS].sort(), [...leaves].sort());
   assert.equal(new Set(M.SHOWN_KEYS).size, M.SHOWN_KEYS.length, 'each key once in page order');
   assert.equal(M.SHOWN_KEYS[0], 'mode', 'Mode comes first');
@@ -195,12 +206,37 @@ test('stale version: the conflict reads "revision changed to …; reload before 
   // Discard takes the newest saved settings.
   const fresh = M.discard(s, { ...design(), rev: 'fc-000013' });
   assert.equal(fresh.config.rev, 'fc-000013'); assert.ok(!M.isDirty(fresh)); assert.equal(fresh.outcome, null);
-  // Other failures.
+  // Other failures. Only a 409 is a revision conflict.
   assert.equal(M.sendOutcome(422, { ok: false, error: 'schema validation failed', errors: ['/desks/keep: contains'] }, []).reason, '/desks/keep: contains');
-  assert.equal(M.sendOutcome(500, { ok: false, error: 'fleet config store failed' }, []).reason, 'fleet config store failed');
+  assert.deepEqual(M.sendOutcome(500, { ok: false, error: 'fleet config store failed' }, ['cadence.deskWatch']), { ok: false, keys: ['cadence.deskWatch'], reason: 'fleet config store failed' });
+  assert.deepEqual(M.sendOutcome(409, { ok: false, error: 'fleet config revision conflict' }, []), { ok: false, keys: [], reason: 'fleet config revision conflict' });
+  assert.deepEqual(M.sendOutcome(422, { ok: false, error: 'schema validation failed', currentRev: 'fc-000013' }, []), { ok: false, keys: [], reason: 'schema validation failed' }, 'a version named by another failure is no conflict');
   assert.equal(M.sendOutcome(0, null, []).reason, 'the board server did not answer');
   assert.equal(M.sendOutcome(302, null, []).reason, 'sign-in expired — reload');
   assert.equal(M.sendOutcome(200, { ok: true }, []).ok, false, 'an answer without the written settings is not a success');
+});
+
+test('stored, change log unfinished: a 500 naming the new version is written, never "Not sent", never a clean success', () => {
+  let s = M.confirm(M.review(M.edit(M.editState(design()), 'cadence.deskWatch', 'desk-watch-two')).s, true);
+  s = M.start(s);
+  // The server stored version 13, then could not finish its change-log entry.
+  const out = M.sendOutcome(500, { ok: false, error: 'fleet config stored but action log finalization failed', currentRev: 'fc-000013' }, M.changes(s));
+  assert.deepEqual(out, { ok: false, stored: true, rev: 'fc-000013', keys: ['cadence.deskWatch'], reason: 'the change log could not record it' });
+  s = M.finish(s, out);
+  const b = M.bar(s);
+  assert.deepEqual({ tone: b.tone, state: b.state, text: `${b.lead} · ${b.rest}` },
+    { tone: 'warn', state: 'stored', text: 'Sent version 13 · saved to the shared file, but the change log could not record it. The desks’ reload is not confirmed.' });
+  assert.ok(!/Not sent/.test(`${b.lead} ${b.rest}`));
+  assert.deepEqual(b.buttons, { discard: false, save: false, review: false, send: false }, 'nothing left to send');
+  assert.ok(!M.isDirty(s), 'what was written shows as saved');
+  assert.equal(s.base['cadence.deskWatch'], 'desk-watch-two');
+  // The written version replaces the view when it is read back; an older read in flight never does.
+  assert.equal(M.adopt(s, design()), s);
+  const written = { ...design(), rev: 'fc-000013', cadence: { ...design().cadence, deskWatch: 'desk-watch-two' } };
+  const read = M.adopt(s, written);
+  assert.equal(read.config, written); assert.ok(!M.isDirty(read));
+  assert.equal(M.bar(read).state, 'stored', 'the outcome stays until the next edit');
+  assert.equal(M.bar(M.edit(read, 'cadence.darwin', 'darwin-two')).state, 'dirty');
 });
 
 test('review: an invalid field stops at its message; a draft equal to the saved settings has nothing to review', () => {
@@ -221,17 +257,51 @@ test('load states: loading and unavailable disable every button', () => {
   assert.equal(M.edit(none, 'desks.maxBusyDesks', '6'), none, 'nothing to edit before the settings arrive');
 });
 
-test('browser draft: restored only for the same version and only printable values', () => {
+test('browser draft: restored only for the same version, and only whole and well shaped; a malformed draft is dropped', () => {
   let s = M.editState(design());
   s = M.edit(s, 'desks.maxBusyDesks', '7');
   const text = M.previewPayload(s);
   assert.deepEqual(JSON.parse(text), { baseRev: 'fc-000012', values: s.draft });
   const fresh = M.editState(design());
-  assert.equal(M.readPreview(text, fresh).draft['desks.maxBusyDesks'], '7');
-  assert.equal(M.readPreview(text, M.editState({ ...design(), rev: 'fc-000013' })).draft['desks.maxBusyDesks'], '5', 'another version ignores it');
-  assert.equal(M.readPreview('{bad', fresh), fresh);
-  assert.equal(M.readPreview(JSON.stringify({ baseRev: 'fc-000012', values: { 'desks.maxBusyDesks': '\u0007', mode: 'live' } }), fresh).draft['desks.maxBusyDesks'], '5');
-  assert.ok(!('mode' in M.readPreview(JSON.stringify({ baseRev: 'fc-000012', values: { mode: 'live' } }), fresh).draft), 'only editable fields are read');
+  const back = M.readPreview(text, fresh);
+  assert.equal(back.dropped, false); assert.equal(back.s.draft['desks.maxBusyDesks'], '7');
+  const other = M.readPreview(text, M.editState({ ...design(), rev: 'fc-000013' }));
+  assert.equal(other.dropped, false, 'another version’s draft is left alone');
+  assert.equal(other.s.draft['desks.maxBusyDesks'], '5', 'and not applied');
+  assert.deepEqual(M.readPreview(null, fresh), { s: fresh, dropped: false }, 'no draft');
+  // An in-progress value of the right shape comes back; Review changes judges it.
+  const typing = M.readPreview(JSON.stringify({ baseRev: 'fc-000012', values: { 'cadence.usOpenArm': '9:3', 'cadence.wakeWindows': JSON.stringify([{ id: 'Late Night', days: [], from: '9', until: '', desks: ['j'] }]) } }), fresh);
+  assert.equal(typing.dropped, false); assert.equal(typing.s.draft['cadence.usOpenArm'], '9:3');
+  assert.equal(M.review(typing.s).error, 'Earliest US-open start must use 24-hour time like 15:35.');
+  // Malformed: dropped whole, the saved settings stay.
+  const windows = raw => JSON.stringify({ baseRev: 'fc-000012', values: { 'desks.maxBusyDesks': '7', 'cadence.wakeWindows': raw } });
+  const w = { id: 'a', days: ['mon'], from: '09:00', until: '17:00', desks: ['j'] };
+  const malformed = {
+    'not JSON': '{bad',
+    'no values': JSON.stringify({ baseRev: 'fc-000012' }),
+    'values a list': JSON.stringify({ baseRev: 'fc-000012', values: ['7'] }),
+    'no version': JSON.stringify({ values: { 'desks.maxBusyDesks': '7' } }),
+    'wake windows null': windows('null'),
+    'wake windows an object': windows('{"id":"a"}'),
+    'wake windows unreadable': windows('[{'),
+    'a window null': windows('[null]'),
+    'a window without desks': windows(JSON.stringify([{ ...w, desks: undefined }])),
+    'a window with another key': windows(JSON.stringify([{ ...w, extra: 1 }])),
+    'a window name not text': windows(JSON.stringify([{ ...w, id: 7 }])),
+    'a day not a day': windows(JSON.stringify([{ ...w, days: ['mon', 'someday'] }])),
+    'desks not a list': windows(JSON.stringify([{ ...w, desks: 'j' }])),
+    'too many windows': windows(JSON.stringify(Array.from({ length: 33 }, () => w))),
+    'a number, not text': JSON.stringify({ baseRev: 'fc-000012', values: { 'desks.maxBusyDesks': 7 } }),
+    'a control character': JSON.stringify({ baseRev: 'fc-000012', values: { 'desks.maxBusyDesks': '\u0007' } }),
+    'the switch off its two values': JSON.stringify({ baseRev: 'fc-000012', values: { 'quota.behavior.amber': 'run_normally' } }),
+    'a key that is not editable': JSON.stringify({ baseRev: 'fc-000012', values: { 'desks.maxBusyDesks': '7', mode: 'live' } }),
+    'too long': JSON.stringify({ baseRev: 'fc-000012', values: { 'amy.routines.close': 'x'.repeat(1201) } }),
+  };
+  for (const [why, raw] of Object.entries(malformed)) assert.deepEqual(M.readPreview(raw, fresh), { s: fresh, dropped: true }, why);
+  // The shape the page draws: a list of windows, or nothing.
+  assert.deepEqual(M.windowsOf(JSON.stringify([w])), [w]);
+  assert.equal(M.windowsOf('null'), null);
+  assert.equal(M.windowsOf(undefined), null);
 });
 
 test('change log: newest first; outcomes in plain words; malformed logs are refused', () => {

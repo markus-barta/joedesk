@@ -135,7 +135,8 @@ export function parseField(field, raw) {
   if (field.type === 'windows') {
     let windows;
     try { windows = JSON.parse(value); } catch { fail('The wake windows could not be read. Reload Settings and try again.'); }
-    if (!Array.isArray(windows) || windows.length > MAX_WINDOWS) fail(`Use at most ${MAX_WINDOWS} wake windows.`);
+    if (!Array.isArray(windows)) fail('The wake windows could not be read. Reload Settings and try again.');
+    if (windows.length > MAX_WINDOWS) fail(`Use at most ${MAX_WINDOWS} wake windows.`);
     windows.forEach((w, i) => {
       const name = `Wake window ${i + 1}`;
       if (!w || typeof w !== 'object' || Array.isArray(w) || typeof w.id !== 'string' || w.id.length > 64 || !ROUTINE_ID.test(w.id)) fail(`${name} needs a lowercase name, for example us-session.`);
@@ -246,8 +247,8 @@ export const canSend = s => isConfirmed(s) && !s.busy;
 export function adopt(s, config) {
   if (!config || s.busy || s.config === config) return s;
   if (s.config && isDirty(s)) return s;
-  // Just sent: an older read in flight never replaces the version written.
-  if (s.outcome?.ok && s.config && vnum(config.rev) < vnum(s.config.rev)) return s;
+  // Just written: an older read in flight never replaces the version written.
+  if ((s.outcome?.ok || s.outcome?.stored) && vnum(config.rev) < vnum(s.outcome.rev)) return s;
   const values = valuesOf(config);
   return { ...s, config, base: values, draft: { ...values }, reviewed: null, confirmed: null };
 }
@@ -276,12 +277,18 @@ export function confirm(s, ticked) {
 }
 export const start = s => ({ ...s, busy: true, outcome: null });
 // After a send: success adopts the written settings (validated by the caller
-// against the shared contract); failure keeps the draft, unconfirmed.
+// against the shared contract); failure keeps the draft, unconfirmed. Stored
+// with an unfinished change-log entry: the reviewed draft is what the shared
+// file now holds, so it shows as saved until that version is read back.
 export function finish(s, result) {
   if (result.ok) {
     const values = valuesOf(result.config);
     return { config: result.config, base: values, draft: { ...values }, reviewed: null, confirmed: null, busy: false,
       outcome: { ok: true, rev: result.config.rev, keys: result.keys } };
+  }
+  if (result.stored) {
+    return { ...s, base: { ...s.draft }, busy: false, reviewed: null, confirmed: null,
+      outcome: { ok: false, stored: true, rev: result.rev, keys: result.keys, reason: result.reason } };
   }
   return { ...s, busy: false, reviewed: null, confirmed: null, outcome: { ok: false, rev: s.config?.rev ?? null, keys: result.keys, reason: result.reason } };
 }
@@ -299,7 +306,11 @@ export function sendOutcome(status, body, attemptedKeys) {
   if (status === 0) return { ok: false, keys: attemptedKeys, reason: 'the board server did not answer' };
   if ([301, 302, 303, 307, 308, 401, 403].includes(status) && !body?.error) return { ok: false, keys: attemptedKeys, reason: 'sign-in expired — reload' };
   const currentRev = typeof body?.currentRev === 'string' && /^fc-\d{6}$/.test(body.currentRev) ? body.currentRev : null;
-  if (currentRev) return { ok: false, keys: attemptedKeys, reason: `revision changed to ${currentRev}; reload before retrying`, currentRev };
+  // Only a 409 is a revision conflict. A 500 naming the current version means
+  // the server stored the draft as that version but could not finish its
+  // change-log entry: written, not "Not sent", and not a clean success either.
+  if (status === 409 && currentRev) return { ok: false, keys: attemptedKeys, reason: `revision changed to ${currentRev}; reload before retrying`, currentRev };
+  if (status === 500 && currentRev) return { ok: false, stored: true, rev: currentRev, keys: attemptedKeys, reason: 'the change log could not record it' };
   const detail = Array.isArray(body?.errors) && body.errors.length ? body.errors[0] : body?.error;
   return { ok: false, keys: attemptedKeys, reason: typeof detail === 'string' && PRINTABLE.test(detail) ? detail.slice(0, 160) : 'request rejected' };
 }
@@ -312,7 +323,8 @@ export function bar(s, { loaded = Boolean(s.base), failed = false } = {}) {
   if (s.busy) return { tone: 'none', state: 'writing', lead: `Writing version ${v + 1}…`, rest: '', buttons: off };
   const buttons = { discard: n > 0, save: n > 0, review: n > 0, send: canSend(s) };
   if (s.outcome?.ok && !n) return { tone: 'ok', state: 'sent', lead: `Sent version ${vnum(s.outcome.rev)}`, rest: 'saved to the shared file. The desks’ reload is not confirmed.', buttons };
-  if (s.outcome && !s.outcome.ok) return { tone: 'bad', state: 'failed', lead: 'Not sent', rest: `version ${vnum(s.outcome.rev)} was not confirmed as written: ${s.outcome.reason}.`, buttons };
+  if (s.outcome?.stored && !n) return { tone: 'warn', state: 'stored', lead: `Sent version ${vnum(s.outcome.rev)}`, rest: `saved to the shared file, but ${s.outcome.reason}. The desks’ reload is not confirmed.`, buttons };
+  if (s.outcome && !s.outcome.ok && !s.outcome.stored) return { tone: 'bad', state: 'failed', lead: 'Not sent', rest: `version ${vnum(s.outcome.rev)} was not confirmed as written: ${s.outcome.reason}.`, buttons };
   if (!n) return { tone: 'ok', state: 'clean', lead: 'No changes', rest: `version ${v} is current`, buttons };
   if (isConfirmed(s)) return { tone: 'ok', state: 'reviewed', lead: `${plural(n, 'change')} reviewed`, rest: `ready to send as version ${v + 1}`, buttons };
   return { tone: 'warn', state: 'dirty', lead: `${plural(n, 'change')} in your draft`, rest: 'review before you send', buttons };
@@ -320,17 +332,38 @@ export function bar(s, { loaded = Boolean(s.base), failed = false } = {}) {
 
 // ---------- The browser-local draft (Save draft) ----------
 export const previewPayload = s => JSON.stringify({ baseRev: s.config.rev, values: s.draft });
+// A draft value has the shape its control can hold: a line of text, one of
+// the switch's two values, or a list of wake windows the editor can draw.
+// Review changes still validates the content.
+const LINE = /^[^\x00-\x1f\x7f]*$/;
+const WINDOW_KEYS = Object.freeze(['id', 'days', 'from', 'until', 'desks']);
+export function windowsOf(raw) {
+  let ws;
+  try { ws = JSON.parse(raw); } catch { return null; }
+  const line = v => typeof v === 'string' && LINE.test(v);
+  const shaped = w => w && typeof w === 'object' && !Array.isArray(w) && Object.keys(w).length === WINDOW_KEYS.length && WINDOW_KEYS.every(k => Object.hasOwn(w, k)) &&
+    line(w.id) && line(w.from) && line(w.until) && Array.isArray(w.days) && w.days.length <= DAYS.length && w.days.every(d => DAYS.includes(d)) &&
+    Array.isArray(w.desks) && w.desks.length <= 32 && w.desks.every(line);
+  return Array.isArray(ws) && ws.length <= MAX_WINDOWS && ws.every(shaped) ? ws : null;
+}
+function draftValueOk(field, v) {
+  if (typeof v !== 'string' || v.length > (field.type === 'windows' ? 131072 : 1200)) return false;
+  if (field.type === 'windows') return windowsOf(v) !== null;
+  if (field.type === 'switch') return [field.x.on, field.x.off].includes(v);
+  return LINE.test(v);
+}
+// The draft saved in this browser comes back only for the version it names,
+// and only whole: one value of the wrong shape, or a key that is not an
+// editable setting, drops it (dropped: true; the caller forgets it).
 export function readPreview(text, s) {
-  if (!s.config || !text) return s;
+  if (!s.config || !text) return { s, dropped: false };
   let stored;
-  try { stored = JSON.parse(text); } catch { return s; }
-  if (!stored || stored.baseRev !== s.config.rev || !stored.values || typeof stored.values !== 'object' || Array.isArray(stored.values)) return s;
-  const draft = { ...s.draft };
-  for (const key of EDITABLE) {
-    const v = stored.values[key];
-    if (typeof v === 'string' && v.length <= (FIELD[key].type === 'windows' ? 131072 : 1200) && /^[\x20-\x7e]*$/.test(v)) draft[key] = v;
-  }
-  return { ...s, draft, reviewed: null, confirmed: null };
+  try { stored = JSON.parse(text); } catch { return { s, dropped: true }; }
+  const values = stored?.values;
+  if (!stored || typeof stored !== 'object' || typeof stored.baseRev !== 'string' || !values || typeof values !== 'object' || Array.isArray(values)) return { s, dropped: true };
+  if (stored.baseRev !== s.config.rev) return { s, dropped: false };
+  if (Object.entries(values).some(([key, v]) => !EDITABLE.includes(key) || !draftValueOk(FIELD[key], v))) return { s, dropped: true };
+  return { s: { ...s, draft: { ...s.draft, ...values }, reviewed: null, confirmed: null }, dropped: false };
 }
 
 // ---------- The change log (/joe/fleet-config/actions.json) ----------

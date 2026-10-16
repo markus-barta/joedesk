@@ -13,7 +13,7 @@ import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, ACTOR, TOKEN, NOW, at } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load, settle, waitFor } from './browser/shots.mjs';
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
-import { designFleet, designActions, designSnapshot } from './browser/settings-fixtures.mjs';
+import { designFleet, designActions, designSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
 
 // The page's own model, for the words and keys Settings must show.
@@ -53,16 +53,18 @@ await page.s('Page.addScriptToEvaluateOnNewDocument', { source: AUDIT });
 const boards = [];
 let sends = 0;
 
-// One answer for matching requests of the page (a status and body, or a failure).
+// One answer for matching requests of the page (a status and body, or a
+// failure); an answer may first do its own work (a promise).
 let route = null;
 browser.on(m => {
   if (m.method !== 'Fetch.requestPaused' || !page.owns(m.sessionId)) return;
-  const id = { requestId: m.params.requestId };
-  if (!route || !m.params.request.url.includes(route.match)) { browser.send('Fetch.continueRequest', id, m.sessionId).catch(() => {}); return; }
-  const a = route.answer(m.params.request);
-  if (a.fail) { browser.send('Fetch.failRequest', { ...id, errorReason: a.fail }, m.sessionId).catch(() => {}); return; }
-  browser.send('Fetch.fulfillRequest', { ...id, responseCode: a.status ?? 200, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, ...(a.headers ?? [])],
-    body: Buffer.from(J(a.body)).toString('base64') }, m.sessionId).catch(() => {});
+  const id = { requestId: m.params.requestId }, r = route;
+  if (!r || !m.params.request.url.includes(r.match)) { browser.send('Fetch.continueRequest', id, m.sessionId).catch(() => {}); return; }
+  Promise.resolve(r.answer(m.params.request)).then(a => {
+    if (a.fail) return browser.send('Fetch.failRequest', { ...id, errorReason: a.fail }, m.sessionId);
+    return browser.send('Fetch.fulfillRequest', { ...id, responseCode: a.status ?? 200, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }, ...(a.headers ?? [])],
+      body: Buffer.from(J(a.body)).toString('base64') }, m.sessionId);
+  }).catch(() => {});
 });
 const intercept = async next => { route = next; await page.setFetch(next ? [{ urlPattern: `*${next.match}*` }] : null); };
 
@@ -292,7 +294,7 @@ try {
       await type(fieldSel('cadence.usOpenArm'), '15:40'); await still('time');
       await mouse('[data-wday="0"][data-d="sat"]'); await still('wake window day');
       const dirty = await note();
-      const saved = await ev(`Object.fromEntries([...document.querySelectorAll('#setMain [data-saved]')].map(e => [e.dataset.saved, e.textContent]))`);
+      const saved = await ev(`Object.fromEntries([...document.querySelectorAll('#setMain [data-saved]')].map(e => [e.dataset.saved, __audit.visible(e) ? e.textContent : '']))`);
       check('AC-24', `${tag}: six changes in the draft; review before you send`, N(dirty.text) === '6 changes in your draft · review before you send' && J(dirty.buttons) === J([true, true, true, false]), dirty);
       check('AC-24', `${tag}: each changed setting shows its saved value; the reserve's meter and example follow the draft`,
         N(saved['desks.maxBusyDesks']) === 'Saved: 5 desks' && N(saved['quota.codex.reservePct']) === 'Saved: 15 %' && N(saved['quota.behavior.amber']) === 'Saved: Slow down nonessential work' && N(saved['desks.keep']) === 'Saved: SXR8, TSLA' &&
@@ -339,7 +341,7 @@ try {
         J(c.cadence.wakeWindows[0].days) === J(['mon', 'tue', 'wed', 'thu', 'fri', 'sat']) && J(c.tools) === J(designFleet().tools) && J(c.secretSlots) === J(designFleet().secretSlots), { sent: sent.map(r => r.url), body });
       const after = await note();
       const tst = await toastText();
-      const page2 = await ev(`({ sub: document.getElementById('setSub').innerText.trim(), saved: [...document.querySelectorAll('#setMain [data-saved]')].map(e => e.textContent).join(''), log0: document.querySelector('#log li').innerText.replace(/\\s+/g, ' ').trim(),
+      const page2 = await ev(`({ sub: document.getElementById('setSub').innerText.trim(), saved: [...document.querySelectorAll('#setMain [data-saved]')].filter(__audit.visible).map(e => e.textContent).join(''), log0: document.querySelector('#log li').innerText.replace(/\\s+/g, ' ').trim(),
         last: document.querySelectorAll('#srcFacts dd')[5].innerText.trim(), rev: document.querySelectorAll('#srcFacts dd')[2].innerText.trim(), busy: document.querySelector('${fieldSel('desks.maxBusyDesks')}').value })`);
       check('AC-24', `${tag}: sent: the edit bar says version 13 is saved and the desks' reload is not confirmed; the toast names the keys`, N(after.text) === 'Sent version 13 · saved to the shared file. The desks’ reload is not confirmed.' &&
         /^Sent version 13 to the desks: .*desks\.maxBusyDesks.*\. Amy and the desks pick it up on their next read; this board cannot confirm that\.$/.test(N(tst)) && J(after.buttons) === J([false, false, false, false]), { after, tst });
@@ -432,7 +434,7 @@ try {
       await intercept({ match: 'fleet-config/propagate', answer: () => ({ status: 500, body: { ok: false, error: 'fleet config store failed' } }) });
       await mouse('#sendBtn'); sends++;
       await waitFor(page, `document.getElementById('editNote').dataset.state === 'failed'`);
-      check('AC-24', `${tag}: a failed write: "version 12 was not confirmed as written: fleet config store failed"; the draft stays`, N((await note()).text) === 'Not sent · version 12 was not confirmed as written: fleet config store failed.' &&
+      check('AC-24', `${tag}: a failed write (a plain 500): "version 12 was not confirmed as written: fleet config store failed"; the draft stays`, N((await note()).text) === 'Not sent · version 12 was not confirmed as written: fleet config store failed.' &&
         N(await toastText()) === 'Sending failed for version 12 (cadence.deskWatch): fleet config store failed.' && (await ev(`document.querySelector('${fieldSel('cadence.deskWatch')}').value`)) === 'desk-watch-two');
       if (viewport.name === '1440') await viewShot(`${viewport.name}-${theme}-settings-failed`, 'Settings: the send failed, the draft stays');
       await auditScreen(page, viewport, theme, 'settings (send failed)');
@@ -454,7 +456,109 @@ try {
             new RegExp(`^Not sent .* ${ACTOR} · the saved settings could not be read`).test(N(await ev(`document.querySelector('#log li').innerText`))));
         } finally { chmodSync(file, mode); }
       }
-      await mouse('#discardBtn');
+      // Stored, change log unfinished: the board server writes version 13 but
+      // cannot finish its change-log entry (it stays pending) and answers 500
+      // naming the version stored. Written: never "Not sent", never a clean success.
+      await ready();
+      await intercept({ match: 'fleet-config/propagate', answer: async req => {
+        const r = await fetch(`${b.url}fleet-config/propagate`, { method: 'POST', headers: { 'x-auth-request-user': ACTOR, origin: `http://127.0.0.1:${b.port}`, 'content-type': 'application/json' }, body: req.postData });
+        const done = await r.json();
+        const file = join(b.dataDir, 'fleet-config-actions.json'), log = JSON.parse(readFileSync(file, 'utf8'));
+        log.entries[log.entries.length - 1] = { ...log.entries.at(-1), outcome: 'pending', reason: 'write_started' };
+        writeFileSync(file, J(log));
+        return { status: 500, body: { ok: false, error: 'fleet config stored but action log finalization failed', currentRev: done.rev } };
+      } });
+      const aboveLog = await rects(ABOVE_LOG);
+      await mouse('#sendBtn'); sends++;
+      await waitFor(page, `document.getElementById('editNote').dataset.state === 'stored'`);
+      const stored = await note(), storedToast = await toastText();
+      await waitFor(page, `document.getElementById('setSub').innerText.includes('version 13') && document.querySelector('#log li')?.dataset.outcome === 'pending'`);
+      const back = await ev(`({ sub: document.getElementById('setSub').innerText.trim(), log0: document.querySelector('#log li').innerText.replace(/\\s+/g, ' ').trim(), last: document.querySelectorAll('#srcFacts dd')[5].innerText.trim(),
+        value: document.querySelector('${fieldSel('cadence.deskWatch')}').value, saved: [...document.querySelectorAll('#setMain [data-saved]')].filter(__audit.visible).map(e => e.textContent).join(''), note: document.getElementById('editNote').innerText.trim() })`);
+      check('AC-24', `${tag}: stored but the change log unfinished (a 500 naming fc-000013): "Sent version 13 · saved to the shared file, but the change log could not record it", never "Not sent"`,
+        N(stored.text) === 'Sent version 13 · saved to the shared file, but the change log could not record it. The desks’ reload is not confirmed.' && J(stored.buttons) === J([false, false, false, false]) &&
+        N(storedToast) === 'Sent version 13 to the desks: cadence.deskWatch. The change log could not record it and shows it as pending. Amy and the desks pick it up on their next read; this board cannot confirm that.' &&
+        !/Not sent|failed/.test(`${stored.text} ${storedToast}`), { stored, storedToast });
+      check('AC-24', `${tag}: stored: the page reads version 13 back, the outcome stays, and the change log shows the send pending, attributed`, N(back.sub) === 'Fleet settings version 13 · paper only' && back.value === 'desk-watch-two' && back.saved === '' && N(back.note) === N(stored.text) &&
+        new RegExp(`^Pending .* Version 12 ?13 · not confirmed ${ACTOR} · writing started; no outcome recorded · .*cadence\\.deskWatch`).test(N(back.log0)) && /^Pending · \d{1,2} [A-Z][a-z]{2}, \d\d:\d\d Vienna · version 13$/.test(N(back.last)) &&
+        (await served(b)).rev === 'fc-000013' && (await served(b)).cadence.deskWatch === 'desk-watch-two', back);
+      check('no-shift', `${tag}: the stored outcome moves nothing above the change log (±0.5 px)`, !shifted(aboveLog, await rects(ABOVE_LOG)).length, shifted(aboveLog, await rects(ABOVE_LOG)).slice(0, 4));
+      if (viewport.name === '1440') await viewShot(`${viewport.name}-${theme}-settings-stored`, 'Settings: stored as version 13, but the change log could not record it (warn outcome, toast; the log shows it pending)');
+      await auditScreen(page, viewport, theme, 'settings (stored, change log unfinished)');
+      await intercept(null);
+      await resetToast();
+    }
+  }
+
+  // ---------- 5a · Long saved values: the Saved box is sized before any edit ----------
+  if (run('long')) {
+    const fleet = longFleet(), b = await designBoard({ fleet });
+    const KEEP_SAVED = `Saved: ${M.display(M.FIELD['desks.keep'], M.keepExtras(fleet.desks.keep).join(','))}`;
+    const combos = [[VIEWPORTS[0], 'light', null], [VIEWPORTS[0], 'dark', WIDE_FONT], [VIEWPORTS[1], 'dark', null], [VIEWPORTS[1], 'light', WIDE_FONT]];
+    for (const [viewport, theme, font] of combos) {
+      const tag = `${viewport.name} ${theme}${font ? ' wide font' : ''} long values`;
+      await openSettings(b, viewport, theme, { font });
+      const base = await rects(SHIFT), baseBar = await bar();
+      const moved = [];
+      const still = async what => { const m = shifted(base, await rects(SHIFT)).concat(shifted(baseBar, await bar())); if (m.length) moved.push({ what, m: m.slice(0, 3) }); };
+      // The 64 kept holdings lose one; the longest routine and check-in names get short.
+      await type(fieldSel('desks.keep'), M.keepExtras(fleet.desks.keep).slice(0, -1).join(',')); await still('64 kept holdings');
+      await type(fieldSel('cadence.deskWatch'), 'desk-watch'); await still('64-character routine name');
+      await type(fieldSel('amy.routines.close'), 'Close recap'); await still('80-character check-in name');
+      const boxes = await ev(`[...document.querySelectorAll('#setMain [data-saved]')].filter(__audit.visible).map(e => { const r = e.getBoundingClientRect(), lh = parseFloat(getComputedStyle(e).lineHeight);
+        const top = e.scrollTop; e.scrollTop = e.scrollHeight; const end = e.scrollTop + e.clientHeight >= e.scrollHeight - 1; e.scrollTop = top;
+        return { key: e.dataset.saved, text: e.textContent, height: r.height, lines: r.height / lh, scrolls: e.scrollHeight > e.clientHeight + 1, focusable: e.tabIndex === 0, end }; })`);
+      const keep = boxes.find(x => x.key === 'desks.keep');
+      check('no-shift', `${tag}: the three Saved lines show the whole saved values (${KEEP_SAVED.length} characters for the kept holdings)`, boxes.length === 3 && keep?.text === KEEP_SAVED &&
+        boxes.find(x => x.key === 'cadence.deskWatch')?.text === `Saved: ${fleet.cadence.deskWatch}` && boxes.find(x => x.key === 'amy.routines.close')?.text === `Saved: ${fleet.amy.routines.close}`, boxes.map(x => ({ ...x, text: x.text.slice(0, 60) })));
+      check('no-shift', `${tag}: a Saved box shows whole lines, at most three; past that it scrolls to its end and takes focus`, boxes.every(x => Math.abs(x.lines - Math.round(x.lines)) < 0.02 && x.lines <= 3.02 && x.focusable === x.scrolls && (!x.scrolls || x.end)) && keep?.scrolls, boxes.map(x => ({ ...x, text: undefined })));
+      await mouse('#reviewBtn'); await still('review dialog');
+      const rows = await ev(`[...document.querySelectorAll('#diffList li')].map(l => l.innerText.replace(/\\s+/g, ' ').trim())`);
+      check('AC-24', `${tag}: Review changes shows the long Before values whole`, rows.length === 3 && rows.some(r => r.includes(`Before: ${KEEP_SAVED.slice('Saved: '.length)}`)), rows.map(r => r.slice(0, 80)));
+      await mouse('#diffDlg .check'); await mouse('#diffConfirm'); await still('confirm and toast');
+      for (const id of ['set-log', 'set-desks']) { await mouse(`#setNav a[data-sec="${id}"]`, false); await still(`section ${id}`); }
+      if (viewport.name === '1440' && !font) {
+        await ev(`document.getElementById('set-desks').scrollIntoView({ block: 'start' })`); await settle(page);
+        await viewShot(`${viewport.name}-${theme}-settings-long-values`, 'Settings with the longest values: 64 kept holdings edited; the Saved box keeps three lines and scrolls; nothing moved');
+      }
+      await auditScreen(page, viewport, theme, 'settings (long values edited)');
+      await mouse('#discardBtn'); await still('discard');
+      check('no-shift', `${tag}: editing the longest values, their Saved lines, the review, the confirmation, the toast, section changes and Discard move nothing (±0.5 px)`, !moved.length, moved);
+      await resetToast();
+    }
+    // Phones: the long values are shown whole, read-only; the gate and its toast move nothing.
+    for (const [theme, font] of [['light', null], ['dark', WIDE_FONT]]) {
+      const tag = `390 ${theme}${font ? ' wide font' : ''} long values`;
+      await openSettings(b, PHONE, theme, { font });
+      const shown = await ev(`Object.fromEntries([...document.querySelectorAll('#setMain [data-row]')].map(r => [r.dataset.row, [...r.querySelectorAll('.phone-only [data-value]')].filter(__audit.visible).map(e => e.innerText.trim()).join('')]))`);
+      check('AC-23', `${tag}: phones show the long values whole, read-only`, N(shown['desks.keep']) === N(KEEP_SAVED.slice('Saved: '.length)) && shown['cadence.deskWatch'] === fleet.cadence.deskWatch && shown['amy.routines.close'] === fleet.amy.routines.close, Object.fromEntries(Object.entries(shown).map(([k, v]) => [k, v.slice(0, 60)])));
+      await auditScreen(page, PHONE, theme, 'settings (long values)');
+      const base = await rects(SHIFT);
+      await tap('#liveOpen'); await key('Escape');
+      const toastNow = await toastText();
+      check('no-shift', `${tag}: opening and closing the LIVE gate, and its toast, move nothing (±0.5 px)`, toastNow === 'Still on PAPER. Nothing was sent and the mode did not change.' && !shifted(base, await rects(SHIFT)).length, shifted(base, await rects(SHIFT)).slice(0, 3));
+      if (!font) await shot(page, PHONE, `390-${theme}-settings-long-values`, 'Settings on a phone with the longest values, read-only and whole');
+      await resetToast();
+    }
+  }
+
+  // ---------- 5b · A malformed browser draft: dropped with the discard words; every group renders ----------
+  if (run('draft')) {
+    const b = await designBoard();
+    const bad = { 'wake windows "null"': { 'desks.maxBusyDesks': '7', 'cadence.wakeWindows': 'null' }, 'a window without desks': { 'cadence.wakeWindows': J([{ id: 'a', days: ['mon'], from: '09:00', until: '17:00' }]) }, 'a key that is not editable': { mode: 'live' } };
+    const cases = [[VIEWPORTS[0], 'light', 'wake windows "null"'], [VIEWPORTS[1], 'dark', 'a window without desks'], [PHONE, 'light', 'wake windows "null"'], [PHONE, 'dark', 'a key that is not editable']];
+    for (const [viewport, theme, which] of cases) {
+      const tag = `${viewport.name} ${theme} draft with ${which}`;
+      await openSettings(b, viewport, theme);
+      await ev(`localStorage.setItem('joe-fleet-config-preview-v1', ${J(J({ baseRev: 'fc-000012', values: bad[which] }))})`);
+      await load(page, b.url, 'settings');
+      await waitFor(page, `document.querySelector('#rtRows .rt-row') && document.querySelector('#log li') && document.querySelector('#grp-mac [data-row]')`);
+      const s = await ev(`({ groups: Object.fromEntries([...document.querySelectorAll('#setMain .fields')].map(g => [g.id, g.querySelectorAll('[data-row]').length])), toast: document.getElementById('toast').classList.contains('on') ? document.getElementById('toast').innerText.trim() : null,
+        stored: localStorage.getItem('joe-fleet-config-preview-v1'), note: document.getElementById('editNote').innerText.trim(), windows: document.querySelectorAll('#setMain [data-wrow]').length, busy: document.querySelector('${fieldSel('desks.maxBusyDesks')}')?.value ?? null })`);
+      const want = Object.fromEntries(M.GROUPS.map(g => [`grp-${g.id}`, g.fields.length + (g.id === 'cadence' ? 1 : 0)]));
+      check('AC-24', `${tag}: the draft is dropped with "Draft discarded. The fields show the saved settings again."`, s.toast === 'Draft discarded. The fields show the saved settings again.' && s.stored === null && (viewport.mobile || (N(s.note) === 'No changes · version 12 is current' && s.busy === '5' && s.windows === 2)), s);
+      check('AC-22', `${tag}: every group renders all its settings`, J(s.groups) === J(want), { got: s.groups, want });
+      await keyChecks(tag);
       await resetToast();
     }
   }
@@ -650,7 +754,9 @@ try {
   if (run('sweep')) {
     const b = await designBoard();
     const widths = Array.from({ length: (1440 - 390) / 10 + 1 }, (_, i) => 390 + i * 10);
-    const LONGEST = 'Not sent · version 12 was not confirmed as written: revision changed to fc-000013; reload before retrying.';
+    // The two longest notes: a stale version, and stored with the change log unfinished.
+    const LONGEST = [['Not sent', 'version 12 was not confirmed as written: revision changed to fc-000013; reload before retrying.'],
+      ['Sent version 13', 'saved to the shared file, but the change log could not record it. The desks’ reload is not confirmed.']];
     for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
       const tag = `${theme}${font ? ' wide font' : ''} settings`;
       await openSettings(b, VIEWPORTS[0], theme, { font });
@@ -666,18 +772,19 @@ try {
         if (r.targets.length) fail.targets.push({ width, targets: r.targets });
         if (r.overlaps.length) fail.overlaps.push({ width, overlaps: r.overlaps.slice(0, 3) });
         if (width > 700) {
-          // The edit bar with its longest note: inside the bar, the bar inside the window, clear of the bottom bar.
-          const fit = await ev(`(() => { const n = document.getElementById('editNote'), keep = n.innerHTML;
-            n.querySelector('.note-t').innerHTML = '<b>Not sent</b> · ' + ${J(LONGEST.slice('Not sent · '.length))};
-            const bar = document.getElementById('editbar').getBoundingClientRect(), t = document.createRange(); t.selectNodeContents(n.querySelector('.note-t'));
-            const text = t.getBoundingClientRect(), nav = document.querySelector('.bottom-nav'), nr = nav.getBoundingClientRect(), navOn = getComputedStyle(nav).display !== 'none';
-            const btns = [...document.querySelectorAll('#editbar .btn')].map(b => b.getBoundingClientRect());
-            const faults = [];
-            if (text.top < bar.top - 0.5 || text.bottom > bar.bottom + 0.5 || text.right > bar.right + 0.5) faults.push('note leaves the bar');
-            if (bar.left < -0.5 || bar.right > innerWidth + 0.5 || bar.bottom > innerHeight + 0.5) faults.push('bar leaves the window');
-            if (navOn && bar.bottom > nr.top + 0.5) faults.push('bar over the bottom bar');
-            if (btns.some(b => b.left < bar.left - 0.5 || b.right > bar.right + 0.5 || b.top < bar.top - 0.5 || b.bottom > bar.bottom + 0.5)) faults.push('a button leaves the bar');
-            if (btns.some((b, i) => i && b.left < btns[i - 1].right - 0.5 && b.top < btns[i - 1].bottom - 0.5)) faults.push('buttons overlap');
+          // The edit bar with its longest notes: inside the bar, the bar inside the window, clear of the bottom bar.
+          const fit = await ev(`(() => { const n = document.getElementById('editNote'), keep = n.innerHTML, faults = [];
+            for (const [lead, rest] of ${J(LONGEST)}) {
+              n.querySelector('.note-t').innerHTML = '<b>' + lead + '</b> · ' + rest;
+              const bar = document.getElementById('editbar').getBoundingClientRect(), t = document.createRange(); t.selectNodeContents(n.querySelector('.note-t'));
+              const text = t.getBoundingClientRect(), nav = document.querySelector('.bottom-nav'), nr = nav.getBoundingClientRect(), navOn = getComputedStyle(nav).display !== 'none';
+              const btns = [...document.querySelectorAll('#editbar .btn')].map(b => b.getBoundingClientRect());
+              if (text.top < bar.top - 0.5 || text.bottom > bar.bottom + 0.5 || text.right > bar.right + 0.5) faults.push(lead + ': note leaves the bar');
+              if (bar.left < -0.5 || bar.right > innerWidth + 0.5 || bar.bottom > innerHeight + 0.5) faults.push(lead + ': bar leaves the window');
+              if (navOn && bar.bottom > nr.top + 0.5) faults.push(lead + ': bar over the bottom bar');
+              if (btns.some(b => b.left < bar.left - 0.5 || b.right > bar.right + 0.5 || b.top < bar.top - 0.5 || b.bottom > bar.bottom + 0.5)) faults.push(lead + ': a button leaves the bar');
+              if (btns.some((b, i) => i && b.left < btns[i - 1].right - 0.5 && b.top < btns[i - 1].bottom - 0.5)) faults.push(lead + ': buttons overlap');
+            }
             n.innerHTML = keep; return faults; })()`);
           if (fit.length) fail.bar.push({ width, fit });
         }
@@ -688,7 +795,7 @@ try {
       check('header', `sweep ${tag}: the header stays in its row; one nav at every width`, !fail.header.length && !fail.nav.length, { header: fail.header.slice(0, 3), nav: fail.nav.slice(0, 6) });
       check('AC-30', `sweep ${tag}: the compact header's buttons and the bottom bar are 44 px targets`, !fail.targets.length, fail.targets.slice(0, 3));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
-      check('no-shift', `sweep ${tag}: from 710 px the edit bar holds its longest note and its buttons inside it, inside the window and above the bottom bar`, !fail.bar.length, fail.bar.slice(0, 4));
+      check('no-shift', `sweep ${tag}: from 710 px the edit bar holds its longest notes and its buttons inside it, inside the window and above the bottom bar`, !fail.bar.length, fail.bar.slice(0, 4));
     }
     // For the visual check: the edit bar above the bottom bar at a tablet width.
     await openSettings(b, { name: '820', width: 820, height: 1000, mobile: false }, 'light');
@@ -722,11 +829,39 @@ scenario for state and history, and test-only Fleet Config fixtures
 (version 12, two wake windows, one host secret reference), its change log,
 the snapshot with the producer-masked hint \`DU…0597\`. Fixtures: clean,
 edited (sent as version 13), stale version (another send wrote version 13
-first), send failures (the store fails, no answer, the server cannot read its
-settings), missing settings (no stored file: the starter file; an unreadable
-stored file: values hidden with the SXR8/TSLA floor). One headless browser,
+first: a 409), send failures (the store fails: a plain 500; no answer; the
+server cannot read its settings), stored with the change log unfinished (the
+server writes version 13, its change-log entry stays pending, and it answers
+500 naming fc-000013), missing settings (no stored file: the starter file; an
+unreadable stored file: values hidden with the SXR8/TSLA floor), the longest
+values the format accepts (64 kept holdings of 16 characters: a 1.133-character
+Saved line; 64-character routine names; 80-character check-in names), and
+malformed browser drafts. One headless browser,
 run sequentially; reduced motion for stable geometry. Browser: ${reference}.
 Compare with \`joed-19-joedesk-approved.html\` (Settings).
+
+## Changed in fix round 1 (Codex gate r1)
+
+- **New \`1440-light-settings-stored.png\`, \`1440-dark-settings-stored.png\`.** A
+  send the server stored as version 13 but whose change-log entry it could not
+  finish (HTTP 500 naming fc-000013) used to read "Not sent". It now reads
+  "Sent version 13 · saved to the shared file, but the change log could not
+  record it. The desks’ reload is not confirmed." with the warning icon; the
+  change log shows the send pending. Only an HTTP 409 reads as a stale version
+  (\`*-settings-stale.png\`); a plain 500 still reads "Not sent"
+  (\`*-settings-failed.png\`). Neither changed.
+- **New \`1440-light-settings-long-values.png\`, \`390-light-settings-long-values.png\`.**
+  The longest values the format accepts. The Saved box is sized from the saved
+  value before any edit; a 64-symbol kept list (a 1.133-character Saved line)
+  no longer grows its row or moves later sections (\`no-shift\` at 1440 and 1024
+  in both fonts; 390 is read-only).
+- **Malformed browser drafts** (wake windows \`null\`, a window without desks, a
+  key that is not editable) are dropped with the discard words, and every group
+  renders (\`AC-24\`/\`AC-22\` at 1440, 1024 and 390; no new screenshot).
+- **Every other screenshot** shows the same content as before this round:
+  short saved values keep their one-line box. Pixel differences against the
+  previous run are run noise only (temporary folder names, a clock second).
+- **Keys.** The key count comes from the schema file; no test hard-codes it.
 
 ## For the visual check
 
@@ -737,8 +872,8 @@ Compare with \`joed-19-joedesk-approved.html\` (Settings).
   its top is in view (the last ones cannot reach the top of the window).
   Phones have no sub-nav, as in the approved design.
 - **Keys.** Every leaf key of \`contracts/fleet-config.schema.json\` shows in
-  mono under its setting: 36 keys (the ticket's "39" counts the spec's 39 table
-  rows, three of which are not schema keys: Routine health, File the board
+  mono under its setting: ${LEAVES.length} keys, derived from the schema file (the spec's
+  "39" adds three rows that have no schema key: Routine health, File the board
   reads, Last sent). Long keys break after a dot, never inside a word.
 - **Kept holdings.** SXR8 and TSLA are named as always kept (inert text, no
   control); only the other symbols are editable. The candidate always starts
@@ -746,9 +881,23 @@ Compare with \`joed-19-joedesk-approved.html\` (Settings).
 - **Edit bar.** One row above 1180 px; two rows (note, then buttons) at 961 to
   1180 px; up to 960 px it floats above the bottom bar (\`820-light-settings-tablet-editbar.png\`).
   The note keeps two lines' room, so no state changes the bar.
-- **Saved line.** One short line under a changed control; the wake windows
-  give their count ("Saved: 2 wake windows · Review changes lists every
-  difference"); Review changes lists every difference.
+- **Saved line.** Under a changed control. The box always holds the saved
+  value and is shown only when the draft differs, so it is sized before any
+  edit and showing it moves nothing: one line for a short value, up to three
+  whole lines for a long one, and past three lines it scrolls (and takes
+  focus) — the 64 kept holdings (\`1440-light-settings-long-values.png\`). The
+  wake windows give their count ("Saved: 2 wake windows · Review changes lists
+  every difference"); Review changes lists every difference.
+- **Stored, change log unfinished.** When the server writes the version but
+  cannot finish its change-log entry (a 500 naming the new version), the edit
+  bar reads "Sent version 13 · saved to the shared file, but the change log
+  could not record it. The desks’ reload is not confirmed." with the warning
+  icon, the toast says the change log shows it as pending, and the change log
+  does (\`1440-light-settings-stored.png\`). Only a 409 is a stale version.
+- **Malformed browser draft.** A saved draft with a value of the wrong shape
+  (for example wake windows \`null\`) or a key that is not editable is dropped
+  with "Draft discarded. The fields show the saved settings again."; every
+  group renders.
 - **Wake windows** take the whole row (label above, one row per window).
 - **Adding or removing a wake window** changes the list itself (the one edit
   that adds height); every other edit, the review, the confirmation, the
@@ -766,7 +915,7 @@ Compare with \`joed-19-joedesk-approved.html\` (Settings).
 | --- | --- | --- |
 | AC-22 Mode then Runtime state; all leaf keys as data-key with visible mono text, against the schema file | \`AC-22\` (clean, starter file, unavailable; six combos) | \`schema keys\` (\`test/settings-model.mjs\`) |
 | AC-23 today's editable/read-only split; phones read-only with the note, no inputs | \`AC-23\` | \`editability\` |
-| AC-24 Edit → Review changes (dialog + tick) → Confirm → Send; edit-bar states and toasts; stale version "revision changed to …; reload before retrying"; audited | \`AC-24\` (edited, draft, stale, failure, unavailable) | \`edit flow\`, \`stale version\`, \`review\`, \`load states\`, \`browser draft\`, \`candidate\`, \`validation\`, \`diff model\`; server: \`Fleet Config propagates one atomic paper revision…\` |
+| AC-24 Edit → Review changes (dialog + tick) → Confirm → Send; edit-bar states and toasts; stale version "revision changed to …; reload before retrying"; audited | \`AC-24\` (edited, draft, stale = 409, failure = plain 500 / no answer / unreadable, stored = 500 naming the version, malformed draft, long values, unavailable) | \`edit flow\`, \`stale version\`, \`stored, change log unfinished\`, \`review\`, \`load states\`, \`browser draft\`, \`candidate\`, \`validation\`, \`diff model\`; server: \`Fleet Config propagates one atomic paper revision…\` |
 | AC-25 seven rows; "Not reported"; no secrets, tokens, full account numbers or env content | \`AC-25\` | — |
 | AC-26 sub-nav reaches every section and marks the one in view | \`AC-26\` (clicks and scrolling; nothing moves) | — |
 | AC-27 How it works, Where this is defined with Sources, Change log, Appearance, About | \`AC-27\` | \`change log\` |
@@ -780,6 +929,7 @@ Compare with \`joed-19-joedesk-approved.html\` (Settings).
 | KEEP SXR8/TSLA floor | \`KEEP\` (unavailable settings; Desk keeps them under Kept holdings) | \`candidate\`, \`validation\` |
 | Tick's P4 carry-over | \`P4-carry-over\` (tap: heading, no ring; keyboard: close button with ring) | — |
 | Part A craft on Settings | AC-1, 2, 5, 28–30, 32, 33, 36, 38, 40, 42–44, 47 (\`auditScreen\`) | — |
+| No layout shift on edit, review, toast or section change (both fonts) | \`no-shift\` (edited; long values at 1440 and 1024 in both fonts, 390 in both fonts; stored outcome; sweep) | — |
 
 ## Checks
 
