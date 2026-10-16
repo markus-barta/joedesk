@@ -13,6 +13,9 @@ export async function configure(page, viewport, theme, { scale = 1 } = {}) {
   await page.s('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: scale, mobile: viewport.mobile });
   await setPointer(page, viewport.mobile);
   await page.s('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }, { name: 'prefers-reduced-motion', value: 'reduce' }] });
+  // Every case of every suite gets the pointer it asked for, or stops here.
+  const media = await pointerMedia(page), want = viewport.mobile ? TOUCH : MOUSE;
+  if (media !== want) throw new Error(`configure ${viewport.width}×${viewport.height} ${theme}: the page's pointer is "${media}", not "${want}"`);
 }
 
 // The pointer is the test's, not the host's. A phone is a touch screen
