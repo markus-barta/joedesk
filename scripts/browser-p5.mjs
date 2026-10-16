@@ -966,6 +966,17 @@ fixed too: desktop widths have a mouse that hovers, phones are touch screens,
 whatever pointer the host has. Browser: ${reference}.
 Compare with \`joed-19-joedesk-approved.html\` (Settings).
 
+## Changed in fix round 6 (Codex r5 of c09d1ea)
+
+- **Every case asserts its pointer, in every suite.** P4's 390 → 1024 → 1440
+  cases went through \`configure\` but never read the pointer after a change.
+  \`configure\` (\`shots.mjs\`) now reads \`(hover)\` and \`(pointer)\` right
+  after setting the media and throws unless a phone has touch ("no hover,
+  coarse") and any other viewport a mouse ("hover, fine"), so P3, P4, P5 and
+  the budget runs are covered by construction; the sweep checks below stay.
+  With touch emulation dropped, \`configure\` at 390 throws ("hover, fine",
+  not "no hover, coarse"). Test-only; every other check is unchanged.
+
 ## Changed in fix round 4 (Codex delta r3 of d8304a5)
 
 - **A desktop width after a phone, in the same page, had the host's
@@ -1154,6 +1165,7 @@ Every screenshot was taken again. What changed, per fix:
 | Tick D: no sticky hover, no tap flash on phones | \`touch\` (every :hover guarded; no tap highlight; System then Dark tints only Dark; the hidden Continue slot's pixels) | — |
 | Linux CI: the pointer is the test's, not the host's | \`touch\` (each case's hover and pointer: a mouse at 1440 and 1024, touch at 390; with a mouse, System takes the hover tint and loses it) | — |
 | Codex delta r3: a desktop width after a phone keeps the test's mouse | \`touch\` (the sweep reads the pointer right after each resize: touch up to 700 px, a mouse above) | — |
+| Codex r5: every case of every suite asserts its pointer | every \`configure\` call (P3, P4, P5: throws unless a phone has touch and any other viewport a mouse) | — |
 | Linux CI: deterministic ages | \`AC-25\` (frozen board clock and page timer, en-US, UTC; the rows unchanged 1.5 s later) | — |
 | Part A craft on Settings | AC-1, 2, 5, 28–30, 32, 33, 36, 38, 40, 42–44, 47 (\`auditScreen\`) | — |
 | No layout shift on edit, review, toast or section change (both fonts) | \`no-shift\` (edited; long values at 1440 and 1024 in both fonts, 390 in both fonts; stored outcome; sweep) | — |
