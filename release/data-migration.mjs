@@ -5,6 +5,17 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { CONTRACTS, validateContract } from '../contracts/index.mjs';
 import { createReadModel } from '../server/read-model.mjs';
+import { checkSchema } from '../contracts/schema-validator.mjs';
+import actionSchema from '../public/joe/fleet-config-actions.schema.json' with { type: 'json' };
+
+// The bounded shared validator supports anyOf. Express the audit schema's
+// two nullable revision types in that equivalent vocabulary.
+const auditSchema = structuredClone(actionSchema);
+for (const key of ['revBefore', 'revAfter']) {
+  const field = auditSchema.$defs.action.properties[key];
+  field.anyOf = field.type.map(type => ({ type }));
+  delete field.type;
+}
 
 const FILES = {
   v1: ['data.json', 'history.json', 'fleet-config.json', 'fleet-config-actions.json'],
@@ -107,15 +118,26 @@ export function migrateToV2({ backup, destination, snapshot, receivedAt }) {
   if (!validateContract('data', snapshot, { stage: 'ingress' }).ok) throw new Error('migration_requires_valid_v2_producer');
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(receivedAt ?? '') ||
       !Number.isFinite(Date.parse(receivedAt)) || new Date(receivedAt).toISOString() !== receivedAt) throw new Error('migration_receipt_required');
-  let fleet = null;
+  let fleet = null, fleetBytes = null;
   if (manifest.files.some(f => f.name === 'fleet-config.json')) {
-    fleet = JSON.parse(read(path.join(backup, 'fleet-config.json')));
+    fleetBytes = read(path.join(backup, 'fleet-config.json'));
+    fleet = JSON.parse(fleetBytes);
     if (!validateContract('fleet-config', fleet).ok) throw new Error('migration_fleet_invalid');
+  }
+  let actions = null;
+  if (manifest.files.some(f => f.name === 'fleet-config-actions.json')) {
+    actions = read(path.join(backup, 'fleet-config-actions.json'));
+    const errors = [];
+    checkSchema(auditSchema, JSON.parse(actions), {}, errors);
+    if (errors.length) throw new Error('migration_fleet_actions_invalid');
   }
   fs.mkdirSync(destination, { mode: 0o700 });
   // Legacy money, history and receipt ages cannot be proven under v2. Leave
   // those bytes in the verified v1 backup. Begin v2 only from producer evidence.
-  if (fleet) write(destination, 'fleet-config.json', JSON.stringify(fleet));
+  if (fleet) write(destination, 'fleet-config.json', fleetBytes);
+  // Same audited format in both boards: preserve ordering, pending/failure
+  // entries and the original serialization byte-for-byte, without truncation.
+  if (actions) write(destination, 'fleet-config-actions.json', actions);
   const model = createReadModel({ dataDir: destination, clock: () => receivedAt });
   if (fleet && !model.observeFleet(fleet).ok) throw new Error('migration_fleet_failed');
   const result = model.accept(snapshot);

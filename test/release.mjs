@@ -2,13 +2,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
 import { join } from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createServer } from 'node:http';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { parseVersion, reserveVersion, compareReleases } from '../release/versioning.mjs';
 import { backupStore, restoreStore, migrateToV2, verifyBackup } from '../release/data-migration.mjs';
 import { createReadModel } from '../server/read-model.mjs';
 import { createJoeServer } from '../server.mjs';
-import { smokeRelease, PROTECTED_READS } from '../scripts/smoke-release.mjs';
+import { smokeRelease, PROTECTED_READS, SSO_REJECTION_HEADER } from '../scripts/smoke-release.mjs';
 import { validateContract } from '../contracts/index.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(new URL('../' + file, import.meta.url)));
@@ -16,7 +18,17 @@ const samples = read('fixtures/valid.json'), active = read('release.json'), prep
 const NOW = samples.data.receivedAt;
 const ingress = () => { const v = structuredClone(samples.data); delete v.receivedAt; return v; };
 const oldRelease = prep.previous_release, next = prep.reservation;
+const audit = { schema: 'inspr.joe.fleet-config.actions.v1', entries: [
+  { id: 'fa-123456-1234abcd', at: NOW, actor: 'fixture', revBefore: 'fc-000001', revAfter: 'fc-000002', changedKeys: ['desks.maxBusyDesks'], outcome: 'success', reason: 'propagated' },
+  { id: 'fa-123457-1234abce', at: NOW, actor: 'fixture', revBefore: 'fc-000002', revAfter: null, changedKeys: [], outcome: 'failure', reason: 'revision_conflict' },
+  { id: 'fa-123458-1234abcf', at: NOW, actor: 'fixture', revBefore: null, revAfter: null, changedKeys: [], outcome: 'pending', reason: 'write_started' },
+] };
 function temporary(t) { const dir = scratch('joed-p6-test-'); t.after(() => discard(dir, 'release test')); return dir; }
+async function listen(t, server) {
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  t.after(() => new Promise(r => { server.closeAllConnections(); server.close(r); }));
+  return `http://127.0.0.1:${server.address().port}/joe/`;
+}
 
 test('P6 version: explicit schemes, real UTC dates, no suffixes or 32-bit assumptions', () => {
   for (const version of ['280229120000.0.0', '991231235959.0.0', next.version]) {
@@ -54,12 +66,14 @@ test('P6 backup and v2 staging: exact legacy bytes restored; new producer receip
   fs.writeFileSync(join(source, 'data.json'), bytes);
   fs.writeFileSync(join(source, 'history.json'), '{"schema":"inspr.joe.household.history.v1","points":[{"old":true}]}\n');
   fs.writeFileSync(join(source, 'fleet-config.json'), JSON.stringify(samples['fleet-config']));
+  const auditBytes = Buffer.from(JSON.stringify(audit, null, 2) + '\n\n');
+  fs.writeFileSync(join(source, 'fleet-config-actions.json'), auditBytes);
   const before = fs.readdirSync(source).map(name => [name, fs.readFileSync(join(source, name)).toString('hex')]);
   const manifest = backupStore({ source, destination: backup, boardSchema: 'v1' });
   assert.throws(() => backupStore({ source, destination: join(source, 'nested'), boardSchema: 'v1' }), /overlaps/);
   assert.throws(() => restoreStore({ backup, destination: join(backup, 'nested'), boardSchema: 'v1' }), /overlaps/);
   assert.throws(() => migrateToV2({ backup, destination: join(backup, 'nested'), snapshot: ingress(), receivedAt: NOW }), /overlaps/);
-  assert.equal(manifest.files.length, 3); assert.equal(fs.statSync(backup).mode & 0o777, 0o700);
+  assert.equal(manifest.files.length, 4); assert.equal(fs.statSync(backup).mode & 0o777, 0o700);
   for (const f of manifest.files) assert.equal(fs.statSync(join(backup, f.name)).mode & 0o777, 0o600);
   assert.equal(verifyBackup(backup).boardSchema, 'v1');
   restoreStore({ backup, destination: restored, boardSchema: 'v1' });
@@ -69,6 +83,9 @@ test('P6 backup and v2 staging: exact legacy bytes restored; new producer receip
   assert.throws(() => createReadModel({ dataDir: source }), /data_migration_required/);
   assert.throws(() => migrateToV2({ backup, destination: stage, snapshot: { schema: 'inspr.joe.household.v1' }, receivedAt: NOW }), /valid_v2/);
   const result = migrateToV2({ backup, destination: stage, snapshot: ingress(), receivedAt: NOW });
+  assert.deepEqual(fs.readFileSync(join(stage, 'fleet-config-actions.json')), auditBytes);
+  assert.equal(fs.statSync(join(stage, 'fleet-config-actions.json')).mode & 0o777, 0o600);
+  assert.deepEqual(fs.readdirSync(restored).sort(), before.map(([name]) => name).sort());
   assert.equal(result.legacyHistory, 'preserved-in-v1-backup-only');
   const model = createReadModel({ dataDir: stage, clock: () => NOW });
   assert.equal(model.feeds().data.value.receivedAt, NOW); assert.equal(model.feeds().history.value.points.length, 1);
@@ -79,7 +96,33 @@ test('P6 backup and v2 staging: exact legacy bytes restored; new producer receip
   backupStore({ source: stage, destination: v2Backup, boardSchema: 'v2' });
   assert.throws(() => restoreStore({ backup: v2Backup, destination: join(root, 'never-v1'), boardSchema: 'v1' }), /incompatible/);
   restoreStore({ backup: v2Backup, destination: join(root, 'v2-restore'), boardSchema: 'v2' });
+  assert.deepEqual(fs.readFileSync(join(root, 'v2-restore', 'fleet-config-actions.json')), auditBytes);
   assert.equal(createReadModel({ dataDir: join(root, 'v2-restore'), clock: () => NOW }).feeds().data.value.seq, samples.data.seq);
+});
+test('P6 migration refuses malformed audit history before creating a destination; absent log stays absent', t => {
+  const root = temporary(t), source = join(root, 'source'); fs.mkdirSync(source);
+  fs.writeFileSync(join(source, 'data.json'), '{"schema":"inspr.joe.household.v1"}');
+  const invalid = [
+    '{', { ...audit, schema: 'unknown' }, { ...audit, entries: {} },
+    { ...audit, entries: [{ ...audit.entries[0], actor: 'invalid actor!' }] },
+    { ...audit, entries: [{ ...audit.entries[0], revAfter: 'not-a-revision' }] },
+    { ...audit, entries: [{ ...audit.entries[0], changedKeys: ['unknown'] }] },
+    { ...audit, entries: [{ ...audit.entries[0], at: '2026-02-30T00:00:00.000Z' }] },
+    { ...audit, entries: Array.from({ length: 201 }, () => audit.entries[0]) },
+  ];
+  for (const [i, value] of invalid.entries()) {
+    fs.writeFileSync(join(source, 'fleet-config-actions.json'), typeof value === 'string' ? value : JSON.stringify(value));
+    const backup = join(root, `backup-${i}`), destination = join(root, `v2-${i}`);
+    backupStore({ source, destination: backup, boardSchema: 'v1' });
+    assert.throws(() => migrateToV2({ backup, destination, snapshot: ingress(), receivedAt: NOW }));
+    assert.equal(fs.existsSync(destination), false);
+  }
+  const emptySource = join(root, 'no-audit'); fs.mkdirSync(emptySource);
+  fs.copyFileSync(join(source, 'data.json'), join(emptySource, 'data.json'));
+  const backup = join(root, 'no-audit-backup'), destination = join(root, 'no-audit-v2');
+  backupStore({ source: emptySource, destination: backup, boardSchema: 'v1' });
+  migrateToV2({ backup, destination, snapshot: ingress(), receivedAt: NOW });
+  assert.equal(fs.existsSync(join(destination, 'fleet-config-actions.json')), false);
 });
 test('P6 backup refuses tampering, extra files, symlinks, oversized input and false schema', t => {
   const root = temporary(t), source = join(root, 'source'); fs.mkdirSync(source);
@@ -106,9 +149,7 @@ test('P6 backup refuses tampering, extra files, symlinks, oversized input and fa
 test('P6 staged ingress: v1 and incompatible producer IDs rejected; v2 restart continuity and anonymous smoke', async t => {
   const root = temporary(t);
   const server = createJoeServer({ dataDir: root, clock: () => NOW, inboxToken: 'p6-synthetic-fixture' });
-  await new Promise(r => server.listen(0, '127.0.0.1', r));
-  t.after(() => new Promise(r => { server.closeAllConnections(); server.close(r); }));
-  const base = `http://127.0.0.1:${server.address().port}/joe/`;
+  const base = await listen(t, server);
   const push = payload => fetch(base + 'inbox', { method: 'POST', headers: { authorization: 'Bearer p6-synthetic-fixture' }, body: JSON.stringify(payload) });
   for (const schema of ['inspr.joe.household.v1', 'inspr.joe.household.v3', 'unknown']) assert.equal((await push({ ...ingress(), schema })).status, 422);
   assert.equal((await push(ingress())).status, 200);
@@ -118,9 +159,37 @@ test('P6 staged ingress: v1 and incompatible producer IDs rejected; v2 restart c
   // The trusted proxy identity is exercised only in this isolated test; OPS
   // must strip any client-supplied identity headers at the real edge.
   assert.equal((await fetch(base + 'fleet-config.json', { headers: { 'x-auth-request-user': 'fixture' } })).status, 200);
-  const result = await smokeRelease(base, active);
-  assert.equal(result.protectedReads, 'anonymous-rejected');
+  await assert.rejects(smokeRelease(base, active), /sso_not_proven/, 'a bare app must fail even though it returns anonymous 401');
+  const forwarded = [], denied = [];
+  const proxy = createServer(async (req, res) => {
+    // Isolated contract fixture, not production SSO: only exact health GET/HEAD
+    // is public, and no client identity is ever forwarded to the app.
+    if (req.url === '/joe/healthz' && ['GET', 'HEAD'].includes(req.method)) {
+      const headers = { accept: 'application/json' };
+      forwarded.push({ path: req.url, headers });
+      const upstream = await fetch(new URL('healthz', base), { method: req.method, headers });
+      res.writeHead(upstream.status, Object.fromEntries(upstream.headers));
+      res.end(Buffer.from(await upstream.arrayBuffer()));
+    } else {
+      denied.push({ path: req.url, spoof: req.headers['x-auth-request-user'] });
+      res.writeHead(302, { location: '/oauth2/start', [SSO_REJECTION_HEADER]: 'required' }); res.end();
+    }
+  });
+  const publicBase = await listen(t, proxy);
+  const result = await smokeRelease(publicBase, active);
+  assert.equal(result.protectedReads, 'sso-rejected');
+  assert.equal(result.protectedUI, 'sso-rejected');
+  assert.equal(result.spoofedIdentity, 'sso-rejected');
   assert.equal(result.results, 'not reported');
+  assert.equal((await fetch(publicBase + 'healthz', { method: 'HEAD' })).status, 200);
+  const cli = await promisify(execFile)(process.execPath, ['scripts/smoke-release.mjs', publicBase, active.version_scheme, active.version], { timeout: 30000 });
+  assert.equal(JSON.parse(cli.stdout).ok, true, 'the deploy CLI passes only through the proxy');
+  await assert.rejects(promisify(execFile)(process.execPath, ['scripts/smoke-release.mjs', base, active.version_scheme, active.version], { timeout: 30000 }), e => e.code === 1 && e.stderr.trim() === 'sso_not_proven');
+  assert.ok(forwarded.every(r => r.path === '/joe/healthz' && !r.headers['x-auth-request-user'] && !r.headers['x-forwarded-user']));
+  for (const route of [...PROTECTED_READS, '', `app.js?v=${active.version}`, 'healthz/', 'healthz-extra']) {
+    assert.ok(denied.some(r => r.path === '/joe/' + route && !r.spoof), `anonymous ${route} denied by proxy`);
+    assert.ok(denied.some(r => r.path === '/joe/' + route && r.spoof === 'joedesk-smoke-spoof'), `spoofed ${route} denied before app`);
+  }
   for (const scheme of ['inspr-calendar-v2', 'inspr-calver-3']) {
     const h = await (await fetch(base + 'healthz')).json();
     assert.equal(validateContract('healthz', { ...h, versionScheme: scheme, version: next.version }).ok, true);
@@ -128,6 +197,34 @@ test('P6 staged ingress: v1 and incompatible producer IDs rejected; v2 restart c
   assert.equal((await fetch(base + 'app.js?v=wrong')).status, 404);
   assert.equal((await fetch(base + `app.js?v=${active.version}&v=${active.version}`)).status, 404);
   assert.equal((await fetch(base + `app.js?v=${active.version}`)).status, 200);
+});
+test('P6 SSO smoke rejects missing edge proof, leaked UI/assets, broad health exemption and spoofed identity bypass', async () => {
+  const health = { ...samples.healthz, version: active.version, versionScheme: active.version_scheme };
+  const base = 'https://board.example.invalid/joe/';
+  const deny = (status = 302) => new Response('', { status, headers: { [SSO_REJECTION_HEADER]: 'required', ...(status < 400 ? { location: '/oauth2/start' } : {}) } });
+  for (const status of [302, 401, 403]) {
+    const result = await smokeRelease(base, active, { allowUnreported: true, fetcher: async url => url.pathname === '/joe/healthz' ? Response.json(health) : deny(status) });
+    assert.equal(result.ok, true);
+  }
+  const cases = [
+    { match: () => true, answer: () => new Response('', { status: 401 }), error: /sso_not_proven/ },
+    { match: u => u.pathname === '/joe/', answer: () => new Response('UI'), error: /protected_ui_exposed/ },
+    { match: u => u.pathname === '/joe/app.js', answer: () => new Response('app bytes'), error: /protected_ui_exposed/ },
+    { match: u => u.pathname === '/joe/healthz/', answer: () => new Response('wrong router', { status: 404 }), error: /protected_ui_exposed/ },
+    { match: u => u.pathname === '/joe/healthz-extra', answer: () => Response.json(health), error: /protected_ui_exposed/ },
+    { match: (_u, init) => !!init.headers['x-auth-request-user'], answer: () => Response.json({ private: 'synthetic' }), error: /spoofed_identity_exposed/ },
+    { match: () => true, answer: () => new Response('', { status: 302, headers: { [SSO_REJECTION_HEADER]: 'required' } }), error: /sso_not_proven/ },
+  ];
+  for (const c of cases) await assert.rejects(smokeRelease(base, active, { allowUnreported: true, fetcher: async (url, init) => {
+    assert.equal(init.credentials, 'omit'); assert.equal(init.redirect, 'manual');
+    if (url.pathname === '/joe/healthz') return Response.json(health);
+    return c.match(url, init) ? c.answer() : deny();
+  } }), c.error);
+  for (const route of PROTECTED_READS) await assert.rejects(smokeRelease(base, active, { allowUnreported: true, fetcher: async (url, init) => {
+    if (url.pathname === '/joe/healthz') return Response.json(health);
+    return url.pathname === '/joe/' + route && init.headers['x-auth-request-user'] ? Response.json({ fixture: true }) : deny();
+  } }), /spoofed_identity_exposed/, route);
+  await assert.rejects(smokeRelease(base, active, { fetcher: async () => Response.json(health, { headers: { [SSO_REJECTION_HEADER]: 'required' } }) }), /sso_marker_on_health/);
 });
 test('P6 smoke: SSO redirects are auth_required; wrong release, stale feeds, exposed reads and oversized health fail', async t => {
   const alias = join(temporary(t), 'smoke.mjs');

@@ -36,9 +36,9 @@ export function reserveVersion(previous, utc) {
 export function compareReleases(a, b, anchor) {
   const x = parseVersion(a), y = parseVersion(b);
   if (a.release_channel !== b.release_channel || !a.release_channel) throw new Error('channel_mismatch');
-  if (CALENDAR_SCHEMES.includes(x.scheme) && CALENDAR_SCHEMES.includes(y.scheme)) return Math.sign(x.version.localeCompare(y.version));
+  if (CALENDAR_SCHEMES.includes(x.scheme) && CALENDAR_SCHEMES.includes(y.scheme)) return x.version < y.version ? -1 : x.version > y.version ? 1 : 0;
   if (x.scheme === y.scheme) {
-    if (x.utc) return Math.sign(x.utc.localeCompare(y.utc));
+    if (x.utc) return x.utc < y.utc ? -1 : x.utc > y.utc ? 1 : 0;
     for (let i = 0; i < 3; i++) { const d = BigInt(x.version.split('.')[i]) - BigInt(y.version.split('.')[i]); if (d) return d > 0n ? 1 : -1; }
     return 0;
   }

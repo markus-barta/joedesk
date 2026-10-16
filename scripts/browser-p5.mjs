@@ -579,11 +579,12 @@ try {
       await type(fieldSel('cadence.deskWatch'), 'desk-watch'); await still('64-character routine name');
       await type(fieldSel('amy.routines.close'), 'Close recap'); await still('80-character check-in name');
       const boxes = await ev(`[...document.querySelectorAll('#setMain [data-saved]')].filter(__audit.visible).map(e => { const r = e.getBoundingClientRect(), lh = parseFloat(getComputedStyle(e).lineHeight);
-        return { key: e.dataset.saved, text: e.textContent, height: r.height, lines: r.height / lh, clipped: e.scrollWidth > e.clientWidth + 1, focusable: e.tabIndex === 0, title: e.title, label: e.getAttribute('aria-label'), overflow: getComputedStyle(e).textOverflow }; })`);
+        const control = e.closest('.f-in').querySelector('input, button'), description = document.getElementById(control.getAttribute('aria-describedby'));
+        return { key: e.dataset.saved, text: e.textContent, height: r.height, lines: r.height / lh, clipped: e.scrollWidth > e.clientWidth + 1, focusable: e.hasAttribute('tabindex'), title: e.title, description: description?.textContent, hidden: description?.hidden, descriptionWidth: description?.getBoundingClientRect().width, overflow: getComputedStyle(e).textOverflow }; })`);
       const keep = boxes.find(x => x.key === 'desks.keep');
       check('no-shift', `${tag}: the Saved lines show the kept count and complete strings`, boxes.length === 3 && keep?.text === `Saved: ${fleet.desks.keep.length} kept symbols` &&
         boxes.find(x => x.key === 'cadence.deskWatch')?.text === `Saved: ${fleet.cadence.deskWatch}` && boxes.find(x => x.key === 'amy.routines.close')?.text === `Saved: ${fleet.amy.routines.close}`, boxes.map(x => ({ ...x, text: x.text.slice(0, 60) })));
-      check('no-shift', `${tag}: every Saved box is one line, with ellipsis and accessible full text; clipped strings take focus`, boxes.every(x => Math.abs(x.lines - 1) < 0.02 && x.focusable === x.clipped && x.title === x.text && x.label === x.text && x.overflow === 'ellipsis'), boxes.map(x => ({ ...x, text: undefined })));
+      check('no-shift', `${tag}: every Saved box is one line with ellipsis; the control describes the full text without an extra tab stop`, boxes.every(x => Math.abs(x.lines - 1) < 0.02 && !x.focusable && x.title === x.text && x.description === x.text && !x.hidden && x.descriptionWidth === 1 && x.overflow === 'ellipsis'), boxes.map(x => ({ ...x, text: undefined })));
       await mouse('#reviewBtn'); await still('review dialog');
       const rows = await ev(`[...document.querySelectorAll('#diffList li')].map(l => l.innerText.replace(/\\s+/g, ' ').trim())`);
       check('AC-24', `${tag}: Review changes shows the long Before values whole`, rows.length === 3 && rows.some(r => r.includes(`Before: ${KEEP_SAVED.slice('Saved: '.length)}`)), rows.map(r => r.slice(0, 80)));
@@ -1113,7 +1114,7 @@ Every screenshot was taken again. What changed, per fix:
 - **Saved line (P6 carry-over).** Under a changed control, always one line
   reserved before editing. Long kept lists and wake windows use counts;
   a long string ends in an ellipsis, keeps its complete title and accessible
-  name, and takes keyboard focus. Review changes lists every difference.
+  description on the field control, without its own tab stop. Review changes lists every difference.
 - **Stored, change log unfinished.** When the server writes the version but
   cannot finish its change-log entry (a 500 naming the new version), the edit
   bar reads "Sent version 13 · saved to the shared file, but the change log

@@ -385,8 +385,10 @@ health is sufficient for deployment smoke even if this option is deferred.
 
 JOED-19 explicitly chooses **INSPR-CalVer3**, machine `inspr-calver-3`, canonical
 `YYMMDDhhmmss.0.0`. This supersedes JOED-13's v2 plan; P6 must rescope/close that
-ticket with the recorded owner decision. The current release source remains
-legacy `calendar` until P6 completes the migration inventory/gates. P1 does
+ticket with the recorded owner decision. Published/live release authority remains
+legacy `calendar` until P6 completes the migration inventory/gates. P6a may set
+`release.json` to its reserved CalVer3 candidate for local builds while keeping
+adoption closed; this does not change the deployed version. P1 does
 not relabel package.json, existing releases or tags. Reserve one UTC coordinate
 for an immutable release set; preserve release_sequence continuity and record
 the legacy anchor. Protocol schema IDs remain independent.
@@ -1307,8 +1309,8 @@ Markus's cutover and live behavior gates pass.
 | Runtime and Nix pins; no new dependencies; release asset graph | Docker/test OCI index digests and immutable nixpkgs revision/NAR hash in preparation; Docker and Nix run `scripts/check-release.mjs` offline; `P6 normal build …` mutates bytes, extras, missing files and manifest; P3 worker closure test; `P6 staged ingress …` rejects stale/duplicate asset versions | OPS records exact built board image/source and its own immutable nixcfg lock; no published artifact was replaced |
 | Board/pusher/executor compatibility | `release/contracts.json` records exact IDs, participant requirements and complete sorted path/size/hash contract-set digest; `P6 staged ingress …` proves real HTTP v2 accept, v1/unknown reject and durable sequence; full P1/P2 tests remain required | Amy's actual producer and executor evidence + JOED-20; fixtures do not establish deployed compatibility |
 | Data backup, migration and exact compatible rollback (class d, §8) | `release/data-migration.mjs`, explicit offline `scripts/prepare-data.mjs`; `P6 backup and v2 staging …` proves byte-exact restore, private modes, new v2 receipt and restart/replay continuity, no fabricated legacy history, wrong-board rollback rejection; `P6 backup refuses …` proves corruption/extra/missing/symlink/size rejection; server refuses legacy stores | OPS supplies real quiesced backup, compatible pins and rehearsed `just rollback-joedesk`; preserve old artifacts |
-| Anonymous health, protected reads, auth redirects (class g, §7/§8) | Existing exact health allowlist remains; `scripts/smoke-release.mjs` checks expected canonical metadata, schema and feed ages, no-cookie reads and redirects; `P6 staged ingress …` and `P6 smoke …` test fresh health, six 401 routes, invalid identity, 302 auth_required, stale feeds, wrong version, exposed reads and size cap; P2 nested privacy rejection tests retained | OPS exact-path SSO exception + edge identity-header stripping + production-host gate incl. cs0; Markus/Tick signed-in UI; no production smoke performed |
-| Tick: Saved line always one line; count long lists; accessible full string | `settings-model.savedText`, CSS width/height/ellipsis and title/aria-label/focus in Settings; model tests, P5 long-value/no-shift regressions and P6 browser checks at 1440/390 light/dark | Tick review of local P6a shots; phone remains read-only |
+| Anonymous health, protected reads, auth redirects (class g, §7/§8) | Existing exact health allowlist remains; `scripts/smoke-release.mjs` checks canonical metadata/feed ages and requires the SSO rejection handler's exclusive `X-JoeDesk-SSO: required` marker on anonymous and spoofed-identity reads, UI/assets and near-health paths. `P6 staged ingress …` proves the bare app fails and the local proxy/CLI passes; `P6 SSO smoke …` rejects missing proof, exposed surfaces, broad exemptions and per-read spoof bypasses. Health 302 remains auth_required; size/privacy checks retained | OPS exact-path SSO exception + rejection marker + edge identity-header stripping + production-host gate incl. cs0; Markus/Tick signed-in UI; no production smoke performed |
+| Tick: Saved line always one line; count long lists; accessible full string | `settings-model.savedText`, CSS width/height/ellipsis and hover title in Settings; a visually hidden full-text span describes the field control through aria-describedby, with no Saved tab stop. P5 no-shift and P6 accessibility-tree checks cover long strings | Tick review of local P6a shots; phone remains read-only |
 | Tick: phone no-break space before middle dot | `format.joinUnits` with phone option in app text observer; unit regression and direct P6 raw DOM checks; copy-only browser assertions accept NBSP-dot | Tick visual review; no data/accounting semantics change |
 
 The release evidence command requires a clean committed tree and a validation
@@ -1322,3 +1324,13 @@ local build checks.
 The exact OPS-354 handoff and CLI forms live in README's P6a section. No nixcfg,
 producer, secret, broker, production host or infrastructure was changed. No push,
 deployment, cross-family gate or product/taste approval is part of this worker.
+
+Fix round 1 also carries the compatible Fleet Config change log byte-for-byte
+into v2 after schema validation. `P6 backup and v2 staging …` checks success,
+failure and pending entries, exact v1 rollback and v2 backup/restore;
+`P6 migration refuses …` checks invalid audit data fails before staging begins.
+`release/preparation.json` records the deployed legacy `db621bf` anchor without
+inventing a sequence-23 tag. The evidence CLI uses its own repository root and
+names the preparation manifest digest `preparation_sha256`. README records
+directory ownership/swap/rollback, the existing inbox exception, staging receipt
+and pusher-sequence rules, and the public smoke's exact route/outputs/exit codes.

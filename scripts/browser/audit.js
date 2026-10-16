@@ -62,7 +62,8 @@
         // The two clamped state lines (data-clamp) are measured by clamps().
         if (el.closest('svg') || !visible(el) || el.closest('[data-clamp]')) continue;
         // P6 Saved captions have an explicit one-line contract, checked by the
-        // P6 browser suite (full title, accessible name and focus when clipped).
+        // P6 browser suite (full title and the field control's description;
+        // the Saved line itself never takes focus).
         if (el.matches('[data-saved]')) continue;
         const cs = getComputedStyle(el);
         if (cs.textOverflow === 'ellipsis' && el.textContent.trim()) failures.push({ el: el.className || el.tagName, why: 'ellipsis' });

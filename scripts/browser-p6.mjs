@@ -66,11 +66,15 @@ try {
         await page.evaluate(`(() => { const e = document.querySelector('[data-field="${key}"]'); e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event('input', {bubbles:true})); })()`);
       }
       await settle(page);
-      const saved = await page.evaluate(`[...document.querySelectorAll('[data-saved].on')].map(e => ({text:e.textContent, title:e.title, label:e.getAttribute('aria-label'), lines:e.getBoundingClientRect().height / parseFloat(getComputedStyle(e).lineHeight), ellipsis:getComputedStyle(e).textOverflow, clipped:e.scrollWidth>e.clientWidth+1, tab:e.tabIndex}))`);
+      const saved = await page.evaluate(`[...document.querySelectorAll('[data-saved].on')].map(e => { const control=e.closest('.f-in').querySelector('input, button'), description=document.getElementById(control.getAttribute('aria-describedby')); return {text:e.textContent, title:e.title, description:description?.textContent, hidden:description?.hidden, width:description?.getBoundingClientRect().width, lines:e.getBoundingClientRect().height / parseFloat(getComputedStyle(e).lineHeight), ellipsis:getComputedStyle(e).textOverflow, clipped:e.scrollWidth>e.clientWidth+1, tab:e.hasAttribute('tabindex')}; })`);
       test(`${tag}: compact kept count`, saved.some(s => s.text === 'Saved: 64 kept symbols'));
-      test(`${tag}: strings stay on one line with accessible complete text`, saved.length === 2 && saved.every(s => s.lines === 1 && s.ellipsis === 'ellipsis' && s.title === s.text && s.label === s.text && (!s.clipped || s.tab === 0)));
-      const clip = await page.evaluate(`(() => { const e = document.querySelector('[data-saved="amy.routines.close"]'); e.focus(); return { focused:document.activeElement===e, clipped:e.scrollWidth>e.clientWidth+1 }; })()`);
-      test(`${tag}: long string is clipped and keyboard focusable`, clip.focused && clip.clipped);
+      test(`${tag}: strings stay on one line with accessible complete text and no extra tab stop`, saved.length === 2 && saved.every(s => s.lines === 1 && s.ellipsis === 'ellipsis' && s.title === s.text && s.description === s.text && !s.hidden && s.width === 1 && !s.tab));
+      const clip = await page.evaluate(`(() => { const e = document.querySelector('[data-saved="amy.routines.close"]'), control=e.closest('.f-in').querySelector('input'); control.focus(); e.focus(); return { controlFocused:document.activeElement===control, clipped:e.scrollWidth>e.clientWidth+1 }; })()`);
+      test(`${tag}: clipped Saved text leaves keyboard focus on its field control`, clip.controlFocused && clip.clipped);
+      const { root: doc } = await page.s('DOM.getDocument');
+      const { nodeId } = await page.s('DOM.querySelector', { nodeId: doc.nodeId, selector: '[data-field="amy.routines.close"]' });
+      const { nodes } = await page.s('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false });
+      test(`${tag}: accessibility tree exposes the complete Saved description on the input`, nodes.some(n => n.description?.value === saved.find(s => s.clipped)?.text));
       for (const section of ['desks','amy']) {
         await page.evaluate(`document.getElementById('set-${section}').scrollIntoView({block:'center'})`); await settle(page);
         const { data } = await page.s('Page.captureScreenshot', { format: 'png' });

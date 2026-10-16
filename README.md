@@ -67,7 +67,8 @@ node scripts/prepare-data.mjs restore --offline BACKUP NEW_RESTORE v1
 
 Migration accepts a real, validated v2 producer snapshot and an explicit UTC
 receipt (ISO form with milliseconds). It creates a separate v2 store, preserving
-compatible Fleet Config and establishing durable sequence/receipt state through
+compatible Fleet Config and its validated change log (`fleet-config-actions.json`)
+byte-for-byte, including pending/failed audit entries, and establishing durable sequence/receipt state through
 the real server acceptance path. Legacy money/history cannot prove the v2
 decimal/evidence/basis contract: their original bytes remain in the v1 backup;
 they are never relabelled or used to fabricate historical observations. The v2
@@ -76,17 +77,37 @@ backup can be restored only with `v2`; a v1 board rollback selects its previous
 producer **and v1 backup**, never the current v2 data directory. The CLI does not
 stop services, select deployment pins or switch a host.
 
+`V2_SNAPSHOT` is Amy's JOED-20 approved staged **ingress** snapshot (no
+`receivedAt`), not a copied v1 file or a served response. `UTC_RECEIPT` is the
+actual UTC time that this snapshot was received for staging, recorded as
+`YYYY-MM-DDTHH:mm:ss.sssZ`; never substitute cutover time to make old evidence
+look fresh. The next pusher sequence must exceed the snapshot's `seq`, with
+non-regressing generation/evidence times. If staging has aged before cutover,
+require a new accepted producer observation before the fresh-feed smoke passes.
+
 ### OPS-354 / P6b handoff
 
 OPS owns these exact nixcfg items through its existing review path:
 
 1. An exact `/joe/healthz` anonymous GET/HEAD SSO exception, tested without a
    cookie; keep UI/assets and all six protected reads behind SSO. Strip incoming
-   identity headers and forward authenticated identity only over the private
-   app connection. Neither inbox credentials nor auth policy change here.
+   identity headers (including `X-Auth-Request-User`, the app's actual identity,
+   and `X-Forwarded-User`) before SSO, and inject `X-Auth-Request-User` only from
+   the authenticated SSO result over the private app connection. Keep the app
+   port unreachable from the public network. Neither inbox credentials nor auth policy change here.
+   Configure the SSO rejection handler to return `X-JoeDesk-SSO: required`
+   **only** on its own anonymous redirect/deny responses (30x with a nonempty
+   `Location`, or 401/403). Strip any upstream copy of that header; never add it
+   globally, on app responses, or on health. This distinguishes an SSO denial
+   from the app's own 401. Protected requests with spoofed identity must hit the
+   same SSO rejection handler before reaching the app. The exact health router
+   must not match `/joe/healthz/` or `/joe/healthz-extra`.
 2. Board/pusher/executor immutable deployment pins, the contract-set SHA256 and
    exact IDs in `release/contracts.json`, with Amy's JOED-20 staging and
    reconciliation approval. Retain previous compatible pins/image/generation.
+   The previous board source pin is `db621bf` (legacy `calendar` version
+   `26.09.21.12.00`, sequence 23); it was deployed without a corresponding tag.
+   Existing tags end at `v26.09.14.17.40` (sequence 22); preserve that history.
    Do not pin `rebuild/v2` before the separate approved cutover.
 3. A private verified v1 backup, a separately staged v2 directory, and one
    `just rollback-joedesk` command selecting the previous compatible pins **and
@@ -97,13 +118,37 @@ OPS owns these exact nixcfg items through its existing review path:
    `/joe/healthz` contract. Do not broaden the public SSO exception or treat a
    404 from the new smoke as success. OPS must bind that legacy smoke to the
    exact previous image and its matching v1 backup in the rollback rehearsal.
-4. The production host gate including `cs0.barta.cm`; no other route exemption.
+   The board's fixed store is `/var/lib/joe-board`, uid 1000. While the board
+   and all writers are stopped, prepare the new directory on the same filesystem,
+   chown the staged directory and every staged file to uid 1000 and the board's
+   configured gid, and preserve 0700/0600 modes. Rename the current store to a
+   retained, unique sibling, then rename the staged directory to the fixed path;
+   never overwrite a directory. Restore the retained directory if the second
+   rename fails. For rollback, restore the verified v1 backup into a new sibling,
+   apply the same ownership/modes and stopped-service swap, then start the
+   compatible v1 pins. Chown is required even when no NixOS activation occurs.
+4. The production host gate including `cs0.barta.cm`; no other route exemption
+   beyond the existing token-only `/joe/inbox` router.
 5. After the gates and Markus's cutover decision, run
    `node scripts/smoke-release.mjs BASE_JOE_URL VERSION_SCHEME CANONICAL_VERSION`.
-   It sends no cookies/identity, follows no redirect, validates the exact health
+   `BASE_JOE_URL` is the public SSO route ending **exactly** in `/joe/`, with no
+   credentials, query or fragment (for example `https://board.example.invalid/joe/`).
+   It sends no cookies or authorization, follows no redirect, validates the exact health
    allowlist and expected version/schema, requires fresh data/history/config
-   and a confirmed gateway, and checks all six anonymous reads are rejected.
-   Health 302 is `auth_required`. Unwired Results remains explicitly reported;
+   and a confirmed gateway. It probes all six reads, `/joe/`,
+   `/joe/app.js?v=CANONICAL_VERSION`, and both near-health paths, first anonymously
+   and again with well-formed synthetic `X-Auth-Request-User` and `X-Forwarded-User`.
+   Every protected probe must receive the marked SSO redirect/deny; a bare app,
+   an app 401, an exposed UI/asset, a broad exemption or a spoof bypass fails.
+   Health must return an unmarked 200. Health 302 is `auth_required`.
+   Exit 0 emits one JSON record with `ok: true`, canonical version/schema, feed
+   ages/states, `protectedReads`, `protectedUI` and `spoofedIdentity` all
+   `sso-rejected`, `healthException: exact-path`, and Results state. Exit 1 emits
+   one value-free stderr reason: `auth_required`, `release_mismatch`,
+   `feeds_not_ready`, `protected_read_exposed`, `protected_ui_exposed`,
+   `spoofed_identity_exposed`, `sso_not_proven`, `sso_marker_on_health`, or
+   `release_smoke_failed` for malformed input/health, transport or other errors.
+   Bodies, identities and credentials are never printed. Unwired Results remains explicitly reported;
    this smoke does not substitute for Amy's results sign-off or Tick/Markus's
    signed-in UI verification.
 

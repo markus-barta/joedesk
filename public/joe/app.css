@@ -742,10 +742,9 @@ dialog.dlg::backdrop { background: var(--scrim); }
 .redacted { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
 .redacted .i { width: 13px; height: 13px; }
 /* The Saved line always holds the saved value (hidden until the draft differs),
-   with one reserved line. Long strings ellipsise; title and accessible name stay complete. */
+   with one reserved line. Long strings ellipsise; title and control description stay complete. */
 .f-saved { height: 18px; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; visibility: hidden; font-size: 12px; line-height: 18px; color: var(--ink-3); margin-top: 4px; text-align: right; }
 .f-saved.on { visibility: visible; }
-.f-saved:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
 .kfloor { display: flex; align-items: flex-start; gap: 7px; margin: 0 0 6px; color: var(--ink-2); font-size: 13px; text-align: right; }
 .kfloor .i { width: 15px; height: 15px; margin-top: 2px; color: var(--ink-3); }
 .set-main .phone-only { display: none; }

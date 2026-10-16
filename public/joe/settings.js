@@ -161,6 +161,7 @@ function fixedValue(f, v) {
   return `<span class="mono">${breakable(v)}</span>`;
 }
 const phoneValue = html => `<div class="ro phone-only"><span data-value>${html}</span></div>`;
+const savedHtml = f => `<div class="f-saved dsk" data-saved="${f.key}" aria-hidden="true"></div><span class="vh dsk" id="${fieldId(f.key)}-saved" hidden></span>`;
 
 function keepControl(f) {
   const floor = `<p class="kfloor">${icon('keep')}<span><span class="mono">SXR8</span> and <span class="mono">TSLA</span> are always kept</span></p>`;
@@ -168,7 +169,7 @@ function keepControl(f) {
   const shown = esc(M.display(f, state.base[f.key]));
   return `${floor}<label class="sub dsk f-sub" for="${fieldId(f.key)}">Other kept symbols, separated by commas</label>
     <input class="inp mono dsk" id="${fieldId(f.key)}" data-field="${f.key}" value="${esc(state.draft[f.key])}" autocomplete="off" spellcheck="false">
-    ${phoneValue(shown)}<div class="f-saved dsk" data-saved="${f.key}"></div>`;
+    ${phoneValue(shown)}${savedHtml(f)}`;
 }
 
 function controlHtml(f) {
@@ -176,7 +177,7 @@ function controlHtml(f) {
   if (!loaded()) return readOnly('Not available', '', 'ring');
   const v = state.draft[f.key], id = fieldId(f.key), label = esc(f.label);
   const phone = phoneValue(esc(M.display(f, state.base[f.key])));
-  const saved = `<div class="f-saved dsk" data-saved="${f.key}"></div>`;
+  const saved = savedHtml(f);
   if (f.type === 'int' || f.type === 'pct') {
     const unit = f.type === 'pct' ? '%' : esc(f.x.unit);
     const meter = f.type === 'pct' ? `<div class="meter dsk" role="img" aria-label="${esc(v)}${NB}% kept free" data-meter-box="${f.key}"><i data-meter="${f.key}" style="width:${Math.max(0, Math.min(100, Number(v) || 0))}%"></i></div>` : '';
@@ -236,7 +237,7 @@ function windowsHtml(f) {
     ${shown}
     <div class="ww-list dsk">${rows || '<p class="ww-none">No wake windows yet.</p>'}</div>
     <div class="ww-add dsk"><button type="button" class="btn" id="wwAdd"${ws.length >= M.MAX_WINDOWS ? ' disabled' : ''}>${icon('plus')}Add wake window</button></div>
-    <div class="f-saved dsk" data-saved="${f.key}"></div>
+    ${savedHtml(f)}
   </div></div>`;
 }
 
@@ -269,7 +270,7 @@ function renderFields(force = false) {
 // controls' values when they changed by a button, never under the caret.
 // The Saved line always holds the saved value and is only shown when the
 // draft differs, so its box is sized before any edit and showing it moves
-// nothing. One line; clipped text remains complete for focus and assistive tech.
+// nothing. One line; the control describes the complete saved text to assistive tech.
 function syncDraft() {
   if (!state.base) return;
   const ch = new Set(M.changes(state));
@@ -278,10 +279,14 @@ function syncDraft() {
     const text = `Saved: ${M.savedText(M.FIELD[k], state.base[k])}`;
     if (el.textContent !== text) el.textContent = text;
     el.title = text;
-    el.setAttribute('aria-label', text);
     if (el.classList.contains('on') !== on) el.classList.toggle('on', on);
-    const clipped = on && el.scrollWidth > el.clientWidth + 1;
-    if (clipped) el.tabIndex = 0; else el.removeAttribute('tabindex');
+    const description = document.getElementById(`${fieldId(k)}-saved`);
+    if (description.textContent !== text) description.textContent = text;
+    description.hidden = !on;
+    for (const control of el.closest('.f-in').querySelectorAll('input, button')) {
+      if (on) control.setAttribute('aria-describedby', description.id);
+      else control.removeAttribute('aria-describedby');
+    }
   }
   for (const el of $$('#setMain [data-field]')) {
     if (el !== document.activeElement && el.value !== state.draft[el.dataset.field]) el.value = state.draft[el.dataset.field];
