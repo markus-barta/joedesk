@@ -316,7 +316,14 @@ try {
       check('AC-24', `${tag}: Confirm review closes the dialog: six changes reviewed, ready to send as version 13`, !(await ev(`document.getElementById('diffDlg').open`)) && N(confirmed.text) === '6 changes reviewed · ready to send as version 13' && J(confirmed.buttons) === J([true, true, true, true]) &&
         (await toastText()) === 'Review confirmed for version 12.', confirmed);
       await still('confirm and toast');
-      check('no-shift', `${tag}: edits, the Saved lines, the review dialog, the confirmation and the toast move nothing (±0.5 px)`, !moved.length, moved);
+      // Section changes from the sub-nav, in this font too.
+      for (const id of ['set-log', 'set-cadence', 'set-about', 'set-mode']) {
+        await mouse(`#setNav a[data-sec="${id}"]`, false);
+        const marked = await ev(`document.querySelector('#setNav a[aria-current="true"]')?.dataset.sec`);
+        if (marked !== id) moved.push({ what: `section ${id} not marked`, marked });
+        await still(`section ${id}`);
+      }
+      check('no-shift', `${tag}: edits, the Saved lines, the review dialog, the confirmation, the toast and section changes move nothing (±0.5 px)`, !moved.length, moved);
       if (viewport.name === '1440' && !font) await viewShot(`${viewport.name}-${theme}-settings-reviewed`, 'Settings: six changes reviewed, ready to send as version 13 (edit bar, toast)');
       // Send to the desks: one POST, a paper draft of version 12; version 13 is written.
       const since = page.requests.length;
