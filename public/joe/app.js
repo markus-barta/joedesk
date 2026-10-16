@@ -13,6 +13,7 @@ import { boardHealthPresentation, dataAge, cellReason } from './health.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { initSettings, renderSettings, showSection, SECTIONS as SETTINGS_SECTIONS } from './settings.js';
 import { dateTimeFull, age, NB, joinUnits } from './format.js';
+import { initVersionDisplay } from './version-display.js';
 
 const SCREENS = ['desk', 'results', 'history', 'settings'];
 const root = document.documentElement;
@@ -36,7 +37,7 @@ function start() {
   const feed = createFeed(kind => {
     if (kind === 'history') dirtyHistory = true;
     schedule(kind);
-  }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, $('#appVersion').textContent.trim(),
+  }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, globalThis.JoeVersion.APP_VERSION,
   { actionsWanted: () => screen === 'settings' });
   // Read-only: fetches the same three reads now instead of at the next poll.
   window.__joedesk.refresh = () => feed.refresh();
@@ -275,7 +276,13 @@ function start() {
 
   // Numbers never part from their units, in static and rendered text alike.
   const fixUnits = node => {
-    if (node.nodeType === 3) { const fixed = joinUnits(node.nodeValue); if (fixed !== node.nodeValue) node.nodeValue = fixed; return; }
+    if (node.nodeType === 3) {
+      let fixed = joinUnits(node.nodeValue, { joinDot: isPhone() });
+      // A separator may start the next inline element (the exact-key line).
+      if (isPhone() && / $/.test(fixed) && node.nextSibling?.textContent?.startsWith('·')) fixed = fixed.slice(0, -1) + NB;
+      if (fixed !== node.nodeValue) node.nodeValue = fixed;
+      return;
+    }
     if (node.nodeType !== 1) return;
     const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
     for (let t = walker.nextNode(); t; t = walker.nextNode()) fixUnits(t);
@@ -286,6 +293,7 @@ function start() {
 
   syncThemeButton();
   initSettings({ feed, tips, schedule });
+  initVersionDisplay();
   $('#footShield').innerHTML = `${icon('shield')}Read-only paper board · nothing here can place a trade`;
   const [first, anchor] = (location.hash || '#desk').slice(1).split('/');
   go(first, anchor);

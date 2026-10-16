@@ -225,6 +225,18 @@ export function display(field, raw) {
   if (field.type === 'time') return `${value} Vienna time`;
   return value;
 }
+// Compact Saved captions. Full values remain in the control and Review changes.
+export function savedText(field, raw) {
+  if (field.type === 'windows') {
+    const n = windowsOf(raw)?.length ?? 0;
+    return `${n} wake window${n === 1 ? '' : 's'}`;
+  }
+  if (field.type === 'symbols') {
+    const symbols = [...new Set([...KEEP_FLOOR, ...String(raw).split(',').map(s => s.trim()).filter(Boolean)])];
+    if (symbols.length > 4) return `${symbols.length} kept symbols`;
+  }
+  return display(field, raw);
+}
 // A wake window as a phone shows it: its name and times, then its days and desks.
 export const windowLines = w => ({ id: w.id, times: `${w.from} to ${w.until}`,
   rest: `${w.days.map(d => DAY_NAME[d] ?? d).join(', ')} · desks ${w.desks.map(d => DESK_NAME[d] ?? d).join(', ')}` });

@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, ACTOR, TOKEN, NOW, at } from './browser/board.mjs';
-import { VIEWPORTS, THEMES, configure, load, settle, waitFor, pointerMedia, MOUSE, TOUCH } from './browser/shots.mjs';
+import { VIEWPORTS, THEMES, configure, load, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { designFleet, designActions, designSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
@@ -92,7 +92,7 @@ async function designBoard({ fleet = designFleet(), actions = designActions(), r
 const served = async b => (await fetch(`${b.url}fleet-config.json`, { headers: { 'x-auth-request-user': ACTOR } })).json();
 
 // ---------- Page helpers ----------
-const ev = expr => page.evaluate(expr);
+const ev = expr => page.evaluate(expr).then(copyText);
 const click = async sel => { await ev(`document.querySelector(${J(sel)}).click()`); await settle(page); };
 async function centre(sel, scroll = true) {
   if (scroll) { await ev(`(() => { const e = document.querySelector(${J(sel)}); const r = e.getBoundingClientRect(); if (r.top < 120 || r.bottom > innerHeight - 140) e.scrollIntoView({ block: 'center' }); })()`); await settle(page); }
@@ -269,7 +269,7 @@ try {
         sources: [...document.querySelectorAll('#set-source tbody tr')].map(r => [...r.cells].map(c => c.innerText.trim())),
         log: [...document.querySelectorAll('#log li')].map(l => l.innerText.replace(/\\s+/g, ' ').trim()), logIntro: document.querySelector('#set-log .sec-head p').innerText.trim(),
         app: [...document.querySelectorAll('#set-appearance [data-themeopt]')].map(b => [b.innerText.trim(), b.getAttribute('aria-pressed')]), appIntro: document.querySelector('#set-appearance .sec-head p').innerText.trim(),
-        about: [...document.querySelectorAll('#set-about .ver li')].map(l => l.innerText.replace(/\\s+/g, ' ').trim()), aboutIntro: document.querySelector('#set-about .sec-head p').innerText.trim(),
+        about: [...document.querySelectorAll('#set-about .ver li')].map(l => l.innerText.replace(/\\s+/g, ' ').trim()), aboutVersion: document.querySelector('#set-about [data-product-version]')?.dataset.canonical, aboutIntro: document.querySelector('#set-about .sec-head p').innerText.trim(),
         sub: document.getElementById('setSub').innerText.trim() })`);
       check('AC-27', `${tag}: How fleet settings work has its five steps and closing line`, copy.how.length === 5 && /^1\s*Change a value/.test(copy.how[0]) && /Review changes/.test(copy.how[1]) && /Confirm review/.test(copy.how[2]) && /Send to the desks/.test(copy.how[3]) && /Save draft/.test(copy.how[4]) && /Passwords, tokens, broker access/.test(copy.howEnd), copy.how);
       check('AC-27', `${tag}: Where this is defined lists the file, version and last send, and Sources has one home per setting`, J(copy.where) === J(['Format', 'Format name', 'Saved version', 'Saved at', 'File the board reads', 'Last sent']) &&
@@ -278,7 +278,7 @@ try {
       check('AC-27', `${tag}: the change log lists every send newest first, attributed, with changed keys only`, copy.log.length === 4 && /^Sent 9 Oct, 20:12:44 Version 11 ?12 markus · desks\.maxBusyDesks, quota\.codex\.reservePct$/.test(N(copy.log[0])) &&
         /^Not sent 9 Oct, 20:10:00 Version 11 · not changed markus · the version had changed · desks\.maxBusyDesks$/.test(N(copy.log[1])) && /secret values are never logged/.test(copy.logIntro), copy.log);
       check('AC-27', `${tag}: Appearance offers Light, Dark and System (System chosen with nothing stored), saved in this browser only`, J(copy.app) === J([['Light', 'false'], ['Dark', 'false'], ['System', 'true']]) && copy.appIntro === 'Saved in this browser only.', copy.app);
-      check('AC-27', `${tag}: About says what JoeDesk is and lists the version history`, copy.aboutIntro === 'JoeDesk is a read-only paper board: no broker access, no order placement.' && copy.about.length === HISTORY.length && N(copy.about[0]).startsWith(`${HISTORY[0].version} 21 Sep 2026 ${HISTORY[0].title}`), copy.about.slice(0, 2));
+      check('AC-27', `${tag}: About says what JoeDesk is and lists the version history`, copy.aboutIntro === 'JoeDesk is a read-only paper board: no broker access, no order placement.' && copy.about.length === HISTORY.length && copy.aboutVersion === HISTORY[0].version && N(copy.about[0]).endsWith(HISTORY[0].title), copy.about.slice(0, 2));
       check('AC-22', `${tag}: the title's line names the fleet settings version and paper only`, N(copy.sub) === 'Fleet settings version 12 · paper only', copy.sub);
       // AC-39: a field's Learn tip gives the longer help, where it applies and the key.
       const learn = '#set-desks [data-term="f:desks.maxBusyDesks"]';
@@ -362,7 +362,7 @@ try {
       check('AC-24', `${tag}: six changes in the draft; review before you send`, N(dirty.text) === '6 changes in your draft · review before you send' && J(dirty.buttons) === J([true, true, true, false]), dirty);
       check('AC-24', `${tag}: each changed setting shows its saved value; the reserve's meter follows the draft, and no caption repeats its %`,
         N(saved['desks.maxBusyDesks']) === 'Saved: 5 desks' && N(saved['quota.codex.reservePct']) === 'Saved: 15 %' && N(saved['quota.behavior.amber']) === 'Saved: Slow down nonessential work' && N(saved['desks.keep']) === 'Saved: SXR8, TSLA' &&
-        N(saved['cadence.usOpenArm']) === 'Saved: 15:35 Vienna time' && N(saved['cadence.wakeWindows']) === 'Saved: 2 wake windows · Review changes lists every difference' && saved['quota.grok.reservePct'] === '' &&
+        N(saved['cadence.usOpenArm']) === 'Saved: 15:35 Vienna time' && N(saved['cadence.wakeWindows']) === 'Saved: 2 wake windows' && saved['quota.grok.reservePct'] === '' &&
         !(await ev(`/of every 100/.test(document.getElementById('set-quota').innerText)`)) && (await ev(`document.querySelector('[data-meter="quota.codex.reservePct"]').style.width`)) === '20%', saved);
       // Review changes: the dialog with Before and After, the review tick, then Confirm.
       await mouse('#reviewBtn');
@@ -574,17 +574,16 @@ try {
       await desksShot('-before', 'Settings with the longest values, before editing: 64 kept holdings in the field; the Saved box is reserved, still hidden');
       // The 64 kept holdings lose one; the longest routine and check-in names get short.
       await type(fieldSel('desks.keep'), M.keepExtras(fleet.desks.keep).slice(0, -1).join(',')); await still('64 kept holdings');
-      await desksShot('', 'Settings with the longest values, while editing: one of the 64 kept holdings removed; the Saved box shows three whole lines and scrolls; nothing moved');
+      await desksShot('', 'Settings with the longest values, while editing: one of the 64 kept holdings removed; the Saved box shows the count on one line; nothing moved');
       await still('the editing screenshot');
       await type(fieldSel('cadence.deskWatch'), 'desk-watch'); await still('64-character routine name');
       await type(fieldSel('amy.routines.close'), 'Close recap'); await still('80-character check-in name');
       const boxes = await ev(`[...document.querySelectorAll('#setMain [data-saved]')].filter(__audit.visible).map(e => { const r = e.getBoundingClientRect(), lh = parseFloat(getComputedStyle(e).lineHeight);
-        const top = e.scrollTop; e.scrollTop = e.scrollHeight; const end = e.scrollTop + e.clientHeight >= e.scrollHeight - 1; e.scrollTop = top;
-        return { key: e.dataset.saved, text: e.textContent, height: r.height, lines: r.height / lh, scrolls: e.scrollHeight > e.clientHeight + 1, focusable: e.tabIndex === 0, end }; })`);
+        return { key: e.dataset.saved, text: e.textContent, height: r.height, lines: r.height / lh, clipped: e.scrollWidth > e.clientWidth + 1, focusable: e.tabIndex === 0, title: e.title, label: e.getAttribute('aria-label'), overflow: getComputedStyle(e).textOverflow }; })`);
       const keep = boxes.find(x => x.key === 'desks.keep');
-      check('no-shift', `${tag}: the three Saved lines show the whole saved values (${KEEP_SAVED.length} characters for the kept holdings)`, boxes.length === 3 && keep?.text === KEEP_SAVED &&
+      check('no-shift', `${tag}: the Saved lines show the kept count and complete strings`, boxes.length === 3 && keep?.text === `Saved: ${fleet.desks.keep.length} kept symbols` &&
         boxes.find(x => x.key === 'cadence.deskWatch')?.text === `Saved: ${fleet.cadence.deskWatch}` && boxes.find(x => x.key === 'amy.routines.close')?.text === `Saved: ${fleet.amy.routines.close}`, boxes.map(x => ({ ...x, text: x.text.slice(0, 60) })));
-      check('no-shift', `${tag}: a Saved box shows whole lines, at most three; past that it scrolls to its end and takes focus`, boxes.every(x => Math.abs(x.lines - Math.round(x.lines)) < 0.02 && x.lines <= 3.02 && x.focusable === x.scrolls && (!x.scrolls || x.end)) && keep?.scrolls, boxes.map(x => ({ ...x, text: undefined })));
+      check('no-shift', `${tag}: every Saved box is one line, with ellipsis and accessible full text; clipped strings take focus`, boxes.every(x => Math.abs(x.lines - 1) < 0.02 && x.focusable === x.clipped && x.title === x.text && x.label === x.text && x.overflow === 'ellipsis'), boxes.map(x => ({ ...x, text: undefined })));
       await mouse('#reviewBtn'); await still('review dialog');
       const rows = await ev(`[...document.querySelectorAll('#diffList li')].map(l => l.innerText.replace(/\\s+/g, ' ').trim())`);
       check('AC-24', `${tag}: Review changes shows the long Before values whole`, rows.length === 3 && rows.some(r => r.includes(`Before: ${KEEP_SAVED.slice('Saved: '.length)}`)), rows.map(r => r.slice(0, 80)));
@@ -1051,7 +1050,7 @@ Every screenshot was taken again. What changed, per fix:
   \`1024-dark-settings-long-values-before.png\` (64 kept holdings, before
   editing), \`1440-light-settings-long-values.png\` and
   \`1024-dark-settings-long-values.png\` (while editing: the Saved box shows
-  three whole lines and scrolls; nothing moved), and
+  the kept-symbol count on one line; nothing moved), and
   \`390-light-settings-long-values-before.png\` (phones are read-only).
 - **Linux CI (AC-25, "Runtime state shows the seven rows").** The rows were
   right; the ages were not deterministic. The page dates everything by the
@@ -1078,9 +1077,9 @@ Every screenshot was taken again. What changed, per fix:
   (\`*-settings-stale.png\`); a plain 500 still reads "Not sent"
   (\`*-settings-failed.png\`). Neither changed.
 - **New \`1440-light-settings-long-values.png\`, \`390-light-settings-long-values.png\`.**
-  The longest values the format accepts. The Saved box is sized from the saved
-  value before any edit; a 64-symbol kept list (a 1.133-character Saved line)
-  no longer grows its row or moves later sections (\`no-shift\` at 1440 and 1024
+  The longest values the format accepts. The Saved box reserves one line
+  before any edit; a 64-symbol kept list uses its count and long strings
+  ellipsise with complete accessible text. Neither moves later sections (\`no-shift\` at 1440 and 1024
   in both fonts; 390 is read-only).
 - **Malformed browser drafts** (wake windows \`null\`, a window without desks, a
   key that is not editable) are dropped with the discard words, and every group
@@ -1111,13 +1110,10 @@ Every screenshot was taken again. What changed, per fix:
 - **Edit bar.** One row above 1180 px; two rows (note, then buttons) at 961 to
   1180 px; up to 960 px it floats above the bottom bar (\`820-light-settings-tablet-editbar.png\`).
   The note keeps two lines' room, so no state changes the bar.
-- **Saved line.** Under a changed control. The box always holds the saved
-  value and is shown only when the draft differs, so it is sized before any
-  edit and showing it moves nothing: one line for a short value, up to three
-  whole lines for a long one, and past three lines it scrolls (and takes
-  focus) — the 64 kept holdings (\`1440-light-settings-long-values.png\`). The
-  wake windows give their count ("Saved: 2 wake windows · Review changes lists
-  every difference"); Review changes lists every difference.
+- **Saved line (P6 carry-over).** Under a changed control, always one line
+  reserved before editing. Long kept lists and wake windows use counts;
+  a long string ends in an ellipsis, keeps its complete title and accessible
+  name, and takes keyboard focus. Review changes lists every difference.
 - **Stored, change log unfinished.** When the server writes the version but
   cannot finish its change-log entry (a 500 naming the new version), the edit
   bar reads "Sent version 13 · saved to the shared file, but the change log

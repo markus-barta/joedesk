@@ -28,6 +28,7 @@
     "versionScheme": {
       "enum": [
         "calendar",
+        "inspr-calendar-v2",
         "inspr-calver-3"
       ],
       "x-owner": "server"

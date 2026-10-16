@@ -50,7 +50,7 @@ const DESK_CHOICES = ['all', 'j', 'joe', 'joel'];
 
 // Everything Results shows, read from the page.
 const RES = `(() => {
-  const t = el => el?.innerText ?? '';
+  const t = el => (el?.innerText ?? '').replace(/\u00a0(?=·)/g, ' ');
   const svg = document.querySelector('#curve > svg');
   return {
     label: t(document.querySelector('#perLabel .cur')), bd: t(document.getElementById('bdTitle')), legend: [...document.querySelectorAll('#curveLegend .lg')].map(t),

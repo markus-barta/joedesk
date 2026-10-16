@@ -2,8 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "26.09.21.12.00",
+    APP_VERSION: "261016151218.0.0",
+    VERSION_SCHEME: "inspr-calver-3",
+    RELEASE_SEQUENCE: 24,
     VERSION_HISTORY: [
+      {
+        version: "261016151218.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-16",
+        title: "A steadier paper desk",
+        changes: ["Rebuilt Desk, History, Results and Settings; pinned release inputs and tested recovery."],
+      },
       {
         version: "26.09.21.12.00",
         date: "2026-09-21",

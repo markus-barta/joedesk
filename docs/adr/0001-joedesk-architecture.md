@@ -1276,3 +1276,49 @@ Apple Silicon workstation (HeadlessChrome 153); the Linux CI run (now with a
 P5 step and a 45-minute browser job) is the merge gate for the font-dependent
 checks. Screenshots and the AC → test map: `~/.local/share/joedesk-qa/p5/index.md`.
 No push, deploy or review gate.
+
+
+## JOED-26 / P6a repository preparation
+
+This addendum records a repository candidate, not an authoritative live adoption
+or cutover. The candidate is `inspr-calver-3` / `261016151218.0.0`, reserved once
+at `2026-10-16T15:12:18Z`, stable sequence 24. `release/preparation.json` records
+the previous release (`calendar` / `26.09.21.12.00` / sequence 23) and the
+explicit migration anchor. The custom legacy scheme is not relabelled as
+INSPR-CalVer1. JOED-19's owner decision supersedes JOED-13, whose v2 proposal is
+cancelled and consolidated into JOED-26. Published history stays intact.
+
+The shared global-default pin is the merged/live, independently reviewed
+consumer bundle record on INSPR-486: source
+`01b3080948c21899cbbacbfa3447da6799af1b56`, config
+`bf6aa144cd73dc97dc941f0f0914138b04ae0a28fbead5123465b15b1f2a2fd9`, manifest
+`d4dcb8c05d0fcad7d60183156166c5a30f21e6abc1ac0c274ee3e0791e5ea912`.
+No product-specific template selection exists; JOED-19 chooses the shared
+default. The complete unchanged bundle is vendored and verified offline on
+normal builds. The one thin product adapter serves footer/current About,
+resolves auto tint from product branding and supplies English interaction text.
+The source is a candidate until publication, review, producer/OPS compatibility,
+Markus's cutover and live behavior gates pass.
+
+| JOED-26 acceptance / P6 deferred scope | Implementation and executable evidence | Remaining owner gate |
+| --- | --- | --- |
+| Migration inventory, UTC reservation, sequence and legacy anchor | `release/preparation.json`; `release/versioning.mjs`; `P6 version: …` and `P6 reservation: …` in `test/release.mjs` cover dates, aliases, 32-bit overflow, suffixes, scheme rejection, collisions, ordering and anchors | Candidate is not authoritative; immutable publication and live behavior remain coordinator/OPS/Markus work |
+| Complete shared presentation bundle, saved pin and thin Pretty adapter | `public/joe/vendor/calver/` pins the recorded source/config/manifest; normal offline build checks enforce exact closure/regular files/sizes/hashes/tracking. `version-display.js` uses the shared renderer/helper; P6 browser asserts six segments, no v/tail, Pretty/SemVer, zero-width seconds, reveal/copy, keyboard/touch, UTC labels, reduced motion and English confirmation at 390/1440 in light/dark | Tick visual approval and coordinator gate; `--require-adoption` stays closed until publication/live evidence |
+| Runtime and Nix pins; no new dependencies; release asset graph | Docker/test OCI index digests and immutable nixpkgs revision/NAR hash in preparation; Docker and Nix run `scripts/check-release.mjs` offline; `P6 normal build …` mutates bytes, extras, missing files and manifest; P3 worker closure test; `P6 staged ingress …` rejects stale/duplicate asset versions | OPS records exact built board image/source and its own immutable nixcfg lock; no published artifact was replaced |
+| Board/pusher/executor compatibility | `release/contracts.json` records exact IDs, participant requirements and complete sorted path/size/hash contract-set digest; `P6 staged ingress …` proves real HTTP v2 accept, v1/unknown reject and durable sequence; full P1/P2 tests remain required | Amy's actual producer and executor evidence + JOED-20; fixtures do not establish deployed compatibility |
+| Data backup, migration and exact compatible rollback (class d, §8) | `release/data-migration.mjs`, explicit offline `scripts/prepare-data.mjs`; `P6 backup and v2 staging …` proves byte-exact restore, private modes, new v2 receipt and restart/replay continuity, no fabricated legacy history, wrong-board rollback rejection; `P6 backup refuses …` proves corruption/extra/missing/symlink/size rejection; server refuses legacy stores | OPS supplies real quiesced backup, compatible pins and rehearsed `just rollback-joedesk`; preserve old artifacts |
+| Anonymous health, protected reads, auth redirects (class g, §7/§8) | Existing exact health allowlist remains; `scripts/smoke-release.mjs` checks expected canonical metadata, schema and feed ages, no-cookie reads and redirects; `P6 staged ingress …` and `P6 smoke …` test fresh health, six 401 routes, invalid identity, 302 auth_required, stale feeds, wrong version, exposed reads and size cap; P2 nested privacy rejection tests retained | OPS exact-path SSO exception + edge identity-header stripping + production-host gate incl. cs0; Markus/Tick signed-in UI; no production smoke performed |
+| Tick: Saved line always one line; count long lists; accessible full string | `settings-model.savedText`, CSS width/height/ellipsis and title/aria-label/focus in Settings; model tests, P5 long-value/no-shift regressions and P6 browser checks at 1440/390 light/dark | Tick review of local P6a shots; phone remains read-only |
+| Tick: phone no-break space before middle dot | `format.joinUnits` with phone option in app text observer; unit regression and direct P6 raw DOM checks; copy-only browser assertions accept NBSP-dot | Tick visual review; no data/accounting semantics change |
+
+The release evidence command requires a clean committed tree and a validation
+run identifier, binds source commit/tree, runtime closure and exact contract-set
+digests, and explicitly emits `candidate-awaiting-coordinator-gates` with no published
+artifacts. The coordinator adds actual artifact coordinates/digests,
+SBOM/signatures/provenance and review evidence before any immutable release set
+is published. The candidate is never labelled an authoritative live release by these
+local build checks.
+
+The exact OPS-354 handoff and CLI forms live in README's P6a section. No nixcfg,
+producer, secret, broker, production host or infrastructure was changed. No push,
+deployment, cross-family gate or product/taste approval is part of this worker.

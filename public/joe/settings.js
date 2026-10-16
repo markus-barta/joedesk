@@ -141,7 +141,7 @@ function aboutSection() {
   const when = date => (/^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ? `${Number(date.slice(8))}${NB}${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}` : '');
   return `<section class="set-sec" id="set-about" aria-labelledby="h-about">
     ${secHead('about', 'h-about', 'About', 'JoeDesk is a read-only paper board: no broker access, no order placement.')}
-    <ul class="ver">${history.length ? history.map(v => `<li><span class="t">${esc(v.version)}</span>${when(v.date) ? ` <span class="m">${when(v.date)}</span>` : ''}<p>${versionTitle(v.title)}</p></li>`).join('')
+    <ul class="ver">${history.length ? history.map(v => `<li><span class="t${v.versionScheme ? ' product-version' : ''}"${v.versionScheme ? ` data-product-version="${esc(v.version)}" data-version-scheme="${esc(v.versionScheme)}"` : ''}>${esc(v.version)}</span>${when(v.date) ? ` <span class="m">${when(v.date)}</span>` : ''}<p>${versionTitle(v.title)}</p></li>`).join('')
       : '<li><p>The version history is not available.</p></li>'}</ul>
   </section>`;
 }
@@ -265,28 +265,23 @@ function renderFields(force = false) {
   return true;
 }
 
-// The wake windows' Saved line gives their count; Review changes lists every
-// difference.
-function savedText(f, raw) {
-  if (f.type !== 'windows') return M.display(f, raw);
-  const n = M.windowsOf(raw)?.length ?? 0;
-  return `${n} wake window${n === 1 ? '' : 's'} · Review changes lists every difference`;
-}
 // The draft's own marks: the Saved line, the reserve meters, the
 // controls' values when they changed by a button, never under the caret.
 // The Saved line always holds the saved value and is only shown when the
 // draft differs, so its box is sized before any edit and showing it moves
-// nothing; past three lines it scrolls (and takes focus to be read).
+// nothing. One line; clipped text remains complete for focus and assistive tech.
 function syncDraft() {
   if (!state.base) return;
   const ch = new Set(M.changes(state));
   for (const el of $$('#setMain [data-saved]')) {
     const k = el.dataset.saved, on = ch.has(k);
-    const text = `Saved: ${savedText(M.FIELD[k], state.base[k])}`;
+    const text = `Saved: ${M.savedText(M.FIELD[k], state.base[k])}`;
     if (el.textContent !== text) el.textContent = text;
+    el.title = text;
+    el.setAttribute('aria-label', text);
     if (el.classList.contains('on') !== on) el.classList.toggle('on', on);
-    const scrolls = on && el.scrollHeight > el.clientHeight + 1;
-    if (el.hasAttribute('tabindex') !== scrolls) { if (scrolls) el.tabIndex = 0; else el.removeAttribute('tabindex'); }
+    const clipped = on && el.scrollWidth > el.clientWidth + 1;
+    if (clipped) el.tabIndex = 0; else el.removeAttribute('tabindex');
   }
   for (const el of $$('#setMain [data-field]')) {
     if (el !== document.activeElement && el.value !== state.draft[el.dataset.field]) el.value = state.draft[el.dataset.field];

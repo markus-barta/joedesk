@@ -23,6 +23,13 @@ const schema = JSON.parse(readFileSync(new URL('../contracts/fleet-config.schema
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const NB = '\u00a0'; // numbers never part from their units
 
+test('P6 Saved captions: window and long symbol counts, complete strings for accessible ellipsis', () => {
+  assert.equal(M.savedText(M.FIELD['cadence.wakeWindows'], '[]'), '0 wake windows');
+  assert.equal(M.savedText(M.FIELD['desks.keep'], 'AAA,BBB,CCC,DDD,EEE'), '7 kept symbols');
+  assert.equal(M.savedText(M.FIELD['desks.keep'], ''), 'SXR8, TSLA');
+  assert.equal(M.savedText(M.FIELD['amy.routines.close'], 'x'.repeat(80)), 'x'.repeat(80));
+});
+
 // The approved design's settings (test-only): version 12, two wake windows.
 function design() {
   const c = structuredClone(valid['fleet-config']);

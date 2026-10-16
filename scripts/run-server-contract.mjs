@@ -12,6 +12,7 @@ import { resolve, dirname } from "node:path";
 const DATA_DIR = "/var/lib/joe-board";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const token = "joedesk-isolated-contract-fixture";
+const testImage = JSON.parse(readFileSync(resolve(repoRoot, 'release/preparation.json'))).runtime.test_image;
 
 // The P2 factory injects every storage path and fixture credential. macOS can
 // exercise it without a daemon or touching the fixed production store. Direct
@@ -68,7 +69,7 @@ const result = spawnSync(
     "-e", `JOE_INBOX_TOKEN=${token}`,
     "-v", `${repoRoot}:/repo:ro`,
     "-w", "/repo",
-    "node:22",
+    testImage,
     "node", "--test", "test/server-contract.mjs",
   ],
   { stdio: "inherit" },
@@ -90,7 +91,7 @@ if (result.error) {
   console.error(
     "Run manually with Docker:\n" +
     `  docker run --rm --network none --tmpfs /var/lib/joe-board ` +
-    `-e JOE_INBOX_TOKEN='${token}' -v "$PWD:/repo:ro" -w /repo node:22 ` +
+    `-e JOE_INBOX_TOKEN='${token}' -v "$PWD:/repo:ro" -w /repo ${testImage} ` +
     "node --test test/server-contract.mjs",
   );
   process.exit(1);

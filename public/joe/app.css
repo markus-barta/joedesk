@@ -584,6 +584,8 @@ span.dbar, span.vbar { display: block; }
 .foot .foot-data { display: block; }
 .foot .foot-data span { display: inline; }
 .foot-data .i { display: inline-block; vertical-align: -3px; margin-right: 6px; }
+.product-version { color: var(--ink); line-height: 44px; min-height: 44px; }
+.version-mode { min-width: 44px; min-height: 44px; margin-left: 8px; padding: 0 6px; background: transparent; color: var(--ink-2); border: 0; font-size: 12px; cursor: pointer; }
 .private { min-height: 100vh; display: grid; place-items: center; padding: 24px var(--gutter); }
 .private-card { max-width: 440px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .private-card .brand-i { width: 36px; height: 36px; color: var(--ink); }
@@ -740,8 +742,8 @@ dialog.dlg::backdrop { background: var(--scrim); }
 .redacted { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
 .redacted .i { width: 13px; height: 13px; }
 /* The Saved line always holds the saved value (hidden until the draft differs),
-   so its box is sized before any edit: up to three lines, scrolling past that. */
-.f-saved { min-height: 18px; max-height: 54px; overflow-y: auto; visibility: hidden; font-size: 12px; line-height: 18px; color: var(--ink-3); margin-top: 4px; text-align: right; overflow-wrap: anywhere; }
+   with one reserved line. Long strings ellipsise; title and accessible name stay complete. */
+.f-saved { height: 18px; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; visibility: hidden; font-size: 12px; line-height: 18px; color: var(--ink-3); margin-top: 4px; text-align: right; }
 .f-saved.on { visibility: visible; }
 .f-saved:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
 .kfloor { display: flex; align-items: flex-start; gap: 7px; margin: 0 0 6px; color: var(--ink-2); font-size: 13px; text-align: right; }

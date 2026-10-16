@@ -26,8 +26,12 @@ jobs:
       - name: Server contract tests (disposable tmpfs container)
         run: |
           docker run --rm --network none --tmpfs /var/lib/joe-board \
-            -v "$PWD:/repo:ro" -w /repo node:22 \
+            -v "$PWD:/repo:ro" -w /repo node:22@sha256:0e5f906573693feaa1e21057ebdcfdb5bd5021f050b2dc7c9deceb629c7da2a8 \
             node --test test/server-contract.mjs
+      - name: Release preparation, staged migration, smoke and SSO negatives (UTC)
+        env:
+          TZ: UTC
+        run: npm run test:release
 
   browser:
     runs-on: ubuntu-latest
@@ -67,6 +71,18 @@ jobs:
         with:
           name: joedesk-p3-screenshots
           path: ${{ runner.temp }}/joedesk-qa/p3
+      - name: Release carry-overs (390/1440, light and dark)
+        env:
+          BROWSER_PATH: /usr/bin/google-chrome
+          JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p6a
+          TZ: UTC
+        run: node scripts/browser-p6.mjs
+      - name: Keep the release screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: joedesk-p6a-screenshots
+          path: ${{ runner.temp }}/joedesk-qa/p6a
       - name: Keep the Results screenshots for the visual check
         if: always()
         uses: actions/upload-artifact@v4

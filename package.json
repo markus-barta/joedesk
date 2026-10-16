@@ -1,6 +1,6 @@
 {
   "name": "joedesk",
-  "version": "26.09.21.12.00",
+  "version": "261016151218.0.0",
   "description": "JoeDesk paper-trading dashboard and inbox server",
   "type": "module",
   "private": true,
@@ -8,12 +8,15 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node scripts/check-package.mjs && node scripts/check-joe-ui.mjs && node scripts/check-fleet-config.mjs && node scripts/check-position-contract.mjs",
-    "test": "npm run test:contracts && npm run test:ui && node scripts/run-server-contract.mjs",
+    "check": "node scripts/check-release.mjs && node scripts/check-package.mjs && node scripts/check-joe-ui.mjs && node scripts/check-fleet-config.mjs && node scripts/check-position-contract.mjs",
+    "test": "npm run test:contracts && npm run test:ui && npm run test:release && node scripts/run-server-contract.mjs",
+    "test:release": "node --test test/release.mjs",
+    "smoke:release": "node scripts/smoke-release.mjs",
+    "release:evidence": "node scripts/release-evidence.mjs",
     "test:contracts": "node --test test/contracts.mjs test/failure-fixtures.mjs test/time-vectors.mjs",
     "test:ui": "node --test test/ui-modules.mjs test/results-model.mjs test/settings-model.mjs",
     "test:contracts:browser": "node scripts/smoke-contracts-browser.mjs",
-    "test:browser": "node scripts/browser-p3.mjs && node scripts/browser-p4.mjs && node scripts/browser-p5.mjs",
+    "test:browser": "node scripts/browser-p3.mjs && node scripts/browser-p4.mjs && node scripts/browser-p5.mjs && node scripts/browser-p6.mjs",
     "budget:reference": "node scripts/budget-reference.mjs",
     "start": "node server.mjs"
   }

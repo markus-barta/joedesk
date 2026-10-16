@@ -43,7 +43,9 @@
       for (const el of document.querySelectorAll('body *')) {
         if (el.closest('svg') && el.tagName.toLowerCase() !== 'text') continue;
         const text = el.tagName.toLowerCase() === 'text' ? el.textContent.trim() : ownText(el);
-        if (!text || !visible(el)) continue;
+        // Shared version separators are decorative (aria-hidden); the digits
+        // and the canonical accessible name are covered by P6.
+        if (!text || !visible(el) || el.closest('.coordinate .separator')) continue;
         const cs = getComputedStyle(el);
         const fg = parseColor(el.tagName.toLowerCase() === 'text' ? cs.fill : cs.color);
         if (!fg) continue;
@@ -59,6 +61,9 @@
       for (const el of document.querySelectorAll('body *')) {
         // The two clamped state lines (data-clamp) are measured by clamps().
         if (el.closest('svg') || !visible(el) || el.closest('[data-clamp]')) continue;
+        // P6 Saved captions have an explicit one-line contract, checked by the
+        // P6 browser suite (full title, accessible name and focus when clipped).
+        if (el.matches('[data-saved]')) continue;
         const cs = getComputedStyle(el);
         if (cs.textOverflow === 'ellipsis' && el.textContent.trim()) failures.push({ el: el.className || el.tagName, why: 'ellipsis' });
         const clips = /(hidden|clip|auto|scroll)/.test(cs.overflowX) && !el.classList.contains('vh') && el.id !== 'tip';

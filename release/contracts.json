@@ -1,0 +1,57 @@
+{
+  "schema": "joedesk.release-contracts.v1",
+  "contract_set_sha256": "cc3456de6a67692f361f1d4604f18b0cc1850787f7bc671907f0a71e82236b35",
+  "manifest_revision": 2,
+  "compatibility": {
+    "data": [
+      "inspr.joe.household.v2"
+    ],
+    "history": [
+      "inspr.joe.household.history.v2"
+    ],
+    "results": [
+      "inspr.joe.household.results.v2"
+    ],
+    "fleet-config": [
+      "inspr.joe.fleet-config.v1"
+    ],
+    "healthz": [
+      "inspr.joe.healthz.v2"
+    ]
+  },
+  "participants": {
+    "board": {
+      "accepts": {
+        "data": [
+          "inspr.joe.household.v2"
+        ],
+        "history": [
+          "inspr.joe.household.history.v2"
+        ],
+        "results": [
+          "inspr.joe.household.results.v2"
+        ],
+        "fleet-config": [
+          "inspr.joe.fleet-config.v1"
+        ],
+        "healthz": [
+          "inspr.joe.healthz.v2"
+        ]
+      },
+      "evidence": "test/release.mjs + test/server-contract.mjs"
+    },
+    "pusher": {
+      "required_contract_set_sha256": "cc3456de6a67692f361f1d4604f18b0cc1850787f7bc671907f0a71e82236b35",
+      "required_data_schema": "inspr.joe.household.v2",
+      "deployment_pin": null,
+      "status": "Amy JOED-20 real producer rehearsal/sign-off required"
+    },
+    "executor": {
+      "required_contract_set_sha256": "cc3456de6a67692f361f1d4604f18b0cc1850787f7bc671907f0a71e82236b35",
+      "reports_via": "pusher data.safety.executor",
+      "deployment_pin": null,
+      "status": "Amy executor/broker reconciliation required"
+    }
+  },
+  "activation": "blocked until exact downstream pins or declared compatibility proof; fixtures are not producer sign-off"
+}
