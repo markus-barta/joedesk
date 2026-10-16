@@ -579,7 +579,7 @@ try {
       await type(fieldSel('cadence.deskWatch'), 'desk-watch'); await still('64-character routine name');
       await type(fieldSel('amy.routines.close'), 'Close recap'); await still('80-character check-in name');
       const boxes = await ev(`[...document.querySelectorAll('#setMain [data-saved]')].filter(__audit.visible).map(e => { const r = e.getBoundingClientRect(), lh = parseFloat(getComputedStyle(e).lineHeight);
-        const control = e.closest('.f-in').querySelector('input, button'), description = document.getElementById(control.getAttribute('aria-describedby'));
+        const control = document.getElementById('f-' + e.dataset.saved.replace(/[^A-Za-z0-9]/g, '-')), description = document.getElementById(control.getAttribute('aria-describedby'));
         return { key: e.dataset.saved, text: e.textContent, height: r.height, lines: r.height / lh, clipped: e.scrollWidth > e.clientWidth + 1, focusable: e.hasAttribute('tabindex'), title: e.title, description: description?.textContent, hidden: description?.hidden, descriptionWidth: description?.getBoundingClientRect().width, overflow: getComputedStyle(e).textOverflow }; })`);
       const keep = boxes.find(x => x.key === 'desks.keep');
       check('no-shift', `${tag}: the Saved lines show the kept count and complete strings`, boxes.length === 3 && keep?.text === `Saved: ${fleet.desks.keep.length} kept symbols` &&

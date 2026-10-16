@@ -276,6 +276,8 @@ function send(res, status, body, headers = {}) {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
     ...headers,
+    // The deploy smoke distinguishes app responses from edge SSO denials.
+    "X-JoeDesk-Origin": "app",
     "Content-Length": Buffer.byteLength(payload),
   });
   res.end(payload);

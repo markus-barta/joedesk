@@ -209,8 +209,8 @@
     },
     {
       "path": "public/joe/settings.js",
-      "size": 43300,
-      "sha256": "cdc83892051a1bc0bf46f5a56608979434449c065dca55975b656d08819b51d1"
+      "size": 43329,
+      "sha256": "75f95fb28a521f4d6dfa3d017bf43b64f75101d5a8530f6672110694d207e4f6"
     },
     {
       "path": "public/joe/terms.js",
@@ -314,8 +314,8 @@
     },
     {
       "path": "server.mjs",
-      "size": 26094,
-      "sha256": "ce45739d7d61ef63789d7900e6c71d880c51f58bfcfb36701629c8fa3e8a9350"
+      "size": 26200,
+      "sha256": "4da1dd4cbecb50281e036055bceacf633f4bb94bebaf73637bc0fd043f26d8d9"
     },
     {
       "path": "time.mjs",

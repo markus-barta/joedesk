@@ -10,7 +10,7 @@ import { parseVersion, reserveVersion, compareReleases } from '../release/versio
 import { backupStore, restoreStore, migrateToV2, verifyBackup } from '../release/data-migration.mjs';
 import { createReadModel } from '../server/read-model.mjs';
 import { createJoeServer } from '../server.mjs';
-import { smokeRelease, PROTECTED_READS, SSO_REJECTION_HEADER } from '../scripts/smoke-release.mjs';
+import { smokeRelease, PROTECTED_READS, APP_ORIGIN_HEADER } from '../scripts/smoke-release.mjs';
 import { validateContract } from '../contracts/index.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(new URL('../' + file, import.meta.url)));
@@ -146,6 +146,28 @@ test('P6 backup refuses tampering, extra files, symlinks, oversized input and fa
   fs.renameSync(file, join(root, 'link')); fs.writeFileSync(file, ' '.repeat(16 * 1024 * 1024 + 1));
   assert.throws(() => backupStore({ source, destination: join(root, 'no-oversize'), boardSchema: 'v1' }));
 });
+test('P6 app stamps health, UI, assets, redirects and errors for every response method', async t => {
+  let failClock = false;
+  const server = createJoeServer({ dataDir: temporary(t), clock: () => { if (failClock) throw new Error('synthetic clock failure'); return NOW; }, inboxToken: 'p6-synthetic-fixture' });
+  const base = await listen(t, server);
+  for (const [route, method, status, headers = {}, body] of [
+    ['healthz', 'GET', 200], ['healthz', 'HEAD', 200], ['healthz', 'POST', 405],
+    ['', 'GET', 200], ['', 'HEAD', 200], [`app.js?v=${active.version}`, 'GET', 200],
+    ['app.js?v=wrong', 'GET', 404], ['healthz/', 'GET', 404], ['healthz-extra', 'GET', 404],
+    ['../joe', 'GET', 308], ['../healthz', 'GET', 200], ['../readyz', 'GET', 200],
+    ['inbox', 'POST', 401], ['inbox', 'POST', 422, { authorization: 'Bearer p6-synthetic-fixture' }, '{}'],
+    ...PROTECTED_READS.flatMap(route => [[route, 'GET', 401], [route, 'HEAD', 401], [route, 'GET', ['data.json', 'history.json', 'results.json'].includes(route) ? 503 : 200, { 'x-auth-request-user': 'fixture' }]]),
+  ]) {
+    const response = await fetch(new URL(route, base), { method, redirect: 'manual', headers: { [APP_ORIGIN_HEADER]: 'client-spoof', ...headers }, body });
+    assert.equal(response.status, status, `${method} ${route}`);
+    assert.equal(response.headers.get(APP_ORIGIN_HEADER), 'app', `${method} ${route}`);
+    await response.body?.cancel();
+  }
+  failClock = true;
+  const failed = await fetch(base + 'healthz');
+  assert.equal(failed.status, 500); assert.equal(failed.headers.get(APP_ORIGIN_HEADER), 'app');
+  await failed.body?.cancel();
+});
 test('P6 staged ingress: v1 and incompatible producer IDs rejected; v2 restart continuity and anonymous smoke', async t => {
   const root = temporary(t);
   const server = createJoeServer({ dataDir: root, clock: () => NOW, inboxToken: 'p6-synthetic-fixture' });
@@ -171,8 +193,12 @@ test('P6 staged ingress: v1 and incompatible producer IDs rejected; v2 restart c
       res.writeHead(upstream.status, Object.fromEntries(upstream.headers));
       res.end(Buffer.from(await upstream.arrayBuffer()));
     } else {
-      denied.push({ path: req.url, spoof: req.headers['x-auth-request-user'] });
-      res.writeHead(302, { location: '/oauth2/start', [SSO_REJECTION_HEADER]: 'required' }); res.end();
+      // oauth2-proxy returns a bare 401 {} for JSON requests and redirects
+      // browser navigation. Neither rejection originates from the app.
+      const json = req.headers.accept?.includes('application/json');
+      denied.push({ path: req.url, spoof: req.headers['x-auth-request-user'], status: json ? 401 : 302 });
+      res.writeHead(json ? 401 : 302, json ? { 'content-type': 'application/json' } : { location: '/oauth2/start' });
+      res.end(json ? '{}' : '');
     }
   });
   const publicBase = await listen(t, proxy);
@@ -181,14 +207,25 @@ test('P6 staged ingress: v1 and incompatible producer IDs rejected; v2 restart c
   assert.equal(result.protectedUI, 'sso-rejected');
   assert.equal(result.spoofedIdentity, 'sso-rejected');
   assert.equal(result.results, 'not reported');
-  assert.equal((await fetch(publicBase + 'healthz', { method: 'HEAD' })).status, 200);
+  for (const method of ['GET', 'HEAD']) {
+    const health = await fetch(publicBase + 'healthz', { method });
+    assert.equal(health.status, 200); assert.equal(health.headers.get(APP_ORIGIN_HEADER), 'app');
+    await health.body?.cancel();
+  }
+  const jsonDenied = await fetch(publicBase + 'data.json', { headers: { accept: 'application/json' } });
+  assert.equal(jsonDenied.status, 401); assert.equal(await jsonDenied.text(), '{}');
+  assert.equal(jsonDenied.headers.has(APP_ORIGIN_HEADER), false);
+  const redirected = await smokeRelease(publicBase, active, { fetcher: (url, init) => fetch(url, { ...init, headers: { ...init.headers, accept: 'text/html' } }) });
+  assert.equal(redirected.ok, true, 'the redirect path also passes without an SSO marker');
   const cli = await promisify(execFile)(process.execPath, ['scripts/smoke-release.mjs', publicBase, active.version_scheme, active.version], { timeout: 30000 });
   assert.equal(JSON.parse(cli.stdout).ok, true, 'the deploy CLI passes only through the proxy');
   await assert.rejects(promisify(execFile)(process.execPath, ['scripts/smoke-release.mjs', base, active.version_scheme, active.version], { timeout: 30000 }), e => e.code === 1 && e.stderr.trim() === 'sso_not_proven');
   assert.ok(forwarded.every(r => r.path === '/joe/healthz' && !r.headers['x-auth-request-user'] && !r.headers['x-forwarded-user']));
   for (const route of [...PROTECTED_READS, '', `app.js?v=${active.version}`, 'healthz/', 'healthz-extra']) {
-    assert.ok(denied.some(r => r.path === '/joe/' + route && !r.spoof), `anonymous ${route} denied by proxy`);
-    assert.ok(denied.some(r => r.path === '/joe/' + route && r.spoof === 'joedesk-smoke-spoof'), `spoofed ${route} denied before app`);
+    for (const status of [401, 302]) {
+      assert.ok(denied.some(r => r.path === '/joe/' + route && !r.spoof && r.status === status), `anonymous ${route} denied by proxy (${status})`);
+      assert.ok(denied.some(r => r.path === '/joe/' + route && r.spoof === 'joedesk-smoke-spoof' && r.status === status), `spoofed ${route} denied before app (${status})`);
+    }
   }
   for (const scheme of ['inspr-calendar-v2', 'inspr-calver-3']) {
     const h = await (await fetch(base + 'healthz')).json();
@@ -201,30 +238,39 @@ test('P6 staged ingress: v1 and incompatible producer IDs rejected; v2 restart c
 test('P6 SSO smoke rejects missing edge proof, leaked UI/assets, broad health exemption and spoofed identity bypass', async () => {
   const health = { ...samples.healthz, version: active.version, versionScheme: active.version_scheme };
   const base = 'https://board.example.invalid/joe/';
-  const deny = (status = 302) => new Response('', { status, headers: { [SSO_REJECTION_HEADER]: 'required', ...(status < 400 ? { location: '/oauth2/start' } : {}) } });
+  const app = value => Response.json(value, { headers: { [APP_ORIGIN_HEADER]: 'app' } });
+  const deny = (status = 302) => new Response(status === 401 ? '{}' : '', { status, headers: status < 400 ? { location: '/oauth2/start' } : {} });
   for (const status of [302, 401, 403]) {
-    const result = await smokeRelease(base, active, { allowUnreported: true, fetcher: async url => url.pathname === '/joe/healthz' ? Response.json(health) : deny(status) });
+    const result = await smokeRelease(base, active, { allowUnreported: true, fetcher: async url => url.pathname === '/joe/healthz' ? app(health) : deny(status) });
     assert.equal(result.ok, true);
   }
   const cases = [
-    { match: () => true, answer: () => new Response('', { status: 401 }), error: /sso_not_proven/ },
+    ...['app', '', 'other'].map(stamp => ({ match: () => true, answer: () => new Response('{}', { status: 401, headers: { [APP_ORIGIN_HEADER]: stamp } }), error: /sso_not_proven/ })),
     { match: u => u.pathname === '/joe/', answer: () => new Response('UI'), error: /protected_ui_exposed/ },
     { match: u => u.pathname === '/joe/app.js', answer: () => new Response('app bytes'), error: /protected_ui_exposed/ },
     { match: u => u.pathname === '/joe/healthz/', answer: () => new Response('wrong router', { status: 404 }), error: /protected_ui_exposed/ },
     { match: u => u.pathname === '/joe/healthz-extra', answer: () => Response.json(health), error: /protected_ui_exposed/ },
     { match: (_u, init) => !!init.headers['x-auth-request-user'], answer: () => Response.json({ private: 'synthetic' }), error: /spoofed_identity_exposed/ },
-    { match: () => true, answer: () => new Response('', { status: 302, headers: { [SSO_REJECTION_HEADER]: 'required' } }), error: /sso_not_proven/ },
+    { match: () => true, answer: () => new Response('', { status: 302 }), error: /sso_not_proven/ },
   ];
   for (const c of cases) await assert.rejects(smokeRelease(base, active, { allowUnreported: true, fetcher: async (url, init) => {
     assert.equal(init.credentials, 'omit'); assert.equal(init.redirect, 'manual');
-    if (url.pathname === '/joe/healthz') return Response.json(health);
+    if (url.pathname === '/joe/healthz') return app(health);
     return c.match(url, init) ? c.answer() : deny();
   } }), c.error);
   for (const route of PROTECTED_READS) await assert.rejects(smokeRelease(base, active, { allowUnreported: true, fetcher: async (url, init) => {
-    if (url.pathname === '/joe/healthz') return Response.json(health);
+    if (url.pathname === '/joe/healthz') return app(health);
     return url.pathname === '/joe/' + route && init.headers['x-auth-request-user'] ? Response.json({ fixture: true }) : deny();
   } }), /spoofed_identity_exposed/, route);
-  await assert.rejects(smokeRelease(base, active, { fetcher: async () => Response.json(health, { headers: { [SSO_REJECTION_HEADER]: 'required' } }) }), /sso_marker_on_health/);
+  for (const stamp of [null, '', 'other']) await assert.rejects(smokeRelease(base, active, { fetcher: async () => Response.json(health, { headers: stamp === null ? {} : { [APP_ORIGIN_HEADER]: stamp } }) }), /app_origin_not_proven/);
+  // Any protected route's app stamp, including only on spoofed requests,
+  // invalidates SSO proof even when its status otherwise resembles an edge denial.
+  for (const route of [...PROTECTED_READS, '', `app.js?v=${active.version}`, 'healthz/', 'healthz-extra']) for (const spoof of [false, true]) {
+    await assert.rejects(smokeRelease(base, active, { allowUnreported: true, fetcher: async (url, init) => {
+      if (url.pathname === '/joe/healthz') return app(health);
+      return url.href === base + route && !!init.headers['x-auth-request-user'] === spoof ? new Response('{}', { status: 403, headers: { [APP_ORIGIN_HEADER]: 'app' } }) : deny();
+    } }), /sso_not_proven/, `${route} (${spoof ? 'spoofed' : 'anonymous'})`);
+  }
 });
 test('P6 smoke: SSO redirects are auth_required; wrong release, stale feeds, exposed reads and oversized health fail', async t => {
   const alias = join(temporary(t), 'smoke.mjs');
@@ -235,15 +281,16 @@ test('P6 smoke: SSO redirects are auth_required; wrong release, stale feeds, exp
   const health = structuredClone(samples.healthz);
   assert.ok(health, 'health fixture');
   Object.assign(health, { version: active.version, versionScheme: active.version_scheme });
+  const app = value => Response.json(value, { headers: { [APP_ORIGIN_HEADER]: 'app' } });
   const url = 'https://board.example.invalid/joe/';
   for (const status of [302, 401, 403]) await assert.rejects(smokeRelease(url, active, { fetcher: async (_url, init) => {
     assert.equal(init.redirect, 'manual'); assert.equal(init.credentials, 'omit'); assert.deepEqual(init.headers, { accept: 'application/json' });
     return new Response('', { status });
   } }), /auth_required/);
-  await assert.rejects(smokeRelease(url, oldRelease, { allowUnreported: true, fetcher: async () => Response.json(health) }), /release_mismatch/);
-  await assert.rejects(smokeRelease(url, active, { fetcher: async () => Response.json({ ...health, snapshotAgeSeconds: 61 }) }), /feeds_not_ready/);
-  await assert.rejects(smokeRelease(url, active, { allowUnreported: true, fetcher: async () => Response.json(health) }), /protected_read_exposed/);
-  await assert.rejects(smokeRelease(url, active, { fetcher: async () => new Response(' '.repeat(16385)) }), /health_size_limit/);
+  await assert.rejects(smokeRelease(url, oldRelease, { allowUnreported: true, fetcher: async () => app(health) }), /release_mismatch/);
+  await assert.rejects(smokeRelease(url, active, { fetcher: async () => app({ ...health, snapshotAgeSeconds: 61 }) }), /feeds_not_ready/);
+  await assert.rejects(smokeRelease(url, active, { allowUnreported: true, fetcher: async () => app(health) }), /protected_read_exposed/);
+  await assert.rejects(smokeRelease(url, active, { fetcher: async () => new Response(' '.repeat(16385), { headers: { [APP_ORIGIN_HEADER]: 'app' } }) }), /health_size_limit/);
   for (const base of ['https://board.example.invalid/', 'https://user:pass@board.example.invalid/joe/', 'https://board.example.invalid/joe/?token=redacted']) await assert.rejects(smokeRelease(base, active), /base_invalid/);
 });
 test('P6 normal build verifies pinned offline bundle/closure; corruption, extra, missing and untracked fail; live adoption stays gated', t => {

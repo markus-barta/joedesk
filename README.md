@@ -95,12 +95,8 @@ OPS owns these exact nixcfg items through its existing review path:
    and `X-Forwarded-User`) before SSO, and inject `X-Auth-Request-User` only from
    the authenticated SSO result over the private app connection. Keep the app
    port unreachable from the public network. Neither inbox credentials nor auth policy change here.
-   Configure the SSO rejection handler to return `X-JoeDesk-SSO: required`
-   **only** on its own anonymous redirect/deny responses (30x with a nonempty
-   `Location`, or 401/403). Strip any upstream copy of that header; never add it
-   globally, on app responses, or on health. This distinguishes an SSO denial
-   from the app's own 401. Protected requests with spoofed identity must hit the
-   same SSO rejection handler before reaching the app. The exact health router
+   Do not add, strip or rewrite `X-JoeDesk-Origin` at the edge. Protected requests
+   with spoofed identity must hit SSO before reaching the app. The exact health router
    must not match `/joe/healthz/` or `/joe/healthz-extra`.
 2. Board/pusher/executor immutable deployment pins, the contract-set SHA256 and
    exact IDs in `release/contracts.json`, with Amy's JOED-20 staging and
@@ -138,19 +134,27 @@ OPS owns these exact nixcfg items through its existing review path:
    and a confirmed gateway. It probes all six reads, `/joe/`,
    `/joe/app.js?v=CANONICAL_VERSION`, and both near-health paths, first anonymously
    and again with well-formed synthetic `X-Auth-Request-User` and `X-Forwarded-User`.
-   Every protected probe must receive the marked SSO redirect/deny; a bare app,
-   an app 401, an exposed UI/asset, a broad exemption or a spoof bypass fails.
-   Health must return an unmarked 200. Health 302 is `auth_required`.
+   Every protected probe must lack `X-JoeDesk-Origin` and receive a 30x with a
+   nonempty `Location`, or 401/403. The app stamps every response with
+   `X-JoeDesk-Origin: app`, including its own 401; a bare app, an exposed UI/asset,
+   a broad exemption or a spoof bypass fails. Health must return 200 with that
+   app stamp. Health 302 is `auth_required`.
    Exit 0 emits one JSON record with `ok: true`, canonical version/schema, feed
    ages/states, `protectedReads`, `protectedUI` and `spoofedIdentity` all
    `sso-rejected`, `healthException: exact-path`, and Results state. Exit 1 emits
    one value-free stderr reason: `auth_required`, `release_mismatch`,
    `feeds_not_ready`, `protected_read_exposed`, `protected_ui_exposed`,
-   `spoofed_identity_exposed`, `sso_not_proven`, `sso_marker_on_health`, or
+   `spoofed_identity_exposed`, `sso_not_proven`, `app_origin_not_proven`, or
    `release_smoke_failed` for malformed input/health, transport or other errors.
    Bodies, identities and credentials are never printed. Unwired Results remains explicitly reported;
    this smoke does not substitute for Amy's results sign-off or Tick/Markus's
    signed-in UI verification.
+6. Post-deploy, send one signed-in request with a spoofed identity header and
+   verify that its Fleet Config audit actor is the authenticated SSO identity.
+   cs0's `authResponseHeaders` must replace the client-supplied
+   `X-Auth-Request-User` with the SSO result. Use a paper-only edit through the
+   trusted proxy, verify the attributed audit entry, and restore the setting.
+   This complements the anonymous spoof probes; no live check ran during P6a.
 
 Tests and acceptance mapping: ADR's JOED-26 addendum, `test/release.mjs` and
 `scripts/browser-p6.mjs`. Local Tick evidence goes to

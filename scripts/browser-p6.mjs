@@ -66,7 +66,7 @@ try {
         await page.evaluate(`(() => { const e = document.querySelector('[data-field="${key}"]'); e.value = ${JSON.stringify(value)}; e.dispatchEvent(new Event('input', {bubbles:true})); })()`);
       }
       await settle(page);
-      const saved = await page.evaluate(`[...document.querySelectorAll('[data-saved].on')].map(e => { const control=e.closest('.f-in').querySelector('input, button'), description=document.getElementById(control.getAttribute('aria-describedby')); return {text:e.textContent, title:e.title, description:description?.textContent, hidden:description?.hidden, width:description?.getBoundingClientRect().width, lines:e.getBoundingClientRect().height / parseFloat(getComputedStyle(e).lineHeight), ellipsis:getComputedStyle(e).textOverflow, clipped:e.scrollWidth>e.clientWidth+1, tab:e.hasAttribute('tabindex')}; })`);
+      const saved = await page.evaluate(`[...document.querySelectorAll('[data-saved].on')].map(e => { const control=document.getElementById('f-' + e.dataset.saved.replace(/[^A-Za-z0-9]/g, '-')), description=document.getElementById(control.getAttribute('aria-describedby')); return {text:e.textContent, title:e.title, description:description?.textContent, hidden:description?.hidden, width:description?.getBoundingClientRect().width, lines:e.getBoundingClientRect().height / parseFloat(getComputedStyle(e).lineHeight), ellipsis:getComputedStyle(e).textOverflow, clipped:e.scrollWidth>e.clientWidth+1, tab:e.hasAttribute('tabindex')}; })`);
       test(`${tag}: compact kept count`, saved.some(s => s.text === 'Saved: 64 kept symbols'));
       test(`${tag}: strings stay on one line with accessible complete text and no extra tab stop`, saved.length === 2 && saved.every(s => s.lines === 1 && s.ellipsis === 'ellipsis' && s.title === s.text && s.description === s.text && !s.hidden && s.width === 1 && !s.tab));
       const clip = await page.evaluate(`(() => { const e = document.querySelector('[data-saved="amy.routines.close"]'), control=e.closest('.f-in').querySelector('input'); control.focus(); e.focus(); return { controlFocused:document.activeElement===control, clipped:e.scrollWidth>e.clientWidth+1 }; })()`);
@@ -80,6 +80,17 @@ try {
         const { data } = await page.s('Page.captureScreenshot', { format: 'png' });
         const file = `${tag}-saved-${section}.png`; writeFileSync(join(output, file), Buffer.from(data, 'base64')); shots.push(file);
       }
+      // Compound fields describe their group once; stepper buttons do not
+      // repeat the description belonging to the primary input.
+      await page.evaluate(`(() => { const e=document.querySelector('[data-field="desks.maxBusyDesks"]'); e.value=String(Number(e.value)+1); e.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('[data-wday="0"]').click(); })()`);
+      await settle(page);
+      const owners = await page.evaluate(`['desks.maxBusyDesks','cadence.wakeWindows'].map(key => { const e=document.getElementById('f-'+key.replace(/[^A-Za-z0-9]/g,'-')), row=e.closest('[data-row]'), id=e.getAttribute('aria-describedby'); return {key,role:e.getAttribute('role'),label:e.getAttribute('aria-label'),described:[...row.querySelectorAll('[aria-describedby]')].map(n=>n===e),description:document.getElementById(id)?.textContent,caption:row.querySelector('[data-saved]').textContent,hidden:row.querySelector('[data-saved]').getAttribute('aria-hidden')}; })`);
+      test(`${tag}: Saved text describes only the primary input or named wake-window group`, owners.every(o=>o.described.length===1 && o.described[0] && o.description===o.caption && o.hidden==='true') && owners[1].role==='group' && !!owners[1].label);
+      const { nodeId: groupId } = await page.s('DOM.querySelector', { nodeId: doc.nodeId, selector: '#f-cadence-wakeWindows' });
+      const { nodes: groups } = await page.s('Accessibility.getPartialAXTree', { nodeId: groupId, fetchRelatives: false });
+      test(`${tag}: accessibility tree gives the wake-window group the complete Saved description`, groups.some(n=>n.role?.value==='group' && n.description?.value===owners[1].description));
+      await page.evaluate(`document.getElementById('discardBtn').click()`); await settle(page);
+      test(`${tag}: discarding clears Saved descriptions from primary controls and groups`, await page.evaluate(`!document.querySelector('#setMain [aria-describedby]') && [...document.querySelectorAll('#setMain .vh[id$="-saved"]')].every(e=>e.hidden)`));
     } else {
       const stray = await page.evaluate(`(() => { const walker = document.createTreeWalker(document.getElementById('app'), NodeFilter.SHOW_TEXT), bad=[]; for(let n=walker.nextNode();n;n=walker.nextNode()) if(/ ·/.test(n.nodeValue) && n.parentElement.getClientRects().length && getComputedStyle(n.parentElement).visibility!=='hidden') bad.push(n.nodeValue); return bad; })()`);
       test(`${tag}: phone spaces before middle dots do not break`, !stray.length);

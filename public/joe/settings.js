@@ -233,7 +233,7 @@ function windowsHtml(f) {
   const saved = M.windowsOf(state.base[f.key]) ?? [];
   const shown = saved.length ? `<div class="phone-only ww-ph">${saved.map(w => { const l = M.windowLines(w); return `<p class="wph" data-value><span><b>${esc(l.id)}</b> · ${esc(l.times)}</span><span class="wph-2">${esc(l.rest)}</span></p>`; }).join('')}</div>`
     : phoneValue('No wake windows');
-  return `<div class="field ww" data-row="${f.key}">${left}<div class="f-in ww-in">
+  return `<div class="field ww" data-row="${f.key}">${left}<div class="f-in ww-in" id="${fieldId(f.key)}" role="group" aria-label="${esc(f.label)}">
     ${shown}
     <div class="ww-list dsk">${rows || '<p class="ww-none">No wake windows yet.</p>'}</div>
     <div class="ww-add dsk"><button type="button" class="btn" id="wwAdd"${ws.length >= M.MAX_WINDOWS ? ' disabled' : ''}>${icon('plus')}Add wake window</button></div>
@@ -283,10 +283,9 @@ function syncDraft() {
     const description = document.getElementById(`${fieldId(k)}-saved`);
     if (description.textContent !== text) description.textContent = text;
     description.hidden = !on;
-    for (const control of el.closest('.f-in').querySelectorAll('input, button')) {
-      if (on) control.setAttribute('aria-describedby', description.id);
-      else control.removeAttribute('aria-describedby');
-    }
+    const control = document.getElementById(fieldId(k));
+    if (on) control.setAttribute('aria-describedby', description.id);
+    else control.removeAttribute('aria-describedby');
   }
   for (const el of $$('#setMain [data-field]')) {
     if (el !== document.activeElement && el.value !== state.draft[el.dataset.field]) el.value = state.draft[el.dataset.field];
