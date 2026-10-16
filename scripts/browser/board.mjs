@@ -22,9 +22,12 @@ export const NOW = '2026-10-14T17:42:22.000Z';
 export const at = (base, seconds) => new Date(Date.parse(base) + seconds * 1000).toISOString();
 export const ingress = value => { const copy = structuredClone(value); delete copy.receivedAt; return copy; };
 
-export async function startBoard({ fleetConfig = null, history = null } = {}) {
+export async function startBoard({ fleetConfig = null, history = null, fleetConfigRaw = null, fleetActions = null } = {}) {
   const dataDir = scratch('joed-p3-board-');
   if (fleetConfig) writeFileSync(join(dataDir, 'fleet-config.json'), JSON.stringify(fleetConfig));
+  // P5: a stored file the server cannot read, and a seeded change log.
+  if (fleetConfigRaw !== null) writeFileSync(join(dataDir, 'fleet-config.json'), fleetConfigRaw);
+  if (fleetActions) writeFileSync(join(dataDir, 'fleet-config-actions.json'), JSON.stringify({ schema: 'inspr.joe.fleet-config.actions.v1', entries: fleetActions }));
   if (history) atomicWrite(join(dataDir, 'history-state.json'), historyEnvelope(history), HISTORY_CAP);
   let base = Date.parse(NOW), real = performance.now(), frozen = false;
   const clock = () => new Date(Math.round(base + (frozen ? 0 : performance.now() - real))).toISOString();
@@ -36,7 +39,7 @@ export async function startBoard({ fleetConfig = null, history = null } = {}) {
     return { status: response.status, body: await response.json() };
   };
   return {
-    port, url: `http://127.0.0.1:${port}/joe/`, push, clock,
+    port, url: `http://127.0.0.1:${port}/joe/`, push, clock, dataDir,
     setNow(iso, { freeze = true } = {}) { base = Date.parse(iso); real = performance.now(); frozen = freeze; },
     async close() {
       server.closeAllConnections();

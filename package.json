@@ -11,9 +11,9 @@
     "check": "node scripts/check-package.mjs && node scripts/check-joe-ui.mjs && node scripts/check-fleet-config.mjs && node scripts/check-position-contract.mjs",
     "test": "npm run test:contracts && npm run test:ui && node scripts/run-server-contract.mjs",
     "test:contracts": "node --test test/contracts.mjs test/failure-fixtures.mjs test/time-vectors.mjs",
-    "test:ui": "node --test test/ui-modules.mjs test/results-model.mjs",
+    "test:ui": "node --test test/ui-modules.mjs test/results-model.mjs test/settings-model.mjs",
     "test:contracts:browser": "node scripts/smoke-contracts-browser.mjs",
-    "test:browser": "node scripts/browser-p3.mjs && node scripts/browser-p4.mjs",
+    "test:browser": "node scripts/browser-p3.mjs && node scripts/browser-p4.mjs && node scripts/browser-p5.mjs",
     "budget:reference": "node scripts/budget-reference.mjs",
     "start": "node server.mjs"
   }

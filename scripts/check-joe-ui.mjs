@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Static checks on the shipped board UI (public/joe): the craft rules that can
-// be read from source, the read-only transport and the term dictionary. The
-// browser gate (scripts/browser-p3.mjs) checks the rendered pages.
+// be read from source, the read-only transport with its one paper write, and
+// the term dictionary. The browser gates (scripts/browser-p3/p4/p5.mjs) check
+// the rendered pages; P5 also proves the write at the network layer.
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -24,11 +25,28 @@ required(/\.ctip[^{]*\{[^}]*background:\s*var\(--tip-bg\)/.test(css) && /\.tip \
 required(/scrollbar-gutter:\s*stable/.test(css), "app.css: scrollbar gutter is stable");
 required(/prefers-reduced-motion:\s*no-preference/.test(css), "app.css: motion only without reduced motion");
 
+// The board reads. Its one write (P5) is fleet-write.js: a single POST of a
+// reviewed paper draft to the fleet settings' propagate route, refused unless
+// the mode is paper, imported only by Settings. No other module writes,
+// names the route or the inbox, or can set a live mode.
+const WRITER = 'fleet-write.js';
 for (const [name, text] of modules) {
-  required(!/method:\s*['"`](POST|PUT|PATCH|DELETE)/i.test(text) && !/\/inbox|propagate/.test(text), `${name}: the board only reads`);
+  if (name === WRITER) continue;
+  required(!/method:\s*['"`](POST|PUT|PATCH|DELETE)/i.test(text) && !/\/inbox|fleet-config\/propagate/.test(text), `${name}: the board only reads`);
+  if (name !== 'settings.js') required(!/from\s+['"]\.\/fleet-write\.js['"]|import\(\s*['"]\.\/fleet-write/.test(text), `${name}: only Settings may import the fleet settings' writer`);
+}
+{
+  const writer = files[WRITER] ?? '';
+  required((writer.match(/fetch\(/g) ?? []).length === 1 && (writer.match(/method:\s*['"`]POST['"`]/g) ?? []).length === 1, `${WRITER}: exactly one request, a POST`);
+  required(/const ROUTE = '\.\/fleet-config\/propagate';/.test(writer) && /fetch\(ROUTE,/.test(writer), `${WRITER}: the request goes only to the propagate route`);
+  required(/config\.mode !== 'paper'/.test(writer) && /config\.rev !== baseRev/.test(writer) && /throw new Error/.test(writer), `${WRITER}: a non-paper draft, or one not based on the version it names, is refused before any request`);
+  required(!/\/inbox/.test(writer), `${WRITER}: never the inbox`);
+}
+for (const [name, text] of modules) {
+  required(!/\bmode\s*[:=]\s*['"`](live|LIVE)['"`]/.test(text) && !/\.mode\s*=\s*(?!['"`]paper['"`])['"`]/.test(text), `${name}: no code path sets a live mode`);
   required(!/serviceWorker/.test(text), `${name}: no service worker`);
   for (const [, key] of text.matchAll(/localStorage\.(?:getItem|setItem|removeItem)\(([^)]+)\)/g)) {
-    required(/THEME_KEY|OBSERVED_EVENTS_KEY|joe-board-theme-v1/.test(key), `${name}: only theme and observed events use browser storage (${key})`);
+    required(/THEME_KEY|OBSERVED_EVENTS_KEY|PREVIEW_KEY|joe-board-theme-v1/.test(key), `${name}: only theme, observed events and the fleet settings draft use browser storage (${key})`);
   }
   const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
   for (const [, quote, body] of code.matchAll(/(['"`])((?:(?!\1)[^\\]|\\.)*)\1/g)) {
@@ -37,6 +55,10 @@ for (const [name, text] of modules) {
 }
 required(!/GridStack|gridstack|layout-v1|phone-order/.test(Object.values(files).join("\n")), "no layout manager or layout storage");
 required(!/\b(TODO|FIXME|HOSTD-\d+|JOED-\d+)\b/.test(files["index.html"].replace(/<!--[\s\S]*?-->/g, "")), "index.html: implementer string");
+
+const model = files['settings-model.js'] ?? '';
+required(/PREVIEW_KEY = 'joe-fleet-config-preview-v1'/.test(model), "settings-model.js: the draft keeps today's browser key");
+required(/KEEP_FLOOR = Object\.freeze\(\['SXR8', 'TSLA'\]\)/.test(model) && /candidate\.mode = 'paper'/.test(model), "settings-model.js: the kept-holdings floor is SXR8 and TSLA, and a candidate is always paper");
 
 const { TERMS } = await import(pathToFileURL(join(root, "terms.js")).href);
 const used = new Set();

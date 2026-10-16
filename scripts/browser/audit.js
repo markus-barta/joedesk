@@ -119,7 +119,7 @@
       const parts = [];
       const walk = node => {
         for (const child of node.childNodes) {
-          if (child.nodeType === 3) { if (child.parentElement && visible(child.parentElement)) parts.push({ text: child.nodeValue, term: Boolean(child.parentElement.closest('.term, .learn, code, .mono, #tip')) }); }
+          if (child.nodeType === 3) { if (child.parentElement && visible(child.parentElement)) parts.push({ text: child.nodeValue, term: Boolean(child.parentElement.closest('.term, .learn, code, .mono, #tip, [data-value]')) }); }
           else if (child.nodeType === 1 && !['SCRIPT', 'STYLE'].includes(child.tagName)) walk(child);
         }
       };
@@ -128,7 +128,7 @@
     },
     gui27() {
       const out = { italics: [], borders: [], pills: [], uppercase: [], cards: [], boxes: [] };
-      const primary = ['hero', 'dcard', 'rhero', 'tile', 'calcard', 'hcard'];
+      const primary = ['hero', 'dcard', 'rhero', 'tile', 'calcard', 'hcard', 'mode-panel'];
       for (const el of document.querySelectorAll('body *')) {
         if (!visible(el) || el.closest('svg')) continue;
         const cs = getComputedStyle(el), r = el.getBoundingClientRect();
@@ -219,7 +219,8 @@
         for (let n; (n = walker.nextNode());) {
           const range = document.createRange();
           range.selectNodeContents(n);
-          const layer = Boolean(n.parentElement.closest('header.top, .bottom-nav'));
+          // The page, or the fixed chrome above it (header, bottom bar, Settings' edit bar).
+          const layer = Boolean(n.parentElement.closest('header.top, .bottom-nav, .editbar'));
           for (const q of range.getClientRects()) if (q.width > 0.5 && q.height > 0.5) boxes.push({ text: n.nodeValue.trim().slice(0, 30), layer, q });
         }
         const hits = [];

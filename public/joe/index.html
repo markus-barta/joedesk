@@ -28,6 +28,9 @@
     "/joe/results.js": "/joe/results.js?v=26.09.21.12.00",
     "/joe/results-model.js": "/joe/results-model.js?v=26.09.21.12.00",
     "/joe/theme.js": "/joe/theme.js?v=26.09.21.12.00",
+    "/joe/settings.js": "/joe/settings.js?v=26.09.21.12.00",
+    "/joe/settings-model.js": "/joe/settings-model.js?v=26.09.21.12.00",
+    "/joe/fleet-write.js": "/joe/fleet-write.js?v=26.09.21.12.00",
     "/joe/time.mjs": "/joe/time.mjs?v=26.09.21.12.00",
     "/joe/market-calendar.json": "/joe/market-calendar.json?v=26.09.21.12.00",
     "/joe/contracts/index.mjs": "/joe/contracts/index.mjs?v=26.09.21.12.00",
@@ -48,6 +51,7 @@
   } }
   </script>
   <link rel="stylesheet" href="./app.css?v=26.09.21.12.00">
+  <script defer src="./joe-version.js?v=26.09.21.12.00"></script>
   <script type="module" src="./app.js?v=26.09.21.12.00"></script>
 </head>
 <body data-screen="desk">
@@ -250,8 +254,12 @@
   </section>
 
   <section class="screen" id="scr-settings" aria-labelledby="setTitle">
-    <div class="scr-h"><h1 id="setTitle">Settings</h1><span class="sub">Fleet settings · paper only</span></div>
-    <p class="set-later"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg><span>Settings are not wired yet on this board. JoeDesk stays read-only and on paper.</span></p>
+    <div class="scr-h"><h1 id="setTitle">Settings</h1><span class="sub" id="setSub"></span></div>
+    <p class="set-phone-note"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg><span>Read-only on a phone. Change fleet settings on a larger screen.</span></p>
+    <div class="set-grid">
+      <nav class="set-nav" id="setNav" aria-label="Settings sections"></nav>
+      <div class="set-main" id="setMain"></div>
+    </div>
   </section>
 
   <footer class="foot">
@@ -260,6 +268,19 @@
   </footer>
 </main>
 
+<!-- Settings: the fleet settings' edit bar (desktop and tablet; phones are read-only) -->
+<div class="editbar" id="editbar" role="region" aria-label="Fleet settings changes">
+  <div class="page editbar-in">
+    <p class="note" id="editNote" aria-live="polite"></p>
+    <div class="edit-btns">
+      <button type="button" class="btn quiet" id="discardBtn" disabled><svg class="i" aria-hidden="true"><use href="#i-undo"/></svg>Discard</button>
+      <button type="button" class="btn quiet" id="savePreview" disabled>Save draft</button>
+      <button type="button" class="btn" id="reviewBtn" disabled>Review changes</button>
+      <button type="button" class="btn primary" id="sendBtn" disabled><svg class="i" aria-hidden="true"><use href="#i-send"/></svg>Send to the desks</button>
+    </div>
+  </div>
+</div>
+
 <nav class="bottom-nav" aria-label="Screens">
   <button type="button" data-go="desk"><svg class="i" aria-hidden="true"><use href="#i-desk"/></svg>Desk</button>
   <button type="button" data-go="results"><svg class="i" aria-hidden="true"><use href="#i-results"/></svg>Results</button>
@@ -267,15 +288,72 @@
   <button type="button" data-go="settings"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
 </nav>
 
+<!-- The LIVE gate: three fixed-size steps; it ends disabled and never sends anything -->
+<dialog class="dlg gate-dlg" id="gateDlg" aria-labelledby="gateTitle">
+  <div class="dlg-in gate">
+    <div class="dlg-h"><h2 id="gateTitle" tabindex="-1"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg>Switch to LIVE</h2><button type="button" class="icon-btn" data-close aria-label="Cancel and stay on paper"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <div class="dlg-b">
+      <ol class="trail" id="gateTrack" aria-label="Steps to live trading"></ol>
+      <div class="gate-step" data-step="1">
+        <h3><svg class="i" aria-hidden="true"><use href="#i-warn"/></svg>LIVE means real orders with real money</h3>
+        <ul>
+          <li><svg class="i" aria-hidden="true"><use href="#i-wallet"/></svg><span>Joe’s desks would place real orders on a live <button type="button" class="term" data-term="ib">Interactive Brokers</button> account. Losses would be real.</span></li>
+          <li><svg class="i" aria-hidden="true"><use href="#i-keep"/></svg><span>Kept holdings (SXR8, TSLA) stay untouched in either mode.</span></li>
+          <li><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg><span>This phase is paper only: the <button type="button" class="term" data-term="executor">paper executor</button> is paper-only by design, JoeDesk has no broker access, and the <button type="button" class="term" data-term="fleet">fleet settings</button> accept only paper.</span></li>
+          <li><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg><span>A switch needs Markus’s approval, given outside JoeDesk.</span></li>
+        </ul>
+      </div>
+      <div class="gate-step" data-step="2" hidden>
+        <h3><svg class="i" aria-hidden="true"><use href="#i-type"/></svg>Type the phrase to continue</h3>
+        <p>Type <span class="phrase">switch joe to live money</span> exactly.</p>
+        <label class="sub phrase-l" for="gatePhrase">Confirmation phrase</label>
+        <input class="inp" id="gatePhrase" type="text" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <p class="match" id="gateMatch" aria-live="polite"></p>
+      </div>
+      <div class="gate-step" data-step="3" hidden>
+        <h3><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg>Waiting for Markus’s approval (out of band)</h3>
+        <p>JoeDesk does not send this request and cannot change the mode. Ask Markus directly; approval and any switch happen outside this board.</p>
+        <div class="final">
+          <button type="button" class="btn" id="liveFinal" disabled aria-describedby="liveWhy"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg>Switch to LIVE</button>
+          <span class="why" id="liveWhy">Locked in this phase: the fleet settings accept only paper, and the paper executor is paper-only by design.</span>
+        </div>
+      </div>
+    </div>
+    <div class="dlg-f">
+      <button type="button" class="btn quiet" id="gateBack">Back</button>
+      <span class="grow"></span>
+      <button type="button" class="btn" id="gateCancel">Cancel</button>
+      <button type="button" class="btn primary" id="gateNext">Continue</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Fleet settings review: Before and After, the review tick, then Confirm -->
+<dialog class="dlg" id="diffDlg" aria-labelledby="diffTitle">
+  <div class="dlg-in">
+    <div class="dlg-h"><h2 id="diffTitle" tabindex="-1">Check what will change</h2><span class="sub" id="diffBase"></span></div>
+    <div class="dlg-b">
+      <p class="ink2">Compare each Before and After value. Confirming marks this exact version as reviewed. Nothing reaches the desks until you choose Send to the desks.</p>
+      <ul class="diff" id="diffList"></ul>
+      <label class="check"><input type="checkbox" id="diffReviewed"><span>I checked every Before and After value above.</span></label>
+    </div>
+    <div class="dlg-f">
+      <button type="button" class="btn" id="diffCancel">Keep editing</button>
+      <button type="button" class="btn primary" id="diffConfirm" disabled>Confirm review</button>
+    </div>
+  </div>
+</dialog>
+
 <!-- Phone: a day's trades -->
 <dialog class="dlg sheet" id="daySheet" aria-labelledby="sheetTitle">
   <div class="dlg-in">
-    <div class="dlg-h"><h2 id="sheetTitle"></h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <div class="dlg-h"><h2 id="sheetTitle" tabindex="-1"></h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
     <div class="dlg-b" id="sheetBody"></div>
   </div>
 </dialog>
 </div>
 
 <div class="tip" id="tip" role="tooltip"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

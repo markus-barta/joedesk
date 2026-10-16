@@ -31,7 +31,14 @@ export async function launch({ hostRules = '' } = {}) {
   const args = ['--headless=new', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--disable-background-networking', '--disable-extensions', '--disable-sync', '--mute-audio', '--hide-scrollbars',
     '--disable-renderer-backgrounding', '--disable-background-timer-throttling', '--js-flags=--max-old-space-size=256',
-    '--font-render-hinting=none', `--user-data-dir=${profile}`];
+    '--font-render-hinting=none', `--user-data-dir=${profile}`,
+    // The pointer is the test's, not the host's. Chrome asks the OS for a
+    // mouse: a Mac always has one, a Linux runner has none, so there
+    // (hover: hover) never matched (the Linux CI run of c942831). Every
+    // document starts with a fine, hovering pointer; touch emulation
+    // (configure) makes it coarse and hover-less for the phone cases.
+    // Emulation.setEmulatedMedia ignores hover and pointer.
+    '--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=2,availableHoverTypes=2'];
   if (hostRules) args.push(`--host-resolver-rules=${hostRules}`);
   const proc = spawn(findBrowser(), args, { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
   proc.stderr.on('data', () => {});
@@ -93,11 +100,11 @@ export async function openPage(browser, { headers = {} } = {}) {
     browser.send('Runtime.runIfWaitingForDebugger', {}, child).catch(() => {});
   });
   browser.on(m => {
-    if (m.method === 'Network.requestWillBeSent' && m.sessionId && m.sessionId !== sessionId) requests.push({ url: m.params.request.url, method: m.params.request.method, worker: true });
+    if (m.method === 'Network.requestWillBeSent' && m.sessionId && m.sessionId !== sessionId) requests.push({ url: m.params.request.url, method: m.params.request.method, postData: m.params.request.postData, worker: true });
     if (m.sessionId !== sessionId) return;
     if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text);
     if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(m.params.args.map(a => a.value ?? a.description).join(' '));
-    if (m.method === 'Network.requestWillBeSent') requests.push({ url: m.params.request.url, method: m.params.request.method });
+    if (m.method === 'Network.requestWillBeSent') requests.push({ url: m.params.request.url, method: m.params.request.method, postData: m.params.request.postData });
   });
   const evaluate = async (expression, { awaitPromise = true } = {}) => {
     const r = await s('Runtime.evaluate', { expression, returnByValue: true, awaitPromise, userGesture: true });

@@ -3,7 +3,7 @@
 // its result-so-far chart, eight tiles, By desk, the calendar and a day's
 // trades. Without a valid record (JOED-20 writes it) Results shows its
 // designed "not wired" state: dashes, never a zero or an estimate.
-import { $, $$, icon, term, learnBtn, deskMark, inlineMark, swatch, patch, bn, pl, st, symBadge, ageSpan, statePhrase } from './ui.js';
+import { $, $$, icon, term, learnBtn, deskMark, inlineMark, swatch, patch, bn, pl, st, symBadge, ageSpan, statePhrase, openDialog } from './ui.js';
 import { TERMS } from './terms.js';
 import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age } from './format.js';
 import { cellReason } from './health.js';
@@ -334,13 +334,15 @@ function dayContent(view, k, desks) {
   return { sum, body, note };
 }
 
-export function openDaySheet(view, k) {
+// Opened by a tap, focus goes to the sheet's heading without a ring; from the
+// keyboard, to its close button with the ring (ui.js openDialog).
+export function openDaySheet(view, k, { pointer = false } = {}) {
   const sheet = $('#daySheet');
   if (!sheet) return;
   const day = dayContent(view, k, deskSet());
   $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(k)}`;
   patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}`);
-  if (!sheet.open) sheet.showModal();
+  openDialog(sheet, { pointer });
 }
 
 // ---------- The record's own state, inside the chart's fixed box ----------
