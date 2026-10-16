@@ -1091,21 +1091,28 @@ symbol on the accepted Fleet Config KEEP list is held back as a whole
 | §4.2 math, scratches, small sample, no loser, drawdown incl. Day intraday, empty period (AC-12) | `test/results-model.mjs` on hand-checkable fixtures (`scratches`, `no-losers`, `drawdown`, `empty`); browser `AC-12`/`AC-16` show the same numbers |
 | §9 budget | Workload: the 14,000-trade record (7.77 MiB) read, validated and indexed in the worker, then 11 period, desk, step and day changes at each width. Reference on mbp2607 (Apple M5 Max, HeadlessChrome 153.0.8010.12, Node v26.11.1), 2026-10-15: Results render worst 7.0 ms, no long task at 390, 1024 or 1440; the P3 workload unchanged (Desk patch 7.7 ms, History draw 9.3 ms). CI guard (2.5 ×): browser `budget` |
 
-**For JOED-20 (coordination, not filed or implemented here).**
+**For JOED-20 (producer coordination; board obligations implemented by JOED-27).**
 1. Freshness: the shared selector marks a record stale after 60 s. The producer
-   should re-send (or the server re-stamp) at least every 30 s, or the
-   freshness rule for results must be agreed separately.
-2. Ingress: no results route exists; the server keeps answering not wired.
-   Who builds the server side (acceptance through `acceptSnapshot('results')`,
-   persistence, `X-Joe-Received-At`) is JOED-20's call with this repo.
-3. `days[].realisedNet/fees/trades` are not cross-checked against `trades[]`;
-   the board uses the trades (spec §7). A semantic check could be added to the
-   contract once the producer agrees.
-4. Gross rounding: the board proves `grossEur` = quantity × move × rate exactly
-   on fixtures; the producer's rounding rule (exact or to cents) needs one
-   written decision.
+   re-sends at least every 30 s with a strictly increasing sequence and
+   non-regressing generation. Stale Results remains visible with STALE and age.
+2. Ingress: JOED-27 adds `POST /joe/inbox/results`, acceptance through
+   `acceptSnapshot('results')`, durable persistence and `X-Joe-Received-At`,
+   sharing the existing machine token. OPS must add the second exact-path
+   token-only edge router without SSO; no prefix exemption. README is the
+   producer/edge handoff. Nothing is deployed by this worker.
+3. Amy's 2026-10-16 contract decision: for each full Vienna day and reported
+   desk, count, realised net and fees reconcile exactly with trades closed on
+   that day. Per-day mismatch paths return 422 and retain last good. Optional
+   day-level `coverage: "full" | "partial"` defaults to full; only explicit
+   partial days skip reconciliation. The board still derives trade P&L from
+   trades, never from day summaries (spec §7).
+4. Amy's gross decision: exact decimal strings end to end, no contract rounding
+   and never rounding before summing. Only board display rounds to cents.
+   Fixtures prove exact FX arithmetic and sums whose cents differ when rounded
+   before summing.
 5. Every configured KEEP symbol stays out of the record (the board holds back a
-   record that trades one).
+   record that trades one). SXR8/TSLA are excluded from both trades and day
+   totals; `fixtures/results-keep-exclusion.json` proves that exclusion.
 6. (Fix round 1.) The record's closes carry no bookkeeping basis, so the board
    can detect a change of basis only inside History's 14 days or against the
    snapshot now. A basis id per desk close in `days[]` (or a restated record
@@ -1332,5 +1339,7 @@ failure and pending entries, exact v1 rollback and v2 backup/restore;
 `release/preparation.json` records the deployed legacy `db621bf` anchor without
 inventing a sequence-23 tag. The evidence CLI uses its own repository root and
 names the preparation manifest digest `preparation_sha256`. README records
-directory ownership/swap/rollback, the existing inbox exception, staging receipt
+directory ownership/swap/rollback, the exact token-only `/joe/inbox` and
+`/joe/inbox/results` edge exceptions (separate routers, no SSO, never prefix
+matches), staging receipt
 and pusher-sequence rules, and the public smoke's exact route/outputs/exit codes.

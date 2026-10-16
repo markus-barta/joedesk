@@ -8,7 +8,7 @@ export function healthProjection(model, release, now) {
   for (const name of ['data', 'history', 'results', 'fleet-config']) {
     const feed = source[name];
     let state = panelState(feed, feed.value, feed.value?.reason, now);
-    if (!feed.value && (!feed.reason || feed.reason === 'results_not_wired')) state = {
+    if (!feed.value && !feed.reason) state = {
       state: 'not reported', ageSeconds: null, reason: feed.reason ?? 'feed_not_received' };
     if (feed.value && Date.parse(now) < Date.parse(feed.value.receivedAt ?? feed.receivedAt)) state = {
       state: 'broken', ageSeconds: null, reason: 'clock_regressed' };

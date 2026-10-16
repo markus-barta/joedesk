@@ -62,7 +62,6 @@ export const CELL_REASON = Object.freeze({
   history_write_failed: 'history could not be saved',
   halt_on: 'emergency stop is on',
   executor_broker_disagreement: 'executor and broker disagree',
-  results_not_wired: 'not wired yet',
 });
 export const cellReason = reason => CELL_REASON[reason] ?? 'not available';
 export const capital = text => text.charAt(0).toUpperCase() + text.slice(1);

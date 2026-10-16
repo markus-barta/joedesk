@@ -6,7 +6,7 @@
 import { $, $$, icon, term, learnBtn, deskMark, inlineMark, swatch, patch, bn, pl, st, symBadge, ageSpan, statePhrase, openDialog } from './ui.js';
 import { TERMS } from './terms.js';
 import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age } from './format.js';
-import { cellReason } from './health.js';
+import { cellReason, STALE_AFTER_S } from './health.js';
 import { drawChart, eurAxis } from './chart.js';
 import { viennaDay } from './time.mjs';
 import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
@@ -31,7 +31,7 @@ export const resultsToday = now => viennaDay(now ?? new Date().toISOString());
 export function resultsView(ctx) {
   const today = resultsToday(ctx.now);
   const cell = ctx.states.results;
-  let ix = cell?.value?.index ?? null, reason = cell?.reason ?? (cell?.value ? null : 'results_not_wired');
+  let ix = cell?.value?.index ?? null, reason = cell?.reason ?? (cell?.value ? null : 'feed_not_received');
   // The accepted kept-holdings policy wins: a record that still trades a kept
   // symbol is not authoritative, so nothing is derived from it.
   const keep = [...new Set([...KEEP_FLOOR, ...(ctx.feeds['fleet-config']?.value?.desks.keep ?? [])])];
@@ -123,7 +123,7 @@ export function renderResults(ctx) {
   const mctx = ix ? numbers(view, per, desks) : null;
   const R = ix ? M.rollup(ix, per, desks, mctx) : null;
   renderHero(view, per, desks, R);
-  renderTiles(R, view);
+  renderTiles(R);
   renderBreakdown(view, per, desks, ix ? DESKS.map(d => M.rollup(ix, per, [d], numbers(view, per, [d]))).concat(desks.length === 3 ? [R] : [M.rollup(ix, per, DESKS, numbers(view, per, DESKS))]) : null);
   renderCalendar(view, per, desks);
   renderStatus(view);
@@ -131,7 +131,7 @@ export function renderResults(ctx) {
 }
 
 function heroSentence(view, per, R) {
-  if (!view.ix) return view.reason === 'results_not_wired' ? 'Results are not wired yet. The board has no closed-trade record for this period.' : `Results are unavailable: ${cellReason(view.reason)}.`;
+  if (!view.ix) return `Results are unavailable: ${cellReason(view.reason)}.`;
   if (R.cut) return `No result ${per.phrase}: ${cutText(R.cut)}, and a change of basis is not a gain or a loss.`;
   if (R.empty) return `No trades ${per.phrase}. Paper results start on ${startText(view.trackingStart)}.`;
   if (R.net === null) return `The result ${per.phrase} is not known yet: the desks’ money ${R.end === view.today ? 'now' : `on ${M.fmtDDM(R.end)}`} is not available.`;
@@ -168,10 +168,9 @@ export function dayTile(R) {
   return { val: two(bn(R.bestDay.units), bn(R.worstDay.units)), mean: `${M.fmtDDM(R.bestDay.date)} · ${M.fmtDDM(R.worstDay.date)}`, tight: tightPair(R.bestDay.units, R.worstDay.units) };
 }
 
-function renderTiles(R, view) {
+function renderTiles(R) {
   if (!R) {
-    const why = view.reason === 'results_not_wired' ? 'Not wired yet' : 'Unavailable';
-    patch($('#tiles'), Object.keys(TILE_ICON).map(k => tile(k, D, why, k === 'dip' ? 'From the desks’ money' : undefined)).join(''));
+    patch($('#tiles'), Object.keys(TILE_ICON).map(k => tile(k, D, 'Unavailable', k === 'dip' ? 'From the desks’ money' : undefined)).join(''));
     return;
   }
   const n = R.trades, decided = R.won + R.lost, u = R.units;
@@ -199,9 +198,9 @@ function renderBreakdown(view, per, desks, rows) {
     patch($('#breakdown'), list.map(r => `
     <div class="brow${r.id === 'all' ? ' total' : ''}${RS.desk === r.id ? ' sel' : ''}" data-row="${r.id}">
       <div class="who">${r.id === 'all' ? '<span class="dmark" aria-hidden="true"><svg viewBox="0 0 28 28"><use href="#i-logo"/></svg></span>' : deskMark(r.id)}${r.name}</div>
-      <div class="track" role="img" aria-label="${r.name}: ${view.reason === 'results_not_wired' ? 'not wired yet' : 'unavailable'}"><span class="z"></span></div>
+      <div class="track" role="img" aria-label="${r.name}: unavailable"><span class="z"></span></div>
       <div class="val"><span class="muted">—</span></div>
-      <div class="facts">${view.reason === 'results_not_wired' ? 'Not wired yet' : 'Unavailable'}</div>
+      <div class="facts">Unavailable</div>
     </div>`).join(''));
     return;
   }
@@ -242,7 +241,7 @@ function dayState(view, k, desks, max) {
   }
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   if (closed) return { cls: 'we', note: 'closed', aria: M.isWeekend(k) ? 'weekend, markets closed' : 'US market holiday, markets closed' };
-  if (!ix) return { cls: 'nw', note: '', aria: view.reason === 'results_not_wired' ? 'not wired yet' : 'unavailable', dash: true };
+  if (!ix) return { cls: 'nw', note: '', aria: 'unavailable', dash: true };
   if (k < view.trackingStart) return { cls: 'we pre', note: '', aria: 'before paper results start' };
   return { cls: 'none', note: 'no trades', aria: 'no trades' };
 }
@@ -260,7 +259,7 @@ function renderCalendar(view, per, desks) {
     const r = M.dayResult(ix, M.dateKey(y, m, d), desks);
     if (r.count) { monthCount += r.count; monthUnits += r.units; monthDays++; }
   }
-  $('#calSum').textContent = !ix ? (view.reason === 'results_not_wired' ? 'Not wired yet' : 'Unavailable')
+  $('#calSum').textContent = !ix ? 'Unavailable'
     : monthCount ? `${signedWord(monthUnits)} over ${plural(monthDays, 'trading day')}` : 'No trades this month';
   const start = M.monday(first);
   const inPer = k => (RS.period === 'day' || RS.period === 'week') && k >= per.start && k <= per.end;
@@ -287,7 +286,7 @@ function renderCalendar(view, per, desks) {
   patch($('#calLegend'), `<span class="nowrap">Loss <span class="ramp"><i style="background:var(--l4)"></i><i style="background:var(--l3)"></i><i style="background:var(--l2)"></i><i style="background:var(--l1)"></i></span></span>
     <span class="nowrap"><span class="ramp"><i style="background:var(--flat)"></i></span> Flat</span>
     <span class="nowrap"><span class="ramp"><i style="background:var(--g1)"></i><i style="background:var(--g2)"></i><i style="background:var(--g3)"></i><i style="background:var(--g4)"></i></span> Gain</span>
-    <span>${!ix ? 'Tints appear once results are wired' : max > 0n ? `Darkest: ${eur(max * 3n / 4n)} to ${eur(max)} in a day` : 'No trading day yet'}</span>`);
+    <span>${!ix ? 'Tints appear once results arrive' : max > 0n ? `Darkest: ${eur(max * 3n / 4n)} to ${eur(max)} in a day` : 'No trading day yet'}</span>`);
   const day = dayContent(view, RS.sel, desks);
   patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}</div>`);
   const sheet = $('#daySheet');
@@ -320,7 +319,7 @@ function dayContent(view, k, desks) {
   const ts = ix ? M.tradesOn(ix, k, desks) : [];
   if (!ix) {
     return { sum: '—', body: `<p class="dp-empty">${icon('info')}<span>${k > today ? `${M.fmtDDM(k)} is still ahead.`
-      : view.reason === 'results_not_wired' ? `No closed-trade record for ${M.fmtDDM(k)} yet: results are not wired.` : `No closed-trade record for ${M.fmtDDM(k)}: ${esc(cellReason(view.reason))}.`}</span></p>`, note: '' };
+      : `No closed-trade record for ${M.fmtDDM(k)}: ${esc(cellReason(view.reason))}.`}</span></p>`, note: '' };
   }
   const r = M.dayResult(ix, k, desks);
   const sum = ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
@@ -355,7 +354,8 @@ function renderStatus(view) {
   const ago = () => ageSpan('res', cell.ageSeconds == null ? 'an unknown time' : `${age(cell.ageSeconds)} ago`);
   const text = cell.retained ? `${cell.reason === 'sequence_replayed' ? 'Results update not used' : 'Results refresh failed'}: ${why ?? 'not available'}. Showing the last good results from ${ago()}.`
     : p.state === 'stale' ? `Results as of ${ago()}${why ? ` · ${why}` : ''}.` : `Results: ${why ?? 'not available'} · as of ${ago()}.`;
-  patch(el, `<div class="res-state" data-state="${p.state}">${st(p.tone, text)}</div>`);
+  const stale = p.state === 'stale' || cell.ageSeconds >= STALE_AFTER_S;
+  patch(el, `<div class="res-state" data-state="${p.state}">${st(p.tone, `${stale ? 'STALE · ' : ''}${text}`)}</div>`);
 }
 
 // ---------- The hero chart: result so far, from € 0 ----------
@@ -364,7 +364,7 @@ function renderCurve(view, per, desks, R, mctx) {
   patch($('#curveLegend'), `<span class="lg"><b class="lg-b">${term('result', 'Result')} so far · ${esc(per.head)}</b></span><span class="lg">${swatch(color)}${esc(whoOf(desks))}</span><span class="lg">${swatch('var(--ink-3)', '', 1.4)}Zero</span><span class="lg muted">${swatch('var(--est)', '1 3.5', 1.6)}No index chosen</span>`);
   const top = 12 + Math.ceil($('#resStatus')?.offsetHeight ?? 0);
   if (!view.ix) {
-    drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: view.reason === 'results_not_wired' ? 'Results are not wired yet' : 'Results are unavailable', label: `Result so far: ${view.reason === 'results_not_wired' ? 'not wired yet' : 'unavailable'}`, pad: { t: top } });
+    drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: 'Results are unavailable', label: 'Result so far: unavailable', pad: { t: top } });
     return;
   }
   const c = M.curve(view.ix, per, desks, mctx);

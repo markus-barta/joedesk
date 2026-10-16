@@ -41,7 +41,7 @@ const at = (base, seconds) => new Date(Date.parse(base) + seconds * 1000).toISOS
 // the previous accepted cells as retained last-good values.
 function board(fixture, { cold = false } = {}) {
   const feeds = { 'fleet-config': { value: structuredClone(valid['fleet-config']), receivedAt: valid.data.receivedAt },
-    results: { value: null, reason: 'results_not_wired' }, history: { value: structuredClone(valid.history) } };
+    results: { value: null, reason: 'feed_not_received' }, history: { value: structuredClone(valid.history) } };
   let previous = {};
   if (!cold) {
     feeds.data = acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt);

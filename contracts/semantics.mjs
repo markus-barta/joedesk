@@ -1,5 +1,6 @@
 import { decimalUnits } from './decimal.mjs';
 import { gatewayReason } from './gateway.mjs';
+import { viennaDay } from '../time.mjs';
 
 const FIELDS = ['equity', 'dayPnl', 'openPnl', 'totalPnl'];
 const KEEP = ['SXR8', 'TSLA'];
@@ -109,8 +110,7 @@ export function checkSemantics(kind, payload, stage, errors) {
   }
   if (kind === 'results') {
     const seen = new Set();
-    payload.days.forEach((day, i) => Object.values(day.desks).forEach(d =>
-      ['equityClose', 'realisedNet', 'fees'].forEach(f => eur(d[f], `$.days[${i}].${f}`))));
+    const closed = new Map();
     payload.trades.forEach((t, i) => {
       const at = `$.trades[${i}]`;
       if (seen.has(t.id)) fail(`${at}.id`, 'uniqueTrade');
@@ -122,7 +122,25 @@ export function checkSemantics(kind, payload, stage, errors) {
       if (t.entryPrice.currency !== t.exitPrice.currency || t.fx.base !== t.entryPrice.currency) fail(at, 'fxCurrency');
       if (decimalUnits(t.feesEur.amount) < 0n) fail(`${at}.feesEur`, 'nonnegative');
       if (decimalUnits(t.grossEur.amount) - decimalUnits(t.feesEur.amount) !== decimalUnits(t.netEur.amount)) fail(at, 'netAfterFees');
+      const key = `${viennaDay(t.closedAt)}|${t.desk}`;
+      const sum = closed.get(key) ?? { trades: 0, realisedNet: 0n, fees: 0n };
+      sum.trades++;
+      sum.realisedNet += decimalUnits(t.netEur.amount);
+      sum.fees += decimalUnits(t.feesEur.amount);
+      closed.set(key, sum);
     });
+    // A windowed trades[] can cover only part of a day. All other day/desk
+    // summaries must reconcile exactly, including zero-trade days. Never
+    // round individual trades or the sum at this contract boundary.
+    payload.days.forEach((day, i) => Object.entries(day.desks).forEach(([id, d]) => {
+      const at = `$.days[${i}].desks.${id}`;
+      ['equityClose', 'realisedNet', 'fees'].forEach(f => eur(d[f], `${at}.${f}`));
+      if (day.coverage === 'partial') return;
+      const sum = closed.get(`${day.date}|${id}`) ?? { trades: 0, realisedNet: 0n, fees: 0n };
+      if (d.trades !== sum.trades) fail(`${at}.trades`, 'dayTradeCount');
+      if (!d.realisedNet || decimalUnits(d.realisedNet.amount) !== sum.realisedNet) fail(`${at}.realisedNet`, 'dayNetSum');
+      if (!d.fees || decimalUnits(d.fees.amount) !== sum.fees) fail(`${at}.fees`, 'dayFeeSum');
+    }));
   }
   if (kind === 'healthz') {
     // Strict schema is the allowlist; no free text, money or identifiers.

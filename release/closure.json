@@ -50,7 +50,7 @@
     {
       "path": "contracts/manifest.json",
       "size": 932,
-      "sha256": "ddf609cef44f67e4dd88aad356546718699e32af7239250629c65221a74b2556"
+      "sha256": "7f75bcf48e08cdc6af1969eb45fd66cf07f938e49b50ce3e37d9974573738517"
     },
     {
       "path": "contracts/panel-state.mjs",
@@ -59,18 +59,18 @@
     },
     {
       "path": "contracts/read.mjs",
-      "size": 1515,
-      "sha256": "48777066715a5697041882b8bb760dc9705c0b8d0819e90dbd0c3e2c27f8f481"
+      "size": 1423,
+      "sha256": "c1d8983dd20f5abb31f0fcb366a756bbe207a41bce2485f64dca0158b519a31b"
     },
     {
       "path": "contracts/reason.schema.json",
-      "size": 991,
-      "sha256": "e9b1e39064dc375f067c724de78ed45d00b89fe5fd0637444f151d543a193e53"
+      "size": 966,
+      "sha256": "52e6515f7aef346937d01ce6827e2bfb71add9dbf57c7a2ab08f63ea2c8497fd"
     },
     {
       "path": "contracts/results.schema.json",
-      "size": 11165,
-      "sha256": "fa710d3b8276c9bcafb5ab1d4336a61737290e3ea97b535c433d2cf3bfbf430b"
+      "size": 11470,
+      "sha256": "3ff6fd8eaaa76d148a65574e415038354625c1b1f89b333898fde9b929ee4f00"
     },
     {
       "path": "contracts/schema-validator.mjs",
@@ -79,8 +79,8 @@
     },
     {
       "path": "contracts/semantics.mjs",
-      "size": 9200,
-      "sha256": "3eb559b4a8eecc8403b76550a1a88f50e8a87ac30b127853e023ad71a3ac0ba4"
+      "size": 10270,
+      "sha256": "45e53558f2043423f0f8002752b8fe5920f1c3ca128de30347cba8ce679c75bd"
     },
     {
       "path": "fleet-config.mjs",
@@ -94,8 +94,8 @@
     },
     {
       "path": "package.json",
-      "size": 1221,
-      "sha256": "90b92cf9d6dfaddb5af845a2853895af2d8fa687254313a1b4b307f1768364ea"
+      "size": 1284,
+      "sha256": "9b20de87c5ac10ac7fc719f39717d08161e0e838f23125ba190dcb224e278a2f"
     },
     {
       "path": "public/joe/app.css",
@@ -159,8 +159,8 @@
     },
     {
       "path": "public/joe/health.js",
-      "size": 11496,
-      "sha256": "a46f95c6a86c83840779088463eec59d45887de67c80e0564baaed2a924fb7d7"
+      "size": 11458,
+      "sha256": "a3bb29a716074dce0fee3c8b4b8029e1aa0e59e0f5085a0833d39eddefbfa959"
     },
     {
       "path": "public/joe/history-model.js",
@@ -199,8 +199,8 @@
     },
     {
       "path": "public/joe/results.js",
-      "size": 30101,
-      "sha256": "855e095e48483fa2a88ed9bfcff6657004c7304a3d67c6c384eac19d2a948e69"
+      "size": 29529,
+      "sha256": "6e2897c8ba29c70210112e38e3b28d7511fd946cab486e1b52bf05ce4748dcf8"
     },
     {
       "path": "public/joe/settings-model.js",
@@ -270,7 +270,7 @@
     {
       "path": "release/contracts.json",
       "size": 1661,
-      "sha256": "f2558be53ac077ba13325718bf88f274dbd105e2ca8c8ab4ac208dd0184edcf0"
+      "sha256": "2e6e0e667df00278bcd3e99974133883a899cc6b38ef321b8480697a5e88eabd"
     },
     {
       "path": "release/data-migration.mjs",
@@ -294,8 +294,8 @@
     },
     {
       "path": "server/health.mjs",
-      "size": 1740,
-      "sha256": "f939692a12cea012913adeb9d8dff33735fe706ddcb1aa1a92c45aa17dc54cd8"
+      "size": 1699,
+      "sha256": "b57b6241fe29890f640a6eab159c6e9cbdb930ff8bf768f11b4f0a0f5693a5dd"
     },
     {
       "path": "server/history.mjs",

@@ -123,8 +123,10 @@ OPS owns these exact nixcfg items through its existing review path:
    rename fails. For rollback, restore the verified v1 backup into a new sibling,
    apply the same ownership/modes and stopped-service swap, then start the
    compatible v1 pins. Chown is required even when no NixOS activation occurs.
-4. The production host gate including `cs0.barta.cm`; no other route exemption
-   beyond the existing token-only `/joe/inbox` router.
+4. The production host gate including `cs0.barta.cm`; only the two exact paths
+   `/joe/inbox` and `/joe/inbox/results` use token-only routers without SSO.
+   Never use a prefix match; preserve the documented SSO and exact health policy
+   on other routes.
 5. After the gates and Markus's cutover decision, run
    `node scripts/smoke-release.mjs BASE_JOE_URL VERSION_SCHEME CANONICAL_VERSION`.
    `BASE_JOE_URL` is the public SSO route ending **exactly** in `/joe/`, with no
@@ -380,14 +382,35 @@ The UI gates non-canonical hosts client-side (privacy stub). That is UX only, no
 `JOE_INBOX_TOKEN` fallback. No new credential or variable; no browser/SSO identity
 is needed for this machine route. Keep the protected read behind trusted SSO.
 
+OPS must add a **second token-only edge router for the exact path
+`/joe/inbox/results`**, without SSO, next to the existing exact `/joe/inbox`
+router. Never use a prefix match: every other `/joe/` route keeps its existing
+SSO policy (including the separately documented exact health exception).
+This repository documents that edge prerequisite; it does not configure it.
+
 Send exactly one JSON `inspr.joe.household.results.v2` snapshot as the body,
 without an envelope or `receivedAt`. Validate it with
 `validateContract('results', snapshot, {stage: 'ingress'})` from the pinned
 `contracts/` package. The UTF-8 request limit is `CONTRACTS.limits.results`
 (8,388,608 bytes); the served snapshot, including the server's `receivedAt`,
-must also fit that contract limit. Decimal money, gross/FX arithmetic, KEEP
-exclusion and all existing schema rules apply unchanged. Gross rounding and
-days/trades cross-check changes still require Amy's separate contract decision.
+must also fit that contract limit. Money, including gross, stays in exact decimal
+strings (up to eight fractional digits) through validation, storage and reads.
+Never round before summing; only the board display rounds to cents. Each trade's
+`netEur` equals its exact `grossEur` minus `feesEur`.
+
+For each fully covered Vienna date in `days[]` and each reported desk,
+`days[i].desks[id].trades` must equal the count of that desk's `trades[]` whose
+`closedAt` falls on that date in `Europe/Vienna`; `realisedNet` and `fees` must
+equal their exact `netEur` and `feesEur` sums. A zero-trade day requires zero
+totals; null totals do not reconcile. A mismatch returns 422 with the per-day
+path (`$.days[i].desks.id.trades`, `.realisedNet` or `.fees`) and rule
+(`dayTradeCount`, `dayNetSum` or `dayFeeSum`), retaining the last good snapshot.
+Day-level `coverage` is optional: `"full"` (the default when omitted) or
+`"partial"`. Use `"partial"` only when a windowed `trades[]` covers part of that
+day; its day/trade cross-check is skipped. Schema and trade checks still apply.
+KEEP holdings **SXR8 and TSLA are excluded from both `trades[]` and all `days[]`
+totals**, including partial days. Results derives trade P&L from `trades[]`;
+day summaries are validated, never substituted for the trade record.
 
 Re-send at least every 30 s with a strictly higher `seq` and non-regressing
 `generatedAt`. Generation may be at most 5 s ahead of the server clock; server
@@ -396,6 +419,7 @@ shared selector marks Results stale at 60 s without a new acceptance; repeated
 generation also becomes `producer_frozen` at 60 s. Exact retries return 422
 without changing stores, freshness or an existing rejection. Other rejections
 persist their closed reason and keep the last good record and its original age.
+Stale Results stays visible, labelled **STALE** with its last-good age.
 
 | Response | Meaning |
 | --- | --- |
@@ -404,7 +428,11 @@ persist their closed reason and keep the last good record and its original age.
 | 401 | `auth_required` — missing/incorrect Bearer token. |
 | 413 | `contract_invalid` — body exceeds the request limit. |
 | 400 | `contract_invalid` — malformed JSON/body. |
+| 405 | Method not allowed — this ingress accepts POST only. |
 | 503 | `auth_required` if the shared token is unavailable; `contract_invalid` for unreadable/corrupt Results storage; `refresh_failed` if snapshot/rejection persistence fails. |
+
+Persistence failures return 503 `refresh_failed` here; the existing data inbox
+still returns 500 for its snapshot save failure.
 
 `GET /joe/results.json` returns the last accepted snapshot (200), including
 `receivedAt`, with `X-Joe-Received-At`, `X-Joe-Server-Now`,

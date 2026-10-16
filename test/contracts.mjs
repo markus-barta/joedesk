@@ -118,6 +118,97 @@ test('paper is fixed, KEEP is excluded from results and cannot be removed from f
   rejects(validateContract('fleet-config', { ...samples['fleet-config'], mode: 'live' }), 'const', '$.mode');
 });
 
+test('results: full day/desk summaries reconcile counts and exact sums, including empty days and nulls', () => {
+  for (const coverage of [undefined, 'full']) {
+    const good = copy(samples.results);
+    if (coverage) good.days[0].coverage = coverage;
+    assert.equal(validateContract('results', good).ok, true);
+    for (const [field, value, rule] of [
+      ['trades', 2, 'dayTradeCount'], ['realisedNet', { amount: '-0.99', currency: 'EUR' }, 'dayNetSum'],
+      ['fees', { amount: '0.64000001', currency: 'EUR' }, 'dayFeeSum'],
+      ['realisedNet', null, 'dayNetSum'], ['fees', null, 'dayFeeSum'],
+    ]) {
+      const bad = copy(good); bad.days[0].desks.j[field] = value;
+      rejects(validateContract('results', bad), rule, `$.days[0].desks.j.${field}`);
+    }
+    const empty = copy(good); empty.days[0].desks.joe.fees.amount = '0.01';
+    rejects(validateContract('results', empty), 'dayFeeSum', '$.days[0].desks.joe.fees');
+  }
+});
+
+test('results: gross and day sums keep sub-cent decimals without rounding in acceptance', () => {
+  const exact = JSON.parse(readFileSync(new URL('../fixtures/results/exact-decimals.json', import.meta.url)));
+  assert.equal(validateContract('results', exact).ok, true);
+  const accepted = acceptSnapshot('results', ingress(exact), null, at);
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(accepted.value, exact);
+  assert.equal(exact.days[0].desks.j.realisedNet.amount, '0.0278');
+  assert.equal(exact.days[0].desks.j.fees.amount, '0.0118');
+  for (const [field, rounded, rule] of [['realisedNet', '0.02', 'dayNetSum'], ['fees', '0.02', 'dayFeeSum']]) {
+    const bad = ingress(exact); bad.seq++; bad.days[0].desks.j[field].amount = rounded;
+    const rejected = acceptSnapshot('results', bad, accepted, later);
+    rejects(rejected, rule, `$.days[0].desks.j.${field}`);
+    assert.strictEqual(rejected.value, accepted.value);
+  }
+  const roundedGross = copy(exact); roundedGross.trades[0].grossEur.amount = '0';
+  rejects(validateContract('results', roundedGross), 'netAfterFees', '$.trades[0]');
+});
+
+test('results: explicit partial days skip reconciliation only for that day; coverage is a closed optional enum', () => {
+  const partial = JSON.parse(readFileSync(new URL('../fixtures/results/partial-day.json', import.meta.url)));
+  assert.equal(validateContract('results', partial).ok, true);
+  assert.equal(acceptSnapshot('results', ingress(partial), null, at).status, 200);
+  for (const coverage of [undefined, 'full']) {
+    const bad = copy(partial);
+    if (coverage) bad.days[0].coverage = coverage; else delete bad.days[0].coverage;
+    rejects(validateContract('results', bad), 'dayTradeCount', '$.days[0].desks.j.trades');
+  }
+  for (const coverage of ['windowed', '', null, true]) {
+    const bad = copy(partial); bad.days[0].coverage = coverage;
+    rejects(validateContract('results', bad), 'enum', '$.days[0].coverage');
+  }
+  const otherDay = copy(partial); otherDay.days[1].desks.j.trades = 1;
+  rejects(validateContract('results', otherDay), 'dayTradeCount', '$.days[1].desks.j.trades');
+  const badTrade = copy(partial); badTrade.trades[0].netEur.amount = '999';
+  rejects(validateContract('results', badTrade), 'netAfterFees', '$.trades[0]');
+});
+
+test('results: daily reconciliation uses Vienna close dates across midnight and the 25-hour DST day', () => {
+  const r = copy(samples.results);
+  r.days = ['2026-10-24', '2026-10-25', '2026-10-26'].map(date => {
+    const d = copy(r.days[0]); d.date = date;
+    d.desks.j.trades = 1;
+    return d;
+  });
+  r.trades = ['2026-10-24T21:59:59.999Z', '2026-10-24T22:00:00.000Z', '2026-10-25T23:00:00.000Z'].map((closedAt, i) => ({
+    ...copy(samples.results.trades[0]), id: `rt-midnight-${i}`, openedAt: closedAt, closedAt,
+  }));
+  assert.equal(validateContract('results', r).ok, true);
+  r.trades[1].closedAt = '2026-10-24T21:59:59.999Z'; r.trades[1].openedAt = r.trades[1].closedAt;
+  rejects(validateContract('results', r), 'dayTradeCount', '$.days[0].desks.j.trades');
+  rejects(validateContract('results', r), 'dayTradeCount', '$.days[1].desks.j.trades');
+});
+
+test('results: KEEP fixture excludes SXR8 and TSLA from both trade records and day totals', () => {
+  const { sourceTrades, snapshot } = JSON.parse(readFileSync(new URL('../fixtures/results-keep-exclusion.json', import.meta.url)));
+  assert.deepEqual(sourceTrades.filter(t => ['SXR8', 'TSLA'].includes(t.symbol)).map(t => t.symbol), ['SXR8', 'TSLA']);
+  assert.deepEqual(snapshot.trades, sourceTrades.filter(t => !['SXR8', 'TSLA'].includes(t.symbol)));
+  assert.equal(validateContract('results', snapshot).ok, true);
+  assert.deepEqual(snapshot.days[0].desks.joel, { equityClose: { amount: '5000', currency: 'EUR' },
+    realisedNet: { amount: '0', currency: 'EUR' }, fees: { amount: '0', currency: 'EUR' }, trades: 0 });
+  for (const t of sourceTrades.filter(t => ['SXR8', 'TSLA'].includes(t.symbol))) {
+    const bad = copy(snapshot); bad.trades.push(t);
+    rejects(validateContract('results', bad), 'keepExcluded', '$.trades[1].symbol');
+    bad.days[0].coverage = 'partial';
+    rejects(validateContract('results', bad), 'keepExcluded', '$.trades[1].symbol');
+  }
+  for (const [field, value, rule] of [['trades', 2, 'dayTradeCount'],
+    ['realisedNet', { amount: '303', currency: 'EUR' }, 'dayNetSum'], ['fees', { amount: '2', currency: 'EUR' }, 'dayFeeSum']]) {
+    const bad = copy(snapshot); bad.days[0].desks.joel[field] = value;
+    rejects(validateContract('results', bad), rule, `$.days[0].desks.joel.${field}`);
+  }
+});
+
 test('accepted receive time belongs to the server; old, unknown, invalid and replayed input keep last-good', () => {
   for (const kind of ['data', 'history', 'results']) {
     const initial = acceptSnapshot(kind, ingress(samples[kind]), null, at);

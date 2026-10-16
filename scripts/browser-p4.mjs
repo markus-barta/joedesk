@@ -14,7 +14,7 @@ import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './brows
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
-import { designResults } from './browser/results.mjs';
+import { designResults, withTradeSummaries } from './browser/results.mjs';
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -433,8 +433,16 @@ try {
       const tag = `${viewport.name} ${theme}`;
       await configure(page, viewport, theme);
       await serve(null);
+      const firstPaint = await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `
+        new MutationObserver(function (_, observer) {
+          const say = document.querySelector('#rheroL .say');
+          if (say?.textContent) { window.__resultsFirstSay = say.textContent; observer.disconnect(); }
+        }).observe(document, { childList: true, subtree: true });` });
       await load(page, board.url, 'results');
+      await page.s('Page.removeScriptToEvaluateOnNewDocument', firstPaint);
       const nw = await page.evaluate(RES);
+      check('results-first-paint', `${tag}: first paint already says no data received yet`,
+        (await page.evaluate('window.__resultsFirstSay')) === 'Results are unavailable: no data received yet.');
       check('AC-16', `${tag}: before the first push Results uses its existing unavailable state: reason, dashes, no zeros, dates kept`,
         nw.say === 'Results are unavailable: no data received yet.' && nw.display === '—' && nw.split.every(x => x === '—') && nw.tiles.every(x => x.val.trim() === '—') &&
         nw.rows.every(x => x.val.trim() === '—') && nw.cal.cells.length >= 28 && !/€\s?0,00/.test(`${nw.say}${nw.split.join('')}`) && nw.curve?.aria === 'Results are unavailable' && nw.curve.empty, nw);
@@ -453,7 +461,7 @@ try {
       await waitFor(page, `document.getElementById('resStatus').innerText.length > 0`);
       await settle(page);
       const stale = await page.evaluate(RES);
-      check('panel-state', `${tag}: a record received 5 min ago says so in the chart's box and keeps its numbers`, /^Results as of 5.min ago · updates are late\.$/.test(stale.status) && stale.display === fresh.display &&
+      check('panel-state', `${tag}: a record received 5 min ago says STALE with age in the chart's box and keeps its numbers`, /^STALE · Results as of 5.min ago · updates are late\.$/.test(stale.status) && stale.display === fresh.display &&
         !shifted(freshRects, await shiftOf(), ['top', 'left', 'height']).length, { status: stale.status, display: [fresh.display, stale.display] });
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-stale`, 'Results, the record received 5 min ago: its age and reason in the chart box');
       await serve(() => ({ fail: 'ConnectionRefused' }));
@@ -461,7 +469,7 @@ try {
       await waitFor(page, `/refresh failed/.test(document.getElementById('resStatus').innerText)`);
       await settle(page);
       const kept = await page.evaluate(RES);
-      check('panel-state', `${tag}: a failed refresh keeps the last good record and says so`, /^Results refresh failed: update failed\. Showing the last good results from \d+.(s|min) ago\.$/.test(kept.status) && kept.display === fresh.display, kept.status);
+      check('panel-state', `${tag}: a failed refresh keeps the last good record and says so`, /^STALE · Results refresh failed: update failed\. Showing the last good results from \d+.(s|min) ago\.$/.test(kept.status) && kept.display === fresh.display, kept.status);
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-refresh-failed`, 'Results, refresh failed: the last good record kept, with its age');
       // Unavailable from the first read: its own reason.
       await serve(() => ({ status: 401, body: { ok: false, reason: 'auth_required' } }));
@@ -612,6 +620,7 @@ try {
       const record = designResults(NOW);
       const close = d => ({ equityClose: { amount: d === 'j' ? '4990' : snapshot.desks.find(x => x.id === d).money.equity.amount, currency: 'EUR' }, realisedNet: { amount: '0', currency: 'EUR' }, fees: { amount: '0', currency: 'EUR' }, trades: 0 });
       record.days.push({ date: inputs.today, desks: Object.fromEntries(DESKS.map(d => [d, close(d)])) });
+      withTradeSummaries(record);
       const ix = M.indexResults(record);
       check('r1-money-now', 'J has no money now; the record has a close for today', inputs.todayUnits[0] === null && ix.dates.at(-1) === inputs.today, inputs.todayUnits);
       await serve(served(record, board));
@@ -720,7 +729,7 @@ try {
       await waitFor(page, `/updates are late/.test(document.getElementById('resStatus').innerText)`);
       const stale = await page.evaluate(RES);
       check('results-ingress', `${viewport.name} ${theme}: at 60 s the real feed is stale, keeps its numbers and moves nothing`,
-        /^Results as of 1.min ago · updates are late\.$/.test(stale.status) && stale.display === live.display &&
+        /^STALE · Results as of 1.min ago · updates are late\.$/.test(stale.status) && stale.display === live.display &&
         !shifted(before, await rects(page, SHIFT), ['top', 'left', 'height']).length, stale.status);
       if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-ingress-stale`, 'Results stale 60 seconds after its last accepted push');
       const bad = structuredClone(record); bad.seq++; bad.generatedAt = board.clock(); bad.trades[0].netEur.amount = '999';

@@ -11,6 +11,7 @@ import { createReadModel } from '../server/read-model.mjs';
 import { atomicWrite } from '../server/storage.mjs';
 import { historyEnvelope, appendHistory, boundHistory, compactPoints, measureHistory, HISTORY_CAP, HISTORY_WARNING } from '../server/history.mjs';
 import { validateContract, CONTRACTS } from '../contracts/index.mjs';
+import { decimalUnits, unitsDecimal } from '../contracts/decimal.mjs';
 import { acceptRead } from '../contracts/read.mjs';
 import { panelStates, panelState, MONEY_FIELDS } from '../contracts/panel-state.mjs';
 
@@ -523,9 +524,11 @@ test('JOED-27 results: malformed 400, oversized 413 and bounded 422 diagnostics 
 test('JOED-27 results: replay and regressed producer/server clocks cannot replace or freshen last-good', async t => {
   const s = await setup(t); await s.pushResults(resultsSnapshot());
   const original = readFileSync(join(s.dataDir, 'results-state.json'));
+  const sameSeq = resultsSnapshot(); sameSeq.trades[0].company = 'same sequence, changed record';
   s.time.ms = 9000;
   for (const [value, reason, error] of [
     [resultsSnapshot(100), 'sequence_replayed', { path: '$.seq', rule: 'sequenceReplayed' }],
+    [sameSeq, 'sequence_replayed', { path: '$.seq', rule: 'sequenceReplayed' }],
     [resultsSnapshot(102, -1), 'clock_regressed', { path: '$.generatedAt', rule: 'clockRegressed' }],
     [resultsSnapshot(102, 14001), 'clock_ahead', { path: '$.generatedAt', rule: 'clockAhead' }],
   ]) {
@@ -541,6 +544,60 @@ test('JOED-27 results: replay and regressed producer/server clocks cannot replac
   assert.deepEqual(regressed.body.errors, [{ path: '$.receivedAt', rule: 'clockRegressed' }]);
   s.time.ms = 10000;
   assert.equal((await s.pushResults(resultsSnapshot(102, 15000))).status, 200); // exactly +5 s allowed
+});
+
+test('JOED-27 results: exact decimals survive HTTP/storage; per-day 422 keeps last-good through restart; partial days skip', async t => {
+  const s = await setup(t);
+  const exact = JSON.parse(readFileSync(new URL('../fixtures/results/exact-decimals.json', import.meta.url)));
+  delete exact.receivedAt; exact.seq = 101; exact.generatedAt = at(0);
+  assert.equal((await s.pushResults(exact)).status, 200);
+  const original = readFileSync(join(s.dataDir, 'results-state.json'));
+  assert.deepEqual((await s.request('/joe/results.json')).body, { ...exact, receivedAt: at(0) });
+  const bad = structuredClone(exact); bad.seq++;
+  Object.assign(bad.days[0].desks.j, { trades: 5, realisedNet: { amount: '0.02', currency: 'EUR' }, fees: { amount: '0.02', currency: 'EUR' } });
+  s.time.ms = 30000;
+  const rejected = await s.pushResults(bad);
+  assert.equal(rejected.status, 422); assert.equal(rejected.body.reason, 'contract_invalid');
+  assert.deepEqual(rejected.body.errors, [
+    { path: '$.days[0].desks.j.trades', rule: 'dayTradeCount' },
+    { path: '$.days[0].desks.j.realisedNet', rule: 'dayNetSum' },
+    { path: '$.days[0].desks.j.fees', rule: 'dayFeeSum' },
+  ]);
+  assert.deepEqual(readFileSync(join(s.dataDir, 'results-state.json')), original);
+  await s.close();
+  const restarted = await setup(t, { dataDir: s.dataDir }); restarted.time.ms = 60000;
+  const read = await restarted.request('/joe/results.json');
+  assert.deepEqual(read.body, { ...exact, receivedAt: at(0) });
+  assert.equal(read.headers.get('x-joe-feed-reason'), 'contract_invalid');
+  assert.equal(read.headers.get('x-joe-received-at'), at(0));
+  assert.equal(restarted.model.panels().results.ageSeconds, 60);
+  assert.equal(restarted.model.panels().results.retained, true);
+  const partial = JSON.parse(readFileSync(new URL('../fixtures/results/partial-day.json', import.meta.url)));
+  delete partial.receivedAt; partial.seq = 102; partial.generatedAt = at(60000);
+  assert.equal((await restarted.pushResults(partial)).status, 200);
+  assert.deepEqual((await restarted.request('/joe/results.json')).body, { ...partial, receivedAt: at(60000) });
+  const full = structuredClone(partial); full.seq++; delete full.days[0].coverage;
+  const invalid = await restarted.pushResults(full);
+  assert.equal(invalid.status, 422);
+  assert.ok(invalid.body.errors.some(e => e.path === '$.days[0].desks.j.trades' && e.rule === 'dayTradeCount'));
+  assert.equal((await restarted.request('/joe/results.json')).body.seq, partial.seq);
+});
+
+test('JOED-27 results: KEEP trades and KEEP-only daily totals are rejected without replacing last-good', async t => {
+  const s = await setup(t); await s.pushResults(resultsSnapshot());
+  const { sourceTrades } = JSON.parse(readFileSync(new URL('../fixtures/results-keep-exclusion.json', import.meta.url)));
+  const original = readFileSync(join(s.dataDir, 'results-state.json'));
+  for (const trade of sourceTrades.filter(t => ['SXR8', 'TSLA'].includes(t.symbol))) {
+    const bad = resultsSnapshot(102); bad.trades.push(trade);
+    const rejected = await s.pushResults(bad);
+    assert.equal(rejected.status, 422);
+    assert.ok(rejected.body.errors.some(e => e.path === '$.trades[1].symbol' && e.rule === 'keepExcluded'));
+  }
+  const polluted = resultsSnapshot(102); polluted.days[0].desks.joel.realisedNet.amount = '303';
+  const rejected = await s.pushResults(polluted);
+  assert.equal(rejected.status, 422);
+  assert.deepEqual(rejected.body.errors, [{ path: '$.days[0].desks.joel.realisedNet', rule: 'dayNetSum' }]);
+  assert.deepEqual(readFileSync(join(s.dataDir, 'results-state.json')), original);
 });
 
 test('JOED-27 results: exact retry is a rejected no-op; new seq and non-regressing generation accept', async t => {
@@ -640,8 +697,14 @@ test('JOED-27 results: exact 8 MiB transport and served boundaries include UTF-8
   value.trades = [];
   const emptyBytes = Buffer.byteLength(JSON.stringify({ ...value, receivedAt: at(0) }));
   const perTrade = Buffer.byteLength(JSON.stringify(trade)) + 1;
-  const count = Math.floor((CONTRACTS.limits.results - emptyBytes + 1) / perTrade);
+  // Leave room for the enlarged full-day count/sums before filling the last
+  // bytes with company text. This is a valid record at both byte boundaries.
+  const count = Math.floor((CONTRACTS.limits.results - emptyBytes - 128 + 1) / perTrade);
   value.trades = Array.from({ length: count }, (_, n) => ({ ...trade, id: `rt-byte-${String(n).padStart(8, '0')}` }));
+  const day = value.days[0].desks.j;
+  day.trades = count;
+  day.realisedNet.amount = String(-count);
+  day.fees.amount = unitsDecimal(decimalUnits(trade.feesEur.amount) * BigInt(count));
   let remaining = CONTRACTS.limits.results - Buffer.byteLength(JSON.stringify({ ...value, receivedAt: at(0) }));
   for (const entry of value.trades) {
     const extra = Math.min(98, remaining); entry.company += 'x'.repeat(extra); remaining -= extra;
