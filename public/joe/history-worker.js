@@ -26,7 +26,9 @@ async function read(url) {
     const reason = response.headers.get('X-Joe-Feed-Reason') ?? undefined;
     let payload = null;
     try { payload = await response.json(); } catch { if (response.ok) return { status: 0, clock, at }; }
-    return { ...(response.ok ? { status: 200, payload, reason } : { status: response.status, payload, reason: payload?.reason ?? undefined }), clock, at };
+    return { ...(response.ok ? { status: 200, payload, reason,
+      generatedAdvancedAt: response.headers.get('X-Joe-Generated-Advanced-At') ?? undefined }
+      : { status: response.status, payload, reason: payload?.reason ?? undefined }), clock, at };
   } catch {
     return { status: 0 };
   }
@@ -63,7 +65,8 @@ async function pollResults(started) {
   posted.results = key;
   if (!value) { self.postMessage({ kind: 'results', reason: accepted.reason ?? null, index: null, clock: clockNow(res), ms: performance.now() - started }); return; }
   const index = indexResults(value);
-  self.postMessage({ kind: 'results', reason: accepted.reason ?? null, index, clock: clockNow(res), ms: performance.now() - started }, resultsTransferables(index));
+  self.postMessage({ kind: 'results', reason: accepted.reason ?? null, generatedAdvancedAt: accepted.generatedAdvancedAt,
+    index, clock: clockNow(res), ms: performance.now() - started }, resultsTransferables(index));
 }
 
 self.onmessage = ({ data }) => {

@@ -277,14 +277,14 @@ async function resultsChecks(page, viewport, theme) {
   const sel = ['#rhero', '.tile', '.brow', '.calcard', '.cell', '#daypanel', '.res-tools'];
   const before = await page.evaluate(`__audit.rects(${JSON.stringify(sel)})`);
   const r = await page.evaluate(`({ hero: document.getElementById('rheroL').innerText, tiles: [...document.querySelectorAll('.tile .tval')].map(t => t.innerText.trim()), label: document.getElementById('perLabel').innerText, rows: document.querySelectorAll('#cal .cell').length + document.querySelectorAll('#cal .cell.out').length })`);
-  check('P4-notwired', `${tag}: Results shows its not-wired state with dashes, no zeros`, /Results are not wired yet\. The board has no closed-trade record for this period\./.test(r.hero) && r.tiles.length === 8 && r.tiles.every(t => t === '—') && !/€ 0,00/.test(r.hero), r);
+  check('P4-notreceived', `${tag}: before the first push Results shows its unavailable state with dashes, no zeros`, /Results are unavailable: no data received yet\./.test(r.hero) && r.tiles.length === 8 && r.tiles.every(t => t === '—') && !/€ 0,00/.test(r.hero), r);
   await page.evaluate(`document.querySelector('#periodSeg [data-period="month"]').click()`);
   await settle(page);
   await page.evaluate(`document.querySelector('#deskSeg [data-desk="joe"]').click()`);
   await settle(page);
   const after = await page.evaluate(`__audit.rects(${JSON.stringify(sel)})`);
   const label = await page.evaluate(`document.getElementById('perLabel').innerText`);
-  check('P4-notwired', `${tag}: period and desk switches work and move nothing`, label.startsWith('This month') && !shifted(before, after).length, { label, moved: shifted(before, after).slice(0, 4) });
+  check('P4-notreceived', `${tag}: period and desk switches work and move nothing`, label.startsWith('This month') && !shifted(before, after).length, { label, moved: shifted(before, after).slice(0, 4) });
   await page.evaluate(`document.querySelector('#periodSeg [data-period="week"]').click(); document.querySelector('#deskSeg [data-desk="all"]').click()`);
   await settle(page);
 }
@@ -346,9 +346,6 @@ const HIST_TEXT = copyExpression(`(() => ({ status: document.querySelector('#his
 const RES_TEXT = copyExpression(`(() => ({ on: document.getElementById('scr-results').classList.contains('on'), hero: document.getElementById('rheroL').innerText,
   tiles: [...document.querySelectorAll('#tiles .tile .tval')].map(t => t.innerText.trim()), label: document.getElementById('perLabel').innerText, days: document.querySelectorAll('#cal [data-day]').length,
   rows: document.querySelectorAll('#breakdown .brow').length, curve: document.querySelector('#curve > svg')?.getAttribute('aria-label') ?? null, day: document.getElementById('daypanel').innerText }))()`);
-// Results' designed not-wired state: dashes, never zeros, with its switches, calendar and day sheet.
-const notWired = r => r.on && /Results are not wired yet\. The board has no closed-trade record for this period\./.test(r.hero) && !/€\s0,00/.test(r.hero) && r.tiles.length === 8 && r.tiles.every(t => t === '—') &&
-  /^This week · /.test(r.label) && r.days >= 28 && r.rows === 4 && r.curve === 'Results are not wired yet' && /results are not wired\.$/.test(r.day.trim());
 // Results without a record because its own read failed: the reason, dashes, no zeros.
 const unavailable = (r, words) => r.on && r.hero.includes(`Results are unavailable: ${words}.`) && !/€\s0,00/.test(r.hero) && r.tiles.length === 8 && r.tiles.every(t => t === '—') &&
   /^This week · /.test(r.label) && r.days >= 28 && r.rows === 4 && r.curve === 'Results are unavailable' && r.day.trim().endsWith(`${words}.`);

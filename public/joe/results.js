@@ -1,8 +1,8 @@
 // Results: the period switch and the desk switch drive every number, all
 // from the closed-trade record (results v2) by spec r3 §4.2: the hero with
 // its result-so-far chart, eight tiles, By desk, the calendar and a day's
-// trades. Without a valid record (JOED-20 writes it) Results shows its
-// designed "not wired" state: dashes, never a zero or an estimate.
+// trades. Before a valid push arrives Results shows its existing unavailable
+// state: dashes, never a zero or an estimate.
 import { $, $$, icon, term, learnBtn, deskMark, inlineMark, swatch, patch, bn, pl, st, symBadge, ageSpan, statePhrase, openDialog } from './ui.js';
 import { TERMS } from './terms.js';
 import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age } from './format.js';

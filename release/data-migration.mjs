@@ -19,7 +19,7 @@ for (const key of ['revBefore', 'revAfter']) {
 
 const FILES = {
   v1: ['data.json', 'history.json', 'fleet-config.json', 'fleet-config-actions.json'],
-  v2: ['data-state.json', 'history-state.json', 'feed-rejections.json', 'fleet-receipt.json', 'fleet-config.json', 'fleet-config-actions.json'],
+  v2: ['data-state.json', 'history-state.json', 'results-state.json', 'feed-rejections.json', 'fleet-receipt.json', 'fleet-config.json', 'fleet-config-actions.json'],
 };
 const CAP = 16 * 1024 * 1024;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -66,6 +66,10 @@ function checkStoreSchema(boardSchema, files) {
     if (files['history-state.json']) {
       const history = JSON.parse(files['history-state.json']);
       if (history.format !== 'joedesk.history-store.v2' || !validateContract('history', history.value).ok) throw new Error('backup_schema_mismatch');
+    }
+    if (files['results-state.json']) {
+      const results = JSON.parse(files['results-state.json']);
+      if (results.format !== 'joedesk.results-store.v2' || !validateContract('results', results.feed?.value).ok) throw new Error('backup_schema_mismatch');
     }
   }
 }

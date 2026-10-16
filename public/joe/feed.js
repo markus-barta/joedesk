@@ -98,7 +98,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       if (data.clock) anchorTo(data.clock.at, data.clock.precise ? 'stamp' : 'date');
       measure(`${kind}-worker`, data.ms);
       if (data.kind === 'unchanged') return;
-      if (kind === 'results') { settle('results', resultsFeed(data.index, data.reason)); onChange('results'); return; }
+      if (kind === 'results') { settle('results', resultsFeed(data.index, data.reason, data.generatedAdvancedAt)); onChange('results'); return; }
       settle('history', { value: data.meta ? { ...data.meta, columns: data.columns, closes: data.closes } : null, reason: data.reason });
       onChange('history');
     };
@@ -126,9 +126,10 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     onChange('history');
   }
 
-  // The closed-trade record (JOED-20 writes it; until then the server answers
-  // "not wired"). The page keeps the record's index and its receipt.
-  const resultsFeed = (index, reason) => ({ value: index ? { ...index.meta, index } : null, reason: reason ?? null });
+  // The accepted closed-trade record from the machine inbox. Keep its index,
+  // original receipt and generation progress through refreshes and rejections.
+  const resultsFeed = (index, reason, generatedAdvancedAt) => ({ value: index ? { ...index.meta, index } : null, reason: reason ?? null,
+    ...(generatedAdvancedAt ? { generatedAdvancedAt } : {}) });
   let resultsFallback = null;
   async function pollResults() {
     if (busy.has('results')) return;
@@ -140,12 +141,14 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     const reason = res.headers?.get('X-Joe-Feed-Reason') ?? undefined;
     const started = performance.now();
     const previous = resultsFallback;
-    const accepted = acceptRead('results', res.status === 200 ? { status: 200, payload: res.payload, reason }
+    const accepted = acceptRead('results', res.status === 200 ? { status: 200, payload: res.payload, reason,
+      generatedAdvancedAt: res.headers?.get('X-Joe-Generated-Advanced-At') ?? undefined }
       : { status: res.status, redirected: res.redirected, payload: res.payload, reason: res.payload?.reason ?? undefined }, previous);
     resultsFallback = accepted;
     const v = accepted.value;
     const same = v && previous?.value === v && feeds.results?.value;
-    settle('results', same ? { value: feeds.results.value, reason: accepted.reason ?? null } : resultsFeed(v ? indexResults(v) : null, accepted.reason));
+    settle('results', same ? { ...feeds.results, reason: accepted.reason ?? null }
+      : resultsFeed(v ? indexResults(v) : null, accepted.reason, accepted.generatedAdvancedAt));
     measure('results-accept', performance.now() - started);
     onChange('results');
   }

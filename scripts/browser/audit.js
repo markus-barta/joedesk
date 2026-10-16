@@ -125,7 +125,9 @@
       const parts = [];
       const walk = node => {
         for (const child of node.childNodes) {
-          if (child.nodeType === 3) { if (child.parentElement && visible(child.parentElement)) parts.push({ text: child.nodeValue, term: Boolean(child.parentElement.closest('.term, .learn, code, .mono, #tip, [data-value]')) }); }
+          if (child.nodeType === 3) { if (child.parentElement && visible(child.parentElement)) parts.push({ text: child.nodeValue,
+            term: Boolean(child.parentElement.closest('.term, .learn, code, .mono, #tip, [data-value]')),
+            sourcePath: Boolean(child.parentElement.closest('#srcFacts dd .mono')?.textContent.startsWith('/')) }); }
           else if (child.nodeType === 1 && !['SCRIPT', 'STYLE'].includes(child.tagName)) walk(child);
         }
       };

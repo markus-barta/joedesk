@@ -11,6 +11,10 @@ import { appendHistory, historyEnvelope, HISTORY_CAP, measureHistory } from './h
 
 const STATE_CAP = 2 * 1024 * 1024;
 const FORMAT = 'joedesk.data-store.v2';
+const RESULTS_FORMAT = 'joedesk.results-store.v2';
+// The snapshot is bounded by the contracts package; leave room only for the
+// server-owned envelope and generation-progress metadata on disk.
+const RESULTS_CAP = CONTRACTS.limits.results + 4096;
 const isMissing = error => error.code === 'ENOENT';
 const failed = (status, reason) => ({ ok: false, status, reason });
 // JSON object order is immaterial. Hash only the validated ingress payload;
@@ -23,9 +27,11 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   if (['data.json', 'history.json'].some(name => existsSync(path.join(dataDir, name)))) throw new Error('data_migration_required');
   const stateFile = path.join(dataDir, 'data-state.json');
   const historyFile = path.join(dataDir, 'history-state.json');
+  const resultsFile = path.join(dataDir, 'results-state.json');
   const rejectionFile = path.join(dataDir, 'feed-rejections.json');
   const fleetFile = path.join(dataDir, 'fleet-receipt.json');
   let state = null, history = null, rejections = {}, fleet = null, storageInvalid = false, historyStorageInvalid = false;
+  let results = null, resultsStorageInvalid = false;
   try {
     state = readJson(stateFile, STATE_CAP);
     if (state.format !== FORMAT || !validateContract('data', state.feed?.value).ok ||
@@ -49,31 +55,73 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     if (!isMissing(error)) { historyStorageInvalid = true; rejections.history = 'history_write_failed'; }
   }
   try {
+    results = readJson(resultsFile, RESULTS_CAP);
+    if (results.format !== RESULTS_FORMAT || !validateContract('results', results.feed?.value).ok ||
+        !validInstant(results.feed.generatedAdvancedAt) ||
+        Date.parse(results.feed.generatedAdvancedAt) > Date.parse(results.feed.value.receivedAt)) throw new Error('contract_invalid');
+  } catch (error) {
+    results = null;
+    if (!isMissing(error)) { resultsStorageInvalid = true; rejections.results = 'contract_invalid'; }
+  }
+  try {
     const stored = readJson(rejectionFile, 16384);
-    if (Object.keys(stored).some(k => !['data', 'history'].includes(k)) || Object.values(stored).some(r => !REASONS.includes(r))) throw new Error('contract_invalid');
+    if (Object.keys(stored).some(k => !['data', 'history', 'results'].includes(k)) || Object.values(stored).some(r => !REASONS.includes(r))) throw new Error('contract_invalid');
     rejections = { ...stored, ...rejections };
   } catch (error) { if (!isMissing(error)) rejections.data = 'contract_invalid'; }
   try {
     fleet = readJson(fleetFile, CONTRACTS.limits['fleet-config'] + 4096);
     if (!validInstant(fleet.receivedAt) || !validateContract('fleet-config', fleet.value).ok) throw new Error('contract_invalid');
   } catch (error) { fleet = null; if (!isMissing(error)) rejections['fleet-config'] = 'contract_invalid'; }
-  let savedReasons = JSON.stringify(Object.fromEntries(Object.entries(rejections).filter(([k]) => ['data', 'history'].includes(k))));
+  const durableReasons = () => Object.fromEntries(Object.entries(rejections).filter(([k]) => ['data', 'history', 'results'].includes(k)));
+  let savedReasons = JSON.stringify(durableReasons());
 
   const feeds = () => ({ data: { ...state?.feed, gatewayProgress: state?.gatewayProgress, reason: rejections.data ?? (state ? null : 'feed_not_received') },
     history: { value: history, reason: rejections.history ?? (history ? null : 'feed_not_received') },
-    results: { value: null, reason: 'results_not_wired' },
+    results: { ...results?.feed, reason: rejections.results ?? (results ? null : 'feed_not_received') },
     'fleet-config': { value: fleet?.value, receivedAt: fleet?.receivedAt, reason: rejections['fleet-config'] ?? (fleet ? null : 'feed_not_received') } });
   const panels = (now = clock()) => panelStates(feeds(), now, state?.cells ?? {});
   function persistReasons() {
-    const reasons = Object.fromEntries(Object.entries(rejections).filter(([k]) => ['data', 'history'].includes(k)));
+    const reasons = durableReasons();
     const encoded = JSON.stringify(reasons);
     if (encoded === savedReasons) return;
     write(rejectionFile, reasons, 16384); savedReasons = encoded;
   }
-  function reject(reason, status = 422) {
-    rejections.data = reason;
-    try { persistReasons(); } catch { return failed(500, 'refresh_failed'); }
+  function reject(reason, status = 422, kind = 'data') {
+    rejections[kind] = reason;
+    try { persistReasons(); } catch { return failed(kind === 'results' ? 503 : 500, 'refresh_failed'); }
     return failed(status, reason);
+  }
+  function acceptResults(candidate) {
+    if (resultsStorageInvalid) return failed(503, 'contract_invalid');
+    const now = clock();
+    const accepted = acceptSnapshot('results', candidate, results?.feed ?? null, now);
+    if (accepted.status !== 200) {
+      const errors = accepted.errors.slice(0, 20).map(({ path, rule }) => ({ path, rule }));
+      // Like data, an exact retry is a rejected no-op: it cannot freshen the
+      // record, overwrite a different rejection or change the displayed state.
+      if (accepted.reason === 'sequence_replayed' && candidate.seq === results?.feed.value.seq) {
+        const { receivedAt, ...previous } = results.feed.value;
+        if (payloadDigest(candidate) === payloadDigest(previous)) return { ...failed(422, accepted.reason), errors };
+      }
+      return { ...reject(accepted.reason, 422, 'results'), errors };
+    }
+    // Receipt stamping must not turn a valid ingress into an oversized,
+    // unreadable served snapshot, especially at the 8 MiB boundary.
+    const served = validateContract('results', accepted.value);
+    if (!served.ok) return { ...reject(served.reason, 422, 'results'),
+      errors: served.errors.slice(0, 20).map(({ path, rule }) => ({ path, rule })) };
+    const next = { format: RESULTS_FORMAT, feed: { value: accepted.value, generatedAdvancedAt: accepted.generatedAdvancedAt } };
+    try { write(resultsFile, next, RESULTS_CAP); }
+    catch (error) {
+      // A rename may have committed before the directory fsync failed. Honor
+      // that sequence in memory too; never let a retry replace committed data.
+      if (error.committed) results = next;
+      return reject('refresh_failed', 503, 'results');
+    }
+    results = next; delete rejections.results;
+    try { persistReasons(); }
+    catch { rejections.results = 'refresh_failed'; return failed(503, 'refresh_failed'); }
+    return { ok: true, status: 200, reason: null, receivedAt: now };
   }
   function accept(candidate) {
     const now = clock();
@@ -185,7 +233,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     }
     return { serverNow: now, feeds: feeds(), panels: selected, data: value };
   }
-  return { accept, reject, feeds, panels, view, observeFleet,
+  return { accept, acceptResults, reject, feeds, panels, view, observeFleet,
     fleetFailure: () => { rejections['fleet-config'] = 'refresh_failed'; },
     hasData: () => Boolean(state) };
 }

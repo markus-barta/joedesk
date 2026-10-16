@@ -36,6 +36,11 @@ function snapshot(seq = 101, generated = 0, checked = generated) {
   value.seq = seq; value.generatedAt = at(generated); value.safety.gateway.checkedAt = at(checked);
   return value;
 }
+function resultsSnapshot(seq = 101, generated = 0) {
+  const value = structuredClone(samples.results); delete value.receivedAt;
+  value.seq = seq; value.generatedAt = at(generated);
+  return value;
+}
 async function setup(t, options = {}) {
   const dataDir = options.dataDir ?? mkdtempSync(join(ROOT, 'p2-'));
   const time = { ms: 0 };
@@ -49,7 +54,9 @@ async function setup(t, options = {}) {
     return { status: response.status, body: text ? JSON.parse(text) : null, headers: response.headers };
   };
   const push = value => request('/joe/inbox', { method: 'POST', headers: { authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(value) });
-  return { dataDir, base, request, push, time, model: server.readModel };
+  const pushResults = value => request('/joe/inbox/results', { method: 'POST', headers: { authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(value) });
+  const close = () => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); });
+  return { dataDir, base, request, push, pushResults, close, time, model: server.readModel };
 }
 
 test('P2 acceptance: 400 malformed, 413 streamed bound, 422 contract failure precede snapshot writes', async t => {
@@ -372,7 +379,7 @@ test('P2 health: anonymous exact allowlist, never-received null ages and failed-
   }
   for (const [name, feed] of Object.entries(first.feeds)) {
     assert.equal(feed.state, 'not reported'); assert.equal(feed.ageSeconds, null);
-    assert.equal(feed.reason, name === 'results' ? 'results_not_wired' : 'feed_not_received');
+    assert.equal(feed.reason, 'feed_not_received');
   }
   assert.deepEqual(first.gateway, { confirmed: false, checkAgeSeconds: null, reason: 'gateway_unconfirmed' });
   await s.push({ schema: 'unknown' });
@@ -399,24 +406,17 @@ test('P2 health: anonymous exact allowlist, never-received null ages and failed-
 test('P2 auth: all four protected reads retain independent last-good ages on SSO failures', async t => {
   const s = await setup(t);
   await s.push(snapshot());
+  await s.pushResults(resultsSnapshot());
   s.time.ms = 1000; await s.push(snapshot(102)); // data receipt advances; history deduplicates
   s.time.ms = 2000; await s.request('/joe/fleet-config.json');
-  const expectedAges = { data: 608, history: 609, results: 610, 'fleet-config': 607 };
+  const expectedAges = { data: 608, history: 609, results: 609, 'fleet-config': 607 };
   for (const kind of ['data', 'history', 'results', 'fleet-config']) {
     const good = await s.request(`/joe/${kind}.json`);
-    // P4: the not-wired results answer carries the server's clock too, like every other read.
+    // Every feed's receipt and clock come from the real HTTP response.
     assert.equal(good.headers.get('x-joe-server-now'), at(2000));
-    let retained;
-    if (kind === 'results') {
-      assert.equal(good.status, 503); assert.equal(good.body.reason, 'results_not_wired');
-      // P4 owns the real Results producer. This one cache is explicitly synthetic;
-      // the other three receipt ages come from the production HTTP responses.
-      retained = { value: { ...structuredClone(samples.results), receivedAt: at(-1000) } };
-    } else {
-      assert.equal(good.status, 200);
-      retained = acceptRead(kind, { status: good.status, payload: good.body,
-        receivedAt: good.headers.get('x-joe-received-at'), generatedAdvancedAt: good.headers.get('x-joe-generated-advanced-at') });
-    }
+    assert.equal(good.status, 200);
+    let retained = acceptRead(kind, { status: good.status, payload: good.body,
+      receivedAt: good.headers.get('x-joe-received-at'), generatedAdvancedAt: good.headers.get('x-joe-generated-advanced-at') });
     const value = retained.value;
     const response = await s.request(`/joe/${kind}.json`, { headers: { 'x-auth-request-user': '' } });
     assert.equal(response.status, 401); assert.equal(response.body.reason, 'auth_required');
@@ -431,13 +431,235 @@ test('P2 auth: all four protected reads retain independent last-good ages on SSO
   assert.equal((await s.request('/joe/data.json')).status, 200);
 });
 
-test('P2 results: only v2 not-wired state; no executor producer fields or write route', async t => {
+test('JOED-27 results: cold feed is not received; only the inbox accepts writes', async t => {
   const s = await setup(t);
   const result = await s.request('/joe/results.json');
   assert.equal(result.status, 503);
-  assert.deepEqual(result.body, { ok: false, schema: CONTRACTS.contracts.results, reason: 'results_not_wired' });
+  assert.deepEqual(result.body, { ok: false, schema: CONTRACTS.contracts.results, reason: 'feed_not_received' });
+  assert.equal(result.headers.get('x-joe-feed-reason'), 'feed_not_received');
+  assert.equal(result.headers.get('x-joe-received-at'), null);
   assert.equal((await s.request('/joe/results.json', { method: 'POST', body: '{}' })).status, 405);
-  assert.equal((await s.request('/joe/inbox/results', { method: 'POST', body: '{}' })).status, 405);
+  assert.equal((await s.request('/joe/inbox/results')).status, 405);
+});
+
+test('JOED-27 results: accepted snapshot and server receipt survive a stopped-server restart independently of data', async t => {
+  const s = await setup(t);
+  await s.push(snapshot());
+  const dataBefore = ['data-state.json', 'history-state.json'].map(f => readFileSync(join(s.dataDir, f)));
+  s.time.ms = 1000;
+  assert.deepEqual((await s.pushResults(resultsSnapshot())).body, { ok: true, status: 200, reason: null, receivedAt: at(1000) });
+  const served = await s.request('/joe/results.json');
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('x-joe-received-at'), at(1000));
+  assert.equal(served.headers.get('x-joe-generated-advanced-at'), at(1000));
+  assert.deepEqual(served.body, { ...resultsSnapshot(), receivedAt: at(1000) });
+  assert.equal(validateContract('results', served.body).ok, true);
+  assert.equal((await stat(join(s.dataDir, 'results-state.json'))).mode & 0o777, 0o600);
+  assert.equal(readdirSync(s.dataDir).includes('results-state.json.next'), false);
+  assert.deepEqual(['data-state.json', 'history-state.json'].map(f => readFileSync(join(s.dataDir, f))), dataBefore);
+  const state = (await s.request('/joe/state.json')).body;
+  assert.equal(state.panels.results.state, 'fresh');
+  assert.equal(Object.hasOwn(state.panels.results, 'value'), false);
+  assert.equal(Object.hasOwn(state.feeds.results, 'value'), false);
+  assert.equal(state.feeds.results.receivedAt, at(1000));
+  assert.equal(JSON.stringify(state).includes('"trades"'), false);
+  await s.close();
+  const restarted = await setup(t, { dataDir: s.dataDir }); restarted.time.ms = 9000;
+  const after = await restarted.request('/joe/results.json');
+  assert.deepEqual(after.body, served.body);
+  assert.equal(after.headers.get('x-joe-received-at'), at(1000));
+  assert.equal((await restarted.pushResults(resultsSnapshot(102, 9000))).status, 200);
+});
+
+test('JOED-27 results: same machine auth, missing/wrong bearer 401 and missing token 503 precede writes', async t => {
+  for (const [inboxToken, authorization, status] of [[TOKEN, '', 401], [TOKEN, 'Bearer wrong-fixture', 401],
+    [TOKEN, `Basic ${TOKEN}`, 401], ['', `Bearer ${TOKEN}`, 503]]) {
+    const s = await setup(t, { inboxToken });
+    const result = await s.request('/joe/inbox/results', { method: 'POST', headers: { authorization }, body: '{' });
+    assert.equal(result.status, status); assert.equal(result.body.reason, 'auth_required');
+    assert.deepEqual(readdirSync(s.dataDir), []);
+    assert.equal(s.model.feeds().results.reason, 'feed_not_received');
+  }
+});
+
+test('JOED-27 results: malformed 400, oversized 413 and bounded 422 diagnostics retain the original record and durable reason', async t => {
+  const s = await setup(t); await s.pushResults(resultsSnapshot());
+  const original = readFileSync(join(s.dataDir, 'results-state.json'));
+  const manyErrors = resultsSnapshot(102);
+  manyErrors.trades = Array.from({ length: 25 }, () => ({ id: 'rt-invalid', privateDiagnostic: 'never echoed' }));
+  for (const [body, status, reason, error] of [
+    ['{', 400, 'contract_invalid'],
+    [' '.repeat(CONTRACTS.limits.results + 1), 413, 'contract_invalid'],
+    [JSON.stringify({ schema: 'unknown' }), 422, 'schema_unsupported', { path: '$.schema', rule: 'const' }],
+    [JSON.stringify({ snapshot: resultsSnapshot(102) }), 422, 'schema_unsupported'],
+    [JSON.stringify([resultsSnapshot(102)]), 422, 'schema_unsupported'],
+    [JSON.stringify({ ...resultsSnapshot(102), receivedAt: at(0) }), 422, 'contract_invalid', { path: '$.receivedAt', rule: 'serverOwned' }],
+    [JSON.stringify(manyErrors), 422, 'contract_invalid'],
+  ]) {
+    s.time.ms += 1000;
+    const result = await s.request('/joe/inbox/results', { method: 'POST', headers: { authorization: `Bearer ${TOKEN}` }, body });
+    assert.equal(result.status, status); assert.equal(result.body.reason, reason);
+    if (status === 422) {
+      assert.ok(result.body.errors.length > 0 && result.body.errors.length <= 20);
+      assert.ok(result.body.errors.every(e => Object.keys(e).sort().join(',') === 'path,rule'));
+      if (error) assert.ok(result.body.errors.some(e => e.path === error.path && e.rule === error.rule), JSON.stringify(result.body.errors));
+      assert.equal(JSON.stringify(result.body).includes('never echoed'), false);
+    }
+    assert.deepEqual(readFileSync(join(s.dataDir, 'results-state.json')), original);
+    const cold = createReadModel({ dataDir: s.dataDir, clock: () => at(s.time.ms) });
+    assert.equal(cold.feeds().results.reason, reason);
+    assert.equal(cold.feeds().results.value.receivedAt, at(0));
+    assert.equal(cold.panels().results.retained, true);
+    assert.equal(cold.panels().results.ageSeconds, s.time.ms / 1000);
+    const read = await s.request('/joe/results.json');
+    assert.equal(read.status, 200); assert.equal(read.headers.get('x-joe-feed-reason'), reason);
+    assert.equal(read.headers.get('x-joe-received-at'), at(0));
+  }
+  assert.equal((await stat(join(s.dataDir, 'feed-rejections.json'))).mode & 0o777, 0o600);
+  assert.equal((await s.pushResults(resultsSnapshot(102, s.time.ms))).status, 200);
+  assert.equal(createReadModel({ dataDir: s.dataDir }).feeds().results.reason, null);
+});
+
+test('JOED-27 results: replay and regressed producer/server clocks cannot replace or freshen last-good', async t => {
+  const s = await setup(t); await s.pushResults(resultsSnapshot());
+  const original = readFileSync(join(s.dataDir, 'results-state.json'));
+  s.time.ms = 9000;
+  for (const [value, reason, error] of [
+    [resultsSnapshot(100), 'sequence_replayed', { path: '$.seq', rule: 'sequenceReplayed' }],
+    [resultsSnapshot(102, -1), 'clock_regressed', { path: '$.generatedAt', rule: 'clockRegressed' }],
+    [resultsSnapshot(102, 14001), 'clock_ahead', { path: '$.generatedAt', rule: 'clockAhead' }],
+  ]) {
+    const response = await s.pushResults(value);
+    assert.equal(response.status, 422); assert.equal(response.body.reason, reason);
+    assert.deepEqual(response.body.errors, [error]);
+    assert.deepEqual(readFileSync(join(s.dataDir, 'results-state.json')), original);
+    assert.equal(createReadModel({ dataDir: s.dataDir }).feeds().results.reason, reason);
+  }
+  s.time.ms = -1;
+  const regressed = await s.pushResults(resultsSnapshot(102));
+  assert.equal(regressed.status, 422); assert.equal(regressed.body.reason, 'clock_regressed');
+  assert.deepEqual(regressed.body.errors, [{ path: '$.receivedAt', rule: 'clockRegressed' }]);
+  s.time.ms = 10000;
+  assert.equal((await s.pushResults(resultsSnapshot(102, 15000))).status, 200); // exactly +5 s allowed
+});
+
+test('JOED-27 results: exact retry is a rejected no-op; new seq and non-regressing generation accept', async t => {
+  const writes = [];
+  const s = await setup(t, { write: (file, ...args) => { writes.push(basename(file)); atomicWrite(file, ...args); } });
+  const original = resultsSnapshot(); await s.pushResults(original);
+  writes.length = 0; s.time.ms = 30000;
+  const response = await s.pushResults(Object.fromEntries(Object.entries(original).reverse()));
+  assert.equal(response.status, 422); assert.equal(response.body.reason, 'sequence_replayed');
+  assert.deepEqual(writes, []); assert.equal(s.model.feeds().results.reason, null);
+  assert.equal(s.model.feeds().results.value.receivedAt, at(0));
+  assert.equal((await s.pushResults(resultsSnapshot(102))).status, 200);
+  assert.equal(s.model.feeds().results.value.receivedAt, at(30000));
+  assert.equal(s.model.feeds().results.generatedAdvancedAt, at(0));
+  s.time.ms = 60000;
+  assert.equal(s.model.panels().results.reason, 'producer_frozen');
+  assert.equal((await s.request('/joe/results.json')).headers.get('x-joe-generated-advanced-at'), at(0));
+  assert.equal((await s.pushResults(resultsSnapshot(103, 60000))).status, 200);
+  assert.equal(s.model.panels().results.state, 'fresh');
+});
+
+test('JOED-27 results: selector, health, browser read and restarted model stale at exactly 60 s without a new accepted push', async t => {
+  const s = await setup(t); await s.pushResults(resultsSnapshot());
+  for (const ms of [59999, 60000, 60001, 300000]) {
+    s.time.ms = ms;
+    const read = await s.request('/joe/results.json');
+    const client = acceptRead('results', { status: read.status, payload: read.body,
+      generatedAdvancedAt: read.headers.get('x-joe-generated-advanced-at') });
+    const cold = createReadModel({ dataDir: s.dataDir, clock: () => at(ms) });
+    const health = (await s.request('/joe/healthz')).body.feeds.results;
+    const state = ms < 60000 ? 'fresh' : 'stale', reason = ms < 60000 ? null : 'snapshot_stale';
+    for (const cell of [s.model.panels().results, cold.panels().results, panelStates({ results: client }, at(ms)).results, health]) {
+      assert.equal(cell.state, state); assert.equal(cell.reason, reason); assert.equal(cell.ageSeconds, ms / 1000);
+    }
+    assert.equal(read.headers.get('x-joe-received-at'), at(0));
+  }
+});
+
+test('JOED-27 results: unavailable or corrupt storage fails closed with 503 and keeps data independent', async t => {
+  for (const committed of [false, true]) {
+    let failing = false;
+    const s = await setup(t, { write: (file, ...args) => {
+      if (failing && file.endsWith('results-state.json')) {
+        if (committed) atomicWrite(file, ...args);
+        throw Object.assign(new Error('fixture write failed'), { committed });
+      }
+      atomicWrite(file, ...args);
+    } });
+    await s.pushResults(resultsSnapshot()); failing = true; s.time.ms = 1000;
+    const response = await s.pushResults(resultsSnapshot(102, 1000));
+    assert.equal(response.status, 503); assert.equal(response.body.reason, 'refresh_failed');
+    const cold = createReadModel({ dataDir: s.dataDir, clock: () => at(1000) });
+    assert.equal(cold.feeds().results.reason, 'refresh_failed');
+    assert.equal(cold.feeds().results.value.seq, committed ? 102 : 101);
+    assert.equal(s.model.feeds().results.value.seq, committed ? 102 : 101);
+    failing = false;
+    assert.equal((await s.push(snapshot())).status, 200);
+    assert.equal((await s.pushResults(resultsSnapshot(103, 1000))).status, 200);
+  }
+  for (const corrupt of ['{', JSON.stringify({ format: 'joedesk.results-store.v2', feed: { value: samples.results, generatedAdvancedAt: 'invalid' } }),
+    ' '.repeat(CONTRACTS.limits.results + 4097)]) {
+    const s = await setup(t);
+    await writeFile(join(s.dataDir, 'results-state.json'), corrupt);
+    const restarted = await setup(t, { dataDir: s.dataDir });
+    const response = await restarted.pushResults(resultsSnapshot());
+    assert.equal(response.status, 503); assert.equal(response.body.reason, 'contract_invalid');
+    assert.equal((await restarted.request('/joe/results.json')).body.reason, 'contract_invalid');
+    assert.equal(readFileSync(join(s.dataDir, 'results-state.json'), 'utf8'), corrupt);
+    assert.equal((await restarted.push(snapshot())).status, 200);
+  }
+});
+
+test('JOED-27 results: rejection persistence failure returns 503 with the last snapshot retained', async t => {
+  let failing = false;
+  const s = await setup(t, { write: (file, ...args) => {
+    if (failing && file.endsWith('feed-rejections.json')) throw new Error('fixture rejection write failed');
+    atomicWrite(file, ...args);
+  } });
+  await s.pushResults(resultsSnapshot()); failing = true;
+  const rejected = await s.pushResults({ schema: 'unknown' });
+  assert.equal(rejected.status, 503); assert.equal(rejected.body.reason, 'refresh_failed');
+  assert.equal(s.model.feeds().results.value.seq, 101);
+  failing = false; await s.pushResults({ schema: 'unknown' }); failing = true;
+  const accepted = await s.pushResults(resultsSnapshot(102));
+  assert.equal(accepted.status, 503); assert.equal(accepted.body.reason, 'refresh_failed');
+  assert.equal(s.model.feeds().results.value.seq, 102);
+});
+
+test('JOED-27 results: exact 8 MiB transport and served boundaries include UTF-8 receipt overhead', async t => {
+  const s = await setup(t);
+  const small = JSON.stringify(resultsSnapshot());
+  const exactBody = small + ' '.repeat(CONTRACTS.limits.results - Buffer.byteLength(small));
+  const accepted = await s.request('/joe/inbox/results', { method: 'POST', headers: { authorization: `Bearer ${TOKEN}` }, body: exactBody });
+  assert.equal(accepted.status, 200); // transport limit is inclusive
+
+  const value = resultsSnapshot(102), trade = { ...value.trades[0], id: 'rt-byte-00000000', company: 'é' };
+  value.trades = [];
+  const emptyBytes = Buffer.byteLength(JSON.stringify({ ...value, receivedAt: at(0) }));
+  const perTrade = Buffer.byteLength(JSON.stringify(trade)) + 1;
+  const count = Math.floor((CONTRACTS.limits.results - emptyBytes + 1) / perTrade);
+  value.trades = Array.from({ length: count }, (_, n) => ({ ...trade, id: `rt-byte-${String(n).padStart(8, '0')}` }));
+  let remaining = CONTRACTS.limits.results - Buffer.byteLength(JSON.stringify({ ...value, receivedAt: at(0) }));
+  for (const entry of value.trades) {
+    const extra = Math.min(98, remaining); entry.company += 'x'.repeat(extra); remaining -= extra;
+    if (!remaining) break;
+  }
+  assert.equal(remaining, 0);
+  assert.equal(Buffer.byteLength(JSON.stringify({ ...value, receivedAt: at(0) })), CONTRACTS.limits.results);
+  assert.equal((await s.pushResults(value)).status, 200);
+  assert.ok((await stat(join(s.dataDir, 'results-state.json'))).size > CONTRACTS.limits.results);
+  assert.equal(createReadModel({ dataDir: s.dataDir }).feeds().results.value.seq, 102);
+  const original = readFileSync(join(s.dataDir, 'results-state.json'));
+  // The ingress still fits, but its server-stamped served form is one byte over.
+  value.seq = 103; value.trades.at(-1).company += 'x';
+  assert.ok(Buffer.byteLength(JSON.stringify(value)) <= CONTRACTS.limits.results);
+  const rejected = await s.pushResults(value);
+  assert.equal(rejected.status, 422); assert.equal(rejected.body.reason, 'contract_invalid');
+  assert.deepEqual(rejected.body.errors, [{ path: '$', rule: 'maxBytes' }]);
+  assert.deepEqual(readFileSync(join(s.dataDir, 'results-state.json')), original);
 });
 
 test('P2 KEEP: accepted Fleet Config policy withholds affected money and measured history', async t => {

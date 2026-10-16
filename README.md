@@ -317,7 +317,7 @@ retain their legacy probe responses. Static UI/assets remain behind external SSO
 `/joe/healthz` reports the actual `release.json` version/scheme, server clock,
 contract-set identifier, four feed states/receipt ages and gateway confirmation,
 check age and closed reason. Never-received feeds have null age and
-`feed_not_received`; unwired Results uses `results_not_wired`. Data/history
+`feed_not_received`, including Results before its first accepted push. Data/history
 without observations return HTTP 503 with that reason, distinct from a missing
 route. Health has no money, identifiers, paths or diagnostic text. The historical
 `calendar` scheme remains readable; this branch reports its CalVer3 candidate.
@@ -336,16 +336,19 @@ API readiness. `contracts/read.mjs` handles SSO redirects, 401/403 and invalid
 refreshes with retention. Replayed deliveries show retained/advisory state,
 preserve the original age and cannot freshen data or turn healthy cells red.
 
-`/joe/results.json` returns HTTP 503 with the v2 schema identifier,
-`results_not_wired` and `X-Joe-Server-Now`. It contains no fabricated executor
-sequence, days or trades; there is no results ingress until JOED-20. The P4
-board reads it every 30 s in its read worker (shared `acceptRead`, then indexed
-once) and shows Results' designed not-wired state until a valid v2 record with
-its server `receivedAt` arrives. History stores only observations
+`/joe/results.json` serves the last accepted results v2 snapshot with its
+original server receipt and any persisted rejection reason in headers. Before
+the first accepted push it returns 503 `feed_not_received` with the v2 schema
+identifier and server clock. The P4 board reads it every 30 s in its read
+worker (shared `acceptRead`, then indexed once) and uses its existing
+live/stale/rejected/unavailable states. History stores only observations
 and null gaps, never the UI's assumed/interpolated continuity values.
 
-P2 persists `data-state.json` (snapshot plus progress and retained-cell receipts)
-and `history-state.json` as independent atomic/fsynced envelopes. Closed rejection
+P2 persists `data-state.json` (snapshot plus progress and retained-cell receipts),
+`history-state.json` and `results-state.json` as independent atomic/fsynced
+envelopes (mode 0600). Results snapshots, receipts, generation progress and
+rejection reasons survive restarts; corrupt Results storage stays untouched
+and fails closed independently of data/history. Closed rejection
 reasons have a separate bounded file. Fleet Config keeps its audited v1 file and
 a server-owned `fleet-receipt.json` for last-good/receipt retention. Refreshes of
 an unchanged revision never reset its age. Corrupt sequence/retention metadata
@@ -369,6 +372,48 @@ The UI gates non-canonical hosts client-side (privacy stub). That is UX only, no
 ### Write routes
 
 `POST /joe/inbox` accepts machine pushes with `Authorization: Bearer <token>`. Configure the token via the secret file or `JOE_INBOX_TOKEN`. No browser session or OAuth on this route.
+
+### Results ingress (for the producer)
+
+`POST /joe/inbox/results` uses the **same** `Authorization: Bearer <token>` as
+`POST /joe/inbox`: `/run/secrets/joe-board-push-token`, with the existing
+`JOE_INBOX_TOKEN` fallback. No new credential or variable; no browser/SSO identity
+is needed for this machine route. Keep the protected read behind trusted SSO.
+
+Send exactly one JSON `inspr.joe.household.results.v2` snapshot as the body,
+without an envelope or `receivedAt`. Validate it with
+`validateContract('results', snapshot, {stage: 'ingress'})` from the pinned
+`contracts/` package. The UTF-8 request limit is `CONTRACTS.limits.results`
+(8,388,608 bytes); the served snapshot, including the server's `receivedAt`,
+must also fit that contract limit. Decimal money, gross/FX arithmetic, KEEP
+exclusion and all existing schema rules apply unchanged. Gross rounding and
+days/trades cross-check changes still require Amy's separate contract decision.
+
+Re-send at least every 30 s with a strictly higher `seq` and non-regressing
+`generatedAt`. Generation may be at most 5 s ahead of the server clock; server
+receipt time may not regress. Only accepted pushes advance the receipt. The
+shared selector marks Results stale at 60 s without a new acceptance; repeated
+generation also becomes `producer_frozen` at 60 s. Exact retries return 422
+without changing stores, freshness or an existing rejection. Other rejections
+persist their closed reason and keep the last good record and its original age.
+
+| Response | Meaning |
+| --- | --- |
+| 200 | `{ok:true,status:200,reason:null,receivedAt}` — accepted and persisted. |
+| 422 | Rejected snapshot; closed `reason` and at most 20 `errors` containing only `{path,rule}`. |
+| 401 | `auth_required` — missing/incorrect Bearer token. |
+| 413 | `contract_invalid` — body exceeds the request limit. |
+| 400 | `contract_invalid` — malformed JSON/body. |
+| 503 | `auth_required` if the shared token is unavailable; `contract_invalid` for unreadable/corrupt Results storage; `refresh_failed` if snapshot/rejection persistence fails. |
+
+`GET /joe/results.json` returns the last accepted snapshot (200), including
+`receivedAt`, with `X-Joe-Received-At`, `X-Joe-Server-Now`,
+`X-Joe-Generated-Advanced-At` and, when present, `X-Joe-Feed-Reason`. No snapshot
+means 503 with the closed reason (`feed_not_received` before any push). Reads
+and rejected pushes never refresh receipts. `/joe/state.json` carries Results
+metadata only; the full record stays on its worker read path.
+
+### Fleet Config propagation
 
 `POST /joe/fleet-config/propagate` accepts the flip plane's JSON `{baseRev, config}` envelope. It requires same-origin browser headers plus the proxy-supplied `X-Auth-Request-User` identity and **must remain behind the same trusted Zitadel SSO reverse proxy as `/joe/`**. The proxy must strip any client-supplied copy of that header before oauth2-proxy supplies the authenticated Zitadel identity; never expose this route directly. The server validates the strict paper-only v1 schema, rejects stale revisions, assigns the next `fc-NNNNNN` revision, and atomically renames it into `/var/lib/joe-board/fleet-config.json` with mode `0644`.
 

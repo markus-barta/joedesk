@@ -93,10 +93,15 @@ test('P6 backup and v2 staging: exact legacy bytes restored; new producer receip
   assert.equal(fs.existsSync(join(stage, 'data.json')), false);
   assert.deepEqual(before, fs.readdirSync(source).map(name => [name, fs.readFileSync(join(source, name)).toString('hex')]));
   const v2Backup = join(root, 'backup-v2');
+  const results = structuredClone(samples.results); delete results.receivedAt;
+  assert.equal(model.acceptResults(results).ok, true);
+  const resultsBytes = fs.readFileSync(join(stage, 'results-state.json'));
   backupStore({ source: stage, destination: v2Backup, boardSchema: 'v2' });
   assert.throws(() => restoreStore({ backup: v2Backup, destination: join(root, 'never-v1'), boardSchema: 'v1' }), /incompatible/);
   restoreStore({ backup: v2Backup, destination: join(root, 'v2-restore'), boardSchema: 'v2' });
   assert.deepEqual(fs.readFileSync(join(root, 'v2-restore', 'fleet-config-actions.json')), auditBytes);
+  assert.deepEqual(fs.readFileSync(join(root, 'v2-restore', 'results-state.json')), resultsBytes);
+  assert.equal(createReadModel({ dataDir: join(root, 'v2-restore'), clock: () => NOW }).feeds().results.value.seq, results.seq);
   assert.equal(createReadModel({ dataDir: join(root, 'v2-restore'), clock: () => NOW }).feeds().data.value.seq, samples.data.seq);
 });
 test('P6 migration refuses malformed audit history before creating a destination; absent log stays absent', t => {

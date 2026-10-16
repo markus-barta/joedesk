@@ -129,8 +129,8 @@
     },
     {
       "path": "public/joe/feed.js",
-      "size": 11713,
-      "sha256": "993892300d75a7dc03a81152d8cdf6506b8afbfff39d8a75bac227c80b0944e3"
+      "size": 11945,
+      "sha256": "1d8bc8b08dafe97115fcd9edb354d5501bc1503d6bc65503a907bbc66dd102c8"
     },
     {
       "path": "public/joe/fleet-config-actions.schema.json",
@@ -169,8 +169,8 @@
     },
     {
       "path": "public/joe/history-worker.js",
-      "size": 4625,
-      "sha256": "cc6b29304bb82a4e74c8ba137dfc9552d8454b26b616418feff097e6b8268f56"
+      "size": 4779,
+      "sha256": "048a043b56389c488587a80d5f166dd1c9e5af129b3cabc5eda0e004c0fb0114"
     },
     {
       "path": "public/joe/history.js",
@@ -199,8 +199,8 @@
     },
     {
       "path": "public/joe/results.js",
-      "size": 30116,
-      "sha256": "7c6f499fe96e715ec50e33486b9e2088a37f164207549ee7c498217a80d877cd"
+      "size": 30101,
+      "sha256": "855e095e48483fa2a88ed9bfcff6657004c7304a3d67c6c384eac19d2a948e69"
     },
     {
       "path": "public/joe/settings-model.js",
@@ -274,8 +274,8 @@
     },
     {
       "path": "release/data-migration.mjs",
-      "size": 8752,
-      "sha256": "9ec4e28d80a34a8e150f7823ba8e6c3bfa69d292c3da8d605cd3f83545cb0cd7"
+      "size": 9038,
+      "sha256": "adf07c3bd9b9ef5ec5848e843d8456f9d5205e71302d841c791d43f5c7d7af79"
     },
     {
       "path": "release/preparation.json",
@@ -304,8 +304,8 @@
     },
     {
       "path": "server/read-model.mjs",
-      "size": 12312,
-      "sha256": "bcf74137f91833f4e8464dc365dd08e59147d9802e3206aef4b399b3ecee8ceb"
+      "size": 15208,
+      "sha256": "cf8c9c3f4e3ec503b15cdd983865f8dd2a579bae939979847a75cdef9c96b220"
     },
     {
       "path": "server/storage.mjs",
@@ -314,8 +314,8 @@
     },
     {
       "path": "server.mjs",
-      "size": 26200,
-      "sha256": "4da1dd4cbecb50281e036055bceacf633f4bb94bebaf73637bc0fd043f26d8d9"
+      "size": 26669,
+      "sha256": "d362272d7350c46311960e2ea25ea1c1400aee81ee821a800d95858420eb5f3c"
     },
     {
       "path": "time.mjs",

@@ -2,7 +2,7 @@
 /**
  * Joe household board service (csb0).
  * Serves static /joe/ UI + schemas + latest snapshot + history + Fleet Config.
- * Accepts POST /joe/inbox with Bearer token (machine push; no browser OAuth).
+ * Accepts POST /joe/inbox[/results] with Bearer token (machine push; no browser OAuth).
  * Accepts same-origin POST /joe/fleet-config/propagate with proxy-supplied Zitadel identity.
  * Paper mutation only — never talks to IB, never places orders.
  */
@@ -43,10 +43,11 @@ const CONTRACT_FILES = Object.freeze(Object.fromEntries([
 const SHARED_FILES = Object.freeze({ "/joe/time.mjs": "time.mjs", "/joe/market-calendar.json": "market-calendar.json" });
 function feedHeaders(kind) {
   const feed = model.feeds()[kind];
+  const receivedAt = feed.value?.receivedAt ?? feed.receivedAt;
   return { "X-Joe-Server-Now": clock(),
     ...(feed.reason ? { "X-Joe-Feed-Reason": feed.reason } : {}),
     ...(feed.generatedAdvancedAt ? { "X-Joe-Generated-Advanced-At": feed.generatedAdvancedAt } : {}),
-    ...(feed.receivedAt ? { "X-Joe-Received-At": feed.receivedAt } : {}) };
+    ...(receivedAt ? { "X-Joe-Received-At": receivedAt } : {}) };
 }
 
 // The UI is plain ES modules; every served asset is listed here explicitly.
@@ -315,25 +316,25 @@ function bearerToken(req) {
   return h.slice(prefix.length).trim();
 }
 
-async function handleInbox(req, res) {
+async function handleInbox(req, res, kind = 'data') {
   if (req.method !== "POST") return sendJson(res, 405, { ok: false, reason: "route_not_found" });
   const expected = inboxToken ?? readToken();
   if (!expected) return sendJson(res, 503, { ok: false, reason: "auth_required" });
   if (!safeEqualStr(bearerToken(req), expected)) return sendJson(res, 401, { ok: false, reason: "auth_required" });
   let raw;
-  try { raw = await readBody(req, CONTRACTS.limits.data); }
+  try { raw = await readBody(req, CONTRACTS.limits[kind]); }
   catch (error) {
     const status = error.code === "TOO_LARGE" ? 413 : 400;
-    const rejected = model.reject("contract_invalid", status);
+    const rejected = model.reject("contract_invalid", status, kind);
     return sendJson(res, rejected.status, rejected);
   }
   let candidate;
   try { candidate = JSON.parse(raw.toString("utf8")); }
   catch {
-    const rejected = model.reject("contract_invalid", 400);
+    const rejected = model.reject("contract_invalid", 400, kind);
     return sendJson(res, rejected.status, rejected);
   }
-  const result = model.accept(candidate);
+  const result = kind === 'results' ? model.acceptResults(candidate) : model.accept(candidate);
   sendJson(res, result.status, result);
 }
 
@@ -588,17 +589,20 @@ function handleStatic(req, res, urlPath) {
     return;
   }
   if (urlPath === "/joe/results.json") {
-    // Until the closed-trade record is wired (JOED-20) every read says so, with the server's clock.
-    sendJson(res, 503, { ok: false, schema: CONTRACTS.contracts.results, reason: "results_not_wired" }, { "X-Joe-Server-Now": clock() });
+    const feed = model.feeds().results;
+    sendJson(res, feed.value ? 200 : 503, feed.value ?? { ok: false, schema: CONTRACTS.contracts.results, reason: feed.reason }, feedHeaders("results"));
     return;
   }
   if (urlPath === "/joe/state.json") {
-    // The 15 s state poll carries no history points; /joe/history.json serves
-    // them on their own 30 s cadence, so this response stays small.
+    // Both large feeds have separate worker reads on a 30 s cadence. Keep
+    // their snapshots out of the 15 s state poll, including panel values.
     const view = model.view();
     const { value, ...history } = view.feeds.history;
     const { value: _points, ...historyPanel } = view.panels.history;
-    sendJson(res, 200, { ...view, panels: { ...view.panels, history: historyPanel }, feeds: { ...view.feeds, history: { ...history,
+    const { value: record, ...results } = view.feeds.results;
+    const { value: _record, ...resultsPanel } = view.panels.results;
+    sendJson(res, 200, { ...view, panels: { ...view.panels, history: historyPanel, results: resultsPanel }, feeds: { ...view.feeds,
+      results: { ...results, ...(record ? { receivedAt: record.receivedAt, seq: record.seq } : {}) }, history: { ...history,
       ...(value ? { receivedAt: value.receivedAt, pointCount: value.points.length } : {}) } } });
     return;
   }
@@ -668,6 +672,10 @@ const server = http.createServer(async (req, res) => {
 
     if (urlPath === "/joe/inbox") {
       await handleInbox(req, res);
+      return;
+    }
+    if (urlPath === "/joe/inbox/results") {
+      await handleInbox(req, res, 'results');
       return;
     }
 

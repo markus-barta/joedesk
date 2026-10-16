@@ -425,7 +425,7 @@ try {
   }
 
   if (run('states')) {
-    // 3 · Not wired (the server's own answer), unavailable, stale, last good kept, kept-holdings mismatch.
+    // 3 · No push yet (the server's own answer), unavailable, stale, retained, KEEP mismatch.
     const { board } = await designBoard();
     const record = designResults(NOW);
     const shiftOf = async () => rects(page, SHIFT);
@@ -435,13 +435,13 @@ try {
       await serve(null);
       await load(page, board.url, 'results');
       const nw = await page.evaluate(RES);
-      check('AC-16', `${tag}: without a record (the server says not wired) Results shows §4.8: the sentence, dashes, no zeros, dates kept`,
-        /^Results are not wired yet\. The board has no closed-trade record for this period\.$/.test(nw.say) && nw.display === '—' && nw.split.every(x => x === '—') && nw.tiles.every(x => x.val.trim() === '—') &&
-        nw.rows.every(x => x.val.trim() === '—') && nw.cal.cells.length >= 28 && !/€\s?0,00/.test(`${nw.say}${nw.split.join('')}`) && nw.curve?.aria === 'Results are not wired yet' && nw.curve.empty, nw);
+      check('AC-16', `${tag}: before the first push Results uses its existing unavailable state: reason, dashes, no zeros, dates kept`,
+        nw.say === 'Results are unavailable: no data received yet.' && nw.display === '—' && nw.split.every(x => x === '—') && nw.tiles.every(x => x.val.trim() === '—') &&
+        nw.rows.every(x => x.val.trim() === '—') && nw.cal.cells.length >= 28 && !/€\s?0,00/.test(`${nw.say}${nw.split.join('')}`) && nw.curve?.aria === 'Results are unavailable' && nw.curve.empty, nw);
       const before = await shiftOf();
       await click(page, '#periodSeg [data-period="month"]'); await click(page, '#deskSeg [data-desk="joel"]'); await click(page, '#prevPer');
-      check('AC-16', `${tag}: not wired, the period and desk switches still work and move nothing`, (await page.evaluate(RES)).label.startsWith('Last month') && !shifted(before, await shiftOf(), ['top', 'left', 'height']).length, shifted(before, await shiftOf()).slice(0, 3));
-      if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-not-wired`, 'Results not wired (the server answers "not wired yet" until JOED-20)');
+      check('AC-16', `${tag}: before the first push, period and desk switches still work and move nothing`, (await page.evaluate(RES)).label.startsWith('Last month') && !shifted(before, await shiftOf(), ['top', 'left', 'height']).length, shifted(before, await shiftOf()).slice(0, 3));
+      if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-not-received`, 'Results before the first accepted push: the existing unavailable state');
       await reset();
       if (theme === 'dark') continue;
       // Fresh, then stale: the record's own age, in the chart's box; nothing moves.
@@ -697,6 +697,48 @@ try {
     }
   }
 
+  if (run('ingress')) {
+    // JOED-27: real HTTP push/read, with no results interception. Exercise both
+    // the module worker and the fallback, including server rejection headers.
+    await serve(null);
+    for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      const { board } = await designBoard();
+      const record = designResults(NOW); delete record.receivedAt;
+      const pushed = await board.pushResults(record);
+      check('results-ingress', `${viewport.name} ${theme}: the real results inbox accepts v2`, pushed.status === 200, pushed);
+      const fallback = viewport.mobile && theme === 'dark';
+      const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
+      await configure(page, viewport, theme);
+      await load(page, board.url, 'results');
+      if (injection) await page.s('Page.removeScriptToEvaluateOnNewDocument', injection);
+      const live = await page.evaluate(RES), before = await rects(page, SHIFT);
+      check('results-ingress', `${viewport.name} ${theme}: accepted push renders live through ${fallback ? 'fallback' : 'worker'}`,
+        live.display !== '—' && !live.status && (await page.evaluate('window.__joedesk.worker()')) === !fallback, live.status);
+      if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-ingress-live`, 'Results live from POST /joe/inbox/results');
+      board.setNow(at(NOW, 69)); // exactly 60 s after the accepted receipt
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `/updates are late/.test(document.getElementById('resStatus').innerText)`);
+      const stale = await page.evaluate(RES);
+      check('results-ingress', `${viewport.name} ${theme}: at 60 s the real feed is stale, keeps its numbers and moves nothing`,
+        /^Results as of 1.min ago · updates are late\.$/.test(stale.status) && stale.display === live.display &&
+        !shifted(before, await rects(page, SHIFT), ['top', 'left', 'height']).length, stale.status);
+      if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-ingress-stale`, 'Results stale 60 seconds after its last accepted push');
+      const bad = structuredClone(record); bad.seq++; bad.generatedAt = board.clock(); bad.trades[0].netEur.amount = '999';
+      const rejected = await board.pushResults(bad);
+      check('results-ingress', `${viewport.name} ${theme}: a bad pushed record is rejected with 422`, rejected.status === 422, rejected);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `/last update was rejected/.test(document.getElementById('resStatus').innerText)`);
+      const retained = await page.evaluate(RES);
+      check('results-ingress', `${viewport.name} ${theme}: rejection header keeps last good numbers with their original age`,
+        /last good results from 1.min ago/.test(retained.status) && retained.display === live.display, retained.status);
+      const next = { ...record, seq: record.seq + 1, generatedAt: board.clock() };
+      check('results-ingress', `${viewport.name} ${theme}: a new accepted push recovers`, (await board.pushResults(next)).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `document.getElementById('resStatus').innerText.length === 0`);
+      check('results-ingress', `${viewport.name} ${theme}: recovery clears the rejection`, !(await page.evaluate(RES)).status);
+    }
+  }
+
   if (run('budget')) {
     // 7 · The Results render budget's CI guard (ADR §9; the reference budget is
     // measured on a reference device by scripts/budget-reference.mjs).
@@ -718,8 +760,9 @@ an injected clock (Wed 14 Oct 2026, 19:42:31 Vienna; the Vienna-date views use
 Thu 1 Apr 2027), the P3 test-only scenario for state, history and fleet
 settings, and the closed-trade record served in the results v2 contract's
 served form: a deterministic test-only design record and the reviewed
-fixtures in \`fixtures/results/\`. Until JOED-20 writes \`/joe/results.json\`,
-the live board shows the not-wired state (\`*-results-not-wired.png\`). One
+fixtures in \`fixtures/results/\`. JOED-27's ingress cases use real machine
+pushes and protected reads, then advance the injected clock to stale at 60 s;
+before the first push the feed says no data received yet. One
 headless browser, run sequentially; reduced motion for stable geometry.
 Compare with \`joed-19-joedesk-approved.html\` (Results).
 
@@ -764,7 +807,7 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 | AC-13 By desk J, Joe, Joel, Total; chosen row tinted | \`AC-13\` | \`by desk\` (desks add up to the total) |
 | AC-14 6 rows; day states and tints; sign + arrow + tint | \`AC-14\` (three months, plus the Vienna-date months) | \`calendar\` |
 | AC-15 a day shows exactly its trades; phones open the sheet | \`AC-15\` (panel; sheet, Escape, ×, focus back) | \`calendar\` (rows = count, oldest first) |
-| AC-16 designed empty state; not wired without a record | \`AC-16\` (empty record, August before tracking, the server's not-wired answer) | \`empty period\`, \`read\` |
+| AC-16 designed empty/unavailable states | \`AC-16\` (empty record, August before tracking, no push received) | \`empty period\`, \`read\` |
 | AC-17 / AC-46 chart to scale; zero-based; legend and tip | \`AC-17\`, \`AC-46\`, \`AC-41\` (opaque tip) | \`hero chart\` |
 | AC-9 / KEEP excluded | \`AC-9\` (no kept symbol on Results; a record trading a kept symbol is held back) | \`kept holdings\` |
 | Vienna dates (ADR deferred P4 row) | \`vienna\` | \`vienna dates\` |
