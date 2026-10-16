@@ -177,6 +177,17 @@ test('results: full days require every desk with closed trades, even when all de
   assert.equal(validateContract('results', noTrades).ok, true);
 });
 
+test('results: Vienna fallback reconciles both repeated hours on 25 October on any host', () => {
+  const dst = JSON.parse(readFileSync(new URL('../fixtures/results/dst-weeks.json', import.meta.url)));
+  const accepted = acceptSnapshot('results', ingress(dst), null, dst.receivedAt);
+  assert.equal(accepted.status, 200);
+  assert.equal(dst.days[1].desks.joel.trades, 5);
+  for (const date of ['2026-10-24', '2026-10-26']) {
+    const wrongDay = ingress(dst); wrongDay.days[1].date = date;
+    rejects(validateContract('results', wrongDay, { stage: 'ingress' }), 'dayTradeCount', '$.days[1].desks.joel.trades');
+  }
+});
+
 test('results: trades without a days entry are skipped, while reported days still reconcile', () => {
   const r = copy(samples.results);
   const today = { ...copy(r.trades[0]), id: 'rt-before-daily-close', desk: 'joel',

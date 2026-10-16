@@ -281,6 +281,40 @@ npm run test:browser
 BROWSER_PATH=/usr/bin/google-chrome node scripts/browser-p3.mjs
 ```
 
+`npm run test:results` runs the full P4 Results gate sequentially under **UTC**
+and **America/New_York**. `test:browser` includes this guard. CI includes Vienna
+too; run the same three-zone check with:
+
+```bash
+npm run test:results -- UTC Europe/Vienna America/New_York
+# One zone, same P4 suite (including the render budget):
+TZ=UTC node scripts/browser-p4.mjs
+```
+
+Each child process sets `TZ` for the injected board server and Chrome. The CDP
+page also sets its requested zone explicitly, since macOS Chrome may keep the
+OS zone despite `TZ`; P4 checks the server, page and dedicated worker zones.
+Reports stay separate under `~/.local/share/joedesk-qa/p4/<zone>/index.md`
+(`JOED_QA_DIR` overrides the parent; slashes in zone names become hyphens).
+Use an approved browser test host; an installed browser guard refusal is a
+blocked check and must be handed to the coordinator without bypassing it.
+
+Vienna day keys always come from the explicit `Europe/Vienna` zone in
+`contracts/vienna-date.mjs` and `time.mjs`; Results uses that same zone for its
+instant-to-day index. UTC date getters serve calendar arithmetic only. The DST
+fixture includes both 02:30s and the exact fallback boundary on **25 Oct 2026**;
+Node tests also check both midnights of that 25-hour day. Full daily summaries
+reconcile the five closes on 25 Oct in every host zone.
+
+`createFeed().refresh()` waits for worker acceptance, including unchanged
+replies, and overlapping worker polls share that pending read. A fast state
+read can advance the clock and display Stale before a Results worker answers;
+dispatch alone must not count as a completed refresh. Otherwise the next
+refresh after a rejected push can be skipped while the previous read is busy.
+The worker regression holds replies explicitly to exercise this ordering,
+rejection retention and fallback completion without timing sleeps. P4 keeps
+the rejection assertion and its existing timeout.
+
 The gate holds the render budget's CI guard (2.5 × the reference budget,
 ADR §9). The budget itself is measured on a reference device (mbp2606 or
 mbp2607) with the same workload:

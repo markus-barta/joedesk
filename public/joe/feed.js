@@ -90,26 +90,46 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   // release's own path; another release's path is not served. Without module
   // workers the same steps run here.
   let worker = null;
+  // A refresh completes when its worker reply has been accepted, including an
+  // unchanged reply. Dispatch alone leaves busy set: the next refresh would
+  // otherwise silently skip the read (for example after a rejected push).
+  const workerReads = new Map();
+  const readInWorker = (kind, message) => {
+    let resolve;
+    const promise = new Promise(done => { resolve = done; });
+    workerReads.set(kind, { promise, resolve });
+    worker.postMessage(message);
+    return promise;
+  };
   try {
     worker = new Worker(new URL(`./v/${encodeURIComponent(version)}/history-worker.js`, import.meta.url), { type: 'module' });
     worker.onmessage = ({ data }) => {
       const kind = data.kind === 'unchanged' ? data.feed : data.kind;
       busy.delete(kind);
-      if (data.clock) anchorTo(data.clock.at, data.clock.precise ? 'stamp' : 'date');
-      measure(`${kind}-worker`, data.ms);
-      if (data.kind === 'unchanged') return;
-      if (kind === 'results') { settle('results', resultsFeed(data.index, data.reason, data.generatedAdvancedAt)); onChange('results'); return; }
-      settle('history', { value: data.meta ? { ...data.meta, columns: data.columns, closes: data.closes } : null, reason: data.reason });
-      onChange('history');
+      const pending = workerReads.get(kind);
+      workerReads.delete(kind);
+      try {
+        if (data.clock) anchorTo(data.clock.at, data.clock.precise ? 'stamp' : 'date');
+        measure(`${kind}-worker`, data.ms);
+        if (data.kind === 'unchanged') return;
+        if (kind === 'results') { settle('results', resultsFeed(data.index, data.reason, data.generatedAdvancedAt)); onChange('results'); return; }
+        settle('history', { value: data.meta ? { ...data.meta, columns: data.columns, closes: data.closes } : null, reason: data.reason });
+        onChange('history');
+      } finally { pending?.resolve(); }
     };
-    worker.onerror = () => { worker = null; busy.delete('history'); busy.delete('results'); pollHistory(); pollResults(); };
+    worker.onerror = () => {
+      const pending = [...workerReads.values()]; workerReads.clear();
+      worker = null; busy.delete('history'); busy.delete('results');
+      const complete = () => pending.forEach(read => read.resolve());
+      Promise.all([pollHistory(), pollResults()]).then(complete, complete);
+    };
   } catch { worker = null; }
 
   let fallback = null;
   async function pollHistory() {
-    if (busy.has('history')) return;
+    if (busy.has('history')) return workerReads.get('history')?.promise;
     busy.add('history');
-    if (worker) { worker.postMessage('poll'); return; }
+    if (worker) return readInWorker('history', 'poll');
     const res = await read('./history.json');
     busy.delete('history');
     anchorFrom(res.clock);
@@ -132,9 +152,9 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     ...(generatedAdvancedAt ? { generatedAdvancedAt } : {}) });
   let resultsFallback = null;
   async function pollResults() {
-    if (busy.has('results')) return;
+    if (busy.has('results')) return workerReads.get('results')?.promise;
     busy.add('results');
-    if (worker) { worker.postMessage('results'); return; }
+    if (worker) return readInWorker('results', 'results');
     const res = await read('./results.json');
     busy.delete('results');
     anchorFrom(res.clock);

@@ -99,8 +99,8 @@
     },
     {
       "path": "package.json",
-      "size": 1284,
-      "sha256": "9b20de87c5ac10ac7fc719f39717d08161e0e838f23125ba190dcb224e278a2f"
+      "size": 1334,
+      "sha256": "5698a019912769bf98fe2eb3c71f3e7e316c9aa1f09831f392579d84aa5c76f5"
     },
     {
       "path": "public/joe/app.css",
@@ -134,8 +134,8 @@
     },
     {
       "path": "public/joe/feed.js",
-      "size": 11945,
-      "sha256": "1d8bc8b08dafe97115fcd9edb354d5501bc1503d6bc65503a907bbc66dd102c8"
+      "size": 12848,
+      "sha256": "ec5657057291447116aad5e36b6b8a8fc3e75bcdb12b3a660a62f348c75e02c6"
     },
     {
       "path": "public/joe/fleet-config-actions.schema.json",

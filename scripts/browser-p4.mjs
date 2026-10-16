@@ -168,6 +168,8 @@ const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' }
 const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, ${cpus().length} cores, Node ${process.version}`;
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
+const hostTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const expectedTimeZone = new Intl.DateTimeFormat('en', { timeZone: process.env.TZ ?? hostTimeZone }).resolvedOptions().timeZone;
 await page.s('Page.addScriptToEvaluateOnNewDocument', { source: AUDIT });
 const boards = [];
 async function newBoard(options) { const b = await startBoard(options); boards.push(b); return b; }
@@ -214,6 +216,9 @@ async function designBoard(now = NOW, fleetConfig = null, edit = null) {
 const reset = async () => { for (const s of ['#periodSeg [data-period="week"]', '#deskSeg [data-desk="all"]']) await click(page, s); };
 
 try {
+  check('host-timezone', 'the server uses the requested host zone', hostTimeZone === expectedTimeZone, { hostTimeZone, expectedTimeZone });
+  const pageTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone');
+  check('host-timezone', 'the page uses the requested host zone', pageTimeZone === expectedTimeZone, { pageTimeZone, expectedTimeZone });
   if (run('design')) {
     // 1 · The design record at every viewport and theme: craft audit, every
     // period × desk against the model, no shift, By desk, calendar, a day, the chart.
@@ -516,14 +521,22 @@ try {
       for (let i = 0; i < 7; i++) { const r = await page.evaluate(RES); months[r.cal.title] = r.cal.cells; await click(page, '#prevMonth'); }
       const cell = (m, day) => months[m]?.find(c => c.day === day);
       const has = (m, day, n) => N(cell(m, day)?.aria).includes(N(`from ${n} trade`));
-      check('vienna', `${tag}: each trade is on its Vienna date (15, 25, 27, 28 Oct; two on 1 Nov; 16 and 31 Mar)`,
-        has('October 2026', '2026-10-15', 1) && !has('October 2026', '2026-10-14', 1) && has('October 2026', '2026-10-25', 1) && has('October 2026', '2026-10-27', 1) && has('October 2026', '2026-10-28', 1) &&
+      check('vienna', `${tag}: each trade is on its Vienna date (15, 27, 28 Oct; five on 25 Oct across fallback; two on 1 Nov; 16 and 31 Mar)`,
+        has('October 2026', '2026-10-15', 1) && !has('October 2026', '2026-10-14', 1) && has('October 2026', '2026-10-25', 5) && has('October 2026', '2026-10-27', 1) && has('October 2026', '2026-10-28', 1) &&
         has('November 2026', '2026-11-01', 2) && has('March 2027', '2027-03-16', 1) && has('March 2027', '2027-03-31', 1),
         Object.fromEntries(Object.entries(months).map(([k, v]) => [k, v.filter(c => /trade/.test(c.aria)).map(c => [c.day, c.aria])])));
       for (const title of Object.keys(months)) {
         const faults = calendarFacts({ cal: { cells: months[title], slots: 42, weeks: 6 } }, ix, DESKS, '2027-04-01', ix.meta.trackingStart);
         check('AC-14', `${tag} ${title}: every day's state follows the record`, !faults.length, faults.slice(0, 4));
       }
+      await click(page, '#nextMonth'); // September → October
+      await click(page, '#cal [data-day="2026-10-25"]');
+      const fallbackDay = await page.evaluate(viewport.mobile
+        ? `({ rows: document.querySelectorAll('#sheetBody .trow').length, text: document.getElementById('sheetBody').innerText })`
+        : `(${RES}).day`);
+      check('vienna', `${tag}: 25 Oct keeps both 02:30s and the fallback boundary in instant order on the same Vienna day`,
+        fallbackDay.rows === 5 && /closed 00:30[\s\S]*closed 02:30[\s\S]*closed 02:59[\s\S]*closed 02:00[\s\S]*closed 02:30/.test(fallbackDay.text), fallbackDay);
+      if (viewport.mobile) await key(page, 'Escape');
       await load(page, board.url, 'results');
       await click(page, '#periodSeg [data-period="week"]');
       for (let i = 0; i < 30 && N((await page.evaluate(RES)).label) !== N('26 Oct – 1 Nov 2026'); i++) await click(page, '#prevPer');
@@ -734,7 +747,8 @@ try {
       if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-ingress-stale`, 'Results stale 60 seconds after its last accepted push');
       const bad = structuredClone(record); bad.seq++; bad.generatedAt = board.clock(); bad.trades[0].netEur.amount = '999';
       const rejected = await board.pushResults(bad);
-      check('results-ingress', `${viewport.name} ${theme}: a bad pushed record is rejected with 422`, rejected.status === 422, rejected);
+      check('results-ingress', `${viewport.name} ${theme}: a bad pushed record is rejected with 422 contract_invalid`,
+        rejected.status === 422 && rejected.body.reason === 'contract_invalid', rejected);
       await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, `/last update was rejected/.test(document.getElementById('resStatus').innerText)`);
       const retained = await page.evaluate(RES);
@@ -753,6 +767,9 @@ try {
     // measured on a reference device by scripts/budget-reference.mjs).
     budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
   }
+  if (process.env.TZ) check('host-timezone', 'dedicated workers use the requested host zone',
+    page.workerTimeZones.length > 0 && page.workerTimeZones.every(zone => zone === expectedTimeZone),
+    { workerTimeZones: page.workerTimeZones, expectedTimeZone });
 } finally {
   await browser.close();
   for (const b of boards) await b.close();
@@ -773,6 +790,7 @@ fixtures in \`fixtures/results/\`. JOED-27's ingress cases use real machine
 pushes and protected reads, then advance the injected clock to stale at 60 s;
 before the first push the feed says no data received yet. One
 headless browser, run sequentially; reduced motion for stable geometry.
+Host and browser time zone: ${expectedTimeZone}; dedicated worker zones are checked too.
 Compare with \`joed-19-joedesk-approved.html\` (Results).
 
 ## For the visual check

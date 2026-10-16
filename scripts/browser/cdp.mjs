@@ -74,14 +74,17 @@ export async function launch({ hostRules = '' } = {}) {
   };
 }
 
-export async function openPage(browser, { headers = {} } = {}) {
+export async function openPage(browser, { headers = {}, timeZone = process.env.TZ } = {}) {
   const { targetId } = await browser.send('Target.createTarget', { url: 'about:blank' });
   const { sessionId } = await browser.send('Target.attachToTarget', { targetId, flatten: true });
   const s = (method, params) => browser.send(method, params, sessionId);
   await s('Page.enable'); await s('Runtime.enable'); await s('Network.enable');
+  // macOS Chrome can use the OS zone despite TZ in its environment. Emulate
+  // the requested host zone explicitly; dedicated workers inherit this zone.
+  if (timeZone) await s('Emulation.setTimezoneOverride', { timezoneId: timeZone });
   const page = { headers };
   if (Object.keys(headers).length) await s('Network.setExtraHTTPHeaders', { headers });
-  const errors = [], requests = [];
+  const errors = [], requests = [], workerTimeZones = [];
   // Workers are their own targets: give them the same request headers and
   // the same request routing before they run.
   const children = new Set();
@@ -97,7 +100,16 @@ export async function openPage(browser, { headers = {} } = {}) {
       if (Object.keys(page.headers).length) await browser.send('Network.setExtraHTTPHeaders', { headers: page.headers }, child);
       if (fetchPatterns) await browser.send('Fetch.enable', { patterns: fetchPatterns }, child);
     } catch { /* not a network-capable target */ }
-    browser.send('Runtime.runIfWaitingForDebugger', {}, child).catch(() => {});
+    await browser.send('Runtime.runIfWaitingForDebugger', {}, child).catch(() => {});
+    if (timeZone && m.params.targetInfo.type === 'worker') {
+      try {
+        await browser.send('Runtime.enable', {}, child);
+        const result = await browser.send('Runtime.evaluate', {
+          expression: 'Intl.DateTimeFormat().resolvedOptions().timeZone', returnByValue: true,
+        }, child);
+        workerTimeZones.push(result.result.value);
+      } catch { workerTimeZones.push(null); }
+    }
   });
   browser.on(m => {
     if (m.method === 'Network.requestWillBeSent' && m.sessionId && m.sessionId !== sessionId) requests.push({ url: m.params.request.url, method: m.params.request.method, postData: m.params.request.postData, worker: true });
@@ -120,5 +132,5 @@ export async function openPage(browser, { headers = {} } = {}) {
     }
   };
   const owns = id => id === sessionId || children.has(id);
-  return { s, evaluate, errors, requests, targetId, setHeaders, setFetch, owns };
+  return { s, evaluate, errors, requests, workerTimeZones, targetId, setHeaders, setFetch, owns };
 }

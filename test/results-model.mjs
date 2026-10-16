@@ -183,6 +183,10 @@ test('vienna dates: extended hours, the five-hour week, NY’s repeated hour, Vi
   assert.deepEqual(Array.from({ length: ix.trades.n }, (_, k) => [of(k), M.trade(ix, k).net]), [
     ['2026-10-15', 1], // 18:30 New York on 14 Oct is already Thursday in Vienna
     ['2026-10-25', 2], // Vienna midnight, the night its clocks go back
+    ['2026-10-25', 9], // 02:30 CEST, before fallback
+    ['2026-10-25', 10], // 02:59:59.999 CEST
+    ['2026-10-25', 11], // 02:00 CET, exactly at fallback
+    ['2026-10-25', 12], // the second 02:30, now CET
     ['2026-10-27', 3], // the five-hour week: 18:30 New York is 23:30 in Vienna, same date
     ['2026-10-28', 4], // 19:10 New York is past Vienna midnight
     ['2026-11-01', 5], // 01:30 EDT
@@ -197,6 +201,30 @@ test('vienna dates: extended hours, the five-hour week, NY’s repeated hour, Vi
   assert.deepEqual(M.tradesOn(ix, '2026-11-01', ALL).map(t => t.closedAt), [Date.parse('2026-11-01T05:30:00.000Z'), Date.parse('2026-11-01T06:30:00.000Z')]);
   assert.equal(M.dayResult(ix, '2026-10-14', ALL).count, 0, 'the 14 Oct evening trade is not on 14 Oct');
   assert.equal(M.periodOf('week', '2026-10-28', later.today).start, '2026-10-26', 'weeks start on Monday, by date');
+});
+
+test('vienna dates: the fallback day lasts 25 hours; both midnights and repeated hours use Vienna', () => {
+  const vectors = [
+    ['2026-10-24T21:59:59.999Z', '2026-10-24'],
+    ['2026-10-24T22:00:00.000Z', '2026-10-25'],
+    ['2026-10-25T00:59:59.999Z', '2026-10-25'],
+    ['2026-10-25T01:00:00.000Z', '2026-10-25'],
+    ['2026-10-25T22:59:59.999Z', '2026-10-25'],
+    ['2026-10-25T23:00:00.000Z', '2026-10-26'],
+  ];
+  for (const [instant, day] of vectors) {
+    assert.equal(M.viennaDate(Date.parse(instant)), day);
+    assert.equal(page.resultsToday(instant), day);
+  }
+  assert.equal(M.viennaMidnight('2026-10-25'), Date.parse('2026-10-24T22:00:00.000Z'));
+  assert.equal(M.viennaMidnight('2026-10-26'), Date.parse('2026-10-25T23:00:00.000Z'));
+  assert.equal(M.viennaMidnight('2026-10-26') - M.viennaMidnight('2026-10-25'), 25 * 3600000);
+  const ix = M.indexResults(fixture('dst-weeks'));
+  assert.equal(M.dayResult(ix, '2026-10-25', ALL).units, E('44'));
+  assert.deepEqual(M.tradesOn(ix, '2026-10-25', ALL).map(t => t.closedAt), [
+    '2026-10-24T22:30:00.000Z', '2026-10-25T00:30:00.000Z', '2026-10-25T00:59:59.999Z',
+    '2026-10-25T01:00:00.000Z', '2026-10-25T01:30:00.000Z',
+  ].map(Date.parse));
 });
 
 test('calendar: a day is Σ net of its trades; tints are quarters of the largest day; a day lists exactly its trades', () => {

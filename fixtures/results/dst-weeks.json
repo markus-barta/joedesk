@@ -56,6 +56,26 @@
           "trades": 0
         }
       }
+    },
+    {
+      "date": "2026-10-25",
+      "desks": {
+        "joel": {
+          "equityClose": {
+            "amount": "5044",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "44",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "1.75",
+            "currency": "EUR"
+          },
+          "trades": 5
+        }
+      }
     }
   ],
   "trades": [
@@ -352,6 +372,154 @@
         "rate": "0.5",
         "source": "fixture-close-rate",
         "observedAt": "2027-03-30T22:30:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-009",
+      "desk": "joel",
+      "symbol": "SOFI",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-24T22:00:00.000Z",
+      "closedAt": "2026-10-25T00:30:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "28.70",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "9.35",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "9",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-25T00:30:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-010",
+      "desk": "joel",
+      "symbol": "SOFI",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-24T22:00:00.000Z",
+      "closedAt": "2026-10-25T00:59:59.999Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "30.70",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "10.35",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "10",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-25T00:59:59.999Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-011",
+      "desk": "joel",
+      "symbol": "SOFI",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-24T22:00:00.000Z",
+      "closedAt": "2026-10-25T01:00:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "32.70",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "11.35",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "11",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-25T01:00:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-012",
+      "desk": "joel",
+      "symbol": "SOFI",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-24T22:00:00.000Z",
+      "closedAt": "2026-10-25T01:30:00.000Z",
+      "entryPrice": {
+        "amount": "10",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "34.70",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "12.35",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "12",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-25T01:30:00.000Z"
       },
       "method": "execution-fifo-net-current-fx"
     }
