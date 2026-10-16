@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, ACTOR, TOKEN, NOW, at } from './browser/board.mjs';
-import { VIEWPORTS, THEMES, configure, load, settle, waitFor } from './browser/shots.mjs';
+import { VIEWPORTS, THEMES, configure, load, settle, waitFor, pointerMedia, MOUSE, TOUCH } from './browser/shots.mjs';
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { designFleet, designActions, designSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
@@ -878,9 +878,12 @@ try {
     for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
       const tag = `${theme}${font ? ' wide font' : ''} settings`;
       await openSettings(b, VIEWPORTS[0], theme, { font });
-      const fail = { scroll: [], past: [], header: [], nav: [], targets: [], overlaps: [], bar: [] };
+      const fail = { scroll: [], past: [], header: [], nav: [], targets: [], overlaps: [], bar: [], pointer: [] };
       for (const width of widths) {
         await configure(page, { name: String(width), width, height: 900, mobile: width <= 700 }, theme);
+        // The pointer right after the resize, the phone↔desktop changes included.
+        const media = await pointerMedia(page);
+        if (media !== (width <= 700 ? TOUCH : MOUSE)) fail.pointer.push({ width, media });
         await settle(page);
         const r = await ev(`__audit.sweep(960, null)`);
         if (r.scroll > r.inner) fail.scroll.push({ width, scroll: r.scroll });
@@ -914,6 +917,7 @@ try {
       check('AC-30', `sweep ${tag}: the compact header's buttons and the bottom bar are 44 px targets`, !fail.targets.length, fail.targets.slice(0, 3));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
       check('no-shift', `sweep ${tag}: from 710 px the edit bar holds its longest notes and its buttons inside it, inside the window and above the bottom bar`, !fail.bar.length, fail.bar.slice(0, 4));
+      check('touch', `sweep ${tag}: read right after each resize, the pointer is touch up to 700 px (no hover, coarse) and a mouse above (hover, fine) at every one of ${n}`, !fail.pointer.length, fail.pointer.slice(0, 8));
     }
     // For the visual check: the edit bar above the bottom bar at a tablet width.
     await openSettings(b, { name: '820', width: 820, height: 1000, mobile: false }, 'light');
@@ -961,6 +965,25 @@ locale, so every age and time reads the same on any runner. The pointer is
 fixed too: desktop widths have a mouse that hovers, phones are touch screens,
 whatever pointer the host has. Browser: ${reference}.
 Compare with \`joed-19-joedesk-approved.html\` (Settings).
+
+## Changed in fix round 4 (Codex delta r3 of d8304a5)
+
+- **A desktop width after a phone, in the same page, had the host's
+  pointer.** Turning touch emulation off hands the live page the host's
+  pointer until Chrome sends it its preferences again (a new page does). The
+  sweep resizes one page from 390 to 1440 px, so on Linux every width from
+  710 px had no hover and no pointer. \`Emulation.setEmulatedMedia\` cannot
+  set them (Chrome overrides no \`hover\` or \`pointer\` feature: Chrome 151
+  Linux and 153 macOS change nothing), so one helper (\`setPointer\` in
+  \`shots.mjs\`, called by \`configure\` in P3, P4 and P5) turns touch on for
+  a phone, turns it off only when a desktop case follows a phone, and then
+  takes a 1×1 screenshot beyond the viewport: Chrome sends the preferences
+  again and the same page has its mouse back. Both sweeps (P3 and P5) read
+  the pointer right after every resize (\`touch\`, "read right after each
+  resize"): touch up to 700 px, a mouse above. Proven on Linux (Playwright
+  noble, Chrome 151, \`TZ=UTC\`): with d8304a5's helper the new check fails
+  from 710 px ("no hover, no pointer") in all 4 P5 and 16 P3 sweeps; with
+  this round they pass. Test-only; every other check is unchanged.
 
 ## Changed in fix round 3 (Linux CI of c942831)
 
@@ -1130,6 +1153,7 @@ Every screenshot was taken again. What changed, per fix:
 | Tick's visual check of 2d29200: A phone wake windows, B item keys, C connections, E no reserve caption | \`AC-23\` (A), \`AC-22\` (B, C), \`AC-24\` (E) | \`phone wake windows\`, \`schema keys\` (item names) |
 | Tick D: no sticky hover, no tap flash on phones | \`touch\` (every :hover guarded; no tap highlight; System then Dark tints only Dark; the hidden Continue slot's pixels) | — |
 | Linux CI: the pointer is the test's, not the host's | \`touch\` (each case's hover and pointer: a mouse at 1440 and 1024, touch at 390; with a mouse, System takes the hover tint and loses it) | — |
+| Codex delta r3: a desktop width after a phone keeps the test's mouse | \`touch\` (the sweep reads the pointer right after each resize: touch up to 700 px, a mouse above) | — |
 | Linux CI: deterministic ages | \`AC-25\` (frozen board clock and page timer, en-US, UTC; the rows unchanged 1.5 s later) | — |
 | Part A craft on Settings | AC-1, 2, 5, 28–30, 32, 33, 36, 38, 40, 42–44, 47 (\`auditScreen\`) | — |
 | No layout shift on edit, review, toast or section change (both fonts) | \`no-shift\` (edited; long values at 1440 and 1024 in both fonts, 390 in both fonts; stored outcome; sweep) | — |

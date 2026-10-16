@@ -9,15 +9,41 @@ export const VIEWPORTS = [
 ];
 export const THEMES = ['light', 'dark'];
 
-// A phone is a touch screen ((hover: none), (pointer: coarse)); any other
-// viewport has the mouse the browser was launched with ((hover: hover),
-// (pointer: fine)). Turning touch off hands the host's own pointer back until
-// the next document, so a desktop case has its mouse from load() on.
 export async function configure(page, viewport, theme, { scale = 1 } = {}) {
   await page.s('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: scale, mobile: viewport.mobile });
-  await page.s('Emulation.setTouchEmulationEnabled', viewport.mobile ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
+  await setPointer(page, viewport.mobile);
   await page.s('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }, { name: 'prefers-reduced-motion', value: 'reduce' }] });
 }
+
+// The pointer is the test's, not the host's. A phone is a touch screen
+// ((hover: none), (pointer: coarse)); any other viewport has the mouse the
+// browser was launched with ((hover: hover), (pointer: fine); cdp.mjs).
+// Touch emulation makes the touch screen, whatever the host. Turning it off
+// hands the live document the host's pointer (a Linux runner has none) until
+// Chrome sends the page its preferences again, which applies the launch
+// flag once more: a new document does, and so does a screenshot beyond the
+// viewport (Chrome swaps the preferences for it and puts them back). So
+// touch is turned off only when a desktop case follows a phone, and then a
+// 1×1 screenshot gives the same document its mouse again, resized live as
+// before. Emulation.setEmulatedMedia cannot do it: it overrides no hover or
+// pointer feature (Chrome 151 Linux, 153 macOS).
+const touching = new WeakSet();
+export async function setPointer(page, mobile) {
+  if (mobile) {
+    await page.s('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    touching.add(page);
+    return;
+  }
+  if (!touching.has(page)) return;
+  await page.s('Emulation.setTouchEmulationEnabled', { enabled: false });
+  touching.delete(page);
+  await page.s('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 }, captureBeyondViewport: true });
+}
+
+// The pointer the page's media queries see, to assert after a change.
+export const MOUSE = 'hover, fine', TOUCH = 'no hover, coarse';
+export const pointerMedia = page => page.evaluate(`[matchMedia('(hover: hover)').matches ? 'hover' : matchMedia('(hover: none)').matches ? 'no hover' : 'hover unknown',
+  matchMedia('(pointer: fine)').matches ? 'fine' : matchMedia('(pointer: coarse)').matches ? 'coarse' : 'no pointer'].join(', ')`);
 
 export async function waitFor(page, expression, timeout = 15000) {
   const until = Date.now() + timeout;
