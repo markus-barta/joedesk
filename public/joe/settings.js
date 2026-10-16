@@ -31,6 +31,8 @@ let restored = false, fieldsKey = null, lastCtx = null, pinnedSec = null, gateSt
 // Long keys may break after a dot or the file name, never inside a word.
 const breakable = text => esc(text).replace(/([.#/])/g, '$1<wbr>');
 const keyCode = key => `<code class="key" data-key="${esc(key)}">${breakable(key)}</code>`;
+// An array's item key, by its own name ("id"); data-key holds the full key.
+const leafCode = key => `<code class="leaf" data-key="${esc(key)}">${esc(M.itemName(key))}</code>`;
 const fieldId = key => `f-${key.replace(/[^A-Za-z0-9]/g, '-')}`;
 const loadedConfig = ctx => ctx?.feeds['fleet-config']?.value ?? null;
 
@@ -177,7 +179,7 @@ function controlHtml(f) {
   const saved = `<div class="f-saved dsk" data-saved="${f.key}"></div>`;
   if (f.type === 'int' || f.type === 'pct') {
     const unit = f.type === 'pct' ? '%' : esc(f.x.unit);
-    const meter = f.type === 'pct' ? `<div class="meter dsk" role="img" aria-label="${esc(v)}${NB}% kept free" data-meter-box="${f.key}"><i data-meter="${f.key}" style="width:${Math.max(0, Math.min(100, Number(v) || 0))}%"></i></div><p class="f-ex dsk" data-example="${f.key}">${esc(M.reserveExample(v))}</p>` : '';
+    const meter = f.type === 'pct' ? `<div class="meter dsk" role="img" aria-label="${esc(v)}${NB}% kept free" data-meter-box="${f.key}"><i data-meter="${f.key}" style="width:${Math.max(0, Math.min(100, Number(v) || 0))}%"></i></div>` : '';
     return `<div class="stepper dsk"><button type="button" data-bump="-1" data-for="${f.key}" aria-label="Lower ${label}">${icon('minus')}</button><input id="${id}" data-field="${f.key}" inputmode="numeric" value="${esc(v)}" aria-label="${label}" autocomplete="off"><span class="u">${unit}</span><button type="button" data-bump="1" data-for="${f.key}" aria-label="Raise ${label}">${icon('plus')}</button></div>${meter}${phone}${saved}`;
   }
   if (f.type === 'num') return `<div class="affix dsk"><span class="ax">€</span><input class="inp" id="${id}" data-field="${f.key}" inputmode="decimal" value="${esc(v)}" aria-label="${label}, in euros" autocomplete="off"></div>${phone}${saved}`;
@@ -188,17 +190,21 @@ function controlHtml(f) {
 }
 
 function readOnlyControl(f, config) {
-  if (!config) return readOnly('Not available', '', 'ring');
+  // The connections' line names their item keys, with or without the values.
+  const perEntry = f.type === 'entries' ? `Read-only · ${M.ITEM_KEYS[f.key].map(leafCode).join(' and ')} per connection` : '';
+  if (!config) return readOnly('Not available', perEntry, 'ring');
   const v = M.get(config, f.key);
   if (f.type === 'fixed') return readOnly(fixedValue(f, v), f.x.why ?? 'Fixed by the settings format');
-  if (f.type === 'entries') return readOnly(v.map(e => `<span class="entry"><span class="mono">${esc(e.id)}</span> · <span class="mono">${esc(e.label)}</span></span>`).join(''), 'Read-only · declared names only');
+  if (f.type === 'entries') return readOnly(v.map(e => `<span class="entry"><span class="mono">${esc(e.id)}</span> · ${esc(e.label)}</span>`).join(''), perEntry);
   if (f.type === 'refs') return readOnly(v.length ? v.map(r => `<span class="secret"><span class="mono">${esc(r)}</span><span class="redacted">${icon('lock')}redacted</span></span>`).join('') : 'None declared', 'Reference names only');
   return '';
 }
 
+// The wake windows' item keys follow their key: "· each window: id · days · …".
+// The connections' item keys are named in their read-only line.
 const fieldLeft = f => {
   const lab = f.x.dot ? st(f.x.dot, esc(f.label)) : `<span>${esc(f.label)}</span>`;
-  const items = M.ITEM_KEYS[f.key] ? `<p class="keys">${M.ITEM_KEYS[f.key].map(keyCode).join('')}</p>` : '';
+  const items = f.type === 'windows' ? ` <span class="key-each">· each window: ${M.ITEM_KEYS[f.key].map(leafCode).join(' · ')}</span>` : '';
   return `<div class="f-k"><div class="f-l">${lab}${learnBtn(`f:${f.key}`)}</div><p class="f-h">${esc(f.help)}</p>${keyCode(f.key)}${items}</div>`;
 };
 
@@ -222,10 +228,12 @@ function windowsHtml(f) {
       <button type="button" class="btn quiet" data-wwdel="${i}" aria-label="Remove wake window ${n}">${icon('trash')}Remove</button>
     </div>`;
   }).join('');
+  // Phones: one tinted block per saved window, its name and times, then its days and desks.
   const saved = M.windowsOf(state.base[f.key]) ?? [];
-  const shown = saved.length ? saved.map(w => `<span class="wline">${esc(M.display(f, JSON.stringify([w])))}</span>`).join('') : 'No wake windows';
+  const shown = saved.length ? `<div class="phone-only ww-ph">${saved.map(w => { const l = M.windowLines(w); return `<p class="wph" data-value><span><b>${esc(l.id)}</b> · ${esc(l.times)}</span><span class="wph-2">${esc(l.rest)}</span></p>`; }).join('')}</div>`
+    : phoneValue('No wake windows');
   return `<div class="field ww" data-row="${f.key}">${left}<div class="f-in ww-in">
-    ${phoneValue(shown)}
+    ${shown}
     <div class="ww-list dsk">${rows || '<p class="ww-none">No wake windows yet.</p>'}</div>
     <div class="ww-add dsk"><button type="button" class="btn" id="wwAdd"${ws.length >= M.MAX_WINDOWS ? ' disabled' : ''}>${icon('plus')}Add wake window</button></div>
     <div class="f-saved dsk" data-saved="${f.key}"></div>
@@ -264,7 +272,7 @@ function savedText(f, raw) {
   const n = M.windowsOf(raw)?.length ?? 0;
   return `${n} wake window${n === 1 ? '' : 's'} · Review changes lists every difference`;
 }
-// The draft's own marks: the Saved line, the reserve meters and examples, the
+// The draft's own marks: the Saved line, the reserve meters, the
 // controls' values when they changed by a button, never under the caret.
 // The Saved line always holds the saved value and is only shown when the
 // draft differs, so its box is sized before any edit and showing it moves
@@ -289,7 +297,6 @@ function syncDraft() {
     el.style.width = `${pct}%`;
     el.parentElement.setAttribute('aria-label', `${String(v).trim()}${NB}% kept free`);
   }
-  for (const el of $$('#setMain [data-example]')) { const t = M.reserveExample(state.draft[el.dataset.example]); if (el.textContent !== t) el.textContent = t; }
   const ws = M.windowsOf(state.draft['cadence.wakeWindows']) ?? [];
   for (const el of $$('#setMain [data-ww]')) { const w = ws[Number(el.dataset.ww)]; if (w && el !== document.activeElement && el.value !== w[el.dataset.wk]) el.value = w[el.dataset.wk]; }
   for (const el of $$('#setMain [data-wday]')) { const w = ws[Number(el.dataset.wday)]; if (w) el.setAttribute('aria-pressed', String(w.days.includes(el.dataset.d))); }

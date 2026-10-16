@@ -65,6 +65,8 @@ export const ITEM_KEYS = Object.freeze({
   'cadence.wakeWindows': ['id', 'days', 'from', 'until', 'desks'].map(k => `cadence.wakeWindows[].${k}`),
   'tools.entries': ['id', 'label'].map(k => `tools.entries[].${k}`),
 });
+// An item key reads as its own name after its array's key ("id", "days").
+export const itemName = key => key.slice(key.lastIndexOf('[].') + 3);
 export const SOURCE_KEYS = Object.freeze(['$schema', 'schema', 'rev', 'updatedAt']);
 // Every key Settings shows, in page order.
 export const SHOWN_KEYS = Object.freeze(['mode', ...FIELDS.flatMap(f => [f.key, ...(ITEM_KEYS[f.key] ?? [])]), ...SOURCE_KEYS]);
@@ -223,11 +225,9 @@ export function display(field, raw) {
   if (field.type === 'time') return `${value} Vienna time`;
   return value;
 }
-// The live example under a capacity reserve.
-export function reserveExample(raw) {
-  const value = String(raw ?? '').trim();
-  return /^\d+$/.test(value) && Number(value) <= 100 ? `Keeps ${Number(value)} of every 100${NB}units free` : 'Enter a whole number from 0 to 100';
-}
+// A wake window as a phone shows it: its name and times, then its days and desks.
+export const windowLines = w => ({ id: w.id, times: `${w.from} to ${w.until}`,
+  rest: `${w.days.map(d => DAY_NAME[d] ?? d).join(', ')} · desks ${w.desks.map(d => DESK_NAME[d] ?? d).join(', ')}` });
 
 // ---------- The edit flow ----------
 // state: { config: the saved settings the draft is based on, base, draft,

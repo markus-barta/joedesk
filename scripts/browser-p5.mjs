@@ -15,6 +15,7 @@ import { VIEWPORTS, THEMES, configure, load, settle, waitFor } from './browser/s
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { designFleet, designActions, designSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
+import { pngColours } from './browser/pixels.mjs';
 
 // The page's own model, for the words and keys Settings must show.
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
@@ -50,6 +51,16 @@ const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, Node ${process.version}`;
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
 await page.s('Page.addScriptToEvaluateOnNewDocument', { source: AUDIT });
+// The same page on every runner. The page's clock is the server's, anchored to
+// its own monotonic timer (feed.js), so between a read and a check its ages
+// kept running: on a slower runner "checked 18 s ago" read "19 s ago" (the
+// Linux CI run of 2d29200). The board's clock is frozen (setNow), and here the
+// page's timer stands still too, so the page's now is exactly the board's.
+// Locale and time zone are fixed: the page writes Vienna time and its own
+// digits, and UTC is the zone in which a slip to the browser's zone would show.
+await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const t = performance.now(); Object.defineProperty(performance, 'now', { value: () => t, configurable: true }); })();` });
+await page.s('Emulation.setTimezoneOverride', { timezoneId: 'UTC' });
+await page.s('Emulation.setLocaleOverride', { locale: 'en-US' });
 const boards = [];
 let sends = 0;
 
@@ -128,6 +139,15 @@ const bar = () => ev(`[...document.querySelectorAll('#editbar, #editNote, .edit-
 const note = () => ev(`({ state: document.getElementById('editNote').dataset.state, text: document.getElementById('editNote').innerText.trim(), buttons: ['discardBtn', 'savePreview', 'reviewBtn', 'sendBtn'].map(id => !document.getElementById(id).disabled) })`);
 const toastText = () => ev(`(() => { const t = document.getElementById('toast'); return t.classList.contains('on') ? t.innerText.trim() : null; })()`);
 const posts = since => page.requests.slice(since).filter(r => r.method !== 'GET');
+// The board server runs in this process and logs its own failures. A fixture
+// that makes one on purpose counts the line it expects (by its message and
+// error) instead of printing it; every other line still prints.
+async function serverLog(message, expected, during) {
+  const print = console.error, seen = [];
+  console.error = (...args) => { if (args[0] === message && expected(args[1])) seen.push(args[1]); else print(...args); };
+  try { await during(); } finally { console.error = print; }
+  return seen;
+}
 const fieldSel = key => `#setMain [data-field="${key}"]`;
 const setFont = async font => { await ev(font ? `document.documentElement.style.setProperty('--font', ${J(font)})` : `document.documentElement.style.removeProperty('--font')`); await settle(page); };
 const resetToast = () => ev(`document.getElementById('toast').classList.remove('on')`);
@@ -146,7 +166,8 @@ async function keyChecks(tag) {
   const seen = await ev(`(() => { const out = {}; const els = [...document.querySelectorAll('#setMain [data-key]')].filter(__audit.visible);
     for (const k of ${J(LEAVES)}) out[k] = els.filter(e => e.dataset.key === k).map(e => ({ text: e.textContent, mono: /mono|Menlo|Consolas|monospace/i.test(getComputedStyle(e).fontFamily) }));
     return { out, order: [...document.querySelectorAll('#setMain > .set-sec')].map(s => s.id) }; })()`);
-  const missing = LEAVES.filter(k => !seen.out[k].some(e => e.text === k && e.mono));
+  // An array's item keys read as their own names ("id"); data-key holds the full key.
+  const missing = LEAVES.filter(k => !seen.out[k].some(e => (e.text === k || (k.includes('[].') && e.text === M.itemName(k))) && e.mono));
   check('AC-22', `${tag}: all ${LEAVES.length} leaf keys of fleet-config.schema.json appear as data-key with visible mono text`, !missing.length, missing);
   check('AC-22', `${tag}: Settings starts with Mode, then Runtime state, in the spec's section order`, J(seen.order) === J(SECTION_IDS), seen.order);
 }
@@ -160,7 +181,7 @@ async function editabilityChecks(tag, viewport, fleet) {
     const base = M.valuesOf(fleet), wrong = [];
     for (const k of M.EDITABLE) {
       const f = M.FIELD[k];
-      const want = f.type === 'windows' ? JSON.parse(base[k]).map(w => M.display(f, J([w]))).join('') : M.display(f, base[k]);
+      const want = f.type === 'windows' ? JSON.parse(base[k]).map(w => { const l = M.windowLines(w); return `${l.id} · ${l.times} ${l.rest}`; }).join(' | ') : M.display(f, base[k]);
       if (N(ph.values[k]).replace(/ /g, '') !== N(want).replace(/ /g, '')) wrong.push({ k, got: ph.values[k], want });
     }
     check('AC-23', `${tag}: phones show every editable value read-only, as saved`, !wrong.length, wrong);
@@ -181,6 +202,42 @@ async function leakChecks(tag) {
   check('AC-25', `${tag}: no secret, token, full account number or environment content anywhere (the account hint is masked)`, !leak.token && !leak.fullAccount && !leak.env && !leak.long.length && leak.refs.every(r => /redacted$/.test(r)), leak);
 }
 
+// Tick's visual check of 2d29200 (A–C, E): the wake windows on a phone, the
+// item keys' line, the expected connections, and no caption under a reserve.
+const MONO = /mono|Menlo|Consolas|monospace/i;
+async function settingFormChecks(tag, viewport, theme, fleet) {
+  const f = await ev(`(() => { const mono = e => ${MONO}.test(getComputedStyle(e).fontFamily);
+    const probe = v => { const i = document.createElement('i'); i.style.color = v; document.body.append(i); const c = getComputedStyle(i).color; i.remove(); return c; };
+    const ww = document.querySelector('#setMain [data-row="cadence.wakeWindows"]'), key = ww.querySelector('.f-k code.key'), each = ww.querySelector('.key-each');
+    const tops = [key, ...each.querySelectorAll('[data-key]')].map(e => e.getBoundingClientRect().top);
+    const why = document.querySelector('#setMain [data-row="tools.entries"] .ro-why');
+    return { keyLine: (key.textContent + ' ' + each.innerText).replace(/\\s+/g, ' ').trim(), eachMono: mono(each), rows: tops.filter((t, i) => tops.findIndex(u => Math.abs(u - t) < 4) === i).length,
+      leaves: [...each.querySelectorAll('[data-key]')].map(e => [e.dataset.key, e.textContent, mono(e)]),
+      why: why.innerText.trim(), whyMono: mono(why), whyLeaves: [...why.querySelectorAll('[data-key]')].map(e => [e.dataset.key, e.textContent, mono(e)]),
+      entries: [...document.querySelectorAll('#setMain [data-row="tools.entries"] .entry')].map(e => ({ text: e.innerText.replace(/\\s+/g, ' ').trim(), id: e.querySelector('.mono').textContent, idMono: mono(e.querySelector('.mono')), restMono: mono(e), display: getComputedStyle(e).display })),
+      phone: [...ww.querySelectorAll('.wph')].filter(__audit.visible).map(p => { const [l1, l2] = p.children; return { l1: l1.innerText.trim(), l2: l2.innerText.trim(), id: l1.querySelector('b').textContent, weight: Number(getComputedStyle(l1.querySelector('b')).fontWeight), l1Colour: getComputedStyle(l1).color, l2Colour: getComputedStyle(l2).color, bg: getComputedStyle(p).backgroundColor, l1Mono: mono(l1), l2Mono: mono(l2) }; }),
+      ink: probe('var(--ink)'), ink2: probe('var(--ink-2)'), sunken: (() => { const i = document.createElement('i'); i.style.backgroundColor = 'var(--sunken)'; document.body.append(i); const c = getComputedStyle(i).backgroundColor; i.remove(); return c; })(),
+      caption: /of every 100/.test(document.getElementById('set-quota').innerText) || Boolean(document.querySelector('#setMain [data-example], #setMain .f-ex')) }; })()`);
+  const names = ['id', 'days', 'from', 'until', 'desks'];
+  check('AC-22', `${tag}: the wake windows' keys read "cadence.wakeWindows · each window: id · days · from · until · desks" (each item key a mono data-key, the words in the body font), on ${viewport.name === '1440' ? 'one line' : 'at most two lines'}`,
+    f.keyLine === 'cadence.wakeWindows · each window: id · days · from · until · desks' && !f.eachMono && J(f.leaves) === J(names.map(n => [`cadence.wakeWindows[].${n}`, n, true])) && f.rows <= (viewport.name === '1440' ? 1 : 2), { keyLine: f.keyLine, rows: f.rows, leaves: f.leaves });
+  check('AC-22', `${tag}: Expected connections reads "Read-only · id and label per connection", id and label as mono data-keys`,
+    f.why === 'Read-only · id and label per connection' && !f.whyMono && J(f.whyLeaves) === J([['tools.entries[].id', 'id', true], ['tools.entries[].label', 'label', true]]), { why: f.why, leaves: f.whyLeaves });
+  const entries = fleet.tools.entries.map(e => `${e.id} · ${e.label}`);
+  check('AC-22', `${tag}: each expected connection reads "id · label": the id mono, the dot and the label in the body font, on one line of text`,
+    J(f.entries.map(e => e.text)) === J(entries) && f.entries.every((e, i) => e.id === fleet.tools.entries[i].id && e.idMono && !e.restMono && e.display === 'block'), f.entries);
+  check('AC-24', `${tag}: no caption under a capacity reserve repeats its %`, !f.caption);
+  if (viewport.mobile) {
+    const want = M.windowsOf(J(fleet.cadence.wakeWindows)).map(M.windowLines);
+    check('AC-23', `${tag}: phones show one tinted block per wake window: the name in semibold and its times, then its days and desks in ink-2`,
+      f.phone.length === want.length && f.phone.every((p, i) => p.l1 === `${want[i].id} · ${want[i].times}` && p.l2 === want[i].rest && p.id === want[i].id && p.weight >= 600 &&
+        p.l1Colour === f.ink && p.l2Colour === f.ink2 && p.bg === f.sunken && p.bg !== 'rgba(0, 0, 0, 0)' && !p.l1Mono && !p.l2Mono), { phone: f.phone, ink2: f.ink2, sunken: f.sunken });
+    await ev(`document.querySelector('#setMain [data-row="cadence.wakeWindows"]').scrollIntoView({ block: 'center' })`); await settle(page);
+    await viewShot(`390-${theme}-settings-wake-windows`, 'Settings on a phone: one tinted block per wake window (name and times, then days and desks); the keys line "cadence.wakeWindows · each window: …"');
+    await ev('window.scrollTo(0, 0)'); await settle(page);
+  }
+}
+
 // ---------- 1 · Clean: the design settings at every viewport and theme ----------
 try {
   if (run('design')) {
@@ -198,7 +255,14 @@ try {
         'Running · broker reachable · brakes off · checked 19:42:13', 'Last numbers 19:42:22 · 9 s old · refreshes every 15 s', 'Board OK · numbers are up to date', 'DU…0597 · € 31.482,75 · checked 9 s ago'];
       const srcs = ['mode', 'safety.halt', 'safety.gateway', 'GET /v1/health on hsb0', 'generatedAt', 'boardHealth', 'brokerAccount.accountHint'];
       check('AC-25', `${tag}: Runtime state shows the seven rows with their sources`, J(rt.map(r => r.lab)) === J(RT_LABELS) && rt.every((r, i) => N(r.val) === N(want[i]) && r.src === srcs[i]), rt);
+      if (viewport === VIEWPORTS[0] && theme === 'light') {
+        // Past the page's one-second tick, with both clocks frozen, the ages stand still.
+        await new Promise(r => setTimeout(r, 1500)); await settle(page);
+        const later = await runtime();
+        check('AC-25', `${tag}: with the board's and the page's clocks frozen, the ages read the same 1.5 s later (any runner speed)`, J(later) === J(rt), later.map(r => r.val));
+      }
       await leakChecks(tag);
+      await settingFormChecks(tag, viewport, theme, fleet);
       // AC-27: the § 8.5 sections and their copy.
       const copy = await ev(`({ how: [...document.querySelectorAll('#set-how .how li')].map(l => l.innerText.trim()), howEnd: document.querySelector('#set-how .how-end').innerText.trim(),
         where: [...document.querySelectorAll('#srcFacts dt')].map(d => d.innerText.trim()), whereDd: [...document.querySelectorAll('#srcFacts dd')].map(d => d.innerText.trim()),
@@ -296,10 +360,10 @@ try {
       const dirty = await note();
       const saved = await ev(`Object.fromEntries([...document.querySelectorAll('#setMain [data-saved]')].map(e => [e.dataset.saved, __audit.visible(e) ? e.textContent : '']))`);
       check('AC-24', `${tag}: six changes in the draft; review before you send`, N(dirty.text) === '6 changes in your draft · review before you send' && J(dirty.buttons) === J([true, true, true, false]), dirty);
-      check('AC-24', `${tag}: each changed setting shows its saved value; the reserve's meter and example follow the draft`,
+      check('AC-24', `${tag}: each changed setting shows its saved value; the reserve's meter follows the draft, and no caption repeats its %`,
         N(saved['desks.maxBusyDesks']) === 'Saved: 5 desks' && N(saved['quota.codex.reservePct']) === 'Saved: 15 %' && N(saved['quota.behavior.amber']) === 'Saved: Slow down nonessential work' && N(saved['desks.keep']) === 'Saved: SXR8, TSLA' &&
         N(saved['cadence.usOpenArm']) === 'Saved: 15:35 Vienna time' && N(saved['cadence.wakeWindows']) === 'Saved: 2 wake windows · Review changes lists every difference' && saved['quota.grok.reservePct'] === '' &&
-        N(await ev(`document.querySelector('[data-example="quota.codex.reservePct"]').textContent`)) === 'Keeps 20 of every 100 units free' && (await ev(`document.querySelector('[data-meter="quota.codex.reservePct"]').style.width`)) === '20%', saved);
+        !(await ev(`/of every 100/.test(document.getElementById('set-quota').innerText)`)) && (await ev(`document.querySelector('[data-meter="quota.codex.reservePct"]').style.width`)) === '20%', saved);
       // Review changes: the dialog with Before and After, the review tick, then Confirm.
       await mouse('#reviewBtn');
       const dlg = await ev(`(() => { const d = document.getElementById('diffDlg'); return { open: d.open, head: d.querySelector('h2').innerText, base: document.getElementById('diffBase').innerText, rows: [...d.querySelectorAll('#diffList li')].map(l => l.innerText.replace(/\\s+/g, ' ').trim()),
@@ -449,11 +513,15 @@ try {
         await ready();
         const file = join(b.dataDir, 'fleet-config.json'), mode = statSync(file).mode;
         chmodSync(file, 0o000);
+        let logged;
         try {
-          await mouse('#sendBtn'); sends++;
-          await waitFor(page, `document.querySelector('#log li')?.innerText.includes('could not be read')`);
+          logged = await serverLog('fleet config read failed', error => error?.code === 'EACCES' && error.path === file, async () => {
+            await mouse('#sendBtn'); sends++;
+            await waitFor(page, `document.querySelector('#log li')?.innerText.includes('could not be read')`);
+          });
           check('AC-24', `${tag}: the server's own failure is surfaced and audited ("the saved settings could not be read")`, N((await note()).text) === 'Not sent · version 12 was not confirmed as written: fleet config unavailable.' &&
             new RegExp(`^Not sent .* ${ACTOR} · the saved settings could not be read`).test(N(await ev(`document.querySelector('#log li').innerText`))));
+          check('AC-24', `${tag}: the board server logged this fixture's unreadable file once ("fleet config read failed", EACCES); nothing else`, logged.length === 1, logged.length);
         } finally { chmodSync(file, mode); }
       }
       // Stored, change log unfinished: the board server writes version 13 but
@@ -501,8 +569,13 @@ try {
       const base = await rects(SHIFT), baseBar = await bar();
       const moved = [];
       const still = async what => { const m = shifted(base, await rects(SHIFT)).concat(shifted(baseBar, await bar())); if (m.length) moved.push({ what, m: m.slice(0, 3) }); };
+      // For the visual check, in the regular font: Desk limits before and while editing.
+      const desksShot = async (suffix, what) => { if (font) return; await ev(`document.getElementById('set-desks').scrollIntoView({ block: 'start' })`); await settle(page); await viewShot(`${viewport.name}-${theme}-settings-long-values${suffix}`, what); };
+      await desksShot('-before', 'Settings with the longest values, before editing: 64 kept holdings in the field; the Saved box is reserved, still hidden');
       // The 64 kept holdings lose one; the longest routine and check-in names get short.
       await type(fieldSel('desks.keep'), M.keepExtras(fleet.desks.keep).slice(0, -1).join(',')); await still('64 kept holdings');
+      await desksShot('', 'Settings with the longest values, while editing: one of the 64 kept holdings removed; the Saved box shows three whole lines and scrolls; nothing moved');
+      await still('the editing screenshot');
       await type(fieldSel('cadence.deskWatch'), 'desk-watch'); await still('64-character routine name');
       await type(fieldSel('amy.routines.close'), 'Close recap'); await still('80-character check-in name');
       const boxes = await ev(`[...document.querySelectorAll('#setMain [data-saved]')].filter(__audit.visible).map(e => { const r = e.getBoundingClientRect(), lh = parseFloat(getComputedStyle(e).lineHeight);
@@ -517,10 +590,6 @@ try {
       check('AC-24', `${tag}: Review changes shows the long Before values whole`, rows.length === 3 && rows.some(r => r.includes(`Before: ${KEEP_SAVED.slice('Saved: '.length)}`)), rows.map(r => r.slice(0, 80)));
       await mouse('#diffDlg .check'); await mouse('#diffConfirm'); await still('confirm and toast');
       for (const id of ['set-log', 'set-desks']) { await mouse(`#setNav a[data-sec="${id}"]`, false); await still(`section ${id}`); }
-      if (viewport.name === '1440' && !font) {
-        await ev(`document.getElementById('set-desks').scrollIntoView({ block: 'start' })`); await settle(page);
-        await viewShot(`${viewport.name}-${theme}-settings-long-values`, 'Settings with the longest values: 64 kept holdings edited; the Saved box keeps three lines and scrolls; nothing moved');
-      }
       await auditScreen(page, viewport, theme, 'settings (long values edited)');
       await mouse('#discardBtn'); await still('discard');
       check('no-shift', `${tag}: editing the longest values, their Saved lines, the review, the confirmation, the toast, section changes and Discard move nothing (±0.5 px)`, !moved.length, moved);
@@ -537,7 +606,11 @@ try {
       await tap('#liveOpen'); await key('Escape');
       const toastNow = await toastText();
       check('no-shift', `${tag}: opening and closing the LIVE gate, and its toast, move nothing (±0.5 px)`, toastNow === 'Still on PAPER. Nothing was sent and the mode did not change.' && !shifted(base, await rects(SHIFT)).length, shifted(base, await rects(SHIFT)).slice(0, 3));
-      if (!font) await shot(page, PHONE, `390-${theme}-settings-long-values`, 'Settings on a phone with the longest values, read-only and whole');
+      if (!font) {
+        await shot(page, PHONE, `390-${theme}-settings-long-values`, 'Settings on a phone with the longest values, read-only and whole');
+        await ev(`document.getElementById('set-desks').scrollIntoView({ block: 'start' })`); await settle(page);
+        await viewShot(`390-${theme}-settings-long-values-before`, 'Settings on a phone with 64 kept holdings: read-only and whole (phones do not edit)');
+      }
       await resetToast();
     }
   }
@@ -648,6 +721,13 @@ try {
       const pushed = await gate();
       check('AC-3', `${tag}: a click on "Switch to LIVE" changes nothing`, pushed.open && pushed.step === 3 && pushed.mode === 'PAPER', pushed.step);
       check('AC-4', `${tag}: the gate keeps one size on all three steps (±0.5 px)`, [s2, s3].every(s => Math.abs(s.w - s1.w) <= 0.5 && Math.abs(s.h - s1.h) <= 0.5), [s1, s2, s3].map(s => [s.w, s.h]));
+      if (viewport.mobile) {
+        // Continue was just tapped and is hidden on step 3: its slot shows the dialog's own surface, nothing else.
+        const slot = await ev(`(() => { const r = document.getElementById('gateNext').getBoundingClientRect(); return { x: r.left + scrollX + 1, y: r.top + scrollY + 1, width: r.width - 2, height: r.height - 2, bg: getComputedStyle(document.getElementById('gateDlg')).backgroundColor }; })()`);
+        const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip: { x: slot.x, y: slot.y, width: slot.width, height: slot.height, scale: 1 } });
+        const px = pngColours(Buffer.from(data, 'base64'));
+        check('touch', `${tag}: at step 3 nothing paints in the hidden Continue slot after the tap (no tap flash, no hover)`, px.colours.size === 1 && px.colours.has(slot.bg), { bg: slot.bg, colours: [...px.colours].slice(0, 4) });
+      }
       moved = moved.concat(shifted(before, await rects(SHIFT)));
       if (viewport.name !== '1024') await viewShot(`${viewport.name}-${theme}-settings-gate-step3`, 'Settings: the LIVE gate, step 3 (approval out of band; Switch to LIVE disabled)');
       await press(viewport, '#gateCancel');
@@ -719,7 +799,34 @@ try {
       const header = await look();
       check('AC-31', `${tag}: the header button switches to dark and Appearance follows`, header.theme === 'dark' && header.stored === 'dark' && J(header.pressed) === J(['dark']), header);
       check('AC-31', `${tag}: switching theme moves nothing (±0.5 px)`, !shifted(before, await rects(SHIFT)).length, shifted(before, await rects(SHIFT)).slice(0, 3));
-      if (viewport.mobile) await viewShot(`${viewport.name}-dark-settings-appearance`, 'Settings on a phone: Appearance, Dark chosen');
+      if (viewport.mobile) {
+        // Only the chosen option is tinted. A tap leaves the browser's hover
+        // state on what it touched; on a phone that state must paint nothing.
+        const tints = () => ev(`[...document.querySelectorAll('[data-themeopt]')].map(b => ({ opt: b.dataset.themeopt, pressed: b.getAttribute('aria-pressed'), bg: getComputedStyle(b).backgroundColor, hoverState: b.matches(':hover') }))`);
+        const only = (list, opt) => list.every(t => (t.opt === opt) === (t.bg !== 'rgba(0, 0, 0, 0)')) && list.every(t => (t.opt === opt) === (t.pressed === 'true'));
+        // Tick's evidence: System was tapped last, then the header button chose Dark.
+        const sticky = await tints();
+        check('touch', `${tag}: System tapped last, Dark chosen by the header button: only Dark is tinted, though System keeps the tap's hover state`, only(sticky, 'dark') && sticky.find(t => t.opt === 'system').hoverState, sticky);
+        await viewShot(`${viewport.name}-dark-settings-appearance`, 'Settings on a phone: Appearance, Dark chosen by the header button after tapping System (System is not tinted)');
+        // Tick's sequence: tap System, then Dark.
+        await tap('[data-themeopt="system"]');
+        const afterSystem = await tints();
+        await viewShot(`${viewport.name}-light-settings-appearance-tap-system`, 'Settings on a phone: Appearance after tapping System (the tap sequence, 1 of 2): only System is tinted');
+        await tap('[data-themeopt="dark"]');
+        const afterDark = await tints();
+        await viewShot(`${viewport.name}-dark-settings-appearance-tap-dark`, 'Settings on a phone: Appearance after tapping System, then Dark (2 of 2): only Dark is tinted');
+        check('touch', `${tag}: with touch, tapping System tints only System; tapping Dark next tints only Dark`, only(afterSystem, 'system') && only(afterDark, 'dark'), { afterSystem, afterDark });
+      }
+      // Every :hover rule applies only where a pointer can hover, and no control flashes on a tap.
+      const touch = await ev(`(() => { const loose = []; const walk = (rules, guarded) => { for (const r of rules) {
+          if (r instanceof CSSMediaRule) walk(r.cssRules, guarded || /\\(hover: hover\\)/.test(r.conditionText));
+          else if (r instanceof CSSStyleRule) { if (/:hover/.test(r.selectorText) && !guarded) loose.push(r.selectorText); }
+          else if (r.cssRules) walk(r.cssRules, guarded); } };
+        let rules = 0; for (const sheet of document.styleSheets) { walk(sheet.cssRules, false); rules += sheet.cssRules.length; }
+        const flash = [...document.querySelectorAll('a, button, input, select, textarea, label, summary, [role=switch], [tabindex]')].filter(e => getComputedStyle(e).getPropertyValue('-webkit-tap-highlight-color') !== 'rgba(0, 0, 0, 0)').map(e => e.id || e.className || e.tagName);
+        const hovers = [...document.styleSheets].flatMap(sh => [...sh.cssRules]).filter(r => r instanceof CSSMediaRule && /\\(hover: hover\\)/.test(r.conditionText)).length;
+        return { loose, flash: flash.slice(0, 5), flashCount: flash.length, hovers, rules, hoverMatches: matchMedia('(hover: hover)').matches }; })()`);
+      check('touch', `${tag}: every :hover rule sits in @media (hover: hover) (${touch.hovers} blocks), and no control has a tap flash`, !touch.loose.length && !touch.flashCount && touch.hovers > 0 && touch.hoverMatches === !viewport.mobile, touch);
       await ev(`localStorage.removeItem('joe-board-theme-v1'); window.__joedesk.setTheme('system'); localStorage.removeItem('joe-board-theme-v1')`);
     }
   }
@@ -837,8 +944,63 @@ unreadable stored file: values hidden with the SXR8/TSLA floor), the longest
 values the format accepts (64 kept holdings of 16 characters: a 1.133-character
 Saved line; 64-character routine names; 80-character check-in names), and
 malformed browser drafts. One headless browser,
-run sequentially; reduced motion for stable geometry. Browser: ${reference}.
+run sequentially; reduced motion for stable geometry. The board's clock and
+the page's timer are both frozen, the browser runs in UTC with the en-US
+locale, so every age and time reads the same on any runner. Browser: ${reference}.
 Compare with \`joed-19-joedesk-approved.html\` (Settings).
+
+## Changed in fix round 2 (Tick's visual check of 2d29200, Linux CI)
+
+Every screenshot was taken again. What changed, per fix:
+
+- **A · Wake windows on a phone.** One tinted block per window, as in the
+  approved design: the name in semibold and its times ("us-session · 15:25 to
+  22:05"), then its days and desks in ink-2 ("Mon, Tue, Wed, Thu, Fri · desks
+  J, Joe, Joel"). The design's doubled "to" is not copied. New
+  \`390-light-settings-wake-windows.png\`, \`390-dark-settings-wake-windows.png\`;
+  also visible in \`390-*-settings.png\` (\`AC-23\`).
+- **B · Item keys.** Back to the approved form: \`cadence.wakeWindows · each
+  window: id · days · from · until · desks\`, each item key a mono
+  \`<code data-key="cadence.wakeWindows[].id">id</code>\`; one line at 1440, at
+  most two below. Expected connections reads "Read-only · id and label per
+  connection" with \`id\` and \`label\` as data-keys. Every leaf key is still
+  a data-key with visible mono text (\`AC-22\` reads data-key; an item key
+  shows its own name). In every \`*-settings.png\`.
+- **C · Expected connections.** The id stays mono; " · " and the label use the
+  body font, on one line of text, so the dot no longer reads as a full stop
+  (\`AC-22\`, every \`*-settings.png\`).
+- **D · Phones: no sticky hover, no tap flash.** Every \`:hover\` rule sits in
+  \`@media (hover: hover)\`, and links, buttons and controls have
+  \`-webkit-tap-highlight-color: transparent\`; \`:active\` and the pressed
+  states give the feedback. At 390 with touch, tapping System and then Dark
+  leaves only Dark tinted (new \`390-light-settings-appearance-tap-system.png\`,
+  \`390-dark-settings-appearance-tap-dark.png\`; \`390-dark-settings-appearance.png\`
+  no longer tints System). On the LIVE gate's step 3 nothing paints in the
+  hidden Continue slot (\`390-*-settings-gate-step3.png\`; checked on the
+  screenshot's pixels). \`touch\` checks.
+- **E · AI capacity.** The caption "Keeps 10 of every 100 units free" is gone
+  (it repeated the %); the meter stays. The AI capacity rows are one line
+  shorter in every \`*-settings*.png\`.
+- **Long kept holdings (Codex r1's reserved height).** New
+  \`1440-light-settings-long-values-before.png\` and
+  \`1024-dark-settings-long-values-before.png\` (64 kept holdings, before
+  editing), \`1440-light-settings-long-values.png\` and
+  \`1024-dark-settings-long-values.png\` (while editing: the Saved box shows
+  three whole lines and scrolls; nothing moved), and
+  \`390-light-settings-long-values-before.png\` (phones are read-only).
+- **Linux CI (AC-25, "Runtime state shows the seven rows").** The rows were
+  right; the ages were not deterministic. The page dates everything by the
+  board's clock anchored to its own monotonic timer, and that timer kept
+  running between the read and the check: on the slower runner "checked 18 s
+  ago" and "9 s old" read "19 s" and "10 s". Not the locale ("€ 31.482,75" is
+  the page's own formatting) and not the time zone ("19:42:13" was right). The
+  gate now freezes the page's timer as well as the board's clock, and fixes the
+  browser's locale (en-US) and time zone (UTC); a check reads the rows again
+  after 1.5 s and finds them unchanged. Proven with \`TZ=UTC\` locally.
+- **The "fleet config read failed … EACCES" lines** in that CI log are the
+  intended fixture (the stored file made unreadable, four desktop runs). The
+  gate now counts that one line per run by its message and error instead of
+  printing it (\`AC-24\`); every other server line still prints.
 
 ## Changed in fix round 1 (Codex gate r1)
 
@@ -874,7 +1036,10 @@ Compare with \`joed-19-joedesk-approved.html\` (Settings).
 - **Keys.** Every leaf key of \`contracts/fleet-config.schema.json\` shows in
   mono under its setting: ${LEAVES.length} keys, derived from the schema file (the spec's
   "39" adds three rows that have no schema key: Routine health, File the board
-  reads, Last sent). Long keys break after a dot, never inside a word.
+  reads, Last sent). Long keys break after a dot, never inside a word. An
+  array's item keys read by their own names after the array's key
+  ("cadence.wakeWindows · each window: id · days · …"; the connections'
+  "Read-only · id and label per connection").
 - **Kept holdings.** SXR8 and TSLA are named as always kept (inert text, no
   control); only the other symbols are editable. The candidate always starts
   with the floor in its saved order.
@@ -898,7 +1063,9 @@ Compare with \`joed-19-joedesk-approved.html\` (Settings).
   (for example wake windows \`null\`) or a key that is not editable is dropped
   with "Draft discarded. The fields show the saved settings again."; every
   group renders.
-- **Wake windows** take the whole row (label above, one row per window).
+- **Wake windows** take the whole row (label above, one row per window). On
+  a phone each window is one tinted block: name and times, then days and desks.
+- **Phones** show no hover state and no tap flash; :active gives the feedback.
 - **Adding or removing a wake window** changes the list itself (the one edit
   that adds height); every other edit, the review, the confirmation, the
   toast and a section change move nothing (\`no-shift\`, both fonts).
@@ -916,7 +1083,7 @@ Compare with \`joed-19-joedesk-approved.html\` (Settings).
 | AC-22 Mode then Runtime state; all leaf keys as data-key with visible mono text, against the schema file | \`AC-22\` (clean, starter file, unavailable; six combos) | \`schema keys\` (\`test/settings-model.mjs\`) |
 | AC-23 today's editable/read-only split; phones read-only with the note, no inputs | \`AC-23\` | \`editability\` |
 | AC-24 Edit → Review changes (dialog + tick) → Confirm → Send; edit-bar states and toasts; stale version "revision changed to …; reload before retrying"; audited | \`AC-24\` (edited, draft, stale = 409, failure = plain 500 / no answer / unreadable, stored = 500 naming the version, malformed draft, long values, unavailable) | \`edit flow\`, \`stale version\`, \`stored, change log unfinished\`, \`review\`, \`load states\`, \`browser draft\`, \`candidate\`, \`validation\`, \`diff model\`; server: \`Fleet Config propagates one atomic paper revision…\` |
-| AC-25 seven rows; "Not reported"; no secrets, tokens, full account numbers or env content | \`AC-25\` | — |
+| AC-25 seven rows; "Not reported"; no secrets, tokens, full account numbers or env content | \`AC-25\` (frozen clocks: the same on any runner) | — |
 | AC-26 sub-nav reaches every section and marks the one in view | \`AC-26\` (clicks and scrolling; nothing moves) | — |
 | AC-27 How it works, Where this is defined with Sources, Change log, Appearance, About | \`AC-27\` | \`change log\` |
 | AC-28 no horizontal scroll 390–1440 | \`AC-28\` (audit at six combos; sweep in 10 px steps, both fonts and themes) | — |
@@ -928,6 +1095,9 @@ Compare with \`joed-19-joedesk-approved.html\` (Settings).
 | AC-39 Learn tips on settings and terms in dialogs | \`AC-39\` | \`editability\` (each field's Learn) |
 | KEEP SXR8/TSLA floor | \`KEEP\` (unavailable settings; Desk keeps them under Kept holdings) | \`candidate\`, \`validation\` |
 | Tick's P4 carry-over | \`P4-carry-over\` (tap: heading, no ring; keyboard: close button with ring) | — |
+| Tick's visual check of 2d29200: A phone wake windows, B item keys, C connections, E no reserve caption | \`AC-23\` (A), \`AC-22\` (B, C), \`AC-24\` (E) | \`phone wake windows\`, \`schema keys\` (item names) |
+| Tick D: no sticky hover, no tap flash on phones | \`touch\` (every :hover guarded; no tap highlight; System then Dark tints only Dark; the hidden Continue slot's pixels) | — |
+| Linux CI: deterministic ages | \`AC-25\` (frozen board clock and page timer, en-US, UTC; the rows unchanged 1.5 s later) | — |
 | Part A craft on Settings | AC-1, 2, 5, 28–30, 32, 33, 36, 38, 40, 42–44, 47 (\`auditScreen\`) | — |
 | No layout shift on edit, review, toast or section change (both fonts) | \`no-shift\` (edited; long values at 1440 and 1024 in both fonts, 390 in both fonts; stored outcome; sweep) | — |
 

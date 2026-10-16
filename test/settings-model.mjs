@@ -53,6 +53,9 @@ test('schema keys: Settings shows every leaf key of fleet-config.schema.json, an
   assert.deepEqual([...M.SHOWN_KEYS].sort(), [...leaves].sort());
   assert.equal(new Set(M.SHOWN_KEYS).size, M.SHOWN_KEYS.length, 'each key once in page order');
   assert.equal(M.SHOWN_KEYS[0], 'mode', 'Mode comes first');
+  // An array's item keys show by their own names after the array's key.
+  for (const [key, items] of Object.entries(M.ITEM_KEYS)) for (const item of items) assert.equal(`${key}[].${M.itemName(item)}`, item);
+  assert.deepEqual(M.ITEM_KEYS['cadence.wakeWindows'].map(M.itemName), ['id', 'days', 'from', 'until', 'desks']);
   // Every leaf of the served (public) copy is the same set.
   const served = JSON.parse(readFileSync(new URL('../public/joe/fleet-config.schema.json', import.meta.url)));
   assert.deepEqual(M.schemaLeafKeys(served).sort(), [...leaves].sort());
@@ -117,8 +120,13 @@ test('diff model: Before and After in plain words; the kept floor always shows',
     'us-session: Mon, Tue, Wed, Thu, Fri, 15:25 to 22:05, desks J, Joe, Joel; eu-morning: Mon, Tue, Wed, Thu, Fri, 08:55 to 11:30, desks Joel');
   assert.equal(M.display(M.FIELD['cadence.wakeWindows'], '[]'), 'No wake windows');
   assert.equal(M.display(M.FIELD['amy.routines.close'], ' '), '(empty)');
-  assert.equal(M.reserveExample('10'), `Keeps 10 of every 100${NB}units free`);
-  assert.equal(M.reserveExample('abc'), 'Enter a whole number from 0 to 100');
+});
+
+test('phone wake windows: one block each, the name and times, then the days and desks', () => {
+  const [us, eu] = M.windowsOf(M.editState(design()).base['cadence.wakeWindows']);
+  assert.deepEqual(M.windowLines(us), { id: 'us-session', times: '15:25 to 22:05', rest: 'Mon, Tue, Wed, Thu, Fri · desks J, Joe, Joel' });
+  assert.deepEqual(M.windowLines(eu), { id: 'eu-morning', times: '08:55 to 11:30', rest: 'Mon, Tue, Wed, Thu, Fri · desks Joel' });
+  assert.equal(M.windowLines({ id: 'x', days: ['sat'], from: '09:00', until: '10:00', desks: ['desk-7'] }).rest, 'Sat · desks desk-7', 'an unknown desk keeps its id');
 });
 
 test('candidate: changed fields only; paper, version, read-only values and the kept floor are the saved ones', () => {
