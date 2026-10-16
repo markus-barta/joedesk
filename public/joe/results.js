@@ -355,7 +355,7 @@ function renderStatus(view) {
   const text = cell.retained ? `${cell.reason === 'sequence_replayed' ? 'Results update not used' : 'Results refresh failed'}: ${why ?? 'not available'}. Showing the last good results from ${ago()}.`
     : p.state === 'stale' ? `Results as of ${ago()}${why ? ` · ${why}` : ''}.` : `Results: ${why ?? 'not available'} · as of ${ago()}.`;
   const stale = p.state === 'stale' || cell.ageSeconds >= STALE_AFTER_S;
-  patch(el, `<div class="res-state" data-state="${p.state}">${st(p.tone, `${stale ? 'STALE · ' : ''}${text}`)}</div>`);
+  patch(el, `<div class="res-state" data-state="${p.state}">${st(p.tone, `${stale ? 'Stale · ' : ''}${text}`)}</div>`);
 }
 
 // ---------- The hero chart: result so far, from € 0 ----------

@@ -461,7 +461,7 @@ try {
       await waitFor(page, `document.getElementById('resStatus').innerText.length > 0`);
       await settle(page);
       const stale = await page.evaluate(RES);
-      check('panel-state', `${tag}: a record received 5 min ago says STALE with age in the chart's box and keeps its numbers`, /^STALE · Results as of 5.min ago · updates are late\.$/.test(stale.status) && stale.display === fresh.display &&
+      check('panel-state', `${tag}: a record received 5 min ago says Stale with age in the chart's box and keeps its numbers`, /^Stale · Results as of 5.min ago · updates are late\.$/.test(stale.status) && stale.display === fresh.display &&
         !shifted(freshRects, await shiftOf(), ['top', 'left', 'height']).length, { status: stale.status, display: [fresh.display, stale.display] });
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-stale`, 'Results, the record received 5 min ago: its age and reason in the chart box');
       await serve(() => ({ fail: 'ConnectionRefused' }));
@@ -469,7 +469,7 @@ try {
       await waitFor(page, `/refresh failed/.test(document.getElementById('resStatus').innerText)`);
       await settle(page);
       const kept = await page.evaluate(RES);
-      check('panel-state', `${tag}: a failed refresh keeps the last good record and says so`, /^STALE · Results refresh failed: update failed\. Showing the last good results from \d+.(s|min) ago\.$/.test(kept.status) && kept.display === fresh.display, kept.status);
+      check('panel-state', `${tag}: a failed refresh keeps the last good record and says so`, /^Stale · Results refresh failed: update failed\. Showing the last good results from \d+.(s|min) ago\.$/.test(kept.status) && kept.display === fresh.display, kept.status);
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-refresh-failed`, 'Results, refresh failed: the last good record kept, with its age');
       // Unavailable from the first read: its own reason.
       await serve(() => ({ status: 401, body: { ok: false, reason: 'auth_required' } }));
@@ -729,7 +729,7 @@ try {
       await waitFor(page, `/updates are late/.test(document.getElementById('resStatus').innerText)`);
       const stale = await page.evaluate(RES);
       check('results-ingress', `${viewport.name} ${theme}: at 60 s the real feed is stale, keeps its numbers and moves nothing`,
-        /^STALE · Results as of 1.min ago · updates are late\.$/.test(stale.status) && stale.display === live.display &&
+        /^Stale · Results as of 1.min ago · updates are late\.$/.test(stale.status) && stale.display === live.display &&
         !shifted(before, await rects(page, SHIFT), ['top', 'left', 'height']).length, stale.status);
       if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-ingress-stale`, 'Results stale 60 seconds after its last accepted push');
       const bad = structuredClone(record); bad.seq++; bad.generatedAt = board.clock(); bad.trades[0].netEur.amount = '999';
