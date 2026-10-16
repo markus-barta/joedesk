@@ -51,7 +51,8 @@ function feedHeaders(kind) {
 
 // The UI is plain ES modules; every served asset is listed here explicitly.
 const UI_MODULES = ["app.js", "host.js", "ui.js", "terms.js", "format.js", "health.js", "feed.js", "events.js",
-  "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js"];
+  "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js",
+  "settings.js", "settings-model.js", "fleet-write.js"];
 const STATIC_FILES = Object.freeze({
   "/joe/": "index.html",
   "/joe/index.html": "index.html",

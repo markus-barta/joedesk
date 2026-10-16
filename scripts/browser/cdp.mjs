@@ -93,11 +93,11 @@ export async function openPage(browser, { headers = {} } = {}) {
     browser.send('Runtime.runIfWaitingForDebugger', {}, child).catch(() => {});
   });
   browser.on(m => {
-    if (m.method === 'Network.requestWillBeSent' && m.sessionId && m.sessionId !== sessionId) requests.push({ url: m.params.request.url, method: m.params.request.method, worker: true });
+    if (m.method === 'Network.requestWillBeSent' && m.sessionId && m.sessionId !== sessionId) requests.push({ url: m.params.request.url, method: m.params.request.method, postData: m.params.request.postData, worker: true });
     if (m.sessionId !== sessionId) return;
     if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails?.exception?.description ?? m.params.exceptionDetails?.text);
     if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(m.params.args.map(a => a.value ?? a.description).join(' '));
-    if (m.method === 'Network.requestWillBeSent') requests.push({ url: m.params.request.url, method: m.params.request.method });
+    if (m.method === 'Network.requestWillBeSent') requests.push({ url: m.params.request.url, method: m.params.request.method, postData: m.params.request.postData });
   });
   const evaluate = async (expression, { awaitPromise = true } = {}) => {
     const r = await s('Runtime.evaluate', { expression, returnByValue: true, awaitPromise, userGesture: true });

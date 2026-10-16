@@ -38,8 +38,9 @@ export function createGate(QA_DIR) {
     check('AC-1', `${tag}: PAPER label after scrolling to the end`, bottom);
     await page.evaluate('window.scrollTo(0, 0)');
     await settle(page);
-    const live = await page.evaluate(`({ live: document.querySelectorAll('.mode-label.live').length, header: document.querySelector('header.top').innerText })`);
-    check('AC-2', `${tag}: no LIVE treatment`, live.live === 0 && !/LIVE/.test(live.header), live);
+    // The LIVE label renders only inside Settings › Mode's locked option, never in the header.
+    const live = await page.evaluate(`({ live: [...document.querySelectorAll('.mode-label.live')].filter(e => !e.closest('#set-mode .mode-opt.locked')).length, header: document.querySelector('header.top').innerText })`);
+    check('AC-2', `${tag}: no LIVE treatment outside Mode's locked option`, live.live === 0 && !/LIVE/.test(live.header), live);
     const h = await page.evaluate('__audit.horizontal()');
     check('AC-28', `${tag}: no horizontal scroll`, h.scroll <= h.inner && (!viewport.mobile || (h.inner === 390 && h.gutter === 16)), h);
     const contrast = await page.evaluate('__audit.contrast()');
@@ -77,7 +78,9 @@ export function createGate(QA_DIR) {
     check('AC-42', `${tag}: charts are to scale`, !badChart, badChart ?? charts.length);
     const icons = await page.evaluate(`[...document.querySelectorAll('button')].filter(b => __audit.visible(b) && !b.textContent.trim() && !b.getAttribute('aria-label')).map(b => b.outerHTML.slice(0, 80))`);
     check('AC-33', `${tag}: every icon-only button has a label`, !icons.length, icons);
-    const actions = await page.evaluate(`[...document.querySelectorAll('button, a[href], input, select')].filter(b => __audit.visible(b) && !b.closest('.term, .learn') && !b.matches('.term, .learn')).map(b => (b.textContent + ' ' + (b.getAttribute('aria-label') ?? '')).trim())`);
+    // The locked "Switch to LIVE…" opener is exempt: it only opens the gate,
+    // which the P5 gate proves sends nothing at any step (network layer).
+    const actions = await page.evaluate(`[...document.querySelectorAll('button, a[href], input, select')].filter(b => __audit.visible(b) && !b.closest('.term, .learn, dialog') && !b.matches('.term, .learn, #liveOpen')).map(b => (b.textContent + ' ' + (b.getAttribute('aria-label') ?? '')).trim())`);
     const acting = actions.filter(t => ACTION.test(t));
     check('AC-5', `${tag}: no control acts on money, orders or the desks`, !acting.length, acting);
   }

@@ -1,8 +1,9 @@
 // JoeDesk shell: navigation, theme, the header light, the footer and one
-// render per animation frame. A read-only paper board: nothing here sends a
-// request that changes anything.
+// render per animation frame. A read-only paper board: the one request that
+// changes anything is a reviewed paper draft of the fleet settings, sent only
+// from Settings (fleet-write.js).
 import { isCanonicalJoeHost } from './host.js';
-import { $, $$, icon, initTips, isPhone } from './ui.js';
+import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer } from './ui.js';
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, forgetCharts } from './desk.js';
@@ -10,6 +11,7 @@ import { renderHistory, historyChart, HS } from './history.js';
 import { renderResults, RS, stepPeriod, resultsView, openDaySheet, forgetResults } from './results.js';
 import { boardHealthPresentation, dataAge, cellReason } from './health.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
+import { initSettings, renderSettings, showSection, SECTIONS as SETTINGS_SECTIONS } from './settings.js';
 import { dateTimeFull, age, NB, joinUnits } from './format.js';
 
 const SCREENS = ['desk', 'results', 'history', 'settings'];
@@ -28,12 +30,14 @@ if (!isCanonicalJoeHost(location.hostname)) {
 
 function start() {
   const tips = initTips();
+  trapDialogs();
   const events = createObservedEvents();
   let lastData = null, frame = 0, pending = null, dirtyHistory = true, panning = false;
   const feed = createFeed(kind => {
     if (kind === 'history') dirtyHistory = true;
     schedule(kind);
-  }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, $('#appVersion').textContent.trim());
+  }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, $('#appVersion').textContent.trim(),
+  { actionsWanted: () => screen === 'settings' });
   // Read-only: fetches the same three reads now instead of at the next poll.
   window.__joedesk.refresh = () => feed.refresh();
   window.__joedesk.worker = () => feed.usesWorker();
@@ -79,6 +83,7 @@ function start() {
       if (moved || dirtyHistory || !['tick', 'results'].includes(reason)) { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }
     }
     if (screen === 'results') guard('results', () => renderResults(ctx));
+    if (screen === 'settings') guard('settings', () => renderSettings(ctx));
     window.__joedesk.renders++;
     if (reason !== 'tick') {
       timings.push({ reason, ms: performance.now() - started, at: started });
@@ -100,11 +105,13 @@ function start() {
     document.body.dataset.screen = next;
     $$('.nav button, .bottom-nav button').forEach(b => { if (b.dataset.go === next) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     closePop();
-    if ($('#daySheet')?.open) $('#daySheet').close();
+    for (const dialog of $$('dialog[open]')) dialog.close();
     try { history.replaceState(null, '', `#${next}`); } catch { /* file or sandboxed context */ }
     dirtyHistory = true; forgetCharts(); forgetResults();
+    if (next === 'settings') feed.refreshActions();
     render('screen');
-    if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0);
+    if (next === 'settings' && SETTINGS_SECTIONS.some(s => s.id === anchor)) showSection(anchor);
+    else if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0);
   }
 
   // The board details are a dialog: opening moves focus into it, Tab stays
@@ -253,17 +260,18 @@ function start() {
     RS.sel = c.dataset.day; RS.moved = true;
     if (['day', 'week', 'month'].includes(RS.period) && RS.sel <= v.today) RS.anchor = RS.sel;
     render('results-day');
-    if (isPhone()) { sheetFrom = RS.sel; openDaySheet(v, RS.sel); }
+    if (isPhone()) { sheetFrom = RS.sel; openDaySheet(v, RS.sel, { pointer: fromPointer(e) }); }
   });
   // The sheet closes with its × button, Escape or a tap outside; focus goes back to the day.
   const sheet = $('#daySheet');
   sheet.addEventListener('click', e => { if (e.target.closest('[data-close]') || e.target === sheet) sheet.close(); });
   sheet.addEventListener('close', () => { if (sheetFrom) document.querySelector(`#cal [data-day="${sheetFrom}"]`)?.focus({ preventScroll: true }); sheetFrom = null; });
 
-  addEventListener('hashchange', () => { const next = location.hash.slice(1).split('/')[0]; if (next !== screen) go(next); });
+  addEventListener('hashchange', () => { const [next, anchor] = location.hash.slice(1).split('/'); if (next !== screen) go(next, anchor); });
   let resize = 0;
   addEventListener('resize', () => { cancelAnimationFrame(resize); resize = requestAnimationFrame(() => { forgetCharts(); forgetResults(); dirtyHistory = true; render('resize'); }); });
-  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncThemeButton);
+  // With System chosen the page follows the OS live (CSS); the header button's words follow too.
+  matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { syncThemeButton(); schedule('theme'); });
 
   // Numbers never part from their units, in static and rendered text alike.
   const fixUnits = node => {
@@ -277,7 +285,9 @@ function start() {
   fixUnits(document.body);
 
   syncThemeButton();
+  initSettings({ feed, tips, schedule });
   $('#footShield').innerHTML = `${icon('shield')}Read-only paper board · nothing here can place a trade`;
-  go((location.hash || '#desk').slice(1).split('/')[0]);
+  const [first, anchor] = (location.hash || '#desk').slice(1).split('/');
+  go(first, anchor);
   feed.start();
 }

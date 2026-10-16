@@ -7,7 +7,11 @@ import { cellReason, capital } from './health.js';
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 export const icon = (id, cls = 'i') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${id}"/></svg>`;
-export const learnBtn = key => `<button type="button" class="learn" data-term="${key}" data-learn="1" aria-expanded="false" aria-label="Learn: ${esc(TERMS[key][0])}">${icon('book')}Learn</button>`;
+// Entries added at run time (each fleet setting's Learn tip) beside the fixed dictionary.
+const added = new Map();
+export const addTerms = entries => { for (const [key, entry] of Object.entries(entries)) added.set(key, entry); };
+const entryOf = key => TERMS[key] ?? added.get(key);
+export const learnBtn = key => `<button type="button" class="learn" data-term="${esc(key)}" data-learn="1" aria-expanded="false" aria-label="Learn: ${esc(entryOf(key)[0])}">${icon('book')}Learn</button>`;
 export const term = (key, text) => `<button type="button" class="term" data-term="${key}">${esc(text ?? TERMS[key][0])}</button>`;
 
 const ST_ICON = { ok: 'ok', warn: 'half', bad: 'stop', none: 'ring' };
@@ -56,13 +60,16 @@ export function initTips() {
       tip.innerHTML = `<b>${esc(TERMS[el.dataset.say][0])}</b>${el.querySelector('[data-clamp]')?.innerHTML ?? ''}`;
       return true;
     }
-    const entry = TERMS[el.dataset.term];
+    const entry = entryOf(el.dataset.term);
     if (!entry) return false;
     tip.innerHTML = `<b>${esc(entry[0])}</b>${esc(entry[1])}<span class="t2">${el.dataset.learn ? 'Term' : 'Also called'}: ${esc(entry[2])}</span>`;
     return true;
   }
   function show(el, pin) {
     if (!fill(el)) return;
+    // Inside an open dialog the tip joins it, so it shows above the dialog.
+    const host = el.closest('dialog[open]') ?? document.body;
+    if (tip.parentElement !== host) host.append(tip);
     if (anchor && anchor !== el) anchor.setAttribute('aria-expanded', 'false');
     anchor = el; pinned = Boolean(pin);
     tip.classList.toggle('pinned', pinned);
@@ -75,6 +82,7 @@ export function initTips() {
     tip.classList.remove('on', 'pinned');
     if (anchor) { anchor.setAttribute('aria-expanded', 'false'); anchor.removeAttribute('aria-describedby'); }
     anchor = null; pinned = false;
+    if (tip.parentElement !== document.body) document.body.append(tip);
   }
   // A rebuilt section hands an open tip to the same term in the new markup.
   rebuilt.tip = {
@@ -123,9 +131,43 @@ export function initTips() {
     const el = anchor;
     hide(true);
     if (document.activeElement !== el) { quiet = true; el.focus(); }
+    // Escape closes the tip only; an open dialog stays open for the next Escape.
+    if (el.closest('dialog[open]')) e.preventDefault();
     e.stopImmediatePropagation();
   }, true);
   return { hide: () => hide(true) };
+}
+
+// Dialogs open modal. Opened by a pointer, focus goes to the dialog's heading
+// (tabindex -1) without a visible ring; opened from the keyboard, the dialog's
+// first control takes focus with its ring. Tab stays inside an open dialog.
+const controlsOf = root => $$('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])', root)
+  .filter(n => !n.disabled && n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden');
+export function openDialog(dialog, { pointer = false } = {}) {
+  if (!dialog) return;
+  if (!dialog.open) dialog.showModal();
+  // The browser's own first focus may land on the heading; choose explicitly.
+  const heading = dialog.querySelector('h2[tabindex="-1"]');
+  if (pointer && heading) heading.focus({ preventScroll: true });
+  else controlsOf(dialog)[0]?.focus({ preventScroll: true });
+}
+// A click from a mouse, pen or touch; a keyboard's click has no pointer type.
+export const fromPointer = event => (typeof event?.pointerType === 'string' ? ['mouse', 'pen', 'touch'].includes(event.pointerType) : Boolean(event && event.detail > 0));
+let dialogTrap = false;
+export function trapDialogs() {
+  if (dialogTrap) return;
+  dialogTrap = true;
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const dialog = [...document.querySelectorAll('dialog[open]')].at(-1);
+    if (!dialog) return;
+    const items = controlsOf(dialog);
+    if (!items.length) return;
+    const first = items[0], last = items[items.length - 1], active = document.activeElement;
+    if (!dialog.contains(active) || active === dialog || active.matches('h2[tabindex="-1"]')) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+    else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+  });
 }
 
 // Ages tick every second without rebuilding a section: structure changes
@@ -135,7 +177,7 @@ export const ageSpan = (key, text) => `<span class="age" data-age="${key}">${esc
 const AGE_RE = /<span class="age" data-age="([^"]+)">([^<]*)<\/span>/g;
 const structure = new WeakMap();
 const rebuilt = { tip: null, busy: false };
-const KEYS = ['data-term', 'data-say', 'data-go', 'data-hdesk', 'data-range', 'data-desk', 'data-day', 'data-period'];
+const KEYS = ['data-term', 'data-say', 'data-go', 'data-hdesk', 'data-range', 'data-desk', 'data-day', 'data-period', 'data-field', 'data-themeopt', 'data-sec'];
 function identity(node, root) {
   if (node.id) return { sel: `#${CSS.escape(node.id)}`, index: 0 };
   const attr = KEYS.find(k => node.hasAttribute(k));

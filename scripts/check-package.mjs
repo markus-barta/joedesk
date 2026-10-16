@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const UI_MODULES = ["app.js", "host.js", "ui.js", "terms.js", "format.js", "health.js", "feed.js", "events.js",
-  "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js"];
+  "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js",
+  "settings.js", "settings-model.js", "fleet-write.js"];
 const CONTRACT_MODULES = ["index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
   "manifest.json", "common.schema.json", "reason.schema.json", "data.schema.json", "history.schema.json", "results.schema.json",
   "fleet-config.schema.json", "healthz.schema.json"];

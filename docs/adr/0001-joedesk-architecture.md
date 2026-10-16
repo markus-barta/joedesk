@@ -1,7 +1,7 @@
 # ADR 0001: JoeDesk contracts and resilient read model
 
-Status: P1 foundation, P2 server and P3 UI merged into rebuild/v2; P4 Results
-candidate for JOED-24 (last section). Earlier text: P2 server integration
+Status: P1 foundation, P2 server, P3 UI and P4 Results merged into rebuild/v2;
+P5 Settings candidate for JOED-25 (last section). Earlier text: P2 server integration
 candidate for JOED-22 (mapping below), under JOED-19. Coordinator
 review remains outstanding. No runtime cutover, producer edit, push or deployment
 is part of P1. P1 left the existing server and browser on legacy contracts;
@@ -1164,3 +1164,115 @@ Node v26.11.1), 2026-10-15: Results render worst 7.3 ms, no long task at 390,
 1024 or 1440; Desk patch 7.4 ms, History draw 8.7 ms. Exact money adds about
 1 ms to receiving a record or a History on the page (BigInt columns are
 copied, not transferred). No push, deploy or review gate.
+
+## P5 Settings candidate — JOED-25
+
+P5 builds Settings exactly per the approved freeze (r3.1, spec § 8, Part A)
+on the P3 shell, theme module, panel states and patterns: Mode first, then
+Runtime state, the seven Fleet Config groups, How fleet settings work, Where
+this is defined, the change log, Appearance and About. A sticky sub-nav
+reaches every section and marks the one in view.
+
+**Modules.** `settings-model.js` is pure (fields, validation, candidate,
+diff, the edit flow's states, the change log, the browser draft) and runs
+under Node. `settings.js` draws it. `fleet-write.js` is the board's one
+write: a single POST of `{ baseRev, config }` to `/joe/fleet-config/propagate`,
+refused before any request unless the config is paper and names the version
+it was made against. Only Settings imports it. Transport stays in `feed.js`:
+the Fleet Config read also keeps `X-Joe-Fleet-Source-Path/-Kind`, and a
+read-only `fleet-config/actions.json` poll runs while Settings is open. No
+new state logic: Runtime state reads the shared `panelStates` cells,
+`brokerState`, `dataAge` and `boardHealthPresentation`; the written
+settings are checked with the shared `validateContract('fleet-config')`.
+
+**Write ownership (ADR "Preserve P5 write ownership").** The server is
+unchanged: same-origin, proxy-identified actor, revision check, schema,
+read-only tools and secret references, atomic write, bounded attributed
+audit. The UI edits exactly today's 14 settings; everything else is
+read-only with a lock and its reason. Edit → Review changes (the dialog and
+its review tick) → Confirm → Send. A draft in progress keeps the version it
+was made against, so a newer version makes its send meet the server's
+409, which the edit bar and the toast surface as "revision changed to
+fc-…; reload before retrying"; the server audits it. Discard takes the
+newest saved version. Save draft keeps today's browser key
+`joe-fleet-config-preview-v1`, restored only for the same version.
+
+**Paper and KEEP.** PAPER is fixed: the candidate is always the saved
+settings plus validated changes with `mode = "paper"`, and the writer refuses
+anything else. The LIVE gate (three fixed-size steps, the typed phrase, a
+disabled final switch) has no request and no state: every close route
+returns to PAPER with the toast. SXR8 and TSLA are named as always kept
+(inert text); only the other symbols are editable, and the candidate always
+starts with the floor in its saved order. With the stored settings
+unreadable, values are hidden, editing is off, the floor is still named, and
+Desk still routes SXR8/TSLA to Kept holdings (`panelStates` floor).
+
+**Leaf keys.** `fleet-config.schema.json` has 36 leaf keys (34 leaves, plus
+the two arrays of objects listed beside their item keys). The ticket's "39"
+counts the spec's 39 table rows in § 8.3, three of which are not schema keys
+(Routine health, File the board reads, Last sent). The tests derive the keys
+from the schema file and assert all of them, visible in mono.
+
+| P5 obligation | Proof |
+| --- | --- |
+| AC-22 Mode, then Runtime state; every leaf key as `data-key` with visible mono text, against the schema | browser `AC-22` (clean, starter file, unavailable; six combos); `schema keys` (`test/settings-model.mjs`) |
+| AC-23 today's editable/read-only split; phones read-only with the note, no inputs | browser `AC-23`; `editability` |
+| AC-24 edit flow, edit-bar states and toasts; stale version surfaced and audited | browser `AC-24` (edited at six combos incl. the wide font; draft; stale; failures; unavailable); `edit flow`, `stale version`, `review`, `load states`, `browser draft`, `candidate`, `validation`, `diff model` |
+| AC-25 seven rows; "Not reported"; no secret, token, full account number or env content | browser `AC-25` (incl. a snapshot without executor and hint; the inbox token never reaches the page) |
+| AC-26 sub-nav reaches and marks every section | browser `AC-26` (clicks and scrolling; nothing moves) |
+| AC-27 § 8.5 sections and copy | browser `AC-27`; `change log` |
+| AC-3/4/37 LIVE gate, asserted at the network layer | browser `AC-3`, `AC-4`, `AC-37` (six combos: no request but the board's GET reads, no stored state, server still paper at the same version); `writer` |
+| AC-5 the only write is a paper draft to propagate | browser `AC-5` (every write of the run); `check-joe-ui` (one writer, one route, paper guard, no live mode anywhere) |
+| AC-28 no horizontal scroll 390–1440 | browser `AC-28` (audits; sweep in 10 px steps, both fonts and themes, plus the edit bar's longest note) |
+| AC-31 Light / Dark / System; System follows the OS live | browser `AC-31` |
+| No layout shift on edit, review, toast or section change (±0.5 px) | browser `no-shift` (six combos, both fonts), `AC-26`, `AC-4`, `AC-31` |
+| Tick's P4 carry-over: pointer opens the 390 day sheet without a ring | browser `P4-carry-over` (tap: heading, no ring; keyboard: close button with its ring) |
+
+**Changed expectations (deliberate).**
+- `check-joe-ui`: "the board only reads" now allows exactly `fleet-write.js`
+  (one POST to the propagate route, the paper guard), imported only by
+  `settings.js`; the preview key joins the allowed browser storage; no module
+  may assign a live mode.
+- The shared audit (`gate.mjs`, `audit.js`): the LIVE label may render only
+  inside Mode's locked option (AC-2); the locked "Switch to LIVE…" opener and
+  controls inside dialogs are exempt from the AC-5 action scan (P5 proves the
+  gate sends nothing); the Mode panel is a primary card (AC-44); config
+  values (`[data-value]`) count as exempt text for AC-38, as the AC says;
+  the sweep treats the edit bar as fixed chrome like the header and the
+  bottom bar.
+- Dialogs open through one rule (`ui.js openDialog`): by a pointer, focus
+  goes to the heading (tabindex -1) without a ring; from the keyboard, to the
+  first control with its ring. The browser's own first focus picked the
+  heading, so it is chosen explicitly. A tip inside a dialog joins it (shown
+  above it); Escape closes the tip before the dialog.
+- A disabled button keeps its disabled look under the pointer (found in the
+  contrast audit: a disabled primary button under the pointer read 2.4:1).
+- `startBoard` (test only) can seed the change log and an unreadable store
+  and exposes its store path; the CDP client records request bodies.
+
+**Decisions for the visual check.** (1) The edit bar is one row above
+1180 px, two rows (note, buttons) at 961–1180 px, and floats above the bottom
+bar up to 960 px; its note keeps two lines' room. (2) The wake windows take
+the whole row. (3) The Saved line stays one short line ("Saved: 2 wake
+windows · Review changes lists every difference" for the windows). (4) Adding
+or removing a wake window is the one edit that changes the page's height;
+everything above the list stays put. (5) Read-only values carry a lock icon
+and their reason ("Fixed by the settings format", "Read-only · not used").
+(6) Long keys and paths break after a dot or slash. (7) As in the approved
+design, phones have no sub-nav: Settings is one read-only column there.
+
+**Not in P5.** Deploy, CalVer3 and rollback (P6); the executor-vs-broker
+order/fill/brake reconciliation (producer side, Amy's sign-off). Found, not
+changed (server, P2 scope): when the stored settings cannot be read, the
+audit's changed keys list every key of the candidate, because there is no
+current version to compare with.
+
+**Verification (this candidate).** `npm run check`; `npm test` (contracts
+95, UI 57 incl. 12 Settings, server contract 40); `node scripts/browser-p5.mjs`
+890/890 under TZ=UTC with CI=true and under Europe/Vienna;
+`node scripts/browser-p3.mjs` 2170/2170 and `node scripts/browser-p4.mjs`
+1613/1613 with the P5 changes. One headless browser at a time, on the local
+Apple Silicon workstation (HeadlessChrome 153); the Linux CI run (now with a
+P5 step and a 45-minute browser job) is the merge gate for the font-dependent
+checks. Screenshots and the AC → test map: `~/.local/share/joedesk-qa/p5/index.md`.
+No push, deploy or review gate.

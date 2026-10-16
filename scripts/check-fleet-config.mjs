@@ -5,8 +5,9 @@ import { validateFleetConfig, nextFleetRevision } from "../fleet-config.mjs";
 
 const repoRoot = resolve(new URL("..", import.meta.url).pathname);
 // The legacy flip-plane editor retired with GridStack in P3 (JOED-23); the
-// rebuilt Settings screen and its UI checks arrive with P5. The schema,
-// example, propagate contract and docs stay checked here.
+// rebuilt Settings screen (P5) is checked by check-joe-ui, test/settings-model.mjs
+// and scripts/browser-p5.mjs. The schema, example, propagate contract and docs
+// stay checked here.
 const [packageJson, schema, actionSchema, example, secretsDoc, humanDoc, scatterMap] = await Promise.all([
   readFile(resolve(repoRoot, "package.json"), "utf8").then(JSON.parse),
   readFile(resolve(repoRoot, "public/joe/fleet-config.schema.json"), "utf8").then(JSON.parse),

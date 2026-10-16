@@ -7,6 +7,7 @@ import { acceptRead } from './contracts/read.mjs';
 import { panelStates } from './contracts/panel-state.mjs';
 import { toColumns, sessionCloses, DESK_IDS } from './history-model.js';
 import { indexResults } from './results-model.js';
+import { acceptActions } from './settings-model.js';
 
 export const POLL_DATA_MS = 15000;
 export const POLL_HISTORY_MS = 30000;
@@ -39,8 +40,10 @@ async function read(url, init = {}) {
   }
 }
 
-export function createFeed(onChange, measure = () => {}, version = '') {
+export function createFeed(onChange, measure = () => {}, version = '', { actionsWanted = () => false } = {}) {
   let anchor = null, serverPanels = {}, fleetTag = null;
+  // Where the server read the fleet settings from, and its change log.
+  let fleetSource = null, actions = null;
   const feeds = { data: null, history: null, results: null, 'fleet-config': null };
   const busy = new Set();
   const now = () => (anchor ? new Date(Math.round(anchor.serverMs + performance.now() - anchor.perf)).toISOString() : null);
@@ -154,11 +157,28 @@ export function createFeed(onChange, measure = () => {}, version = '') {
     busy.delete('fleet');
     anchorFrom(res.clock);
     if (res.status === 304) return;
-    if (res.status === 200) fleetTag = res.headers.get('ETag');
+    if (res.status === 200) {
+      fleetTag = res.headers.get('ETag');
+      const path = res.headers.get('X-Joe-Fleet-Source-Path'), kind = res.headers.get('X-Joe-Fleet-Source-Kind');
+      fleetSource = { path: path && /^\/[\x20-\x7e]{1,200}$/.test(path) ? path : null, kind: ['stored', 'example'].includes(kind) ? kind : null };
+    }
     settle('fleet-config', acceptRead('fleet-config', res.status === 200
       ? { status: 200, payload: res.payload, receivedAt: res.headers.get('X-Joe-Received-At') ?? undefined }
       : { status: res.status, redirected: res.redirected, payload: res.payload }, feeds['fleet-config']));
     onChange('fleet');
+  }
+
+  // The fleet settings' change log: every send to the desks, newest first.
+  // A failed read keeps the last good log and says why.
+  async function pollActions() {
+    if (busy.has('actions')) return;
+    busy.add('actions');
+    const res = await read('./fleet-config/actions.json');
+    busy.delete('actions');
+    anchorFrom(res.clock);
+    const entries = res.status === 200 ? acceptActions(res.payload) : null;
+    actions = entries ? { entries, reason: null } : { entries: actions?.entries ?? null, reason: AUTH.has(res.status) ? 'auth_required' : res.status === 200 ? 'contract_invalid' : 'refresh_failed' };
+    onChange('actions');
   }
 
   // Every panel through the shared selector at the anchored server time. The
@@ -168,9 +188,9 @@ export function createFeed(onChange, measure = () => {}, version = '') {
   function select() {
     const at = now();
     const input = Object.fromEntries(Object.entries(feeds).filter(([, feed]) => feed));
-    if (at) return { now: at, feeds: input, states: panelStates(input, at, serverPanels) };
+    if (at) return { now: at, feeds: input, states: panelStates(input, at, serverPanels), fleetSource, actions };
     const undated = Object.fromEntries(Object.entries(input).map(([key, feed]) => [key, feed.value == null ? feed : { value: null, reason: feed.reason ?? null }]));
-    return { now: null, feeds: undated, states: panelStates(undated, NO_CLOCK, {}) };
+    return { now: null, feeds: undated, states: panelStates(undated, NO_CLOCK, {}), fleetSource, actions };
   }
   // Every first read (state, history, closed-trade record, fleet settings) has
   // answered, with a value or a reason; the page then marks itself ready.
@@ -183,11 +203,11 @@ export function createFeed(onChange, measure = () => {}, version = '') {
     pollResults();
     timers = [
       setInterval(pollState, POLL_DATA_MS),
-      setInterval(() => { pollHistory(); pollResults(); pollFleet(); }, POLL_HISTORY_MS),
+      setInterval(() => { pollHistory(); pollResults(); pollFleet(); if (actionsWanted()) pollActions(); }, POLL_HISTORY_MS),
       setInterval(() => onChange('tick'), TICK_MS),
     ];
   }
   const stop = () => { timers.forEach(clearInterval); timers = []; };
   const refresh = () => Promise.all([pollFleet(), pollState(), pollHistory(), pollResults()]);
-  return { start, stop, select, now, settled, refresh, refreshHistory: pollHistory, refreshResults: pollResults, usesWorker: () => Boolean(worker), feeds };
+  return { start, stop, select, now, settled, refresh, refreshHistory: pollHistory, refreshResults: pollResults, refreshFleet: pollFleet, refreshActions: pollActions, usesWorker: () => Boolean(worker), feeds };
 }
