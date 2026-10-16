@@ -799,11 +799,20 @@ try {
       const header = await look();
       check('AC-31', `${tag}: the header button switches to dark and Appearance follows`, header.theme === 'dark' && header.stored === 'dark' && J(header.pressed) === J(['dark']), header);
       check('AC-31', `${tag}: switching theme moves nothing (±0.5 px)`, !shifted(before, await rects(SHIFT)).length, shifted(before, await rects(SHIFT)).slice(0, 3));
+      // Only the chosen option is tinted. A tap leaves the browser's hover
+      // state on what it touched; on a phone that state must paint nothing.
+      const tints = () => ev(`[...document.querySelectorAll('[data-themeopt]')].map(b => ({ opt: b.dataset.themeopt, pressed: b.getAttribute('aria-pressed'), bg: getComputedStyle(b).backgroundColor, hoverState: b.matches(':hover') }))`);
+      const only = (list, opt) => list.every(t => (t.opt === opt) === (t.bg !== 'rgba(0, 0, 0, 0)')) && list.every(t => (t.opt === opt) === (t.pressed === 'true'));
+      if (!viewport.mobile) {
+        // With a mouse the hover style is live: the option under the pointer
+        // is tinted while the pointer is there, and only then.
+        await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', ...await centre('[data-themeopt="system"]', false) }); await settle(page);
+        const over = await tints();
+        await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 }); await settle(page);
+        const away = await tints(), system = over.find(t => t.opt === 'system');
+        check('touch', `${tag}: with a mouse, the hover style applies: System is tinted while the pointer is over it, and only Dark once the pointer leaves`, system.hoverState && system.pressed !== 'true' && system.bg !== 'rgba(0, 0, 0, 0)' && only(away, 'dark'), { over, away });
+      }
       if (viewport.mobile) {
-        // Only the chosen option is tinted. A tap leaves the browser's hover
-        // state on what it touched; on a phone that state must paint nothing.
-        const tints = () => ev(`[...document.querySelectorAll('[data-themeopt]')].map(b => ({ opt: b.dataset.themeopt, pressed: b.getAttribute('aria-pressed'), bg: getComputedStyle(b).backgroundColor, hoverState: b.matches(':hover') }))`);
-        const only = (list, opt) => list.every(t => (t.opt === opt) === (t.bg !== 'rgba(0, 0, 0, 0)')) && list.every(t => (t.opt === opt) === (t.pressed === 'true'));
         // Tick's evidence: System was tapped last, then the header button chose Dark.
         const sticky = await tints();
         check('touch', `${tag}: System tapped last, Dark chosen by the header button: only Dark is tinted, though System keeps the tap's hover state`, only(sticky, 'dark') && sticky.find(t => t.opt === 'system').hoverState, sticky);
@@ -825,8 +834,10 @@ try {
         let rules = 0; for (const sheet of document.styleSheets) { walk(sheet.cssRules, false); rules += sheet.cssRules.length; }
         const flash = [...document.querySelectorAll('a, button, input, select, textarea, label, summary, [role=switch], [tabindex]')].filter(e => getComputedStyle(e).getPropertyValue('-webkit-tap-highlight-color') !== 'rgba(0, 0, 0, 0)').map(e => e.id || e.className || e.tagName);
         const hovers = [...document.styleSheets].flatMap(sh => [...sh.cssRules]).filter(r => r instanceof CSSMediaRule && /\\(hover: hover\\)/.test(r.conditionText)).length;
-        return { loose, flash: flash.slice(0, 5), flashCount: flash.length, hovers, rules, hoverMatches: matchMedia('(hover: hover)').matches }; })()`);
-      check('touch', `${tag}: every :hover rule sits in @media (hover: hover) (${touch.hovers} blocks), and no control has a tap flash`, !touch.loose.length && !touch.flashCount && touch.hovers > 0 && touch.hoverMatches === !viewport.mobile, touch);
+        return { loose, flash: flash.slice(0, 5), flashCount: flash.length, hovers, rules, hoverMatches: matchMedia('(hover: hover)').matches,
+          pointer: matchMedia('(pointer: fine)').matches ? 'fine' : matchMedia('(pointer: coarse)').matches ? 'coarse' : 'none' }; })()`);
+      check('touch', `${tag}: every :hover rule sits in @media (hover: hover) (${touch.hovers} blocks), and no control has a tap flash (${viewport.mobile ? 'touch: no hover, a coarse pointer' : 'a mouse: hover, a fine pointer'})`,
+        !touch.loose.length && !touch.flashCount && touch.hovers > 0 && touch.hoverMatches === !viewport.mobile && touch.pointer === (viewport.mobile ? 'coarse' : 'fine'), touch);
       await ev(`localStorage.removeItem('joe-board-theme-v1'); window.__joedesk.setTheme('system'); localStorage.removeItem('joe-board-theme-v1')`);
     }
   }
@@ -946,8 +957,28 @@ Saved line; 64-character routine names; 80-character check-in names), and
 malformed browser drafts. One headless browser,
 run sequentially; reduced motion for stable geometry. The board's clock and
 the page's timer are both frozen, the browser runs in UTC with the en-US
-locale, so every age and time reads the same on any runner. Browser: ${reference}.
+locale, so every age and time reads the same on any runner. The pointer is
+fixed too: desktop widths have a mouse that hovers, phones are touch screens,
+whatever pointer the host has. Browser: ${reference}.
 Compare with \`joed-19-joedesk-approved.html\` (Settings).
+
+## Changed in fix round 3 (Linux CI of c942831)
+
+- **Linux CI (\`touch\`, "every :hover rule sits in @media (hover: hover)")**
+  failed at 1440 and 1024. The product CSS was right; the test took the
+  host's pointer. Chrome asks the operating system for a mouse: a Mac always
+  reports one, a Linux runner none, so \`(hover: hover)\` did not match at
+  desktop widths there. \`Emulation.setEmulatedMedia\` ignores \`hover\` and
+  \`pointer\`, so the browser is launched with a fine, hovering pointer
+  (\`--blink-settings\`), and the phone cases keep touch emulation (no hover,
+  a coarse pointer). The check also asserts each case's pointer, and a new
+  desktop check moves the mouse over System: it takes the hover tint and loses
+  it when the pointer leaves. Proven under \`TZ=UTC\` on a Linux host without a
+  hover pointer (c942831 fails the same two checks; this round passes) and on
+  macOS with a Chrome flag that removes the hover pointer. No product file
+  changed, and every screenshot shows the same content: the pixel differences
+  against the previous run are run noise (temporary folder names, a few
+  anti-aliased corner pixels that differ between two runs of c942831 too).
 
 ## Changed in fix round 2 (Tick's visual check of 2d29200, Linux CI)
 
@@ -1066,6 +1097,7 @@ Every screenshot was taken again. What changed, per fix:
 - **Wake windows** take the whole row (label above, one row per window). On
   a phone each window is one tinted block: name and times, then days and desks.
 - **Phones** show no hover state and no tap flash; :active gives the feedback.
+  With a mouse, the hover tint shows while the pointer is over a control.
 - **Adding or removing a wake window** changes the list itself (the one edit
   that adds height); every other edit, the review, the confirmation, the
   toast and a section change move nothing (\`no-shift\`, both fonts).
@@ -1097,6 +1129,7 @@ Every screenshot was taken again. What changed, per fix:
 | Tick's P4 carry-over | \`P4-carry-over\` (tap: heading, no ring; keyboard: close button with ring) | — |
 | Tick's visual check of 2d29200: A phone wake windows, B item keys, C connections, E no reserve caption | \`AC-23\` (A), \`AC-22\` (B, C), \`AC-24\` (E) | \`phone wake windows\`, \`schema keys\` (item names) |
 | Tick D: no sticky hover, no tap flash on phones | \`touch\` (every :hover guarded; no tap highlight; System then Dark tints only Dark; the hidden Continue slot's pixels) | — |
+| Linux CI: the pointer is the test's, not the host's | \`touch\` (each case's hover and pointer: a mouse at 1440 and 1024, touch at 390; with a mouse, System takes the hover tint and loses it) | — |
 | Linux CI: deterministic ages | \`AC-25\` (frozen board clock and page timer, en-US, UTC; the rows unchanged 1.5 s later) | — |
 | Part A craft on Settings | AC-1, 2, 5, 28–30, 32, 33, 36, 38, 40, 42–44, 47 (\`auditScreen\`) | — |
 | No layout shift on edit, review, toast or section change (both fonts) | \`no-shift\` (edited; long values at 1440 and 1024 in both fonts, 390 in both fonts; stored outcome; sweep) | — |

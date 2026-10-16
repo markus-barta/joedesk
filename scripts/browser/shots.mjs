@@ -9,6 +9,10 @@ export const VIEWPORTS = [
 ];
 export const THEMES = ['light', 'dark'];
 
+// A phone is a touch screen ((hover: none), (pointer: coarse)); any other
+// viewport has the mouse the browser was launched with ((hover: hover),
+// (pointer: fine)). Turning touch off hands the host's own pointer back until
+// the next document, so a desktop case has its mouse from load() on.
 export async function configure(page, viewport, theme, { scale = 1 } = {}) {
   await page.s('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: scale, mobile: viewport.mobile });
   await page.s('Emulation.setTouchEmulationEnabled', viewport.mobile ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
