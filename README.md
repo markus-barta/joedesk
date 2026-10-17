@@ -481,22 +481,34 @@ Desk filtering warns only where the selected desks have trades on that date.
 
 Results marks **closed past Vienna dates** with `coverage: "partial"` as
 **Partial**, using the existing half-circle warning SVG and calendar warning
-slot. Desktop cells replace the note with **Partial**; phones show the icon.
+slot. On tinted cells the icon inherits the cell's ink, as Stale does; on a
+neutral no-trade Partial it uses the warning token. Desktop cells replace the
+note with **Partial** in full ink; phones show the icon.
 The cell's accessible label includes “Partial: this day's record is incomplete”
 and the reason. The day panel and phone sheet prefix the exact visible trade
-count and amount with **Partial** and explain on the existing day-note line:
+count and amount with **Partial**, label known amounts **so far**, and explain
+on the existing day-note line:
 “Part of this day's activity couldn't be confirmed, so its result may be
 incomplete.” A partial day with no visible trades shows a muted **—** on the
-neutral calendar surface, and **Partial · record incomplete** in the day
+neutral calendar surface, and **Partial · record incomplete · —** in the day
 summary; it never claims €0, “no trades” or “sat out”. This day-wide warning
 also applies when a desk filter has no visible trades. **Stale** takes priority
-if both diagnostics occur. The open Vienna date has no partial marker; it
-becomes eligible only at Vienna midnight, including across DST changes.
+if both diagnostics occur. From Vienna day D+2, a date D still partial shows
+**Stale**, retaining the partial reason and “so far” on known amounts. Its
+accessible explanation is “Stale: still incomplete;” plus the reason. Escalation
+uses date-key arithmetic, including across DST and month/year boundaries.
+The open Vienna date has no marker. Narrow day summaries drop the trade count
+before the Partial/Stale label, exact amount or “so far”; unknown amounts never
+say “so far”. Calendar amounts never say “so far”.
 The server preserves producer coverage and nullable summaries on protected
 reads and restart; both the read worker and fallback retain partial dates.
 All amounts and totals still come from the existing exact trade calculations.
-The optional period-wide partial-day count is deferred; the existing wrapping
-record-status line is unchanged.
+The desktop calendar month summary appends a warning segment, **incl. N partial
+days**, counting only closed dates still labelled Partial. Today, future dates
+and Stale dates do not count. With no trades and a counted partial date it says
+**No trades recorded this month · incl. 1 partial day**. If room is tight,
+“over N trading days” shortens to “in N days”. This line is hidden on phones;
+the record-status line, period tiles and week column do not carry the hint.
 
 On phones, Results calendar amounts use compact forms such as `1`, `4,1`,
 `13`, `1k` and `1,2k`, rounded once from exact decimals, half away from zero.

@@ -385,29 +385,44 @@ phones where the icon remains visible. Trade amounts remain visible; a desk
 filter with no trades on the affected date does not warn.
 
 For a **closed past Vienna date**, `coverage: "partial"` shows **Partial** in
-the calendar's existing warning slot (half-circle SVG in the warning tone).
-Desktop cells replace their note with **Partial**; phone cells show only the
-icon. The accessible label adds “Partial: this day's record is incomplete”
-and the reason. The day panel and phone sheet show **Partial · N trades ·
-±€X**, with “Part of this day's activity couldn't be confirmed, so its result
-may be incomplete.” on the existing info-note line. Exact trade amounts stay
-visible and remain the source for trade totals.
+the calendar's existing warning slot (half-circle SVG).
+Desktop cells replace their note with **Partial** in full ink; phone cells show
+only the icon. On gain/loss/flat tints the icon inherits the cell's ink; a
+neutral no-trade Partial uses the warning token. Both theme token sets keep
+icon contrast at least 3:1. The accessible label adds “Partial: this day's
+record is incomplete” and the reason. The day panel and phone sheet show
+**Partial · N trades · ±€X so far**, with “Part of this day's activity couldn't
+be confirmed, so its result may be incomplete.” on the existing info-note line.
+Exact trade amounts stay visible and remain the source for trade totals.
 
 `{date, desks: {}, coverage: "partial"}` is valid even without any trades.
 Unknown partial summary money stays `null`. With no visible trades, the cell
 shows a muted **—**, its neutral surface and hairline, plus the warning; the
-day summary reads **Partial · record incomplete**, with the same reason.
+day summary reads **Partial · record incomplete · —**, with the same reason.
 Neither view claims €0, “no trades” or “sat out”. Coverage applies to the day,
 including when a selected desk has no visible trades. **Stale** wins when a
 missing-summary diagnostic and partial coverage coincide; each view has one
-warning only. The open Vienna date and future dates never show partial markers.
-Vienna midnight, using the shared zone helper, closes the day even across DST.
+warning only. From Vienna D+2 onward, a date D still partial instead shows
+**Stale** with “Stale: still incomplete;” plus the partial reason in its
+accessible label. The partial reason stays on the day-note line. Known amounts
+still say “so far”; unknown amounts show **—** without “so far”. When narrow,
+the day panel/sheet drops the trade count before the status, amount or “so far”.
+Calendar cells never say “so far”. The open Vienna date and future dates have
+no marker. The shared Vienna helper and date-key arithmetic cover midnight,
+DST changes and month boundaries without measuring elapsed 24-hour intervals.
 
 Coverage and nullable summaries pass through acceptance, persistence, restart
 and `/joe/results.json` unchanged. Both client read paths index partial dates
 without using summary money for trade P&L; the worker's transfer preserves them.
-No schema change is required. The optional partial-day count in the record's
-status line is deferred pending narrow-screen layout verification.
+No schema change is required. The desktop calendar month summary appends
+**incl. N partial days** in its own warning segment, counting only closed dates
+still labelled Partial (today and Stale dates excluded). With no trades and a
+counted partial date it reads **No trades recorded this month · incl. 1 partial
+day**. “Over N trading days” shortens to “in N days” first if necessary. The
+summary stays on one line and is hidden on phones. No partial hint appears in
+the record-status line, period tiles or week column. The unchanged contract
+and single generic reason are retained for this round; reason enums are a
+separate contract change.
 
 ## Local layout
 

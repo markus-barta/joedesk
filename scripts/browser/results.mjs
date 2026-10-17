@@ -4,7 +4,7 @@
 // back to € 5.000 per desk at the tracking start; trades sit in the regular
 // New York session, with exact FX arithmetic: gross = quantity × price move ×
 // close rate, net = gross − fees.
-import { scenario, NOW } from './board.mjs';
+import { scenario, NOW, valid } from './board.mjs';
 import { validateContract } from '../../contracts/index.mjs';
 import { marketSession, zonedInstant, viennaDay, NY } from '../../time.mjs';
 import { decimalUnits, unitsDecimal } from '../../contracts/decimal.mjs';
@@ -39,6 +39,43 @@ export function withTradeSummaries(record) {
     d.fees.amount = unitsDecimal(decimalUnits(d.fees.amount) + decimalUnits(t.feesEur.amount));
   }
   return record;
+}
+
+// JOED-30: only yesterday can remain Partial under T+1. Capture the traded
+// and unattributed-only versions of that date as separate accepted snapshots.
+export function partialDaysResults(now = '2026-10-16T12:00:00.000Z') {
+  const dates = { partial: '2026-10-15', escalated: '2026-10-14', missing: '2026-10-13',
+    normal: '2026-10-12', emptyEscalated: '2026-10-11', today: '2026-10-16' };
+  const baseline = withTradeSummaries({ ...structuredClone(valid.results), generatedAt: now,
+    days: [dates.emptyEscalated, dates.normal, dates.escalated, dates.partial, dates.today].map(date => ({ date,
+      desks: date === dates.emptyEscalated ? {} : structuredClone(valid.results.days[0].desks),
+      ...(date === dates.today ? { coverage: 'partial' } : {}) })),
+    trades: [dates.normal, dates.missing, dates.escalated, dates.partial, dates.today].map((date, i) => ({
+      ...structuredClone(valid.results.trades[0]), id: `rt-partial-${i}`,
+      openedAt: `${date}T10:00:00.000Z`, closedAt: `${date}T10:10:00.000Z` })),
+  });
+  delete baseline.receivedAt;
+  const partial = structuredClone(baseline);
+  for (const day of partial.days.filter(d => [dates.partial, dates.escalated, dates.emptyEscalated].includes(d.date))) {
+    day.coverage = 'partial';
+    for (const desk of Object.values(day.desks)) desk.realisedNet = desk.fees = null;
+  }
+  const empty = structuredClone(partial);
+  empty.trades = empty.trades.filter(t => viennaDay(t.closedAt) !== dates.partial);
+  empty.days.find(d => d.date === dates.partial).desks = {};
+  const missing = structuredClone(partial);
+  missing.days = missing.days.filter(d => d.date !== dates.partial);
+  const large = structuredClone(partial), template = large.trades.find(t => viennaDay(t.closedAt) === dates.partial);
+  large.trades = large.trades.filter(t => viennaDay(t.closedAt) !== dates.partial);
+  large.trades.push(...Array.from({ length: 99 }, (_, i) => {
+    const t = structuredClone(template);
+    t.id = `rt-partial-large-${i}`;
+    t.netEur.amount = i === 98 ? '-999999.99' : '0';
+    t.grossEur.amount = unitsDecimal(decimalUnits(t.netEur.amount) + decimalUnits(t.feesEur.amount));
+    return t;
+  }));
+  const emptyMonth = withTradeSummaries({ ...structuredClone(empty), trades: [] });
+  return { dates, baseline, partial, empty, missing, large, emptyMonth };
 }
 
 export function designResults(now = NOW, { trackingStart = '2026-09-10', seq = 412 } = {}) {

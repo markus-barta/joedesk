@@ -27,7 +27,7 @@ const { validateContract } = await import('../contracts/index.mjs');
 const { acceptRead } = await import('../contracts/read.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const hm = await import('../public/joe/history-model.js');
-const { designResults, withTradeSummaries } = await import('../scripts/browser/results.mjs');
+const { designResults, withTradeSummaries, partialDaysResults } = await import('../scripts/browser/results.mjs');
 
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ALL = ['j', 'joe', 'joel'];
@@ -645,7 +645,7 @@ function calendarCapture(t) {
     page.renderCalendar({ ix, today, trackingStart: ix.meta.trackingStart }, M.periodOf('month', selected, today, ix.meta.trackingStart), desks);
     const html = nodes.get('#cal').innerHTML;
     return { html, cell: day => html.match(new RegExp(`<button[^>]*data-day="${day}"[^>]*>[\\s\\S]*?<\\/button>`))?.[0],
-      panel: nodes.get('#daypanel').innerHTML, sheet: nodes.get('#sheetBody').innerHTML };
+      panel: nodes.get('#daypanel').innerHTML, sheet: nodes.get('#sheetBody').innerHTML, month: nodes.get('#calSum').innerHTML };
   };
 }
 const partialReason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
@@ -653,17 +653,17 @@ const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'");
 
 test('JOED-30 rendering: closed partial trades keep their exact amount, tint and one warning in every day view', t => {
   const render = calendarCapture(t), value = fixture('partial-day');
-  let r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-14');
+  let r = render(value, '2026-10-15T12:00:00.000Z', '2026-10-14');
   const cell = r.cell('2026-10-14');
   assert.match(cell, /class="cell l[1-4]\b/);
-  assert.match(cell, /class="day-warning st warn"[^>]*>[\s\S]*href="#i-half"/);
+  assert.match(cell, /class="day-warning st"[^>]*>[\s\S]*href="#i-half"/);
   assert.equal((cell.match(/class="day-warning/g) ?? []).length, 1);
   assert.match(cell, /<span class="n">Partial<\/span>/);
   assert.match(textOf(cell), /−1,00/);
   assert.match(cell.replaceAll('&#39;', "'"), /−€ 1,00 from 1 trade; Partial: this day's record is incomplete/);
   assert.ok(cell.includes(fmt.esc(partialReason)), 'the accessible label and tooltip carry the reason');
   for (const html of [r.panel, r.sheet]) {
-    assert.match(textOf(html), /Partial · 1 trade · −€ 1,00/);
+    assert.match(textOf(html), /Partial · 1 trade · −€ 1,00 so far/);
     assert.match(html, /class="st warn"[^>]*>[\s\S]*href="#i-half"/);
     assert.ok(textOf(html).includes(partialReason));
     assert.equal((html.match(/class="trow"/g) ?? []).length, 1);
@@ -671,9 +671,9 @@ test('JOED-30 rendering: closed partial trades keep their exact amount, tint and
   }
   // Coverage is day-wide: filtering to a desk without visible trades cannot
   // claim that desk sat out when the day's record is incomplete.
-  r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-14', ['joe']);
+  r = render(value, '2026-10-15T12:00:00.000Z', '2026-10-14', ['joe']);
   assert.match(r.cell('2026-10-14'), /class="cell none\b/);
-  assert.match(textOf(r.sheet), /Partial · record incomplete/);
+  assert.match(textOf(r.sheet), /Partial · record incomplete · —/);
   assert.doesNotMatch(textOf(r.sheet), /[Nn]o trades|sat out|€/);
 });
 
@@ -681,16 +681,18 @@ test('JOED-30 rendering: a partial date with no trades is a neutral dash and inc
   const render = calendarCapture(t);
   const value = record([{ date: '2026-10-13', desks: {}, coverage: 'partial' }, { date: '2026-10-25', desks: {}, coverage: 'partial' }]);
   for (const day of ['2026-10-13', '2026-10-25']) {
-    const r = render(value, '2026-10-26T00:00:00.000Z', day), cell = r.cell(day);
+    const r = render(value, `${M.addDays(day, 1)}T12:00:00.000Z`, day), cell = r.cell(day);
     assert.match(cell, /class="cell none\b/);
     assert.match(cell, /<span class="v"><span class="muted">—<\/span><\/span>/);
     assert.match(cell, /<span class="n">Partial<\/span>/);
+    assert.match(cell, /class="day-warning st warn"/);
+    assert.match(cell, /\bday-incomplete\b/);
     assert.match(cell.replaceAll('&#39;', "'"), /no complete record; Partial: this day's record is incomplete/);
     assert.doesNotMatch(cell, /class="cell (?:g|l|flat|we)|class="pl"|[Nn]o trades|sat out|€|>0</);
     for (const html of [r.panel, r.sheet]) {
-      assert.match(textOf(html), /Partial · record incomplete/);
+      assert.match(textOf(html), /Partial · record incomplete · —/);
       assert.ok(textOf(html).includes(partialReason));
-      assert.doesNotMatch(textOf(html), /[Nn]o trades|sat out|€|\b0\b/);
+      assert.doesNotMatch(textOf(html), /[Nn]o trades|sat out|€|\b0\b|so far/);
     }
   }
 });
@@ -702,12 +704,24 @@ test('JOED-30 rendering: Stale wins over partial coverage in the cell, panel and
   assert.equal((cell.match(/class="day-warning/g) ?? []).length, 1);
   assert.match(cell, /<span class="n">Stale<\/span>/);
   assert.match(cell, /Stale: daily summary missing/);
-  assert.doesNotMatch(cell, /Partial|incomplete/);
+  assert.doesNotMatch(textOf(cell), /Partial|incomplete/);
   for (const html of [r.panel, r.sheet]) {
     assert.match(textOf(html), /Stale · 1 trade · −€ 1,00/);
     assert.match(textOf(html), /Daily summary missing\./);
     assert.doesNotMatch(textOf(html), /Partial|incomplete/);
   }
+});
+
+test('JOED-30 browser snapshots: each partial, empty, Stale handoff, worst amount and empty month is valid ingress', () => {
+  const { dates, ...snapshots } = partialDaysResults();
+  for (const [name, payload] of Object.entries(snapshots)) {
+    const checked = validateContract('results', payload, { stage: 'ingress' });
+    assert.ok(checked.ok, `${name}: ${JSON.stringify(checked.errors)}`);
+  }
+  assert.equal(M.dayResult(M.indexResults(snapshots.large), dates.partial, ALL).count, 99);
+  assert.equal(M.dayResult(M.indexResults(snapshots.large), dates.partial, ALL).units, E('-999999.99'));
+  assert.equal(snapshots.empty.days.find(d => d.date === dates.partial).coverage, 'partial');
+  assert.equal(M.dayResult(M.indexResults(snapshots.empty), dates.partial, ALL).count, 0);
 });
 
 test('JOED-30 rendering: only closed Vienna dates show partial, across midnight and the autumn DST boundary', t => {
@@ -728,4 +742,106 @@ test('JOED-30 rendering: only closed Vienna dates show partial, across midnight 
     assert.match(ahead.cell(day), /class="cell fut\b/);
     assert.doesNotMatch(ahead.cell(day), /Partial|day-warning/);
   }
+});
+
+test('JOED-30 rendering: T+1 becomes Stale at Vienna D+2, across autumn DST and month/year boundaries', t => {
+  const render = calendarCapture(t);
+  for (const [day, before, after] of [
+    ['2026-10-24', '2026-10-25T22:59:59.999Z', '2026-10-25T23:00:00.000Z'],
+    ['2026-10-25', '2026-10-26T22:59:59.999Z', '2026-10-26T23:00:00.000Z'],
+    ['2026-10-31', '2026-11-01T22:59:59.999Z', '2026-11-01T23:00:00.000Z'],
+    ['2026-12-31', '2027-01-01T22:59:59.999Z', '2027-01-01T23:00:00.000Z'],
+  ]) for (const hasTrades of [false, true]) {
+    const value = record([{ date: day, desks: {}, coverage: 'partial' }],
+      hasTrades ? [tradeOf('rt-escalate', 'j', `${day}T14:00:00.000Z`, '-12.4')] : []);
+    const partial = render(value, before, day), stale = render(value, after, day);
+    assert.match(partial.cell(day), /<span class="n">Partial<\/span>/);
+    assert.match(partial.month, /incl\. 1 partial day/);
+    assert.match(stale.cell(day), /<span class="n">Stale<\/span>/);
+    assert.equal((stale.cell(day).match(/class="day-warning/g) ?? []).length, 1);
+    assert.ok(stale.cell(day).includes(fmt.esc(`Stale: still incomplete; ${partialReason}`)));
+    assert.doesNotMatch(stale.month, /incl\.|class="st warn"/);
+    for (const html of [stale.panel, stale.sheet]) {
+      assert.match(textOf(html), hasTrades ? /Stale · 1 trade · −€ 12,40 so far/ : /Stale · record incomplete · —/);
+      assert.ok(textOf(html).includes(partialReason));
+      assert.doesNotMatch(html, /Daily summary missing|sat out/);
+    }
+    assert.equal(stale.cell(day).match(/class="cell ([^ ]+)/)[1], partial.cell(day).match(/class="cell ([^ ]+)/)[1]);
+  }
+});
+
+test('JOED-30 rendering: missing summary hands off to Partial without changing the amount or cell slots', t => {
+  const render = calendarCapture(t), day = '2026-10-15';
+  const value = record([], [tradeOf('rt-handoff', 'j', `${day}T14:00:00.000Z`, '-1')]);
+  value.missingDays = [day];
+  const stale = render(value, '2026-10-16T12:00:00.000Z', day);
+  assert.match(stale.cell(day), /Stale: daily summary missing/);
+  value.days.push({ date: day, desks: {}, coverage: 'partial' });
+  value.missingDays = [];
+  const partial = render(value, '2026-10-16T12:00:00.000Z', day);
+  assert.match(partial.cell(day), /<span class="n">Partial<\/span>/);
+  assert.doesNotMatch(partial.cell(day), /Stale/);
+  for (const slot of ['d', 'v']) assert.equal(partial.cell(day).match(new RegExp(`<span class="${slot}">[\\s\\S]*?<span class="${slot === 'd' ? 'day-warning' : 'n'}`))?.[0],
+    stale.cell(day).match(new RegExp(`<span class="${slot}">[\\s\\S]*?<span class="${slot === 'd' ? 'day-warning' : 'n'}`))?.[0]);
+  assert.equal((partial.cell(day).match(/class="day-warning/g) ?? []).length, 1);
+});
+
+test('JOED-30 month summary: only closed, un-escalated partial dates count, with unknown/no-trade wording', t => {
+  const render = calendarCapture(t);
+  const value = record(['2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17']
+    .map(date => ({ date, desks: {}, coverage: 'partial' })));
+  let r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-15');
+  assert.equal(textOf(r.month), 'No trades recorded this month · incl. 1 partial day');
+  assert.match(r.month, / · <span class="st warn">/);
+  assert.doesNotMatch(r.html, /incl\.|so far/);
+  value.missingDays = ['2026-10-15'];
+  value.trades.push(tradeOf('rt-partial-count', 'j', '2026-10-15T14:00:00.000Z', '-0.03'));
+  r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-15');
+  assert.doesNotMatch(r.month, /incl\./, 'a Stale diagnostic takes priority and excludes the day');
+  value.missingDays = [];
+  r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-15');
+  assert.match(r.month, /Down € 0,03/);
+  assert.match(r.month, /class="month-long">over 1 trading day/);
+  assert.match(r.month, /class="month-short">in 1 day/);
+  assert.match(r.month, /incl\. 1 partial day/);
+  const empty = render(record([]), '2026-10-16T12:00:00.000Z', '2026-10-15');
+  assert.equal(empty.month, 'No trades this month');
+});
+
+test('JOED-30 partial icon: inherited tint ink and neutral warn are at least 3:1 in both theme token sets', t => {
+  const render = calendarCapture(t), css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  const tokens = block => Object.fromEntries([...block.matchAll(/--([\w-]+):\s*(#[\da-f]{6})\b/gi)].map(m => [m[1], m[2]]));
+  const light = tokens(css.match(/:root \{([^}]+)\}/)[1]);
+  const dark = tokens(css.match(/:root\[data-theme="dark"\] \{([^}]+)\}/)[1]);
+  const luminance = hex => hex.slice(1).match(/../g).map(c => parseInt(c, 16) / 255)
+    .map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4).reduce((s, c, i) => s + c * [.2126, .7152, .0722][i], 0);
+  const contrast = (a, b) => { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
+  for (const [cls, net] of [['g1', '1'], ['g2', '300'], ['g3', '600'], ['g4', '1000'],
+    ['l1', '-1'], ['l2', '-300'], ['l3', '-600'], ['l4', '-1000'], ['flat', '0'], ['none', null]]) {
+    const value = record([{ date: '2026-10-15', desks: {}, coverage: 'partial' }], [
+      tradeOf('rt-max-tint', 'j', '2026-10-14T14:00:00.000Z', '1000'),
+      ...(net === null ? [] : [tradeOf('rt-partial-tint', 'j', '2026-10-15T14:00:00.000Z', net)]),
+    ]);
+    const cell = render(value, '2026-10-16T12:00:00.000Z', '2026-10-15').cell('2026-10-15');
+    assert.match(cell, new RegExp(`class="cell ${cls}\\b`));
+    assert.match(cell, new RegExp(`class="day-warning st${cls === 'none' ? ' warn' : ''}"`));
+    for (const [theme, palette] of [['light', light], ['dark', dark]]) {
+      const foreground = palette[cls === 'none' ? 'warn' : 'ink'];
+      for (const background of cls === 'none' ? [palette.surface, palette.canvas] : [palette[cls]])
+        assert.ok(contrast(foreground, background) >= 3, `${theme} ${cls}: ${contrast(foreground, background)}`);
+    }
+  }
+  assert.match(css, /\.cell\.day-incomplete \.n \{ color: var\(--ink\); \}/, 'the neutral Partial note uses full ink');
+});
+
+test('JOED-30 partial summary: 99 trades keep the exact large amount and so far in a single removable-count slot', t => {
+  const render = calendarCapture(t), day = '2026-10-15';
+  const value = record([{ date: day, desks: {}, coverage: 'partial' }], Array.from({ length: 99 }, (_, i) =>
+    tradeOf(`rt-partial-large-${i}`, 'j', `${day}T14:00:00.000Z`, i === 98 ? '-999999.99' : '0')));
+  const r = render(value, '2026-10-16T12:00:00.000Z', day);
+  for (const html of [r.panel, r.sheet]) {
+    assert.match(textOf(html), /Partial · 99 trades · −€ 999\.999,99 so far/);
+    assert.match(html, /<span class="dp-trades">99 trades · <\/span><span class="dp-amount">−€ 999\.999,99 so far<\/span>/);
+  }
+  assert.doesNotMatch(r.cell(day), /so far/);
 });

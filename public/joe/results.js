@@ -105,7 +105,9 @@ const partialDay = (view, k) => k < view.today && view.ix?.partialDays?.has(k);
 function dayWarning(view, k, desks) {
   if (k >= view.today) return null;
   if (missingDay(view.ix, k, desks)) return { label: 'Stale', text: missingDayText(k), note: 'Daily summary missing.' };
-  if (partialDay(view, k)) return { label: 'Partial', text: `Partial: this day's record is incomplete. ${PARTIAL_REASON}`, note: PARTIAL_REASON };
+  if (partialDay(view, k)) return k <= M.addDays(view.today, -2)
+    ? { label: 'Stale', text: `Stale: still incomplete; ${PARTIAL_REASON}`, note: PARTIAL_REASON }
+    : { label: 'Partial', text: `Partial: this day's record is incomplete. ${PARTIAL_REASON}`, note: PARTIAL_REASON };
   return null;
 }
 
@@ -270,13 +272,17 @@ export function renderCalendar(view, per, desks) {
   $('#prevMonth').disabled = first <= M.firstStep(view.trackingStart);
   $('#nextMonth').disabled = first >= M.dateKey(...M.ymOf(today), 1);
   const max = ix ? maxDay(ix, desks) : 0n;
-  let monthCount = 0, monthUnits = 0n, monthDays = 0;
+  let monthCount = 0, monthUnits = 0n, monthDays = 0, partialDays = 0;
   if (ix) for (let d = 1; d <= M.daysIn(y, m); d++) {
-    const r = M.dayResult(ix, M.dateKey(y, m, d), desks);
+    const k = M.dateKey(y, m, d), r = M.dayResult(ix, k, desks);
     if (r.count) { monthCount += r.count; monthUnits += r.units; monthDays++; }
+    if (dayWarning(view, k, desks)?.label === 'Partial') partialDays++;
   }
-  $('#calSum').textContent = !ix ? 'Unavailable'
-    : monthCount ? `${signedWord(monthUnits)} over ${plural(monthDays, 'trading day')}` : 'No trades this month';
+  const monthSum = !ix ? 'Unavailable' : monthCount
+    ? `${signedWord(monthUnits)} <span class="month-long">over ${plural(monthDays, 'trading day')}</span><span class="month-short">in ${plural(monthDays, 'day')}</span>`
+    : partialDays ? 'No trades recorded this month' : 'No trades this month';
+  patch($('#calSum'), `${monthSum}${partialDays ? ` · ${st('warn', `incl. ${partialDays} partial day${partialDays === 1 ? '' : 's'}`)}` : ''}`);
+  fitMonthSummary($('#calSum'));
   const start = M.monday(first);
   const inPer = k => (RS.period === 'day' || RS.period === 'week') && k >= per.start && k <= per.end;
   let html = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow" role="columnheader">${d}</div>`).join('') + '<div class="dow wkh" role="columnheader">Week</div>';
@@ -290,11 +296,11 @@ export function renderCalendar(view, per, desks) {
       inMonth = true;
       const s = dayState(view, k, desks, max);
       const warning = dayWarning(view, k, desks);
-      // Heatmap ink keeps the warning readable on every gain/loss tint;
-      // the day's summary uses the usual warning icon tint on its surface.
-      const cls = ['cell', s.cls, k === today ? 'today' : '', k === RS.sel ? 'sel' : '', inPer(k) ? 'inper' : ''].filter(Boolean).join(' ');
+      // Both warnings inherit heatmap ink on tinted cells. Only a Partial
+      // warning on a neutral no-trade cell uses the warning token.
+      const cls = ['cell', s.cls, warning ? 'day-incomplete' : '', k === today ? 'today' : '', k === RS.sel ? 'sel' : '', inPer(k) ? 'inper' : ''].filter(Boolean).join(' ');
       const value = s.r ? `<span class="vl">${plain(s.r.units)}</span><span class="vs">${compact(s.r.units)}</span>` : s.dash ? '<span class="muted">—</span>' : '';
-      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${warning ? `; ${esc(warning.text)}` : ''}"><span class="d">${Number(k.slice(8))}</span>${warning ? `<span class="day-warning st${warning.label === 'Partial' ? ' warn' : ''}" title="${esc(warning.text)}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${warning ? warning.label : s.note}</span></button>`;
+      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${warning ? `; ${esc(warning.text)}` : ''}"><span class="d">${Number(k.slice(8))}</span>${warning ? `<span class="day-warning st${warning.label === 'Partial' && s.cls === 'none' ? ' warn' : ''}" title="${esc(warning.text)}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${warning ? warning.label : s.note}</span></button>`;
     }
     // A week still ahead has nothing to sum yet.
     const ahead = wk > today;
@@ -308,11 +314,28 @@ export function renderCalendar(view, per, desks) {
     <span>${!ix ? 'Tints appear once results arrive' : max > 0n ? `Darkest: ${eur(max * 3n / 4n)} to ${eur(max)} in a day` : 'No trading day yet'}</span>`);
   const day = dayContent(view, RS.sel, desks);
   patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}</div>`);
+  fitDaySummary($('#daypanel'));
   const sheet = $('#daySheet');
   if (sheet?.open) {
     $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(RS.sel)}`;
     patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}`);
+    fitDaySummary($('#sheetBody'));
   }
+}
+
+// Measure in the actual font and available room. Keep fixed line heights;
+// shorten the month wording and drop the optional trade count before money.
+function fitMonthSummary(el) {
+  if (!el?.getBoundingClientRect || !el.clientWidth) return;
+  el.classList.remove('compact');
+  if (el.parentElement.scrollWidth > el.parentElement.clientWidth) el.classList.add('compact');
+}
+function fitDaySummary(root) {
+  const sum = root?.querySelector?.('.dp-sum'), count = sum?.querySelector('.dp-trades');
+  if (!count || !sum.clientWidth) return;
+  count.hidden = false;
+  const head = root.querySelector('.dp-head');
+  if (sum.scrollWidth > sum.clientWidth || (head && head.scrollWidth > head.clientWidth)) count.hidden = true;
 }
 
 // ---------- A day's trades ----------
@@ -342,8 +365,11 @@ function dayContent(view, k, desks) {
   }
   const r = M.dayResult(ix, k, desks);
   const warning = dayWarning(view, k, desks);
-  const incomplete = warning?.label === 'Partial' && !ts.length;
-  const summary = ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : incomplete ? 'record incomplete' : 'No trades';
+  const partial = partialDay(view, k), incomplete = partial && !ts.length;
+  const summary = partial ? ts.length
+    ? `<span class="dp-trades">${plural(ts.length, 'trade')} · </span><span class="dp-amount">${eur(r.units, true)} so far</span>`
+    : 'record incomplete · <span class="dp-amount">—</span>'
+    : ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
   const sum = warning ? `${st('warn', warning.label)} · ${summary}` : summary;
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   const why = k > today ? `${M.fmtDDM(k)} is still ahead.` : closed ? `No trades on ${M.fmtDDM(k)}: ${M.isWeekend(k) ? 'weekend' : 'US market holiday'}, markets closed.`
@@ -364,6 +390,7 @@ export function openDaySheet(view, k, { pointer = false } = {}) {
   $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(k)}`;
   patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}`);
   openDialog(sheet, { pointer });
+  fitDaySummary($('#sheetBody'));
 }
 
 // ---------- The record's own state, inside the chart's fixed box ----------
