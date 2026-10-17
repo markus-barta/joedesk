@@ -100,7 +100,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       // Like data, an exact retry is a rejected no-op: it cannot freshen the
       // record, overwrite a different rejection or change the displayed state.
       if (accepted.reason === 'sequence_replayed' && candidate.seq === results?.feed.value.seq) {
-        const { receivedAt, ...previous } = results.feed.value;
+        const { receivedAt, missingDays, ...previous } = results.feed.value;
         if (payloadDigest(candidate) === payloadDigest(previous)) return { ...failed(422, accepted.reason), errors };
       }
       return { ...reject(accepted.reason, 422, 'results'), errors };

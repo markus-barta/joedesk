@@ -55,6 +55,19 @@ function record(days, trades = [], trackingStart = '2026-09-10') {
 const histRow = (t, desks) => ({ t, desks: Object.fromEntries(Object.entries(desks).map(([id, [equity, basis]]) =>
   [id, { money: { equity: equity === null ? null : eurOf(equity) }, ...(basis ? { historyBasis: basis } : {}) }])), totals: {} });
 
+test('JOED-28 results: server missing-day warnings survive indexing and worker transfer without changing trade money', () => {
+  const value = fixture('scratches');
+  const before = M.indexResults(value);
+  value.missingDays = ['2026-10-13'];
+  const ix = M.indexResults(value);
+  const transferred = structuredClone(ix, { transfer: M.transferables(ix) });
+  assert.deepEqual([...transferred.missingDays], ['2026-10-13']);
+  for (const id of M.DESK_IDS) {
+    assert.deepEqual(M.dayResult(transferred, '2026-10-13', [id]), M.dayResult(before, '2026-10-13', [id]));
+  }
+  assert.equal(before.missingDays.size, 0);
+});
+
 test('fixtures: every results fixture is a valid served v2 contract', () => {
   for (const name of ['empty', 'scratches', 'no-losers', 'drawdown', 'dst-weeks', 'exact-decimals', 'partial-day']) {
     const r = validateContract('results', fixture(name));

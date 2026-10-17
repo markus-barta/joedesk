@@ -762,6 +762,72 @@ try {
     }
   }
 
+  if (run('missing-days')) {
+    // JOED-28: real ingress diagnostics through both read paths. The complete
+    // and missing records share trade money, so geometry can be compared.
+    await serve(null);
+    for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      const tag = `${viewport.name} ${theme}`;
+      const { board } = await designBoard('2026-10-16T12:00:00.000Z');
+      const record = structuredClone(valid.results); delete record.receivedAt;
+      record.generatedAt = board.clock();
+      record.trades.push({ ...structuredClone(record.trades[0]), id: 'rt-missing-day',
+        openedAt: '2026-10-15T15:00:00.000Z', closedAt: '2026-10-15T15:00:00.000Z' });
+      // A reported partial day is covered, with no warning.
+      record.days.push({ date: '2026-10-15', coverage: 'partial', desks: {} });
+      check('missing-days', `${tag}: partial day accepts`, (await board.pushResults(record)).status === 200);
+      const fallback = viewport.mobile && theme === 'dark';
+      const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
+      await configure(page, viewport, theme);
+      await load(page, board.url, 'results');
+      if (injection) await page.s('Page.removeScriptToEvaluateOnNewDocument', injection);
+      await click(page, '#cal [data-day="2026-10-15"]');
+      if (viewport.mobile) await key(page, 'Escape');
+      const covered = await page.evaluate(RES), before = await rects(page, SHIFT);
+      check('missing-days', `${tag}: partial day has no warning`, !await page.evaluate('Boolean(document.querySelector("#cal .day-warning"))'));
+      const missing = { ...structuredClone(record), seq: record.seq + 1 };
+      missing.days = missing.days.filter(day => day.date !== '2026-10-15');
+      check('missing-days', `${tag}: missing closed day accepts with 200`, (await board.pushResults(missing)).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `Boolean(document.querySelector('#cal [data-day="2026-10-15"] .day-warning'))`);
+      const warned = await page.evaluate(RES);
+      const marker = await page.evaluate(`(() => {
+        const cell = document.querySelector('#cal [data-day="2026-10-15"]');
+        const mark = cell.querySelector('.day-warning'), r = mark.getBoundingClientRect(), c = cell.getBoundingClientRect();
+        return { visible: r.width > 0 && r.height > 0 && r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom,
+          aria: cell.getAttribute('aria-label'), icon: Boolean(mark.querySelector('use[href="#i-half"]')) && Boolean(document.querySelector('#daypanel .st.warn use[href="#i-half"]')),
+          summary: document.querySelector('#daypanel .dp-sum').textContent };
+      })()`);
+      check('missing-days', `${tag}: affected day shows the existing warning marker through ${fallback ? 'fallback' : 'worker'}`,
+        marker.visible && marker.icon && /Stale: daily summary missing/.test(marker.aria) && marker.summary === 'Stale' && !warned.status, marker);
+      check('missing-days', `${tag}: warning changes no trade amounts or outer geometry`,
+        covered.display === warned.display && covered.cal.cells.find(c => c.day === '2026-10-15').v === warned.cal.cells.find(c => c.day === '2026-10-15').v &&
+        !shifted(before, await rects(page, SHIFT), ['top', 'left', 'width', 'height']).length);
+      await auditScreen(page, viewport, theme, 'results (missing daily summary)');
+      await shot(page, viewport, `${viewport.name}-${theme}-results-missing-day`, 'Results: Stale on 15 October, whose daily summary is missing');
+      if (viewport.mobile) {
+        await click(page, '#cal [data-day="2026-10-15"]');
+        check('missing-days', `${tag}: phone sheet shows Stale and the retained trade`, await page.evaluate('document.querySelector("#sheetBody .dp-sum").textContent === "Stale" && document.querySelectorAll("#sheetBody .trow").length === 1'));
+        await key(page, 'Escape');
+      }
+      await click(page, '#deskSeg [data-desk="joe"]');
+      check('missing-days', `${tag}: a desk without trades on that date has no warning`, !await page.evaluate(`Boolean(document.querySelector('#cal [data-day="2026-10-15"] .day-warning'))`));
+      await click(page, '#deskSeg [data-desk="all"]');
+      const fixed = { ...record, seq: missing.seq + 1 };
+      check('missing-days', `${tag}: a covered replacement accepts`, (await board.pushResults(fixed)).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, '!document.querySelector("#cal .day-warning")');
+      check('missing-days', `${tag}: subsequent partial coverage clears the warning`, (await page.evaluate(RES)).day.sum === covered.day.sum);
+      // A trade on today's open Vienna date remains silent even without a day.
+      const open = { ...structuredClone(missing), seq: fixed.seq + 1 };
+      open.trades.at(-1).openedAt = open.trades.at(-1).closedAt = '2026-10-16T10:00:00.000Z';
+      check('missing-days', `${tag}: open date accepts`, (await board.pushResults(open)).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `document.querySelector('#cal [data-day="2026-10-15"] .n').textContent === 'no trades'`);
+      check('missing-days', `${tag}: open date has no warning`, !await page.evaluate('Boolean(document.querySelector("#cal .day-warning"))'));
+    }
+  }
+
   if (run('budget')) {
     // 7 · The Results render budget's CI guard (ADR §9; the reference budget is
     // measured on a reference device by scripts/budget-reference.mjs).

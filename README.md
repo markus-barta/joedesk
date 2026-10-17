@@ -429,10 +429,12 @@ SSO policy (including the separately documented exact health exception).
 This repository documents that edge prerequisite; it does not configure it.
 
 Send exactly one JSON `inspr.joe.household.results.v2` snapshot as the body,
-without an envelope or `receivedAt`. Validate it with
+without an envelope, `receivedAt` or `missingDays` (both server-owned).
+Validate it with
 `validateContract('results', snapshot, {stage: 'ingress'})` from the pinned
 `contracts/` package. The UTF-8 request limit is `CONTRACTS.limits.results`
-(8,388,608 bytes); the served snapshot, including the server's `receivedAt`,
+(8,388,608 bytes); the served snapshot, including the server's `receivedAt`
+and diagnostics,
 must also fit that contract limit. Money, including gross, stays in exact decimal
 strings (up to eight fractional digits) through validation, storage and reads.
 Never round before summing; only the board display rounds to cents. Each trade's
@@ -457,16 +459,31 @@ KEEP holdings **SXR8 and TSLA are excluded from both `trades[]` and all `days[]`
 totals**, including partial days. Results derives trade P&L from `trades[]`;
 day summaries are validated, never substituted for the trade record.
 
-**Producer contract pin — manifest revision 3.** Compared with revision 2,
+On acceptance, the server computes `missingDays`: sorted unique **past Vienna
+dates** with closed trades but no `days[]` entry. The protected Results read
+includes this server-owned list when nonempty (omitted means no warnings).
+This is accepted with **200**, never a rejection for a missing daily entry.
+The current open Vienna date and future dates are skipped; a reported
+`coverage: "partial"` day is present and does not warn. Dates use explicit
+`Europe/Vienna` conversion, including the 25-hour DST day, against the server's
+receipt date. Diagnostics stay with that accepted snapshot across reads,
+rejections and restart; the next accepted push recomputes them.
+The affected calendar day and its trade summary use the existing **Stale**
+warning marker, without moving the layout or changing the trade amounts.
+Desk filtering warns only where the selected desks have trades on that date.
+
+**Producer contract pin — manifest revision 4.** Compared with revision 2,
 revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds
 optional day-level `coverage` (`"full"` by default, or `"partial"`), the exact
 day/trade cross-check across every desk described above, and explicit KEEP
 exclusion from both trade records and day totals. It also removes
-`results_not_wired` from the closed reason enum. JOED-20 producers must re-vendor
-the complete self-contained `contracts/` directory, including `vienna-date.mjs`,
-and re-pin to `release/contracts.json`'s `contract_set_sha256`; a revision-2 digest does not
-cover revision-3 acceptance. The release manifest's pusher/executor requirements
-carry that same digest. This remains a coordinated cutover candidate, pending
+`results_not_wired` from the closed reason enum. Revision 4 adds the optional
+server-owned `missingDays` read diagnostic and forbids producer-supplied copies.
+JOED-20 producers must re-vendor the complete self-contained `contracts/`
+directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
+`contract_set_sha256`; an earlier digest does not cover revision-4 acceptance
+and reads. The release manifest's pusher/executor requirements carry that
+same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.
 
 Re-send at least every 30 s with a strictly higher `seq` and non-regressing
@@ -476,7 +493,7 @@ shared selector marks Results stale at 60 s without a new acceptance; repeated
 generation also becomes `producer_frozen` at 60 s. Exact retries return 422
 without changing stores, freshness or an existing rejection. Other rejections
 persist their closed reason and keep the last good record and its original age.
-Stale Results stays visible, labelled **STALE** with its last-good age.
+Stale Results stays visible, labelled **Stale** with its last-good age.
 
 | Response | Meaning |
 | --- | --- |

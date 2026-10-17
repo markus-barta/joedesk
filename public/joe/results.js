@@ -94,6 +94,9 @@ const startText = ts => (ts ? `${M.fmtDM(ts)} ${ts.slice(0, 4)}` : 'their first 
 // A change of bookkeeping basis, said as such.
 const cutText = cut => `${names(cut.desks)}’s bookkeeping basis changed on ${M.fmtDDM(M.viennaDate(cut.at))}`;
 
+const missingDay = (ix, k, desks) => ix?.missingDays?.has(k) && M.dayResult(ix, k, desks).count > 0;
+const missingDayText = k => `Stale: daily summary missing for ${M.fmtDay(k)}`;
+
 // The context every number of one render shares (the model builds it).
 const numbers = (view, per, desks) => M.moneyContext(view.ix, view, per, desks);
 
@@ -273,9 +276,12 @@ function renderCalendar(view, per, desks) {
       if (cy !== y || cm !== m) { html += '<div class="cell out" aria-hidden="true"></div>'; continue; }
       inMonth = true;
       const s = dayState(view, k, desks, max);
+      const missing = missingDay(ix, k, desks);
+      // Heatmap ink keeps the warning readable on every gain/loss tint;
+      // the day's summary uses the usual warning icon tint on its surface.
       const cls = ['cell', s.cls, k === today ? 'today' : '', k === RS.sel ? 'sel' : '', inPer(k) ? 'inper' : ''].filter(Boolean).join(' ');
       const value = s.r ? `<span class="vl">${plain(s.r.units)}</span><span class="vs">${compact(s.r.units)}</span>` : s.dash ? '<span class="muted">—</span>' : '';
-      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}"><span class="d">${Number(k.slice(8))}</span><span class="v">${value}</span><span class="n">${s.note}</span></button>`;
+      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${missing ? `; ${esc(missingDayText(k))}` : ''}"><span class="d">${Number(k.slice(8))}</span>${missing ? `<span class="day-warning st" title="${esc(missingDayText(k))}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${missing ? 'Stale' : s.note}</span></button>`;
     }
     // A week still ahead has nothing to sum yet.
     const ahead = wk > today;
@@ -322,7 +328,8 @@ function dayContent(view, k, desks) {
       : `No closed-trade record for ${M.fmtDDM(k)}: ${esc(cellReason(view.reason))}.`}</span></p>`, note: '' };
   }
   const r = M.dayResult(ix, k, desks);
-  const sum = ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
+  const sum = missingDay(ix, k, desks) ? `<span title="${esc(missingDayText(k))}" aria-label="${esc(missingDayText(k))}">${st('warn', 'Stale')}</span>`
+    : ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   const why = k > today ? `${M.fmtDDM(k)} is still ahead.` : closed ? `No trades on ${M.fmtDDM(k)}: ${M.isWeekend(k) ? 'weekend' : 'US market holiday'}, markets closed.`
     : k < view.trackingStart ? `No trades on ${M.fmtDDM(k)}: paper results start on ${startText(view.trackingStart)}.` : `No trades on ${M.fmtDDM(k)}: the desks sat out.`;

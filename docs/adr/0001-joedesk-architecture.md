@@ -1094,7 +1094,7 @@ symbol on the accepted Fleet Config KEEP list is held back as a whole
 **For JOED-20 (producer coordination; board obligations implemented by JOED-27).**
 1. Freshness: the shared selector marks a record stale after 60 s. The producer
    re-sends at least every 30 s with a strictly increasing sequence and
-   non-regressing generation. Stale Results remains visible with STALE and age.
+   non-regressing generation. Stale Results remains visible with Stale and age.
 2. Ingress: JOED-27 adds `POST /joe/inbox/results`, acceptance through
    `acceptSnapshot('results')`, durable persistence and `X-Joe-Received-At`,
    sharing the existing machine token. OPS must add the second exact-path
@@ -1104,7 +1104,14 @@ symbol on the accepted Fleet Config KEEP list is held back as a whole
    Vienna day covers every trade closed on that day, including every desk that
    traded. An omitted trading desk returns a per-day 422 (`dayDeskRequired`);
    count, realised net and fees reconcile exactly. Per-day mismatches retain
-   last good. Dates with no `days[]` entry are skipped. Optional
+   last good. Dates with no `days[]` entry are skipped by reconciliation.
+   JOED-28 computes server-owned `missingDays` on acceptance: sorted unique
+   past Vienna dates with closed trades and no daily entry. They accept with
+   200 and show the existing Stale warning on the affected calendar day and
+   day summary, with fixed geometry and unchanged trade amounts. Today's open
+   Vienna date is silent; receipt time defines today, including DST. The list
+   is omitted when empty and persists with the accepted snapshot across
+   restart/rejection, until recomputed by the next accepted push. Optional
    day-level `coverage: "full" | "partial"` defaults to full; only explicit
    partial days skip reconciliation. The board still derives trade P&L from
    trades, never from day summaries (spec §7).

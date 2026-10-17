@@ -355,6 +355,35 @@ ranked by the shared `panelStates` selector at the server's anchored clock.
 There is no browser-side ingest and no `window.JoeBoard` helper surface; the
 v1 helpers it exposed do not apply to the v2 contracts.
 
+## Results v2 missing daily summaries
+
+The rebuilt Results feed uses `inspr.joe.household.results.v2` and the shared
+`contracts/` package (manifest revision 4). Its producer sends `days[]` and
+`trades[]` to `POST /joe/inbox/results`; `receivedAt` and `missingDays` are
+server-owned and must be omitted at ingress. See README “Results ingress” for
+the complete acceptance and producer-pin contract.
+
+At each acceptance, `missingDays` lists sorted unique past dates that have
+closed trades but no `days[]` entry, using explicit `Europe/Vienna` dates for
+both `closedAt` and the server receipt. The accepted Results read includes the
+list only when nonempty. A missing daily entry returns 200 and a warning, not
+422. The current open Vienna date, future dates and reported partial-coverage
+days do not warn. Full-day reconciliation and exact trade arithmetic still
+apply independently.
+
+For example, trades closed on 15 October 2026 with only 14 October in `days[]`
+produce `missingDays: ["2026-10-15"]` when received on 16 October in Vienna.
+Before Vienna midnight closes the 15th, that date does not warn. On 25 October,
+both repeated 02:30 hours and the final instant before midnight belong to the
+same 25-hour Vienna date, regardless of the server's local time zone.
+
+Diagnostics persist with the accepted record; a later accepted push recomputes
+them. The affected calendar day and selected day's summary display the existing
+sentence-case **Stale** warning treatment, with a missing-summary explanation
+in the accessible label/tooltip. Calendar geometry stays fixed, including on
+phones where the icon remains visible. Trade amounts remain visible; a desk
+filter with no trades on the affected date does not warn.
+
 ## Local layout
 
 The rebuilt board (JOED-23) has a fixed layout: no GridStack, no layout menu

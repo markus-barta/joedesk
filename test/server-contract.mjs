@@ -472,6 +472,54 @@ test('JOED-27 results: accepted snapshot and server receipt survive a stopped-se
   assert.equal((await restarted.pushResults(resultsSnapshot(102, 9000))).status, 200);
 });
 
+test('JOED-28 results: missing closed days accept with 200, persist, retain on rejection and clear on partial coverage', async t => {
+  const now = '2026-10-16T12:00:00.000Z';
+  const s = await setup(t, { clock: () => now });
+  const value = resultsSnapshot(); value.generatedAt = now;
+  value.trades.push({ ...structuredClone(value.trades[0]), id: 'rt-missing-day',
+    openedAt: '2026-10-15T15:00:00.000Z', closedAt: '2026-10-15T15:00:00.000Z' });
+  assert.equal((await s.pushResults(value)).status, 200);
+  const read = await s.request('/joe/results.json');
+  assert.equal(read.status, 200);
+  assert.deepEqual(read.body.missingDays, ['2026-10-15']);
+  assert.equal(read.headers.get('x-joe-feed-reason'), null);
+  assert.equal(acceptRead('results', { status: 200, payload: read.body }).reason, null);
+  assert.equal((await s.request('/joe/state.json')).body.panels.results.state, 'fresh');
+  const cold = createReadModel({ dataDir: s.dataDir, clock: () => now });
+  assert.deepEqual(cold.feeds().results.value, read.body);
+  const before = readFileSync(join(s.dataDir, 'results-state.json'));
+  const bad = { ...structuredClone(value), seq: value.seq + 1 }; bad.trades[0].netEur.amount = '999';
+  assert.equal((await s.pushResults(bad)).status, 422);
+  // Exact retries must compare only producer fields, excluding diagnostics.
+  assert.equal((await s.pushResults(value)).body.reason, 'sequence_replayed');
+  assert.deepEqual(readFileSync(join(s.dataDir, 'results-state.json')), before);
+  const retained = await s.request('/joe/results.json');
+  assert.deepEqual(retained.body, read.body);
+  assert.equal(retained.headers.get('x-joe-feed-reason'), 'contract_invalid');
+  const partial = { ...structuredClone(value), seq: value.seq + 1 };
+  partial.days.push({ date: '2026-10-15', coverage: 'partial', desks: {} });
+  assert.equal((await s.pushResults(partial)).status, 200);
+  assert.deepEqual((await s.request('/joe/results.json')).body.missingDays ?? [], []);
+  const spoof = { ...partial, seq: partial.seq + 1, missingDays: [] };
+  const rejected = await s.pushResults(spoof);
+  assert.equal(rejected.status, 422);
+  assert.deepEqual(rejected.body.errors, [{ path: '$.missingDays', rule: 'serverOwned' }]);
+});
+
+test('JOED-28 results: HTTP diagnostics skip the open Vienna date and use the DST day rather than the host date', async t => {
+  for (const [now, closedAt, expected] of [
+    ['2026-10-15T22:30:00.000Z', '2026-10-15T22:00:00.000Z', []],
+    ['2026-10-26T12:00:00.000Z', '2026-10-24T22:00:00.000Z', ['2026-10-25']],
+    ['2026-10-26T12:00:00.000Z', '2026-10-25T22:59:59.999Z', ['2026-10-25']],
+  ]) {
+    const s = await setup(t, { clock: () => now });
+    const value = resultsSnapshot(); value.generatedAt = now;
+    value.trades.push({ ...structuredClone(value.trades[0]), id: 'rt-vienna-day', openedAt: closedAt, closedAt });
+    assert.equal((await s.pushResults(value)).status, 200);
+    assert.deepEqual((await s.request('/joe/results.json')).body.missingDays ?? [], expected);
+  }
+});
+
 test('JOED-27 results: same machine auth, missing/wrong bearer 401 and missing token 503 precede writes', async t => {
   for (const [inboxToken, authorization, status] of [[TOKEN, '', 401], [TOKEN, 'Bearer wrong-fixture', 401],
     [TOKEN, `Basic ${TOKEN}`, 401], ['', `Bearer ${TOKEN}`, 503]]) {
