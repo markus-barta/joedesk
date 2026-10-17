@@ -934,6 +934,23 @@ try {
       check('trade-amount', `${tag}: company text matches the source without soft hyphens, and symbols, numbers and meta stay untouched`,
         detail.rows.every(row => row.company === record.trades.find(t => t.id === row.id)?.company &&
           row.symbol === record.trades.find(t => t.id === row.id)?.symbol && row.softHyphensOnlyInCompany), detail.rows);
+      if (viewport.name === '360' || viewport.name === '1440') {
+        const copied = await page.evaluate(`(() => {
+          const words = [...document.querySelectorAll(${JSON.stringify(root)} + ' [data-trade="rt-amount-million"] .name > span.word')];
+          const selection = document.getSelection(), range = document.createRange(), data = new DataTransfer();
+          range.setStartBefore(words[0]); range.setEndAfter(words.at(-1));
+          selection.removeAllRanges(); selection.addRange(range);
+          try {
+            const selected = selection.toString();
+            const event = new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: data });
+            words[0].dispatchEvent(event);
+            return { selected, text: data.getData('text/plain'), prevented: event.defaultPrevented };
+          } finally { selection.removeAllRanges(); }
+        })()`);
+        check('trade-amount', `${tag}: copying a hyphenated company name preserves its plain source text`,
+          copied.selected.includes('\u00ad') && copied.prevented &&
+          copied.text === record.trades.find(t => t.id === 'rt-amount-million').company, copied);
+      }
       check('trade-amount', `${tag}: manual hyphenation leaves at least three source characters in every broken-word line`,
         detail.rows.every(r => r.lang === 'en' && r.hyphens === 'manual' && r.brokenWords.every(w =>
           w.fragments.length === w.lines.length && w.fragments.map(f => f.text).join('') === w.word &&

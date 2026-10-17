@@ -8,7 +8,7 @@ import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, forgetCharts } from './desk.js';
 import { renderHistory, historyChart, HS } from './history.js';
-import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults } from './results.js';
+import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
 import { boardHealthPresentation, dataAge, cellReason } from './health.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { initSettings, renderSettings, showSection, SECTIONS as SETTINGS_SECTIONS } from './settings.js';
@@ -240,6 +240,7 @@ function start() {
 
   // Results: the period and desk switches, the stepper, the month arrows and
   // a day drive every number; on a phone a day opens its trades in a sheet.
+  for (const root of [$('#daypanel'), $('#daySheet')]) root.addEventListener('copy', copyDayText);
   const view = () => resultsView(context());
   $('#periodSeg').addEventListener('click', e => {
     const b = e.target.closest('[data-period]');

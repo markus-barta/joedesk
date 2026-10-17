@@ -345,6 +345,17 @@ function fitDaySummary(root) {
 }
 
 // ---------- A day's trades ----------
+export const stripSoftHyphens = text => text.replaceAll('\u00ad', '');
+export function copyDayText(event) {
+  const root = event.currentTarget, selection = root.ownerDocument.getSelection();
+  if (!event.clipboardData || !selection || selection.isCollapsed || !selection.rangeCount) return;
+  for (let i = 0; i < selection.rangeCount; i++) {
+    if (!root.contains(selection.getRangeAt(i).commonAncestorContainer)) return;
+  }
+  event.clipboardData.setData('text/plain', stripSoftHyphens(selection.toString()));
+  event.preventDefault();
+}
+
 function held(t) {
   const opened = M.viennaDate(t.openedAt);
   if (opened !== t.date) return `held since ${M.fmtDM(opened)}`;

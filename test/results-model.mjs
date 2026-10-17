@@ -653,6 +653,35 @@ function calendarCapture(t) {
 const partialReason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
 const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'").replaceAll('\u00ad', '');
 
+test('JOED-31 copy: remove every soft hyphen and preserve all other characters exactly', () => {
+  const plain = 'DEMO · Demonstration\u00a0company\r\n−€\u00a01.000.000,12\nÜberraschung\t𐐀 & <name> - ‐ ‑ –\u200b';
+  assert.equal(page.stripSoftHyphens('\u00ad' + plain.replace('Demonstration', 'Dem\u00adons\u00adtra\u00adtion') + '\u00ad\u00ad'), plain);
+  assert.equal(page.stripSoftHyphens(plain), plain);
+  assert.equal(page.stripSoftHyphens(''), '');
+  assert.equal(page.stripSoftHyphens('\u00ad\u00ad'), '');
+});
+
+test('JOED-31 copy: only intercept a nonempty selection wholly inside the detail surface', () => {
+  const inside = {}, outside = {}, writes = [];
+  const selection = { rangeCount: 1, isCollapsed: false, getRangeAt: () => ({ commonAncestorContainer: inside }),
+    toString: () => 'Dem\u00adonstration\n−€\u00a012,34' };
+  const event = { currentTarget: { ownerDocument: { getSelection: () => selection }, contains: node => node === inside },
+    clipboardData: { setData: (...args) => writes.push(args) }, preventDefault: () => writes.push('prevented') };
+  page.copyDayText(event);
+  assert.deepEqual(writes, [['text/plain', 'Demonstration\n−€\u00a012,34'], 'prevented']);
+  writes.length = 0;
+  for (const ranges of [[outside], [inside, outside], []]) {
+    selection.rangeCount = ranges.length;
+    selection.getRangeAt = i => ({ commonAncestorContainer: ranges[i] });
+    page.copyDayText(event);
+  }
+  selection.rangeCount = 1; selection.getRangeAt = () => ({ commonAncestorContainer: inside });
+  selection.isCollapsed = true; page.copyDayText(event);
+  selection.isCollapsed = false; page.copyDayText({ ...event, clipboardData: null });
+  page.copyDayText({ ...event, currentTarget: { ...event.currentTarget, ownerDocument: { getSelection: () => null } } });
+  assert.deepEqual(writes, []);
+});
+
 test('JOED-31 rendering: exact extreme amounts and prices survive whole-word names and atomic meta units', t => {
   const { date, record: value } = tradeAmountResults();
   assert.equal(validateContract('results', value, { stage: 'ingress' }).ok, true);
