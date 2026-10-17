@@ -1048,9 +1048,30 @@ try {
         layout.reasonTag === 'P' && layout.positionTag === 'P' && layout.siblings && layout.gap === 8 && layout.cssGap === '8px', layout);
       return layout;
     };
-    const cropNoteView = async (selector, name, what) => {
+    const checkReasonFocusRing = async label => {
+      const focus = await page.evaluate(`(() => {
+        const line = document.querySelector('#sheetBody .dp-reasons-extra .dp-reason');
+        if (!line || document.activeElement !== line) return null;
+        const css = getComputedStyle(line), r = line.getBoundingClientRect();
+        const width = parseFloat(css.outlineWidth), offset = parseFloat(css.outlineOffset);
+        // An outline's outer edge is width + offset beyond the border box.
+        // No box shadow is allowed here unless its extent is also measured.
+        const extent = width + offset;
+        const ring = { top: r.top - extent, bottom: r.bottom + extent, left: r.left - extent, right: r.right + extent };
+        return { visible: line.matches('[tabindex="-1"]:focus-visible'),
+          outline: { style: css.outlineStyle, width, offset, color: css.outlineColor }, shadow: css.boxShadow,
+          line: { top: r.top, bottom: r.bottom, left: r.left, right: r.right }, ring,
+          overflow: { top: Math.max(0, r.top - ring.top), bottom: Math.max(0, ring.bottom - r.bottom),
+            left: Math.max(0, r.left - ring.left), right: Math.max(0, ring.right - r.right) } };
+      })()`);
+      check('partial-days', `${label}: visible keyboard focus ring stays inside its reason line with exactly 0 px protrusion`,
+        focus?.visible && focus.outline.style === 'solid' && focus.outline.width > 0 &&
+        !['transparent', 'rgba(0, 0, 0, 0)'].includes(focus.outline.color) && focus.shadow === 'none' &&
+        Object.values(focus.overflow).every(px => px === 0), focus);
+    };
+    const cropNoteView = async (selector, name, what, scale = 1) => {
       const clip = await page.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
-        return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+        return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: ${scale} }; })()`);
       const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
       shots.push({ file: `${name}.png`, what });
@@ -1264,6 +1285,7 @@ try {
           geometry.unchanged, { ...reasonDetail, geometry });
         check('partial-days', `${tag}: keyboard-expanded sheet holds all content without scrolling when below the 80vh cap`,
           reasonDetail.sheet.reservedHeight >= reasonDetail.sheet.cap || reasonDetail.sheet.scrollHeight <= reasonDetail.sheet.clientHeight, reasonDetail.sheet);
+        await checkReasonFocusRing(`${tag} nine reasons keyboard-expanded`);
         await checkNoteGap(reasonRoot, `${tag} nine reasons keyboard-expanded`);
         await key(page, 'Escape');
         await click(page, `#cal [data-day="${partialTrade}"]`);
@@ -1355,6 +1377,7 @@ try {
             { ...expanded, geometry });
           check('partial-days', `${tag}: ${input}-expanded three-reason content is below the 80vh cap and fits the reserved body without scrolling`,
             expanded.sheet.reservedHeight < expanded.sheet.cap && expanded.sheet.scrollHeight <= expanded.sheet.clientHeight, expanded.sheet);
+          if (input === 'keyboard') await checkReasonFocusRing(`${tag} three reasons keyboard-expanded`);
           await key(page, 'Escape');
         }
       }
@@ -1437,7 +1460,13 @@ try {
             sheetAfter.height < expanded.sheet.cap && expanded.sheet.reservedHeight < expanded.sheet.cap &&
             contentAfter.expandedSheetHeight < expanded.sheet.cap && expanded.sheet.scrollHeight <= expanded.sheet.clientHeight,
             { ...expanded.sheet, content: contentAfter, sheetAfter });
-          if (viewport.name === '360' && input === 'keyboard') await cropSheet(growingName + '-expanded', 'All five reasons revealed in place: content grows, sheet stays below cap without moving');
+          if (input === 'keyboard') {
+            await checkReasonFocusRing(`${tag} growing five reasons keyboard-expanded`);
+            if (viewport.name === '360') {
+              await cropSheet(growingName + '-expanded', 'All five reasons revealed in place: content grows, sheet stays below cap without moving');
+              await cropNoteView('#sheetBody .dp-note', growingName + '-expanded-focus-crop', 'JOED-33: keyboard focus ring contained in the revealed line, clear of adjacent reasons (2×)', 2);
+            }
+          }
           await key(page, 'Escape');
         }
       }
@@ -1718,6 +1747,10 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   position sentences proves content grows below the 80vh cap at 360/390 in both
   themes; Enter and real touch preserve sheet, prior content and outer geometry
   exactly. Its 360 crops are \`360-*-results-partial-growing-reasons-{collapsed,expanded}.png\`.
+  JOED-33 measures the visible keyboard outline's outer box after every reason
+  reveal at 360/390 in both themes: it must stay inside its own line with exactly
+  0 px protrusion. Zoomed note crops with keyboard focus are
+  \`360-*-results-partial-growing-reasons-expanded-focus-crop.png\` (2×).
   The reason/desk block and position note must be sibling paragraphs exactly
   8 px apart in every variant, before and after reveals. Extra crops are
   \`1440-*-results-partial-empty-panel-crop.png\`,

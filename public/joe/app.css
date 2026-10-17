@@ -348,6 +348,8 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .dp-note-copy > p { margin: 0; }
 .dp-note-lines { min-width: 0; }
 .dp-note-lead, .dp-reason, .dp-desk-note, .dp-reasons-extra { display: block; }
+/* Revealed reasons keep their focus ring inside the line, clear of neighbours. */
+.dp-reason[tabindex="-1"]:focus-visible { outline-offset: -2px; }
 .dp-reasons-more { display: block; width: 100%; min-height: 44px; text-align: left; padding: 0; border: 0; background: transparent; color: var(--ink-2); font: inherit; }
 /* The measured full-content height survives removal of the disclosure. */
 .sheet .dlg-in { height: 100%; }
