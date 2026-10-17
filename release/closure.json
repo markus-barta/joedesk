@@ -204,8 +204,8 @@
     },
     {
       "path": "public/joe/results.js",
-      "size": 30282,
-      "sha256": "ce31a45f0dec4faf8b9e8530d9653539e8ec1d33d8d411d150487f23b3b52121"
+      "size": 30479,
+      "sha256": "19d84db3a62e27b6af990dddb815c3f823a2bef857b9f7e377069412a67e1bc9"
     },
     {
       "path": "public/joe/settings-model.js",

@@ -474,6 +474,13 @@ The day panel and phone sheet prefix the retained trade count and net amount
 with **Stale** and show **Daily summary missing** in the day note.
 Desk filtering warns only where the selected desks have trades on that date.
 
+On phones, Results calendar amounts use compact forms such as `1`, `4,1`,
+`13`, `1k` and `1,2k`, rounded once from exact decimals, half away from zero.
+A trailing `,0` is omitted. An amount that rounds to zero shows `0` without a
+sign or arrow and keeps its day tint; an exactly zero day stays flat. The cell's
+accessible label and the day sheet retain the exact amount. Desktop calendar
+amounts and the week column keep their existing formatting.
+
 **Producer contract pin — manifest revision 4.** Compared with revision 2,
 revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds
 optional day-level `coverage` (`"full"` by default, or `"partial"`), the exact

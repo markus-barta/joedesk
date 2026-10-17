@@ -3,6 +3,7 @@
 // server (state, history, fleet settings) with the closed-trade record served
 // as the contract's served form, at 390/1024/1440 in light and dark
 // (AC-10–17, 41, 42, 46, Part A craft), plus Tick's desk-card header at 390.
+// JOED-29 adds a focused phone calendar scenario at 360/390 in both themes.
 // One headless browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir, cpus } from 'node:os';
@@ -31,6 +32,7 @@ const M = await import('../public/joe/results-model.js');
 const hm = await import('../public/joe/history-model.js');
 const fmt = await import('../public/joe/format.js');
 const { decimalUnits, unitsDecimal } = await import('../contracts/decimal.mjs');
+const { validateContract } = await import('../contracts/index.mjs');
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p4');
 mkdirSync(QA_DIR, { recursive: true });
@@ -719,6 +721,96 @@ try {
     }
   }
 
+  if (run('phone-calendar')) {
+    // JOED-29: this record belongs only to the focused scenario. The shared
+    // design fixture and VIEWPORTS keep their existing data and expectations.
+    const { board } = await designBoard();
+    const cases = [
+      // Vienna date, exact amount, phone text (including its sign).
+      ['2026-10-01', '1', '+1'], ['2026-10-02', '-1', '−1'],
+      ['2026-10-05', '12.58', '+13'], ['2026-10-06', '-12.58', '−13'],
+      ['2026-10-07', '1234', '+1,2k'], ['2026-10-08', '-1234', '−1,2k'],
+      ['2026-10-09', '-0.03', '0'], ['2026-10-12', '0', '0'],
+    ];
+    const eurOf = amount => ({ amount, currency: 'EUR' });
+    const empty = { ...fixture('empty'), generatedAt: at(NOW, -20) };
+    const record = withTradeSummaries({ ...empty, seq: empty.seq + 1,
+      days: cases.map(([date]) => ({ date, desks: Object.fromEntries(DESKS.map(id => [id, {
+        equityClose: eurOf('5000'), realisedNet: eurOf('0'), fees: eurOf('0'), trades: 0,
+      }])) })),
+      trades: cases.map(([date, net], i) => {
+        const closedAt = `${date}T15:00:00.000Z`;
+        return { id: `rt-phone-${i}`, desk: 'j', symbol: 'KO', company: 'Coca-Cola', side: 'long', quantity: '1',
+          openedAt: at(closedAt, -600), closedAt,
+          entryPrice: { amount: '2000', currency: 'USD' },
+          exitPrice: { amount: unitsDecimal(decimalUnits('2000') + decimalUnits(net)), currency: 'USD' },
+          grossEur: eurOf(net), feesEur: eurOf('0'), netEur: eurOf(net),
+          fx: { base: 'USD', quote: 'EUR', rate: '1', source: 'test-close-rate', observedAt: closedAt }, method: 'execution-fifo-net-current-fx' };
+      }),
+    });
+    const checked = validateContract('results', record);
+    check('phone-calendar', 'the focused phone record is a valid results v2 contract', checked.ok, checked.errors);
+    // Change compact text without changing the maximum day's tint legend or
+    // surrounding content, so geometry measures the amount update itself.
+    const baseline = structuredClone(record); baseline.seq--;
+    for (const [i, net] of [[0, '4.1'], [1, '-4.1'], [6, '-0.05']]) {
+      const trade = baseline.trades[i];
+      trade.netEur = trade.grossEur = eurOf(net);
+      trade.exitPrice.amount = unitsDecimal(decimalUnits('2000') + decimalUnits(net));
+    }
+    withTradeSummaries(baseline);
+    const viewports = [VIEWPORTS.find(v => v.name === '390'), { name: '360', width: 360, height: 780, mobile: true }];
+    const geometry = async () => [...await rects(page, ['.calcard', '.cal-head', '#cal', '#calTitle', '#prevMonth', '#nextMonth', '.cal-legend', 'footer.foot']), ...await page.evaluate(SLOTS)];
+    for (const viewport of viewports) for (const theme of THEMES) {
+      const tag = `${viewport.name} ${theme}`;
+      await serve(served(baseline, board));
+      await configure(page, viewport, theme);
+      await load(page, board.url, 'results');
+      await waitFor(page, `document.querySelector('#cal [data-day="2026-10-01"] .vs')?.textContent === '+4,1'`);
+      const before = await geometry();
+      await serve(served(record, board));
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `document.querySelector('#cal [data-day="2026-10-09"].l1 .vs')?.textContent === '0'`);
+      await settle(page);
+      const cells = await page.evaluate(`(() => {
+        const cells = [...document.querySelectorAll('#cal [data-day]')];
+        return cells.map(el => ({ day: el.dataset.day, text: el.querySelector('.vs')?.textContent ?? '',
+          cls: el.className, glyphs: el.querySelectorAll('.vs svg, .vs use').length,
+          aria: el.getAttribute('aria-label'), title: el.hasAttribute('title') || Boolean(el.querySelector('[title]')),
+          visible: __audit.visible(el.querySelector('.vs')) }));
+      })()`);
+      for (const [day, amount, text] of cases) {
+        const cell = cells.find(c => c.day === day);
+        check('phone-calendar', `${tag} ${day}: ${amount} reads ${text}, with its exact accessible amount and no title`,
+          cell?.text === text && cell.visible && !cell.title && N(cell.aria).includes(N(fmt.eur(decimalUnits(amount), true))), cell);
+      }
+      const loss = cells.find(c => c.day === '2026-10-09'), flat = cells.find(c => c.day === '2026-10-12');
+      check('phone-calendar', `${tag}: −0,03 reads 0 with no sign or glyph, in the first loss tint`,
+        loss?.text === '0' && loss.glyphs === 0 && loss.cls.split(' ').includes('l1'), loss);
+      check('phone-calendar', `${tag}: an exactly zero day stays flat with no sign or glyph`,
+        flat?.text === '0' && flat.glyphs === 0 && flat.cls.split(' ').includes('flat'), flat);
+      const clipped = await page.evaluate(`[...document.querySelectorAll('#cal .cell .v')].filter(el => el.scrollWidth > el.clientWidth).map(el =>
+        ({ day: el.closest('[data-day]')?.dataset.day, text: el.innerText, scroll: el.scrollWidth, client: el.clientWidth }))`);
+      check('phone-calendar', `${tag}: every calendar amount fits without a clipped glyph`, !clipped.length, clipped);
+      const after = await geometry();
+      check('phone-calendar', `${tag}: calendar outer geometry and all slots move exactly 0 px when compact amounts change`,
+        JSON.stringify(before) === JSON.stringify(after), { before, after });
+      await page.evaluate(`document.querySelector('.calcard').scrollIntoView({ block: 'center' })`);
+      await settle(page);
+      await viewShot(page, `${viewport.name}-${theme}-results-phone-calendar`, 'Phone calendar: compact gains and losses, no trailing ,0; −0,03 reads 0 in its loss tint');
+      await click(page, '#cal [data-day="2026-10-02"]');
+      const sheet = await page.evaluate(`({ open: document.getElementById('daySheet').open,
+        sum: document.querySelector('#sheetBody .dp-sum')?.textContent,
+        net: document.querySelector('#sheetBody .trow .net')?.textContent })`);
+      check('phone-calendar', `${tag}: the −1 day opens a sheet with the exact −€ 1,00`,
+        sheet.open && N(sheet.sum) === N('1 trade · −€ 1,00') && N(sheet.net) === N('−€ 1,00'), sheet);
+      await key(page, 'Escape');
+      check('phone-calendar', `${tag}: opening and closing the sheet moves outer geometry exactly 0 px`,
+        JSON.stringify(after) === JSON.stringify(await geometry()));
+    }
+    await serve(null);
+  }
+
   if (run('ingress')) {
     // JOED-27: real HTTP push/read, with no results interception. Exercise both
     // the module worker and the fallback, including server rejection headers.
@@ -899,9 +991,14 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 - **Calendar.** US market holidays read "closed", like weekends. Weeks still
   ahead show no sum. A day before tracking shows only its date. A day's
   amount always fits its cell, rounded once: desktop "4,10", "123", "12k",
-  "1,2M"; phones "4,1", "123", "1,2k", "0,1M" (scaled forms a step smaller).
+  "1,2M"; phones "1", "4,1", "123", "1k", "1,2k", "1M", "0,1M" (scaled
+  forms a step smaller, with no trailing ",0"). A phone amount rounded to zero
+  has no sign or arrow and keeps its day tint; exactly zero stays flat.
   The cell's label and the day's trades give the exact amount
-  (\`*-results-large-amounts.png\`).
+  (\`*-results-large-amounts.png\`). JOED-29's focused calendar screenshots at
+  360/390 in light/dark are \`*-results-phone-calendar.png\`: one-, two- and
+  four-digit gains and losses, −0,03 and flat, with exact day sheets, no
+  overflowing amounts and exactly 0 px geometry movement.
 - **Hero chart time axis** (fix round 1). The x axis is real time: each close
   sits at the end of its Vienna date, today's money at now; missing dates keep
   their width, and a session without a close in the record breaks the line

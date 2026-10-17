@@ -542,9 +542,14 @@ test('calendar amounts: exact, rounded once, and in their cell’s room at any s
   const form = (v, phone) => page.calAmount(E(v), phone).text;
   const table = [
     // amount, desktop (also the week column), phone
+    ['0', '0,00', '0'], ['1', '1,00', '1'], ['-1', '1,00', '1'], ['12.58', '12,58', '13'],
+    ['0.95', '0,95', '1'], ['0.94', '0,94', '0,9'], ['1.05', '1,05', '1,1'], ['1.04', '1,04', '1'],
+    ['2.25', '2,25', '2,3'], ['-2.25', '2,25', '2,3'], ['2.249', '2,25', '2,2'],
+    ['0.05', '0,05', '0,1'], ['0.049', '0,05', '0'], ['-0.03', '0,03', '0'],
+    ['1234', '1.234', '1,2k'], ['-1000', '1.000', '1k'], ['1000000', '1,0M', '1M'],
     ['4.1', '4,10', '4,1'], ['-9.949', '9,95', '9,9'], ['99.994', '99,99', '100'], ['99.995', '100', '100'], ['123.45', '123', '123'],
-    ['999.5', '1.000', '1,0k'], ['9999.49', '9.999', '10k'], ['9999.5', '10k', '10k'], ['100000.12345678', '100k', '0,1M'],
-    ['999499', '999k', '1,0M'], ['1234567', '1,2M', '1,2M'], ['99950000', '100M', '0,1B'], ['123456789012', '123B', '0,1T'],
+    ['999.5', '1.000', '1k'], ['9999.49', '9.999', '10k'], ['9999.5', '10k', '10k'], ['100000.12345678', '100k', '0,1M'],
+    ['999499', '999k', '1M'], ['1234567', '1,2M', '1,2M'], ['99950000', '100M', '0,1B'], ['123456789012', '123B', '0,1T'],
     ['999500000000000', '1e15', '1e15'], ['99999999999999999999999999999999', '1e32', '1e32']];
   for (const [v, desktop, phone] of table) assert.deepEqual([form(v, false), form(v, true)], [desktop, phone], v);
   // Desktop holds six narrow signs, phones four (scaled forms a step smaller): measured at 390/1024/1440 in both fonts.
@@ -553,4 +558,38 @@ test('calendar amounts: exact, rounded once, and in their cell’s room at any s
     const p = page.calAmount(E(v), true);
     assert.ok(p.text.length <= (p.cls ? 4 : 3), `phone ${v}`);
   }
+});
+
+test('JOED-29 calendar rendering: phone rounded zero has no sign or arrow, keeps its loss tint; exact zero stays flat', t => {
+  const documentBefore = globalThis.document, stateBefore = { ...page.RS };
+  t.after(() => {
+    if (documentBefore === undefined) delete globalThis.document;
+    else globalThis.document = documentBefore;
+    Object.assign(page.RS, stateBefore);
+  });
+  // Capture the real calendar renderer's markup without starting a browser.
+  const nodes = new Map(['calTitle', 'prevMonth', 'nextMonth', 'calSum', 'cal', 'calLegend', 'daypanel', 'daySheet']
+    .map(id => [`#${id}`, { innerHTML: '', textContent: '' }]));
+  globalThis.document = { querySelector: selector => nodes.get(selector), activeElement: null };
+  const ix = M.indexResults(record([closeDay('2026-10-12', '5001'), closeDay('2026-10-13', '5001'), closeDay(today, '5000.97')], [
+    tradeOf('rt-gain', 'j', '2026-10-12T15:00:00.000Z', '1'),
+    tradeOf('rt-flat', 'j', '2026-10-13T15:00:00.000Z', '0'),
+    tradeOf('rt-small-loss', 'j', '2026-10-14T15:00:00.000Z', '-0.03'),
+  ]));
+  Object.assign(page.RS, { cal: [2026, 9], sel: today, period: 'week' });
+  page.renderCalendar({ ix, today, trackingStart: ix.meta.trackingStart }, M.periodOf('week', today, today, ix.meta.trackingStart), ALL);
+  const html = nodes.get('#cal').innerHTML;
+  const cell = day => html.match(new RegExp(`<button[^>]*data-day="${day}"[^>]*>[\\s\\S]*?<\\/button>`))?.[0];
+  const phone = day => cell(day)?.match(/<span class="vs">([\s\S]*?)<\/span><\/span><span class="n">/)?.[1];
+  const loss = cell(today), flat = cell('2026-10-13');
+  assert.ok(loss && flat, 'both calendar cells were rendered');
+  assert.match(loss, /class="cell l1\b/);
+  assert.equal(phone(today), '<span class="pl">0</span>');
+  assert.doesNotMatch(phone(today), /[−+]|<svg|<use/);
+  assert.match(loss, /aria-label="[^"]*−€ 0,03 from 1 trade"/, 'the exact loss stays accessible');
+  assert.match(loss, /class="vl">[\s\S]*href="#i-down"\/><\/svg>−0,03/, 'desktop still shows the exact loss');
+  assert.match(flat, /class="cell flat\b/);
+  assert.equal(phone('2026-10-13'), '<span class="pl">0</span>');
+  assert.match(flat, /class="vl"><span class="pl">0,00<\/span>/);
+  assert.doesNotMatch(`${loss}${flat}`, /title=/);
 });
