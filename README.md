@@ -123,8 +123,10 @@ OPS owns these exact nixcfg items through its existing review path:
    rename fails. For rollback, restore the verified v1 backup into a new sibling,
    apply the same ownership/modes and stopped-service swap, then start the
    compatible v1 pins. Chown is required even when no NixOS activation occurs.
-4. The production host gate including `cs0.barta.cm`; no other route exemption
-   beyond the existing token-only `/joe/inbox` router.
+4. The production host gate including `cs0.barta.cm`; only the two exact paths
+   `/joe/inbox` and `/joe/inbox/results` use token-only routers without SSO.
+   Never use a prefix match; preserve the documented SSO and exact health policy
+   on other routes.
 5. After the gates and Markus's cutover decision, run
    `node scripts/smoke-release.mjs BASE_JOE_URL VERSION_SCHEME CANONICAL_VERSION`.
    `BASE_JOE_URL` is the public SSO route ending **exactly** in `/joe/`, with no
@@ -279,6 +281,46 @@ npm run test:browser
 BROWSER_PATH=/usr/bin/google-chrome node scripts/browser-p3.mjs
 ```
 
+`npm run test:results` runs the full P4 Results gate sequentially under **UTC**
+and **America/New_York**. `test:browser` includes this guard. CI includes Vienna
+too; run the same three-zone check with:
+
+```bash
+npm run test:results -- UTC Europe/Vienna America/New_York
+# One zone, same P4 suite (including the render budget):
+TZ=UTC node scripts/browser-p4.mjs
+```
+
+Each child process sets `TZ` for the injected board server and Chrome. The CDP
+page also sets its requested zone explicitly, since macOS Chrome may keep the
+OS zone despite `TZ`; P4 checks the server, page and dedicated worker zones.
+Reports stay separate under `~/.local/share/joedesk-qa/p4/<zone>/index.md`
+(`JOED_QA_DIR` overrides the parent; slashes in zone names become hyphens).
+Use an approved browser test host; an installed browser guard refusal is a
+blocked check and must be handed to the coordinator without bypassing it.
+
+P3–P6 share browser teardown: request a graceful close, wait for process exit,
+then remove the profile. A stuck browser gets SIGTERM and then SIGKILL with
+bounded exit waits; if it still has not exited, cleanup fails and retains the
+profile. CI scratch removal retries filesystem contention up to five times
+(100 ms delay); workstation scratch still goes to Trash.
+
+Vienna day keys always come from the explicit `Europe/Vienna` zone in
+`contracts/vienna-date.mjs` and `time.mjs`; Results uses that same zone for its
+instant-to-day index. UTC date getters serve calendar arithmetic only. The DST
+fixture includes both 02:30s and the exact fallback boundary on **25 Oct 2026**;
+Node tests also check both midnights of that 25-hour day. Full daily summaries
+reconcile the five closes on 25 Oct in every host zone.
+
+`createFeed().refresh()` waits for worker acceptance, including unchanged
+replies, and overlapping worker polls share that pending read. A fast state
+read can advance the clock and display Stale before a Results worker answers;
+dispatch alone must not count as a completed refresh. Otherwise the next
+refresh after a rejected push can be skipped while the previous read is busy.
+The worker regression holds replies explicitly to exercise this ordering,
+rejection retention and fallback completion without timing sleeps. P4 keeps
+the rejection assertion and its existing timeout.
+
 The gate holds the render budget's CI guard (2.5 × the reference budget,
 ADR §9). The budget itself is measured on a reference device (mbp2606 or
 mbp2607) with the same workload:
@@ -317,7 +359,7 @@ retain their legacy probe responses. Static UI/assets remain behind external SSO
 `/joe/healthz` reports the actual `release.json` version/scheme, server clock,
 contract-set identifier, four feed states/receipt ages and gateway confirmation,
 check age and closed reason. Never-received feeds have null age and
-`feed_not_received`; unwired Results uses `results_not_wired`. Data/history
+`feed_not_received`, including Results before its first accepted push. Data/history
 without observations return HTTP 503 with that reason, distinct from a missing
 route. Health has no money, identifiers, paths or diagnostic text. The historical
 `calendar` scheme remains readable; this branch reports its CalVer3 candidate.
@@ -336,16 +378,19 @@ API readiness. `contracts/read.mjs` handles SSO redirects, 401/403 and invalid
 refreshes with retention. Replayed deliveries show retained/advisory state,
 preserve the original age and cannot freshen data or turn healthy cells red.
 
-`/joe/results.json` returns HTTP 503 with the v2 schema identifier,
-`results_not_wired` and `X-Joe-Server-Now`. It contains no fabricated executor
-sequence, days or trades; there is no results ingress until JOED-20. The P4
-board reads it every 30 s in its read worker (shared `acceptRead`, then indexed
-once) and shows Results' designed not-wired state until a valid v2 record with
-its server `receivedAt` arrives. History stores only observations
+`/joe/results.json` serves the last accepted results v2 snapshot with its
+original server receipt and any persisted rejection reason in headers. Before
+the first accepted push it returns 503 `feed_not_received` with the v2 schema
+identifier and server clock. The P4 board reads it every 30 s in its read
+worker (shared `acceptRead`, then indexed once) and uses its existing
+live/stale/rejected/unavailable states. History stores only observations
 and null gaps, never the UI's assumed/interpolated continuity values.
 
-P2 persists `data-state.json` (snapshot plus progress and retained-cell receipts)
-and `history-state.json` as independent atomic/fsynced envelopes. Closed rejection
+P2 persists `data-state.json` (snapshot plus progress and retained-cell receipts),
+`history-state.json` and `results-state.json` as independent atomic/fsynced
+envelopes (mode 0600). Results snapshots, receipts, generation progress and
+rejection reasons survive restarts; corrupt Results storage stays untouched
+and fails closed independently of data/history. Closed rejection
 reasons have a separate bounded file. Fleet Config keeps its audited v1 file and
 a server-owned `fleet-receipt.json` for last-good/receipt retention. Refreshes of
 an unchanged revision never reset its age. Corrupt sequence/retention metadata
@@ -369,6 +414,91 @@ The UI gates non-canonical hosts client-side (privacy stub). That is UX only, no
 ### Write routes
 
 `POST /joe/inbox` accepts machine pushes with `Authorization: Bearer <token>`. Configure the token via the secret file or `JOE_INBOX_TOKEN`. No browser session or OAuth on this route.
+
+### Results ingress (for the producer)
+
+`POST /joe/inbox/results` uses the **same** `Authorization: Bearer <token>` as
+`POST /joe/inbox`: `/run/secrets/joe-board-push-token`, with the existing
+`JOE_INBOX_TOKEN` fallback. No new credential or variable; no browser/SSO identity
+is needed for this machine route. Keep the protected read behind trusted SSO.
+
+OPS must add a **second token-only edge router for the exact path
+`/joe/inbox/results`**, without SSO, next to the existing exact `/joe/inbox`
+router. Never use a prefix match: every other `/joe/` route keeps its existing
+SSO policy (including the separately documented exact health exception).
+This repository documents that edge prerequisite; it does not configure it.
+
+Send exactly one JSON `inspr.joe.household.results.v2` snapshot as the body,
+without an envelope or `receivedAt`. Validate it with
+`validateContract('results', snapshot, {stage: 'ingress'})` from the pinned
+`contracts/` package. The UTF-8 request limit is `CONTRACTS.limits.results`
+(8,388,608 bytes); the served snapshot, including the server's `receivedAt`,
+must also fit that contract limit. Money, including gross, stays in exact decimal
+strings (up to eight fractional digits) through validation, storage and reads.
+Never round before summing; only the board display rounds to cents. Each trade's
+`netEur` equals its exact `grossEur` minus `feesEur`.
+
+For each fully covered Vienna date in `days[]`, **every trade closed that day**
+must be covered by its desk summary. A desk with closed trades cannot be omitted:
+that returns 422 with path `$.days[i].desks.id` and rule `dayDeskRequired`.
+Desks without closed trades may be omitted. For each included desk,
+`days[i].desks[id].trades` must equal the count of that desk's `trades[]` whose
+`closedAt` falls on that date in `Europe/Vienna`; `realisedNet` and `fees` must
+equal their exact `netEur` and `feesEur` sums. A zero-trade day requires zero
+totals; null totals do not reconcile. A mismatch returns 422 with the per-day
+path (`$.days[i].desks.id.trades`, `.realisedNet` or `.fees`) and rule
+(`dayTradeCount`, `dayNetSum` or `dayFeeSum`), retaining the last good snapshot.
+Trades on dates with no `days[]` entry (for example today before daily close)
+are skipped by this cross-check; their schema and trade checks still apply.
+Day-level `coverage` is optional: `"full"` (the default when omitted) or
+`"partial"`. Use `"partial"` only when a windowed `trades[]` covers part of that
+day; its day/trade cross-check is skipped. Schema and trade checks still apply.
+KEEP holdings **SXR8 and TSLA are excluded from both `trades[]` and all `days[]`
+totals**, including partial days. Results derives trade P&L from `trades[]`;
+day summaries are validated, never substituted for the trade record.
+
+**Producer contract pin — manifest revision 3.** Compared with revision 2,
+revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds
+optional day-level `coverage` (`"full"` by default, or `"partial"`), the exact
+day/trade cross-check across every desk described above, and explicit KEEP
+exclusion from both trade records and day totals. It also removes
+`results_not_wired` from the closed reason enum. JOED-20 producers must re-vendor
+the complete self-contained `contracts/` directory, including `vienna-date.mjs`,
+and re-pin to `release/contracts.json`'s `contract_set_sha256`; a revision-2 digest does not
+cover revision-3 acceptance. The release manifest's pusher/executor requirements
+carry that same digest. This remains a coordinated cutover candidate, pending
+producer rehearsal and sign-off.
+
+Re-send at least every 30 s with a strictly higher `seq` and non-regressing
+`generatedAt`. Generation may be at most 5 s ahead of the server clock; server
+receipt time may not regress. Only accepted pushes advance the receipt. The
+shared selector marks Results stale at 60 s without a new acceptance; repeated
+generation also becomes `producer_frozen` at 60 s. Exact retries return 422
+without changing stores, freshness or an existing rejection. Other rejections
+persist their closed reason and keep the last good record and its original age.
+Stale Results stays visible, labelled **STALE** with its last-good age.
+
+| Response | Meaning |
+| --- | --- |
+| 200 | `{ok:true,status:200,reason:null,receivedAt}` — accepted and persisted. |
+| 422 | Rejected snapshot; closed `reason` and at most 20 `errors` containing only `{path,rule}`. |
+| 401 | `auth_required` — missing/incorrect Bearer token. |
+| 413 | `contract_invalid` — body exceeds the request limit. |
+| 400 | `contract_invalid` — malformed JSON/body. |
+| 405 | Method not allowed — this ingress accepts POST only. |
+| 503 | `auth_required` if the shared token is unavailable; `contract_invalid` for unreadable/corrupt Results storage; `refresh_failed` if snapshot/rejection persistence fails. |
+
+Persistence failures return 503 `refresh_failed` here; the existing data inbox
+still returns 500 for its snapshot save failure.
+
+`GET /joe/results.json` returns the last accepted snapshot (200), including
+`receivedAt`, with `X-Joe-Received-At`, `X-Joe-Server-Now`,
+`X-Joe-Generated-Advanced-At` and, when present, `X-Joe-Feed-Reason`. No snapshot
+means 503 with the closed reason (`feed_not_received` before any push). Reads
+and rejected pushes never refresh receipts. `/joe/state.json` carries Results
+metadata only; the full record stays on its worker read path.
+
+### Fleet Config propagation
 
 `POST /joe/fleet-config/propagate` accepts the flip plane's JSON `{baseRev, config}` envelope. It requires same-origin browser headers plus the proxy-supplied `X-Auth-Request-User` identity and **must remain behind the same trusted Zitadel SSO reverse proxy as `/joe/`**. The proxy must strip any client-supplied copy of that header before oauth2-proxy supplies the authenticated Zitadel identity; never expose this route directly. The server validates the strict paper-only v1 schema, rejects stale revisions, assigns the next `fc-NNNNNN` revision, and atomically renames it into `/var/lib/joe-board/fleet-config.json` with mode `0644`.
 

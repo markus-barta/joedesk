@@ -1,0 +1,216 @@
+{
+  "sourceTrades": [
+    {
+      "id": "rt-synthetic-001",
+      "desk": "j",
+      "symbol": "DEMO",
+      "side": "long",
+      "quantity": "2",
+      "openedAt": "2026-10-14T15:00:00.000Z",
+      "closedAt": "2026-10-14T17:39:00.000Z",
+      "entryPrice": {
+        "amount": "20",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "19.8",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "-0.36",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.64",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "-1",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.9",
+        "source": "synthetic-close-rate",
+        "observedAt": "2026-10-14T17:39:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-keep-0",
+      "desk": "joel",
+      "symbol": "SXR8",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-14T15:00:00.000Z",
+      "closedAt": "2026-10-14T17:39:00.000Z",
+      "entryPrice": {
+        "amount": "20",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "122",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "102",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "1",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "101",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "1",
+        "source": "synthetic-close-rate",
+        "observedAt": "2026-10-14T17:39:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-keep-1",
+      "desk": "joel",
+      "symbol": "TSLA",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-14T15:00:00.000Z",
+      "closedAt": "2026-10-14T17:39:00.000Z",
+      "entryPrice": {
+        "amount": "20",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "223",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "203",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "1",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "202",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "1",
+        "source": "synthetic-close-rate",
+        "observedAt": "2026-10-14T17:39:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    }
+  ],
+  "snapshot": {
+    "schema": "inspr.joe.household.results.v2",
+    "seq": 8,
+    "generatedAt": "2026-10-14T17:42:22.000Z",
+    "receivedAt": "2026-10-14T17:42:22.000Z",
+    "currency": "EUR",
+    "timeZone": "Europe/Vienna",
+    "trackingStart": "2026-09-10",
+    "days": [
+      {
+        "date": "2026-10-14",
+        "desks": {
+          "j": {
+            "equityClose": {
+              "amount": "4999",
+              "currency": "EUR"
+            },
+            "realisedNet": {
+              "amount": "-1",
+              "currency": "EUR"
+            },
+            "fees": {
+              "amount": "0.64",
+              "currency": "EUR"
+            },
+            "trades": 1
+          },
+          "joe": {
+            "equityClose": {
+              "amount": "5000",
+              "currency": "EUR"
+            },
+            "realisedNet": {
+              "amount": "0",
+              "currency": "EUR"
+            },
+            "fees": {
+              "amount": "0",
+              "currency": "EUR"
+            },
+            "trades": 0
+          },
+          "joel": {
+            "equityClose": {
+              "amount": "5000",
+              "currency": "EUR"
+            },
+            "realisedNet": {
+              "amount": "0",
+              "currency": "EUR"
+            },
+            "fees": {
+              "amount": "0",
+              "currency": "EUR"
+            },
+            "trades": 0
+          }
+        }
+      }
+    ],
+    "trades": [
+      {
+        "id": "rt-synthetic-001",
+        "desk": "j",
+        "symbol": "DEMO",
+        "side": "long",
+        "quantity": "2",
+        "openedAt": "2026-10-14T15:00:00.000Z",
+        "closedAt": "2026-10-14T17:39:00.000Z",
+        "entryPrice": {
+          "amount": "20",
+          "currency": "USD"
+        },
+        "exitPrice": {
+          "amount": "19.8",
+          "currency": "USD"
+        },
+        "grossEur": {
+          "amount": "-0.36",
+          "currency": "EUR"
+        },
+        "feesEur": {
+          "amount": "0.64",
+          "currency": "EUR"
+        },
+        "netEur": {
+          "amount": "-1",
+          "currency": "EUR"
+        },
+        "fx": {
+          "base": "USD",
+          "quote": "EUR",
+          "rate": "0.9",
+          "source": "synthetic-close-rate",
+          "observedAt": "2026-10-14T17:39:00.000Z"
+        },
+        "method": "execution-fifo-net-current-fx"
+      }
+    ],
+    "benchmark": null
+  }
+}

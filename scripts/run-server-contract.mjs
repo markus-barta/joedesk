@@ -19,7 +19,7 @@ const testImage = JSON.parse(readFileSync(resolve(repoRoot, 'release/preparation
 // test invocation still fails closed unless this private empty root is given.
 if (process.platform === "darwin") {
   const root = mkdtempSync(resolve(tmpdir(), "joedesk-contract-"));
-  const native = spawnSync(process.execPath, ["--test", "test/server-contract.mjs"], {
+  const native = spawnSync(process.execPath, ["--test", "--test-concurrency=2", "test/server-contract.mjs"], {
     cwd: repoRoot, stdio: "inherit", env: { ...process.env, JOED_TEST_ROOT: root },
   });
   const cleanup = spawnSync("/usr/bin/trash", [root], { stdio: "inherit" });
@@ -51,7 +51,7 @@ function isDisposableJoeBoardEnv() {
 function runNodeTest() {
   const result = spawnSync(
     "node",
-    ["--test", "test/server-contract.mjs"],
+    ["--test", "--test-concurrency=2", "test/server-contract.mjs"],
     { cwd: repoRoot, stdio: "inherit", env: { ...process.env, JOE_INBOX_TOKEN: token } },
   );
   process.exit(result.status ?? 1);
@@ -70,7 +70,7 @@ const result = spawnSync(
     "-v", `${repoRoot}:/repo:ro`,
     "-w", "/repo",
     testImage,
-    "node", "--test", "test/server-contract.mjs",
+    "node", "--test", "--test-concurrency=2", "test/server-contract.mjs",
   ],
   { stdio: "inherit" },
 );
@@ -81,7 +81,7 @@ if (result.error) {
     [
       "--user", "--map-root-user", "--mount", "--net", "--fork",
       "sh", "-c",
-      "set -eu; mount -t tmpfs tmpfs /var/lib; mkdir -p /var/lib/joe-board; mount -t tmpfs tmpfs /var/lib/joe-board; ip link set lo up; exec node --test test/server-contract.mjs",
+      "set -eu; mount -t tmpfs tmpfs /var/lib; mkdir -p /var/lib/joe-board; mount -t tmpfs tmpfs /var/lib/joe-board; ip link set lo up; exec node --test --test-concurrency=2 test/server-contract.mjs",
     ],
     { cwd: repoRoot, stdio: "inherit", env: { ...process.env, JOE_INBOX_TOKEN: token } },
   );
@@ -92,7 +92,7 @@ if (result.error) {
     "Run manually with Docker:\n" +
     `  docker run --rm --network none --tmpfs /var/lib/joe-board ` +
     `-e JOE_INBOX_TOKEN='${token}' -v "$PWD:/repo:ro" -w /repo ${testImage} ` +
-    "node --test test/server-contract.mjs",
+    "node --test --test-concurrency=2 test/server-contract.mjs",
   );
   process.exit(1);
 }

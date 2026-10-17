@@ -1,5 +1,6 @@
 import calendar from './market-calendar.json' with { type: 'json' };
 import { validDate, validInstant } from './contracts/schema-validator.mjs';
+import { viennaDay } from './contracts/vienna-date.mjs';
 
 export const NY = 'America/New_York';
 export const VIENNA = 'Europe/Vienna';
@@ -15,7 +16,7 @@ export function wall(instant, zone) {
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`;
 }
 export const nyDay = instant => wall(instant, NY).slice(0, 10);
-export const viennaDay = instant => wall(instant, VIENNA).slice(0, 10);
+export { viennaDay };
 
 export function viennaISOWeek(instant) {
   const d = new Date(`${viennaDay(instant)}T00:00:00Z`);

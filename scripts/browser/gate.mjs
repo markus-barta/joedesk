@@ -64,12 +64,16 @@ export function createGate(QA_DIR) {
     const text = await page.evaluate('__audit.text()');
     const plain = text.filter(t => !t.term).map(t => t.text).join(' ');
     const all = text.map(t => t.text).join(' ');
+    // The deliberately displayed source filename may contain a ticket-named
+    // checkout directory. Exempt only that path from the placeholder scan;
+    // labels, descriptions, code values and other monospace text still count.
+    const copy = text.filter(t => !t.sourcePath).map(t => t.text).join(' ');
     const termHit = plain.match(TERM_PATTERN);
     check('AC-38', `${tag}: trade terms only inside Term or Learn`, !termHit, termHit?.[0]);
     check('AC-40', `${tag}: no text glyph used as an icon`, !GLYPHS.test(all), all.match(GLYPHS)?.[0]);
     const rendered = text.map(t => t.text).join('');
     check('AC-47', `${tag}: numbers never part from their units`, !SPLIT_UNIT.test(rendered), rendered.match(SPLIT_UNIT)?.[0]);
-    check('AC-32', `${tag}: English only, no implementer strings`, !IMPLEMENTER.test(all) && !GERMAN.test(all), all.match(IMPLEMENTER)?.[0] ?? all.match(GERMAN)?.[0]);
+    check('AC-32', `${tag}: English only, no implementer strings`, !IMPLEMENTER.test(copy) && !GERMAN.test(all), copy.match(IMPLEMENTER)?.[0] ?? all.match(GERMAN)?.[0]);
     const terms = await page.evaluate('__audit.terms()');
     const badTerm = terms.find(t => t.style !== 'dotted' || t.thickness !== '1px' || t.offset !== '3px' || !(t.alpha >= 0.3 && t.alpha <= 0.6));
     check('AC-47', `${tag}: term underlines are faint, dotted, 1 px, offset 3 px`, (terms.length > 0 || screen === 'settings') && !badTerm, badTerm);

@@ -14,7 +14,7 @@ import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './brows
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
-import { designResults } from './browser/results.mjs';
+import { designResults, withTradeSummaries } from './browser/results.mjs';
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -168,6 +168,8 @@ const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' }
 const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, ${cpus().length} cores, Node ${process.version}`;
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
+const hostTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const expectedTimeZone = new Intl.DateTimeFormat('en', { timeZone: process.env.TZ ?? hostTimeZone }).resolvedOptions().timeZone;
 await page.s('Page.addScriptToEvaluateOnNewDocument', { source: AUDIT });
 const boards = [];
 async function newBoard(options) { const b = await startBoard(options); boards.push(b); return b; }
@@ -214,6 +216,9 @@ async function designBoard(now = NOW, fleetConfig = null, edit = null) {
 const reset = async () => { for (const s of ['#periodSeg [data-period="week"]', '#deskSeg [data-desk="all"]']) await click(page, s); };
 
 try {
+  check('host-timezone', 'the server uses the requested host zone', hostTimeZone === expectedTimeZone, { hostTimeZone, expectedTimeZone });
+  const pageTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone');
+  check('host-timezone', 'the page uses the requested host zone', pageTimeZone === expectedTimeZone, { pageTimeZone, expectedTimeZone });
   if (run('design')) {
     // 1 · The design record at every viewport and theme: craft audit, every
     // period × desk against the model, no shift, By desk, calendar, a day, the chart.
@@ -425,7 +430,7 @@ try {
   }
 
   if (run('states')) {
-    // 3 · Not wired (the server's own answer), unavailable, stale, last good kept, kept-holdings mismatch.
+    // 3 · No push yet (the server's own answer), unavailable, stale, retained, KEEP mismatch.
     const { board } = await designBoard();
     const record = designResults(NOW);
     const shiftOf = async () => rects(page, SHIFT);
@@ -433,15 +438,23 @@ try {
       const tag = `${viewport.name} ${theme}`;
       await configure(page, viewport, theme);
       await serve(null);
+      const firstPaint = await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `
+        new MutationObserver(function (_, observer) {
+          const say = document.querySelector('#rheroL .say');
+          if (say?.textContent) { window.__resultsFirstSay = say.textContent; observer.disconnect(); }
+        }).observe(document, { childList: true, subtree: true });` });
       await load(page, board.url, 'results');
+      await page.s('Page.removeScriptToEvaluateOnNewDocument', firstPaint);
       const nw = await page.evaluate(RES);
-      check('AC-16', `${tag}: without a record (the server says not wired) Results shows §4.8: the sentence, dashes, no zeros, dates kept`,
-        /^Results are not wired yet\. The board has no closed-trade record for this period\.$/.test(nw.say) && nw.display === '—' && nw.split.every(x => x === '—') && nw.tiles.every(x => x.val.trim() === '—') &&
-        nw.rows.every(x => x.val.trim() === '—') && nw.cal.cells.length >= 28 && !/€\s?0,00/.test(`${nw.say}${nw.split.join('')}`) && nw.curve?.aria === 'Results are not wired yet' && nw.curve.empty, nw);
+      check('results-first-paint', `${tag}: first paint already says no data received yet`,
+        (await page.evaluate('window.__resultsFirstSay')) === 'Results are unavailable: no data received yet.');
+      check('AC-16', `${tag}: before the first push Results uses its existing unavailable state: reason, dashes, no zeros, dates kept`,
+        nw.say === 'Results are unavailable: no data received yet.' && nw.display === '—' && nw.split.every(x => x === '—') && nw.tiles.every(x => x.val.trim() === '—') &&
+        nw.rows.every(x => x.val.trim() === '—') && nw.cal.cells.length >= 28 && !/€\s?0,00/.test(`${nw.say}${nw.split.join('')}`) && nw.curve?.aria === 'Results are unavailable' && nw.curve.empty, nw);
       const before = await shiftOf();
       await click(page, '#periodSeg [data-period="month"]'); await click(page, '#deskSeg [data-desk="joel"]'); await click(page, '#prevPer');
-      check('AC-16', `${tag}: not wired, the period and desk switches still work and move nothing`, (await page.evaluate(RES)).label.startsWith('Last month') && !shifted(before, await shiftOf(), ['top', 'left', 'height']).length, shifted(before, await shiftOf()).slice(0, 3));
-      if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-not-wired`, 'Results not wired (the server answers "not wired yet" until JOED-20)');
+      check('AC-16', `${tag}: before the first push, period and desk switches still work and move nothing`, (await page.evaluate(RES)).label.startsWith('Last month') && !shifted(before, await shiftOf(), ['top', 'left', 'height']).length, shifted(before, await shiftOf()).slice(0, 3));
+      if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-not-received`, 'Results before the first accepted push: the existing unavailable state');
       await reset();
       if (theme === 'dark') continue;
       // Fresh, then stale: the record's own age, in the chart's box; nothing moves.
@@ -453,7 +466,7 @@ try {
       await waitFor(page, `document.getElementById('resStatus').innerText.length > 0`);
       await settle(page);
       const stale = await page.evaluate(RES);
-      check('panel-state', `${tag}: a record received 5 min ago says so in the chart's box and keeps its numbers`, /^Results as of 5.min ago · updates are late\.$/.test(stale.status) && stale.display === fresh.display &&
+      check('panel-state', `${tag}: a record received 5 min ago says Stale with age in the chart's box and keeps its numbers`, /^Stale · Results as of 5.min ago · updates are late\.$/.test(stale.status) && stale.display === fresh.display &&
         !shifted(freshRects, await shiftOf(), ['top', 'left', 'height']).length, { status: stale.status, display: [fresh.display, stale.display] });
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-stale`, 'Results, the record received 5 min ago: its age and reason in the chart box');
       await serve(() => ({ fail: 'ConnectionRefused' }));
@@ -461,7 +474,7 @@ try {
       await waitFor(page, `/refresh failed/.test(document.getElementById('resStatus').innerText)`);
       await settle(page);
       const kept = await page.evaluate(RES);
-      check('panel-state', `${tag}: a failed refresh keeps the last good record and says so`, /^Results refresh failed: update failed\. Showing the last good results from \d+.(s|min) ago\.$/.test(kept.status) && kept.display === fresh.display, kept.status);
+      check('panel-state', `${tag}: a failed refresh keeps the last good record and says so`, /^Stale · Results refresh failed: update failed\. Showing the last good results from \d+.(s|min) ago\.$/.test(kept.status) && kept.display === fresh.display, kept.status);
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-refresh-failed`, 'Results, refresh failed: the last good record kept, with its age');
       // Unavailable from the first read: its own reason.
       await serve(() => ({ status: 401, body: { ok: false, reason: 'auth_required' } }));
@@ -508,14 +521,22 @@ try {
       for (let i = 0; i < 7; i++) { const r = await page.evaluate(RES); months[r.cal.title] = r.cal.cells; await click(page, '#prevMonth'); }
       const cell = (m, day) => months[m]?.find(c => c.day === day);
       const has = (m, day, n) => N(cell(m, day)?.aria).includes(N(`from ${n} trade`));
-      check('vienna', `${tag}: each trade is on its Vienna date (15, 25, 27, 28 Oct; two on 1 Nov; 16 and 31 Mar)`,
-        has('October 2026', '2026-10-15', 1) && !has('October 2026', '2026-10-14', 1) && has('October 2026', '2026-10-25', 1) && has('October 2026', '2026-10-27', 1) && has('October 2026', '2026-10-28', 1) &&
+      check('vienna', `${tag}: each trade is on its Vienna date (15, 27, 28 Oct; five on 25 Oct across fallback; two on 1 Nov; 16 and 31 Mar)`,
+        has('October 2026', '2026-10-15', 1) && !has('October 2026', '2026-10-14', 1) && has('October 2026', '2026-10-25', 5) && has('October 2026', '2026-10-27', 1) && has('October 2026', '2026-10-28', 1) &&
         has('November 2026', '2026-11-01', 2) && has('March 2027', '2027-03-16', 1) && has('March 2027', '2027-03-31', 1),
         Object.fromEntries(Object.entries(months).map(([k, v]) => [k, v.filter(c => /trade/.test(c.aria)).map(c => [c.day, c.aria])])));
       for (const title of Object.keys(months)) {
         const faults = calendarFacts({ cal: { cells: months[title], slots: 42, weeks: 6 } }, ix, DESKS, '2027-04-01', ix.meta.trackingStart);
         check('AC-14', `${tag} ${title}: every day's state follows the record`, !faults.length, faults.slice(0, 4));
       }
+      await click(page, '#nextMonth'); // September → October
+      await click(page, '#cal [data-day="2026-10-25"]');
+      const fallbackDay = await page.evaluate(viewport.mobile
+        ? `({ rows: document.querySelectorAll('#sheetBody .trow').length, text: document.getElementById('sheetBody').innerText })`
+        : `(${RES}).day`);
+      check('vienna', `${tag}: 25 Oct keeps both 02:30s and the fallback boundary in instant order on the same Vienna day`,
+        fallbackDay.rows === 5 && /closed 00:30[\s\S]*closed 02:30[\s\S]*closed 02:59[\s\S]*closed 02:00[\s\S]*closed 02:30/.test(fallbackDay.text), fallbackDay);
+      if (viewport.mobile) await key(page, 'Escape');
       await load(page, board.url, 'results');
       await click(page, '#periodSeg [data-period="week"]');
       for (let i = 0; i < 30 && N((await page.evaluate(RES)).label) !== N('26 Oct – 1 Nov 2026'); i++) await click(page, '#prevPer');
@@ -612,6 +633,7 @@ try {
       const record = designResults(NOW);
       const close = d => ({ equityClose: { amount: d === 'j' ? '4990' : snapshot.desks.find(x => x.id === d).money.equity.amount, currency: 'EUR' }, realisedNet: { amount: '0', currency: 'EUR' }, fees: { amount: '0', currency: 'EUR' }, trades: 0 });
       record.days.push({ date: inputs.today, desks: Object.fromEntries(DESKS.map(d => [d, close(d)])) });
+      withTradeSummaries(record);
       const ix = M.indexResults(record);
       check('r1-money-now', 'J has no money now; the record has a close for today', inputs.todayUnits[0] === null && ix.dates.at(-1) === inputs.today, inputs.todayUnits);
       await serve(served(record, board));
@@ -697,11 +719,57 @@ try {
     }
   }
 
+  if (run('ingress')) {
+    // JOED-27: real HTTP push/read, with no results interception. Exercise both
+    // the module worker and the fallback, including server rejection headers.
+    await serve(null);
+    for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      const { board } = await designBoard();
+      const record = designResults(NOW); delete record.receivedAt;
+      const pushed = await board.pushResults(record);
+      check('results-ingress', `${viewport.name} ${theme}: the real results inbox accepts v2`, pushed.status === 200, pushed);
+      const fallback = viewport.mobile && theme === 'dark';
+      const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
+      await configure(page, viewport, theme);
+      await load(page, board.url, 'results');
+      if (injection) await page.s('Page.removeScriptToEvaluateOnNewDocument', injection);
+      const live = await page.evaluate(RES), before = await rects(page, SHIFT);
+      check('results-ingress', `${viewport.name} ${theme}: accepted push renders live through ${fallback ? 'fallback' : 'worker'}`,
+        live.display !== '—' && !live.status && (await page.evaluate('window.__joedesk.worker()')) === !fallback, live.status);
+      if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-ingress-live`, 'Results live from POST /joe/inbox/results');
+      board.setNow(at(NOW, 69)); // exactly 60 s after the accepted receipt
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `/updates are late/.test(document.getElementById('resStatus').innerText)`);
+      const stale = await page.evaluate(RES);
+      check('results-ingress', `${viewport.name} ${theme}: at 60 s the real feed is stale, keeps its numbers and moves nothing`,
+        /^Stale · Results as of 1.min ago · updates are late\.$/.test(stale.status) && stale.display === live.display &&
+        !shifted(before, await rects(page, SHIFT), ['top', 'left', 'height']).length, stale.status);
+      if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-ingress-stale`, 'Results stale 60 seconds after its last accepted push');
+      const bad = structuredClone(record); bad.seq++; bad.generatedAt = board.clock(); bad.trades[0].netEur.amount = '999';
+      const rejected = await board.pushResults(bad);
+      check('results-ingress', `${viewport.name} ${theme}: a bad pushed record is rejected with 422 contract_invalid`,
+        rejected.status === 422 && rejected.body.reason === 'contract_invalid', rejected);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `/last update was rejected/.test(document.getElementById('resStatus').innerText)`);
+      const retained = await page.evaluate(RES);
+      check('results-ingress', `${viewport.name} ${theme}: rejection header keeps last good numbers with their original age`,
+        /last good results from 1.min ago/.test(retained.status) && retained.display === live.display, retained.status);
+      const next = { ...record, seq: record.seq + 1, generatedAt: board.clock() };
+      check('results-ingress', `${viewport.name} ${theme}: a new accepted push recovers`, (await board.pushResults(next)).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `document.getElementById('resStatus').innerText.length === 0`);
+      check('results-ingress', `${viewport.name} ${theme}: recovery clears the rejection`, !(await page.evaluate(RES)).status);
+    }
+  }
+
   if (run('budget')) {
     // 7 · The Results render budget's CI guard (ADR §9; the reference budget is
     // measured on a reference device by scripts/budget-reference.mjs).
     budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
   }
+  if (process.env.TZ) check('host-timezone', 'dedicated workers use the requested host zone',
+    page.workerTimeZones.length > 0 && page.workerTimeZones.every(zone => zone === expectedTimeZone),
+    { workerTimeZones: page.workerTimeZones, expectedTimeZone });
 } finally {
   await browser.close();
   for (const b of boards) await b.close();
@@ -718,9 +786,11 @@ an injected clock (Wed 14 Oct 2026, 19:42:31 Vienna; the Vienna-date views use
 Thu 1 Apr 2027), the P3 test-only scenario for state, history and fleet
 settings, and the closed-trade record served in the results v2 contract's
 served form: a deterministic test-only design record and the reviewed
-fixtures in \`fixtures/results/\`. Until JOED-20 writes \`/joe/results.json\`,
-the live board shows the not-wired state (\`*-results-not-wired.png\`). One
+fixtures in \`fixtures/results/\`. JOED-27's ingress cases use real machine
+pushes and protected reads, then advance the injected clock to stale at 60 s;
+before the first push the feed says no data received yet. One
 headless browser, run sequentially; reduced motion for stable geometry.
+Host and browser time zone: ${expectedTimeZone}; dedicated worker zones are checked too.
 Compare with \`joed-19-joedesk-approved.html\` (Results).
 
 ## For the visual check
@@ -764,7 +834,7 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 | AC-13 By desk J, Joe, Joel, Total; chosen row tinted | \`AC-13\` | \`by desk\` (desks add up to the total) |
 | AC-14 6 rows; day states and tints; sign + arrow + tint | \`AC-14\` (three months, plus the Vienna-date months) | \`calendar\` |
 | AC-15 a day shows exactly its trades; phones open the sheet | \`AC-15\` (panel; sheet, Escape, ×, focus back) | \`calendar\` (rows = count, oldest first) |
-| AC-16 designed empty state; not wired without a record | \`AC-16\` (empty record, August before tracking, the server's not-wired answer) | \`empty period\`, \`read\` |
+| AC-16 designed empty/unavailable states | \`AC-16\` (empty record, August before tracking, no push received) | \`empty period\`, \`read\` |
 | AC-17 / AC-46 chart to scale; zero-based; legend and tip | \`AC-17\`, \`AC-46\`, \`AC-41\` (opaque tip) | \`hero chart\` |
 | AC-9 / KEEP excluded | \`AC-9\` (no kept symbol on Results; a record trading a kept symbol is held back) | \`kept holdings\` |
 | Vienna dates (ADR deferred P4 row) | \`vienna\` | \`vienna dates\` |

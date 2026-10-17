@@ -8,8 +8,7 @@ export function acceptRead(kind, { status, redirected = false, payload, received
   if (redirected || [301, 302, 303, 307, 308, 401, 403].includes(status)) return reject('auth_required');
   if (reason && !REASONS.includes(reason)) return reject('contract_invalid');
   if (status !== 200) return reject(reason || (status === 404 ? 'route_not_found' :
-    payload?.reason === 'feed_not_received' ? 'feed_not_received' :
-      kind === 'results' && payload?.reason === 'results_not_wired' ? 'results_not_wired' : 'refresh_failed'));
+    payload?.reason === 'feed_not_received' ? 'feed_not_received' : 'refresh_failed'));
   const checked = validateContract(kind, payload);
   if (!checked.ok) return reject(checked.reason);
   if (kind === 'fleet-config' && !validInstant(receivedAt)) return reject('contract_invalid');

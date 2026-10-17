@@ -34,17 +34,17 @@ export async function startBoard({ fleetConfig = null, history = null, fleetConf
   const server = createJoeServer({ dataDir, clock, inboxToken: TOKEN });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
-  const push = async payload => {
-    const response = await fetch(`http://127.0.0.1:${port}/joe/inbox`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
+  const push = async (payload, kind = 'data') => {
+    const response = await fetch(`http://127.0.0.1:${port}/joe/inbox${kind === 'results' ? '/results' : ''}`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
     return { status: response.status, body: await response.json() };
   };
   return {
-    port, url: `http://127.0.0.1:${port}/joe/`, push, clock, dataDir,
+    port, url: `http://127.0.0.1:${port}/joe/`, push, pushResults: payload => push(payload, 'results'), clock, dataDir,
     setNow(iso, { freeze = true } = {}) { base = Date.parse(iso); real = performance.now(); frozen = freeze; },
     async close() {
       server.closeAllConnections();
       await new Promise(resolve => server.close(resolve));
-      discard(dataDir, 'board store');
+      await discard(dataDir, 'board store');
     },
   };
 }

@@ -26,6 +26,29 @@ export function findBrowser() {
   throw new Error('No Chrome found; set BROWSER_PATH');
 }
 
+export async function closeBrowserProcess(proc, requestClose, timeout = 3000) {
+  const hasExited = () => proc.exitCode !== null || proc.signalCode !== null;
+  if (hasExited()) return;
+  let onExit;
+  const exited = new Promise(resolve => { onExit = () => resolve(true); proc.once('exit', onExit); });
+  const waitForExit = async () => {
+    let timer;
+    try {
+      return await Promise.race([exited, new Promise(resolve => { timer = setTimeout(() => resolve(false), timeout); })]);
+    } finally { clearTimeout(timer); }
+  };
+  try {
+    // A CDP acknowledgement (or a disconnected pipe) is not process exit.
+    // Keep the exit listener installed before asking Chrome to close.
+    Promise.resolve().then(requestClose).catch(() => { /* pipe may close with Chrome */ });
+    if (await waitForExit()) return;
+    if (!hasExited()) proc.kill('SIGTERM');
+    if (await waitForExit()) return;
+    if (!hasExited()) proc.kill('SIGKILL');
+    if (!await waitForExit()) throw new Error('Browser did not exit; profile retained');
+  } finally { proc.off('exit', onExit); }
+}
+
 export async function launch({ hostRules = '' } = {}) {
   const profile = scratch('joed-p3-browser-');
   const args = ['--headless=new', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', '--disable-gpu',
@@ -62,26 +85,26 @@ export async function launch({ hostRules = '' } = {}) {
     pending.set(n, { resolve, reject, method });
     proc.stdio[3].write(`${JSON.stringify({ id: n, method, params, ...(sessionId ? { sessionId } : {}) })}\0`);
   });
-  const exited = new Promise(resolve => proc.on('exit', resolve));
   return {
     send, on: fn => listeners.add(fn), off: fn => listeners.delete(fn),
     async close() {
-      try { await Promise.race([send('Browser.close'), new Promise(r => setTimeout(r, 3000))]); } catch { /* already closing */ }
-      if (proc.exitCode === null) proc.kill('SIGTERM');
-      await Promise.race([exited, new Promise(r => setTimeout(r, 3000))]);
-      discard(profile, 'browser profile');
+      await closeBrowserProcess(proc, () => send('Browser.close'));
+      await discard(profile, 'browser profile');
     },
   };
 }
 
-export async function openPage(browser, { headers = {} } = {}) {
+export async function openPage(browser, { headers = {}, timeZone = process.env.TZ } = {}) {
   const { targetId } = await browser.send('Target.createTarget', { url: 'about:blank' });
   const { sessionId } = await browser.send('Target.attachToTarget', { targetId, flatten: true });
   const s = (method, params) => browser.send(method, params, sessionId);
   await s('Page.enable'); await s('Runtime.enable'); await s('Network.enable');
+  // macOS Chrome can use the OS zone despite TZ in its environment. Emulate
+  // the requested host zone explicitly; dedicated workers inherit this zone.
+  if (timeZone) await s('Emulation.setTimezoneOverride', { timezoneId: timeZone });
   const page = { headers };
   if (Object.keys(headers).length) await s('Network.setExtraHTTPHeaders', { headers });
-  const errors = [], requests = [];
+  const errors = [], requests = [], workerTimeZones = [];
   // Workers are their own targets: give them the same request headers and
   // the same request routing before they run.
   const children = new Set();
@@ -97,7 +120,16 @@ export async function openPage(browser, { headers = {} } = {}) {
       if (Object.keys(page.headers).length) await browser.send('Network.setExtraHTTPHeaders', { headers: page.headers }, child);
       if (fetchPatterns) await browser.send('Fetch.enable', { patterns: fetchPatterns }, child);
     } catch { /* not a network-capable target */ }
-    browser.send('Runtime.runIfWaitingForDebugger', {}, child).catch(() => {});
+    await browser.send('Runtime.runIfWaitingForDebugger', {}, child).catch(() => {});
+    if (timeZone && m.params.targetInfo.type === 'worker') {
+      try {
+        await browser.send('Runtime.enable', {}, child);
+        const result = await browser.send('Runtime.evaluate', {
+          expression: 'Intl.DateTimeFormat().resolvedOptions().timeZone', returnByValue: true,
+        }, child);
+        workerTimeZones.push(result.result.value);
+      } catch { workerTimeZones.push(null); }
+    }
   });
   browser.on(m => {
     if (m.method === 'Network.requestWillBeSent' && m.sessionId && m.sessionId !== sessionId) requests.push({ url: m.params.request.url, method: m.params.request.method, postData: m.params.request.postData, worker: true });
@@ -120,5 +152,5 @@ export async function openPage(browser, { headers = {} } = {}) {
     }
   };
   const owns = id => id === sessionId || children.has(id);
-  return { s, evaluate, errors, requests, targetId, setHeaders, setFetch, owns };
+  return { s, evaluate, errors, requests, workerTimeZones, targetId, setHeaders, setFetch, owns };
 }

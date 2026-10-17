@@ -41,7 +41,7 @@ const at = (base, seconds) => new Date(Date.parse(base) + seconds * 1000).toISOS
 // the previous accepted cells as retained last-good values.
 function board(fixture, { cold = false } = {}) {
   const feeds = { 'fleet-config': { value: structuredClone(valid['fleet-config']), receivedAt: valid.data.receivedAt },
-    results: { value: null, reason: 'results_not_wired' }, history: { value: structuredClone(valid.history) } };
+    results: { value: null, reason: 'feed_not_received' }, history: { value: structuredClone(valid.history) } };
   let previous = {};
   if (!cold) {
     feeds.data = acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt);
@@ -281,6 +281,84 @@ test('cold start: without the server clock every panel still shows its own state
     await dated.refresh();
     assert.ok(Math.abs(Date.parse(dated.select().now) - Date.parse('2026-10-14T17:42:22.000Z')) < 1000);
   } finally { globalThis.fetch = realFetch; }
+});
+
+test('refresh: await the worker before the next results push, including unchanged replies', async () => {
+  const realWorker = globalThis.Worker, realFetch = globalThis.fetch;
+  const { indexResults } = await import('../public/joe/results-model.js');
+  let worker, stamp = valid.results.receivedAt;
+  const index = indexResults(valid.results);
+  class HeldWorker {
+    messages = [];
+    constructor() { worker = this; }
+    postMessage(message) { this.messages.push(message); }
+    reply(data) { this.onmessage({ data: { ...data, ms: 0 } }); }
+  }
+  try {
+    globalThis.Worker = HeldWorker;
+    globalThis.fetch = async () => new Response(JSON.stringify({ ok: false }), {
+      status: 503, headers: { 'X-Joe-Server-Now': stamp },
+    });
+    const feed = createFeed(() => {});
+    const turn = () => new Promise(resolve => setImmediate(resolve));
+    for (const phase of ['live', 'stale', 'rejected', 'recovered']) {
+      if (phase === 'stale') stamp = at(valid.results.receivedAt, 60);
+      let finished = false;
+      const refreshed = feed.refresh().then(() => { finished = true; });
+      await turn();
+      // A fast state/clock read can make the retained record stale while its
+      // worker read is still in flight. This is not a completed refresh.
+      if (phase === 'stale') assert.equal(feed.select().states.results.state, 'stale');
+      assert.equal(finished, false, `${phase}: the worker is still reading`);
+      let concurrentFinished = false;
+      const concurrent = feed.refreshResults().then(() => { concurrentFinished = true; });
+      assert.deepEqual(worker.messages.splice(0), ['poll', 'results'], 'one read per feed');
+      worker.reply({ kind: 'unchanged', feed: 'history' });
+      await turn();
+      assert.equal(finished, false, `${phase}: history cannot complete results`);
+      assert.equal(concurrentFinished, false, `${phase}: overlapping callers await the same read`);
+      if (phase === 'stale') worker.reply({ kind: 'unchanged', feed: 'results' });
+      else worker.reply({ kind: 'results', index, reason: phase === 'rejected' ? 'contract_invalid' : null });
+      await Promise.all([refreshed, concurrent]);
+      assert.equal(finished, true);
+      const cell = feed.select().states.results;
+      assert.equal(cell.value.index, index);
+      assert.equal(cell.valueReceivedAt, valid.results.receivedAt, 'refresh never freshens the receipt');
+      assert.equal(cell.reason, phase === 'rejected' ? 'contract_invalid' : phase === 'live' ? null : 'snapshot_stale');
+      assert.equal(cell.retained, phase === 'rejected');
+    }
+  } finally { globalThis.Worker = realWorker; globalThis.fetch = realFetch; }
+});
+
+test('refresh: a worker failure completes pending callers after the fallback read', async () => {
+  const realWorker = globalThis.Worker, realFetch = globalThis.fetch;
+  let worker, release;
+  const held = new Promise(resolve => { release = resolve; });
+  try {
+    globalThis.Worker = class {
+      constructor() { worker = this; }
+      postMessage() {}
+    };
+    globalThis.fetch = async url => {
+      if (String(url).includes('results.json')) {
+        await held;
+        return new Response(JSON.stringify(valid.results), { headers: { 'X-Joe-Server-Now': valid.results.receivedAt } });
+      }
+      return new Response('{}', { status: 503 });
+    };
+    const feed = createFeed(() => {});
+    let finished = false;
+    const refreshed = feed.refresh().then(() => { finished = true; });
+    worker.onerror();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(finished, false, 'the fallback has not answered yet');
+    release();
+    await refreshed;
+    assert.equal(feed.usesWorker(), false);
+    assert.equal(feed.select().states.results.state, 'fresh');
+    assert.equal(feed.feeds.results.value.seq, valid.results.seq);
+    assert.equal(feed.feeds.results.value.receivedAt, valid.results.receivedAt);
+  } finally { release(); globalThis.Worker = realWorker; globalThis.fetch = realFetch; }
 });
 
 const pt = (t, values, basis = {}) => ({ t, desks: Object.fromEntries(hm.DESK_IDS.map(id => [id, {

@@ -26,6 +26,7 @@ for (const vector of vectors) test(`time vector: ${vector.id}`, () => {
   assert.equal(vienna, vector.vienna);
   assert.equal(productionWall(vector.utc, NY), vector.ny);
   assert.equal(productionWall(vector.utc, VIENNA), vector.vienna);
+  assert.equal(viennaDay(vector.utc), vector.vienna.slice(0, 10));
   assert.equal(isRTH(vector.utc), vector.rth);
   const offset = (Date.parse(vienna.replace(' ', 'T') + 'Z') - Date.parse(ny.replace(' ', 'T') + 'Z')) / 3600000;
   assert.equal(offset, vector.offsetHours);

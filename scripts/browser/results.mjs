@@ -7,6 +7,7 @@
 import { scenario, NOW } from './board.mjs';
 import { validateContract } from '../../contracts/index.mjs';
 import { marketSession, zonedInstant, viennaDay, NY } from '../../time.mjs';
+import { decimalUnits, unitsDecimal } from '../../contracts/decimal.mjs';
 
 const DESKS = ['j', 'joe', 'joel'];
 const SYMBOLS = [['BAC', 'Bank of America', 46], ['INTC', 'Intel', 24], ['F', 'Ford', 11.5], ['SOFI', 'SoFi Technologies', 14.5], ['T', 'AT&T', 27],
@@ -22,6 +23,23 @@ const session = k => { const s = marketSession(zonedInstant(k, '12:00:00', NY));
 const U = 1e6;
 const toU = s => Math.round(Number(s) * U);
 const fromU = u => dec(u / U, 6);
+
+// Fixture builder: retain independently chosen equity closes, but supply real
+// day/desk trade totals when a scenario replaces or expands the trade window.
+export function withTradeSummaries(record) {
+  const days = new Map(record.days.map(day => [day.date, day]));
+  for (const day of record.days) for (const d of Object.values(day.desks)) {
+    d.trades = 0; d.realisedNet = { amount: '0', currency: 'EUR' }; d.fees = { amount: '0', currency: 'EUR' };
+  }
+  for (const t of record.trades) {
+    const d = days.get(viennaDay(t.closedAt))?.desks[t.desk];
+    if (!d) continue;
+    d.trades++;
+    d.realisedNet.amount = unitsDecimal(decimalUnits(d.realisedNet.amount) + decimalUnits(t.netEur.amount));
+    d.fees.amount = unitsDecimal(decimalUnits(d.fees.amount) + decimalUnits(t.feesEur.amount));
+  }
+  return record;
+}
 
 export function designResults(now = NOW, { trackingStart = '2026-09-10', seq = 412 } = {}) {
   const R = random(20261015);
@@ -115,6 +133,7 @@ export function largeResults(now = NOW, trades = 14000) {
   }
   const level = { j: 500000, joe: 500000, joel: 500000 };
   out.days = sessions.map(k => ({ date: k, desks: Object.fromEntries(DESKS.map(d => { level[d] += Math.round((R() - 0.5) * 400); return [d, { equityClose: { amount: cents(level[d]), currency: 'EUR' }, realisedNet: { amount: '0', currency: 'EUR' }, fees: { amount: '0', currency: 'EUR' }, trades: 0 }]; })) }));
+  withTradeSummaries(out);
   const checked = validateContract('results', out);
   if (!checked.ok) throw new Error(`large results invalid: ${JSON.stringify(checked.errors.slice(0, 5))}`);
   return out;

@@ -1,0 +1,212 @@
+{
+  "schema": "inspr.joe.household.results.v2",
+  "seq": 8,
+  "generatedAt": "2026-10-14T17:42:22.000Z",
+  "receivedAt": "2026-10-14T17:42:22.000Z",
+  "currency": "EUR",
+  "timeZone": "Europe/Vienna",
+  "trackingStart": "2026-09-10",
+  "days": [
+    {
+      "date": "2026-10-14",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "4999",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0.0278",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0.0118",
+            "currency": "EUR"
+          },
+          "trades": 4
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    }
+  ],
+  "trades": [
+    {
+      "id": "rt-exact-1",
+      "desk": "j",
+      "symbol": "DEMO",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-14T15:00:00.000Z",
+      "closedAt": "2026-10-14T17:30:00.000Z",
+      "entryPrice": {
+        "amount": "20",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "20.0098",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.0049",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.0009",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "0.004",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "synthetic-close-rate",
+        "observedAt": "2026-10-14T17:30:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-exact-2",
+      "desk": "j",
+      "symbol": "DEMO",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-14T15:00:00.000Z",
+      "closedAt": "2026-10-14T17:31:00.000Z",
+      "entryPrice": {
+        "amount": "20",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "20.0098",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.0049",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.0009",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "0.004",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "synthetic-close-rate",
+        "observedAt": "2026-10-14T17:31:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-exact-3",
+      "desk": "j",
+      "symbol": "DEMO",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-14T15:00:00.000Z",
+      "closedAt": "2026-10-14T17:32:00.000Z",
+      "entryPrice": {
+        "amount": "20",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "20.0298",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.0149",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.005",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "0.0099",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "synthetic-close-rate",
+        "observedAt": "2026-10-14T17:32:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-exact-4",
+      "desk": "j",
+      "symbol": "DEMO",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-14T15:00:00.000Z",
+      "closedAt": "2026-10-14T17:33:00.000Z",
+      "entryPrice": {
+        "amount": "20",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "20.0298",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.0149",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.005",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "0.0099",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "synthetic-close-rate",
+        "observedAt": "2026-10-14T17:33:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    }
+  ],
+  "benchmark": null
+}

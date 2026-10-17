@@ -27,7 +27,7 @@ const { validateContract } = await import('../contracts/index.mjs');
 const { acceptRead } = await import('../contracts/read.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const hm = await import('../public/joe/history-model.js');
-const { designResults } = await import('../scripts/browser/results.mjs');
+const { designResults, withTradeSummaries } = await import('../scripts/browser/results.mjs');
 
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ALL = ['j', 'joe', 'joel'];
@@ -46,6 +46,7 @@ const tradeOf = (id, desk, closedAt, net, fees = '0') => ({ id, desk, symbol: 'K
 function record(days, trades = [], trackingStart = '2026-09-10') {
   const r = { schema: 'inspr.joe.household.results.v2', seq: 1, generatedAt: '2026-10-14T17:40:00.000Z', receivedAt: '2026-10-14T17:40:00.000Z',
     currency: 'EUR', timeZone: 'Europe/Vienna', trackingStart, days, trades, benchmark: null };
+  withTradeSummaries(r);
   const checked = validateContract('results', r);
   assert.ok(checked.ok, JSON.stringify(checked.errors));
   return r;
@@ -55,7 +56,7 @@ const histRow = (t, desks) => ({ t, desks: Object.fromEntries(Object.entries(des
   [id, { money: { equity: equity === null ? null : eurOf(equity) }, ...(basis ? { historyBasis: basis } : {}) }])), totals: {} });
 
 test('fixtures: every results fixture is a valid served v2 contract', () => {
-  for (const name of ['empty', 'scratches', 'no-losers', 'drawdown', 'dst-weeks']) {
+  for (const name of ['empty', 'scratches', 'no-losers', 'drawdown', 'dst-weeks', 'exact-decimals', 'partial-day']) {
     const r = validateContract('results', fixture(name));
     assert.ok(r.ok, `${name}: ${JSON.stringify(r.errors)}`);
   }
@@ -79,7 +80,7 @@ test('decimal: exact multiplication, division and half-away rounding; no binary 
 });
 
 test('fx: each trade’s gross is its quantity times the price move at the close rate, exactly', () => {
-  for (const name of ['scratches', 'no-losers', 'drawdown', 'dst-weeks']) {
+  for (const name of ['scratches', 'no-losers', 'drawdown', 'dst-weeks', 'exact-decimals']) {
     for (const t of fixture(name).trades) assert.equal(M.grossFromFx(t), decimalUnits(t.grossEur.amount), `${name} ${t.id}`);
   }
   for (const t of designResults().trades) assert.equal(M.grossFromFx(t), decimalUnits(t.grossEur.amount), `design ${t.id}`);
@@ -182,6 +183,10 @@ test('vienna dates: extended hours, the five-hour week, NY’s repeated hour, Vi
   assert.deepEqual(Array.from({ length: ix.trades.n }, (_, k) => [of(k), M.trade(ix, k).net]), [
     ['2026-10-15', 1], // 18:30 New York on 14 Oct is already Thursday in Vienna
     ['2026-10-25', 2], // Vienna midnight, the night its clocks go back
+    ['2026-10-25', 9], // 02:30 CEST, before fallback
+    ['2026-10-25', 10], // 02:59:59.999 CEST
+    ['2026-10-25', 11], // 02:00 CET, exactly at fallback
+    ['2026-10-25', 12], // the second 02:30, now CET
     ['2026-10-27', 3], // the five-hour week: 18:30 New York is 23:30 in Vienna, same date
     ['2026-10-28', 4], // 19:10 New York is past Vienna midnight
     ['2026-11-01', 5], // 01:30 EDT
@@ -196,6 +201,30 @@ test('vienna dates: extended hours, the five-hour week, NY’s repeated hour, Vi
   assert.deepEqual(M.tradesOn(ix, '2026-11-01', ALL).map(t => t.closedAt), [Date.parse('2026-11-01T05:30:00.000Z'), Date.parse('2026-11-01T06:30:00.000Z')]);
   assert.equal(M.dayResult(ix, '2026-10-14', ALL).count, 0, 'the 14 Oct evening trade is not on 14 Oct');
   assert.equal(M.periodOf('week', '2026-10-28', later.today).start, '2026-10-26', 'weeks start on Monday, by date');
+});
+
+test('vienna dates: the fallback day lasts 25 hours; both midnights and repeated hours use Vienna', () => {
+  const vectors = [
+    ['2026-10-24T21:59:59.999Z', '2026-10-24'],
+    ['2026-10-24T22:00:00.000Z', '2026-10-25'],
+    ['2026-10-25T00:59:59.999Z', '2026-10-25'],
+    ['2026-10-25T01:00:00.000Z', '2026-10-25'],
+    ['2026-10-25T22:59:59.999Z', '2026-10-25'],
+    ['2026-10-25T23:00:00.000Z', '2026-10-26'],
+  ];
+  for (const [instant, day] of vectors) {
+    assert.equal(M.viennaDate(Date.parse(instant)), day);
+    assert.equal(page.resultsToday(instant), day);
+  }
+  assert.equal(M.viennaMidnight('2026-10-25'), Date.parse('2026-10-24T22:00:00.000Z'));
+  assert.equal(M.viennaMidnight('2026-10-26'), Date.parse('2026-10-25T23:00:00.000Z'));
+  assert.equal(M.viennaMidnight('2026-10-26') - M.viennaMidnight('2026-10-25'), 25 * 3600000);
+  const ix = M.indexResults(fixture('dst-weeks'));
+  assert.equal(M.dayResult(ix, '2026-10-25', ALL).units, E('44'));
+  assert.deepEqual(M.tradesOn(ix, '2026-10-25', ALL).map(t => t.closedAt), [
+    '2026-10-24T22:30:00.000Z', '2026-10-25T00:30:00.000Z', '2026-10-25T00:59:59.999Z',
+    '2026-10-25T01:00:00.000Z', '2026-10-25T01:30:00.000Z',
+  ].map(Date.parse));
 });
 
 test('calendar: a day is Σ net of its trades; tints are quarters of the largest day; a day lists exactly its trades', () => {
@@ -291,14 +320,14 @@ test('the worker’s index arrives intact by transfer', () => {
   assert.equal(M.trade(copy, 0).id, designResults().trades.slice().sort((a, b) => Date.parse(a.closedAt) - Date.parse(b.closedAt) || (a.id < b.id ? -1 : 1))[0].id);
 });
 
-test('read: the results read keeps the last good record on a failed refresh, and says not wired until JOED-20', () => {
+test('read: results keeps last good on a failed refresh and says no data before the first push', () => {
   const good = fixture('scratches');
   const first = acceptRead('results', { status: 200, payload: good });
   assert.equal(first.value, good);
   const failed = acceptRead('results', { status: 0 }, first);
   assert.equal(failed.value, good); assert.equal(failed.reason, 'refresh_failed');
-  const notWired = acceptRead('results', { status: 503, payload: { reason: 'results_not_wired' } });
-  assert.equal(notWired.value, null); assert.equal(notWired.reason, 'results_not_wired');
+  const missing = acceptRead('results', { status: 503, payload: { reason: 'feed_not_received' } });
+  assert.equal(missing.value, null); assert.equal(missing.reason, 'feed_not_received');
   const auth = acceptRead('results', { status: 401 });
   assert.equal(auth.reason, 'auth_required');
   // The shared selector gives the record its own state and age.
@@ -310,6 +339,34 @@ test('read: the results read keeps the last good record on a failed refresh, and
   assert.deepEqual([stale.results.state, stale.results.reason], ['stale', 'snapshot_stale']);
   const kept = panelStates({ results: { value: { ...ix.meta, index: ix }, reason: 'refresh_failed' } }, at(600));
   assert.deepEqual([kept.results.state, kept.results.retained, Math.round(kept.results.ageSeconds)], ['broken', true, 600]);
+});
+
+test('first paint: Results has the no-data reason before any feed or state arrives', () => {
+  for (const cell of [undefined, { value: null, reason: null }]) {
+    const view = page.resultsView({ now: '2026-10-14T17:42:22.000Z', states: { results: cell }, feeds: {} });
+    assert.equal(view.ix, null);
+    assert.equal(view.reason, 'feed_not_received');
+  }
+});
+
+test('results: sum exact trade money before display rounding, including gross and fees', () => {
+  const r = fixture('exact-decimals');
+  const R = roll(M.indexResults(r), 'day', '2026-10-14');
+  assert.deepEqual([R.units.gross, R.units.fees, R.units.realised], [E('0.0396'), E('0.0118'), E('0.0278')]);
+  assert.deepEqual([fmt.eur(R.units.gross), fmt.eur(R.units.fees), fmt.eur(R.units.realised)], ['€ 0,04', '€ 0,01', '€ 0,03']);
+  for (const [field, sum] of [['grossEur', R.units.gross], ['feesEur', R.units.fees], ['netEur', R.units.realised]]) {
+    const roundedFirst = r.trades.reduce((s, t) => s + roundUnits(E(t[field].amount)), 0n);
+    assert.notEqual(roundedFirst, roundUnits(sum), field);
+  }
+});
+
+test('results: partial day summaries never replace the exact visible trade-level P&L', () => {
+  const r = fixture('partial-day');
+  const ix = M.indexResults(r);
+  const R = roll(ix, 'day', '2026-10-14');
+  assert.deepEqual([R.trades, R.units.realised, R.units.fees], [1, E('-1'), E('0.64')]);
+  assert.equal(M.dayResult(ix, '2026-10-14', ALL).units, E('-1'));
+  assert.equal(r.days[0].desks.j.realisedNet.amount, '-2', 'the wider summary is validated as partial, never used as trade P&L');
 });
 
 // ---------- Fix round 1 (Codex review r1): each fails on 7009b62 ----------
