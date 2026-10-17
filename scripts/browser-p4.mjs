@@ -992,6 +992,11 @@ try {
     const { partial: partialTrade, escalated, missing: stale, normal, emptyEscalated, today } = dates;
     const filteredReasons = structuredClone(singleReason);
     filteredReasons.days.find(d => d.date === today).partialReasons = ['history_gap'];
+    // The 14th has a trade but no opened-position sentence. Five reasons
+    // leave three hidden lines, so revealing them grows the content below cap.
+    const growingReasons = structuredClone(partial), growingDay = escalated;
+    growingReasons.days.find(d => d.date === growingDay).partialReasons = ['capture_gap', 'history_gap',
+      'broker_trade_count_mismatch', 'broker_realised_pnl_mismatch', 'unattributed_activity'];
     const reason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
     let seq = baseline.seq;
     const replace = async (record, label) => {
@@ -1325,6 +1330,89 @@ try {
         }
       }
 
+      if (viewport.mobile) {
+        await replace(growingReasons, `${tag} growing reasons below cap`);
+        const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
+          '#sheetBody .dp-note-lines > .dp-reason:nth-child(2)', '#sheetBody .dp-note-lines > .dp-reason:nth-child(3)'];
+        const movedRects = (before, after) => {
+          const old = new Map(before.map(r => [r.key, r])), next = new Map(after.map(r => [r.key, r]));
+          return [...new Set([...old.keys(), ...next.keys()])].filter(key => !same(old.get(key), next.get(key))).map(key => {
+            const a = old.get(key), b = next.get(key);
+            return { key, before: a ?? null, after: b ?? null,
+              delta: a && b ? Object.fromEntries(['top', 'left', 'height', 'width'].map(k => [k, b[k] - a[k]])) : null };
+          });
+        };
+        const contentProbe = () => page.evaluate(`(() => {
+          const root = document.getElementById('sheetBody'), extra = root.querySelector('.dp-reasons-extra'), button = root.querySelector('.dp-reasons-more');
+          // scrollHeight includes the reserved blank space. Measure the actual
+          // content through the last block's bottom, including body padding.
+          const height = () => root.lastElementChild.getBoundingClientRect().bottom - root.getBoundingClientRect().top + parseFloat(getComputedStyle(root).paddingBottom);
+          const collapsed = height(), extraHidden = extra.hidden, buttonHidden = button?.hidden;
+          let expanded;
+          try {
+            extra.hidden = false;
+            if (button) button.hidden = true;
+            expanded = height();
+          } finally {
+            extra.hidden = extraHidden;
+            if (button) button.hidden = buttonHidden;
+          }
+          return { collapsed, expanded, expandedSheetHeight: document.querySelector('#daySheet .dlg-h').getBoundingClientRect().height + expanded,
+            positionNotes: [...root.querySelectorAll('.dp-note-lines > span:not([class])')].map(el => el.innerText) };
+        })()`);
+        const cropSheet = async (name, what) => {
+          const clip = await page.evaluate(`(() => { const r = document.getElementById('daySheet').getBoundingClientRect();
+            return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+          const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
+          writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+          shots.push({ file: `${name}.png`, what });
+        };
+        const expected = M.partialReasons(growingReasons.days.find(d => d.date === growingDay)).map(r => r.text);
+        const growingName = `${viewport.name}-${theme}-results-partial-growing-reasons`;
+        for (const input of ['keyboard', 'pointer']) {
+          await click(page, `#cal [data-day="${growingDay}"]`);
+          if (viewport.name === '360' && input === 'keyboard') await cropSheet(growingName + '-collapsed', 'Below-cap growing sheet: two visible reasons and +3 more, without a position sentence');
+          const collapsed = await reasonProbe(), contentBefore = await contentProbe(), sheetBefore = await sheetGeometry();
+          const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT);
+          check('partial-days', `${tag}: ${input} growing five-reason sheet starts below the 80vh cap with two visible lines and +3 more`,
+            collapsed.button?.text === '+3 more' && collapsed.button.name === 'Show 3 more reasons' && collapsed.button.height >= 44 && collapsed.button.keyboard &&
+            collapsed.lines.length === 5 && same(collapsed.lines.map(l => l.text), expected) && collapsed.lines.filter(l => l.visible).length === 2 &&
+            fixedBefore.filter(r => r.key.includes('.dp-reason:nth-child(')).length === 2 && !contentBefore.positionNotes.length &&
+            contentBefore.expanded > contentBefore.collapsed && contentBefore.expandedSheetHeight < collapsed.sheet.cap &&
+            sheetBefore.height < collapsed.sheet.cap && collapsed.sheet.reservedHeight < collapsed.sheet.cap,
+            { ...collapsed, content: contentBefore, sheetBefore, above: fixedBefore, outer: outerBefore });
+          if (input === 'keyboard') {
+            await page.evaluate('document.querySelector("#sheetBody .dp-reasons-more").focus({preventScroll:true})');
+            await key(page, 'Enter');
+          } else {
+            const target = await page.evaluate(`(() => { const r = document.querySelector('#sheetBody .dp-reasons-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+            await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [target] });
+            await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await settle(page);
+          }
+          await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
+          const expanded = await reasonProbe(), contentAfter = await contentProbe(), sheetAfter = await sheetGeometry();
+          const fixedAfter = await rects(page, above), outerAfter = await rects(page, SHIFT);
+          const geometry = {
+            unchanged: same(sheetBefore, sheetAfter) && same(fixedBefore, fixedAfter) && same(outerBefore, outerAfter),
+            sheet: { before: sheetBefore, after: sheetAfter,
+              delta: { top: sheetAfter.top - sheetBefore.top, height: sheetAfter.height - sheetBefore.height } },
+            aboveMoved: movedRects(fixedBefore, fixedAfter), outerMoved: movedRects(outerBefore, outerAfter),
+          };
+          check('partial-days', `${tag}: ${input} reveals all five reasons as content grows with sheet top, height and prior content exactly 0 px`,
+            expanded.lines.length === 5 && same(expanded.lines.map(l => l.text), expected) && expanded.lines.every(l => l.visible) &&
+            contentAfter.expanded > contentBefore.collapsed && !contentAfter.positionNotes.length &&
+            !expanded.button && expanded.focused && expanded.live === 'polite' && !expanded.clipped && geometry.unchanged,
+            { ...expanded, contentBefore, contentAfter, geometry });
+          check('partial-days', `${tag}: ${input}-expanded growing five-reason content is below the 80vh cap and fits the reserved body without scrolling`,
+            sheetAfter.height < expanded.sheet.cap && expanded.sheet.reservedHeight < expanded.sheet.cap &&
+            contentAfter.expandedSheetHeight < expanded.sheet.cap && expanded.sheet.scrollHeight <= expanded.sheet.clientHeight,
+            { ...expanded.sheet, content: contentAfter, sheetAfter });
+          if (viewport.name === '360' && input === 'keyboard') await cropSheet(growingName + '-expanded', 'All five reasons revealed in place: content grows, sheet stays below cap without moving');
+          await key(page, 'Escape');
+        }
+      }
+
       for (const [record, kind] of [[partial, 'legacy'], [filteredReasons, 'reasoned']]) {
         await replace(record, `${tag} ${kind} reason`);
         await click(page, '#deskSeg [data-desk="joe"]');
@@ -1577,7 +1665,11 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   reveals remove the 44 px button, politely announce and focus the first revealed
   reason, and move the sheet top, height and prior content exactly 0 px. The
   pointer case uses a real touch tap after reopening collapsed. A one-reason
-  sheet must be shorter than the nine-code sheet. Other crops cover
+  sheet must be shorter than the nine-code sheet. A five-reason day without
+  position sentences proves content grows below the 80vh cap at 360/390 in both
+  themes; Enter and real touch preserve sheet, prior content and outer geometry
+  exactly. Its 360 crops are \`360-*-results-partial-growing-reasons-{collapsed,expanded}.png\`.
+  Other crops cover
   \`*-results-partial-{single-reason,counted,desk-filtered,today-so-far,today-no-trades,today-empty-filtered}.png\`.
 - **Hero chart time axis** (fix round 1). The x axis is real time: each close
   sits at the end of its Vienna date, today's money at now; missing dates keep
