@@ -552,7 +552,8 @@ test('calendar amounts: exact, rounded once, and in their cell’s room at any s
     ['999499', '999k', '1M'], ['1234567', '1,2M', '1,2M'], ['99950000', '100M', '0,1B'], ['123456789012', '123B', '0,1T'],
     ['999500000000000', '1e15', '1e15'], ['99999999999999999999999999999999', '1e32', '1e32']];
   for (const [v, desktop, phone] of table) assert.deepEqual([form(v, false), form(v, true)], [desktop, phone], v);
-  // Desktop holds six narrow signs, phones four (scaled forms a step smaller): measured at 390/1024/1440 in both fonts.
+  // Formatting bounds only; the browser scenario measures signed phone forms
+  // at 360/390 in Linux Chrome, including the 10 px scaled forms.
   for (const [v] of table) {
     assert.ok(form(v, false).length <= 5, `desktop ${v}`);
     const p = page.calAmount(E(v), true);
@@ -560,7 +561,7 @@ test('calendar amounts: exact, rounded once, and in their cell’s room at any s
   }
 });
 
-test('JOED-29 calendar rendering: phone rounded zero has no sign or arrow, keeps its loss tint; exact zero stays flat', t => {
+test('JOED-29 calendar rendering: phone cells keep signs and tints without arrows; desktop and week arrows remain', t => {
   const documentBefore = globalThis.document, stateBefore = { ...page.RS };
   t.after(() => {
     if (documentBefore === undefined) delete globalThis.document;
@@ -575,6 +576,11 @@ test('JOED-29 calendar rendering: phone rounded zero has no sign or arrow, keeps
     tradeOf('rt-gain', 'j', '2026-10-12T15:00:00.000Z', '1'),
     tradeOf('rt-flat', 'j', '2026-10-13T15:00:00.000Z', '0'),
     tradeOf('rt-small-loss', 'j', '2026-10-14T15:00:00.000Z', '-0.03'),
+    tradeOf('rt-loss', 'j', '2026-10-08T15:00:00.000Z', '-1'),
+    tradeOf('rt-scaled-gain', 'j', '2026-10-09T15:00:00.000Z', '1234'),
+    tradeOf('rt-scaled-loss', 'j', '2026-10-06T15:00:00.000Z', '-1234'),
+    tradeOf('rt-million', 'j', '2026-10-07T15:00:00.000Z', '100000'),
+    tradeOf('rt-week-loss', 'j', '2026-10-01T15:00:00.000Z', '-1'),
   ]));
   Object.assign(page.RS, { cal: [2026, 9], sel: today, period: 'week' });
   page.renderCalendar({ ix, today, trackingStart: ix.meta.trackingStart }, M.periodOf('week', today, today, ix.meta.trackingStart), ALL);
@@ -591,5 +597,17 @@ test('JOED-29 calendar rendering: phone rounded zero has no sign or arrow, keeps
   assert.match(flat, /class="cell flat\b/);
   assert.equal(phone('2026-10-13'), '<span class="pl">0</span>');
   assert.match(flat, /class="vl"><span class="pl">0,00<\/span>/);
-  assert.doesNotMatch(`${loss}${flat}`, /title=/);
+  for (const [day, cls, text, direction] of [
+    ['2026-10-12', '', '+1', 'up'], ['2026-10-08', '', '−1', 'down'],
+    ['2026-10-09', ' sc', '+1,2k', 'up'], ['2026-10-06', ' sc', '−1,2k', 'down'],
+    ['2026-10-07', ' sx', '+0,1M', 'up'],
+  ]) {
+    assert.equal(phone(day), `<span class="pl${cls}">${text}</span>`, day);
+    assert.match(cell(day), new RegExp(`class="vl">[\\s\\S]*href="#i-${direction}"`), day);
+    assert.match(cell(day), new RegExp(`class="cell ${direction === 'up' ? 'g' : 'l'}[1-4]\\b`), day);
+  }
+  const weeks = html.match(/<div class="wk">[\s\S]*?<\/div>/g) ?? [];
+  assert.ok(weeks.some(week => week.includes('href="#i-up"')), 'a positive week keeps its arrow');
+  assert.ok(weeks.some(week => week.includes('href="#i-down"')), 'a negative week keeps its arrow');
+  assert.doesNotMatch(html, /title=/);
 });

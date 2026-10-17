@@ -64,7 +64,8 @@ const absUnits = u => (u < 0n ? -u : u);
 // Desktop (also the week column): "4,10", "123", "12k", "1,2M" … "9e15";
 // phones: "1", "4,1", "123", "1k", "1,2k", "12k", "1M", "0,1M" … "9e15",
 // with no trailing ",0", the scaled forms a step smaller. Rounded phone zero
-// has no sign or arrow. The exact amount is in the cell's label and its trades.
+// has no sign. Phone cells omit the arrow; the exact amount is in the label
+// and the day's trades. Desktop and the week column retain their arrows.
 const SCALES = [['k', 3], ['M', 6], ['B', 9], ['T', 12]];
 export function calAmount(u, phone = false) {
   const a = absUnits(u), at = (exp, d) => divRound(a * 10n ** BigInt(d), 10n ** BigInt(exp) * UNIT);
@@ -86,7 +87,7 @@ const calHtml = (u, phone) => {
   if (isZero(u)) return `<span class="pl">${phone ? '0' : '0,00'}</span>`;
   const { text, cls } = calAmount(u, phone);
   if (phone && text === '0') return '<span class="pl">0</span>';
-  return `<span class="pl${cls ? ` ${cls}` : ''}">${icon(u > 0n ? 'up' : 'down')}${u < 0n ? MINUS : '+'}${text}</span>`;
+  return `<span class="pl${cls ? ` ${cls}` : ''}">${phone ? '' : icon(u > 0n ? 'up' : 'down')}${u < 0n ? MINUS : '+'}${text}</span>`;
 };
 const plain = u => calHtml(u, false);
 const compact = u => calHtml(u, true);
