@@ -345,7 +345,7 @@ function fitDaySummary(root) {
 }
 
 // ---------- A day's trades ----------
-export const stripSoftHyphens = text => text.replaceAll('\u00ad', '');
+export const stripSoftHyphens = text => text.replaceAll('\u00ad', '').replaceAll('\u00a0', ' ');
 export function copyDayText(event) {
   const root = event.currentTarget, selection = root.ownerDocument.getSelection();
   if (!event.clipboardData || !selection || selection.isCollapsed || !selection.rangeCount) return;

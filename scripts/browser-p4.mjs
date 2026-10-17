@@ -129,7 +129,8 @@ function tradeWordLines(el) {
           hyphens.push({ offset: start, boxes });
           continue;
         }
-        const box = boxes[0];
+        // Chrome can prepend the previous line's drawn hyphen box.
+        const box = boxes.at(-1);
         if (!box) continue;
         let fragment = fragments.find(f => Math.abs(f.top - box.top) < 0.5);
         if (!fragment) fragments.push(fragment = { top: box.top, text: '' });
@@ -936,20 +937,30 @@ try {
           row.symbol === record.trades.find(t => t.id === row.id)?.symbol && row.softHyphensOnlyInCompany), detail.rows);
       if (viewport.name === '360' || viewport.name === '1440') {
         const copied = await page.evaluate(`(() => {
-          const words = [...document.querySelectorAll(${JSON.stringify(root)} + ' [data-trade="rt-amount-million"] .name > span.word')];
-          const selection = document.getSelection(), range = document.createRange(), data = new DataTransfer();
-          range.setStartBefore(words[0]); range.setEndAfter(words.at(-1));
-          selection.removeAllRanges(); selection.addRange(range);
-          try {
-            const selected = selection.toString();
-            const event = new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: data });
-            words[0].dispatchEvent(event);
-            return { selected, text: data.getData('text/plain'), prevented: event.defaultPrevented };
-          } finally { selection.removeAllRanges(); }
+          const row = document.querySelector(${JSON.stringify(root)} + ' [data-trade="rt-amount-million"]');
+          const words = [...row.querySelectorAll('.name > span.word')], amount = row.querySelector('.net .pl');
+          const selection = document.getSelection();
+          const copy = (range, target) => {
+            const data = new DataTransfer();
+            selection.removeAllRanges(); selection.addRange(range);
+            try {
+              const selected = selection.toString();
+              const event = new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: data });
+              target.dispatchEvent(event);
+              return { selected, text: data.getData('text/plain'), prevented: event.defaultPrevented };
+            } finally { selection.removeAllRanges(); }
+          };
+          const companyRange = document.createRange(), amountRange = document.createRange();
+          companyRange.setStartBefore(words[0]); companyRange.setEndAfter(words.at(-1));
+          amountRange.selectNodeContents(amount);
+          return { company: copy(companyRange, words[0]), amount: { ...copy(amountRange, amount), visible: amount.textContent } };
         })()`);
         check('trade-amount', `${tag}: copying a hyphenated company name preserves its plain source text`,
-          copied.selected.includes('\u00ad') && copied.prevented &&
-          copied.text === record.trades.find(t => t.id === 'rt-amount-million').company, copied);
+          copied.company.selected.includes('\u00ad') && copied.company.prevented &&
+          copied.company.text === record.trades.find(t => t.id === 'rt-amount-million').company, copied.company);
+        check('trade-amount', `${tag}: copying an amount preserves its visible text with normal spaces`,
+          copied.amount.selected.includes('\u00a0') && copied.amount.prevented &&
+          copied.amount.text === copied.amount.visible.replaceAll('\u00a0', ' '), copied.amount);
       }
       check('trade-amount', `${tag}: manual hyphenation leaves at least three source characters in every broken-word line`,
         detail.rows.every(r => r.lang === 'en' && r.hyphens === 'manual' && r.brokenWords.every(w =>

@@ -555,8 +555,8 @@ with at least three source letters before, between and after opportunities.
 a browser dictionary; `overflow-wrap: anywhere` remains the final fallback
 if even a fragment cannot fit. Symbols, numbers and meta text receive no soft
 hyphens, and text comparisons strip U+00AD to preserve the recorded copy.
-Copying selected text from the day panel or phone sheet removes only U+00AD
-from the browser's plain text, preserving every other character and line break.
+Copying selected text from the day panel or phone sheet removes U+00AD and
+maps U+00A0 to normal spaces, preserving every other character and line break.
 Meta units (desk, side/quantity, close time and holding duration) stay together and wrap
 between units. Each middle dot is a nowrap suffix of the preceding unit;
 after layout and resize, line-ending dots use `visibility: hidden`, retaining
@@ -579,7 +579,8 @@ line to contain at least three source characters, and require a positive-width
 soft-hyphen glyph at every break. The 360 million row must exercise a break;
 desktop fixture words remain unbroken.
 Synthetic copy events at 360/1440 in both themes must copy the full company
-name without U+00AD from the sheet and panel respectively.
+name without U+00AD and the visible amount with normal spaces from the sheet
+and panel respectively.
 Visible glyph checks reject a middle dot at either end of every meta line;
 resize and repeated-fit probes verify flush starts, reserved suffix widths,
 stable wrapping and uniform panel price sizing, including a roomy peer row.
