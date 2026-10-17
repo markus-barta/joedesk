@@ -562,8 +562,11 @@ Desktop panels show all reasons. Phone sheets show two reason sentences, then a
 and its reason and positions blocks always fill the width available beside the
 info icon, with or without the button. Activation removes the button and focuses
 the first revealed reason (`tabindex="-1"`) in a polite live region. Its keyboard
-focus ring stays inset within that line, clear of neighbouring reasons without
-changing their spacing. Reopening starts collapsed. The sheet reserves its full
+focus ring stays inset within that line, at least 2 px clear of its first glyph
+and clear of neighbouring reasons. Every reason has 4 px inline padding and
+−4 px inline margins in both states, keeping its text aligned with the lead;
+the note reserves 4 px at its inline end to contain the overhang without
+horizontal overflow. Reopening starts collapsed. The sheet reserves its full
 content height, capped at 80vh;
 collapsed spare room sits at the bottom, and revealing reasons changes neither
 its top edge nor height nor the position or width of already visible reason lines.
