@@ -774,7 +774,22 @@ try {
               const range = document.createRange();
               range.setStart(node, match.index); range.setEnd(node, match.index + match[0].length);
               const rects = [...range.getClientRects()].filter(r => r.width > 0);
-              out.push({ word: match[0], lines: [...new Set(rects.map(r => r.top))] });
+              const lines = [...new Set(rects.map(r => r.top))];
+              let unbrokenWidth = range.getBoundingClientRect().width;
+              if (lines.length > 1) {
+                // Keep the word's real font and ancestor selectors, but remove
+                // its width constraint to measure the last-resort exception.
+                const probe = node.parentElement.cloneNode(false);
+                probe.textContent = match[0];
+                Object.assign(probe.style, { position: 'fixed', visibility: 'hidden', pointerEvents: 'none',
+                  whiteSpace: 'nowrap', width: 'max-content', minWidth: '0', maxWidth: 'none' });
+                node.parentElement.after(probe);
+                try {
+                  range.selectNodeContents(probe);
+                  unbrokenWidth = range.getBoundingClientRect().width;
+                } finally { probe.remove(); }
+              }
+              out.push({ word: match[0], lines, unbrokenWidth });
             }
           }
           return out;
@@ -782,6 +797,10 @@ try {
         const rows = [...root.querySelectorAll('.trow')].map(row => {
           const net = row.querySelector('.net'), amount = net.querySelector('.pl'), px = row.querySelector('.px');
           const name = row.querySelector('.name'), meta = name.querySelector('.meta');
+          const nameBounds = name.getBoundingClientRect(), nameStyle = getComputedStyle(name);
+          const nameContentWidth = nameBounds.width - parseFloat(nameStyle.paddingLeft) - parseFloat(nameStyle.paddingRight) -
+            parseFloat(nameStyle.borderLeftWidth) - parseFloat(nameStyle.borderRightWidth);
+          const nameWords = words(name);
           const r = row.getBoundingClientRect(), n = net.getBoundingClientRect(), a = amount.getBoundingClientRect(), p = px.getBoundingClientRect();
           const pieces = [...px.querySelectorAll('.ln > span, .fee')].map(el => {
             const p = el.getBoundingClientRect(); return { text: el.textContent, top: p.top, left: p.left, right: p.right,
@@ -789,7 +808,8 @@ try {
           });
           return { id: row.dataset.trade, text: net.textContent, scroll: net.scrollWidth, client: net.clientWidth,
             width: n.width, amountWidth: a.width, nowrap: getComputedStyle(net).whiteSpace === 'nowrap',
-            nameWidth: name.getBoundingClientRect().width, words: words(name),
+            nameWidth: nameBounds.width, nameContentWidth, words: nameWords,
+            brokenWords: nameWords.filter(w => w.lines.length > 1),
             nameFits: name.scrollWidth <= name.clientWidth,
             metaUnits: [...meta.querySelectorAll('.meta-unit')].map(unit => ({ text: unit.textContent,
               nowrap: getComputedStyle(unit).whiteSpace === 'nowrap', words: words(unit),
@@ -819,8 +839,9 @@ try {
       }
       check('trade-amount', `${tag}: no row overflows its detail surface and every amount shares the right edge`,
         detail.scroll <= detail.client && detail.rows.every(r => r.rowInside && r.right === detail.rows[0].right), detail);
-      check('trade-amount', `${tag}: name and meta line breaks stay at word boundaries, with atomic meta units`,
-        detail.rows.every(r => r.nameFits && r.words.length > 10 && r.words.every(w => w.lines.length === 1) &&
+      check('trade-amount', `${tag}: name and meta line breaks stay at word boundaries unless a phone token exceeds its column, with atomic meta units`,
+        detail.rows.every(r => r.nameFits && r.words.length > 10 && r.words.every(w => w.lines.length === 1 ||
+          (viewport.mobile && w.lines.length > 1 && w.unbrokenWidth > r.nameContentWidth)) &&
           r.metaUnits.length === 4 && r.metaUnits.every(unit => unit.nowrap && unit.words.every(w => w.lines.length === 1)) &&
           r.metaUnits.some(unit => unit.text.includes('Long')) && r.metaUnits.some(unit => unit.text.startsWith('closed ')) &&
           r.metaUnits.some(unit => unit.text.startsWith('held '))), detail.rows);
