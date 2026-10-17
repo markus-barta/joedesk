@@ -41,6 +41,32 @@ export function withTradeSummaries(record) {
   return record;
 }
 
+// JOED-31: exact large results beside long native price pairs, plus a short
+// result to prove the original 92 px minimum and common right alignment.
+export function tradeAmountResults(now = NOW) {
+  const date = '2026-10-13';
+  const eur = amount => ({ amount, currency: 'EUR' });
+  const cases = [
+    ['loss', '1', '102000', '2000', '-100000', '0.12', '-100000.12'],
+    ['gain', '10', '2000', '102000', '1000000', '0.01', '999999.99'],
+    ['million', '10', '102000', '2000', '-1000000', '0.12', '-1000000.12'],
+    ['short', '1', '2000', '2012.35', '12.35', '0.01', '12.34'],
+  ];
+  const record = withTradeSummaries({ ...structuredClone(valid.results), generatedAt: now,
+    days: [{ date, desks: structuredClone(valid.results.days[0].desks) }],
+    trades: cases.map(([id, quantity, entry, exit, gross, fees, net], i) => ({
+      ...structuredClone(valid.results.trades[0]), id: `rt-amount-${id}`, desk: DESKS[i % DESKS.length],
+      company: 'Demonstration company with a long name', quantity,
+      openedAt: `${date}T14:00:00.000Z`, closedAt: `${date}T15:0${i}:00.000Z`,
+      entryPrice: { amount: entry, currency: 'USD' }, exitPrice: { amount: exit, currency: 'USD' },
+      grossEur: eur(gross), feesEur: eur(fees), netEur: eur(net),
+      fx: { ...structuredClone(valid.results.trades[0].fx), rate: '1', observedAt: `${date}T15:0${i}:00.000Z` },
+    })),
+  });
+  delete record.receivedAt;
+  return { date, record };
+}
+
 // JOED-30: only yesterday can remain Partial under T+1. Capture the traded
 // and unattributed-only versions of that date as separate accepted snapshots.
 export function partialDaysResults(now = '2026-10-16T12:00:00.000Z') {

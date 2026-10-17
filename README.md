@@ -529,6 +529,18 @@ the formatter emits `1M` for € 999.000. Its five calendar crops show October's
 ±€ 1.200.000, gain, loss, zero, k and missing-day warning, under `JOED_QA_DIR`.
 The generated `index.md` and CI log retain the measurement table.
 
+Day-detail trade amounts keep their full value on one right-aligned line.
+Their columns grow to fit, with the original 92 px minimum for short amounts;
+company names and entry/exit prices wrap first. On phones, prices and fees
+use the second row beneath the company and amount columns.
+The focused `trade-amount` browser scenario checks −€ 100.000,12,
++€ 999.999,99 and −€ 1.000.000,12 beside long USD price pairs at
+1440/1024/390/360 in both themes, through the real inbox and worker/fallback.
+It asserts exact amount, price and fee text, no clipping or row overflow,
+common right edges, and exactly 0 px outer movement on open/close.
+Widest-row crops go to `JOED_QA_DIR` as
+`*-results-trade-amount-{panel,sheet}-crop.png` for the visual check.
+
 **Producer contract pin — manifest revision 5.** Compared with revision 2,
 revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds
 optional day-level `coverage` (`"full"` by default, or `"partial"`), the exact

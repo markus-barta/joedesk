@@ -5,6 +5,7 @@
 // (AC-10–17, 41, 42, 46, Part A craft), plus Tick's desk-card header at 390.
 // JOED-29 adds a focused phone calendar scenario at 360/390 in both themes.
 // JOED-30 adds partial-days: its own month, panel and sheet at every width.
+// JOED-31 adds trade-amount: full amounts beside long prices in panel/sheet.
 // One headless browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir, cpus } from 'node:os';
@@ -16,7 +17,7 @@ import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './brows
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
-import { designResults, withTradeSummaries, partialDaysResults } from './browser/results.mjs';
+import { designResults, withTradeSummaries, partialDaysResults, tradeAmountResults } from './browser/results.mjs';
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -43,7 +44,7 @@ const { results, shots, check: gateCheck, shot, auditScreen } = createGate(QA_DI
 const check = (ac, name, ok, detail) => {
   gateCheck(ac, name, ok, detail);
   // Preserve both geometry snapshots and every clipping row in the CI log.
-  if (!ok && ['phone-calendar', 'partial-days'].includes(ac)) console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
+  if (!ok && ['phone-calendar', 'partial-days', 'trade-amount'].includes(ac)) console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
 };
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ONLY = (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean);
@@ -726,6 +727,94 @@ try {
         await shot(page, viewport, `${viewport.name}-${theme}-results-large-amounts`, 'Results with a € 100.000,12345678 trade: exact, rounded once, nothing clipped');
       }
       await serve(null);
+    }
+  }
+
+  if (run('trade-amount')) {
+    // A separate accepted fixture: shared design data and expectations stay
+    // unchanged. The same rows go through the real worker and phone fallback.
+    await serve(null);
+    const { board } = await designBoard();
+    const { date, record } = tradeAmountResults(board.clock());
+    const checked = validateContract('results', record, { stage: 'ingress' });
+    check('trade-amount', 'large results and price pairs form a valid ingress record', checked.ok, checked.errors);
+    const pushed = await board.pushResults(record);
+    check('trade-amount', 'the real results inbox accepts the focused record', pushed.status === 200, pushed);
+    const want = [
+      ['loss', `−€${NB}100.000,12`, '102.000,00', '2.000,00', '0,12'],
+      ['gain', `+€${NB}999.999,99`, '2.000,00', '102.000,00', '0,01'],
+      ['million', `−€${NB}1.000.000,12`, '102.000,00', '2.000,00', '0,12'],
+      ['short', `+€${NB}12,34`, '2.000,00', '2.012,35', '0,01'],
+    ];
+    const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 780, mobile: true }];
+    for (const viewport of viewports) for (const theme of THEMES) {
+      const tag = `${viewport.name} ${theme}`, root = viewport.mobile ? '#sheetBody' : '#daypanel .dp-list';
+      const fallback = viewport.mobile && theme === 'dark';
+      const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
+      await configure(page, viewport, theme);
+      await load(page, board.url, 'results');
+      if (injection) await page.s('Page.removeScriptToEvaluateOnNewDocument', injection);
+      await waitFor(page, `document.querySelector('#cal [data-day="${date}"] .n')?.textContent === '4${NB}trades'`);
+      const initialDay = await page.evaluate('document.querySelector("#cal .sel").dataset.day');
+      const before = await rects(page, SHIFT);
+      await click(page, `#cal [data-day="${date}"]`);
+      const opened = await rects(page, SHIFT);
+      check('trade-amount', `${tag}: opening the ${viewport.mobile ? 'sheet' : 'panel'} moves outer geometry exactly 0 px`,
+        JSON.stringify(before) === JSON.stringify(opened), { before, opened });
+      const detail = await page.evaluate(`(() => {
+        const root = document.querySelector(${JSON.stringify(root)}), bounds = root.getBoundingClientRect();
+        const rows = [...root.querySelectorAll('.trow')].map(row => {
+          const net = row.querySelector('.net'), amount = net.querySelector('.pl'), px = row.querySelector('.px');
+          const r = row.getBoundingClientRect(), n = net.getBoundingClientRect(), a = amount.getBoundingClientRect(), p = px.getBoundingClientRect();
+          const pieces = [...px.querySelectorAll('.ln > span, .fee')].map(el => {
+            const p = el.getBoundingClientRect(); return { text: el.textContent, left: p.left, right: p.right,
+              scroll: el.scrollWidth, client: el.clientWidth };
+          });
+          return { id: row.dataset.trade, text: net.textContent, scroll: net.scrollWidth, client: net.clientWidth,
+            width: n.width, right: n.right, amountInside: a.left >= n.left && a.right <= n.right,
+            rowInside: r.left >= bounds.left && r.right <= bounds.right && row.scrollWidth <= row.clientWidth,
+            pxFits: px.scrollWidth <= px.clientWidth && pieces.every(piece => piece.left >= p.left && piece.right <= p.right && piece.scroll <= piece.client), pieces };
+        });
+        return { visible: __audit.visible(root), open: document.getElementById('daySheet').open,
+          scroll: root.scrollWidth, client: root.clientWidth, rows };
+      })()`);
+      check('trade-amount', `${tag}: the expected detail surface is visible with all four rows`,
+        detail.visible && detail.open === viewport.mobile && detail.rows.length === want.length, detail);
+      for (const [id, text, entry, exit, fee] of want) {
+        const row = detail.rows.find(r => r.id === `rt-amount-${id}`);
+        check('trade-amount', `${tag} ${id}: exact amount never clips and keeps at least 92 px`,
+          row?.text === text && row.scroll <= row.client && row.amountInside && row.width >= 92, row);
+        check('trade-amount', `${tag} ${id}: both full prices and the fee fit without losing digits`,
+          row?.pxFits && JSON.stringify(row.pieces.map(p => p.text)) === JSON.stringify([
+            `$${NB}${entry}`, `$${NB}${exit}`, `fees €${NB}${fee}`,
+          ]), row);
+      }
+      check('trade-amount', `${tag}: no row overflows its detail surface and every amount shares the right edge`,
+        detail.scroll <= detail.client && detail.rows.every(r => r.rowInside && r.right === detail.rows[0].right), detail);
+      check('trade-amount', `${tag}: short amounts keep the approved 92 px column`,
+        detail.rows.find(r => r.id === 'rt-amount-short')?.width === 92, detail.rows);
+      check('trade-amount', `${tag}: the expected ${fallback ? 'fallback' : 'worker'} renders the fixture`,
+        (await page.evaluate('window.__joedesk.worker()')) === !fallback);
+      // Crop the whole widest row, including its yielding name/price columns.
+      // Scroll only the detail container so the surrounding page stays put.
+      await page.evaluate(`(() => {
+        const root = document.querySelector(${JSON.stringify(root)}), row = root.querySelector('[data-trade="rt-amount-million"]');
+        root.scrollTop += row.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      })()`);
+      await settle(page);
+      const clip = await page.evaluate(`(() => {
+        const r = document.querySelector(${JSON.stringify(`${root} [data-trade="rt-amount-million"]`)}).getBoundingClientRect();
+        return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 };
+      })()`);
+      const name = `${viewport.name}-${theme}-results-trade-amount-${viewport.mobile ? 'sheet' : 'panel'}-crop`;
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true });
+      writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+      shots.push({ file: `${name}.png`, what: 'Full −€ 1.000.000,12 result; long prices and company name yield first' });
+      if (viewport.mobile) await key(page, 'Escape');
+      else await click(page, `#cal [data-day="${initialDay}"]`);
+      const closed = await rects(page, SHIFT);
+      check('trade-amount', `${tag}: closing the sheet or returning to the original day moves outer geometry exactly 0 px`,
+        JSON.stringify(before) === JSON.stringify(closed), { before, closed });
     }
   }
 
@@ -1691,6 +1780,16 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   desktop arrows. August and September add the full signed form set, with
   ±999k measured as INFO only. Amount changes, month changes and closing a settled
   open sheet must move geometry exactly 0 px. The tap's own movement is INFO.
+- **Trade-row amounts (JOED-31).** The dedicated \`trade-amount\` scenario
+  uses real ingress at 1440/1024/390/360 in light and dark, including the
+  phone fallback. It checks full −€ 100.000,12, +€ 999.999,99 and
+  −€ 1.000.000,12 results beside long USD entry/exit prices and fees.
+  Amounts must fit without rounding or clipping, share their right edge,
+  and keep the original 92 px minimum for short results. Names and prices
+  yield first; every row and price part must fit its panel or sheet.
+  Opening and closing the detail surface moves outer geometry exactly
+  0 px. The widest row at each width/theme is captured in
+  \`*-results-trade-amount-{panel,sheet}-crop.png\`.
 - **Partial coverage (JOED-30).** The dedicated \`partial-days\` scenario uses
   real ingress at 1440/1024/390/360, light and dark, through the worker and
   fallback. October shows yesterday (15th) as Partial, missing-summary Stale
@@ -1765,6 +1864,7 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 | Fix round 1 · exact money at any size | \`r1-exact\` (€ 100.000,12345678 trades: tiles, split, calendar, labels) | \`money: exact …\`, \`calendar amounts: …\` |
 | Fix round 1 · equal days are two days | \`r1-days\` | \`best and worst day: …\` |
 | JOED-29 phone amounts, 10 px floor, no clipping and 0 px shift | \`phone-calendar\` (360/390, both themes; measurements below; desktop glyph crop) | \`JOED-29 calendar rendering: …\` |
+| JOED-31 trade amounts, exact prices/fees, aligned right edges, no overflow and 0 px shift | \`trade-amount\` (1440/1024/390/360, both themes; widest-row crops) | — |
 
 ## Checks
 
