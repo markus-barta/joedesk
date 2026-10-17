@@ -28,7 +28,7 @@ const { acceptRead } = await import('../contracts/read.mjs');
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const hm = await import('../public/joe/history-model.js');
-const { designResults, withTradeSummaries, partialDaysResults, retainedPartialResults } = await import('../scripts/browser/results.mjs');
+const { designResults, withTradeSummaries, partialDaysResults, tradeAmountResults, retainedPartialResults } = await import('../scripts/browser/results.mjs');
 const { preflightSnapshot } = await import('../scripts/browser/board.mjs');
 
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
@@ -651,7 +651,115 @@ function calendarCapture(t) {
   };
 }
 const partialReason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
-const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'");
+const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'").replaceAll('\u00ad', '');
+
+test('JOED-31 copy: remove soft hyphens, normalize NBSP and preserve all other characters exactly', () => {
+  const selected = 'DEMO · Demonstration\u00a0company\r\n−€\u00a01.000.000,12\nÜberraschung\t𐐀 & <name> - ‐ ‑ –\u200b';
+  const plain = 'DEMO · Demonstration company\r\n−€ 1.000.000,12\nÜberraschung\t𐐀 & <name> - ‐ ‑ –\u200b';
+  assert.equal(page.stripSoftHyphens('\u00ad' + selected.replace('Demonstration', 'Dem\u00adons\u00adtra\u00adtion') + '\u00ad\u00ad'), plain);
+  assert.equal(page.stripSoftHyphens(selected), plain);
+  assert.equal(page.stripSoftHyphens(plain), plain);
+  assert.equal(page.stripSoftHyphens(''), '');
+  assert.equal(page.stripSoftHyphens('\u00ad\u00ad'), '');
+});
+
+test('JOED-31 copy: only intercept a nonempty selection wholly inside the detail surface', () => {
+  const inside = {}, outside = {}, writes = [];
+  const selection = { rangeCount: 1, isCollapsed: false, getRangeAt: () => ({ commonAncestorContainer: inside }),
+    toString: () => 'Dem\u00adonstration\n−€\u00a012,34' };
+  const event = { currentTarget: { ownerDocument: { getSelection: () => selection }, contains: node => node === inside },
+    clipboardData: { setData: (...args) => writes.push(args) }, preventDefault: () => writes.push('prevented') };
+  page.copyDayText(event);
+  assert.deepEqual(writes, [['text/plain', 'Demonstration\n−€ 12,34'], 'prevented']);
+  writes.length = 0;
+  for (const ranges of [[outside], [inside, outside], []]) {
+    selection.rangeCount = ranges.length;
+    selection.getRangeAt = i => ({ commonAncestorContainer: ranges[i] });
+    page.copyDayText(event);
+  }
+  selection.rangeCount = 1; selection.getRangeAt = () => ({ commonAncestorContainer: inside });
+  selection.isCollapsed = true; page.copyDayText(event);
+  selection.isCollapsed = false; page.copyDayText({ ...event, clipboardData: null });
+  page.copyDayText({ ...event, currentTarget: { ...event.currentTarget, ownerDocument: { getSelection: () => null } } });
+  assert.deepEqual(writes, []);
+});
+
+test('JOED-31 rendering: exact extreme amounts and prices survive whole-word names and atomic meta units', t => {
+  const { date, record: value } = tradeAmountResults();
+  assert.equal(validateContract('results', value, { stage: 'ingress' }).ok, true);
+  assert.equal(M.dayResult(M.indexResults(value), date, ALL).units, E('-99987.91'));
+  const render = calendarCapture(t), r = render(value, '2026-10-16T12:00:00.000Z', date);
+  for (const html of [r.panel, r.sheet]) {
+    assert.ok(textOf(html).includes('−€ 1.000.000,12'));
+    assert.ok(textOf(html).includes('$ 102.000,12345678'));
+    assert.ok(textOf(html).includes('$ 2.000,12345678'));
+    assert.ok(textOf(html).includes('Demonstration company with a long name'));
+    assert.equal((html.match(/<div class="name" lang="en"><b class="word">DEMO<\/b> · /g) ?? []).length, 4);
+    assert.equal((html.match(/class="meta-unit"/g) ?? []).length, 16);
+    assert.match(html.replaceAll('\u00ad', ''), /<span class="word">Demonstration<\/span> <span class="word">company<\/span>/);
+    assert.equal((html.match(/class="meta-sep" aria-hidden="true"> ·<\/span><\/span> <span class="meta-unit">/g) ?? []).length, 12);
+    assert.match(html, /<span class="meta-unit">closed 17:02<span class="meta-sep" aria-hidden="true"> ·<\/span><\/span> <span class="meta-unit">held 1 h 2 min<\/span>/);
+  }
+});
+
+test('JOED-31 rendering: long company words have deterministic soft hyphens and at least three source letters per fragment', t => {
+  const cases = [
+    ['abcdefgh', 'abc\u00addefgh'],
+    ['abcdefghi', 'abc\u00addef\u00adghi'],
+    ['abcdefghij', 'abc\u00addef\u00adghij'],
+    ['Demonstration', 'Dem\u00adons\u00adtra\u00adtion'],
+    ['Überraschung', 'Übe\u00adrra\u00adsch\u00adung'],
+    ['𐐀𐐁𐐂𐐃𐐄𐐅𐐆𐐇', '𐐀𐐁𐐂\u00ad𐐃𐐄𐐅𐐆𐐇'],
+  ];
+  const words = [...cases.map(([source]) => source), ...Array.from({ length: 25 }, (_, i) => 'A'.repeat(i + 8))];
+  const { date, record: value } = tradeAmountResults();
+  value.trades.forEach(trade => { trade.company = words.join(' '); });
+  const render = calendarCapture(t), r = render(value, '2026-10-16T12:00:00.000Z', date);
+  for (const html of [r.panel, r.sheet]) {
+    const names = [...html.matchAll(/<div class="name"[^>]*>([\s\S]*?)<span class="meta">/g)];
+    assert.equal(names.length, 4);
+    assert.ok(!html.replace(/<span class="word">[^<]*<\/span>/g, '').includes('\u00ad'), 'only company tokens contain soft hyphens');
+    for (const [, name] of names) {
+      const tokens = [...name.matchAll(/<span class="word">([^<]*)<\/span>/g)].map(([, text]) => text);
+      assert.deepEqual(tokens.slice(0, cases.length), cases.map(([, expected]) => expected));
+      assert.deepEqual(tokens.map(text => text.replaceAll('\u00ad', '')), words);
+      for (const token of tokens) {
+        const fragments = token.split('\u00ad');
+        assert.ok(fragments.length > 1, token);
+        assert.ok(fragments.every(fragment => [...fragment].length >= 3), token);
+      }
+    }
+  }
+  assert.equal(value.trades[0].company, words.join(' '), 'the recorded company text is unchanged');
+});
+
+test('JOED-31 rendering: short words, symbols, numbers and meta units never gain soft hyphens', t => {
+  const { date, record: value } = tradeAmountResults();
+  const company = 'A BB CCC DDDD EEEEE FFFFFF company 1234567890';
+  value.trades.forEach(trade => { trade.company = company; trade.symbol = 'LONGSYMBOL'; });
+  const render = calendarCapture(t), r = render(value, '2026-10-16T12:00:00.000Z', date);
+  for (const html of [r.panel, r.sheet]) {
+    assert.ok(!html.includes('\u00ad'));
+    assert.equal((html.match(/<b class="word">LONGSYMBOL<\/b>/g) ?? []).length, 4);
+    assert.equal(textOf(html).split(company).length - 1, 4);
+    assert.ok(textOf(html).includes('Long 10'));
+    assert.ok(textOf(html).includes('closed 17:02'));
+    assert.ok(textOf(html).includes('held 1 h 2 min'));
+    assert.ok(textOf(html).includes('$ 102.000,12345678'));
+  }
+});
+
+test('JOED-31 rendering: company tokens preserve spacing and escape markup in panel and sheet', t => {
+  const { date, record: value } = tradeAmountResults();
+  value.trades[2].company = 'First  <script> & "company"';
+  const render = calendarCapture(t), r = render(value, '2026-10-16T12:00:00.000Z', date);
+  for (const html of [r.panel, r.sheet]) {
+    assert.ok(html.includes('<span class="word">First</span>  <span class="word">&lt;script&gt;</span>'));
+    assert.ok(html.includes('<span class="word">&amp;</span>'));
+    assert.ok(html.includes('<span class="word">&quot;company&quot;</span>'));
+    assert.ok(!html.includes('<script>'));
+  }
+});
 
 test('JOED-30 rendering: closed partial trades keep their exact amount, tint and one warning in every day view', t => {
   const render = calendarCapture(t), value = fixture('partial-day');

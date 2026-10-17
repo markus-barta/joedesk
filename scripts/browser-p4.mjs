@@ -5,6 +5,7 @@
 // (AC-10–17, 41, 42, 46, Part A craft), plus Tick's desk-card header at 390.
 // JOED-29 adds a focused phone calendar scenario at 360/390 in both themes.
 // JOED-30 adds partial-days: its own month, panel and sheet at every width.
+// JOED-31 adds trade-amount: full amounts beside long prices in panel/sheet.
 // One headless browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir, cpus } from 'node:os';
@@ -16,7 +17,7 @@ import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './brows
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
-import { designResults, withTradeSummaries, partialDaysResults, retainedPartialResults } from './browser/results.mjs';
+import { designResults, withTradeSummaries, partialDaysResults, tradeAmountResults, retainedPartialResults } from './browser/results.mjs';
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -43,14 +44,124 @@ const { results, shots, check: gateCheck, shot, auditScreen } = createGate(QA_DI
 const check = (ac, name, ok, detail) => {
   gateCheck(ac, name, ok, detail);
   // Preserve both geometry snapshots and every clipping row in the CI log.
-  if (!ok && ['phone-calendar', 'partial-days'].includes(ac)) console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
+  if (!ok && ['phone-calendar', 'partial-days', 'trade-amount'].includes(ac)) console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
 };
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ONLY = (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean);
 const run = name => !ONLY.length || ONLY.includes(name);
 
-const N = text => String(text ?? '').replace(/[\s ]+/g, '');
+const N = text => String(text ?? '').replace(/[\s \u00ad]+/g, '');
 const NB = '\u00a0';
+// Executed in the page: measure visible text glyphs independently of the
+// fitter, and unit boxes so a line beginning with an icon must also be flush.
+function tradeMetaLines(meta) {
+  const bounds = meta.getBoundingClientRect(), lines = [], suffixes = [];
+  const units = [...meta.querySelectorAll('.meta-unit')].map(unit => ({
+    text: unit.textContent, ...unit.getBoundingClientRect().toJSON(),
+  }));
+  const walker = document.createTreeWalker(meta, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (getComputedStyle(node.parentElement).visibility !== 'visible') continue;
+    for (const match of node.textContent.matchAll(/\S/gu)) {
+      const range = document.createRange();
+      range.setStart(node, match.index); range.setEnd(node, match.index + match[0].length);
+      for (const r of range.getClientRects()) {
+        if (!r.width || !r.height) continue;
+        let line = lines.find(line => Math.abs(line.top - r.top) < 1);
+        if (!line) lines.push(line = { top: r.top, glyphs: [] });
+        line.glyphs.push({ text: match[0], left: r.left });
+      }
+    }
+  }
+  for (const [i, unit] of [...meta.querySelectorAll('.meta-unit')].entries()) {
+    const suffix = unit.querySelector('.meta-sep');
+    if (!suffix) continue;
+    const box = suffix.getBoundingClientRect();
+    suffixes.push({ text: suffix.textContent, width: box.width,
+      visibility: getComputedStyle(suffix).visibility,
+      preceding: suffix.previousSibling?.textContent?.trim(),
+      lineEnd: !units[i + 1] || units[i + 1].top >= units[i].bottom - 0.5 });
+  }
+  return { units, suffixes, lines: lines.sort((a, b) => a.top - b.top).map(line => ({
+    top: line.top, text: line.glyphs.sort((a, b) => a.left - b.left).map(g => g.text).join(''),
+  })), startsFlush: units.every((unit, i) => i && unit.top < units[i - 1].bottom - 0.5 || Math.abs(unit.left - bounds.left) < 0.5) };
+}
+const cleanMetaLines = rows => rows.length === 4 && rows.every(row => row.meta.lines.length > 0 && row.meta.startsFlush &&
+  row.meta.lines.every(line => !line.text.startsWith('·') && !line.text.endsWith('·')) &&
+  row.meta.suffixes.length === 3 && row.meta.suffixes.every(suffix => suffix.width > 0 && suffix.preceding &&
+    suffix.text.trim() === '·' && suffix.visibility === (suffix.lineEnd ? 'hidden' : 'visible')));
+// Executed in the page in the actual capture state, including list clipping.
+// Text/visibility alone would miss the first line scrolled under the header.
+function tradeSymbols(root, expected) {
+  const list = root.getBoundingClientRect();
+  const panel = root.closest('dialog, .daypanel').getBoundingClientRect();
+  return [...root.querySelectorAll('.trow')].map(row => {
+    const name = row.querySelector('.name'), symbol = name.querySelector('b.word');
+    const rect = symbol?.getBoundingClientRect(), style = symbol && getComputedStyle(symbol);
+    const prefix = expected[row.dataset.trade];
+    return { id: row.dataset.trade, expected: prefix, text: name.textContent, rect: rect?.toJSON(),
+      startsWithSymbol: Boolean(prefix && name.firstElementChild === symbol && symbol.textContent === prefix &&
+        name.textContent.replaceAll('\u00ad', '').replace(/\u00a0/g, ' ').startsWith(prefix + ' · ')),
+      rendered: Boolean(rect?.width > 0 && rect.height > 0 && style.visibility === 'visible' &&
+        style.display !== 'none' && Number(style.opacity) > 0),
+      inside: Boolean(rect && [list, panel].every(b => rect.left >= b.left && rect.right <= b.right &&
+        rect.top >= b.top && rect.bottom <= b.bottom)) };
+  });
+}
+// Executed in the page: source letters and drawn soft hyphens have separate
+// Ranges, so an invisible opportunity cannot count as a letter or a dash.
+function tradeWordLines(el) {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), out = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    for (const match of node.textContent.matchAll(/\S+/gu)) {
+      const range = document.createRange();
+      range.setStart(node, match.index); range.setEnd(node, match.index + match[0].length);
+      const rects = [...range.getClientRects()].filter(r => r.width > 0);
+      const lines = [...new Set(rects.map(r => r.top))], fragments = [], hyphens = [];
+      let unbrokenWidth = range.getBoundingClientRect().width, offset = match.index;
+      for (const char of match[0]) {
+        const start = offset;
+        range.setStart(node, start); range.setEnd(node, offset += char.length);
+        const boxes = [...range.getClientRects()].filter(r => r.width > 0 && r.height > 0);
+        if (char === '\u00ad') {
+          hyphens.push({ offset: start, boxes });
+          continue;
+        }
+        // Chrome can prepend the previous line's drawn hyphen box.
+        const box = boxes.at(-1);
+        if (!box) continue;
+        let fragment = fragments.find(f => Math.abs(f.top - box.top) < 0.5);
+        if (!fragment) fragments.push(fragment = { top: box.top, text: '' });
+        fragment.text += char;
+        fragment.end = offset; fragment.right = box.right;
+      }
+      for (const fragment of fragments) {
+        const boxes = hyphens.filter(h => h.offset === fragment.end).flatMap(h => h.boxes);
+        fragment.hyphenWidth = Math.max(0, ...boxes.filter(box => Math.abs(box.top - fragment.top) < 0.5 &&
+          box.right >= fragment.right).map(box => box.width));
+        fragment.visibleText = fragment.text + (fragment.hyphenWidth > 0 ? '-' : '');
+      }
+      const word = match[0].replaceAll('\u00ad', '');
+      if (lines.length > 1) {
+        // Preserve the real font and ancestor selectors while measuring the
+        // source word without its constraint or discretionary opportunities.
+        const probe = node.parentElement.cloneNode(false);
+        probe.textContent = word;
+        Object.assign(probe.style, { position: 'fixed', visibility: 'hidden', pointerEvents: 'none',
+          whiteSpace: 'nowrap', width: 'max-content', minWidth: '0', maxWidth: 'none' });
+        node.parentElement.after(probe);
+        try {
+          range.selectNodeContents(probe);
+          unbrokenWidth = range.getBoundingClientRect().width;
+        } finally { probe.remove(); }
+      }
+      out.push({ word, lines, fragments, unbrokenWidth });
+    }
+  }
+  return out;
+}
 const money = n => (n === null || n === undefined ? '—' : fmt.money(n, 'EUR', true));
 const two = (a, b) => `${a === null || a === undefined ? '—' : money(a)}/${b === null || b === undefined ? '—' : money(b)}`;
 const DESKS = ['j', 'joe', 'joel'];
@@ -59,7 +170,7 @@ const DESK_CHOICES = ['all', 'j', 'joe', 'joel'];
 
 // Everything Results shows, read from the page.
 const RES = `(() => {
-  const t = el => (el?.innerText ?? '').replace(/\u00a0(?=·)/g, ' ');
+  const t = el => (el?.innerText ?? '').replaceAll('\u00ad', '').replace(/\u00a0(?=·)/g, ' ');
   const svg = document.querySelector('#curve > svg');
   return {
     label: t(document.querySelector('#perLabel .cur')), bd: t(document.getElementById('bdTitle')), legend: [...document.querySelectorAll('#curveLegend .lg')].map(t),
@@ -726,6 +837,332 @@ try {
         await shot(page, viewport, `${viewport.name}-${theme}-results-large-amounts`, 'Results with a € 100.000,12345678 trade: exact, rounded once, nothing clipped');
       }
       await serve(null);
+    }
+  }
+
+  if (run('trade-amount')) {
+    // A separate accepted fixture: shared design data and expectations stay
+    // unchanged. The same rows go through the real worker and phone fallback.
+    await serve(null);
+    const { board } = await designBoard();
+    const { date, record } = tradeAmountResults(board.clock());
+    const checked = validateContract('results', record, { stage: 'ingress' });
+    check('trade-amount', 'large results and price pairs form a valid ingress record', checked.ok, checked.errors);
+    const pushed = await board.pushResults(record);
+    check('trade-amount', 'the real results inbox accepts the focused record', pushed.status === 200, pushed);
+    const want = [
+      ['loss', `−€${NB}100.000,12`, '102.000,00', '2.000,00', '0,12'],
+      ['gain', `+€${NB}999.999,99`, '2.000,00', '102.000,00', '0,01'],
+      ['million', `−€${NB}1.000.000,12`, '102.000,12345678', '2.000,12345678', '0,12'],
+      ['short', `+€${NB}12,34`, '2.000,00', '2.012,35', '0,01'],
+    ];
+    const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 780, mobile: true }];
+    for (const viewport of viewports) for (const theme of THEMES) {
+      const tag = `${viewport.name} ${theme}`, root = viewport.mobile ? '#sheetBody' : '#daypanel .dp-list';
+      const fallback = viewport.mobile && theme === 'dark';
+      const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
+      await configure(page, viewport, theme);
+      await load(page, board.url, 'results');
+      if (injection) await page.s('Page.removeScriptToEvaluateOnNewDocument', injection);
+      await waitFor(page, `document.querySelector('#cal [data-day="${date}"] .n')?.textContent === '4${NB}trades'`);
+      const initialDay = await page.evaluate('document.querySelector("#cal .sel").dataset.day');
+      const before = await rects(page, SHIFT);
+      await click(page, `#cal [data-day="${date}"]`);
+      const opened = await rects(page, SHIFT);
+      check('trade-amount', `${tag}: opening the ${viewport.mobile ? 'sheet' : 'panel'} moves outer geometry exactly 0 px`,
+        JSON.stringify(before) === JSON.stringify(opened), { before, opened });
+      const detail = await page.evaluate(`(() => {
+        const root = document.querySelector(${JSON.stringify(root)}), bounds = root.getBoundingClientRect();
+        const panel = document.getElementById('daypanel').getBoundingClientRect();
+        const words = ${tradeWordLines.toString()};
+        const rows = [...root.querySelectorAll('.trow')].map(row => {
+          const net = row.querySelector('.net'), amount = net.querySelector('.pl'), px = row.querySelector('.px');
+          const name = row.querySelector('.name'), meta = name.querySelector('.meta');
+          const nameBounds = name.getBoundingClientRect(), nameStyle = getComputedStyle(name);
+          const nameContentWidth = nameBounds.width - parseFloat(nameStyle.paddingLeft) - parseFloat(nameStyle.paddingRight) -
+            parseFloat(nameStyle.borderLeftWidth) - parseFloat(nameStyle.borderRightWidth);
+          const nameWords = words(name);
+          const r = row.getBoundingClientRect(), n = net.getBoundingClientRect(), a = amount.getBoundingClientRect(), p = px.getBoundingClientRect();
+          const pieces = [...px.querySelectorAll('.ln > span, .fee')].map(el => {
+            const p = el.getBoundingClientRect(); return { text: el.textContent, top: p.top, left: p.left, right: p.right,
+              scroll: el.scrollWidth, client: el.clientWidth };
+          });
+          return { id: row.dataset.trade, text: net.textContent, scroll: net.scrollWidth, client: net.clientWidth,
+            width: n.width, amountWidth: a.width, nowrap: getComputedStyle(net).whiteSpace === 'nowrap',
+            nameWidth: nameBounds.width, nameContentWidth, words: nameWords,
+            lang: name.lang, hyphens: nameStyle.hyphens,
+            company: [...name.querySelectorAll(':scope > span.word')].map(word => word.textContent.replaceAll('\u00ad', '')).join(' '),
+            symbol: name.querySelector('b.word').textContent,
+            softHyphensOnlyInCompany: [name.querySelector('b.word'), meta, px, net].every(el => !el.textContent.includes('\u00ad')),
+            brokenWords: nameWords.filter(w => w.lines.length > 1),
+            nameFits: name.scrollWidth <= name.clientWidth,
+            metaUnits: [...meta.querySelectorAll('.meta-unit')].map(unit => ({ text: unit.textContent,
+              nowrap: getComputedStyle(unit).whiteSpace === 'nowrap', words: words(unit),
+              top: unit.getBoundingClientRect().top, bottom: unit.getBoundingClientRect().bottom })),
+            meta: (${tradeMetaLines.toString()})(meta), priceFont: getComputedStyle(px).fontSize,
+            smallPrice: px.classList.contains('small'), feeFont: getComputedStyle(px.querySelector('.fee')).fontSize,
+            priceColumn: getComputedStyle(px).gridColumn, right: n.right, amountInside: a.left >= n.left && a.right <= n.right,
+            amountInPanel: a.left >= panel.left && a.right <= panel.right,
+            rowInside: r.left >= bounds.left && r.right <= bounds.right && row.scrollWidth <= row.clientWidth,
+            pxFits: px.scrollWidth <= px.clientWidth && pieces.every(piece => piece.left >= p.left && piece.right <= p.right && piece.scroll <= piece.client), pieces };
+        });
+        const head = document.querySelector('#daypanel .dp-head'), summary = head.querySelector('.dp-sum');
+        const range = document.createRange(); range.selectNodeContents(summary);
+        const header = { text: summary.textContent, scroll: head.scrollWidth, client: head.clientWidth,
+          rects: [...range.getClientRects()].map(r => r.toJSON()), panel: panel.toJSON() };
+        return { visible: __audit.visible(root), open: document.getElementById('daySheet').open,
+          scroll: root.scrollWidth, client: root.clientWidth, rows, header };
+      })()`);
+      check('trade-amount', `${tag}: the expected detail surface is visible with all four rows`,
+        detail.visible && detail.open === viewport.mobile && detail.rows.length === want.length, detail);
+      for (const [id, text, entry, exit, fee] of want) {
+        const row = detail.rows.find(r => r.id === `rt-amount-${id}`);
+        check('trade-amount', `${tag} ${id}: exact amount stays on one line and never clips`,
+          row?.text === text && row.nowrap && row.scroll <= row.client && row.amountInside, row);
+        check('trade-amount', `${tag} ${id}: both full prices and the fee fit without losing digits`,
+          row?.pxFits && JSON.stringify(row.pieces.map(p => p.text)) === JSON.stringify([
+            `$${NB}${entry}`, `$${NB}${exit}`, `fees €${NB}${fee}`,
+          ]), row);
+      }
+      check('trade-amount', `${tag}: no row overflows its detail surface and every amount shares the right edge`,
+        detail.scroll <= detail.client && detail.rows.every(r => r.rowInside && r.right === detail.rows[0].right), detail);
+      check('trade-amount', `${tag}: name and meta line breaks stay at word boundaries unless a phone token exceeds its column, with atomic meta units`,
+        detail.rows.every(r => r.nameFits && r.words.length > 10 && r.words.every(w => w.lines.length === 1 ||
+          (viewport.mobile && w.lines.length > 1 && w.unbrokenWidth > r.nameContentWidth)) &&
+          r.metaUnits.length === 4 && r.metaUnits.every(unit => unit.nowrap && unit.words.every(w => w.lines.length === 1)) &&
+          r.metaUnits.some(unit => unit.text.includes('Long')) && r.metaUnits.some(unit => unit.text.startsWith('closed ')) &&
+          r.metaUnits.some(unit => unit.text.startsWith('held '))), detail.rows);
+      check('trade-amount', `${tag}: company text matches the source without soft hyphens, and symbols, numbers and meta stay untouched`,
+        detail.rows.every(row => row.company === record.trades.find(t => t.id === row.id)?.company &&
+          row.symbol === record.trades.find(t => t.id === row.id)?.symbol && row.softHyphensOnlyInCompany), detail.rows);
+      if (viewport.name === '360' || viewport.name === '1440') {
+        const copied = await page.evaluate(`(() => {
+          const row = document.querySelector(${JSON.stringify(root)} + ' [data-trade="rt-amount-million"]');
+          const words = [...row.querySelectorAll('.name > span.word')], amount = row.querySelector('.net .pl');
+          const selection = document.getSelection();
+          const copy = (range, target) => {
+            const data = new DataTransfer();
+            selection.removeAllRanges(); selection.addRange(range);
+            try {
+              const selected = selection.toString();
+              const event = new ClipboardEvent('copy', { bubbles: true, cancelable: true, clipboardData: data });
+              target.dispatchEvent(event);
+              return { selected, text: data.getData('text/plain'), prevented: event.defaultPrevented };
+            } finally { selection.removeAllRanges(); }
+          };
+          const companyRange = document.createRange(), amountRange = document.createRange();
+          companyRange.setStartBefore(words[0]); companyRange.setEndAfter(words.at(-1));
+          amountRange.selectNodeContents(amount);
+          return { company: copy(companyRange, words[0]), amount: { ...copy(amountRange, amount), visible: amount.textContent } };
+        })()`);
+        check('trade-amount', `${tag}: copying a hyphenated company name preserves its plain source text`,
+          copied.company.selected.includes('\u00ad') && copied.company.prevented &&
+          copied.company.text === record.trades.find(t => t.id === 'rt-amount-million').company, copied.company);
+        check('trade-amount', `${tag}: copying an amount preserves its visible text with normal spaces`,
+          copied.amount.selected.includes('\u00a0') && copied.amount.prevented &&
+          copied.amount.text === copied.amount.visible.replaceAll('\u00a0', ' '), copied.amount);
+      }
+      check('trade-amount', `${tag}: manual hyphenation leaves at least three source characters in every broken-word line`,
+        detail.rows.every(r => r.lang === 'en' && r.hyphens === 'manual' && r.brokenWords.every(w =>
+          w.fragments.length === w.lines.length && w.fragments.map(f => f.text).join('') === w.word &&
+          w.fragments.every(f => [...f.text].length >= 3))), detail.rows);
+      check('trade-amount', `${tag}: each broken-word fragment ends in a drawn soft hyphen except the final fragment`,
+        detail.rows.every(r => r.brokenWords.every(w => w.fragments.every((f, i) => i === w.fragments.length - 1 ?
+          f.hyphenWidth === 0 && f.visibleText === f.text : f.hyphenWidth > 0 && f.visibleText.endsWith('-')))) &&
+        (viewport.name !== '360' || detail.rows.find(r => r.id === 'rt-amount-million')?.brokenWords.some(w => w.word === 'Demonstration')), detail.rows);
+      check('trade-amount', `${tag}: no visible dot starts or ends a meta line, suffixes stay with the preceding unit, and new lines start flush`,
+        cleanMetaLines(detail.rows), detail.rows.map(({ id, meta }) => ({ id, meta })));
+      check('trade-amount', `${tag}: every price in the panel uses one size, with all rows at 11 px if any needs it`,
+        new Set(detail.rows.map(r => r.priceFont)).size === 1 &&
+        detail.rows.every(r => r.smallPrice === detail.rows[0].smallPrice && (!r.smallPrice || r.priceFont === '11px' && r.feeFont === '11px')), detail.rows);
+      if (viewport.mobile) {
+        check('trade-amount', `${tag}: phone amount columns fit their content without clipping and prices span the second row`,
+          detail.rows.every(r => Math.abs(r.width - r.amountWidth) < 1 && r.nowrap && r.scroll <= r.client &&
+            r.amountInside && r.priceColumn === '2 / -1'), detail.rows);
+      } else {
+        check('trade-amount', `${tag}: desktop amounts keep at least 92 px and short amounts keep the approved 92 px column`,
+          detail.rows.every(r => r.width >= 92) && detail.rows.find(r => r.id === 'rt-amount-short')?.width === 92, detail.rows);
+        check('trade-amount', `${tag}: every desktop name column keeps 120 px and every full amount stays inside the panel`,
+          detail.rows.every(r => r.nameWidth >= 120 && r.amountInPanel), detail.rows);
+        const h = detail.header;
+        check('trade-amount', `${tag}: the full trade-count and amount header stays inside the panel`,
+          N(h.text) === N(`4 trades · −€ 99.987,91`) && h.scroll <= h.client && h.rects.length > 0 &&
+          h.rects.every(r => r.left >= h.panel.left && r.right <= h.panel.right && r.top >= h.panel.top && r.bottom <= h.panel.bottom), h);
+      }
+      if (viewport.name === '1440') {
+        const long = detail.rows.find(r => r.id === 'rt-amount-million');
+        check('trade-amount', `${tag}: eight-decimal prices wrap before the full amount loses space`,
+          long?.pxFits && long.pieces[1].top > long.pieces[0].top, long);
+      }
+      check('trade-amount', `${tag}: the expected ${fallback ? 'fallback' : 'worker'} renders the fixture`,
+        (await page.evaluate('window.__joedesk.worker()')) === !fallback);
+      const yieldOrder = await page.evaluate(`(async () => {
+        const { fitTradeRows } = await import('./results.js');
+        const host = document.createElement('div');
+        host.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden;pointer-events:none;width:1000px';
+        const row = document.querySelector(${JSON.stringify(root)} + ' [data-trade="rt-amount-million"]').cloneNode(true);
+        const peer = document.querySelector(${JSON.stringify(root)} + ' [data-trade="rt-amount-short"]').cloneNode(true);
+        row.style.display = peer.style.display = 'block'; peer.querySelector('.px').style.width = '1000px';
+        host.append(row, peer); document.body.append(host);
+        try {
+          const px = row.querySelector('.px'), fee = px.querySelector('.fee'), ln = px.querySelector('.ln');
+          const prices = [...ln.children];
+          const size = width => { px.style.width = width + 'px'; fitTradeRows(host); };
+          const snapshot = () => ({ small: px.classList.contains('small'), feeWrap: px.classList.contains('wrap-fee'),
+            font: getComputedStyle(px).fontSize, feeFont: getComputedStyle(fee).fontSize,
+            peerFont: getComputedStyle(peer.querySelector('.px')).fontSize,
+            peerSmall: peer.querySelector('.px').classList.contains('small'),
+            wrapped: prices[1].getBoundingClientRect().top > prices[0].getBoundingClientRect().top,
+            feeBelow: fee.getBoundingClientRect().top >= ln.getBoundingClientRect().bottom,
+            fits: px.scrollWidth <= px.clientWidth });
+          size(1000);
+          const gap = parseFloat(getComputedStyle(px).columnGap);
+          const regular = Math.max(...prices.map(p => p.getBoundingClientRect().width)) + fee.getBoundingClientRect().width + gap;
+          size(regular + 1); const pairWrap = snapshot();
+          px.classList.add('small');
+          const smallPrice = Math.max(...prices.map(p => p.getBoundingClientRect().width));
+          const small = smallPrice + fee.getBoundingClientRect().width + gap;
+          size((regular + small) / 2); const reduced = snapshot();
+          size(smallPrice + 1); const feeWrap = snapshot();
+          size(1000); const recovered = snapshot();
+          // The exception belongs to a single oversized token. Ordinary
+          // company words above must never take this internal-break path.
+          const name = row.querySelector('.name'), word = name.querySelector('.word');
+          name.style.width = '120px'; word.textContent = 'X'.repeat(80);
+          const range = document.createRange(); range.selectNodeContents(word);
+          const token = { lines: [...new Set([...range.getClientRects()].map(r => r.top))].length,
+            fits: name.scrollWidth <= name.clientWidth, width: word.getBoundingClientRect().width };
+          return { pairWrap, reduced, feeWrap, recovered, token };
+        } finally { host.remove(); }
+      })()`);
+      check('trade-amount', `${tag}: price wrap precedes the 11 px token, fee wrap follows, and wider columns recover`,
+        yieldOrder.pairWrap.wrapped && !yieldOrder.pairWrap.small && !yieldOrder.pairWrap.feeWrap && !yieldOrder.pairWrap.feeBelow && yieldOrder.pairWrap.fits &&
+        yieldOrder.reduced.wrapped && yieldOrder.reduced.small && yieldOrder.reduced.font === '11px' && !yieldOrder.reduced.feeWrap && yieldOrder.reduced.fits &&
+        yieldOrder.feeWrap.small && yieldOrder.feeWrap.feeFont === '11px' && yieldOrder.feeWrap.feeWrap && yieldOrder.feeWrap.feeBelow && yieldOrder.feeWrap.fits &&
+        !yieldOrder.recovered.small && !yieldOrder.recovered.feeWrap && yieldOrder.recovered.fits, yieldOrder);
+      check('trade-amount', `${tag}: a single constrained price reduces its roomy peer too, and both recover together`,
+        ['pairWrap', 'reduced', 'feeWrap', 'recovered'].every(step => yieldOrder[step].font === yieldOrder[step].peerFont &&
+          yieldOrder[step].small === yieldOrder[step].peerSmall), yieldOrder);
+      check('trade-amount', `${tag}: only an oversized single name token breaks internally without overflow`,
+        yieldOrder.token.lines > 1 && yieldOrder.token.fits && yieldOrder.token.width <= 120, yieldOrder.token);
+      const resizedLayout = `(() => {
+        const root = document.querySelector(${JSON.stringify(root)});
+        return [...root.querySelectorAll('.trow')].map(row => ({ id: row.dataset.trade,
+          meta: (${tradeMetaLines.toString()})(row.querySelector('.meta')),
+          priceFont: getComputedStyle(row.querySelector('.px')).fontSize }));
+      })()`;
+      const alternate = viewports.find(v => v.name === ({ '1440': '1024', '1024': '1440', '390': '360', '360': '390' })[viewport.name]);
+      await configure(page, alternate, theme);
+      await settle(page);
+      const resized = await page.evaluate(resizedLayout);
+      check('trade-amount', `${tag}: live resize to ${alternate.width} keeps dots off meta line edges, starts flush and uses one panel price size`,
+        cleanMetaLines(resized) && new Set(resized.map(row => row.priceFont)).size === 1, resized);
+      await configure(page, viewport, theme);
+      await settle(page);
+      const restored = await page.evaluate(resizedLayout);
+      check('trade-amount', `${tag}: resizing back restores clean meta lines and the original panel price size`,
+        cleanMetaLines(restored) && restored.every(row => row.priceFont === detail.rows.find(r => r.id === row.id)?.priceFont), restored);
+      const stable = await page.evaluate(`(async () => {
+        const { fitTradeRows } = await import('./results.js');
+        const root = document.querySelector(${JSON.stringify(root)});
+        const geometry = () => [...root.querySelectorAll('.meta-unit, .meta-sep')].map(el => el.getBoundingClientRect().toJSON());
+        const visibility = () => [...root.querySelectorAll('.meta-sep')].map(el => getComputedStyle(el).visibility);
+        const before = geometry(), hidden = visibility();
+        fitTradeRows(root); const once = geometry(), first = visibility();
+        fitTradeRows(root); const twice = geometry(), second = visibility();
+        const suffixes = [...root.querySelectorAll('.meta-sep')];
+        try {
+          suffixes.forEach(el => { el.style.visibility = 'visible'; });
+          return { before, once, twice, shown: geometry(), hidden, first, second };
+        } finally { suffixes.forEach(el => el.style.removeProperty('visibility')); }
+      })()`);
+      check('trade-amount', `${tag}: hiding dots keeps their widths and repeated layout never reflows or flips visibility`,
+        [stable.once, stable.twice, stable.shown].every(boxes => JSON.stringify(boxes) === JSON.stringify(stable.before)) &&
+        JSON.stringify(stable.hidden) === JSON.stringify(stable.first) && JSON.stringify(stable.first) === JSON.stringify(stable.second), stable);
+      const expectedSymbols = Object.fromEntries(record.trades.map(t => [t.id, t.symbol]));
+      const symbols = await page.evaluate(`(${tradeSymbols.toString()})(document.querySelector(${JSON.stringify(root)}), ${JSON.stringify(expectedSymbols)})`);
+      check('trade-amount', `${tag}: every row starts with its recorded symbol and the symbol is rendered`,
+        symbols.length === want.length && symbols.every(row => row.startsWithSymbol && row.rendered), symbols);
+      // A bottom-scrolled list cut row 1's first line out of the old crop.
+      // Capture the entire list at its tested width instead. Height overrides
+      // are capture-only and restored before the row crop and shift checks.
+      const captureSelectors = viewport.mobile ? ['#daySheet', '#daySheet .dlg-in', root] : ['#daypanel', root];
+      const savedCapture = await page.evaluate(`(() => {
+        const nodes = ${JSON.stringify(captureSelectors)}.map(selector => document.querySelector(selector));
+        const saved = nodes.map(el => ({ style: el.getAttribute('style'), scrollTop: el.scrollTop }));
+        const list = nodes.at(-1), surface = nodes[0];
+        const height = list.scrollHeight + 1;
+        // Retain the content width even on hosts with non-overlay scrollbars.
+        const width = list.getBoundingClientRect().width - (list.offsetWidth - list.clientWidth);
+        Object.assign(list.style, { flex: 'none', width: width + 'px', height: height + 'px', maxHeight: 'none', overflow: 'visible' });
+        list.scrollTop = 0;
+        Object.assign(surface.style, { height: 'auto', maxHeight: 'none' });
+        if (surface.matches('dialog')) {
+          Object.assign(surface.style, { position: 'fixed', top: '0', bottom: 'auto', margin: '0' });
+          nodes[1].style.maxHeight = 'none';
+        }
+        return saved;
+      })()`);
+      try {
+        await settle(page);
+        const crop = await page.evaluate(`(() => {
+          const root = document.querySelector(${JSON.stringify(root)}), list = root.getBoundingClientRect();
+          const panel = root.closest('dialog, .daypanel').getBoundingClientRect();
+          const rows = [...root.querySelectorAll('.trow')].map(row => {
+            const r = row.getBoundingClientRect();
+            return { id: row.dataset.trade, rect: r.toJSON(), visible: Boolean(r.width > 0 && r.height > 0 &&
+              [list, panel].every(b => r.left >= b.left && r.right <= b.right && r.top >= b.top && r.bottom <= b.bottom)) };
+          });
+          return { list: list.toJSON(), rows, scrollTop: root.scrollTop,
+            symbols: (${tradeSymbols.toString()})(root, ${JSON.stringify(expectedSymbols)}),
+            clip: { x: panel.left + scrollX, y: panel.top + scrollY,
+              width: panel.width + ${viewport.mobile ? 0 : 16}, height: panel.height, scale: 1 }, panel: panel.toJSON() };
+        })()`);
+        check('trade-amount', `${tag}: all four rows including million and short fit the full-list capture`,
+          crop.scrollTop === 0 && crop.rows.length === want.length && crop.rows.every(row => row.visible), crop);
+        check('trade-amount', `${tag}: every symbol starts its name, is rendered and lies inside the visible list and panel in crop state`,
+          crop.symbols.length === want.length && crop.symbols.every(row => row.startsWithSymbol && row.rendered && row.inside), crop);
+        if (!viewport.mobile) {
+          check('trade-amount', `${tag}: the whole-panel crop includes 16 px beyond its right edge`,
+            crop.clip.width === crop.panel.width + 16, crop);
+        }
+        if (!viewport.mobile || viewport.name === '360') {
+          const name = `${viewport.name}-${theme}-results-trade-amount-${viewport.mobile ? 'sheet' : 'panel'}-full-crop`;
+          const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip: crop.clip, captureBeyondViewport: true });
+          writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+          shots.push({ file: `${name}.png`, what: `Full list at the tested width, height expanded only for capture: every symbol/name first line, manual company hyphens, amount, price and fee${viewport.mobile ? '' : '; 16 px right margin'}` });
+        }
+      } finally {
+        await page.evaluate(`(() => {
+          const selectors = ${JSON.stringify(captureSelectors)}, saved = ${JSON.stringify(savedCapture)};
+          selectors.forEach((selector, i) => {
+            const el = document.querySelector(selector);
+            if (saved[i].style === null) el.removeAttribute('style'); else el.setAttribute('style', saved[i].style);
+          });
+          selectors.forEach((selector, i) => { document.querySelector(selector).scrollTop = saved[i].scrollTop; });
+        })()`);
+        await settle(page);
+      }
+      // Crop the whole widest row, including its yielding name/price columns.
+      // Scroll only the detail container so the surrounding page stays put.
+      await page.evaluate(`(() => {
+        const root = document.querySelector(${JSON.stringify(root)}), row = root.querySelector('[data-trade="rt-amount-million"]');
+        root.scrollTop += row.getBoundingClientRect().top - root.getBoundingClientRect().top;
+      })()`);
+      await settle(page);
+      const clip = await page.evaluate(`(() => {
+        const r = document.querySelector(${JSON.stringify(`${root} [data-trade="rt-amount-million"]`)}).getBoundingClientRect();
+        return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 };
+      })()`);
+      const name = `${viewport.name}-${theme}-results-trade-amount-${viewport.mobile ? 'sheet' : 'panel'}-crop`;
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true });
+      writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+      shots.push({ file: `${name}.png`, what: 'Full −€ 1.000.000,12 result; eight-decimal prices and company name yield first' });
+      if (viewport.mobile) await key(page, 'Escape');
+      else await click(page, `#cal [data-day="${initialDay}"]`);
+      const closed = await rects(page, SHIFT);
+      check('trade-amount', `${tag}: closing the sheet or returning to the original day moves outer geometry exactly 0 px`,
+        JSON.stringify(before) === JSON.stringify(closed), { before, closed });
     }
   }
 
@@ -1769,6 +2206,40 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   desktop arrows. August and September add the full signed form set, with
   ±999k measured as INFO only. Amount changes, month changes and closing a settled
   open sheet must move geometry exactly 0 px. The tap's own movement is INFO.
+- **Trade-row amounts (JOED-31).** The dedicated \`trade-amount\` scenario
+  uses real ingress at 1440/1024/390/360 in light and dark, including the
+  phone fallback. It checks full −€ 100.000,12, +€ 999.999,99 and
+  −€ 1.000.000,12 results beside USD entry/exit prices with up to eight
+  decimals and fees. At 1440 the eight-decimal pair must wrap.
+  Amounts must fit without rounding or clipping, share their right edge,
+  and keep the original 92 px minimum on desktop. Phone amount columns
+  size to their content, with prices spanning the second row. Desktop names
+  keep at least 120 px; Range rectangles prove no name or meta word breaks
+  internally except for oversized phone tokens. Deterministic soft hyphens
+  in company letter runs of eight or more use manual hyphenation, leaving
+  at least three source characters on every broken-word line and a drawn
+  hyphen at every break. Text comparisons strip U+00AD; symbol, numeric and
+  meta text cannot contain it. The 360 million row must exercise a break.
+  Meta dots stay inside the preceding nowrap unit; visible glyph
+  checks forbid dots at either line edge and require flush line starts, also
+  after live resize. Hidden suffixes retain their width; repeated fits must
+  preserve geometry and visibility. Only an oversized single name token may
+  break. The price pair wraps first, then all panel rows use the 11 px token
+  if any needs it, then the fee may wrap; measured probes check this order,
+  the roomy peer's size and recovery at every width/theme. Every row, amount, price part
+  and the full desktop trade-count/amount header must fit its panel or sheet.
+  Opening and closing the detail surface moves outer geometry exactly
+  0 px. The widest row at each width/theme is captured in
+  \`*-results-trade-amount-{panel,sheet}-crop.png\`. Whole-panel crops at
+  1440/1024 in both themes are \`*-results-trade-amount-panel-full-crop.png\`
+  with 16 px beyond the panel's right edge for clipping and alignment review.
+  Full-list captures expand only height and preserve content width, reset
+  scrolling to the top and restore the layout afterwards. All four rows and
+  their rendered symbol prefixes must lie inside the visible list and panel
+  in capture state at every width/theme; bottom scrolling previously cut
+  row 1's symbol line out of the desktop crop.
+  Whole 360 px sheets in both themes are
+  \`360-*-results-trade-amount-sheet-full-crop.png\`.
 - **Partial coverage (JOED-30).** The dedicated \`partial-days\` scenario uses
   real ingress at 1440/1024/390/360, light and dark, through the worker and
   fallback. October shows yesterday (15th) as Partial, missing-summary Stale
@@ -1857,6 +2328,7 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 | Fix round 1 · exact money at any size | \`r1-exact\` (€ 100.000,12345678 trades: tiles, split, calendar, labels) | \`money: exact …\`, \`calendar amounts: …\` |
 | Fix round 1 · equal days are two days | \`r1-days\` | \`best and worst day: …\` |
 | JOED-29 phone amounts, 10 px floor, no clipping and 0 px shift | \`phone-calendar\` (360/390, both themes; measurements below; desktop glyph crop) | \`JOED-29 calendar rendering: …\` |
+| JOED-31 trade amounts, eight-decimal prices/fees, desktop/phone sizing, aligned right edges, no overflow and 0 px shift | \`trade-amount\` (1440/1024/390/360, both themes; widest-row and desktop whole-panel crops) | — |
 
 ## Checks
 

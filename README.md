@@ -545,6 +545,61 @@ the formatter emits `1M` for € 999.000. Its five calendar crops show October's
 ±€ 1.200.000, gain, loss, zero, k and missing-day warning, under `JOED_QA_DIR`.
 The generated `index.md` and CI log retain the measurement table.
 
+Day-detail trade amounts keep their full value on one right-aligned line.
+Their columns grow to fit, with the original 92 px minimum for short amounts
+on desktop. Names keep at least 120 px and wrap between whole words; only
+an individual token wider than the column may break internally. English
+company letter runs of eight or more contain deterministic soft hyphens,
+with at least three source letters before, between and after opportunities.
+`hyphens: manual` draws a hyphen only when the oversized word breaks, without
+a browser dictionary; `overflow-wrap: anywhere` remains the final fallback
+if even a fragment cannot fit. Symbols, numbers and meta text receive no soft
+hyphens, and text comparisons strip U+00AD to preserve the recorded copy.
+Copying selected text from the day panel or phone sheet removes U+00AD and
+maps U+00A0 to normal spaces, preserving every other character and line break.
+Meta units (desk, side/quantity, close time and holding duration) stay together and wrap
+between units. Each middle dot is a nowrap suffix of the preceding unit;
+after layout and resize, line-ending dots use `visibility: hidden`, retaining
+their width so lines stay stable and the next line starts flush.
+Entry/exit prices wrap first, then the entire panel uses the 11 px small token
+if any row needs it, then fees may wrap. Wider panels recover their regular
+price size together. Phone amount
+columns size to their content, while prices and fees span the second row
+beneath the company and amount columns.
+The focused `trade-amount` browser scenario checks −€ 100.000,12,
++€ 999.999,99 and −€ 1.000.000,12 beside USD price pairs with up to eight decimals at
+1440/1024/390/360 in both themes, through the real inbox and worker/fallback.
+It asserts exact amount, price and fee text, no clipping or row overflow,
+common right edges, desktop-only 92 px sizing, phone content sizing, wrapping
+of the eight-decimal pair at 1440, and exactly 0 px outer movement on open/close.
+Range rectangles check every name/meta word, atomic meta units, the 120 px
+desktop name floor, full panel-header visibility and the price/fee yield order.
+Per-character Range measurements exclude U+00AD, require every broken-word
+line to contain at least three source characters, and require a positive-width
+soft-hyphen glyph at every break. The 360 million row must exercise a break;
+desktop fixture words remain unbroken.
+Synthetic copy events at 360/1440 in both themes must copy the full company
+name without U+00AD and the visible amount with normal spaces from the sheet
+and panel respectively.
+Visible glyph checks reject a middle dot at either end of every meta line;
+resize and repeated-fit probes verify flush starts, reserved suffix widths,
+stable wrapping and uniform panel price sizing, including a roomy peer row.
+Widest-row crops go to `JOED_QA_DIR` as
+`*-results-trade-amount-{panel,sheet}-crop.png` for the visual check.
+Whole-panel crops at 1440/1024 in both themes add
+`*-results-trade-amount-panel-full-crop.png` with a 16 px margin beyond the
+panel's right edge for clipping and cross-row alignment review. Captures
+temporarily expand the list's height at its tested content width and reset
+its scroll to the top, then restore the original layout. All four rows,
+including every symbol/name first line, must fit inside the list and panel;
+bottom-scrolling to the million/short rows had clipped row 1's symbol line.
+Symbol checks compare the name prefix with the recorded symbol, require a
+non-zero visible symbol box, and verify list/panel containment in capture
+state at all four widths and both themes.
+The full 360 px sheet in each theme is
+`360-*-results-trade-amount-sheet-full-crop.png`, using the same temporary
+height expansion to show every row's first line.
+
 **Producer contract pin — manifest revision 6.** Compared with revision 2,
 revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds
 optional day-level `coverage` (`"full"` by default, or `"partial"`), the exact
