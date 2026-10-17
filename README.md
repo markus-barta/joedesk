@@ -513,6 +513,19 @@ count. With no trades and a counted partial date it says
 “over N trading days” shortens to “in N days”. This line is hidden on phones;
 the record-status line, period tiles and week column do not carry the hint.
 
+The hero's result sentence also appends **incl. N partial days** for the
+selected period, using the same count helper as the calendar month line.
+Day, Week, Month, This year and All count closed partial-coverage dates across
+their whole range, including Stale-escalated dates and days without trades.
+Today, future dates and missing-summary Stale without partial coverage never
+count. Desk filters keep the same count because coverage belongs to the whole
+day. One warning SVG follows the sentence; tiles and By-desk rows stay plain.
+Phones at ≤ 600 px reserve two sentence lines with and without the hint.
+The dedicated `period-hint` browser scenario checks zero tile movement at
+360/390/1024, desktop one-line fit, warning-icon contrast and clipping. It
+writes hero crops at 1440/1024/390 in both themes, plus 390 without the hint,
+under `JOED_QA_DIR` for the visual check.
+
 On phones, Results calendar amounts use compact forms such as `1`, `4,1`,
 `13`, `1k` and `1,2k`, rounded once from exact decimals, half away from zero.
 A trailing `,0` is omitted. Phone day cells use the sign and tint for direction,

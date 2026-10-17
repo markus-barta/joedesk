@@ -101,6 +101,7 @@ const missingDay = (ix, k, desks) => ix?.missingDays?.has(k) && M.dayResult(ix, 
 const missingDayText = k => `Stale: daily summary missing for ${M.fmtDay(k)}`;
 const PARTIAL_REASON = M.PARTIAL_REASON;
 const partialDay = (view, k) => k < view.today && view.ix?.partialDays?.has(k);
+const partialHint = count => count ? ` · ${st('warn', `incl. ${count} partial day${count === 1 ? '' : 's'}`)}` : '';
 // One warning slot, with a missing summary taking priority over partial coverage.
 function dayWarning(view, k, desks) {
   if (k >= view.today) return null;
@@ -158,12 +159,12 @@ function heroSentence(view, per, R) {
   return `${signedWord(R.units.net)} ${per.phrase}.`;
 }
 
-function renderHero(view, per, desks, R) {
+export function renderHero(view, per, desks, R) {
   const none = !R || R.empty;
   patch($('#rheroL'), `
     <div class="hero-k">${icon('results')}<span>${term('result')} · ${esc(whoOf(desks))}</span></div>
     <div class="display">${none || R.net === null ? D : bn(R.units.net)}</div>
-    <p class="say">${esc(heroSentence(view, per, R))}</p>
+    <p class="say">${esc(heroSentence(view, per, R))}${partialHint(M.countPartialDays(view.ix, per, view.today))}</p>
     <dl class="split">
       <dt>${term('closed')}</dt><dd>${none ? '—' : pl(R.units.realised)}</dd>
       <dt>${term('stillopen')}</dt><dd>${none || R.unreal === null ? '—' : pl(R.units.unreal)}</dd>
@@ -275,16 +276,16 @@ export function renderCalendar(view, per, desks) {
   $('#prevMonth').disabled = first <= M.firstStep(view.trackingStart);
   $('#nextMonth').disabled = first >= M.dateKey(...M.ymOf(today), 1);
   const max = ix ? maxDay(ix, desks) : 0n;
-  let monthCount = 0, monthUnits = 0n, monthDays = 0, partialDays = 0;
+  const partialDays = M.countPartialDays(ix, { start: first, end: M.dateKey(y, m, M.daysIn(y, m)) }, today);
+  let monthCount = 0, monthUnits = 0n, monthDays = 0;
   if (ix) for (let d = 1; d <= M.daysIn(y, m); d++) {
     const k = M.dateKey(y, m, d), r = M.dayResult(ix, k, desks);
     if (r.count) { monthCount += r.count; monthUnits += r.units; monthDays++; }
-    if (partialDay(view, k)) partialDays++;
   }
   const monthSum = !ix ? 'Unavailable' : monthCount
     ? `${signedWord(monthUnits)} <span class="month-long">over ${plural(monthDays, 'trading day')}</span><span class="month-short">in ${plural(monthDays, 'day')}</span>`
     : partialDays ? 'No trades recorded this month' : 'No trades this month';
-  patch($('#calSum'), `${monthSum}${partialDays ? ` · ${st('warn', `incl. ${partialDays} partial day${partialDays === 1 ? '' : 's'}`)}` : ''}`);
+  patch($('#calSum'), `${monthSum}${partialHint(partialDays)}`);
   fitMonthSummary($('#calSum'));
   const start = M.monday(first);
   const inPer = k => (RS.period === 'day' || RS.period === 'week') && k >= per.start && k <= per.end;

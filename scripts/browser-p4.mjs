@@ -5,6 +5,7 @@
 // (AC-10–17, 41, 42, 46, Part A craft), plus Tick's desk-card header at 390.
 // JOED-29 adds a focused phone calendar scenario at 360/390 in both themes.
 // JOED-30 adds partial-days: its own month, panel and sheet at every width.
+// JOED-32 adds period-hint: the hero sentence, stable tiles and hero crops.
 // One headless browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir, cpus } from 'node:os';
@@ -16,7 +17,7 @@ import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './brows
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
-import { designResults, withTradeSummaries, partialDaysResults } from './browser/results.mjs';
+import { designResults, withTradeSummaries, partialDaysResults, periodHintResults } from './browser/results.mjs';
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -43,7 +44,7 @@ const { results, shots, check: gateCheck, shot, auditScreen } = createGate(QA_DI
 const check = (ac, name, ok, detail) => {
   gateCheck(ac, name, ok, detail);
   // Preserve both geometry snapshots and every clipping row in the CI log.
-  if (!ok && ['phone-calendar', 'partial-days'].includes(ac)) console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
+  if (!ok && ['phone-calendar', 'partial-days', 'period-hint'].includes(ac)) console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
 };
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ONLY = (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean);
@@ -978,6 +979,101 @@ try {
     }
   }
 
+  if (run('period-hint')) {
+    await serve(null);
+    const { board } = await designBoard('2026-10-16T12:00:00.000Z');
+    const { baseline, partial } = periodHintResults(board.clock());
+    let seq = baseline.seq;
+    const push = async record => {
+      check('period-hint', 'the dedicated snapshot accepts through real ingress', (await board.pushResults({ ...record, seq: ++seq })).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+    };
+    const probe = () => page.evaluate(`(${(() => {
+      const say = document.querySelector('#rheroL .say'), box = say.getBoundingClientRect(), cs = getComputedStyle(say);
+      const range = document.createRange(); range.selectNodeContents(say);
+      const content = range.getBoundingClientRect(), hint = say.querySelector('.st');
+      const rects = [...range.getClientRects()];
+      const rgb = color => color.match(/[\d.]+/g).map(Number);
+      const background = el => {
+        const chain = []; for (let p = el; p; p = p.parentElement) chain.unshift(p);
+        return chain.reduce((bg, p) => {
+          const fg = rgb(getComputedStyle(p).backgroundColor), alpha = fg[3] ?? 1;
+          return fg.slice(0, 3).map((c, i) => c * alpha + bg[i] * (1 - alpha));
+        }, [255, 255, 255]);
+      };
+      const luminance = cs => cs.map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4)
+        .reduce((s, c, i) => s + c * [.2126, .7152, .0722][i], 0);
+      const svg = hint?.querySelector('svg'), fg = svg ? rgb(getComputedStyle(svg).color) : null, bg = background(say);
+      const x = fg ? luminance(fg.slice(0, 3)) : null, y = luminance(bg);
+      return { sentence: say.textContent, hint: hint?.textContent ?? null, monthHint: document.querySelector('#calSum .st')?.textContent ?? null,
+        height: box.height, contentHeight: content.height, lineHeight: parseFloat(cs.lineHeight), width: box.width,
+        clipped: say.scrollWidth > say.clientWidth || rects.some(r => r.left < box.left - .5 || r.right > box.right + .5 || r.bottom > box.bottom + .5),
+        icon: Boolean(svg?.querySelector('use[href="#i-half"]')), fg, bg, contrast: fg ? (Math.max(x, y) + .05) / (Math.min(x, y) + .05) : null,
+        otherHints: /incl\./.test(document.querySelector('#tiles').textContent + document.querySelector('#breakdown').textContent),
+      };
+    }).toString()})()`);
+    const crop = async (viewport, theme, suffix) => {
+      const clip = await page.evaluate(`(() => { const r = document.getElementById('rhero').getBoundingClientRect();
+        return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const file = `${viewport.name}-${theme}-results-period-${suffix}-hero.png`;
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true });
+      writeFileSync(join(QA_DIR, file), Buffer.from(data, 'base64'));
+      shots.push({ file, what: suffix === 'hint' ? 'Hero: incl. 2 partial days, including one escalated date' : 'Hero: no partial hint, with the same two-line phone reserve' });
+    };
+    const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 800, mobile: true }];
+    for (const viewport of viewports) for (const theme of THEMES) {
+      const tag = `${viewport.name} ${theme}`;
+      // Replacing snapshots changes coverage only; period switches then show
+      // or hide the same hint without modifying the tiles' geometry.
+      check('period-hint', `${tag}: baseline ingress accepts`, (await board.pushResults({ ...baseline, seq: ++seq })).status === 200);
+      await configure(page, viewport, theme);
+      await load(page, board.url, 'results');
+      await click(page, '#periodSeg [data-period="month"]');
+      await click(page, '#deskSeg [data-desk="all"]');
+      await waitFor(page, 'document.querySelector("#tiles .tval .num")');
+      const geometry = await rects(page, ['.tile']), reserve = await probe();
+      check('period-hint', `${tag}: baseline has no hint and no clipping`, !reserve.hint && !reserve.clipped, reserve);
+      if (viewport.name === '390') await crop(viewport, theme, 'no-hint');
+      await push(partial);
+      await waitFor(page, 'document.querySelector("#rheroL .say .st")?.textContent === "incl. 2 partial days"');
+      for (const [period, count] of [['month', 2], ['day', 0], ['week', 2], ['ytd', 2], ['all', 2]]) {
+        await click(page, `#periodSeg [data-period="${period}"]`);
+        for (const desk of DESK_CHOICES) {
+          await click(page, `#deskSeg [data-desk="${desk}"]`);
+          const p = await probe(), next = await rects(page, ['.tile']);
+          check('period-hint', `${tag} ${period} ${desk}: correct whole-day hint; no tile or By-desk hints`,
+            p.hint === (count ? 'incl. 2 partial days' : null) && !p.otherHints && (!count || p.icon), p);
+          check('period-hint', `${tag} ${period} ${desk}: tiles move exactly 0 px`,
+            !shifted(geometry, next, ['top', 'left', 'width', 'height']).length, { before: geometry, after: next });
+          check('period-hint', `${tag} ${period} ${desk}: no clipping; phone reserve or desktop single line`,
+            !p.clipped && (viewport.mobile ? p.height === reserve.height && p.height === 2 * p.lineHeight : p.contentHeight <= p.lineHeight + 1), p);
+          if (count) check('period-hint', `${tag} ${period} ${desk}: warn icon contrast is at least 3:1 on the hero`, p.contrast >= 3, p);
+          if (period === 'month') check('period-hint', `${tag} ${desk}: hero and calendar counts agree`, p.hint === p.monthHint, p);
+        }
+      }
+      await click(page, '#periodSeg [data-period="month"]');
+      await click(page, '#deskSeg [data-desk="all"]');
+      if (viewport.name !== '360') await crop(viewport, theme, 'hint');
+      if (!viewport.mobile) {
+        // Real sentence markup with the longest normal amount/date forms.
+        // Diagnostic/unavailable sentences retain their existing wrapping.
+        for (const sentence of ['Down €\u00a0999.999,99 in September 2025.', 'Down €\u00a0999.999,99 in the week of 28\u00a0Sep.']) {
+          await page.evaluate(`document.querySelector('#rheroL .say').firstChild.textContent = ${JSON.stringify(sentence + ' · ')}`);
+          const p = await probe();
+          check('period-hint', `${tag}: longest realistic result sentence stays on one line without clipping`,
+            !p.clipped && p.contentHeight <= p.lineHeight + 1, p);
+        }
+        // Restore actual renderer content before the next real snapshot.
+        await click(page, '#periodSeg [data-period="week"]');
+        await click(page, '#periodSeg [data-period="month"]');
+      }
+      await push(baseline);
+      await waitFor(page, '!document.querySelector("#rheroL .say .st")');
+      check('period-hint', `${tag}: removing coverage warnings moves tiles exactly 0 px`,
+        !shifted(geometry, await rects(page, ['.tile']), ['top', 'left', 'width', 'height']).length);
+    }
+  }
+
   if (run('partial-days')) {
     // Real ingress, worker and fallback. T+1 permits only yesterday to remain
     // Partial; the empty snapshot shows that same day without visible trades.
@@ -1691,6 +1787,15 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   desktop arrows. August and September add the full signed form set, with
   ±999k measured as INFO only. Amount changes, month changes and closing a settled
   open sheet must move geometry exactly 0 px. The tap's own movement is INFO.
+- **Period hint (JOED-32).** The independent \`period-hint\` scenario changes
+  coverage through real ingress, switches every period and desk at
+  360/390/1024/1440 in both themes, and requires exactly 0 px tile movement.
+  The hero and month counts agree; today has no hint. Phone sentences reserve
+  two lines with or without the hint; desktop sentences, including long
+  amount/date probes, must fit one line. Computed warning-icon contrast is
+  at least 3:1 against the hero and neither sentence nor hint may clip.
+  \`{1440,1024,390}-*-results-period-hint-hero.png\` are the hero crops with
+  two partial days; \`390-*-results-period-no-hint-hero.png\` shows the reserve.
 - **Partial coverage (JOED-30).** The dedicated \`partial-days\` scenario uses
   real ingress at 1440/1024/390/360, light and dark, through the worker and
   fallback. October shows yesterday (15th) as Partial, missing-summary Stale

@@ -256,9 +256,12 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 /* ---------- Results ---------- */
 .res-tools { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin: 18px 0 18px; }
 .res-tools .grow { flex: 1; }
-.rhero { padding: 22px 26px 20px; display: grid; grid-template-columns: 340px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0 34px; height: 352px; }
+/* Keep enough sentence width for the period hint at 1024, independent of
+   whether it is present. The hero and tiles retain their fixed heights. */
+.rhero { padding: 22px 26px 20px; display: grid; grid-template-columns: minmax(0, min(500px, 55%)) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0 34px; height: 352px; }
 .rhero .display { font-size: 40px; line-height: 48px; }
 .rhero .say { font-size: 14px; color: var(--ink-2); min-height: 42px; }
+.rhero .say .st { vertical-align: top; }
 .split { margin: 14px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 13.5px; padding-top: 14px; border-top: 1px solid var(--line); }
 .split dt { color: var(--ink-2); } .split dd { margin: 0; text-align: right; white-space: nowrap; }
 .rhero-l { display: flex; flex-direction: column; min-height: 0; }
@@ -389,7 +392,7 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 /* ---------- Middle widths ---------- */
 @media (max-width: 1180px) {
   .hero { grid-template-columns: 1fr; }
-  .rhero { grid-template-columns: 280px minmax(0, 1fr); gap: 0 24px; }
+  .rhero { gap: 0 24px; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .prow { grid-template-columns: 38px minmax(0, 1.4fr) 100px 100px minmax(120px, 1fr) 110px; }
   .prow .c-opened { display: none; }
@@ -467,6 +470,7 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .t-long { display: none; } .t-short { display: inline; }
   .rhero { grid-template-columns: 1fr; grid-template-rows: auto auto; height: auto; padding: 18px 16px; }
   .rhero-l { height: 300px; display: flex; flex-direction: column; }
+  .rhero .say { min-height: 2lh; flex-shrink: 0; }
   .rhero-r { height: 300px; margin-top: 8px; }
   .rhero-r .legend { flex-direction: column; align-items: flex-start; gap: 3px; }
   .rchart { height: 196px; }

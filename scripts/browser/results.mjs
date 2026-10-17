@@ -165,6 +165,19 @@ export function designResults(now = NOW, { trackingStart = '2026-09-10', seq = 4
   return payload;
 }
 
+// JOED-32's own accepted snapshots: two closed partial dates (one already
+// escalated), while all trade amounts and equity closes stay identical.
+export function periodHintResults(now = '2026-10-16T12:00:00.000Z') {
+  const baseline = designResults(now), partial = structuredClone(baseline);
+  for (const day of partial.days.filter(d => ['2026-10-14', '2026-10-15'].includes(d.date))) {
+    day.coverage = 'partial';
+    day.partialReasons = ['history_gap'];
+    for (const desk of Object.values(day.desks)) desk.realisedNet = desk.fees = null;
+  }
+  for (const value of [baseline, partial]) delete value.receivedAt;
+  return { baseline, partial };
+}
+
 // The largest record the 8 MiB contract allows for this trade shape, for the
 // render budget: a year of sessions with many trades a day.
 export function largeResults(now = NOW, trades = 14000) {

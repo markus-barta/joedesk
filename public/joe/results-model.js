@@ -44,6 +44,16 @@ export function partialReasonLabel(day) {
   return reasons.length ? `${reasons[0].label}${reasons.length > 1 ? `, and ${reasons.length - 1} more` : ''}` : PARTIAL_REASON;
 }
 
+// Coverage belongs to the whole Vienna day, independently of trades, desk
+// filters and escalation from Partial to Stale. The open day never counts.
+export function countPartialDays(ix, per, today) {
+  let count = 0;
+  for (const day of ix?.partialDays ?? []) {
+    if (day >= per.start && day <= per.end && day < today) count++;
+  }
+  return count;
+}
+
 // ---------- Vienna dates ----------
 // Vienna's midnight always falls on a whole UTC hour (its offsets are whole
 // hours), so one UTC hour has one Vienna date: one Intl call per hour.
