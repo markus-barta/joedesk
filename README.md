@@ -521,14 +521,18 @@ Today, future dates and missing-summary Stale without partial coverage never
 count. Desk filters keep the same count because coverage belongs to the whole
 day. One warning SVG follows the sentence; tiles and By-desk rows stay plain.
 With a hint, the sentence's final full stop gives way to the separator; without
-one it stays. A period with counted partial days and no trades says **No trades
-recorded**, as on the calendar month line. Phones at ≤ 600 px reserve at least
-two sentence lines; long no-trade and unknown-result sentences may take three
-at 360/390 without moving the split rows, chart or tiles. Desktop keeps the
-original 340 px left column (280 px at ≤ 1180 px); normal result sentences take
-at most two lines and the hint wraps as one unbreakable unit.
+one it stays. An empty period (no closed trades and a known, flat result) with
+counted partial days says **No trades recorded**, as on the calendar month
+line; without them it says **No trades**. Open-position gains or losses keep
+their **Up/Down € …** sentence, and unknown results keep their explanation.
+Phones at ≤ 700 px reserve at least two sentence lines. The browser assertions
+require long no-trade, older-week unknown-result and basis-change wordings with
+the hint to fit at most three lines at 360/390 without moving the split rows,
+chart or tiles. Desktop keeps the original 340 px left column (280 px at
+≤ 1180 px); the assertions require normal, empty and unknown-result sentences
+with the hint to fit at most two lines, with the hint unbroken.
 The dedicated `period-hint` browser scenario checks zero movement of tiles and
-hero children at 360/390/768/1024, desktop two-line fit, warning-icon contrast
+hero children at 360/390/768/1024/1440, desktop two-line fit, warning-icon contrast
 and clipping. It writes full-hero crops, including the unchanged chart, at
 1440/1024/768/390 in both themes, plus 390 without the hint, under `JOED_QA_DIR`
 for the visual check.

@@ -154,7 +154,7 @@ export function renderResults(ctx) {
 function heroSentence(view, per, R, partialDays) {
   if (!view.ix) return `Results are unavailable: ${cellReason(view.reason)}.`;
   if (R.cut) return `No result ${per.phrase}: ${cutText(R.cut)}, and a change of basis is not a gain or a loss.`;
-  if (R.empty || (partialDays && !R.trades)) return `No trades${partialDays ? ' recorded' : ''} ${per.phrase}. Paper results start on ${startText(view.trackingStart)}.`;
+  if (R.empty) return `No trades${partialDays ? ' recorded' : ''} ${per.phrase}. Paper results start on ${startText(view.trackingStart)}.`;
   if (R.net === null) return `The result ${per.phrase} is not known yet: the desks’ money ${R.end === view.today ? 'now' : `on ${M.fmtDDM(R.end)}`} is not available.`;
   return `${signedWord(R.units.net)} ${per.phrase}.`;
 }

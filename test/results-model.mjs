@@ -29,6 +29,7 @@ const { acceptRead } = await import('../contracts/read.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const hm = await import('../public/joe/history-model.js');
 const { designResults, withTradeSummaries, partialDaysResults, periodHintResults } = await import('../scripts/browser/results.mjs');
+const { scenario } = await import('../scripts/browser/board.mjs');
 
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ALL = ['j', 'joe', 'joel'];
@@ -653,9 +654,9 @@ const partialReason = "Part of this day's activity couldn't be confirmed, so its
 const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'");
 
 function heroCapture() {
-  return (value, now, period, anchor, desks = ALL) => {
+  return (value, now, period, anchor, desks = ALL, todayUnits = [E('5000'), E('5000'), E('5000')]) => {
     const ix = value ? M.indexResults(value) : null, today = page.resultsToday(now);
-    const view = { ix, today, trackingStart: ix?.meta.trackingStart, todayUnits: [E('5000'), E('5000'), E('5000')], nowMs: Date.parse(now) };
+    const view = { ix, today, trackingStart: ix?.meta.trackingStart, todayUnits, nowMs: Date.parse(now) };
     const per = M.periodOf(period, anchor, today, view.trackingStart);
     const R = ix ? M.rollup(ix, per, desks, M.moneyContext(ix, view, per, desks)) : null;
     const before = globalThis.document, node = { innerHTML: '' };
@@ -692,26 +693,54 @@ test('JOED-32 hero: only a sentence without a partial-day hint keeps its final f
   assert.doesNotMatch(render(null, now, 'month', '2026-10-16').sentence, /incl\./);
 });
 
-test('JOED-32 hero: counted partial days with no trades say recorded, including missing or moving equity', t => {
+test('JOED-32 hero: empty periods say recorded only when they include counted partial days', t => {
   const render = heroCapture(t), now = '2026-10-16T12:00:00.000Z';
-  for (const close of [null, '5000', '5001']) {
-    const days = [closeDay('2026-09-30', close), closeDay('2026-10-15', close)];
+  const full = record([closeDay('2026-09-30', '5000'), closeDay('2026-10-15', '5000')]);
+  const partial = structuredClone(full);
+  partial.days[1].coverage = 'partial';
+  for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
+    const sentence = textOf(render(partial, now, 'month', '2026-10-16', desks).sentence);
+    assert.match(sentence, /^No trades recorded this month\. Paper results start on .+ · incl\. 1 partial day$/);
+    const plain = textOf(render(full, now, 'month', '2026-10-16', desks).sentence);
+    assert.match(plain, /^No trades this month\. Paper results start on .+\.$/);
+    assert.doesNotMatch(plain, /recorded|incl\./);
+    assert.doesNotMatch(textOf(render(partial, now, 'day', '2026-10-16', desks).sentence), /recorded|incl\./,
+      'partial days outside the selected period do not change the wording');
+  }
+});
+
+test('JOED-32 hero: partial days with no closed trades keep the open-position gain or loss sentence', t => {
+  const render = heroCapture(t), now = '2026-10-16T12:00:00.000Z';
+  for (const [close, direction] of [['4999', 'Up'], ['5001', 'Down']]) {
+    const days = [closeDay('2026-09-30', close, close, close), closeDay('2026-10-15', close, close, close)];
     const full = record(days), partial = structuredClone(full);
     partial.days[1].coverage = 'partial';
     for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
-      const sentence = textOf(render(partial, now, 'month', '2026-10-16', desks).sentence);
-      assert.match(sentence, /^No trades recorded this month\. Paper results start on .+ · incl\. 1 partial day$/);
+      const { html, sentence } = render(partial, now, 'month', '2026-10-16', desks);
+      const amount = fmt.eur(E(desks.length));
+      assert.equal(textOf(sentence), `${direction} ${amount} this month · incl. 1 partial day`);
+      assert.doesNotMatch(html.match(/<div class="display">([\s\S]*?)<\/div>/)[1], /muted/,
+        'open-position movement keeps its hero number');
       const plain = textOf(render(full, now, 'month', '2026-10-16', desks).sentence);
-      assert.ok(plain.endsWith('.'));
-      assert.doesNotMatch(plain, /recorded|incl\./, 'without counted partial days, existing wording stays');
-      if (close === '5000') assert.match(plain, /^No trades this month\. Paper results start on /);
-      assert.doesNotMatch(textOf(render(partial, now, 'day', '2026-10-16', desks).sentence), /recorded|incl\./,
-        'partial days outside the selected period do not change the wording');
+      assert.equal(plain, `${direction} ${amount} this month.`);
     }
   }
   const { partial } = periodHintResults(now);
   assert.doesNotMatch(textOf(render(partial, now, 'month', '2026-10-16').sentence), /No trades/,
     'traded periods keep their result sentence');
+});
+
+test('JOED-32 hero: partial days with no closed trades keep the unknown-money explanation', t => {
+  const render = heroCapture(t), now = '2026-10-16T12:00:00.000Z';
+  const full = record([closeDay('2026-09-30', null, null, null), closeDay('2026-10-15', null, null, null)]);
+  const partial = structuredClone(full);
+  partial.days[1].coverage = 'partial';
+  for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
+    const plain = textOf(render(full, now, 'month', '2026-10-16', desks).sentence);
+    assert.equal(plain, 'The result this month is not known yet: the desks’ money now is not available.');
+    assert.equal(textOf(render(partial, now, 'month', '2026-10-16', desks).sentence),
+      plain.slice(0, -1) + ' · incl. 1 partial day');
+  }
 });
 
 test('JOED-32 count: Day, Week, Month, This year and All use the selected inclusive Vienna range', t => {
@@ -771,9 +800,10 @@ test('JOED-32 browser snapshots: valid ingress, two closed partial dates and rea
   assert.equal(M.countPartialDays(M.indexResults(baseline), M.periodOf('month', '2026-10-16', '2026-10-16'), '2026-10-16'), 0);
   assert.equal(M.countPartialDays(M.indexResults(partial), M.periodOf('month', '2026-10-16', '2026-10-16'), '2026-10-16'), 2);
   const render = heroCapture(t), now = '2026-10-16T12:00:00.000Z';
+  const todayUnits = scenario(now).snapshot.desks.map(d => E(d.money.equity.amount));
   assert.equal(empty.trades.length, 0);
-  assert.deepEqual(empty.days.map(d => Object.values(d.desks).map(d => d.equityClose)), partial.days.map(d => Object.values(d.desks).map(d => d.equityClose)));
-  assert.match(textOf(render(empty, now, 'month', '2026-10-16').sentence), /^No trades recorded this month\. Paper results start on .+ · incl\. 2 partial days$/);
+  for (const day of empty.days) assert.deepEqual(ALL.map(id => E(day.desks[id].equityClose.amount)), todayUnits);
+  assert.match(textOf(render(empty, now, 'month', '2026-10-16', ALL, todayUnits).sentence), /^No trades recorded this month\. Paper results start on .+ · incl\. 2 partial days$/);
   assert.match(textOf(render(unknown, now, 'month', '2026-10-16').sentence), /^The result this month is not known yet: .+ · incl\. 2 partial days$/);
   assert.doesNotMatch(render(unknown, now, 'month', '2026-10-16').sentence, /\. · /);
 });

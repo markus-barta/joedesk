@@ -176,6 +176,11 @@ export function periodHintResults(now = '2026-10-16T12:00:00.000Z') {
   }
   for (const value of [baseline, partial]) delete value.receivedAt;
   const empty = withTradeSummaries({ ...structuredClone(partial), trades: [] });
+  // No closed trades alone is not empty: flatten every close to today's
+  // observed equity so this snapshot exercises the actual empty hero branch.
+  const { snapshot } = scenario(now);
+  const equity = Object.fromEntries(snapshot.desks.map(d => [d.id, d.money.equity]));
+  for (const day of empty.days) for (const [id, desk] of Object.entries(day.desks)) desk.equityClose = structuredClone(equity[id]);
   const unknown = structuredClone(partial);
   for (const day of unknown.days) for (const desk of Object.values(day.desks)) desk.equityClose = null;
   return { baseline, partial, empty, unknown };
