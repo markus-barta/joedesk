@@ -58,6 +58,7 @@ export function partialDaysResults(now = '2026-10-16T12:00:00.000Z') {
   const partial = structuredClone(baseline);
   for (const day of partial.days.filter(d => [dates.partial, dates.escalated, dates.emptyEscalated].includes(d.date))) {
     day.coverage = 'partial';
+    day.partialReasons = ['history_gap'];
     for (const desk of Object.values(day.desks)) desk.realisedNet = desk.fees = null;
   }
   const empty = structuredClone(partial);

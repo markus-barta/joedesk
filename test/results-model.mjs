@@ -25,6 +25,7 @@ const { bn } = await import('../public/joe/ui.js');
 const { decimalUnits, divRound, roundUnits, mulUnits, divUnits, unitsDecimal, unitsNumber } = await import('../contracts/decimal.mjs');
 const { validateContract } = await import('../contracts/index.mjs');
 const { acceptRead } = await import('../contracts/read.mjs');
+const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const hm = await import('../public/joe/history-model.js');
 const { designResults, withTradeSummaries, partialDaysResults } = await import('../scripts/browser/results.mjs');
@@ -43,8 +44,8 @@ const closeDay = (date, j, joe = '5000', joel = '5000') => ({ date, desks: Objec
 const tradeOf = (id, desk, closedAt, net, fees = '0') => ({ id, desk, symbol: 'KO', company: 'Coca-Cola', side: 'long', quantity: '1', openedAt: closedAt, closedAt,
   entryPrice: { amount: '70', currency: 'USD' }, exitPrice: { amount: '70', currency: 'USD' }, grossEur: eurOf(unitsDecimal(decimalUnits(net) + decimalUnits(fees))),
   feesEur: eurOf(fees), netEur: eurOf(net), fx: { base: 'USD', quote: 'EUR', rate: '0.9', source: 'test-close-rate', observedAt: closedAt }, method: 'execution-fifo-net-current-fx' });
-function record(days, trades = [], trackingStart = '2026-09-10') {
-  const r = { schema: 'inspr.joe.household.results.v2', seq: 1, generatedAt: '2026-10-14T17:40:00.000Z', receivedAt: '2026-10-14T17:40:00.000Z',
+function record(days, trades = [], trackingStart = '2026-09-10', receivedAt = '2026-10-14T17:40:00.000Z') {
+  const r = { schema: 'inspr.joe.household.results.v2', seq: 1, generatedAt: receivedAt, receivedAt,
     currency: 'EUR', timeZone: 'Europe/Vienna', trackingStart, days, trades, benchmark: null };
   withTradeSummaries(r);
   const checked = validateContract('results', r);
@@ -70,7 +71,7 @@ test('JOED-28 results: server missing-day warnings survive indexing and worker t
 
 test('JOED-30 results: partial dates, empty desks and nullable summaries validate and survive worker transfer', () => {
   const value = fixture('partial-day');
-  value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial' });
+  value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial', partialReasons: ['history_gap'] });
   const day = value.days[0];
   day.desks.j.realisedNet = day.desks.j.fees = null;
   assert.ok(validateContract('results', value).ok);
@@ -679,8 +680,10 @@ test('JOED-30 rendering: closed partial trades keep their exact amount, tint and
 
 test('JOED-30 rendering: a partial date with no trades is a neutral dash and incomplete record, including weekends', t => {
   const render = calendarCapture(t);
-  const value = record([{ date: '2026-10-13', desks: {}, coverage: 'partial' }, { date: '2026-10-25', desks: {}, coverage: 'partial' }]);
   for (const day of ['2026-10-13', '2026-10-25']) {
+    // Accepted while open; the retained record still renders its fallback
+    // after midnight without pretending a cause was supplied at acceptance.
+    const value = record([{ date: day, desks: {}, coverage: 'partial' }], [], '2026-09-10', `${day}T12:00:00.000Z`);
     const r = render(value, `${M.addDays(day, 1)}T12:00:00.000Z`, day), cell = r.cell(day);
     assert.match(cell, /class="cell none\b/);
     assert.match(cell, /<span class="v"><span class="muted">—<\/span><\/span>/);
@@ -715,7 +718,7 @@ test('JOED-30 rendering: Stale wins over partial coverage in the cell, panel and
 test('JOED-30 browser snapshots: each partial, empty, Stale handoff, worst amount and empty month is valid ingress', () => {
   const { dates, ...snapshots } = partialDaysResults();
   for (const [name, payload] of Object.entries(snapshots)) {
-    const checked = validateContract('results', payload, { stage: 'ingress' });
+    const checked = validateContract('results', payload, { stage: 'ingress', receivedAt: payload.generatedAt });
     assert.ok(checked.ok, `${name}: ${JSON.stringify(checked.errors)}`);
   }
   assert.equal(M.dayResult(M.indexResults(snapshots.large), dates.partial, ALL).count, 99);
@@ -955,6 +958,34 @@ test('JOED-30 today without explicit reasons: no reason note, with only an optio
         assert.match(html, /<div class="dp-note-copy"><p class="dp-position-note">/);
         assert.match(textOf(html), /Coca-Cola \(KO, Joe\), opened today at 11:15, is still open; it counts as Still open and on Desk\./);
       } else assert.doesNotMatch(html, /class="dp-note"|dp-position-note/, 'no explanatory note at all');
+    }
+  }
+});
+
+test('JOED-34 rev 6 rendering: accepted open partial days have no note unless a real FX cause exists, including DST', t => {
+  const render = calendarCapture(t);
+  for (const [now, day] of [
+    ['2026-10-15T22:00:00.000Z', '2026-10-16'],
+    ['2026-10-25T00:30:00.000Z', '2026-10-25'],
+    ['2026-10-25T01:30:00.000Z', '2026-10-25'],
+    ['2027-03-28T21:59:59.999Z', '2027-03-28'],
+  ]) for (const partialReasons of [undefined, ['fx_missing']]) {
+    const value = record([{ date: day, desks: {}, coverage: 'partial', ...(partialReasons ? { partialReasons } : {}) }]);
+    delete value.receivedAt; value.generatedAt = now;
+    const accepted = acceptSnapshot('results', value, null, now);
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(accepted.value.days[0].partialReasons, partialReasons, 'acceptance invents no cause');
+    assert.ok(validateContract('results', accepted.value).ok);
+    for (const desks of [ALL, ['joe']]) {
+      const r = render(accepted.value, now, day, desks);
+      assert.doesNotMatch(r.cell(day), /day-warning|Partial|Stale/);
+      for (const html of [r.panel, r.sheet]) {
+        if (partialReasons) {
+          const note = html.match(/<p class="dp-note-lines">([\s\S]*?)<\/p>/)?.[1];
+          assert.equal(textOf(note), 'Result may be incomplete.No EUR exchange rate was recorded for this day.' +
+            (desks.length === 1 ? M.PARTIAL_DESK_NOTE : ''));
+        } else assert.doesNotMatch(html, /class="dp-note"|dp-note-lines|dp-note-lead|dp-reason|dp-desk-note/);
+      }
     }
   }
 });

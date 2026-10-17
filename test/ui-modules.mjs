@@ -288,7 +288,7 @@ test('JOED-30 reads: the actual results worker and fallback both preserve partia
   const value = structuredClone(valid.results);
   value.days[0].coverage = 'partial';
   for (const desk of Object.values(value.days[0].desks)) desk.realisedNet = desk.fees = null;
-  value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial' });
+  value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial', partialReasons: ['history_gap'] });
   const { indexResults } = await import('../public/joe/results-model.js');
   const expected = indexResults(value);
   try {

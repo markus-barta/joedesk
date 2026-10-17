@@ -1118,9 +1118,16 @@ symbol on the accepted Fleet Config KEEP list is held back as a whole
    JOED-30 manifest revision 5 adds optional, nonempty unique `partialReasons`
    in canonical enum order and optional known `unattributedCount` (minimum 1,
    only with `unattributed_activity`). Reasons require `coverage: "partial"`;
-   semantic failures use the existing per-day 422 paths. Legacy partial rows
-   without reasons and empty-desk rows remain valid. `avg_cost_mismatch` is
-   reserved for future producer emission. The order and exact sentences are
+   semantic failures use the existing per-day 422 paths. JOED-34 revision 6
+   requires reasons on closed partial days (`partialReasonsRequired` at
+   `$.days[i].partialReasons`); closure means date before the server receipt's
+   Vienna date, using the same DST-safe helper and receipt as `missingDays`.
+   The open day may omit reasons unless a real cause exists (e.g. `fx_missing`);
+   supplied arrays remain nonempty and canonical, with the enum unchanged.
+   `capture_gap` is reserved for a real mid-day tracking start. Served validation
+   uses the persisted receipt, keeping then-open records readable after midnight
+   and restart. Empty-desk rows remain valid under these rules.
+   `avg_cost_mismatch` is reserved for future producer emission. The order and exact sentences are
    recorded in `docs/joe-data-contract.md`; `fx_disabled` suppresses `fx_missing`
    only in presentation. The board keeps the fallback for absent/unknown reasons,
    renders known reasons on separate lines, and uses the first short label plus
@@ -1137,8 +1144,10 @@ symbol on the accepted Fleet Config KEEP list is held back as a whole
    and amount slots retain it. All closed partial dates, including escalated
    Stale dates, count in the desktop month hint; missing-summary Stale alone
    does not. Empty-desk rows add nothing to sums and show unknown under every
-   filter. The revision-5 contract digest, participant requirements and runtime
-   closure move together through the offline release checker; no release or
+   filter. Today without reasons has no reason note; with `fx_missing` it shows
+   “No EUR exchange rate was recorded for this day.” No rendering change is
+   needed for revision 6. The revision-6 contract digest, participant requirements
+   and runtime closure move together through the offline release checker; no release or
    downstream repository change is implied.
 4. Amy's gross decision: exact decimal strings end to end, no contract rounding
    and never rounding before summing. Only board display rounds to cents.
