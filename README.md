@@ -525,7 +525,9 @@ one it stays. An empty period (no closed trades and a known, flat result) with
 counted partial days says **No trades recorded**, as on the calendar month
 line; without them it says **No trades**. Open-position gains or losses keep
 their **Up/Down € …** sentence, and unknown results keep their explanation.
-Phones at ≤ 700 px reserve at least two sentence lines. The browser assertions
+Phones at ≤ 700 px keep a two-line sentence reserve inside a fixed 301 px left
+column; its content needs 300.75 px with three lines, leaving slack for a long
+sentence and hint without moving the split or benchmark. The browser assertions
 require long no-trade, older-week unknown-result and basis-change wordings with
 the hint to fit at most three lines at 360/390 without moving the split rows,
 chart or tiles. Desktop keeps the original 340 px left column (280 px at

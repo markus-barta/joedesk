@@ -467,7 +467,10 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .step-label { flex: 1; width: auto; }
   .t-long { display: none; } .t-short { display: inline; }
   .rhero { grid-template-columns: 1fr; grid-template-rows: auto auto; height: auto; padding: 18px 16px; }
-  .rhero-l { height: 300px; display: flex; flex-direction: column; }
+  /* Three sentence lines need 300.75 px: label 20.25 + number 54 +
+     sentence 65 + split 117 + benchmark 44.5 (including margins/borders).
+     Round up so the split's auto margin still has slack on the third line. */
+  .rhero-l { height: 301px; display: flex; flex-direction: column; }
   .rhero .say { min-height: 2lh; flex-shrink: 0; }
   .rhero-r { height: 300px; margin-top: 8px; }
   .rhero-r .legend { flex-direction: column; align-items: flex-start; gap: 3px; }

@@ -104,8 +104,8 @@
     },
     {
       "path": "public/joe/app.css",
-      "size": 70688,
-      "sha256": "6f6fdc2c9f7f760fb390942c999585864ba0b77853124c7d42746b29eeb406f9"
+      "size": 70910,
+      "sha256": "f71b4b0795080bb59e12e0ff082f2779d5a4f5b5a7275d68ef1a07886e5c6cd2"
     },
     {
       "path": "public/joe/app.js",
