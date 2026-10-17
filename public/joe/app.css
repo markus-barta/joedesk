@@ -259,6 +259,9 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .rhero { padding: 22px 26px 20px; display: grid; grid-template-columns: 340px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0 34px; height: 352px; }
 .rhero .display { font-size: 40px; line-height: 48px; }
 .rhero .say { font-size: 14px; color: var(--ink-2); min-height: 42px; }
+.rhero .say .st { vertical-align: top; }
+/* The word space plus this margin gives about 6 px before the warning icon. */
+.rhero .say .st, #calSum .st { margin-inline-start: 3px; }
 .split { margin: 14px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 13.5px; padding-top: 14px; border-top: 1px solid var(--line); }
 .split dt { color: var(--ink-2); } .split dd { margin: 0; text-align: right; white-space: nowrap; }
 .rhero-l { display: flex; flex-direction: column; min-height: 0; }
@@ -466,7 +469,11 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .step-label { flex: 1; width: auto; }
   .t-long { display: none; } .t-short { display: inline; }
   .rhero { grid-template-columns: 1fr; grid-template-rows: auto auto; height: auto; padding: 18px 16px; }
-  .rhero-l { height: 300px; display: flex; flex-direction: column; }
+  /* Three sentence lines need 300.75 px: label 20.25 + number 54 +
+     sentence 65 + split 117 + benchmark 44.5 (including margins/borders).
+     Round up so the split's auto margin still has slack on the third line. */
+  .rhero-l { height: 301px; display: flex; flex-direction: column; }
+  .rhero .say { min-height: 2lh; flex-shrink: 0; }
   .rhero-r { height: 300px; margin-top: 8px; }
   .rhero-r .legend { flex-direction: column; align-items: flex-start; gap: 3px; }
   .rchart { height: 196px; }
