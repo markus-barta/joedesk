@@ -301,6 +301,7 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .cell .v { font-size: 12.5px; font-weight: 650; line-height: 1.2; white-space: nowrap; }
 .cell .pl { gap: 3px; }
 .cell .n { font-size: 11px; line-height: 1.2; }
+.cell .day-warning { position: absolute; top: 7px; right: 6px; line-height: 1; }
 .cell.out { visibility: hidden; }
 .cell.none { box-shadow: inset 0 0 0 1px var(--line); }
 .cell.we .d, .cell.fut .d, .cell.none .n, .cell.we .n { color: var(--ink-3); }
@@ -466,6 +467,7 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .wk, .dow.wkh { display: none; }
   .dow { padding-left: 4px; }
   .cell { height: 52px; padding: 5px 4px; border-radius: 8px; }
+  .cell .day-warning { top: 5px; right: 4px; }
   .cell .v { font-size: 11.5px; } .cell .n { display: none; }
   .cell .pl { gap: 2px; } .cell .pl .i { width: 7px; height: 7px; }
   .cell .vl { display: none; } .cell .vs { display: inline; }

@@ -179,6 +179,7 @@ export function indexResults(value) {
   return {
     meta: { schema: value.schema, seq: value.seq, generatedAt: value.generatedAt, receivedAt: value.receivedAt, reason: value.reason ?? null,
       trackingStart: value.trackingStart, days: value.days.length, trades: n },
+    missingDays: new Set(value.missingDays ?? []),
     dates, agg, close, trades, symbols: [...symbols.keys()], symbolDesks: Uint8Array.from(symbols.values()),
   };
 }

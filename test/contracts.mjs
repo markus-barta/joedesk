@@ -204,6 +204,47 @@ test('results: trades without a days entry are skipped, while reported days stil
   assert.equal(validateContract('results', r).ok, true);
 });
 
+test('JOED-28 results: accept and warn only for missing closed Vienna dates, including the 25-hour DST day', () => {
+  for (const [receivedAt, closedAt, coverage, expected] of [
+    ['2026-10-16T12:00:00.000Z', '2026-10-15T15:00:00.000Z', null, ['2026-10-15']],
+    ['2026-10-15T21:59:59.999Z', '2026-10-15T15:00:00.000Z', null, []],
+    ['2026-10-15T22:00:00.000Z', '2026-10-15T15:00:00.000Z', null, ['2026-10-15']],
+    ['2026-10-16T12:00:00.000Z', '2026-10-15T15:00:00.000Z', 'partial', []],
+    ['2026-10-26T12:00:00.000Z', '2026-10-24T22:00:00.000Z', null, ['2026-10-25']],
+    ['2026-10-26T12:00:00.000Z', '2026-10-25T00:30:00.000Z', null, ['2026-10-25']],
+    ['2026-10-26T12:00:00.000Z', '2026-10-25T01:30:00.000Z', null, ['2026-10-25']],
+    ['2026-10-26T12:00:00.000Z', '2026-10-25T22:59:59.999Z', null, ['2026-10-25']],
+    ['2026-10-26T12:00:00.000Z', '2026-10-25T23:00:00.000Z', null, []],
+  ]) {
+    const value = ingress(samples.results);
+    value.trades.push({ ...copy(value.trades[0]), id: 'rt-missing-day', openedAt: closedAt, closedAt });
+    if (coverage) value.days.push({ date: '2026-10-15', coverage, desks: {} });
+    const accepted = acceptSnapshot('results', value, null, receivedAt);
+    assert.equal(accepted.status, 200, closedAt);
+    assert.deepEqual(accepted.value.missingDays ?? [], expected, closedAt);
+    assert.equal(validateContract('results', accepted.value).ok, true);
+    assert.equal(Object.hasOwn(value, 'missingDays'), false);
+  }
+  const value = ingress(samples.results);
+  value.days = [];
+  for (const [i, date] of ['2026-10-15', '2026-10-13', '2026-10-15'].entries()) {
+    const closedAt = `${date}T15:00:00.000Z`;
+    value.trades.push({ ...copy(value.trades[0]), id: `rt-missing-${i}`, openedAt: closedAt, closedAt });
+  }
+  assert.deepEqual(acceptSnapshot('results', value, null, '2026-10-16T12:00:00.000Z').value.missingDays,
+    ['2026-10-13', '2026-10-14', '2026-10-15']);
+  for (const missingDays of [[], ['2026-10-15']]) {
+    rejects(acceptSnapshot('results', { ...value, missingDays }, null, '2026-10-16T12:00:00.000Z'), 'serverOwned', '$.missingDays');
+  }
+});
+
+test('JOED-28 results: served missing-day diagnostics reject duplicate dates', () => {
+  const value = { ...copy(samples.results), missingDays: ['2026-10-13', '2026-10-15'] };
+  assert.equal(validateContract('results', value).ok, true);
+  value.missingDays.push('2026-10-13');
+  rejects(validateContract('results', value), 'uniqueItems', '$.missingDays');
+});
+
 test('results: explicit partial days skip reconciliation only for that day; coverage is a closed optional enum', () => {
   const partial = JSON.parse(readFileSync(new URL('../fixtures/results/partial-day.json', import.meta.url)));
   assert.equal(validateContract('results', partial).ok, true);

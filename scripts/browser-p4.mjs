@@ -762,6 +762,97 @@ try {
     }
   }
 
+  if (run('missing-days')) {
+    // JOED-28: real ingress diagnostics through both read paths. The complete
+    // and missing records share trade money, so geometry can be compared.
+    await serve(null);
+    for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      const tag = `${viewport.name} ${theme}`;
+      const { board } = await designBoard('2026-10-16T12:00:00.000Z');
+      const record = structuredClone(valid.results); delete record.receivedAt;
+      record.generatedAt = board.clock();
+      record.trades.push({ ...structuredClone(record.trades[0]), id: 'rt-missing-day',
+        openedAt: '2026-10-15T15:00:00.000Z', closedAt: '2026-10-15T15:00:00.000Z' });
+      // A reported partial day is covered, with no warning.
+      record.days.push({ date: '2026-10-15', coverage: 'partial', desks: {} });
+      check('missing-days', `${tag}: partial day accepts`, (await board.pushResults(record)).status === 200);
+      const fallback = viewport.mobile && theme === 'dark';
+      const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
+      await configure(page, viewport, theme);
+      await load(page, board.url, 'results');
+      if (injection) await page.s('Page.removeScriptToEvaluateOnNewDocument', injection);
+      await click(page, '#cal [data-day="2026-10-15"]');
+      if (viewport.mobile) await key(page, 'Escape');
+      const covered = await page.evaluate(RES), before = await rects(page, SHIFT);
+      const coveredSummary = await page.evaluate('document.querySelector("#daypanel .dp-sum").textContent');
+      check('missing-days', `${tag}: partial day has no warning`, !await page.evaluate('Boolean(document.querySelector("#cal .day-warning"))'));
+      const missing = { ...structuredClone(record), seq: record.seq + 1 };
+      missing.days = missing.days.filter(day => day.date !== '2026-10-15');
+      check('missing-days', `${tag}: missing closed day accepts with 200`, (await board.pushResults(missing)).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `Boolean(document.querySelector('#cal [data-day="2026-10-15"] .day-warning'))`);
+      const warned = await page.evaluate(RES);
+      const marker = await page.evaluate(`(() => {
+        const cell = document.querySelector('#cal [data-day="2026-10-15"]');
+        const mark = cell.querySelector('.day-warning'), r = mark.getBoundingClientRect(), c = cell.getBoundingClientRect();
+        const padding = getComputedStyle(cell), offset = getComputedStyle(mark);
+        const panel = document.getElementById('daypanel'), head = panel.querySelector('.dp-head').getBoundingClientRect();
+        const heading = panel.querySelector('h3').getBoundingClientRect(), sum = panel.querySelector('.dp-sum'), s = sum.getBoundingClientRect();
+        return { visible: r.width > 0 && r.height > 0 && r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom,
+          aria: cell.getAttribute('aria-label'), icon: Boolean(mark.querySelector('use[href="#i-half"]')) && Boolean(document.querySelector('#daypanel .st.warn use[href="#i-half"]')),
+          aligned: offset.top === padding.paddingTop && offset.right === padding.paddingRight,
+          summary: sum.textContent, note: panel.querySelector('.dp-note')?.innerText ?? '', noteVisible: __audit.visible(panel.querySelector('.dp-note')),
+          singleLine: head.height === 36 && s.height <= head.height && heading.right <= s.left && s.right <= head.right && getComputedStyle(sum).whiteSpace === 'nowrap' };
+      })()`);
+      check('missing-days', `${tag}: affected day shows the existing warning marker through ${fallback ? 'fallback' : 'worker'}`,
+        marker.visible && marker.icon && /Stale: daily summary missing/.test(marker.aria) && N(marker.summary) === N(`Stale · ${coveredSummary}`) && !warned.status, marker);
+      check('missing-days', `${tag}: warning icon follows the date padding`, marker.aligned, marker);
+      if (!viewport.mobile) {
+        check('missing-days', `${tag}: day panel keeps its single-line 36 px header and a visible reason`,
+          marker.singleLine && marker.noteVisible && marker.note.includes('Daily summary missing'), marker);
+      }
+      check('missing-days', `${tag}: warning changes no trade amounts or outer geometry`,
+        covered.display === warned.display && covered.cal.cells.find(c => c.day === '2026-10-15').v === warned.cal.cells.find(c => c.day === '2026-10-15').v &&
+        !shifted(before, await rects(page, SHIFT), ['top', 'left', 'width', 'height']).length);
+      await auditScreen(page, viewport, theme, 'results (missing daily summary)');
+      await shot(page, viewport, `${viewport.name}-${theme}-results-missing-day`, 'Results: Stale on 15 October, whose daily summary is missing');
+      if (viewport.mobile) {
+        await click(page, '#cal [data-day="2026-10-15"]');
+        const sheet = await page.evaluate(`(() => {
+          const body = document.getElementById('sheetBody'), sum = body.querySelector('.dp-sum'), note = body.querySelector('.dp-note');
+          return { summary: sum.textContent, trades: body.querySelectorAll('.trow').length,
+            note: note?.innerText ?? '', noteVisible: __audit.visible(note),
+            singleLine: getComputedStyle(sum).whiteSpace === 'nowrap' && sum.scrollWidth <= sum.clientWidth };
+        })()`);
+        check('missing-days', `${tag}: phone sheet retains the summary and trade with a visible missing-summary reason`,
+          N(sheet.summary) === N(`Stale · ${coveredSummary}`) && sheet.trades === 1 && sheet.note.includes('Daily summary missing') && sheet.noteVisible && sheet.singleLine, sheet);
+        await viewShot(page, `${viewport.name}-${theme}-results-missing-day-sheet`, 'Phone day sheet: Stale with the retained summary and missing daily summary reason');
+      }
+      const { nodes } = await page.s('Accessibility.getFullAXTree');
+      const accessibleText = nodes.filter(n => !n.ignored && n.role?.value === 'StaticText').map(n => n.name?.value ?? '');
+      check('missing-days', `${tag}: Stale and its reason are readable in the accessibility tree`,
+        accessibleText.includes('Stale') && accessibleText.some(text => text.includes('Daily summary missing')), accessibleText.filter(text => /Stale|Daily summary missing/.test(text)));
+      if (viewport.mobile) {
+        await key(page, 'Escape');
+      }
+      await click(page, '#deskSeg [data-desk="joe"]');
+      check('missing-days', `${tag}: a desk without trades on that date has no warning`, !await page.evaluate(`Boolean(document.querySelector('#cal [data-day="2026-10-15"] .day-warning'))`));
+      await click(page, '#deskSeg [data-desk="all"]');
+      const fixed = { ...record, seq: missing.seq + 1 };
+      check('missing-days', `${tag}: a covered replacement accepts`, (await board.pushResults(fixed)).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, '!document.querySelector("#cal .day-warning")');
+      check('missing-days', `${tag}: subsequent partial coverage clears the warning`, (await page.evaluate(RES)).day.sum === covered.day.sum);
+      // A trade on today's open Vienna date remains silent even without a day.
+      const open = { ...structuredClone(missing), seq: fixed.seq + 1 };
+      open.trades.at(-1).openedAt = open.trades.at(-1).closedAt = '2026-10-16T10:00:00.000Z';
+      check('missing-days', `${tag}: open date accepts`, (await board.pushResults(open)).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `document.querySelector('#cal [data-day="2026-10-15"] .n').textContent === 'no trades'`);
+      check('missing-days', `${tag}: open date has no warning`, !await page.evaluate('Boolean(document.querySelector("#cal .day-warning"))'));
+    }
+  }
+
   if (run('budget')) {
     // 7 · The Results render budget's CI guard (ADR §9; the reference budget is
     // measured on a reference device by scripts/budget-reference.mjs).
