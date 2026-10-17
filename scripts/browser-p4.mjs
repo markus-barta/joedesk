@@ -743,7 +743,7 @@ try {
     const want = [
       ['loss', `−€${NB}100.000,12`, '102.000,00', '2.000,00', '0,12'],
       ['gain', `+€${NB}999.999,99`, '2.000,00', '102.000,00', '0,01'],
-      ['million', `−€${NB}1.000.000,12`, '102.000,00', '2.000,00', '0,12'],
+      ['million', `−€${NB}1.000.000,12`, '102.000,12345678', '2.000,12345678', '0,12'],
       ['short', `+€${NB}12,34`, '2.000,00', '2.012,35', '0,01'],
     ];
     const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 780, mobile: true }];
@@ -767,11 +767,12 @@ try {
           const net = row.querySelector('.net'), amount = net.querySelector('.pl'), px = row.querySelector('.px');
           const r = row.getBoundingClientRect(), n = net.getBoundingClientRect(), a = amount.getBoundingClientRect(), p = px.getBoundingClientRect();
           const pieces = [...px.querySelectorAll('.ln > span, .fee')].map(el => {
-            const p = el.getBoundingClientRect(); return { text: el.textContent, left: p.left, right: p.right,
+            const p = el.getBoundingClientRect(); return { text: el.textContent, top: p.top, left: p.left, right: p.right,
               scroll: el.scrollWidth, client: el.clientWidth };
           });
           return { id: row.dataset.trade, text: net.textContent, scroll: net.scrollWidth, client: net.clientWidth,
-            width: n.width, right: n.right, amountInside: a.left >= n.left && a.right <= n.right,
+            width: n.width, amountWidth: a.width, nowrap: getComputedStyle(net).whiteSpace === 'nowrap',
+            priceColumn: getComputedStyle(px).gridColumn, right: n.right, amountInside: a.left >= n.left && a.right <= n.right,
             rowInside: r.left >= bounds.left && r.right <= bounds.right && row.scrollWidth <= row.clientWidth,
             pxFits: px.scrollWidth <= px.clientWidth && pieces.every(piece => piece.left >= p.left && piece.right <= p.right && piece.scroll <= piece.client), pieces };
         });
@@ -782,8 +783,8 @@ try {
         detail.visible && detail.open === viewport.mobile && detail.rows.length === want.length, detail);
       for (const [id, text, entry, exit, fee] of want) {
         const row = detail.rows.find(r => r.id === `rt-amount-${id}`);
-        check('trade-amount', `${tag} ${id}: exact amount never clips and keeps at least 92 px`,
-          row?.text === text && row.scroll <= row.client && row.amountInside && row.width >= 92, row);
+        check('trade-amount', `${tag} ${id}: exact amount stays on one line and never clips`,
+          row?.text === text && row.nowrap && row.scroll <= row.client && row.amountInside, row);
         check('trade-amount', `${tag} ${id}: both full prices and the fee fit without losing digits`,
           row?.pxFits && JSON.stringify(row.pieces.map(p => p.text)) === JSON.stringify([
             `$${NB}${entry}`, `$${NB}${exit}`, `fees €${NB}${fee}`,
@@ -791,10 +792,33 @@ try {
       }
       check('trade-amount', `${tag}: no row overflows its detail surface and every amount shares the right edge`,
         detail.scroll <= detail.client && detail.rows.every(r => r.rowInside && r.right === detail.rows[0].right), detail);
-      check('trade-amount', `${tag}: short amounts keep the approved 92 px column`,
-        detail.rows.find(r => r.id === 'rt-amount-short')?.width === 92, detail.rows);
+      if (viewport.mobile) {
+        check('trade-amount', `${tag}: phone amount columns fit their content without clipping and prices span the second row`,
+          detail.rows.every(r => Math.abs(r.width - r.amountWidth) < 1 && r.nowrap && r.scroll <= r.client &&
+            r.amountInside && r.priceColumn === '2 / -1'), detail.rows);
+      } else {
+        check('trade-amount', `${tag}: desktop amounts keep at least 92 px and short amounts keep the approved 92 px column`,
+          detail.rows.every(r => r.width >= 92) && detail.rows.find(r => r.id === 'rt-amount-short')?.width === 92, detail.rows);
+      }
+      if (viewport.name === '1440') {
+        const long = detail.rows.find(r => r.id === 'rt-amount-million');
+        check('trade-amount', `${tag}: eight-decimal prices wrap before the full amount loses space`,
+          long?.pxFits && long.pieces[1].top > long.pieces[0].top, long);
+      }
       check('trade-amount', `${tag}: the expected ${fallback ? 'fallback' : 'worker'} renders the fixture`,
         (await page.evaluate('window.__joedesk.worker()')) === !fallback);
+      if (!viewport.mobile) {
+        // Capture the actual panel before scrolling to the widest row, so
+        // short and large amounts can be compared together at both widths.
+        await page.evaluate(`document.querySelector(${JSON.stringify(root)}).scrollTop = 0`);
+        await settle(page);
+        const clip = await page.evaluate(`(() => { const r = document.getElementById('daypanel').getBoundingClientRect();
+          return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+        const name = `${viewport.name}-${theme}-results-trade-amount-panel-full-crop`;
+        const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true });
+        writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+        shots.push({ file: `${name}.png`, what: 'Whole day panel: compare short and large amounts, price columns and fees across rows' });
+      }
       // Crop the whole widest row, including its yielding name/price columns.
       // Scroll only the detail container so the surrounding page stays put.
       await page.evaluate(`(() => {
@@ -809,7 +833,7 @@ try {
       const name = `${viewport.name}-${theme}-results-trade-amount-${viewport.mobile ? 'sheet' : 'panel'}-crop`;
       const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true });
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
-      shots.push({ file: `${name}.png`, what: 'Full −€ 1.000.000,12 result; long prices and company name yield first' });
+      shots.push({ file: `${name}.png`, what: 'Full −€ 1.000.000,12 result; eight-decimal prices and company name yield first' });
       if (viewport.mobile) await key(page, 'Escape');
       else await click(page, `#cal [data-day="${initialDay}"]`);
       const closed = await rects(page, SHIFT);
@@ -1783,13 +1807,17 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 - **Trade-row amounts (JOED-31).** The dedicated \`trade-amount\` scenario
   uses real ingress at 1440/1024/390/360 in light and dark, including the
   phone fallback. It checks full −€ 100.000,12, +€ 999.999,99 and
-  −€ 1.000.000,12 results beside long USD entry/exit prices and fees.
+  −€ 1.000.000,12 results beside USD entry/exit prices with up to eight
+  decimals and fees. At 1440 the eight-decimal pair must wrap.
   Amounts must fit without rounding or clipping, share their right edge,
-  and keep the original 92 px minimum for short results. Names and prices
-  yield first; every row and price part must fit its panel or sheet.
+  and keep the original 92 px minimum on desktop. Phone amount columns
+  size to their content, with prices spanning the second row. Names and
+  prices yield first; every row and price part must fit its panel or sheet.
   Opening and closing the detail surface moves outer geometry exactly
   0 px. The widest row at each width/theme is captured in
-  \`*-results-trade-amount-{panel,sheet}-crop.png\`.
+  \`*-results-trade-amount-{panel,sheet}-crop.png\`. Whole-panel crops at
+  1440/1024 in both themes are \`*-results-trade-amount-panel-full-crop.png\`
+  for cross-row amount and price alignment review.
 - **Partial coverage (JOED-30).** The dedicated \`partial-days\` scenario uses
   real ingress at 1440/1024/390/360, light and dark, through the worker and
   fallback. October shows yesterday (15th) as Partial, missing-summary Stale
@@ -1864,7 +1892,7 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 | Fix round 1 · exact money at any size | \`r1-exact\` (€ 100.000,12345678 trades: tiles, split, calendar, labels) | \`money: exact …\`, \`calendar amounts: …\` |
 | Fix round 1 · equal days are two days | \`r1-days\` | \`best and worst day: …\` |
 | JOED-29 phone amounts, 10 px floor, no clipping and 0 px shift | \`phone-calendar\` (360/390, both themes; measurements below; desktop glyph crop) | \`JOED-29 calendar rendering: …\` |
-| JOED-31 trade amounts, exact prices/fees, aligned right edges, no overflow and 0 px shift | \`trade-amount\` (1440/1024/390/360, both themes; widest-row crops) | — |
+| JOED-31 trade amounts, eight-decimal prices/fees, desktop/phone sizing, aligned right edges, no overflow and 0 px shift | \`trade-amount\` (1440/1024/390/360, both themes; widest-row and desktop whole-panel crops) | — |
 
 ## Checks
 

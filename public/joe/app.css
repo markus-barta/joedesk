@@ -687,7 +687,7 @@ dialog.dlg::backdrop { background: var(--scrim); }
   .dlg-h { padding: 14px 16px 0; }
   .dlg-b { padding: 10px 16px 20px; }
   .tval.tight { font-size: 20px; }
-  .trow { grid-template-columns: 38px minmax(0, 1fr) minmax(92px, max-content); }
+  .trow { grid-template-columns: 38px minmax(0, 1fr) auto; }
   .trow .px { grid-column: 2 / -1; text-align: left; }
   .trow .px .ln { justify-content: flex-start; }
   .trow .net { grid-column: 3; grid-row: 1; }
