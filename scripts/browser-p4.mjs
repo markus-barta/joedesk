@@ -1048,9 +1048,36 @@ try {
         layout.reasonTag === 'P' && layout.positionTag === 'P' && layout.siblings && layout.gap === 8 && layout.cssGap === '8px', layout);
       return layout;
     };
-    const cropNoteView = async (selector, name, what) => {
+    const checkReasonFocusRing = async label => {
+      const focus = await page.evaluate(`(() => {
+        const line = document.querySelector('#sheetBody .dp-reasons-extra .dp-reason');
+        if (!line || document.activeElement !== line) return null;
+        const css = getComputedStyle(line), r = line.getBoundingClientRect();
+        const width = parseFloat(css.outlineWidth), offset = parseFloat(css.outlineOffset);
+        // An outline's outer edge is width + offset beyond the border box.
+        // No box shadow is allowed here unless its extent is also measured.
+        const extent = width + offset;
+        const ring = { top: r.top - extent, bottom: r.bottom + extent, left: r.left - extent, right: r.right + extent };
+        const glyph = document.createRange();
+        glyph.setStart(line.firstChild, 0); glyph.setEnd(line.firstChild, 1);
+        const glyphLeft = glyph.getBoundingClientRect().left;
+        return { visible: line.matches('[tabindex="-1"]:focus-visible'),
+          outline: { style: css.outlineStyle, width, offset, color: css.outlineColor }, shadow: css.boxShadow,
+          line: { top: r.top, bottom: r.bottom, left: r.left, right: r.right }, ring,
+          glyphLeft, clearance: glyphLeft - (ring.left + width),
+          overflow: { top: Math.max(0, r.top - ring.top), bottom: Math.max(0, ring.bottom - r.bottom),
+            left: Math.max(0, r.left - ring.left), right: Math.max(0, ring.right - r.right) } };
+      })()`);
+      check('partial-days', `${label}: visible keyboard focus ring stays inside its reason line with exactly 0 px protrusion`,
+        focus?.visible && focus.outline.style === 'solid' && focus.outline.width > 0 &&
+        !['transparent', 'rgba(0, 0, 0, 0)'].includes(focus.outline.color) && focus.shadow === 'none' &&
+        Object.values(focus.overflow).every(px => px === 0), focus);
+      check('partial-days', `${label}: the ring's inner left edge is at least 2 px clear of the first glyph`,
+        focus?.visible && focus.clearance >= 2, focus);
+    };
+    const cropNoteView = async (selector, name, what, scale = 1) => {
       const clip = await page.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
-        return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+        return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: ${scale} }; })()`);
       const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
       shots.push({ file: `${name}.png`, what });
@@ -1207,10 +1234,20 @@ try {
       await replace(reasons, `${tag} nine reasons`);
       const reasonRoot = viewport.mobile ? '#sheetBody' : '#daypanel';
       if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
-      const reasonProbe = () => page.evaluate(`(() => {
+      const reasonProbe = async (label = 'reasons') => {
+        const detail = await page.evaluate(`(() => {
         const root = document.querySelector(${JSON.stringify(reasonRoot)}), note = root.querySelector('.dp-note');
         const lines = [...root.querySelectorAll('.dp-reason')], button = root.querySelector('.dp-reasons-more');
-        return { lead: root.querySelector('.dp-note-lead')?.innerText, lines: lines.map(el => ({ text: el.innerText, visible: __audit.visible(el) })),
+        const textX = el => {
+          if (!el || !__audit.visible(el)) return null;
+          const range = document.createRange(); range.selectNodeContents(el);
+          return range.getClientRects()[0]?.left ?? null;
+        };
+        const lead = root.querySelector('.dp-note-lead');
+        return { lead: lead?.innerText, leadX: textX(lead),
+          lines: lines.map(el => ({ text: el.innerText, visible: __audit.visible(el), x: textX(el) })),
+          overflow: [note, root, root.querySelector('.dp-list'), ${viewport.mobile} ? document.getElementById('daySheet') : null]
+            .filter(Boolean).map(el => ({ element: el.id || el.className, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth })),
           button: button && { text: button.innerText, height: button.getBoundingClientRect().height, name: button.getAttribute('aria-label'),
             expanded: button.getAttribute('aria-expanded'), keyboard: button.tagName === 'BUTTON' && !button.disabled && button.tabIndex === 0 },
           focused: document.activeElement === root.querySelector('.dp-reasons-extra .dp-reason') && document.activeElement?.tabIndex === -1,
@@ -1218,8 +1255,14 @@ try {
           sheet: ${viewport.mobile} ? { reservedHeight: parseFloat(document.getElementById('daySheet').style.height),
             cap: innerHeight * .8, scrollHeight: root.scrollHeight, clientHeight: root.clientHeight } : null,
           clipped: [note, ...lines.filter(el => __audit.visible(el))].some(el => el.scrollWidth > el.clientWidth) };
-      })()`);
-      let reasonDetail = await reasonProbe();
+        })()`);
+        check('partial-days', `${tag}: ${label} reason text aligns with the lead within 0.5 px`,
+          detail.leadX !== null && detail.lines.filter(l => l.visible).every(l => l.x !== null && Math.abs(l.x - detail.leadX) <= .5), detail);
+        check('partial-days', `${tag}: ${label} note, panel or sheet has no horizontal overflow`,
+          detail.overflow.every(el => el.scrollWidth <= el.clientWidth), detail.overflow);
+        return detail;
+      };
+      let reasonDetail = await reasonProbe('nine reasons collapsed or panel');
       await checkNoteGap(reasonRoot, `${tag} nine reasons collapsed`);
       const expectedReasons = M.partialReasons(reasons.days.find(d => d.date === partialTrade)).map(r => r.text);
       check('partial-days', `${tag}: canonical reason sentences wrap cleanly; FX disabled suppresses missing`,
@@ -1257,17 +1300,18 @@ try {
         await page.evaluate('document.querySelector("#sheetBody .dp-reasons-more").focus({preventScroll:true})');
         await key(page, 'Enter');
         await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
-        reasonDetail = await reasonProbe();
+        reasonDetail = await reasonProbe('nine reasons keyboard-expanded');
         let geometry = await revealGeometry(sheetBefore);
         check('partial-days', `${tag}: keyboard reveal removes the button, focuses and politely announces all 8 reasons with 0 px sheet movement`,
           reasonDetail.lines.length === 8 && reasonDetail.lines.every(l => l.visible) && !reasonDetail.button && reasonDetail.focused && reasonDetail.live === 'polite' && !reasonDetail.clipped &&
           geometry.unchanged, { ...reasonDetail, geometry });
         check('partial-days', `${tag}: keyboard-expanded sheet holds all content without scrolling when below the 80vh cap`,
           reasonDetail.sheet.reservedHeight >= reasonDetail.sheet.cap || reasonDetail.sheet.scrollHeight <= reasonDetail.sheet.clientHeight, reasonDetail.sheet);
+        await checkReasonFocusRing(`${tag} nine reasons keyboard-expanded`);
         await checkNoteGap(reasonRoot, `${tag} nine reasons keyboard-expanded`);
         await key(page, 'Escape');
         await click(page, `#cal [data-day="${partialTrade}"]`);
-        const reopened = await reasonProbe(), pointerBefore = await sheetGeometry();
+        const reopened = await reasonProbe('nine reasons reopened'), pointerBefore = await sheetGeometry();
         check('partial-days', `${tag}: reopening the sheet starts collapsed with the same full-content height`,
           reopened.button?.text === '+6 more' && reopened.lines.filter(l => l.visible).length === 2 && same(sheetBefore, pointerBefore), reopened);
         const target = await page.evaluate(`(() => { const r = document.querySelector('#sheetBody .dp-reasons-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
@@ -1275,7 +1319,7 @@ try {
         await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
         await settle(page);
         await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
-        reasonDetail = await reasonProbe();
+        reasonDetail = await reasonProbe('nine reasons pointer-expanded');
         geometry = await revealGeometry(pointerBefore);
         check('partial-days', `${tag}: a real pointer tap reveals all reasons and keeps sheet top, height and prior content exactly 0 px`,
           reasonDetail.lines.length === 8 && reasonDetail.lines.every(l => l.visible) && !reasonDetail.button && reasonDetail.focused && !reasonDetail.clipped &&
@@ -1292,7 +1336,7 @@ try {
         [counted, 'counted', "2\u00a0trades couldn't be matched to a desk."]]) {
         await replace(record, `${tag} ${suffix}`);
         if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
-        const detail = await reasonProbe();
+        const detail = await reasonProbe(suffix);
         check('partial-days', `${tag}: ${suffix} has exact copy without a disclosure`, detail.lines.length === 1 && detail.lines[0].text === sentence && !detail.button && !detail.clipped, detail);
         if (viewport.mobile && record === singleReason) {
           const one = await sheetGeometry();
@@ -1304,7 +1348,7 @@ try {
 
       await replace(threeReasons, `${tag} one more reason`);
       if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
-      const singular = await reasonProbe();
+      const singular = await reasonProbe('three reasons collapsed or panel');
       check('partial-days', `${tag}: a single hidden reason has singular accessible copy`,
         viewport.mobile ? singular.button?.text === '+1 more' && singular.button.name === 'Show 1 more reason' : !singular.button, singular);
       if (viewport.mobile) {
@@ -1323,7 +1367,7 @@ try {
         const expected = M.partialReasons(threeReasons.days.find(d => d.date === partialTrade)).map(r => r.text);
         for (const input of ['keyboard', 'pointer']) {
           if (input === 'pointer') await click(page, `#cal [data-day="${partialTrade}"]`);
-          const collapsed = await reasonProbe(), sheetBefore = await sheetGeometry();
+          const collapsed = await reasonProbe(`three reasons ${input} collapsed`), sheetBefore = await sheetGeometry();
           const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT);
           check('partial-days', `${tag}: ${input} three-reason sheet starts below the 80vh cap with two visible lines and +1 more`,
             collapsed.button?.text === '+1 more' && collapsed.button.name === 'Show 1 more reason' &&
@@ -1341,7 +1385,7 @@ try {
             await settle(page);
           }
           await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
-          const expanded = await reasonProbe(), sheetAfter = await sheetGeometry();
+          const expanded = await reasonProbe(`three reasons ${input}-expanded`), sheetAfter = await sheetGeometry();
           const fixedAfter = await rects(page, above), outerAfter = await rects(page, SHIFT);
           const geometry = {
             unchanged: same(sheetBefore, sheetAfter) && same(fixedBefore, fixedAfter) && same(outerBefore, outerAfter),
@@ -1355,6 +1399,7 @@ try {
             { ...expanded, geometry });
           check('partial-days', `${tag}: ${input}-expanded three-reason content is below the 80vh cap and fits the reserved body without scrolling`,
             expanded.sheet.reservedHeight < expanded.sheet.cap && expanded.sheet.scrollHeight <= expanded.sheet.clientHeight, expanded.sheet);
+          if (input === 'keyboard') await checkReasonFocusRing(`${tag} three reasons keyboard-expanded`);
           await key(page, 'Escape');
         }
       }
@@ -1401,7 +1446,7 @@ try {
         for (const input of ['keyboard', 'pointer']) {
           await click(page, `#cal [data-day="${growingDay}"]`);
           if (viewport.name === '360' && input === 'keyboard') await cropSheet(growingName + '-collapsed', 'Below-cap growing sheet: two visible reasons and +3 more, without a position sentence');
-          const collapsed = await reasonProbe(), contentBefore = await contentProbe(), sheetBefore = await sheetGeometry();
+          const collapsed = await reasonProbe(`growing five reasons ${input} collapsed`), contentBefore = await contentProbe(), sheetBefore = await sheetGeometry();
           const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT);
           check('partial-days', `${tag}: ${input} growing five-reason sheet starts below the 80vh cap with two visible lines and +3 more`,
             collapsed.button?.text === '+3 more' && collapsed.button.name === 'Show 3 more reasons' && collapsed.button.height >= 44 && collapsed.button.keyboard &&
@@ -1420,7 +1465,7 @@ try {
             await settle(page);
           }
           await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
-          const expanded = await reasonProbe(), contentAfter = await contentProbe(), sheetAfter = await sheetGeometry();
+          const expanded = await reasonProbe(`growing five reasons ${input}-expanded`), contentAfter = await contentProbe(), sheetAfter = await sheetGeometry();
           const fixedAfter = await rects(page, above), outerAfter = await rects(page, SHIFT);
           const geometry = {
             unchanged: same(sheetBefore, sheetAfter) && same(fixedBefore, fixedAfter) && same(outerBefore, outerAfter),
@@ -1437,7 +1482,13 @@ try {
             sheetAfter.height < expanded.sheet.cap && expanded.sheet.reservedHeight < expanded.sheet.cap &&
             contentAfter.expandedSheetHeight < expanded.sheet.cap && expanded.sheet.scrollHeight <= expanded.sheet.clientHeight,
             { ...expanded.sheet, content: contentAfter, sheetAfter });
-          if (viewport.name === '360' && input === 'keyboard') await cropSheet(growingName + '-expanded', 'All five reasons revealed in place: content grows, sheet stays below cap without moving');
+          if (input === 'keyboard') {
+            await checkReasonFocusRing(`${tag} growing five reasons keyboard-expanded`);
+            if (viewport.name === '360') {
+              await cropSheet(growingName + '-expanded', 'All five reasons revealed in place: content grows, sheet stays below cap without moving');
+              await cropNoteView('#sheetBody .dp-note', growingName + '-expanded-focus-crop', 'JOED-33: keyboard focus ring contained in the revealed line, 2 px clear of aligned reason text (2×)', 2);
+            }
+          }
           await key(page, 'Escape');
         }
       }
@@ -1718,6 +1769,14 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   position sentences proves content grows below the 80vh cap at 360/390 in both
   themes; Enter and real touch preserve sheet, prior content and outer geometry
   exactly. Its 360 crops are \`360-*-results-partial-growing-reasons-{collapsed,expanded}.png\`.
+  JOED-33 measures the visible keyboard outline's outer box after every reason
+  reveal at 360/390 in both themes: it must stay inside its own line with exactly
+  0 px protrusion and its inner left edge must be at least 2 px clear of the
+  first glyph. Every visible reason's text starts within 0.5 px of its lead in
+  collapsed and expanded sheets and desktop panels, including 1440. The note,
+  panel and sheet must satisfy scrollWidth ≤ clientWidth in every state.
+  Zoomed note crops with keyboard focus are
+  \`360-*-results-partial-growing-reasons-expanded-focus-crop.png\` (2×).
   The reason/desk block and position note must be sibling paragraphs exactly
   8 px apart in every variant, before and after reveals. Extra crops are
   \`1440-*-results-partial-empty-panel-crop.png\`,
