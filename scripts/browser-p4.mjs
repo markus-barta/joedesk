@@ -808,14 +808,26 @@ try {
       check('trade-amount', `${tag}: the expected ${fallback ? 'fallback' : 'worker'} renders the fixture`,
         (await page.evaluate('window.__joedesk.worker()')) === !fallback);
       if (!viewport.mobile) {
-        // Capture the actual panel before scrolling to the widest row, so
-        // short and large amounts can be compared together at both widths.
-        await page.evaluate(`document.querySelector(${JSON.stringify(root)}).scrollTop = 0`);
+        // Keep the final million and short rows together in the visible list,
+        // so both desktop panel crops show their amount alignment.
+        await page.evaluate(`(() => { const list = document.querySelector(${JSON.stringify(root)});
+          list.scrollTop = list.scrollHeight; })()`);
         await settle(page);
-        const clip = await page.evaluate(`(() => { const r = document.getElementById('daypanel').getBoundingClientRect();
-          return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+        const crop = await page.evaluate(`(() => {
+          const list = document.querySelector(${JSON.stringify(root)}).getBoundingClientRect();
+          const panel = document.getElementById('daypanel').getBoundingClientRect();
+          const rows = ['rt-amount-million', 'rt-amount-short'].map(id => {
+            const r = document.querySelector(${JSON.stringify(root)} + ' [data-trade="' + id + '"]')?.getBoundingClientRect();
+            return { id, rect: r?.toJSON(), visible: Boolean(r && r.width > 0 && r.height > 0 &&
+              [list, panel].every(b => r.left >= b.left && r.right <= b.right && r.top >= b.top && r.bottom <= b.bottom)) };
+          });
+          return { list: list.toJSON(), rows, clip: { x: panel.left + scrollX, y: panel.top + scrollY,
+            width: panel.width, height: panel.height, scale: 1 } };
+        })()`);
+        check('trade-amount', `${tag}: million and short rows are fully visible inside the list and whole-panel crop`,
+          crop.rows.every(row => row.visible), crop);
         const name = `${viewport.name}-${theme}-results-trade-amount-panel-full-crop`;
-        const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true });
+        const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip: crop.clip, captureBeyondViewport: true });
         writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
         shots.push({ file: `${name}.png`, what: 'Whole day panel: compare short and large amounts, price columns and fees across rows' });
       }
