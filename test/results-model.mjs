@@ -680,12 +680,12 @@ test('JOED-32 hero: only a sentence without a partial-day hint keeps its final f
     const covered = structuredClone(value);
     for (const day of covered.days) if (dates.slice(0, count).includes(day.date)) day.coverage = 'partial';
     const { html, sentence } = render(covered, now, 'month', '2026-10-16');
-    assert.ok(sentence.startsWith(count ? baseline.slice(0, -1) + ' · ' : baseline), 'only the final full stop changes');
+    assert.ok(sentence.startsWith(count ? baseline.slice(0, -1) + ' ' : baseline), 'only the final full stop changes');
     assert.equal((sentence.match(/class="st warn"/g) ?? []).length, count ? 1 : 0);
     assert.equal((html.match(/incl\./g) ?? []).length, count ? 1 : 0, 'the hero has only one hint');
     if (count) {
-      assert.doesNotMatch(sentence, /\. · /);
-      assert.match(sentence, / · <span class="st warn"><svg/);
+      assert.doesNotMatch(sentence, /·|\. <span class="st warn">/);
+      assert.match(sentence, / <span class="st warn"><svg/);
       assert.match(sentence, /href="#i-half"/);
       assert.ok(textOf(sentence).endsWith(`incl. ${count} partial day${count === 1 ? '' : 's'}`));
     }
@@ -700,7 +700,7 @@ test('JOED-32 hero: empty periods say recorded only when they include counted pa
   partial.days[1].coverage = 'partial';
   for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
     const sentence = textOf(render(partial, now, 'month', '2026-10-16', desks).sentence);
-    assert.match(sentence, /^No trades recorded this month\. Paper results start on .+ · incl\. 1 partial day$/);
+    assert.match(sentence, /^No trades recorded this month\. Paper results start on .+ incl\. 1 partial day$/);
     const plain = textOf(render(full, now, 'month', '2026-10-16', desks).sentence);
     assert.match(plain, /^No trades this month\. Paper results start on .+\.$/);
     assert.doesNotMatch(plain, /recorded|incl\./);
@@ -718,7 +718,7 @@ test('JOED-32 hero: partial days with no closed trades keep the open-position ga
     for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
       const { html, sentence } = render(partial, now, 'month', '2026-10-16', desks);
       const amount = fmt.eur(E(desks.length));
-      assert.equal(textOf(sentence), `${direction} ${amount} this month · incl. 1 partial day`);
+      assert.equal(textOf(sentence), `${direction} ${amount} this month incl. 1 partial day`);
       assert.doesNotMatch(html.match(/<div class="display">([\s\S]*?)<\/div>/)[1], /muted/,
         'open-position movement keeps its hero number');
       const plain = textOf(render(full, now, 'month', '2026-10-16', desks).sentence);
@@ -833,7 +833,7 @@ test('JOED-32 browser snapshots: valid ingress, two closed partial dates and rea
   assert.equal(empty.trackingStart, '2026-09-30');
   for (const day of empty.days) assert.deepEqual(ALL.map(id => E(day.desks[id].equityClose.amount)), todayUnits);
   assert.equal(textOf(render(empty, now, 'month', '2026-10-16', ALL, todayUnits).sentence),
-    'No trades recorded this month. Paper results start on 30\u00a0Sep 2026 · incl. 2 partial days');
+    'No trades recorded this month. Paper results start on 30\u00a0Sep 2026 incl. 2 partial days');
   assert.match(textOf(render(unknown, now, 'month', '2026-10-16').sentence), /^The result this month is not known yet: .+\.$/);
   assert.doesNotMatch(render(unknown, now, 'month', '2026-10-16').sentence, /incl\./);
 });
@@ -992,8 +992,9 @@ test('JOED-30 month summary: every closed partial date counts, including escalat
   const value = record(['2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17']
     .map(date => ({ date, desks: {}, coverage: 'partial' })));
   let r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-15');
-  assert.equal(textOf(r.month), 'No trades recorded this month · incl. 2 partial days');
-  assert.match(r.month, / · <span class="st warn">/);
+  assert.equal(textOf(r.month), 'No trades recorded this month incl. 2 partial days');
+  assert.match(r.month, / <span class="st warn">/);
+  assert.doesNotMatch(r.month, /·/);
   assert.doesNotMatch(r.html, /incl\.|so far/);
   value.missingDays = ['2026-10-15'];
   value.trades.push(tradeOf('rt-partial-count', 'j', '2026-10-15T14:00:00.000Z', '-0.03'));
@@ -1005,6 +1006,10 @@ test('JOED-30 month summary: every closed partial date counts, including escalat
   assert.match(r.month, /class="month-long">over 1 trading day/);
   assert.match(r.month, /class="month-short">in 1 day/);
   assert.match(r.month, /incl\. 2 partial days/);
+  assert.doesNotMatch(r.month, /·/);
+  const singular = render(record([{ date: '2026-10-15', desks: {}, coverage: 'partial' }]), '2026-10-16T12:00:00.000Z', '2026-10-15');
+  assert.equal(textOf(singular.month), 'No trades recorded this month incl. 1 partial day');
+  assert.match(singular.month, / <span class="st warn"><svg[^>]*><use href="#i-half"\/><\/svg><span>incl\. 1 partial day<\/span><\/span>$/);
   const empty = render(record([]), '2026-10-16T12:00:00.000Z', '2026-10-15');
   assert.equal(empty.month, 'No trades this month');
 });

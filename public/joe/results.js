@@ -101,7 +101,7 @@ const missingDay = (ix, k, desks) => ix?.missingDays?.has(k) && M.dayResult(ix, 
 const missingDayText = k => `Stale: daily summary missing for ${M.fmtDay(k)}`;
 const PARTIAL_REASON = M.PARTIAL_REASON;
 const partialDay = (view, k) => k < view.today && view.ix?.partialDays?.has(k);
-const partialHint = count => count ? ` · ${st('warn', `incl. ${count} partial day${count === 1 ? '' : 's'}`)}` : '';
+const partialHint = count => count ? ` ${st('warn', `incl. ${count} partial day${count === 1 ? '' : 's'}`)}` : '';
 // One warning slot, with a missing summary taking priority over partial coverage.
 function dayWarning(view, k, desks) {
   if (k >= view.today) return null;
