@@ -91,6 +91,24 @@ const cleanMetaLines = rows => rows.length === 4 && rows.every(row => row.meta.l
   row.meta.lines.every(line => !line.text.startsWith('·') && !line.text.endsWith('·')) &&
   row.meta.suffixes.length === 3 && row.meta.suffixes.every(suffix => suffix.width > 0 && suffix.preceding &&
     suffix.text.trim() === '·' && suffix.visibility === (suffix.lineEnd ? 'hidden' : 'visible')));
+// Executed in the page in the actual capture state, including list clipping.
+// Text/visibility alone would miss the first line scrolled under the header.
+function tradeSymbols(root, expected) {
+  const list = root.getBoundingClientRect();
+  const panel = root.closest('dialog, .daypanel').getBoundingClientRect();
+  return [...root.querySelectorAll('.trow')].map(row => {
+    const name = row.querySelector('.name'), symbol = name.querySelector('b.word');
+    const rect = symbol?.getBoundingClientRect(), style = symbol && getComputedStyle(symbol);
+    const prefix = expected[row.dataset.trade];
+    return { id: row.dataset.trade, expected: prefix, text: name.textContent, rect: rect?.toJSON(),
+      startsWithSymbol: Boolean(prefix && name.firstElementChild === symbol && symbol.textContent === prefix &&
+        name.textContent.replace(/\u00a0/g, ' ').startsWith(prefix + ' · ')),
+      rendered: Boolean(rect?.width > 0 && rect.height > 0 && style.visibility === 'visible' &&
+        style.display !== 'none' && Number(style.opacity) > 0),
+      inside: Boolean(rect && [list, panel].every(b => rect.left >= b.left && rect.right <= b.right &&
+        rect.top >= b.top && rect.bottom <= b.bottom)) };
+  });
+}
 const money = n => (n === null || n === undefined ? '—' : fmt.money(n, 'EUR', true));
 const two = (a, b) => `${a === null || a === undefined ? '—' : money(a)}/${b === null || b === undefined ? '—' : money(b)}`;
 const DESKS = ['j', 'joe', 'joel'];
@@ -813,7 +831,20 @@ try {
               const range = document.createRange();
               range.setStart(node, match.index); range.setEnd(node, match.index + match[0].length);
               const rects = [...range.getClientRects()].filter(r => r.width > 0);
-              const lines = [...new Set(rects.map(r => r.top))];
+              const lines = [...new Set(rects.map(r => r.top))], fragments = [];
+              // Count source characters per rendered line, excluding a
+              // browser-generated hyphen from the minimum fragment length.
+              let offset = match.index;
+              for (const char of match[0]) {
+                const glyph = document.createRange();
+                glyph.setStart(node, offset); glyph.setEnd(node, offset + char.length);
+                offset += char.length;
+                const box = [...glyph.getClientRects()].find(r => r.width > 0 && r.height > 0);
+                if (!box) continue;
+                let fragment = fragments.find(f => Math.abs(f.top - box.top) < 0.5);
+                if (!fragment) fragments.push(fragment = { top: box.top, text: '' });
+                fragment.text += char;
+              }
               let unbrokenWidth = range.getBoundingClientRect().width;
               if (lines.length > 1) {
                 // Keep the word's real font and ancestor selectors, but remove
@@ -828,7 +859,7 @@ try {
                   unbrokenWidth = range.getBoundingClientRect().width;
                 } finally { probe.remove(); }
               }
-              out.push({ word: match[0], lines, unbrokenWidth });
+              out.push({ word: match[0], lines, fragments, unbrokenWidth });
             }
           }
           return out;
@@ -848,6 +879,7 @@ try {
           return { id: row.dataset.trade, text: net.textContent, scroll: net.scrollWidth, client: net.clientWidth,
             width: n.width, amountWidth: a.width, nowrap: getComputedStyle(net).whiteSpace === 'nowrap',
             nameWidth: nameBounds.width, nameContentWidth, words: nameWords,
+            lang: name.lang, hyphens: nameStyle.hyphens,
             brokenWords: nameWords.filter(w => w.lines.length > 1),
             nameFits: name.scrollWidth <= name.clientWidth,
             metaUnits: [...meta.querySelectorAll('.meta-unit')].map(unit => ({ text: unit.textContent,
@@ -886,6 +918,9 @@ try {
           r.metaUnits.length === 4 && r.metaUnits.every(unit => unit.nowrap && unit.words.every(w => w.lines.length === 1)) &&
           r.metaUnits.some(unit => unit.text.includes('Long')) && r.metaUnits.some(unit => unit.text.startsWith('closed ')) &&
           r.metaUnits.some(unit => unit.text.startsWith('held '))), detail.rows);
+      check('trade-amount', `${tag}: English automatic hyphenation leaves at least three source characters in every broken-word line`,
+        detail.rows.every(r => r.lang === 'en' && r.hyphens === 'auto' && r.brokenWords.every(w =>
+          w.fragments.length === w.lines.length && w.fragments.every(f => [...f.text].length >= 3))), detail.rows);
       check('trade-amount', `${tag}: no visible dot starts or ends a meta line, suffixes stay with the preceding unit, and new lines start flush`,
         cleanMetaLines(detail.rows), detail.rows.map(({ id, meta }) => ({ id, meta })));
       check('trade-amount', `${tag}: every price in the panel uses one size, with all rows at 11 px if any needs it`,
@@ -995,41 +1030,69 @@ try {
       check('trade-amount', `${tag}: hiding dots keeps their widths and repeated layout never reflows or flips visibility`,
         [stable.once, stable.twice, stable.shown].every(boxes => JSON.stringify(boxes) === JSON.stringify(stable.before)) &&
         JSON.stringify(stable.hidden) === JSON.stringify(stable.first) && JSON.stringify(stable.first) === JSON.stringify(stable.second), stable);
-      if (!viewport.mobile) {
-        // Keep the final million and short rows together in the visible list,
-        // so both desktop panel crops show their amount alignment.
-        await page.evaluate(`(() => { const list = document.querySelector(${JSON.stringify(root)});
-          list.scrollTop = list.scrollHeight; })()`);
+      const expectedSymbols = Object.fromEntries(record.trades.map(t => [t.id, t.symbol]));
+      const symbols = await page.evaluate(`(${tradeSymbols.toString()})(document.querySelector(${JSON.stringify(root)}), ${JSON.stringify(expectedSymbols)})`);
+      check('trade-amount', `${tag}: every row starts with its recorded symbol and the symbol is rendered`,
+        symbols.length === want.length && symbols.every(row => row.startsWithSymbol && row.rendered), symbols);
+      // A bottom-scrolled list cut row 1's first line out of the old crop.
+      // Capture the entire list at its tested width instead. Height overrides
+      // are capture-only and restored before the row crop and shift checks.
+      const captureSelectors = viewport.mobile ? ['#daySheet', '#daySheet .dlg-in', root] : ['#daypanel', root];
+      const savedCapture = await page.evaluate(`(() => {
+        const nodes = ${JSON.stringify(captureSelectors)}.map(selector => document.querySelector(selector));
+        const saved = nodes.map(el => ({ style: el.getAttribute('style'), scrollTop: el.scrollTop }));
+        const list = nodes.at(-1), surface = nodes[0];
+        const height = list.scrollHeight + 1;
+        // Retain the content width even on hosts with non-overlay scrollbars.
+        const width = list.getBoundingClientRect().width - (list.offsetWidth - list.clientWidth);
+        Object.assign(list.style, { flex: 'none', width: width + 'px', height: height + 'px', maxHeight: 'none', overflow: 'visible' });
+        list.scrollTop = 0;
+        Object.assign(surface.style, { height: 'auto', maxHeight: 'none' });
+        if (surface.matches('dialog')) {
+          Object.assign(surface.style, { position: 'fixed', top: '0', bottom: 'auto', margin: '0' });
+          nodes[1].style.maxHeight = 'none';
+        }
+        return saved;
+      })()`);
+      try {
         await settle(page);
         const crop = await page.evaluate(`(() => {
-          const list = document.querySelector(${JSON.stringify(root)}).getBoundingClientRect();
-          const panel = document.getElementById('daypanel').getBoundingClientRect();
-          const rows = ['rt-amount-million', 'rt-amount-short'].map(id => {
-            const r = document.querySelector(${JSON.stringify(root)} + ' [data-trade="' + id + '"]')?.getBoundingClientRect();
-            return { id, rect: r?.toJSON(), visible: Boolean(r && r.width > 0 && r.height > 0 &&
+          const root = document.querySelector(${JSON.stringify(root)}), list = root.getBoundingClientRect();
+          const panel = root.closest('dialog, .daypanel').getBoundingClientRect();
+          const rows = [...root.querySelectorAll('.trow')].map(row => {
+            const r = row.getBoundingClientRect();
+            return { id: row.dataset.trade, rect: r.toJSON(), visible: Boolean(r.width > 0 && r.height > 0 &&
               [list, panel].every(b => r.left >= b.left && r.right <= b.right && r.top >= b.top && r.bottom <= b.bottom)) };
           });
-          return { list: list.toJSON(), rows, clip: { x: panel.left + scrollX, y: panel.top + scrollY,
-            width: panel.width + 16, height: panel.height, scale: 1 }, panel: panel.toJSON() };
+          return { list: list.toJSON(), rows, scrollTop: root.scrollTop,
+            symbols: (${tradeSymbols.toString()})(root, ${JSON.stringify(expectedSymbols)}),
+            clip: { x: panel.left + scrollX, y: panel.top + scrollY,
+              width: panel.width + ${viewport.mobile ? 0 : 16}, height: panel.height, scale: 1 }, panel: panel.toJSON() };
         })()`);
-        check('trade-amount', `${tag}: million and short rows are fully visible inside the list and whole-panel crop`,
-          crop.rows.every(row => row.visible), crop);
-        check('trade-amount', `${tag}: the whole-panel crop includes 16 px beyond its right edge`,
-          crop.clip.width === crop.panel.width + 16, crop);
-        const name = `${viewport.name}-${theme}-results-trade-amount-panel-full-crop`;
-        const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip: crop.clip, captureBeyondViewport: true });
-        writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
-        shots.push({ file: `${name}.png`, what: 'Whole day panel with 16 px beyond its right edge: compare amounts, whole name/meta words, prices and fees' });
-      }
-      if (viewport.name === '360') {
-        const clip = await page.evaluate(`(() => {
-          const r = document.getElementById('daySheet').getBoundingClientRect();
-          return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 };
+        check('trade-amount', `${tag}: all four rows including million and short fit the full-list capture`,
+          crop.scrollTop === 0 && crop.rows.length === want.length && crop.rows.every(row => row.visible), crop);
+        check('trade-amount', `${tag}: every symbol starts its name, is rendered and lies inside the visible list and panel in crop state`,
+          crop.symbols.length === want.length && crop.symbols.every(row => row.startsWithSymbol && row.rendered && row.inside), crop);
+        if (!viewport.mobile) {
+          check('trade-amount', `${tag}: the whole-panel crop includes 16 px beyond its right edge`,
+            crop.clip.width === crop.panel.width + 16, crop);
+        }
+        if (!viewport.mobile || viewport.name === '360') {
+          const name = `${viewport.name}-${theme}-results-trade-amount-${viewport.mobile ? 'sheet' : 'panel'}-full-crop`;
+          const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip: crop.clip, captureBeyondViewport: true });
+          writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+          shots.push({ file: `${name}.png`, what: `Full list at the tested width, height expanded only for capture: every symbol/name first line, amount, price and fee${viewport.mobile ? '' : '; 16 px right margin'}` });
+        }
+      } finally {
+        await page.evaluate(`(() => {
+          const selectors = ${JSON.stringify(captureSelectors)}, saved = ${JSON.stringify(savedCapture)};
+          selectors.forEach((selector, i) => {
+            const el = document.querySelector(selector);
+            if (saved[i].style === null) el.removeAttribute('style'); else el.setAttribute('style', saved[i].style);
+          });
+          selectors.forEach((selector, i) => { document.querySelector(selector).scrollTop = saved[i].scrollTop; });
         })()`);
-        const name = `${viewport.name}-${theme}-results-trade-amount-sheet-full-crop`;
-        const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true });
-        writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
-        shots.push({ file: `${name}.png`, what: 'Whole 360 px day sheet: meta line endings and uniform panel price size' });
+        await settle(page);
       }
       // Crop the whole widest row, including its yielding name/price columns.
       // Scroll only the detail container so the surrounding page stays put.
@@ -2103,7 +2166,9 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   and keep the original 92 px minimum on desktop. Phone amount columns
   size to their content, with prices spanning the second row. Desktop names
   keep at least 120 px; Range rectangles prove no name or meta word breaks
-  internally. Meta dots stay inside the preceding nowrap unit; visible glyph
+  internally except for oversized phone tokens, whose English automatic
+  hyphenation must leave at least three source characters on each line.
+  Meta dots stay inside the preceding nowrap unit; visible glyph
   checks forbid dots at either line edge and require flush line starts, also
   after live resize. Hidden suffixes retain their width; repeated fits must
   preserve geometry and visibility. Only an oversized single name token may
@@ -2116,6 +2181,11 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   \`*-results-trade-amount-{panel,sheet}-crop.png\`. Whole-panel crops at
   1440/1024 in both themes are \`*-results-trade-amount-panel-full-crop.png\`
   with 16 px beyond the panel's right edge for clipping and alignment review.
+  Full-list captures expand only height and preserve content width, reset
+  scrolling to the top and restore the layout afterwards. All four rows and
+  their rendered symbol prefixes must lie inside the visible list and panel
+  in capture state at every width/theme; bottom scrolling previously cut
+  row 1's symbol line out of the desktop crop.
   Whole 360 px sheets in both themes are
   \`360-*-results-trade-amount-sheet-full-crop.png\`.
 - **Partial coverage (JOED-30).** The dedicated \`partial-days\` scenario uses

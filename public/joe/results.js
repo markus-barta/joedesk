@@ -358,7 +358,7 @@ const metaSuffix = '<span class="meta-sep" aria-hidden="true"> ·</span>';
 function tradeRows(ts) {
   return ts.map(t => `<div class="trow" data-trade="${esc(t.id)}">
     ${symBadge(t.symbol, t.desk)}
-    <div class="name"><b class="word">${esc(t.symbol)}</b>${t.company ? ` · ${tradeWords(t.company)}` : ''}<span class="meta"><span class="meta-unit">${inlineMark(t.desk)} ${LABEL[t.desk]}${metaSuffix}</span> <span class="meta-unit">${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(t.quantity.replace('.', ','))}${metaSuffix}</span> <span class="meta-unit">closed ${timeHM(new Date(t.closedAt).toISOString())}${metaSuffix}</span> <span class="meta-unit">${held(t)}</span></span></div>
+    <div class="name" lang="en"><b class="word">${esc(t.symbol)}</b>${t.company ? ` · ${tradeWords(t.company)}` : ''}<span class="meta"><span class="meta-unit">${inlineMark(t.desk)} ${LABEL[t.desk]}${metaSuffix}</span> <span class="meta-unit">${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(t.quantity.replace('.', ','))}${metaSuffix}</span> <span class="meta-unit">closed ${timeHM(new Date(t.closedAt).toISOString())}${metaSuffix}</span> <span class="meta-unit">${held(t)}</span></span></div>
     <div class="px"><span class="ln"><span>${price(t.entry)}</span><span>${icon('arrow')}${price(t.exit)}</span></span><span class="fee">fees ${eur(t.units.fees)}</span></div>
     <div class="net">${pl(t.units.net)}</div>
   </div>`).join('');

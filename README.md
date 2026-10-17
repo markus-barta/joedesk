@@ -548,7 +548,9 @@ The generated `index.md` and CI log retain the measurement table.
 Day-detail trade amounts keep their full value on one right-aligned line.
 Their columns grow to fit, with the original 92 px minimum for short amounts
 on desktop. Names keep at least 120 px and wrap between whole words; only
-an individual token wider than the column may break internally. Meta units
+an individual token wider than the column may break internally. English
+company text uses automatic hyphenation with at least three characters on
+each side of a hyphen, keeping last-resort breaks readable. Meta units
 (desk, side/quantity, close time and holding duration) stay together and wrap
 between units. Each middle dot is a nowrap suffix of the preceding unit;
 after layout and resize, line-ending dots use `visibility: hidden`, retaining
@@ -566,6 +568,8 @@ common right edges, desktop-only 92 px sizing, phone content sizing, wrapping
 of the eight-decimal pair at 1440, and exactly 0 px outer movement on open/close.
 Range rectangles check every name/meta word, atomic meta units, the 120 px
 desktop name floor, full panel-header visibility and the price/fee yield order.
+Per-character Range measurements require every broken-word line to contain
+at least three source characters; desktop fixture words remain unbroken.
 Visible glyph checks reject a middle dot at either end of every meta line;
 resize and repeated-fit probes verify flush starts, reserved suffix widths,
 stable wrapping and uniform panel price sizing, including a roomy peer row.
@@ -573,10 +577,17 @@ Widest-row crops go to `JOED_QA_DIR` as
 `*-results-trade-amount-{panel,sheet}-crop.png` for the visual check.
 Whole-panel crops at 1440/1024 in both themes add
 `*-results-trade-amount-panel-full-crop.png` with a 16 px margin beyond the
-panel's right edge for clipping and cross-row alignment review. Both the
-million and short rows must be fully visible in each whole-panel crop.
+panel's right edge for clipping and cross-row alignment review. Captures
+temporarily expand the list's height at its tested content width and reset
+its scroll to the top, then restore the original layout. All four rows,
+including every symbol/name first line, must fit inside the list and panel;
+bottom-scrolling to the million/short rows had clipped row 1's symbol line.
+Symbol checks compare the name prefix with the recorded symbol, require a
+non-zero visible symbol box, and verify list/panel containment in capture
+state at all four widths and both themes.
 The full 360 px sheet in each theme is
-`360-*-results-trade-amount-sheet-full-crop.png`.
+`360-*-results-trade-amount-sheet-full-crop.png`, using the same temporary
+height expansion to show every row's first line.
 
 **Producer contract pin — manifest revision 6.** Compared with revision 2,
 revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds

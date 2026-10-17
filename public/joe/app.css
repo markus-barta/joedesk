@@ -673,7 +673,7 @@ span.dbar, span.vbar { display: block; }
 .tval .bn .ar { width: 12px; height: 12px; }
 /* Keep whole words together. Only an individual token wider than the name
    column can break inside its own constrained inline block. */
-.trow .name { min-width: 120px; word-break: normal; overflow-wrap: normal; }
+.trow .name { min-width: 120px; word-break: normal; overflow-wrap: normal; hyphens: auto; hyphenate-limit-chars: 6 3 3; }
 .trow .name .word { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 .trow .name .meta-unit { display: inline-block; white-space: nowrap; }
 .trow .name .meta-sep.line-end { visibility: hidden; }

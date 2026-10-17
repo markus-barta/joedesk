@@ -663,6 +663,7 @@ test('JOED-31 rendering: exact extreme amounts and prices survive whole-word nam
     assert.ok(textOf(html).includes('$ 102.000,12345678'));
     assert.ok(textOf(html).includes('$ 2.000,12345678'));
     assert.ok(textOf(html).includes('Demonstration company with a long name'));
+    assert.equal((html.match(/<div class="name" lang="en"><b class="word">DEMO<\/b> · /g) ?? []).length, 4);
     assert.equal((html.match(/class="meta-unit"/g) ?? []).length, 16);
     assert.match(html, /<span class="word">Demonstration<\/span> <span class="word">company<\/span>/);
     assert.equal((html.match(/class="meta-sep" aria-hidden="true"> ·<\/span><\/span> <span class="meta-unit">/g) ?? []).length, 12);
