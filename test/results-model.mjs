@@ -28,7 +28,8 @@ const { acceptRead } = await import('../contracts/read.mjs');
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const hm = await import('../public/joe/history-model.js');
-const { designResults, withTradeSummaries, partialDaysResults } = await import('../scripts/browser/results.mjs');
+const { designResults, withTradeSummaries, partialDaysResults, retainedPartialResults } = await import('../scripts/browser/results.mjs');
+const { preflightSnapshot } = await import('../scripts/browser/board.mjs');
 
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ALL = ['j', 'joe', 'joel'];
@@ -720,11 +721,40 @@ test('JOED-30 browser snapshots: each partial, empty, Stale handoff, worst amoun
   for (const [name, payload] of Object.entries(snapshots)) {
     const checked = validateContract('results', payload, { stage: 'ingress', receivedAt: payload.generatedAt });
     assert.ok(checked.ok, `${name}: ${JSON.stringify(checked.errors)}`);
+    assert.equal(preflightSnapshot('results', payload, null, payload.generatedAt).status, 200, name);
   }
   assert.equal(M.dayResult(M.indexResults(snapshots.large), dates.partial, ALL).count, 99);
   assert.equal(M.dayResult(M.indexResults(snapshots.large), dates.partial, ALL).units, E('-999999.99'));
   assert.equal(snapshots.empty.days.find(d => d.date === dates.partial).coverage, 'partial');
   assert.equal(M.dayResult(M.indexResults(snapshots.empty), dates.partial, ALL).count, 0);
+});
+
+test('browser preflight: rejects closed reasonless fixtures and replays before any page wait', () => {
+  const { receivedAt, record } = retainedPartialResults();
+  const open = preflightSnapshot('results', record, null, receivedAt);
+  const closedAt = '2026-10-15T22:00:00.000Z';
+  assert.throws(() => preflightSnapshot('results', record, null, closedAt), /partialReasonsRequired/);
+  assert.throws(() => preflightSnapshot('results', record, open, receivedAt), /sequenceReplayed/);
+  const intentional = preflightSnapshot('results', record, open, receivedAt, { status: 422, reason: 'sequence_replayed' });
+  assert.equal(intentional.value, open.value);
+  const unknown = structuredClone(record);
+  unknown.days.at(-1).partialReasons = ['future_reason'];
+  assert.throws(() => preflightSnapshot('results', unknown, null, receivedAt), /enum/);
+});
+
+test('browser default-line fixture: accepted while open, readable and rendered after Vienna midnight', t => {
+  const { receivedAt, record } = retainedPartialResults();
+  const accepted = preflightSnapshot('results', record, null, receivedAt);
+  const now = '2026-10-16T12:00:00.000Z';
+  assert.ok(validateContract('results', accepted.value).ok);
+  const read = acceptRead('results', { status: 200, payload: accepted.value }, null);
+  assert.equal(read.value.receivedAt, receivedAt);
+  const r = calendarCapture(t)(read.value, now, '2026-10-15');
+  for (const html of [r.panel, r.sheet]) {
+    assert.match(textOf(html), /Partial/);
+    assert.ok(textOf(html).includes(M.PARTIAL_REASON));
+    assert.doesNotMatch(html, /dp-note-lead|dp-reason/);
+  }
 });
 
 test('JOED-30 rendering: only closed Vienna dates show partial, across midnight and the autumn DST boundary', t => {

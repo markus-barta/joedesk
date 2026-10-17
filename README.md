@@ -299,6 +299,16 @@ Reports stay separate under `~/.local/share/joedesk-qa/p4/<zone>/index.md`
 Use an approved browser test host; an installed browser guard refusal is a
 blocked check and must be handed to the coordinator without bypassing it.
 
+Every P3–P6 inbox push first runs `acceptSnapshot` in Node against the prior
+accepted record and the board's receipt clock. Unexpected rejection stops with
+the contract rule and path before HTTP or a page wait; rejection scenarios name
+their expected status and reason. Partial-day replacements wait for the refresh
+and render, including changes to today's reason that leave calendar HTML intact.
+Default-line coverage uses a reasonless snapshot accepted while the day was open
+and retained into the next day. Reason overflow is measured at the enclosing
+note and individual lines: the paragraph deliberately allows the 4 px reason
+box overhang within the note's reserved padding.
+
 P3–P6 share browser teardown: request a graceful close, wait for process exit,
 then remove the profile. A stuck browser gets SIGTERM and then SIGKILL with
 bounded exit waits; if it still has not exited, cleanup fails and retains the
