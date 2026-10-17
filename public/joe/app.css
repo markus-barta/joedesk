@@ -346,10 +346,10 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .dp-note-lines { min-width: 0; }
 .dp-note-lead, .dp-reason, .dp-desk-note { display: block; }
 .dp-reasons-more { display: block; width: 100%; min-height: 44px; text-align: left; padding: 0 8px; border: 0; background: transparent; color: var(--ink-2); font: inherit; }
-/* Reserve the available sheet before expansion, so revealing reasons grows
-   down into its body without lifting anything above the button. */
-dialog.sheet:has(.dp-reasons-more) { height: 80vh; }
-.sheet:has(.dp-reasons-more) .dlg-in { height: 100%; }
+/* The measured full-content height survives removal of the disclosure. */
+.sheet .dlg-in { height: 100%; }
+.sheet .dlg-h { flex-shrink: 0; }
+.sheet .dlg-b { scrollbar-gutter: stable; }
 
 /* ---------- History ---------- */
 .hist-tools { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin: 18px 0 12px; }

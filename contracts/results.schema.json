@@ -87,8 +87,8 @@
           },
           "unattributedCount": {
             "type": "integer",
-            "minimum": 0,
-            "description": "Optional, only when known and partialReasons contains unattributed_activity.",
+            "minimum": 1,
+            "description": "Optional positive count, only when known and partialReasons contains unattributed_activity.",
             "x-owner": "paper executor 8470"
           },
           "desks": {

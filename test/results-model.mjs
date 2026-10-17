@@ -864,8 +864,12 @@ test('JOED-30 rev 5 copy: every sentence, short label, count form, FX dedup and 
     assert.deepEqual(M.partialReasons({ partialReasons: [code] }), [{ label, text }]);
     assert.equal(M.partialReasonLabel({ partialReasons: [code] }), label);
   }
-  for (const n of [0, 1, 2]) assert.equal(M.partialReasons({ partialReasons: ['unattributed_activity'], unattributedCount: n })[0].text,
-    `${n} trade${n === 1 ? '' : 's'} couldn't be matched to a desk.`);
+  for (const n of [1, 2]) assert.equal(M.partialReasons({ partialReasons: ['unattributed_activity'], unattributedCount: n })[0].text,
+    `${n}\u00a0trade${n === 1 ? '' : 's'} couldn't be matched to a desk.`);
+  const counted = M.partialReasons({ partialReasons: ['unattributed_activity'], unattributedCount: 2 })[0].text;
+  assert.equal(counted.charCodeAt(1), 0x00a0, 'keep the number with its unit using the house NO-BREAK SPACE');
+  assert.equal(M.partialReasons({ partialReasons: ['unattributed_activity'], unattributedCount: 0 })[0].text,
+    "Some trades couldn't be matched to a desk.", 'defensive rendering never presents a contradictory zero count');
   for (const partialReasons of [undefined, [], ['unknown_code']]) {
     assert.deepEqual(M.partialReasons({ partialReasons }), []);
     assert.equal(M.partialReasonLabel({ partialReasons }), partialReason);
@@ -877,7 +881,8 @@ test('JOED-30 rev 5 copy: every sentence, short label, count form, FX dedup and 
 
 test('JOED-30 rev 5 rendering: exact note sentences, first reason aria, default, desk scope and phone expansion markup', t => {
   const render = calendarCapture(t), day = '2026-10-15', now = '2026-10-16T12:00:00.000Z';
-  for (const partialReasons of [undefined, ['unknown_code'], ['history_gap'], ['unknown_code', 'history_gap'], M.PARTIAL_REASONS.map(([code]) => code)]) {
+  for (const partialReasons of [undefined, ['unknown_code'], ['history_gap'], ['unknown_code', 'history_gap'],
+    ['capture_gap', 'history_gap', 'broker_trade_count_mismatch'], M.PARTIAL_REASONS.map(([code]) => code)]) {
     const value = record([{ date: day, desks: {}, coverage: 'partial' }]);
     // Unknown future codes cannot enter rev 5; exercise the renderer defensively.
     if (partialReasons) value.days[0].partialReasons = partialReasons;
@@ -891,8 +896,10 @@ test('JOED-30 rev 5 rendering: exact note sentences, first reason aria, default,
     assert.equal((r.panel.match(/class="dp-reason"/g) ?? []).length, reasons.length);
     assert.doesNotMatch(r.panel, /dp-reasons-more|dayReasonsExtra/);
     if (reasons.length > 2) {
-      assert.match(r.sheet, /aria-expanded="false" aria-controls="dayReasonsExtra" aria-label="Show 6 more reasons">\+6 more/);
-      assert.match(r.sheet, /id="dayReasonsExtra" hidden/);
+      const n = reasons.length - 2;
+      assert.ok(r.sheet.includes(`aria-expanded="false" aria-controls="dayReasonsExtra" aria-label="Show ${n} more reason${n === 1 ? '' : 's'}">+${n} more`));
+      assert.match(r.sheet, /id="dayReasonsExtra" aria-live="polite" hidden/);
+      assert.equal((r.sheet.match(/class="dp-reason" tabindex="-1"/g) ?? []).length, n);
       assert.equal((r.sheet.split('class="dp-reasons-more"')[0].match(/class="dp-reason"/g) ?? []).length, 2);
     } else assert.doesNotMatch(r.sheet, /dp-reasons-more/);
     for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
@@ -900,18 +907,23 @@ test('JOED-30 rev 5 rendering: exact note sentences, first reason aria, default,
       assert.match(filtered.cell(day), /class="v"><span class="muted">—/);
       assert.match(filtered.month, /incl\. 1 partial day/);
       assert.equal(textOf(filtered.sheet).includes(M.PARTIAL_DESK_NOTE), desks.length === 1);
+      if (desks.length === 1) for (const html of [filtered.panel, filtered.sheet]) {
+        const explanation = reasons.at(-1)?.text ?? partialReason;
+        const at = textOf(html).indexOf(explanation);
+        assert.ok(at >= 0 && at < textOf(html).indexOf(M.PARTIAL_DESK_NOTE), 'scope follows the sentence it qualifies');
+      }
     }
   }
 });
 
 test('JOED-30 rev 5: count copy renders singular/plural and reason metadata survives worker transfer', t => {
   const render = calendarCapture(t), day = '2026-10-15';
-  for (const n of [0, 1, 4]) {
+  for (const n of [1, 2, 4]) {
     const value = record([{ date: day, desks: {}, coverage: 'partial', partialReasons: ['unattributed_activity'], unattributedCount: n }]);
     const ix = M.indexResults(value), copy = structuredClone(ix, { transfer: M.transferables(ix) });
     assert.deepEqual(copy.partialDetails.get(day), { partialReasons: ['unattributed_activity'], unattributedCount: n });
     const r = render(value, '2026-10-16T12:00:00.000Z', day);
-    for (const html of [r.panel, r.sheet]) assert.ok(textOf(html).includes(`${n} trade${n === 1 ? '' : 's'} couldn't be matched to a desk.`));
+    for (const html of [r.panel, r.sheet]) assert.ok(textOf(html).includes(`${n}\u00a0trade${n === 1 ? '' : 's'} couldn't be matched to a desk.`));
   }
 });
 
@@ -925,6 +937,21 @@ test('JOED-30 rev 5 today: known amounts say so far and reasons render without a
     assert.match(textOf(html), /1 trade · −€ 12,40 so far/);
     assert.ok(textOf(html).includes('Trade capture had a gap on this day.'));
     assert.doesNotMatch(html, /class="st warn"|>Partial</);
+  }
+});
+
+test('JOED-30 rev 5 today: an empty selected desk or empty-desk row says No trades so far without Partial', t => {
+  const render = calendarCapture(t), day = '2026-10-25';
+  for (const partialReasons of [undefined, ['capture_gap']]) for (const traded of [false, true]) {
+    const value = record([{ date: day, desks: {}, coverage: 'partial', ...(partialReasons ? { partialReasons } : {}) }],
+      traded ? [tradeOf('rt-today-other-desk', 'j', `${day}T14:00:00.000Z`, '-12.4')] : []);
+    for (const desks of traded ? [['joe'], ['joel']] : [ALL, ['j'], ['joe'], ['joel']]) {
+      const r = render(value, `${day}T22:59:59.999Z`, day, desks);
+      for (const html of [r.panel, r.sheet]) {
+        assert.match(html, /class="dp-sum">No trades so far</);
+        assert.doesNotMatch(html, /record incomplete|Partial|sat out|>—</);
+      }
+    }
   }
 });
 
@@ -963,17 +990,12 @@ test('JOED-30 rev 5: empty-desk rows stay unknown under every filter, add nothin
   }
 });
 
-test('JOED-30 rev 5 phone disclosure: reveals below its control with accessible expanded state and can collapse', () => {
-  const extra = { hidden: true }, attrs = { 'aria-expanded': 'false' };
-  const button = { dataset: { more: '6' }, parentElement: { querySelector: () => extra },
-    getAttribute: key => attrs[key], setAttribute: (key, value) => { attrs[key] = value; } };
+test('JOED-30 rev 5 phone disclosure: removes its control and focuses the first revealed reason without scrolling', () => {
+  const events = [];
+  const firstReason = { focus: options => events.push(['focus', options]) };
+  const extra = { hidden: true, querySelector: selector => selector === '.dp-reason' ? firstReason : null };
+  const button = { parentElement: { querySelector: () => extra }, remove: () => events.push(['remove']) };
   page.toggleDayReasons(button);
   assert.equal(extra.hidden, false);
-  assert.equal(attrs['aria-expanded'], 'true');
-  assert.equal(button.textContent, 'Show fewer');
-  page.toggleDayReasons(button);
-  assert.equal(extra.hidden, true);
-  assert.equal(attrs['aria-expanded'], 'false');
-  assert.equal(attrs['aria-label'], 'Show 6 more reasons');
-  assert.equal(button.textContent, '+6 more');
+  assert.deepEqual(events, [['remove'], ['focus', { preventScroll: true }]]);
 });

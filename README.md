@@ -542,7 +542,7 @@ day in canonical order: `capture_gap`, `history_gap`,
 `unattributed_activity`, `avg_cost_mismatch`, `fx_disabled`, `fx_missing`,
 `broker_evidence_missing`. `avg_cost_mismatch` is reserved: accepted and rendered,
 not yet emitted. Reasons must be unique and nonempty and are allowed only with
-`coverage: "partial"`. `unattributedCount` is a nonnegative integer, omitted when
+`coverage: "partial"`. `unattributedCount` is a positive integer (minimum 1), omitted when
 unknown, and allowed only with `unattributed_activity`. Invalid combinations or
 order return per-day 422 errors. Legacy partial rows without reasons still accept.
 `{date, desks: {}, coverage: "partial", partialReasons: ["history_gap"]}` is valid;
@@ -555,11 +555,17 @@ With `fx_disabled`, the board omits `fx_missing`. Unknown codes never appear as
 raw text: known codes still render; when none remain, the default sentence appears.
 The cell's accessible reason is the first short label plus **, and N more**.
 Desktop panels show all reasons. Phone sheets show two reason sentences, then a
-44 px **+N more** button that reveals the others below it in the same sheet.
-The sheet reserves its available height when opening so expansion moves nothing
-above the button. A desk filter adds **Applies to the whole day; this desk may be
-unaffected.** Count copy uses “1 trade couldn't be matched to a desk.” or
-“N trades couldn't be matched to a desk.”
+44 px **+N more** button, named **Show N more reasons** (singular **Show 1 more
+reason**). Activation removes the button and focuses the first revealed reason
+(`tabindex="-1"`) in a polite live region. Reopening starts collapsed. The sheet
+reserves its full content height, capped at 80vh; collapsed spare room sits at
+the bottom, and revealing reasons changes neither its top edge nor height.
+Short days have short sheets. A desk filter adds **Applies to the whole day;
+this desk may be unaffected.** after the reason or default sentence. Count copy
+uses “1 trade couldn't be matched to a desk.” or “N trades couldn't be matched
+to a desk.”, with U+00A0 between the number and unit. An empty selected desk on
+today, including an empty-desk row, reads **No trades so far**, without Partial
+or “record incomplete”.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s

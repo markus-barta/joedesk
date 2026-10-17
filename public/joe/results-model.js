@@ -36,8 +36,8 @@ export function partialReasons(day) {
   const codes = new Set(day?.partialReasons ?? []);
   if (codes.has('fx_disabled')) codes.delete('fx_missing');
   return PARTIAL_REASONS.filter(([code]) => codes.has(code)).map(([code, label, sentence]) => ({ label,
-    text: code === 'unattributed_activity' && Number.isInteger(day.unattributedCount) && day.unattributedCount >= 0
-      ? `${day.unattributedCount} trade${day.unattributedCount === 1 ? '' : 's'} couldn't be matched to a desk.` : sentence }));
+    text: code === 'unattributed_activity' && Number.isInteger(day.unattributedCount) && day.unattributedCount >= 1
+      ? `${day.unattributedCount}${NB}trade${day.unattributedCount === 1 ? '' : 's'} couldn't be matched to a desk.` : sentence }));
 }
 export function partialReasonLabel(day) {
   const reasons = partialReasons(day);

@@ -502,7 +502,8 @@ test('JOED-30 rev 5 HTTP: reason semantic 422s retain the accepted record throug
     [d => { delete d.coverage; }, 'partialReasons', 'partialCoverageRequired'],
     [d => { d.coverage = 'full'; }, 'partialReasons', 'partialCoverageRequired'],
     [d => { d.partialReasons = ['history_gap', 'capture_gap']; }, 'partialReasons', 'canonicalOrder'],
-    [d => { d.unattributedCount = 0; }, 'unattributedCount', 'unattributedReasonRequired'],
+    [d => { d.unattributedCount = 1; }, 'unattributedCount', 'unattributedReasonRequired'],
+    [d => { d.partialReasons = ['unattributed_activity']; d.unattributedCount = 0; }, 'unattributedCount', 'minimum'],
   ]) {
     const bad = structuredClone(value); bad.seq++; mutate(bad.days[0]);
     const rejected = await s.pushResults(bad);

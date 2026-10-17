@@ -323,6 +323,7 @@ export function renderCalendar(view, per, desks) {
     $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(RS.sel)}`;
     patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}`);
     fitDaySummary($('#sheetBody'));
+    fitDaySheet(sheet);
   }
 }
 
@@ -371,7 +372,7 @@ function dayContent(view, k, desks) {
   const partial = k <= today && ix.partialDays?.has(k), incomplete = partial && !ts.length;
   const summary = partial ? ts.length
     ? `<span class="dp-trades">${plural(ts.length, 'trade')} · </span><span class="dp-amount">${eur(r.units, true)} so far</span>`
-    : 'record incomplete'
+    : k === today ? 'No trades so far' : 'record incomplete'
     : ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
   const sum = warning ? `${st('warn', warning.label)} · ${summary}` : summary;
   const closed = M.isWeekend(k) || M.marketHoliday(k);
@@ -385,26 +386,47 @@ function dayContent(view, k, desks) {
   return { sum, body, note, reasons, deskNote: partial && desks.length === 1 ? M.PARTIAL_DESK_NOTE : '' };
 }
 
-// A multi-reason sheet reserves its height before opening. Reveal below the
-// button, leaving its heading and the first two reasons exactly in place.
+// The sheet already has room for every reason. Remove the one-way disclosure
+// and focus its first revealed line without scrolling anything under the tap.
 export function toggleDayReasons(button) {
   const extra = button.parentElement.querySelector('.dp-reasons-extra');
   if (!extra) return;
-  const expanded = button.getAttribute('aria-expanded') !== 'true';
-  extra.hidden = !expanded;
-  button.setAttribute('aria-expanded', String(expanded));
-  button.textContent = expanded ? 'Show fewer' : `+${button.dataset.more} more`;
-  button.setAttribute('aria-label', expanded ? 'Show fewer reasons' : `Show ${button.dataset.more} more reasons`);
+  extra.hidden = false;
+  button.remove();
+  extra.querySelector('.dp-reason')?.focus({ preventScroll: true });
 }
 
 function dayNote(day, sheet = false) {
   const { reasons = [], note, deskNote } = day;
-  const line = reason => `<span class="dp-reason">${esc(reason.text)}</span>`;
+  const line = (reason, revealed = false) => `<span class="dp-reason"${revealed ? ' tabindex="-1"' : ''}>${esc(reason.text)}</span>`;
   const more = reasons.length - 2;
-  const reasonLines = reasons.length ? `<span class="dp-note-lead">Result may be incomplete.</span>${reasons.slice(0, sheet ? 2 : reasons.length).map(line).join('')}${sheet && more > 0
-    ? `<button type="button" class="dp-reasons-more" data-more="${more}" aria-expanded="false" aria-controls="dayReasonsExtra" aria-label="Show ${more} more reasons">+${more} more</button><span class="dp-reasons-extra" id="dayReasonsExtra" hidden>${reasons.slice(2).map(line).join('')}</span>` : ''}` : '';
-  const content = `${reasonLines}${deskNote ? `<span class="dp-desk-note">${esc(deskNote)}</span>` : ''}${note ? `<span>${esc(note)}</span>` : ''}`;
+  const reasonLines = reasons.length ? `<span class="dp-note-lead">Result may be incomplete.</span>${reasons.slice(0, sheet ? 2 : reasons.length).map(reason => line(reason)).join('')}${sheet && more > 0
+    ? `<button type="button" class="dp-reasons-more" aria-expanded="false" aria-controls="dayReasonsExtra" aria-label="Show ${more} more reason${more === 1 ? '' : 's'}">+${more} more</button><span class="dp-reasons-extra" id="dayReasonsExtra" aria-live="polite" hidden>${reasons.slice(2).map(reason => line(reason, true)).join('')}</span>` : ''}` : '';
+  const content = `${reasonLines}${note ? `<span>${esc(note)}</span>` : ''}${deskNote ? `<span class="dp-desk-note">${esc(deskNote)}</span>` : ''}`;
   return content ? `<p class="dp-note">${icon('info')}<span class="dp-note-lines">${content}</span></p>` : '';
+}
+
+// Measure after the house typography observer joins numbers and units, still
+// before paint, so wrapping matches the text that will actually be shown.
+// The collapsed body leaves this room at the bottom; CSS caps it at 80vh.
+function fitDaySheet(sheet) {
+  if (!sheet?.getBoundingClientRect) return;
+  queueMicrotask(() => {
+    if (!sheet.open) return;
+    const extra = sheet.querySelector('.dp-reasons-extra'), button = sheet.querySelector('.dp-reasons-more');
+    if (extra && !button) return;
+    sheet.style.height = '';
+    const body = sheet.querySelector('.dlg-b');
+    fitDaySummary(body);
+    if (!extra || !button) return;
+    const head = sheet.querySelector('.dlg-h'), collapsed = body.scrollHeight;
+    extra.hidden = false;
+    button.hidden = true;
+    const height = Math.ceil(head.getBoundingClientRect().height + Math.max(collapsed, body.scrollHeight));
+    extra.hidden = true;
+    button.hidden = false;
+    sheet.style.height = `${height}px`;
+  });
 }
 
 // Opened by a tap, focus goes to the sheet's heading without a ring; from the
@@ -414,9 +436,13 @@ export function openDaySheet(view, k, { pointer = false } = {}) {
   if (!sheet) return;
   const day = dayContent(view, k, deskSet());
   $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(k)}`;
+  // Rebuild even when patch's cached source matches the last opening: the
+  // disclosure may have removed itself from that DOM in the meantime.
+  patch($('#sheetBody'), '');
   patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}`);
   openDialog(sheet, { pointer });
   fitDaySummary($('#sheetBody'));
+  fitDaySheet(sheet);
 }
 
 // ---------- The record's own state, inside the chart's fixed box ----------

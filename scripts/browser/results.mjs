@@ -83,7 +83,12 @@ export function partialDaysResults(now = '2026-10-16T12:00:00.000Z') {
   singleReason.days.find(d => d.date === dates.partial).partialReasons = ['history_gap'];
   const counted = structuredClone(partial);
   Object.assign(counted.days.find(d => d.date === dates.partial), { partialReasons: ['unattributed_activity'], unattributedCount: 2 });
-  return { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted };
+  const threeReasons = structuredClone(partial);
+  threeReasons.days.find(d => d.date === dates.partial).partialReasons = ['capture_gap', 'history_gap', 'broker_trade_count_mismatch'];
+  const emptyToday = structuredClone(reasons);
+  emptyToday.trades = emptyToday.trades.filter(t => viennaDay(t.closedAt) !== dates.today);
+  emptyToday.days.find(d => d.date === dates.today).desks = {};
+  return { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted, threeReasons, emptyToday };
 }
 
 export function designResults(now = NOW, { trackingStart = '2026-09-10', seq = 412 } = {}) {

@@ -941,7 +941,7 @@ test('JOED-30 rev 5: optional canonical partial reasons, reserved code and empty
     const value = ingress(samples.results);
     value.days[0] = { date: value.days[0].date, desks: {}, coverage: 'partial',
       ...(partialReasons ? { partialReasons } : {}) };
-    for (const unattributedCount of partialReasons === codes ? [undefined, 0, 1, 2] : [undefined]) {
+    for (const unattributedCount of partialReasons === codes ? [undefined, 1, 2] : [undefined]) {
       if (unattributedCount !== undefined) value.days[0].unattributedCount = unattributedCount;
       const accepted = acceptSnapshot('results', value, null, at);
       assert.equal(accepted.status, 200, JSON.stringify(accepted.errors));
@@ -959,7 +959,7 @@ test('JOED-30 rev 5: each partial-reason semantic violation returns a per-day 42
     [d => { delete d.coverage; }, 'partialCoverageRequired', 'partialReasons'],
     [d => { d.coverage = 'full'; }, 'partialCoverageRequired', 'partialReasons'],
     [d => { d.partialReasons = ['history_gap', 'capture_gap']; }, 'canonicalOrder', 'partialReasons'],
-    [d => { d.unattributedCount = 0; }, 'unattributedReasonRequired', 'unattributedCount'],
+    [d => { d.unattributedCount = 1; }, 'unattributedReasonRequired', 'unattributedCount'],
     [d => { delete d.partialReasons; d.unattributedCount = 1; }, 'unattributedReasonRequired', 'unattributedCount'],
   ]) {
     const bad = copy(value); bad.seq++; mutate(bad.days[0]);
@@ -969,13 +969,14 @@ test('JOED-30 rev 5: each partial-reason semantic violation returns a per-day 42
   }
 });
 
-test('JOED-30 rev 5: reasons are nonempty, unique and closed; counts are nonnegative integers', () => {
+test('JOED-30 rev 5: reasons are nonempty, unique and closed; counts are positive integers', () => {
   for (const [field, item, rule, path] of [
     ['partialReasons', [], 'minItems', 'partialReasons'],
     ['partialReasons', ['capture_gap', 'capture_gap'], 'uniqueItems', 'partialReasons'],
     ['partialReasons', ['future_code'], 'enum', 'partialReasons[0]'],
     ['partialReasons', [1], 'type', 'partialReasons[0]'],
     ['unattributedCount', -1, 'minimum', 'unattributedCount'],
+    ['unattributedCount', 0, 'minimum', 'unattributedCount'],
     ['unattributedCount', 1.5, 'type', 'unattributedCount'],
     ['unattributedCount', null, 'type', 'unattributedCount'],
   ]) {

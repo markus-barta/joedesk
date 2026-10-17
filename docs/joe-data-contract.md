@@ -429,11 +429,12 @@ Manifest revision 5 adds optional `days[].partialReasons`: a nonempty, unique
 array in this canonical order. It is permitted only with `coverage: "partial"`.
 Rev-5 producers emit at least one reason on each partial day. `avg_cost_mismatch`
 is reserved, accepted and rendered but not yet emitted by producers. The optional
-nonnegative integer `unattributedCount` is present only when known and only with
+positive integer `unattributedCount` (minimum 1) is present only when known and only with
 `unattributed_activity`. Semantics return per-day 422 errors:
 `$.days[i].partialReasons` / `partialCoverageRequired` or `canonicalOrder`, and
 `$.days[i].unattributedCount` / `unattributedReasonRequired`. Empty/duplicate arrays,
-unknown codes and invalid counts fail schema validation. Legacy partial rows
+unknown codes and invalid counts (including zero) fail schema validation with
+422; zero reports `$.days[i].unattributedCount` / `minimum`. Legacy partial rows
 without reasons remain valid.
 
 | Reason (canonical order) | Cell short label | Exact note sentence |
@@ -449,17 +450,23 @@ without reasons remain valid.
 | `broker_evidence_missing` | Broker evidence missing | The broker hasn't confirmed fees or results for some trades yet. |
 
 The note leads with **Result may be incomplete.**, then one sentence per reason.
-With a known count, unattributed activity reads **1 trade couldn't be matched to
-a desk.** or **N trades couldn't be matched to a desk.** (including zero).
+With a known positive count, unattributed activity reads **1 trade couldn't be
+matched to a desk.** or **N trades couldn't be matched to a desk.**, with U+00A0
+between the number and unit. Omit the count when unknown; never send zero.
 `fx_disabled` suppresses `fx_missing`. Rendering ignores unknown future codes;
 when no known code remains it uses the legacy default sentence, never raw codes.
 The cell aria uses only the first short label, then **, and N more** where needed;
 escalated aria stays **Stale: still incomplete;** plus those short labels.
 Desktop panels show every reason. Phone sheets show the first two reason
-sentences and a keyboard-accessible 44 px **+N more** button. Extra sentences
-expand below it in the same sheet; its reserved height keeps everything above
-the button at exactly the same position. A desk filter adds **Applies to the
-whole day; this desk may be unaffected.**
+sentences and a keyboard-accessible 44 px **+N more** button, named **Show N more
+reasons** (singular **Show 1 more reason**). Activation removes the button and
+focuses the first revealed sentence (`tabindex="-1"`) in a polite live region.
+Reopening starts collapsed. The sheet reserves its expanded content height,
+capped at 80vh; collapsed spare room stays at the bottom. Revealing changes
+neither sheet top nor height, and short days have short sheets. A desk filter
+adds **Applies to the whole day; this desk may be unaffected.** after the reason
+or legacy default sentence. Today with no trades in the selected desk, including
+an empty-desk row, reads **No trades so far**, without Partial or “record incomplete”.
 
 The row `{date, desks: {}, coverage: "partial", partialReasons: ["history_gap"]}`
 is valid and remains **—** under all desk filters. It adds no money or trades to
