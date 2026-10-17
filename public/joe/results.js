@@ -62,12 +62,14 @@ const absUnits = u => (u < 0n ? -u : u);
 
 // A calendar amount in its cell's room, from exact units and rounded once.
 // Desktop (also the week column): "4,10", "123", "12k", "1,2M" … "9e15";
-// phones: "4,1", "123", "1,2k", "12k", "0,1M" … "9e15", the scaled forms a
-// step smaller. The exact amount is in the cell's label and its trades.
+// phones: "1", "4,1", "123", "1k", "1,2k", "12k", "1M", "0,1M" … "9e15",
+// with no trailing ",0", the scaled forms a step smaller. Rounded phone zero
+// has no sign. Phone cells omit the arrow; the exact amount is in the label
+// and the day's trades. Desktop and the week column retain their arrows.
 const SCALES = [['k', 3], ['M', 6], ['B', 9], ['T', 12]];
 export function calAmount(u, phone = false) {
   const a = absUnits(u), at = (exp, d) => divRound(a * 10n ** BigInt(d), 10n ** BigInt(exp) * UNIT);
-  const one = m => `${m / 10n},${m % 10n}`;
+  const one = m => phone && m % 10n === 0n ? `${m / 10n}` : `${m / 10n},${m % 10n}`;
   if (phone ? at(0, 1) < 100n : at(0, 2) < 10000n) return { text: phone ? one(at(0, 1)) : digits(u), cls: '' };
   if (at(0, 0) < (phone ? 1000n : 10000n)) return { text: digits(at(0, 0) * UNIT, 0), cls: '' };
   // From here on: a unit with at most two (phones) or three digits, one decimal below 10.
@@ -84,7 +86,8 @@ export function calAmount(u, phone = false) {
 const calHtml = (u, phone) => {
   if (isZero(u)) return `<span class="pl">${phone ? '0' : '0,00'}</span>`;
   const { text, cls } = calAmount(u, phone);
-  return `<span class="pl${cls ? ` ${cls}` : ''}">${icon(u > 0n ? 'up' : 'down')}${u < 0n ? MINUS : '+'}${text}</span>`;
+  if (phone && text === '0') return '<span class="pl">0</span>';
+  return `<span class="pl${cls ? ` ${cls}` : ''}">${phone ? '' : icon(u > 0n ? 'up' : 'down')}${u < 0n ? MINUS : '+'}${text}</span>`;
 };
 const plain = u => calHtml(u, false);
 const compact = u => calHtml(u, true);
@@ -249,7 +252,7 @@ function dayState(view, k, desks, max) {
   return { cls: 'none', note: 'no trades', aria: 'no trades' };
 }
 
-function renderCalendar(view, per, desks) {
+export function renderCalendar(view, per, desks) {
   const { ix, today } = view;
   const [y, m] = RS.cal;
   const first = M.dateKey(y, m, 1);
