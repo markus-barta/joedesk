@@ -33,6 +33,7 @@ const hm = await import('../public/joe/history-model.js');
 const fmt = await import('../public/joe/format.js');
 const { decimalUnits, unitsDecimal } = await import('../contracts/decimal.mjs');
 const { validateContract } = await import('../contracts/index.mjs');
+const { missingResultsDays } = await import('../contracts/vienna-date.mjs');
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p4');
 mkdirSync(QA_DIR, { recursive: true });
@@ -731,28 +732,34 @@ try {
     // JOED-29: this record belongs only to the focused scenario. The shared
     // design fixture and VIEWPORTS keep their existing data and expectations.
     const { board } = await designBoard();
+    const august = ['03', '04', '05', '06', '07', '10', '11', '12', '13', '14', '17', '18', '19', '20', '21', '24', '25', '26', '27'];
     const september = ['01', '02', '03', '04', '08', '09', '10', '11', '14', '15', '16', '17', '18', '21', '22', '23', '24', '25', '28', '29'];
     const forms = [
       // Exact gain, current phone text, optional test-only stress form.
-      ['4.1', '4,1'], ['12.58', '13'], ['123', '123'], ['999', '999'],
-      ['1000', '1k'], ['12000', '12k'], ['999000', '1M', '999k'],
+      ['1', '1'], ['4.1', '4,1'], ['12.58', '13'], ['123', '123'], ['999', '999'],
+      ['1000', '1k'], ['1234', '1,2k'], ['12000', '12k'],
+      ['1200000', '1,2M'], ['9900000', '9,9M'], ['100000', '0,1M'],
+      ['100000000', '0,1B'], ['1200000000', '1,2B'], ['1200000000000', '1,2T'],
       ['1000000', '1M'], ['1000000000', '1B'], ['1000000000000', '1T'],
+      ['1000000000000000', '1e15'], ['999000', '1M', '999k'],
     ];
     const cases = forms.flatMap(([amount, text, probe], i) => [
-      [`2026-09-${september[i * 2]}`, amount, `+${text}`, probe && `+${probe}`],
-      [`2026-09-${september[i * 2 + 1]}`, `-${amount}`, `−${text}`, probe && `−${probe}`],
+      [`2026-08-${august[i]}`, `-${amount}`, `−${text}`, probe && `−${probe}`],
+      [`2026-09-${september[i]}`, amount, `+${text}`, probe && `+${probe}`],
     ]).concat([
       // October's crop includes both signs, zero, k and the widest forms.
       ['2026-10-01', '1', '+1'], ['2026-10-02', '-1', '−1'],
       ['2026-10-05', '1234', '+1,2k'], ['2026-10-06', '-1234', '−1,2k'],
-      ['2026-10-07', '1000000000000000', '+1e15'], ['2026-10-08', '-1000000000000000', '−1e15'],
+      ['2026-10-07', '1200000', '+1,2M'], ['2026-10-08', '-1200000', '−1,2M'],
       ['2026-10-09', '-0.03', '0'], ['2026-10-12', '0', '0'],
       ['2026-10-13', '100000', '+0,1M'], ['2026-10-14', '-100000', '−0,1M'],
     ]);
+    const missingDay = '2026-10-13';
     const eurOf = amount => ({ amount, currency: 'EUR' });
-    const empty = { ...fixture('empty'), trackingStart: '2026-09-01', generatedAt: at(NOW, -20) };
+    const empty = { ...fixture('empty'), trackingStart: '2026-08-01', generatedAt: at(NOW, -20) };
     const record = withTradeSummaries({ ...empty, seq: empty.seq + 1,
-      days: cases.map(([date]) => ({ date, desks: Object.fromEntries(DESKS.map(id => [id, {
+      // A closed past day retains its trade but has no daily entry (JOED-28).
+      days: cases.filter(([date]) => date !== missingDay).map(([date]) => ({ date, desks: Object.fromEntries(DESKS.map(id => [id, {
         equityClose: eurOf('5000'), realisedNet: eurOf('0'), fees: eurOf('0'), trades: 0,
       }])) })),
       trades: cases.map(([date, net], i) => {
@@ -767,6 +774,7 @@ try {
           fx: { base: 'USD', quote: 'EUR', rate: '1', source: 'test-close-rate', observedAt: closedAt }, method: 'execution-fifo-net-current-fx' };
       }),
     });
+    record.missingDays = missingResultsDays(record, at(board.clock(), -18));
     const checked = validateContract('results', record);
     check('phone-calendar', 'the focused phone record is a valid results v2 contract', checked.ok, checked.errors);
     // Change compact text without changing the maximum day's tint legend or
@@ -794,7 +802,8 @@ try {
           const v = el.querySelector('.v'), pl = el.querySelector('.vs .pl');
           return { day: el.dataset.day, text: el.querySelector('.vs')?.textContent ?? '',
             cls: el.className, glyphs: el.querySelectorAll('.vs svg, .vs use').length,
-            aria: el.getAttribute('aria-label'), title: el.hasAttribute('title') || Boolean(el.querySelector('[title]')),
+            aria: el.getAttribute('aria-label'), title: el.hasAttribute('title') || Boolean(el.querySelector('[title]:not(.day-warning)')),
+            warning: Boolean(el.querySelector('.day-warning')),
             visible: __audit.visible(el.querySelector('.vs')), scroll: v.scrollWidth, client: v.clientWidth,
             font: pl ? Number.parseFloat(getComputedStyle(pl).fontSize) : null };
         });
@@ -805,29 +814,34 @@ try {
           cell?.text === text && cell.visible && cell.glyphs === 0 && !cell.title &&
           N(cell.aria).includes(N(fmt.eur(decimalUnits(amount), true))), cell ?? { day, text: null, scroll: null, client: null });
         if (!cell) continue;
-        // Measure the signed form at both sizes inside its real phone cell.
-        // 999k is explicitly a stress probe: the unchanged formatter emits 1M.
-        const measurement = await page.evaluate(`(() => {
-          const cell = document.querySelector('#cal [data-day="${day}"]'), v = cell.querySelector('.v'), pl = cell.querySelector('.vs .pl');
-          const probe = pl.cloneNode(false); probe.textContent = ${JSON.stringify(stress ?? text)};
-          probe.setAttribute('aria-hidden', 'true');
-          probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;width:max-content';
-          pl.parentElement.append(probe);
-          probe.style.fontSize = '11.5px'; const px115 = probe.getBoundingClientRect().width;
-          probe.style.fontSize = '10px'; const px10 = probe.getBoundingClientRect().width;
-          probe.remove();
-          const saved = pl.textContent, savedClass = pl.className;
-          if (${Boolean(stress)}) { pl.textContent = ${JSON.stringify(stress ?? text)}; pl.className = 'pl sc'; }
-          const result = { day: cell.dataset.day, text: pl.textContent, px115, px10,
-            scroll: v.scrollWidth, client: v.clientWidth, font: Number.parseFloat(getComputedStyle(pl).fontSize) };
-          pl.textContent = saved; pl.className = savedClass;
-          return result;
-        })()`);
-        phoneMeasurements.push({ viewport: viewport.name, theme, ...measurement });
-        check('phone-calendar', `${tag} ${day}: ${measurement.text} fits at 10 px and uses the step-down when 11.5 px overflows`,
-          measurement.px10 <= measurement.client && measurement.font >= 10 &&
-          (measurement.px115 <= measurement.client || measurement.font === 10) && measurement.scroll <= measurement.client, measurement);
+        // Assert the actual formatter output; 999k is measured as INFO only.
+        for (const [form, info] of [[text, false], ...(stress ? [[stress, true]] : [])]) {
+          const measurement = await page.evaluate(`(() => {
+            const cell = document.querySelector('#cal [data-day="${day}"]'), v = cell.querySelector('.v'), pl = cell.querySelector('.vs .pl');
+            const probe = pl.cloneNode(false); probe.textContent = ${JSON.stringify(form)};
+            probe.setAttribute('aria-hidden', 'true');
+            probe.style.cssText = 'position:absolute;visibility:hidden;white-space:nowrap;width:max-content';
+            pl.parentElement.append(probe);
+            probe.style.fontSize = '11.5px'; const px115 = probe.getBoundingClientRect().width;
+            probe.style.fontSize = '10px'; const px10 = probe.getBoundingClientRect().width;
+            probe.remove();
+            const saved = pl.textContent, savedClass = pl.className;
+            if (${info}) { pl.textContent = ${JSON.stringify(form)}; pl.className = 'pl sc'; }
+            const result = { day: cell.dataset.day, text: pl.textContent, px115, px10,
+              width: v.getBoundingClientRect().width, ink: pl.getBoundingClientRect().width,
+              scroll: v.scrollWidth, client: v.clientWidth, font: Number.parseFloat(getComputedStyle(pl).fontSize) };
+            pl.textContent = saved; pl.className = savedClass;
+            return result;
+          })()`);
+          phoneMeasurements.push({ viewport: viewport.name, theme, info, ...measurement });
+          if (info) console.log(`INFO phone-calendar probe (not asserted): ${JSON.stringify({ viewport: viewport.name, theme, ...measurement })}`);
+          else check('phone-calendar', `${tag} ${day}: ${measurement.text} fits at 10 px and uses the step-down when 11.5 px overflows`,
+            measurement.px10 <= measurement.width && measurement.ink <= measurement.width && measurement.font >= 10 &&
+            (measurement.px115 <= measurement.width || measurement.font === 10) && measurement.scroll <= measurement.client, measurement);
+        }
       }
+      check('phone-calendar', `${tag}: only the closed past day without a daily entry has a warning`,
+        cells.filter(c => c.warning).map(c => c.day).join() === (month === '2026-10' ? missingDay : ''), cells.filter(c => c.warning));
       const loss = cells.find(c => c.day === '2026-10-09'), flat = cells.find(c => c.day === '2026-10-12');
       if (loss) check('phone-calendar', `${tag}: −0,03 reads 0 with no sign or glyph, in the first loss tint`,
         loss.text === '0' && loss.glyphs === 0 && loss.cls.split(' ').includes('l1'), loss);
@@ -852,16 +866,30 @@ try {
       const after = await geometry();
       check('phone-calendar', `${tag}: calendar outer geometry and all slots move exactly 0 px when compact amounts change`,
         JSON.stringify(before) === JSON.stringify(after), { before, after });
-      await click(page, '#prevMonth');
-      await inspectMonth(viewport, theme, '2026-09');
-      const previousMonth = await geometry();
-      check('phone-calendar', `${tag}: changing month moves outer geometry and slots exactly 0 px`,
-        JSON.stringify(after) === JSON.stringify(previousMonth), { before: after, after: previousMonth });
+      for (const month of ['2026-09', '2026-08']) {
+        await click(page, '#prevMonth');
+        await inspectMonth(viewport, theme, month);
+        const previousMonth = await geometry();
+        check('phone-calendar', `${tag}: changing to ${month} moves outer geometry and slots exactly 0 px`,
+          JSON.stringify(after) === JSON.stringify(previousMonth), { before: after, after: previousMonth });
+      }
+      await click(page, '#nextMonth');
       await click(page, '#nextMonth');
       const returned = await geometry();
       check('phone-calendar', `${tag}: returning to October moves outer geometry and slots exactly 0 px`,
         JSON.stringify(after) === JSON.stringify(returned), { before: after, after: returned });
-      await crop(`${viewport.name}-${theme}-results-phone-calendar`, 'October phone calendar: gain, loss, zero, k and widest forms; no phone arrows, 10 px scaled amounts');
+      const warning = await page.evaluate(`(() => {
+        const cell = document.querySelector('#cal [data-day="${missingDay}"]'), mark = cell.querySelector('.day-warning');
+        if (!mark) return null;
+        const r = mark.getBoundingClientRect(), c = cell.getBoundingClientRect(), padding = getComputedStyle(cell), offset = getComputedStyle(mark);
+        return { visible: __audit.visible(mark) && r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom,
+          icon: Boolean(mark.querySelector('use[href="#i-half"]')), aria: cell.getAttribute('aria-label'),
+          aligned: offset.top === padding.paddingTop && offset.right === padding.paddingRight,
+          padding: padding.paddingRight, right: offset.right };
+      })()`);
+      check('phone-calendar', `${tag}: October crop includes the missing-day warning aligned at 3 px`,
+        warning?.visible && warning.icon && warning.aligned && warning.padding === '3px' && warning.right === '3px' && /Stale: daily summary missing/.test(warning.aria), warning);
+      await crop(`${viewport.name}-${theme}-results-phone-calendar`, 'October phone calendar: ±1,2M, gain, loss, zero, k and the missing-day warning on 13 October; no phone arrows, 10 px scaled amounts');
       const beforeTap = await geometry();
       await click(page, '#cal [data-day="2026-10-02"]');
       // A day tap changes the period anchor and can move content above the
@@ -900,7 +928,9 @@ try {
       check('phone-calendar', `1440 light ${day}: desktop keeps its ${glyph ?? 'flat'} treatment`, cell?.visible && cell.glyph === glyph,
         cell ?? { day, text: null, scroll: null, client: null });
     }
-    await crop('1440-light-results-phone-calendar', 'Same October calendar at desktop width, with the original up/down glyphs');
+    check('phone-calendar', '1440 light: the same October crop includes the missing-day warning',
+      await page.evaluate(`Boolean(document.querySelector('#cal [data-day="${missingDay}"] .day-warning use[href="#i-half"]'))`));
+    await crop('1440-light-results-phone-calendar', 'Same October calendar: ±€ 1.200.000, gain, loss, zero, k and the missing-day warning, with the original desktop up/down glyphs');
     await serve(null);
   }
 
@@ -1060,20 +1090,25 @@ const phoneWidthRows = [];
 for (const theme of THEMES) for (const form of new Set(phoneMeasurements.filter(m => m.theme === theme).map(m => m.text))) {
   const at = width => phoneMeasurements.find(m => m.theme === theme && m.text === form && m.viewport === width);
   const narrow = at('360'), wide = at('390');
-  phoneWidthRows.push(`| ${theme} | ${form} | ${px(narrow?.px115)} / ${px(wide?.px115)} | ${px(narrow?.px10)} / ${px(wide?.px10)} | ${narrow?.client ?? 'missing'} / ${wide?.client ?? 'missing'} |`);
+  phoneWidthRows.push(`| ${theme} | ${form} | ${narrow?.info ? 'INFO only' : 'asserted'} | ${px(narrow?.px115)} / ${px(wide?.px115)} | ${px(narrow?.px10)} / ${px(wide?.px10)} | ${px(narrow?.width)} / ${px(wide?.width)} | ${narrow?.client ?? 'missing'} / ${wide?.client ?? 'missing'} |`);
 }
 const phoneWidthReport = phoneMeasurements.length ? `## Phone calendar measurements (JOED-29)
 
 Each signed form and unsigned 0 is measured inside a real phone cell in this
-browser, at 11.5 px and 10 px. Width pairs below are **360 / 390**; cell width
-is the amount box's clientWidth. Gains and losses are separate rows.
-999k is a test-only stress probe: the unchanged formatter emits 1M for € 999.000.
-Scaled forms use 10 px; a form that overflows even at 10 px fails with its
-day, text, scrollWidth, clientWidth and measured widths. No replacement format
-is selected by this check.
+browser, at 11.5 px and 10 px. Width pairs below are **360 / 390**; the amount
+box width is fractional (getBoundingClientRect), with clientWidth shown
+separately. Phone cells have 3 px horizontal padding. Gains and losses are
+separate rows. The full asserted set is ±1, ±4,1, ±13, ±123, ±999, ±1k,
+±1,2k, ±12k, ±1M, ±1,2M, ±9,9M, ±0,1M, ±0,1B, ±1,2B, ±1,2T, ±1B,
+±1T, ±1e15 and unsigned 0. Both signed 999k probes are INFO only and never
+asserted: the unchanged formatter emits 1M for € 999.000.
+Scaled forms use 10 px; actual forms must fit the fractional box and satisfy
+scrollWidth ≤ clientWidth. A form that exceeds the fractional box at 11.5 px
+must use the 10 px step-down. A failure retains day, text, fractional box and
+ink widths, scrollWidth, clientWidth and both measured sizes.
 
-| Theme | Form | Width at 11.5 px (360 / 390) | Width at 10 px (360 / 390) | Cell width (360 / 390) |
-| --- | --- | --- | --- | --- |
+| Theme | Form | Check | Width at 11.5 px (360 / 390) | Width at 10 px (360 / 390) | Fractional box width (360 / 390) | clientWidth (360 / 390) |
+| --- | --- | --- | --- | --- | --- | --- |
 ${phoneWidthRows.join('\n')}
 
 ${phoneTapInfo.map(info => `- INFO tap geometry (no assertion): ${JSON.stringify(info)}`).join('\n')}
@@ -1115,9 +1150,10 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   The cell's label and the day's trades give the exact amount
   (\`*-results-large-amounts.png\`). JOED-29's focused calendar screenshots at
   360/390 in light/dark are \`*-results-phone-calendar.png\`: October crops
-  with a gain, loss, zero, k and the widest scaled forms; the 1440 light crop
-  shows the same month with its original desktop arrows. September adds the
-  remaining signed forms. Amount changes, month changes and closing a settled
+  with ±1,2M (±€ 1.200.000), a gain, loss, zero, k and the missing-day warning
+  on 13 October; the 1440 light crop shows the same month with its original
+  desktop arrows. August and September add the full signed form set, with
+  ±999k measured as INFO only. Amount changes, month changes and closing a settled
   open sheet must move geometry exactly 0 px. The tap's own movement is INFO.
 - **Hero chart time axis** (fix round 1). The x axis is real time: each close
   sits at the end of its Vienna date, today's money at now; missing dates keep
