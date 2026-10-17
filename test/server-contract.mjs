@@ -477,8 +477,10 @@ test('JOED-30 results: partial coverage, empty desks and unknown summary money r
   const s = await setup(t, { clock: () => now });
   const value = resultsSnapshot(); value.generatedAt = now;
   value.days[0].coverage = 'partial';
+  value.days[0].partialReasons = ['unattributed_activity'];
+  value.days[0].unattributedCount = 1;
   for (const desk of Object.values(value.days[0].desks)) desk.realisedNet = desk.fees = null;
-  value.days.push({ date: '2026-10-15', desks: {}, coverage: 'partial' });
+  value.days.push({ date: '2026-10-15', desks: {}, coverage: 'partial', partialReasons: ['history_gap'] });
   assert.equal((await s.pushResults(value)).status, 200);
   const read = await s.request('/joe/results.json');
   assert.equal(read.status, 200);
@@ -488,6 +490,27 @@ test('JOED-30 results: partial coverage, empty desks and unknown summary money r
   assert.deepEqual(read.body.missingDays ?? [], []);
   const cold = createReadModel({ dataDir: s.dataDir, clock: () => now });
   assert.deepEqual(cold.feeds().results.value.days, value.days, 'restart preserves the producer coverage and nulls');
+});
+
+test('JOED-30 rev 5 HTTP: reason semantic 422s retain the accepted record through restart', async t => {
+  const now = '2026-10-16T12:00:00.000Z', s = await setup(t, { clock: () => now });
+  const value = resultsSnapshot(); value.generatedAt = now;
+  value.days[0] = { date: value.days[0].date, desks: {}, coverage: 'partial', partialReasons: ['history_gap'] };
+  assert.equal((await s.pushResults(value)).status, 200);
+  const saved = (await s.request('/joe/results.json')).body;
+  for (const [mutate, field, rule] of [
+    [d => { delete d.coverage; }, 'partialReasons', 'partialCoverageRequired'],
+    [d => { d.coverage = 'full'; }, 'partialReasons', 'partialCoverageRequired'],
+    [d => { d.partialReasons = ['history_gap', 'capture_gap']; }, 'partialReasons', 'canonicalOrder'],
+    [d => { d.unattributedCount = 0; }, 'unattributedCount', 'unattributedReasonRequired'],
+  ]) {
+    const bad = structuredClone(value); bad.seq++; mutate(bad.days[0]);
+    const rejected = await s.pushResults(bad);
+    assert.equal(rejected.status, 422);
+    assert.ok(rejected.body.errors.some(e => e.path === `$.days[0].${field}` && e.rule === rule));
+    assert.deepEqual((await s.request('/joe/results.json')).body, saved);
+    assert.deepEqual(createReadModel({ dataDir: s.dataDir, clock: () => now }).feeds().results.value, saved);
+  }
 });
 
 test('JOED-28 results: missing closed days accept with 200, persist, retain on rejection and clear on partial coverage', async t => {

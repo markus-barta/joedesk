@@ -673,7 +673,7 @@ test('JOED-30 rendering: closed partial trades keep their exact amount, tint and
   // claim that desk sat out when the day's record is incomplete.
   r = render(value, '2026-10-15T12:00:00.000Z', '2026-10-14', ['joe']);
   assert.match(r.cell('2026-10-14'), /class="cell none\b/);
-  assert.match(textOf(r.sheet), /Partial · record incomplete · —/);
+  assert.match(textOf(r.sheet), /Partial · record incomplete/);
   assert.doesNotMatch(textOf(r.sheet), /[Nn]o trades|sat out|€/);
 });
 
@@ -690,7 +690,7 @@ test('JOED-30 rendering: a partial date with no trades is a neutral dash and inc
     assert.match(cell.replaceAll('&#39;', "'"), /no complete record; Partial: this day's record is incomplete/);
     assert.doesNotMatch(cell, /class="cell (?:g|l|flat|we)|class="pl"|[Nn]o trades|sat out|€|>0</);
     for (const html of [r.panel, r.sheet]) {
-      assert.match(textOf(html), /Partial · record incomplete · —/);
+      assert.match(textOf(html), /Partial · record incomplete/);
       assert.ok(textOf(html).includes(partialReason));
       assert.doesNotMatch(textOf(html), /[Nn]o trades|sat out|€|\b0\b|so far/);
     }
@@ -734,7 +734,8 @@ test('JOED-30 rendering: only closed Vienna dates show partial, across midnight 
     const r = render(value, open, day);
     assert.match(r.cell(day), /\btoday\b/);
     assert.doesNotMatch(r.cell(day), /Partial|day-warning|incomplete/);
-    assert.doesNotMatch(r.panel + r.sheet, /Partial|incomplete/);
+    assert.doesNotMatch(r.panel + r.sheet, />Partial</);
+    if (hasTrades) assert.match(textOf(r.panel), /so far/);
     const later = render(value, closed, day);
     assert.match(later.cell(day), /day-warning/);
     assert.match(textOf(later.sheet), hasTrades ? /Partial · 1 trade · \+€ 1,01/ : /Partial · record incomplete/);
@@ -760,9 +761,9 @@ test('JOED-30 rendering: T+1 becomes Stale at Vienna D+2, across autumn DST and 
     assert.match(stale.cell(day), /<span class="n">Stale<\/span>/);
     assert.equal((stale.cell(day).match(/class="day-warning/g) ?? []).length, 1);
     assert.ok(stale.cell(day).includes(fmt.esc(`Stale: still incomplete; ${partialReason}`)));
-    assert.doesNotMatch(stale.month, /incl\.|class="st warn"/);
+    assert.match(stale.month, /incl\. 1 partial day/);
     for (const html of [stale.panel, stale.sheet]) {
-      assert.match(textOf(html), hasTrades ? /Stale · 1 trade · −€ 12,40 so far/ : /Stale · record incomplete · —/);
+      assert.match(textOf(html), hasTrades ? /Stale · 1 trade · −€ 12,40 so far/ : /Stale · record incomplete/);
       assert.ok(textOf(html).includes(partialReason));
       assert.doesNotMatch(html, /Daily summary missing|sat out/);
     }
@@ -786,24 +787,24 @@ test('JOED-30 rendering: missing summary hands off to Partial without changing t
   assert.equal((partial.cell(day).match(/class="day-warning/g) ?? []).length, 1);
 });
 
-test('JOED-30 month summary: only closed, un-escalated partial dates count, with unknown/no-trade wording', t => {
+test('JOED-30 month summary: every closed partial date counts, including escalated dates, with unknown/no-trade wording', t => {
   const render = calendarCapture(t);
   const value = record(['2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17']
     .map(date => ({ date, desks: {}, coverage: 'partial' })));
   let r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-15');
-  assert.equal(textOf(r.month), 'No trades recorded this month · incl. 1 partial day');
+  assert.equal(textOf(r.month), 'No trades recorded this month · incl. 2 partial days');
   assert.match(r.month, / · <span class="st warn">/);
   assert.doesNotMatch(r.html, /incl\.|so far/);
   value.missingDays = ['2026-10-15'];
   value.trades.push(tradeOf('rt-partial-count', 'j', '2026-10-15T14:00:00.000Z', '-0.03'));
   r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-15');
-  assert.doesNotMatch(r.month, /incl\./, 'a Stale diagnostic takes priority and excludes the day');
+  assert.match(r.month, /incl\. 2 partial days/, 'coverage still counts if the marker is Stale');
   value.missingDays = [];
   r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-15');
   assert.match(r.month, /Down € 0,03/);
   assert.match(r.month, /class="month-long">over 1 trading day/);
   assert.match(r.month, /class="month-short">in 1 day/);
-  assert.match(r.month, /incl\. 1 partial day/);
+  assert.match(r.month, /incl\. 2 partial days/);
   const empty = render(record([]), '2026-10-16T12:00:00.000Z', '2026-10-15');
   assert.equal(empty.month, 'No trades this month');
 });
@@ -844,4 +845,135 @@ test('JOED-30 partial summary: 99 trades keep the exact large amount and so far 
     assert.match(html, /<span class="dp-trades">99 trades · <\/span><span class="dp-amount">−€ 999\.999,99 so far<\/span>/);
   }
   assert.doesNotMatch(r.cell(day), /so far/);
+});
+
+
+test('JOED-30 rev 5 copy: every sentence, short label, count form, FX dedup and unknown-code fallback', () => {
+  const expected = [
+    ['capture_gap', 'Capture gap', 'Trade capture had a gap on this day.'],
+    ['history_gap', 'History gap', 'The trade history has a gap that covers this day.'],
+    ['broker_trade_count_mismatch', 'Broker trade count mismatch', "Our trade count differs from the broker's."],
+    ['broker_realised_pnl_mismatch', 'Broker result mismatch', "Our result differs from the broker's by more than €0.01."],
+    ['unattributed_activity', 'Unattributed activity', "Some trades couldn't be matched to a desk."],
+    ['avg_cost_mismatch', 'Average-cost mismatch', "Our average cost differs from the broker's."],
+    ['fx_disabled', 'FX sampling off', 'EUR conversion was switched off for this day.'],
+    ['fx_missing', 'FX missing', 'No EUR exchange rate was recorded for this day.'],
+    ['broker_evidence_missing', 'Broker evidence missing', "The broker hasn't confirmed fees or results for some trades yet."],
+  ];
+  for (const [code, label, text] of expected) {
+    assert.deepEqual(M.partialReasons({ partialReasons: [code] }), [{ label, text }]);
+    assert.equal(M.partialReasonLabel({ partialReasons: [code] }), label);
+  }
+  for (const n of [0, 1, 2]) assert.equal(M.partialReasons({ partialReasons: ['unattributed_activity'], unattributedCount: n })[0].text,
+    `${n} trade${n === 1 ? '' : 's'} couldn't be matched to a desk.`);
+  for (const partialReasons of [undefined, [], ['unknown_code']]) {
+    assert.deepEqual(M.partialReasons({ partialReasons }), []);
+    assert.equal(M.partialReasonLabel({ partialReasons }), partialReason);
+  }
+  const day = { partialReasons: ['unknown_code', ...expected.map(([code]) => code).reverse()] };
+  assert.deepEqual(M.partialReasons(day), expected.filter(([code]) => code !== 'fx_missing').map(([, label, text]) => ({ label, text })));
+  assert.equal(M.partialReasonLabel(day), 'Capture gap, and 7 more');
+});
+
+test('JOED-30 rev 5 rendering: exact note sentences, first reason aria, default, desk scope and phone expansion markup', t => {
+  const render = calendarCapture(t), day = '2026-10-15', now = '2026-10-16T12:00:00.000Z';
+  for (const partialReasons of [undefined, ['unknown_code'], ['history_gap'], ['unknown_code', 'history_gap'], M.PARTIAL_REASONS.map(([code]) => code)]) {
+    const value = record([{ date: day, desks: {}, coverage: 'partial' }]);
+    // Unknown future codes cannot enter rev 5; exercise the renderer defensively.
+    if (partialReasons) value.days[0].partialReasons = partialReasons;
+    const r = render(value, now, day), reasons = M.partialReasons(value.days[0]);
+    for (const html of [r.panel, r.sheet]) {
+      assert.ok(textOf(html).includes(reasons.length ? 'Result may be incomplete.' : partialReason));
+      for (const reason of reasons) assert.ok(textOf(html).includes(reason.text), reason.text);
+      assert.doesNotMatch(html, /unknown_code|capture_gap|history_gap|fx_missing/);
+    }
+    assert.ok(r.cell(day).includes(fmt.esc(M.partialReasonLabel(value.days[0]))));
+    assert.equal((r.panel.match(/class="dp-reason"/g) ?? []).length, reasons.length);
+    assert.doesNotMatch(r.panel, /dp-reasons-more|dayReasonsExtra/);
+    if (reasons.length > 2) {
+      assert.match(r.sheet, /aria-expanded="false" aria-controls="dayReasonsExtra" aria-label="Show 6 more reasons">\+6 more/);
+      assert.match(r.sheet, /id="dayReasonsExtra" hidden/);
+      assert.equal((r.sheet.split('class="dp-reasons-more"')[0].match(/class="dp-reason"/g) ?? []).length, 2);
+    } else assert.doesNotMatch(r.sheet, /dp-reasons-more/);
+    for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
+      const filtered = render(value, now, day, desks);
+      assert.match(filtered.cell(day), /class="v"><span class="muted">—/);
+      assert.match(filtered.month, /incl\. 1 partial day/);
+      assert.equal(textOf(filtered.sheet).includes(M.PARTIAL_DESK_NOTE), desks.length === 1);
+    }
+  }
+});
+
+test('JOED-30 rev 5: count copy renders singular/plural and reason metadata survives worker transfer', t => {
+  const render = calendarCapture(t), day = '2026-10-15';
+  for (const n of [0, 1, 4]) {
+    const value = record([{ date: day, desks: {}, coverage: 'partial', partialReasons: ['unattributed_activity'], unattributedCount: n }]);
+    const ix = M.indexResults(value), copy = structuredClone(ix, { transfer: M.transferables(ix) });
+    assert.deepEqual(copy.partialDetails.get(day), { partialReasons: ['unattributed_activity'], unattributedCount: n });
+    const r = render(value, '2026-10-16T12:00:00.000Z', day);
+    for (const html of [r.panel, r.sheet]) assert.ok(textOf(html).includes(`${n} trade${n === 1 ? '' : 's'} couldn't be matched to a desk.`));
+  }
+});
+
+test('JOED-30 rev 5 today: known amounts say so far and reasons render without a Partial marker', t => {
+  const render = calendarCapture(t), day = '2026-10-25';
+  const value = record([{ date: day, desks: {}, coverage: 'partial', partialReasons: ['capture_gap'] }],
+    [tradeOf('rt-today-reason', 'j', `${day}T14:00:00.000Z`, '-12.4')]);
+  const r = render(value, `${day}T22:59:59.999Z`, day);
+  assert.doesNotMatch(r.cell(day), /day-warning|Partial|incomplete/);
+  for (const html of [r.panel, r.sheet]) {
+    assert.match(textOf(html), /1 trade · −€ 12,40 so far/);
+    assert.ok(textOf(html).includes('Trade capture had a gap on this day.'));
+    assert.doesNotMatch(html, /class="st warn"|>Partial</);
+  }
+});
+
+
+test('JOED-30 rev 5: every individual reason sentence renders in both details, including FX missing alone', t => {
+  const render = calendarCapture(t), day = '2026-10-15';
+  for (const [code, label, sentence] of M.PARTIAL_REASONS) {
+    const value = record([{ date: day, desks: {}, coverage: 'partial', partialReasons: [code] }]);
+    const r = render(value, '2026-10-16T12:00:00.000Z', day);
+    for (const html of [r.panel, r.sheet]) assert.ok(textOf(html).includes(sentence), code);
+    assert.ok(r.cell(day).includes(fmt.esc(label)));
+    const stale = render(value, '2026-10-17T12:00:00.000Z', day);
+    assert.ok(stale.cell(day).includes(fmt.esc(`Stale: still incomplete; ${label}`)));
+  }
+});
+
+test('JOED-30 rev 5: empty-desk rows stay unknown under every filter, add nothing and count with escalated partials', t => {
+  const render = calendarCapture(t), day = '2026-10-15';
+  const base = record([], [tradeOf('rt-missing-closed', 'j', '2026-10-12T14:00:00.000Z', '12.4')]);
+  base.missingDays = ['2026-10-12'];
+  const value = structuredClone(base);
+  value.days = ['2026-10-13', '2026-10-14', day, '2026-10-16'].map(date =>
+    ({ date, desks: {}, coverage: 'partial', partialReasons: ['history_gap'] }));
+  for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
+    const r = render(value, '2026-10-16T12:00:00.000Z', day, desks);
+    assert.match(r.month, /incl\. 3 partial days/);
+    for (const date of ['2026-10-13', '2026-10-14', day]) assert.match(r.cell(date), /class="v"><span class="muted">—/);
+    assert.match(r.cell('2026-10-13'), /<span class="n">Stale/);
+    assert.match(r.cell('2026-10-14'), /<span class="n">Stale/);
+    assert.match(r.cell(day), /<span class="n">Partial/);
+    for (const ix of [M.indexResults(base), M.indexResults(value)]) {
+      const R = roll(ix, 'month', day, desks, { ...ctxOf(), today: '2026-10-16' });
+      assert.equal(R.units.realised, desks.includes('j') ? E('12.4') : 0n);
+      assert.equal(R.trades, desks.includes('j') ? 1 : 0);
+    }
+  }
+});
+
+test('JOED-30 rev 5 phone disclosure: reveals below its control with accessible expanded state and can collapse', () => {
+  const extra = { hidden: true }, attrs = { 'aria-expanded': 'false' };
+  const button = { dataset: { more: '6' }, parentElement: { querySelector: () => extra },
+    getAttribute: key => attrs[key], setAttribute: (key, value) => { attrs[key] = value; } };
+  page.toggleDayReasons(button);
+  assert.equal(extra.hidden, false);
+  assert.equal(attrs['aria-expanded'], 'true');
+  assert.equal(button.textContent, 'Show fewer');
+  page.toggleDayReasons(button);
+  assert.equal(extra.hidden, true);
+  assert.equal(attrs['aria-expanded'], 'false');
+  assert.equal(attrs['aria-label'], 'Show 6 more reasons');
+  assert.equal(button.textContent, '+6 more');
 });

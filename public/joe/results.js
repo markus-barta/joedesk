@@ -99,15 +99,18 @@ const cutText = cut => `${names(cut.desks)}’s bookkeeping basis changed on ${M
 
 const missingDay = (ix, k, desks) => ix?.missingDays?.has(k) && M.dayResult(ix, k, desks).count > 0;
 const missingDayText = k => `Stale: daily summary missing for ${M.fmtDay(k)}`;
-const PARTIAL_REASON = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
+const PARTIAL_REASON = M.PARTIAL_REASON;
 const partialDay = (view, k) => k < view.today && view.ix?.partialDays?.has(k);
 // One warning slot, with a missing summary taking priority over partial coverage.
 function dayWarning(view, k, desks) {
   if (k >= view.today) return null;
   if (missingDay(view.ix, k, desks)) return { label: 'Stale', text: missingDayText(k), note: 'Daily summary missing.' };
-  if (partialDay(view, k)) return k <= M.addDays(view.today, -2)
-    ? { label: 'Stale', text: `Stale: still incomplete; ${PARTIAL_REASON}`, note: PARTIAL_REASON }
-    : { label: 'Partial', text: `Partial: this day's record is incomplete. ${PARTIAL_REASON}`, note: PARTIAL_REASON };
+  if (partialDay(view, k)) {
+    const reason = M.partialReasonLabel(view.ix.partialDetails?.get(k));
+    return k <= M.addDays(view.today, -2)
+      ? { label: 'Stale', text: `Stale: still incomplete; ${reason}`, note: PARTIAL_REASON }
+      : { label: 'Partial', text: `Partial: this day's record is incomplete. ${reason}`, note: PARTIAL_REASON };
+  }
   return null;
 }
 
@@ -276,7 +279,7 @@ export function renderCalendar(view, per, desks) {
   if (ix) for (let d = 1; d <= M.daysIn(y, m); d++) {
     const k = M.dateKey(y, m, d), r = M.dayResult(ix, k, desks);
     if (r.count) { monthCount += r.count; monthUnits += r.units; monthDays++; }
-    if (dayWarning(view, k, desks)?.label === 'Partial') partialDays++;
+    if (partialDay(view, k)) partialDays++;
   }
   const monthSum = !ix ? 'Unavailable' : monthCount
     ? `${signedWord(monthUnits)} <span class="month-long">over ${plural(monthDays, 'trading day')}</span><span class="month-short">in ${plural(monthDays, 'day')}</span>`
@@ -313,12 +316,12 @@ export function renderCalendar(view, per, desks) {
     <span class="nowrap"><span class="ramp"><i style="background:var(--g1)"></i><i style="background:var(--g2)"></i><i style="background:var(--g3)"></i><i style="background:var(--g4)"></i></span> Gain</span>
     <span>${!ix ? 'Tints appear once results arrive' : max > 0n ? `Darkest: ${eur(max * 3n / 4n)} to ${eur(max)} in a day` : 'No trading day yet'}</span>`);
   const day = dayContent(view, RS.sel, desks);
-  patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}</div>`);
+  patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${dayNote(day)}</div>`);
   fitDaySummary($('#daypanel'));
   const sheet = $('#daySheet');
   if (sheet?.open) {
     $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(RS.sel)}`;
-    patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}`);
+    patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}`);
     fitDaySummary($('#sheetBody'));
   }
 }
@@ -365,10 +368,10 @@ function dayContent(view, k, desks) {
   }
   const r = M.dayResult(ix, k, desks);
   const warning = dayWarning(view, k, desks);
-  const partial = partialDay(view, k), incomplete = partial && !ts.length;
+  const partial = k <= today && ix.partialDays?.has(k), incomplete = partial && !ts.length;
   const summary = partial ? ts.length
     ? `<span class="dp-trades">${plural(ts.length, 'trade')} · </span><span class="dp-amount">${eur(r.units, true)} so far</span>`
-    : 'record incomplete · <span class="dp-amount">—</span>'
+    : 'record incomplete'
     : ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
   const sum = warning ? `${st('warn', warning.label)} · ${summary}` : summary;
   const closed = M.isWeekend(k) || M.marketHoliday(k);
@@ -377,8 +380,31 @@ function dayContent(view, k, desks) {
   const body = ts.length ? tradeRows(ts) : incomplete ? '' : `<p class="dp-empty">${icon(closed ? 'clock' : 'info')}<span>${esc(why)}</span></p>`;
   // A lot opened this day and still held counts in Still open and on Desk.
   const opened = (view.positions ?? []).filter(p => p.openedAt && desks.includes(p.desk) && M.viennaDate(Date.parse(p.openedAt)) === k);
-  const note = [warning?.note ?? '', ...opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`)].filter(Boolean).join(' ');
-  return { sum, body, note };
+  const reasons = partial && !missingDay(ix, k, desks) ? M.partialReasons(ix.partialDetails?.get(k)) : [];
+  const note = [reasons.length ? '' : warning?.note ?? (partial ? PARTIAL_REASON : ''), ...opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`)].filter(Boolean).join(' ');
+  return { sum, body, note, reasons, deskNote: partial && desks.length === 1 ? M.PARTIAL_DESK_NOTE : '' };
+}
+
+// A multi-reason sheet reserves its height before opening. Reveal below the
+// button, leaving its heading and the first two reasons exactly in place.
+export function toggleDayReasons(button) {
+  const extra = button.parentElement.querySelector('.dp-reasons-extra');
+  if (!extra) return;
+  const expanded = button.getAttribute('aria-expanded') !== 'true';
+  extra.hidden = !expanded;
+  button.setAttribute('aria-expanded', String(expanded));
+  button.textContent = expanded ? 'Show fewer' : `+${button.dataset.more} more`;
+  button.setAttribute('aria-label', expanded ? 'Show fewer reasons' : `Show ${button.dataset.more} more reasons`);
+}
+
+function dayNote(day, sheet = false) {
+  const { reasons = [], note, deskNote } = day;
+  const line = reason => `<span class="dp-reason">${esc(reason.text)}</span>`;
+  const more = reasons.length - 2;
+  const reasonLines = reasons.length ? `<span class="dp-note-lead">Result may be incomplete.</span>${reasons.slice(0, sheet ? 2 : reasons.length).map(line).join('')}${sheet && more > 0
+    ? `<button type="button" class="dp-reasons-more" data-more="${more}" aria-expanded="false" aria-controls="dayReasonsExtra" aria-label="Show ${more} more reasons">+${more} more</button><span class="dp-reasons-extra" id="dayReasonsExtra" hidden>${reasons.slice(2).map(line).join('')}</span>` : ''}` : '';
+  const content = `${reasonLines}${deskNote ? `<span class="dp-desk-note">${esc(deskNote)}</span>` : ''}${note ? `<span>${esc(note)}</span>` : ''}`;
+  return content ? `<p class="dp-note">${icon('info')}<span class="dp-note-lines">${content}</span></p>` : '';
 }
 
 // Opened by a tap, focus goes to the sheet's heading without a ring; from the
@@ -388,7 +414,7 @@ export function openDaySheet(view, k, { pointer = false } = {}) {
   if (!sheet) return;
   const day = dayContent(view, k, deskSet());
   $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(k)}`;
-  patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}`);
+  patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}`);
   openDialog(sheet, { pointer });
   fitDaySummary($('#sheetBody'));
 }

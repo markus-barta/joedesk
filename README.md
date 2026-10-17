@@ -487,25 +487,27 @@ note with **Partial** in full ink; phones show the icon.
 The cell's accessible label includes “Partial: this day's record is incomplete”
 and the reason. The day panel and phone sheet prefix the exact visible trade
 count and amount with **Partial**, label known amounts **so far**, and explain
-on the existing day-note line:
+by default on the existing day-note line:
 “Part of this day's activity couldn't be confirmed, so its result may be
 incomplete.” A partial day with no visible trades shows a muted **—** on the
-neutral calendar surface, and **Partial · record incomplete · —** in the day
+neutral calendar surface, and **Partial · record incomplete** in the day
 summary; it never claims €0, “no trades” or “sat out”. This day-wide warning
 also applies when a desk filter has no visible trades. **Stale** takes priority
 if both diagnostics occur. From Vienna day D+2, a date D still partial shows
 **Stale**, retaining the partial reason and “so far” on known amounts. Its
 accessible explanation is “Stale: still incomplete;” plus the reason. Escalation
 uses date-key arithmetic, including across DST and month/year boundaries.
-The open Vienna date has no marker. Narrow day summaries drop the trade count
+The open Vienna date has no marker; its known partial amount still says **so far**
+and its reasons can appear in the note. Narrow day summaries drop the trade count
 before the Partial/Stale label, exact amount or “so far”; unknown amounts never
 say “so far”. Calendar amounts never say “so far”.
 The server preserves producer coverage and nullable summaries on protected
 reads and restart; both the read worker and fallback retain partial dates.
 All amounts and totals still come from the existing exact trade calculations.
 The desktop calendar month summary appends a warning segment, **incl. N partial
-days**, counting only closed dates still labelled Partial. Today, future dates
-and Stale dates do not count. With no trades and a counted partial date it says
+days**, counting every closed partial date, including dates escalated to Stale.
+Today, future dates and a missing-summary Stale without partial coverage do not
+count. With no trades and a counted partial date it says
 **No trades recorded this month · incl. 1 partial day**. If room is tight,
 “over N trading days” shortens to “in N days”. This line is hidden on phones;
 the record-status line, period tiles and week column do not carry the hint.
@@ -526,16 +528,42 @@ the formatter emits `1M` for € 999.000. Its five calendar crops show October's
 ±€ 1.200.000, gain, loss, zero, k and missing-day warning, under `JOED_QA_DIR`.
 The generated `index.md` and CI log retain the measurement table.
 
-**Producer contract pin — manifest revision 4.** Compared with revision 2,
+**Producer contract pin — manifest revision 5.** Compared with revision 2,
 revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds
 optional day-level `coverage` (`"full"` by default, or `"partial"`), the exact
 day/trade cross-check across every desk described above, and explicit KEEP
 exclusion from both trade records and day totals. It also removes
 `results_not_wired` from the closed reason enum. Revision 4 adds the optional
 server-owned `missingDays` read diagnostic and forbids producer-supplied copies.
+Revision 5 adds optional `days[].partialReasons` and `unattributedCount` without
+changing the schema ID. Rev-5 producers emit at least one reason for each partial
+day in canonical order: `capture_gap`, `history_gap`,
+`broker_trade_count_mismatch`, `broker_realised_pnl_mismatch`,
+`unattributed_activity`, `avg_cost_mismatch`, `fx_disabled`, `fx_missing`,
+`broker_evidence_missing`. `avg_cost_mismatch` is reserved: accepted and rendered,
+not yet emitted. Reasons must be unique and nonempty and are allowed only with
+`coverage: "partial"`. `unattributedCount` is a nonnegative integer, omitted when
+unknown, and allowed only with `unattributed_activity`. Invalid combinations or
+order return per-day 422 errors. Legacy partial rows without reasons still accept.
+`{date, desks: {}, coverage: "partial", partialReasons: ["history_gap"]}` is valid;
+it shows **—** under every desk filter, adds nothing to sums, and counts as one
+closed partial day in the month hint.
+
+Known reasons replace the default note with **Result may be incomplete.** and
+one exact explanation per reason in canonical order (see the data contract).
+With `fx_disabled`, the board omits `fx_missing`. Unknown codes never appear as
+raw text: known codes still render; when none remain, the default sentence appears.
+The cell's accessible reason is the first short label plus **, and N more**.
+Desktop panels show all reasons. Phone sheets show two reason sentences, then a
+44 px **+N more** button that reveals the others below it in the same sheet.
+The sheet reserves its available height when opening so expansion moves nothing
+above the button. A desk filter adds **Applies to the whole day; this desk may be
+unaffected.** Count copy uses “1 trade couldn't be matched to a desk.” or
+“N trades couldn't be matched to a desk.”
+
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
-`contract_set_sha256`; an earlier digest does not cover revision-4 acceptance
+`contract_set_sha256`; an earlier digest does not cover revision-5 acceptance
 and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.

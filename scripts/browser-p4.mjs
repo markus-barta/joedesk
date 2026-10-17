@@ -983,15 +983,16 @@ try {
     // Partial; the empty snapshot shows that same day without visible trades.
     await serve(null);
     const { board } = await designBoard('2026-10-16T12:00:00.000Z');
-    const { dates, baseline, partial, empty, missing, large, emptyMonth } = partialDaysResults(board.clock());
+    const { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted } = partialDaysResults(board.clock());
     const { partial: partialTrade, escalated, missing: stale, normal, emptyEscalated, today } = dates;
     const reason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
     let seq = baseline.seq;
     const replace = async (record, label) => {
+      const oldCalendar = await page.evaluate('document.getElementById("cal").innerHTML');
       check('partial-days', `${label}: accepted ingress`, (await board.pushResults({ ...record, seq: ++seq })).status === 200);
       await page.evaluate('window.__joedesk.refresh()');
       const count = record.trades.filter(t => t.closedAt.startsWith(partialTrade)).length;
-      await waitFor(page, `document.querySelector('#cal [data-day="${partialTrade}"] .n').textContent === ${JSON.stringify(
+      await waitFor(page, `document.getElementById('cal').innerHTML !== ${JSON.stringify(oldCalendar)} && document.querySelector('#cal [data-day="${partialTrade}"] .n').textContent === ${JSON.stringify(
         record === missing ? 'Stale' : record.days.find(d => d.date === partialTrade)?.coverage === 'partial' ? 'Partial' :
           count + '\u00a0' + (count === 1 ? 'trade' : 'trades'))}`);
       await settle(page);
@@ -1056,15 +1057,15 @@ try {
       check('partial-days', `${tag}: trade totals and the record status stay unchanged`,
         shown.display === full.display && same(shown.split, full.split) && shown.status === full.status && !shown.status);
       const month = await monthProbe();
-      check('partial-days', `${tag}: desktop month hint counts only yesterday and never clips or wraps`,
-        month.visible === !viewport.mobile && (viewport.mobile || (month.hint === 'incl. 1 partial day' && !month.clipped && month.height <= 20)), month);
+      check('partial-days', `${tag}: desktop month hint counts all 3 closed partial days, including 2 escalated, and never clips or wraps`,
+        month.visible === !viewport.mobile && (viewport.mobile || (month.hint === 'incl. 3 partial days' && !month.clipped && month.height <= 20)), month);
       check('partial-days', `${tag}: read uses the expected ${fallback ? 'fallback' : 'worker'}`,
         await page.evaluate('window.__joedesk.worker()') === !fallback);
       // The general mobile audit requires the standard 390 px/44 px targets.
       // Like JOED-29, 360 keeps all focused checks without running that audit.
       if (viewport.name !== '360') await auditScreen(page, viewport, theme, 'results (partial coverage)');
       await shot(page, viewport, `${viewport.name}-${theme}-results-partial-days`, 'October: Partial 15th, Stale missing 13th, Stale incomplete 11th/14th, normal 12th, open today 16th');
-      if (!viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-partial-month-hint`, 'Desktop month summary: incl. 1 partial day, excluding today and Stale dates');
+      if (!viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-partial-month-hint`, 'Desktop month summary: incl. 3 partial days, including 2 escalated, excluding today and missing-summary Stale');
 
       // Computed browser colours, every tint, including the neutral card's
       // composed background. Probes inherit the actual calendar's ancestors.
@@ -1110,7 +1111,7 @@ try {
             clipped: [root, sum, note, ...root.querySelectorAll('.trow')].filter(Boolean).some(el => el.scrollWidth > el.clientWidth) };
         })()`);
         check('partial-days', `${tag}: ${hasTrades ? 'traded' : 'empty'} ${viewport.mobile ? 'sheet' : 'panel'} keeps the amount/reason without clipping`,
-          (hasTrades ? /^Partial·(?:1trade·)?−€1,00sofar$/.test(N(detail.sum)) : N(detail.sum) === N('Partial · record incomplete · —')) &&
+          (hasTrades ? /^Partial·(?:1trade·)?−€1,00sofar$/.test(N(detail.sum)) : N(detail.sum) === N('Partial · record incomplete')) &&
           detail.rows === (hasTrades ? 1 : 0) && detail.warning === 1 && detail.reason === reason && detail.noteVisible && detail.info && !detail.clipped &&
           (hasTrades || !/€|no trades|sat out|so far/i.test(detail.text)), detail);
         const name = `${viewport.name}-${theme}-results-partial-${hasTrades ? 'trade' : 'empty'}-${viewport.mobile ? 'sheet' : 'panel'}`;
@@ -1158,9 +1159,79 @@ try {
       await replace(emptyMonth, `${tag} no trades this month`);
       const emptyMonthProbe = await monthProbe();
       check('partial-days', `${tag}: an empty month with Partial says No trades recorded this month; hint fits`,
-        !viewport.mobile ? N(emptyMonthProbe.text) === N('No trades recorded this month · incl. 1 partial day') && !emptyMonthProbe.clipped && emptyMonthProbe.height <= 20
+        !viewport.mobile ? N(emptyMonthProbe.text) === N('No trades recorded this month · incl. 3 partial days') && !emptyMonthProbe.clipped && emptyMonthProbe.height <= 20
           : !emptyMonthProbe.visible, emptyMonthProbe);
-      if (!viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-partial-empty-month-hint`, 'No trades recorded this month · incl. 1 partial day');
+      if (!viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-partial-empty-month-hint`, 'No trades recorded this month · incl. 3 partial days');
+
+      // Rev 5: 9 accepted codes render 8 sentences after FX dedup. All reason
+      // variants use real ingress and the same worker/fallback paths above.
+      await replace(reasons, `${tag} nine reasons`);
+      const reasonRoot = viewport.mobile ? '#sheetBody' : '#daypanel';
+      if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
+      const reasonProbe = () => page.evaluate(`(() => {
+        const root = document.querySelector(${JSON.stringify(reasonRoot)}), note = root.querySelector('.dp-note');
+        const lines = [...root.querySelectorAll('.dp-reason')], button = root.querySelector('.dp-reasons-more');
+        return { lead: root.querySelector('.dp-note-lead')?.innerText, lines: lines.map(el => ({ text: el.innerText, visible: __audit.visible(el) })),
+          button: button && { text: button.innerText, height: button.getBoundingClientRect().height, name: button.getAttribute('aria-label'),
+            expanded: button.getAttribute('aria-expanded'), keyboard: button.tagName === 'BUTTON' && !button.disabled && button.tabIndex === 0 },
+          clipped: [note, ...lines.filter(el => __audit.visible(el))].some(el => el.scrollWidth > el.clientWidth) };
+      })()`);
+      let reasonDetail = await reasonProbe();
+      const expectedReasons = M.partialReasons(reasons.days.find(d => d.date === partialTrade)).map(r => r.text);
+      check('partial-days', `${tag}: canonical reason sentences wrap cleanly; FX disabled suppresses missing`,
+        reasonDetail.lead === 'Result may be incomplete.' && same(reasonDetail.lines.map(l => l.text), expectedReasons) &&
+        reasonDetail.lines.filter(l => l.visible).length === (viewport.mobile ? 2 : 8) && !reasonDetail.clipped &&
+        (!viewport.mobile ? !reasonDetail.button : reasonDetail.button.text === '+6 more' && reasonDetail.button.height >= 44 &&
+          reasonDetail.button.keyboard && reasonDetail.button.name === 'Show 6 more reasons'), reasonDetail);
+      const reasonsName = `${viewport.name}-${theme}-results-partial-nine-reasons`;
+      if (viewport.mobile) {
+        await viewShot(page, reasonsName + '-collapsed', 'Nine codes: two visible reason lines and +6 more');
+        const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
+          '#sheetBody .dp-note-lines > .dp-reason', '#sheetBody .dp-reasons-more'];
+        const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT);
+        // First activation is keyboard; the second verifies a pointer tap.
+        await page.evaluate('document.querySelector("#sheetBody .dp-reasons-more").focus({preventScroll:true})');
+        await key(page, 'Enter');
+        await settle(page);
+        reasonDetail = await reasonProbe();
+        check('partial-days', `${tag}: keyboard reveal shows all 8 reasons in the same sheet with exactly 0 px above the button`,
+          reasonDetail.lines.every(l => l.visible) && reasonDetail.button.expanded === 'true' && !reasonDetail.clipped &&
+          same(fixedBefore, await rects(page, above)) && same(outerBefore, await rects(page, SHIFT)), reasonDetail);
+        await click(page, '#sheetBody .dp-reasons-more');
+        await click(page, '#sheetBody .dp-reasons-more');
+        check('partial-days', `${tag}: pointer reveal also moves all prior content exactly 0 px`,
+          (await reasonProbe()).lines.every(l => l.visible) && same(fixedBefore, await rects(page, above)) && same(outerBefore, await rects(page, SHIFT)));
+        await viewShot(page, reasonsName + '-expanded', 'All eight reason sentences revealed in place');
+        await key(page, 'Escape');
+      } else await shot(page, viewport, reasonsName + '-panel', 'All eight reason sentences in canonical order');
+
+      for (const [record, suffix, sentence] of [[singleReason, 'single-reason', 'The trade history has a gap that covers this day.'],
+        [counted, 'counted', "2 trades couldn't be matched to a desk."]]) {
+        await replace(record, `${tag} ${suffix}`);
+        if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
+        const detail = await reasonProbe();
+        check('partial-days', `${tag}: ${suffix} has exact copy without a disclosure`, detail.lines.length === 1 && detail.lines[0].text === sentence && !detail.button && !detail.clipped, detail);
+        if (viewport.mobile) { await viewShot(page, `${viewport.name}-${theme}-results-partial-${suffix}`, sentence); await key(page, 'Escape'); }
+        else await shot(page, viewport, `${viewport.name}-${theme}-results-partial-${suffix}`, sentence);
+      }
+
+      await click(page, '#deskSeg [data-desk="joe"]');
+      if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
+      const deskNote = await page.evaluate(`document.querySelector(${JSON.stringify(reasonRoot)}).innerText`);
+      check('partial-days', `${tag}: a filtered partial day names the whole-day scope`, deskNote.includes('Applies to the whole day; this desk may be unaffected.'), deskNote);
+      if (viewport.mobile) { await viewShot(page, `${viewport.name}-${theme}-results-partial-desk-filtered`, 'Whole-day partial warning under the Joe filter'); await key(page, 'Escape'); }
+      else await shot(page, viewport, `${viewport.name}-${theme}-results-partial-desk-filtered`, 'Whole-day partial warning under the Joe filter');
+      await click(page, '#deskSeg [data-desk="all"]');
+      await replace(reasons, `${tag} today reason`);
+      await click(page, `#cal [data-day="${today}"]`);
+      const todayDetail = await page.evaluate(`(() => { const root = document.querySelector(${JSON.stringify(reasonRoot)}); return { sum: root.querySelector('.dp-sum').innerText,
+        note: root.querySelector('.dp-note').innerText, markers: document.querySelectorAll('#cal [data-day="${today}"] .day-warning').length }; })()`);
+      check('partial-days', `${tag}: today keeps its known amount so far and reason without a Partial marker`,
+        /so far/.test(todayDetail.sum) && !/Partial/.test(todayDetail.sum) && todayDetail.markers === 0 &&
+        todayDetail.note.includes('The trade history has a gap that covers this day.'), todayDetail);
+      if (viewport.mobile) { await viewShot(page, `${viewport.name}-${theme}-results-partial-today-so-far`, 'Open Vienna day: exact known amount so far, without a Partial marker'); await key(page, 'Escape'); }
+      else await shot(page, viewport, `${viewport.name}-${theme}-results-partial-today-so-far`, 'Open Vienna day: exact known amount so far, without a Partial marker');
+
     }
   }
 
@@ -1355,10 +1426,16 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   summaries must satisfy scrollWidth ≤ clientWidth. Both theme token sets
   get computed icon contrast checks for every tint (≥ 3:1), including neutral.
   A missing-summary Stale hands off to Partial at 0 px. Desktop month hints
-  count closed, un-escalated Partial dates, hide on phones and never clip.
+  count every closed partial date, including Stale-escalated dates; today and
+  missing-summary Stale never count. They hide on phones and never clip.
   Worst-case 99-trade summaries preserve Partial, exact money and “so far”
   at every width; the count yields first. The general audit runs only on
-  standard viewports, while 360 keeps every focused assertion.
+  standard viewports, while 360 keeps every focused assertion. Rev-5 crops
+  \`*-results-partial-nine-reasons-panel.png\` show all eight displayed sentences
+  (nine codes with FX dedup); phones use
+  \`*-results-partial-nine-reasons-{collapsed,expanded}.png\`. Keyboard and pointer
+  reveal must move everything above the 44 px button exactly 0 px. Other crops
+  cover \`*-results-partial-{single-reason,counted,desk-filtered,today-so-far}.png\`.
 - **Hero chart time axis** (fix round 1). The x axis is real time: each close
   sits at the end of its Vienna date, today's money at now; missing dates keep
   their width, and a session without a close in the record breaks the line

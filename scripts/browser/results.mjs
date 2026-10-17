@@ -75,7 +75,15 @@ export function partialDaysResults(now = '2026-10-16T12:00:00.000Z') {
     return t;
   }));
   const emptyMonth = withTradeSummaries({ ...structuredClone(empty), trades: [] });
-  return { dates, baseline, partial, empty, missing, large, emptyMonth };
+  const reasons = structuredClone(partial);
+  reasons.days.find(d => d.date === dates.partial).partialReasons = ['capture_gap', 'history_gap', 'broker_trade_count_mismatch',
+    'broker_realised_pnl_mismatch', 'unattributed_activity', 'avg_cost_mismatch', 'fx_disabled', 'fx_missing', 'broker_evidence_missing'];
+  reasons.days.find(d => d.date === dates.today).partialReasons = ['history_gap'];
+  const singleReason = structuredClone(partial);
+  singleReason.days.find(d => d.date === dates.partial).partialReasons = ['history_gap'];
+  const counted = structuredClone(partial);
+  Object.assign(counted.days.find(d => d.date === dates.partial), { partialReasons: ['unattributed_activity'], unattributedCount: 2 });
+  return { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted };
 }
 
 export function designResults(now = NOW, { trackingStart = '2026-09-10', seq = 412 } = {}) {

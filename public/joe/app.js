@@ -8,7 +8,7 @@ import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, forgetCharts } from './desk.js';
 import { renderHistory, historyChart, HS } from './history.js';
-import { renderResults, RS, stepPeriod, resultsView, openDaySheet, forgetResults } from './results.js';
+import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults } from './results.js';
 import { boardHealthPresentation, dataAge, cellReason } from './health.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { initSettings, renderSettings, showSection, SECTIONS as SETTINGS_SECTIONS } from './settings.js';
@@ -265,7 +265,11 @@ function start() {
   });
   // The sheet closes with its × button, Escape or a tap outside; focus goes back to the day.
   const sheet = $('#daySheet');
-  sheet.addEventListener('click', e => { if (e.target.closest('[data-close]') || e.target === sheet) sheet.close(); });
+  sheet.addEventListener('click', e => {
+    const more = e.target.closest('.dp-reasons-more');
+    if (more) toggleDayReasons(more);
+    if (e.target.closest('[data-close]') || e.target === sheet) sheet.close();
+  });
   sheet.addEventListener('close', () => { if (sheetFrom) document.querySelector(`#cal [data-day="${sheetFrom}"]`)?.focus({ preventScroll: true }); sheetFrom = null; });
 
   addEventListener('hashchange', () => { const [next, anchor] = location.hash.slice(1).split('/'); if (next !== screen) go(next, anchor); });
