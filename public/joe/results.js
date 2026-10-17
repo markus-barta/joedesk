@@ -353,7 +353,10 @@ function held(t) {
 }
 // A price in full, exactly as recorded (at least two decimals).
 const price = p => money(decimalUnits(p.amount), p.currency, false, Math.max(2, (p.amount.split('.')[1] ?? '').length));
-const tradeWords = text => text.split(/(\s+)/u).map(word => /^\s+$/u.test(word) ? esc(word) : `<span class="word">${esc(word)}</span>`).join('');
+// Company letters only: deterministic breaks need no browser dictionary.
+// Each opportunity leaves at least three source letters on either side.
+const softHyphens = word => word.replace(/\p{L}{8,}/gu, letters => letters.replace(/(\p{L}{3})(?=\p{L}{3})/gu, '$1\u00ad'));
+const tradeWords = text => text.split(/(\s+)/u).map(word => /^\s+$/u.test(word) ? esc(word) : `<span class="word">${esc(softHyphens(word))}</span>`).join('');
 const metaSuffix = '<span class="meta-sep" aria-hidden="true"> ·</span>';
 function tradeRows(ts) {
   return ts.map(t => `<div class="trow" data-trade="${esc(t.id)}">

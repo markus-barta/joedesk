@@ -549,9 +549,13 @@ Day-detail trade amounts keep their full value on one right-aligned line.
 Their columns grow to fit, with the original 92 px minimum for short amounts
 on desktop. Names keep at least 120 px and wrap between whole words; only
 an individual token wider than the column may break internally. English
-company text uses automatic hyphenation with at least three characters on
-each side of a hyphen, keeping last-resort breaks readable. Meta units
-(desk, side/quantity, close time and holding duration) stay together and wrap
+company letter runs of eight or more contain deterministic soft hyphens,
+with at least three source letters before, between and after opportunities.
+`hyphens: manual` draws a hyphen only when the oversized word breaks, without
+a browser dictionary; `overflow-wrap: anywhere` remains the final fallback
+if even a fragment cannot fit. Symbols, numbers and meta text receive no soft
+hyphens, and text comparisons strip U+00AD to preserve the recorded copy.
+Meta units (desk, side/quantity, close time and holding duration) stay together and wrap
 between units. Each middle dot is a nowrap suffix of the preceding unit;
 after layout and resize, line-ending dots use `visibility: hidden`, retaining
 their width so lines stay stable and the next line starts flush.
@@ -568,8 +572,10 @@ common right edges, desktop-only 92 px sizing, phone content sizing, wrapping
 of the eight-decimal pair at 1440, and exactly 0 px outer movement on open/close.
 Range rectangles check every name/meta word, atomic meta units, the 120 px
 desktop name floor, full panel-header visibility and the price/fee yield order.
-Per-character Range measurements require every broken-word line to contain
-at least three source characters; desktop fixture words remain unbroken.
+Per-character Range measurements exclude U+00AD, require every broken-word
+line to contain at least three source characters, and require a positive-width
+soft-hyphen glyph at every break. The 360 million row must exercise a break;
+desktop fixture words remain unbroken.
 Visible glyph checks reject a middle dot at either end of every meta line;
 resize and repeated-fit probes verify flush starts, reserved suffix widths,
 stable wrapping and uniform panel price sizing, including a roomy peer row.

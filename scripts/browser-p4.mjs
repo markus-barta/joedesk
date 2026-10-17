@@ -50,7 +50,7 @@ const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${n
 const ONLY = (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean);
 const run = name => !ONLY.length || ONLY.includes(name);
 
-const N = text => String(text ?? '').replace(/[\s ]+/g, '');
+const N = text => String(text ?? '').replace(/[\s \u00ad]+/g, '');
 const NB = '\u00a0';
 // Executed in the page: measure visible text glyphs independently of the
 // fitter, and unit boxes so a line beginning with an icon must also be flush.
@@ -102,12 +102,64 @@ function tradeSymbols(root, expected) {
     const prefix = expected[row.dataset.trade];
     return { id: row.dataset.trade, expected: prefix, text: name.textContent, rect: rect?.toJSON(),
       startsWithSymbol: Boolean(prefix && name.firstElementChild === symbol && symbol.textContent === prefix &&
-        name.textContent.replace(/\u00a0/g, ' ').startsWith(prefix + ' · ')),
+        name.textContent.replaceAll('\u00ad', '').replace(/\u00a0/g, ' ').startsWith(prefix + ' · ')),
       rendered: Boolean(rect?.width > 0 && rect.height > 0 && style.visibility === 'visible' &&
         style.display !== 'none' && Number(style.opacity) > 0),
       inside: Boolean(rect && [list, panel].every(b => rect.left >= b.left && rect.right <= b.right &&
         rect.top >= b.top && rect.bottom <= b.bottom)) };
   });
+}
+// Executed in the page: source letters and drawn soft hyphens have separate
+// Ranges, so an invisible opportunity cannot count as a letter or a dash.
+function tradeWordLines(el) {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), out = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    for (const match of node.textContent.matchAll(/\S+/gu)) {
+      const range = document.createRange();
+      range.setStart(node, match.index); range.setEnd(node, match.index + match[0].length);
+      const rects = [...range.getClientRects()].filter(r => r.width > 0);
+      const lines = [...new Set(rects.map(r => r.top))], fragments = [], hyphens = [];
+      let unbrokenWidth = range.getBoundingClientRect().width, offset = match.index;
+      for (const char of match[0]) {
+        const start = offset;
+        range.setStart(node, start); range.setEnd(node, offset += char.length);
+        const boxes = [...range.getClientRects()].filter(r => r.width > 0 && r.height > 0);
+        if (char === '\u00ad') {
+          hyphens.push({ offset: start, boxes });
+          continue;
+        }
+        const box = boxes[0];
+        if (!box) continue;
+        let fragment = fragments.find(f => Math.abs(f.top - box.top) < 0.5);
+        if (!fragment) fragments.push(fragment = { top: box.top, text: '' });
+        fragment.text += char;
+        fragment.end = offset; fragment.right = box.right;
+      }
+      for (const fragment of fragments) {
+        const boxes = hyphens.filter(h => h.offset === fragment.end).flatMap(h => h.boxes);
+        fragment.hyphenWidth = Math.max(0, ...boxes.filter(box => Math.abs(box.top - fragment.top) < 0.5 &&
+          box.right >= fragment.right).map(box => box.width));
+        fragment.visibleText = fragment.text + (fragment.hyphenWidth > 0 ? '-' : '');
+      }
+      const word = match[0].replaceAll('\u00ad', '');
+      if (lines.length > 1) {
+        // Preserve the real font and ancestor selectors while measuring the
+        // source word without its constraint or discretionary opportunities.
+        const probe = node.parentElement.cloneNode(false);
+        probe.textContent = word;
+        Object.assign(probe.style, { position: 'fixed', visibility: 'hidden', pointerEvents: 'none',
+          whiteSpace: 'nowrap', width: 'max-content', minWidth: '0', maxWidth: 'none' });
+        node.parentElement.after(probe);
+        try {
+          range.selectNodeContents(probe);
+          unbrokenWidth = range.getBoundingClientRect().width;
+        } finally { probe.remove(); }
+      }
+      out.push({ word, lines, fragments, unbrokenWidth });
+    }
+  }
+  return out;
 }
 const money = n => (n === null || n === undefined ? '—' : fmt.money(n, 'EUR', true));
 const two = (a, b) => `${a === null || a === undefined ? '—' : money(a)}/${b === null || b === undefined ? '—' : money(b)}`;
@@ -117,7 +169,7 @@ const DESK_CHOICES = ['all', 'j', 'joe', 'joel'];
 
 // Everything Results shows, read from the page.
 const RES = `(() => {
-  const t = el => (el?.innerText ?? '').replace(/\u00a0(?=·)/g, ' ');
+  const t = el => (el?.innerText ?? '').replaceAll('\u00ad', '').replace(/\u00a0(?=·)/g, ' ');
   const svg = document.querySelector('#curve > svg');
   return {
     label: t(document.querySelector('#perLabel .cur')), bd: t(document.getElementById('bdTitle')), legend: [...document.querySelectorAll('#curveLegend .lg')].map(t),
@@ -821,49 +873,7 @@ try {
       const detail = await page.evaluate(`(() => {
         const root = document.querySelector(${JSON.stringify(root)}), bounds = root.getBoundingClientRect();
         const panel = document.getElementById('daypanel').getBoundingClientRect();
-        // A Range over each word exposes internal line breaks even inside
-        // an inline block whose own bounding rectangle spans several lines.
-        const words = el => {
-          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), out = [];
-          while (walker.nextNode()) {
-            const node = walker.currentNode;
-            for (const match of node.textContent.matchAll(/\\S+/gu)) {
-              const range = document.createRange();
-              range.setStart(node, match.index); range.setEnd(node, match.index + match[0].length);
-              const rects = [...range.getClientRects()].filter(r => r.width > 0);
-              const lines = [...new Set(rects.map(r => r.top))], fragments = [];
-              // Count source characters per rendered line, excluding a
-              // browser-generated hyphen from the minimum fragment length.
-              let offset = match.index;
-              for (const char of match[0]) {
-                const glyph = document.createRange();
-                glyph.setStart(node, offset); glyph.setEnd(node, offset + char.length);
-                offset += char.length;
-                const box = [...glyph.getClientRects()].find(r => r.width > 0 && r.height > 0);
-                if (!box) continue;
-                let fragment = fragments.find(f => Math.abs(f.top - box.top) < 0.5);
-                if (!fragment) fragments.push(fragment = { top: box.top, text: '' });
-                fragment.text += char;
-              }
-              let unbrokenWidth = range.getBoundingClientRect().width;
-              if (lines.length > 1) {
-                // Keep the word's real font and ancestor selectors, but remove
-                // its width constraint to measure the last-resort exception.
-                const probe = node.parentElement.cloneNode(false);
-                probe.textContent = match[0];
-                Object.assign(probe.style, { position: 'fixed', visibility: 'hidden', pointerEvents: 'none',
-                  whiteSpace: 'nowrap', width: 'max-content', minWidth: '0', maxWidth: 'none' });
-                node.parentElement.after(probe);
-                try {
-                  range.selectNodeContents(probe);
-                  unbrokenWidth = range.getBoundingClientRect().width;
-                } finally { probe.remove(); }
-              }
-              out.push({ word: match[0], lines, fragments, unbrokenWidth });
-            }
-          }
-          return out;
-        };
+        const words = ${tradeWordLines.toString()};
         const rows = [...root.querySelectorAll('.trow')].map(row => {
           const net = row.querySelector('.net'), amount = net.querySelector('.pl'), px = row.querySelector('.px');
           const name = row.querySelector('.name'), meta = name.querySelector('.meta');
@@ -880,6 +890,9 @@ try {
             width: n.width, amountWidth: a.width, nowrap: getComputedStyle(net).whiteSpace === 'nowrap',
             nameWidth: nameBounds.width, nameContentWidth, words: nameWords,
             lang: name.lang, hyphens: nameStyle.hyphens,
+            company: [...name.querySelectorAll(':scope > span.word')].map(word => word.textContent.replaceAll('\u00ad', '')).join(' '),
+            symbol: name.querySelector('b.word').textContent,
+            softHyphensOnlyInCompany: [name.querySelector('b.word'), meta, px, net].every(el => !el.textContent.includes('\u00ad')),
             brokenWords: nameWords.filter(w => w.lines.length > 1),
             nameFits: name.scrollWidth <= name.clientWidth,
             metaUnits: [...meta.querySelectorAll('.meta-unit')].map(unit => ({ text: unit.textContent,
@@ -918,9 +931,17 @@ try {
           r.metaUnits.length === 4 && r.metaUnits.every(unit => unit.nowrap && unit.words.every(w => w.lines.length === 1)) &&
           r.metaUnits.some(unit => unit.text.includes('Long')) && r.metaUnits.some(unit => unit.text.startsWith('closed ')) &&
           r.metaUnits.some(unit => unit.text.startsWith('held '))), detail.rows);
-      check('trade-amount', `${tag}: English automatic hyphenation leaves at least three source characters in every broken-word line`,
-        detail.rows.every(r => r.lang === 'en' && r.hyphens === 'auto' && r.brokenWords.every(w =>
-          w.fragments.length === w.lines.length && w.fragments.every(f => [...f.text].length >= 3))), detail.rows);
+      check('trade-amount', `${tag}: company text matches the source without soft hyphens, and symbols, numbers and meta stay untouched`,
+        detail.rows.every(row => row.company === record.trades.find(t => t.id === row.id)?.company &&
+          row.symbol === record.trades.find(t => t.id === row.id)?.symbol && row.softHyphensOnlyInCompany), detail.rows);
+      check('trade-amount', `${tag}: manual hyphenation leaves at least three source characters in every broken-word line`,
+        detail.rows.every(r => r.lang === 'en' && r.hyphens === 'manual' && r.brokenWords.every(w =>
+          w.fragments.length === w.lines.length && w.fragments.map(f => f.text).join('') === w.word &&
+          w.fragments.every(f => [...f.text].length >= 3))), detail.rows);
+      check('trade-amount', `${tag}: each broken-word fragment ends in a drawn soft hyphen except the final fragment`,
+        detail.rows.every(r => r.brokenWords.every(w => w.fragments.every((f, i) => i === w.fragments.length - 1 ?
+          f.hyphenWidth === 0 && f.visibleText === f.text : f.hyphenWidth > 0 && f.visibleText.endsWith('-')))) &&
+        (viewport.name !== '360' || detail.rows.find(r => r.id === 'rt-amount-million')?.brokenWords.some(w => w.word === 'Demonstration')), detail.rows);
       check('trade-amount', `${tag}: no visible dot starts or ends a meta line, suffixes stay with the preceding unit, and new lines start flush`,
         cleanMetaLines(detail.rows), detail.rows.map(({ id, meta }) => ({ id, meta })));
       check('trade-amount', `${tag}: every price in the panel uses one size, with all rows at 11 px if any needs it`,
@@ -1081,7 +1102,7 @@ try {
           const name = `${viewport.name}-${theme}-results-trade-amount-${viewport.mobile ? 'sheet' : 'panel'}-full-crop`;
           const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip: crop.clip, captureBeyondViewport: true });
           writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
-          shots.push({ file: `${name}.png`, what: `Full list at the tested width, height expanded only for capture: every symbol/name first line, amount, price and fee${viewport.mobile ? '' : '; 16 px right margin'}` });
+          shots.push({ file: `${name}.png`, what: `Full list at the tested width, height expanded only for capture: every symbol/name first line, manual company hyphens, amount, price and fee${viewport.mobile ? '' : '; 16 px right margin'}` });
         }
       } finally {
         await page.evaluate(`(() => {
@@ -2166,8 +2187,11 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   and keep the original 92 px minimum on desktop. Phone amount columns
   size to their content, with prices spanning the second row. Desktop names
   keep at least 120 px; Range rectangles prove no name or meta word breaks
-  internally except for oversized phone tokens, whose English automatic
-  hyphenation must leave at least three source characters on each line.
+  internally except for oversized phone tokens. Deterministic soft hyphens
+  in company letter runs of eight or more use manual hyphenation, leaving
+  at least three source characters on every broken-word line and a drawn
+  hyphen at every break. Text comparisons strip U+00AD; symbol, numeric and
+  meta text cannot contain it. The 360 million row must exercise a break.
   Meta dots stay inside the preceding nowrap unit; visible glyph
   checks forbid dots at either line edge and require flush line starts, also
   after live resize. Hidden suffixes retain their width; repeated fits must
