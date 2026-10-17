@@ -987,6 +987,10 @@ try {
     const fixed = ['#rhero', '#rheroL .hero-k', '#rheroL .display', '#rheroL .split', '#rheroL .split dt', '#rheroL .split dd',
       '#rheroL .bench', '#curveLegend', '#curve', '.tile'];
     const sameGeometry = (before, after) => JSON.stringify(before) === JSON.stringify(after);
+    const splitDelta = (before, after) => after.find(r => r.key === '#rheroL .split#0').top - before.find(r => r.key === '#rheroL .split#0').top;
+    // Keep two lines at 1440 wherever they fit; otherwise allow three in the
+    // existing column. Narrow desktop and phones may also use three lines.
+    const lineLimit = (viewport, p) => viewport.width === 1440 && p.contentHeight <= 2 * p.lineHeight + 1 ? 2 : 3;
     const chart = () => page.evaluate('document.querySelector("#curve > svg")?.outerHTML');
     let seq = baseline.seq;
     const push = async record => {
@@ -1050,14 +1054,14 @@ try {
         await click(page, `#periodSeg [data-period="${period}"]`);
         for (const desk of DESK_CHOICES) {
           await click(page, `#deskSeg [data-desk="${desk}"]`);
-          const p = await probe(), next = await rects(page, fixed);
+          const p = await probe(), next = await rects(page, fixed), maxLines = lineLimit(viewport, p);
           check('period-hint', `${tag} ${period} ${desk}: correct whole-day hint; no tile or By-desk hints`,
             p.hint === (count ? 'incl. 2 partial days' : null) && !p.otherHints && (!count || p.icon), p);
           check('period-hint', `${tag} ${period} ${desk}: tiles, split rows, benchmark, legend and chart move exactly 0 px`,
             sameGeometry(geometry, next), { before: geometry, after: next });
-          check('period-hint', `${tag} ${period} ${desk}: no clipping, at most two normal sentence lines and the hint never splits`,
-            !p.clipped && p.hintUnbroken && p.contentHeight <= 2 * p.lineHeight + 1 &&
-            (!viewport.mobile || (p.height === reserve.height && p.height === 2 * p.lineHeight)), p);
+          check('period-hint', `${tag} ${period} ${desk}: no clipping, at most ${maxLines} sentence lines and the hint never splits`,
+            !p.clipped && p.hintUnbroken && p.contentHeight <= maxLines * p.lineHeight + 1 &&
+            (!viewport.mobile || (p.height >= 2 * p.lineHeight && p.height <= maxLines * p.lineHeight)), p);
           check('period-hint', `${tag} ${period} ${desk}: only an unhinted sentence keeps its final full stop`,
             count ? !p.sentence.includes('. · ') : p.sentence.endsWith('.'), p);
           if (count) check('period-hint', `${tag} ${period} ${desk}: warn icon contrast is at least 3:1 on the hero`, p.contrast >= 3, p);
@@ -1068,62 +1072,70 @@ try {
       await click(page, '#deskSeg [data-desk="all"]');
       check('period-hint', `${tag}: the full-hero crop includes the unchanged chart`, baselineChart === await chart());
       if (viewport.name !== '360') await crop(viewport, theme, 'hint');
-      if (!viewport.mobile) {
-        // Real sentence markup with the longest normal amount/date forms.
-        for (const sentence of ['Down €\u00a0999.999,99 in September 2025', 'Down €\u00a0999.999,99 in the week of 28\u00a0Sep']) {
-          await page.evaluate(`document.querySelector('#rheroL .say').firstChild.textContent = ${JSON.stringify(sentence + ' · ')}`);
-          const p = await probe();
-          check('period-hint', `${tag}: longest realistic result sentence fits two lines and the hint never splits`,
-            !p.clipped && p.hintUnbroken && p.contentHeight <= 2 * p.lineHeight + 1, p);
-          check('period-hint', `${tag}: long result wording moves hero children and tiles exactly 0 px`,
-            sameGeometry(geometry, await rects(page, fixed)));
-        }
-        // Restore actual renderer content before the next real snapshot.
-        await click(page, '#periodSeg [data-period="week"]');
-        await click(page, '#periodSeg [data-period="month"]');
+      // Real sentence markup with wide amount/date forms, including a past
+      // week with two-digit dates. Unknown and basis-change forms have no hint.
+      for (const sentence of ['Down €\u00a0999.999,99 in September 2025', 'Down €\u00a0999.999,99 in the week of 21\u00a0Sep']) {
+        await page.evaluate(`document.querySelector('#rheroL .say').firstChild.textContent = ${JSON.stringify(sentence + ' · ')}`);
+        const p = await probe(), next = await rects(page, fixed), maxLines = lineLimit(viewport, p);
+        check('period-hint', `${tag}: longest realistic result sentence fits at most ${maxLines} lines and the hint never splits`,
+          p.hint === 'incl. 2 partial days' && !p.clipped && p.hintUnbroken && p.contentHeight <= maxLines * p.lineHeight + 1, p);
+        check('period-hint', `${tag}: long result wording moves hero children and tiles exactly 0 px`,
+          sameGeometry(geometry, next), { splitTopDeltaPx: splitDelta(geometry, next), sentence: p.sentence, before: geometry, after: next });
       }
+      // Restore actual renderer content before the next real snapshot.
+      await click(page, '#periodSeg [data-period="week"]');
+      await click(page, '#periodSeg [data-period="month"]');
       {
-        // Actual empty and unknown-result paths at every width: desktop gets
-        // two lines; phones may use three within the fixed left column's slack.
-        const maxLines = viewport.mobile ? 3 : 2;
-        for (const [record, prefix] of [[empty, 'No trades recorded this month. Paper results start on '],
-          [unknown, 'The result this month is not known yet: ']]) {
-          await push(record);
-          await waitFor(page, `document.querySelector('#rheroL .say').textContent.startsWith(${JSON.stringify(prefix)})`);
-          const p = await probe(), next = await rects(page, fixed);
-          check('period-hint', `${tag}: ${prefix} fits at most ${maxLines} lines without clipping or splitting the hint`,
-            p.hint === 'incl. 2 partial days' && !p.clipped && p.hintUnbroken && p.height >= 2 * p.lineHeight &&
-            p.height <= maxLines * p.lineHeight && p.contentHeight <= maxLines * p.lineHeight + 1, p);
-          check('period-hint', `${tag}: long no-trade or unknown-result wording moves hero children and tiles exactly 0 px`,
-            sameGeometry(geometry, next), { before: geometry, after: next });
-          const noHint = withTradeSummaries(structuredClone(record));
-          for (const day of noHint.days) { delete day.coverage; delete day.partialReasons; }
-          await push(noHint);
-          await waitFor(page, '!document.querySelector("#rheroL .say .st")');
-          const plain = await probe(), plainGeometry = await rects(page, fixed);
-          check('period-hint', `${tag}: removing a long sentence hint keeps the full stop, fits ${maxLines} lines and moves hero children and tiles exactly 0 px`,
-            !plain.clipped && plain.sentence.endsWith('.') && plain.contentHeight <= maxLines * plain.lineHeight + 1 &&
-            sameGeometry(geometry, plainGeometry), { sentence: plain, before: geometry, after: plainGeometry });
-        }
-      }
-      if (viewport.mobile) {
-        await push(partial);
-        await waitFor(page, 'document.querySelector("#rheroL .say .st")?.textContent === "incl. 2 partial days"');
-        // Keep real renderer markup and the warning; probe the longest older
-        // week wordings, including all three desks in a basis-change sentence.
-        for (const sentence of [
-          'No trades recorded in the week of 28\u00a0Sep. Paper results start on 30\u00a0Sep 2025',
-          'The result in the week of 28\u00a0Sep is not known yet: the desks’ money on Fri 2\u00a0Oct is not available',
-          'No result in the week of 28\u00a0Sep: J, Joe and Joel’s bookkeeping basis changed on Wed 30\u00a0Sep, and a change of basis is not a gain or a loss',
-        ]) {
-          await page.evaluate(`document.querySelector('#rheroL .say').firstChild.textContent = ${JSON.stringify(sentence + ' · ')}`);
-          const p = await probe(), next = await rects(page, fixed);
-          check('period-hint', `${tag}: longest phone wording fits at most three lines without clipping or splitting the hint`,
-            p.hint === 'incl. 2 partial days' && !p.clipped && p.hintUnbroken &&
-            p.height <= 3 * p.lineHeight && p.contentHeight <= 3 * p.lineHeight + 1, p);
-          check('period-hint', `${tag}: longest phone wording moves hero children and tiles exactly 0 px`,
-            sameGeometry(geometry, next), { sentence: p.sentence, before: geometry, after: next });
-        }
+        // The longest eligible real path uses a wide tracking-start date.
+        await push(empty);
+        const prefix = 'No trades recorded this month. Paper results start on 30\u00a0Sep 2026';
+        await waitFor(page, `document.querySelector('#rheroL .say').textContent.startsWith(${JSON.stringify(prefix)})`);
+        const p = await probe(), next = await rects(page, fixed), maxLines = lineLimit(viewport, p);
+        check('period-hint', `${tag}: widest real no-trade sentence fits at most ${maxLines} lines without clipping or splitting the hint`,
+          p.hint === 'incl. 2 partial days' && !p.clipped && p.hintUnbroken && p.height >= 2 * p.lineHeight &&
+          p.height <= maxLines * p.lineHeight && p.contentHeight <= maxLines * p.lineHeight + 1, p);
+        check('period-hint', `${tag}: widest real no-trade wording moves hero children and tiles exactly 0 px`,
+          sameGeometry(geometry, next), { splitTopDeltaPx: splitDelta(geometry, next), sentence: p, before: geometry, after: next });
+        // Keep the real empty-path markup and warning for the widest older-week
+        // phrase. No Sunday-money probe applies: that unknown form has no hint.
+        const olderWeek = 'No trades recorded in the week of 21\u00a0Sep. Paper results start on 30\u00a0Sep 2026';
+        await page.evaluate(`document.querySelector('#rheroL .say').firstChild.textContent = ${JSON.stringify(olderWeek + ' · ')}`);
+        const older = await probe(), olderGeometry = await rects(page, fixed), olderMax = lineLimit(viewport, older);
+        check('period-hint', `${tag}: widest older-week no-trade wording fits at most ${olderMax} lines without clipping or splitting the hint`,
+          older.hint === 'incl. 2 partial days' && !older.clipped && older.hintUnbroken &&
+          older.height <= olderMax * older.lineHeight && older.contentHeight <= olderMax * older.lineHeight + 1, older);
+        if (viewport.mobile) check('period-hint', `${tag}: the widest eligible sentence exercises a third phone line`,
+          older.height === 3 * older.lineHeight, older);
+        check('period-hint', `${tag}: widest older-week no-trade wording moves hero children and tiles exactly 0 px`,
+          sameGeometry(geometry, olderGeometry), { splitTopDeltaPx: splitDelta(geometry, olderGeometry), sentence: older, before: geometry, after: olderGeometry });
+        // Toggle the warning alone for that widest phrase; even the third
+        // line must leave the split, benchmark, chart, legend and tiles fixed.
+        await page.evaluate(`document.querySelector('#rheroL .say').textContent = ${JSON.stringify(olderWeek + '.')}`);
+        const olderPlain = await probe(), olderPlainGeometry = await rects(page, fixed);
+        check('period-hint', `${tag}: removing the widest older-week hint moves hero children and tiles exactly 0 px`,
+          !olderPlain.hint && !olderPlain.clipped && sameGeometry(olderGeometry, olderPlainGeometry),
+          { splitTopDeltaPx: splitDelta(olderGeometry, olderPlainGeometry), sentence: olderPlain, before: olderGeometry, after: olderPlainGeometry });
+        const noHint = withTradeSummaries(structuredClone(empty));
+        for (const day of noHint.days) { delete day.coverage; delete day.partialReasons; }
+        await push(noHint);
+        await waitFor(page, 'document.querySelector("#rheroL .say").textContent.startsWith("No trades this month.")');
+        const plain = await probe(), plainGeometry = await rects(page, fixed), plainMax = lineLimit(viewport, plain);
+        check('period-hint', `${tag}: removing empty-period coverage keeps the full stop, fits ${plainMax} lines and moves hero children and tiles exactly 0 px`,
+          !plain.hint && !plain.clipped && plain.sentence.endsWith('.') && plain.contentHeight <= plainMax * plain.lineHeight + 1 &&
+          sameGeometry(next, plainGeometry), { sentence: plain, before: next, after: plainGeometry });
+        await push(unknown);
+        await waitFor(page, 'document.querySelector("#rheroL .say").textContent.startsWith("The result this month is not known yet:")');
+        const unknownCovered = await probe(), unknownGeometry = await rects(page, fixed);
+        check('period-hint', `${tag}: unknown money has no hero hint while the unchanged month line counts partial dates`,
+          !unknownCovered.hint && unknownCovered.sentence.endsWith('.') && unknownCovered.monthHint === 'incl. 2 partial days', unknownCovered);
+        const unknownFull = withTradeSummaries(structuredClone(unknown));
+        for (const day of unknownFull.days) { delete day.coverage; delete day.partialReasons; }
+        await push(unknownFull);
+        await waitFor(page, '!document.querySelector("#calSum .st")');
+        const unknownPlain = await probe(), unknownPlainGeometry = await rects(page, fixed);
+        check('period-hint', `${tag}: unknown-money coverage toggles leave the explanation and hero children and tiles unchanged at exactly 0 px`,
+          !unknownPlain.hint && unknownPlain.sentence === unknownCovered.sentence && sameGeometry(unknownGeometry, unknownPlainGeometry),
+          { sentence: unknownPlain, before: unknownGeometry, after: unknownPlainGeometry });
       }
       await push(baseline);
       await waitFor(page, '!document.querySelector("#rheroL .say .st")');
@@ -1850,12 +1862,14 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   coverage through real ingress, switches every period and desk at
   360/390/768/1024/1440 in both themes, and requires exactly 0 px movement of
   tiles, split rows, benchmark, legend and chart. The hero and month counts
-  agree; today has no hint. Phones reserve at least two sentence lines; long
-  no-trade, older-week unknown-result and basis-change wordings with the hint
-  must fit three at 360/390 without moving hero children or tiles. Desktop
-  keeps its original 340/280 px columns; normal, empty and unknown-result
-  sentences with the hint must fit at most two lines, including long amount/date
-  probes.
+  agree for stated results; today has no hint. Unavailable, basis-change and
+  unknown-result explanations never carry a hero hint; the month line is
+  unchanged. Phones reserve at least two sentence lines; the empty form with
+  the wide date 30 Sep 2026 and the older week of 21 Sep must fit three at
+  360/390 without moving hero children or tiles. Desktop keeps its original
+  340/280 px columns and permits three lines at 768/1024. At 1440 two lines
+  remain the expectation wherever they fit, otherwise three; all eligible long
+  amount/date probes require the same exact 0 px geometry.
   The hint never splits. Computed warning-icon contrast is at least 3:1 against
   the hero and neither sentence nor hint may clip. Coverage alone never changes
   the chart SVG. \`{1440,1024,768,390}-*-results-period-hint-hero.png\` are the full-hero crops with

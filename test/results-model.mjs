@@ -654,11 +654,11 @@ const partialReason = "Part of this day's activity couldn't be confirmed, so its
 const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'");
 
 function heroCapture() {
-  return (value, now, period, anchor, desks = ALL, todayUnits = [E('5000'), E('5000'), E('5000')]) => {
+  return (value, now, period, anchor, desks = ALL, todayUnits = [E('5000'), E('5000'), E('5000')], inputs = {}) => {
     const ix = value ? M.indexResults(value) : null, today = page.resultsToday(now);
-    const view = { ix, today, trackingStart: ix?.meta.trackingStart, todayUnits, nowMs: Date.parse(now) };
+    const view = { ix, today, trackingStart: ix?.meta.trackingStart, todayUnits, nowMs: Date.parse(now), ...inputs };
     const per = M.periodOf(period, anchor, today, view.trackingStart);
-    const R = ix ? M.rollup(ix, per, desks, M.moneyContext(ix, view, per, desks)) : null;
+    const R = view.ix ? M.rollup(view.ix, per, desks, M.moneyContext(view.ix, view, per, desks)) : null;
     const before = globalThis.document, node = { innerHTML: '' };
     globalThis.document = { querySelector: () => node };
     try { page.renderHero(view, per, desks, R); }
@@ -730,7 +730,7 @@ test('JOED-32 hero: partial days with no closed trades keep the open-position ga
     'traded periods keep their result sentence');
 });
 
-test('JOED-32 hero: partial days with no closed trades keep the unknown-money explanation', t => {
+test('JOED-32 hero: unknown-money explanations never carry a partial-day hint', t => {
   const render = heroCapture(t), now = '2026-10-16T12:00:00.000Z';
   const full = record([closeDay('2026-09-30', null, null, null), closeDay('2026-10-15', null, null, null)]);
   const partial = structuredClone(full);
@@ -738,8 +738,36 @@ test('JOED-32 hero: partial days with no closed trades keep the unknown-money ex
   for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
     const plain = textOf(render(full, now, 'month', '2026-10-16', desks).sentence);
     assert.equal(plain, 'The result this month is not known yet: the desks’ money now is not available.');
-    assert.equal(textOf(render(partial, now, 'month', '2026-10-16', desks).sentence),
-      plain.slice(0, -1) + ' · incl. 1 partial day');
+    assert.equal(textOf(render(partial, now, 'month', '2026-10-16', desks).sentence), plain);
+    const olderWeek = 'The result in the week of 21\u00a0Sep is not known yet: the desks’ money on Sun 27\u00a0Sep is not available.';
+    for (const coverage of [false, true]) {
+      const value = record([{ ...closeDay('2026-09-27', null, null, null), ...(coverage ? { coverage: 'partial' } : {}) }]);
+      assert.equal(textOf(render(value, now, 'week', '2026-09-21', desks).sentence), olderWeek);
+    }
+  }
+});
+
+test('JOED-32 hero: basis-change explanations never carry a partial-day hint', t => {
+  const render = heroCapture(t), now = '2026-10-16T12:00:00.000Z';
+  const { baseline, partial } = periodHintResults(now);
+  for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
+    const cuts = desks.map(desk => ({ desk, at: Date.parse('2026-10-14T10:00:00.000Z') }));
+    const sentences = [baseline, partial].map(value => textOf(render(value, now, 'month', '2026-10-16', desks, undefined, { cuts }).sentence));
+    const who = desks.length === 3 ? 'J, Joe and Joel' : { j: 'J', joe: 'Joe', joel: 'Joel' }[desks[0]];
+    assert.equal(sentences[0], `No result this month: ${who}’s bookkeeping basis changed on Wed 14\u00a0Oct, and a change of basis is not a gain or a loss.`);
+    assert.equal(sentences[1], sentences[0], 'partial dates do not qualify a basis-change explanation');
+  }
+});
+
+test('JOED-32 hero: unavailable records never carry a partial-day hint', t => {
+  const render = heroCapture(t), now = '2026-10-16T12:00:00.000Z';
+  const { baseline, partial } = periodHintResults(now);
+  const plain = render(null, now, 'month', '2026-10-16').sentence;
+  assert.match(textOf(plain), /^Results are unavailable: .+\.$/);
+  assert.doesNotMatch(plain, /incl\./);
+  for (const value of [baseline, partial]) for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
+    assert.equal(render(value, now, 'month', '2026-10-16', desks, undefined, { ix: null }).sentence, plain,
+      'an unavailable source cannot expose coverage from its retained record');
   }
 });
 
@@ -802,10 +830,12 @@ test('JOED-32 browser snapshots: valid ingress, two closed partial dates and rea
   const render = heroCapture(t), now = '2026-10-16T12:00:00.000Z';
   const todayUnits = scenario(now).snapshot.desks.map(d => E(d.money.equity.amount));
   assert.equal(empty.trades.length, 0);
+  assert.equal(empty.trackingStart, '2026-09-30');
   for (const day of empty.days) assert.deepEqual(ALL.map(id => E(day.desks[id].equityClose.amount)), todayUnits);
-  assert.match(textOf(render(empty, now, 'month', '2026-10-16', ALL, todayUnits).sentence), /^No trades recorded this month\. Paper results start on .+ · incl\. 2 partial days$/);
-  assert.match(textOf(render(unknown, now, 'month', '2026-10-16').sentence), /^The result this month is not known yet: .+ · incl\. 2 partial days$/);
-  assert.doesNotMatch(render(unknown, now, 'month', '2026-10-16').sentence, /\. · /);
+  assert.equal(textOf(render(empty, now, 'month', '2026-10-16', ALL, todayUnits).sentence),
+    'No trades recorded this month. Paper results start on 30\u00a0Sep 2026 · incl. 2 partial days');
+  assert.match(textOf(render(unknown, now, 'month', '2026-10-16').sentence), /^The result this month is not known yet: .+\.$/);
+  assert.doesNotMatch(render(unknown, now, 'month', '2026-10-16').sentence, /incl\./);
 });
 
 test('JOED-32 hero warning: the existing warn token exceeds 3:1 on both neutral theme surfaces', () => {

@@ -161,7 +161,8 @@ function heroSentence(view, per, R, partialDays) {
 
 export function renderHero(view, per, desks, R) {
   const none = !R || R.empty;
-  const partialDays = M.countPartialDays(view.ix, per, view.today);
+  // Coverage qualifies a stated result, not an explanation of a missing one.
+  const partialDays = view.ix && !R.cut && (R.empty || R.net !== null) ? M.countPartialDays(view.ix, per, view.today) : 0;
   const sentence = heroSentence(view, per, R, partialDays);
   patch($('#rheroL'), `
     <div class="hero-k">${icon('results')}<span>${term('result')} · ${esc(whoOf(desks))}</span></div>

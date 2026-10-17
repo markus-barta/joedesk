@@ -176,6 +176,9 @@ export function periodHintResults(now = '2026-10-16T12:00:00.000Z') {
   }
   for (const value of [baseline, partial]) delete value.receivedAt;
   const empty = withTradeSummaries({ ...structuredClone(partial), trades: [] });
+  // A wide real date for the longest sentence that still carries the hint.
+  empty.trackingStart = '2026-09-30';
+  empty.days = empty.days.filter(day => day.date >= empty.trackingStart);
   // No closed trades alone is not empty: flatten every close to today's
   // observed equity so this snapshot exercises the actual empty hero branch.
   const { snapshot } = scenario(now);

@@ -513,8 +513,10 @@ count. With no trades and a counted partial date it says
 “over N trading days” shortens to “in N days”. This line is hidden on phones;
 the record-status line, period tiles and week column do not carry the hint.
 
-The hero's result sentence also appends **incl. N partial days** for the
-selected period, using the same count helper as the calendar month line.
+The hero's stated result (**Up/Down € …**, or **Flat**) and empty-period
+sentence append **incl. N partial days** for the selected period, using the
+same count helper as the calendar month line. Unavailable, basis-change and
+unknown-result explanations keep their full stop and carry no hero hint.
 Day, Week, Month, This year and All count closed partial-coverage dates across
 their whole range, including Stale-escalated dates and days without trades.
 Today, future dates and missing-summary Stale without partial coverage never
@@ -524,17 +526,20 @@ With a hint, the sentence's final full stop gives way to the separator; without
 one it stays. An empty period (no closed trades and a known, flat result) with
 counted partial days says **No trades recorded**, as on the calendar month
 line; without them it says **No trades**. Open-position gains or losses keep
-their **Up/Down € …** sentence, and unknown results keep their explanation.
+their **Up/Down € …** sentence and its hint; the calendar month line keeps its
+own coverage hint even when the hero cannot state a result.
 Phones at ≤ 700 px keep a two-line sentence reserve inside a fixed 301 px left
 column; its content needs 300.75 px with three lines, leaving slack for a long
 sentence and hint without moving the split or benchmark. The browser assertions
-require long no-trade, older-week unknown-result and basis-change wordings with
-the hint to fit at most three lines at 360/390 without moving the split rows,
-chart or tiles. Desktop keeps the original 340 px left column (280 px at
-≤ 1180 px); the assertions require normal, empty and unknown-result sentences
-with the hint to fit at most two lines, with the hint unbroken.
+require the longest eligible empty wording, with **Paper results start on
+30 Sep 2026** and the older **week of 21 Sep**, to fit three lines at 360/390
+without moving the split rows, benchmark, chart, legend or tiles. Desktop keeps
+the original 340 px left column (280 px at ≤ 1180 px); hinted result and empty
+sentences may use three lines at 768/1024. At 1440 they keep two lines where
+they fit, otherwise three, with the same exact zero-movement requirement and
+the hint unbroken.
 The dedicated `period-hint` browser scenario checks zero movement of tiles and
-hero children at 360/390/768/1024/1440, desktop two-line fit, warning-icon contrast
+hero children at 360/390/768/1024/1440, the desktop line limits, warning-icon contrast
 and clipping. It writes full-hero crops, including the unchanged chart, at
 1440/1024/768/390 in both themes, plus 390 without the hint, under `JOED_QA_DIR`
 for the visual check.
