@@ -382,9 +382,9 @@ function dayContent(view, k, desks) {
   // A lot opened this day and still held counts in Still open and on Desk.
   const opened = (view.positions ?? []).filter(p => p.openedAt && desks.includes(p.desk) && M.viennaDate(Date.parse(p.openedAt)) === k);
   const reasons = partial && !missingDay(ix, k, desks) ? M.partialReasons(ix.partialDetails?.get(k)) : [];
-  const note = reasons.length ? '' : warning?.note ?? (partial ? PARTIAL_REASON : '');
+  const note = reasons.length || k === today ? '' : warning?.note ?? (partial ? PARTIAL_REASON : '');
   const positionNote = opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`).join(' ');
-  return { sum, body, note, reasons, deskNote: partial && desks.length === 1 ? M.PARTIAL_DESK_NOTE : '', positionNote };
+  return { sum, body, note, reasons, deskNote: partial && desks.length === 1 && (note || reasons.length) ? M.PARTIAL_DESK_NOTE : '', positionNote };
 }
 
 // The sheet already has room for every reason. Remove the one-way disclosure
@@ -403,13 +403,15 @@ function dayNote(day, sheet = false) {
   const more = reasons.length - 2;
   const reasonLines = reasons.length ? `<span class="dp-note-lead">Result may be incomplete.</span>${reasons.slice(0, sheet ? 2 : reasons.length).map(reason => line(reason)).join('')}${sheet && more > 0
     ? `<button type="button" class="dp-reasons-more" aria-expanded="false" aria-controls="dayReasonsExtra" aria-label="Show ${more} more reason${more === 1 ? '' : 's'}">+${more} more</button><span class="dp-reasons-extra" id="dayReasonsExtra" aria-live="polite" hidden>${reasons.slice(2).map(reason => line(reason, true)).join('')}</span>` : ''}` : '';
-  const content = `${reasonLines}${note ? `<span>${esc(note)}</span>` : ''}${deskNote ? `<span class="dp-desk-note">${esc(deskNote)}</span>` : ''}${positionNote ? `${note && !deskNote ? ' ' : ''}<span>${esc(positionNote)}</span>` : ''}`;
-  return content ? `<p class="dp-note">${icon('info')}<span class="dp-note-lines">${content}</span></p>` : '';
+  const explanation = `${reasonLines}${note ? `<span>${esc(note)}</span>` : ''}${deskNote ? `<span class="dp-desk-note">${esc(deskNote)}</span>` : ''}`;
+  const content = `${explanation ? `<p class="dp-note-lines">${explanation}</p>` : ''}${positionNote ? `<p class="dp-position-note">${esc(positionNote)}</p>` : ''}`;
+  return content ? `<div class="dp-note">${icon('info')}<div class="dp-note-copy">${content}</div></div>` : '';
 }
 
 // Measure after the house typography observer joins numbers and units, still
 // before paint, so wrapping matches the text that will actually be shown.
 // The collapsed body leaves this room at the bottom; CSS caps it at 80vh.
+// body.scrollHeight includes the gap before the separate positions paragraph.
 function fitDaySheet(sheet) {
   if (!sheet?.getBoundingClientRect) return;
   queueMicrotask(() => {

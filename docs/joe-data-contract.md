@@ -408,8 +408,9 @@ accessible label. The partial reason stays on the day-note line. Known amounts
 still say “so far”; unknown amounts show **—** without “so far”. When narrow,
 the day panel/sheet drops the trade count before the status, amount or “so far”.
 Calendar cells never say “so far”. The open Vienna date and future dates have
-no marker. Today's known partial amount says **so far** and its note can show
-reasons under the same rules. The shared Vienna helper and date-key arithmetic
+no marker. Today's known partial amount says **so far**; its reason note appears
+only for explicit producer reasons, never the generic default or a lead without
+reasons. The shared Vienna helper and date-key arithmetic
 cover midnight,
 DST changes and month boundaries without measuring elapsed 24-hour intervals.
 
@@ -454,7 +455,8 @@ With a known positive count, unattributed activity reads **1 trade couldn't be
 matched to a desk.** or **N trades couldn't be matched to a desk.**, with U+00A0
 between the number and unit. Omit the count when unknown; never send zero.
 `fx_disabled` suppresses `fx_missing`. Rendering ignores unknown future codes;
-when no known code remains it uses the legacy default sentence, never raw codes.
+when no known code remains, closed days use the legacy default sentence and today
+has no reason note. Raw codes never appear.
 The cell aria uses only the first short label, then **, and N more** where needed;
 escalated aria stays **Stale: still incomplete;** plus those short labels.
 Desktop panels show every reason. Phone sheets show the first two reason
@@ -465,7 +467,11 @@ Reopening starts collapsed. The sheet reserves its expanded content height,
 capped at 80vh; collapsed spare room stays at the bottom. Revealing changes
 neither sheet top nor height, and short days have short sheets. A desk filter
 adds **Applies to the whole day; this desk may be unaffected.** after the reason
-or legacy default sentence. Today with no trades in the selected desk, including
+or legacy default sentence; today gets this scope only with explicit reasons.
+The reason/desk block and the positions note are separate paragraphs with an
+8 px gap in both the desktop panel and phone sheet. The reserved expanded height
+includes this gap. Today without reasons has only its positions note if a matching
+position exists, otherwise no note. Today with no trades in the selected desk, including
 an empty-desk row, reads **No trades so far**, without Partial or “record incomplete”.
 
 The row `{date, desks: {}, coverage: "partial", partialReasons: ["history_gap"]}`

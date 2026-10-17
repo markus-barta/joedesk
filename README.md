@@ -497,8 +497,9 @@ if both diagnostics occur. From Vienna day D+2, a date D still partial shows
 **Stale**, retaining the partial reason and “so far” on known amounts. Its
 accessible explanation is “Stale: still incomplete;” plus the reason. Escalation
 uses date-key arithmetic, including across DST and month/year boundaries.
-The open Vienna date has no marker; its known partial amount still says **so far**
-and its reasons can appear in the note. Narrow day summaries drop the trade count
+The open Vienna date has no marker; its known partial amount still says **so far**.
+Its reason note appears only for explicit producer reasons, never the generic
+default sentence or a lead without reasons. Narrow day summaries drop the trade count
 before the Partial/Stale label, exact amount or “so far”; unknown amounts never
 say “so far”. Calendar amounts never say “so far”.
 The server preserves producer coverage and nullable summaries on protected
@@ -552,7 +553,8 @@ closed partial day in the month hint.
 Known reasons replace the default note with **Result may be incomplete.** and
 one exact explanation per reason in canonical order (see the data contract).
 With `fx_disabled`, the board omits `fx_missing`. Unknown codes never appear as
-raw text: known codes still render; when none remain, the default sentence appears.
+raw text: known codes still render; when none remain, closed days use the default
+sentence and today has no reason note.
 The cell's accessible reason is the first short label plus **, and N more**.
 Desktop panels show all reasons. Phone sheets show two reason sentences, then a
 44 px **+N more** button, named **Show N more reasons** (singular **Show 1 more
@@ -562,7 +564,10 @@ reserves its full content height, capped at 80vh; collapsed spare room sits at
 the bottom, and revealing reasons changes neither its top edge nor height.
 Short days have short sheets. A desk filter adds **Applies to the whole day;
 this desk may be unaffected.** after the reason or default sentence and before
-any “opened …, is still open” position sentences, on today and closed days. Count copy
+any “opened …, is still open” position sentences. Today gets desk scope only with
+explicit reasons. Position sentences always occupy their own paragraph, 8 px
+after the complete reason/desk block in both the panel and sheet. The sheet's
+reserved expanded height includes this gap. Count copy
 uses “1 trade couldn't be matched to a desk.” or “N trades couldn't be matched
 to a desk.”, with U+00A0 between the number and unit. An empty selected desk on
 today, including an empty-desk row, reads **No trades so far**, without Partial

@@ -921,15 +921,40 @@ for (const reasoned of [false, true]) test(`JOED-30 note order: ${reasoned ? 're
   const value = record([{ date: day, desks: {}, coverage: 'partial',
     ...(reasoned ? { partialReasons: ['capture_gap', 'history_gap'] } : {}) }]);
   const positions = [{ desk: 'joe', symbol: 'KO', company: 'Coca-Cola', openedAt: `${day}T09:15:00.000Z` }];
-  for (const today of [day, '2026-10-16', '2026-10-17']) {
-    const r = render(value, `${today}T12:00:00.000Z`, day, ['joe'], positions);
-    const explanation = reasoned ? 'Result may be incomplete.Trade capture had a gap on this day.The trade history has a gap that covers this day.' : partialReason;
+  for (const today of [day, '2026-10-16', '2026-10-17']) for (const desks of [ALL, ['joe']]) {
+    const r = render(value, `${today}T12:00:00.000Z`, day, desks, positions);
+    const explanation = reasoned ? 'Result may be incomplete.Trade capture had a gap on this day.The trade history has a gap that covers this day.' : today === day ? '' : partialReason;
+    const scope = explanation && desks.length === 1 ? M.PARTIAL_DESK_NOTE : '';
     const position = `Coca-Cola (KO, Joe), opened ${today === day ? 'today at 11:15' : 'this day'}, is still open; it counts as Still open and on Desk.`;
     for (const html of [r.panel, r.sheet]) {
-      const note = html.match(/<p class="dp-note">([\s\S]*?)<\/p>/)?.[1];
-      assert.ok(note, 'the day view has an explanatory note');
-      assert.equal(textOf(note), explanation + M.PARTIAL_DESK_NOTE + position,
-        'exact note order: partial explanation, whole-day scope, then the opened position');
+      const reasonBlock = html.match(/<p class="dp-note-lines">([\s\S]*?)<\/p>/)?.[1] ?? '';
+      const positionBlock = html.match(/<p class="dp-position-note">([\s\S]*?)<\/p>/)?.[1];
+      assert.equal(textOf(reasonBlock), explanation + scope, 'the explanation and optional desk scope share their own paragraph');
+      assert.equal(textOf(positionBlock), position, 'the opened position has its own paragraph');
+      if (explanation) assert.match(html, /<\/p><p class="dp-position-note">/, 'reason and positions are sibling paragraphs');
+      else assert.doesNotMatch(html, /dp-note-lines|dp-desk-note/, 'today without reasons has only its position paragraph');
+    }
+  }
+});
+
+test('JOED-30 today without explicit reasons: no reason note, with only an optional separate position paragraph', t => {
+  const render = calendarCapture(t), { dates, todayWithoutReasons } = partialDaysResults();
+  const day = dates.today;
+  assert.equal(todayWithoutReasons.days.find(d => d.date === day).coverage, 'partial');
+  assert.equal(todayWithoutReasons.days.find(d => d.date === day).partialReasons, undefined);
+  const position = { desk: 'joe', symbol: 'KO', company: 'Coca-Cola', openedAt: `${day}T09:15:00.000Z` };
+  for (const traded of [false, true]) for (const desks of [ALL, ['joe']]) for (const positions of [[], [position]]) {
+    const value = structuredClone(todayWithoutReasons);
+    if (traded) value.trades.push(tradeOf('rt-today-no-reasons', 'joe', `${day}T10:00:00.000Z`, '-12.4'));
+    const r = render(value, `${day}T12:00:00.000Z`, day, desks, positions);
+    for (const html of [r.panel, r.sheet]) {
+      assert.doesNotMatch(html, /dp-note-lines|dp-note-lead|dp-reason|dp-desk-note/);
+      assert.ok(!textOf(html).includes(partialReason));
+      assert.ok(!textOf(html).includes('Result may be incomplete.'));
+      if (positions.length) {
+        assert.match(html, /<div class="dp-note-copy"><p class="dp-position-note">/);
+        assert.match(textOf(html), /Coca-Cola \(KO, Joe\), opened today at 11:15, is still open; it counts as Still open and on Desk\./);
+      } else assert.doesNotMatch(html, /class="dp-note"|dp-position-note/, 'no explanatory note at all');
     }
   }
 });
@@ -953,6 +978,7 @@ test('JOED-30 rev 5 today: known amounts say so far and reasons render without a
   assert.doesNotMatch(r.cell(day), /day-warning|Partial|incomplete/);
   for (const html of [r.panel, r.sheet]) {
     assert.match(textOf(html), /1 trade · −€ 12,40 so far/);
+    assert.match(html, /<p class="dp-note-lines"><span class="dp-note-lead">Result may be incomplete\.<\/span>/);
     assert.ok(textOf(html).includes('Trade capture had a gap on this day.'));
     assert.doesNotMatch(html, /class="st warn"|>Partial</);
   }

@@ -88,7 +88,9 @@ export function partialDaysResults(now = '2026-10-16T12:00:00.000Z') {
   const emptyToday = structuredClone(reasons);
   emptyToday.trades = emptyToday.trades.filter(t => viennaDay(t.closedAt) !== dates.today);
   emptyToday.days.find(d => d.date === dates.today).desks = {};
-  return { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted, threeReasons, emptyToday };
+  const todayWithoutReasons = structuredClone(emptyToday);
+  delete todayWithoutReasons.days.find(d => d.date === dates.today).partialReasons;
+  return { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted, threeReasons, emptyToday, todayWithoutReasons };
 }
 
 export function designResults(now = NOW, { trackingStart = '2026-09-10', seq = 412 } = {}) {
