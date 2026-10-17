@@ -343,11 +343,12 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .dp-empty .i { color: var(--ink-3); margin-top: 2px; }
 .dp-note { padding: 10px 0 0; color: var(--ink-3); font-size: 12px; display: flex; gap: 7px; }
 .dp-note .i { width: 14px; height: 14px; margin-top: 1px; flex-shrink: 0; }
-.dp-note-copy { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+/* The text column keeps its full width when the disclosure is removed. */
+.dp-note-copy { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .dp-note-copy > p { margin: 0; }
 .dp-note-lines { min-width: 0; }
-.dp-note-lead, .dp-reason, .dp-desk-note { display: block; }
-.dp-reasons-more { display: block; width: 100%; min-height: 44px; text-align: left; padding: 0 8px; border: 0; background: transparent; color: var(--ink-2); font: inherit; }
+.dp-note-lead, .dp-reason, .dp-desk-note, .dp-reasons-extra { display: block; }
+.dp-reasons-more { display: block; width: 100%; min-height: 44px; text-align: left; padding: 0; border: 0; background: transparent; color: var(--ink-2); font: inherit; }
 /* The measured full-content height survives removal of the disclosure. */
 .sheet .dlg-in { height: 100%; }
 .sheet .dlg-h { flex-shrink: 0; }

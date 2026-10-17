@@ -557,11 +557,14 @@ raw text: known codes still render; when none remain, closed days use the defaul
 sentence and today has no reason note.
 The cell's accessible reason is the first short label plus **, and N more**.
 Desktop panels show all reasons. Phone sheets show two reason sentences, then a
-44 px **+N more** button, named **Show N more reasons** (singular **Show 1 more
-reason**). Activation removes the button and focuses the first revealed reason
-(`tabindex="-1"`) in a polite live region. Reopening starts collapsed. The sheet
-reserves its full content height, capped at 80vh; collapsed spare room sits at
-the bottom, and revealing reasons changes neither its top edge nor height.
+44 px **+N more** button on its own row, left-aligned with the text, named
+**Show N more reasons** (singular **Show 1 more reason**). The note's text column
+and its reason and positions blocks always fill the width available beside the
+info icon, with or without the button. Activation removes the button and focuses
+the first revealed reason (`tabindex="-1"`) in a polite live region. Reopening
+starts collapsed. The sheet reserves its full content height, capped at 80vh;
+collapsed spare room sits at the bottom, and revealing reasons changes neither
+its top edge nor height nor the position or width of already visible reason lines.
 Short days have short sheets. A desk filter adds **Applies to the whole day;
 this desk may be unaffected.** after the reason or default sentence and before
 any “opened …, is still open” position sentences. Today gets desk scope only with
