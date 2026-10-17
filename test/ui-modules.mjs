@@ -283,6 +283,40 @@ test('cold start: without the server clock every panel still shows its own state
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('JOED-30 reads: the actual results worker and fallback both preserve partial coverage and exact trade money', async () => {
+  const realWorker = globalThis.Worker, realFetch = globalThis.fetch, realSelf = globalThis.self;
+  const value = structuredClone(valid.results);
+  value.days[0].coverage = 'partial';
+  for (const desk of Object.values(value.days[0].desks)) desk.realisedNet = desk.fees = null;
+  value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial' });
+  const { indexResults } = await import('../public/joe/results-model.js');
+  const expected = indexResults(value);
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify(value), { headers: { 'X-Joe-Server-Now': value.receivedAt } });
+    let reply;
+    const message = new Promise(resolve => { reply = resolve; });
+    globalThis.self = { postMessage: (data, transfer) => reply(structuredClone(data, { transfer })) };
+    await import('../public/joe/history-worker.js?joed30-partial');
+    self.onmessage({ data: 'results' });
+    const result = await message;
+    assert.equal(result.kind, 'results');
+    assert.deepEqual(result.index.partialDays, expected.partialDays);
+    assert.deepEqual(result.index.agg, expected.agg);
+    globalThis.Worker = undefined;
+    const feed = createFeed(() => {});
+    await feed.refreshResults();
+    assert.equal(feed.usesWorker(), false);
+    const cell = feed.select().states.results;
+    assert.equal(cell.state, 'fresh');
+    assert.deepEqual(cell.value.index.partialDays, expected.partialDays);
+    assert.deepEqual(cell.value.index.agg, expected.agg);
+  } finally {
+    globalThis.Worker = realWorker; globalThis.fetch = realFetch;
+    if (realSelf === undefined) delete globalThis.self;
+    else globalThis.self = realSelf;
+  }
+});
+
 test('refresh: await the worker before the next results push, including unchanged replies', async () => {
   const realWorker = globalThis.Worker, realFetch = globalThis.fetch;
   const { indexResults } = await import('../public/joe/results-model.js');

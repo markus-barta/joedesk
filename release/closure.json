@@ -50,7 +50,7 @@
     {
       "path": "contracts/manifest.json",
       "size": 932,
-      "sha256": "b7b8e3e6eb74b0ad2c60472fd6d48686f65637d345801656e0c95a6f1bee5bcf"
+      "sha256": "6924e485301cf05b83f67bd52e30217cd179d8de3125a1317c09f86e3bbced50"
     },
     {
       "path": "contracts/panel-state.mjs",
@@ -69,8 +69,8 @@
     },
     {
       "path": "contracts/results.schema.json",
-      "size": 11817,
-      "sha256": "84ba3ea4de6aa443fd991bbe48fbea889e09cec0ba56f966def7be6972fcbfa3"
+      "size": 12834,
+      "sha256": "cd0551b237fafa2ebb6cfaaee6b7f06293144662bfae4a37b5ad9c3d8db32189"
     },
     {
       "path": "contracts/schema-validator.mjs",
@@ -79,8 +79,8 @@
     },
     {
       "path": "contracts/semantics.mjs",
-      "size": 10620,
-      "sha256": "b1019e4bd4195b71fa671a427b5cf50723731a7aa867aa9cd13b550cb79d655c"
+      "size": 11330,
+      "sha256": "3fb25e587d195b66098a917fb98ba2468dedc5038e96e2e0be08911fe9c78034"
     },
     {
       "path": "contracts/vienna-date.mjs",
@@ -104,13 +104,13 @@
     },
     {
       "path": "public/joe/app.css",
-      "size": 69474,
-      "sha256": "7a181ee21adb9a7e016b4cd6cfc70f7e7a62d7f8abf325b5c56e519f54f4e414"
+      "size": 70596,
+      "sha256": "39e1ae0a2a54f48d1a71a5497c38705c4a9f32a7641ef3d4e0128ce70eec2d64"
     },
     {
       "path": "public/joe/app.js",
-      "size": 15866,
-      "sha256": "fb9a947a4669c162fc1742d9ec3541839f9c6e6ff14d684c2f183a91aefee3c8"
+      "size": 15983,
+      "sha256": "ae9c071e992c0b69e077d04730195dc678ed0b57fdd4fe412252f926be9fea3c"
     },
     {
       "path": "public/joe/chart.js",
@@ -199,13 +199,13 @@
     },
     {
       "path": "public/joe/results-model.js",
-      "size": 28857,
-      "sha256": "57bac25d9a370fe8c8cb436a0fffcfc69e5cb7efe3d27b7fb24860afd17f7aa1"
+      "size": 31166,
+      "sha256": "3cb86764751f7bd7ab5ebd74c189095821ae40824f9fe16907f84a06f34573a9"
     },
     {
       "path": "public/joe/results.js",
-      "size": 30562,
-      "sha256": "c6981b577083102ee14c0b397ffedef8f0d46b3611007d216e94805acc3791cf"
+      "size": 36094,
+      "sha256": "5d6521309efb5de4b834f8914abde52cbaff80f7b1dc943cd84cdadc9704035e"
     },
     {
       "path": "public/joe/settings-model.js",
@@ -275,7 +275,7 @@
     {
       "path": "release/contracts.json",
       "size": 1661,
-      "sha256": "f0334247e6555ed1ce54a34d24e37ffeb2860399528dccf0ea1bb2a8bdcf84ef"
+      "sha256": "19a972a2f980ebb3acb65a28c52c2ca40c5934f5d564e3d7bd782e017aa08ee2"
     },
     {
       "path": "release/data-migration.mjs",

@@ -4,6 +4,7 @@
 // as the contract's served form, at 390/1024/1440 in light and dark
 // (AC-10–17, 41, 42, 46, Part A craft), plus Tick's desk-card header at 390.
 // JOED-29 adds a focused phone calendar scenario at 360/390 in both themes.
+// JOED-30 adds partial-days: its own month, panel and sheet at every width.
 // One headless browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir, cpus } from 'node:os';
@@ -15,7 +16,7 @@ import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './brows
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
-import { designResults, withTradeSummaries } from './browser/results.mjs';
+import { designResults, withTradeSummaries, partialDaysResults } from './browser/results.mjs';
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -42,7 +43,7 @@ const { results, shots, check: gateCheck, shot, auditScreen } = createGate(QA_DI
 const check = (ac, name, ok, detail) => {
   gateCheck(ac, name, ok, detail);
   // Preserve both geometry snapshots and every clipping row in the CI log.
-  if (!ok && ac === 'phone-calendar') console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
+  if (!ok && ['phone-calendar', 'partial-days'].includes(ac)) console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
 };
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ONLY = (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean);
@@ -167,7 +168,7 @@ const viewShot = async (page, name, what) => {
   shots.push({ file: `${name}.png`, what });
 };
 const key = async (page, name) => {
-  await page.s('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode: name === 'Escape' ? 27 : 13 });
+  await page.s('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode: name === 'Escape' ? 27 : 13, ...(name === 'Enter' ? { text: '\r' } : {}) });
   await page.s('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code: name, windowsVirtualKeyCode: name === 'Escape' ? 27 : 13 });
   await settle(page);
 };
@@ -977,6 +978,540 @@ try {
     }
   }
 
+  if (run('partial-days')) {
+    // Real ingress, worker and fallback. T+1 permits only yesterday to remain
+    // Partial; the empty snapshot shows that same day without visible trades.
+    await serve(null);
+    const { board } = await designBoard('2026-10-16T12:00:00.000Z', null, ({ snapshot }) => {
+      // Two paper positions under Joe: one opened yesterday, one today.
+      snapshot.positions.rows.filter(p => p.scope === 'stage0').forEach((p, i) => {
+        p.desk = 'joe'; p.openedAt = `2026-10-${i ? '16' : '15'}T09:15:00.000Z`;
+      });
+    });
+    const { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted, threeReasons, emptyToday, todayWithoutReasons } = partialDaysResults(board.clock());
+    const { partial: partialTrade, escalated, missing: stale, normal, emptyEscalated, today } = dates;
+    const filteredReasons = structuredClone(singleReason);
+    filteredReasons.days.find(d => d.date === today).partialReasons = ['history_gap'];
+    // The 14th has a trade but no opened-position sentence. Five reasons
+    // leave three hidden lines, so revealing them grows the content below cap.
+    const growingReasons = structuredClone(partial), growingDay = escalated;
+    growingReasons.days.find(d => d.date === growingDay).partialReasons = ['capture_gap', 'history_gap',
+      'broker_trade_count_mismatch', 'broker_realised_pnl_mismatch', 'unattributed_activity'];
+    const reason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
+    let seq = baseline.seq;
+    const replace = async (record, label) => {
+      const oldCalendar = await page.evaluate('document.getElementById("cal").innerHTML');
+      check('partial-days', `${label}: accepted ingress`, (await board.pushResults({ ...record, seq: ++seq })).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+      const count = record.trades.filter(t => t.closedAt.startsWith(partialTrade)).length;
+      await waitFor(page, `document.getElementById('cal').innerHTML !== ${JSON.stringify(oldCalendar)} && document.querySelector('#cal [data-day="${partialTrade}"] .n').textContent === ${JSON.stringify(
+        record === missing ? 'Stale' : record.days.find(d => d.date === partialTrade)?.coverage === 'partial' ? 'Partial' :
+          count + '\u00a0' + (count === 1 ? 'trade' : 'trades'))}`);
+      await settle(page);
+    };
+    const inspect = () => page.evaluate(`(${(() => {
+      const probe = document.createElement('span'); probe.style.color = 'var(--warn)'; document.body.append(probe);
+      const warn = getComputedStyle(probe).color; probe.remove();
+      return [...document.querySelectorAll('#cal [data-day]')].map(cell => {
+        const markers = [...cell.querySelectorAll('.day-warning')], note = cell.querySelector('.n');
+        const marker = markers[0], r = marker?.getBoundingClientRect(), c = cell.getBoundingClientRect();
+        const css = getComputedStyle(cell), offset = marker && getComputedStyle(marker);
+        const tone = marker && getComputedStyle(marker.querySelector('svg')).color;
+        return { day: cell.dataset.day, markers: markers.length, half: Boolean(marker?.querySelector('use[href="#i-half"]')),
+          warn: tone === warn, ink: tone === css.color, noteInk: getComputedStyle(note).color === css.color,
+          inside: r ? r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom : false,
+          aligned: offset ? offset.top === css.paddingTop && offset.right === css.paddingRight : false,
+          note: note.textContent, noteVisible: __audit.visible(note), value: cell.querySelector('.v').innerText,
+          muted: Boolean(cell.querySelector('.v .muted')), cls: cell.className, bg: css.backgroundColor, ring: css.boxShadow,
+          aria: cell.getAttribute('aria-label'), clipped: [cell, cell.querySelector('.v'), marker].filter(Boolean).some(el => el.scrollWidth > el.clientWidth) };
+      });
+    }).toString()})()`);
+    const monthProbe = () => page.evaluate(`(${(() => {
+      const el = document.getElementById('calSum'), head = el.parentElement, st = el.querySelector('.st.warn');
+      return { visible: __audit.visible(el), text: el.innerText, hint: st?.innerText, compact: el.classList.contains('compact'),
+        clipped: el.scrollWidth > el.clientWidth || head.scrollWidth > head.clientWidth,
+        height: el.getBoundingClientRect().height };
+    }).toString()})()`);
+    const contentSlots = ['#cal .cell .d', '#cal .cell .v', '#cal .cell .n'];
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const noteLayout = rootSelector => page.evaluate(`(() => {
+      const root = document.querySelector(${JSON.stringify(rootSelector)}), reason = root.querySelector('.dp-note-lines'), position = root.querySelector('.dp-position-note');
+      return { reason: reason?.innerText ?? '', lines: [...(reason?.children ?? [])].map(el => el.textContent.trim()),
+        position: position?.innerText ?? '', reasonTag: reason?.tagName, positionTag: position?.tagName,
+        siblings: Boolean(reason && position && reason.nextElementSibling === position && reason.parentElement === position.parentElement),
+        gap: reason && position ? position.getBoundingClientRect().top - reason.getBoundingClientRect().bottom : null,
+        cssGap: getComputedStyle(root.querySelector('.dp-note-copy')).rowGap };
+    })()`);
+    const checkNoteGap = async (rootSelector, label) => {
+      const layout = await noteLayout(rootSelector);
+      check('partial-days', `${label}: reason block and positions are separate paragraphs exactly 8 px apart`,
+        layout.reasonTag === 'P' && layout.positionTag === 'P' && layout.siblings && layout.gap === 8 && layout.cssGap === '8px', layout);
+      return layout;
+    };
+    const cropNoteView = async (selector, name, what) => {
+      const clip = await page.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+        return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
+      writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+      shots.push({ file: `${name}.png`, what });
+    };
+    const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 800, mobile: true }];
+    for (const viewport of viewports) for (const theme of THEMES) {
+      const tag = `${viewport.name} ${theme}`;
+      check('partial-days', `${tag}: full baseline accepts`, (await board.pushResults({ ...baseline, seq: ++seq })).status === 200);
+      const fallback = viewport.mobile && theme === 'dark';
+      const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
+      await configure(page, viewport, theme);
+      await load(page, board.url, 'results');
+      if (injection) await page.s('Page.removeScriptToEvaluateOnNewDocument', injection);
+      await click(page, '#periodSeg [data-period="month"]');
+      await click(page, `#cal [data-day="${partialTrade}"]`);
+      if (viewport.mobile) await key(page, 'Escape');
+      const before = await rects(page, SHIFT), full = await page.evaluate(RES), contentRects = await rects(page, contentSlots);
+      await replace(partial, tag);
+      const shown = await page.evaluate(RES), cells = await inspect(), cell = day => cells.find(c => c.day === day);
+      const trade = cell(partialTrade), old = cell(escalated), oldEmpty = cell(emptyEscalated);
+      check('partial-days', `${tag}: Partial inherits tint ink, keeps its slot and accessible reason`,
+        trade.markers === 1 && trade.half && trade.ink && trade.inside && trade.aligned && trade.note === 'Partial' &&
+        trade.noteVisible === !viewport.mobile && trade.aria.includes("; Partial: this day's record is incomplete") &&
+        trade.aria.includes(reason) && !trade.clipped, trade);
+      check('partial-days', `${tag}: partial trade keeps the exact amount and loss tint`,
+        N(trade.aria).includes(N('−€ 1,00 from 1 trade')) && /\bl[1-4]\b/.test(trade.cls) &&
+        shown.cal.cells.find(c => c.day === partialTrade).v === full.cal.cells.find(c => c.day === partialTrade).v, trade);
+      check('partial-days', `${tag}: both traded and empty old partial dates escalate to exactly one Stale marker`,
+        [old, oldEmpty].every(c => c.markers === 1 && c.half && c.ink && c.note === 'Stale' && c.noteInk &&
+          c.aria.includes(`Stale: still incomplete; ${reason}`) && !c.clipped), [old, oldEmpty]);
+      check('partial-days', `${tag}: missing-day Stale, open today and normal retain their states`,
+        cell(stale).markers === 1 && cell(stale).note === 'Stale' && cell(stale).aria.includes('daily summary missing') &&
+        cell(today).markers === 0 && !cell(today).aria.includes('Partial') && /\btoday\b/.test(cell(today).cls) &&
+        cell(normal).markers === 0 && cell(normal).note !== 'Partial', cells.filter(c => [stale, today, normal].includes(c.day)));
+      check('partial-days', `${tag}: adding warnings and the month hint moves outer and cell slots exactly 0 px`,
+        same(before, await rects(page, SHIFT)) && same(contentRects, await rects(page, contentSlots)));
+      check('partial-days', `${tag}: trade totals and the record status stay unchanged`,
+        shown.display === full.display && same(shown.split, full.split) && shown.status === full.status && !shown.status);
+      const month = await monthProbe();
+      check('partial-days', `${tag}: desktop month hint counts all 3 closed partial days, including 2 escalated, and never clips or wraps`,
+        month.visible === !viewport.mobile && (viewport.mobile || (month.hint === 'incl. 3 partial days' && !month.clipped && month.height <= 20)), month);
+      check('partial-days', `${tag}: read uses the expected ${fallback ? 'fallback' : 'worker'}`,
+        await page.evaluate('window.__joedesk.worker()') === !fallback);
+      // The general mobile audit requires the standard 390 px/44 px targets.
+      // Like JOED-29, 360 keeps all focused checks without running that audit.
+      if (viewport.name !== '360') await auditScreen(page, viewport, theme, 'results (partial coverage)');
+      await shot(page, viewport, `${viewport.name}-${theme}-results-partial-days`, 'October: Partial 15th, Stale missing 13th, Stale incomplete 11th/14th, normal 12th, open today 16th');
+      if (!viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-partial-month-hint`, 'Desktop month summary: incl. 3 partial days, including 2 escalated, excluding today and missing-summary Stale');
+
+      // Computed browser colours, every tint, including the neutral card's
+      // composed background. Probes inherit the actual calendar's ancestors.
+      const contrasts = await page.evaluate(`(${(() => {
+        const rgb = c => c.match(/[\d.]+/g).map(Number);
+        const composite = (front, back) => { const a = front[3] ?? 1; return front.slice(0, 3).map((c, i) => c * a + back[i] * (1 - a)); };
+        const background = el => {
+          const chain = []; for (let p = el; p; p = p.parentElement) chain.unshift(p);
+          return chain.reduce((bg, p) => composite(rgb(getComputedStyle(p).backgroundColor), bg), [255, 255, 255]);
+        };
+        const luminance = cs => cs.slice(0, 3).map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4)
+          .reduce((s, c, i) => s + c * [.2126, .7152, .0722][i], 0);
+        return ['g1', 'g2', 'g3', 'g4', 'l1', 'l2', 'l3', 'l4', 'flat', 'none'].map(cls => {
+          const cell = document.querySelector('#cal .day-incomplete').cloneNode(true);
+          cell.className = 'cell ' + cls + ' day-incomplete'; cell.style.cssText = 'position:fixed;top:0;left:0;width:62px';
+          const marker = cell.querySelector('.day-warning'); marker.className = 'day-warning st' + (cls === 'none' ? ' warn' : '');
+          document.getElementById('cal').append(cell);
+          const fg = getComputedStyle(marker.querySelector('svg')).color, bg = background(cell), x = luminance(rgb(fg)), y = luminance(bg);
+          const ratio = (Math.max(x, y) + .05) / (Math.min(x, y) + .05);
+          cell.remove(); return { cls, fg, bg, ratio };
+        });
+      }).toString()})()`);
+      check('partial-days', `${tag}: every computed partial icon contrast is at least 3:1`, contrasts.every(c => c.ratio >= 3), contrasts);
+
+      for (const hasTrades of [true, false]) {
+        if (!hasTrades) await replace(empty, `${tag} empty`);
+        const c = (await inspect()).find(c => c.day === partialTrade);
+        if (!hasTrades) {
+          check('partial-days', `${tag}: no-trade Partial is a neutral muted dash, warn icon and full-ink note`,
+            c.markers === 1 && c.half && c.warn && c.noteInk && c.note === 'Partial' && c.value === '—' && c.muted &&
+            /\bnone\b/.test(c.cls) && c.bg === 'rgba(0, 0, 0, 0)' && /inset/.test(c.ring) &&
+            c.aria.includes('no complete record; Partial:') && !/€|no trades|sat out/.test(c.aria) && !c.clipped, c);
+          await shot(page, viewport, `${viewport.name}-${theme}-results-partial-empty-days`, 'Same October snapshot with an unattributed-only Partial on the 15th');
+        }
+        const closedSheet = viewport.mobile ? await rects(page, SHIFT) : null;
+        await click(page, `#cal [data-day="${partialTrade}"]`);
+        const detail = await page.evaluate(`(() => {
+          const root = document.querySelector(${JSON.stringify(viewport.mobile ? '#sheetBody' : '#daypanel')});
+          const sum = root.querySelector('.dp-sum'), note = root.querySelector('.dp-note-lines');
+          return { sum: sum.innerText, text: root.innerText, rows: root.querySelectorAll('.trow').length,
+            warning: root.querySelectorAll('.dp-sum .st.warn use[href="#i-half"]').length,
+            reason: note?.innerText, noteVisible: __audit.visible(note), info: Boolean(root.querySelector('.dp-note use[href="#i-info"]')),
+            clipped: [root, sum, note, ...root.querySelectorAll('.trow')].filter(Boolean).some(el => el.scrollWidth > el.clientWidth) };
+        })()`);
+        check('partial-days', `${tag}: ${hasTrades ? 'traded' : 'empty'} ${viewport.mobile ? 'sheet' : 'panel'} keeps the amount/reason without clipping`,
+          (hasTrades ? /^Partial·(?:1trade·)?−€1,00sofar$/.test(N(detail.sum)) : N(detail.sum) === N('Partial · record incomplete')) &&
+          detail.rows === (hasTrades ? 1 : 0) && detail.warning === 1 &&
+          detail.reason === reason &&
+          detail.noteVisible && detail.info && !detail.clipped &&
+          (hasTrades || !/€|no trades|sat out|so far/i.test(detail.text)), detail);
+        const name = `${viewport.name}-${theme}-results-partial-${hasTrades ? 'trade' : 'empty'}-${viewport.mobile ? 'sheet' : 'panel'}`;
+        const layout = await checkNoteGap(viewport.mobile ? '#sheetBody' : '#daypanel', `${tag} ${hasTrades ? 'traded' : 'empty'} legacy`);
+        check('partial-days', `${tag}: legacy positions paragraph retains its exact sentence`,
+          layout.position === 'Bank of America (BAC, Joe), opened this day, is still open; it counts as Still open and on Desk.', layout);
+        if (viewport.name === '1440' && !hasTrades) await cropNoteView('#daypanel', name + '-crop', 'Legacy empty panel: separate position paragraph, exactly 8 px after the default reason');
+        if (viewport.mobile) {
+          await viewShot(page, name, `Partial on 15 October: ${hasTrades ? 'exact money so far' : 'unknown amount and incomplete record'}`);
+          await key(page, 'Escape');
+          check('partial-days', `${tag}: closing the partial sheet returns to exactly the same geometry`, same(closedSheet, await rects(page, SHIFT)));
+        } else await shot(page, viewport, name, `Partial on 15 October: ${hasTrades ? 'exact money so far' : 'unknown amount and incomplete record'}`);
+      }
+
+      await replace(missing, `${tag} missing handoff`);
+      const handoffBefore = await rects(page, SHIFT), handoffSlots = await rects(page, contentSlots);
+      const handoffStale = (await inspect()).find(c => c.day === partialTrade);
+      await replace(partial, `${tag} partial handoff`);
+      const handoffPartial = (await inspect()).find(c => c.day === partialTrade);
+      check('partial-days', `${tag}: JOED-28 Stale swaps to JOED-30 Partial at exactly 0 px`,
+        handoffStale.note === 'Stale' && handoffStale.aria.includes('daily summary missing') && handoffPartial.note === 'Partial' &&
+        handoffPartial.markers === 1 && handoffStale.value === handoffPartial.value &&
+        same(handoffBefore, await rects(page, SHIFT)) && same(handoffSlots, await rects(page, contentSlots)));
+
+      // Same 99 trade rows before and after: adding Partial/so far cannot
+      // change the fixed 36 px header or the settled phone sheet's geometry.
+      const largeFull = structuredClone(large); largeFull.days.find(d => d.date === partialTrade).coverage = 'full';
+      withTradeSummaries(largeFull);
+      await replace(largeFull, `${tag} full large summary`);
+      if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
+      const headerSelectors = viewport.mobile ? ['.dlg-h', '#sheetBody .dp-sum'] : ['.dp-head'];
+      const headerBefore = await rects(page, headerSelectors);
+      await replace(large, `${tag} partial large summary`);
+      const largeDetail = await page.evaluate(`(() => {
+        const root = document.querySelector(${JSON.stringify(viewport.mobile ? '#sheetBody' : '#daypanel')});
+        const sum = root.querySelector('.dp-sum'), header = root.querySelector('.dp-head'), amount = sum.querySelector('.dp-amount');
+        return { visible: sum.innerText, complete: sum.textContent, height: header?.getBoundingClientRect().height,
+          clipped: sum.scrollWidth > sum.clientWidth || Boolean(header && header.scrollWidth > header.clientWidth),
+          amountClipped: amount.getBoundingClientRect().right > sum.getBoundingClientRect().right };
+      })()`);
+      check('partial-days', `${tag}: worst summary keeps Partial, −€ 999.999,99 and so far; optional count drops first; 0 px`,
+        /^Partial·(?:99trades·)?−€999\.999,99sofar$/.test(N(largeDetail.visible)) &&
+        N(largeDetail.complete) === N('Partial · 99 trades · −€ 999.999,99 so far') && !largeDetail.clipped && !largeDetail.amountClipped &&
+        (viewport.mobile || largeDetail.height === 36) && same(headerBefore, await rects(page, headerSelectors)), largeDetail);
+      const largeName = `${viewport.name}-${theme}-results-partial-so-far`;
+      if (viewport.mobile) { await viewShot(page, largeName, 'Worst partial amount so far; trade count yields first'); await key(page, 'Escape'); }
+      else await shot(page, viewport, largeName, 'Worst partial amount so far in the fixed 36 px day header');
+
+      await replace(emptyMonth, `${tag} no trades this month`);
+      const emptyMonthProbe = await monthProbe();
+      check('partial-days', `${tag}: an empty month with Partial says No trades recorded this month; hint fits`,
+        !viewport.mobile ? N(emptyMonthProbe.text) === N('No trades recorded this month · incl. 3 partial days') && !emptyMonthProbe.clipped && emptyMonthProbe.height <= 20
+          : !emptyMonthProbe.visible, emptyMonthProbe);
+      if (!viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-partial-empty-month-hint`, 'No trades recorded this month · incl. 3 partial days');
+
+      // Rev 5: 9 accepted codes render 8 sentences after FX dedup. All reason
+      // variants use real ingress and the same worker/fallback paths above.
+      await replace(reasons, `${tag} nine reasons`);
+      const reasonRoot = viewport.mobile ? '#sheetBody' : '#daypanel';
+      if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
+      const reasonProbe = () => page.evaluate(`(() => {
+        const root = document.querySelector(${JSON.stringify(reasonRoot)}), note = root.querySelector('.dp-note');
+        const lines = [...root.querySelectorAll('.dp-reason')], button = root.querySelector('.dp-reasons-more');
+        return { lead: root.querySelector('.dp-note-lead')?.innerText, lines: lines.map(el => ({ text: el.innerText, visible: __audit.visible(el) })),
+          button: button && { text: button.innerText, height: button.getBoundingClientRect().height, name: button.getAttribute('aria-label'),
+            expanded: button.getAttribute('aria-expanded'), keyboard: button.tagName === 'BUTTON' && !button.disabled && button.tabIndex === 0 },
+          focused: document.activeElement === root.querySelector('.dp-reasons-extra .dp-reason') && document.activeElement?.tabIndex === -1,
+          live: root.querySelector('.dp-reasons-extra')?.getAttribute('aria-live'),
+          sheet: ${viewport.mobile} ? { reservedHeight: parseFloat(document.getElementById('daySheet').style.height),
+            cap: innerHeight * .8, scrollHeight: root.scrollHeight, clientHeight: root.clientHeight } : null,
+          clipped: [note, ...lines.filter(el => __audit.visible(el))].some(el => el.scrollWidth > el.clientWidth) };
+      })()`);
+      let reasonDetail = await reasonProbe();
+      await checkNoteGap(reasonRoot, `${tag} nine reasons collapsed`);
+      const expectedReasons = M.partialReasons(reasons.days.find(d => d.date === partialTrade)).map(r => r.text);
+      check('partial-days', `${tag}: canonical reason sentences wrap cleanly; FX disabled suppresses missing`,
+        reasonDetail.lead === 'Result may be incomplete.' && same(reasonDetail.lines.map(l => l.text), expectedReasons) &&
+        reasonDetail.lines.filter(l => l.visible).length === (viewport.mobile ? 2 : 8) && !reasonDetail.clipped &&
+        (!viewport.mobile ? !reasonDetail.button : reasonDetail.button.text === '+6 more' && reasonDetail.button.height >= 44 &&
+          reasonDetail.button.keyboard && reasonDetail.button.name === 'Show 6 more reasons'), reasonDetail);
+      const reasonsName = `${viewport.name}-${theme}-results-partial-nine-reasons`;
+      const sheetGeometry = () => page.evaluate(`(() => { const r = document.getElementById('daySheet').getBoundingClientRect(); return { top: r.top, height: r.height }; })()`);
+      let nineReasonHeight;
+      if (viewport.mobile) {
+        await viewShot(page, reasonsName + '-collapsed', 'Nine codes: two visible reason lines and +6 more');
+        const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
+          // Only the first two reason lines, visible before either reveal.
+          '#sheetBody .dp-note-lines > .dp-reason:nth-child(2)', '#sheetBody .dp-note-lines > .dp-reason:nth-child(3)'];
+        const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT), sheetBefore = await sheetGeometry();
+        const movedRects = (before, after) => {
+          const old = new Map(before.map(r => [r.key, r])), next = new Map(after.map(r => [r.key, r]));
+          return [...new Set([...old.keys(), ...next.keys()])].filter(key => !same(old.get(key), next.get(key))).map(key => {
+            const a = old.get(key), b = next.get(key);
+            return { key, before: a ?? null, after: b ?? null,
+              delta: a && b ? Object.fromEntries(['top', 'left', 'height', 'width'].map(k => [k, b[k] - a[k]])) : null };
+          });
+        };
+        const revealGeometry = async before => {
+          const after = await sheetGeometry(), fixedAfter = await rects(page, above), outerAfter = await rects(page, SHIFT);
+          return { unchanged: same(before, after) && same(fixedBefore, fixedAfter) && same(outerBefore, outerAfter),
+            sheet: { before, after, delta: { top: after.top - before.top, height: after.height - before.height } },
+            aboveMoved: movedRects(fixedBefore, fixedAfter), outerMoved: movedRects(outerBefore, outerAfter) };
+        };
+        nineReasonHeight = sheetBefore.height;
+        check('partial-days', `${tag}: geometry tracks exactly the two reasons visible before expansion`,
+          fixedBefore.filter(r => r.key.includes('.dp-reason:nth-child(')).length === 2, fixedBefore);
+        check('partial-days', `${tag}: nine-reason sheet is capped at 80vh`, nineReasonHeight <= viewport.height * .8, sheetBefore);
+        await page.evaluate('document.querySelector("#sheetBody .dp-reasons-more").focus({preventScroll:true})');
+        await key(page, 'Enter');
+        await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
+        reasonDetail = await reasonProbe();
+        let geometry = await revealGeometry(sheetBefore);
+        check('partial-days', `${tag}: keyboard reveal removes the button, focuses and politely announces all 8 reasons with 0 px sheet movement`,
+          reasonDetail.lines.length === 8 && reasonDetail.lines.every(l => l.visible) && !reasonDetail.button && reasonDetail.focused && reasonDetail.live === 'polite' && !reasonDetail.clipped &&
+          geometry.unchanged, { ...reasonDetail, geometry });
+        check('partial-days', `${tag}: keyboard-expanded sheet holds all content without scrolling when below the 80vh cap`,
+          reasonDetail.sheet.reservedHeight >= reasonDetail.sheet.cap || reasonDetail.sheet.scrollHeight <= reasonDetail.sheet.clientHeight, reasonDetail.sheet);
+        await checkNoteGap(reasonRoot, `${tag} nine reasons keyboard-expanded`);
+        await key(page, 'Escape');
+        await click(page, `#cal [data-day="${partialTrade}"]`);
+        const reopened = await reasonProbe(), pointerBefore = await sheetGeometry();
+        check('partial-days', `${tag}: reopening the sheet starts collapsed with the same full-content height`,
+          reopened.button?.text === '+6 more' && reopened.lines.filter(l => l.visible).length === 2 && same(sheetBefore, pointerBefore), reopened);
+        const target = await page.evaluate(`(() => { const r = document.querySelector('#sheetBody .dp-reasons-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+        await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [target] });
+        await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await settle(page);
+        await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
+        reasonDetail = await reasonProbe();
+        geometry = await revealGeometry(pointerBefore);
+        check('partial-days', `${tag}: a real pointer tap reveals all reasons and keeps sheet top, height and prior content exactly 0 px`,
+          reasonDetail.lines.length === 8 && reasonDetail.lines.every(l => l.visible) && !reasonDetail.button && reasonDetail.focused && !reasonDetail.clipped &&
+          geometry.unchanged, { ...reasonDetail, geometry });
+        check('partial-days', `${tag}: pointer-expanded sheet holds all content without scrolling when below the 80vh cap`,
+          reasonDetail.sheet.reservedHeight >= reasonDetail.sheet.cap || reasonDetail.sheet.scrollHeight <= reasonDetail.sheet.clientHeight, reasonDetail.sheet);
+        await checkNoteGap(reasonRoot, `${tag} nine reasons pointer-expanded`);
+        await viewShot(page, reasonsName + '-expanded', 'All eight reason sentences revealed in place');
+        if (viewport.name === '360') await cropNoteView('#daySheet', reasonsName + '-expanded-crop', 'All eight reasons plus a separate position paragraph after an exact 8 px gap');
+        await key(page, 'Escape');
+      } else await shot(page, viewport, reasonsName + '-panel', 'All eight reason sentences in canonical order');
+
+      for (const [record, suffix, sentence] of [[singleReason, 'single-reason', 'The trade history has a gap that covers this day.'],
+        [counted, 'counted', "2\u00a0trades couldn't be matched to a desk."]]) {
+        await replace(record, `${tag} ${suffix}`);
+        if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
+        const detail = await reasonProbe();
+        check('partial-days', `${tag}: ${suffix} has exact copy without a disclosure`, detail.lines.length === 1 && detail.lines[0].text === sentence && !detail.button && !detail.clipped, detail);
+        if (viewport.mobile && record === singleReason) {
+          const one = await sheetGeometry();
+          check('partial-days', `${tag}: a one-reason day has a shorter sheet than the nine-code day`, one.height < nineReasonHeight && one.height < viewport.height * .8, { one, nineReasonHeight });
+        }
+        if (viewport.mobile) { await viewShot(page, `${viewport.name}-${theme}-results-partial-${suffix}`, sentence); await key(page, 'Escape'); }
+        else await shot(page, viewport, `${viewport.name}-${theme}-results-partial-${suffix}`, sentence);
+      }
+
+      await replace(threeReasons, `${tag} one more reason`);
+      if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
+      const singular = await reasonProbe();
+      check('partial-days', `${tag}: a single hidden reason has singular accessible copy`,
+        viewport.mobile ? singular.button?.text === '+1 more' && singular.button.name === 'Show 1 more reason' : !singular.button, singular);
+      if (viewport.mobile) {
+        // Three reasons are the two visible lines plus +1 more: exercise the
+        // below-cap reveal independently of the capped nine-reason sheet.
+        const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
+          '#sheetBody .dp-note-lines > .dp-reason:nth-child(2)', '#sheetBody .dp-note-lines > .dp-reason:nth-child(3)'];
+        const movedRects = (before, after) => {
+          const old = new Map(before.map(r => [r.key, r])), next = new Map(after.map(r => [r.key, r]));
+          return [...new Set([...old.keys(), ...next.keys()])].filter(key => !same(old.get(key), next.get(key))).map(key => {
+            const a = old.get(key), b = next.get(key);
+            return { key, before: a ?? null, after: b ?? null,
+              delta: a && b ? Object.fromEntries(['top', 'left', 'height', 'width'].map(k => [k, b[k] - a[k]])) : null };
+          });
+        };
+        const expected = M.partialReasons(threeReasons.days.find(d => d.date === partialTrade)).map(r => r.text);
+        for (const input of ['keyboard', 'pointer']) {
+          if (input === 'pointer') await click(page, `#cal [data-day="${partialTrade}"]`);
+          const collapsed = await reasonProbe(), sheetBefore = await sheetGeometry();
+          const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT);
+          check('partial-days', `${tag}: ${input} three-reason sheet starts below the 80vh cap with two visible lines and +1 more`,
+            collapsed.button?.text === '+1 more' && collapsed.button.name === 'Show 1 more reason' &&
+            collapsed.lines.filter(l => l.visible).length === 2 &&
+            fixedBefore.filter(r => r.key.includes('.dp-reason:nth-child(')).length === 2 &&
+            sheetBefore.height < collapsed.sheet.cap && collapsed.sheet.reservedHeight < collapsed.sheet.cap,
+            { ...collapsed, sheetBefore, above: fixedBefore, outer: outerBefore });
+          if (input === 'keyboard') {
+            await page.evaluate('document.querySelector("#sheetBody .dp-reasons-more").focus({preventScroll:true})');
+            await key(page, 'Enter');
+          } else {
+            const target = await page.evaluate(`(() => { const r = document.querySelector('#sheetBody .dp-reasons-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+            await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [target] });
+            await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await settle(page);
+          }
+          await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
+          const expanded = await reasonProbe(), sheetAfter = await sheetGeometry();
+          const fixedAfter = await rects(page, above), outerAfter = await rects(page, SHIFT);
+          const geometry = {
+            unchanged: same(sheetBefore, sheetAfter) && same(fixedBefore, fixedAfter) && same(outerBefore, outerAfter),
+            sheet: { before: sheetBefore, after: sheetAfter,
+              delta: { top: sheetAfter.top - sheetBefore.top, height: sheetAfter.height - sheetBefore.height } },
+            aboveMoved: movedRects(fixedBefore, fixedAfter), outerMoved: movedRects(outerBefore, outerAfter),
+          };
+          check('partial-days', `${tag}: ${input} reveals all three reasons with sheet top, height and prior content exactly 0 px`,
+            expanded.lines.length === 3 && same(expanded.lines.map(l => l.text), expected) && expanded.lines.every(l => l.visible) &&
+            !expanded.button && expanded.focused && expanded.live === 'polite' && !expanded.clipped && geometry.unchanged,
+            { ...expanded, geometry });
+          check('partial-days', `${tag}: ${input}-expanded three-reason content is below the 80vh cap and fits the reserved body without scrolling`,
+            expanded.sheet.reservedHeight < expanded.sheet.cap && expanded.sheet.scrollHeight <= expanded.sheet.clientHeight, expanded.sheet);
+          await key(page, 'Escape');
+        }
+      }
+
+      if (viewport.mobile) {
+        await replace(growingReasons, `${tag} growing reasons below cap`);
+        const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
+          '#sheetBody .dp-note-lines > .dp-reason:nth-child(2)', '#sheetBody .dp-note-lines > .dp-reason:nth-child(3)'];
+        const movedRects = (before, after) => {
+          const old = new Map(before.map(r => [r.key, r])), next = new Map(after.map(r => [r.key, r]));
+          return [...new Set([...old.keys(), ...next.keys()])].filter(key => !same(old.get(key), next.get(key))).map(key => {
+            const a = old.get(key), b = next.get(key);
+            return { key, before: a ?? null, after: b ?? null,
+              delta: a && b ? Object.fromEntries(['top', 'left', 'height', 'width'].map(k => [k, b[k] - a[k]])) : null };
+          });
+        };
+        const contentProbe = () => page.evaluate(`(() => {
+          const root = document.getElementById('sheetBody'), extra = root.querySelector('.dp-reasons-extra'), button = root.querySelector('.dp-reasons-more');
+          // scrollHeight includes the reserved blank space. Measure the actual
+          // content through the last block's bottom, including body padding.
+          const height = () => root.lastElementChild.getBoundingClientRect().bottom - root.getBoundingClientRect().top + parseFloat(getComputedStyle(root).paddingBottom);
+          const collapsed = height(), extraHidden = extra.hidden, buttonHidden = button?.hidden;
+          let expanded;
+          try {
+            extra.hidden = false;
+            if (button) button.hidden = true;
+            expanded = height();
+          } finally {
+            extra.hidden = extraHidden;
+            if (button) button.hidden = buttonHidden;
+          }
+          return { collapsed, expanded, expandedSheetHeight: document.querySelector('#daySheet .dlg-h').getBoundingClientRect().height + expanded,
+            positionNotes: [...root.querySelectorAll('.dp-position-note')].map(el => el.innerText) };
+        })()`);
+        const cropSheet = async (name, what) => {
+          const clip = await page.evaluate(`(() => { const r = document.getElementById('daySheet').getBoundingClientRect();
+            return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+          const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
+          writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+          shots.push({ file: `${name}.png`, what });
+        };
+        const expected = M.partialReasons(growingReasons.days.find(d => d.date === growingDay)).map(r => r.text);
+        const growingName = `${viewport.name}-${theme}-results-partial-growing-reasons`;
+        for (const input of ['keyboard', 'pointer']) {
+          await click(page, `#cal [data-day="${growingDay}"]`);
+          if (viewport.name === '360' && input === 'keyboard') await cropSheet(growingName + '-collapsed', 'Below-cap growing sheet: two visible reasons and +3 more, without a position sentence');
+          const collapsed = await reasonProbe(), contentBefore = await contentProbe(), sheetBefore = await sheetGeometry();
+          const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT);
+          check('partial-days', `${tag}: ${input} growing five-reason sheet starts below the 80vh cap with two visible lines and +3 more`,
+            collapsed.button?.text === '+3 more' && collapsed.button.name === 'Show 3 more reasons' && collapsed.button.height >= 44 && collapsed.button.keyboard &&
+            collapsed.lines.length === 5 && same(collapsed.lines.map(l => l.text), expected) && collapsed.lines.filter(l => l.visible).length === 2 &&
+            fixedBefore.filter(r => r.key.includes('.dp-reason:nth-child(')).length === 2 && !contentBefore.positionNotes.length &&
+            contentBefore.expanded > contentBefore.collapsed && contentBefore.expandedSheetHeight < collapsed.sheet.cap &&
+            sheetBefore.height < collapsed.sheet.cap && collapsed.sheet.reservedHeight < collapsed.sheet.cap,
+            { ...collapsed, content: contentBefore, sheetBefore, above: fixedBefore, outer: outerBefore });
+          if (input === 'keyboard') {
+            await page.evaluate('document.querySelector("#sheetBody .dp-reasons-more").focus({preventScroll:true})');
+            await key(page, 'Enter');
+          } else {
+            const target = await page.evaluate(`(() => { const r = document.querySelector('#sheetBody .dp-reasons-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+            await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [target] });
+            await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+            await settle(page);
+          }
+          await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
+          const expanded = await reasonProbe(), contentAfter = await contentProbe(), sheetAfter = await sheetGeometry();
+          const fixedAfter = await rects(page, above), outerAfter = await rects(page, SHIFT);
+          const geometry = {
+            unchanged: same(sheetBefore, sheetAfter) && same(fixedBefore, fixedAfter) && same(outerBefore, outerAfter),
+            sheet: { before: sheetBefore, after: sheetAfter,
+              delta: { top: sheetAfter.top - sheetBefore.top, height: sheetAfter.height - sheetBefore.height } },
+            aboveMoved: movedRects(fixedBefore, fixedAfter), outerMoved: movedRects(outerBefore, outerAfter),
+          };
+          check('partial-days', `${tag}: ${input} reveals all five reasons as content grows with sheet top, height and prior content exactly 0 px`,
+            expanded.lines.length === 5 && same(expanded.lines.map(l => l.text), expected) && expanded.lines.every(l => l.visible) &&
+            contentAfter.expanded > contentBefore.collapsed && !contentAfter.positionNotes.length &&
+            !expanded.button && expanded.focused && expanded.live === 'polite' && !expanded.clipped && geometry.unchanged,
+            { ...expanded, contentBefore, contentAfter, geometry });
+          check('partial-days', `${tag}: ${input}-expanded growing five-reason content is below the 80vh cap and fits the reserved body without scrolling`,
+            sheetAfter.height < expanded.sheet.cap && expanded.sheet.reservedHeight < expanded.sheet.cap &&
+            contentAfter.expandedSheetHeight < expanded.sheet.cap && expanded.sheet.scrollHeight <= expanded.sheet.clientHeight,
+            { ...expanded.sheet, content: contentAfter, sheetAfter });
+          if (viewport.name === '360' && input === 'keyboard') await cropSheet(growingName + '-expanded', 'All five reasons revealed in place: content grows, sheet stays below cap without moving');
+          await key(page, 'Escape');
+        }
+      }
+
+      for (const [record, kind] of [[partial, 'legacy'], [filteredReasons, 'reasoned']]) {
+        await replace(record, `${tag} ${kind} reason`);
+        await click(page, '#deskSeg [data-desk="joe"]');
+        for (const day of [partialTrade, today]) {
+          await click(page, `#cal [data-day="${day}"]`);
+          const layout = await noteLayout(reasonRoot);
+          const expected = [
+            ...(kind === 'legacy' ? day === today ? [] : [reason] : ['Result may be incomplete.', 'The trade history has a gap that covers this day.']),
+            ...(kind === 'legacy' && day === today ? [] : [M.PARTIAL_DESK_NOTE]),
+          ];
+          const position = `${day === today ? 'Coca-Cola (KO, Joe), opened today at 11:15' : 'Bank of America (BAC, Joe), opened this day'}, is still open; it counts as Still open and on Desk.`;
+          check('partial-days', `${tag}: filtered ${kind} partial ${day === today ? 'today' : 'closed day'} has exact order: explanation, desk scope, opened position`,
+            same(layout.lines.map(N), expected.map(N)) && layout.position === position && layout.positionTag === 'P', { layout, expected, position });
+          if (expected.length) await checkNoteGap(reasonRoot, `${tag} filtered ${kind} ${day}`);
+          else check('partial-days', `${tag}: legacy today has only a positions paragraph`, !layout.reasonTag && layout.gap === null, layout);
+          const name = `${viewport.name}-${theme}-results-partial-desk-filtered-${kind}-${day === today ? 'today' : 'closed'}`;
+          if (viewport.mobile) { await viewShot(page, name, 'Partial explanation, whole-day scope, then the open Joe position'); await key(page, 'Escape'); }
+          else await shot(page, viewport, name, 'Partial explanation, whole-day scope, then the open Joe position');
+        }
+        await click(page, '#deskSeg [data-desk="all"]');
+      }
+      await replace(todayWithoutReasons, `${tag} today without explicit reasons`);
+      for (const desk of ['all', 'joe', 'j']) {
+        await click(page, `#deskSeg [data-desk="${desk}"]`);
+        await click(page, `#cal [data-day="${today}"]`);
+        const detail = await page.evaluate(`(() => { const root = document.querySelector(${JSON.stringify(reasonRoot)}); return {
+          sum: root.querySelector('.dp-sum').innerText, note: root.querySelector('.dp-note')?.innerText ?? '',
+          reasons: root.querySelectorAll('.dp-note-lines, .dp-note-lead, .dp-reason, .dp-desk-note').length,
+          positions: [...root.querySelectorAll('.dp-position-note')].map(el => ({ tag: el.tagName, text: el.innerText })),
+          noteCount: root.querySelectorAll('.dp-note').length }; })()`);
+        const hasPosition = desk !== 'j';
+        check('partial-days', `${tag}: today without explicit reasons under ${desk} has no reason note and only its optional position paragraph`,
+          detail.sum === 'No trades so far' && detail.reasons === 0 && detail.noteCount === (hasPosition ? 1 : 0) &&
+          same(detail.positions, hasPosition ? [{ tag: 'P', text: 'Coca-Cola (KO, Joe), opened today at 11:15, is still open; it counts as Still open and on Desk.' }] : []), detail);
+        if (viewport.name === '360' && desk === 'all') await cropNoteView('#daySheet', `${viewport.name}-${theme}-results-partial-today-without-reasons-crop`, 'Today without explicit reasons: positions paragraph only');
+        if (viewport.mobile) await key(page, 'Escape');
+      }
+      await click(page, '#deskSeg [data-desk="all"]');
+      await replace(reasons, `${tag} today reason`);
+      await click(page, `#cal [data-day="${today}"]`);
+      const todayDetail = await page.evaluate(`(() => { const root = document.querySelector(${JSON.stringify(reasonRoot)}); return { sum: root.querySelector('.dp-sum').innerText,
+        note: root.querySelector('.dp-note').innerText, markers: document.querySelectorAll('#cal [data-day="${today}"] .day-warning').length }; })()`);
+      check('partial-days', `${tag}: today keeps its known amount so far and reason without a Partial marker`,
+        /so far/.test(todayDetail.sum) && !/Partial/.test(todayDetail.sum) && todayDetail.markers === 0 &&
+        todayDetail.note.includes('The trade history has a gap that covers this day.'), todayDetail);
+      await checkNoteGap(reasonRoot, `${tag} today with explicit reasons`);
+      if (viewport.mobile) { await viewShot(page, `${viewport.name}-${theme}-results-partial-today-so-far`, 'Open Vienna day: exact known amount so far, without a Partial marker'); await key(page, 'Escape'); }
+      else await shot(page, viewport, `${viewport.name}-${theme}-results-partial-today-so-far`, 'Open Vienna day: exact known amount so far, without a Partial marker');
+
+      const todayDesk = reasons.trades.find(t => t.closedAt.startsWith(today)).desk;
+      const emptyDesk = ['j', 'joe', 'joel'].find(d => d !== todayDesk);
+      for (const emptyRow of [false, true]) {
+        if (emptyRow) {
+          await click(page, '#deskSeg [data-desk="all"]');
+          await replace(emptyToday, `${tag} empty today row`);
+        } else await click(page, `#deskSeg [data-desk="${emptyDesk}"]`);
+        if (viewport.mobile) await click(page, `#cal [data-day="${today}"]`);
+        const noTrades = await page.evaluate(`(() => { const root = document.querySelector(${JSON.stringify(reasonRoot)}); return {
+          sum: root.querySelector('.dp-sum').innerText, rows: root.querySelectorAll('.trow').length,
+          markers: document.querySelectorAll('#cal [data-day="${today}"] .day-warning').length }; })()`);
+        check('partial-days', `${tag}: today with ${emptyRow ? 'an empty-desk row' : 'no trades in the selected desk'} says No trades so far`,
+          noTrades.sum === 'No trades so far' && noTrades.rows === 0 && noTrades.markers === 0, noTrades);
+        const name = `${viewport.name}-${theme}-results-partial-today-${emptyRow ? 'no-trades' : 'empty-filtered'}`;
+        if (viewport.mobile) { await viewShot(page, name, 'No trades so far on the open Vienna day'); await key(page, 'Escape'); }
+        else await shot(page, viewport, name, 'No trades so far on the open Vienna day');
+      }
+
+    }
+  }
+
   if (run('missing-days')) {
     // JOED-28: real ingress diagnostics through both read paths. The complete
     // and missing records share trade money, so geometry can be compared.
@@ -988,9 +1523,10 @@ try {
       record.generatedAt = board.clock();
       record.trades.push({ ...structuredClone(record.trades[0]), id: 'rt-missing-day',
         openedAt: '2026-10-15T15:00:00.000Z', closedAt: '2026-10-15T15:00:00.000Z' });
-      // A reported partial day is covered, with no warning.
-      record.days.push({ date: '2026-10-15', coverage: 'partial', desks: {} });
-      check('missing-days', `${tag}: partial day accepts`, (await board.pushResults(record)).status === 200);
+      // Fully covered baseline: JOED-30's separate scenario owns partial.
+      record.days.push({ date: '2026-10-15', desks: structuredClone(valid.results.days[0].desks) });
+      withTradeSummaries(record);
+      check('missing-days', `${tag}: covered day accepts`, (await board.pushResults(record)).status === 200);
       const fallback = viewport.mobile && theme === 'dark';
       const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
       await configure(page, viewport, theme);
@@ -1000,7 +1536,7 @@ try {
       if (viewport.mobile) await key(page, 'Escape');
       const covered = await page.evaluate(RES), before = await rects(page, SHIFT);
       const coveredSummary = await page.evaluate('document.querySelector("#daypanel .dp-sum").textContent');
-      check('missing-days', `${tag}: partial day has no warning`, !await page.evaluate('Boolean(document.querySelector("#cal .day-warning"))'));
+      check('missing-days', `${tag}: covered day has no warning`, !await page.evaluate('Boolean(document.querySelector("#cal .day-warning"))'));
       const missing = { ...structuredClone(record), seq: record.seq + 1 };
       missing.days = missing.days.filter(day => day.date !== '2026-10-15');
       check('missing-days', `${tag}: missing closed day accepts with 200`, (await board.pushResults(missing)).status === 200);
@@ -1057,7 +1593,7 @@ try {
       check('missing-days', `${tag}: a covered replacement accepts`, (await board.pushResults(fixed)).status === 200);
       await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, '!document.querySelector("#cal .day-warning")');
-      check('missing-days', `${tag}: subsequent partial coverage clears the warning`, (await page.evaluate(RES)).day.sum === covered.day.sum);
+      check('missing-days', `${tag}: subsequent full coverage clears the warning`, (await page.evaluate(RES)).day.sum === covered.day.sum);
       // A trade on today's open Vienna date remains silent even without a day.
       const open = { ...structuredClone(missing), seq: fixed.seq + 1 };
       open.trades.at(-1).openedAt = open.trades.at(-1).closedAt = '2026-10-16T10:00:00.000Z';
@@ -1155,6 +1691,42 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   desktop arrows. August and September add the full signed form set, with
   ±999k measured as INFO only. Amount changes, month changes and closing a settled
   open sheet must move geometry exactly 0 px. The tap's own movement is INFO.
+- **Partial coverage (JOED-30).** The dedicated \`partial-days\` scenario uses
+  real ingress at 1440/1024/390/360, light and dark, through the worker and
+  fallback. October shows yesterday (15th) as Partial, missing-summary Stale
+  on the 13th, Stale-escalated partials on the 11th/14th, a normal 12th and
+  open today (16th) with no marker. A separate accepted snapshot makes the
+  15th unattributed-only: T+1 allows only yesterday to remain Partial. \`*-results-partial-days.png\` captures the
+  month; \`*-results-partial-{trade,empty}-{panel,sheet}.png\` captures each
+  partial summary and its info-note reason. The partial replacement must
+  preserve trade amounts, totals and geometry exactly; all cells and detail
+  summaries must satisfy scrollWidth ≤ clientWidth. Both theme token sets
+  get computed icon contrast checks for every tint (≥ 3:1), including neutral.
+  A missing-summary Stale hands off to Partial at 0 px. Desktop month hints
+  count every closed partial date, including Stale-escalated dates; today and
+  missing-summary Stale never count. They hide on phones and never clip.
+  Worst-case 99-trade summaries preserve Partial, exact money and “so far”
+  at every width; the count yields first. The general audit runs only on
+  standard viewports, while 360 keeps every focused assertion. Rev-5 crops
+  \`*-results-partial-nine-reasons-panel.png\` show all eight displayed sentences
+  (nine codes with FX dedup); phones use
+  \`*-results-partial-nine-reasons-{collapsed,expanded}.png\`. Keyboard and pointer
+  reveals remove the 44 px button, politely announce and focus the first revealed
+  reason, and move the sheet top, height and prior content exactly 0 px. The
+  pointer case uses a real touch tap after reopening collapsed. A one-reason
+  sheet must be shorter than the nine-code sheet. A five-reason day without
+  position sentences proves content grows below the 80vh cap at 360/390 in both
+  themes; Enter and real touch preserve sheet, prior content and outer geometry
+  exactly. Its 360 crops are \`360-*-results-partial-growing-reasons-{collapsed,expanded}.png\`.
+  The reason/desk block and position note must be sibling paragraphs exactly
+  8 px apart in every variant, before and after reveals. Extra crops are
+  \`1440-*-results-partial-empty-panel-crop.png\`,
+  \`360-*-results-partial-nine-reasons-expanded-crop.png\` and
+  \`360-*-results-partial-today-without-reasons-crop.png\`. Today without explicit
+  reasons has no reason/desk note under All, Joe or J; only a matching open
+  position keeps a note. Explicit reasons keep their lead and sentences.
+  Other crops cover
+  \`*-results-partial-{single-reason,counted,desk-filtered,today-so-far,today-no-trades,today-empty-filtered}.png\`.
 - **Hero chart time axis** (fix round 1). The x axis is real time: each close
   sits at the end of its Vienna date, today's money at now; missing dates keep
   their width, and a session without a close in the record breaks the line

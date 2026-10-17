@@ -931,3 +931,57 @@ test('fix3 low 5: carried valuation maps to null plus retained_values with its o
   }
   assert.equal(states['today.dayPnl'].state, 'fresh');
 });
+
+
+test('JOED-30 rev 5: optional canonical partial reasons, reserved code and empty desks accept through ingress', () => {
+  const codes = ['capture_gap', 'history_gap', 'broker_trade_count_mismatch', 'broker_realised_pnl_mismatch',
+    'unattributed_activity', 'avg_cost_mismatch', 'fx_disabled', 'fx_missing', 'broker_evidence_missing'];
+  assert.deepEqual(SCHEMAS.results.properties.days.items.properties.partialReasons.items.enum, codes);
+  for (const partialReasons of [undefined, ['history_gap'], ['avg_cost_mismatch'], codes]) {
+    const value = ingress(samples.results);
+    value.days[0] = { date: value.days[0].date, desks: {}, coverage: 'partial',
+      ...(partialReasons ? { partialReasons } : {}) };
+    for (const unattributedCount of partialReasons === codes ? [undefined, 1, 2] : [undefined]) {
+      if (unattributedCount !== undefined) value.days[0].unattributedCount = unattributedCount;
+      const accepted = acceptSnapshot('results', value, null, at);
+      assert.equal(accepted.status, 200, JSON.stringify(accepted.errors));
+      assert.deepEqual(accepted.value.days, value.days);
+      assert.equal(validateContract('results', accepted.value).ok, true);
+    }
+  }
+});
+
+test('JOED-30 rev 5: each partial-reason semantic violation returns a per-day 422 and retains last good', () => {
+  const value = ingress(samples.results);
+  value.days[0] = { date: value.days[0].date, desks: {}, coverage: 'partial', partialReasons: ['history_gap'] };
+  const good = acceptSnapshot('results', value, null, at).value;
+  for (const [mutate, rule, field] of [
+    [d => { delete d.coverage; }, 'partialCoverageRequired', 'partialReasons'],
+    [d => { d.coverage = 'full'; }, 'partialCoverageRequired', 'partialReasons'],
+    [d => { d.partialReasons = ['history_gap', 'capture_gap']; }, 'canonicalOrder', 'partialReasons'],
+    [d => { d.unattributedCount = 1; }, 'unattributedReasonRequired', 'unattributedCount'],
+    [d => { delete d.partialReasons; d.unattributedCount = 1; }, 'unattributedReasonRequired', 'unattributedCount'],
+  ]) {
+    const bad = copy(value); bad.seq++; mutate(bad.days[0]);
+    const accepted = acceptSnapshot('results', bad, { value: good }, later);
+    rejects(accepted, rule, `$.days[0].${field}`);
+    assert.strictEqual(accepted.value, good);
+  }
+});
+
+test('JOED-30 rev 5: reasons are nonempty, unique and closed; counts are positive integers', () => {
+  for (const [field, item, rule, path] of [
+    ['partialReasons', [], 'minItems', 'partialReasons'],
+    ['partialReasons', ['capture_gap', 'capture_gap'], 'uniqueItems', 'partialReasons'],
+    ['partialReasons', ['future_code'], 'enum', 'partialReasons[0]'],
+    ['partialReasons', [1], 'type', 'partialReasons[0]'],
+    ['unattributedCount', -1, 'minimum', 'unattributedCount'],
+    ['unattributedCount', 0, 'minimum', 'unattributedCount'],
+    ['unattributedCount', 1.5, 'type', 'unattributedCount'],
+    ['unattributedCount', null, 'type', 'unattributedCount'],
+  ]) {
+    const value = ingress(samples.results);
+    value.days[0] = { date: value.days[0].date, desks: {}, coverage: 'partial', partialReasons: ['unattributed_activity'], [field]: item };
+    rejects(acceptSnapshot('results', value, null, at), rule, `$.days[0].${path}`);
+  }
+});

@@ -293,18 +293,24 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .calcard { padding: 18px 20px 18px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0 26px; }
 .cal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 36px; }
 .cal-head h3 { font-size: 15px; font-weight: 650; width: 136px; text-align: center; white-space: nowrap; }
+#calSum { flex-shrink: 0; white-space: nowrap; }
+#calSum .month-short, #calSum.compact .month-long { display: none; }
+#calSum.compact .month-short { display: inline; }
+#calSum .st, .dp-sum .st { vertical-align: top; }
 .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) 78px; gap: 5px; margin-top: 8px; }
 .dow { font-size: 11.5px; color: var(--ink-3); height: 20px; padding-left: 8px; }
 .cell { position: relative; height: 62px; border-radius: 10px; padding: 7px 6px; border: 0; background: transparent; color: var(--ink); text-align: left; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; overflow: hidden; }
 @media (hover: hover) { button.cell:hover { box-shadow: inset 0 0 0 1px var(--line-2); } }
 .cell .d { font-size: 12px; line-height: 1.2; }
-.cell .v { font-size: 12.5px; font-weight: 650; line-height: 1.2; white-space: nowrap; }
+/* Reserve the amount line even before a partial record adds its unknown dash. */
+.cell .v { font-size: 12.5px; font-weight: 650; line-height: 1.2; min-height: 1.2em; white-space: nowrap; }
 .cell .pl { gap: 3px; }
 .cell .n { font-size: 11px; line-height: 1.2; }
 .cell .day-warning { position: absolute; top: 7px; right: 6px; line-height: 1; }
 .cell.out { visibility: hidden; }
 .cell.none { box-shadow: inset 0 0 0 1px var(--line); }
 .cell.we .d, .cell.fut .d, .cell.none .n, .cell.we .n { color: var(--ink-3); }
+.cell.day-incomplete .n { color: var(--ink); }
 .cell.flat { background: var(--flat); }
 .cell.g1 { background: var(--g1); } .cell.g2 { background: var(--g2); } .cell.g3 { background: var(--g3); } .cell.g4 { background: var(--g4); }
 .cell.l1 { background: var(--l1); } .cell.l2 { background: var(--l2); } .cell.l3 { background: var(--l3); } .cell.l4 { background: var(--l4); }
@@ -322,7 +328,8 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .daypanel { display: flex; flex-direction: column; min-width: 0; height: 506px; padding-left: 26px; border-left: 1px solid var(--line); }
 .dp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; }
 .dp-head h3 { font-size: 15px; font-weight: 650; white-space: nowrap; }
-.dp-sum { color: var(--ink-2); font-size: 13px; white-space: nowrap; }
+.dp-sum { color: var(--ink-2); font-size: 13px; line-height: 20px; white-space: nowrap; }
+.dp-head h3, .dp-head .dp-sum { flex-shrink: 0; }
 .dp-list { flex: 1; overflow-y: auto; margin-top: 8px; }
 .trow { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto 92px; gap: 2px 12px; align-items: center; padding: 10px 2px; border-top: 1px solid var(--line); }
 .trow .name b { font-weight: 650; }
@@ -335,7 +342,17 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .dp-empty { padding: 22px 0; color: var(--ink-2); display: flex; gap: 10px; align-items: flex-start; }
 .dp-empty .i { color: var(--ink-3); margin-top: 2px; }
 .dp-note { padding: 10px 0 0; color: var(--ink-3); font-size: 12px; display: flex; gap: 7px; }
-.dp-note .i { width: 14px; height: 14px; margin-top: 1px; }
+.dp-note .i { width: 14px; height: 14px; margin-top: 1px; flex-shrink: 0; }
+/* The text column keeps its full width when the disclosure is removed. */
+.dp-note-copy { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.dp-note-copy > p { margin: 0; }
+.dp-note-lines { min-width: 0; }
+.dp-note-lead, .dp-reason, .dp-desk-note, .dp-reasons-extra { display: block; }
+.dp-reasons-more { display: block; width: 100%; min-height: 44px; text-align: left; padding: 0; border: 0; background: transparent; color: var(--ink-2); font: inherit; }
+/* The measured full-content height survives removal of the disclosure. */
+.sheet .dlg-in { height: 100%; }
+.sheet .dlg-h { flex-shrink: 0; }
+.sheet .dlg-b { scrollbar-gutter: stable; }
 
 /* ---------- History ---------- */
 .hist-tools { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin: 18px 0 12px; }

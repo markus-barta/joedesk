@@ -17,6 +17,33 @@ export const SCRATCH = 500000n;
 export const SMALL_SAMPLE = 30;
 const CENT = 1000000n;
 
+// Rev-5 reasons in their canonical presentation order. Unknown future codes
+// never become copy; a legacy partial row keeps the generic fallback.
+export const PARTIAL_REASON = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
+export const PARTIAL_DESK_NOTE = 'Applies to the whole day; this desk may be unaffected.';
+export const PARTIAL_REASONS = Object.freeze([
+  ['capture_gap', 'Capture gap', 'Trade capture had a gap on this day.'],
+  ['history_gap', 'History gap', 'The trade history has a gap that covers this day.'],
+  ['broker_trade_count_mismatch', 'Broker trade count mismatch', "Our trade count differs from the broker's."],
+  ['broker_realised_pnl_mismatch', 'Broker result mismatch', "Our result differs from the broker's by more than €0.01."],
+  ['unattributed_activity', 'Unattributed activity', "Some trades couldn't be matched to a desk."],
+  ['avg_cost_mismatch', 'Average-cost mismatch', "Our average cost differs from the broker's."],
+  ['fx_disabled', 'FX sampling off', 'EUR conversion was switched off for this day.'],
+  ['fx_missing', 'FX missing', 'No EUR exchange rate was recorded for this day.'],
+  ['broker_evidence_missing', 'Broker evidence missing', "The broker hasn't confirmed fees or results for some trades yet."],
+].map(Object.freeze));
+export function partialReasons(day) {
+  const codes = new Set(day?.partialReasons ?? []);
+  if (codes.has('fx_disabled')) codes.delete('fx_missing');
+  return PARTIAL_REASONS.filter(([code]) => codes.has(code)).map(([code, label, sentence]) => ({ label,
+    text: code === 'unattributed_activity' && Number.isInteger(day.unattributedCount) && day.unattributedCount >= 1
+      ? `${day.unattributedCount}${NB}trade${day.unattributedCount === 1 ? '' : 's'} couldn't be matched to a desk.` : sentence }));
+}
+export function partialReasonLabel(day) {
+  const reasons = partialReasons(day);
+  return reasons.length ? `${reasons[0].label}${reasons.length > 1 ? `, and ${reasons.length - 1} more` : ''}` : PARTIAL_REASON;
+}
+
 // ---------- Vienna dates ----------
 // Vienna's midnight always falls on a whole UTC hour (its offsets are whole
 // hours), so one UTC hour has one Vienna date: one Intl call per hour.
@@ -180,6 +207,9 @@ export function indexResults(value) {
     meta: { schema: value.schema, seq: value.seq, generatedAt: value.generatedAt, receivedAt: value.receivedAt, reason: value.reason ?? null,
       trackingStart: value.trackingStart, days: value.days.length, trades: n },
     missingDays: new Set(value.missingDays ?? []),
+    partialDays: new Set(value.days.filter(d => d.coverage === 'partial').map(d => d.date)),
+    partialDetails: new Map(value.days.filter(d => d.coverage === 'partial').map(d => [d.date,
+      { partialReasons: d.partialReasons, unattributedCount: d.unattributedCount }])),
     dates, agg, close, trades, symbols: [...symbols.keys()], symbolDesks: Uint8Array.from(symbols.values()),
   };
 }

@@ -99,6 +99,20 @@ const cutText = cut => `${names(cut.desks)}’s bookkeeping basis changed on ${M
 
 const missingDay = (ix, k, desks) => ix?.missingDays?.has(k) && M.dayResult(ix, k, desks).count > 0;
 const missingDayText = k => `Stale: daily summary missing for ${M.fmtDay(k)}`;
+const PARTIAL_REASON = M.PARTIAL_REASON;
+const partialDay = (view, k) => k < view.today && view.ix?.partialDays?.has(k);
+// One warning slot, with a missing summary taking priority over partial coverage.
+function dayWarning(view, k, desks) {
+  if (k >= view.today) return null;
+  if (missingDay(view.ix, k, desks)) return { label: 'Stale', text: missingDayText(k), note: 'Daily summary missing.' };
+  if (partialDay(view, k)) {
+    const reason = M.partialReasonLabel(view.ix.partialDetails?.get(k));
+    return k <= M.addDays(view.today, -2)
+      ? { label: 'Stale', text: `Stale: still incomplete; ${reason}`, note: PARTIAL_REASON }
+      : { label: 'Partial', text: `Partial: this day's record is incomplete. ${reason}`, note: PARTIAL_REASON };
+  }
+  return null;
+}
 
 // The context every number of one render shares (the model builds it).
 const numbers = (view, per, desks) => M.moneyContext(view.ix, view, per, desks);
@@ -245,6 +259,7 @@ function dayState(view, k, desks, max) {
     if (isZero(r.units)) return { cls: 'flat', r, note, aria: `${money(0)} from ${note}` };
     return { cls: `${r.units > 0n ? 'g' : 'l'}${M.tintStep(r.units, max)}`, r, note, aria: `${eur(r.units, true)} from ${note}` };
   }
+  if (partialDay(view, k)) return { cls: 'none', note: 'Partial', aria: 'no complete record', dash: true };
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   if (closed) return { cls: 'we', note: 'closed', aria: M.isWeekend(k) ? 'weekend, markets closed' : 'US market holiday, markets closed' };
   if (!ix) return { cls: 'nw', note: '', aria: 'unavailable', dash: true };
@@ -260,13 +275,17 @@ export function renderCalendar(view, per, desks) {
   $('#prevMonth').disabled = first <= M.firstStep(view.trackingStart);
   $('#nextMonth').disabled = first >= M.dateKey(...M.ymOf(today), 1);
   const max = ix ? maxDay(ix, desks) : 0n;
-  let monthCount = 0, monthUnits = 0n, monthDays = 0;
+  let monthCount = 0, monthUnits = 0n, monthDays = 0, partialDays = 0;
   if (ix) for (let d = 1; d <= M.daysIn(y, m); d++) {
-    const r = M.dayResult(ix, M.dateKey(y, m, d), desks);
+    const k = M.dateKey(y, m, d), r = M.dayResult(ix, k, desks);
     if (r.count) { monthCount += r.count; monthUnits += r.units; monthDays++; }
+    if (partialDay(view, k)) partialDays++;
   }
-  $('#calSum').textContent = !ix ? 'Unavailable'
-    : monthCount ? `${signedWord(monthUnits)} over ${plural(monthDays, 'trading day')}` : 'No trades this month';
+  const monthSum = !ix ? 'Unavailable' : monthCount
+    ? `${signedWord(monthUnits)} <span class="month-long">over ${plural(monthDays, 'trading day')}</span><span class="month-short">in ${plural(monthDays, 'day')}</span>`
+    : partialDays ? 'No trades recorded this month' : 'No trades this month';
+  patch($('#calSum'), `${monthSum}${partialDays ? ` · ${st('warn', `incl. ${partialDays} partial day${partialDays === 1 ? '' : 's'}`)}` : ''}`);
+  fitMonthSummary($('#calSum'));
   const start = M.monday(first);
   const inPer = k => (RS.period === 'day' || RS.period === 'week') && k >= per.start && k <= per.end;
   let html = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow" role="columnheader">${d}</div>`).join('') + '<div class="dow wkh" role="columnheader">Week</div>';
@@ -279,12 +298,12 @@ export function renderCalendar(view, per, desks) {
       if (cy !== y || cm !== m) { html += '<div class="cell out" aria-hidden="true"></div>'; continue; }
       inMonth = true;
       const s = dayState(view, k, desks, max);
-      const missing = missingDay(ix, k, desks);
-      // Heatmap ink keeps the warning readable on every gain/loss tint;
-      // the day's summary uses the usual warning icon tint on its surface.
-      const cls = ['cell', s.cls, k === today ? 'today' : '', k === RS.sel ? 'sel' : '', inPer(k) ? 'inper' : ''].filter(Boolean).join(' ');
+      const warning = dayWarning(view, k, desks);
+      // Both warnings inherit heatmap ink on tinted cells. Only a Partial
+      // warning on a neutral no-trade cell uses the warning token.
+      const cls = ['cell', s.cls, warning ? 'day-incomplete' : '', k === today ? 'today' : '', k === RS.sel ? 'sel' : '', inPer(k) ? 'inper' : ''].filter(Boolean).join(' ');
       const value = s.r ? `<span class="vl">${plain(s.r.units)}</span><span class="vs">${compact(s.r.units)}</span>` : s.dash ? '<span class="muted">—</span>' : '';
-      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${missing ? `; ${esc(missingDayText(k))}` : ''}"><span class="d">${Number(k.slice(8))}</span>${missing ? `<span class="day-warning st" title="${esc(missingDayText(k))}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${missing ? 'Stale' : s.note}</span></button>`;
+      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${warning ? `; ${esc(warning.text)}` : ''}"><span class="d">${Number(k.slice(8))}</span>${warning ? `<span class="day-warning st${warning.label === 'Partial' && s.cls === 'none' ? ' warn' : ''}" title="${esc(warning.text)}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${warning ? warning.label : s.note}</span></button>`;
     }
     // A week still ahead has nothing to sum yet.
     const ahead = wk > today;
@@ -297,12 +316,30 @@ export function renderCalendar(view, per, desks) {
     <span class="nowrap"><span class="ramp"><i style="background:var(--g1)"></i><i style="background:var(--g2)"></i><i style="background:var(--g3)"></i><i style="background:var(--g4)"></i></span> Gain</span>
     <span>${!ix ? 'Tints appear once results arrive' : max > 0n ? `Darkest: ${eur(max * 3n / 4n)} to ${eur(max)} in a day` : 'No trading day yet'}</span>`);
   const day = dayContent(view, RS.sel, desks);
-  patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}</div>`);
+  patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${dayNote(day)}</div>`);
+  fitDaySummary($('#daypanel'));
   const sheet = $('#daySheet');
   if (sheet?.open) {
     $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(RS.sel)}`;
-    patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}`);
+    patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}`);
+    fitDaySummary($('#sheetBody'));
+    fitDaySheet(sheet);
   }
+}
+
+// Measure in the actual font and available room. Keep fixed line heights;
+// shorten the month wording and drop the optional trade count before money.
+function fitMonthSummary(el) {
+  if (!el?.getBoundingClientRect || !el.clientWidth) return;
+  el.classList.remove('compact');
+  if (el.parentElement.scrollWidth > el.parentElement.clientWidth) el.classList.add('compact');
+}
+function fitDaySummary(root) {
+  const sum = root?.querySelector?.('.dp-sum'), count = sum?.querySelector('.dp-trades');
+  if (!count || !sum.clientWidth) return;
+  count.hidden = false;
+  const head = root.querySelector('.dp-head');
+  if (sum.scrollWidth > sum.clientWidth || (head && head.scrollWidth > head.clientWidth)) count.hidden = true;
 }
 
 // ---------- A day's trades ----------
@@ -331,17 +368,68 @@ function dayContent(view, k, desks) {
       : `No closed-trade record for ${M.fmtDDM(k)}: ${esc(cellReason(view.reason))}.`}</span></p>`, note: '' };
   }
   const r = M.dayResult(ix, k, desks);
-  const missing = missingDay(ix, k, desks);
-  const summary = ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
-  const sum = missing ? `${st('warn', 'Stale')} · ${summary}` : summary;
+  const warning = dayWarning(view, k, desks);
+  const partial = k <= today && ix.partialDays?.has(k), incomplete = partial && !ts.length;
+  const summary = partial ? ts.length
+    ? `<span class="dp-trades">${plural(ts.length, 'trade')} · </span><span class="dp-amount">${eur(r.units, true)} so far</span>`
+    : k === today ? 'No trades so far' : 'record incomplete'
+    : ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
+  const sum = warning ? `${st('warn', warning.label)} · ${summary}` : summary;
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   const why = k > today ? `${M.fmtDDM(k)} is still ahead.` : closed ? `No trades on ${M.fmtDDM(k)}: ${M.isWeekend(k) ? 'weekend' : 'US market holiday'}, markets closed.`
     : k < view.trackingStart ? `No trades on ${M.fmtDDM(k)}: paper results start on ${startText(view.trackingStart)}.` : `No trades on ${M.fmtDDM(k)}: the desks sat out.`;
-  const body = ts.length ? tradeRows(ts) : `<p class="dp-empty">${icon(closed ? 'clock' : 'info')}<span>${esc(why)}</span></p>`;
+  const body = ts.length ? tradeRows(ts) : incomplete ? '' : `<p class="dp-empty">${icon(closed ? 'clock' : 'info')}<span>${esc(why)}</span></p>`;
   // A lot opened this day and still held counts in Still open and on Desk.
   const opened = (view.positions ?? []).filter(p => p.openedAt && desks.includes(p.desk) && M.viennaDate(Date.parse(p.openedAt)) === k);
-  const note = [missing ? 'Daily summary missing.' : '', ...opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`)].filter(Boolean).join(' ');
-  return { sum, body, note };
+  const reasons = partial && !missingDay(ix, k, desks) ? M.partialReasons(ix.partialDetails?.get(k)) : [];
+  const note = reasons.length || k === today ? '' : warning?.note ?? (partial ? PARTIAL_REASON : '');
+  const positionNote = opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`).join(' ');
+  return { sum, body, note, reasons, deskNote: partial && desks.length === 1 && (note || reasons.length) ? M.PARTIAL_DESK_NOTE : '', positionNote };
+}
+
+// The sheet already has room for every reason. Remove the one-way disclosure
+// and focus its first revealed line without scrolling anything under the tap.
+export function toggleDayReasons(button) {
+  const extra = button.parentElement.querySelector('.dp-reasons-extra');
+  if (!extra) return;
+  extra.hidden = false;
+  button.remove();
+  extra.querySelector('.dp-reason')?.focus({ preventScroll: true });
+}
+
+function dayNote(day, sheet = false) {
+  const { reasons = [], note, deskNote, positionNote } = day;
+  const line = (reason, revealed = false) => `<span class="dp-reason"${revealed ? ' tabindex="-1"' : ''}>${esc(reason.text)}</span>`;
+  const more = reasons.length - 2;
+  const reasonLines = reasons.length ? `<span class="dp-note-lead">Result may be incomplete.</span>${reasons.slice(0, sheet ? 2 : reasons.length).map(reason => line(reason)).join('')}${sheet && more > 0
+    ? `<button type="button" class="dp-reasons-more" aria-expanded="false" aria-controls="dayReasonsExtra" aria-label="Show ${more} more reason${more === 1 ? '' : 's'}">+${more} more</button><span class="dp-reasons-extra" id="dayReasonsExtra" aria-live="polite" hidden>${reasons.slice(2).map(reason => line(reason, true)).join('')}</span>` : ''}` : '';
+  const explanation = `${reasonLines}${note ? `<span>${esc(note)}</span>` : ''}${deskNote ? `<span class="dp-desk-note">${esc(deskNote)}</span>` : ''}`;
+  const content = `${explanation ? `<p class="dp-note-lines">${explanation}</p>` : ''}${positionNote ? `<p class="dp-position-note">${esc(positionNote)}</p>` : ''}`;
+  return content ? `<div class="dp-note">${icon('info')}<div class="dp-note-copy">${content}</div></div>` : '';
+}
+
+// Measure after the house typography observer joins numbers and units, still
+// before paint, so wrapping matches the text that will actually be shown.
+// The collapsed body leaves this room at the bottom; CSS caps it at 80vh.
+// body.scrollHeight includes the gap before the separate positions paragraph.
+function fitDaySheet(sheet) {
+  if (!sheet?.getBoundingClientRect) return;
+  queueMicrotask(() => {
+    if (!sheet.open) return;
+    const extra = sheet.querySelector('.dp-reasons-extra'), button = sheet.querySelector('.dp-reasons-more');
+    if (extra && !button) return;
+    sheet.style.height = '';
+    const body = sheet.querySelector('.dlg-b');
+    fitDaySummary(body);
+    if (!extra || !button) return;
+    const head = sheet.querySelector('.dlg-h'), collapsed = body.scrollHeight;
+    extra.hidden = false;
+    button.hidden = true;
+    const height = Math.ceil(head.getBoundingClientRect().height + Math.max(collapsed, body.scrollHeight));
+    extra.hidden = true;
+    button.hidden = false;
+    sheet.style.height = `${height}px`;
+  });
 }
 
 // Opened by a tap, focus goes to the sheet's heading without a ring; from the
@@ -351,8 +439,13 @@ export function openDaySheet(view, k, { pointer = false } = {}) {
   if (!sheet) return;
   const day = dayContent(view, k, deskSet());
   $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(k)}`;
-  patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${day.note ? `<p class="dp-note">${icon('info')}<span>${esc(day.note)}</span></p>` : ''}`);
+  // Rebuild even when patch's cached source matches the last opening: the
+  // disclosure may have removed itself from that DOM in the meantime.
+  patch($('#sheetBody'), '');
+  patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}`);
   openDialog(sheet, { pointer });
+  fitDaySummary($('#sheetBody'));
+  fitDaySheet(sheet);
 }
 
 // ---------- The record's own state, inside the chart's fixed box ----------

@@ -25,6 +25,16 @@ required(/\.ctip[^{]*\{[^}]*background:\s*var\(--tip-bg\)/.test(css) && /\.tip \
 required(/scrollbar-gutter:\s*stable/.test(css), "app.css: scrollbar gutter is stable");
 required(/prefers-reduced-motion:\s*no-preference/.test(css), "app.css: motion only without reduced motion");
 
+// The icon is fixed-width; its sibling must fill the remaining note width
+// independently of the disclosure's intrinsic size or presence. Paragraphs
+// stretch across that column, with the separate positions note 8 px below.
+const noteCopy = css.match(/\.dp-note-copy\s*\{([^}]+)\}/)?.[1] ?? '';
+required(/flex:\s*1\s+1\s+0\s*;/.test(noteCopy) && /min-width:\s*0\s*;/.test(noteCopy), "app.css: note column width is independent of the disclosure");
+required(/display:\s*flex\s*;/.test(noteCopy) && /flex-direction:\s*column\s*;/.test(noteCopy) && /gap:\s*8px\s*;/.test(noteCopy), "app.css: note paragraphs fill the column with an 8 px gap");
+required(/\.dp-note-lead,\s*\.dp-reason,\s*\.dp-desk-note,\s*\.dp-reasons-extra\s*\{\s*display:\s*block\s*;/.test(css), "app.css: every reason block fills the text column");
+const reasonsMore = css.match(/\.dp-reasons-more\s*\{([^}]+)\}/)?.[1] ?? '';
+required(/display:\s*block\s*;/.test(reasonsMore) && /width:\s*100%\s*;/.test(reasonsMore) && /min-height:\s*44px\s*;/.test(reasonsMore) && /text-align:\s*left\s*;/.test(reasonsMore) && /padding:\s*0\s*;/.test(reasonsMore), "app.css: reason disclosure has its own full-width row aligned with the text");
+
 // The board reads. Its one write (P5) is fleet-write.js: a single POST of a
 // reviewed paper draft to the fleet settings' propagate route, refused unless
 // the mode is paper, imported only by Settings. No other module writes,
