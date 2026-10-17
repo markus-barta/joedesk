@@ -52,6 +52,45 @@ const run = name => !ONLY.length || ONLY.includes(name);
 
 const N = text => String(text ?? '').replace(/[\s ]+/g, '');
 const NB = '\u00a0';
+// Executed in the page: measure visible text glyphs independently of the
+// fitter, and unit boxes so a line beginning with an icon must also be flush.
+function tradeMetaLines(meta) {
+  const bounds = meta.getBoundingClientRect(), lines = [], suffixes = [];
+  const units = [...meta.querySelectorAll('.meta-unit')].map(unit => ({
+    text: unit.textContent, ...unit.getBoundingClientRect().toJSON(),
+  }));
+  const walker = document.createTreeWalker(meta, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (getComputedStyle(node.parentElement).visibility !== 'visible') continue;
+    for (const match of node.textContent.matchAll(/\S/gu)) {
+      const range = document.createRange();
+      range.setStart(node, match.index); range.setEnd(node, match.index + match[0].length);
+      for (const r of range.getClientRects()) {
+        if (!r.width || !r.height) continue;
+        let line = lines.find(line => Math.abs(line.top - r.top) < 1);
+        if (!line) lines.push(line = { top: r.top, glyphs: [] });
+        line.glyphs.push({ text: match[0], left: r.left });
+      }
+    }
+  }
+  for (const [i, unit] of [...meta.querySelectorAll('.meta-unit')].entries()) {
+    const suffix = unit.querySelector('.meta-sep');
+    if (!suffix) continue;
+    const box = suffix.getBoundingClientRect();
+    suffixes.push({ text: suffix.textContent, width: box.width,
+      visibility: getComputedStyle(suffix).visibility,
+      preceding: suffix.previousSibling?.textContent?.trim(),
+      lineEnd: !units[i + 1] || units[i + 1].top >= units[i].bottom - 0.5 });
+  }
+  return { units, suffixes, lines: lines.sort((a, b) => a.top - b.top).map(line => ({
+    top: line.top, text: line.glyphs.sort((a, b) => a.left - b.left).map(g => g.text).join(''),
+  })), startsFlush: units.every((unit, i) => i && unit.top < units[i - 1].bottom - 0.5 || Math.abs(unit.left - bounds.left) < 0.5) };
+}
+const cleanMetaLines = rows => rows.length === 4 && rows.every(row => row.meta.lines.length > 0 && row.meta.startsFlush &&
+  row.meta.lines.every(line => !line.text.startsWith('·') && !line.text.endsWith('·')) &&
+  row.meta.suffixes.length === 3 && row.meta.suffixes.every(suffix => suffix.width > 0 && suffix.preceding &&
+    suffix.text.trim() === '·' && suffix.visibility === (suffix.lineEnd ? 'hidden' : 'visible')));
 const money = n => (n === null || n === undefined ? '—' : fmt.money(n, 'EUR', true));
 const two = (a, b) => `${a === null || a === undefined ? '—' : money(a)}/${b === null || b === undefined ? '—' : money(b)}`;
 const DESKS = ['j', 'joe', 'joel'];
@@ -814,6 +853,8 @@ try {
             metaUnits: [...meta.querySelectorAll('.meta-unit')].map(unit => ({ text: unit.textContent,
               nowrap: getComputedStyle(unit).whiteSpace === 'nowrap', words: words(unit),
               top: unit.getBoundingClientRect().top, bottom: unit.getBoundingClientRect().bottom })),
+            meta: (${tradeMetaLines.toString()})(meta), priceFont: getComputedStyle(px).fontSize,
+            smallPrice: px.classList.contains('small'), feeFont: getComputedStyle(px.querySelector('.fee')).fontSize,
             priceColumn: getComputedStyle(px).gridColumn, right: n.right, amountInside: a.left >= n.left && a.right <= n.right,
             amountInPanel: a.left >= panel.left && a.right <= panel.right,
             rowInside: r.left >= bounds.left && r.right <= bounds.right && row.scrollWidth <= row.clientWidth,
@@ -845,6 +886,11 @@ try {
           r.metaUnits.length === 4 && r.metaUnits.every(unit => unit.nowrap && unit.words.every(w => w.lines.length === 1)) &&
           r.metaUnits.some(unit => unit.text.includes('Long')) && r.metaUnits.some(unit => unit.text.startsWith('closed ')) &&
           r.metaUnits.some(unit => unit.text.startsWith('held '))), detail.rows);
+      check('trade-amount', `${tag}: no visible dot starts or ends a meta line, suffixes stay with the preceding unit, and new lines start flush`,
+        cleanMetaLines(detail.rows), detail.rows.map(({ id, meta }) => ({ id, meta })));
+      check('trade-amount', `${tag}: every price in the panel uses one size, with all rows at 11 px if any needs it`,
+        new Set(detail.rows.map(r => r.priceFont)).size === 1 &&
+        detail.rows.every(r => r.smallPrice === detail.rows[0].smallPrice && (!r.smallPrice || r.priceFont === '11px' && r.feeFont === '11px')), detail.rows);
       if (viewport.mobile) {
         check('trade-amount', `${tag}: phone amount columns fit their content without clipping and prices span the second row`,
           detail.rows.every(r => Math.abs(r.width - r.amountWidth) < 1 && r.nowrap && r.scroll <= r.client &&
@@ -871,13 +917,17 @@ try {
         const host = document.createElement('div');
         host.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden;pointer-events:none;width:1000px';
         const row = document.querySelector(${JSON.stringify(root)} + ' [data-trade="rt-amount-million"]').cloneNode(true);
-        row.style.display = 'block'; host.append(row); document.body.append(host);
+        const peer = document.querySelector(${JSON.stringify(root)} + ' [data-trade="rt-amount-short"]').cloneNode(true);
+        row.style.display = peer.style.display = 'block'; peer.querySelector('.px').style.width = '1000px';
+        host.append(row, peer); document.body.append(host);
         try {
           const px = row.querySelector('.px'), fee = px.querySelector('.fee'), ln = px.querySelector('.ln');
           const prices = [...ln.children];
           const size = width => { px.style.width = width + 'px'; fitTradeRows(host); };
           const snapshot = () => ({ small: px.classList.contains('small'), feeWrap: px.classList.contains('wrap-fee'),
             font: getComputedStyle(px).fontSize, feeFont: getComputedStyle(fee).fontSize,
+            peerFont: getComputedStyle(peer.querySelector('.px')).fontSize,
+            peerSmall: peer.querySelector('.px').classList.contains('small'),
             wrapped: prices[1].getBoundingClientRect().top > prices[0].getBoundingClientRect().top,
             feeBelow: fee.getBoundingClientRect().top >= ln.getBoundingClientRect().bottom,
             fits: px.scrollWidth <= px.clientWidth });
@@ -906,8 +956,45 @@ try {
         yieldOrder.reduced.wrapped && yieldOrder.reduced.small && yieldOrder.reduced.font === '11px' && !yieldOrder.reduced.feeWrap && yieldOrder.reduced.fits &&
         yieldOrder.feeWrap.small && yieldOrder.feeWrap.feeFont === '11px' && yieldOrder.feeWrap.feeWrap && yieldOrder.feeWrap.feeBelow && yieldOrder.feeWrap.fits &&
         !yieldOrder.recovered.small && !yieldOrder.recovered.feeWrap && yieldOrder.recovered.fits, yieldOrder);
+      check('trade-amount', `${tag}: a single constrained price reduces its roomy peer too, and both recover together`,
+        ['pairWrap', 'reduced', 'feeWrap', 'recovered'].every(step => yieldOrder[step].font === yieldOrder[step].peerFont &&
+          yieldOrder[step].small === yieldOrder[step].peerSmall), yieldOrder);
       check('trade-amount', `${tag}: only an oversized single name token breaks internally without overflow`,
         yieldOrder.token.lines > 1 && yieldOrder.token.fits && yieldOrder.token.width <= 120, yieldOrder.token);
+      const resizedLayout = `(() => {
+        const root = document.querySelector(${JSON.stringify(root)});
+        return [...root.querySelectorAll('.trow')].map(row => ({ id: row.dataset.trade,
+          meta: (${tradeMetaLines.toString()})(row.querySelector('.meta')),
+          priceFont: getComputedStyle(row.querySelector('.px')).fontSize }));
+      })()`;
+      const alternate = viewports.find(v => v.name === ({ '1440': '1024', '1024': '1440', '390': '360', '360': '390' })[viewport.name]);
+      await configure(page, alternate, theme);
+      await settle(page);
+      const resized = await page.evaluate(resizedLayout);
+      check('trade-amount', `${tag}: live resize to ${alternate.width} keeps dots off meta line edges, starts flush and uses one panel price size`,
+        cleanMetaLines(resized) && new Set(resized.map(row => row.priceFont)).size === 1, resized);
+      await configure(page, viewport, theme);
+      await settle(page);
+      const restored = await page.evaluate(resizedLayout);
+      check('trade-amount', `${tag}: resizing back restores clean meta lines and the original panel price size`,
+        cleanMetaLines(restored) && restored.every(row => row.priceFont === detail.rows.find(r => r.id === row.id)?.priceFont), restored);
+      const stable = await page.evaluate(`(async () => {
+        const { fitTradeRows } = await import('./results.js');
+        const root = document.querySelector(${JSON.stringify(root)});
+        const geometry = () => [...root.querySelectorAll('.meta-unit, .meta-sep')].map(el => el.getBoundingClientRect().toJSON());
+        const visibility = () => [...root.querySelectorAll('.meta-sep')].map(el => getComputedStyle(el).visibility);
+        const before = geometry(), hidden = visibility();
+        fitTradeRows(root); const once = geometry(), first = visibility();
+        fitTradeRows(root); const twice = geometry(), second = visibility();
+        const suffixes = [...root.querySelectorAll('.meta-sep')];
+        try {
+          suffixes.forEach(el => { el.style.visibility = 'visible'; });
+          return { before, once, twice, shown: geometry(), hidden, first, second };
+        } finally { suffixes.forEach(el => el.style.removeProperty('visibility')); }
+      })()`);
+      check('trade-amount', `${tag}: hiding dots keeps their widths and repeated layout never reflows or flips visibility`,
+        [stable.once, stable.twice, stable.shown].every(boxes => JSON.stringify(boxes) === JSON.stringify(stable.before)) &&
+        JSON.stringify(stable.hidden) === JSON.stringify(stable.first) && JSON.stringify(stable.first) === JSON.stringify(stable.second), stable);
       if (!viewport.mobile) {
         // Keep the final million and short rows together in the visible list,
         // so both desktop panel crops show their amount alignment.
@@ -933,6 +1020,16 @@ try {
         const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip: crop.clip, captureBeyondViewport: true });
         writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
         shots.push({ file: `${name}.png`, what: 'Whole day panel with 16 px beyond its right edge: compare amounts, whole name/meta words, prices and fees' });
+      }
+      if (viewport.name === '360') {
+        const clip = await page.evaluate(`(() => {
+          const r = document.getElementById('daySheet').getBoundingClientRect();
+          return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 };
+        })()`);
+        const name = `${viewport.name}-${theme}-results-trade-amount-sheet-full-crop`;
+        const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true });
+        writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+        shots.push({ file: `${name}.png`, what: 'Whole 360 px day sheet: meta line endings and uniform panel price size' });
       }
       // Crop the whole widest row, including its yielding name/price columns.
       // Scroll only the detail container so the surrounding page stays put.
@@ -2006,16 +2103,21 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   and keep the original 92 px minimum on desktop. Phone amount columns
   size to their content, with prices spanning the second row. Desktop names
   keep at least 120 px; Range rectangles prove no name or meta word breaks
-  internally, and meta units wrap only between the middle dots. Only an
-  oversized single name token may break. The price pair wraps first, then
-  uses the 11 px token, then the fee may wrap; measured probes check this
-  order and recovery at every width/theme. Every row, amount, price part
+  internally. Meta dots stay inside the preceding nowrap unit; visible glyph
+  checks forbid dots at either line edge and require flush line starts, also
+  after live resize. Hidden suffixes retain their width; repeated fits must
+  preserve geometry and visibility. Only an oversized single name token may
+  break. The price pair wraps first, then all panel rows use the 11 px token
+  if any needs it, then the fee may wrap; measured probes check this order,
+  the roomy peer's size and recovery at every width/theme. Every row, amount, price part
   and the full desktop trade-count/amount header must fit its panel or sheet.
   Opening and closing the detail surface moves outer geometry exactly
   0 px. The widest row at each width/theme is captured in
   \`*-results-trade-amount-{panel,sheet}-crop.png\`. Whole-panel crops at
   1440/1024 in both themes are \`*-results-trade-amount-panel-full-crop.png\`
   with 16 px beyond the panel's right edge for clipping and alignment review.
+  Whole 360 px sheets in both themes are
+  \`360-*-results-trade-amount-sheet-full-crop.png\`.
 - **Partial coverage (JOED-30).** The dedicated \`partial-days\` scenario uses
   real ingress at 1440/1024/390/360, light and dark, through the worker and
   fallback. October shows yesterday (15th) as Partial, missing-summary Stale

@@ -676,12 +676,13 @@ span.dbar, span.vbar { display: block; }
 .trow .name { min-width: 120px; word-break: normal; overflow-wrap: normal; }
 .trow .name .word { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
 .trow .name .meta-unit { display: inline-block; white-space: nowrap; }
+.trow .name .meta-sep.line-end { visibility: hidden; }
 .trow .name .i.side { width: 12px; height: 12px; display: inline; vertical-align: -1px; }
 .trow .name .i.im { width: 13px; height: 13px; vertical-align: -2px; }
 .trow .px .ln { display: inline-flex; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; column-gap: 5px; white-space: normal; }
 .trow .px .ln > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-/* fitTradeRows tries the wrapped pair first, then the small token, then
-   permits the fee to wrap. Amount sizing is independent of these steps. */
+/* fitTradeRows tries the wrapped pair first, then the panel-wide small token,
+   then permits the fee to wrap. Amount sizing is independent of these steps. */
 .trow .px.small, .trow .px.small .fee { font-size: var(--trade-price-small); }
 .trow .px.wrap-fee { grid-template-columns: minmax(0, 1fr); }
 .trow .px.wrap-fee .fee { grid-column: 1; white-space: normal; }

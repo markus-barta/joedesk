@@ -665,7 +665,8 @@ test('JOED-31 rendering: exact extreme amounts and prices survive whole-word nam
     assert.ok(textOf(html).includes('Demonstration company with a long name'));
     assert.equal((html.match(/class="meta-unit"/g) ?? []).length, 16);
     assert.match(html, /<span class="word">Demonstration<\/span> <span class="word">company<\/span>/);
-    assert.match(html, /<span class="meta-unit">closed 17:02<\/span> · <span class="meta-unit">held 1 h 2 min<\/span>/);
+    assert.equal((html.match(/class="meta-sep" aria-hidden="true"> ·<\/span><\/span> <span class="meta-unit">/g) ?? []).length, 12);
+    assert.match(html, /<span class="meta-unit">closed 17:02<span class="meta-sep" aria-hidden="true"> ·<\/span><\/span> <span class="meta-unit">held 1 h 2 min<\/span>/);
   }
 });
 

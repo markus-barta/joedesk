@@ -550,8 +550,12 @@ Their columns grow to fit, with the original 92 px minimum for short amounts
 on desktop. Names keep at least 120 px and wrap between whole words; only
 an individual token wider than the column may break internally. Meta units
 (desk, side/quantity, close time and holding duration) stay together and wrap
-only between the middle dots. Entry/exit prices wrap first, then use the
-11 px small token, then fees may wrap. Phone amount
+between units. Each middle dot is a nowrap suffix of the preceding unit;
+after layout and resize, line-ending dots use `visibility: hidden`, retaining
+their width so lines stay stable and the next line starts flush.
+Entry/exit prices wrap first, then the entire panel uses the 11 px small token
+if any row needs it, then fees may wrap. Wider panels recover their regular
+price size together. Phone amount
 columns size to their content, while prices and fees span the second row
 beneath the company and amount columns.
 The focused `trade-amount` browser scenario checks −€ 100.000,12,
@@ -562,12 +566,17 @@ common right edges, desktop-only 92 px sizing, phone content sizing, wrapping
 of the eight-decimal pair at 1440, and exactly 0 px outer movement on open/close.
 Range rectangles check every name/meta word, atomic meta units, the 120 px
 desktop name floor, full panel-header visibility and the price/fee yield order.
+Visible glyph checks reject a middle dot at either end of every meta line;
+resize and repeated-fit probes verify flush starts, reserved suffix widths,
+stable wrapping and uniform panel price sizing, including a roomy peer row.
 Widest-row crops go to `JOED_QA_DIR` as
 `*-results-trade-amount-{panel,sheet}-crop.png` for the visual check.
 Whole-panel crops at 1440/1024 in both themes add
 `*-results-trade-amount-panel-full-crop.png` with a 16 px margin beyond the
 panel's right edge for clipping and cross-row alignment review. Both the
 million and short rows must be fully visible in each whole-panel crop.
+The full 360 px sheet in each theme is
+`360-*-results-trade-amount-sheet-full-crop.png`.
 
 **Producer contract pin — manifest revision 6.** Compared with revision 2,
 revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds

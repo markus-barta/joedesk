@@ -354,10 +354,11 @@ function held(t) {
 // A price in full, exactly as recorded (at least two decimals).
 const price = p => money(decimalUnits(p.amount), p.currency, false, Math.max(2, (p.amount.split('.')[1] ?? '').length));
 const tradeWords = text => text.split(/(\s+)/u).map(word => /^\s+$/u.test(word) ? esc(word) : `<span class="word">${esc(word)}</span>`).join('');
+const metaSuffix = '<span class="meta-sep" aria-hidden="true"> ·</span>';
 function tradeRows(ts) {
   return ts.map(t => `<div class="trow" data-trade="${esc(t.id)}">
     ${symBadge(t.symbol, t.desk)}
-    <div class="name"><b class="word">${esc(t.symbol)}</b>${t.company ? ` · ${tradeWords(t.company)}` : ''}<span class="meta"><span class="meta-unit">${inlineMark(t.desk)} ${LABEL[t.desk]}</span> · <span class="meta-unit">${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(t.quantity.replace('.', ','))}</span> · <span class="meta-unit">closed ${timeHM(new Date(t.closedAt).toISOString())}</span> · <span class="meta-unit">${held(t)}</span></span></div>
+    <div class="name"><b class="word">${esc(t.symbol)}</b>${t.company ? ` · ${tradeWords(t.company)}` : ''}<span class="meta"><span class="meta-unit">${inlineMark(t.desk)} ${LABEL[t.desk]}${metaSuffix}</span> <span class="meta-unit">${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(t.quantity.replace('.', ','))}${metaSuffix}</span> <span class="meta-unit">closed ${timeHM(new Date(t.closedAt).toISOString())}${metaSuffix}</span> <span class="meta-unit">${held(t)}</span></span></div>
     <div class="px"><span class="ln"><span>${price(t.entry)}</span><span>${icon('arrow')}${price(t.exit)}</span></span><span class="fee">fees ${eur(t.units.fees)}</span></div>
     <div class="net">${pl(t.units.net)}</div>
   </div>`).join('');
@@ -367,24 +368,42 @@ function tradeRows(ts) {
 // can wrap normally before either single price needs the small type token.
 // Rerenders/resizes reset the steps so a wider column recovers its normal size.
 export function fitTradeRows(root) {
-  for (const row of root?.querySelectorAll?.('.trow') ?? []) {
+  const rows = [...root?.querySelectorAll?.('.trow') ?? []];
+  const columns = rows.map(row => {
     const px = row.querySelector('.px');
     row.classList.remove('prices-below');
     px.classList.remove('small', 'wrap-fee');
-    if (!px.clientWidth) continue;
-    const overflows = (el, column) => {
-      const box = column.getBoundingClientRect(), range = document.createRange();
-      range.selectNodeContents(el);
-      // scrollWidth misses overflow to the left of right-aligned fee text.
-      return el.scrollWidth > el.clientWidth || [...range.getClientRects()].some(r => r.left < box.left || r.right > box.right);
-    };
     const ln = px.querySelector('.ln'), prices = [...ln.children], fee = px.querySelector('.fee');
+    return { row, px, ln, prices, fee };
+  });
+  const overflows = (el, column) => {
+    const box = column.getBoundingClientRect(), range = document.createRange();
+    range.selectNodeContents(el);
+    // scrollWidth misses overflow to the left of right-aligned fee text.
+    return el.scrollWidth > el.clientWidth || [...range.getClientRects()].some(r => r.left < box.left || r.right > box.right);
+  };
+  const needsSmall = columns.some(({ px, ln, prices, fee }) => px.clientWidth &&
+    (prices.some(el => overflows(el, ln)) || overflows(fee, px)));
+  // Decide once for the panel, before any fee or below-row fallback.
+  if (needsSmall) for (const { px } of columns) px.classList.add('small');
+  for (const { row, px, ln, prices, fee } of columns) {
+    if (!px.clientWidth) continue;
     const pricesOverflow = () => prices.some(el => overflows(el, ln));
-    if (pricesOverflow() || overflows(fee, px)) px.classList.add('small');
     if (pricesOverflow() || overflows(fee, px)) px.classList.add('wrap-fee');
     // Beyond the supported long-price fixture, keep an indivisible price
     // visible beneath the first row if even the small token cannot fit.
     if (pricesOverflow()) row.classList.add('prices-below');
+  }
+  for (const row of rows) {
+    const units = [...row.querySelectorAll('.meta-unit')];
+    for (const [i, unit] of units.entries()) {
+      const suffix = unit.querySelector('.meta-sep');
+      if (!suffix || !unit.clientWidth) continue;
+      const box = unit.getBoundingClientRect(), next = units[i + 1]?.getBoundingClientRect();
+      // Visibility keeps the suffix's width. Repeated fits and resizes cannot
+      // move a unit back onto the preceding line and flip the dot on again.
+      suffix.classList.toggle('line-end', !next || next.top >= box.bottom - 0.5);
+    }
   }
 }
 
