@@ -16,7 +16,7 @@ import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './brows
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
-import { designResults, withTradeSummaries, partialDaysResults } from './browser/results.mjs';
+import { designResults, withTradeSummaries, partialDaysResults, retainedPartialResults } from './browser/results.mjs';
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -962,7 +962,7 @@ try {
         !shifted(before, await rects(page, SHIFT), ['top', 'left', 'height']).length, stale.status);
       if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-ingress-stale`, 'Results stale 60 seconds after its last accepted push');
       const bad = structuredClone(record); bad.seq++; bad.generatedAt = board.clock(); bad.trades[0].netEur.amount = '999';
-      const rejected = await board.pushResults(bad);
+      const rejected = await board.pushResults(bad, { status: 422, reason: 'contract_invalid' });
       check('results-ingress', `${viewport.name} ${theme}: a bad pushed record is rejected with 422 contract_invalid`,
         rejected.status === 422 && rejected.body.reason === 'contract_invalid', rejected);
       await page.evaluate('window.__joedesk.refresh()');
@@ -988,23 +988,21 @@ try {
         p.desk = 'joe'; p.openedAt = `2026-10-${i ? '16' : '15'}T09:15:00.000Z`;
       });
     });
-    const { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted, threeReasons, emptyToday, todayWithoutReasons } = partialDaysResults(board.clock());
+    const { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted, threeReasons,
+      emptyToday, todayWithoutReasons, filteredReasons, growingReasons, largeFull } = partialDaysResults(board.clock());
     const { partial: partialTrade, escalated, missing: stale, normal, emptyEscalated, today } = dates;
-    const filteredReasons = structuredClone(singleReason);
-    filteredReasons.days.find(d => d.date === today).partialReasons = ['history_gap'];
     // The 14th has a trade but no opened-position sentence. Five reasons
     // leave three hidden lines, so revealing them grows the content below cap.
-    const growingReasons = structuredClone(partial), growingDay = escalated;
-    growingReasons.days.find(d => d.date === growingDay).partialReasons = ['capture_gap', 'history_gap',
-      'broker_trade_count_mismatch', 'broker_realised_pnl_mismatch', 'unattributed_activity'];
-    const reason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
+    const growingDay = escalated;
+    const reason = 'The trade history has a gap that covers this day.', reasonLabel = 'History gap';
     let seq = baseline.seq;
     const replace = async (record, label) => {
-      const oldCalendar = await page.evaluate('document.getElementById("cal").innerHTML');
       check('partial-days', `${label}: accepted ingress`, (await board.pushResults({ ...record, seq: ++seq })).status === 200);
-      await page.evaluate('window.__joedesk.refresh()');
+      // A reason on today changes the panel but leaves calendar HTML intact.
+      // refresh resolves after the worker/fallback read; then wait for paint.
+      await page.evaluate('window.__joedesk.refresh().then(() => new Promise(requestAnimationFrame))');
       const count = record.trades.filter(t => t.closedAt.startsWith(partialTrade)).length;
-      await waitFor(page, `document.getElementById('cal').innerHTML !== ${JSON.stringify(oldCalendar)} && document.querySelector('#cal [data-day="${partialTrade}"] .n').textContent === ${JSON.stringify(
+      await waitFor(page, `document.querySelector('#cal [data-day="${partialTrade}"] .n').textContent === ${JSON.stringify(
         record === missing ? 'Stale' : record.days.find(d => d.date === partialTrade)?.coverage === 'partial' ? 'Partial' :
           count + '\u00a0' + (count === 1 ? 'trade' : 'trades'))}`);
       await settle(page);
@@ -1101,13 +1099,13 @@ try {
       check('partial-days', `${tag}: Partial inherits tint ink, keeps its slot and accessible reason`,
         trade.markers === 1 && trade.half && trade.ink && trade.inside && trade.aligned && trade.note === 'Partial' &&
         trade.noteVisible === !viewport.mobile && trade.aria.includes("; Partial: this day's record is incomplete") &&
-        trade.aria.includes(reason) && !trade.clipped, trade);
+        trade.aria.includes(reasonLabel) && !trade.clipped, trade);
       check('partial-days', `${tag}: partial trade keeps the exact amount and loss tint`,
         N(trade.aria).includes(N('−€ 1,00 from 1 trade')) && /\bl[1-4]\b/.test(trade.cls) &&
         shown.cal.cells.find(c => c.day === partialTrade).v === full.cal.cells.find(c => c.day === partialTrade).v, trade);
       check('partial-days', `${tag}: both traded and empty old partial dates escalate to exactly one Stale marker`,
         [old, oldEmpty].every(c => c.markers === 1 && c.half && c.ink && c.note === 'Stale' && c.noteInk &&
-          c.aria.includes(`Stale: still incomplete; ${reason}`) && !c.clipped), [old, oldEmpty]);
+          c.aria.includes(`Stale: still incomplete; ${reasonLabel}`) && !c.clipped), [old, oldEmpty]);
       check('partial-days', `${tag}: missing-day Stale, open today and normal retain their states`,
         cell(stale).markers === 1 && cell(stale).note === 'Stale' && cell(stale).aria.includes('daily summary missing') &&
         cell(today).markers === 0 && !cell(today).aria.includes('Partial') && /\btoday\b/.test(cell(today).cls) &&
@@ -1158,29 +1156,37 @@ try {
             c.markers === 1 && c.half && c.warn && c.noteInk && c.note === 'Partial' && c.value === '—' && c.muted &&
             /\bnone\b/.test(c.cls) && c.bg === 'rgba(0, 0, 0, 0)' && /inset/.test(c.ring) &&
             c.aria.includes('no complete record; Partial:') && !/€|no trades|sat out/.test(c.aria) && !c.clipped, c);
-          await shot(page, viewport, `${viewport.name}-${theme}-results-partial-empty-days`, 'Same October snapshot with an unattributed-only Partial on the 15th');
+          await shot(page, viewport, `${viewport.name}-${theme}-results-partial-empty-days`, 'Same October snapshot with a no-trade history-gap Partial on the 15th');
         }
         const closedSheet = viewport.mobile ? await rects(page, SHIFT) : null;
         await click(page, `#cal [data-day="${partialTrade}"]`);
         const detail = await page.evaluate(`(() => {
           const root = document.querySelector(${JSON.stringify(viewport.mobile ? '#sheetBody' : '#daypanel')});
           const sum = root.querySelector('.dp-sum'), note = root.querySelector('.dp-note-lines');
+          // Reason boxes intentionally overhang their paragraph by 4 px.
+          // Measure the enclosing note and the actual lines, not that paragraph.
+          const measured = [root, root.querySelector('.dp-head'), sum, root.querySelector('.dp-note'),
+            ...root.querySelectorAll('.dp-note-lead, .dp-reason, .dp-position-note, .trow')].filter(Boolean);
+          const overflow = measured.filter(el => el.scrollWidth > el.clientWidth).map(el => ({
+            element: el.className || el.id, scroll: el.scrollWidth, client: el.clientWidth }));
           return { sum: sum.innerText, text: root.innerText, rows: root.querySelectorAll('.trow').length,
             warning: root.querySelectorAll('.dp-sum .st.warn use[href="#i-half"]').length,
             reason: note?.innerText, noteVisible: __audit.visible(note), info: Boolean(root.querySelector('.dp-note use[href="#i-info"]')),
-            clipped: [root, sum, note, ...root.querySelectorAll('.trow')].filter(Boolean).some(el => el.scrollWidth > el.clientWidth) };
+            reasonLines: [...note.children].map(el => el.innerText),
+            paragraph: { scroll: note.scrollWidth, client: note.clientWidth },
+            overflow, clipped: overflow.length > 0 };
         })()`);
         check('partial-days', `${tag}: ${hasTrades ? 'traded' : 'empty'} ${viewport.mobile ? 'sheet' : 'panel'} keeps the amount/reason without clipping`,
           (hasTrades ? /^Partial·(?:1trade·)?−€1,00sofar$/.test(N(detail.sum)) : N(detail.sum) === N('Partial · record incomplete')) &&
           detail.rows === (hasTrades ? 1 : 0) && detail.warning === 1 &&
-          detail.reason === reason &&
+          same(detail.reasonLines, ['Result may be incomplete.', reason]) &&
           detail.noteVisible && detail.info && !detail.clipped &&
           (hasTrades || !/€|no trades|sat out|so far/i.test(detail.text)), detail);
         const name = `${viewport.name}-${theme}-results-partial-${hasTrades ? 'trade' : 'empty'}-${viewport.mobile ? 'sheet' : 'panel'}`;
-        const layout = await checkNoteGap(viewport.mobile ? '#sheetBody' : '#daypanel', `${tag} ${hasTrades ? 'traded' : 'empty'} legacy`);
-        check('partial-days', `${tag}: legacy positions paragraph retains its exact sentence`,
+        const layout = await checkNoteGap(viewport.mobile ? '#sheetBody' : '#daypanel', `${tag} ${hasTrades ? 'traded' : 'empty'} history gap`);
+        check('partial-days', `${tag}: history-gap positions paragraph retains its exact sentence`,
           layout.position === 'Bank of America (BAC, Joe), opened this day, is still open; it counts as Still open and on Desk.', layout);
-        if (viewport.name === '1440' && !hasTrades) await cropNoteView('#daypanel', name + '-crop', 'Legacy empty panel: separate position paragraph, exactly 8 px after the default reason');
+        if (viewport.name === '1440' && !hasTrades) await cropNoteView('#daypanel', name + '-crop', 'Empty panel: separate position paragraph, exactly 8 px after the history-gap reason');
         if (viewport.mobile) {
           await viewShot(page, name, `Partial on 15 October: ${hasTrades ? 'exact money so far' : 'unknown amount and incomplete record'}`);
           await key(page, 'Escape');
@@ -1200,8 +1206,6 @@ try {
 
       // Same 99 trade rows before and after: adding Partial/so far cannot
       // change the fixed 36 px header or the settled phone sheet's geometry.
-      const largeFull = structuredClone(large); largeFull.days.find(d => d.date === partialTrade).coverage = 'full';
-      withTradeSummaries(largeFull);
       await replace(largeFull, `${tag} full large summary`);
       if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
       const headerSelectors = viewport.mobile ? ['.dlg-h', '#sheetBody .dp-sum'] : ['.dp-head'];
@@ -1493,21 +1497,21 @@ try {
         }
       }
 
-      for (const [record, kind] of [[partial, 'legacy'], [filteredReasons, 'reasoned']]) {
+      for (const [record, kind] of [[partial, 'partial'], [filteredReasons, 'reasoned']]) {
         await replace(record, `${tag} ${kind} reason`);
         await click(page, '#deskSeg [data-desk="joe"]');
         for (const day of [partialTrade, today]) {
           await click(page, `#cal [data-day="${day}"]`);
           const layout = await noteLayout(reasonRoot);
           const expected = [
-            ...(kind === 'legacy' ? day === today ? [] : [reason] : ['Result may be incomplete.', 'The trade history has a gap that covers this day.']),
-            ...(kind === 'legacy' && day === today ? [] : [M.PARTIAL_DESK_NOTE]),
+            ...(kind === 'partial' && day === today ? [] : ['Result may be incomplete.', reason]),
+            ...(kind === 'partial' && day === today ? [] : [M.PARTIAL_DESK_NOTE]),
           ];
           const position = `${day === today ? 'Coca-Cola (KO, Joe), opened today at 11:15' : 'Bank of America (BAC, Joe), opened this day'}, is still open; it counts as Still open and on Desk.`;
           check('partial-days', `${tag}: filtered ${kind} partial ${day === today ? 'today' : 'closed day'} has exact order: explanation, desk scope, opened position`,
             same(layout.lines.map(N), expected.map(N)) && layout.position === position && layout.positionTag === 'P', { layout, expected, position });
           if (expected.length) await checkNoteGap(reasonRoot, `${tag} filtered ${kind} ${day}`);
-          else check('partial-days', `${tag}: legacy today has only a positions paragraph`, !layout.reasonTag && layout.gap === null, layout);
+          else check('partial-days', `${tag}: reasonless today has only a positions paragraph`, !layout.reasonTag && layout.gap === null, layout);
           const name = `${viewport.name}-${theme}-results-partial-desk-filtered-${kind}-${day === today ? 'today' : 'closed'}`;
           if (viewport.mobile) { await viewShot(page, name, 'Partial explanation, whole-day scope, then the open Joe position'); await key(page, 'Escape'); }
           else await shot(page, viewport, name, 'Partial explanation, whole-day scope, then the open Joe position');
@@ -1560,6 +1564,29 @@ try {
         else await shot(page, viewport, name, 'No trades so far on the open Vienna day');
       }
 
+    }
+
+    // Preserve the legacy default line through a revision-6-valid path: the
+    // original receipt was on the still-open day, now retained after midnight.
+    const retained = retainedPartialResults();
+    const { board: retainedBoard } = await designBoard(retained.receivedAt, null, ({ snapshot }) => {
+      snapshot.positions.rows.find(p => p.scope === 'stage0').openedAt = '2026-10-15T09:15:00.000Z';
+    });
+    await retainedBoard.pushResults(retained.record);
+    retainedBoard.setNow('2026-10-16T12:00:00.000Z');
+    for (const viewport of viewports) for (const theme of THEMES) {
+      const injection = viewport.mobile && theme === 'dark'
+        ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
+      await configure(page, viewport, theme);
+      await load(page, retainedBoard.url, 'results');
+      if (injection) await page.s('Page.removeScriptToEvaluateOnNewDocument', injection);
+      await click(page, '#cal [data-day="2026-10-15"]');
+      const root = viewport.mobile ? '#sheetBody' : '#daypanel';
+      const layout = await checkNoteGap(root, `${viewport.name} ${theme} retained open-day default`);
+      check('partial-days', `${viewport.name} ${theme}: retained open-day snapshot keeps the exact default line before positions`,
+        layout.lines.length === 1 && layout.lines[0] === M.PARTIAL_REASON &&
+        layout.position === 'Bank of America (BAC, J), opened this day, is still open; it counts as Still open and on Desk.', layout);
+      if (viewport.mobile) await key(page, 'Escape');
     }
   }
 
@@ -1747,7 +1774,13 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   fallback. October shows yesterday (15th) as Partial, missing-summary Stale
   on the 13th, Stale-escalated partials on the 11th/14th, a normal 12th and
   open today (16th) with no marker. A separate accepted snapshot makes the
-  15th unattributed-only: T+1 allows only yesterday to remain Partial. \`*-results-partial-days.png\` captures the
+  15th empty with a history gap: T+1 allows only yesterday to remain Partial.
+  Closed partial fixtures carry canonical reasons for revision 6. Every inbox
+  push is preflighted with the real acceptance semantics before any page wait.
+  A reasonless record accepted while open is retained into the next day for
+  default-line coverage. Refresh waits do not require changed calendar HTML.
+  Reason-box overhang is checked against the enclosing note and actual lines.
+  \`*-results-partial-days.png\` captures the
   month; \`*-results-partial-{trade,empty}-{panel,sheet}.png\` captures each
   partial summary and its info-note reason. The partial replacement must
   preserve trade amounts, totals and geometry exactly; all cells and detail

@@ -299,6 +299,16 @@ Reports stay separate under `~/.local/share/joedesk-qa/p4/<zone>/index.md`
 Use an approved browser test host; an installed browser guard refusal is a
 blocked check and must be handed to the coordinator without bypassing it.
 
+Every P3–P6 inbox push first runs `acceptSnapshot` in Node against the prior
+accepted record and the board's receipt clock. Unexpected rejection stops with
+the contract rule and path before HTTP or a page wait; rejection scenarios name
+their expected status and reason. Partial-day replacements wait for the refresh
+and render, including changes to today's reason that leave calendar HTML intact.
+Default-line coverage uses a reasonless snapshot accepted while the day was open
+and retained into the next day. Reason overflow is measured at the enclosing
+note and individual lines: the paragraph deliberately allows the 4 px reason
+box overhang within the note's reserved padding.
+
 P3–P6 share browser teardown: request a graceful close, wait for process exit,
 then remove the profile. A stuck browser gets SIGTERM and then SIGKILL with
 bounded exit waits; if it still has not exited, cleanup fails and retains the
@@ -432,7 +442,10 @@ Send exactly one JSON `inspr.joe.household.results.v2` snapshot as the body,
 without an envelope, `receivedAt` or `missingDays` (both server-owned).
 Validate it with
 `validateContract('results', snapshot, {stage: 'ingress'})` from the pinned
-`contracts/` package. The UTF-8 request limit is `CONTRACTS.limits.results`
+`contracts/` package. To check receipt-dependent rules locally, also pass the
+expected server `receivedAt` as a validation option; `acceptSnapshot` always
+supplies the actual trusted receipt. The UTF-8 request limit is
+`CONTRACTS.limits.results`
 (8,388,608 bytes); the served snapshot, including the server's `receivedAt`
 and diagnostics,
 must also fit that contract limit. Money, including gross, stays in exact decimal
@@ -458,7 +471,10 @@ a windowed trade record, capture gaps, unattributed activity, stale currency
 conversion or a broker-backstop mismatch. Its day/trade cross-check is skipped;
 schema and trade checks still apply. Unknown summary `realisedNet` and `fees`
 may be `null`. An unattributed-only day can be `{date, desks: {}, coverage:
-"partial"}` with no trades; it is not a confirmed zero-trade day.
+"partial", partialReasons: ["unattributed_activity"]}` with no trades; it is
+not a confirmed zero-trade day. A closed partial day requires a reason. The
+open Vienna day may omit reasons when there is no real cause beyond the day
+still being open.
 KEEP holdings **SXR8 and TSLA are excluded from both `trades[]` and all `days[]`
 totals**, including partial days. Results derives trade P&L from `trades[]`;
 day summaries are validated, never substituted for the trade record.
@@ -529,7 +545,7 @@ the formatter emits `1M` for € 999.000. Its five calendar crops show October's
 ±€ 1.200.000, gain, loss, zero, k and missing-day warning, under `JOED_QA_DIR`.
 The generated `index.md` and CI log retain the measurement table.
 
-**Producer contract pin — manifest revision 5.** Compared with revision 2,
+**Producer contract pin — manifest revision 6.** Compared with revision 2,
 revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds
 optional day-level `coverage` (`"full"` by default, or `"partial"`), the exact
 day/trade cross-check across every desk described above, and explicit KEEP
@@ -537,15 +553,25 @@ exclusion from both trade records and day totals. It also removes
 `results_not_wired` from the closed reason enum. Revision 4 adds the optional
 server-owned `missingDays` read diagnostic and forbids producer-supplied copies.
 Revision 5 adds optional `days[].partialReasons` and `unattributedCount` without
-changing the schema ID. Rev-5 producers emit at least one reason for each partial
-day in canonical order: `capture_gap`, `history_gap`,
+changing the schema ID. Revision 6 requires at least one reason for every
+**closed partial Vienna day** (date before the server receipt's Vienna date).
+The open day may omit `partialReasons` unless a real cause exists, such as
+`fx_missing`, in which case emit at least one. `capture_gap` is reserved for a
+real mid-day tracking start; an unfinished day alone is not a capture gap.
+The enum and canonical order stay unchanged: `capture_gap`, `history_gap`,
 `broker_trade_count_mismatch`, `broker_realised_pnl_mismatch`,
 `unattributed_activity`, `avg_cost_mismatch`, `fx_disabled`, `fx_missing`,
 `broker_evidence_missing`. `avg_cost_mismatch` is reserved: accepted and rendered,
 not yet emitted. Reasons must be unique and nonempty and are allowed only with
 `coverage: "partial"`. `unattributedCount` is a positive integer (minimum 1), omitted when
 unknown, and allowed only with `unattributed_activity`. Invalid combinations or
-order return per-day 422 errors. Legacy partial rows without reasons still accept.
+order return per-day 422 errors. A closed partial day without reasons returns
+422 at `$.days[i].partialReasons` with rule `partialReasonsRequired`, retaining
+the last good snapshot. Closure uses the same DST-safe `viennaDay` helper and
+server receipt as `missingDays`, never the producer or host date. Served
+validation uses the persisted receipt, so an accepted open day remains readable
+after midnight. Omit `partialReasons` when there is no cause; an explicit empty
+array still fails `minItems`.
 `{date, desks: {}, coverage: "partial", partialReasons: ["history_gap"]}` is valid;
 it shows **—** under every desk filter, adds nothing to sums, and counts as one
 closed partial day in the month hint.
@@ -554,7 +580,8 @@ Known reasons replace the default note with **Result may be incomplete.** and
 one exact explanation per reason in canonical order (see the data contract).
 With `fx_disabled`, the board omits `fx_missing`. Unknown codes never appear as
 raw text: known codes still render; when none remain, closed days use the default
-sentence and today has no reason note.
+sentence and today has no reason note. Today with `fx_missing` shows
+**No EUR exchange rate was recorded for this day.**
 The cell's accessible reason is the first short label plus **, and N more**.
 Desktop panels show all reasons. Phone sheets show two reason sentences, then a
 44 px **+N more** button on its own row, left-aligned with the text, named
@@ -583,7 +610,7 @@ or “record incomplete”.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
-`contract_set_sha256`; an earlier digest does not cover revision-5 acceptance
+`contract_set_sha256`; an earlier digest does not cover revision-6 acceptance
 and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.

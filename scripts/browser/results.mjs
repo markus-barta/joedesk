@@ -58,6 +58,7 @@ export function partialDaysResults(now = '2026-10-16T12:00:00.000Z') {
   const partial = structuredClone(baseline);
   for (const day of partial.days.filter(d => [dates.partial, dates.escalated, dates.emptyEscalated].includes(d.date))) {
     day.coverage = 'partial';
+    day.partialReasons = ['history_gap'];
     for (const desk of Object.values(day.desks)) desk.realisedNet = desk.fees = null;
   }
   const empty = structuredClone(partial);
@@ -90,7 +91,29 @@ export function partialDaysResults(now = '2026-10-16T12:00:00.000Z') {
   emptyToday.days.find(d => d.date === dates.today).desks = {};
   const todayWithoutReasons = structuredClone(emptyToday);
   delete todayWithoutReasons.days.find(d => d.date === dates.today).partialReasons;
-  return { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted, threeReasons, emptyToday, todayWithoutReasons };
+  const filteredReasons = structuredClone(singleReason);
+  filteredReasons.days.find(d => d.date === dates.today).partialReasons = ['history_gap'];
+  const growingReasons = structuredClone(partial);
+  growingReasons.days.find(d => d.date === dates.escalated).partialReasons = ['capture_gap', 'history_gap',
+    'broker_trade_count_mismatch', 'broker_realised_pnl_mismatch', 'unattributed_activity'];
+  const largeFull = structuredClone(large);
+  largeFull.days.find(d => d.date === dates.partial).coverage = 'full';
+  delete largeFull.days.find(d => d.date === dates.partial).partialReasons;
+  withTradeSummaries(largeFull);
+  return { dates, baseline, partial, empty, missing, large, emptyMonth, reasons, singleReason, counted, threeReasons,
+    emptyToday, todayWithoutReasons, filteredReasons, growingReasons, largeFull };
+}
+
+// A reasonless open-day record stays valid at its original receipt after
+// midnight. Viewed the next day, it exercises the board's default sentence
+// without sending a reasonless closed day or an enum-unknown reason.
+export function retainedPartialResults() {
+  const receivedAt = '2026-10-15T21:59:50.000Z';
+  const { dates, partial: record } = partialDaysResults(receivedAt);
+  record.days = record.days.filter(day => day.date <= dates.partial);
+  record.trades = record.trades.filter(trade => viennaDay(trade.closedAt) <= dates.partial);
+  delete record.days.find(day => day.date === dates.partial).partialReasons;
+  return { receivedAt, record };
 }
 
 export function designResults(now = NOW, { trackingStart = '2026-09-10', seq = 412 } = {}) {

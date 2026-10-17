@@ -22,6 +22,16 @@ export const NOW = '2026-10-14T17:42:22.000Z';
 export const at = (base, seconds) => new Date(Date.parse(base) + seconds * 1000).toISOString();
 export const ingress = value => { const copy = structuredClone(value); delete copy.receivedAt; return copy; };
 
+// Fail before HTTP or a page wait. Intentional rejection scenarios must name
+// their expected outcome; every other browser fixture must be accepted.
+export function preflightSnapshot(kind, payload, previous, receivedAt, { status = 200, reason = null } = {}) {
+  const checked = acceptSnapshot(kind, payload, previous, receivedAt);
+  if (checked.status !== status || checked.reason !== reason) {
+    throw new Error(`browser ${kind} fixture: expected ${status}/${reason}, got ${checked.status}/${checked.reason}; ${JSON.stringify(checked.errors)}`);
+  }
+  return checked;
+}
+
 export async function startBoard({ fleetConfig = null, history = null, fleetConfigRaw = null, fleetActions = null } = {}) {
   const dataDir = scratch('joed-p3-board-');
   if (fleetConfig) writeFileSync(join(dataDir, 'fleet-config.json'), JSON.stringify(fleetConfig));
@@ -34,12 +44,19 @@ export async function startBoard({ fleetConfig = null, history = null, fleetConf
   const server = createJoeServer({ dataDir, clock, inboxToken: TOKEN });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
-  const push = async (payload, kind = 'data') => {
+  const accepted = new Map();
+  const push = async (payload, kind = 'data', expected) => {
+    const checked = preflightSnapshot(kind, payload, accepted.get(kind), clock(), expected);
     const response = await fetch(`http://127.0.0.1:${port}/joe/inbox${kind === 'results' ? '/results' : ''}`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' }, body: JSON.stringify(payload) });
-    return { status: response.status, body: await response.json() };
+    const body = await response.json();
+    if (response.status !== checked.status || (body.reason ?? null) !== checked.reason) {
+      throw new Error(`browser ${kind} inbox disagrees with preflight: ${response.status}; ${JSON.stringify(body)}`);
+    }
+    if (checked.status === 200) accepted.set(kind, { ...checked, value: { ...checked.value, receivedAt: body.receivedAt } });
+    return { status: response.status, body };
   };
   return {
-    port, url: `http://127.0.0.1:${port}/joe/`, push, pushResults: payload => push(payload, 'results'), clock, dataDir,
+    port, url: `http://127.0.0.1:${port}/joe/`, push, pushResults: (payload, expected) => push(payload, 'results', expected), clock, dataDir,
     setNow(iso, { freeze = true } = {}) { base = Date.parse(iso); real = performance.now(); frozen = freeze; },
     async close() {
       server.closeAllConnections();
