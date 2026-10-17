@@ -561,7 +561,8 @@ reason**). Activation removes the button and focuses the first revealed reason
 reserves its full content height, capped at 80vh; collapsed spare room sits at
 the bottom, and revealing reasons changes neither its top edge nor height.
 Short days have short sheets. A desk filter adds **Applies to the whole day;
-this desk may be unaffected.** after the reason or default sentence. Count copy
+this desk may be unaffected.** after the reason or default sentence and before
+any “opened …, is still open” position sentences, on today and closed days. Count copy
 uses “1 trade couldn't be matched to a desk.” or “N trades couldn't be matched
 to a desk.”, with U+00A0 between the number and unit. An empty selected desk on
 today, including an empty-desk row, reads **No trades so far**, without Partial

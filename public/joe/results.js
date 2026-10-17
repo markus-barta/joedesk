@@ -382,8 +382,9 @@ function dayContent(view, k, desks) {
   // A lot opened this day and still held counts in Still open and on Desk.
   const opened = (view.positions ?? []).filter(p => p.openedAt && desks.includes(p.desk) && M.viennaDate(Date.parse(p.openedAt)) === k);
   const reasons = partial && !missingDay(ix, k, desks) ? M.partialReasons(ix.partialDetails?.get(k)) : [];
-  const note = [reasons.length ? '' : warning?.note ?? (partial ? PARTIAL_REASON : ''), ...opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`)].filter(Boolean).join(' ');
-  return { sum, body, note, reasons, deskNote: partial && desks.length === 1 ? M.PARTIAL_DESK_NOTE : '' };
+  const note = reasons.length ? '' : warning?.note ?? (partial ? PARTIAL_REASON : '');
+  const positionNote = opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`).join(' ');
+  return { sum, body, note, reasons, deskNote: partial && desks.length === 1 ? M.PARTIAL_DESK_NOTE : '', positionNote };
 }
 
 // The sheet already has room for every reason. Remove the one-way disclosure
@@ -397,12 +398,12 @@ export function toggleDayReasons(button) {
 }
 
 function dayNote(day, sheet = false) {
-  const { reasons = [], note, deskNote } = day;
+  const { reasons = [], note, deskNote, positionNote } = day;
   const line = (reason, revealed = false) => `<span class="dp-reason"${revealed ? ' tabindex="-1"' : ''}>${esc(reason.text)}</span>`;
   const more = reasons.length - 2;
   const reasonLines = reasons.length ? `<span class="dp-note-lead">Result may be incomplete.</span>${reasons.slice(0, sheet ? 2 : reasons.length).map(reason => line(reason)).join('')}${sheet && more > 0
     ? `<button type="button" class="dp-reasons-more" aria-expanded="false" aria-controls="dayReasonsExtra" aria-label="Show ${more} more reason${more === 1 ? '' : 's'}">+${more} more</button><span class="dp-reasons-extra" id="dayReasonsExtra" aria-live="polite" hidden>${reasons.slice(2).map(reason => line(reason, true)).join('')}</span>` : ''}` : '';
-  const content = `${reasonLines}${note ? `<span>${esc(note)}</span>` : ''}${deskNote ? `<span class="dp-desk-note">${esc(deskNote)}</span>` : ''}`;
+  const content = `${reasonLines}${note ? `<span>${esc(note)}</span>` : ''}${deskNote ? `<span class="dp-desk-note">${esc(deskNote)}</span>` : ''}${positionNote ? `${note && !deskNote ? ' ' : ''}<span>${esc(positionNote)}</span>` : ''}`;
   return content ? `<p class="dp-note">${icon('info')}<span class="dp-note-lines">${content}</span></p>` : '';
 }
 

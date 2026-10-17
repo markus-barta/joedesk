@@ -639,10 +639,10 @@ function calendarCapture(t) {
     .map(id => [`#${id}`, { innerHTML: '', textContent: '' }]));
   nodes.get('#daySheet').open = true;
   globalThis.document = { querySelector: selector => nodes.get(selector), activeElement: null };
-  return (value, now, selected, desks = ALL) => {
+  return (value, now, selected, desks = ALL, positions = []) => {
     const ix = M.indexResults(value), today = page.resultsToday(now);
     Object.assign(page.RS, { cal: M.ymOf(selected), sel: selected, period: 'month' });
-    page.renderCalendar({ ix, today, trackingStart: ix.meta.trackingStart }, M.periodOf('month', selected, today, ix.meta.trackingStart), desks);
+    page.renderCalendar({ ix, today, trackingStart: ix.meta.trackingStart, positions }, M.periodOf('month', selected, today, ix.meta.trackingStart), desks);
     const html = nodes.get('#cal').innerHTML;
     return { html, cell: day => html.match(new RegExp(`<button[^>]*data-day="${day}"[^>]*>[\\s\\S]*?<\\/button>`))?.[0],
       panel: nodes.get('#daypanel').innerHTML, sheet: nodes.get('#sheetBody').innerHTML, month: nodes.get('#calSum').innerHTML };
@@ -912,6 +912,24 @@ test('JOED-30 rev 5 rendering: exact note sentences, first reason aria, default,
         const at = textOf(html).indexOf(explanation);
         assert.ok(at >= 0 && at < textOf(html).indexOf(M.PARTIAL_DESK_NOTE), 'scope follows the sentence it qualifies');
       }
+    }
+  }
+});
+
+for (const reasoned of [false, true]) test(`JOED-30 note order: ${reasoned ? 'reasoned' : 'legacy'} partial → desk scope → opened position on today and closed days`, t => {
+  const render = calendarCapture(t), day = '2026-10-15';
+  const value = record([{ date: day, desks: {}, coverage: 'partial',
+    ...(reasoned ? { partialReasons: ['capture_gap', 'history_gap'] } : {}) }]);
+  const positions = [{ desk: 'joe', symbol: 'KO', company: 'Coca-Cola', openedAt: `${day}T09:15:00.000Z` }];
+  for (const today of [day, '2026-10-16', '2026-10-17']) {
+    const r = render(value, `${today}T12:00:00.000Z`, day, ['joe'], positions);
+    const explanation = reasoned ? 'Result may be incomplete.Trade capture had a gap on this day.The trade history has a gap that covers this day.' : partialReason;
+    const position = `Coca-Cola (KO, Joe), opened ${today === day ? 'today at 11:15' : 'this day'}, is still open; it counts as Still open and on Desk.`;
+    for (const html of [r.panel, r.sheet]) {
+      const note = html.match(/<p class="dp-note">([\s\S]*?)<\/p>/)?.[1];
+      assert.ok(note, 'the day view has an explanatory note');
+      assert.equal(textOf(note), explanation + M.PARTIAL_DESK_NOTE + position,
+        'exact note order: partial explanation, whole-day scope, then the opened position');
     }
   }
 });
