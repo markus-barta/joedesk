@@ -470,6 +470,8 @@ receipt date. Diagnostics stay with that accepted snapshot across reads,
 rejections and restart; the next accepted push recomputes them.
 The affected calendar day and its trade summary use the existing **Stale**
 warning marker, without moving the layout or changing the trade amounts.
+The day panel and phone sheet prefix the retained trade count and net amount
+with **Stale** and show **Daily summary missing** in the day note.
 Desk filtering warns only where the selected desks have trades on that date.
 
 **Producer contract pin — manifest revision 4.** Compared with revision 2,

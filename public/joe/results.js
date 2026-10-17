@@ -328,15 +328,16 @@ function dayContent(view, k, desks) {
       : `No closed-trade record for ${M.fmtDDM(k)}: ${esc(cellReason(view.reason))}.`}</span></p>`, note: '' };
   }
   const r = M.dayResult(ix, k, desks);
-  const sum = missingDay(ix, k, desks) ? `<span title="${esc(missingDayText(k))}" aria-label="${esc(missingDayText(k))}">${st('warn', 'Stale')}</span>`
-    : ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
+  const missing = missingDay(ix, k, desks);
+  const summary = ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
+  const sum = missing ? `${st('warn', 'Stale')} · ${summary}` : summary;
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   const why = k > today ? `${M.fmtDDM(k)} is still ahead.` : closed ? `No trades on ${M.fmtDDM(k)}: ${M.isWeekend(k) ? 'weekend' : 'US market holiday'}, markets closed.`
     : k < view.trackingStart ? `No trades on ${M.fmtDDM(k)}: paper results start on ${startText(view.trackingStart)}.` : `No trades on ${M.fmtDDM(k)}: the desks sat out.`;
   const body = ts.length ? tradeRows(ts) : `<p class="dp-empty">${icon(closed ? 'clock' : 'info')}<span>${esc(why)}</span></p>`;
   // A lot opened this day and still held counts in Still open and on Desk.
   const opened = (view.positions ?? []).filter(p => p.openedAt && desks.includes(p.desk) && M.viennaDate(Date.parse(p.openedAt)) === k);
-  const note = opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`).join(' ');
+  const note = [missing ? 'Daily summary missing.' : '', ...opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`)].filter(Boolean).join(' ');
   return { sum, body, note };
 }
 

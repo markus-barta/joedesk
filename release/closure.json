@@ -69,8 +69,8 @@
     },
     {
       "path": "contracts/results.schema.json",
-      "size": 11790,
-      "sha256": "f99df56805364299b19d24154df5fa9cab6e361d8582d17f374fbf13fd8aa936"
+      "size": 11817,
+      "sha256": "84ba3ea4de6aa443fd991bbe48fbea889e09cec0ba56f966def7be6972fcbfa3"
     },
     {
       "path": "contracts/schema-validator.mjs",
@@ -104,8 +104,8 @@
     },
     {
       "path": "public/joe/app.css",
-      "size": 69443,
-      "sha256": "e1fe24db58ef554a622c19d173901583324706a0344bf791066f8e952ac4e418"
+      "size": 69490,
+      "sha256": "3c45496d5347efd5a07cba5304f05703331ddcaa656a431d9d35094f4dbba510"
     },
     {
       "path": "public/joe/app.js",
@@ -204,8 +204,8 @@
     },
     {
       "path": "public/joe/results.js",
-      "size": 30242,
-      "sha256": "0b20d430e162039ab3c6a375ec04012a3fd76b358dccb9cacec46d7a089d25e2"
+      "size": 30282,
+      "sha256": "ce31a45f0dec4faf8b9e8530d9653539e8ec1d33d8d411d150487f23b3b52121"
     },
     {
       "path": "public/joe/settings-model.js",
@@ -275,7 +275,7 @@
     {
       "path": "release/contracts.json",
       "size": 1661,
-      "sha256": "a8d2b2eade0da8f6b83560925a78d4ae9273cd443edeaf470890e1a5a6daef6e"
+      "sha256": "f0334247e6555ed1ce54a34d24e37ffeb2860399528dccf0ea1bb2a8bdcf84ef"
     },
     {
       "path": "release/data-migration.mjs",

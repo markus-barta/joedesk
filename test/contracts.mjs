@@ -238,6 +238,13 @@ test('JOED-28 results: accept and warn only for missing closed Vienna dates, inc
   }
 });
 
+test('JOED-28 results: served missing-day diagnostics reject duplicate dates', () => {
+  const value = { ...copy(samples.results), missingDays: ['2026-10-13', '2026-10-15'] };
+  assert.equal(validateContract('results', value).ok, true);
+  value.missingDays.push('2026-10-13');
+  rejects(validateContract('results', value), 'uniqueItems', '$.missingDays');
+});
+
 test('results: explicit partial days skip reconciliation only for that day; coverage is a closed optional enum', () => {
   const partial = JSON.parse(readFileSync(new URL('../fixtures/results/partial-day.json', import.meta.url)));
   assert.equal(validateContract('results', partial).ok, true);

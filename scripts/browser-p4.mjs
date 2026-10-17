@@ -784,6 +784,7 @@ try {
       await click(page, '#cal [data-day="2026-10-15"]');
       if (viewport.mobile) await key(page, 'Escape');
       const covered = await page.evaluate(RES), before = await rects(page, SHIFT);
+      const coveredSummary = await page.evaluate('document.querySelector("#daypanel .dp-sum").textContent');
       check('missing-days', `${tag}: partial day has no warning`, !await page.evaluate('Boolean(document.querySelector("#cal .day-warning"))'));
       const missing = { ...structuredClone(record), seq: record.seq + 1 };
       missing.days = missing.days.filter(day => day.date !== '2026-10-15');
@@ -794,12 +795,22 @@ try {
       const marker = await page.evaluate(`(() => {
         const cell = document.querySelector('#cal [data-day="2026-10-15"]');
         const mark = cell.querySelector('.day-warning'), r = mark.getBoundingClientRect(), c = cell.getBoundingClientRect();
+        const padding = getComputedStyle(cell), offset = getComputedStyle(mark);
+        const panel = document.getElementById('daypanel'), head = panel.querySelector('.dp-head').getBoundingClientRect();
+        const heading = panel.querySelector('h3').getBoundingClientRect(), sum = panel.querySelector('.dp-sum'), s = sum.getBoundingClientRect();
         return { visible: r.width > 0 && r.height > 0 && r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom,
           aria: cell.getAttribute('aria-label'), icon: Boolean(mark.querySelector('use[href="#i-half"]')) && Boolean(document.querySelector('#daypanel .st.warn use[href="#i-half"]')),
-          summary: document.querySelector('#daypanel .dp-sum').textContent };
+          aligned: offset.top === padding.paddingTop && offset.right === padding.paddingRight,
+          summary: sum.textContent, note: panel.querySelector('.dp-note')?.innerText ?? '', noteVisible: __audit.visible(panel.querySelector('.dp-note')),
+          singleLine: head.height === 36 && s.height <= head.height && heading.right <= s.left && s.right <= head.right && getComputedStyle(sum).whiteSpace === 'nowrap' };
       })()`);
       check('missing-days', `${tag}: affected day shows the existing warning marker through ${fallback ? 'fallback' : 'worker'}`,
-        marker.visible && marker.icon && /Stale: daily summary missing/.test(marker.aria) && marker.summary === 'Stale' && !warned.status, marker);
+        marker.visible && marker.icon && /Stale: daily summary missing/.test(marker.aria) && N(marker.summary) === N(`Stale · ${coveredSummary}`) && !warned.status, marker);
+      check('missing-days', `${tag}: warning icon follows the date padding`, marker.aligned, marker);
+      if (!viewport.mobile) {
+        check('missing-days', `${tag}: day panel keeps its single-line 36 px header and a visible reason`,
+          marker.singleLine && marker.noteVisible && marker.note.includes('Daily summary missing'), marker);
+      }
       check('missing-days', `${tag}: warning changes no trade amounts or outer geometry`,
         covered.display === warned.display && covered.cal.cells.find(c => c.day === '2026-10-15').v === warned.cal.cells.find(c => c.day === '2026-10-15').v &&
         !shifted(before, await rects(page, SHIFT), ['top', 'left', 'width', 'height']).length);
@@ -807,7 +818,21 @@ try {
       await shot(page, viewport, `${viewport.name}-${theme}-results-missing-day`, 'Results: Stale on 15 October, whose daily summary is missing');
       if (viewport.mobile) {
         await click(page, '#cal [data-day="2026-10-15"]');
-        check('missing-days', `${tag}: phone sheet shows Stale and the retained trade`, await page.evaluate('document.querySelector("#sheetBody .dp-sum").textContent === "Stale" && document.querySelectorAll("#sheetBody .trow").length === 1'));
+        const sheet = await page.evaluate(`(() => {
+          const body = document.getElementById('sheetBody'), sum = body.querySelector('.dp-sum'), note = body.querySelector('.dp-note');
+          return { summary: sum.textContent, trades: body.querySelectorAll('.trow').length,
+            note: note?.innerText ?? '', noteVisible: __audit.visible(note),
+            singleLine: getComputedStyle(sum).whiteSpace === 'nowrap' && sum.scrollWidth <= sum.clientWidth };
+        })()`);
+        check('missing-days', `${tag}: phone sheet retains the summary and trade with a visible missing-summary reason`,
+          N(sheet.summary) === N(`Stale · ${coveredSummary}`) && sheet.trades === 1 && sheet.note.includes('Daily summary missing') && sheet.noteVisible && sheet.singleLine, sheet);
+        await viewShot(page, `${viewport.name}-${theme}-results-missing-day-sheet`, 'Phone day sheet: Stale with the retained summary and missing daily summary reason');
+      }
+      const { nodes } = await page.s('Accessibility.getFullAXTree');
+      const accessibleText = nodes.filter(n => !n.ignored && n.role?.value === 'StaticText').map(n => n.name?.value ?? '');
+      check('missing-days', `${tag}: Stale and its reason are readable in the accessibility tree`,
+        accessibleText.includes('Stale') && accessibleText.some(text => text.includes('Daily summary missing')), accessibleText.filter(text => /Stale|Daily summary missing/.test(text)));
+      if (viewport.mobile) {
         await key(page, 'Escape');
       }
       await click(page, '#deskSeg [data-desk="joe"]');
