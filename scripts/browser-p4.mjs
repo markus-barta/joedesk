@@ -763,8 +763,25 @@ try {
         JSON.stringify(before) === JSON.stringify(opened), { before, opened });
       const detail = await page.evaluate(`(() => {
         const root = document.querySelector(${JSON.stringify(root)}), bounds = root.getBoundingClientRect();
+        const panel = document.getElementById('daypanel').getBoundingClientRect();
+        // A Range over each word exposes internal line breaks even inside
+        // an inline block whose own bounding rectangle spans several lines.
+        const words = el => {
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), out = [];
+          while (walker.nextNode()) {
+            const node = walker.currentNode;
+            for (const match of node.textContent.matchAll(/\\S+/gu)) {
+              const range = document.createRange();
+              range.setStart(node, match.index); range.setEnd(node, match.index + match[0].length);
+              const rects = [...range.getClientRects()].filter(r => r.width > 0);
+              out.push({ word: match[0], lines: [...new Set(rects.map(r => r.top))] });
+            }
+          }
+          return out;
+        };
         const rows = [...root.querySelectorAll('.trow')].map(row => {
           const net = row.querySelector('.net'), amount = net.querySelector('.pl'), px = row.querySelector('.px');
+          const name = row.querySelector('.name'), meta = name.querySelector('.meta');
           const r = row.getBoundingClientRect(), n = net.getBoundingClientRect(), a = amount.getBoundingClientRect(), p = px.getBoundingClientRect();
           const pieces = [...px.querySelectorAll('.ln > span, .fee')].map(el => {
             const p = el.getBoundingClientRect(); return { text: el.textContent, top: p.top, left: p.left, right: p.right,
@@ -772,12 +789,22 @@ try {
           });
           return { id: row.dataset.trade, text: net.textContent, scroll: net.scrollWidth, client: net.clientWidth,
             width: n.width, amountWidth: a.width, nowrap: getComputedStyle(net).whiteSpace === 'nowrap',
+            nameWidth: name.getBoundingClientRect().width, words: words(name),
+            nameFits: name.scrollWidth <= name.clientWidth,
+            metaUnits: [...meta.querySelectorAll('.meta-unit')].map(unit => ({ text: unit.textContent,
+              nowrap: getComputedStyle(unit).whiteSpace === 'nowrap', words: words(unit),
+              top: unit.getBoundingClientRect().top, bottom: unit.getBoundingClientRect().bottom })),
             priceColumn: getComputedStyle(px).gridColumn, right: n.right, amountInside: a.left >= n.left && a.right <= n.right,
+            amountInPanel: a.left >= panel.left && a.right <= panel.right,
             rowInside: r.left >= bounds.left && r.right <= bounds.right && row.scrollWidth <= row.clientWidth,
             pxFits: px.scrollWidth <= px.clientWidth && pieces.every(piece => piece.left >= p.left && piece.right <= p.right && piece.scroll <= piece.client), pieces };
         });
+        const head = document.querySelector('#daypanel .dp-head'), summary = head.querySelector('.dp-sum');
+        const range = document.createRange(); range.selectNodeContents(summary);
+        const header = { text: summary.textContent, scroll: head.scrollWidth, client: head.clientWidth,
+          rects: [...range.getClientRects()].map(r => r.toJSON()), panel: panel.toJSON() };
         return { visible: __audit.visible(root), open: document.getElementById('daySheet').open,
-          scroll: root.scrollWidth, client: root.clientWidth, rows };
+          scroll: root.scrollWidth, client: root.clientWidth, rows, header };
       })()`);
       check('trade-amount', `${tag}: the expected detail surface is visible with all four rows`,
         detail.visible && detail.open === viewport.mobile && detail.rows.length === want.length, detail);
@@ -792,6 +819,11 @@ try {
       }
       check('trade-amount', `${tag}: no row overflows its detail surface and every amount shares the right edge`,
         detail.scroll <= detail.client && detail.rows.every(r => r.rowInside && r.right === detail.rows[0].right), detail);
+      check('trade-amount', `${tag}: name and meta line breaks stay at word boundaries, with atomic meta units`,
+        detail.rows.every(r => r.nameFits && r.words.length > 10 && r.words.every(w => w.lines.length === 1) &&
+          r.metaUnits.length === 4 && r.metaUnits.every(unit => unit.nowrap && unit.words.every(w => w.lines.length === 1)) &&
+          r.metaUnits.some(unit => unit.text.includes('Long')) && r.metaUnits.some(unit => unit.text.startsWith('closed ')) &&
+          r.metaUnits.some(unit => unit.text.startsWith('held '))), detail.rows);
       if (viewport.mobile) {
         check('trade-amount', `${tag}: phone amount columns fit their content without clipping and prices span the second row`,
           detail.rows.every(r => Math.abs(r.width - r.amountWidth) < 1 && r.nowrap && r.scroll <= r.client &&
@@ -799,6 +831,12 @@ try {
       } else {
         check('trade-amount', `${tag}: desktop amounts keep at least 92 px and short amounts keep the approved 92 px column`,
           detail.rows.every(r => r.width >= 92) && detail.rows.find(r => r.id === 'rt-amount-short')?.width === 92, detail.rows);
+        check('trade-amount', `${tag}: every desktop name column keeps 120 px and every full amount stays inside the panel`,
+          detail.rows.every(r => r.nameWidth >= 120 && r.amountInPanel), detail.rows);
+        const h = detail.header;
+        check('trade-amount', `${tag}: the full trade-count and amount header stays inside the panel`,
+          N(h.text) === N(`4 trades · −€ 99.987,91`) && h.scroll <= h.client && h.rects.length > 0 &&
+          h.rects.every(r => r.left >= h.panel.left && r.right <= h.panel.right && r.top >= h.panel.top && r.bottom <= h.panel.bottom), h);
       }
       if (viewport.name === '1440') {
         const long = detail.rows.find(r => r.id === 'rt-amount-million');
@@ -807,6 +845,48 @@ try {
       }
       check('trade-amount', `${tag}: the expected ${fallback ? 'fallback' : 'worker'} renders the fixture`,
         (await page.evaluate('window.__joedesk.worker()')) === !fallback);
+      const yieldOrder = await page.evaluate(`(async () => {
+        const { fitTradeRows } = await import('./results.js');
+        const host = document.createElement('div');
+        host.style.cssText = 'position:fixed;left:0;top:0;visibility:hidden;pointer-events:none;width:1000px';
+        const row = document.querySelector(${JSON.stringify(root)} + ' [data-trade="rt-amount-million"]').cloneNode(true);
+        row.style.display = 'block'; host.append(row); document.body.append(host);
+        try {
+          const px = row.querySelector('.px'), fee = px.querySelector('.fee'), ln = px.querySelector('.ln');
+          const prices = [...ln.children];
+          const size = width => { px.style.width = width + 'px'; fitTradeRows(host); };
+          const snapshot = () => ({ small: px.classList.contains('small'), feeWrap: px.classList.contains('wrap-fee'),
+            font: getComputedStyle(px).fontSize, feeFont: getComputedStyle(fee).fontSize,
+            wrapped: prices[1].getBoundingClientRect().top > prices[0].getBoundingClientRect().top,
+            feeBelow: fee.getBoundingClientRect().top >= ln.getBoundingClientRect().bottom,
+            fits: px.scrollWidth <= px.clientWidth });
+          size(1000);
+          const gap = parseFloat(getComputedStyle(px).columnGap);
+          const regular = Math.max(...prices.map(p => p.getBoundingClientRect().width)) + fee.getBoundingClientRect().width + gap;
+          size(regular + 1); const pairWrap = snapshot();
+          px.classList.add('small');
+          const smallPrice = Math.max(...prices.map(p => p.getBoundingClientRect().width));
+          const small = smallPrice + fee.getBoundingClientRect().width + gap;
+          size((regular + small) / 2); const reduced = snapshot();
+          size(smallPrice + 1); const feeWrap = snapshot();
+          size(1000); const recovered = snapshot();
+          // The exception belongs to a single oversized token. Ordinary
+          // company words above must never take this internal-break path.
+          const name = row.querySelector('.name'), word = name.querySelector('.word');
+          name.style.width = '120px'; word.textContent = 'X'.repeat(80);
+          const range = document.createRange(); range.selectNodeContents(word);
+          const token = { lines: [...new Set([...range.getClientRects()].map(r => r.top))].length,
+            fits: name.scrollWidth <= name.clientWidth, width: word.getBoundingClientRect().width };
+          return { pairWrap, reduced, feeWrap, recovered, token };
+        } finally { host.remove(); }
+      })()`);
+      check('trade-amount', `${tag}: price wrap precedes the 11 px token, fee wrap follows, and wider columns recover`,
+        yieldOrder.pairWrap.wrapped && !yieldOrder.pairWrap.small && !yieldOrder.pairWrap.feeWrap && !yieldOrder.pairWrap.feeBelow && yieldOrder.pairWrap.fits &&
+        yieldOrder.reduced.wrapped && yieldOrder.reduced.small && yieldOrder.reduced.font === '11px' && !yieldOrder.reduced.feeWrap && yieldOrder.reduced.fits &&
+        yieldOrder.feeWrap.small && yieldOrder.feeWrap.feeFont === '11px' && yieldOrder.feeWrap.feeWrap && yieldOrder.feeWrap.feeBelow && yieldOrder.feeWrap.fits &&
+        !yieldOrder.recovered.small && !yieldOrder.recovered.feeWrap && yieldOrder.recovered.fits, yieldOrder);
+      check('trade-amount', `${tag}: only an oversized single name token breaks internally without overflow`,
+        yieldOrder.token.lines > 1 && yieldOrder.token.fits && yieldOrder.token.width <= 120, yieldOrder.token);
       if (!viewport.mobile) {
         // Keep the final million and short rows together in the visible list,
         // so both desktop panel crops show their amount alignment.
@@ -822,14 +902,16 @@ try {
               [list, panel].every(b => r.left >= b.left && r.right <= b.right && r.top >= b.top && r.bottom <= b.bottom)) };
           });
           return { list: list.toJSON(), rows, clip: { x: panel.left + scrollX, y: panel.top + scrollY,
-            width: panel.width, height: panel.height, scale: 1 } };
+            width: panel.width + 16, height: panel.height, scale: 1 }, panel: panel.toJSON() };
         })()`);
         check('trade-amount', `${tag}: million and short rows are fully visible inside the list and whole-panel crop`,
           crop.rows.every(row => row.visible), crop);
+        check('trade-amount', `${tag}: the whole-panel crop includes 16 px beyond its right edge`,
+          crop.clip.width === crop.panel.width + 16, crop);
         const name = `${viewport.name}-${theme}-results-trade-amount-panel-full-crop`;
         const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip: crop.clip, captureBeyondViewport: true });
         writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
-        shots.push({ file: `${name}.png`, what: 'Whole day panel: compare short and large amounts, price columns and fees across rows' });
+        shots.push({ file: `${name}.png`, what: 'Whole day panel with 16 px beyond its right edge: compare amounts, whole name/meta words, prices and fees' });
       }
       // Crop the whole widest row, including its yielding name/price columns.
       // Scroll only the detail container so the surrounding page stays put.
@@ -1823,13 +1905,18 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   decimals and fees. At 1440 the eight-decimal pair must wrap.
   Amounts must fit without rounding or clipping, share their right edge,
   and keep the original 92 px minimum on desktop. Phone amount columns
-  size to their content, with prices spanning the second row. Names and
-  prices yield first; every row and price part must fit its panel or sheet.
+  size to their content, with prices spanning the second row. Desktop names
+  keep at least 120 px; Range rectangles prove no name or meta word breaks
+  internally, and meta units wrap only between the middle dots. Only an
+  oversized single name token may break. The price pair wraps first, then
+  uses the 11 px token, then the fee may wrap; measured probes check this
+  order and recovery at every width/theme. Every row, amount, price part
+  and the full desktop trade-count/amount header must fit its panel or sheet.
   Opening and closing the detail surface moves outer geometry exactly
   0 px. The widest row at each width/theme is captured in
   \`*-results-trade-amount-{panel,sheet}-crop.png\`. Whole-panel crops at
   1440/1024 in both themes are \`*-results-trade-amount-panel-full-crop.png\`
-  for cross-row amount and price alignment review.
+  with 16 px beyond the panel's right edge for clipping and alignment review.
 - **Partial coverage (JOED-30).** The dedicated \`partial-days\` scenario uses
   real ingress at 1440/1024/390/360, light and dark, through the worker and
   fallback. October shows yesterday (15th) as Partial, missing-summary Stale

@@ -317,11 +317,13 @@ export function renderCalendar(view, per, desks) {
     <span>${!ix ? 'Tints appear once results arrive' : max > 0n ? `Darkest: ${eur(max * 3n / 4n)} to ${eur(max)} in a day` : 'No trading day yet'}</span>`);
   const day = dayContent(view, RS.sel, desks);
   patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${dayNote(day)}</div>`);
+  fitTradeRows($('#daypanel'));
   fitDaySummary($('#daypanel'));
   const sheet = $('#daySheet');
   if (sheet?.open) {
     $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(RS.sel)}`;
     patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}`);
+    fitTradeRows($('#sheetBody'));
     fitDaySummary($('#sheetBody'));
     fitDaySheet(sheet);
   }
@@ -351,13 +353,39 @@ function held(t) {
 }
 // A price in full, exactly as recorded (at least two decimals).
 const price = p => money(decimalUnits(p.amount), p.currency, false, Math.max(2, (p.amount.split('.')[1] ?? '').length));
+const tradeWords = text => text.split(/(\s+)/u).map(word => /^\s+$/u.test(word) ? esc(word) : `<span class="word">${esc(word)}</span>`).join('');
 function tradeRows(ts) {
   return ts.map(t => `<div class="trow" data-trade="${esc(t.id)}">
     ${symBadge(t.symbol, t.desk)}
-    <div class="name"><b>${esc(t.symbol)}</b>${t.company ? ` · ${esc(t.company)}` : ''}<span>${inlineMark(t.desk)} ${LABEL[t.desk]} · ${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(t.quantity.replace('.', ','))} · closed ${timeHM(new Date(t.closedAt).toISOString())}, ${held(t)}</span></div>
+    <div class="name"><b class="word">${esc(t.symbol)}</b>${t.company ? ` · ${tradeWords(t.company)}` : ''}<span class="meta"><span class="meta-unit">${inlineMark(t.desk)} ${LABEL[t.desk]}</span> · <span class="meta-unit">${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(t.quantity.replace('.', ','))}</span> · <span class="meta-unit">closed ${timeHM(new Date(t.closedAt).toISOString())}</span> · <span class="meta-unit">${held(t)}</span></span></div>
     <div class="px"><span class="ln"><span>${price(t.entry)}</span><span>${icon('arrow')}${price(t.exit)}</span></span><span class="fee">fees ${eur(t.units.fees)}</span></div>
     <div class="net">${pl(t.units.net)}</div>
   </div>`).join('');
+}
+
+// Use the rendered font and column, rather than viewport thresholds: a pair
+// can wrap normally before either single price needs the small type token.
+// Rerenders/resizes reset the steps so a wider column recovers its normal size.
+export function fitTradeRows(root) {
+  for (const row of root?.querySelectorAll?.('.trow') ?? []) {
+    const px = row.querySelector('.px');
+    row.classList.remove('prices-below');
+    px.classList.remove('small', 'wrap-fee');
+    if (!px.clientWidth) continue;
+    const overflows = (el, column) => {
+      const box = column.getBoundingClientRect(), range = document.createRange();
+      range.selectNodeContents(el);
+      // scrollWidth misses overflow to the left of right-aligned fee text.
+      return el.scrollWidth > el.clientWidth || [...range.getClientRects()].some(r => r.left < box.left || r.right > box.right);
+    };
+    const ln = px.querySelector('.ln'), prices = [...ln.children], fee = px.querySelector('.fee');
+    const pricesOverflow = () => prices.some(el => overflows(el, ln));
+    if (pricesOverflow() || overflows(fee, px)) px.classList.add('small');
+    if (pricesOverflow() || overflows(fee, px)) px.classList.add('wrap-fee');
+    // Beyond the supported long-price fixture, keep an indivisible price
+    // visible beneath the first row if even the small token cannot fit.
+    if (pricesOverflow()) row.classList.add('prices-below');
+  }
 }
 
 function dayContent(view, k, desks) {
@@ -444,6 +472,7 @@ export function openDaySheet(view, k, { pointer = false } = {}) {
   patch($('#sheetBody'), '');
   patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}`);
   openDialog(sheet, { pointer });
+  fitTradeRows($('#sheetBody'));
   fitDaySummary($('#sheetBody'));
   fitDaySheet(sheet);
 }

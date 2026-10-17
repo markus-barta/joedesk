@@ -531,7 +531,11 @@ The generated `index.md` and CI log retain the measurement table.
 
 Day-detail trade amounts keep their full value on one right-aligned line.
 Their columns grow to fit, with the original 92 px minimum for short amounts
-on desktop; company names and entry/exit prices wrap first. Phone amount
+on desktop. Names keep at least 120 px and wrap between whole words; only
+an individual token wider than the column may break internally. Meta units
+(desk, side/quantity, close time and holding duration) stay together and wrap
+only between the middle dots. Entry/exit prices wrap first, then use the
+11 px small token, then fees may wrap. Phone amount
 columns size to their content, while prices and fees span the second row
 beneath the company and amount columns.
 The focused `trade-amount` browser scenario checks −€ 100.000,12,
@@ -540,10 +544,14 @@ The focused `trade-amount` browser scenario checks −€ 100.000,12,
 It asserts exact amount, price and fee text, no clipping or row overflow,
 common right edges, desktop-only 92 px sizing, phone content sizing, wrapping
 of the eight-decimal pair at 1440, and exactly 0 px outer movement on open/close.
+Range rectangles check every name/meta word, atomic meta units, the 120 px
+desktop name floor, full panel-header visibility and the price/fee yield order.
 Widest-row crops go to `JOED_QA_DIR` as
 `*-results-trade-amount-{panel,sheet}-crop.png` for the visual check.
 Whole-panel crops at 1440/1024 in both themes add
-`*-results-trade-amount-panel-full-crop.png` for cross-row alignment review.
+`*-results-trade-amount-panel-full-crop.png` with a 16 px margin beyond the
+panel's right edge for clipping and cross-row alignment review. Both the
+million and short rows must be fully visible in each whole-panel crop.
 
 **Producer contract pin — manifest revision 5.** Compared with revision 2,
 revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds

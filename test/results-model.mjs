@@ -27,7 +27,7 @@ const { validateContract } = await import('../contracts/index.mjs');
 const { acceptRead } = await import('../contracts/read.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const hm = await import('../public/joe/history-model.js');
-const { designResults, withTradeSummaries, partialDaysResults } = await import('../scripts/browser/results.mjs');
+const { designResults, withTradeSummaries, partialDaysResults, tradeAmountResults } = await import('../scripts/browser/results.mjs');
 
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ALL = ['j', 'joe', 'joel'];
@@ -650,6 +650,34 @@ function calendarCapture(t) {
 }
 const partialReason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
 const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'");
+
+test('JOED-31 rendering: exact extreme amounts and prices survive whole-word names and atomic meta units', t => {
+  const { date, record: value } = tradeAmountResults();
+  assert.equal(validateContract('results', value, { stage: 'ingress' }).ok, true);
+  assert.equal(M.dayResult(M.indexResults(value), date, ALL).units, E('-99987.91'));
+  const render = calendarCapture(t), r = render(value, '2026-10-16T12:00:00.000Z', date);
+  for (const html of [r.panel, r.sheet]) {
+    assert.ok(textOf(html).includes('−€ 1.000.000,12'));
+    assert.ok(textOf(html).includes('$ 102.000,12345678'));
+    assert.ok(textOf(html).includes('$ 2.000,12345678'));
+    assert.ok(textOf(html).includes('Demonstration company with a long name'));
+    assert.equal((html.match(/class="meta-unit"/g) ?? []).length, 16);
+    assert.match(html, /<span class="word">Demonstration<\/span> <span class="word">company<\/span>/);
+    assert.match(html, /<span class="meta-unit">closed 17:02<\/span> · <span class="meta-unit">held 1 h 2 min<\/span>/);
+  }
+});
+
+test('JOED-31 rendering: company tokens preserve spacing and escape markup in panel and sheet', t => {
+  const { date, record: value } = tradeAmountResults();
+  value.trades[2].company = 'First  <script> & "company"';
+  const render = calendarCapture(t), r = render(value, '2026-10-16T12:00:00.000Z', date);
+  for (const html of [r.panel, r.sheet]) {
+    assert.ok(html.includes('<span class="word">First</span>  <span class="word">&lt;script&gt;</span>'));
+    assert.ok(html.includes('<span class="word">&amp;</span>'));
+    assert.ok(html.includes('<span class="word">&quot;company&quot;</span>'));
+    assert.ok(!html.includes('<script>'));
+  }
+});
 
 test('JOED-30 rendering: closed partial trades keep their exact amount, tint and one warning in every day view', t => {
   const render = calendarCapture(t), value = fixture('partial-day');
