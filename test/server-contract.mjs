@@ -514,6 +514,40 @@ test('JOED-30 rev 5 HTTP: reason semantic 422s retain the accepted record throug
   }
 });
 
+test('JOED-34 rev 6 HTTP: open partial days accept with no cause or FX missing; closed reasonless days retain last-good', async t => {
+  for (const [day, before, after] of [
+    ['2026-10-15', '2026-10-15T21:59:59.999Z', '2026-10-15T22:00:00.000Z'],
+    ['2026-10-25', '2026-10-25T22:59:59.999Z', '2026-10-25T23:00:00.000Z'],
+    ['2027-03-28', '2027-03-28T21:59:59.999Z', '2027-03-28T22:00:00.000Z'],
+  ]) {
+    let now = before;
+    const s = await setup(t, { clock: () => now });
+    const value = resultsSnapshot(); value.generatedAt = before;
+    value.days = [{ date: day, desks: {}, coverage: 'partial' }]; value.trades = [];
+    for (const partialReasons of [undefined, ['fx_missing'], undefined]) {
+      if (partialReasons) value.days[0].partialReasons = partialReasons;
+      else delete value.days[0].partialReasons;
+      assert.equal((await s.pushResults(value)).status, 200);
+      assert.deepEqual((await s.request('/joe/results.json')).body.days, value.days);
+      value.seq++;
+    }
+    const saved = (await s.request('/joe/results.json')).body;
+    const bytes = readFileSync(join(s.dataDir, 'results-state.json'));
+    now = after; // The producer still has the previous day's clock.
+    const rejected = await s.pushResults(value);
+    assert.equal(rejected.status, 422);
+    assert.equal(rejected.body.reason, 'contract_invalid');
+    assert.deepEqual(rejected.body.errors, [{ path: '$.days[0].partialReasons', rule: 'partialReasonsRequired' }]);
+    assert.deepEqual(readFileSync(join(s.dataDir, 'results-state.json')), bytes);
+    assert.deepEqual((await s.request('/joe/results.json')).body, saved);
+    assert.deepEqual(createReadModel({ dataDir: s.dataDir, clock: () => now }).feeds().results.value, saved,
+      'restart validates the original receipt, preserving the then-open day');
+    value.days[0].partialReasons = ['fx_missing'];
+    assert.equal((await s.pushResults(value)).status, 200);
+    assert.deepEqual((await s.request('/joe/results.json')).body.days[0].partialReasons, ['fx_missing']);
+  }
+});
+
 test('JOED-28 results: missing closed days accept with 200, persist, retain on rejection and clear on partial coverage', async t => {
   const now = '2026-10-16T12:00:00.000Z';
   const s = await setup(t, { clock: () => now });
@@ -539,7 +573,7 @@ test('JOED-28 results: missing closed days accept with 200, persist, retain on r
   assert.deepEqual(retained.body, read.body);
   assert.equal(retained.headers.get('x-joe-feed-reason'), 'contract_invalid');
   const partial = { ...structuredClone(value), seq: value.seq + 1 };
-  partial.days.push({ date: '2026-10-15', coverage: 'partial', desks: {} });
+  partial.days.push({ date: '2026-10-15', coverage: 'partial', desks: {}, partialReasons: ['history_gap'] });
   assert.equal((await s.pushResults(partial)).status, 200);
   assert.deepEqual((await s.request('/joe/results.json')).body.missingDays ?? [], []);
   const spoof = { ...partial, seq: partial.seq + 1, missingDays: [] };
