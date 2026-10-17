@@ -4,6 +4,7 @@
 // as the contract's served form, at 390/1024/1440 in light and dark
 // (AC-10–17, 41, 42, 46, Part A craft), plus Tick's desk-card header at 390.
 // JOED-29 adds a focused phone calendar scenario at 360/390 in both themes.
+// JOED-30 adds partial-days: its own month, panel and sheet at every width.
 // One headless browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir, cpus } from 'node:os';
@@ -977,6 +978,115 @@ try {
     }
   }
 
+  if (run('partial-days')) {
+    // JOED-30: real ingress, the worker and fallback. Keep all five states in
+    // one month; the full baseline has identical trade money and geometry.
+    await serve(null);
+    const { board } = await designBoard('2026-10-16T12:00:00.000Z');
+    const partialTrade = '2026-10-12', partialEmpty = '2026-10-13', stale = '2026-10-14', normal = '2026-10-15', today = '2026-10-16';
+    const reason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
+    const baseline = withTradeSummaries({ ...structuredClone(valid.results), generatedAt: board.clock(),
+      days: [partialTrade, partialEmpty, normal, today].map(date => ({ date,
+        desks: date === partialEmpty ? {} : structuredClone(valid.results.days[0].desks),
+        ...(date === today ? { coverage: 'partial' } : {}) })),
+      trades: [partialTrade, stale, normal, today].map((date, i) => ({ ...structuredClone(valid.results.trades[0]),
+        id: `rt-partial-${i}`, openedAt: `${date}T10:00:00.000Z`, closedAt: `${date}T10:10:00.000Z` })),
+    });
+    delete baseline.receivedAt;
+    const partial = structuredClone(baseline);
+    for (const day of partial.days.filter(d => [partialTrade, partialEmpty].includes(d.date))) {
+      day.coverage = 'partial';
+      for (const desk of Object.values(day.desks)) desk.realisedNet = desk.fees = null;
+    }
+    let seq = baseline.seq;
+    const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 800, mobile: true }];
+    for (const viewport of viewports) for (const theme of THEMES) {
+      const tag = `${viewport.name} ${theme}`;
+      check('partial-days', `${tag}: full baseline accepts`, (await board.pushResults({ ...baseline, seq: ++seq })).status === 200);
+      const fallback = viewport.mobile && theme === 'dark';
+      const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
+      await configure(page, viewport, theme);
+      await load(page, board.url, 'results');
+      if (injection) await page.s('Page.removeScriptToEvaluateOnNewDocument', injection);
+      await click(page, '#periodSeg [data-period="month"]');
+      await click(page, `#cal [data-day="${partialTrade}"]`);
+      if (viewport.mobile) await key(page, 'Escape');
+      const before = await rects(page, SHIFT), full = await page.evaluate(RES);
+      const contentRects = await rects(page, ['#cal .cell .d', '#cal .cell .v', '#cal .cell .n']);
+      check('partial-days', `${tag}: partial replacement accepts`, (await board.pushResults({ ...partial, seq: ++seq })).status === 200);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `document.querySelector('#cal [data-day="${partialTrade}"] .n').textContent === 'Partial'`);
+      const shown = await page.evaluate(RES);
+      const cells = await page.evaluate(`(() => {
+        const probe = document.createElement('span'); probe.style.color = 'var(--warn)'; document.body.append(probe);
+        const warn = getComputedStyle(probe).color; probe.remove();
+        return [...document.querySelectorAll('#cal [data-day]')].map(cell => {
+          const markers = [...cell.querySelectorAll('.day-warning')], note = cell.querySelector('.n');
+          const marker = markers[0], r = marker?.getBoundingClientRect(), c = cell.getBoundingClientRect();
+          const css = getComputedStyle(cell), offset = marker && getComputedStyle(marker);
+          return { day: cell.dataset.day, markers: markers.length, half: Boolean(marker?.querySelector('use[href="#i-half"]')),
+            warn: marker ? getComputedStyle(marker.querySelector('svg')).color === warn : false,
+            inside: r ? r.left >= c.left && r.right <= c.right && r.top >= c.top && r.bottom <= c.bottom : false,
+            aligned: offset ? offset.top === css.paddingTop && offset.right === css.paddingRight : false,
+            note: note.textContent, noteVisible: __audit.visible(note), value: cell.querySelector('.v').innerText,
+            muted: Boolean(cell.querySelector('.v .muted')), cls: cell.className, bg: css.backgroundColor, ring: css.boxShadow,
+            aria: cell.getAttribute('aria-label'), clipped: [cell, cell.querySelector('.v'), marker].filter(Boolean).some(el => el.scrollWidth > el.clientWidth) };
+        });
+      })()`);
+      const cell = day => cells.find(c => c.day === day), trade = cell(partialTrade), empty = cell(partialEmpty);
+      for (const day of [partialTrade, partialEmpty]) {
+        const c = cell(day);
+        check('partial-days', `${tag} ${day}: one warn half icon in the existing slot; note only on desktop; complete accessible reason`,
+          c.markers === 1 && c.half && c.warn && c.inside && c.aligned && c.note === 'Partial' && c.noteVisible === !viewport.mobile &&
+          c.aria.includes("; Partial: this day's record is incomplete") && c.aria.includes(reason) && !c.clipped, c);
+      }
+      check('partial-days', `${tag}: partial trade keeps the amount and loss tint`,
+        N(trade.aria).includes(N('−€ 1,00 from 1 trade')) && /\bl[1-4]\b/.test(trade.cls) &&
+        shown.cal.cells.find(c => c.day === partialTrade).v === full.cal.cells.find(c => c.day === partialTrade).v, trade);
+      check('partial-days', `${tag}: unattributed-only partial is a muted neutral dash with a hairline`,
+        empty.value === '—' && empty.muted && /\bnone\b/.test(empty.cls) && !/\b(?:g[1-4]|l[1-4]|flat|we)\b/.test(empty.cls) &&
+        empty.bg === 'rgba(0, 0, 0, 0)' && /inset/.test(empty.ring) && empty.aria.includes('no complete record; Partial:') && !/€|no trades|sat out/.test(empty.aria), empty);
+      check('partial-days', `${tag}: Stale, open today and normal retain their states`,
+        cell(stale).markers === 1 && cell(stale).note === 'Stale' && !cell(stale).aria.includes('Partial') &&
+        cell(today).markers === 0 && !cell(today).aria.includes('Partial') && /\btoday\b/.test(cell(today).cls) &&
+        cell(normal).markers === 0 && cell(normal).note !== 'Partial', cells.filter(c => [stale, today, normal].includes(c.day)));
+      check('partial-days', `${tag}: marking partial moves outer and cell content geometry exactly 0 px`,
+        JSON.stringify(before) === JSON.stringify(await rects(page, SHIFT)) &&
+        JSON.stringify(contentRects) === JSON.stringify(await rects(page, ['#cal .cell .d', '#cal .cell .v', '#cal .cell .n'])),
+        { before, after: await rects(page, SHIFT) });
+      check('partial-days', `${tag}: totals and the record status stay unchanged`,
+        shown.display === full.display && JSON.stringify(shown.split) === JSON.stringify(full.split) && shown.status === full.status && !shown.status);
+      check('partial-days', `${tag}: read uses the expected ${fallback ? 'fallback' : 'worker'}`,
+        await page.evaluate('window.__joedesk.worker()') === !fallback);
+      await auditScreen(page, viewport, theme, 'results (partial coverage)');
+      await shot(page, viewport, `${viewport.name}-${theme}-results-partial-days`, 'October: partial trade on 12th, incomplete 13th, Stale 14th, normal 15th and open today 16th');
+      for (const day of [partialTrade, partialEmpty]) {
+        const closedSheet = viewport.mobile ? await rects(page, SHIFT) : null;
+        await click(page, `#cal [data-day="${day}"]`);
+        const detail = await page.evaluate(`(() => {
+          const root = document.querySelector(${JSON.stringify(viewport.mobile ? '#sheetBody' : '#daypanel')});
+          const sum = root.querySelector('.dp-sum'), note = root.querySelector('.dp-note');
+          return { sum: sum.textContent, text: root.innerText, rows: root.querySelectorAll('.trow').length,
+            warning: root.querySelectorAll('.dp-sum .st.warn use[href="#i-half"]').length,
+            reason: note?.innerText, noteVisible: __audit.visible(note), info: Boolean(note?.querySelector('use[href="#i-info"]')),
+            clipped: [root, sum, note, ...root.querySelectorAll('.trow')].filter(Boolean).some(el => el.scrollWidth > el.clientWidth) };
+        })()`);
+        const hasTrades = day === partialTrade;
+        check('partial-days', `${tag} ${day}: ${viewport.mobile ? 'sheet' : 'panel'} has the summary, reason and no clipping`,
+          N(detail.sum) === N(hasTrades ? 'Partial · 1 trade · −€ 1,00' : 'Partial · record incomplete') && detail.rows === (hasTrades ? 1 : 0) &&
+          detail.warning === 1 && detail.reason === reason && detail.noteVisible && detail.info && !detail.clipped &&
+          (hasTrades || !/€|no trades|sat out/i.test(detail.text)), detail);
+        const name = `${viewport.name}-${theme}-results-partial-${hasTrades ? 'trade' : 'empty'}-${viewport.mobile ? 'sheet' : 'panel'}`;
+        if (viewport.mobile) {
+          await viewShot(page, name, `Partial day ${day}: ${hasTrades ? 'retained trade amount' : 'record incomplete'}, with the reason`);
+          await key(page, 'Escape');
+          check('partial-days', `${tag} ${day}: closing the sheet returns to exactly the same geometry`,
+            JSON.stringify(closedSheet) === JSON.stringify(await rects(page, SHIFT)));
+        } else await shot(page, viewport, name, `Partial day ${day}: ${hasTrades ? 'retained trade amount' : 'record incomplete'}, with the reason`);
+      }
+    }
+  }
+
   if (run('missing-days')) {
     // JOED-28: real ingress diagnostics through both read paths. The complete
     // and missing records share trade money, so geometry can be compared.
@@ -988,9 +1098,10 @@ try {
       record.generatedAt = board.clock();
       record.trades.push({ ...structuredClone(record.trades[0]), id: 'rt-missing-day',
         openedAt: '2026-10-15T15:00:00.000Z', closedAt: '2026-10-15T15:00:00.000Z' });
-      // A reported partial day is covered, with no warning.
-      record.days.push({ date: '2026-10-15', coverage: 'partial', desks: {} });
-      check('missing-days', `${tag}: partial day accepts`, (await board.pushResults(record)).status === 200);
+      // Fully covered baseline: JOED-30's separate scenario owns partial.
+      record.days.push({ date: '2026-10-15', desks: structuredClone(valid.results.days[0].desks) });
+      withTradeSummaries(record);
+      check('missing-days', `${tag}: covered day accepts`, (await board.pushResults(record)).status === 200);
       const fallback = viewport.mobile && theme === 'dark';
       const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
       await configure(page, viewport, theme);
@@ -1000,7 +1111,7 @@ try {
       if (viewport.mobile) await key(page, 'Escape');
       const covered = await page.evaluate(RES), before = await rects(page, SHIFT);
       const coveredSummary = await page.evaluate('document.querySelector("#daypanel .dp-sum").textContent');
-      check('missing-days', `${tag}: partial day has no warning`, !await page.evaluate('Boolean(document.querySelector("#cal .day-warning"))'));
+      check('missing-days', `${tag}: covered day has no warning`, !await page.evaluate('Boolean(document.querySelector("#cal .day-warning"))'));
       const missing = { ...structuredClone(record), seq: record.seq + 1 };
       missing.days = missing.days.filter(day => day.date !== '2026-10-15');
       check('missing-days', `${tag}: missing closed day accepts with 200`, (await board.pushResults(missing)).status === 200);
@@ -1057,7 +1168,7 @@ try {
       check('missing-days', `${tag}: a covered replacement accepts`, (await board.pushResults(fixed)).status === 200);
       await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, '!document.querySelector("#cal .day-warning")');
-      check('missing-days', `${tag}: subsequent partial coverage clears the warning`, (await page.evaluate(RES)).day.sum === covered.day.sum);
+      check('missing-days', `${tag}: subsequent full coverage clears the warning`, (await page.evaluate(RES)).day.sum === covered.day.sum);
       // A trade on today's open Vienna date remains silent even without a day.
       const open = { ...structuredClone(missing), seq: fixed.seq + 1 };
       open.trades.at(-1).openedAt = open.trades.at(-1).closedAt = '2026-10-16T10:00:00.000Z';
@@ -1155,6 +1266,17 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   desktop arrows. August and September add the full signed form set, with
   ±999k measured as INFO only. Amount changes, month changes and closing a settled
   open sheet must move geometry exactly 0 px. The tap's own movement is INFO.
+- **Partial coverage (JOED-30).** The dedicated \`partial-days\` scenario uses
+  real ingress at 1440/1024/390/360, light and dark, through the worker and
+  fallback. October shows a partial trade on the 12th, an unattributed-only
+  partial on the 13th, Stale on the 14th, a normal 15th and open today on the
+  16th with no partial marker. \`*-results-partial-days.png\` captures the
+  month; \`*-results-partial-{trade,empty}-{panel,sheet}.png\` captures each
+  partial summary and its info-note reason. The partial replacement must
+  preserve trade amounts, totals and geometry exactly; all cells and detail
+  summaries must satisfy scrollWidth ≤ clientWidth. The optional status-line
+  partial-day count is deferred, so this scenario also checks the status stays
+  unchanged.
 - **Hero chart time axis** (fix round 1). The x axis is real time: each close
   sits at the end of its Vienna date, today's money at now; missing dates keep
   their width, and a session without a close in the record breaks the line

@@ -368,8 +368,8 @@ closed trades but no `days[]` entry, using explicit `Europe/Vienna` dates for
 both `closedAt` and the server receipt. The accepted Results read includes the
 list only when nonempty. A missing daily entry returns 200 and a warning, not
 422. The current open Vienna date, future dates and reported partial-coverage
-days do not warn. Full-day reconciliation and exact trade arithmetic still
-apply independently.
+days do not warn as missing. Full-day reconciliation and exact trade arithmetic
+still apply independently.
 
 For example, trades closed on 15 October 2026 with only 14 October in `days[]`
 produce `missingDays: ["2026-10-15"]` when received on 16 October in Vienna.
@@ -383,6 +383,31 @@ sentence-case **Stale** warning treatment, with a missing-summary explanation
 in the accessible label/tooltip. Calendar geometry stays fixed, including on
 phones where the icon remains visible. Trade amounts remain visible; a desk
 filter with no trades on the affected date does not warn.
+
+For a **closed past Vienna date**, `coverage: "partial"` shows **Partial** in
+the calendar's existing warning slot (half-circle SVG in the warning tone).
+Desktop cells replace their note with **Partial**; phone cells show only the
+icon. The accessible label adds “Partial: this day's record is incomplete”
+and the reason. The day panel and phone sheet show **Partial · N trades ·
+±€X**, with “Part of this day's activity couldn't be confirmed, so its result
+may be incomplete.” on the existing info-note line. Exact trade amounts stay
+visible and remain the source for trade totals.
+
+`{date, desks: {}, coverage: "partial"}` is valid even without any trades.
+Unknown partial summary money stays `null`. With no visible trades, the cell
+shows a muted **—**, its neutral surface and hairline, plus the warning; the
+day summary reads **Partial · record incomplete**, with the same reason.
+Neither view claims €0, “no trades” or “sat out”. Coverage applies to the day,
+including when a selected desk has no visible trades. **Stale** wins when a
+missing-summary diagnostic and partial coverage coincide; each view has one
+warning only. The open Vienna date and future dates never show partial markers.
+Vienna midnight, using the shared zone helper, closes the day even across DST.
+
+Coverage and nullable summaries pass through acceptance, persistence, restart
+and `/joe/results.json` unchanged. Both client read paths index partial dates
+without using summary money for trade P&L; the worker's transfer preserves them.
+No schema change is required. The optional partial-day count in the record's
+status line is deferred pending narrow-screen layout verification.
 
 ## Local layout
 

@@ -472,6 +472,24 @@ test('JOED-27 results: accepted snapshot and server receipt survive a stopped-se
   assert.equal((await restarted.pushResults(resultsSnapshot(102, 9000))).status, 200);
 });
 
+test('JOED-30 results: partial coverage, empty desks and unknown summary money reach the protected read unchanged', async t => {
+  const now = '2026-10-16T12:00:00.000Z';
+  const s = await setup(t, { clock: () => now });
+  const value = resultsSnapshot(); value.generatedAt = now;
+  value.days[0].coverage = 'partial';
+  for (const desk of Object.values(value.days[0].desks)) desk.realisedNet = desk.fees = null;
+  value.days.push({ date: '2026-10-15', desks: {}, coverage: 'partial' });
+  assert.equal((await s.pushResults(value)).status, 200);
+  const read = await s.request('/joe/results.json');
+  assert.equal(read.status, 200);
+  assert.ok(validateContract('results', read.body).ok);
+  assert.deepEqual(read.body.days, value.days);
+  assert.deepEqual(read.body.trades, value.trades);
+  assert.deepEqual(read.body.missingDays ?? [], []);
+  const cold = createReadModel({ dataDir: s.dataDir, clock: () => now });
+  assert.deepEqual(cold.feeds().results.value.days, value.days, 'restart preserves the producer coverage and nulls');
+});
+
 test('JOED-28 results: missing closed days accept with 200, persist, retain on rejection and clear on partial coverage', async t => {
   const now = '2026-10-16T12:00:00.000Z';
   const s = await setup(t, { clock: () => now });

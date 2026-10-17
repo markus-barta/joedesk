@@ -68,6 +68,20 @@ test('JOED-28 results: server missing-day warnings survive indexing and worker t
   assert.equal(before.missingDays.size, 0);
 });
 
+test('JOED-30 results: partial dates, empty desks and nullable summaries validate and survive worker transfer', () => {
+  const value = fixture('partial-day');
+  value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial' });
+  const day = value.days[0];
+  day.desks.j.realisedNet = day.desks.j.fees = null;
+  assert.ok(validateContract('results', value).ok);
+  const ix = M.indexResults(value);
+  const copy = structuredClone(ix, { transfer: M.transferables(ix) });
+  assert.deepEqual([...copy.partialDays].sort(), ['2026-10-13', '2026-10-14']);
+  assert.equal(M.dayResult(copy, '2026-10-14', ALL).units, E('-1'));
+  assert.deepEqual(M.dayResult(copy, '2026-10-13', ALL), { count: 0, units: 0n, net: 0 });
+  assert.equal(M.indexResults(fixture('scratches')).partialDays.size, 0, 'omitted coverage stays full');
+});
+
 test('fixtures: every results fixture is a valid served v2 contract', () => {
   for (const name of ['empty', 'scratches', 'no-losers', 'drawdown', 'dst-weeks', 'exact-decimals', 'partial-day']) {
     const r = validateContract('results', fixture(name));
@@ -610,4 +624,108 @@ test('JOED-29 calendar rendering: phone cells keep signs and tints without arrow
   assert.ok(weeks.some(week => week.includes('href="#i-up"')), 'a positive week keeps its arrow');
   assert.ok(weeks.some(week => week.includes('href="#i-down"')), 'a negative week keeps its arrow');
   assert.doesNotMatch(html, /title=/);
+});
+
+// Real calendar, panel and already-open phone sheet renderers, captured under
+// Node. No browser is started; CI measures the same markup at phone widths.
+function calendarCapture(t) {
+  const before = globalThis.document, state = { ...page.RS };
+  t.after(() => {
+    if (before === undefined) delete globalThis.document;
+    else globalThis.document = before;
+    Object.assign(page.RS, state);
+  });
+  const nodes = new Map(['calTitle', 'prevMonth', 'nextMonth', 'calSum', 'cal', 'calLegend', 'daypanel', 'daySheet', 'sheetTitle', 'sheetBody']
+    .map(id => [`#${id}`, { innerHTML: '', textContent: '' }]));
+  nodes.get('#daySheet').open = true;
+  globalThis.document = { querySelector: selector => nodes.get(selector), activeElement: null };
+  return (value, now, selected, desks = ALL) => {
+    const ix = M.indexResults(value), today = page.resultsToday(now);
+    Object.assign(page.RS, { cal: M.ymOf(selected), sel: selected, period: 'month' });
+    page.renderCalendar({ ix, today, trackingStart: ix.meta.trackingStart }, M.periodOf('month', selected, today, ix.meta.trackingStart), desks);
+    const html = nodes.get('#cal').innerHTML;
+    return { html, cell: day => html.match(new RegExp(`<button[^>]*data-day="${day}"[^>]*>[\\s\\S]*?<\\/button>`))?.[0],
+      panel: nodes.get('#daypanel').innerHTML, sheet: nodes.get('#sheetBody').innerHTML };
+  };
+}
+const partialReason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
+const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'");
+
+test('JOED-30 rendering: closed partial trades keep their exact amount, tint and one warning in every day view', t => {
+  const render = calendarCapture(t), value = fixture('partial-day');
+  let r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-14');
+  const cell = r.cell('2026-10-14');
+  assert.match(cell, /class="cell l[1-4]\b/);
+  assert.match(cell, /class="day-warning st warn"[^>]*>[\s\S]*href="#i-half"/);
+  assert.equal((cell.match(/class="day-warning/g) ?? []).length, 1);
+  assert.match(cell, /<span class="n">Partial<\/span>/);
+  assert.match(textOf(cell), /−1,00/);
+  assert.match(cell.replaceAll('&#39;', "'"), /−€ 1,00 from 1 trade; Partial: this day's record is incomplete/);
+  assert.ok(cell.includes(fmt.esc(partialReason)), 'the accessible label and tooltip carry the reason');
+  for (const html of [r.panel, r.sheet]) {
+    assert.match(textOf(html), /Partial · 1 trade · −€ 1,00/);
+    assert.match(html, /class="st warn"[^>]*>[\s\S]*href="#i-half"/);
+    assert.ok(textOf(html).includes(partialReason));
+    assert.equal((html.match(/class="trow"/g) ?? []).length, 1);
+    assert.match(html, /class="dp-note">[\s\S]*href="#i-info"/);
+  }
+  // Coverage is day-wide: filtering to a desk without visible trades cannot
+  // claim that desk sat out when the day's record is incomplete.
+  r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-14', ['joe']);
+  assert.match(r.cell('2026-10-14'), /class="cell none\b/);
+  assert.match(textOf(r.sheet), /Partial · record incomplete/);
+  assert.doesNotMatch(textOf(r.sheet), /[Nn]o trades|sat out|€/);
+});
+
+test('JOED-30 rendering: a partial date with no trades is a neutral dash and incomplete record, including weekends', t => {
+  const render = calendarCapture(t);
+  const value = record([{ date: '2026-10-13', desks: {}, coverage: 'partial' }, { date: '2026-10-25', desks: {}, coverage: 'partial' }]);
+  for (const day of ['2026-10-13', '2026-10-25']) {
+    const r = render(value, '2026-10-26T00:00:00.000Z', day), cell = r.cell(day);
+    assert.match(cell, /class="cell none\b/);
+    assert.match(cell, /<span class="v"><span class="muted">—<\/span><\/span>/);
+    assert.match(cell, /<span class="n">Partial<\/span>/);
+    assert.match(cell.replaceAll('&#39;', "'"), /no complete record; Partial: this day's record is incomplete/);
+    assert.doesNotMatch(cell, /class="cell (?:g|l|flat|we)|class="pl"|[Nn]o trades|sat out|€|>0</);
+    for (const html of [r.panel, r.sheet]) {
+      assert.match(textOf(html), /Partial · record incomplete/);
+      assert.ok(textOf(html).includes(partialReason));
+      assert.doesNotMatch(textOf(html), /[Nn]o trades|sat out|€|\b0\b/);
+    }
+  }
+});
+
+test('JOED-30 rendering: Stale wins over partial coverage in the cell, panel and phone sheet', t => {
+  const render = calendarCapture(t), value = fixture('partial-day');
+  value.missingDays = ['2026-10-14'];
+  const r = render(value, '2026-10-16T12:00:00.000Z', '2026-10-14'), cell = r.cell('2026-10-14');
+  assert.equal((cell.match(/class="day-warning/g) ?? []).length, 1);
+  assert.match(cell, /<span class="n">Stale<\/span>/);
+  assert.match(cell, /Stale: daily summary missing/);
+  assert.doesNotMatch(cell, /Partial|incomplete/);
+  for (const html of [r.panel, r.sheet]) {
+    assert.match(textOf(html), /Stale · 1 trade · −€ 1,00/);
+    assert.match(textOf(html), /Daily summary missing\./);
+    assert.doesNotMatch(textOf(html), /Partial|incomplete/);
+  }
+});
+
+test('JOED-30 rendering: only closed Vienna dates show partial, across midnight and the autumn DST boundary', t => {
+  const render = calendarCapture(t);
+  for (const [day, open, closed] of [
+    ['2026-10-14', '2026-10-14T21:59:59.999Z', '2026-10-14T22:00:00.000Z'],
+    ['2026-10-25', '2026-10-25T22:59:59.999Z', '2026-10-25T23:00:00.000Z'],
+  ]) for (const hasTrades of [false, true]) {
+    const value = record([{ date: day, desks: {}, coverage: 'partial' }], hasTrades ? [tradeOf('rt-boundary', 'j', `${day}T14:00:00.000Z`, '1.005')] : []);
+    const r = render(value, open, day);
+    assert.match(r.cell(day), /\btoday\b/);
+    assert.doesNotMatch(r.cell(day), /Partial|day-warning|incomplete/);
+    assert.doesNotMatch(r.panel + r.sheet, /Partial|incomplete/);
+    const later = render(value, closed, day);
+    assert.match(later.cell(day), /day-warning/);
+    assert.match(textOf(later.sheet), hasTrades ? /Partial · 1 trade · \+€ 1,01/ : /Partial · record incomplete/);
+    const ahead = render(value, `${M.addDays(day, -1)}T12:00:00.000Z`, day);
+    assert.match(ahead.cell(day), /class="cell fut\b/);
+    assert.doesNotMatch(ahead.cell(day), /Partial|day-warning/);
+  }
 });

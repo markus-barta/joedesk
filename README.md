@@ -453,26 +453,50 @@ path (`$.days[i].desks.id.trades`, `.realisedNet` or `.fees`) and rule
 Trades on dates with no `days[]` entry (for example today before daily close)
 are skipped by this cross-check; their schema and trade checks still apply.
 Day-level `coverage` is optional: `"full"` (the default when omitted) or
-`"partial"`. Use `"partial"` only when a windowed `trades[]` covers part of that
-day; its day/trade cross-check is skipped. Schema and trade checks still apply.
+`"partial"`. Use `"partial"` when the day's record may be incomplete, including
+a windowed trade record, capture gaps, unattributed activity, stale currency
+conversion or a broker-backstop mismatch. Its day/trade cross-check is skipped;
+schema and trade checks still apply. Unknown summary `realisedNet` and `fees`
+may be `null`. An unattributed-only day can be `{date, desks: {}, coverage:
+"partial"}` with no trades; it is not a confirmed zero-trade day.
 KEEP holdings **SXR8 and TSLA are excluded from both `trades[]` and all `days[]`
 totals**, including partial days. Results derives trade P&L from `trades[]`;
 day summaries are validated, never substituted for the trade record.
 
 On acceptance, the server computes `missingDays`: sorted unique **past Vienna
 dates** with closed trades but no `days[]` entry. The protected Results read
-includes this server-owned list when nonempty (omitted means no warnings).
+includes this server-owned list when nonempty (omitted means no missing-summary
+warnings).
 This is accepted with **200**, never a rejection for a missing daily entry.
 The current open Vienna date and future dates are skipped; a reported
-`coverage: "partial"` day is present and does not warn. Dates use explicit
-`Europe/Vienna` conversion, including the 25-hour DST day, against the server's
-receipt date. Diagnostics stay with that accepted snapshot across reads,
+`coverage: "partial"` day is present and does not warn as missing. Dates use
+explicit `Europe/Vienna` conversion, including the 25-hour DST day, against
+the server's receipt date. Diagnostics stay with that accepted snapshot across reads,
 rejections and restart; the next accepted push recomputes them.
 The affected calendar day and its trade summary use the existing **Stale**
 warning marker, without moving the layout or changing the trade amounts.
 The day panel and phone sheet prefix the retained trade count and net amount
 with **Stale** and show **Daily summary missing** in the day note.
 Desk filtering warns only where the selected desks have trades on that date.
+
+Results marks **closed past Vienna dates** with `coverage: "partial"` as
+**Partial**, using the existing half-circle warning SVG and calendar warning
+slot. Desktop cells replace the note with **Partial**; phones show the icon.
+The cell's accessible label includes “Partial: this day's record is incomplete”
+and the reason. The day panel and phone sheet prefix the exact visible trade
+count and amount with **Partial** and explain on the existing day-note line:
+“Part of this day's activity couldn't be confirmed, so its result may be
+incomplete.” A partial day with no visible trades shows a muted **—** on the
+neutral calendar surface, and **Partial · record incomplete** in the day
+summary; it never claims €0, “no trades” or “sat out”. This day-wide warning
+also applies when a desk filter has no visible trades. **Stale** takes priority
+if both diagnostics occur. The open Vienna date has no partial marker; it
+becomes eligible only at Vienna midnight, including across DST changes.
+The server preserves producer coverage and nullable summaries on protected
+reads and restart; both the read worker and fallback retain partial dates.
+All amounts and totals still come from the existing exact trade calculations.
+The optional period-wide partial-day count is deferred; the existing wrapping
+record-status line is unchanged.
 
 On phones, Results calendar amounts use compact forms such as `1`, `4,1`,
 `13`, `1k` and `1,2k`, rounded once from exact decimals, half away from zero.

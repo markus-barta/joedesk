@@ -99,6 +99,15 @@ const cutText = cut => `${names(cut.desks)}’s bookkeeping basis changed on ${M
 
 const missingDay = (ix, k, desks) => ix?.missingDays?.has(k) && M.dayResult(ix, k, desks).count > 0;
 const missingDayText = k => `Stale: daily summary missing for ${M.fmtDay(k)}`;
+const PARTIAL_REASON = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
+const partialDay = (view, k) => k < view.today && view.ix?.partialDays?.has(k);
+// One warning slot, with a missing summary taking priority over partial coverage.
+function dayWarning(view, k, desks) {
+  if (k >= view.today) return null;
+  if (missingDay(view.ix, k, desks)) return { label: 'Stale', text: missingDayText(k), note: 'Daily summary missing.' };
+  if (partialDay(view, k)) return { label: 'Partial', text: `Partial: this day's record is incomplete. ${PARTIAL_REASON}`, note: PARTIAL_REASON };
+  return null;
+}
 
 // The context every number of one render shares (the model builds it).
 const numbers = (view, per, desks) => M.moneyContext(view.ix, view, per, desks);
@@ -245,6 +254,7 @@ function dayState(view, k, desks, max) {
     if (isZero(r.units)) return { cls: 'flat', r, note, aria: `${money(0)} from ${note}` };
     return { cls: `${r.units > 0n ? 'g' : 'l'}${M.tintStep(r.units, max)}`, r, note, aria: `${eur(r.units, true)} from ${note}` };
   }
+  if (partialDay(view, k)) return { cls: 'none', note: 'Partial', aria: 'no complete record', dash: true };
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   if (closed) return { cls: 'we', note: 'closed', aria: M.isWeekend(k) ? 'weekend, markets closed' : 'US market holiday, markets closed' };
   if (!ix) return { cls: 'nw', note: '', aria: 'unavailable', dash: true };
@@ -279,12 +289,12 @@ export function renderCalendar(view, per, desks) {
       if (cy !== y || cm !== m) { html += '<div class="cell out" aria-hidden="true"></div>'; continue; }
       inMonth = true;
       const s = dayState(view, k, desks, max);
-      const missing = missingDay(ix, k, desks);
+      const warning = dayWarning(view, k, desks);
       // Heatmap ink keeps the warning readable on every gain/loss tint;
       // the day's summary uses the usual warning icon tint on its surface.
       const cls = ['cell', s.cls, k === today ? 'today' : '', k === RS.sel ? 'sel' : '', inPer(k) ? 'inper' : ''].filter(Boolean).join(' ');
       const value = s.r ? `<span class="vl">${plain(s.r.units)}</span><span class="vs">${compact(s.r.units)}</span>` : s.dash ? '<span class="muted">—</span>' : '';
-      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${missing ? `; ${esc(missingDayText(k))}` : ''}"><span class="d">${Number(k.slice(8))}</span>${missing ? `<span class="day-warning st" title="${esc(missingDayText(k))}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${missing ? 'Stale' : s.note}</span></button>`;
+      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${warning ? `; ${esc(warning.text)}` : ''}"><span class="d">${Number(k.slice(8))}</span>${warning ? `<span class="day-warning st${warning.label === 'Partial' ? ' warn' : ''}" title="${esc(warning.text)}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${warning ? warning.label : s.note}</span></button>`;
     }
     // A week still ahead has nothing to sum yet.
     const ahead = wk > today;
@@ -331,16 +341,17 @@ function dayContent(view, k, desks) {
       : `No closed-trade record for ${M.fmtDDM(k)}: ${esc(cellReason(view.reason))}.`}</span></p>`, note: '' };
   }
   const r = M.dayResult(ix, k, desks);
-  const missing = missingDay(ix, k, desks);
-  const summary = ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
-  const sum = missing ? `${st('warn', 'Stale')} · ${summary}` : summary;
+  const warning = dayWarning(view, k, desks);
+  const incomplete = warning?.label === 'Partial' && !ts.length;
+  const summary = ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : incomplete ? 'record incomplete' : 'No trades';
+  const sum = warning ? `${st('warn', warning.label)} · ${summary}` : summary;
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   const why = k > today ? `${M.fmtDDM(k)} is still ahead.` : closed ? `No trades on ${M.fmtDDM(k)}: ${M.isWeekend(k) ? 'weekend' : 'US market holiday'}, markets closed.`
     : k < view.trackingStart ? `No trades on ${M.fmtDDM(k)}: paper results start on ${startText(view.trackingStart)}.` : `No trades on ${M.fmtDDM(k)}: the desks sat out.`;
-  const body = ts.length ? tradeRows(ts) : `<p class="dp-empty">${icon(closed ? 'clock' : 'info')}<span>${esc(why)}</span></p>`;
+  const body = ts.length ? tradeRows(ts) : incomplete ? '' : `<p class="dp-empty">${icon(closed ? 'clock' : 'info')}<span>${esc(why)}</span></p>`;
   // A lot opened this day and still held counts in Still open and on Desk.
   const opened = (view.positions ?? []).filter(p => p.openedAt && desks.includes(p.desk) && M.viennaDate(Date.parse(p.openedAt)) === k);
-  const note = [missing ? 'Daily summary missing.' : '', ...opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`)].filter(Boolean).join(' ');
+  const note = [warning?.note ?? '', ...opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`)].filter(Boolean).join(' ');
   return { sum, body, note };
 }
 
