@@ -175,7 +175,10 @@ export function periodHintResults(now = '2026-10-16T12:00:00.000Z') {
     for (const desk of Object.values(day.desks)) desk.realisedNet = desk.fees = null;
   }
   for (const value of [baseline, partial]) delete value.receivedAt;
-  return { baseline, partial };
+  const empty = withTradeSummaries({ ...structuredClone(partial), trades: [] });
+  const unknown = structuredClone(partial);
+  for (const day of unknown.days) for (const desk of Object.values(day.desks)) desk.equityClose = null;
+  return { baseline, partial, empty, unknown };
 }
 
 // The largest record the 8 MiB contract allows for this trade shape, for the

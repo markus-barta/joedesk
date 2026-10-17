@@ -520,11 +520,18 @@ their whole range, including Stale-escalated dates and days without trades.
 Today, future dates and missing-summary Stale without partial coverage never
 count. Desk filters keep the same count because coverage belongs to the whole
 day. One warning SVG follows the sentence; tiles and By-desk rows stay plain.
-Phones at ≤ 600 px reserve two sentence lines with and without the hint.
-The dedicated `period-hint` browser scenario checks zero tile movement at
-360/390/1024, desktop one-line fit, warning-icon contrast and clipping. It
-writes hero crops at 1440/1024/390 in both themes, plus 390 without the hint,
-under `JOED_QA_DIR` for the visual check.
+With a hint, the sentence's final full stop gives way to the separator; without
+one it stays. A period with counted partial days and no trades says **No trades
+recorded**, as on the calendar month line. Phones at ≤ 600 px reserve at least
+two sentence lines; long no-trade and unknown-result sentences may take three
+at 360/390 without moving the split rows, chart or tiles. Desktop keeps the
+original 340 px left column (280 px at ≤ 1180 px); normal result sentences take
+at most two lines and the hint wraps as one unbreakable unit.
+The dedicated `period-hint` browser scenario checks zero movement of tiles and
+hero children at 360/390/768/1024, desktop two-line fit, warning-icon contrast
+and clipping. It writes full-hero crops, including the unchanged chart, at
+1440/1024/768/390 in both themes, plus 390 without the hint, under `JOED_QA_DIR`
+for the visual check.
 
 On phones, Results calendar amounts use compact forms such as `1`, `4,1`,
 `13`, `1k` and `1,2k`, rounded once from exact decimals, half away from zero.

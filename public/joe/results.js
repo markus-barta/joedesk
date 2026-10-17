@@ -151,20 +151,22 @@ export function renderResults(ctx) {
   renderCurve(view, per, desks, R, mctx);
 }
 
-function heroSentence(view, per, R) {
+function heroSentence(view, per, R, partialDays) {
   if (!view.ix) return `Results are unavailable: ${cellReason(view.reason)}.`;
   if (R.cut) return `No result ${per.phrase}: ${cutText(R.cut)}, and a change of basis is not a gain or a loss.`;
-  if (R.empty) return `No trades ${per.phrase}. Paper results start on ${startText(view.trackingStart)}.`;
+  if (R.empty || (partialDays && !R.trades)) return `No trades${partialDays ? ' recorded' : ''} ${per.phrase}. Paper results start on ${startText(view.trackingStart)}.`;
   if (R.net === null) return `The result ${per.phrase} is not known yet: the desks’ money ${R.end === view.today ? 'now' : `on ${M.fmtDDM(R.end)}`} is not available.`;
   return `${signedWord(R.units.net)} ${per.phrase}.`;
 }
 
 export function renderHero(view, per, desks, R) {
   const none = !R || R.empty;
+  const partialDays = M.countPartialDays(view.ix, per, view.today);
+  const sentence = heroSentence(view, per, R, partialDays);
   patch($('#rheroL'), `
     <div class="hero-k">${icon('results')}<span>${term('result')} · ${esc(whoOf(desks))}</span></div>
     <div class="display">${none || R.net === null ? D : bn(R.units.net)}</div>
-    <p class="say">${esc(heroSentence(view, per, R))}${partialHint(M.countPartialDays(view.ix, per, view.today))}</p>
+    <p class="say">${esc(partialDays ? sentence.replace(/\.$/, '') : sentence)}${partialHint(partialDays)}</p>
     <dl class="split">
       <dt>${term('closed')}</dt><dd>${none ? '—' : pl(R.units.realised)}</dd>
       <dt>${term('stillopen')}</dt><dd>${none || R.unreal === null ? '—' : pl(R.units.unreal)}</dd>

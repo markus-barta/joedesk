@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { reserveVersion, compareReleases } from '../release/versioning.mjs';
 
-export const CLOSURE_SHA256 = '9b814546898cb8a4f696e01fcf5b35c42ec5bb0131151add99ff5785d4b1aa73';
+export const CLOSURE_SHA256 = '8d2de8332d2f88f30a6b3ea1a66153b59f8570084c117f9ee221fa3f928f3464';
 export const PRESENTATION_PIN = Object.freeze({
   source_commit: '01b3080948c21899cbbacbfa3447da6799af1b56',
   config_sha256: 'bf6aa144cd73dc97dc941f0f0914138b04ae0a28fbead5123465b15b1f2a2fd9',
