@@ -456,29 +456,38 @@ try {
           const after = __audit.rects(${J(geometrySelectors)}), afterBroker = button.querySelector('.lbl-long').textContent;
           const label = button.querySelector('b');
           const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), css = getComputedStyle(button);
-          const range = document.createRange(), glyphs = [];
+          const range = document.createRange(), glyphs = [], words = [];
           const edges = r => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
           range.selectNodeContents(label);
           const lines = [...range.getClientRects()].map(edges);
           const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
-          for (let n; (n = walker.nextNode());) for (const match of n.textContent.matchAll(/\\S/gu)) {
-            range.setStart(n, match.index); range.setEnd(n, match.index + match[0].length);
-            glyphs.push({ glyph: match[0], ...edges(range.getBoundingClientRect()) });
+          for (let n; (n = walker.nextNode());) {
+            for (const match of n.textContent.matchAll(/\\S/gu)) {
+              range.setStart(n, match.index); range.setEnd(n, match.index + match[0].length);
+              glyphs.push({ glyph: match[0], ...edges(range.getBoundingClientRect()) });
+            }
+            for (const match of n.textContent.matchAll(/\\S+/gu)) {
+              range.setStart(n, match.index); range.setEnd(n, match.index + match[0].length);
+              words.push({ text: match[0], lines: [...range.getClientRects()].map(edges) });
+            }
           }
-          const inside = glyphs.length > 0 && glyphs.every(r => r.left >= Math.max(cell.left, box.left + parseFloat(css.paddingLeft)) - 0.5 && r.right <= Math.min(cell.right, box.right - parseFloat(css.paddingRight)) + 0.5 && r.top >= box.top && r.bottom <= box.bottom);
+          const inside = glyphs.length > 0 && glyphs.every(r => [cell, box].every(b => r.left >= b.left - 0.5 && r.right <= b.right + 0.5 && r.top >= b.top && r.bottom <= b.bottom));
+          const ellipsis = css.textOverflow === 'ellipsis' || getComputedStyle(label).textOverflow === 'ellipsis' || /…|\\.\\.\\./u.test(label.textContent);
           const row = document.querySelector('.top-in'), rowBox = row.getBoundingClientRect(), rowCSS = getComputedStyle(row);
           const first = row.querySelector('.brand').getBoundingClientRect(), last = document.getElementById('themeBtn').getBoundingClientRect();
           const items = [...row.children].filter(__audit.visible).map(e => e.getBoundingClientRect());
           const inRow = items.every((r, i) => r.left >= rowBox.left + parseFloat(rowCSS.paddingLeft) - 0.5 && r.right <= rowBox.right - parseFloat(rowCSS.paddingRight) + 0.5 && (!i || r.left >= items[i - 1].right - 0.5));
           return { before, after, beforeBroker, afterBroker, inRow,
-            label: { text: label.textContent, lineCount: lines.length, lines, glyphs, inside, cell: edges(cell), pill: edges(box) },
+            label: { text: label.textContent, lineCount: lines.length, lines, glyphs, words, inside, ellipsis, cell: edges(cell), pill: edges(box) },
             inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: rowCSS.paddingLeft, paddingRight: rowCSS.paddingRight },
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
         if (h.reason === 'ledger_size_limit') {
+          const maxLines = [360, 390].includes(viewport.width) ? 2 : 1;
+          const intactWords = measured.label.words.length > 0 && measured.label.words.every(word => word.lines.length === 1);
           const evidence = { label: measured.label, inRow: measured.inRow, horizontal: measured.horizontal, clipping: measured.clipping };
           console.log(`executor-header ${viewport.name} ${theme}: ${J(evidence)}`);
-          check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: existing Needs fix label fits; no clipping, overlap or ellipsis`, measured.label.inside && measured.inRow && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
+          check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: existing Needs fix label fits; no clipping, overlap or ellipsis`, measured.label.lineCount >= 1 && measured.label.lineCount <= maxLines && intactWords && measured.label.inside && !measured.label.ellipsis && measured.inRow && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
         }
         if (viewport.width === 360) check('executor-health', `${theme} header ${h.label}: original 16 px inset at 360`, measured.inset.left === 16 && measured.inset.right === 16 && measured.inset.paddingLeft === '16px' && measured.inset.paddingRight === '16px', measured.inset);
         const moved = exactMoves(measured.before, measured.after);
