@@ -1438,6 +1438,8 @@ try {
       const say = document.querySelector('#rheroL .say'), box = say.getBoundingClientRect(), cs = getComputedStyle(say);
       const range = document.createRange(); range.selectNodeContents(say);
       const content = range.getBoundingClientRect(), hint = say.querySelector('.st');
+      const sentenceRange = document.createRange(); sentenceRange.selectNodeContents(say.firstChild);
+      const firstLine = sentenceRange.getClientRects()[0], hintBox = hint?.getBoundingClientRect();
       const month = document.getElementById('calSum'), monthHint = month.querySelector('.st');
       const unbroken = (el, lineHeight) => !el || (getComputedStyle(el).whiteSpace === 'nowrap' &&
         el.getClientRects().length === 1 && el.getBoundingClientRect().height <= lineHeight + 1);
@@ -1455,6 +1457,8 @@ try {
       const svg = hint?.querySelector('svg'), fg = svg ? rgb(getComputedStyle(svg).color) : null, bg = background(say);
       const x = fg ? luminance(fg.slice(0, 3)) : null, y = luminance(bg);
       return { sentence: say.textContent, hint: hint?.textContent ?? null, hintPrefix: hint?.previousSibling?.textContent ?? '',
+        firstLineLeft: firstLine.left, hintLeft: hintBox?.left ?? null,
+        hintLine: hintBox ? 1 + Math.round((hintBox.top - firstLine.top) / parseFloat(cs.lineHeight)) : null,
         monthHint: monthHint?.textContent ?? null,
         noMiddleDot: !say.textContent.includes('·') && !month.textContent.includes('·'),
         monthHintUnbroken: !month.getClientRects().length || unbroken(monthHint, parseFloat(getComputedStyle(month).lineHeight)),
@@ -1515,6 +1519,11 @@ try {
       await click(page, '#periodSeg [data-period="month"]');
       await click(page, '#deskSeg [data-desk="all"]');
       check('period-hint', `${tag}: the full-hero crop includes the unchanged chart`, baselineChart === await chart());
+      if (viewport.name === '1024') {
+        const wrapped = await probe();
+        check('period-hint', `${tag}: the hint wraps to line 2 and starts flush with line 1 within 0.5 px`,
+          wrapped.hintLine === 2 && Math.abs(wrapped.hintLeft - wrapped.firstLineLeft) <= .5, wrapped);
+      }
       if (viewport.name !== '360') await crop(viewport, theme, 'hint');
       // Real sentence markup with wide amount/date forms, including a past
       // week with two-digit dates. Unknown and basis-change forms have no hint.
@@ -2402,7 +2411,10 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   amount/date probes require the same exact 0 px geometry.
   Neither the hero sentence nor the month line contains a middle dot, so no
   line box can start or end with one. Both hint units stay unbroken, with the
-  warning icon itself separating the words. Computed warning-icon contrast is
+  warning icon itself separating the words. One plain breaking space precedes
+  each hint and collapses at a wrap. At 1024 the hero hint must occupy line 2
+  with its left edge within 0.5 px of line 1; the light hero crop is
+  \`1024-light-results-period-hint-hero.png\`. Computed warning-icon contrast is
   at least 3:1 against the hero and neither sentence nor hint may clip. Coverage alone never changes
   the chart SVG. \`{1440,1024,768,390}-*-results-period-hint-hero.png\` are the full-hero crops with
   two partial days; \`390-*-results-period-no-hint-hero.png\` shows the reserve.

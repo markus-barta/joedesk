@@ -424,7 +424,8 @@ The schema ID stays v2. The desktop calendar month summary appends
 date, including Stale-escalated dates. Today, future dates and missing-summary
 Stale dates without partial coverage are excluded. With no trades and a
 counted partial date it reads **No trades recorded this month ◑ incl. 1 partial
-day**. The warning SVG separates the hint, with about 6 px before it and no
+day**. One plain breaking space precedes the warning SVG separator; it collapses
+at a wrap so the icon starts flush with the sentence's first line. There is no
 middle dot; the icon and words stay one nowrap unit, as on the hero sentence.
 “Over N trading days” shortens to “in N days” first if necessary. The
 summary stays on one line and is hidden on phones. No partial hint appears in

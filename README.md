@@ -539,9 +539,10 @@ Today, future dates and missing-summary Stale without partial coverage never
 count. Desk filters keep the same count because coverage belongs to the whole
 day. One warning SVG follows the sentence; tiles and By-desk rows stay plain.
 With a hint, the sentence drops its final full stop. The warning SVG itself
-separates the hint from the sentence, with about 6 px before the icon and no
-middle dot, on both the hero and calendar month line. The icon and words stay
-one nowrap unit; a wrapped hint starts with the icon. Without a hint the full
+separates the hint from the sentence, with one plain breaking space before the
+icon, on both the hero and calendar month line. The space collapses at a wrap,
+so the icon starts flush with the sentence's first line. The icon and words stay
+one nowrap unit. Without a hint the full
 stop stays. An empty period (no closed trades and a known, flat result) with
 counted partial days says **No trades recorded**, as on the calendar month
 line; without them it says **No trades**. Open-position gains or losses keep
@@ -563,7 +564,9 @@ and clipping. It also forbids middle dots in both lines and splitting either
 hint unit, while preserving the calendar geometry. It writes full-hero crops,
 including the unchanged chart, at
 1440/1024/768/390 in both themes, plus 390 without the hint, under `JOED_QA_DIR`
-for the visual check. The `partial-days` scenario adds cropped 1440 px month
+for the visual check. At 1024 the hint must wrap onto line 2, whose left edge
+matches line 1 within 0.5 px; `1024-light-results-period-hint-hero.png` is the
+visual-check crop. The `partial-days` scenario adds cropped 1440 px month
 lines in both themes (`1440-*-results-partial-month-line.png`) and checks that
 the month summary keeps its long-to-short wording when space is tight.
 
