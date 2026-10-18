@@ -10,7 +10,7 @@
   "scripts": {
     "check": "node scripts/check-release.mjs && node scripts/check-package.mjs && node scripts/check-joe-ui.mjs && node scripts/check-fleet-config.mjs && node scripts/check-position-contract.mjs",
     "test": "npm run test:contracts && npm run test:ui && npm run test:release && node scripts/run-server-contract.mjs",
-    "test:release": "node --test --test-concurrency=2 test/release.mjs",
+    "test:release": "node --test --test-concurrency=2 test/release.mjs test/release-set.mjs",
     "smoke:release": "node scripts/smoke-release.mjs",
     "release:evidence": "node scripts/release-evidence.mjs",
     "test:contracts": "node --test --test-concurrency=2 test/contracts.mjs test/failure-fixtures.mjs test/time-vectors.mjs",

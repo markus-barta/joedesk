@@ -44,8 +44,51 @@ the worker already uses the matching release path. No service worker is used.
 `npm run release:evidence -- VALIDATION_RUN_ID` emits source commit/tree,
 runtime-closure and contract-set digests, dependency pins, candidate metadata
 and pending gates from a clean committed source. It emits candidate evidence;
-the coordinator still supplies the immutable output artifact coordinates and
-digests, signatures/SBOM/provenance and reviewed downstream compatibility.
+CI supplies image/SBOM/provenance digests through the release set below. The
+coordinator still owns publication approval, signatures and reviewed downstream
+compatibility.
+
+### Publication (v2)
+
+Publish the final candidate by merging `rebuild/v2` into `main` through a
+reviewed PR **as a merge commit**, preserving history; do not squash. The CI run
+of that exact `main` commit is the validation run. Its `joedesk-release-set`
+artifact contains `release-set.json` (`joedesk.release-set.v1`) and
+`release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
+validation run URL/attempt, in the cutover commit. OPS pins the **full source
+SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
+An SSH-signed tag `v261016151218.0.0` is optional; only Markus can create it.
+The version reservation remains unchanged and does not imply cutover approval.
+
+Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
+Dockerfile, with `SOURCE_DATE_EPOCH` set to the source commit time and layer
+timestamps rewritten. No registry push occurs. The release-set job runs only
+after `package`, `browser` and `docker` succeed. It records the platform image,
+image index and config digests, and the **in-toto statement blob** digests for
+the SPDX SBOM and SLSA v0.2/v1 provenance. These blobs are inside the first OCI
+archive in `joedesk-oci-image`. Both artifacts are retained for 90 days; OPS
+must preserve them in its durable cutover evidence before expiry.
+`reproducible.identical` compares the two platform image manifest digests
+(including config/layers), excluding time-varying attestation/index bytes;
+a mismatch is recorded without failing CI. The JSON key order is stable;
+`generated_at` is informational and never supplies the release version.
+
+Verify a downloaded record from a local checkout containing its source commit:
+
+```sh
+shasum -a 256 -c release-set.json.sha256
+node scripts/verify-release-set.mjs release-set.json --commit FULL_SOURCE_SHA
+```
+
+The verifier reads Git objects at that commit, checking the tree, reservation,
+contract revision and complete contract file set, exact `release/contracts.json`
+bytes, runtime base and closure pin. It rejects unknown keys and malformed
+digests. It does not establish CI authenticity or re-download/verify the OCI
+archive: retain the matching run artifacts for artifact inspection. GitHub
+artifact signing (`actions/attest-build-provenance`) is deliberately omitted;
+this workflow requires only read-only contents permission and no new secrets,
+OIDC or attestation write grants. The BuildKit provenance is unsigned evidence;
+coordinator signature/review and all producer/OPS/live gates remain separate.
 
 ### Offline data preparation and rollback
 
