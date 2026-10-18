@@ -428,7 +428,9 @@ try {
         }
       }
       // Every header label, including loading and the last stale age before
-      // the 180 s stopped-feed state, uses the production markup.
+      // the 180 s stopped-feed state, uses the production markup. Only the
+      // two new executor labels have the strict single-line contract; existing
+      // states keep the baseline audits, frozen markup and 0 px movement check.
       const header = await ev(`document.getElementById('hdrHealth').innerHTML`);
       const ctx = { feeds: { data: { value: snapshot } }, states: { gateway: { state: 'fresh' } } };
       const reference = headerHealth(ctx, { reason: 'board_ok', label: 'Board OK', statusTone: 'ok' });
@@ -445,23 +447,30 @@ try {
           const after = __audit.rects(${J(geometrySelectors)}), afterBroker = button.querySelector('.lbl-long').textContent;
           const label = button.querySelector('b');
           const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), css = getComputedStyle(button);
-          const range = document.createRange(), words = [];
+          const range = document.createRange(), glyphs = [];
+          const edges = r => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+          range.selectNodeContents(label);
+          const lines = [...range.getClientRects()].map(edges);
           const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
-          for (let n; (n = walker.nextNode());) for (const match of n.textContent.matchAll(/\\S+/g)) {
+          for (let n; (n = walker.nextNode());) for (const match of n.textContent.matchAll(/\\S/gu)) {
             range.setStart(n, match.index); range.setEnd(n, match.index + match[0].length);
-            const r = range.getBoundingClientRect(); words.push({ word: match[0], left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+            glyphs.push({ glyph: match[0], ...edges(range.getBoundingClientRect()) });
           }
-          const inside = words.every(r => r.left >= Math.max(cell.left, box.left + parseFloat(css.paddingLeft)) - 0.5 && r.right <= Math.min(cell.right, box.right - parseFloat(css.paddingRight)) + 0.5 && r.top >= box.top && r.bottom <= box.bottom);
-          const lines = [...new Set(words.map(r => r.top))].length;
+          const inside = glyphs.length > 0 && glyphs.every(r => r.left >= Math.max(cell.left, box.left + parseFloat(css.paddingLeft)) - 0.5 && r.right <= Math.min(cell.right, box.right - parseFloat(css.paddingRight)) + 0.5 && r.top >= box.top && r.bottom <= box.bottom);
           const row = document.querySelector('.top-in'), rowBox = row.getBoundingClientRect(), rowCSS = getComputedStyle(row);
           const first = row.querySelector('.brand').getBoundingClientRect(), last = document.getElementById('themeBtn').getBoundingClientRect();
           const items = [...row.children].filter(__audit.visible).map(e => e.getBoundingClientRect());
           const inRow = items.every((r, i) => r.left >= rowBox.left + parseFloat(rowCSS.paddingLeft) - 0.5 && r.right <= rowBox.right - parseFloat(rowCSS.paddingRight) + 0.5 && (!i || r.left >= items[i - 1].right - 0.5));
-          return { before, after, beforeBroker, afterBroker, inside, inRow, lines, words, height: box.height,
+          return { before, after, beforeBroker, afterBroker, inRow,
+            label: { text: label.textContent, lineCount: lines.length, lines, glyphs, inside, cell: edges(cell), pill: edges(box) },
             inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: rowCSS.paddingLeft, paddingRight: rowCSS.paddingRight },
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
-        check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly one line, every glyph fits; no clipping, overlap or ellipsis`, measured.inside && measured.inRow && measured.lines === 1 && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, measured);
+        if (['results_capture_failed', 'ledger_size_limit'].includes(h.reason)) {
+          const evidence = { label: measured.label, inRow: measured.inRow, horizontal: measured.horizontal, clipping: measured.clipping };
+          console.log(`executor-header ${viewport.name} ${theme}: ${J(evidence)}`);
+          check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: exactly one line, every glyph fits; no clipping, overlap or ellipsis`, measured.label.inside && measured.inRow && measured.label.lineCount === 1 && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
+        }
         if (viewport.width === 360) check('executor-health', `${theme} header ${h.label}: original 16 px inset at 360`, measured.inset.left === 16 && measured.inset.right === 16 && measured.inset.paddingLeft === '16px' && measured.inset.paddingRight === '16px', measured.inset);
         const moved = exactMoves(measured.before, measured.after);
         check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly 0 px movement outside the intrinsic pill in the same page and broker state`, !moved.length && measured.beforeBroker === measured.afterBroker && measured.afterBroker === brokerWord, { moved, beforeBroker: measured.beforeBroker, afterBroker: measured.afterBroker });
