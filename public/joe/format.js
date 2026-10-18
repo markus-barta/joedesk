@@ -16,21 +16,25 @@ export const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp
 export const amountOf = money => (money && typeof money.amount === 'string' ? Number(money.amount) : null);
 export const currencySymbol = currency => SYMBOL[currency] ?? currency;
 
-// Decimal MB, rounded half-even directly from the contract's integer bytes.
-export function ledgerMegabytes(bytes) {
+// Decimal MB/GB/TB, rounded half-even directly from integer bytes. Promote
+// after rounding too, so 999,95 MB reads 1,0 GB rather than 1000,0 MB.
+export function ledgerAmount(bytes) {
   if (!Number.isSafeInteger(bytes) || bytes < 0) throw new TypeError('Nonnegative integer bytes required');
-  const value = BigInt(bytes), step = 100000n, half = step / 2n;
-  let tenths = value / step;
-  const remainder = value % step;
-  if (remainder > half || (remainder === half && tenths % 2n !== 0n)) tenths++;
-  return `${tenths / 10n},${tenths % 10n}${NB}MB`;
+  const value = BigInt(bytes), units = ['MB', 'GB', 'TB'];
+  for (let i = 0, step = 100000n; i < units.length; i++, step *= 1000n) {
+    let tenths = value / step;
+    const remainder = value % step, half = step / 2n;
+    if (remainder > half || (remainder === half && tenths % 2n !== 0n)) tenths++;
+    if (tenths >= 10000n && i < units.length - 1) continue;
+    return `${tenths / 10n},${tenths % 10n}${NB}${units[i]}`;
+  }
 }
 
 export function ledgerSize(executor) {
   if (executor?.ledgerBytes == null) return null;
   const { ledgerBytes: bytes, ledgerCapBytes: cap } = executor;
   return {
-    text: `ledger ${ledgerMegabytes(bytes)}${cap == null ? '' : ` of ${ledgerMegabytes(cap)}`}`,
+    text: `ledger ${ledgerAmount(bytes)}${cap == null ? '' : ` of ${ledgerAmount(cap)}`}`,
     title: `Ledger: ${bytes} bytes${cap == null ? '' : ` of ${cap} bytes`}`,
   };
 }

@@ -80,15 +80,14 @@ test('host gate: canonical hosts include the production host; others get the pri
     '10.0.0.1', 'example.ts.net', 'hsb1.example.com', 'cs0.barta.com']) assert.ok(!isCanonicalJoeHost(host), host);
 });
 
-test('ledger size: decimal MB round half-even from exact integer bytes, including large values', () => {
+test('ledger size: decimal MB round half-even from exact integer bytes', () => {
   for (const [bytes, text] of [[0, '0,0'], [49999, '0,0'], [50000, '0,0'], [50001, '0,1'],
     [999999, '1,0'], [1000000, '1,0'], [3249999, '3,2'], [3250000, '3,2'], [3250001, '3,3'],
-    [3349999, '3,3'], [3350000, '3,4'], [3350001, '3,4'], [9950000, '10,0'],
-    [9007199254650000, '9007199254,6'], [Number.MAX_SAFE_INTEGER, '9007199254,7']]) {
-    assert.equal(format.ledgerMegabytes(bytes), `${text} MB`, String(bytes));
+    [3349999, '3,3'], [3350000, '3,4'], [3350001, '3,4'], [9950000, '10,0']]) {
+    assert.equal(format.ledgerAmount(bytes), `${text} MB`, String(bytes));
   }
   for (const bytes of [-1, 0.5, '1000000', NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
-    assert.throws(() => format.ledgerMegabytes(bytes), TypeError);
+    assert.throws(() => format.ledgerAmount(bytes), TypeError);
   }
   assert.equal(format.ledgerSize({}), null);
   assert.deepEqual(format.ledgerSize({ ledgerBytes: 3250000 }), { text: 'ledger 3,2 MB', title: 'Ledger: 3250000 bytes' });
@@ -97,6 +96,21 @@ test('ledger size: decimal MB round half-even from exact integer bytes, includin
   });
   assert.deepEqual(format.ledgerSize({ ledgerBytes: 9000000, ledgerCapBytes: 8000000 }), {
     text: 'ledger 9,0 MB of 8,0 MB', title: 'Ledger: 9000000 bytes of 8000000 bytes',
+  });
+});
+
+test('ledger size: rounding promotes MB to GB and GB to TB; values beyond the reserve stay correct', () => {
+  for (const [bytes, text] of [[999949999, '999,9 MB'], [999950000, '1,0 GB'], [1000000000, '1,0 GB'],
+    [3250000000, '3,2 GB'], [3350000000, '3,4 GB'],
+    [999949999999, '999,9 GB'], [999950000000, '1,0 TB'], [1000000000000, '1,0 TB'],
+    [3250000000000, '3,2 TB'], [3350000000000, '3,4 TB'],
+    [999900000000000, '999,9 TB'], [999949999999999, '999,9 TB'], [999950000000000, '1000,0 TB'],
+    [8999850000000000, '8999,8 TB'], [8999950000000000, '9000,0 TB'],
+    [9007150000000000, '9007,2 TB'], [Number.MAX_SAFE_INTEGER, '9007,2 TB']]) {
+    assert.equal(format.ledgerAmount(bytes), text, String(bytes));
+  }
+  assert.deepEqual(format.ledgerSize({ ledgerBytes: Number.MAX_SAFE_INTEGER, ledgerCapBytes: 1000000000 }), {
+    text: 'ledger 9007,2 TB of 1,0 GB', title: 'Ledger: 9007199254740991 bytes of 1000000000 bytes',
   });
 });
 

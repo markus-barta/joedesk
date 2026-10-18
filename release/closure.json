@@ -104,8 +104,8 @@
     },
     {
       "path": "public/joe/app.css",
-      "size": 72661,
-      "sha256": "45138ae52008a07f9803f4e535a57072882cbb29740430ad91f497211f7d35be"
+      "size": 73297,
+      "sha256": "9a4121b3d044f159600629e91d3cb3a3269898982ffa6fd9b83f2990110c4897"
     },
     {
       "path": "public/joe/app.js",
@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 27696,
-      "sha256": "617216922f9ae03e0d116bb02bd9aadc3c6a8742fb74ed155dfae7348fd6c27a"
+      "size": 27852,
+      "sha256": "08ea720d7845fccb500292e152423d41f2d557a4c155dc09c667d4aa97a89223"
     },
     {
       "path": "public/joe/events.js",
@@ -159,8 +159,8 @@
     },
     {
       "path": "public/joe/format.js",
-      "size": 6425,
-      "sha256": "bb5c61f96135261e20eb03bc83a3475c10b7663e53c21e8e59818c8f59d8519e"
+      "size": 6654,
+      "sha256": "19a248d555beec5c1294244c901d08d204bbd8aeb55735ef79bca76355229f28"
     },
     {
       "path": "public/joe/health.js",
@@ -214,8 +214,8 @@
     },
     {
       "path": "public/joe/settings.js",
-      "size": 44470,
-      "sha256": "390ff52248aa57414120c794076e0133c2b4c709fcc5e4417818425d9d0115a9"
+      "size": 44480,
+      "sha256": "d3af7e9c3d82b011a732d7444a5a65e9f144a323daf055655c5add2873860f8a"
     },
     {
       "path": "public/joe/terms.js",

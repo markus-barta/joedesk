@@ -28,6 +28,9 @@ if (nodeModule.registerHooks) {
 export async function resolve(specifier, context, next) { return next(mapped(specifier, context.parentURL), context); }`)}`, import.meta.url);
 }
 const M = await import('../public/joe/settings-model.js');
+const { headerHealth } = await import('../public/joe/desk.js');
+const { REASON_COPY } = await import('../public/joe/health.js');
+const { age } = await import('../public/joe/format.js');
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p5');
 mkdirSync(QA_DIR, { recursive: true });
@@ -341,6 +344,8 @@ try {
   // JOED-44: real ingress -> shared selectors -> runtime row and header.
   // CI owns browser execution and emits both crops for the coordinator's gate.
   if (run('executor')) {
+    await page.s('DOM.enable');
+    await page.s('CSS.enable');
     const crop = async (selector, name) => {
       const clip = await ev(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
       const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
@@ -353,9 +358,25 @@ try {
       return !b || a.key !== b.key ? [{ key: a.key, missing: true }]
         : ['top', 'left', 'width', 'height'].filter(k => a[k] !== b[k]).map(k => ({ key: a.key, k, from: a[k], to: b[k] }));
     }).concat(before.length === after.length ? [] : [{ count: [before.length, after.length] }]);
-    for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+    const healthCases = Object.entries(REASON_COPY).map(([reason, explanation]) => ({
+      reason, explanation,
+      label: reason === 'board_ok' ? 'Board OK' : reason === 'results_capture_failed' ? 'Executor degraded'
+        : reason === 'ledger_size_limit' ? 'Orders refused' : reason === 'snapshot_stale' ? `Stale ${age(179)}`
+          : reason === 'gateway_unconfirmed' ? 'Broker unsure'
+            : ['halt_on', 'gateway_down', 'feed_disconnected', 'equity_unavailable', 'producer_stuck', 'day_unavailable_rth', 'no_snapshot'].includes(reason) ? 'Needs fix' : 'Data delayed',
+      statusTone: 'warn',
+    }));
+    const executorViewports = [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }];
+    for (const viewport of executorViewports) for (const theme of THEMES) {
       const b = await designBoard();
       await openSettings(b, viewport, theme);
+      // Measure the font Chrome actually renders on this runner; the CSS
+      // family list alone would hide a Linux fallback behind SF Pro.
+      const { root } = await page.s('DOM.getDocument');
+      const { nodeId } = await page.s('DOM.querySelector', { nodeId: root.nodeId, selector: '#hdrHealth b > span:first-child' });
+      const { fonts } = await page.s('CSS.getPlatformFontsForNode', { nodeId });
+      check('executor-health', `${viewport.name} ${theme}: rendered font is recorded (Linux uses its installed font)`, fonts.some(f => f.glyphCount > 0) && (process.platform !== 'linux' || fonts.every(f => !/SF Pro/i.test(f.familyName))), fonts);
+      console.log(`executor-font ${viewport.name} ${theme}: ${J(fonts)}`);
       const baseline = await geometry();
       const headerClass = await ev(`document.getElementById('hdrHealth').className`);
       const { snapshot } = designSnapshot(NOW);
@@ -375,13 +396,13 @@ try {
         const pushed = await b.push(snapshot);
         check('executor-health', `${tag}: the real inbox accepts the state`, pushed.status === 200, pushed);
         await ev('window.__joedesk.refresh().then(() => true)');
-        await waitFor(page, `document.querySelector('#hdrHealth b').innerText.trim() === ${J(c.label)} && document.querySelector('#rtRows .rt-row:nth-child(4) .val').innerText.includes(${J(c.start.split(' · ')[0])})`);
+        await waitFor(page, `document.querySelector('#hdrHealth b > span:first-child').textContent.trim() === ${J(c.label)} && document.querySelector('#rtRows .rt-row:nth-child(4) .val').innerText.includes(${J(c.start.split(' · ')[0])})`);
         await settle(page);
         const seen = await ev(`(() => {
           const row = document.querySelector('#rtRows .rt-row:nth-child(4)'), status = row.querySelector('.rt-reserve > .st'), h = document.getElementById('hdrHealth'), ledger = row.querySelector('[role="group"]');
           const probe = document.createElement('span'); probe.style.color = 'var(--${c.tone === 'ok' ? 'ok' : c.tone === 'bad' ? 'bad' : 'warn'})'; document.body.append(probe); const want = getComputedStyle(probe).color; probe.remove();
           return { text: row.querySelector('.val').innerText.trim(), tone: status.className, colour: getComputedStyle(status.querySelector('.i')).color, want,
-            label: h.querySelector('b').innerText.trim(), headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
+            label: h.querySelector('b > span:first-child').textContent.trim(), headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
             name: h.getAttribute('aria-label'), ledger: ledger && { title: ledger.title, name: ledger.getAttribute('aria-label') } };
         })()`);
         const text = N(seen.text);
@@ -394,11 +415,58 @@ try {
         const bounds = await ev(`({ horizontal: __audit.horizontal(), clipping: __audit.clipping() })`);
         check('executor-health', `${tag}: no overflow or clipping`, bounds.horizontal.scroll <= bounds.horizontal.inner && !bounds.clipping.length, bounds);
         if (['capture-degraded', 'ledger-full'].includes(c.name)) {
-          await auditScreen(page, viewport, theme, `settings executor ${c.name}`);
+          if (viewport.width !== 360) await auditScreen(page, viewport, theme, `settings executor ${c.name}`);
           await crop('#rtRows .rt-row:nth-child(4)', `${viewport.name}-${theme}-settings-executor-${c.name}`);
           await crop('header.top', `${viewport.name}-${theme}-header-executor-${c.name}`);
         }
       }
+      // Every header label, including loading and the last stale age before
+      // the 180 s stopped-feed state, uses the production markup.
+      const header = await ev(`document.getElementById('hdrHealth').innerHTML`);
+      for (const h of [...healthCases, { label: 'Loading', statusTone: 'warn' }]) {
+        const view = headerHealth({ feeds: { data: { value: snapshot } }, states: { gateway: { state: 'fresh' } } }, h);
+        await ev(`document.getElementById('hdrHealth').innerHTML = ${J(view.html)}`);
+        const measured = await ev(`(() => {
+          const button = document.getElementById('hdrHealth'), label = button.querySelector('b > span:first-child'), sizer = button.querySelector('.health-sizing');
+          const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), reserve = sizer.getBoundingClientRect();
+          const range = document.createRange(), words = [];
+          const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
+          for (let n; (n = walker.nextNode());) for (const match of n.textContent.matchAll(/\\S+/g)) {
+            range.setStart(n, match.index); range.setEnd(n, match.index + match[0].length);
+            const r = range.getBoundingClientRect(); words.push({ word: match[0], left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+          }
+          const inside = words.every(r => r.left >= cell.left - 0.5 && r.right <= cell.right + 0.5 && r.top >= box.top && r.bottom <= box.bottom);
+          const lines = [...new Set(words.map(r => r.top))].length;
+          return { inside, lines, words, height: box.height, reserveHeight: reserve.height, lineHeight: parseFloat(getComputedStyle(label).lineHeight), horizontal: __audit.horizontal(), clipping: __audit.clipping() };
+        })()`);
+        check('executor-health', `${viewport.name} ${theme} header ${h.label}: every glyph fits; no clipping or ellipsis`, measured.inside && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, measured);
+        if (viewport.mobile && h.label === 'Executor degraded') check('executor-health', `${viewport.name} ${theme}: capture label and always-on reserve are two lines in the 44 px button`, measured.lines === 2 && measured.words.length === 2 && measured.height === 44 && Math.abs(measured.reserveHeight - measured.lineHeight * 2) < 0.1, measured);
+        const moved = exactMoves(baseline, await geometry());
+        check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly 0 px movement`, !moved.length, moved);
+      }
+      await ev(`document.getElementById('hdrHealth').innerHTML = ${J(header)}`);
+      // Compare every real board-health sentence with the hidden reserve in
+      // this font/column, then restore the real healthy sentence.
+      const reserve = await ev(`(() => {
+        const row = document.querySelector('#rtRows .rt-row:nth-child(6)'), text = row.querySelector('.rt-reserve > .st > span'), original = text.innerHTML;
+        const sizing = row.querySelector('.rt-sizing .st > span'), height = sizing.getBoundingClientRect().height;
+        const sentences = ${J(healthCases)}.map(h => { text.textContent = h.label + ' · ' + h.explanation; return { reason: h.reason, height: text.getBoundingClientRect().height }; });
+        text.innerHTML = original;
+        const executor = document.querySelector('#rtRows .rt-row:nth-child(4) .rt-sizing').textContent;
+        return { height, sentences, executor };
+      })()`);
+      check('executor-health', `${viewport.name} ${theme}: board-status reserve is the true longest health sentence`, reserve.sentences.every(s => s.height <= reserve.height) && reserve.sentences.some(s => s.height === reserve.height), reserve);
+      check('executor-health', `${viewport.name} ${theme}: executor reserves 999,9 TB per value and the real longest flags`, N(reserve.executor) === 'Degraded · results capture failing — trading continues · ledger 999,9 TB of 999,9 TB · emergency stop on · broker not reachable · brakes off · checked 23:59:59', reserve.executor);
+      // Beyond the normal reserve, TB values remain truthful and may add
+      // lines. Check containment/accessibility rather than forbidding growth.
+      snapshot.seq++;
+      snapshot.safety.executor = { ...healthy, status: 'degraded', reason: 'results_capture_failed', ledgerBytes: Number.MAX_SAFE_INTEGER, ledgerCapBytes: Number.MAX_SAFE_INTEGER };
+      const large = await b.push(snapshot);
+      check('executor-health', `${viewport.name} ${theme}: very large ledger is accepted`, large.status === 200, large);
+      await ev('window.__joedesk.refresh().then(() => true)');
+      await settle(page);
+      const largeView = await ev(`(() => { const ledger = document.querySelector('#rtRows .rt-row:nth-child(4) [role="group"]'); return { text: ledger?.textContent, title: ledger?.title, name: ledger?.getAttribute('aria-label'), horizontal: __audit.horizontal(), clipping: __audit.clipping() }; })()`);
+      check('executor-health', `${viewport.name} ${theme}: very large TB values wrap without clipping and preserve exact bytes`, N(largeView.text) === 'ledger 9007,2 TB of 9007,2 TB' && largeView.title === 'Ledger: 9007199254740991 bytes of 9007199254740991 bytes' && largeView.name === largeView.title && largeView.horizontal.scroll <= largeView.horizontal.inner && !largeView.clipping.length, largeView);
     }
   }
 

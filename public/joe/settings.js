@@ -308,7 +308,7 @@ const rtRow = (ic, label, value, source) => `<div class="rt-row"><div class="lab
 // Reserve the complete health report at the current width and font. Hidden
 // text shares the visible cell, so changing health never moves later rows.
 const rtReserve = (html, sizing) => `<div class="rt-reserve">${html}<span class="rt-sizing" aria-hidden="true">${st('none', esc(sizing))}</span></div>`;
-const EXECUTOR_SIZING = `Degraded · results capture failing — trading continues · ${ledgerSize({ ledgerBytes: Number.MAX_SAFE_INTEGER, ledgerCapBytes: Number.MAX_SAFE_INTEGER }).text} · emergency stop on · broker not reachable · brakes off · checked 23:59:59`;
+const EXECUTOR_SIZING = `Degraded · results capture failing — trading continues · ${ledgerSize({ ledgerBytes: 999900000000000, ledgerCapBytes: 999900000000000 }).text} · emergency stop on · broker not reachable · brakes off · checked 23:59:59`;
 // A value with its panel's own state: the fresh words, or the words plus the state.
 function withState(cell, key, tone, html, held) {
   const p = statePhrase(cell, key, held);
@@ -361,7 +361,7 @@ function runtimeHtml(ctx) {
   }
   rows.push(rtRow('feed', 'Board data', board, 'generatedAt'));
   const health = boardHealthPresentation(states, feeds, now);
-  rows.push(rtRow('gauge', term('boardok', 'Board status'), rtReserve(st(health.statusTone, `${esc(health.label)} · ${esc(health.explanation)}`), 'Executor degraded · results capture failing — trading continues'), 'boardHealth'));
+  rows.push(rtRow('gauge', term('boardok', 'Board status'), rtReserve(st(health.statusTone, `${esc(health.label)} · ${esc(health.explanation)}`), 'Broker unsure · the broker connection has not checked in — reload; if still old, tell Amy'), 'boardHealth'));
   const acct = states.paperAccount, hint = data?.brokerAccount?.accountHint;
   const who = hint ? term('account', hint) : 'Account number not reported';
   let account;

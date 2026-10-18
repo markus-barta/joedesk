@@ -723,13 +723,20 @@ executor/broker disagreement halt.
 
 Optional `safety.executor.ledgerBytes` (integer ≥ 0) and `ledgerCapBytes`
 (integer ≥ 1) belong to paper executor 8470. A cap requires a byte count;
-over-cap reports remain valid. Settings uses decimal MB (1 MB = 1,000,000 bytes),
-one decimal with a comma, rounded half-even with integer arithmetic. A count
+over-cap reports remain valid. Settings scales decimal MB/GB/TB by 1,000
+(1 MB = 1,000,000 bytes), using one decimal with a comma and integer half-even
+rounding. Rounding to 1000,0 promotes to the next unit: 999,950,000 bytes reads
+1,0 GB. The reserve uses 999,9 TB per value and the longest flag tail; larger
+values remain correct in TB and may wrap. A count
 without a cap shows only its size; neither field means no ledger text. The title
 and accessible name retain exact byte counts. Health text reserves its space so
-state changes do not move the header or later Settings sections. PR CI's P5
+state changes do not move the header or later Settings sections within that
+reserve. On phones “Executor degraded” and its always-present hidden reserve
+use two lines inside the same 44 px button. PR CI's P5
 `executor` checks cover all three degraded wire combinations, recovery and ledger
-rounding at 1440/1024/390 in both themes, with executor-row and header crops.
+rounding at 1440/1024/390/360 in both themes, with executor-row and header crops.
+It records Chrome's actual rendered font, checks every header label for zero
+movement and clipping, and compares every board-health sentence to its reserve.
 
 Re-send at least every 30 s with a strictly higher `seq` and non-regressing
 `generatedAt`. Generation may be at most 5 s ahead of the server clock; server

@@ -649,7 +649,18 @@ span.dbar, span.vbar { display: block; }
   /* A longer light label wraps inside the header button rather than pushing the theme button out. */
   .top-in { gap: 6px; }
   .hdr-health { padding: 0 6px; gap: 5px; min-width: 0; white-space: normal; line-height: 1.1; text-align: left; }
+  /* Both layers reserve the longest word in the browser's own font, and the
+     capture label always uses two lines inside the existing 44 px button. */
+  .hdr-health .health-break { display: block; }
+  .hdr-health .lbl, .hdr-health b { flex-shrink: 0; }
+  .hdr-health b { position: relative; }
+  .hdr-health b > span:first-child { position: absolute; inset: 0; }
   .brand, .theme-btn { flex: none; }
+}
+@media (max-width: 400px) {
+  /* Give the longest word the same room down to 360 px, in Linux fonts too,
+     without changing any label's typography or the page's content gutter. */
+  .top-in { gap: 4px; padding-inline: clamp(0px, calc((100vw - 360px) / 2), 16px); }
 }
 
 /* ---------- Results (P4) ---------- */
