@@ -781,9 +781,11 @@ forced line break. The two short labels have full titles and accessible names:
 `executor` checks cover all three degraded wire combinations, recovery and ledger
 rounding at 1440/1024/390/360 in both themes, with executor-row and header crops.
 It records Chrome's actual rendered font, checks every header label for wrapping
-and clipping, compares existing header markup and geometry with commit c1c71a1
-(the browser checkout includes history), and compares every board-health sentence
-to its reserve. Browser verification and the coordinator's gate remain required.
+and clipping, measures exact 0 px movement outside the intrinsic pill within the
+same page and broker state, and compares every board-health sentence to its
+reserve. Node tests compare the six existing header labels (including Loading)
+and every broker word against a frozen c1c71a1 renderer fixture; tests need no
+Git history. Browser verification and the coordinator's gate remain required.
 
 Re-send at least every 30 s with a strictly higher `seq` and non-regressing
 `generatedAt`. Generation may be at most 5 s ahead of the server clock; server

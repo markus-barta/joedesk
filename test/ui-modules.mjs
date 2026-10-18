@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
+import { headerHealth as frozenHeaderHealth } from './fixtures/header-health-c1c71a1.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -166,6 +167,32 @@ test('health: capture is behind every data warning; the full ledger is red immed
   b.states.halt.value = true;
   b.feeds.data.value.safety.haltReason = 'executor_broker_disagreement';
   assert.equal(view().reason, 'halt_on');
+});
+
+test('header: six existing labels and every broker word match the frozen c1c71a1 renderer byte-for-byte', () => {
+  const cases = [
+    { reason: 'board_ok', label: 'Board OK' },
+    { reason: 'halt_on', label: 'Needs fix' },
+    { reason: 'snapshot_stale', label: `Stale ${format.age(179)}` },
+    { reason: 'refresh_failed', label: 'Data delayed' },
+    { reason: 'gateway_unconfirmed', label: 'Broker unsure' },
+    { label: 'Loading' },
+  ];
+  const brokers = [
+    { word: 'OK', state: 'fresh', gateway: { apiSessionReady: true } },
+    { word: 'unstable', state: 'fresh', gateway: { apiSessionReady: false, reason: 'gateway_degraded' } },
+    { word: 'down', state: 'fresh', gateway: { apiSessionReady: false, reason: 'gateway_down' } },
+    { word: 'unsure', state: 'stale', gateway: { apiSessionReady: true } },
+    { word: 'unsure', state: 'not reported', gateway: null },
+  ];
+  for (const h of cases) for (const statusTone of ['ok', 'warn', 'bad', 'none']) for (const b of brokers) {
+    const ctx = { feeds: { data: { value: b.gateway ? { safety: { gateway: b.gateway } } : null } }, states: { gateway: { state: b.state } } };
+    const p = { ...h, statusTone }, tag = `${h.label} / ${statusTone} / ${b.word}${b.gateway ? '' : ' (no data)'}`;
+    const { html, label, title } = headerHealth(ctx, p);
+    assert.deepEqual({ html, label }, frozenHeaderHealth(ctx, p), tag);
+    assert.ok(html.includes(`<span class="lbl-long">· Broker ${b.word}</span>`), tag);
+    assert.equal(title, null, tag);
+  }
 });
 
 test('header: short executor labels retain full accessible explanations and recover to the original markup', () => {
