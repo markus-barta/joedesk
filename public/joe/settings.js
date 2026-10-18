@@ -4,8 +4,9 @@
 // (dialog and review tick), Confirm, Send to the desks; fleet-write.js sends.
 // The LIVE gate never sends anything and cannot change the mode.
 import { $, $$, icon, term, learnBtn, st, ageSpan, patch, statePhrase, addTerms, openDialog, fromPointer, isPhone } from './ui.js';
-import { esc, age, money, amountOf, timeHMS, dayDM, dateTimeFull, NB } from './format.js';
-import { boardHealthPresentation, brokerState, dataAge, cellReason, STALE_AFTER_S } from './health.js';
+import { esc, age, money, amountOf, timeHMS, dayDM, dateTimeFull, ledgerSize, NB } from './format.js';
+import { boardHealthPresentation, brokerState, dataAge, cellReason, executorPresentation, STALE_AFTER_S } from './health.js';
+import { panelState } from './contracts/panel-state.mjs';
 import { setTheme, storedTheme } from './theme.js';
 import { validateContract } from './contracts/index.mjs';
 import { sendFleetDraft } from './fleet-write.js';
@@ -304,6 +305,10 @@ function syncDraft() {
 
 // ---------- Runtime state (read-only, seven rows) ----------
 const rtRow = (ic, label, value, source) => `<div class="rt-row"><div class="lab">${icon(ic)}<span>${label}</span></div><div class="val">${value}</div><div class="src"><code>${source}</code></div></div>`;
+// Reserve the complete health report at the current width and font. Hidden
+// text shares the visible cell, so changing health never moves later rows.
+const rtReserve = (html, sizing) => `<div class="rt-reserve">${html}<span class="rt-sizing" aria-hidden="true">${st('none', esc(sizing))}</span></div>`;
+const EXECUTOR_SIZING = `Degraded · results capture failing — trading continues · ${ledgerSize({ ledgerBytes: 999900000000000, ledgerCapBytes: 999900000000000 }).text} · emergency stop on · broker not reachable · brakes off · checked 23:59:59`;
 // A value with its panel's own state: the fresh words, or the words plus the state.
 function withState(cell, key, tone, html, held) {
   const p = statePhrase(cell, key, held);
@@ -336,12 +341,15 @@ function runtimeHtml(ctx) {
   let executor;
   if (!ex) executor = notReported(exCell);
   else {
-    const status = { running: 'Running', degraded: 'Degraded', down: 'Down' }[ex.status] ?? 'Not reported';
-    const parts = [status, ...(ex.halt ? ['emergency stop on'] : []), `broker ${ex.gatewayReachable ? 'reachable' : 'not reachable'}`, `${term('brakes', 'brakes')} ${ex.brakes ? 'on' : 'off'}`, `checked ${timeHMS(ex.checkedAt)}`];
-    const tone = ex.status === 'down' || ex.halt ? 'bad' : ex.status === 'degraded' || ex.brakes || !ex.gatewayReachable ? 'warn' : 'ok';
-    executor = withState(exCell, 'rt.executor', tone, parts.join(' · '));
+    const { status, tone, reason } = executorPresentation(ex), ledger = ledgerSize(ex);
+    const healthReason = ['results_capture_failed', 'ledger_size_limit'].includes(ex.reason);
+    const parts = [status, ...(reason && healthReason ? [esc(reason)] : []), ...(ledger ? [`<span role="group" title="${esc(ledger.title)}" aria-label="${esc(ledger.title)}">${esc(ledger.text)}</span>`] : []), ...(ex.halt ? ['emergency stop on'] : []), `broker ${ex.gatewayReachable ? 'reachable' : 'not reachable'}`, `${term('brakes', 'brakes')} ${ex.brakes ? 'on' : 'off'}`, `checked ${timeHMS(ex.checkedAt)}`];
+    // Rank capture/ledger health here, with the feed still owning freshness.
+    // Other executor reasons keep their existing panel-state copy and tone.
+    const runtimeCell = healthReason ? panelState(feeds.data, ex, null, now) : exCell;
+    executor = withState(runtimeCell, 'rt.executor', tone, parts.join(' · '));
   }
-  rows.push(rtRow('cpu', term('executor'), executor, 'GET /v1/health on hsb0'));
+  rows.push(rtRow('cpu', term('executor'), rtReserve(executor, EXECUTOR_SIZING), 'GET /v1/health on hsb0'));
   let board;
   if (!data) board = st('none', `Not reported · ${esc(cellReason(feeds.data?.reason ?? 'feed_not_received'))}`);
   else {
@@ -353,7 +361,7 @@ function runtimeHtml(ctx) {
   }
   rows.push(rtRow('feed', 'Board data', board, 'generatedAt'));
   const health = boardHealthPresentation(states, feeds, now);
-  rows.push(rtRow('gauge', term('boardok', 'Board status'), st(health.statusTone, `${esc(health.label)} · ${esc(health.explanation)}`), 'boardHealth'));
+  rows.push(rtRow('gauge', term('boardok', 'Board status'), rtReserve(st(health.statusTone, `${esc(health.label)} · ${esc(health.explanation)}`), 'Broker unsure · the broker connection has not checked in — reload; if still old, tell Amy'), 'boardHealth'));
   const acct = states.paperAccount, hint = data?.brokerAccount?.accountHint;
   const who = hint ? term('account', hint) : 'Account number not reported';
   let account;

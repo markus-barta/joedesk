@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
+import { headerHealth as frozenHeaderHealth } from './fixtures/header-health-c1c71a1.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -24,7 +25,7 @@ const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, executorProblem } = await import('../public/joe/desk.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
 const { readdirSync } = await import('node:fs');
@@ -78,6 +79,184 @@ test('host gate: canonical hosts include the production host; others get the pri
     '100.127.255.255', 'hsb1.tail1234.ts.net', 'foo.hsb1.ts.net', 'hsb1.ts.net', 'cs0.barta.cm', 'cs0', 'CS0.BARTA.CM']) assert.ok(isCanonicalJoeHost(host), host);
   for (const host of ['example.com', '8.8.8.8', '100.63.255.255', '100.128.0.1', '100.64.0.256', '100.64.0.07', '192.168.1.10',
     '10.0.0.1', 'example.ts.net', 'hsb1.example.com', 'cs0.barta.com']) assert.ok(!isCanonicalJoeHost(host), host);
+});
+
+test('ledger size: decimal MB round half-even from exact integer bytes', () => {
+  for (const [bytes, text] of [[0, '0,0'], [49999, '0,0'], [50000, '0,0'], [50001, '0,1'],
+    [999999, '1,0'], [1000000, '1,0'], [3249999, '3,2'], [3250000, '3,2'], [3250001, '3,3'],
+    [3349999, '3,3'], [3350000, '3,4'], [3350001, '3,4'], [9950000, '10,0']]) {
+    assert.equal(format.ledgerAmount(bytes), `${text} MB`, String(bytes));
+  }
+  for (const bytes of [-1, 0.5, '1000000', NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => format.ledgerAmount(bytes), TypeError);
+  }
+  assert.equal(format.ledgerSize({}), null);
+  assert.deepEqual(format.ledgerSize({ ledgerBytes: 3250000 }), { text: 'ledger 3,2 MB', title: 'Ledger: 3250000 bytes' });
+  assert.deepEqual(format.ledgerSize({ ledgerBytes: 3250000, ledgerCapBytes: 8000000 }), {
+    text: 'ledger 3,2 MB of 8,0 MB', title: 'Ledger: 3250000 bytes of 8000000 bytes',
+  });
+  assert.deepEqual(format.ledgerSize({ ledgerBytes: 9000000, ledgerCapBytes: 8000000 }), {
+    text: 'ledger 9,0 MB of 8,0 MB', title: 'Ledger: 9000000 bytes of 8000000 bytes',
+  });
+});
+
+test('ledger size: rounding promotes MB to GB and GB to TB; values beyond the reserve stay correct', () => {
+  for (const [bytes, text] of [[999949999, '999,9 MB'], [999950000, '1,0 GB'], [1000000000, '1,0 GB'],
+    [3250000000, '3,2 GB'], [3350000000, '3,4 GB'],
+    [999949999999, '999,9 GB'], [999950000000, '1,0 TB'], [1000000000000, '1,0 TB'],
+    [3250000000000, '3,2 TB'], [3350000000000, '3,4 TB'],
+    [999900000000000, '999,9 TB'], [999949999999999, '999,9 TB'], [999950000000000, '1000,0 TB'],
+    [8999850000000000, '8999,8 TB'], [8999950000000000, '9000,0 TB'],
+    [9007150000000000, '9007,2 TB'], [Number.MAX_SAFE_INTEGER, '9007,2 TB']]) {
+    assert.equal(format.ledgerAmount(bytes), text, String(bytes));
+  }
+  assert.deepEqual(format.ledgerSize({ ledgerBytes: Number.MAX_SAFE_INTEGER, ledgerCapBytes: 1000000000 }), {
+    text: 'ledger 9007,2 TB of 1,0 GB', title: 'Ledger: 9007199254740991 bytes of 1000000000 bytes',
+  });
+});
+
+test('executor presentation: degraded without a reason is yellow; capture warns and a full ledger is red', () => {
+  const base = { status: 'running', halt: false, brakes: false, gatewayReachable: true };
+  for (const [fields, expected] of [[{}, ['Running', 'ok', null]],
+    [{ status: 'degraded' }, ['Degraded', 'warn', null]],
+    [{ status: 'degraded', reason: 'results_capture_failed' }, ['Degraded', 'warn', 'results capture failing — trading continues']],
+    [{ status: 'degraded', reason: 'ledger_size_limit' }, ['Degraded', 'bad', 'trade record is full — new orders refused']],
+    [{ status: 'down', reason: 'results_capture_failed' }, ['Down', 'bad', 'results capture failing — trading continues']],
+    [{ halt: true, reason: 'executor_broker_disagreement' }, ['Running', 'bad', 'executor and broker disagree']]]) {
+    const p = health.executorPresentation({ ...base, ...fields });
+    assert.deepEqual([p.status, p.tone, p.reason], expected);
+  }
+});
+
+test('health: capture leaves board health unchanged; the full ledger is red immediately after halt', () => {
+  const payload = ingress(valid.data);
+  payload.seq++;
+  const b = board({ feed: 'data', payload, receivedAt: valid.data.receivedAt, now: valid.data.receivedAt });
+  const view = (states = b.states, feeds = b.feeds, now = b.now) => health.boardHealthPresentation(states, feeds, now);
+  const healthy = view();
+  Object.assign(b.feeds.data.value.safety.executor, { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 });
+  assert.deepEqual(view(), healthy);
+  delete b.feeds.data.value.safety.executor.reason;
+  assert.deepEqual(view(), healthy);
+  b.feeds.data.value.safety.executor.reason = 'results_capture_failed';
+  // Check every existing yellow and red fixture against the same executor warning.
+  for (const id of ['stale-receive-age', 'c-frozen-producer', 'b-incomplete-family', 'b-equity-null-gateway-ready',
+    'h-keep-policy-mismatch', 'b-weekend-no-sod', 'j-ny-midnight-gap', 'a-gateway-up-but-dead',
+    'c-old-producer-image', 'unknown-schema', 'g-expired-sso', 'd-routing-stub']) {
+    const other = board(fixture(id));
+    const prior = health.boardHealthPresentation(other.states, other.feeds, other.now);
+    Object.assign(other.feeds.data.value.safety.executor, { status: 'degraded', reason: 'results_capture_failed' });
+    assert.deepEqual(health.boardHealthPresentation(other.states, other.feeds, other.now), prior, id);
+  }
+  for (const reason of ['gateway_degraded', 'gateway_unconfirmed']) {
+    const feeds = structuredClone(b.feeds);
+    Object.assign(feeds.data.value.safety.gateway, { apiSessionReady: false, reason });
+    assert.equal(view(panelStates(feeds, b.now, b.states), feeds).reason, reason);
+  }
+  for (const [name, expected] of [['today.dayPnl', 'day_pending'], ['today.openPnl', 'open_unavailable_rth']]) {
+    const states = structuredClone(b.states);
+    states[name].value = null;
+    assert.equal(view(states).reason, expected);
+  }
+  for (const status of ['running', 'degraded', 'down']) {
+    Object.assign(b.feeds.data.value.safety.executor, { status, reason: 'ledger_size_limit' });
+    const p = view();
+    assert.deepEqual([p.tone, p.reason, p.label, p.statusTone], ['red', 'ledger_size_limit', 'Needs fix', 'bad']);
+  }
+  assert.equal(view().explanation, 'trade record is full — new orders refused');
+  assert.equal(view(b.states, b.feeds, at(b.now, 200)).reason, 'ledger_size_limit');
+  // Both ordinary and executor/broker disagreement halts keep precedence.
+  b.states.halt.value = true;
+  for (const haltReason of ['halt_on', 'executor_broker_disagreement']) {
+    b.feeds.data.value.safety.haltReason = haltReason;
+    assert.equal(view().reason, 'halt_on');
+  }
+});
+
+test('header: existing labels, ledger Needs fix and every broker word match frozen c1c71a1 markup', () => {
+  const cases = [
+    { reason: 'board_ok', label: 'Board OK' },
+    { reason: 'halt_on', label: 'Needs fix' },
+    { reason: 'ledger_size_limit', label: 'Needs fix', explanation: health.REASON_COPY.ledger_size_limit },
+    { reason: 'snapshot_stale', label: `Stale ${format.age(179)}` },
+    { reason: 'refresh_failed', label: 'Data delayed' },
+    { reason: 'gateway_unconfirmed', label: 'Broker unsure' },
+    { label: 'Loading' },
+  ];
+  const brokers = [
+    { word: 'OK', state: 'fresh', gateway: { apiSessionReady: true } },
+    { word: 'unstable', state: 'fresh', gateway: { apiSessionReady: false, reason: 'gateway_degraded' } },
+    { word: 'down', state: 'fresh', gateway: { apiSessionReady: false, reason: 'gateway_down' } },
+    { word: 'unsure', state: 'stale', gateway: { apiSessionReady: true } },
+    { word: 'unsure', state: 'not reported', gateway: null },
+  ];
+  for (const h of cases) for (const statusTone of ['ok', 'warn', 'bad', 'none']) for (const b of brokers) {
+    const ctx = { feeds: { data: { value: b.gateway ? { safety: { gateway: b.gateway } } : null } }, states: { gateway: { state: b.state } } };
+    const p = { ...h, statusTone }, tag = `${h.label} / ${statusTone} / ${b.word}${b.gateway ? '' : ' (no data)'}`;
+    const { html, label, title } = headerHealth(ctx, p);
+    const frozen = frozenHeaderHealth(ctx, p);
+    assert.equal(html, frozen.html, tag);
+    assert.equal(label, h.reason === 'ledger_size_limit' ? frozen.label.replace('Needs fix,', `Needs fix: ${h.explanation},`) : frozen.label, tag);
+    assert.ok(html.includes(`<span class="lbl-long">· Broker ${b.word}</span>`), tag);
+    assert.equal(title, h.reason === 'ledger_size_limit' ? h.explanation : null, tag);
+  }
+});
+
+test('header: capture leaves the header unchanged; ledger Needs fix carries its reason and recovers', () => {
+  const payload = ingress(valid.data);
+  payload.seq++;
+  const b = board({ feed: 'data', payload, receivedAt: valid.data.receivedAt, now: valid.data.receivedAt });
+  const view = () => headerHealth(b, health.boardHealthPresentation(b.states, b.feeds, b.now));
+  const healthy = view();
+  assert.match(healthy.html, /<b>Board OK<\/b><span class="lbl-long">· Broker OK<\/span>/);
+  assert.equal(healthy.label, 'Board OK, broker connection OK. Open Desk.');
+  assert.equal(healthy.title, null);
+  Object.assign(b.feeds.data.value.safety.executor, { status: 'degraded', reason: 'results_capture_failed' });
+  assert.deepEqual(view(), healthy);
+  delete b.feeds.data.value.safety.executor.reason;
+  assert.deepEqual(view(), healthy);
+  b.feeds.data.value.safety.executor.reason = 'ledger_size_limit';
+  const header = view();
+  assert.ok(header.html.includes('<b>Needs fix</b>'));
+  assert.ok(header.html.includes('tone-bad'));
+  assert.equal(header.title, 'trade record is full — new orders refused');
+  assert.equal(header.label, 'Needs fix: trade record is full — new orders refused, broker connection OK. Open Desk.');
+  Object.assign(b.feeds.data.value.safety.executor, { status: 'running' });
+  delete b.feeds.data.value.safety.executor.reason;
+  assert.deepEqual(view(), healthy);
+});
+
+test('Desk executor problem: precise capture/full-ledger sentences, optional sizes and recovery', () => {
+  const capture = 'Paper executor degraded: results capture failing, trading continues';
+  const full = 'Trade record is full: new orders refused';
+  const base = { status: 'degraded', reason: 'results_capture_failed' };
+  for (const [fields, expected] of [
+    [base, `${capture}.`],
+    [{ ...base, ledgerBytes: 3250000, ledgerCapBytes: 8000000 }, `${capture} (ledger 3,2 MB of 8,0 MB).`],
+    [{ ...base, ledgerBytes: 3350000 }, `${capture} (ledger 3,4 MB).`],
+    [{ ...base, reason: 'ledger_size_limit', ledgerBytes: 9000000, ledgerCapBytes: 8000000 }, `${full} (ledger 9,0 MB of 8,0 MB).`],
+    [{ status: 'running', reason: 'ledger_size_limit', ledgerBytes: 0 }, `${full} (ledger 0,0 MB).`],
+    [{ status: 'down', reason: 'ledger_size_limit' }, `${full}.`],
+    [{ status: 'degraded' }, null],
+    [{ status: 'running' }, null],
+    [{ status: 'down', reason: 'results_capture_failed' }, null],
+  ]) assert.equal(executorProblem({ safety: { executor: fields } }), expected);
+  assert.equal(executorProblem(null), null);
+  assert.equal(executorProblem({ safety: {} }), null);
+});
+
+test('Desk executor problem: live ticks reuse the sentence; a new snapshot recomputes it', () => {
+  let reads = 0;
+  const executor = { status: 'degraded', reason: 'results_capture_failed', ledgerCapBytes: 8000000,
+    get ledgerBytes() { reads++; return 3250000; } };
+  const data = { safety: { executor } };
+  const sentence = executorProblem(data), firstReads = reads;
+  assert.ok(firstReads > 0);
+  for (let tick = 0; tick < 60; tick++) assert.equal(executorProblem(data), sentence);
+  assert.equal(reads, firstReads);
+  assert.equal(executorProblem({ safety: { executor: { ...executor, ledgerBytes: 3350000 } } }),
+    'Paper executor degraded: results capture failing, trading continues (ledger 3,4 MB of 8,0 MB).');
+  assert.equal(executorProblem({ safety: { executor: { status: 'running' } } }), null);
 });
 
 test('health: every P1 fixture lands on today’s light, label and plain reason', () => {

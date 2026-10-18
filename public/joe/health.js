@@ -28,6 +28,7 @@ export const REASON_COPY = Object.freeze({
   day_unavailable_rth: 'today’s result is waiting on data — the operator must check',
   refresh_failed: 'update failed — reload; if it repeats, tell Amy',
   no_snapshot: 'no board data — reload; if still empty, tell Amy',
+  ledger_size_limit: 'trade record is full — new orders refused',
 });
 
 // Closed wire reasons, as the short plain words a cell or diagnostic shows.
@@ -58,10 +59,11 @@ export const CELL_REASON = Object.freeze({
   source_not_authoritative: 'held back: the kept-holdings list disagrees',
   history_size_limit: 'history is full',
   history_compacted: 'history was compacted',
-  ledger_size_limit: 'trade record is full',
+  ledger_size_limit: 'trade record is full — new orders refused',
   history_write_failed: 'history could not be saved',
   halt_on: 'emergency stop is on',
   executor_broker_disagreement: 'executor and broker disagree',
+  results_capture_failed: 'results capture failing — trading continues',
 });
 export const cellReason = reason => CELL_REASON[reason] ?? 'not available';
 export const capital = text => text.charAt(0).toUpperCase() + text.slice(1);
@@ -97,6 +99,13 @@ export function dataAge(feeds, now) {
   return { receipt: feedAge(feeds.data, now), frozen: cell.ageSeconds, state: cell.state, reason: cell.reason };
 }
 
+export function executorPresentation(executor) {
+  const status = { running: 'Running', degraded: 'Degraded', down: 'Down' }[executor.status] ?? 'Not reported';
+  const tone = executor.reason === 'ledger_size_limit' || executor.status === 'down' || executor.halt ? 'bad'
+    : executor.status === 'degraded' || executor.brakes || !executor.gatewayReachable ? 'warn' : 'ok';
+  return { status, tone, reason: executor.reason ? cellReason(executor.reason) : null };
+}
+
 export function localBoardHealth(states, feeds, now) {
   const data = feeds.data?.value;
   if (!data) return { tone: 'red', reason: 'no_snapshot' };
@@ -106,6 +115,7 @@ export function localBoardHealth(states, feeds, now) {
   const transport = TRANSPORT.includes(feeds.data.reason);
   const rejected = Boolean(feeds.data.reason) && !transport;
   if (states.halt?.value === true) return { tone: 'red', reason: 'halt_on' };
+  if (data.safety.executor?.reason === 'ledger_size_limit') return { tone: 'red', reason: 'ledger_size_limit' };
   if (broker.word === 'down') return { tone: 'red', reason: 'gateway_down' };
   if (receipt !== null && receipt >= FEED_STOPPED_S) return { tone: 'red', reason: 'feed_disconnected' };
   if (frozen !== null && frozen >= FEED_STOPPED_S) return { tone: 'red', reason: 'producer_stuck' };

@@ -28,6 +28,9 @@ if (nodeModule.registerHooks) {
 export async function resolve(specifier, context, next) { return next(mapped(specifier, context.parentURL), context); }`)}`, import.meta.url);
 }
 const M = await import('../public/joe/settings-model.js');
+const { headerHealth } = await import('../public/joe/desk.js');
+const { REASON_COPY } = await import('../public/joe/health.js');
+const { age } = await import('../public/joe/format.js');
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p5');
 mkdirSync(QA_DIR, { recursive: true });
@@ -335,6 +338,189 @@ try {
       await auditScreen(page, viewport, theme, 'settings (not reported)');
       await leakChecks(tag);
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-settings-not-reported`, 'Settings without the executor report or the account hint: "Not reported"');
+    }
+  }
+
+  // JOED-44: real ingress -> shared selectors -> runtime row and header.
+  // CI owns browser execution and emits both crops for the coordinator's gate.
+  if (run('executor')) {
+    await page.s('DOM.enable');
+    await page.s('CSS.enable');
+    const crop = async (selector, name) => {
+      const clip = await ev(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
+      writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+      shots.push({ file: `${name}.png`, what: `Executor health: ${name}` });
+    };
+    // The original pill follows its label's intrinsic width. Other chrome and
+    // the reserved Settings rows still keep their boxes across state changes.
+    const geometrySelectors = ['header.top', '.top-in', '.top-in > :not(#hdrHealth)', '#setMain > .set-sec', '#rtRows .rt-row'];
+    const geometry = () => rects(geometrySelectors);
+    const exactMoves = (before, after) => before.flatMap((a, i) => {
+      const b = after[i];
+      return !b || a.key !== b.key ? [{ key: a.key, missing: true }]
+        : ['top', 'left', 'width', 'height'].filter(k => a[k] !== b[k]).map(k => ({ key: a.key, k, from: a[k], to: b[k] }));
+    }).concat(before.length === after.length ? [] : [{ count: [before.length, after.length] }]);
+    const healthCases = Object.entries(REASON_COPY).map(([reason, explanation]) => ({
+      reason, explanation,
+      label: reason === 'board_ok' ? 'Board OK' : reason === 'snapshot_stale' ? `Stale ${age(179)}`
+          : reason === 'gateway_unconfirmed' ? 'Broker unsure'
+            : ['halt_on', 'ledger_size_limit', 'gateway_down', 'feed_disconnected', 'equity_unavailable', 'producer_stuck', 'day_unavailable_rth', 'no_snapshot'].includes(reason) ? 'Needs fix' : 'Data delayed',
+      statusTone: 'warn',
+    }));
+    const executorViewports = [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }];
+    for (const viewport of executorViewports) for (const theme of THEMES) {
+      const b = await designBoard();
+      await openSettings(b, viewport, theme);
+      // Measure the font Chrome actually renders on this runner; the CSS
+      // family list alone would hide a Linux fallback behind SF Pro.
+      const { root } = await page.s('DOM.getDocument');
+      const { nodeId } = await page.s('DOM.querySelector', { nodeId: root.nodeId, selector: '#hdrHealth b' });
+      const { fonts } = await page.s('CSS.getPlatformFontsForNode', { nodeId });
+      check('executor-health', `${viewport.name} ${theme}: rendered font is recorded (Linux uses its installed font)`, fonts.some(f => f.glyphCount > 0) && (process.platform !== 'linux' || fonts.every(f => !/SF Pro/i.test(f.familyName))), fonts);
+      console.log(`executor-font ${viewport.name} ${theme}: ${J(fonts)}`);
+      const baseline = await geometry();
+      const headerClass = await ev(`document.getElementById('hdrHealth').className`);
+      const brokerWord = await ev(`document.querySelector('#hdrHealth .lbl-long').textContent`);
+      const { snapshot } = designSnapshot(NOW);
+      const healthy = structuredClone(snapshot.safety.executor);
+      const cases = [
+        { name: 'degraded-no-reason', fields: { status: 'degraded' }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · broker reachable', ledger: null, problem: null },
+        { name: 'capture-degraded', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · results capture failing — trading continues · ledger 3,2 MB of 8,0 MB', ledger: 'Ledger: 3250000 bytes of 8000000 bytes', problem: 'Paper executor degraded: results capture failing, trading continues (ledger 3,2 MB of 8,0 MB).' },
+        { name: 'ledger-full', fields: { status: 'degraded', reason: 'ledger_size_limit', ledgerBytes: 9000000, ledgerCapBytes: 8000000 }, tone: 'bad', label: 'Needs fix', headerTone: 'bad', start: 'Degraded · trade record is full — new orders refused · ledger 9,0 MB of 8,0 MB', ledger: 'Ledger: 9000000 bytes of 8000000 bytes', problem: 'Trade record is full: new orders refused (ledger 9,0 MB of 8,0 MB).' },
+        { name: 'capture-bytes-only', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3350000 }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · results capture failing — trading continues · ledger 3,4 MB · broker reachable', ledger: 'Ledger: 3350000 bytes', problem: 'Paper executor degraded: results capture failing, trading continues (ledger 3,4 MB).' },
+        { name: 'capture-no-ledger', fields: { status: 'degraded', reason: 'results_capture_failed' }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · results capture failing — trading continues · broker reachable', ledger: null, problem: 'Paper executor degraded: results capture failing, trading continues.' },
+        { name: 'healthy', fields: {}, tone: 'ok', label: 'Board OK', headerTone: 'ok', start: 'Running · broker reachable · brakes off · checked 19:42:13', ledger: null, problem: null },
+      ];
+      for (const c of cases) {
+        const tag = `${viewport.name} ${theme} executor ${c.name}`;
+        snapshot.seq++;
+        snapshot.safety.executor = { ...healthy, ...c.fields };
+        const pushed = await b.push(snapshot);
+        check('executor-health', `${tag}: the real inbox accepts the state`, pushed.status === 200, pushed);
+        await ev('window.__joedesk.refresh().then(() => true)');
+        await waitFor(page, `document.querySelector('#hdrHealth b').textContent.trim() === ${J(c.label)} && document.querySelector('#rtRows .rt-row:nth-child(4) .val').innerText.includes(${J(c.start.split(' · ')[0])})`);
+        await settle(page);
+        const seen = await ev(`(() => {
+          const row = document.querySelector('#rtRows .rt-row:nth-child(4)'), status = row.querySelector('.rt-reserve > .st'), h = document.getElementById('hdrHealth'), ledger = row.querySelector('[role="group"]');
+          const probe = document.createElement('span'); probe.style.color = 'var(--${c.tone === 'ok' ? 'ok' : c.tone === 'bad' ? 'bad' : 'warn'})'; document.body.append(probe); const want = getComputedStyle(probe).color; probe.remove();
+          probe.style.color = 'var(--${c.headerTone})'; document.body.append(probe); const headerWant = getComputedStyle(probe).color; probe.remove();
+          return { text: row.querySelector('.val').innerText.trim(), tone: status.className, colour: getComputedStyle(status.querySelector('.i')).color, want, headerWant,
+            label: h.querySelector('b').textContent.trim(), brokerWord: h.querySelector('.lbl-long').textContent, headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
+            name: h.getAttribute('aria-label'), title: h.getAttribute('title'), ledger: ledger && { title: ledger.title, name: ledger.getAttribute('aria-label') } };
+        })()`);
+        const text = N(seen.text);
+        const title = c.fields.reason === 'ledger_size_limit' ? REASON_COPY.ledger_size_limit : null;
+        check('executor-health', `${tag}: row copy, semantic tone and header label/tone`, text.startsWith(c.start) && text.endsWith(' · brakes off · checked 19:42:13') && seen.tone === `st ${c.tone}` && seen.colour === seen.want && seen.label === c.label && seen.headerTone.includes(`tone-${c.headerTone}`), seen);
+        check('executor-health', `${tag}: full accessible explanation and title; recovery clears the title`, seen.name === `${c.label}${title ? `: ${title}` : ''}, broker connection OK. Open Desk.` && seen.title === title, seen);
+        check('executor-health', `${tag}: header keeps board health's semantic colour`, seen.headerColour === seen.headerWant, seen);
+        check('executor-health', `${tag}: exact bytes in the ledger title and accessible name, only when reported`, c.ledger ? seen.ledger?.title === c.ledger && seen.ledger?.name === c.ledger : seen.ledger === null && !text.includes('ledger'), seen.ledger);
+        if (c.name === 'healthy') check('executor-health', `${tag}: healthy copy is unchanged`, text === c.start, seen);
+        const moved = exactMoves(baseline, await geometry());
+        check('executor-health', `${tag}: 0 px shift outside the intrinsic pill in the same page and broker state; header keeps its class`, !moved.length && seen.headerClass === headerClass && seen.brokerWord === brokerWord, { moved, brokerWord, seen: seen.brokerWord });
+        const bounds = await ev(`({ horizontal: __audit.horizontal(), clipping: __audit.clipping() })`);
+        check('executor-health', `${tag}: no overflow or clipping`, bounds.horizontal.scroll <= bounds.horizontal.inner && !bounds.clipping.length, bounds);
+        if (['capture-degraded', 'ledger-full'].includes(c.name)) {
+          if (viewport.width !== 360) await auditScreen(page, viewport, theme, `settings executor ${c.name}`);
+          await crop('#rtRows .rt-row:nth-child(4)', `${viewport.name}-${theme}-settings-executor-${c.name}`);
+          await crop('header.top', `${viewport.name}-${theme}-header-executor-${c.name}`);
+        }
+        await click('.nav [data-go="desk"]');
+        await click('#healthMore');
+        const desk = await ev(`(() => {
+          const pop = document.getElementById('healthPop');
+          return { open: pop.classList.contains('on'), problem: pop.querySelector('p').textContent, headerTone: document.documentElement.dataset.joeState,
+            horizontal: __audit.horizontal(), clipping: __audit.clipping() };
+        })()`);
+        check('executor-health', `${tag}: Desk explains executor health without changing the board tone`, desk.open && N(desk.problem) === (c.problem ?? 'No current problems.') && desk.headerTone === c.headerTone, desk);
+        check('executor-health', `${tag}: Desk explanation has no overflow or clipping`, desk.horizontal.scroll <= desk.horizontal.inner && !desk.clipping.length, desk);
+        if (['capture-degraded', 'ledger-full'].includes(c.name)) await crop('#healthPop', `${viewport.name}-${theme}-desk-executor-${c.name}`);
+        await click('.nav [data-go="settings"]');
+      }
+      // Every header label, including loading and the last stale age before
+      // the 180 s stopped-feed state, uses the existing production markup.
+      // Keep the baseline audits, frozen markup and 0 px movement check.
+      const header = await ev(`document.getElementById('hdrHealth').innerHTML`);
+      const ctx = { feeds: { data: { value: snapshot } }, states: { gateway: { state: 'fresh' } } };
+      const reference = headerHealth(ctx, { reason: 'board_ok', label: 'Board OK', statusTone: 'ok' });
+      for (const h of [...healthCases, { label: 'Loading', statusTone: 'warn' }]) {
+        const view = headerHealth(ctx, h);
+        // Measure both states in one synchronous page task. No stylesheet,
+        // viewport, fixture or broker change, and no tick can interleave.
+        // Frozen pre-JOED-44 markup is covered by the Node unit test.
+        const measured = await ev(`(() => {
+          const button = document.getElementById('hdrHealth');
+          button.innerHTML = ${J(reference.html)};
+          const before = __audit.rects(${J(geometrySelectors)}), beforeBroker = button.querySelector('.lbl-long').textContent;
+          button.innerHTML = ${J(view.html)};
+          const after = __audit.rects(${J(geometrySelectors)}), afterBroker = button.querySelector('.lbl-long').textContent;
+          const label = button.querySelector('b');
+          const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), css = getComputedStyle(button);
+          const range = document.createRange(), glyphs = [], words = [];
+          const edges = r => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+          range.selectNodeContents(label);
+          const lines = [...range.getClientRects()].map(edges);
+          const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
+          for (let n; (n = walker.nextNode());) {
+            for (const match of n.textContent.matchAll(/\\S/gu)) {
+              range.setStart(n, match.index); range.setEnd(n, match.index + match[0].length);
+              glyphs.push({ glyph: match[0], ...edges(range.getBoundingClientRect()) });
+            }
+            for (const match of n.textContent.matchAll(/\\S+/gu)) {
+              range.setStart(n, match.index); range.setEnd(n, match.index + match[0].length);
+              words.push({ text: match[0], lines: [...range.getClientRects()].map(edges) });
+            }
+          }
+          const inside = glyphs.length > 0 && glyphs.every(r => r.left >= Math.max(cell.left, box.left + parseFloat(css.paddingLeft)) - 0.5 && r.right <= Math.min(cell.right, box.right - parseFloat(css.paddingRight)) + 0.5 && r.top >= box.top && r.bottom <= box.bottom);
+          const ellipsis = css.textOverflow === 'ellipsis' || getComputedStyle(label).textOverflow === 'ellipsis' || /…|\\.\\.\\./u.test(label.textContent);
+          const row = document.querySelector('.top-in'), rowBox = row.getBoundingClientRect(), rowCSS = getComputedStyle(row);
+          const first = row.querySelector('.brand').getBoundingClientRect(), last = document.getElementById('themeBtn').getBoundingClientRect();
+          const items = [...row.children].filter(__audit.visible).map(e => e.getBoundingClientRect());
+          const inRow = items.every((r, i) => r.left >= rowBox.left + parseFloat(rowCSS.paddingLeft) - 0.5 && r.right <= rowBox.right - parseFloat(rowCSS.paddingRight) + 0.5 && (!i || r.left >= items[i - 1].right - 0.5));
+          return { before, after, beforeBroker, afterBroker, inRow,
+            label: { text: label.textContent, lineCount: lines.length, lines, glyphs, words, inside, ellipsis, cell: edges(cell), pill: edges(box) },
+            inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: rowCSS.paddingLeft, paddingRight: rowCSS.paddingRight },
+            horizontal: __audit.horizontal(), clipping: __audit.clipping() };
+        })()`);
+        if (h.reason === 'ledger_size_limit') {
+          const evidence = { label: measured.label, inRow: measured.inRow, horizontal: measured.horizontal, clipping: measured.clipping };
+          // At 360, the existing halt_on Needs fix label already overflows by
+          // 2.36 px (glyph right 296.36, button right 294): JOED-46. Log it only.
+          if (viewport.width === 360) evidence.knownPreExisting = 'JOED-46: existing Needs fix label overflows the button by 2.36 px in the baseline';
+          console.log(`executor-header ${viewport.name} ${theme}: ${J(evidence)}`);
+          if ([390, 1024, 1440].includes(viewport.width)) {
+            const maxLines = viewport.width === 390 ? 2 : 1;
+            const intactWords = measured.label.words.length > 0 && measured.label.words.every(word => word.lines.length === 1);
+            check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: existing Needs fix label fits; no clipping, overlap or ellipsis`, measured.label.lineCount >= 1 && measured.label.lineCount <= maxLines && intactWords && measured.label.inside && !measured.label.ellipsis && measured.inRow && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
+          }
+        }
+        if (viewport.width === 360) check('executor-health', `${theme} header ${h.label}: original 16 px inset at 360`, measured.inset.left === 16 && measured.inset.right === 16 && measured.inset.paddingLeft === '16px' && measured.inset.paddingRight === '16px', measured.inset);
+        const moved = exactMoves(measured.before, measured.after);
+        check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly 0 px movement outside the intrinsic pill in the same page and broker state`, !moved.length && measured.beforeBroker === measured.afterBroker && measured.afterBroker === brokerWord, { moved, beforeBroker: measured.beforeBroker, afterBroker: measured.afterBroker });
+      }
+      await ev(`document.getElementById('hdrHealth').innerHTML = ${J(header)}`);
+      // Compare every real board-health sentence with the hidden reserve in
+      // this font/column, then restore the real healthy sentence.
+      const reserve = await ev(`(() => {
+        const row = document.querySelector('#rtRows .rt-row:nth-child(6)'), text = row.querySelector('.rt-reserve > .st > span'), original = text.innerHTML;
+        const sizing = row.querySelector('.rt-sizing .st > span'), height = sizing.getBoundingClientRect().height;
+        const sentences = ${J(healthCases)}.map(h => { text.textContent = h.label + ' · ' + h.explanation; return { reason: h.reason, height: text.getBoundingClientRect().height }; });
+        text.innerHTML = original;
+        const executor = document.querySelector('#rtRows .rt-row:nth-child(4) .rt-sizing').textContent;
+        return { height, sentences, executor };
+      })()`);
+      check('executor-health', `${viewport.name} ${theme}: board-status reserve is the true longest health sentence`, reserve.sentences.every(s => s.height <= reserve.height) && reserve.sentences.some(s => s.height === reserve.height), reserve);
+      check('executor-health', `${viewport.name} ${theme}: executor reserves 999,9 TB per value and the real longest flags`, N(reserve.executor) === 'Degraded · results capture failing — trading continues · ledger 999,9 TB of 999,9 TB · emergency stop on · broker not reachable · brakes off · checked 23:59:59', reserve.executor);
+      // Beyond the normal reserve, TB values remain truthful and may add
+      // lines. Check containment/accessibility rather than forbidding growth.
+      snapshot.seq++;
+      snapshot.safety.executor = { ...healthy, status: 'degraded', reason: 'results_capture_failed', ledgerBytes: Number.MAX_SAFE_INTEGER, ledgerCapBytes: Number.MAX_SAFE_INTEGER };
+      const large = await b.push(snapshot);
+      check('executor-health', `${viewport.name} ${theme}: very large ledger is accepted`, large.status === 200, large);
+      await ev('window.__joedesk.refresh().then(() => true)');
+      await settle(page);
+      const largeView = await ev(`(() => { const ledger = document.querySelector('#rtRows .rt-row:nth-child(4) [role="group"]'); return { text: ledger?.textContent, title: ledger?.title, name: ledger?.getAttribute('aria-label'), horizontal: __audit.horizontal(), clipping: __audit.clipping() }; })()`);
+      check('executor-health', `${viewport.name} ${theme}: very large TB values wrap without clipping and preserve exact bytes`, N(largeView.text) === 'ledger 9007,2 TB of 9007,2 TB' && largeView.title === 'Ledger: 9007199254740991 bytes of 9007199254740991 bytes' && largeView.name === largeView.title && largeView.horizontal.scroll <= largeView.horizontal.inner && !largeView.clipping.length, largeView);
     }
   }
 

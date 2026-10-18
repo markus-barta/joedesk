@@ -61,6 +61,8 @@ test('only the documented JSON Schema vocabulary is used; every field has exactl
   assert.equal(owners['data.receivedAt'], 'server');
   assert.equal(owners['data.totals.equity.amount'], 'pusher');
   assert.equal(owners['data.safety.executor.gatewayReachable'], 'paper executor 8470');
+  assert.equal(owners['data.safety.executor.ledgerBytes'], 'paper executor 8470');
+  assert.equal(owners['data.safety.executor.ledgerCapBytes'], 'paper executor 8470');
   assert.equal(owners['results.trades[].netEur.amount'], 'paper executor 8470');
   assert.equal(owners['history.points[].desks.j.money.equity.amount'], 'server');
   assert.equal(owners['fleet-config.desks.stage0.capEur'], 'server');
@@ -77,6 +79,49 @@ test('one closed reason enum is used everywhere, including field errors', () => 
   const data = copy(samples.data);
   data.totals.reasons = { equity: 'new-unreviewed-reason' };
   rejects(validateContract('data', data), 'enum', '$.totals.reasons.equity');
+});
+
+test('rev 7 executor: rev 6 payloads remain valid; the reason enum is append-only', () => {
+  assert.equal(CONTRACTS.revision, 7);
+  assert.equal(CONTRACTS.contracts.data, 'inspr.joe.household.v2');
+  assert.equal(REASONS.at(-2), 'executor_broker_disagreement');
+  assert.equal(REASONS.at(-1), 'results_capture_failed');
+  for (const [kind, payload] of Object.entries(samples)) {
+    assert.equal(validateContract(kind, payload).ok, true, kind);
+  }
+  const data = copy(samples.data);
+  data.safety.executor.status = 'degraded';
+  // The rev 6 pusher can report degraded without a reason or ledger fields.
+  delete data.safety.executor.reason;
+  assert.equal(validateContract('data', data).ok, true);
+  for (const reason of ['results_capture_failed', 'ledger_size_limit']) {
+    data.safety.executor.reason = reason;
+    assert.equal(validateContract('data', data).ok, true, reason);
+  }
+});
+
+test('rev 7 executor: ledger bytes and optional cap validate without hiding over-cap reports', () => {
+  for (const fields of [{}, { ledgerBytes: 0 }, { ledgerBytes: 3250000 },
+    { ledgerBytes: 0, ledgerCapBytes: 1 }, { ledgerBytes: 8000000, ledgerCapBytes: 8000000 },
+    { ledgerBytes: 9000000, ledgerCapBytes: 8000000 },
+    { ledgerBytes: Number.MAX_SAFE_INTEGER, ledgerCapBytes: Number.MAX_SAFE_INTEGER }]) {
+    const data = copy(samples.data);
+    Object.assign(data.safety.executor, fields, { status: 'degraded', reason: 'results_capture_failed' });
+    assert.equal(validateContract('data', data).ok, true, JSON.stringify(fields));
+    assert.equal(validateContract('data', ingress(data), { stage: 'ingress' }).ok, true);
+  }
+  const capOnly = copy(samples.data);
+  capOnly.safety.executor.ledgerCapBytes = 8000000;
+  rejects(validateContract('data', capOnly), 'required', '$.safety.executor.ledgerBytes');
+  rejects(validateContract('data', ingress(capOnly), { stage: 'ingress' }), 'required', '$.safety.executor.ledgerBytes');
+  for (const [key, minimum] of [['ledgerBytes', 0], ['ledgerCapBytes', 1]]) {
+    for (const value of [null, '8000000', true, {}, [], 1.5, Number.MAX_SAFE_INTEGER + 1, minimum - 1]) {
+      const data = copy(samples.data);
+      Object.assign(data.safety.executor, { ledgerBytes: 0, [key]: value });
+      const rule = value === minimum - 1 ? 'minimum' : 'type';
+      rejects(validateContract('data', data), rule, `$.safety.executor.${key}`);
+    }
+  }
 });
 
 test('missing feed retains false HALT with its original receipt rather than treating it as absent', () => {

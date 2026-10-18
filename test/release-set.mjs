@@ -51,7 +51,7 @@ for (const [field, value, reason] of [
   ['version_scheme', 'inspr-calendar-v2', /version_scheme:/],
   ['release_channel', 'preview', /release_channel:/],
   ['release_sequence', 25, /release_sequence:/],
-  ['contracts.manifest_revision', 7, /manifest_revision/],
+  ['contracts.manifest_revision', goodFixture.contracts.manifest_revision + 1, /manifest_revision/],
   ['contracts.contract_set_sha256', 'f'.repeat(64), /contract_set_sha256/],
   ['contracts.contracts_json_sha256', 'f'.repeat(64), /contracts_json_sha256/],
   ['closure_sha256', 'f'.repeat(64), /closure_sha256/],
