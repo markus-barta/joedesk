@@ -216,6 +216,30 @@ export function designResults(now = NOW, { trackingStart = '2026-09-10', seq = 4
   return payload;
 }
 
+// JOED-32's own accepted snapshots: two closed partial dates (one already
+// escalated), while all trade amounts and equity closes stay identical.
+export function periodHintResults(now = '2026-10-16T12:00:00.000Z') {
+  const baseline = designResults(now), partial = structuredClone(baseline);
+  for (const day of partial.days.filter(d => ['2026-10-14', '2026-10-15'].includes(d.date))) {
+    day.coverage = 'partial';
+    day.partialReasons = ['history_gap'];
+    for (const desk of Object.values(day.desks)) desk.realisedNet = desk.fees = null;
+  }
+  for (const value of [baseline, partial]) delete value.receivedAt;
+  const empty = withTradeSummaries({ ...structuredClone(partial), trades: [] });
+  // A wide real date for the longest sentence that still carries the hint.
+  empty.trackingStart = '2026-09-30';
+  empty.days = empty.days.filter(day => day.date >= empty.trackingStart);
+  // No closed trades alone is not empty: flatten every close to today's
+  // observed equity so this snapshot exercises the actual empty hero branch.
+  const { snapshot } = scenario(now);
+  const equity = Object.fromEntries(snapshot.desks.map(d => [d.id, d.money.equity]));
+  for (const day of empty.days) for (const [id, desk] of Object.entries(day.desks)) desk.equityClose = structuredClone(equity[id]);
+  const unknown = structuredClone(partial);
+  for (const day of unknown.days) for (const desk of Object.values(day.desks)) desk.equityClose = null;
+  return { baseline, partial, empty, unknown };
+}
+
 // The largest record the 8 MiB contract allows for this trade shape, for the
 // render budget: a year of sessions with many trades a day.
 export function largeResults(now = NOW, trades = 14000) {
