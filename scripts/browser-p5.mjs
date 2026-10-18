@@ -338,6 +338,70 @@ try {
     }
   }
 
+  // JOED-44: real ingress -> shared selectors -> runtime row and header.
+  // CI owns browser execution and emits both crops for the coordinator's gate.
+  if (run('executor')) {
+    const crop = async (selector, name) => {
+      const clip = await ev(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
+      writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+      shots.push({ file: `${name}.png`, what: `Executor health: ${name}` });
+    };
+    const geometry = () => rects(['header.top', '.top-in > *', '#hdrHealth b', '#hdrHealth .lbl-long', '#setMain > .set-sec', '#rtRows .rt-row']);
+    const exactMoves = (before, after) => before.flatMap((a, i) => {
+      const b = after[i];
+      return !b || a.key !== b.key ? [{ key: a.key, missing: true }]
+        : ['top', 'left', 'width', 'height'].filter(k => a[k] !== b[k]).map(k => ({ key: a.key, k, from: a[k], to: b[k] }));
+    }).concat(before.length === after.length ? [] : [{ count: [before.length, after.length] }]);
+    for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      const b = await designBoard();
+      await openSettings(b, viewport, theme);
+      const baseline = await geometry();
+      const headerClass = await ev(`document.getElementById('hdrHealth').className`);
+      const { snapshot } = designSnapshot(NOW);
+      const healthy = structuredClone(snapshot.safety.executor);
+      const cases = [
+        { name: 'degraded-no-reason', fields: { status: 'degraded' }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · broker reachable', ledger: null },
+        { name: 'capture-degraded', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 }, tone: 'warn', label: 'Executor degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · ledger 3,2 MB of 8,0 MB', ledger: 'Ledger: 3250000 bytes of 8000000 bytes' },
+        { name: 'ledger-full', fields: { status: 'degraded', reason: 'ledger_size_limit', ledgerBytes: 9000000, ledgerCapBytes: 8000000 }, tone: 'bad', label: 'Orders refused', headerTone: 'bad', start: 'Degraded · trade record is full — new orders refused · ledger 9,0 MB of 8,0 MB', ledger: 'Ledger: 9000000 bytes of 8000000 bytes' },
+        { name: 'capture-bytes-only', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3350000 }, tone: 'warn', label: 'Executor degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · ledger 3,4 MB · broker reachable', ledger: 'Ledger: 3350000 bytes' },
+        { name: 'capture-no-ledger', fields: { status: 'degraded', reason: 'results_capture_failed' }, tone: 'warn', label: 'Executor degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · broker reachable', ledger: null },
+        { name: 'healthy', fields: {}, tone: 'ok', label: 'Board OK', headerTone: 'ok', start: 'Running · broker reachable · brakes off · checked 19:42:13', ledger: null },
+      ];
+      for (const c of cases) {
+        const tag = `${viewport.name} ${theme} executor ${c.name}`;
+        snapshot.seq++;
+        snapshot.safety.executor = { ...healthy, ...c.fields };
+        const pushed = await b.push(snapshot);
+        check('executor-health', `${tag}: the real inbox accepts the state`, pushed.status === 200, pushed);
+        await ev('window.__joedesk.refresh().then(() => true)');
+        await waitFor(page, `document.querySelector('#hdrHealth b').innerText.trim() === ${J(c.label)} && document.querySelector('#rtRows .rt-row:nth-child(4) .val').innerText.includes(${J(c.start.split(' · ')[0])})`);
+        await settle(page);
+        const seen = await ev(`(() => {
+          const row = document.querySelector('#rtRows .rt-row:nth-child(4)'), status = row.querySelector('.rt-reserve > .st'), h = document.getElementById('hdrHealth'), ledger = row.querySelector('[role="group"]');
+          const probe = document.createElement('span'); probe.style.color = 'var(--${c.tone === 'ok' ? 'ok' : c.tone === 'bad' ? 'bad' : 'warn'})'; document.body.append(probe); const want = getComputedStyle(probe).color; probe.remove();
+          return { text: row.querySelector('.val').innerText.trim(), tone: status.className, colour: getComputedStyle(status.querySelector('.i')).color, want,
+            label: h.querySelector('b').innerText.trim(), headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
+            name: h.getAttribute('aria-label'), ledger: ledger && { title: ledger.title, name: ledger.getAttribute('aria-label') } };
+        })()`);
+        const text = N(seen.text);
+        check('executor-health', `${tag}: row copy, semantic tone and header label/tone`, text.startsWith(c.start) && text.endsWith(' · brakes off · checked 19:42:13') && seen.tone === `st ${c.tone}` && seen.colour === seen.want && seen.label === c.label && seen.headerTone.includes(`tone-${c.headerTone}`) && seen.name.startsWith(c.label), seen);
+        if (c.name !== 'degraded-no-reason') check('executor-health', `${tag}: header uses the same semantic colour`, seen.headerColour === seen.want, seen);
+        check('executor-health', `${tag}: exact bytes in the ledger title and accessible name, only when reported`, c.ledger ? seen.ledger?.title === c.ledger && seen.ledger?.name === c.ledger : seen.ledger === null && !text.includes('ledger'), seen.ledger);
+        if (c.name === 'healthy') check('executor-health', `${tag}: healthy copy is unchanged`, text === c.start, seen);
+        const moved = exactMoves(baseline, await geometry());
+        check('executor-health', `${tag}: 0 px shift; header keeps its width class and label/broker boxes`, !moved.length && seen.headerClass === headerClass, moved);
+        const bounds = await ev(`({ horizontal: __audit.horizontal(), clipping: __audit.clipping() })`);
+        check('executor-health', `${tag}: no overflow or clipping`, bounds.horizontal.scroll <= bounds.horizontal.inner && !bounds.clipping.length, bounds);
+        if (['capture-degraded', 'ledger-full'].includes(c.name)) {
+          await auditScreen(page, viewport, theme, `settings executor ${c.name}`);
+          await crop('#rtRows .rt-row:nth-child(4)', `${viewport.name}-${theme}-settings-executor-${c.name}`);
+          await crop('header.top', `${viewport.name}-${theme}-header-executor-${c.name}`);
+        }
+      }
+    }
+  }
+
   // ---------- 2 · Edited: Edit, Review changes, Confirm, Send; nothing moves ----------
   if (run('edit')) {
     const combos = [[VIEWPORTS[0], 'light', null], [VIEWPORTS[0], 'dark', null], [VIEWPORTS[1], 'light', null], [VIEWPORTS[1], 'dark', null], [VIEWPORTS[0], 'light', WIDE_FONT], [VIEWPORTS[1], 'dark', WIDE_FONT]];

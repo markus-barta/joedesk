@@ -358,7 +358,7 @@ v1 helpers it exposed do not apply to the v2 contracts.
 ## Results v2 missing daily summaries
 
 The rebuilt Results feed uses `inspr.joe.household.results.v2` and the shared
-`contracts/` package (manifest revision 6). Its producer sends `days[]` and
+`contracts/` package (manifest revision 7). Its producer sends `days[]` and
 `trades[]` to `POST /joe/inbox/results`; `receivedAt` and `missingDays` are
 server-owned and must be omitted at ingress. See README “Results ingress” for
 the complete acceptance and producer-pin contract.

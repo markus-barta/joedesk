@@ -706,10 +706,30 @@ or “record incomplete”.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
-`contract_set_sha256`; an earlier digest does not cover revision-6 acceptance
+`contract_set_sha256`; an earlier digest does not cover revision-7 acceptance
 and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.
+
+Contract-set revision 7 keeps every revision-6 payload valid and the data ID
+`inspr.joe.household.v2`. The optional executor reason `results_capture_failed`
+means degraded health: results capture is failing and trading continues. Settings
+shows the reason in yellow and the header reads “Executor degraded”, after every
+existing data warning. A degraded executor without a reason stays “Degraded”
+in Settings; the board does not infer capture failure. The `ledger_size_limit`
+reason is red regardless of executor status: “Orders refused”, with “trade record
+is full — new orders refused”. The emergency stop keeps precedence, including an
+executor/broker disagreement halt.
+
+Optional `safety.executor.ledgerBytes` (integer ≥ 0) and `ledgerCapBytes`
+(integer ≥ 1) belong to paper executor 8470. A cap requires a byte count;
+over-cap reports remain valid. Settings uses decimal MB (1 MB = 1,000,000 bytes),
+one decimal with a comma, rounded half-even with integer arithmetic. A count
+without a cap shows only its size; neither field means no ledger text. The title
+and accessible name retain exact byte counts. Health text reserves its space so
+state changes do not move the header or later Settings sections. PR CI's P5
+`executor` checks cover all three degraded wire combinations, recovery and ledger
+rounding at 1440/1024/390 in both themes, with executor-row and header crops.
 
 Re-send at least every 30 s with a strictly higher `seq` and non-regressing
 `generatedAt`. Generation may be at most 5 s ahead of the server clock; server

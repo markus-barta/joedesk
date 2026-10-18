@@ -80,6 +80,80 @@ test('host gate: canonical hosts include the production host; others get the pri
     '10.0.0.1', 'example.ts.net', 'hsb1.example.com', 'cs0.barta.com']) assert.ok(!isCanonicalJoeHost(host), host);
 });
 
+test('ledger size: decimal MB round half-even from exact integer bytes, including large values', () => {
+  for (const [bytes, text] of [[0, '0,0'], [49999, '0,0'], [50000, '0,0'], [50001, '0,1'],
+    [999999, '1,0'], [1000000, '1,0'], [3249999, '3,2'], [3250000, '3,2'], [3250001, '3,3'],
+    [3349999, '3,3'], [3350000, '3,4'], [3350001, '3,4'], [9950000, '10,0'],
+    [9007199254650000, '9007199254,6'], [Number.MAX_SAFE_INTEGER, '9007199254,7']]) {
+    assert.equal(format.ledgerMegabytes(bytes), `${text} MB`, String(bytes));
+  }
+  for (const bytes of [-1, 0.5, '1000000', NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => format.ledgerMegabytes(bytes), TypeError);
+  }
+  assert.equal(format.ledgerSize({}), null);
+  assert.deepEqual(format.ledgerSize({ ledgerBytes: 3250000 }), { text: 'ledger 3,2 MB', title: 'Ledger: 3250000 bytes' });
+  assert.deepEqual(format.ledgerSize({ ledgerBytes: 3250000, ledgerCapBytes: 8000000 }), {
+    text: 'ledger 3,2 MB of 8,0 MB', title: 'Ledger: 3250000 bytes of 8000000 bytes',
+  });
+  assert.deepEqual(format.ledgerSize({ ledgerBytes: 9000000, ledgerCapBytes: 8000000 }), {
+    text: 'ledger 9,0 MB of 8,0 MB', title: 'Ledger: 9000000 bytes of 8000000 bytes',
+  });
+});
+
+test('executor presentation: degraded without a reason is yellow; capture warns and a full ledger is red', () => {
+  const base = { status: 'running', halt: false, brakes: false, gatewayReachable: true };
+  for (const [fields, expected] of [[{}, ['Running', 'ok', null]],
+    [{ status: 'degraded' }, ['Degraded', 'warn', null]],
+    [{ status: 'degraded', reason: 'results_capture_failed' }, ['Degraded', 'warn', 'results capture failing — trading continues']],
+    [{ status: 'degraded', reason: 'ledger_size_limit' }, ['Degraded', 'bad', 'trade record is full — new orders refused']],
+    [{ status: 'down', reason: 'results_capture_failed' }, ['Down', 'bad', 'results capture failing — trading continues']],
+    [{ halt: true, reason: 'executor_broker_disagreement' }, ['Running', 'bad', 'executor and broker disagree']]]) {
+    const p = health.executorPresentation({ ...base, ...fields });
+    assert.deepEqual([p.status, p.tone, p.reason], expected);
+  }
+});
+
+test('health: capture is behind every data warning; the full ledger is red immediately after halt', () => {
+  const payload = ingress(valid.data);
+  payload.seq++;
+  Object.assign(payload.safety.executor, { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 });
+  const b = board({ feed: 'data', payload, receivedAt: valid.data.receivedAt, now: valid.data.receivedAt });
+  const view = (states = b.states, feeds = b.feeds, now = b.now) => health.boardHealthPresentation(states, feeds, now);
+  const p = view();
+  assert.deepEqual([p.tone, p.reason, p.label, p.statusTone], ['yellow', 'results_capture_failed', 'Executor degraded', 'warn']);
+  assert.equal(p.explanation, 'results capture failing — trading continues');
+  delete b.feeds.data.value.safety.executor.reason;
+  assert.equal(view().reason, 'board_ok');
+  b.feeds.data.value.safety.executor.reason = 'results_capture_failed';
+  // Check every existing yellow and red fixture against the same executor warning.
+  for (const id of ['stale-receive-age', 'c-frozen-producer', 'b-incomplete-family', 'b-equity-null-gateway-ready',
+    'h-keep-policy-mismatch', 'b-weekend-no-sod', 'j-ny-midnight-gap', 'a-gateway-up-but-dead',
+    'c-old-producer-image', 'unknown-schema', 'g-expired-sso', 'd-routing-stub']) {
+    const other = board(fixture(id));
+    const prior = health.boardHealthPresentation(other.states, other.feeds, other.now);
+    Object.assign(other.feeds.data.value.safety.executor, { status: 'degraded', reason: 'results_capture_failed' });
+    assert.equal(health.boardHealthPresentation(other.states, other.feeds, other.now).reason, prior.reason, id);
+  }
+  for (const reason of ['gateway_degraded', 'gateway_unconfirmed']) {
+    const feeds = structuredClone(b.feeds);
+    Object.assign(feeds.data.value.safety.gateway, { apiSessionReady: false, reason });
+    assert.equal(view(panelStates(feeds, b.now, b.states), feeds).reason, reason);
+  }
+  for (const [name, expected] of [['today.dayPnl', 'day_pending'], ['today.openPnl', 'open_unavailable_rth']]) {
+    const states = structuredClone(b.states);
+    states[name].value = null;
+    assert.equal(view(states).reason, expected);
+  }
+  b.feeds.data.value.safety.executor.reason = 'ledger_size_limit';
+  assert.deepEqual([view().tone, view().reason, view().label, view().statusTone], ['red', 'ledger_size_limit', 'Orders refused', 'bad']);
+  assert.equal(view().explanation, 'trade record is full — new orders refused');
+  assert.equal(view(b.states, b.feeds, at(b.now, 200)).reason, 'ledger_size_limit');
+  // OPS's disagreement halt keeps its existing precedence over a ledger bound.
+  b.states.halt.value = true;
+  b.feeds.data.value.safety.haltReason = 'executor_broker_disagreement';
+  assert.equal(view().reason, 'halt_on');
+});
+
 test('health: every P1 fixture lands on today’s light, label and plain reason', () => {
   const expect = {
     'e-layout-storage-unavailable': ['green', 'board_ok', 'Board OK'],

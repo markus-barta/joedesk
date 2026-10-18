@@ -16,6 +16,25 @@ export const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp
 export const amountOf = money => (money && typeof money.amount === 'string' ? Number(money.amount) : null);
 export const currencySymbol = currency => SYMBOL[currency] ?? currency;
 
+// Decimal MB, rounded half-even directly from the contract's integer bytes.
+export function ledgerMegabytes(bytes) {
+  if (!Number.isSafeInteger(bytes) || bytes < 0) throw new TypeError('Nonnegative integer bytes required');
+  const value = BigInt(bytes), step = 100000n, half = step / 2n;
+  let tenths = value / step;
+  const remainder = value % step;
+  if (remainder > half || (remainder === half && tenths % 2n !== 0n)) tenths++;
+  return `${tenths / 10n},${tenths % 10n}${NB}MB`;
+}
+
+export function ledgerSize(executor) {
+  if (executor?.ledgerBytes == null) return null;
+  const { ledgerBytes: bytes, ledgerCapBytes: cap } = executor;
+  return {
+    text: `ledger ${ledgerMegabytes(bytes)}${cap == null ? '' : ` of ${ledgerMegabytes(cap)}`}`,
+    title: `Ledger: ${bytes} bytes${cap == null ? '' : ` of ${cap} bytes`}`,
+  };
+}
+
 function exactParts(units, d) {
   const abs = roundUnits(units < 0n ? -units : units, d);
   return [String(abs / UNIT), String(abs % UNIT).padStart(8, '0').slice(0, d)];
