@@ -104,13 +104,13 @@
     },
     {
       "path": "public/joe/app.css",
-      "size": 73297,
-      "sha256": "9a4121b3d044f159600629e91d3cb3a3269898982ffa6fd9b83f2990110c4897"
+      "size": 72490,
+      "sha256": "061224a61d577668cab480db346357f1af76c2f356d3a6c9acfb7a03607dbe7b"
     },
     {
       "path": "public/joe/app.js",
-      "size": 16095,
-      "sha256": "71c5a2fbf25e177bc3808094a4e0ff04686ddcb3f1b2eeaa7862d4ab9fe789ff"
+      "size": 16193,
+      "sha256": "f40a88c1f458d9c9805f5006a39c04e64db7ef2f96d6e115476d28fa81190765"
     },
     {
       "path": "public/joe/chart.js",
@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 27852,
-      "sha256": "08ea720d7845fccb500292e152423d41f2d557a4c155dc09c667d4aa97a89223"
+      "size": 27993,
+      "sha256": "f8adcc4fe88c0dbf2d4655c4248b6a111a9491717d8da67768ce309e1527e6fc"
     },
     {
       "path": "public/joe/events.js",

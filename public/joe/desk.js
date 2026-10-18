@@ -93,10 +93,12 @@ export function headerHealth(ctx, health) {
   const data = ctx.feeds.data?.value;
   const broker = data ? brokerState(ctx.states, data) : { word: 'unsure', tone: 'warn' };
   const words = { OK: 'Broker OK', degraded: 'Broker unstable', down: 'Broker down', unsure: 'Broker unsure' };
-  const executorLabel = 'Executor<span class="health-break"> </span>degraded';
-  const label = health.label === 'Executor degraded' ? executorLabel : esc(health.label);
-  return { html: `${icon(TONE_ICON[health.statusTone], `i tone-${health.statusTone}`)}<span class="lbl"><b><span>${label}</span><span class="health-sizing" aria-hidden="true">${executorLabel}</span></b><span class="lbl-long">· ${words[broker.word]}</span></span>`,
-    label: `${health.label}, broker connection ${broker.word === 'OK' ? 'OK' : broker.word}. Open Desk.` };
+  const title = health.reason === 'results_capture_failed' ? 'Executor degraded: results capture failing, trading continues'
+    : health.reason === 'ledger_size_limit' ? 'Trade record is full: new orders refused' : null;
+  const label = health.reason === 'results_capture_failed' ? 'Degraded'
+    : health.reason === 'ledger_size_limit' ? 'No new orders' : health.label;
+  return { html: `${icon(TONE_ICON[health.statusTone], `i tone-${health.statusTone}`)}<span class="lbl"><b>${esc(label)}</b><span class="lbl-long">· ${words[broker.word]}</span></span>`,
+    label: `${title ?? health.label}, broker connection ${broker.word === 'OK' ? 'OK' : broker.word}. Open Desk.`, title };
 }
 
 function sinceLabel(data) {

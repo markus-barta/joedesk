@@ -267,28 +267,26 @@
         heads.forEach((h, i) => { h.querySelector('.state > span').textContent = keep[i][0]; const a = h.querySelector('.hb .age'); if (a) a.textContent = keep[i][1]; });
       }
       const b = health.querySelector('b'), long = health.querySelector('.lbl-long'), lbl = health.querySelector('.lbl') ?? b;
-      // Exercise the visible label without destroying its always-on reserve.
-      const face = b.querySelector(':scope > span:not(.health-sizing)') ?? b;
-      const keep = [face.innerHTML, long.textContent];
+      const keep = [b.textContent, long.textContent];
       const main = document.getElementById('main'), header = document.querySelector('header.top');
       const still = () => [header, ...items.filter(el => el !== health), main].map(el => ({ id: name(el), ...box(el) }));
       const base = still();
       for (const label of light.labels) for (const word of light.brokers) {
-        face.textContent = label; long.textContent = `· ${word}`;
+        b.textContent = label; long.textContent = `· ${word}`;
         const faults = headerFaults();
         still().forEach((r, i) => { if (['left', 'top', 'width', 'height'].some(k => Math.abs(r[k] - base[i][k]) > 0.5)) faults.push(`${r.id} moved`); });
         const h = box(health), hs = getComputedStyle(health);
         const lines = Math.round(lbl.getBoundingClientRect().height / parseFloat(getComputedStyle(lbl).lineHeight));
-        for (const part of [face, long].filter(visible)) {
+        for (const part of [b, long].filter(visible)) {
           const range = document.createRange();
           range.selectNodeContents(part);
           const r = range.getBoundingClientRect();
-          if (r.left < h.left + parseFloat(hs.paddingLeft) - 1 || r.right > h.right - parseFloat(hs.paddingRight) + 1 || r.top < h.top - 0.5 || r.bottom > h.bottom + 0.5) faults.push(`${part === face ? 'label' : 'broker word'} leaves the button`);
+          if (r.left < h.left + parseFloat(hs.paddingLeft) - 1 || r.right > h.right - parseFloat(hs.paddingRight) + 1 || r.top < h.top - 0.5 || r.bottom > h.bottom + 0.5) faults.push(`${part === b ? 'label' : 'broker word'} leaves the button`);
         }
         if (lines > 2) faults.push(`${lines} lines`);
         if (faults.length) out.labels.push({ light: `${label} · ${word}`, faults });
       }
-      face.innerHTML = keep[0]; long.textContent = keep[1];
+      b.textContent = keep[0]; long.textContent = keep[1];
       return out;
     },
   };

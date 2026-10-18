@@ -757,12 +757,12 @@ producer rehearsal and sign-off.
 Contract-set revision 7 keeps every revision-6 payload valid and the data ID
 `inspr.joe.household.v2`. The optional executor reason `results_capture_failed`
 means degraded health: results capture is failing and trading continues. Settings
-shows the reason in yellow and the header reads “Executor degraded”, after every
+shows the reason in yellow and the header reads “Degraded”, after every
 existing data warning. A degraded executor without a reason stays “Degraded”
 in Settings; the board does not infer capture failure. The `ledger_size_limit`
-reason is red regardless of executor status: “Orders refused”, with “trade record
-is full — new orders refused”. The emergency stop keeps precedence, including an
-executor/broker disagreement halt.
+reason is red regardless of executor status: the header reads “No new orders”,
+with “trade record is full — new orders refused”. The emergency stop keeps
+precedence, including an executor/broker disagreement halt.
 
 Optional `safety.executor.ledgerBytes` (integer ≥ 0) and `ledgerCapBytes`
 (integer ≥ 1) belong to paper executor 8470. A cap requires a byte count;
@@ -772,14 +772,18 @@ rounding. Rounding to 1000,0 promotes to the next unit: 999,950,000 bytes reads
 1,0 GB. The reserve uses 999,9 TB per value and the longest flag tail; larger
 values remain correct in TB and may wrap. A count
 without a cap shows only its size; neither field means no ledger text. The title
-and accessible name retain exact byte counts. Health text reserves its space so
-state changes do not move the header or later Settings sections within that
-reserve. On phones “Executor degraded” and its always-present hidden reserve
-use two lines inside the same 44 px button. PR CI's P5
+and accessible name retain exact byte counts. Settings health text reserves its
+space so state changes do not move later sections within that reserve. The header
+keeps its pre-JOED-44 layout and 16 px phone inset, without a sizing reserve or a
+forced line break. The two short labels have full titles and accessible names:
+“Executor degraded: results capture failing, trading continues” and
+“Trade record is full: new orders refused”. PR CI's P5
 `executor` checks cover all three degraded wire combinations, recovery and ledger
 rounding at 1440/1024/390/360 in both themes, with executor-row and header crops.
-It records Chrome's actual rendered font, checks every header label for zero
-movement and clipping, and compares every board-health sentence to its reserve.
+It records Chrome's actual rendered font, checks every header label for wrapping
+and clipping, compares existing header markup and geometry with commit c1c71a1
+(the browser checkout includes history), and compares every board-health sentence
+to its reserve. Browser verification and the coordinator's gate remain required.
 
 Re-send at least every 30 s with a strictly higher `seq` and non-regressing
 `generatedAt`. Generation may be at most 5 s ahead of the server clock; server

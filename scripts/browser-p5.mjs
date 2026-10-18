@@ -6,6 +6,7 @@
 // network layer, Appearance (System follows the OS live), Tick's P4 focus
 // carry-over and a width sweep. One headless browser, one page, sequential.
 import { readFileSync, writeFileSync, mkdirSync, chmodSync, statSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { homedir, cpus } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
@@ -344,6 +345,15 @@ try {
   // JOED-44: real ingress -> shared selectors -> runtime row and header.
   // CI owns browser execution and emits both crops for the coordinator's gate.
   if (run('executor')) {
+    // Read the actual pre-JOED-44 renderer and stylesheet, independently of
+    // candidate bytes. CI's browser checkout includes this immutable history.
+    const beforeCommit = 'c1c71a127116969cb33fa76f50aab3b47dbb965f';
+    const beforeFile = file => execFileSync('git', ['show', `${beforeCommit}:${file}`], { cwd: new URL('../', import.meta.url), encoding: 'utf8' });
+    const beforeCSS = beforeFile('public/joe/app.css');
+    const deskURL = new URL('../public/joe/desk.js', import.meta.url).href;
+    const beforeDesk = beforeFile('public/joe/desk.js').replace(/from '(\.\/[^']+)'/g,
+      (_, specifier) => `from '${new URL(mapped(specifier, deskURL), deskURL).href}'`);
+    const { headerHealth: beforeHeaderHealth } = await import(`data:text/javascript,${encodeURIComponent(beforeDesk)}`);
     await page.s('DOM.enable');
     await page.s('CSS.enable');
     const crop = async (selector, name) => {
@@ -352,7 +362,10 @@ try {
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
       shots.push({ file: `${name}.png`, what: `Executor health: ${name}` });
     };
-    const geometry = () => rects(['header.top', '.top-in > *', '#hdrHealth b', '#hdrHealth .lbl-long', '#setMain > .set-sec', '#rtRows .rt-row']);
+    // The original pill follows its label's intrinsic width. Other chrome and
+    // the reserved Settings rows still keep their boxes across state changes.
+    const geometry = () => rects(['header.top', '.top-in > :not(#hdrHealth)', '#setMain > .set-sec', '#rtRows .rt-row']);
+    const headerGeometry = () => rects(['header.top', '.top-in', '.top-in > *', '#hdrHealth .i', '#hdrHealth .lbl', '#hdrHealth b', '#hdrHealth .lbl-long']);
     const exactMoves = (before, after) => before.flatMap((a, i) => {
       const b = after[i];
       return !b || a.key !== b.key ? [{ key: a.key, missing: true }]
@@ -373,7 +386,7 @@ try {
       // Measure the font Chrome actually renders on this runner; the CSS
       // family list alone would hide a Linux fallback behind SF Pro.
       const { root } = await page.s('DOM.getDocument');
-      const { nodeId } = await page.s('DOM.querySelector', { nodeId: root.nodeId, selector: '#hdrHealth b > span:first-child' });
+      const { nodeId } = await page.s('DOM.querySelector', { nodeId: root.nodeId, selector: '#hdrHealth b' });
       const { fonts } = await page.s('CSS.getPlatformFontsForNode', { nodeId });
       check('executor-health', `${viewport.name} ${theme}: rendered font is recorded (Linux uses its installed font)`, fonts.some(f => f.glyphCount > 0) && (process.platform !== 'linux' || fonts.every(f => !/SF Pro/i.test(f.familyName))), fonts);
       console.log(`executor-font ${viewport.name} ${theme}: ${J(fonts)}`);
@@ -383,10 +396,10 @@ try {
       const healthy = structuredClone(snapshot.safety.executor);
       const cases = [
         { name: 'degraded-no-reason', fields: { status: 'degraded' }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · broker reachable', ledger: null },
-        { name: 'capture-degraded', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 }, tone: 'warn', label: 'Executor degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · ledger 3,2 MB of 8,0 MB', ledger: 'Ledger: 3250000 bytes of 8000000 bytes' },
-        { name: 'ledger-full', fields: { status: 'degraded', reason: 'ledger_size_limit', ledgerBytes: 9000000, ledgerCapBytes: 8000000 }, tone: 'bad', label: 'Orders refused', headerTone: 'bad', start: 'Degraded · trade record is full — new orders refused · ledger 9,0 MB of 8,0 MB', ledger: 'Ledger: 9000000 bytes of 8000000 bytes' },
-        { name: 'capture-bytes-only', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3350000 }, tone: 'warn', label: 'Executor degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · ledger 3,4 MB · broker reachable', ledger: 'Ledger: 3350000 bytes' },
-        { name: 'capture-no-ledger', fields: { status: 'degraded', reason: 'results_capture_failed' }, tone: 'warn', label: 'Executor degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · broker reachable', ledger: null },
+        { name: 'capture-degraded', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 }, tone: 'warn', label: 'Degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · ledger 3,2 MB of 8,0 MB', ledger: 'Ledger: 3250000 bytes of 8000000 bytes' },
+        { name: 'ledger-full', fields: { status: 'degraded', reason: 'ledger_size_limit', ledgerBytes: 9000000, ledgerCapBytes: 8000000 }, tone: 'bad', label: 'No new orders', headerTone: 'bad', start: 'Degraded · trade record is full — new orders refused · ledger 9,0 MB of 8,0 MB', ledger: 'Ledger: 9000000 bytes of 8000000 bytes' },
+        { name: 'capture-bytes-only', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3350000 }, tone: 'warn', label: 'Degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · ledger 3,4 MB · broker reachable', ledger: 'Ledger: 3350000 bytes' },
+        { name: 'capture-no-ledger', fields: { status: 'degraded', reason: 'results_capture_failed' }, tone: 'warn', label: 'Degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · broker reachable', ledger: null },
         { name: 'healthy', fields: {}, tone: 'ok', label: 'Board OK', headerTone: 'ok', start: 'Running · broker reachable · brakes off · checked 19:42:13', ledger: null },
       ];
       for (const c of cases) {
@@ -396,22 +409,25 @@ try {
         const pushed = await b.push(snapshot);
         check('executor-health', `${tag}: the real inbox accepts the state`, pushed.status === 200, pushed);
         await ev('window.__joedesk.refresh().then(() => true)');
-        await waitFor(page, `document.querySelector('#hdrHealth b > span:first-child').textContent.trim() === ${J(c.label)} && document.querySelector('#rtRows .rt-row:nth-child(4) .val').innerText.includes(${J(c.start.split(' · ')[0])})`);
+        await waitFor(page, `document.querySelector('#hdrHealth b').textContent.trim() === ${J(c.label)} && document.querySelector('#rtRows .rt-row:nth-child(4) .val').innerText.includes(${J(c.start.split(' · ')[0])})`);
         await settle(page);
         const seen = await ev(`(() => {
           const row = document.querySelector('#rtRows .rt-row:nth-child(4)'), status = row.querySelector('.rt-reserve > .st'), h = document.getElementById('hdrHealth'), ledger = row.querySelector('[role="group"]');
           const probe = document.createElement('span'); probe.style.color = 'var(--${c.tone === 'ok' ? 'ok' : c.tone === 'bad' ? 'bad' : 'warn'})'; document.body.append(probe); const want = getComputedStyle(probe).color; probe.remove();
           return { text: row.querySelector('.val').innerText.trim(), tone: status.className, colour: getComputedStyle(status.querySelector('.i')).color, want,
-            label: h.querySelector('b > span:first-child').textContent.trim(), headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
-            name: h.getAttribute('aria-label'), ledger: ledger && { title: ledger.title, name: ledger.getAttribute('aria-label') } };
+            label: h.querySelector('b').textContent.trim(), headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
+            name: h.getAttribute('aria-label'), title: h.getAttribute('title'), ledger: ledger && { title: ledger.title, name: ledger.getAttribute('aria-label') } };
         })()`);
         const text = N(seen.text);
-        check('executor-health', `${tag}: row copy, semantic tone and header label/tone`, text.startsWith(c.start) && text.endsWith(' · brakes off · checked 19:42:13') && seen.tone === `st ${c.tone}` && seen.colour === seen.want && seen.label === c.label && seen.headerTone.includes(`tone-${c.headerTone}`) && seen.name.startsWith(c.label), seen);
+        const title = c.fields.reason === 'results_capture_failed' ? 'Executor degraded: results capture failing, trading continues'
+          : c.fields.reason === 'ledger_size_limit' ? 'Trade record is full: new orders refused' : null;
+        check('executor-health', `${tag}: row copy, semantic tone and header label/tone`, text.startsWith(c.start) && text.endsWith(' · brakes off · checked 19:42:13') && seen.tone === `st ${c.tone}` && seen.colour === seen.want && seen.label === c.label && seen.headerTone.includes(`tone-${c.headerTone}`), seen);
+        check('executor-health', `${tag}: full accessible explanation and title; recovery clears the title`, seen.name.startsWith(title ?? c.label) && seen.title === title, seen);
         if (c.name !== 'degraded-no-reason') check('executor-health', `${tag}: header uses the same semantic colour`, seen.headerColour === seen.want, seen);
         check('executor-health', `${tag}: exact bytes in the ledger title and accessible name, only when reported`, c.ledger ? seen.ledger?.title === c.ledger && seen.ledger?.name === c.ledger : seen.ledger === null && !text.includes('ledger'), seen.ledger);
         if (c.name === 'healthy') check('executor-health', `${tag}: healthy copy is unchanged`, text === c.start, seen);
         const moved = exactMoves(baseline, await geometry());
-        check('executor-health', `${tag}: 0 px shift; header keeps its width class and label/broker boxes`, !moved.length && seen.headerClass === headerClass, moved);
+        check('executor-health', `${tag}: 0 px shift outside the intrinsic pill; header keeps its class`, !moved.length && seen.headerClass === headerClass, moved);
         const bounds = await ev(`({ horizontal: __audit.horizontal(), clipping: __audit.clipping() })`);
         check('executor-health', `${tag}: no overflow or clipping`, bounds.horizontal.scroll <= bounds.horizontal.inner && !bounds.clipping.length, bounds);
         if (['capture-degraded', 'ledger-full'].includes(c.name)) {
@@ -424,25 +440,46 @@ try {
       // the 180 s stopped-feed state, uses the production markup.
       const header = await ev(`document.getElementById('hdrHealth').innerHTML`);
       for (const h of [...healthCases, { label: 'Loading', statusTone: 'warn' }]) {
-        const view = headerHealth({ feeds: { data: { value: snapshot } }, states: { gateway: { state: 'fresh' } } }, h);
+        const ctx = { feeds: { data: { value: snapshot } }, states: { gateway: { state: 'fresh' } } };
+        const view = headerHealth(ctx, h);
         await ev(`document.getElementById('hdrHealth').innerHTML = ${J(view.html)}`);
         const measured = await ev(`(() => {
-          const button = document.getElementById('hdrHealth'), label = button.querySelector('b > span:first-child'), sizer = button.querySelector('.health-sizing');
-          const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), reserve = sizer.getBoundingClientRect();
+          const button = document.getElementById('hdrHealth'), label = button.querySelector('b');
+          const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), css = getComputedStyle(button);
           const range = document.createRange(), words = [];
           const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
           for (let n; (n = walker.nextNode());) for (const match of n.textContent.matchAll(/\\S+/g)) {
             range.setStart(n, match.index); range.setEnd(n, match.index + match[0].length);
             const r = range.getBoundingClientRect(); words.push({ word: match[0], left: r.left, right: r.right, top: r.top, bottom: r.bottom });
           }
-          const inside = words.every(r => r.left >= cell.left - 0.5 && r.right <= cell.right + 0.5 && r.top >= box.top && r.bottom <= box.bottom);
+          const inside = words.every(r => r.left >= Math.max(cell.left, box.left + parseFloat(css.paddingLeft)) - 0.5 && r.right <= Math.min(cell.right, box.right - parseFloat(css.paddingRight)) + 0.5 && r.top >= box.top && r.bottom <= box.bottom);
           const lines = [...new Set(words.map(r => r.top))].length;
-          return { inside, lines, words, height: box.height, reserveHeight: reserve.height, lineHeight: parseFloat(getComputedStyle(label).lineHeight), horizontal: __audit.horizontal(), clipping: __audit.clipping() };
+          const row = document.querySelector('.top-in'), rowBox = row.getBoundingClientRect(), rowCSS = getComputedStyle(row);
+          const first = row.querySelector('.brand').getBoundingClientRect(), last = document.getElementById('themeBtn').getBoundingClientRect();
+          const items = [...row.children].filter(__audit.visible).map(e => e.getBoundingClientRect());
+          const inRow = items.every((r, i) => r.left >= rowBox.left + parseFloat(rowCSS.paddingLeft) - 0.5 && r.right <= rowBox.right - parseFloat(rowCSS.paddingRight) + 0.5 && (!i || r.left >= items[i - 1].right - 0.5));
+          return { inside, inRow, lines, words, height: box.height,
+            inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: rowCSS.paddingLeft, paddingRight: rowCSS.paddingRight },
+            horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
-        check('executor-health', `${viewport.name} ${theme} header ${h.label}: every glyph fits; no clipping or ellipsis`, measured.inside && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, measured);
-        if (viewport.mobile && h.label === 'Executor degraded') check('executor-health', `${viewport.name} ${theme}: capture label and always-on reserve are two lines in the 44 px button`, measured.lines === 2 && measured.words.length === 2 && measured.height === 44 && Math.abs(measured.reserveHeight - measured.lineHeight * 2) < 0.1, measured);
+        check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly one line, every glyph fits; no clipping, overlap or ellipsis`, measured.inside && measured.inRow && measured.lines === 1 && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, measured);
+        if (viewport.width === 360) check('executor-health', `${theme} header ${h.label}: original 16 px inset at 360`, measured.inset.left === 16 && measured.inset.right === 16 && measured.inset.paddingLeft === '16px' && measured.inset.paddingRight === '16px', measured.inset);
+        if (!['results_capture_failed', 'ledger_size_limit'].includes(h.reason)) {
+          const before = beforeHeaderHealth(ctx, h);
+          check('executor-health', `${viewport.name} ${theme} header ${h.label}: byte-for-byte pre-JOED-44 markup and accessible name`, view.html === before.html && view.label === before.label, { before, view });
+          const current = await headerGeometry();
+          await ev(`(() => {
+            const style = document.createElement('style'); style.id = 'beforeJOED44'; style.textContent = ${J(beforeCSS)}; document.head.append(style);
+            document.querySelector('link[href*="app.css"]').disabled = true;
+            document.getElementById('hdrHealth').innerHTML = ${J(before.html)};
+          })()`);
+          const prior = await headerGeometry();
+          await ev(`(() => { document.getElementById('beforeJOED44').remove(); document.querySelector('link[href*="app.css"]').disabled = false; document.getElementById('hdrHealth').innerHTML = ${J(view.html)}; })()`);
+          const changed = exactMoves(prior, current);
+          check('executor-health', `${viewport.name} ${theme} header ${h.label}: original label-box width and complete header geometry (0 px delta)`, !changed.length, changed);
+        }
         const moved = exactMoves(baseline, await geometry());
-        check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly 0 px movement`, !moved.length, moved);
+        check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly 0 px movement outside the intrinsic pill`, !moved.length, moved);
       }
       await ev(`document.getElementById('hdrHealth').innerHTML = ${J(header)}`);
       // Compare every real board-health sentence with the hidden reserve in

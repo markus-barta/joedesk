@@ -24,7 +24,7 @@ const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth } = await import('../public/joe/desk.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
 const { readdirSync } = await import('node:fs');
@@ -166,6 +166,32 @@ test('health: capture is behind every data warning; the full ledger is red immed
   b.states.halt.value = true;
   b.feeds.data.value.safety.haltReason = 'executor_broker_disagreement';
   assert.equal(view().reason, 'halt_on');
+});
+
+test('header: short executor labels retain full accessible explanations and recover to the original markup', () => {
+  const payload = ingress(valid.data);
+  payload.seq++;
+  const b = board({ feed: 'data', payload, receivedAt: valid.data.receivedAt, now: valid.data.receivedAt });
+  const view = () => headerHealth(b, health.boardHealthPresentation(b.states, b.feeds, b.now));
+  const healthy = view();
+  assert.match(healthy.html, /<b>Board OK<\/b><span class="lbl-long">· Broker OK<\/span>/);
+  assert.equal(healthy.label, 'Board OK, broker connection OK. Open Desk.');
+  assert.equal(healthy.title, null);
+  for (const [reason, label, title, tone] of [
+    ['results_capture_failed', 'Degraded', 'Executor degraded: results capture failing, trading continues', 'warn'],
+    ['ledger_size_limit', 'No new orders', 'Trade record is full: new orders refused', 'bad'],
+  ]) {
+    Object.assign(b.feeds.data.value.safety.executor, { status: 'degraded', reason });
+    const header = view();
+    assert.ok(header.html.includes(`<b>${label}</b>`));
+    assert.ok(header.html.includes(`tone-${tone}`));
+    assert.equal(header.title, title);
+    assert.equal(header.label, `${title}, broker connection OK. Open Desk.`);
+    assert.doesNotMatch(header.html, /health-sizing|health-break/);
+  }
+  Object.assign(b.feeds.data.value.safety.executor, { status: 'running' });
+  delete b.feeds.data.value.safety.executor.reason;
+  assert.deepEqual(view(), healthy);
 });
 
 test('health: every P1 fixture lands on today’s light, label and plain reason', () => {
