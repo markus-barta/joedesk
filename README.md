@@ -716,9 +716,19 @@ Re-send at least every 30 s with a strictly higher `seq` and non-regressing
 receipt time may not regress. Only accepted pushes advance the receipt. The
 shared selector marks Results stale at 60 s without a new acceptance; repeated
 generation also becomes `producer_frozen` at 60 s. Exact retries return 422
-without changing stores, freshness or an existing rejection. Other rejections
+without changing stores, freshness or an existing rejection. Other rejections,
+except the midnight-straddle case below,
 persist their closed reason and keep the last good record and its original age.
 Stale Results stays visible, labelled **Stale** with its last-good age.
+
+Once until the next accepted Results push, a midnight-straddle 422 leaves the
+feed reason and rejection file unchanged: every validation error must be
+`partialReasonsRequired` for the generated Vienna day, receipt must be on the
+next Vienna calendar day, and the positive generation-to-receipt interval must
+be at most five minutes. The response stays unchanged and the server logs the
+non-fault event `rollover_resend_pending` with the instants and failing dates.
+A second qualifying rejection is stored normally. The flag is in memory and
+restart re-arms it; a missing resend surfaces through normal staleness at 60 s.
 
 | Response | Meaning |
 | --- | --- |

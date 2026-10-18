@@ -42,6 +42,21 @@ function resultsSnapshot(seq = 101, generated = 0) {
   value.seq = seq; value.generatedAt = at(generated);
   return value;
 }
+function rolloverSnapshot(seq, generatedAt, date = viennaDay(generatedAt)) {
+  const value = resultsSnapshot(seq);
+  value.generatedAt = generatedAt; value.trackingStart = date;
+  value.trades = []; value.days = [{ date, coverage: 'partial', desks: {} }];
+  return value;
+}
+async function setupRollover(t, generatedAt = '2026-10-17T21:59:55.000Z', receivedAt = '2026-10-17T22:00:05.000Z') {
+  const writes = [];
+  const s = await setup(t, { write: (file, ...args) => { writes.push(basename(file)); atomicWrite(file, ...args); } });
+  s.time.ms = Date.parse(generatedAt) - BASE_TIME;
+  assert.equal((await s.pushResults(rolloverSnapshot(101, generatedAt))).status, 200);
+  const original = (await s.request('/joe/results.json')).body;
+  s.time.ms = Date.parse(receivedAt) - BASE_TIME; writes.length = 0;
+  return { ...s, writes, original, candidate: rolloverSnapshot(102, generatedAt) };
+}
 async function setup(t, options = {}) {
   const dataDir = options.dataDir ?? mkdtempSync(join(ROOT, 'p2-'));
   const time = { ms: 0 };
@@ -594,6 +609,151 @@ test('JOED-28 results: HTTP diagnostics skip the open Vienna date and use the DS
     assert.equal((await s.pushResults(value)).status, 200);
     assert.deepEqual((await s.request('/joe/results.json')).body.missingDays ?? [], expected);
   }
+});
+
+test('JOED-36 results: a midnight straddle keeps the 422 response, last-good and rejection file; resend is accepted', async t => {
+  const logs = []; t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
+  const s = await setupRollover(t);
+  // An existing data diagnostic also makes a rejection-file rewrite observable.
+  s.model.reject('schema_unsupported');
+  const before = readFileSync(join(s.dataDir, 'feed-rejections.json'));
+  const snapshotBefore = readFileSync(join(s.dataDir, 'results-state.json'));
+  s.writes.length = 0;
+  const response = await s.pushResults(s.candidate);
+  assert.equal(response.status, 422);
+  assert.deepEqual(response.body, { ok: false, status: 422, reason: 'contract_invalid',
+    errors: [{ path: '$.days[0].partialReasons', rule: 'partialReasonsRequired' }] });
+  assert.deepEqual(s.writes, []);
+  assert.deepEqual(readFileSync(join(s.dataDir, 'feed-rejections.json')), before);
+  assert.deepEqual(readFileSync(join(s.dataDir, 'results-state.json')), snapshotBefore);
+  const read = await s.request('/joe/results.json');
+  assert.deepEqual(read.body, s.original); assert.equal(read.headers.get('x-joe-feed-reason'), null);
+  assert.equal((await s.request('/joe/state.json')).body.panels.results.state, 'fresh');
+  assert.deepEqual(logs, [{ event: 'rollover_resend_pending', generatedAt: s.candidate.generatedAt,
+    receivedAt: at(s.time.ms), days: ['2026-10-17'] }]);
+  s.time.ms += 1000;
+  const resend = { ...s.candidate, generatedAt: at(s.time.ms) };
+  resend.days[0].partialReasons = ['history_gap'];
+  assert.equal((await s.pushResults(resend)).status, 200);
+  assert.deepEqual((await s.request('/joe/results.json')).body, { ...resend, receivedAt: at(s.time.ms) });
+  assert.equal(s.model.feeds().results.reason, null);
+});
+
+test('JOED-36 results: a missing resend becomes snapshot_stale at 60 seconds without a contract fault', async t => {
+  const logs = []; t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
+  const s = await setupRollover(t);
+  assert.equal((await s.pushResults(s.candidate)).status, 422);
+  const receipt = Date.parse(s.original.receivedAt) - BASE_TIME;
+  for (const [age, state, reason] of [[59999, 'fresh', null], [60000, 'stale', 'snapshot_stale'], [360000, 'stale', 'snapshot_stale']]) {
+    s.time.ms = receipt + age;
+    const panel = (await s.request('/joe/state.json')).body.panels.results;
+    assert.equal(panel.state, state); assert.equal(panel.reason, reason); assert.equal(panel.ageSeconds, age / 1000);
+    assert.equal((await s.request('/joe/healthz')).body.feeds.results.reason, reason);
+    const read = await s.request('/joe/results.json');
+    assert.equal(read.headers.get('x-joe-feed-reason'), null); assert.deepEqual(read.body, s.original);
+  }
+  assert.deepEqual(s.writes, []); assert.equal(logs.length, 1);
+  assert.equal(readdirSync(s.dataDir).includes('feed-rejections.json'), false);
+});
+
+test('JOED-36 results: the second rollover rejection is persisted; acceptance re-arms the next rollover', async t => {
+  const logs = []; t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
+  const s = await setupRollover(t);
+  assert.equal((await s.pushResults(s.candidate)).status, 422); assert.deepEqual(s.writes, []);
+  assert.equal((await s.pushResults(s.candidate)).status, 422);
+  assert.deepEqual(s.writes, ['feed-rejections.json']); assert.equal(logs.length, 1);
+  assert.deepEqual(JSON.parse(readFileSync(join(s.dataDir, 'feed-rejections.json'))), { results: 'contract_invalid' });
+  assert.equal((await s.request('/joe/results.json')).headers.get('x-joe-feed-reason'), 'contract_invalid');
+  const panel = (await s.request('/joe/state.json')).body.panels.results;
+  assert.equal(panel.state, 'broken'); assert.equal(panel.reason, 'contract_invalid');
+  assert.equal(createReadModel({ dataDir: s.dataDir }).feeds().results.reason, 'contract_invalid');
+  const resend = structuredClone(s.candidate);
+  resend.generatedAt = at(s.time.ms); resend.days[0].partialReasons = ['history_gap'];
+  assert.equal((await s.pushResults(resend)).status, 200);
+  assert.deepEqual(JSON.parse(readFileSync(join(s.dataDir, 'feed-rejections.json'))), {});
+  const generatedAt = '2026-10-18T21:59:55.000Z';
+  s.time.ms = Date.parse(generatedAt) - BASE_TIME + 10000; s.writes.length = 0;
+  assert.equal((await s.pushResults(rolloverSnapshot(103, generatedAt))).status, 422);
+  assert.deepEqual(s.writes, []); assert.equal(s.model.feeds().results.reason, null); assert.equal(logs.length, 2);
+});
+
+test('JOED-36 results: exemption preserves an existing results reason and restart re-arms the in-memory flag', async t => {
+  const logs = []; t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
+  const s = await setupRollover(t);
+  s.model.reject('sequence_replayed', 422, 'results');
+  const before = readFileSync(join(s.dataDir, 'feed-rejections.json'));
+  s.writes.length = 0;
+  assert.equal((await s.pushResults(s.candidate)).status, 422);
+  assert.equal(s.model.feeds().results.reason, 'sequence_replayed');
+  assert.deepEqual(readFileSync(join(s.dataDir, 'feed-rejections.json')), before); assert.deepEqual(s.writes, []);
+  await s.close();
+  const restarted = await setup(t, { dataDir: s.dataDir }); restarted.time.ms = s.time.ms;
+  assert.equal((await restarted.pushResults(s.candidate)).status, 422);
+  assert.equal(restarted.model.feeds().results.reason, 'sequence_replayed');
+  assert.deepEqual(readFileSync(join(s.dataDir, 'feed-rejections.json')), before); assert.equal(logs.length, 2);
+});
+
+test('JOED-36 results: calendar rollover is independent of host zone across Vienna DST, month and year boundaries', async t => {
+  const logs = []; t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
+  for (const [generatedAt, receivedAt, day] of [
+    ['2026-03-28T22:59:55.000Z', '2026-03-28T23:00:05.000Z', '2026-03-28'],
+    ['2026-03-29T21:59:55.000Z', '2026-03-29T22:00:05.000Z', '2026-03-29'],
+    ['2026-10-24T21:59:55.000Z', '2026-10-24T22:00:05.000Z', '2026-10-24'],
+    ['2026-10-25T22:59:55.000Z', '2026-10-25T23:00:05.000Z', '2026-10-25'],
+    ['2026-01-31T22:59:55.000Z', '2026-01-31T23:00:05.000Z', '2026-01-31'],
+    ['2026-12-31T22:59:55.000Z', '2026-12-31T23:00:05.000Z', '2026-12-31'],
+  ]) {
+    const s = await setupRollover(t, generatedAt, receivedAt);
+    assert.equal((await s.pushResults(s.candidate)).status, 422);
+    assert.equal(s.model.feeds().results.reason, null); assert.deepEqual(s.writes, []);
+    assert.deepEqual(logs.at(-1), { event: 'rollover_resend_pending', generatedAt, receivedAt, days: [day] });
+  }
+  assert.equal(logs.length, 6);
+});
+
+test('JOED-36 results: exactly five minutes is exempt; excess skew, wrong days and mixed errors remain faults', async t => {
+  const logs = []; t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
+  const edge = await setupRollover(t, '2026-10-17T21:55:00.000Z', '2026-10-17T22:00:00.000Z');
+  assert.equal((await edge.pushResults(edge.candidate)).status, 422);
+  assert.equal(edge.model.feeds().results.reason, null); assert.deepEqual(edge.writes, []);
+  for (const [label, generatedAt, receivedAt, mutate] of [
+    ['over five minutes', '2026-10-17T21:55:00.000Z', '2026-10-17T22:00:00.001Z'],
+    ['two dates later', '2026-10-17T21:59:55.000Z', '2026-10-18T22:00:05.000Z'],
+    ['same date', '2026-10-17T21:59:55.000Z', '2026-10-17T21:59:56.000Z', value => { value.days[0].date = '2026-10-16'; }],
+    ['older closed day', '2026-10-17T21:59:55.000Z', '2026-10-17T22:00:05.000Z', value => { value.days[0].date = '2026-10-16'; }],
+    ['mixed errors', '2026-10-17T21:59:55.000Z', '2026-10-17T22:00:05.000Z', value => { value.days[0].unattributedCount = 1; }],
+    ['zero skew', '2026-10-17T22:00:05.000Z', '2026-10-17T22:00:05.000Z', value => { value.days[0].date = '2026-10-17'; }],
+    ['negative skew', '2026-10-17T22:00:05.000Z', '2026-10-17T22:00:04.000Z', value => { value.days[0].date = '2026-10-17'; }],
+  ]) {
+    const s = await setupRollover(t, generatedAt, receivedAt); mutate?.(s.candidate);
+    const response = await s.pushResults(s.candidate);
+    assert.equal(response.status, 422, label); assert.equal(response.body.reason, 'contract_invalid', label);
+    assert.equal(s.model.feeds().results.reason, 'contract_invalid', label);
+    assert.deepEqual(s.writes, ['feed-rejections.json'], label);
+    assert.deepEqual(JSON.parse(readFileSync(join(s.dataDir, 'feed-rejections.json'))), { results: 'contract_invalid' }, label);
+    assert.deepEqual((await s.request('/joe/results.json')).body, s.original, label);
+  }
+  assert.equal(logs.length, 1);
+});
+
+test('JOED-36 results: the full validation error list controls exemption beyond the 20-error response slice', async t => {
+  const logs = []; t.mock.method(console, 'info', line => logs.push(JSON.parse(line)));
+  for (const variant of ['all rollover', 'mixed after slice', 'older day after slice']) {
+    const s = await setupRollover(t);
+    s.candidate.days = Array.from({ length: 21 }, () => structuredClone(s.candidate.days[0]));
+    if (variant === 'mixed after slice') s.candidate.days[20].unattributedCount = 1;
+    if (variant === 'older day after slice') s.candidate.days[20].date = '2026-10-16';
+    const checked = validateContract('results', s.candidate, { stage: 'ingress', receivedAt: at(s.time.ms) });
+    assert.ok(checked.errors.length > 20);
+    const response = await s.pushResults(s.candidate);
+    assert.equal(response.status, 422); assert.equal(response.body.reason, 'contract_invalid');
+    assert.deepEqual(response.body.errors, checked.errors.slice(0, 20));
+    assert.ok(response.body.errors.every(error => error.rule === 'partialReasonsRequired'));
+    const exempt = variant === 'all rollover';
+    assert.equal(s.model.feeds().results.reason, exempt ? null : 'contract_invalid', variant);
+    assert.deepEqual(s.writes, exempt ? [] : ['feed-rejections.json'], variant);
+  }
+  assert.equal(logs.length, 1);
 });
 
 test('JOED-27 results: same machine auth, missing/wrong bearer 401 and missing token 503 precede writes', async t => {

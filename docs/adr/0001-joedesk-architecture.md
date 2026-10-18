@@ -88,6 +88,14 @@ and persist a separate safe rejection reason. Transport oversize remains HTTP
 P1 tests exercise this boundary, not a claim that the legacy HTTP server now
 accepts v2. Malformed JSON remains HTTP 400 in P2.
 
+Results has one storage exception for the midnight-straddle predicate documented
+in `docs/joe-data-contract.md`: its 422 response is unchanged, while the first
+qualifying rejection preserves the feed reason and rejection file and logs
+`rollover_resend_pending`. Only instants and failing dates enter that event.
+Acceptance re-arms the in-memory flag, as does restart; a second rejection is
+stored normally, and a missing resend surfaces through normal 60-second staleness.
+Data/history ingress and the revision-6 contract package remain unchanged.
+
 ## 2. Freshness truth
 
 Data, history and results carry an independently monotonic positive safe-integer
