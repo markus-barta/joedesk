@@ -454,6 +454,16 @@ can pass an expected `receivedAt` option to check this rule locally. Served
 validation uses the persisted receipt, preserving an accepted open-day record
 after midnight or restart.
 
+A midnight-straddle rejection keeps its usual 422 reason and errors but leaves
+the feed reason, last accepted snapshot and rejection file unchanged once until
+the next accepted Results push. This applies only when every validation error
+is `partialReasonsRequired` for the snapshot's generated Vienna day, receipt is
+on the next Vienna calendar day, and receipt follows generation by at most five
+minutes. The server logs `rollover_resend_pending` with only the two instants and
+failing dates. A second qualifying rejection before acceptance is stored
+normally. This one-shot flag is in memory; a server restart re-arms it. Without
+a resend, normal `snapshot_stale` at 60 seconds exposes the aging snapshot.
+
 | Reason (canonical order) | Cell short label | Exact note sentence |
 | --- | --- | --- |
 | `capture_gap` | Capture gap | Trade capture had a gap on this day. |
