@@ -109,8 +109,8 @@
     },
     {
       "path": "public/joe/app.js",
-      "size": 16193,
-      "sha256": "f40a88c1f458d9c9805f5006a39c04e64db7ef2f96d6e115476d28fa81190765"
+      "size": 16255,
+      "sha256": "1d2569d2a30e98b68631d76716314eabbd85b02120de3243299660546320eab4"
     },
     {
       "path": "public/joe/chart.js",
@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 27993,
-      "sha256": "f8adcc4fe88c0dbf2d4655c4248b6a111a9491717d8da67768ce309e1527e6fc"
+      "size": 28672,
+      "sha256": "57691af7a485b7e9060abc4aeda9914dd2a45ea8f3eef627e55bdebf13d5bf64"
     },
     {
       "path": "public/joe/events.js",
@@ -164,8 +164,8 @@
     },
     {
       "path": "public/joe/health.js",
-      "size": 12594,
-      "sha256": "3bad34350586a3b1cfff057c1753a55d03d3ddda2c092e257819a5e3153a63d4"
+      "size": 12203,
+      "sha256": "a59f85f6f455659e305db597cbfd2b4f994262068ceb2b7570df80e6d76d5523"
     },
     {
       "path": "public/joe/history-model.js",

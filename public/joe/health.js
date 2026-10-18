@@ -28,7 +28,6 @@ export const REASON_COPY = Object.freeze({
   day_unavailable_rth: 'today’s result is waiting on data — the operator must check',
   refresh_failed: 'update failed — reload; if it repeats, tell Amy',
   no_snapshot: 'no board data — reload; if still empty, tell Amy',
-  results_capture_failed: 'results capture failing — trading continues',
   ledger_size_limit: 'trade record is full — new orders refused',
 });
 
@@ -135,18 +134,13 @@ export function localBoardHealth(states, feeds, now) {
   if (data.desks.some(desk => desk.state === 'stuck')) return { tone: 'yellow', reason: 'retained_values' };
   if (isRTH(now) && !current(states['today.dayPnl'])) return { tone: 'yellow', reason: 'day_pending' };
   if (isRTH(now) && !current(states['today.openPnl'])) return { tone: 'yellow', reason: 'open_unavailable_rth' };
-  if (data.safety.executor?.status === 'degraded' && data.safety.executor.reason === 'results_capture_failed') {
-    return { tone: 'yellow', reason: 'results_capture_failed' };
-  }
   return { tone: 'green', reason: 'board_ok' };
 }
 
 export function boardHealthPresentation(states, feeds, now) {
   const health = localBoardHealth(states, feeds, now);
   const { frozen } = dataAge(feeds, now);
-  const label = health.reason === 'ledger_size_limit' ? 'Orders refused'
-    : health.reason === 'results_capture_failed' ? 'Executor degraded'
-    : health.tone === 'green' ? 'Board OK'
+  const label = health.tone === 'green' ? 'Board OK'
     : health.tone === 'red' ? 'Needs fix'
       : health.reason === 'snapshot_stale' ? `Stale ${age(frozen)}`
         : health.reason === 'gateway_unconfirmed' ? 'Broker unsure'

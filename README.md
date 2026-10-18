@@ -757,12 +757,16 @@ producer rehearsal and sign-off.
 Contract-set revision 7 keeps every revision-6 payload valid and the data ID
 `inspr.joe.household.v2`. The optional executor reason `results_capture_failed`
 means degraded health: results capture is failing and trading continues. Settings
-shows the reason in yellow and the header reads “Degraded”, after every
-existing data warning. A degraded executor without a reason stays “Degraded”
-in Settings; the board does not infer capture failure. The `ledger_size_limit`
-reason is red regardless of executor status: the header reads “No new orders”,
-with “trade record is full — new orders refused”. The emergency stop keeps
-precedence, including an executor/broker disagreement halt.
+shows the reason in yellow. Desk’s health explanation adds “Paper executor
+degraded: results capture failing, trading continues (ledger 3,2 MB of 8,0 MB).”
+using the reported size; without ledger fields it omits the parentheses.
+Capture failure and a degraded executor without a reason leave the header’s
+board-data tone and label unchanged; the board does not infer capture failure.
+The `ledger_size_limit` reason is red regardless of executor status: the header
+uses the existing “Needs fix” label, with “trade record is full — new orders
+refused” in its title and accessible name. Desk’s problem sentence is “Trade
+record is full: new orders refused (ledger 9,0 MB of 8,0 MB).” The emergency stop
+keeps precedence, including an executor/broker disagreement halt.
 
 Optional `safety.executor.ledgerBytes` (integer ≥ 0) and `ledgerCapBytes`
 (integer ≥ 1) belong to paper executor 8470. A cap requires a byte count;
@@ -775,17 +779,22 @@ without a cap shows only its size; neither field means no ledger text. The title
 and accessible name retain exact byte counts. Settings health text reserves its
 space so state changes do not move later sections within that reserve. The header
 keeps its pre-JOED-44 layout and 16 px phone inset, without a sizing reserve or a
-forced line break. The two short labels have full titles and accessible names:
-“Executor degraded: results capture failing, trading continues” and
-“Trade record is full: new orders refused”. PR CI's P5
+forced line break. It introduces no new header labels. PR CI's P5
 `executor` checks cover all three degraded wire combinations, recovery and ledger
-rounding at 1440/1024/390/360 in both themes, with executor-row and header crops.
-It records Chrome's actual rendered font, checks every header label for wrapping
-and clipping, measures exact 0 px movement outside the intrinsic pill within the
+rounding at 1440/1024/390/360 in both themes, with Settings executor-row, header
+and Desk explanation crops and no-overflow/no-clipping checks. It records
+Chrome’s actual rendered font, checks the full-ledger “Needs fix” label fits,
+measures exact 0 px movement outside the intrinsic pill within the
 same page and broker state, and compares every board-health sentence to its
 reserve. Node tests compare the six existing header labels (including Loading)
-and every broker word against a frozen c1c71a1 renderer fixture; tests need no
-Git history. Browser verification and the coordinator's gate remain required.
+and every broker word against a frozen c1c71a1 renderer fixture, including the
+full-ledger “Needs fix” markup and its additional title; tests need no Git history.
+The Desk executor sentence, including ledger arithmetic, is computed once per
+snapshot and reused on live ticks. Settings formatting and its hidden sizers run
+only while Settings renders (the executor sizer is prepared once at module load).
+The header’s ledger-priority check remains a constant-time reason comparison;
+the performance budgets are unchanged. Browser verification and the coordinator’s
+gate remain required.
 
 Re-send at least every 30 s with a strictly higher `seq` and non-regressing
 `generatedAt`. Generation may be at most 5 s ahead of the server clock; server

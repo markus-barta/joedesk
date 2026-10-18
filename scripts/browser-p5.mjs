@@ -363,10 +363,9 @@ try {
     }).concat(before.length === after.length ? [] : [{ count: [before.length, after.length] }]);
     const healthCases = Object.entries(REASON_COPY).map(([reason, explanation]) => ({
       reason, explanation,
-      label: reason === 'board_ok' ? 'Board OK' : reason === 'results_capture_failed' ? 'Executor degraded'
-        : reason === 'ledger_size_limit' ? 'Orders refused' : reason === 'snapshot_stale' ? `Stale ${age(179)}`
+      label: reason === 'board_ok' ? 'Board OK' : reason === 'snapshot_stale' ? `Stale ${age(179)}`
           : reason === 'gateway_unconfirmed' ? 'Broker unsure'
-            : ['halt_on', 'gateway_down', 'feed_disconnected', 'equity_unavailable', 'producer_stuck', 'day_unavailable_rth', 'no_snapshot'].includes(reason) ? 'Needs fix' : 'Data delayed',
+            : ['halt_on', 'ledger_size_limit', 'gateway_down', 'feed_disconnected', 'equity_unavailable', 'producer_stuck', 'day_unavailable_rth', 'no_snapshot'].includes(reason) ? 'Needs fix' : 'Data delayed',
       statusTone: 'warn',
     }));
     const executorViewports = [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }];
@@ -386,12 +385,12 @@ try {
       const { snapshot } = designSnapshot(NOW);
       const healthy = structuredClone(snapshot.safety.executor);
       const cases = [
-        { name: 'degraded-no-reason', fields: { status: 'degraded' }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · broker reachable', ledger: null },
-        { name: 'capture-degraded', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 }, tone: 'warn', label: 'Degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · ledger 3,2 MB of 8,0 MB', ledger: 'Ledger: 3250000 bytes of 8000000 bytes' },
-        { name: 'ledger-full', fields: { status: 'degraded', reason: 'ledger_size_limit', ledgerBytes: 9000000, ledgerCapBytes: 8000000 }, tone: 'bad', label: 'No new orders', headerTone: 'bad', start: 'Degraded · trade record is full — new orders refused · ledger 9,0 MB of 8,0 MB', ledger: 'Ledger: 9000000 bytes of 8000000 bytes' },
-        { name: 'capture-bytes-only', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3350000 }, tone: 'warn', label: 'Degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · ledger 3,4 MB · broker reachable', ledger: 'Ledger: 3350000 bytes' },
-        { name: 'capture-no-ledger', fields: { status: 'degraded', reason: 'results_capture_failed' }, tone: 'warn', label: 'Degraded', headerTone: 'warn', start: 'Degraded · results capture failing — trading continues · broker reachable', ledger: null },
-        { name: 'healthy', fields: {}, tone: 'ok', label: 'Board OK', headerTone: 'ok', start: 'Running · broker reachable · brakes off · checked 19:42:13', ledger: null },
+        { name: 'degraded-no-reason', fields: { status: 'degraded' }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · broker reachable', ledger: null, problem: null },
+        { name: 'capture-degraded', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · results capture failing — trading continues · ledger 3,2 MB of 8,0 MB', ledger: 'Ledger: 3250000 bytes of 8000000 bytes', problem: 'Paper executor degraded: results capture failing, trading continues (ledger 3,2 MB of 8,0 MB).' },
+        { name: 'ledger-full', fields: { status: 'degraded', reason: 'ledger_size_limit', ledgerBytes: 9000000, ledgerCapBytes: 8000000 }, tone: 'bad', label: 'Needs fix', headerTone: 'bad', start: 'Degraded · trade record is full — new orders refused · ledger 9,0 MB of 8,0 MB', ledger: 'Ledger: 9000000 bytes of 8000000 bytes', problem: 'Trade record is full: new orders refused (ledger 9,0 MB of 8,0 MB).' },
+        { name: 'capture-bytes-only', fields: { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3350000 }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · results capture failing — trading continues · ledger 3,4 MB · broker reachable', ledger: 'Ledger: 3350000 bytes', problem: 'Paper executor degraded: results capture failing, trading continues (ledger 3,4 MB).' },
+        { name: 'capture-no-ledger', fields: { status: 'degraded', reason: 'results_capture_failed' }, tone: 'warn', label: 'Board OK', headerTone: 'ok', start: 'Degraded · results capture failing — trading continues · broker reachable', ledger: null, problem: 'Paper executor degraded: results capture failing, trading continues.' },
+        { name: 'healthy', fields: {}, tone: 'ok', label: 'Board OK', headerTone: 'ok', start: 'Running · broker reachable · brakes off · checked 19:42:13', ledger: null, problem: null },
       ];
       for (const c of cases) {
         const tag = `${viewport.name} ${theme} executor ${c.name}`;
@@ -405,16 +404,16 @@ try {
         const seen = await ev(`(() => {
           const row = document.querySelector('#rtRows .rt-row:nth-child(4)'), status = row.querySelector('.rt-reserve > .st'), h = document.getElementById('hdrHealth'), ledger = row.querySelector('[role="group"]');
           const probe = document.createElement('span'); probe.style.color = 'var(--${c.tone === 'ok' ? 'ok' : c.tone === 'bad' ? 'bad' : 'warn'})'; document.body.append(probe); const want = getComputedStyle(probe).color; probe.remove();
-          return { text: row.querySelector('.val').innerText.trim(), tone: status.className, colour: getComputedStyle(status.querySelector('.i')).color, want,
+          probe.style.color = 'var(--${c.headerTone})'; document.body.append(probe); const headerWant = getComputedStyle(probe).color; probe.remove();
+          return { text: row.querySelector('.val').innerText.trim(), tone: status.className, colour: getComputedStyle(status.querySelector('.i')).color, want, headerWant,
             label: h.querySelector('b').textContent.trim(), brokerWord: h.querySelector('.lbl-long').textContent, headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
             name: h.getAttribute('aria-label'), title: h.getAttribute('title'), ledger: ledger && { title: ledger.title, name: ledger.getAttribute('aria-label') } };
         })()`);
         const text = N(seen.text);
-        const title = c.fields.reason === 'results_capture_failed' ? 'Executor degraded: results capture failing, trading continues'
-          : c.fields.reason === 'ledger_size_limit' ? 'Trade record is full: new orders refused' : null;
+        const title = c.fields.reason === 'ledger_size_limit' ? REASON_COPY.ledger_size_limit : null;
         check('executor-health', `${tag}: row copy, semantic tone and header label/tone`, text.startsWith(c.start) && text.endsWith(' · brakes off · checked 19:42:13') && seen.tone === `st ${c.tone}` && seen.colour === seen.want && seen.label === c.label && seen.headerTone.includes(`tone-${c.headerTone}`), seen);
-        check('executor-health', `${tag}: full accessible explanation and title; recovery clears the title`, seen.name.startsWith(title ?? c.label) && seen.title === title, seen);
-        if (c.name !== 'degraded-no-reason') check('executor-health', `${tag}: header uses the same semantic colour`, seen.headerColour === seen.want, seen);
+        check('executor-health', `${tag}: full accessible explanation and title; recovery clears the title`, seen.name === `${c.label}${title ? `: ${title}` : ''}, broker connection OK. Open Desk.` && seen.title === title, seen);
+        check('executor-health', `${tag}: header keeps board health's semantic colour`, seen.headerColour === seen.headerWant, seen);
         check('executor-health', `${tag}: exact bytes in the ledger title and accessible name, only when reported`, c.ledger ? seen.ledger?.title === c.ledger && seen.ledger?.name === c.ledger : seen.ledger === null && !text.includes('ledger'), seen.ledger);
         if (c.name === 'healthy') check('executor-health', `${tag}: healthy copy is unchanged`, text === c.start, seen);
         const moved = exactMoves(baseline, await geometry());
@@ -426,11 +425,21 @@ try {
           await crop('#rtRows .rt-row:nth-child(4)', `${viewport.name}-${theme}-settings-executor-${c.name}`);
           await crop('header.top', `${viewport.name}-${theme}-header-executor-${c.name}`);
         }
+        await click('.nav [data-go="desk"]');
+        await click('#healthMore');
+        const desk = await ev(`(() => {
+          const pop = document.getElementById('healthPop');
+          return { open: pop.classList.contains('on'), problem: pop.querySelector('p').textContent, headerTone: document.documentElement.dataset.joeState,
+            horizontal: __audit.horizontal(), clipping: __audit.clipping() };
+        })()`);
+        check('executor-health', `${tag}: Desk explains executor health without changing the board tone`, desk.open && N(desk.problem) === (c.problem ?? 'No current problems.') && desk.headerTone === c.headerTone, desk);
+        check('executor-health', `${tag}: Desk explanation has no overflow or clipping`, desk.horizontal.scroll <= desk.horizontal.inner && !desk.clipping.length, desk);
+        if (['capture-degraded', 'ledger-full'].includes(c.name)) await crop('#healthPop', `${viewport.name}-${theme}-desk-executor-${c.name}`);
+        await click('.nav [data-go="settings"]');
       }
       // Every header label, including loading and the last stale age before
-      // the 180 s stopped-feed state, uses the production markup. Only the
-      // two new executor labels have the strict single-line contract; existing
-      // states keep the baseline audits, frozen markup and 0 px movement check.
+      // the 180 s stopped-feed state, uses the existing production markup.
+      // Keep the baseline audits, frozen markup and 0 px movement check.
       const header = await ev(`document.getElementById('hdrHealth').innerHTML`);
       const ctx = { feeds: { data: { value: snapshot } }, states: { gateway: { state: 'fresh' } } };
       const reference = headerHealth(ctx, { reason: 'board_ok', label: 'Board OK', statusTone: 'ok' });
@@ -466,10 +475,10 @@ try {
             inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: rowCSS.paddingLeft, paddingRight: rowCSS.paddingRight },
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
-        if (['results_capture_failed', 'ledger_size_limit'].includes(h.reason)) {
+        if (h.reason === 'ledger_size_limit') {
           const evidence = { label: measured.label, inRow: measured.inRow, horizontal: measured.horizontal, clipping: measured.clipping };
           console.log(`executor-header ${viewport.name} ${theme}: ${J(evidence)}`);
-          check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: exactly one line, every glyph fits; no clipping, overlap or ellipsis`, measured.label.inside && measured.inRow && measured.label.lineCount === 1 && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
+          check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: existing Needs fix label fits; no clipping, overlap or ellipsis`, measured.label.inside && measured.inRow && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
         }
         if (viewport.width === 360) check('executor-health', `${theme} header ${h.label}: original 16 px inset at 360`, measured.inset.left === 16 && measured.inset.right === 16 && measured.inset.paddingLeft === '16px' && measured.inset.paddingRight === '16px', measured.inset);
         const moved = exactMoves(measured.before, measured.after);

@@ -2,7 +2,7 @@
 // kept holdings. Every number comes from one panel-state cell; each cell shows
 // fresh, stale with age, not reported, or broken with its reason, on its own.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption } from './ui.js';
-import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, NB } from './format.js';
+import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, STALE_AFTER_S } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
@@ -18,6 +18,21 @@ const STATE = {
   'sit-out': { tone: 'none', icon: 'pause', word: 'Sitting out' },
   stuck: { tone: 'bad', icon: 'stop', word: 'Stuck' },
 };
+
+// Accepted snapshots are immutable between reads. Format this snapshot-only
+// explanation once, rather than redoing ledger arithmetic on Desk live ticks.
+const executorProblems = new WeakMap();
+export function executorProblem(data) {
+  if (!data) return null;
+  if (executorProblems.has(data)) return executorProblems.get(data);
+  const executor = data.safety.executor;
+  const problem = executor?.reason === 'ledger_size_limit' ? 'Trade record is full: new orders refused'
+    : executor?.status === 'degraded' && executor.reason === 'results_capture_failed' ? 'Paper executor degraded: results capture failing, trading continues' : null;
+  const ledger = problem ? ledgerSize(executor) : null;
+  const sentence = problem ? `${problem}${ledger ? ` (${ledger.text})` : ''}.` : null;
+  executorProblems.set(data, sentence);
+  return sentence;
+}
 
 // One money cell: the value (or a dash) and a caption for exactly the state
 // the shared selector gave it, with this cell's own age and reason. A fresh
@@ -70,6 +85,8 @@ function healthPop(ctx, health) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
   const problems = boardDiagnostics(states, feeds, now);
+  const executor = executorProblem(data);
+  if (executor) problems.push(executor);
   const rows = [];
   if (data) {
     const { receipt } = dataAge(feeds, now);
@@ -93,12 +110,9 @@ export function headerHealth(ctx, health) {
   const data = ctx.feeds.data?.value;
   const broker = data ? brokerState(ctx.states, data) : { word: 'unsure', tone: 'warn' };
   const words = { OK: 'Broker OK', degraded: 'Broker unstable', down: 'Broker down', unsure: 'Broker unsure' };
-  const title = health.reason === 'results_capture_failed' ? 'Executor degraded: results capture failing, trading continues'
-    : health.reason === 'ledger_size_limit' ? 'Trade record is full: new orders refused' : null;
-  const label = health.reason === 'results_capture_failed' ? 'Degraded'
-    : health.reason === 'ledger_size_limit' ? 'No new orders' : health.label;
-  return { html: `${icon(TONE_ICON[health.statusTone], `i tone-${health.statusTone}`)}<span class="lbl"><b>${esc(label)}</b><span class="lbl-long">· ${words[broker.word]}</span></span>`,
-    label: `${title ?? health.label}, broker connection ${broker.word === 'OK' ? 'OK' : broker.word}. Open Desk.`, title };
+  const title = health.reason === 'ledger_size_limit' ? health.explanation : null;
+  return { html: `${icon(TONE_ICON[health.statusTone], `i tone-${health.statusTone}`)}<span class="lbl"><b>${esc(health.label)}</b><span class="lbl-long">· ${words[broker.word]}</span></span>`,
+    label: `${health.label}${title ? `: ${title}` : ''}, broker connection ${broker.word === 'OK' ? 'OK' : broker.word}. Open Desk.`, title };
 }
 
 function sinceLabel(data) {

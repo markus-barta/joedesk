@@ -25,7 +25,7 @@ const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus, headerHealth } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, executorProblem } = await import('../public/joe/desk.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
 const { readdirSync } = await import('node:fs');
@@ -128,17 +128,16 @@ test('executor presentation: degraded without a reason is yellow; capture warns 
   }
 });
 
-test('health: capture is behind every data warning; the full ledger is red immediately after halt', () => {
+test('health: capture leaves board health unchanged; the full ledger is red immediately after halt', () => {
   const payload = ingress(valid.data);
   payload.seq++;
-  Object.assign(payload.safety.executor, { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 });
   const b = board({ feed: 'data', payload, receivedAt: valid.data.receivedAt, now: valid.data.receivedAt });
   const view = (states = b.states, feeds = b.feeds, now = b.now) => health.boardHealthPresentation(states, feeds, now);
-  const p = view();
-  assert.deepEqual([p.tone, p.reason, p.label, p.statusTone], ['yellow', 'results_capture_failed', 'Executor degraded', 'warn']);
-  assert.equal(p.explanation, 'results capture failing — trading continues');
+  const healthy = view();
+  Object.assign(b.feeds.data.value.safety.executor, { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 });
+  assert.deepEqual(view(), healthy);
   delete b.feeds.data.value.safety.executor.reason;
-  assert.equal(view().reason, 'board_ok');
+  assert.deepEqual(view(), healthy);
   b.feeds.data.value.safety.executor.reason = 'results_capture_failed';
   // Check every existing yellow and red fixture against the same executor warning.
   for (const id of ['stale-receive-age', 'c-frozen-producer', 'b-incomplete-family', 'b-equity-null-gateway-ready',
@@ -147,7 +146,7 @@ test('health: capture is behind every data warning; the full ledger is red immed
     const other = board(fixture(id));
     const prior = health.boardHealthPresentation(other.states, other.feeds, other.now);
     Object.assign(other.feeds.data.value.safety.executor, { status: 'degraded', reason: 'results_capture_failed' });
-    assert.equal(health.boardHealthPresentation(other.states, other.feeds, other.now).reason, prior.reason, id);
+    assert.deepEqual(health.boardHealthPresentation(other.states, other.feeds, other.now), prior, id);
   }
   for (const reason of ['gateway_degraded', 'gateway_unconfirmed']) {
     const feeds = structuredClone(b.feeds);
@@ -159,20 +158,26 @@ test('health: capture is behind every data warning; the full ledger is red immed
     states[name].value = null;
     assert.equal(view(states).reason, expected);
   }
-  b.feeds.data.value.safety.executor.reason = 'ledger_size_limit';
-  assert.deepEqual([view().tone, view().reason, view().label, view().statusTone], ['red', 'ledger_size_limit', 'Orders refused', 'bad']);
+  for (const status of ['running', 'degraded', 'down']) {
+    Object.assign(b.feeds.data.value.safety.executor, { status, reason: 'ledger_size_limit' });
+    const p = view();
+    assert.deepEqual([p.tone, p.reason, p.label, p.statusTone], ['red', 'ledger_size_limit', 'Needs fix', 'bad']);
+  }
   assert.equal(view().explanation, 'trade record is full — new orders refused');
   assert.equal(view(b.states, b.feeds, at(b.now, 200)).reason, 'ledger_size_limit');
-  // OPS's disagreement halt keeps its existing precedence over a ledger bound.
+  // Both ordinary and executor/broker disagreement halts keep precedence.
   b.states.halt.value = true;
-  b.feeds.data.value.safety.haltReason = 'executor_broker_disagreement';
-  assert.equal(view().reason, 'halt_on');
+  for (const haltReason of ['halt_on', 'executor_broker_disagreement']) {
+    b.feeds.data.value.safety.haltReason = haltReason;
+    assert.equal(view().reason, 'halt_on');
+  }
 });
 
-test('header: six existing labels and every broker word match the frozen c1c71a1 renderer byte-for-byte', () => {
+test('header: existing labels, ledger Needs fix and every broker word match frozen c1c71a1 markup', () => {
   const cases = [
     { reason: 'board_ok', label: 'Board OK' },
     { reason: 'halt_on', label: 'Needs fix' },
+    { reason: 'ledger_size_limit', label: 'Needs fix', explanation: health.REASON_COPY.ledger_size_limit },
     { reason: 'snapshot_stale', label: `Stale ${format.age(179)}` },
     { reason: 'refresh_failed', label: 'Data delayed' },
     { reason: 'gateway_unconfirmed', label: 'Broker unsure' },
@@ -189,13 +194,15 @@ test('header: six existing labels and every broker word match the frozen c1c71a1
     const ctx = { feeds: { data: { value: b.gateway ? { safety: { gateway: b.gateway } } : null } }, states: { gateway: { state: b.state } } };
     const p = { ...h, statusTone }, tag = `${h.label} / ${statusTone} / ${b.word}${b.gateway ? '' : ' (no data)'}`;
     const { html, label, title } = headerHealth(ctx, p);
-    assert.deepEqual({ html, label }, frozenHeaderHealth(ctx, p), tag);
+    const frozen = frozenHeaderHealth(ctx, p);
+    assert.equal(html, frozen.html, tag);
+    assert.equal(label, h.reason === 'ledger_size_limit' ? frozen.label.replace('Needs fix,', `Needs fix: ${h.explanation},`) : frozen.label, tag);
     assert.ok(html.includes(`<span class="lbl-long">· Broker ${b.word}</span>`), tag);
-    assert.equal(title, null, tag);
+    assert.equal(title, h.reason === 'ledger_size_limit' ? h.explanation : null, tag);
   }
 });
 
-test('header: short executor labels retain full accessible explanations and recover to the original markup', () => {
+test('header: capture leaves the header unchanged; ledger Needs fix carries its reason and recovers', () => {
   const payload = ingress(valid.data);
   payload.seq++;
   const b = board({ feed: 'data', payload, receivedAt: valid.data.receivedAt, now: valid.data.receivedAt });
@@ -204,21 +211,52 @@ test('header: short executor labels retain full accessible explanations and reco
   assert.match(healthy.html, /<b>Board OK<\/b><span class="lbl-long">· Broker OK<\/span>/);
   assert.equal(healthy.label, 'Board OK, broker connection OK. Open Desk.');
   assert.equal(healthy.title, null);
-  for (const [reason, label, title, tone] of [
-    ['results_capture_failed', 'Degraded', 'Executor degraded: results capture failing, trading continues', 'warn'],
-    ['ledger_size_limit', 'No new orders', 'Trade record is full: new orders refused', 'bad'],
-  ]) {
-    Object.assign(b.feeds.data.value.safety.executor, { status: 'degraded', reason });
-    const header = view();
-    assert.ok(header.html.includes(`<b>${label}</b>`));
-    assert.ok(header.html.includes(`tone-${tone}`));
-    assert.equal(header.title, title);
-    assert.equal(header.label, `${title}, broker connection OK. Open Desk.`);
-    assert.doesNotMatch(header.html, /health-sizing|health-break/);
-  }
+  Object.assign(b.feeds.data.value.safety.executor, { status: 'degraded', reason: 'results_capture_failed' });
+  assert.deepEqual(view(), healthy);
+  delete b.feeds.data.value.safety.executor.reason;
+  assert.deepEqual(view(), healthy);
+  b.feeds.data.value.safety.executor.reason = 'ledger_size_limit';
+  const header = view();
+  assert.ok(header.html.includes('<b>Needs fix</b>'));
+  assert.ok(header.html.includes('tone-bad'));
+  assert.equal(header.title, 'trade record is full — new orders refused');
+  assert.equal(header.label, 'Needs fix: trade record is full — new orders refused, broker connection OK. Open Desk.');
   Object.assign(b.feeds.data.value.safety.executor, { status: 'running' });
   delete b.feeds.data.value.safety.executor.reason;
   assert.deepEqual(view(), healthy);
+});
+
+test('Desk executor problem: precise capture/full-ledger sentences, optional sizes and recovery', () => {
+  const capture = 'Paper executor degraded: results capture failing, trading continues';
+  const full = 'Trade record is full: new orders refused';
+  const base = { status: 'degraded', reason: 'results_capture_failed' };
+  for (const [fields, expected] of [
+    [base, `${capture}.`],
+    [{ ...base, ledgerBytes: 3250000, ledgerCapBytes: 8000000 }, `${capture} (ledger 3,2 MB of 8,0 MB).`],
+    [{ ...base, ledgerBytes: 3350000 }, `${capture} (ledger 3,4 MB).`],
+    [{ ...base, reason: 'ledger_size_limit', ledgerBytes: 9000000, ledgerCapBytes: 8000000 }, `${full} (ledger 9,0 MB of 8,0 MB).`],
+    [{ status: 'running', reason: 'ledger_size_limit', ledgerBytes: 0 }, `${full} (ledger 0,0 MB).`],
+    [{ status: 'down', reason: 'ledger_size_limit' }, `${full}.`],
+    [{ status: 'degraded' }, null],
+    [{ status: 'running' }, null],
+    [{ status: 'down', reason: 'results_capture_failed' }, null],
+  ]) assert.equal(executorProblem({ safety: { executor: fields } }), expected);
+  assert.equal(executorProblem(null), null);
+  assert.equal(executorProblem({ safety: {} }), null);
+});
+
+test('Desk executor problem: live ticks reuse the sentence; a new snapshot recomputes it', () => {
+  let reads = 0;
+  const executor = { status: 'degraded', reason: 'results_capture_failed', ledgerCapBytes: 8000000,
+    get ledgerBytes() { reads++; return 3250000; } };
+  const data = { safety: { executor } };
+  const sentence = executorProblem(data), firstReads = reads;
+  assert.ok(firstReads > 0);
+  for (let tick = 0; tick < 60; tick++) assert.equal(executorProblem(data), sentence);
+  assert.equal(reads, firstReads);
+  assert.equal(executorProblem({ safety: { executor: { ...executor, ledgerBytes: 3350000 } } }),
+    'Paper executor degraded: results capture failing, trading continues (ledger 3,4 MB of 8,0 MB).');
+  assert.equal(executorProblem({ safety: { executor: { status: 'running' } } }), null);
 });
 
 test('health: every P1 fixture lands on today’s light, label and plain reason', () => {

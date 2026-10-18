@@ -60,8 +60,10 @@ function start() {
     const btn = $('#hdrHealth');
     if (btn.innerHTML !== head.html) btn.innerHTML = head.html;
     btn.setAttribute('aria-label', head.label);
-    if (head.title) btn.setAttribute('title', head.title);
-    else btn.removeAttribute('title');
+    if (btn.getAttribute('title') !== head.title) {
+      if (head.title) btn.setAttribute('title', head.title);
+      else btn.removeAttribute('title');
+    }
     root.dataset.joeState = health.statusTone;
     const data = ctx.feeds.data?.value;
     const reason = ctx.feeds.data?.reason;
