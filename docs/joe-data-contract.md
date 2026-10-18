@@ -358,7 +358,7 @@ v1 helpers it exposed do not apply to the v2 contracts.
 ## Results v2 missing daily summaries
 
 The rebuilt Results feed uses `inspr.joe.household.results.v2` and the shared
-`contracts/` package (manifest revision 5). Its producer sends `days[]` and
+`contracts/` package (manifest revision 6). Its producer sends `days[]` and
 `trades[]` to `POST /joe/inbox/results`; `receivedAt` and `missingDays` are
 server-owned and must be omitted at ingress. See README “Results ingress” for
 the complete acceptance and producer-pin contract.
@@ -395,7 +395,9 @@ record is incomplete” and the reason. The day panel and phone sheet show
 be confirmed, so its result may be incomplete.” as the default info-note line.
 Exact trade amounts stay visible and remain the source for trade totals.
 
-`{date, desks: {}, coverage: "partial"}` is valid even without any trades.
+`{date, desks: {}, coverage: "partial", partialReasons: ["history_gap"]}` is
+valid even without any trades. A reasonless partial row is valid for the open
+Vienna day when no real cause exists beyond the day still being open.
 Unknown partial summary money stays `null`. With no visible trades, the cell
 shows a muted **—**, its neutral surface and hairline, plus the warning; the
 day summary reads **Partial · record incomplete**, with the same reason.
@@ -430,15 +432,26 @@ the record-status line, period tiles or week column.
 
 Manifest revision 5 adds optional `days[].partialReasons`: a nonempty, unique
 array in this canonical order. It is permitted only with `coverage: "partial"`.
-Rev-5 producers emit at least one reason on each partial day. `avg_cost_mismatch`
-is reserved, accepted and rendered but not yet emitted by producers. The optional
+Revision 6 requires at least one reason on every closed partial day: its date
+is before the server receipt's Vienna date, computed with the same DST-safe
+`viennaDay` helper and receipt used by `missingDays`. The open Vienna day may
+omit `partialReasons` unless a real cause exists (e.g. `fx_missing`), in which
+case the producer emits at least one. `capture_gap` is reserved for a real
+mid-day tracking start, never merely an unfinished day. The enum is unchanged.
+`avg_cost_mismatch` is reserved, accepted and rendered but not yet emitted by
+producers. The optional
 positive integer `unattributedCount` (minimum 1) is present only when known and only with
 `unattributed_activity`. Semantics return per-day 422 errors:
-`$.days[i].partialReasons` / `partialCoverageRequired` or `canonicalOrder`, and
+`$.days[i].partialReasons` / `partialReasonsRequired` (closed partial day
+without reasons), `partialCoverageRequired` or `canonicalOrder`, and
 `$.days[i].unattributedCount` / `unattributedReasonRequired`. Empty/duplicate arrays,
 unknown codes and invalid counts (including zero) fail schema validation with
-422; zero reports `$.days[i].unattributedCount` / `minimum`. Legacy partial rows
-without reasons remain valid.
+422; zero reports `$.days[i].unattributedCount` / `minimum`. When no cause exists,
+omit the array; `[]` still fails `minItems`. The server supplies the trusted
+receipt to ingress validation through `acceptSnapshot`; producer validation
+can pass an expected `receivedAt` option to check this rule locally. Served
+validation uses the persisted receipt, preserving an accepted open-day record
+after midnight or restart.
 
 | Reason (canonical order) | Cell short label | Exact note sentence |
 | --- | --- | --- |
@@ -458,7 +471,8 @@ matched to a desk.** or **N trades couldn't be matched to a desk.**, with U+00A
 between the number and unit. Omit the count when unknown; never send zero.
 `fx_disabled` suppresses `fx_missing`. Rendering ignores unknown future codes;
 when no known code remains, closed days use the legacy default sentence and today
-has no reason note. Raw codes never appear.
+has no reason note. Today with `fx_missing` shows **No EUR exchange rate was
+recorded for this day.** Raw codes never appear.
 The cell aria uses only the first short label, then **, and N more** where needed;
 escalated aria stays **Stale: still incomplete;** plus those short labels.
 Desktop panels show every reason. Phone sheets show the first two reason

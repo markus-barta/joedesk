@@ -218,7 +218,7 @@ test('JOED-28 results: accept and warn only for missing closed Vienna dates, inc
   ]) {
     const value = ingress(samples.results);
     value.trades.push({ ...copy(value.trades[0]), id: 'rt-missing-day', openedAt: closedAt, closedAt });
-    if (coverage) value.days.push({ date: '2026-10-15', coverage, desks: {} });
+    if (coverage) value.days.push({ date: '2026-10-15', coverage, desks: {}, partialReasons: ['history_gap'] });
     const accepted = acceptSnapshot('results', value, null, receivedAt);
     assert.equal(accepted.status, 200, closedAt);
     assert.deepEqual(accepted.value.missingDays ?? [], expected, closedAt);
@@ -243,6 +243,48 @@ test('JOED-28 results: served missing-day diagnostics reject duplicate dates', (
   assert.equal(validateContract('results', value).ok, true);
   value.missingDays.push('2026-10-13');
   rejects(validateContract('results', value), 'uniqueItems', '$.missingDays');
+});
+
+test('JOED-34 rev 6: partial reasons follow the server receipt Vienna day across midnight and both DST changes', () => {
+  for (const [receivedAt, today, yesterday] of [
+    ['2026-10-15T21:59:59.999Z', '2026-10-15', '2026-10-14'],
+    ['2026-10-15T22:00:00.000Z', '2026-10-16', '2026-10-15'],
+    ['2026-10-24T22:00:00.000Z', '2026-10-25', '2026-10-24'],
+    ['2026-10-25T00:30:00.000Z', '2026-10-25', '2026-10-24'],
+    ['2026-10-25T01:30:00.000Z', '2026-10-25', '2026-10-24'],
+    ['2026-10-25T22:59:59.999Z', '2026-10-25', '2026-10-24'],
+    ['2026-10-25T23:00:00.000Z', '2026-10-26', '2026-10-25'],
+    ['2027-03-27T23:00:00.000Z', '2027-03-28', '2027-03-27'],
+    ['2027-03-28T21:59:59.999Z', '2027-03-28', '2027-03-27'],
+    ['2027-03-28T22:00:00.000Z', '2027-03-29', '2027-03-28'],
+  ]) {
+    const value = ingress(samples.results);
+    value.generatedAt = new Date(Date.parse(receivedAt) - 1000).toISOString();
+    value.days = [{ date: today, desks: {}, coverage: 'partial' }];
+    value.trades[0].openedAt = value.trades[0].closedAt = `${yesterday}T12:00:00.000Z`;
+    for (const partialReasons of [undefined, ['fx_missing']]) {
+      if (partialReasons) value.days[0].partialReasons = partialReasons;
+      const accepted = acceptSnapshot('results', value, null, receivedAt);
+      assert.equal(accepted.status, 200, `${receivedAt}: ${JSON.stringify(accepted.errors)}`);
+      assert.deepEqual(accepted.value.days, value.days, 'receipt adds no invented cause');
+      assert.deepEqual(accepted.value.missingDays, [yesterday], 'missingDays shares the receipt date');
+      assert.ok(validateContract('results', accepted.value).ok, 'served uses the persisted receipt');
+
+      const closed = copy(value); closed.seq++;
+      closed.days.push({ date: yesterday, desks: {}, coverage: 'partial' });
+      const rejected = acceptSnapshot('results', closed, accepted, receivedAt);
+      rejects(rejected, 'partialReasonsRequired', '$.days[1].partialReasons');
+      assert.strictEqual(rejected.value, accepted.value);
+      rejects(validateContract('results', { ...closed, receivedAt }), 'partialReasonsRequired', '$.days[1].partialReasons');
+      rejects(validateContract('results', closed, { stage: 'ingress', receivedAt }), 'partialReasonsRequired', '$.days[1].partialReasons');
+      closed.days[1].partialReasons = ['history_gap'];
+      const repaired = acceptSnapshot('results', closed, accepted, receivedAt);
+      assert.equal(repaired.status, 200);
+      assert.deepEqual(repaired.value.missingDays ?? [], []);
+    }
+    value.days[0].partialReasons = [];
+    rejects(acceptSnapshot('results', value, null, receivedAt), 'minItems', '$.days[0].partialReasons');
+  }
 });
 
 test('results: explicit partial days skip reconciliation only for that day; coverage is a closed optional enum', () => {

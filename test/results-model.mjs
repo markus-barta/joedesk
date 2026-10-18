@@ -26,10 +26,11 @@ const { decimalUnits, divRound, roundUnits, mulUnits, divUnits, unitsDecimal, un
 const { validateContract } = await import('../contracts/index.mjs');
 const { missingResultsDays } = await import('../contracts/vienna-date.mjs');
 const { acceptRead } = await import('../contracts/read.mjs');
+const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const hm = await import('../public/joe/history-model.js');
-const { designResults, withTradeSummaries, partialDaysResults, periodHintResults } = await import('../scripts/browser/results.mjs');
-const { scenario } = await import('../scripts/browser/board.mjs');
+const { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } = await import('../scripts/browser/results.mjs');
+const { scenario, preflightSnapshot } = await import('../scripts/browser/board.mjs');
 
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ALL = ['j', 'joe', 'joel'];
@@ -45,8 +46,8 @@ const closeDay = (date, j, joe = '5000', joel = '5000') => ({ date, desks: Objec
 const tradeOf = (id, desk, closedAt, net, fees = '0') => ({ id, desk, symbol: 'KO', company: 'Coca-Cola', side: 'long', quantity: '1', openedAt: closedAt, closedAt,
   entryPrice: { amount: '70', currency: 'USD' }, exitPrice: { amount: '70', currency: 'USD' }, grossEur: eurOf(unitsDecimal(decimalUnits(net) + decimalUnits(fees))),
   feesEur: eurOf(fees), netEur: eurOf(net), fx: { base: 'USD', quote: 'EUR', rate: '0.9', source: 'test-close-rate', observedAt: closedAt }, method: 'execution-fifo-net-current-fx' });
-function record(days, trades = [], trackingStart = '2026-09-10') {
-  const r = { schema: 'inspr.joe.household.results.v2', seq: 1, generatedAt: '2026-10-14T17:40:00.000Z', receivedAt: '2026-10-14T17:40:00.000Z',
+function record(days, trades = [], trackingStart = '2026-09-10', receivedAt = '2026-10-14T17:40:00.000Z') {
+  const r = { schema: 'inspr.joe.household.results.v2', seq: 1, generatedAt: receivedAt, receivedAt,
     currency: 'EUR', timeZone: 'Europe/Vienna', trackingStart, days, trades, benchmark: null };
   withTradeSummaries(r);
   const checked = validateContract('results', r);
@@ -72,7 +73,7 @@ test('JOED-28 results: server missing-day warnings survive indexing and worker t
 
 test('JOED-30 results: partial dates, empty desks and nullable summaries validate and survive worker transfer', () => {
   const value = fixture('partial-day');
-  value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial' });
+  value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial', partialReasons: ['history_gap'] });
   const day = value.days[0];
   day.desks.j.realisedNet = day.desks.j.fees = null;
   assert.ok(validateContract('results', value).ok);
@@ -651,7 +652,7 @@ function calendarCapture(t) {
   };
 }
 const partialReason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
-const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'");
+const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'").replaceAll('\u00ad', '');
 
 function heroCapture() {
   return (value, now, period, anchor, desks = ALL, todayUnits = [E('5000'), E('5000'), E('5000')], inputs = {}) => {
@@ -678,7 +679,9 @@ test('JOED-32 hero: only a sentence without a partial-day hint keeps its final f
   assert.ok(baseline.endsWith('.'), 'the unhinted sentence keeps its full stop');
   for (const count of [0, 1, 2]) {
     const covered = structuredClone(value);
-    for (const day of covered.days) if (dates.slice(0, count).includes(day.date)) day.coverage = 'partial';
+    for (const day of covered.days) if (dates.slice(0, count).includes(day.date)) {
+      day.coverage = 'partial'; day.partialReasons = ['history_gap'];
+    }
     const { html, sentence } = render(covered, now, 'month', '2026-10-16');
     assert.ok(sentence.startsWith(count ? baseline.slice(0, -1) + ' ' : baseline), 'only the final full stop changes');
     assert.equal((sentence.match(/class="st warn"/g) ?? []).length, count ? 1 : 0);
@@ -698,6 +701,7 @@ test('JOED-32 hero: empty periods say recorded only when they include counted pa
   const full = record([closeDay('2026-09-30', '5000'), closeDay('2026-10-15', '5000')]);
   const partial = structuredClone(full);
   partial.days[1].coverage = 'partial';
+  partial.days[1].partialReasons = ['history_gap'];
   for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
     const sentence = textOf(render(partial, now, 'month', '2026-10-16', desks).sentence);
     assert.match(sentence, /^No trades recorded this month\. Paper results start on .+ incl\. 1 partial day$/);
@@ -715,6 +719,7 @@ test('JOED-32 hero: partial days with no closed trades keep the open-position ga
     const days = [closeDay('2026-09-30', close, close, close), closeDay('2026-10-15', close, close, close)];
     const full = record(days), partial = structuredClone(full);
     partial.days[1].coverage = 'partial';
+    partial.days[1].partialReasons = ['history_gap'];
     for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
       const { html, sentence } = render(partial, now, 'month', '2026-10-16', desks);
       const amount = fmt.eur(E(desks.length));
@@ -735,13 +740,14 @@ test('JOED-32 hero: unknown-money explanations never carry a partial-day hint', 
   const full = record([closeDay('2026-09-30', null, null, null), closeDay('2026-10-15', null, null, null)]);
   const partial = structuredClone(full);
   partial.days[1].coverage = 'partial';
+  partial.days[1].partialReasons = ['history_gap'];
   for (const desks of [ALL, ['j'], ['joe'], ['joel']]) {
     const plain = textOf(render(full, now, 'month', '2026-10-16', desks).sentence);
     assert.equal(plain, 'The result this month is not known yet: the desks’ money now is not available.');
     assert.equal(textOf(render(partial, now, 'month', '2026-10-16', desks).sentence), plain);
     const olderWeek = 'The result in the week of 21\u00a0Sep is not known yet: the desks’ money on Sun 27\u00a0Sep is not available.';
     for (const coverage of [false, true]) {
-      const value = record([{ ...closeDay('2026-09-27', null, null, null), ...(coverage ? { coverage: 'partial' } : {}) }]);
+      const value = record([{ ...closeDay('2026-09-27', null, null, null), ...(coverage ? { coverage: 'partial', partialReasons: ['history_gap'] } : {}) }]);
       assert.equal(textOf(render(value, now, 'week', '2026-09-21', desks).sentence), olderWeek);
     }
   }
@@ -774,7 +780,7 @@ test('JOED-32 hero: unavailable records never carry a partial-day hint', t => {
 test('JOED-32 count: Day, Week, Month, This year and All use the selected inclusive Vienna range', t => {
   const render = heroCapture(t), now = '2026-10-16T12:00:00.000Z', today = page.resultsToday(now);
   const value = record(['2025-12-31', '2026-01-01', '2026-09-30', '2026-10-01', '2026-10-11', '2026-10-14', '2026-10-15', today, '2026-10-17']
-    .map(date => ({ date, desks: {}, coverage: 'partial' })), [], '2025-12-01');
+    .map(date => ({ date, desks: {}, coverage: 'partial', ...(date < today ? { partialReasons: ['history_gap'] } : {}) })), [], '2025-12-01');
   const ix = M.indexResults(value);
   for (const [period, anchor, count] of [['day', today, 0], ['day', '2026-10-15', 1], ['day', '2026-10-13', 0],
     ['week', today, 2], ['week', '2026-10-11', 1], ['month', today, 4], ['month', '2026-09-30', 1], ['ytd', today, 6], ['all', today, 7]]) {
@@ -820,8 +826,12 @@ test('JOED-32 hero: Vienna midnight closes partial dates across DST and the year
 test('JOED-32 browser snapshots: valid ingress, two closed partial dates and real long-sentence paths', t => {
   const { baseline, partial, empty, unknown } = periodHintResults();
   for (const value of [baseline, partial, empty, unknown]) {
-    const checked = validateContract('results', value, { stage: 'ingress' });
+    const checked = validateContract('results', value, { stage: 'ingress', receivedAt: value.generatedAt });
     assert.ok(checked.ok, JSON.stringify(checked.errors));
+    assert.equal(preflightSnapshot('results', value, null, value.generatedAt).status, 200);
+    for (const day of value.days) if (day.coverage === 'partial' && day.date < page.resultsToday(value.generatedAt)) {
+      assert.ok(day.partialReasons?.length, `${day.date}: a closed partial day carries a reason`);
+    }
   }
   assert.deepEqual(partial.trades, baseline.trades);
   assert.deepEqual(partial.days.map(d => Object.values(d.desks).map(d => d.equityClose)), baseline.days.map(d => Object.values(d.desks).map(d => d.equityClose)));
@@ -848,6 +858,114 @@ test('JOED-32 hero warning: the existing warn token exceeds 3:1 on both neutral 
       const x = luminance(palette.warn), y = luminance(background);
       assert.ok((Math.max(x, y) + .05) / (Math.min(x, y) + .05) >= 3);
     }
+  }
+});
+
+test('JOED-31 copy: remove soft hyphens, normalize NBSP and preserve all other characters exactly', () => {
+  const selected = 'DEMO · Demonstration\u00a0company\r\n−€\u00a01.000.000,12\nÜberraschung\t𐐀 & <name> - ‐ ‑ –\u200b';
+  const plain = 'DEMO · Demonstration company\r\n−€ 1.000.000,12\nÜberraschung\t𐐀 & <name> - ‐ ‑ –\u200b';
+  assert.equal(page.stripSoftHyphens('\u00ad' + selected.replace('Demonstration', 'Dem\u00adons\u00adtra\u00adtion') + '\u00ad\u00ad'), plain);
+  assert.equal(page.stripSoftHyphens(selected), plain);
+  assert.equal(page.stripSoftHyphens(plain), plain);
+  assert.equal(page.stripSoftHyphens(''), '');
+  assert.equal(page.stripSoftHyphens('\u00ad\u00ad'), '');
+});
+
+test('JOED-31 copy: only intercept a nonempty selection wholly inside the detail surface', () => {
+  const inside = {}, outside = {}, writes = [];
+  const selection = { rangeCount: 1, isCollapsed: false, getRangeAt: () => ({ commonAncestorContainer: inside }),
+    toString: () => 'Dem\u00adonstration\n−€\u00a012,34' };
+  const event = { currentTarget: { ownerDocument: { getSelection: () => selection }, contains: node => node === inside },
+    clipboardData: { setData: (...args) => writes.push(args) }, preventDefault: () => writes.push('prevented') };
+  page.copyDayText(event);
+  assert.deepEqual(writes, [['text/plain', 'Demonstration\n−€ 12,34'], 'prevented']);
+  writes.length = 0;
+  for (const ranges of [[outside], [inside, outside], []]) {
+    selection.rangeCount = ranges.length;
+    selection.getRangeAt = i => ({ commonAncestorContainer: ranges[i] });
+    page.copyDayText(event);
+  }
+  selection.rangeCount = 1; selection.getRangeAt = () => ({ commonAncestorContainer: inside });
+  selection.isCollapsed = true; page.copyDayText(event);
+  selection.isCollapsed = false; page.copyDayText({ ...event, clipboardData: null });
+  page.copyDayText({ ...event, currentTarget: { ...event.currentTarget, ownerDocument: { getSelection: () => null } } });
+  assert.deepEqual(writes, []);
+});
+
+test('JOED-31 rendering: exact extreme amounts and prices survive whole-word names and atomic meta units', t => {
+  const { date, record: value } = tradeAmountResults();
+  assert.equal(validateContract('results', value, { stage: 'ingress' }).ok, true);
+  assert.equal(M.dayResult(M.indexResults(value), date, ALL).units, E('-99987.91'));
+  const render = calendarCapture(t), r = render(value, '2026-10-16T12:00:00.000Z', date);
+  for (const html of [r.panel, r.sheet]) {
+    assert.ok(textOf(html).includes('−€ 1.000.000,12'));
+    assert.ok(textOf(html).includes('$ 102.000,12345678'));
+    assert.ok(textOf(html).includes('$ 2.000,12345678'));
+    assert.ok(textOf(html).includes('Demonstration company with a long name'));
+    assert.equal((html.match(/<div class="name" lang="en"><b class="word">DEMO<\/b> · /g) ?? []).length, 4);
+    assert.equal((html.match(/class="meta-unit"/g) ?? []).length, 16);
+    assert.match(html.replaceAll('\u00ad', ''), /<span class="word">Demonstration<\/span> <span class="word">company<\/span>/);
+    assert.equal((html.match(/class="meta-sep" aria-hidden="true"> ·<\/span><\/span> <span class="meta-unit">/g) ?? []).length, 12);
+    assert.match(html, /<span class="meta-unit">closed 17:02<span class="meta-sep" aria-hidden="true"> ·<\/span><\/span> <span class="meta-unit">held 1 h 2 min<\/span>/);
+  }
+});
+
+test('JOED-31 rendering: long company words have deterministic soft hyphens and at least three source letters per fragment', t => {
+  const cases = [
+    ['abcdefgh', 'abc\u00addefgh'],
+    ['abcdefghi', 'abc\u00addef\u00adghi'],
+    ['abcdefghij', 'abc\u00addef\u00adghij'],
+    ['Demonstration', 'Dem\u00adons\u00adtra\u00adtion'],
+    ['Überraschung', 'Übe\u00adrra\u00adsch\u00adung'],
+    ['𐐀𐐁𐐂𐐃𐐄𐐅𐐆𐐇', '𐐀𐐁𐐂\u00ad𐐃𐐄𐐅𐐆𐐇'],
+  ];
+  const words = [...cases.map(([source]) => source), ...Array.from({ length: 25 }, (_, i) => 'A'.repeat(i + 8))];
+  const { date, record: value } = tradeAmountResults();
+  value.trades.forEach(trade => { trade.company = words.join(' '); });
+  const render = calendarCapture(t), r = render(value, '2026-10-16T12:00:00.000Z', date);
+  for (const html of [r.panel, r.sheet]) {
+    const names = [...html.matchAll(/<div class="name"[^>]*>([\s\S]*?)<span class="meta">/g)];
+    assert.equal(names.length, 4);
+    assert.ok(!html.replace(/<span class="word">[^<]*<\/span>/g, '').includes('\u00ad'), 'only company tokens contain soft hyphens');
+    for (const [, name] of names) {
+      const tokens = [...name.matchAll(/<span class="word">([^<]*)<\/span>/g)].map(([, text]) => text);
+      assert.deepEqual(tokens.slice(0, cases.length), cases.map(([, expected]) => expected));
+      assert.deepEqual(tokens.map(text => text.replaceAll('\u00ad', '')), words);
+      for (const token of tokens) {
+        const fragments = token.split('\u00ad');
+        assert.ok(fragments.length > 1, token);
+        assert.ok(fragments.every(fragment => [...fragment].length >= 3), token);
+      }
+    }
+  }
+  assert.equal(value.trades[0].company, words.join(' '), 'the recorded company text is unchanged');
+});
+
+test('JOED-31 rendering: short words, symbols, numbers and meta units never gain soft hyphens', t => {
+  const { date, record: value } = tradeAmountResults();
+  const company = 'A BB CCC DDDD EEEEE FFFFFF company 1234567890';
+  value.trades.forEach(trade => { trade.company = company; trade.symbol = 'LONGSYMBOL'; });
+  const render = calendarCapture(t), r = render(value, '2026-10-16T12:00:00.000Z', date);
+  for (const html of [r.panel, r.sheet]) {
+    assert.ok(!html.includes('\u00ad'));
+    assert.equal((html.match(/<b class="word">LONGSYMBOL<\/b>/g) ?? []).length, 4);
+    assert.equal(textOf(html).split(company).length - 1, 4);
+    assert.ok(textOf(html).includes('Long 10'));
+    assert.ok(textOf(html).includes('closed 17:02'));
+    assert.ok(textOf(html).includes('held 1 h 2 min'));
+    assert.ok(textOf(html).includes('$ 102.000,12345678'));
+  }
+});
+
+test('JOED-31 rendering: company tokens preserve spacing and escape markup in panel and sheet', t => {
+  const { date, record: value } = tradeAmountResults();
+  value.trades[2].company = 'First  <script> & "company"';
+  const render = calendarCapture(t), r = render(value, '2026-10-16T12:00:00.000Z', date);
+  for (const html of [r.panel, r.sheet]) {
+    assert.ok(html.includes('<span class="word">First</span>  <span class="word">&lt;script&gt;</span>'));
+    assert.ok(html.includes('<span class="word">&amp;</span>'));
+    assert.ok(html.includes('<span class="word">&quot;company&quot;</span>'));
+    assert.ok(!html.includes('<script>'));
   }
 });
 
@@ -879,8 +997,10 @@ test('JOED-30 rendering: closed partial trades keep their exact amount, tint and
 
 test('JOED-30 rendering: a partial date with no trades is a neutral dash and incomplete record, including weekends', t => {
   const render = calendarCapture(t);
-  const value = record([{ date: '2026-10-13', desks: {}, coverage: 'partial' }, { date: '2026-10-25', desks: {}, coverage: 'partial' }]);
   for (const day of ['2026-10-13', '2026-10-25']) {
+    // Accepted while open; the retained record still renders its fallback
+    // after midnight without pretending a cause was supplied at acceptance.
+    const value = record([{ date: day, desks: {}, coverage: 'partial' }], [], '2026-09-10', `${day}T12:00:00.000Z`);
     const r = render(value, `${M.addDays(day, 1)}T12:00:00.000Z`, day), cell = r.cell(day);
     assert.match(cell, /class="cell none\b/);
     assert.match(cell, /<span class="v"><span class="muted">—<\/span><\/span>/);
@@ -915,13 +1035,42 @@ test('JOED-30 rendering: Stale wins over partial coverage in the cell, panel and
 test('JOED-30 browser snapshots: each partial, empty, Stale handoff, worst amount and empty month is valid ingress', () => {
   const { dates, ...snapshots } = partialDaysResults();
   for (const [name, payload] of Object.entries(snapshots)) {
-    const checked = validateContract('results', payload, { stage: 'ingress' });
+    const checked = validateContract('results', payload, { stage: 'ingress', receivedAt: payload.generatedAt });
     assert.ok(checked.ok, `${name}: ${JSON.stringify(checked.errors)}`);
+    assert.equal(preflightSnapshot('results', payload, null, payload.generatedAt).status, 200, name);
   }
   assert.equal(M.dayResult(M.indexResults(snapshots.large), dates.partial, ALL).count, 99);
   assert.equal(M.dayResult(M.indexResults(snapshots.large), dates.partial, ALL).units, E('-999999.99'));
   assert.equal(snapshots.empty.days.find(d => d.date === dates.partial).coverage, 'partial');
   assert.equal(M.dayResult(M.indexResults(snapshots.empty), dates.partial, ALL).count, 0);
+});
+
+test('browser preflight: rejects closed reasonless fixtures and replays before any page wait', () => {
+  const { receivedAt, record } = retainedPartialResults();
+  const open = preflightSnapshot('results', record, null, receivedAt);
+  const closedAt = '2026-10-15T22:00:00.000Z';
+  assert.throws(() => preflightSnapshot('results', record, null, closedAt), /partialReasonsRequired/);
+  assert.throws(() => preflightSnapshot('results', record, open, receivedAt), /sequenceReplayed/);
+  const intentional = preflightSnapshot('results', record, open, receivedAt, { status: 422, reason: 'sequence_replayed' });
+  assert.equal(intentional.value, open.value);
+  const unknown = structuredClone(record);
+  unknown.days.at(-1).partialReasons = ['future_reason'];
+  assert.throws(() => preflightSnapshot('results', unknown, null, receivedAt), /enum/);
+});
+
+test('browser default-line fixture: accepted while open, readable and rendered after Vienna midnight', t => {
+  const { receivedAt, record } = retainedPartialResults();
+  const accepted = preflightSnapshot('results', record, null, receivedAt);
+  const now = '2026-10-16T12:00:00.000Z';
+  assert.ok(validateContract('results', accepted.value).ok);
+  const read = acceptRead('results', { status: 200, payload: accepted.value }, null);
+  assert.equal(read.value.receivedAt, receivedAt);
+  const r = calendarCapture(t)(read.value, now, '2026-10-15');
+  for (const html of [r.panel, r.sheet]) {
+    assert.match(textOf(html), /Partial/);
+    assert.ok(textOf(html).includes(M.PARTIAL_REASON));
+    assert.doesNotMatch(html, /dp-note-lead|dp-reason/);
+  }
 });
 
 test('JOED-30 rendering: only closed Vienna dates show partial, across midnight and the autumn DST boundary', t => {
@@ -1160,6 +1309,34 @@ test('JOED-30 today without explicit reasons: no reason note, with only an optio
         assert.match(html, /<div class="dp-note-copy"><p class="dp-position-note">/);
         assert.match(textOf(html), /Coca-Cola \(KO, Joe\), opened today at 11:15, is still open; it counts as Still open and on Desk\./);
       } else assert.doesNotMatch(html, /class="dp-note"|dp-position-note/, 'no explanatory note at all');
+    }
+  }
+});
+
+test('JOED-34 rev 6 rendering: accepted open partial days have no note unless a real FX cause exists, including DST', t => {
+  const render = calendarCapture(t);
+  for (const [now, day] of [
+    ['2026-10-15T22:00:00.000Z', '2026-10-16'],
+    ['2026-10-25T00:30:00.000Z', '2026-10-25'],
+    ['2026-10-25T01:30:00.000Z', '2026-10-25'],
+    ['2027-03-28T21:59:59.999Z', '2027-03-28'],
+  ]) for (const partialReasons of [undefined, ['fx_missing']]) {
+    const value = record([{ date: day, desks: {}, coverage: 'partial', ...(partialReasons ? { partialReasons } : {}) }]);
+    delete value.receivedAt; value.generatedAt = now;
+    const accepted = acceptSnapshot('results', value, null, now);
+    assert.equal(accepted.status, 200);
+    assert.deepEqual(accepted.value.days[0].partialReasons, partialReasons, 'acceptance invents no cause');
+    assert.ok(validateContract('results', accepted.value).ok);
+    for (const desks of [ALL, ['joe']]) {
+      const r = render(accepted.value, now, day, desks);
+      assert.doesNotMatch(r.cell(day), /day-warning|Partial|Stale/);
+      for (const html of [r.panel, r.sheet]) {
+        if (partialReasons) {
+          const note = html.match(/<p class="dp-note-lines">([\s\S]*?)<\/p>/)?.[1];
+          assert.equal(textOf(note), 'Result may be incomplete.No EUR exchange rate was recorded for this day.' +
+            (desks.length === 1 ? M.PARTIAL_DESK_NOTE : ''));
+        } else assert.doesNotMatch(html, /class="dp-note"|dp-note-lines|dp-note-lead|dp-reason|dp-desk-note/);
+      }
     }
   }
 });

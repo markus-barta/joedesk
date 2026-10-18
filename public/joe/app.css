@@ -23,6 +23,7 @@
   --font: -apple-system, "SF Pro Text", system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   --gutter: 28px; --maxw: 1240px; --radius: 16px;
+  --trade-price-small: 11px;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -334,23 +335,27 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .dp-sum { color: var(--ink-2); font-size: 13px; line-height: 20px; white-space: nowrap; }
 .dp-head h3, .dp-head .dp-sum { flex-shrink: 0; }
 .dp-list { flex: 1; overflow-y: auto; margin-top: 8px; }
-.trow { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto 92px; gap: 2px 12px; align-items: center; padding: 10px 2px; border-top: 1px solid var(--line); }
+.trow { display: grid; grid-template-columns: 38px minmax(120px, 1fr) minmax(0, max-content) minmax(92px, max-content); gap: 2px 12px; align-items: center; padding: 10px 2px; border-top: 1px solid var(--line); }
 .trow .name b { font-weight: 650; }
-.trow .name span { display: block; color: var(--ink-3); font-size: 12px; }
-.trow .px { text-align: right; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+.trow .name .meta { display: block; color: var(--ink-3); font-size: 12px; }
+.trow .px { display: grid; grid-template-columns: minmax(0, 1fr) max-content; column-gap: 8px; align-items: start; min-width: 0; text-align: right; font-size: 13px; color: var(--ink-2); white-space: normal; }
 .trow .px .ln { display: inline-flex; align-items: center; gap: 5px; }
 .trow .px .ln .i { width: 12px; height: 12px; color: var(--ink-3); }
-.trow .px .fee { display: block; color: var(--ink-3); font-size: 12px; }
-.trow .net { text-align: right; font-weight: 650; }
+.trow .px .fee { grid-column: 2; display: block; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+.trow .net { grid-column: 4; grid-row: 1; text-align: right; font-weight: 650; white-space: nowrap; }
 .dp-empty { padding: 22px 0; color: var(--ink-2); display: flex; gap: 10px; align-items: flex-start; }
 .dp-empty .i { color: var(--ink-3); margin-top: 2px; }
-.dp-note { padding: 10px 0 0; color: var(--ink-3); font-size: 12px; display: flex; gap: 7px; }
+/* Reserve the reason boxes' inline-end overhang inside the note. */
+.dp-note { padding: 10px 0 0; padding-inline-end: 4px; color: var(--ink-3); font-size: 12px; display: flex; gap: 7px; }
 .dp-note .i { width: 14px; height: 14px; margin-top: 1px; flex-shrink: 0; }
 /* The text column keeps its full width when the disclosure is removed. */
 .dp-note-copy { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
 .dp-note-copy > p { margin: 0; }
 .dp-note-lines { min-width: 0; }
 .dp-note-lead, .dp-reason, .dp-desk-note, .dp-reasons-extra { display: block; }
+/* Every reason keeps its text aligned and leaves 2 px clear of the inset ring. */
+.dp-reason { padding-inline: 4px; margin-inline: -4px; }
+.dp-reason[tabindex="-1"]:focus-visible { outline-offset: -2px; }
 .dp-reasons-more { display: block; width: 100%; min-height: 44px; text-align: left; padding: 0; border: 0; background: transparent; color: var(--ink-2); font: inherit; }
 /* The measured full-content height survives removal of the disclosure. */
 .sheet .dlg-in { height: 100%; }
@@ -673,12 +678,23 @@ span.dbar, span.vbar { display: block; }
 .brow .facts { white-space: normal; line-height: 16px; }
 .tval.tight { font-size: 23px; }
 .tval .bn .ar { width: 12px; height: 12px; }
-.trow { grid-template-columns: 38px minmax(0, 1fr) fit-content(44%) 92px; }
-.trow .name { min-width: 0; }
+/* Keep whole words together. Only an individual token wider than the name
+   column can break at its soft hyphens; anywhere is the final fallback if
+   even a fragment cannot fit inside the constrained inline block. */
+.trow .name { min-width: 120px; word-break: normal; overflow-wrap: normal; hyphens: manual; }
+.trow .name .word { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+.trow .name .meta-unit { display: inline-block; white-space: nowrap; }
+.trow .name .meta-sep.line-end { visibility: hidden; }
 .trow .name .i.side { width: 12px; height: 12px; display: inline; vertical-align: -1px; }
 .trow .name .i.im { width: 13px; height: 13px; vertical-align: -2px; }
-.trow .px .ln { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; column-gap: 5px; white-space: normal; }
+.trow .px .ln { display: inline-flex; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; column-gap: 5px; white-space: normal; }
 .trow .px .ln > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+/* fitTradeRows tries the wrapped pair first, then the panel-wide small token,
+   then permits the fee to wrap. Amount sizing is independent of these steps. */
+.trow .px.small, .trow .px.small .fee { font-size: var(--trade-price-small); }
+.trow .px.wrap-fee { grid-template-columns: minmax(0, 1fr); }
+.trow .px.wrap-fee .fee { grid-column: 1; white-space: normal; }
+.trow.prices-below .px { grid-column: 2 / -1; }
 .cell.pre .d { color: var(--ink-3); }
 .wk > span:first-child:empty::before { content: "\00a0"; }
 /* Phones: a day's trades open in a bottom sheet. */
@@ -695,7 +711,8 @@ dialog.dlg::backdrop { background: var(--scrim); }
   .dlg-b { padding: 10px 16px 20px; }
   .tval.tight { font-size: 20px; }
   .trow { grid-template-columns: 38px minmax(0, 1fr) auto; }
-  .trow .px { grid-column: 2 / 3; text-align: left; }
+  .trow .name { min-width: 0; }
+  .trow .px { grid-column: 2 / -1; text-align: left; }
   .trow .px .ln { justify-content: flex-start; }
   .trow .net { grid-column: 3; grid-row: 1; }
 }

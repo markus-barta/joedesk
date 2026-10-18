@@ -299,6 +299,16 @@ Reports stay separate under `~/.local/share/joedesk-qa/p4/<zone>/index.md`
 Use an approved browser test host; an installed browser guard refusal is a
 blocked check and must be handed to the coordinator without bypassing it.
 
+Every P3–P6 inbox push first runs `acceptSnapshot` in Node against the prior
+accepted record and the board's receipt clock. Unexpected rejection stops with
+the contract rule and path before HTTP or a page wait; rejection scenarios name
+their expected status and reason. Partial-day replacements wait for the refresh
+and render, including changes to today's reason that leave calendar HTML intact.
+Default-line coverage uses a reasonless snapshot accepted while the day was open
+and retained into the next day. Reason overflow is measured at the enclosing
+note and individual lines: the paragraph deliberately allows the 4 px reason
+box overhang within the note's reserved padding.
+
 P3–P6 share browser teardown: request a graceful close, wait for process exit,
 then remove the profile. A stuck browser gets SIGTERM and then SIGKILL with
 bounded exit waits; if it still has not exited, cleanup fails and retains the
@@ -432,7 +442,10 @@ Send exactly one JSON `inspr.joe.household.results.v2` snapshot as the body,
 without an envelope, `receivedAt` or `missingDays` (both server-owned).
 Validate it with
 `validateContract('results', snapshot, {stage: 'ingress'})` from the pinned
-`contracts/` package. The UTF-8 request limit is `CONTRACTS.limits.results`
+`contracts/` package. To check receipt-dependent rules locally, also pass the
+expected server `receivedAt` as a validation option; `acceptSnapshot` always
+supplies the actual trusted receipt. The UTF-8 request limit is
+`CONTRACTS.limits.results`
 (8,388,608 bytes); the served snapshot, including the server's `receivedAt`
 and diagnostics,
 must also fit that contract limit. Money, including gross, stays in exact decimal
@@ -458,7 +471,10 @@ a windowed trade record, capture gaps, unattributed activity, stale currency
 conversion or a broker-backstop mismatch. Its day/trade cross-check is skipped;
 schema and trade checks still apply. Unknown summary `realisedNet` and `fees`
 may be `null`. An unattributed-only day can be `{date, desks: {}, coverage:
-"partial"}` with no trades; it is not a confirmed zero-trade day.
+"partial", partialReasons: ["unattributed_activity"]}` with no trades; it is
+not a confirmed zero-trade day. A closed partial day requires a reason. The
+open Vienna day may omit reasons when there is no real cause beyond the day
+still being open.
 KEEP holdings **SXR8 and TSLA are excluded from both `trades[]` and all `days[]`
 totals**, including partial days. Results derives trade P&L from `trades[]`;
 day summaries are validated, never substituted for the trade record.
@@ -567,7 +583,62 @@ the formatter emits `1M` for € 999.000. Its five calendar crops show October's
 ±€ 1.200.000, gain, loss, zero, k and missing-day warning, under `JOED_QA_DIR`.
 The generated `index.md` and CI log retain the measurement table.
 
-**Producer contract pin — manifest revision 5.** Compared with revision 2,
+Day-detail trade amounts keep their full value on one right-aligned line.
+Their columns grow to fit, with the original 92 px minimum for short amounts
+on desktop. Names keep at least 120 px and wrap between whole words; only
+an individual token wider than the column may break internally. English
+company letter runs of eight or more contain deterministic soft hyphens,
+with at least three source letters before, between and after opportunities.
+`hyphens: manual` draws a hyphen only when the oversized word breaks, without
+a browser dictionary; `overflow-wrap: anywhere` remains the final fallback
+if even a fragment cannot fit. Symbols, numbers and meta text receive no soft
+hyphens, and text comparisons strip U+00AD to preserve the recorded copy.
+Copying selected text from the day panel or phone sheet removes U+00AD and
+maps U+00A0 to normal spaces, preserving every other character and line break.
+Meta units (desk, side/quantity, close time and holding duration) stay together and wrap
+between units. Each middle dot is a nowrap suffix of the preceding unit;
+after layout and resize, line-ending dots use `visibility: hidden`, retaining
+their width so lines stay stable and the next line starts flush.
+Entry/exit prices wrap first, then the entire panel uses the 11 px small token
+if any row needs it, then fees may wrap. Wider panels recover their regular
+price size together. Phone amount
+columns size to their content, while prices and fees span the second row
+beneath the company and amount columns.
+The focused `trade-amount` browser scenario checks −€ 100.000,12,
++€ 999.999,99 and −€ 1.000.000,12 beside USD price pairs with up to eight decimals at
+1440/1024/390/360 in both themes, through the real inbox and worker/fallback.
+It asserts exact amount, price and fee text, no clipping or row overflow,
+common right edges, desktop-only 92 px sizing, phone content sizing, wrapping
+of the eight-decimal pair at 1440, and exactly 0 px outer movement on open/close.
+Range rectangles check every name/meta word, atomic meta units, the 120 px
+desktop name floor, full panel-header visibility and the price/fee yield order.
+Per-character Range measurements exclude U+00AD, require every broken-word
+line to contain at least three source characters, and require a positive-width
+soft-hyphen glyph at every break. The 360 million row must exercise a break;
+desktop fixture words remain unbroken.
+Synthetic copy events at 360/1440 in both themes must copy the full company
+name without U+00AD and the visible amount with normal spaces from the sheet
+and panel respectively.
+Visible glyph checks reject a middle dot at either end of every meta line;
+resize and repeated-fit probes verify flush starts, reserved suffix widths,
+stable wrapping and uniform panel price sizing, including a roomy peer row.
+Widest-row crops go to `JOED_QA_DIR` as
+`*-results-trade-amount-{panel,sheet}-crop.png` for the visual check.
+Whole-panel crops at 1440/1024 in both themes add
+`*-results-trade-amount-panel-full-crop.png` with a 16 px margin beyond the
+panel's right edge for clipping and cross-row alignment review. Captures
+temporarily expand the list's height at its tested content width and reset
+its scroll to the top, then restore the original layout. All four rows,
+including every symbol/name first line, must fit inside the list and panel;
+bottom-scrolling to the million/short rows had clipped row 1's symbol line.
+Symbol checks compare the name prefix with the recorded symbol, require a
+non-zero visible symbol box, and verify list/panel containment in capture
+state at all four widths and both themes.
+The full 360 px sheet in each theme is
+`360-*-results-trade-amount-sheet-full-crop.png`, using the same temporary
+height expansion to show every row's first line.
+
+**Producer contract pin — manifest revision 6.** Compared with revision 2,
 revision 3 keeps the `inspr.joe.household.results.v2` schema identifier and adds
 optional day-level `coverage` (`"full"` by default, or `"partial"`), the exact
 day/trade cross-check across every desk described above, and explicit KEEP
@@ -575,15 +646,25 @@ exclusion from both trade records and day totals. It also removes
 `results_not_wired` from the closed reason enum. Revision 4 adds the optional
 server-owned `missingDays` read diagnostic and forbids producer-supplied copies.
 Revision 5 adds optional `days[].partialReasons` and `unattributedCount` without
-changing the schema ID. Rev-5 producers emit at least one reason for each partial
-day in canonical order: `capture_gap`, `history_gap`,
+changing the schema ID. Revision 6 requires at least one reason for every
+**closed partial Vienna day** (date before the server receipt's Vienna date).
+The open day may omit `partialReasons` unless a real cause exists, such as
+`fx_missing`, in which case emit at least one. `capture_gap` is reserved for a
+real mid-day tracking start; an unfinished day alone is not a capture gap.
+The enum and canonical order stay unchanged: `capture_gap`, `history_gap`,
 `broker_trade_count_mismatch`, `broker_realised_pnl_mismatch`,
 `unattributed_activity`, `avg_cost_mismatch`, `fx_disabled`, `fx_missing`,
 `broker_evidence_missing`. `avg_cost_mismatch` is reserved: accepted and rendered,
 not yet emitted. Reasons must be unique and nonempty and are allowed only with
 `coverage: "partial"`. `unattributedCount` is a positive integer (minimum 1), omitted when
 unknown, and allowed only with `unattributed_activity`. Invalid combinations or
-order return per-day 422 errors. Legacy partial rows without reasons still accept.
+order return per-day 422 errors. A closed partial day without reasons returns
+422 at `$.days[i].partialReasons` with rule `partialReasonsRequired`, retaining
+the last good snapshot. Closure uses the same DST-safe `viennaDay` helper and
+server receipt as `missingDays`, never the producer or host date. Served
+validation uses the persisted receipt, so an accepted open day remains readable
+after midnight. Omit `partialReasons` when there is no cause; an explicit empty
+array still fails `minItems`.
 `{date, desks: {}, coverage: "partial", partialReasons: ["history_gap"]}` is valid;
 it shows **—** under every desk filter, adds nothing to sums, and counts as one
 closed partial day in the month hint.
@@ -592,15 +673,21 @@ Known reasons replace the default note with **Result may be incomplete.** and
 one exact explanation per reason in canonical order (see the data contract).
 With `fx_disabled`, the board omits `fx_missing`. Unknown codes never appear as
 raw text: known codes still render; when none remain, closed days use the default
-sentence and today has no reason note.
+sentence and today has no reason note. Today with `fx_missing` shows
+**No EUR exchange rate was recorded for this day.**
 The cell's accessible reason is the first short label plus **, and N more**.
 Desktop panels show all reasons. Phone sheets show two reason sentences, then a
 44 px **+N more** button on its own row, left-aligned with the text, named
 **Show N more reasons** (singular **Show 1 more reason**). The note's text column
 and its reason and positions blocks always fill the width available beside the
 info icon, with or without the button. Activation removes the button and focuses
-the first revealed reason (`tabindex="-1"`) in a polite live region. Reopening
-starts collapsed. The sheet reserves its full content height, capped at 80vh;
+the first revealed reason (`tabindex="-1"`) in a polite live region. Its keyboard
+focus ring stays inset within that line, at least 2 px clear of its first glyph
+and clear of neighbouring reasons. Every reason has 4 px inline padding and
+−4 px inline margins in both states, keeping its text aligned with the lead;
+the note reserves 4 px at its inline end to contain the overhang without
+horizontal overflow. Reopening starts collapsed. The sheet reserves its full
+content height, capped at 80vh;
 collapsed spare room sits at the bottom, and revealing reasons changes neither
 its top edge nor height nor the position or width of already visible reason lines.
 Short days have short sheets. A desk filter adds **Applies to the whole day;
@@ -616,7 +703,7 @@ or “record incomplete”.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
-`contract_set_sha256`; an earlier digest does not cover revision-5 acceptance
+`contract_set_sha256`; an earlier digest does not cover revision-6 acceptance
 and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.

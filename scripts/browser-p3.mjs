@@ -477,7 +477,7 @@ try {
     const b = await newBoard({ fleetConfig: f.fleetConfig ?? null });
     b.setNow(valid.data.receivedAt);
     await b.push(ingress(valid.data));
-    if (!f.transportReason && f.feed === 'data') { b.setNow(f.receivedAt); const r = await b.push(f.payload); check('fixtures', `${id}: server status ${f.expectedStatus}`, r.status === f.expectedStatus, r.body); }
+    if (!f.transportReason && f.feed === 'data') { b.setNow(f.receivedAt); const r = await b.push(f.payload, 'data', { status: f.expectedStatus, reason: f.expectedStatus === 200 ? null : f.expected['today.equity'].reason }); check('fixtures', `${id}: server status ${f.expectedStatus}`, r.status === f.expectedStatus, r.body); }
     const viewports = id === 'e-layout-storage-unavailable' ? VIEWPORTS : id === 'a-gateway-up-but-dead' ? [VIEWPORTS[1], VIEWPORTS[2]] : [VIEWPORTS[1]];
     for (const viewport of viewports) {
       const theme = viewport.mobile ? 'dark' : 'light';
@@ -536,7 +536,7 @@ try {
   for (const live of [false, true]) {
     const b = await newBoard();
     b.setNow(NOW);
-    if (live) { const payload = ingress(valid.data); payload.mode = 'LIVE'; const r = await b.push(payload); check('AC-6', 'a LIVE snapshot is rejected', r.status === 422, r.body); }
+    if (live) { const payload = ingress(valid.data); payload.mode = 'LIVE'; const r = await b.push(payload, 'data', { status: 422, reason: 'contract_invalid' }); check('AC-6', 'a LIVE snapshot is rejected', r.status === 422, r.body); }
     for (const viewport of live ? [VIEWPORTS[0]] : VIEWPORTS) for (const theme of live ? ['light'] : THEMES) {
       await configure(page, viewport, theme);
       await load(page, b.url, 'desk');
@@ -655,7 +655,7 @@ try {
     const replay = structuredClone(base);
     replay.desks[0].action = 'The same sequence number with a different body';
     b.setNow(at(NOW, 20));
-    const r = await b.push(replay);
+    const r = await b.push(replay, 'data', { status: 422, reason: 'sequence_replayed' });
     check('passthrough', 'a non-identical replay is rejected as sequence_replayed', r.status === 422 && r.body.reason === 'sequence_replayed', r.body);
     b.setNow(at(NOW, 30));
     const server = await (await fetch(`${b.url}state.json`, { headers: { 'x-auth-request-user': ACTOR } })).json();
