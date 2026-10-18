@@ -309,8 +309,8 @@
     },
     {
       "path": "server/read-model.mjs",
-      "size": 15221,
-      "sha256": "4a64f9845241ffde3c8d42270d1bcd4074621ce79b1f98a11567d44e8bcf9160"
+      "size": 16740,
+      "sha256": "9bea6d0a69192a6769faf39e94b1d74711f53a58b8a4f2d544047d784c955dbd"
     },
     {
       "path": "server/storage.mjs",

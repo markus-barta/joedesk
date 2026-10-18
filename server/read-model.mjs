@@ -6,6 +6,7 @@ import { acceptSnapshot } from '../contracts/accept.mjs';
 import { panelStates, DATA_PANELS, MONEY_FIELDS } from '../contracts/panel-state.mjs';
 import { gatewayCheckAgeMs } from '../contracts/gateway.mjs';
 import { validInstant } from '../contracts/schema-validator.mjs';
+import { viennaDay } from '../contracts/vienna-date.mjs';
 import { atomicWrite, readJson } from './storage.mjs';
 import { appendHistory, historyEnvelope, HISTORY_CAP, measureHistory } from './history.mjs';
 
@@ -15,6 +16,7 @@ const RESULTS_FORMAT = 'joedesk.results-store.v2';
 // The snapshot is bounded by the contracts package; leave room only for the
 // server-owned envelope and generation-progress metadata on disk.
 const RESULTS_CAP = CONTRACTS.limits.results + 4096;
+const ROLLOVER_RESEND_MAX_SKEW_MS = 5 * 60 * 1000;
 const isMissing = error => error.code === 'ENOENT';
 const failed = (status, reason) => ({ ok: false, status, reason });
 // JSON object order is immaterial. Hash only the validated ingress payload;
@@ -22,6 +24,21 @@ const failed = (status, reason) => ({ ok: false, status, reason });
 const payloadDigest = value => createHash('sha256').update(JSON.stringify(value, (_key, entry) =>
   entry && typeof entry === 'object' && !Array.isArray(entry) ?
     Object.fromEntries(Object.keys(entry).sort().map(key => [key, entry[key]])) : entry)).digest('hex');
+
+function resultsRolloverDay(candidate, errors, receivedAt) {
+  if (!validInstant(candidate?.generatedAt) || !errors.length) return null;
+  const skew = Date.parse(receivedAt) - Date.parse(candidate.generatedAt);
+  if (skew <= 0 || skew > ROLLOVER_RESEND_MAX_SKEW_MS) return null;
+  const generatedDay = viennaDay(candidate.generatedAt);
+  // Advance the date key in UTC, not the local instant by an elapsed 24 hours.
+  const nextDay = new Date(`${generatedDay}T00:00:00.000Z`);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  if (viennaDay(receivedAt) !== nextDay.toISOString().slice(0, 10)) return null;
+  return errors.every(({ path, rule }) => {
+    const match = /^\$\.days\[(\d+)\]\.partialReasons$/.exec(path);
+    return rule === 'partialReasonsRequired' && match && candidate.days[Number(match[1])]?.date === generatedDay;
+  }) ? generatedDay : null;
+}
 
 export function createReadModel({ dataDir, clock = () => new Date().toISOString(), write = atomicWrite }) {
   if (['data.json', 'history.json'].some(name => existsSync(path.join(dataDir, name)))) throw new Error('data_migration_required');
@@ -32,6 +49,8 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   const fleetFile = path.join(dataDir, 'fleet-receipt.json');
   let state = null, history = null, rejections = {}, fleet = null, storageInvalid = false, historyStorageInvalid = false;
   let results = null, resultsStorageInvalid = false;
+  // One exemption until a successful results acceptance; restart re-arms it.
+  let rolloverResendPending = false;
   try {
     state = readJson(stateFile, STATE_CAP);
     if (state.format !== FORMAT || !validateContract('data', state.feed?.value).ok ||
@@ -103,6 +122,13 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
         const { receivedAt, missingDays, ...previous } = results.feed.value;
         if (payloadDigest(candidate) === payloadDigest(previous)) return { ...failed(422, accepted.reason), errors };
       }
+      const rolloverDay = !rolloverResendPending && resultsRolloverDay(candidate, accepted.errors, now);
+      if (rolloverDay) {
+        rolloverResendPending = true;
+        console.info(JSON.stringify({ event: 'rollover_resend_pending', generatedAt: candidate.generatedAt,
+          receivedAt: now, days: [rolloverDay] }));
+        return { ...failed(422, accepted.reason), errors };
+      }
       return { ...reject(accepted.reason, 422, 'results'), errors };
     }
     // Receipt stamping must not turn a valid ingress into an oversized,
@@ -121,6 +147,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     results = next; delete rejections.results;
     try { persistReasons(); }
     catch { rejections.results = 'refresh_failed'; return failed(503, 'refresh_failed'); }
+    rolloverResendPending = false;
     return { ok: true, status: 200, reason: null, receivedAt: now };
   }
   function accept(candidate) {
