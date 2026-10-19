@@ -83,13 +83,34 @@ export async function go(page, screen) {
   await settle(page);
 }
 
-export async function screenshot(page, viewport, file) {
-  const height = await page.evaluate('Math.ceil(document.documentElement.scrollHeight)');
-  await page.s('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: Math.max(viewport.height, height), deviceScaleFactor: 1, mobile: viewport.mobile });
-  await settle(page);
-  const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
-  await page.s('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: viewport.mobile });
-  await settle(page);
-  mkdirSync(join(file, '..'), { recursive: true });
-  writeFileSync(file, Buffer.from(data, 'base64'));
+export async function screenshot(page, viewport, file, { selector = null } = {}) {
+  let data;
+  if (selector) {
+    await page.evaluate(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({ block: 'start' })`);
+    await settle(page);
+    const clip = await page.evaluate(`(() => {
+      const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect();
+      return r && { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 };
+    })()`);
+    if (!clip || clip.width <= 0 || clip.height <= 0) throw new Error('Screenshot section is missing or empty');
+    ({ data } = await page.s('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true }));
+  } else {
+    const height = await page.evaluate('Math.ceil(document.documentElement.scrollHeight)');
+    try {
+      await page.s('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: Math.max(viewport.height, height), deviceScaleFactor: 1, mobile: viewport.mobile });
+      await settle(page);
+      ({ data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }));
+    } finally {
+      await page.s('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: viewport.mobile });
+      await settle(page);
+    }
+  }
+  const bytes = Buffer.from(data, 'base64');
+  // Private capture callers own their exclusive 0600 writer. Existing P-suite
+  // callers keep their file-writing behavior and use the same capture code.
+  if (file !== undefined) {
+    mkdirSync(join(file, '..'), { recursive: true });
+    writeFileSync(file, bytes);
+  }
+  return bytes;
 }

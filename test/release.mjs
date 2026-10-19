@@ -15,6 +15,9 @@ import { createReadModel } from '../server/read-model.mjs';
 import { createJoeServer } from '../server.mjs';
 import { smokeRelease, PROTECTED_READS, APP_ORIGIN_HEADER } from '../scripts/smoke-release.mjs';
 import { validateContract } from '../contracts/index.mjs';
+// Private capture tooling stays outside the runtime/package closure while its
+// Node-only tests run in the existing npm test / CI release suite.
+import './preview-capture.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(new URL('../' + file, import.meta.url)));
 const samples = read('fixtures/valid.json'), active = read('release.json'), prep = read('release/preparation.json');

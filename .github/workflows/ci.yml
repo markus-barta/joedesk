@@ -72,6 +72,27 @@ jobs:
           JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p5
           TZ: UTC
         run: node scripts/browser-p5.mjs
+      - name: Preview capture refuses a 0755 output directory (exit 2, no files)
+        run: |
+          bad_out=$(mktemp -d "$RUNNER_TEMP/joedesk-preview-public.XXXXXX")
+          chmod 0755 "$bad_out"
+          status=0
+          node scripts/preview-capture.mjs --base-url http://127.0.0.1:1/joe/ --out "$bad_out" || status=$?
+          test "$status" -eq 2
+          test -z "$(ls -A "$bad_out")"
+      - name: Preview capture synthetic rev 9 (KEEP, unmapped row, absent Results, value-free summary)
+        env:
+          BROWSER_PATH: /usr/bin/google-chrome
+          TZ: UTC
+        run: |
+          install -d -m 0700 "$RUNNER_TEMP/joedesk-preview-capture"
+          node scripts/preview-capture-ci.mjs "$RUNNER_TEMP/joedesk-preview-capture"
+      - name: Keep synthetic preview PNGs and value-free summary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joedesk-preview-capture
+          path: ${{ runner.temp }}/joedesk-preview-capture
+          if-no-files-found: error
       - name: Keep the screenshots for the visual check
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
