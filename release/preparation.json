@@ -1,13 +1,13 @@
 {
   "schema": "joedesk.release-preparation.v1",
-  "ticket": "JOED-26",
+  "ticket": "JOED-50",
   "status": "candidate",
   "reservation": {
     "version_scheme": "inspr-calver-3",
-    "version": "261016151218.0.0",
+    "version": "261019102825.0.0",
     "release_channel": "stable",
-    "release_sequence": 24,
-    "reserved_at": "2026-10-16T15:12:18Z"
+    "release_sequence": 25,
+    "reserved_at": "2026-10-19T10:28:25Z"
   },
   "anchor": {
     "legacy_scheme": "calendar",
@@ -133,11 +133,17 @@
   ],
   "previous_release": {
     "product": "JoeDesk",
-    "version_scheme": "calendar",
-    "version": "26.09.21.12.00",
+    "version_scheme": "inspr-calver-3",
+    "version": "261016151218.0.0",
     "release_channel": "stable",
-    "release_sequence": 23,
-    "note": "Put the household decision pulse, KEEP scope, and short learning next steps above the detail cards."
+    "release_sequence": 24,
+    "status": "published-candidate",
+    "source_branch": "main",
+    "source_commit": "dafe7909af04ba5ded3c4b55504ea10970e07e4d",
+    "release_set_ticket": "JOED-41",
+    "disposition": "superseded-before-deployment",
+    "deployed": false,
+    "note": "Published rev 7 candidate; release set verified under JOED-41. Never deployed."
   },
   "legacy_deployment_inventory": {
     "board_source_pin": "db621bf",
@@ -147,5 +153,13 @@
     "last_tag": "v26.09.14.17.40",
     "last_tag_release_sequence": 22,
     "evidence": "Review r1: deployed nixcfg/flake.nix pin; the sequence-23 deployment has no matching tag. Preserve existing published history."
+  },
+  "last_deployed_release": {
+    "product": "JoeDesk",
+    "version_scheme": "calendar",
+    "version": "26.09.21.12.00",
+    "release_channel": "stable",
+    "release_sequence": 23,
+    "note": "Put the household decision pulse, KEEP scope, and short learning next steps above the detail cards."
   }
 }
