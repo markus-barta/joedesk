@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261016151218.0.0",
+  "version": "261019102825.0.0",
   "release_channel": "stable",
-  "release_sequence": 24,
+  "release_sequence": 25,
   "status": "candidate",
-  "note": "JOED-26 rebuild candidate; publication, producer, OPS, review and live adoption gates remain."
+  "note": "Rev 8 cut-over candidate: paper-account cash, nullable position values with per-field reasons, and a stable hero in every state."
 }

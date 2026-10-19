@@ -1340,11 +1340,25 @@ No push, deploy or review gate.
 
 ## JOED-26 / P6a repository preparation
 
-This addendum records a repository candidate, not an authoritative live adoption
-or cutover. The candidate is `inspr-calver-3` / `261016151218.0.0`, reserved once
-at `2026-10-16T15:12:18Z`, stable sequence 24. `release/preparation.json` records
-the previous release (`calendar` / `26.09.21.12.00` / sequence 23) and the
-explicit migration anchor. The custom legacy scheme is not relabelled as
+This addendum records repository preparation, with live adoption and cutover
+still pending. JOED-26 originally reserved `inspr-calver-3` / `261016151218.0.0`
+at `2026-10-16T15:12:18Z`, stable sequence 24. That rev 7 candidate was published
+on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d` and its release set
+verified under JOED-41, but it was never deployed.
+
+JOED-50 supersedes it before deployment with the rev 8 candidate
+`261019102825.0.0`, reserved once at `2026-10-19T10:28:25Z`, stable sequence 25.
+The changed artifact set includes paper-account cash, nullable position values
+with per-field reasons, and the stable hero; it cannot reuse sequence 24's
+immutable coordinate. `release/preparation.json` now records sequence 24 as
+`previous_release`, including its publication and never-deployed disposition,
+and retains `calendar` / `26.09.21.12.00` / sequence 23 as `last_deployed_release`.
+The explicit sequence-23 → sequence-24 migration anchor stays unchanged.
+Footer/About and `/joe/healthz` derive the current version from the active build;
+About's legacy history excludes the superseded, never-deployed publication.
+`check-release` still enforces a strictly later reservation, with CLI regressions
+covering equal/earlier coordinates after closure verification. Contract revision
+8 and its complete set remain unchanged by JOED-50. The custom legacy scheme is not relabelled as
 INSPR-CalVer1. JOED-19's owner decision supersedes JOED-13, whose v2 proposal is
 cancelled and consolidated into JOED-26. Published history stays intact.
 

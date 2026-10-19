@@ -27,6 +27,7 @@ if ((!privateNativeRoot && !disposableLinux) || readdirSync(ROOT).length) {
   throw new Error('Refusing HTTP tests outside an empty private native root or disposable tmpfs; run npm test');
 }
 const samples = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
+const activeRelease = JSON.parse(readFileSync(new URL('../release.json', import.meta.url)));
 const BASE_TIME = Date.parse(samples.data.receivedAt);
 const TOKEN = 'joedesk-isolated-contract-fixture';
 const FLEET_ACTOR = 'hostd-contract-user';
@@ -475,7 +476,8 @@ test('P2 health: anonymous exact allowlist, never-received null ages and failed-
   const get = () => s.request('/joe/healthz', { headers: { 'x-auth-request-user': '' } });
   const first = (await get()).body;
   assert.equal(validateContract('healthz', first).ok, true);
-  assert.equal(first.versionScheme, 'inspr-calver-3'); assert.equal(first.version, '261016151218.0.0');
+  assert.equal(first.versionScheme, activeRelease.version_scheme); assert.equal(first.version, activeRelease.version);
+  assert.notEqual(first.version, '261016151218.0.0', 'health reports the running candidate, not the superseded publication');
   assert.equal(first.serverNow, at(0)); assert.equal(first.snapshotAgeSeconds, null);
   for (const [version, versionScheme] of [['261015150000.0.0', 'calendar'], ['26.10.15.15.00', 'inspr-calver-3'], ['26.02.30.15.00', 'calendar']]) {
     assert.equal(validateContract('healthz', { ...first, version, versionScheme }).ok, false);
@@ -1350,7 +1352,7 @@ test('P3 UI: every shipped module is served, legacy layout assets are not, and t
   const s = await setup(t);
   const shipped = readdirSync(new URL('../public/joe/', import.meta.url)).filter(name => /\.(js|css|html)$/.test(name));
   for (const name of shipped) {
-    const response = await fetch(s.base + '/joe/' + name + '?v=261016151218.0.0');
+    const response = await fetch(s.base + '/joe/' + name + '?v=' + activeRelease.version);
     assert.equal(response.status, 200, name);
     assert.match(response.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : name.endsWith('.html') ? /text\/html/ : /text\/javascript/);
     assert.equal(response.headers.get('cache-control'), 'no-store');
