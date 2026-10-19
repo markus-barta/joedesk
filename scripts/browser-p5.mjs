@@ -448,7 +448,7 @@ try {
       const header = await ev(`document.getElementById('hdrHealth').innerHTML`);
       const ctx = { feeds: { data: { value: snapshot } }, states: { gateway: { state: 'fresh' } } };
       const reference = headerHealth(ctx, { reason: 'board_ok', label: 'Board OK', statusTone: 'ok' });
-      for (const h of [...healthCases, { label: 'Loading', statusTone: 'warn' }]) {
+      for (const h of [...healthCases, { label: 'Loading', statusTone: 'none' }]) {
         const view = headerHealth(ctx, h);
         // Measure both states in one synchronous page task. No stylesheet,
         // viewport, fixture or broker change, and no tick can interleave.
@@ -460,7 +460,8 @@ try {
           button.innerHTML = ${J(view.html)};
           const after = __audit.rects(${J(geometrySelectors)}), afterBroker = button.querySelector('.lbl-long').textContent;
           const label = button.querySelector('b');
-          const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), css = getComputedStyle(button), icon = button.querySelector('svg').getBoundingClientRect();
+          const iconNode = button.querySelector('svg'), iconVisible = __audit.visible(iconNode);
+          const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), css = getComputedStyle(button), icon = iconNode.getBoundingClientRect();
           const range = document.createRange(), glyphs = [], words = [];
           const edges = r => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
           range.selectNodeContents(label);
@@ -477,15 +478,15 @@ try {
             }
           }
           const inside = glyphs.length > 0 && glyphs.every(r => r.left >= Math.max(cell.left, box.left + parseFloat(css.paddingLeft)) - 0.5 && r.right <= Math.min(cell.right, box.right - parseFloat(css.paddingRight)) + 0.5 && r.top >= box.top && r.bottom <= box.bottom);
-          const iconInside = icon.left >= box.left && icon.right <= box.right && icon.top >= box.top && icon.bottom <= box.bottom;
-          const iconOverlap = glyphs.filter(r => Math.min(r.right, icon.right) - Math.max(r.left, icon.left) > 0.5 && Math.min(r.bottom, icon.bottom) - Math.max(r.top, icon.top) > 0.5);
+          const iconInside = !iconVisible || (icon.left >= box.left && icon.right <= box.right && icon.top >= box.top && icon.bottom <= box.bottom);
+          const iconOverlap = iconVisible ? glyphs.filter(r => Math.min(r.right, icon.right) - Math.max(r.left, icon.left) > 0.5 && Math.min(r.bottom, icon.bottom) - Math.max(r.top, icon.top) > 0.5) : [];
           const ellipsis = css.textOverflow === 'ellipsis' || getComputedStyle(label).textOverflow === 'ellipsis' || /…|\\.\\.\\./u.test(label.textContent);
           const row = document.querySelector('.top-in'), rowBox = row.getBoundingClientRect(), rowCSS = getComputedStyle(row);
           const first = row.querySelector('.brand').getBoundingClientRect(), last = document.getElementById('themeBtn').getBoundingClientRect();
           const items = [...row.children].filter(__audit.visible).map(e => e.getBoundingClientRect());
           const inRow = items.every((r, i) => r.left >= rowBox.left + parseFloat(rowCSS.paddingLeft) - 0.5 && r.right <= rowBox.right - parseFloat(rowCSS.paddingRight) + 0.5 && (!i || r.left >= items[i - 1].right - 0.5));
           return { before, after, beforeBroker, afterBroker, inRow,
-            label: { text: label.textContent, lineCount: lines.length, lines, glyphs, words, inside, ellipsis, cell: edges(cell), pill: edges(box), icon: edges(icon), iconInside, iconOverlap },
+            label: { text: label.textContent, lineCount: lines.length, lines, glyphs, words, inside, ellipsis, cell: edges(cell), pill: edges(box), icon: edges(icon), iconVisible, iconInside, iconOverlap },
             height: { header: rowBox.height, button: box.height },
             inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: rowCSS.paddingLeft, paddingRight: rowCSS.paddingRight },
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
@@ -496,6 +497,7 @@ try {
         const intactWords = measured.label.words.length > 0 && measured.label.words.every(word => word.lines.length === 1);
         const labelCheck = h.reason === 'ledger_size_limit' ? 'existing Needs fix label fits' : 'existing label fits';
         check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: ${labelCheck}; no clipping, overlap or ellipsis`, measured.label.lineCount >= 1 && measured.label.lineCount <= maxLines && intactWords && measured.label.inside && measured.label.iconInside && !measured.label.iconOverlap.length && !measured.label.ellipsis && measured.inRow && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
+        check('executor-health', `${viewport.name} ${theme} header ${h.label}: only phone Loading hides its icon`, measured.label.iconVisible === !(h.label === 'Loading' && viewport.width <= 700), evidence);
         check('executor-health', `${viewport.name} ${theme} header ${h.label}: original header and button heights`, measured.height.header === (viewport.mobile ? 54 : 58) && measured.height.button === (viewport.mobile ? 44 : 34), measured.height);
         if (viewport.mobile && headerCrops.has(h.reason)) {
           // A live tick may render between the synchronous measurement and

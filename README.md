@@ -780,14 +780,17 @@ and accessible name retain exact byte counts. Settings health text reserves its
 space so state changes do not move later sections within that reserve. The header
 keeps its desktop layout, 16 px phone inset and existing heights. On phones the
 icon shares the first label line; the next line uses the button's full inner
-width, without a sizing reserve or a forced line break (JOED-46).
+width, without a sizing reserve or a forced line break (JOED-46). Loading alone
+hides its decorative icon at widths up to 700 px so the label uses the whole
+line; its accessible name and desktop appearance stay unchanged.
 It introduces no new header labels. PR CI's P5
 `executor` checks cover all three degraded wire combinations, recovery and ledger
 rounding at 1440/1024/390/360 in both themes, with Settings executor-row, header
 and Desk explanation crops and no-overflow/no-clipping checks. It records
 Chrome’s actual rendered font and checks every existing label fits at all four
-widths, including “Stale 2 min”. Label evidence includes line and glyph boxes,
-intact words, icon containment and no icon overlap. At 360/390 in both themes it
+widths, including “Stale 2 min” and “Loading”. Label evidence includes line and
+glyph boxes, intact words, icon containment and no icon overlap, with an explicit
+check that only phone Loading hides its icon. At 360/390 in both themes it
 emits `header-{board-ok,needs-fix,data-delayed,broker-unsure,stale}` crops. It
 measures exact 0 px movement outside the intrinsic pill within the
 same page and broker state, and compares every board-health sentence to its
