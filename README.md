@@ -317,6 +317,15 @@ copy, panel states, honest chart scales, contrast, 44 px targets, clipping
 and the two clamped state lines, layout shift in this machine's font and a
 wide one, terms, privacy stub) and writes screenshots plus an
 `index.md` to `~/.local/share/joedesk-qa/p3` (`JOED_QA_DIR` overrides it).
+The budget trace keeps timestamped long-task attribution, overlapping render
+and worker-reply events, and long-animation-frame script/layout attribution
+where supported. Desk and History live-push windows begin after their setup
+settles; setup tasks remain in the trace separately, and tasks crossing into
+an update window still count. The CI guard remains 125 ms (2.5 × reference).
+Term-focus checks reacquire rebuilt terms and wait up to 2 s for each term's
+own tip and expanded state. The large-ledger Settings check waits up to 5 s
+for its exact-byte title and accessible name before measuring containment.
+These checks report their failed sub-conditions explicitly.
 It uses `BROWSER_PATH`, a Playwright headless shell or Google Chrome:
 
 ```bash
@@ -820,6 +829,12 @@ widths, including “Stale 2 min” and “Loading”. Label evidence includes l
 glyph boxes, intact words, icon containment and no icon overlap, with an explicit
 check that only phone Loading hides its icon. At 360/390 in both themes it
 emits `header-{board-ok,needs-fix,data-delayed,broker-unsure,stale}` crops. It
+captures a static production-header clone outside the live header, with scripts
+running throughout; disabling scripts can consume a pending animation callback
+and strand the board's pending-frame flag (JOED-47). After the header loop at
+every width/theme, a refresh must increase the board's render count within 5 s.
+The large-TB check still requires its exact byte title and accessible name,
+formatted text and containment, and logs each failing condition. It
 measures exact 0 px movement outside the intrinsic pill within the
 same page and broker state, and compares every board-health sentence to its
 reserve. Node tests compare the six existing header labels (including Loading)
