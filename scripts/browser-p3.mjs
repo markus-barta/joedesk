@@ -189,18 +189,35 @@ async function key(page, name, modifiers = 0) {
 // explanation; on desktop, hovering does too.
 async function everyTerm(page, viewport, tag) {
   const focused = await page.evaluate(`(async () => {
-    const out = [];
-    for (const t of [...document.querySelectorAll('[data-term]')].filter(__audit.visible)) {
-      t.focus({ preventScroll: true });
-      await new Promise(r => requestAnimationFrame(r));
-      const tip = document.getElementById('tip');
-      out.push({ term: t.dataset.term, on: tip.classList.contains('on'), head: tip.querySelector('b')?.textContent, expanded: t.getAttribute('aria-expanded') });
-      t.blur();
+    const out = [], heads = ${JSON.stringify(Object.fromEntries(Object.entries(TERMS).map(([key, entry]) => [key, entry[0]])))};
+    const visible = () => [...document.querySelectorAll('[data-term]')].filter(__audit.visible);
+    // A tick can rebuild a section between terms. Keep identities (including
+    // repeated terms), not nodes which may be detached by the next frame.
+    const counts = new Map();
+    const terms = visible().map(t => { const term = t.dataset.term, index = counts.get(term) ?? 0; counts.set(term, index + 1); return { term, index }; });
+    for (const { term, index } of terms) {
+      const until = Date.now() + 2000;
+      let seen, t;
+      do {
+        t = visible().filter(e => e.dataset.term === term)[index];
+        if (t && document.activeElement !== t) t.focus({ preventScroll: true });
+        const tip = document.getElementById('tip');
+        const conditions = { connected: Boolean(t?.isConnected), focused: Boolean(t && document.activeElement === t),
+          tipOpen: tip.classList.contains('on'), ownHead: tip.querySelector('b')?.textContent === heads[term],
+          expanded: t?.getAttribute('aria-expanded') === 'true' };
+        seen = { term, index, head: tip.querySelector('b')?.textContent ?? null, expectedHead: heads[term],
+          expanded: t?.getAttribute('aria-expanded') ?? null, conditions, failed: Object.keys(conditions).filter(k => !conditions[k]) };
+        if (!seen.failed.length || Date.now() >= until) break;
+        await new Promise(r => setTimeout(r, 25));
+      } while (true);
+      out.push(seen);
+      t?.blur();
     }
     return out;
   })()`);
-  const badFocus = focused.filter(f => !f.on || f.head !== TERMS[f.term]?.[0] || f.expanded !== 'true');
-  check('AC-39', `${tag}: all ${focused.length} terms explain themselves on keyboard focus`, focused.length > 0 && !badFocus.length, badFocus.slice(0, 4));
+  const badFocus = focused.filter(f => f.failed.length);
+  check('AC-39', `${tag}: all ${focused.length} terms explain themselves on keyboard focus`, focused.length > 0 && !badFocus.length,
+    { failed: focused.length ? badFocus.slice(0, 4) : ['no visible terms'], count: focused.length });
   if (viewport.mobile) return;
   const count = await page.evaluate(`[...document.querySelectorAll('[data-term]')].filter(__audit.visible).length`);
   const badHover = [];
@@ -208,12 +225,13 @@ async function everyTerm(page, viewport, tag) {
     const box = await page.evaluate(`(() => { const t = [...document.querySelectorAll('[data-term]')].filter(__audit.visible)[${i}]; t.scrollIntoView({ block: 'center' }); const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, term: t.dataset.term }; })()`);
     await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
     const tip = await page.evaluate(`({ on: document.getElementById('tip').classList.contains('on'), head: document.getElementById('tip').querySelector('b')?.textContent })`);
-    if (!tip.on || tip.head !== TERMS[box.term][0]) badHover.push({ ...box, ...tip });
+    const failed = [!tip.on && 'tipOpen', tip.head !== TERMS[box.term][0] && 'ownHead'].filter(Boolean);
+    if (failed.length) badHover.push({ failed, ...box, ...tip, expectedHead: TERMS[box.term][0] });
     await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 });
   }
   await page.evaluate('window.scrollTo(0, 0)');
   await settle(page);
-  check('AC-39', `${tag}: all ${count} terms explain themselves on hover`, count > 0 && !badHover.length, badHover.slice(0, 4));
+  check('AC-39', `${tag}: all ${count} terms explain themselves on hover`, count > 0 && !badHover.length, { failed: count ? badHover.slice(0, 4) : ['no visible terms'], count });
 }
 
 async function focusChecks(page, tag) {
@@ -871,9 +889,9 @@ try {
   // dark, in this machine's font and the wide one, every screen, resizing the
   // live page. The page never scrolls sideways, nothing reaches past its
   // right edge and no text overlaps other text. Up to COMPACT px the header
-  // is the phone's (the nav in the bottom bar, 44 px buttons, icons
-  // centred); above, the desktop one. On Desk every light label, with every
-  // broker word, keeps the header in its row: nothing leaves it or overlaps,
+  // is the phone's (the nav in the bottom bar, 44 px buttons, the light's
+  // icon on its first line); above, the desktop one. On Desk every light label,
+  // with every broker word, keeps the header in its row: nothing leaves it or overlaps,
   // nothing else moves, and the label stays inside its button. Each desk
   // card's header keeps one box with its longest state and heartbeat texts.
   const { snapshot, history } = scenario(NOW);
@@ -923,7 +941,7 @@ try {
       check('header', `sweep ${tag}: the header's items stay in its row and never overlap at any of ${n}`, !fail.header.length, fail.header.slice(0, 4));
       check('header', `sweep ${tag}: one nav at every width, the bottom bar up to ${COMPACT} px and the header's above, all four screens in view`, !fail.nav.length, fail.nav.slice(0, 8));
       check('AC-30', `sweep ${tag}: the compact header's buttons and the bottom bar are 44 px targets up to ${COMPACT} px`, !fail.targets.length, fail.targets.slice(0, 4));
-      check('header', `sweep ${tag}: the header's and bottom bar's icons are centred at every width`, !fail.icons.length, fail.icons.slice(0, 4));
+      check('header', `sweep ${tag}: icons are centred, with the phone light's icon aligned to its first line, at every width`, !fail.icons.length, fail.icons.slice(0, 4));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: each desk card's header keeps one box with its longest state and heartbeat texts, which never overlap (two heartbeat lines at most, under the state below 340 px)`, !fail.cards.length, fail.cards.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: ${light.labels.length} light labels × ${light.brokers.length} broker words at every width: the label stays inside its button (the deferred one aside), nothing else in the header or the page moves`, !fail.labels.length, fail.labels.slice(0, 4));

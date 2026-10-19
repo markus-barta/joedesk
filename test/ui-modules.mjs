@@ -5,7 +5,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { headerHealth as frozenHeaderHealth } from './fixtures/header-health-c1c71a1.mjs';
+import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
+import { CI_GUARD, REFERENCE_BUDGET } from '../scripts/browser/budget.mjs';
+import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -20,12 +24,13 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const format = await import('../public/joe/format.js');
+const { cashCaption, stateCaption, reservedCaption } = await import('../public/joe/ui.js');
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus, headerHealth, executorProblem } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, executorProblem, heroLeft, keptHtml, positionsHtml } = await import('../public/joe/desk.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
 const { readdirSync } = await import('node:fs');
@@ -79,6 +84,225 @@ test('host gate: canonical hosts include the production host; others get the pri
     '100.127.255.255', 'hsb1.tail1234.ts.net', 'foo.hsb1.ts.net', 'hsb1.ts.net', 'cs0.barta.cm', 'cs0', 'CS0.BARTA.CM']) assert.ok(isCanonicalJoeHost(host), host);
   for (const host of ['example.com', '8.8.8.8', '100.63.255.255', '100.128.0.1', '100.64.0.256', '100.64.0.07', '192.168.1.10',
     '10.0.0.1', 'example.ts.net', 'hsb1.example.com', 'cs0.barta.com']) assert.ok(!isCanonicalJoeHost(host), host);
+});
+
+test('cash formatting: exact broker lexemes display at two decimals without a floating-point round trip', () => {
+  for (const [amount, text] of [['12345.67890123', '€ 12.345,68'], ['1.00500000', '€ 1,01'],
+    ['-1.00500000', '−€ 1,01'], ['0.00000001', '€ 0,00'], ['-0.00000001', '€ 0,00'],
+    ['9007199254740993.00500000', '€ 9.007.199.254.740.993,01'], ['12345.67000000', '€ 12.345,67']]) {
+    const value = { amount, currency: 'EUR' };
+    assert.deepEqual(format.cashAmount(value), { text, title: `Cash: EUR ${amount}` });
+    assert.equal(value.amount, amount);
+    for (const key of ['hero.cash', 'rt.cash']) {
+      const html = cashCaption({ state: 'fresh', value }, key);
+      assert.ok(html.includes(`title="Cash: EUR ${amount}" aria-label="Cash: EUR ${amount}"`));
+      assert.ok(html.includes(`>${text}</span>`));
+    }
+  }
+});
+
+test('cash captions: null, omitted and broken retained values always explain why', () => {
+  for (const key of ['hero.cash', 'rt.cash']) {
+    const nullHtml = cashCaption({ state: 'broken', value: null, reason: 'gateway_unconfirmed' }, key);
+    assert.match(nullHtml, />not reported · broker connection not confirmed<\/span>/);
+    assert.match(nullHtml, /title="Cash not reported · broker connection not confirmed" aria-label="Cash not reported · broker connection not confirmed"/);
+    const held = cashCaption({ state: 'broken', value: { amount: '12345.67890123', currency: 'EUR' },
+      retained: true, reason: 'gateway_unconfirmed' }, key);
+    assert.equal(held, nullHtml);
+    assert.match(cashCaption(null, key), />not reported · no data received yet<\/span>/);
+  }
+});
+
+test('cash captions: stale values keep exact accessibility and their own reason with the same reserve', () => {
+  const value = { amount: '12345.67890123', currency: 'EUR' };
+  const reserve = html => html.slice(html.indexOf('<span class="cash-sizing"'));
+  const fresh = cashCaption({ state: 'fresh', value }, 'hero.cash');
+  const stale = cashCaption({ state: 'stale', value, reason: 'snapshot_stale' }, 'hero.cash');
+  const absent = cashCaption({ state: 'broken', value: null, reason: 'source_unavailable' }, 'hero.cash');
+  assert.match(stale, />€ 12\.345,68 · updates are late<\/span>/);
+  assert.match(stale, /aria-label="Cash: EUR 12345\.67890123 · updates are late"/);
+  assert.equal(reserve(stale), reserve(fresh));
+  assert.equal(reserve(absent), reserve(fresh));
+});
+
+test('cash captions: Amy’s label and caption stay fixed; every null and stale reason reserves its own words', () => {
+  for (const [reason, why] of Object.entries(health.CELL_REASON)) {
+    for (const key of ['hero.cash', 'rt.cash']) {
+      const html = cashCaption({ state: 'broken', value: null, reason }, key);
+      assert.ok(html.includes('<span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span>'));
+      assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`not reported · ${why}`)}</span>`), reason);
+      assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`−€ 999.999,99 · ${why}`)}</span>`), reason);
+    }
+  }
+});
+
+test('hero captions: every reason reserves retained, stale, broken and null wording with real ages', () => {
+  const sizing = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
+  const html = reservedCaption('after fees', ['after fees']);
+  const phrases = sizing(html);
+  assert.ok(phrases.includes('after fees'));
+  assert.ok(phrases.includes('Not reported'));
+  assert.ok(phrases.includes('Unavailable · not available'));
+  for (const why of new Set(Object.values(health.CELL_REASON))) {
+    const escaped = format.esc(why), capital = health.capital(escaped);
+    assert.ok(phrases.includes(`Unavailable · ${escaped}`), why);
+    assert.ok(phrases.includes(`Not reported · ${escaped}`), why);
+    for (const ago of ['999 days ago', '23 h 59 min ago', 'age unknown']) {
+      assert.ok(phrases.includes(`Last good value, ${ago} · ${escaped}`), why);
+      assert.ok(phrases.includes(`As of ${ago} · ${escaped}`), why);
+      assert.ok(phrases.includes(`${capital} · as of ${ago}`), why);
+    }
+  }
+  for (const ago of ['999 days ago', '23 h 59 min ago', 'age unknown']) {
+    assert.ok(phrases.includes(`Last good value, ${ago}`));
+    assert.ok(phrases.includes(`As of ${ago}`));
+    assert.ok(phrases.includes(`Not available · as of ${ago}`));
+  }
+  assert.equal(phrases.length, new Set(phrases).size);
+  assert.ok(phrases.every(text => !text.includes('data-age')));
+  const visible = stateCaption({ state: 'broken', value: {}, retained: true, reason: 'gateway_unconfirmed', ageSeconds: 90 }, 'hero.open');
+  assert.match(reservedCaption(visible, ['after fees']), /<span class="account-caption"><span>Last good value, <span class="age" data-age="hero.open">1 min ago<\/span> · broker connection not confirmed<\/span>/);
+  assert.deepEqual(sizing(reservedCaption(visible, ['after fees'])), phrases, 'reserve stays identical across states');
+});
+
+test('hero captions: all four KPIs keep the same reserve through session loss and incomplete bookkeeping', () => {
+  const fresh = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
+  const session = board(fixture('a-gateway-up-but-dead'));
+  const incomplete = structuredClone(fresh);
+  incomplete.states['desks.j.equity'].value = null;
+  const kpis = ctx => [...heroLeft(ctx).matchAll(/<div class="kpi"[\s\S]*?<\/div>/g)].map(m => m[0]);
+  const reserve = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
+  const baseline = kpis(fresh);
+  assert.equal(baseline.length, 4);
+  for (const ctx of [fresh, session, incomplete]) {
+    const actual = kpis(ctx);
+    assert.equal(actual.length, 4);
+    actual.forEach((html, i) => {
+      assert.match(html, /<span class="c"><span class="account-caption">/);
+      assert.deepEqual(reserve(html), reserve(baseline[i]));
+      assert.ok(reserve(html).includes('Last good value, 999 days ago · broker connection not confirmed'));
+    });
+  }
+  assert.ok(reserve(baseline[2]).includes('started with € 15.000'));
+  assert.ok(reserve(baseline[2]).includes('J’s bookkeeping incomplete · desk total unavailable'));
+});
+
+test('position rows: omitted optional P&L stays a plain dash without a reason or title', () => {
+  for (const data of [valid.data, read('positions-null.json')]) {
+    const ctx = { states: panelStates({ data: { value: data } }, data.receivedAt), feeds: { data: { value: data } }, now: data.receivedAt };
+    const html = positionsHtml(ctx).html;
+    assert.match(html, /<div class="r"><span class="muted">—<\/span><\/div>/);
+    assert.doesNotMatch(html, /Open result:|Today’s result:|no data received yet/);
+  }
+  for (const field of ['dayPnl', 'openPnl']) for (const scope of ['stage0', 'keep']) {
+    const row = structuredClone(valid.data.positions.rows.find(r => r.scope === scope));
+    delete row.dayPnl; delete row.openPnl;
+    row.reasons = { [field]: 'not_exact_yet' };
+    const render = value => scope === 'keep' ? keptHtml({ states: { kept: { state: 'fresh', value: [value] } } })
+      : positionsHtml({ states: { positions: { state: 'fresh', value: [value] } }, feeds: {}, now: valid.data.receivedAt }).html;
+    assert.doesNotMatch(render(row), /not exact yet|no data received yet|Open result:|Today’s result:/, `${scope} absent ${field}`);
+    row[field] = null;
+    const html = render(row), label = field === 'openPnl' ? 'Open result' : 'Today’s result';
+    assert.ok(html.includes(`${label}: not exact yet`), `${scope} null ${field}`);
+    if (scope === 'stage0' && field === 'openPnl') assert.match(html, /title="Open result: not reported · not exact yet" aria-label="Open result: not reported · not exact yet">—<\/span>/);
+    row[field] = { amount: '1.25', currency: 'EUR' };
+    assert.doesNotMatch(render(row), /not exact yet|no data received yet|Open result:|Today’s result:/, `${scope} valued ${field}`);
+    if (scope === 'stage0' && field === 'openPnl') assert.match(render(row), /\+€ 1,25/);
+  }
+});
+
+test('position rows: null values expose their reasons visibly and in accessible dash names', () => {
+  const data = read('positions-null.json');
+  const cells = panelStates({ data: { value: data } }, data.receivedAt);
+  const ctx = { states: cells, feeds: { data: { value: data } }, now: data.receivedAt };
+  const kept = keptHtml(ctx), positions = positionsHtml(ctx).html;
+  for (const label of ['Quantity', 'Last price', 'Worth']) for (const why of ['not exact yet', 'not reported by the broker']) {
+    assert.ok(kept.includes(`title="${label}: not reported · ${why}" aria-label="${label}: not reported · ${why}">—</span>`));
+    assert.ok(kept.includes(`${label}: ${why}`));
+  }
+  assert.match(positions, /title="Last price: not reported · not reported by the broker"/);
+  assert.match(positions, /class="position-reasons">Last price: not reported by the broker/);
+  assert.doesNotMatch(kept.slice(kept.indexOf('<div class="prow"')), /<(?:button|a|input)\b|tabindex=/);
+  assert.match(kept, /data-keep="SXR8"/);
+  assert.match(kept, /data-keep="TSLA"/);
+  assert.equal(health.cellReason('not_exact_yet'), 'not exact yet');
+  assert.equal(health.cellReason('source_unavailable'), 'not reported by the broker');
+  assert.equal(health.cellReason('source_not_authoritative'), 'held back: the kept-holdings list disagrees');
+});
+
+test('position worth: null tracks stay hidden in place; valued tracks stay visible; KEEP has no track', () => {
+  const mapped = valid.data.positions.rows.find(row => row.scope === 'stage0');
+  const kept = valid.data.positions.rows.find(row => row.scope === 'keep');
+  for (const source of [mapped, { ...mapped, desk: null, scope: 'legacy' }, read('positions-unmapped.json'), kept]) {
+    for (const marketValue of [null, { amount: '0', currency: 'EUR' }, { amount: '12.5', currency: 'EUR' }]) {
+      const row = { ...source, marketValue, reasons: { ...source.reasons } };
+      if (marketValue === null) row.reasons.marketValue = 'not_exact_yet';
+      else delete row.reasons.marketValue;
+      const ctx = { states: { positions: { state: 'fresh', value: [row] }, kept: { state: 'fresh', value: [row] } }, feeds: {} };
+      const html = row.scope === 'keep' ? keptHtml(ctx) : positionsHtml(ctx).html;
+      if (row.scope === 'keep') assert.doesNotMatch(html, /class="vbar"/);
+      else if (marketValue === null) assert.match(html, /<span class="vbar" style="visibility:hidden"><\/span>/,
+        'retain the track element and its layout space without painting an unknown worth');
+      else {
+        assert.match(html, /<span class="vbar">/);
+        assert.doesNotMatch(html, /visibility:hidden/);
+      }
+    }
+  }
+});
+
+test('unmapped positions: visible reason, honest row count, neutral identity, last in desk order, excluded from figures', () => {
+  const data = read('positions-null.json'), unmapped = read('positions-unmapped.json');
+  const mapped = data.positions.rows[0];
+  data.positions.rows.push(...['joe', 'joel'].map((desk, i) => ({ ...structuredClone(mapped), desk, symbol: `DESK${i}` })),
+    { ...structuredClone(mapped), desk: null, symbol: 'OLD', scope: 'legacy' });
+  const context = value => ({ states: panelStates({ data: { value } }, value.receivedAt), feeds: { data: { value } }, now: value.receivedAt });
+  const before = context(data), baseline = positionsHtml(before);
+  assert.equal(baseline.sub, '4 open · desk positions only · each in its own currency', 'no unmapped rows: byte-identical subtitle');
+  // Put it first in the input, with a symbol that also sorts before the desks.
+  data.positions.rows.unshift(unmapped);
+  const after = context(data), rendered = positionsHtml(after);
+  const row = rendered.html.slice(rendered.html.lastIndexOf('<div class="prow"'));
+  const label = 'No desk · not matched to a desk';
+  assert.ok(row.includes(`title="${label}" aria-label="${label}">${label}</span>`));
+  assert.ok(row.includes('<span class="sym" aria-hidden="true">AAA</span>'));
+  assert.doesNotMatch(row, /var\(--desk-|class="i im"|class="dmark"/);
+  assert.deepEqual([...rendered.html.matchAll(/<div class="name"><b>([^<]+)<\/b>/g)].map(m => m[1]),
+    ['OLD', 'DEMO', 'DESK0', 'DESK1', 'AAA'], 'legacy order and all mapped desk order stay unchanged');
+  for (const field of ['Quantity', 'Last price', 'Worth', 'Open result']) {
+    assert.ok(row.includes(`title="${field}: not reported · not exact yet" aria-label="${field}: not reported · not exact yet">—</span>`));
+  }
+  for (const field of ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result']) assert.ok(row.includes(`${field}: not exact yet`));
+  assert.equal(rendered.sub, '5 open · 1 not matched to a desk · each in its own currency');
+  assert.equal(Number.parseInt(rendered.sub), [...rendered.html.matchAll(/<div class="prow" data-desk=/g)].length,
+    'open count matches every listed row, including legacy and unmapped positions');
+  for (const name of DATA_PANELS.filter(name => name !== 'positions')) {
+    assert.deepEqual(after.states[name], before.states[name], `${name}: no guessed attribution or partial sum`);
+  }
+  assert.equal(heroLeft(after), heroLeft(before), 'Today totals and account figures stay unchanged');
+  assert.equal(keptHtml(after), keptHtml(before));
+  const only = context({ ...data, positions: { ...data.positions, rows: [unmapped] } });
+  assert.equal(positionsHtml(only).sub, '1 open · 1 not matched to a desk · each in its own currency');
+  assert.ok(positionsHtml(only).html.includes(label), 'zero desk rows still shows the unmapped position');
+  const multiple = context({ ...data, positions: { ...data.positions, rows: [...data.positions.rows, { ...unmapped, symbol: 'BBB' }] } });
+  assert.equal(positionsHtml(multiple).sub, '6 open · 2 not matched to a desk · each in its own currency');
+});
+
+test('kept worth: one null summand withholds the complete total rather than showing a partial sum', () => {
+  const data = read('valid.json').data;
+  const rows = data.positions.rows.filter(row => row.scope === 'keep');
+  for (const state of ['fresh', 'stale', 'broken']) {
+    const ctx = { states: { kept: { state, value: rows, reason: state === 'fresh' ? null : 'snapshot_stale', ageSeconds: 90 } } };
+    assert.match(keptHtml(ctx), /worth € 600,00 and \$ 200,00/i);
+    const incomplete = structuredClone(rows);
+    incomplete[0].marketValue = null;
+    incomplete[0].reasons = { marketValue: 'source_unavailable' };
+    ctx.states.kept.value = incomplete;
+    const html = keptHtml(ctx);
+    assert.match(html, /Worth not available · not reported by the broker/);
+    assert.doesNotMatch(html.slice(0, html.indexOf('<div class="prow"')), /worth \$ 200,00/i);
+    assert.equal(format.sumByCurrency(incomplete.map(row => row.marketValue)), null);
+  }
 });
 
 test('ledger size: decimal MB round half-even from exact integer bytes', () => {
@@ -224,6 +448,98 @@ test('header: capture leaves the header unchanged; ledger Needs fix carries its 
   Object.assign(b.feeds.data.value.safety.executor, { status: 'running' });
   delete b.feeds.data.value.safety.executor.reason;
   assert.deepEqual(view(), healthy);
+});
+
+// Execute the actual production scheduler. Only its render body and the native
+// frame queue are stand-ins; Blink consumes due callbacks even when disabled
+// scripting makes their JS invocation return without running (JOED-47).
+function headerFrameHarness(onRender = () => {}) {
+  const app = readFileSync(new URL('../public/joe/app.js', import.meta.url), 'utf8');
+  const schedule = app.match(/^  function schedule\(reason = 'tick'\) \{[\s\S]*?^  \}/m)?.[0];
+  assert.ok(schedule, 'use the production schedule(), not a rewritten copy');
+  let next = 0;
+  const queued = [];
+  const board = runInNewContext(`(() => {
+    let frame = 0, pending = null, renders = 0;
+    function render(reason) { frame = 0; renders++; onRender(reason); }
+    ${schedule}
+    return { schedule, state: () => ({ frame, renders }) };
+  })()`, { onRender, requestAnimationFrame: callback => { queued.push(callback); return ++next; } });
+  return { ...board, queued, due: (scriptsEnabled = true) => {
+    const callbacks = queued.splice(0);
+    if (scriptsEnabled) for (const callback of callbacks) callback();
+  } };
+}
+
+test('header crops: consuming a disabled rAF strands schedule(), deferring it preserves rendering', () => {
+  const dropped = headerFrameHarness();
+  dropped.schedule();
+  dropped.due(false);
+  assert.ok(dropped.state().frame > 0);
+  for (const reason of ['data', 'tick', 'fleet-config']) dropped.schedule(reason);
+  dropped.due();
+  assert.equal(dropped.state().renders, 0, 're-enabling scripts cannot replay the consumed callback');
+  assert.equal(dropped.queued.length, 0, 'refresh/tick cannot schedule while frame stays set');
+
+  const deferred = headerFrameHarness();
+  deferred.schedule();
+  // No frame is consumed during a true pause; it remains queued on resume.
+  assert.equal(deferred.queued.length, 1);
+  deferred.due();
+  deferred.schedule('data');
+  deferred.due();
+  assert.equal(deferred.state().renders, 2);
+  assert.equal(deferred.state().frame, 0);
+});
+
+test('header crops: exact serialized clone survives live renders and is removed on success or failure', async () => {
+  for (const fail of [false, true]) {
+    const liveButton = { innerHTML: 'live header' }, button = {
+      ...liveButton, attributes: { id: 'hdrHealth', title: 'previous title' },
+      setAttribute(key, value) { this.attributes[key] = value; },
+      removeAttribute(key) { delete this.attributes[key]; },
+    };
+    let mounted = null;
+    const copy = { style: {}, attributes: {},
+      querySelector: selector => { assert.equal(selector, '#hdrHealth'); return button; },
+      querySelectorAll: selector => { assert.equal(selector, '[id]'); return [button]; },
+      setAttribute(key, value) { this.attributes[key] = value; },
+      removeAttribute(key) { delete this.attributes[key]; },
+      remove() { mounted = null; },
+    };
+    const live = { cloneNode: deep => { assert.equal(deep, true); return copy; },
+      getBoundingClientRect: () => ({ left: 0, width: 390 }),
+      parentElement: { append: node => { mounted = node; } },
+    };
+    const document = { documentElement: { scrollHeight: 2000 },
+      querySelector: selector => selector === 'header.top' ? live : mounted,
+    };
+    const page = { evaluate: source => runInNewContext(source, { document, scrollX: 0 }) };
+    const board = headerFrameHarness(() => { liveButton.innerHTML = 'next live header'; });
+    const view = { html: '<b>Needs fix</b>', label: 'Needs fix. Open Desk.', title: null };
+    board.schedule('tick');
+    const capture = captureHeaderCrop(page, view, async selector => {
+      assert.equal(selector, '[data-joedesk-header-crop]');
+      assert.equal(mounted, copy);
+      assert.equal(copy.style.position, 'absolute');
+      assert.equal(copy.style.top, '2016px');
+      assert.equal(copy.style.width, '390px');
+      assert.equal(button.attributes.id, undefined, 'renders still find only the live header IDs');
+      assert.equal(button.attributes.title, undefined, 'no stale tooltip on the clone');
+      assert.equal(button.attributes['aria-label'], view.label);
+      assert.equal(copy.inert, true);
+      board.due();
+      assert.equal(liveButton.innerHTML, 'next live header');
+      assert.equal(button.innerHTML, view.html, 'capture keeps the requested production markup across a tick');
+      board.schedule('data'); board.due();
+      assert.equal(board.state().renders, 2, 'a refresh still renders while capture is in flight');
+      if (fail) throw new Error('capture failed');
+    });
+    if (fail) await assert.rejects(capture, /capture failed/);
+    else await capture;
+    assert.equal(mounted, null, 'the temporary header is always removed');
+    assert.equal(liveButton.innerHTML, 'next live header', 'cleanup never restores stale live markup');
+  }
 });
 
 test('Desk executor problem: precise capture/full-ledger sentences, optional sizes and recovery', () => {
@@ -741,5 +1057,56 @@ test('terms: every entry has a plain label, a meaning and the trade term', () =>
   for (const [key, [label, meaning, also]] of Object.entries(TERMS)) {
     assert.ok(label && meaning && also, key);
     assert.doesNotMatch(label, /\b(P&L|IB|HALT|KEEP|NAV|FIFO|Gateway)\b/, key);
+  }
+});
+
+test('browser budget: setup stays separate while boundary-crossing and live tasks keep the 125 ms guard', () => {
+  assert.equal(REFERENCE_BUDGET.taskMs, 50);
+  assert.equal(CI_GUARD.taskMs, 125);
+  assert.equal(CI_GUARD.patchMs / REFERENCE_BUDGET.patchMs, 2.5);
+  assert.equal(CI_GUARD.historyMs / REFERENCE_BUDGET.historyMs, 2.5);
+  const tasks = [{ startTime: 0, duration: 90 }, { startTime: 90, duration: 132 },
+    { startTime: 260, duration: 132 }, { startTime: 450, duration: 125 }, { startTime: 650, duration: 60 }];
+  const windows = [{ name: 'desk updates', start: 100, end: 250 }, { name: 'history setup', start: 250, end: 400 },
+    { name: 'history updates', start: 400, end: 650 }];
+  const worker = { reason: 'history-worker', at: 455, ms: 600 };
+  const render = { reason: 'data', at: 110, ms: 28 };
+  const frame = { startTime: 90, duration: 140, scripts: [{ invoker: 'Window.requestAnimationFrame', forcedStyleAndLayoutDuration: 100 }] };
+  const details = attributeBudgetTasks({ tasks, frames: [frame] }, [worker, render], windows);
+  assert.deepEqual(details.map(t => t.phases), [[], ['desk updates'], ['history setup'], ['history updates'], []]);
+  assert.deepEqual(details.filter(t => t.phases.some(p => p.endsWith('updates'))).filter(t => t.duration >= CI_GUARD.taskMs).map(t => t.duration), [132, 125]);
+  assert.deepEqual(details[1].events, [render], '600 ms in the worker is not a 600 ms task on the page');
+  assert.deepEqual(details[3].events, [worker], 'the worker reply is attributed at receipt time');
+  assert.deepEqual(details[1].frames, [frame], 'style/layout evidence is retained beside the task');
+  assert.deepEqual(details[3].frames, []);
+});
+
+test('browser budget: observer snapshots drain undelivered entries once, with attribution and optional frame support', () => {
+  for (const hasFrames of [true, false]) {
+    const observers = [];
+    class Observer {
+      static supportedEntryTypes = hasFrames ? ['longtask', 'long-animation-frame'] : ['longtask'];
+      constructor(callback) { this.callback = callback; this.queued = []; observers.push(this); }
+      observe(options) { this.options = options; }
+      takeRecords() { return this.queued.splice(0); }
+    }
+    const window = {};
+    // Execute the exact serialized browser payload without a browser or any
+    // imported closure. Queue records without invoking their delivery callback.
+    runInNewContext(`(${observeBudgetTasks.toString()})()`, { window, PerformanceObserver: Observer });
+    const attribution = { name: 'unknown', containerType: 'window', containerId: '', containerName: '', containerSrc: '' };
+    observers[0].queued.push({ startTime: 90, duration: 132, name: 'self', attribution: [attribution] });
+    if (hasFrames) observers[1].queued.push({ startTime: 90, duration: 140, blockingDuration: 90,
+      renderStart: 95, styleAndLayoutStart: 120, scripts: [{ invoker: 'Window.requestAnimationFrame', duration: 28, forcedStyleAndLayoutDuration: 2 }] });
+    const snapshot = window.__budgetTasks.snapshot();
+    assert.equal(snapshot.hasFrames, hasFrames);
+    assert.equal(snapshot.tasks[0].duration, 132);
+    assert.deepEqual({ ...snapshot.tasks[0].attribution[0] }, attribution);
+    assert.equal(snapshot.frames.length, hasFrames ? 1 : 0);
+    if (hasFrames) assert.equal(snapshot.frames[0].scripts[0].forcedStyleAndLayoutDuration, 2);
+    assert.equal(window.__budgetTasks.snapshot().tasks.length, 1, 'drained entries are never duplicated');
+    assert.deepEqual({ ...observers[0].options }, { type: 'longtask', buffered: true });
+    observers[0].callback({ getEntries: () => [{ startTime: 450, duration: 125, name: 'self', attribution: [] }] });
+    assert.equal(window.__budgetTasks.snapshot().tasks.length, 2, 'delivered entries are retained too');
   }
 });

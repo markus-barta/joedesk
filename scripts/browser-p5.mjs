@@ -16,6 +16,7 @@ import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { designFleet, designActions, designSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
 import { pngColours } from './browser/pixels.mjs';
+import { captureHeaderCrop } from './browser/header-crop.mjs';
 
 // The page's own model, for the words and keys Settings must show.
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
@@ -255,7 +256,7 @@ try {
       await editabilityChecks(tag, viewport, fleet);
       const rt = await runtime();
       const want = ['Paper · the board data and the fleet settings both say paper', 'Off · paper trading is not paused', 'Answering · checked 18 s ago (19:42:13)',
-        'Running · broker reachable · brakes off · checked 19:42:13', 'Last numbers 19:42:22 · 9 s old · refreshes every 15 s', 'Board OK · numbers are up to date', 'DU…0597 · € 31.482,75 · checked 9 s ago'];
+        'Running · broker reachable · brakes off · checked 19:42:13', 'Last numbers 19:42:22 · 9 s old · refreshes every 15 s', 'Board OK · numbers are up to date', 'DU…0597 · € 31.482,75 · checked 9 s ago Cash cash · as the broker reports it not reported · no data received yet'];
       const srcs = ['mode', 'safety.halt', 'safety.gateway', 'GET /v1/health on hsb0', 'generatedAt', 'boardHealth', 'brokerAccount.accountHint'];
       check('AC-25', `${tag}: Runtime state shows the seven rows with their sources`, J(rt.map(r => r.lab)) === J(RT_LABELS) && rt.every((r, i) => N(r.val) === N(want[i]) && r.src === srcs[i]), rt);
       if (viewport === VIEWPORTS[0] && theme === 'light') {
@@ -334,15 +335,180 @@ try {
       const tag = `${viewport.name} ${theme} without executor or account hint`;
       await openSettings(bare, viewport, theme);
       const rt = await runtime();
-      check('AC-25', `${tag}: absent proposed fields show "Not reported"`, rt[3].val === 'Not reported' && N(rt[6].val) === 'Account number not reported · € 31.482,75 · checked 9 s ago', rt);
+      check('AC-25', `${tag}: absent proposed fields show "Not reported"`, rt[3].val === 'Not reported' && N(rt[6].val) === 'Account number not reported · € 31.482,75 · checked 9 s ago Cash cash · as the broker reports it not reported · no data received yet', rt);
       await auditScreen(page, viewport, theme, 'settings (not reported)');
       await leakChecks(tag);
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-settings-not-reported`, 'Settings without the executor report or the account hint: "Not reported"');
     }
   }
 
+  // JOED-49: one real account observation through ingress, shared selectors
+  // and both surfaces. Browser execution/crops belong to PR CI.
+  if (run('cash')) {
+    const viewports = [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }];
+    const amount = '12345.67890123';
+    const crop = async (selector, name) => {
+      const clip = await ev(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
+      writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+      shots.push({ file: `${name}.png`, what: `Paper-account cash: ${name}` });
+    };
+    for (const viewport of viewports) for (const theme of THEMES) {
+      const { snapshot: base } = designSnapshot(NOW);
+      const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b);
+      let seq = base.seq, offset = 0;
+      const push = async (phase, seconds) => {
+        b.setNow(at(NOW, offset + seconds));
+        const next = phase === 'session' ? JSON.parse(readFileSync(new URL('../fixtures/failures/a-gateway-up-but-dead.json', import.meta.url))).payload : structuredClone(base);
+        next.seq = ++seq; next.generatedAt = b.clock(); next.safety.gateway.checkedAt = b.clock();
+        if (phase === 'session') next.safety.gateway.reason = 'gateway_unconfirmed';
+        if (['null', 'session', 'not-exact'].includes(phase)) {
+          next.brokerAccount.cash = null;
+          next.brokerAccount.reasons = { cash: phase === 'session' ? 'gateway_unconfirmed' : phase === 'not-exact' ? 'not_exact_yet' : 'source_unavailable' };
+        } else if (phase !== 'rev7') next.brokerAccount.cash = { amount, currency: 'EUR' };
+        const accepted = await b.push(next);
+        check('paper-cash', `${viewport.name} ${theme} ${phase}: real ingress accepts the snapshot`, accepted.status === 200, accepted);
+      };
+      for (const screen of ['desk', 'settings']) {
+        offset = screen === 'desk' ? 0 : 300;
+        await push('value', 0);
+        b.setNow(at(NOW, offset + 9));
+        await configure(page, viewport, theme);
+        await load(page, b.url, screen);
+        if (screen === 'settings') await waitFor(page, `document.querySelector('#rtRows [data-cash="rt.cash"]')`);
+        const selector = screen === 'desk' ? '#heroL [data-cell="hero.account"]' : '#rtRows .rt-row:last-child';
+        const cashKey = screen === 'desk' ? 'hero.cash' : 'rt.cash';
+        const surface = screen === 'desk' ? 'desk-hero-cash' : 'settings-account-cash';
+        // Compare the cash surface in its own account box. Earlier Settings
+        // rows have independent state copy; their movement is not cash layout.
+        const measure = () => ev(`(() => {
+          const parent = document.querySelector(${J(selector)}), p = parent.getBoundingClientRect();
+          const nodes = [parent, parent.querySelector('.cash-reserve'), parent.querySelector('[data-cash]')];
+          if (${J(screen)} === 'desk') nodes.push(document.getElementById('deskHero'));
+          return nodes.map((e, i) => { const r = e.getBoundingClientRect(); return { key: i, top: r.top - p.top, left: r.left - p.left, width: r.width, height: r.height }; });
+        })()`);
+        const baseline = await measure();
+        for (const phase of ['value', 'stale', 'null', 'not-exact', 'session', 'rev7', 'recovered']) {
+          if (phase === 'stale') b.setNow(at(NOW, offset + 90));
+          else if (phase !== 'value') await push(phase === 'recovered' ? 'value' : phase, 120 + ['null', 'not-exact', 'session', 'rev7', 'recovered'].indexOf(phase) * 30);
+          await ev('window.__joedesk.refresh().then(() => true)');
+          await settle(page);
+          const seen = await ev(`(() => {
+            const e = document.querySelector('[data-cash="${cashKey}"]'), parent = document.querySelector(${J(selector)});
+            const r = e.getBoundingClientRect(), p = parent.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(e);
+            const glyphs = [...range.getClientRects()].map(g => ({ left: g.left, right: g.right, top: g.top, bottom: g.bottom }));
+            const cs = getComputedStyle(e);
+            return { text: e.innerText.trim(), label: e.closest('.cash-block').querySelector('.cash-label').innerText, caption: e.closest('.cash-block').querySelector('.cash-caption').innerText, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'),
+              fits: glyphs.every(g => g.left >= p.left - 0.5 && g.right <= p.right + 0.5 && g.top >= p.top - 0.5 && g.bottom <= p.bottom + 0.5),
+              clipped: e.scrollWidth > e.clientWidth || e.scrollHeight > e.clientHeight, style: cs.fontStyle,
+              horizontal: __audit.horizontal(), clipping: __audit.clipping() };
+          })()`);
+          const tag = `${viewport.name} ${theme} ${screen} cash ${phase}`;
+          const hasValue = ['value', 'stale', 'recovered'].includes(phase);
+          const why = phase === 'stale' ? 'updates are late' : phase === 'session' ? 'broker connection not confirmed'
+            : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact yet' : 'not reported by the broker';
+          const expected = hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `not reported · ${why}`;
+          const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : `Cash not reported · ${why}`;
+          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme, independent null reason`, N(seen.text) === expected && seen.label === 'Cash' && seen.caption === 'cash · as the broker reports it' && seen.title === exact && seen.name === exact && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
+          check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
+          const after = await measure();
+          const moved = baseline.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== after[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: after[i]?.[k] })));
+          check('paper-cash', `${tag}: cash and account boxes have exactly 0 px shift`, !moved.length, moved);
+          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? '#deskHero' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
+        }
+      }
+    }
+  }
+
+  // Revs 8/9: partial observations and unmapped desk identity stay explicit;
+  // KEEP stays inert. Browser execution and crops belong to PR CI.
+  if (run('positions')) {
+    const nulls = JSON.parse(readFileSync(new URL('../fixtures/positions-null.json', import.meta.url)));
+    const unmapped = JSON.parse(readFileSync(new URL('../fixtures/positions-unmapped.json', import.meta.url)));
+    for (const viewport of [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }]) for (const theme of THEMES) {
+      const { snapshot } = designSnapshot(NOW);
+      snapshot.positions.rows = structuredClone(nulls.positions.rows);
+      for (const row of snapshot.positions.rows) row.updatedAt = NOW;
+      const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b); b.setNow(NOW);
+      const accepted = await b.push(snapshot);
+      const tag = `${viewport.name} ${theme} nullable positions`;
+      check('positions', `${tag}: real ingress accepts per-field null reasons`, accepted.status === 200, accepted);
+      b.setNow(at(NOW, 9));
+      await configure(page, viewport, theme); await load(page, b.url, 'desk');
+      await waitFor(page, `document.querySelectorAll('#kept [data-keep]').length === 2`);
+      const figureSelectors = ['#deskHero', '#heroL .kpi', '#heroL .cash-reserve', '#desks', '.dcard'];
+      const figureBoxes = await rects(figureSelectors);
+      const figures = () => ev(`({ values: [...document.querySelectorAll('#heroL .display, #heroL .kpi dd > .bn, #heroL [data-cash], .dcard .dnums .v')].map(e => e.innerText), count: document.getElementById('posSub').innerText })`);
+      const before = await figures();
+      snapshot.seq++;
+      snapshot.positions.rows.unshift({ ...structuredClone(unmapped), updatedAt: NOW });
+      const withUnmapped = await b.push(snapshot);
+      check('desk-unmapped', `${tag}: real ingress accepts a null desk with its own reason`, withUnmapped.status === 200, withUnmapped);
+      await ev('window.__joedesk.refresh().then(() => true)'); await settle(page);
+      await waitFor(page, `document.querySelector('#positions [data-desk=""] .name > span[aria-label]')`);
+      const after = await figures();
+      check('desk-unmapped', `${tag}: desk cards, Today and account figures exclude the unmapped row`, J(before.values) === J(after.values), { before, after });
+      check('desk-unmapped', `${tag}: open count includes every listed row and names the unmatched row`,
+        N(before.count) === '1 open · desk positions only · each in its own currency' &&
+        N(after.count) === '2 open · 1 not matched to a desk · each in its own currency', { before: before.count, after: after.count });
+      const afterBoxes = await rects(figureSelectors);
+      const figureMovement = figureBoxes.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== afterBoxes[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: afterBoxes[i]?.[k] })));
+      if (figureBoxes.length !== afterBoxes.length) figureMovement.push({ count: [figureBoxes.length, afterBoxes.length] });
+      check('desk-unmapped', `${tag}: cash, KPI reserves and desk cards have exactly 0 px shift`, !figureMovement.length, figureMovement);
+      const seen = await ev(`(() => ({
+        kept: [...document.querySelectorAll('#kept [data-keep]')].map(row => ({ symbol: row.dataset.keep,
+          text: row.innerText, reasons: row.querySelector('.position-reasons')?.innerText,
+          dashes: [...row.querySelectorAll('[aria-label]')].map(e => ({ text: e.innerText, title: e.title, name: e.getAttribute('aria-label') })),
+          interactive: row.querySelectorAll('button, a, input, [tabindex]').length, tracks: row.querySelectorAll('.vbar').length })),
+        worth: document.querySelector('#kept .pstate').innerText,
+        desk: document.querySelector('#positions [data-desk="j"]')?.innerText,
+        unmapped: (() => { const row = document.querySelector('#positions [data-desk=""]'), label = row.querySelector('.name > span[aria-label]');
+          const track = row.querySelector('.vbar'), targets = [row, ...row.children, track];
+          const boxes = () => targets.map(e => { const r = e.getBoundingClientRect(); return [r.top, r.left, r.width, r.height]; });
+          const visibility = getComputedStyle(track).visibility, original = track.style.visibility, hiddenBoxes = boxes();
+          track.style.visibility = 'visible'; const visibleBoxes = boxes(); track.style.visibility = original;
+          return { text: row.innerText, reason: row.querySelector('.position-reasons')?.innerText, label: label.innerText, title: label.title, name: label.getAttribute('aria-label'),
+            worthTrack: { visibility, hiddenBoxes, visibleBoxes },
+            colour: row.querySelector('.sym').getAttribute('style'), marks: row.querySelectorAll('.im, .dmark').length,
+            dashes: [...row.querySelectorAll('.position-value')].map(e => ({ text: e.textContent, title: e.title, name: e.getAttribute('aria-label') })) }; })(),
+        order: [...document.querySelectorAll('#positions .prow:not(.hd) .name > b')].map(e => e.innerText),
+        mark: [...document.querySelectorAll('#positions [aria-label]')].some(e => e.getAttribute('aria-label') === 'Last price: not reported · not reported by the broker' && e.title === e.getAttribute('aria-label') && e.textContent === '—'),
+        horizontal: __audit.horizontal(), clipping: __audit.clipping()
+      }))()`);
+      for (const row of seen.kept) {
+        const why = row.symbol === 'SXR8' ? 'not exact yet' : 'not reported by the broker';
+        check('positions', `${tag} ${row.symbol}: quantity and values visibly explain their nulls`,
+          ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => row.reasons?.includes(`${label}: ${why}`)) &&
+          ['Quantity', 'Last price', 'Worth'].every(label => row.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · ${why}` && d.name === d.title)), row);
+        check('KEEP', `${tag} ${row.symbol}: no interactive element inside the kept row`, row.interactive === 0, row);
+        check('positions', `${tag} ${row.symbol}: unknown KEEP worth has no bar track`, row.tracks === 0, row);
+      }
+      check('positions', `${tag}: a stage0 null mark has its accessible and visible reason`, seen.mark && seen.desk?.includes('Last price: not reported by the broker'), seen);
+      const deskLabel = 'No desk · not matched to a desk', u = seen.unmapped;
+      check('desk-unmapped', `${tag}: unknown worth hides the track with exactly 0 px row, cell or track shift`,
+        u.worthTrack.visibility === 'hidden' && J(u.worthTrack.hiddenBoxes) === J(u.worthTrack.visibleBoxes), u.worthTrack);
+      check('desk-unmapped', `${tag}: visible name line, title and accessible name carry the desk reason without a desk colour or mark`,
+        u.label === deskLabel && u.title === deskLabel && u.name === deskLabel && !u.colour && u.marks === 0 && J(seen.order) === J(['DEMO', 'AAA']), seen);
+      check('desk-unmapped', `${tag}: all null values stay dashes with their own reasons`,
+        ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => u.reason?.includes(`${label}: not exact yet`)) &&
+        ['Quantity', 'Last price', 'Worth', 'Open result'].every(label => u.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · not exact yet` && d.name === d.title)), u);
+      check('positions', `${tag}: no partial kept worth is presented as complete`, /Worth not available · not exact yet · not reported by the broker/.test(N(seen.worth)), seen.worth);
+      check('positions', `${tag}: no overflow or clipping`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
+      const clip = await ev(`(() => { const r = document.getElementById('kept').getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
+      const file = `${viewport.name}-${theme}-desk-kept-null.png`;
+      writeFileSync(join(QA_DIR, file), Buffer.from(data, 'base64'));
+      shots.push({ file, what: `Nullable KEEP rows and unavailable worth: ${tag}` });
+      const deskClip = await ev(`(() => { const r = document.querySelector('#positions [data-desk=""]').getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const deskCrop = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: deskClip });
+      const deskFile = `${viewport.name}-${theme}-desk-unmapped.png`;
+      writeFileSync(join(QA_DIR, deskFile), Buffer.from(deskCrop.data, 'base64'));
+      shots.push({ file: deskFile, what: `Unmapped desk position with its visible reason: ${tag}` });
+    }
+  }
+
   // JOED-44: real ingress -> shared selectors -> runtime row and header.
-  // CI owns browser execution and emits both crops for the coordinator's gate.
+  // CI owns browser execution and emits the crops for the coordinator's gate.
   if (run('executor')) {
     await page.s('DOM.enable');
     await page.s('CSS.enable');
@@ -366,8 +532,13 @@ try {
       label: reason === 'board_ok' ? 'Board OK' : reason === 'snapshot_stale' ? `Stale ${age(179)}`
           : reason === 'gateway_unconfirmed' ? 'Broker unsure'
             : ['halt_on', 'ledger_size_limit', 'gateway_down', 'feed_disconnected', 'equity_unavailable', 'producer_stuck', 'day_unavailable_rth', 'no_snapshot'].includes(reason) ? 'Needs fix' : 'Data delayed',
-      statusTone: 'warn',
+      statusTone: reason === 'board_ok' ? 'ok'
+        : ['halt_on', 'ledger_size_limit', 'gateway_down', 'feed_disconnected', 'equity_unavailable', 'producer_stuck', 'day_unavailable_rth', 'no_snapshot'].includes(reason) ? 'bad' : 'warn',
     }));
+    const headerCrops = new Map([
+      ['board_ok', 'board-ok'], ['ledger_size_limit', 'needs-fix'],
+      ['refresh_failed', 'data-delayed'], ['gateway_unconfirmed', 'broker-unsure'], ['snapshot_stale', 'stale'],
+    ]);
     const executorViewports = [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }];
     for (const viewport of executorViewports) for (const theme of THEMES) {
       const b = await designBoard();
@@ -443,7 +614,7 @@ try {
       const header = await ev(`document.getElementById('hdrHealth').innerHTML`);
       const ctx = { feeds: { data: { value: snapshot } }, states: { gateway: { state: 'fresh' } } };
       const reference = headerHealth(ctx, { reason: 'board_ok', label: 'Board OK', statusTone: 'ok' });
-      for (const h of [...healthCases, { label: 'Loading', statusTone: 'warn' }]) {
+      for (const h of [...healthCases, { label: 'Loading', statusTone: 'none' }]) {
         const view = headerHealth(ctx, h);
         // Measure both states in one synchronous page task. No stylesheet,
         // viewport, fixture or broker change, and no tick can interleave.
@@ -455,7 +626,8 @@ try {
           button.innerHTML = ${J(view.html)};
           const after = __audit.rects(${J(geometrySelectors)}), afterBroker = button.querySelector('.lbl-long').textContent;
           const label = button.querySelector('b');
-          const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), css = getComputedStyle(button);
+          const iconNode = button.querySelector('svg'), iconVisible = __audit.visible(iconNode);
+          const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), css = getComputedStyle(button), icon = iconNode.getBoundingClientRect();
           const range = document.createRange(), glyphs = [], words = [];
           const edges = r => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
           range.selectNodeContents(label);
@@ -472,33 +644,46 @@ try {
             }
           }
           const inside = glyphs.length > 0 && glyphs.every(r => r.left >= Math.max(cell.left, box.left + parseFloat(css.paddingLeft)) - 0.5 && r.right <= Math.min(cell.right, box.right - parseFloat(css.paddingRight)) + 0.5 && r.top >= box.top && r.bottom <= box.bottom);
+          const iconInside = !iconVisible || (icon.left >= box.left && icon.right <= box.right && icon.top >= box.top && icon.bottom <= box.bottom);
+          const iconOverlap = iconVisible ? glyphs.filter(r => Math.min(r.right, icon.right) - Math.max(r.left, icon.left) > 0.5 && Math.min(r.bottom, icon.bottom) - Math.max(r.top, icon.top) > 0.5) : [];
           const ellipsis = css.textOverflow === 'ellipsis' || getComputedStyle(label).textOverflow === 'ellipsis' || /…|\\.\\.\\./u.test(label.textContent);
           const row = document.querySelector('.top-in'), rowBox = row.getBoundingClientRect(), rowCSS = getComputedStyle(row);
           const first = row.querySelector('.brand').getBoundingClientRect(), last = document.getElementById('themeBtn').getBoundingClientRect();
           const items = [...row.children].filter(__audit.visible).map(e => e.getBoundingClientRect());
           const inRow = items.every((r, i) => r.left >= rowBox.left + parseFloat(rowCSS.paddingLeft) - 0.5 && r.right <= rowBox.right - parseFloat(rowCSS.paddingRight) + 0.5 && (!i || r.left >= items[i - 1].right - 0.5));
           return { before, after, beforeBroker, afterBroker, inRow,
-            label: { text: label.textContent, lineCount: lines.length, lines, glyphs, words, inside, ellipsis, cell: edges(cell), pill: edges(box) },
+            label: { text: label.textContent, lineCount: lines.length, lines, glyphs, words, inside, ellipsis, cell: edges(cell), pill: edges(box), icon: edges(icon), iconVisible, iconInside, iconOverlap },
+            height: { header: rowBox.height, button: box.height },
             inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: rowCSS.paddingLeft, paddingRight: rowCSS.paddingRight },
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
-        if (h.reason === 'ledger_size_limit') {
-          const evidence = { label: measured.label, inRow: measured.inRow, horizontal: measured.horizontal, clipping: measured.clipping };
-          // At 360, the existing halt_on Needs fix label already overflows by
-          // 2.36 px (glyph right 296.36, button right 294): JOED-46. Log it only.
-          if (viewport.width === 360) evidence.knownPreExisting = 'JOED-46: existing Needs fix label overflows the button by 2.36 px in the baseline';
-          console.log(`executor-header ${viewport.name} ${theme}: ${J(evidence)}`);
-          if ([390, 1024, 1440].includes(viewport.width)) {
-            const maxLines = viewport.width === 390 ? 2 : 1;
-            const intactWords = measured.label.words.length > 0 && measured.label.words.every(word => word.lines.length === 1);
-            check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: existing Needs fix label fits; no clipping, overlap or ellipsis`, measured.label.lineCount >= 1 && measured.label.lineCount <= maxLines && intactWords && measured.label.inside && !measured.label.ellipsis && measured.inRow && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
-          }
+        const evidence = { reason: h.reason ?? 'loading', label: measured.label, inRow: measured.inRow, height: measured.height, horizontal: measured.horizontal, clipping: measured.clipping };
+        console.log(`executor-header ${viewport.name} ${theme}: ${J(evidence)}`);
+        const maxLines = viewport.mobile ? 2 : 1;
+        const intactWords = measured.label.words.length > 0 && measured.label.words.every(word => word.lines.length === 1);
+        const labelCheck = h.reason === 'ledger_size_limit' ? 'existing Needs fix label fits' : 'existing label fits';
+        check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: ${labelCheck}; no clipping, overlap or ellipsis`, measured.label.lineCount >= 1 && measured.label.lineCount <= maxLines && intactWords && measured.label.inside && measured.label.iconInside && !measured.label.iconOverlap.length && !measured.label.ellipsis && measured.inRow && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
+        check('executor-health', `${viewport.name} ${theme} header ${h.label}: only phone Loading hides its icon`, measured.label.iconVisible === !(h.label === 'Loading' && viewport.width <= 700), evidence);
+        check('executor-health', `${viewport.name} ${theme} header ${h.label}: original header and button heights`, measured.height.header === (viewport.mobile ? 54 : 58) && measured.height.button === (viewport.mobile ? 44 : 34), measured.height);
+        if (viewport.mobile && headerCrops.has(h.reason)) {
+          // A live tick may render between the synchronous measurement and
+          // screenshot. Pin a static copy; leave page work free to run.
+          await captureHeaderCrop(page, view, selector => crop(selector, `${viewport.name}-${theme}-header-${headerCrops.get(h.reason)}`));
         }
         if (viewport.width === 360) check('executor-health', `${theme} header ${h.label}: original 16 px inset at 360`, measured.inset.left === 16 && measured.inset.right === 16 && measured.inset.paddingLeft === '16px' && measured.inset.paddingRight === '16px', measured.inset);
         const moved = exactMoves(measured.before, measured.after);
         check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly 0 px movement outside the intrinsic pill in the same page and broker state`, !moved.length && measured.beforeBroker === measured.afterBroker && measured.afterBroker === brokerWord, { moved, beforeBroker: measured.beforeBroker, afterBroker: measured.afterBroker });
       }
       await ev(`document.getElementById('hdrHealth').innerHTML = ${J(header)}`);
+      // Guard every viewport/theme immediately after the header loop. A lost
+      // board frame must fail here, before the large-ledger render assertion.
+      const rendersBefore = await ev('(() => { const before = window.__joedesk.renders; return window.__joedesk.refresh().then(() => before); })()');
+      let renderWait = null;
+      try {
+        await waitFor(page, `window.__joedesk.renders > ${rendersBefore}`, 5000);
+      } catch (error) { renderWait = error.message; }
+      const rendersAfter = await ev('window.__joedesk.renders');
+      check('executor-health', `${viewport.name} ${theme}: board keeps rendering after the header crops`, renderWait === null && rendersAfter > rendersBefore, { rendersBefore, rendersAfter, renderWait });
       // Compare every real board-health sentence with the hidden reserve in
       // this font/column, then restore the real healthy sentence.
       const reserve = await ev(`(() => {
@@ -518,9 +703,20 @@ try {
       const large = await b.push(snapshot);
       check('executor-health', `${viewport.name} ${theme}: very large ledger is accepted`, large.status === 200, large);
       await ev('window.__joedesk.refresh().then(() => true)');
+      // refresh finishes the reads; Settings still renders on its next frame.
+      // Wait for this ledger's exact bytes, rather than a frame or an old row.
+      const exactLedger = 'Ledger: 9007199254740991 bytes of 9007199254740991 bytes';
+      let ledgerWait = null;
+      try {
+        await waitFor(page, `(() => { const ledger = document.querySelector('#rtRows .rt-row:nth-child(4) [role="group"]'); return ledger?.title === ${J(exactLedger)} && ledger?.getAttribute('aria-label') === ${J(exactLedger)}; })()`, 5000);
+      } catch (error) { ledgerWait = error.message; }
       await settle(page);
-      const largeView = await ev(`(() => { const ledger = document.querySelector('#rtRows .rt-row:nth-child(4) [role="group"]'); return { text: ledger?.textContent, title: ledger?.title, name: ledger?.getAttribute('aria-label'), horizontal: __audit.horizontal(), clipping: __audit.clipping() }; })()`);
-      check('executor-health', `${viewport.name} ${theme}: very large TB values wrap without clipping and preserve exact bytes`, N(largeView.text) === 'ledger 9007,2 TB of 9007,2 TB' && largeView.title === 'Ledger: 9007199254740991 bytes of 9007199254740991 bytes' && largeView.name === largeView.title && largeView.horizontal.scroll <= largeView.horizontal.inner && !largeView.clipping.length, largeView);
+      const largeView = await ev(`(() => { const ledger = document.querySelector('#rtRows .rt-row:nth-child(4) [role="group"]'); return { present: Boolean(ledger), text: ledger?.textContent ?? null, title: ledger?.title ?? null, name: ledger?.getAttribute('aria-label') ?? null, horizontal: __audit.horizontal(), clipping: __audit.clipping() }; })()`);
+      const conditions = { rendered: largeView.present, exactBytesReady: ledgerWait === null, formattedTB: N(largeView.text) === 'ledger 9007,2 TB of 9007,2 TB',
+        exactTitle: largeView.title === exactLedger, exactAccessibleName: largeView.name === exactLedger,
+        noOverflow: largeView.horizontal.scroll <= largeView.horizontal.inner, noClipping: !largeView.clipping.length };
+      const failed = Object.keys(conditions).filter(k => !conditions[k]);
+      check('executor-health', `${viewport.name} ${theme}: very large TB values wrap without clipping and preserve exact bytes`, !failed.length, { failed, conditions, ledgerWait, ...largeView });
     }
   }
 

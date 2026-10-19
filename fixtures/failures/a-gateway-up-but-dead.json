@@ -209,6 +209,12 @@
       "reason": "upstream_lost",
       "retained": true
     },
+    "paperCash": {
+      "state": "broken",
+      "ageSeconds": 9,
+      "reason": "upstream_lost",
+      "retained": false
+    },
     "desks.j.equity": {
       "state": "broken",
       "ageSeconds": 609,

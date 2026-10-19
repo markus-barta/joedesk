@@ -40,6 +40,12 @@
       "reason": "route_not_found",
       "retained": true
     },
+    "paperCash": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "route_not_found",
+      "retained": false
+    },
     "desks.j.equity": {
       "state": "broken",
       "ageSeconds": 609,

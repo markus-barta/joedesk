@@ -1,0 +1,211 @@
+{
+  "schema": "inspr.joe.household.v2",
+  "seq": 101,
+  "generatedAt": "2026-10-14T17:42:22.000Z",
+  "receivedAt": "2026-10-14T17:42:22.000Z",
+  "mode": "PAPER",
+  "currency": "EUR",
+  "source": {
+    "kind": "live-ib-api",
+    "label": "Synthetic paper API projection"
+  },
+  "safety": {
+    "halt": false,
+    "haltReason": null,
+    "gateway": {
+      "apiSessionReady": true,
+      "checkedAt": "2026-10-14T17:42:22.000Z"
+    },
+    "executor": {
+      "status": "running",
+      "halt": false,
+      "brakes": false,
+      "gatewayReachable": true,
+      "checkedAt": "2026-10-14T17:42:22.000Z"
+    }
+  },
+  "desks": [
+    {
+      "id": "j",
+      "label": "J",
+      "state": "working",
+      "action": "Synthetic paper observation; no action requested.",
+      "heartbeatAt": "2026-10-14T17:42:22.000Z",
+      "money": {
+        "equity": {
+          "amount": "4999",
+          "currency": "EUR"
+        },
+        "dayPnl": {
+          "amount": "-1",
+          "currency": "EUR"
+        },
+        "openPnl": {
+          "amount": "0",
+          "currency": "EUR"
+        },
+        "totalPnl": {
+          "amount": "-1",
+          "currency": "EUR"
+        }
+      },
+      "historyBasis": "j.paper.v2"
+    },
+    {
+      "id": "joe",
+      "label": "Joe",
+      "state": "sit-out",
+      "action": "Synthetic paper observation; no action requested.",
+      "heartbeatAt": "2026-10-14T17:42:22.000Z",
+      "money": {
+        "equity": {
+          "amount": "5000",
+          "currency": "EUR"
+        },
+        "dayPnl": {
+          "amount": "0",
+          "currency": "EUR"
+        },
+        "openPnl": {
+          "amount": "0",
+          "currency": "EUR"
+        },
+        "totalPnl": {
+          "amount": "0",
+          "currency": "EUR"
+        }
+      },
+      "historyBasis": "joe.paper.v2"
+    },
+    {
+      "id": "joel",
+      "label": "Joel",
+      "state": "sit-out",
+      "action": "Synthetic paper observation; no action requested.",
+      "heartbeatAt": "2026-10-14T17:42:22.000Z",
+      "money": {
+        "equity": {
+          "amount": "5000",
+          "currency": "EUR"
+        },
+        "dayPnl": {
+          "amount": "0",
+          "currency": "EUR"
+        },
+        "openPnl": {
+          "amount": "0",
+          "currency": "EUR"
+        },
+        "totalPnl": {
+          "amount": "0",
+          "currency": "EUR"
+        }
+      },
+      "historyBasis": "joel.paper.v2"
+    }
+  ],
+  "totals": {
+    "equity": {
+      "amount": "14999",
+      "currency": "EUR"
+    },
+    "dayPnl": {
+      "amount": "-1",
+      "currency": "EUR"
+    },
+    "openPnl": {
+      "amount": "0",
+      "currency": "EUR"
+    },
+    "totalPnl": {
+      "amount": "-1",
+      "currency": "EUR"
+    }
+  },
+  "pnlSources": {
+    "day": {
+      "status": "available",
+      "method": "sod-virtual-equity",
+      "currency": "EUR",
+      "scope": "virtual-desks",
+      "observedAt": "2026-10-14T17:42:22.000Z",
+      "periodStart": "2026-10-14T04:00:00.000Z"
+    },
+    "open": {
+      "status": "available",
+      "method": "owned-lots-current-mark-fx",
+      "currency": "EUR",
+      "scope": "virtual-desks",
+      "observedAt": "2026-10-14T17:42:22.000Z"
+    }
+  },
+  "brokerAccount": {
+    "equity": {
+      "amount": "28000",
+      "currency": "EUR"
+    },
+    "scope": "paper-account-including-keep",
+    "observedAt": "2026-10-14T17:42:22.000Z"
+  },
+  "positions": {
+    "source": "live-ib-api",
+    "observedAt": "2026-10-14T17:42:22.000Z",
+    "rows": [
+      {
+        "desk": "j",
+        "symbol": "DEMO",
+        "company": "Synthetic instrument",
+        "side": "long",
+        "quantity": "2",
+        "mark": null,
+        "marketValue": {
+          "amount": "40",
+          "currency": "USD"
+        },
+        "scope": "stage0",
+        "updatedAt": "2026-10-14T17:42:22.000Z",
+        "reasons": {
+          "mark": "source_unavailable"
+        }
+      },
+      {
+        "desk": null,
+        "symbol": "SXR8",
+        "side": "long",
+        "quantity": null,
+        "mark": null,
+        "marketValue": null,
+        "scope": "keep",
+        "updatedAt": "2026-10-14T17:42:22.000Z",
+        "dayPnl": null,
+        "openPnl": null,
+        "reasons": {
+          "quantity": "not_exact_yet",
+          "mark": "not_exact_yet",
+          "marketValue": "not_exact_yet",
+          "dayPnl": "not_exact_yet",
+          "openPnl": "not_exact_yet"
+        }
+      },
+      {
+        "desk": null,
+        "symbol": "TSLA",
+        "side": "long",
+        "quantity": null,
+        "mark": null,
+        "marketValue": null,
+        "scope": "keep",
+        "updatedAt": "2026-10-14T17:42:22.000Z",
+        "dayPnl": null,
+        "openPnl": null,
+        "reasons": {
+          "quantity": "source_unavailable",
+          "mark": "source_unavailable",
+          "marketValue": "source_unavailable",
+          "dayPnl": "source_unavailable",
+          "openPnl": "source_unavailable"
+        }
+      }
+    ]
+  }
+}

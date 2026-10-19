@@ -243,6 +243,12 @@
       "reason": null,
       "retained": false
     },
+    "paperCash": {
+      "state": "not reported",
+      "ageSeconds": null,
+      "reason": null,
+      "retained": false
+    },
     "desks.j.equity": {
       "state": "fresh",
       "ageSeconds": 9,

@@ -3,7 +3,7 @@
 // change log, Appearance and About. The edit flow is Edit, Review changes
 // (dialog and review tick), Confirm, Send to the desks; fleet-write.js sends.
 // The LIVE gate never sends anything and cannot change the mode.
-import { $, $$, icon, term, learnBtn, st, ageSpan, patch, statePhrase, addTerms, openDialog, fromPointer, isPhone } from './ui.js';
+import { $, $$, icon, term, learnBtn, st, ageSpan, patch, statePhrase, addTerms, openDialog, fromPointer, isPhone, cashCaption } from './ui.js';
 import { esc, age, money, amountOf, timeHMS, dayDM, dateTimeFull, ledgerSize, NB } from './format.js';
 import { boardHealthPresentation, brokerState, dataAge, cellReason, executorPresentation, STALE_AFTER_S } from './health.js';
 import { panelState } from './contracts/panel-state.mjs';
@@ -309,6 +309,7 @@ const rtRow = (ic, label, value, source) => `<div class="rt-row"><div class="lab
 // text shares the visible cell, so changing health never moves later rows.
 const rtReserve = (html, sizing) => `<div class="rt-reserve">${html}<span class="rt-sizing" aria-hidden="true">${st('none', esc(sizing))}</span></div>`;
 const EXECUTOR_SIZING = `Degraded · results capture failing — trading continues · ${ledgerSize({ ledgerBytes: 999900000000000, ledgerCapBytes: 999900000000000 }).text} · emergency stop on · broker not reachable · brakes off · checked 23:59:59`;
+const ACCOUNT_SIZING = 'Account number not reported · total not reported · last update had an unknown format · checked 999 days ago · last good total, 999 days ago · last update repeated an old one';
 // A value with its panel's own state: the fresh words, or the words plus the state.
 function withState(cell, key, tone, html, held) {
   const p = statePhrase(cell, key, held);
@@ -368,7 +369,7 @@ function runtimeHtml(ctx) {
   if (acct?.value == null && !hint) account = notReported(acct);
   else if (acct?.value == null) account = st('none', `${who} · total not reported${acct?.reason ? ` · ${esc(cellReason(acct.reason))}` : ''}`);
   else account = withState(acct, 'rt.account', 'ok', `${who} · ${money(amountOf(acct.value), acct.value.currency)} · checked ${ageSpan('rt.account.age', `${age(acct.ageSeconds)} ago`)}`, 'last good total');
-  rows.push(rtRow('wallet', term('paperacct'), account, 'brokerAccount.accountHint'));
+  rows.push(rtRow('wallet', term('paperacct'), `${rtReserve(account, ACCOUNT_SIZING)}<span class="account-cash-line">${cashCaption(states.paperCash, 'rt.cash')}</span>`, 'brokerAccount.accountHint'));
   return rows.join('');
 }
 

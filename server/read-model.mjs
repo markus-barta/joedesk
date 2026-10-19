@@ -53,6 +53,12 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   let rolloverResendPending = false;
   try {
     state = readJson(stateFile, STATE_CAP);
+    // Rev 7 stores have every original cell and no cash observation. Accept
+    // that exact older shape without discarding the sequence or last-goods.
+    if (state.format === FORMAT && state.cells && !Object.hasOwn(state.cells, 'paperCash') &&
+        !Object.hasOwn(state.feed?.value?.brokerAccount ?? {}, 'cash')) {
+      state.cells.paperCash = { value: null, valueReceivedAt: null };
+    }
     if (state.format !== FORMAT || !validateContract('data', state.feed?.value).ok ||
         !validInstant(state.feed.generatedAdvancedAt) || Date.parse(state.feed.generatedAdvancedAt) > Date.parse(state.feed.value.receivedAt) || !state.cells ||
         Object.keys(state.cells).length !== DATA_PANELS.length ||
@@ -247,6 +253,10 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
           (projection.paperAccount.retained || projection.paperAccount.value == null)) {
         value.brokerAccount.equity = null; value.brokerAccount.reason = projection.paperAccount.reason;
       }
+      if (value.brokerAccount && Object.hasOwn(value.brokerAccount, 'cash') && projection.paperCash.state === 'broken' &&
+          (projection.paperCash.retained || projection.paperCash.value == null)) {
+        value.brokerAccount.cash = null; (value.brokerAccount.reasons ??= {}).cash = projection.paperCash.reason;
+      }
       for (const [period, field] of [['day', 'dayPnl'], ['open', 'openPnl']]) {
         if (value.pnlSources?.[period] && state.feed.value.totals[field] != null && value.totals[field] == null) value.pnlSources[period] = {
           ...value.pnlSources[period], status: 'unavailable', reason: value.totals.reasons?.[field] ?? 'family_projection_unavailable' };
@@ -254,8 +264,12 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       if (value.positions && projection.positions.state === 'broken' &&
           (projection.positions.retained || projection.positions.value == null || projection.positions.reason === 'source_not_authoritative')) {
         value.positions.reason = projection.positions.reason;
-        value.positions.rows = value.positions.rows.map(row => ({ ...row,
-          ...Object.fromEntries(['mark', 'marketValue', 'dayPnl', 'openPnl'].filter(f => Object.hasOwn(row, f)).map(f => [f, null])) }));
+        value.positions.rows = value.positions.rows.map(row => {
+          const fields = ['mark', 'marketValue', 'dayPnl', 'openPnl'].filter(f => Object.hasOwn(row, f));
+          return { ...row, ...Object.fromEntries(fields.map(f => [f, null])),
+            reasons: { ...row.reasons, ...Object.fromEntries(fields.map(f => [f,
+              row[f] == null && row.reasons?.[f] ? row.reasons[f] : projection.positions.reason])) } };
+        });
       }
     }
     return { serverNow: now, feeds: feeds(), panels: selected, data: value };

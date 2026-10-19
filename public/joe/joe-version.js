@@ -2,16 +2,16 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261016151218.0.0",
+    APP_VERSION: "261019102825.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 24,
+    RELEASE_SEQUENCE: 25,
     VERSION_HISTORY: [
       {
-        version: "261016151218.0.0",
+        version: "261019102825.0.0",
         versionScheme: "inspr-calver-3",
-        date: "2026-10-16",
-        title: "A steadier paper desk",
-        changes: ["Rebuilt Desk, History, Results and Settings; pinned release inputs and tested recovery."],
+        date: "2026-10-19",
+        title: "Cash and clearer paper positions",
+        changes: ["Show paper-account cash beside the account total.", "Explain unavailable position values with per-field reasons.", "Keep the hero stable in every state, including on phones."],
       },
       {
         version: "26.09.21.12.00",

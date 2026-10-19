@@ -60,6 +60,9 @@ test('only the documented JSON Schema vocabulary is used; every field has exactl
   for (const [kind, schema] of Object.entries(SCHEMAS)) walk(schema, schema, schema['x-owner'], kind);
   assert.equal(owners['data.receivedAt'], 'server');
   assert.equal(owners['data.totals.equity.amount'], 'pusher');
+  assert.equal(owners['data.brokerAccount.cash.amount'], 'pusher');
+  assert.equal(owners['data.brokerAccount.reasons.cash'], 'pusher');
+  assert.equal(owners['data.positions.rows[].reasons.desk'], 'pusher');
   assert.equal(owners['data.safety.executor.gatewayReachable'], 'paper executor 8470');
   assert.equal(owners['data.safety.executor.ledgerBytes'], 'paper executor 8470');
   assert.equal(owners['data.safety.executor.ledgerCapBytes'], 'paper executor 8470');
@@ -82,10 +85,10 @@ test('one closed reason enum is used everywhere, including field errors', () => 
 });
 
 test('rev 7 executor: rev 6 payloads remain valid; the reason enum is append-only', () => {
-  assert.equal(CONTRACTS.revision, 7);
+  assert.equal(CONTRACTS.revision, 9);
   assert.equal(CONTRACTS.contracts.data, 'inspr.joe.household.v2');
-  assert.equal(REASONS.at(-2), 'executor_broker_disagreement');
-  assert.equal(REASONS.at(-1), 'results_capture_failed');
+  assert.equal(REASONS.at(-5), 'executor_broker_disagreement');
+  assert.equal(REASONS.at(-4), 'results_capture_failed');
   for (const [kind, payload] of Object.entries(samples)) {
     assert.equal(validateContract(kind, payload).ok, true, kind);
   }
@@ -122,6 +125,212 @@ test('rev 7 executor: ledger bytes and optional cap validate without hiding over
       rejects(validateContract('data', data), rule, `$.safety.executor.${key}`);
     }
   }
+});
+
+const ROW_FIELDS = ['quantity', 'mark', 'marketValue', 'dayPnl', 'openPnl'];
+for (const field of ROW_FIELDS) test(`rev 8 positions: null ${field} requires its own closed reason in every scope`, () => {
+  for (const scope of ['stage0', 'keep', 'legacy']) {
+    const data = copy(samples.data), row = data.positions.rows[0];
+    row.scope = scope;
+    if (scope === 'keep') { row.desk = null; row.symbol = 'SXR8'; }
+    row[field] = null;
+    for (const stage of ['ingress', 'served']) {
+      const payload = stage === 'ingress' ? ingress(data) : data;
+      rejects(validateContract('data', payload, { stage }), 'reasonRequired', `$.positions.rows[0].${field}`);
+    }
+    for (const reason of ['not_exact_yet', 'source_unavailable', 'baseline_pending']) {
+      row.reasons = { [field]: reason };
+      assert.equal(validateContract('data', data).ok, true, `${scope}/${field}/${reason}`);
+    }
+    row.reasons[field] = 'unreviewed';
+    rejects(validateContract('data', data), 'enum', `$.positions.rows[0].reasons.${field}`);
+    row.reasons = { other: 'source_unavailable' };
+    rejects(validateContract('data', data), 'additionalProperties', '$.positions.rows[0].reasons');
+  }
+});
+
+test('rev 8 positions: panel reason applies only under the unchanged session-unavailable rule', () => {
+  const data = copy(samples.data), row = data.positions.rows[0];
+  for (const field of ROW_FIELDS) row[field] = null;
+  data.positions.reason = 'source_unavailable';
+  for (const field of ROW_FIELDS) rejects(validateContract('data', data), 'reasonRequired', `$.positions.rows[0].${field}`);
+  for (const scenario of ['down', 'missing', 'stale-check']) {
+    const unavailable = unavailableSession(copy(data));
+    if (scenario === 'missing') delete unavailable.safety.gateway;
+    if (scenario === 'stale-check') unavailable.safety.gateway = { apiSessionReady: true, checkedAt: '2026-10-14T17:40:22.000Z' };
+    assert.equal(validateContract('data', unavailable).ok, true, scenario);
+    delete unavailable.positions.reason;
+    for (const field of ROW_FIELDS) rejects(validateContract('data', unavailable), 'reasonRequired', `$.positions.rows[0].${field}`);
+    unavailable.positions.rows[0].reasons = Object.fromEntries(ROW_FIELDS.map(field => [field, 'source_unavailable']));
+    rejects(validateContract('data', unavailable), 'reasonRequired', '$.positions.reason');
+  }
+  const session = unavailableSession(copy(samples.data));
+  assert.equal(session.positions.rows[0].quantity, '2');
+  assert.equal(validateContract('data', session).ok, true, 'unconfirmed sessions still permit the reported quantity');
+  session.positions.rows[0].mark = copy(samples.data.positions.rows[0].mark);
+  session.positions.rows[0].reasons = { mark: 'source_unavailable' };
+  rejects(validateContract('data', session), 'sessionUnavailable', '$.positions.rows[0].mark');
+});
+
+test('rev 8 positions: reasoned rev 7 payloads stay valid; KEEP identity and reason ordering survive', () => {
+  assert.deepEqual(REASONS.slice(-3, -1), ['not_exact_yet', 'source_unavailable']);
+  const data = JSON.parse(readFileSync(new URL('../fixtures/positions-null.json', import.meta.url)));
+  assert.equal(validateContract('data', data).ok, true);
+  assert.equal(Object.hasOwn(data.brokerAccount, 'cash'), false);
+  const rev7 = copy(data);
+  for (const row of rev7.positions.rows) {
+    if (row.quantity === null) row.quantity = '1';
+    for (const field of Object.keys(row.reasons)) row.reasons[field] = 'baseline_pending';
+  }
+  assert.equal(validateContract('data', rev7).ok, true, 'rev 7 shapes and existing reason codes remain accepted');
+  const kept = data.positions.rows.filter(row => row.scope === 'keep');
+  assert.deepEqual(kept.map(row => [row.symbol, row.side, row.desk]), [['SXR8', 'long', null], ['TSLA', 'long', null]]);
+  for (const field of ['symbol', 'side']) {
+    const bad = copy(data); delete bad.positions.rows[1][field];
+    rejects(validateContract('data', bad), 'required', `$.positions.rows[1].${field}`);
+  }
+  const bad = copy(data); bad.positions.rows[1].desk = 'j';
+  rejects(validateContract('data', bad), 'keepExcluded', '$.positions.rows[1]');
+});
+
+test('rev 9 positions: a stage0 null desk requires its own closed reason at ingress and on reads', () => {
+  const data = copy(samples.data);
+  data.positions.rows[0] = JSON.parse(readFileSync(new URL('../fixtures/positions-unmapped.json', import.meta.url)));
+  assert.equal(REASONS.at(-1), 'desk_unmapped');
+  const accepted = acceptSnapshot('data', ingress(data), null, at);
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(accepted.value.positions.rows[0], data.positions.rows[0], 'no guessing, dropping or rewriting');
+  for (const stage of ['ingress', 'served']) {
+    const payload = stage === 'ingress' ? ingress(data) : copy(data), row = payload.positions.rows[0];
+    assert.equal(validateContract('data', payload, { stage }).ok, true);
+    delete row.reasons.desk;
+    payload.positions.reason = 'desk_unmapped';
+    rejects(validateContract('data', payload, { stage }), 'deskRequired', '$.positions.rows[0]');
+    row.reasons.desk = 'unreviewed';
+    rejects(validateContract('data', payload, { stage }), 'enum', '$.positions.rows[0].reasons.desk');
+    row.reasons.desk = null;
+    rejects(validateContract('data', payload, { stage }), 'type', '$.positions.rows[0].reasons.desk');
+  }
+});
+
+test('rev 9 positions: a desk reason contradicts an assigned desk or KEEP; legacy needs no new reason', () => {
+  for (const stage of ['ingress', 'served']) {
+    for (const scope of ['stage0', 'legacy', 'keep']) for (const desk of ['j', 'joe', 'joel', null]) {
+      const data = stage === 'ingress' ? ingress(samples.data) : copy(samples.data), row = data.positions.rows[0];
+      row.scope = scope; row.desk = desk;
+      if (scope === 'keep') row.symbol = 'SXR8';
+      if (scope === 'legacy' || (scope === 'keep' && desk === null)) {
+        assert.equal(validateContract('data', data, { stage }).ok, true, `${stage}/${scope}/${desk}: unchanged without a reason`);
+      }
+      row.reasons = { desk: 'desk_unmapped' };
+      if (desk !== null || scope === 'keep') {
+        rejects(validateContract('data', data, { stage }), 'contradictoryDesk', '$.positions.rows[0].reasons.desk');
+      }
+    }
+    for (const symbol of ['SXR8', 'TSLA']) {
+      const data = stage === 'ingress' ? ingress(samples.data) : copy(samples.data), row = data.positions.rows[0];
+      row.symbol = symbol; row.scope = 'keep'; row.desk = null; row.reasons = { desk: 'desk_unmapped' };
+      rejects(validateContract('data', data, { stage }), 'contradictoryDesk', '$.positions.rows[0].reasons.desk');
+    }
+    const rev8 = JSON.parse(readFileSync(new URL('../fixtures/positions-null.json', import.meta.url)));
+    rev8.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+    assert.equal(validateContract('data', stage === 'ingress' ? ingress(rev8) : rev8, { stage }).ok, true, 'revision 8 stays accepted');
+  }
+});
+
+test('rev 8 cash: rev 7 payloads with or without the account still validate', () => {
+  const data = copy(samples.data);
+  assert.equal(Object.hasOwn(data.brokerAccount, 'cash'), false);
+  assert.equal(validateContract('data', data).ok, true);
+  delete data.brokerAccount;
+  assert.equal(validateContract('data', data).ok, true);
+  assert.equal(validateContract('data', ingress(data), { stage: 'ingress' }).ok, true);
+});
+
+test('rev 8 cash: exact EUR money or null with its own closed reason, never equity’s reason', () => {
+  for (const amount of ['0', '-0.00000001', '12345.67890123', '9007199254740993.00500000']) {
+    const data = copy(samples.data);
+    data.brokerAccount.cash = { amount, currency: 'EUR' };
+    assert.equal(validateContract('data', data).ok, true, amount);
+    const accepted = acceptSnapshot('data', ingress(data), null, at);
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.value.brokerAccount.cash.amount, amount);
+  }
+  const data = copy(samples.data);
+  data.brokerAccount.cash = null;
+  data.brokerAccount.reason = 'upstream_lost';
+  for (const stage of ['served', 'ingress']) {
+    const value = stage === 'ingress' ? ingress(data) : data;
+    rejects(validateContract('data', value, { stage }), 'reasonRequired', '$.brokerAccount.cash');
+  }
+  for (const reason of REASONS) {
+    data.brokerAccount.reasons = { cash: reason };
+    assert.equal(validateContract('data', data).ok, true, reason);
+  }
+  data.brokerAccount.reasons.cash = 'unreviewed';
+  rejects(validateContract('data', data), 'enum', '$.brokerAccount.reasons.cash');
+  data.brokerAccount.reasons = { equity: 'upstream_lost' };
+  rejects(validateContract('data', data), 'additionalProperties', '$.brokerAccount.reasons');
+});
+
+test('rev 8 cash: floats, malformed precision and foreign currency fail', () => {
+  for (const cash of [1.25, '1.25', { amount: 1.25, currency: 'EUR' },
+    { amount: '1.123456789', currency: 'EUR' }, { amount: '1e3', currency: 'EUR' },
+    { amount: '01.25', currency: 'EUR' }, { amount: '1', currency: 'USD' }]) {
+    const data = copy(samples.data); data.brokerAccount.cash = cash;
+    assert.equal(validateContract('data', data).ok, false, JSON.stringify(cash));
+  }
+});
+
+test('rev 8 cash: a value plus its reason mirrors equity acceptance and leaves equity independent', () => {
+  const data = copy(samples.data);
+  data.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+  data.brokerAccount.reasons = { cash: 'retained_values' };
+  assert.equal(validateContract('data', data).ok, true);
+  const states = panelStates({ data: { value: data } }, later);
+  assert.equal(states.paperAccount.state, 'fresh');
+  assert.equal(states.paperCash.state, 'broken');
+  assert.equal(states.paperCash.reason, 'retained_values');
+  data.brokerAccount.reason = 'retained_values';
+  assert.equal(validateContract('data', data).ok, true);
+});
+
+test('rev 8 cash: fresh, stale, broken retention, gateway expiry and recovery follow the account', () => {
+  const data = copy(samples.data);
+  data.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+  const feed = { value: data, generatedAdvancedAt: at };
+  const fresh = panelStates({ data: feed }, later);
+  assert.equal(fresh.paperCash.state, 'fresh');
+  assert.deepEqual(fresh.paperCash.value, data.brokerAccount.cash);
+  const stale = panelStates({ data: feed }, '2026-10-14T17:43:52.000Z', fresh);
+  assert.equal(stale.paperCash.state, 'stale');
+  assert.equal(stale.paperCash.reason, 'snapshot_stale');
+  assert.deepEqual(stale.paperCash.value, data.brokerAccount.cash);
+  const missing = copy(data);
+  missing.receivedAt = missing.generatedAt = later; missing.safety.gateway.checkedAt = later;
+  missing.brokerAccount.cash = null; missing.brokerAccount.reasons = { cash: 'source_unavailable' };
+  const broken = panelStates({ data: { value: missing, generatedAdvancedAt: later } }, later, fresh);
+  assert.equal(broken.paperCash.state, 'broken');
+  assert.equal(broken.paperCash.retained, true);
+  assert.equal(broken.paperCash.valueReceivedAt, at);
+  assert.equal(broken.paperAccount.state, 'fresh');
+  const expiredFeed = { ...feed, value: copy(data) };
+  expiredFeed.value.safety.gateway.checkedAt = '2026-10-14T17:42:12.000Z';
+  const expired = panelStates({ data: expiredFeed }, '2026-10-14T17:43:12.000Z', fresh);
+  assert.equal(expired.paperCash.reason, 'gateway_unconfirmed');
+  assert.equal(expired.paperCash.retained, true);
+  assert.equal(expired.paperCash.valueReceivedAt, at);
+  assert.equal(panelStates({ data: feed }, later, broken).paperCash.state, 'fresh');
+});
+
+test('rev 8 cash: an unconfirmed session requires cash null with its own reason', () => {
+  const data = copy(JSON.parse(readFileSync(new URL('../fixtures/failures/a-gateway-up-but-dead.json', import.meta.url))).payload);
+  data.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+  rejects(validateContract('data', data, { stage: 'ingress' }), 'sessionUnavailable', '$.brokerAccount.cash');
+  data.brokerAccount.cash = null;
+  rejects(validateContract('data', data, { stage: 'ingress' }), 'reasonRequired', '$.brokerAccount.cash');
+  data.brokerAccount.reasons = { cash: 'gateway_unconfirmed' };
+  assert.equal(validateContract('data', data, { stage: 'ingress' }).ok, true);
 });
 
 test('missing feed retains false HALT with its original receipt rather than treating it as absent', () => {
