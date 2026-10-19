@@ -18,6 +18,7 @@ import { validateContract } from '../contracts/index.mjs';
 // Private capture tooling stays outside the runtime/package closure while its
 // Node-only tests run in the existing npm test / CI release suite.
 import './preview-capture.mjs';
+import './adoption.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(new URL('../' + file, import.meta.url)));
 const samples = read('fixtures/valid.json'), active = read('release.json'), prep = read('release/preparation.json');
@@ -415,7 +416,7 @@ test('P6 smoke: SSO redirects are auth_required; wrong release, stale feeds, exp
   await assert.rejects(smokeRelease(url, active, { fetcher: async () => new Response(' '.repeat(16385), { headers: { [APP_ORIGIN_HEADER]: 'app' } }) }), /health_size_limit/);
   for (const base of ['https://board.example.invalid/', 'https://user:pass@board.example.invalid/joe/', 'https://board.example.invalid/joe/?token=redacted']) await assert.rejects(smokeRelease(base, active), /base_invalid/);
 });
-test('P6 normal build verifies pinned offline bundle/closure; corruption, extra, missing and untracked fail; live adoption stays gated', t => {
+test('P6 normal build verifies pinned offline bundle/closure; corruption, extra, missing and untracked fail', t => {
   execFileSync(process.execPath, ['scripts/check-release.mjs'], { stdio: 'pipe' });
   const root = temporary(t);
   const files = read('release/closure.json').files;
@@ -437,6 +438,4 @@ test('P6 normal build verifies pinned offline bundle/closure; corruption, extra,
   execFileSync('git', ['init', '-q', root], { stdio: 'pipe' });
   assert.equal(run().status, 1, 'working-tree builds reject untracked payloads even with matching hashes');
   fs.appendFileSync(join(root, 'release/closure.json'), '\n'); assert.equal(run().status, 1);
-  const adopt = spawnSync(process.execPath, ['scripts/check-release.mjs', '--require-adoption'], { encoding: 'utf8' });
-  assert.equal(adopt.status, 1); assert.match(adopt.stderr, /pending_publication/);
 });

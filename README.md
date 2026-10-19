@@ -33,8 +33,8 @@ use it; legacy history remains plain. The SemVer/Pretty switch is session-only;
 auto colors follow the actual product accent. Tooltip and accessible name
 carry the complete coordinate and UTC timestamp; English copy feedback uses
 the shared interaction helper. No runtime settings are fetched.
-`node scripts/check-release.mjs --require-adoption` still fails until the
-coordinator's immutable-publication and live gates are met.
+`node scripts/check-release.mjs --require-adoption` fails until a matching
+adoption record captures the coordinator's immutable-publication and live gates.
 
 Every `npm run check`, Docker build and Nix package build verifies the committed
 runtime closure offline: exact file set, regular files, byte counts and SHA256.
@@ -97,6 +97,49 @@ artifact signing (`actions/attest-build-provenance`) is deliberately omitted;
 this workflow requires only read-only contents permission and no new secrets,
 OIDC or attestation write grants. The BuildKit provenance is unsigned evidence;
 coordinator signature/review and all producer/OPS/live gates remain separate.
+
+### Recording adoption
+
+JOED writes `adoption/<active-version>.json` only after OPS's live checks and
+Markus's UI look. Use a normal reviewed PR to `rebuild/v2`. The record is outside
+the runtime closure and Docker COPY set: recording adoption requires no image
+change, rebuild, new release coordinate or change to published artifacts. Keep
+the original main merge, immutable release set and image digest. Run this from
+a checkout containing that merge and its descendants, not inside the image.
+
+The strict `joedesk.adoption.v1` validator in `scripts/check-adoption.mjs` requires
+these fields (unknown keys at any level fail):
+
+- `schema`, `version`, `version_scheme`, `release_channel`, `release_sequence`;
+  the four coordinates must match `release.json` and the reservation.
+- `source: { commit, tree }` with full main-merge Git SHAs;
+  `release_set_sha256`, `image_digest`, `contract_set_sha256`, and
+  `validation_run_id` (a positive decimal string). Digests are lowercase SHA256;
+  `image_digest` includes `sha256:`. The contract digest matches `release/contracts.json`.
+- `decisions`: at least one distinct Desk question UUID.
+- `deployment: { deployed_at, operator_ticket, rollback_reference }`: UTC time,
+  an operator ticket key (such as `OPS-354`), and a value-free procedure/evidence reference identifying
+  the retained immutable artifact and compatible backup for rollback.
+- `live_checks`: exactly `joed_live_check`, `ops_t76_live`, `smoke_release`, and
+  `spoof_check`, each `{ status: "pass", checked_at }`.
+- `markus_ui_look: { status: "confirmed", checked_at }`, and `adopted_at`.
+
+All times must be real UTC instants (`YYYY-MM-DDThh:mm:ss[.sss]Z`). Keep records
+value-free: no secrets, credential-bearing hostnames, IPs, account data or money.
+Verify the retained release-set bytes and committed source metadata as well:
+
+```sh
+node scripts/check-release.mjs --require-adoption --release-set /path/to/release-set.json
+```
+
+Without `--release-set`, the same command verifies the record, active coordinates,
+contracts and local Git source/tree/ancestry. With it, the shared release-set
+verifier also binds the exact manifest SHA256, commit, image and validation run.
+Success reports `adopted` and `authoritative: true`; normal checks retain their
+candidate output. Record the AGENTS-VERSIONING adoption outcome on the owning
+ticket: the presentation pin was reviewed and unchanged. Preserve previous
+records and releases; rollback selects the recorded prior immutable artifact
+and matching backup, recording a new deployment event.
 
 ### Offline data preparation and rollback
 
