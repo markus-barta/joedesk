@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 31224,
-      "sha256": "dc1e8a5752769a177b1f0fd091f06e87cd8a9b7bfb253fabad36e42edef392db"
+      "size": 31356,
+      "sha256": "9d4b1c1a66ed09e8fe7b4d65ad77003ce554edf2529a79c1263e6526e061a379"
     },
     {
       "path": "public/joe/events.js",

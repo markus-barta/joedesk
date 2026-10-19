@@ -447,7 +447,10 @@ try {
       await ev('window.__joedesk.refresh().then(() => true)'); await settle(page);
       await waitFor(page, `document.querySelector('#positions [data-desk=""] .name > span[aria-label]')`);
       const after = await figures();
-      check('desk-unmapped', `${tag}: desk counts, desk cards, Today and account figures exclude the unmapped row`, J(before) === J(after), { before, after });
+      check('desk-unmapped', `${tag}: desk cards, Today and account figures exclude the unmapped row`, J(before.values) === J(after.values), { before, after });
+      check('desk-unmapped', `${tag}: open count includes every listed row and names the unmatched row`,
+        N(before.count) === '1 open · desk positions only · each in its own currency' &&
+        N(after.count) === '2 open · 1 not matched to a desk · each in its own currency', { before: before.count, after: after.count });
       const afterBoxes = await rects(figureSelectors);
       const figureMovement = figureBoxes.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== afterBoxes[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: afterBoxes[i]?.[k] })));
       if (figureBoxes.length !== afterBoxes.length) figureMovement.push({ count: [figureBoxes.length, afterBoxes.length] });
@@ -456,11 +459,16 @@ try {
         kept: [...document.querySelectorAll('#kept [data-keep]')].map(row => ({ symbol: row.dataset.keep,
           text: row.innerText, reasons: row.querySelector('.position-reasons')?.innerText,
           dashes: [...row.querySelectorAll('[aria-label]')].map(e => ({ text: e.innerText, title: e.title, name: e.getAttribute('aria-label') })),
-          interactive: row.querySelectorAll('button, a, input, [tabindex]').length })),
+          interactive: row.querySelectorAll('button, a, input, [tabindex]').length, tracks: row.querySelectorAll('.vbar').length })),
         worth: document.querySelector('#kept .pstate').innerText,
         desk: document.querySelector('#positions [data-desk="j"]')?.innerText,
         unmapped: (() => { const row = document.querySelector('#positions [data-desk=""]'), label = row.querySelector('.name > span[aria-label]');
+          const track = row.querySelector('.vbar'), targets = [row, ...row.children, track];
+          const boxes = () => targets.map(e => { const r = e.getBoundingClientRect(); return [r.top, r.left, r.width, r.height]; });
+          const visibility = getComputedStyle(track).visibility, original = track.style.visibility, hiddenBoxes = boxes();
+          track.style.visibility = 'visible'; const visibleBoxes = boxes(); track.style.visibility = original;
           return { text: row.innerText, reason: row.querySelector('.position-reasons')?.innerText, label: label.innerText, title: label.title, name: label.getAttribute('aria-label'),
+            worthTrack: { visibility, hiddenBoxes, visibleBoxes },
             colour: row.querySelector('.sym').getAttribute('style'), marks: row.querySelectorAll('.im, .dmark').length,
             dashes: [...row.querySelectorAll('.position-value')].map(e => ({ text: e.textContent, title: e.title, name: e.getAttribute('aria-label') })) }; })(),
         order: [...document.querySelectorAll('#positions .prow:not(.hd) .name > b')].map(e => e.innerText),
@@ -473,9 +481,12 @@ try {
           ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => row.reasons?.includes(`${label}: ${why}`)) &&
           ['Quantity', 'Last price', 'Worth'].every(label => row.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · ${why}` && d.name === d.title)), row);
         check('KEEP', `${tag} ${row.symbol}: no interactive element inside the kept row`, row.interactive === 0, row);
+        check('positions', `${tag} ${row.symbol}: unknown KEEP worth has no bar track`, row.tracks === 0, row);
       }
       check('positions', `${tag}: a stage0 null mark has its accessible and visible reason`, seen.mark && seen.desk?.includes('Last price: not reported by the broker'), seen);
       const deskLabel = 'No desk · not matched to a desk', u = seen.unmapped;
+      check('desk-unmapped', `${tag}: unknown worth hides the track with exactly 0 px row, cell or track shift`,
+        u.worthTrack.visibility === 'hidden' && J(u.worthTrack.hiddenBoxes) === J(u.worthTrack.visibleBoxes), u.worthTrack);
       check('desk-unmapped', `${tag}: visible name line, title and accessible name carry the desk reason without a desk colour or mark`,
         u.label === deskLabel && u.title === deskLabel && u.name === deskLabel && !u.colour && u.marks === 0 && J(seen.order) === J(['DEMO', 'AAA']), seen);
       check('desk-unmapped', `${tag}: all null values stay dashes with their own reasons`,

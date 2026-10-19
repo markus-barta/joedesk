@@ -299,12 +299,13 @@ export function positionsHtml(ctx) {
       <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span${deskLabel ? ` title="${esc(deskLabel)}" aria-label="${esc(deskLabel)}"` : ''}>${deskLabel ? esc(deskLabel) : r.desk ? `${inlineMark(r.desk)} ${LABEL[r.desk]}` : 'No desk'}${opened}${legacy}</span><span class="position-mobile">${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)} · worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell)}</div>
       <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)}</div>
       <div class="r c-px num">${positionValue(r, 'mark', cell)}</div>
-      <div class="c-worth"><span class="num">${positionValue(r, 'marketValue', cell)}</span><span class="vbar">${value != null && max ? `<i data-v="${value}" data-cur="${esc(r.marketValue.currency)}" style="width:${(Math.abs(value) / max * 100).toFixed(3)}%"></i>` : ''}</span></div>
+      <div class="c-worth"><span class="num">${positionValue(r, 'marketValue', cell)}</span><span class="vbar"${value == null ? ' style="visibility:hidden"' : ''}>${value != null && max ? `<i data-v="${value}" data-cur="${esc(r.marketValue.currency)}" style="width:${(Math.abs(value) / max * 100).toFixed(3)}%"></i>` : ''}</span></div>
       <div class="r">${presentNull(r, 'openPnl') ? positionValue(r, 'openPnl', cell) : pl(amountOf(r.openPnl), r.openPnl?.currency ?? cur)}</div>
       <div class="r c-opened num">${r.updatedAt ? timeHM(r.updatedAt) : '—'}</div>
     </div>`;
   }).join('');
-  return { sub: `${rows.filter(r => !unmapped(r)).length} open · desk positions only · each in its own currency`, html: `${state}${header}${body}` };
+  const unmatched = rows.filter(unmapped).length;
+  return { sub: `${rows.length} open · ${unmatched ? `${unmatched} not matched to a desk` : 'desk positions only'} · each in its own currency`, html: `${state}${header}${body}` };
 }
 
 // Kept holdings: the read-only caption, then the section's own state line with

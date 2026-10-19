@@ -818,12 +818,17 @@ stay valid. The API-session exception cannot replace a desk reason.
 The board's existing name line reads **No desk · not matched to a desk**,
 also in title and accessible name, with no desk colour or mark. Unmapped
 stage0 rows sort after all desk rows, retaining other ordering, and add
-nothing to the open count, desk figures or Today totals. Amy's switch
+nothing to desk figures or Today totals. When any are present, the subtitle
+counts every listed row and names the unmatched ones: `4 open · 1 not matched
+to a desk · each in its own currency`. Without them its wording is unchanged.
+An unknown worth has no visible bar track; the hidden track retains its space.
+KEEP rows have no worth track. Amy's switch
 snapshot keeps their values null with `not_exact_yet`; the row shows em
 dashes with each value's own reason, without partial totals.
 `fixtures/positions-unmapped.json` supplies this synthetic row. P5's existing
 `positions` scenario adds real-ingress, accessible-copy, neutral-identity,
-ordering, figure-exclusion and exact 0 px cash/KPI/card movement checks,
+ordering, row-count, figure-exclusion and exact 0 px cash/KPI/card movement checks,
+plus an exact 0 px row/cell/track check when the unknown-worth track is hidden,
 plus `<width>-<theme>-desk-unmapped.png` crops at 1440/1024/390/360 in both
 themes. Browser execution and visual approval remain with CI/coordinator.
 The cash and KPI sizing reserves include the new short reason through
