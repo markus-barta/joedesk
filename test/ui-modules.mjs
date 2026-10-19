@@ -5,7 +5,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { headerHealth as frozenHeaderHealth } from './fixtures/header-health-c1c71a1.mjs';
+import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
+import { CI_GUARD, REFERENCE_BUDGET } from '../scripts/browser/budget.mjs';
+import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -224,6 +228,98 @@ test('header: capture leaves the header unchanged; ledger Needs fix carries its 
   Object.assign(b.feeds.data.value.safety.executor, { status: 'running' });
   delete b.feeds.data.value.safety.executor.reason;
   assert.deepEqual(view(), healthy);
+});
+
+// Execute the actual production scheduler. Only its render body and the native
+// frame queue are stand-ins; Blink consumes due callbacks even when disabled
+// scripting makes their JS invocation return without running (JOED-47).
+function headerFrameHarness(onRender = () => {}) {
+  const app = readFileSync(new URL('../public/joe/app.js', import.meta.url), 'utf8');
+  const schedule = app.match(/^  function schedule\(reason = 'tick'\) \{[\s\S]*?^  \}/m)?.[0];
+  assert.ok(schedule, 'use the production schedule(), not a rewritten copy');
+  let next = 0;
+  const queued = [];
+  const board = runInNewContext(`(() => {
+    let frame = 0, pending = null, renders = 0;
+    function render(reason) { frame = 0; renders++; onRender(reason); }
+    ${schedule}
+    return { schedule, state: () => ({ frame, renders }) };
+  })()`, { onRender, requestAnimationFrame: callback => { queued.push(callback); return ++next; } });
+  return { ...board, queued, due: (scriptsEnabled = true) => {
+    const callbacks = queued.splice(0);
+    if (scriptsEnabled) for (const callback of callbacks) callback();
+  } };
+}
+
+test('header crops: consuming a disabled rAF strands schedule(), deferring it preserves rendering', () => {
+  const dropped = headerFrameHarness();
+  dropped.schedule();
+  dropped.due(false);
+  assert.ok(dropped.state().frame > 0);
+  for (const reason of ['data', 'tick', 'fleet-config']) dropped.schedule(reason);
+  dropped.due();
+  assert.equal(dropped.state().renders, 0, 're-enabling scripts cannot replay the consumed callback');
+  assert.equal(dropped.queued.length, 0, 'refresh/tick cannot schedule while frame stays set');
+
+  const deferred = headerFrameHarness();
+  deferred.schedule();
+  // No frame is consumed during a true pause; it remains queued on resume.
+  assert.equal(deferred.queued.length, 1);
+  deferred.due();
+  deferred.schedule('data');
+  deferred.due();
+  assert.equal(deferred.state().renders, 2);
+  assert.equal(deferred.state().frame, 0);
+});
+
+test('header crops: exact serialized clone survives live renders and is removed on success or failure', async () => {
+  for (const fail of [false, true]) {
+    const liveButton = { innerHTML: 'live header' }, button = {
+      ...liveButton, attributes: { id: 'hdrHealth', title: 'previous title' },
+      setAttribute(key, value) { this.attributes[key] = value; },
+      removeAttribute(key) { delete this.attributes[key]; },
+    };
+    let mounted = null;
+    const copy = { style: {}, attributes: {},
+      querySelector: selector => { assert.equal(selector, '#hdrHealth'); return button; },
+      querySelectorAll: selector => { assert.equal(selector, '[id]'); return [button]; },
+      setAttribute(key, value) { this.attributes[key] = value; },
+      removeAttribute(key) { delete this.attributes[key]; },
+      remove() { mounted = null; },
+    };
+    const live = { cloneNode: deep => { assert.equal(deep, true); return copy; },
+      getBoundingClientRect: () => ({ left: 0, width: 390 }),
+      parentElement: { append: node => { mounted = node; } },
+    };
+    const document = { documentElement: { scrollHeight: 2000 },
+      querySelector: selector => selector === 'header.top' ? live : mounted,
+    };
+    const page = { evaluate: source => runInNewContext(source, { document, scrollX: 0 }) };
+    const board = headerFrameHarness(() => { liveButton.innerHTML = 'next live header'; });
+    const view = { html: '<b>Needs fix</b>', label: 'Needs fix. Open Desk.', title: null };
+    board.schedule('tick');
+    const capture = captureHeaderCrop(page, view, async selector => {
+      assert.equal(selector, '[data-joedesk-header-crop]');
+      assert.equal(mounted, copy);
+      assert.equal(copy.style.position, 'absolute');
+      assert.equal(copy.style.top, '2016px');
+      assert.equal(copy.style.width, '390px');
+      assert.equal(button.attributes.id, undefined, 'renders still find only the live header IDs');
+      assert.equal(button.attributes.title, undefined, 'no stale tooltip on the clone');
+      assert.equal(button.attributes['aria-label'], view.label);
+      assert.equal(copy.inert, true);
+      board.due();
+      assert.equal(liveButton.innerHTML, 'next live header');
+      assert.equal(button.innerHTML, view.html, 'capture keeps the requested production markup across a tick');
+      board.schedule('data'); board.due();
+      assert.equal(board.state().renders, 2, 'a refresh still renders while capture is in flight');
+      if (fail) throw new Error('capture failed');
+    });
+    if (fail) await assert.rejects(capture, /capture failed/);
+    else await capture;
+    assert.equal(mounted, null, 'the temporary header is always removed');
+    assert.equal(liveButton.innerHTML, 'next live header', 'cleanup never restores stale live markup');
+  }
 });
 
 test('Desk executor problem: precise capture/full-ledger sentences, optional sizes and recovery', () => {
@@ -741,5 +837,56 @@ test('terms: every entry has a plain label, a meaning and the trade term', () =>
   for (const [key, [label, meaning, also]] of Object.entries(TERMS)) {
     assert.ok(label && meaning && also, key);
     assert.doesNotMatch(label, /\b(P&L|IB|HALT|KEEP|NAV|FIFO|Gateway)\b/, key);
+  }
+});
+
+test('browser budget: setup stays separate while boundary-crossing and live tasks keep the 125 ms guard', () => {
+  assert.equal(REFERENCE_BUDGET.taskMs, 50);
+  assert.equal(CI_GUARD.taskMs, 125);
+  assert.equal(CI_GUARD.patchMs / REFERENCE_BUDGET.patchMs, 2.5);
+  assert.equal(CI_GUARD.historyMs / REFERENCE_BUDGET.historyMs, 2.5);
+  const tasks = [{ startTime: 0, duration: 90 }, { startTime: 90, duration: 132 },
+    { startTime: 260, duration: 132 }, { startTime: 450, duration: 125 }, { startTime: 650, duration: 60 }];
+  const windows = [{ name: 'desk updates', start: 100, end: 250 }, { name: 'history setup', start: 250, end: 400 },
+    { name: 'history updates', start: 400, end: 650 }];
+  const worker = { reason: 'history-worker', at: 455, ms: 600 };
+  const render = { reason: 'data', at: 110, ms: 28 };
+  const frame = { startTime: 90, duration: 140, scripts: [{ invoker: 'Window.requestAnimationFrame', forcedStyleAndLayoutDuration: 100 }] };
+  const details = attributeBudgetTasks({ tasks, frames: [frame] }, [worker, render], windows);
+  assert.deepEqual(details.map(t => t.phases), [[], ['desk updates'], ['history setup'], ['history updates'], []]);
+  assert.deepEqual(details.filter(t => t.phases.some(p => p.endsWith('updates'))).filter(t => t.duration >= CI_GUARD.taskMs).map(t => t.duration), [132, 125]);
+  assert.deepEqual(details[1].events, [render], '600 ms in the worker is not a 600 ms task on the page');
+  assert.deepEqual(details[3].events, [worker], 'the worker reply is attributed at receipt time');
+  assert.deepEqual(details[1].frames, [frame], 'style/layout evidence is retained beside the task');
+  assert.deepEqual(details[3].frames, []);
+});
+
+test('browser budget: observer snapshots drain undelivered entries once, with attribution and optional frame support', () => {
+  for (const hasFrames of [true, false]) {
+    const observers = [];
+    class Observer {
+      static supportedEntryTypes = hasFrames ? ['longtask', 'long-animation-frame'] : ['longtask'];
+      constructor(callback) { this.callback = callback; this.queued = []; observers.push(this); }
+      observe(options) { this.options = options; }
+      takeRecords() { return this.queued.splice(0); }
+    }
+    const window = {};
+    // Execute the exact serialized browser payload without a browser or any
+    // imported closure. Queue records without invoking their delivery callback.
+    runInNewContext(`(${observeBudgetTasks.toString()})()`, { window, PerformanceObserver: Observer });
+    const attribution = { name: 'unknown', containerType: 'window', containerId: '', containerName: '', containerSrc: '' };
+    observers[0].queued.push({ startTime: 90, duration: 132, name: 'self', attribution: [attribution] });
+    if (hasFrames) observers[1].queued.push({ startTime: 90, duration: 140, blockingDuration: 90,
+      renderStart: 95, styleAndLayoutStart: 120, scripts: [{ invoker: 'Window.requestAnimationFrame', duration: 28, forcedStyleAndLayoutDuration: 2 }] });
+    const snapshot = window.__budgetTasks.snapshot();
+    assert.equal(snapshot.hasFrames, hasFrames);
+    assert.equal(snapshot.tasks[0].duration, 132);
+    assert.deepEqual({ ...snapshot.tasks[0].attribution[0] }, attribution);
+    assert.equal(snapshot.frames.length, hasFrames ? 1 : 0);
+    if (hasFrames) assert.equal(snapshot.frames[0].scripts[0].forcedStyleAndLayoutDuration, 2);
+    assert.equal(window.__budgetTasks.snapshot().tasks.length, 1, 'drained entries are never duplicated');
+    assert.deepEqual({ ...observers[0].options }, { type: 'longtask', buffered: true });
+    observers[0].callback({ getEntries: () => [{ startTime: 450, duration: 125, name: 'self', attribution: [] }] });
+    assert.equal(window.__budgetTasks.snapshot().tasks.length, 2, 'delivered entries are retained too');
   }
 });
