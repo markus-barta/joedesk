@@ -282,7 +282,9 @@ export function positionsHtml(ctx) {
     missing: 'Position detail is unavailable', absent: 'Position detail is not present in this snapshot.' });
   if (!rows) return { sub: 'Desk positions only · each in its own currency', html: state };
   if (!rows.length) return { sub: '0 open · desk positions only · each in its own currency', html: `${state}<p class="empty-line">${icon('info')}<span>No open positions.</span></p>` };
-  const sorted = [...rows].sort((a, b) => DESKS.indexOf(a.desk) - DESKS.indexOf(b.desk) || a.symbol.localeCompare(b.symbol));
+  const unmapped = row => row.scope === 'stage0' && row.desk === null;
+  const deskOrder = row => unmapped(row) ? DESKS.length : DESKS.indexOf(row.desk);
+  const sorted = [...rows].sort((a, b) => deskOrder(a) - deskOrder(b) || a.symbol.localeCompare(b.symbol));
   const maxByCurrency = new Map();
   for (const r of sorted) { const v = Math.abs(amountOf(r.marketValue) ?? 0); const c = r.marketValue?.currency; if (c) maxByCurrency.set(c, Math.max(maxByCurrency.get(c) ?? 0, v)); }
   const today = ctx.now ? localDay(ctx.now, NY) : null;
@@ -291,17 +293,19 @@ export function positionsHtml(ctx) {
     const value = amountOf(r.marketValue), max = maxByCurrency.get(r.marketValue?.currency) || 0;
     const opened = r.openedAt ? ` · opened ${localDay(r.openedAt, NY) === today ? `today ${timeHM(r.openedAt)}` : dayDDM(r.openedAt)}` : '';
     const legacy = r.scope === 'legacy' ? ` · older holding, outside the ${term('stage0', 'first stage')}` : '';
+    const deskLabel = unmapped(r) ? `No desk · ${cellReason(r.reasons.desk)}` : null;
     return `<div class="prow" data-desk="${esc(r.desk ?? '')}">
       ${symBadge(r.symbol, r.desk)}
-      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span>${r.desk ? `${inlineMark(r.desk)} ${LABEL[r.desk]}` : 'No desk'}${opened}${legacy}</span><span class="position-mobile">${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)} · worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell)}</div>
+      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span${deskLabel ? ` title="${esc(deskLabel)}" aria-label="${esc(deskLabel)}"` : ''}>${deskLabel ? esc(deskLabel) : r.desk ? `${inlineMark(r.desk)} ${LABEL[r.desk]}` : 'No desk'}${opened}${legacy}</span><span class="position-mobile">${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)} · worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell)}</div>
       <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)}</div>
       <div class="r c-px num">${positionValue(r, 'mark', cell)}</div>
-      <div class="c-worth"><span class="num">${positionValue(r, 'marketValue', cell)}</span><span class="vbar">${value != null && max ? `<i data-v="${value}" data-cur="${esc(r.marketValue.currency)}" style="width:${(Math.abs(value) / max * 100).toFixed(3)}%"></i>` : ''}</span></div>
+      <div class="c-worth"><span class="num">${positionValue(r, 'marketValue', cell)}</span><span class="vbar"${value == null ? ' style="visibility:hidden"' : ''}>${value != null && max ? `<i data-v="${value}" data-cur="${esc(r.marketValue.currency)}" style="width:${(Math.abs(value) / max * 100).toFixed(3)}%"></i>` : ''}</span></div>
       <div class="r">${presentNull(r, 'openPnl') ? positionValue(r, 'openPnl', cell) : pl(amountOf(r.openPnl), r.openPnl?.currency ?? cur)}</div>
       <div class="r c-opened num">${r.updatedAt ? timeHM(r.updatedAt) : '—'}</div>
     </div>`;
   }).join('');
-  return { sub: `${rows.length} open · desk positions only · each in its own currency`, html: `${state}${header}${body}` };
+  const unmatched = rows.filter(unmapped).length;
+  return { sub: `${rows.length} open · ${unmatched ? `${unmatched} not matched to a desk` : 'desk positions only'} · each in its own currency`, html: `${state}${header}${body}` };
 }
 
 // Kept holdings: the read-only caption, then the section's own state line with

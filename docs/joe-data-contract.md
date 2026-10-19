@@ -355,6 +355,28 @@ ranked by the shared `panelStates` selector at the server's anchored clock.
 There is no browser-side ingest and no `window.JoeBoard` helper surface; the
 v1 helpers it exposed do not apply to the v2 contracts.
 
+## Unmapped v2 desk positions (manifest revision 9)
+
+The shared `contracts/` data ID remains `inspr.joe.household.v2`. Revision 9
+adds optional pusher-owned `positions.rows[].reasons.desk` to the closed reason
+bag and appends `desk_unmapped` to the reason enum: the broker reports this
+position, but the dated ownership mapping has no desk for it. Keep that row
+as `scope: "stage0"`, `desk: null`, with its own desk reason; never guess a
+desk or drop it. A stage0 null desk without `reasons.desk` fails `deskRequired`.
+A non-null desk plus a desk reason, or any KEEP row with a desk reason, fails
+`contradictoryDesk`. A panel/session reason cannot replace the desk reason.
+KEEP still uses `scope: "keep"`, `desk: null`, without a desk reason. Legacy
+rows need no new reason. Every valid rev-8 payload stays accepted.
+
+The position's existing visible name line, title and accessible name read
+**No desk · not matched to a desk**, via the shared cell-reason copy, with no
+desk colour or mark. Unmapped stage0 rows sort after the desk rows and do not
+enter desk counts, desk money or Today totals. Other ordering stays unchanged.
+On Amy's switch snapshot, values remain null with their own `not_exact_yet`
+reasons, showing em dashes and visible explanations; no partial total is
+derived. Producers re-vendor the complete `contracts/` directory and the
+revision-9 digest in `release/contracts.json` before coordinated activation.
+
 ## Results v2 missing daily summaries
 
 The rebuilt Results feed uses `inspr.joe.household.results.v2` and the shared

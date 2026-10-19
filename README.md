@@ -766,7 +766,7 @@ or “record incomplete”.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
-`contract_set_sha256`; an earlier digest does not cover revision-8 acceptance
+`contract_set_sha256`; an earlier digest does not cover revision-9 acceptance
 and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.
@@ -785,7 +785,7 @@ fails with `reasonRequired`; a value with a reason is accepted, matching equity.
 Rev-7 payloads omitting cash or the whole account still validate when their
 position nulls carry reasons as described below. Old durable cell sets retain
 their sequence and last-good observations on restart. The data ID stays
-`inspr.joe.household.v2`, and the contract-set revision stays 8.
+`inspr.joe.household.v2`.
 
 Revision 8 also permits null `positions.rows[].quantity` and adds the closed
 per-row `reasons` object with optional `quantity`, `mark`, `marketValue`,
@@ -804,6 +804,35 @@ The frozen-ready fixture also carries row reasons because its advancing-push
 test initially uses a still-confirmed check; its original payload observations
 and panel expectations stay unchanged. `fixtures/positions-null.json` adds
 reasoned KEEP nulls and a stage0 null mark.
+
+Contract-set revision 9 (JOED-52) adds optional pusher-owned `reasons.desk`
+to that closed per-row bag and appends `desk_unmapped` to the reason enum,
+preserving its earlier order and the `inspr.joe.household.v2` data ID.
+A broker-reported non-KEEP position absent from the dated ownership mapping
+stays `scope: "stage0"`, `desk: null`, with `reasons.desk: "desk_unmapped"`;
+the producer never guesses a desk or drops the row. A stage0 null desk without
+its own reason fails `deskRequired`. A desk reason with a non-null desk, or
+on any KEEP row, fails `contradictoryDesk`. KEEP still requires `scope: "keep"`
+and `desk: null` without a desk reason; legacy rules and all rev-8 payloads
+stay valid. The API-session exception cannot replace a desk reason.
+The board's existing name line reads **No desk · not matched to a desk**,
+also in title and accessible name, with no desk colour or mark. Unmapped
+stage0 rows sort after all desk rows, retaining other ordering, and add
+nothing to desk figures or Today totals. When any are present, the subtitle
+counts every listed row and names the unmatched ones: `4 open · 1 not matched
+to a desk · each in its own currency`. Without them its wording is unchanged.
+An unknown worth has no visible bar track; the hidden track retains its space.
+KEEP rows have no worth track. Amy's switch
+snapshot keeps their values null with `not_exact_yet`; the row shows em
+dashes with each value's own reason, without partial totals.
+`fixtures/positions-unmapped.json` supplies this synthetic row. P5's existing
+`positions` scenario adds real-ingress, accessible-copy, neutral-identity,
+ordering, row-count, figure-exclusion and exact 0 px cash/KPI/card movement checks,
+plus an exact 0 px row/cell/track check when the unknown-worth track is hidden,
+plus `<width>-<theme>-desk-unmapped.png` crops at 1440/1024/390/360 in both
+themes. Browser execution and visual approval remain with CI/coordinator.
+The cash and KPI sizing reserves include the new short reason through
+`CELL_REASON`, with their existing geometry checks unchanged.
 
 The reason enum appends `not_exact_yet` (the broker reports it, but it is not
 yet captured exactly) and `source_unavailable` (the broker did not report it,

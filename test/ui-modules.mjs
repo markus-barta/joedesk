@@ -230,6 +230,64 @@ test('position rows: null values expose their reasons visibly and in accessible 
   assert.equal(health.cellReason('source_not_authoritative'), 'held back: the kept-holdings list disagrees');
 });
 
+test('position worth: null tracks stay hidden in place; valued tracks stay visible; KEEP has no track', () => {
+  const mapped = valid.data.positions.rows.find(row => row.scope === 'stage0');
+  const kept = valid.data.positions.rows.find(row => row.scope === 'keep');
+  for (const source of [mapped, { ...mapped, desk: null, scope: 'legacy' }, read('positions-unmapped.json'), kept]) {
+    for (const marketValue of [null, { amount: '0', currency: 'EUR' }, { amount: '12.5', currency: 'EUR' }]) {
+      const row = { ...source, marketValue, reasons: { ...source.reasons } };
+      if (marketValue === null) row.reasons.marketValue = 'not_exact_yet';
+      else delete row.reasons.marketValue;
+      const ctx = { states: { positions: { state: 'fresh', value: [row] }, kept: { state: 'fresh', value: [row] } }, feeds: {} };
+      const html = row.scope === 'keep' ? keptHtml(ctx) : positionsHtml(ctx).html;
+      if (row.scope === 'keep') assert.doesNotMatch(html, /class="vbar"/);
+      else if (marketValue === null) assert.match(html, /<span class="vbar" style="visibility:hidden"><\/span>/,
+        'retain the track element and its layout space without painting an unknown worth');
+      else {
+        assert.match(html, /<span class="vbar">/);
+        assert.doesNotMatch(html, /visibility:hidden/);
+      }
+    }
+  }
+});
+
+test('unmapped positions: visible reason, honest row count, neutral identity, last in desk order, excluded from figures', () => {
+  const data = read('positions-null.json'), unmapped = read('positions-unmapped.json');
+  const mapped = data.positions.rows[0];
+  data.positions.rows.push(...['joe', 'joel'].map((desk, i) => ({ ...structuredClone(mapped), desk, symbol: `DESK${i}` })),
+    { ...structuredClone(mapped), desk: null, symbol: 'OLD', scope: 'legacy' });
+  const context = value => ({ states: panelStates({ data: { value } }, value.receivedAt), feeds: { data: { value } }, now: value.receivedAt });
+  const before = context(data), baseline = positionsHtml(before);
+  assert.equal(baseline.sub, '4 open · desk positions only · each in its own currency', 'no unmapped rows: byte-identical subtitle');
+  // Put it first in the input, with a symbol that also sorts before the desks.
+  data.positions.rows.unshift(unmapped);
+  const after = context(data), rendered = positionsHtml(after);
+  const row = rendered.html.slice(rendered.html.lastIndexOf('<div class="prow"'));
+  const label = 'No desk · not matched to a desk';
+  assert.ok(row.includes(`title="${label}" aria-label="${label}">${label}</span>`));
+  assert.ok(row.includes('<span class="sym" aria-hidden="true">AAA</span>'));
+  assert.doesNotMatch(row, /var\(--desk-|class="i im"|class="dmark"/);
+  assert.deepEqual([...rendered.html.matchAll(/<div class="name"><b>([^<]+)<\/b>/g)].map(m => m[1]),
+    ['OLD', 'DEMO', 'DESK0', 'DESK1', 'AAA'], 'legacy order and all mapped desk order stay unchanged');
+  for (const field of ['Quantity', 'Last price', 'Worth', 'Open result']) {
+    assert.ok(row.includes(`title="${field}: not reported · not exact yet" aria-label="${field}: not reported · not exact yet">—</span>`));
+  }
+  for (const field of ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result']) assert.ok(row.includes(`${field}: not exact yet`));
+  assert.equal(rendered.sub, '5 open · 1 not matched to a desk · each in its own currency');
+  assert.equal(Number.parseInt(rendered.sub), [...rendered.html.matchAll(/<div class="prow" data-desk=/g)].length,
+    'open count matches every listed row, including legacy and unmapped positions');
+  for (const name of DATA_PANELS.filter(name => name !== 'positions')) {
+    assert.deepEqual(after.states[name], before.states[name], `${name}: no guessed attribution or partial sum`);
+  }
+  assert.equal(heroLeft(after), heroLeft(before), 'Today totals and account figures stay unchanged');
+  assert.equal(keptHtml(after), keptHtml(before));
+  const only = context({ ...data, positions: { ...data.positions, rows: [unmapped] } });
+  assert.equal(positionsHtml(only).sub, '1 open · 1 not matched to a desk · each in its own currency');
+  assert.ok(positionsHtml(only).html.includes(label), 'zero desk rows still shows the unmapped position');
+  const multiple = context({ ...data, positions: { ...data.positions, rows: [...data.positions.rows, { ...unmapped, symbol: 'BBB' }] } });
+  assert.equal(positionsHtml(multiple).sub, '6 open · 2 not matched to a desk · each in its own currency');
+});
+
 test('kept worth: one null summand withholds the complete total rather than showing a partial sum', () => {
   const data = read('valid.json').data;
   const rows = data.positions.rows.filter(row => row.scope === 'keep');

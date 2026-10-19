@@ -1,0 +1,21 @@
+{
+  "desk": null,
+  "symbol": "AAA",
+  "company": "Synthetic unmapped instrument",
+  "side": "long",
+  "quantity": null,
+  "mark": null,
+  "marketValue": null,
+  "dayPnl": null,
+  "openPnl": null,
+  "scope": "stage0",
+  "updatedAt": "2026-10-14T17:42:22.000Z",
+  "reasons": {
+    "quantity": "not_exact_yet",
+    "mark": "not_exact_yet",
+    "marketValue": "not_exact_yet",
+    "dayPnl": "not_exact_yet",
+    "openPnl": "not_exact_yet",
+    "desk": "desk_unmapped"
+  }
+}
