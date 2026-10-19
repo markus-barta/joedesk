@@ -25,7 +25,7 @@ export const SECTIONS = Object.freeze([
   { id: 'history-bookkeeping', route: 'history', screens: ['desk', 'history'], selector: '#jAcct', content: 'dd' },
   { id: 'history-events', route: 'history', screens: ['desk', 'history'], selector: '#events', content: 'li' },
   { id: 'results', route: 'results', screens: ['results'], selector: '#rhero', content: '#rheroL .display' },
-  { id: 'results-tiles', route: 'results', screens: ['results'], selector: '#tiles', content: '.tval' },
+  { id: 'results-tiles', route: 'results', screens: ['results'], selector: '#tiles', content: '.tval', item: '.tile', explanation: '.tmean' },
   { id: 'results-calendar', route: 'results', screens: ['results'], selector: '#cal', content: '.cell:not(.out)' },
   { id: 'results-breakdown', route: 'results', screens: ['results'], selector: '#breakdown', content: '.track', graphic: true },
   { id: 'settings-mode', route: 'settings', screens: ['settings'], selector: '#set-mode', content: '#modeLede' },
@@ -118,11 +118,16 @@ export function privateOutput(out, names) {
 // CDP. Unknown data-state strings become a count, never an exported string.
 export function inspectSections(table, notReceived, document) {
   const known = ['fresh', 'stale', 'not reported', 'broken'];
+  const hasText = node => Boolean(node?.textContent.replace(/[\s—−-]/g, ''));
   return table.map(section => {
     const root = document.querySelector(section.selector);
     const nodes = root ? [...root.querySelectorAll(section.content)] : [];
     const present = Boolean(root);
-    const nonEmpty = nodes.length > 0 && nodes.every(n => section.graphic || Boolean(n.textContent.replace(/[\s—−-]/g, '')));
+    const explained = node => {
+      const scope = section.item ? node.closest(section.item) : root;
+      return Boolean(scope && section.explanation && [...scope.querySelectorAll(section.explanation)].some(hasText));
+    };
+    const nonEmpty = nodes.length > 0 && (section.graphic || nodes.some(hasText) || nodes.every(explained));
     const seen = root ? [root, ...root.querySelectorAll('[data-state]')].map(n => n.getAttribute('data-state')).filter(s => s !== null) : [];
     return {
       id: section.id, present, nonEmpty,
@@ -169,6 +174,14 @@ export function assertValueFree(summary) {
 }
 export const passed = summary => summary.permissionsValid && Object.values(summary.counts).every(n => n === 0);
 
+function logCheckError(log, step, error) {
+  const classes = ['Error', 'TypeError', 'ReferenceError', 'SyntaxError', 'RangeError', 'EvalError', 'URIError', 'CaptureError'];
+  const name = error instanceof CaptureError ? 'CaptureError' : classes.find(c => c === error?.name) ?? 'Error';
+  // Step ids and exception classes are fixed code vocabulary. Only synthetic
+  // CI may print the exception message; none of it enters summary.json.
+  log(`preview-capture: step=${step} exception=${name}${process.env.CI === 'true' ? ` message=${JSON.stringify(error?.message ?? 'check failed')}` : ''}`);
+}
+
 export async function restrictOrigin(browser, page, baseUrl, counts) {
   const origin = new URL(baseUrl).origin;
   const pending = new Set();
@@ -214,9 +227,12 @@ export async function capture(options, { launchBrowser = launch, log = console.l
   const counts = Object.fromEntries(COUNTERS.map(k => [k, 0]));
   const checks = [];
   let browser, page, restriction, onError, health;
+  let step = 'launch';
   try {
     browser = await launchBrowser({ profileParent: output.dir, commandTimeout: 20000 });
+    step = 'downloads';
     await browser.send('Browser.setDownloadBehavior', { behavior: 'deny' });
+    step = 'open-page';
     page = await openPage(browser);
     onError = m => {
       if (!page.owns(m.sessionId)) return;
@@ -224,32 +240,45 @@ export async function capture(options, { launchBrowser = launch, log = console.l
       if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') counts.consoleErrors++;
     };
     browser.on(onError);
+    step = 'restrict-origin';
     restriction = await restrictOrigin(browser, page, options.baseUrl, counts);
     for (const screen of options.screens) for (const width of options.widths) for (const theme of options.themes) {
       const before = { ...counts };
       const check = { screen, width, theme, sections: [] };
       try {
+        step = 'output-permissions';
         output.verify();
         const viewport = viewportFor(width);
+        step = 'configure';
         await configure(page, viewport, theme);
+        step = 'load';
         await load(page, options.baseUrl, screen === 'positions' ? 'desk' : screen);
+        step = 'health';
         health = await readHealth(page, options.baseUrl);
         const table = sectionsFor(screen);
         for (const route of new Set(table.map(s => s.route))) {
+          step = `${route}-navigate`;
           await go(page, route);
           const selection = table.filter(s => s.route === route);
+          step = `${route}-sections`;
           const sections = await page.evaluate(`(${inspectSections.toString()})(${JSON.stringify(selection)}, ${health.resultsNotReceived === true}, document)`);
           check.sections.push(...sections);
         }
+        step = 'capture-navigate';
         await go(page, screen === 'positions' ? 'desk' : screen);
+        step = 'settle';
         await settle(page);
+        step = 'screenshot';
         const bytes = await screenshot(page, viewport, undefined, screen === 'positions' ? { selector: '#positions' } : {});
         if (!bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new CaptureError('invalid PNG');
+        step = 'write-png';
         output.write(`${screen}-${width}-${theme}.png`, bytes);
       } catch (error) {
         if (error instanceof CaptureError && error.exitCode === 2) throw error;
         counts.checkErrors++;
+        logCheckError(log, step, error);
       }
+      step = 'drain-requests';
       await restriction.drain();
       for (const k of COUNTERS) check[k] = counts[k] - before[k];
       checks.push(check);
@@ -260,6 +289,7 @@ export async function capture(options, { launchBrowser = launch, log = console.l
   } catch (error) {
     if (error instanceof CaptureError && error.exitCode === 2) throw error;
     counts.checkErrors++;
+    logCheckError(log, step, error);
   } finally {
     try { await browser?.close(); } catch { counts.checkErrors++; }
     if (restriction) { await restriction.drain(); restriction.dispose(); }

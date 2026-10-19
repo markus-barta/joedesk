@@ -167,7 +167,9 @@ group, source/log, appearance and About. Desk captures also visit History to
 check it, then return to Desk. Only Results with the health feed's exact
 `not reported` / `feed_not_received` pair may be empty; its unavailable UI
 currently emits no panel `data-state` line, so the summary reports no observed
-state names there. Missing sections still fail.
+state names there. Missing sections still fail. A received Results section
+counts as content when it has a real value, or every dash tile has its own
+explanation (for example, profit factor needs a losing trade).
 
 The summary uses an allow-list serializer: fixed section/screen/state names,
 widths, themes, booleans, counts, and only `/joe/healthz`'s `version` and
@@ -176,8 +178,12 @@ hints, URLs or error messages. Requests outside the base origin are blocked
 with CDP Fetch interception, including worker requests; any block fails the run.
 Exit 0 means all checks passed; exit 1 means capture/content/errors failed;
 exit 2 means invalid arguments or output permissions. Terminal lines are also
-value-free. CI alone uploads **synthetic** fixture images and the checked
-summary as `joedesk-preview-capture`.
+value-free: check exceptions print a fixed step id and exception class, with
+the message added only when `CI=true` for synthetic diagnostics. Exception
+messages never enter the summary. Dedicated-worker requests pause on their
+owning page/frame's Fetch session; workers resume after their runtime and
+nested-worker tracking are enabled. CI alone uploads **synthetic** fixture
+images and the checked summary as `joedesk-preview-capture`.
 
 **Real screenshots go only to Amy: never commit or upload them. Trash the
 captures afterwards** (`trash "$capture_dir"`). Only the value-free summary

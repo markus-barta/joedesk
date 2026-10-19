@@ -120,20 +120,28 @@ export async function openPage(browser, { headers = {}, timeZone = process.env.T
   const errors = [], requests = [], workerTimeZones = [];
   // Workers are their own targets: give them the same request headers and
   // the same request routing before they run.
-  const children = new Set();
+  const children = new Set(), workers = new Set();
   let fetchPatterns = null;
   let strictFetch = false;
   const routing = { errors: 0 };
   await s('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
   browser.on(async m => {
-    if (m.method === 'Target.detachedFromTarget' && (m.sessionId === sessionId || children.has(m.sessionId))) children.delete(m.params.sessionId);
+    if (m.method === 'Target.detachedFromTarget' && (m.sessionId === sessionId || children.has(m.sessionId))) {
+      children.delete(m.params.sessionId); workers.delete(m.params.sessionId);
+    }
     if (m.method !== 'Target.attachedToTarget' || (m.sessionId !== sessionId && !(strictFetch && children.has(m.sessionId)))) return;
     const child = m.params.sessionId;
     children.add(child);
+    const worker = m.params.targetInfo.type === 'worker';
+    if (worker) workers.add(child);
     try {
       await browser.send('Network.enable', {}, child);
       if (Object.keys(page.headers).length) await browser.send('Network.setExtraHTTPHeaders', { headers: page.headers }, child);
-      if (fetchPatterns) await browser.send('Fetch.enable', { patterns: fetchPatterns }, child);
+      // Dedicated workers have no Fetch domain. Their requests pause on the
+      // owning page/frame's Fetch session, including requests of nested workers.
+      // Sending Fetch.enable to the worker used to strand it before resume,
+      // so the board never settled and every preview load timed out.
+      if (fetchPatterns && !worker) await browser.send('Fetch.enable', { patterns: fetchPatterns }, child);
       if (strictFetch) {
         await browser.send('Runtime.enable', {}, child);
         await browser.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, child);
@@ -175,6 +183,7 @@ export async function openPage(browser, { headers = {}, timeZone = process.env.T
     fetchPatterns = patterns;
     strictFetch = strict;
     for (const target of [sessionId, ...children]) {
+      if (workers.has(target)) continue;
       try { await browser.send(patterns ? 'Fetch.enable' : 'Fetch.disable', patterns ? { patterns } : {}, target); }
       catch (error) {
         if (strict) { routing.errors++; throw error; }

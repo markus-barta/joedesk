@@ -9,6 +9,19 @@ import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { openPage } from '../scripts/browser/cdp.mjs';
 import { screenshot } from '../scripts/browser/shots.mjs';
 import { parseArgs, privateOutput, SECTIONS, inspectSections, serializeSummary, assertValueFree, passed, restrictOrigin, capture } from '../scripts/preview-capture.mjs';
+import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
+import { designSnapshot, designFleet, designActions, NOW, at } from '../scripts/browser/settings-fixtures.mjs';
+import { panelStates } from '../contracts/panel-state.mjs';
+
+const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
+globalThis.document ??= { documentElement: { dataset: {} } };
+const [deskUI, historyUI, resultsUI, settingsUI, settingsModel, resultsModel, ui, historyModel] = await Promise.all([
+  builders('desk.js', ['deskCard']), builders('history.js', ['bookkeepingHtml', 'eventsHtml']),
+  builders('results.js', ['renderTiles', 'renderBreakdown']),
+  builders('settings.js', ['buildSkeleton', 'fieldHtml', 'runtimeHtml', 'sourceHtml', 'logHtml']),
+  import('../public/joe/settings-model.js'), import('../public/joe/results-model.js'),
+  import('../public/joe/ui.js'), import('../public/joe/history-model.js'),
+]).finally(() => { if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument); else delete globalThis.document; });
 
 const execute = promisify(execFile);
 const BASE = 'http://127.0.0.1:8080/joe/';
@@ -147,7 +160,85 @@ test('preview sections: only a rendered Results empty with feed_not_received is 
   assert.ok(!JSON.stringify(poisoned).includes('PRIVATE'));
 });
 
-function fakeBrowser({ failFetch = null, failScreenshot = false } = {}) {
+function renderedBoard(t) {
+  const document = htmlDocument(fs.readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  for (const [key, value] of Object.entries({ document, matchMedia: () => ({ matches: true }), JoeVersion: {} })) {
+    const before = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+    t.after(() => { if (before) Object.defineProperty(globalThis, key, before); else delete globalThis[key]; });
+  }
+  const window = {};
+  runInNewContext(fs.readFileSync(new URL('../public/joe/joe-version.js', import.meta.url), 'utf8'), { window });
+  globalThis.JoeVersion = window.JoeVersion;
+  const { snapshot, history } = designSnapshot();
+  const results = JSON.parse(fs.readFileSync(new URL('../fixtures/results/no-losers.json', import.meta.url)));
+  const feeds = { data: { value: { ...snapshot, receivedAt: NOW } },
+    history: { value: { ...history, columns: historyModel.toColumns(history.points) } },
+    results: { value: { ...results, index: resultsModel.indexResults(results) } },
+    'fleet-config': { value: designFleet(), receivedAt: NOW } };
+  const ctx = { feeds, now: at(NOW, 9), states: panelStates(feeds, at(NOW, 9)),
+    events: { recent: () => [], baseline: () => true }, actions: { entries: designActions() } };
+  const set = (selector, html) => { const node = document.querySelector(selector); assert.ok(node, selector); node.innerHTML = html; };
+  set('#heroL', deskUI.heroLeft(ctx));
+  for (const id of ['j', 'joe', 'joel']) set(`#desk-${id}`, deskUI.deskCard(ctx, id, 100, true));
+  set('#positions', deskUI.positionsHtml(ctx).html);
+  set('#kept', deskUI.keptHtml(ctx));
+  set('#jAcct', historyUI.bookkeepingHtml(ctx));
+  set('#events', historyUI.eventsHtml(ctx));
+  Object.assign(document.querySelector('#histChart'), { clientWidth: 900, clientHeight: 300 });
+  historyUI.historyChart(ctx);
+  const view = resultsUI.resultsView(ctx), desks = ['j', 'joe', 'joel'];
+  Object.assign(resultsUI.RS, { period: 'all', cal: resultsModel.ymOf(view.today), sel: view.today });
+  const per = resultsModel.periodOf('all', view.today, view.today, view.trackingStart);
+  const rollup = chosen => resultsModel.rollup(view.ix, per, chosen, resultsModel.moneyContext(view.ix, view, per, chosen));
+  resultsUI.renderHero(view, per, desks, rollup(desks));
+  resultsUI.renderTiles(rollup(desks));
+  resultsUI.renderBreakdown(view, per, desks, desks.map(id => rollup([id])).concat(rollup(desks)));
+  resultsUI.renderCalendar(view, per, desks);
+  ui.addTerms(settingsModel.FIELD_TERMS);
+  settingsUI.buildSkeleton();
+  set('#modeLede', 'Every order goes to the practice account.');
+  set('#rtRows', settingsUI.runtimeHtml(ctx));
+  for (const group of settingsModel.GROUPS) set(`#grp-${group.id}`, group.fields.map(field => settingsUI.fieldHtml(field, feeds['fleet-config'].value)).join(''));
+  set('#srcFacts', settingsUI.sourceHtml(ctx));
+  set('#log', settingsUI.logHtml(ctx));
+  return document;
+}
+
+test('preview sections: the real multi-section board markup passes the entire serialized selector table through capture', async t => {
+  const document = renderedBoard(t), dir = temporary(t);
+  assert.ok(document.querySelector('#tiles [data-tile="pf"] .tval').textContent.trim() === '—');
+  assert.match(document.querySelector('#tiles [data-tile="pf"] .tmean').textContent, /losing trade/);
+  const sections = inspectSections(SECTIONS, false, document);
+  assert.deepEqual(sections.filter(s => !s.present || !s.nonEmpty || s.invalidStates).map(s => s.id), []);
+  const browser = fakeBrowser({ document, health: { ...HEALTH, resultsNotReceived: false } });
+  assert.equal(await capture({ ...opts(dir), screens: ['desk', 'positions', 'settings', 'results', 'history'] },
+    { launchBrowser: async () => browser, log: () => {} }), 0);
+  const summary = JSON.parse(fs.readFileSync(join(dir, 'summary.json')));
+  assertValueFree(summary);
+  assert.equal(summary.checks.length, 20);
+  assert.ok(summary.checks.every(c => c.sections.every(s => s.nonEmpty && s.ok && !s.allowedEmpty)));
+  document.querySelector('#kept').remove();
+  assert.deepEqual(inspectSections(SECTIONS, false, document).filter(s => !s.present || !s.nonEmpty).map(s => s.id), ['kept']);
+});
+
+test('preview Results tiles: real values or each dash’s own explanation count; unexplained all-dash and missing content fail', () => {
+  const table = SECTIONS.filter(s => s.id === 'results-tiles');
+  const inspect = (html, notReceived = false) => inspectSections(table, notReceived, htmlDocument(html))[0];
+  const tile = (value, why = '') => `<article class="tile"><div class="tval">${value}</div>${why ? `<p class="tmean">${why}</p>` : ''}</article>`;
+  assert.equal(inspect(`<div id="tiles">${tile('12')}${tile('—', 'Needs a losing trade')}</div>`).nonEmpty, true);
+  assert.equal(inspect(`<div id="tiles">${tile('12')}${tile('—')}</div>`).nonEmpty, true);
+  const explained = `<div id="tiles">${tile('—', 'Needs a won or lost trade')}${tile('—', 'Needs a losing trade')}</div>`;
+  assert.equal(inspect(explained).nonEmpty, true);
+  assert.equal(inspect(`<div id="tiles">${tile('—', 'Needs a losing trade')}${tile('—')}</div>`).nonEmpty, false);
+  const empty = `<div id="tiles">${tile('—')}${tile(' − ')}</div>`;
+  assert.deepEqual([inspect(empty).nonEmpty, inspect(empty).allowedEmpty], [false, false]);
+  assert.deepEqual([inspect(empty, true).nonEmpty, inspect(empty, true).allowedEmpty], [false, true]);
+  assert.equal(inspect('<div id="tiles"></div>', true).allowedEmpty, false);
+  assert.equal(inspect('<div></div>', true).allowedEmpty, false);
+});
+
+function fakeBrowser({ failFetch = null, failScreenshot = false, document = dom(), health = HEALTH } = {}) {
   const listeners = new Set(), calls = [];
   let mobile = false;
   const browser = {
@@ -166,8 +257,11 @@ function fakeBrowser({ failFetch = null, failScreenshot = false } = {}) {
       if (method === 'Runtime.evaluate') {
         const e = params.expression;
         let value = true;
-        if (e.includes('inspectSections(')) value = runInNewContext(e, { document: dom() });
-        else if (e.includes('const response = await fetch')) value = HEALTH;
+        assert.equal(params.returnByValue, true);
+        if (sessionId === 'page') assert.equal(params.awaitPromise, true);
+        if (e.includes('inspectSections(')) value = runInNewContext(e, { document });
+        else if (e.includes('const response = await fetch')) value = health;
+        else if (e === 'Intl.DateTimeFormat().resolvedOptions().timeZone') value = 'UTC';
         else if (e.includes("matchMedia('(hover: hover)')")) value = mobile ? 'no hover, coarse' : 'hover, fine';
         else if (e.includes('Math.ceil(document.documentElement.scrollHeight)')) value = 1000;
         else if (e.includes('getBoundingClientRect')) value = { x: 16, y: 300, width: 358, height: 400, scale: 1 };
@@ -185,27 +279,57 @@ test('preview network: Fetch blocks cross-origin, cross-port, malformed and redi
   for (const sessionId of ['page', 'worker']) {
     if (sessionId === 'worker') await browser.emit({ method: 'Target.attachedToTarget', sessionId: 'page', params: { sessionId, targetInfo: { type: 'worker', targetId: 'worker-target' } } });
     for (const url of [BASE, BASE + '?private=QUERY_PRIVATE', 'http://127.0.0.1:8081/joe/', 'https://external.test/?private=QUERY_PRIVATE', 'file:///private', 'malformed']) {
-      await browser.emit({ method: 'Fetch.requestPaused', sessionId, params: { requestId: url, request: { url } } });
+      // Chromium delivers dedicated-worker Fetch pauses on the owning page,
+      // even though Network events belong to the worker's own session.
+      await browser.emit({ method: 'Fetch.requestPaused', sessionId: 'page', params: { requestId: `${sessionId}-${url}`, request: { url } } });
     }
   }
   await restriction.drain(); restriction.dispose();
   assert.equal(counts.blockedRequests, 8);
   assert.equal(browser.calls.filter(c => c.method === 'Fetch.failRequest').length, 8);
   assert.equal(browser.calls.filter(c => c.method === 'Fetch.continueRequest').length, 4);
-  assert.ok(browser.calls.some(c => c.method === 'Fetch.enable' && c.params.patterns[0].urlPattern === '*' && c.sessionId === 'worker'));
+  assert.ok(browser.calls.some(c => c.method === 'Fetch.enable' && c.params.patterns[0].urlPattern === '*' && c.sessionId === 'page'));
+  assert.ok(!browser.calls.some(c => c.method === 'Fetch.enable' && c.sessionId === 'worker'));
   assert.ok(browser.calls.some(c => c.method === 'Runtime.enable' && c.sessionId === 'worker'));
 });
 
-test('preview network: strict interception failure rejects the page and never resumes an unprotected worker', async () => {
+test('preview network: strict interception failure rejects the page and never resumes an unprotected frame', async () => {
   const failed = fakeBrowser({ failFetch: 'page' }), failedPage = await openPage(failed);
   await assert.rejects(restrictOrigin(failed, failedPage, BASE, {}));
   assert.equal(failedPage.routing.errors, 1);
-  const browser = fakeBrowser({ failFetch: 'worker' }), page = await openPage(browser);
+  const browser = fakeBrowser({ failFetch: 'frame' }), page = await openPage(browser);
   await restrictOrigin(browser, page, BASE, {});
-  await browser.emit({ method: 'Target.attachedToTarget', sessionId: 'page', params: { sessionId: 'worker', targetInfo: { type: 'worker', targetId: 'worker-target' } } });
+  await browser.emit({ method: 'Target.attachedToTarget', sessionId: 'page', params: { sessionId: 'frame', targetInfo: { type: 'iframe', targetId: 'frame-target' } } });
   assert.equal(page.routing.errors, 1);
-  assert.ok(browser.calls.some(c => c.method === 'Target.closeTarget' && c.params.targetId === 'worker-target'));
-  assert.ok(!browser.calls.some(c => c.method === 'Runtime.runIfWaitingForDebugger' && c.sessionId === 'worker'));
+  assert.ok(browser.calls.some(c => c.method === 'Target.closeTarget' && c.params.targetId === 'frame-target'));
+  assert.ok(!browser.calls.some(c => c.method === 'Runtime.runIfWaitingForDebugger' && c.sessionId === 'frame'));
+});
+
+test('preview network: real worker protocol shape resumes dedicated and nested workers; frame interception stays strict', async () => {
+  const browser = fakeBrowser(), send = browser.send.bind(browser);
+  browser.send = async (method, params, sessionId) => {
+    if (method.startsWith('Fetch.') && ['worker', 'nested-worker'].includes(sessionId)) throw new Error('Fetch domain is unavailable on dedicated workers');
+    return send(method, params, sessionId);
+  };
+  const page = await openPage(browser, { timeZone: 'UTC' }), counts = { blockedRequests: 0, interceptionErrors: 0 };
+  const restriction = await restrictOrigin(browser, page, BASE, counts);
+  for (const [sessionId, parent, type] of [['worker', 'page', 'worker'], ['nested-worker', 'worker', 'worker'], ['frame', 'page', 'iframe']]) {
+    await browser.emit({ method: 'Target.attachedToTarget', sessionId: parent, params: { sessionId, targetInfo: { type, targetId: `${sessionId}-target` } } });
+    assert.equal(page.owns(sessionId), true);
+    assert.ok(browser.calls.some(c => c.method === 'Runtime.runIfWaitingForDebugger' && c.sessionId === sessionId));
+    assert.ok(browser.calls.some(c => c.method === 'Target.setAutoAttach' && c.sessionId === sessionId));
+  }
+  await page.setFetch([{ urlPattern: '*', requestStage: 'Request' }], { strict: true });
+  await browser.emit({ method: 'Fetch.requestPaused', sessionId: 'page', params: { requestId: 'nested-egress', request: { url: 'https://external.test/' } } });
+  await restriction.drain(); restriction.dispose();
+  assert.equal(page.routing.errors, 0);
+  assert.deepEqual(page.workerTimeZones, ['UTC', 'UTC']);
+  assert.equal(counts.blockedRequests, 1);
+  assert.equal(counts.interceptionErrors, 0);
+  assert.ok(browser.calls.some(c => c.method === 'Fetch.failRequest' && c.sessionId === 'page' && c.params.requestId === 'nested-egress'));
+  assert.ok(browser.calls.some(c => c.method === 'Fetch.enable' && c.sessionId === 'frame'));
+  await browser.emit({ method: 'Target.detachedFromTarget', sessionId: 'worker', params: { sessionId: 'nested-worker' } });
+  assert.equal(page.owns('nested-worker'), false);
 });
 
 test('preview capture: the orchestration writes only named 0600 PNGs and a value-free summary using shared capture helpers', async t => {
@@ -239,6 +363,29 @@ test('preview capture: page/console/blocked errors are counted without messages 
   assert.equal(summary.counts.pageErrors, 1); assert.equal(summary.counts.consoleErrors, 1); assert.equal(summary.counts.blockedRequests, 1);
   assert.ok(!text.includes('PRIVATE'));
   assertValueFree(summary);
+});
+
+test('preview capture: failure diagnostics name the step and exception class; messages are CI-only and never in summary.json', async t => {
+  const before = process.env.CI;
+  try {
+    for (const ci of ['false', 'true', '1']) for (const step of ['load', 'desk-sections']) {
+      process.env.CI = ci;
+      const dir = temporary(t), browser = fakeBrowser(), send = browser.send.bind(browser), lines = [];
+      browser.send = async (method, params, sessionId) => {
+        if ((step === 'load' && method === 'Page.navigate') ||
+            (step === 'desk-sections' && method === 'Runtime.evaluate' && params.expression.includes('inspectSections('))) throw new TypeError('DIAGNOSTIC_PRIVATE');
+        return send(method, params, sessionId);
+      };
+      assert.equal(await capture({ ...opts(dir), screens: ['desk'], widths: [390], themes: ['light'] },
+        { launchBrowser: async () => browser, log: line => lines.push(line) }), 1);
+      assert.ok(lines.some(line => line.includes(`step=${step} exception=TypeError`)));
+      assert.equal(lines.some(line => line.includes('DIAGNOSTIC_PRIVATE')), ci === 'true');
+      const text = fs.readFileSync(join(dir, 'summary.json'), 'utf8'), summary = JSON.parse(text);
+      assert.equal(summary.counts.checkErrors, 1);
+      assert.ok(!text.includes('DIAGNOSTIC_PRIVATE') && !text.includes('TypeError'));
+      assertValueFree(summary);
+    }
+  } finally { if (before === undefined) delete process.env.CI; else process.env.CI = before; }
 });
 
 test('preview shared screenshot: buffer capture restores the viewport after a capture failure', async () => {

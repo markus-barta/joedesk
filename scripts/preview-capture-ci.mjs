@@ -26,6 +26,11 @@ let egress = 0;
 let foreign;
 const external = createServer((_req, res) => { egress++; res.end('synthetic'); });
 const proxy = createServer((req, res) => {
+  if (req.url === '/joe/preview-nested-worker.js') {
+    res.writeHead(200, { 'content-type': 'application/javascript' });
+    res.end('new Worker("/joe/preview-worker.js");');
+    return;
+  }
   if (req.url === '/joe/preview-worker.js') {
     res.writeHead(200, { 'content-type': 'application/javascript' });
     res.end(`fetch(${JSON.stringify(foreign)}).catch(() => {});`);
@@ -87,6 +92,7 @@ try {
   const negatives = {
     network: `fetch(${JSON.stringify(foreign)}).catch(() => {});`,
     worker: 'new Worker("/joe/preview-worker.js");',
+    nestedWorker: 'new Worker("/joe/preview-nested-worker.js");',
     redirect: 'fetch("/joe/preview-redirect").catch(() => {});',
     errors: 'console.error("SYNTHETIC_PRIVATE"); setTimeout(() => { throw new Error("SYNTHETIC_PRIVATE"); }, 0);',
     empty: 'addEventListener("DOMContentLoaded", () => { document.getElementById("kept").remove(); });',
@@ -97,7 +103,7 @@ try {
     assert.equal(await run(dir, ['--screens', 'positions', '--widths', '390', '--themes', 'light']), 1);
     const rejected = JSON.parse(readFileSync(join(dir, 'summary.json')));
     assertValueFree(rejected);
-    if (['network', 'worker', 'redirect'].includes(negative)) { assert.ok(rejected.counts.blockedRequests > 0); assert.equal(egress, 0); }
+    if (['network', 'worker', 'nestedWorker', 'redirect'].includes(negative)) { assert.ok(rejected.counts.blockedRequests > 0); assert.equal(egress, 0); }
     if (negative === 'errors') { assert.ok(rejected.counts.pageErrors > 0); assert.ok(rejected.counts.consoleErrors > 0); }
     if (negative === 'empty') assert.ok(rejected.counts.failingSections > 0);
   }
