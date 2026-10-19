@@ -871,9 +871,9 @@ try {
   // dark, in this machine's font and the wide one, every screen, resizing the
   // live page. The page never scrolls sideways, nothing reaches past its
   // right edge and no text overlaps other text. Up to COMPACT px the header
-  // is the phone's (the nav in the bottom bar, 44 px buttons, icons
-  // centred); above, the desktop one. On Desk every light label, with every
-  // broker word, keeps the header in its row: nothing leaves it or overlaps,
+  // is the phone's (the nav in the bottom bar, 44 px buttons, the light's
+  // icon on its first line); above, the desktop one. On Desk every light label,
+  // with every broker word, keeps the header in its row: nothing leaves it or overlaps,
   // nothing else moves, and the label stays inside its button. Each desk
   // card's header keeps one box with its longest state and heartbeat texts.
   const { snapshot, history } = scenario(NOW);
@@ -923,7 +923,7 @@ try {
       check('header', `sweep ${tag}: the header's items stay in its row and never overlap at any of ${n}`, !fail.header.length, fail.header.slice(0, 4));
       check('header', `sweep ${tag}: one nav at every width, the bottom bar up to ${COMPACT} px and the header's above, all four screens in view`, !fail.nav.length, fail.nav.slice(0, 8));
       check('AC-30', `sweep ${tag}: the compact header's buttons and the bottom bar are 44 px targets up to ${COMPACT} px`, !fail.targets.length, fail.targets.slice(0, 4));
-      check('header', `sweep ${tag}: the header's and bottom bar's icons are centred at every width`, !fail.icons.length, fail.icons.slice(0, 4));
+      check('header', `sweep ${tag}: icons are centred, with the phone light's icon aligned to its first line, at every width`, !fail.icons.length, fail.icons.slice(0, 4));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: each desk card's header keeps one box with its longest state and heartbeat texts, which never overlap (two heartbeat lines at most, under the state below 340 px)`, !fail.cards.length, fail.cards.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: ${light.labels.length} light labels × ${light.brokers.length} broker words at every width: the label stays inside its button (the deferred one aside), nothing else in the header or the page moves`, !fail.labels.length, fail.labels.slice(0, 4));

@@ -179,7 +179,7 @@
       return { bgAlpha: parseColor(cs.backgroundColor)?.a, opacity: Number(cs.opacity), visible: cs.visibility };
     },
     // One width of the width sweep: the page's right edge, the header's row,
-    // the one nav, 44 px targets and centred icons in the compact header, and
+    // the one nav, 44 px targets and aligned icons in the compact header, and
     // (light given) every light label put through the header.
     sweep(compactMax, light) {
       const box = el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
@@ -216,7 +216,14 @@
         if ((axes.includes('x') && Math.abs(dx) > 0.5) || (axes.includes('y') && Math.abs(dy) > 0.5)) icons.push(`${what} off by ${dx.toFixed(2)}, ${dy.toFixed(2)}`);
       };
       centred(theme, 'xy', 'theme');
-      centred(health, 'y', 'light');
+      if (innerWidth <= 700) {
+        // The phone light's icon shares its first line so the next line can
+        // use the full button width. It aligns with that line, not the two-line block.
+        const icon = health.querySelector(':scope > svg'), label = health.querySelector('b');
+        const range = document.createRange(); range.selectNodeContents(label);
+        const first = range.getClientRects()[0], i = box(icon), h = box(health);
+        if (!first || Math.abs((i.top + i.bottom) / 2 - (first.top + first.bottom) / 2) > 2 || i.right > first.left + 0.5 || i.left < h.left || i.top < h.top || i.bottom > h.bottom) icons.push('light: icon leaves its first line or button');
+      } else centred(health, 'y', 'light');
       centred(document.getElementById('modeLabel'), 'y', 'PAPER');
       buttons.forEach(b => centred(b, compact ? 'x' : 'y', `${compact ? 'bar' : 'nav'} ${b.dataset.go}`));
       // Text on text: any two visible text boxes of the same layer (the page,
