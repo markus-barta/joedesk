@@ -16,6 +16,8 @@ const boards = [], shots = [], checks = [];
 const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });
 await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `window.__copies=[]; Object.defineProperty(navigator,'clipboard',{value:{writeText:async text=>{window.__copies.push(text);}},configurable:true});` });
 const active = JSON.parse(readFileSync(new URL('../release.json', import.meta.url)));
+const coordinate = active.version.split('.')[0];
+const expectedUTC = `20${coordinate.slice(0, 2)}-${coordinate.slice(2, 4)}-${coordinate.slice(4, 6)} ${coordinate.slice(6, 8)}:${coordinate.slice(8, 10)}:${coordinate.slice(10, 12)} UTC`;
 const test = (name, condition) => { assert.ok(condition, name); checks.push(name); };
 try {
   const fleet = longFleet();
@@ -29,7 +31,7 @@ try {
     await page.evaluate(`document.getElementById('set-about').scrollIntoView({block:'center'})`); await settle(page);
     const version = await page.evaluate(`(() => { const e=document.getElementById('appVersion'); return {canonical:e.dataset.canonical,title:e.title,label:e.getAttribute('aria-label'),segments:[...e.children].filter(n=>['yy','mm','dd','hh','mi','ss'].includes(n.className)).length,tail:!!e.querySelector('.tail,.v'),seconds:e.querySelector('.ss').getBoundingClientRect().width,transition:e.querySelector('.ss').style.transition,all:[...document.querySelectorAll('[data-product-version]')].map(n=>n.dataset.canonical)}; })()`);
     test(`${tag}: six-segment shared Pretty with hidden seconds and no decorative v/tail`, version.canonical === active.version && version.segments === 6 && !version.tail && version.seconds === 0 && version.all.length === 2 && version.all.every(v=>v===active.version));
-    test(`${tag}: exact canonical coordinate and human UTC in tooltip and accessible name`, version.title.includes(active.version) && version.title.includes('2026-10-16 15:12:18 UTC') && version.label.includes(active.version) && version.label.includes('UTC'));
+    test(`${tag}: exact canonical coordinate and human UTC in tooltip and accessible name`, version.title.includes(active.version) && version.title.includes(expectedUTC) && version.label.includes(active.version) && version.label.includes(expectedUTC));
     await screenshot(page, viewport, join(output, `${tag}-version.png`)); shots.push(`${tag}-version.png`);
     await page.evaluate(`document.getElementById('appVersion').scrollIntoView({block:'center'})`); await settle(page);
     if (viewport.mobile) {
