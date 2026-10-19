@@ -189,18 +189,35 @@ async function key(page, name, modifiers = 0) {
 // explanation; on desktop, hovering does too.
 async function everyTerm(page, viewport, tag) {
   const focused = await page.evaluate(`(async () => {
-    const out = [];
-    for (const t of [...document.querySelectorAll('[data-term]')].filter(__audit.visible)) {
-      t.focus({ preventScroll: true });
-      await new Promise(r => requestAnimationFrame(r));
-      const tip = document.getElementById('tip');
-      out.push({ term: t.dataset.term, on: tip.classList.contains('on'), head: tip.querySelector('b')?.textContent, expanded: t.getAttribute('aria-expanded') });
-      t.blur();
+    const out = [], heads = ${JSON.stringify(Object.fromEntries(Object.entries(TERMS).map(([key, entry]) => [key, entry[0]])))};
+    const visible = () => [...document.querySelectorAll('[data-term]')].filter(__audit.visible);
+    // A tick can rebuild a section between terms. Keep identities (including
+    // repeated terms), not nodes which may be detached by the next frame.
+    const counts = new Map();
+    const terms = visible().map(t => { const term = t.dataset.term, index = counts.get(term) ?? 0; counts.set(term, index + 1); return { term, index }; });
+    for (const { term, index } of terms) {
+      const until = Date.now() + 2000;
+      let seen, t;
+      do {
+        t = visible().filter(e => e.dataset.term === term)[index];
+        if (t && document.activeElement !== t) t.focus({ preventScroll: true });
+        const tip = document.getElementById('tip');
+        const conditions = { connected: Boolean(t?.isConnected), focused: Boolean(t && document.activeElement === t),
+          tipOpen: tip.classList.contains('on'), ownHead: tip.querySelector('b')?.textContent === heads[term],
+          expanded: t?.getAttribute('aria-expanded') === 'true' };
+        seen = { term, index, head: tip.querySelector('b')?.textContent ?? null, expectedHead: heads[term],
+          expanded: t?.getAttribute('aria-expanded') ?? null, conditions, failed: Object.keys(conditions).filter(k => !conditions[k]) };
+        if (!seen.failed.length || Date.now() >= until) break;
+        await new Promise(r => setTimeout(r, 25));
+      } while (true);
+      out.push(seen);
+      t?.blur();
     }
     return out;
   })()`);
-  const badFocus = focused.filter(f => !f.on || f.head !== TERMS[f.term]?.[0] || f.expanded !== 'true');
-  check('AC-39', `${tag}: all ${focused.length} terms explain themselves on keyboard focus`, focused.length > 0 && !badFocus.length, badFocus.slice(0, 4));
+  const badFocus = focused.filter(f => f.failed.length);
+  check('AC-39', `${tag}: all ${focused.length} terms explain themselves on keyboard focus`, focused.length > 0 && !badFocus.length,
+    { failed: focused.length ? badFocus.slice(0, 4) : ['no visible terms'], count: focused.length });
   if (viewport.mobile) return;
   const count = await page.evaluate(`[...document.querySelectorAll('[data-term]')].filter(__audit.visible).length`);
   const badHover = [];
@@ -208,12 +225,13 @@ async function everyTerm(page, viewport, tag) {
     const box = await page.evaluate(`(() => { const t = [...document.querySelectorAll('[data-term]')].filter(__audit.visible)[${i}]; t.scrollIntoView({ block: 'center' }); const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, term: t.dataset.term }; })()`);
     await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
     const tip = await page.evaluate(`({ on: document.getElementById('tip').classList.contains('on'), head: document.getElementById('tip').querySelector('b')?.textContent })`);
-    if (!tip.on || tip.head !== TERMS[box.term][0]) badHover.push({ ...box, ...tip });
+    const failed = [!tip.on && 'tipOpen', tip.head !== TERMS[box.term][0] && 'ownHead'].filter(Boolean);
+    if (failed.length) badHover.push({ failed, ...box, ...tip, expectedHead: TERMS[box.term][0] });
     await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 });
   }
   await page.evaluate('window.scrollTo(0, 0)');
   await settle(page);
-  check('AC-39', `${tag}: all ${count} terms explain themselves on hover`, count > 0 && !badHover.length, badHover.slice(0, 4));
+  check('AC-39', `${tag}: all ${count} terms explain themselves on hover`, count > 0 && !badHover.length, { failed: count ? badHover.slice(0, 4) : ['no visible terms'], count });
 }
 
 async function focusChecks(page, tag) {

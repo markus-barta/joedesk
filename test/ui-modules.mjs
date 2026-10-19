@@ -5,7 +5,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { headerHealth as frozenHeaderHealth } from './fixtures/header-health-c1c71a1.mjs';
+import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
+import { CI_GUARD, REFERENCE_BUDGET } from '../scripts/browser/budget.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -741,5 +744,56 @@ test('terms: every entry has a plain label, a meaning and the trade term', () =>
   for (const [key, [label, meaning, also]] of Object.entries(TERMS)) {
     assert.ok(label && meaning && also, key);
     assert.doesNotMatch(label, /\b(P&L|IB|HALT|KEEP|NAV|FIFO|Gateway)\b/, key);
+  }
+});
+
+test('browser budget: setup stays separate while boundary-crossing and live tasks keep the 125 ms guard', () => {
+  assert.equal(REFERENCE_BUDGET.taskMs, 50);
+  assert.equal(CI_GUARD.taskMs, 125);
+  assert.equal(CI_GUARD.patchMs / REFERENCE_BUDGET.patchMs, 2.5);
+  assert.equal(CI_GUARD.historyMs / REFERENCE_BUDGET.historyMs, 2.5);
+  const tasks = [{ startTime: 0, duration: 90 }, { startTime: 90, duration: 132 },
+    { startTime: 260, duration: 132 }, { startTime: 450, duration: 125 }, { startTime: 650, duration: 60 }];
+  const windows = [{ name: 'desk updates', start: 100, end: 250 }, { name: 'history setup', start: 250, end: 400 },
+    { name: 'history updates', start: 400, end: 650 }];
+  const worker = { reason: 'history-worker', at: 455, ms: 600 };
+  const render = { reason: 'data', at: 110, ms: 28 };
+  const frame = { startTime: 90, duration: 140, scripts: [{ invoker: 'Window.requestAnimationFrame', forcedStyleAndLayoutDuration: 100 }] };
+  const details = attributeBudgetTasks({ tasks, frames: [frame] }, [worker, render], windows);
+  assert.deepEqual(details.map(t => t.phases), [[], ['desk updates'], ['history setup'], ['history updates'], []]);
+  assert.deepEqual(details.filter(t => t.phases.some(p => p.endsWith('updates'))).filter(t => t.duration >= CI_GUARD.taskMs).map(t => t.duration), [132, 125]);
+  assert.deepEqual(details[1].events, [render], '600 ms in the worker is not a 600 ms task on the page');
+  assert.deepEqual(details[3].events, [worker], 'the worker reply is attributed at receipt time');
+  assert.deepEqual(details[1].frames, [frame], 'style/layout evidence is retained beside the task');
+  assert.deepEqual(details[3].frames, []);
+});
+
+test('browser budget: observer snapshots drain undelivered entries once, with attribution and optional frame support', () => {
+  for (const hasFrames of [true, false]) {
+    const observers = [];
+    class Observer {
+      static supportedEntryTypes = hasFrames ? ['longtask', 'long-animation-frame'] : ['longtask'];
+      constructor(callback) { this.callback = callback; this.queued = []; observers.push(this); }
+      observe(options) { this.options = options; }
+      takeRecords() { return this.queued.splice(0); }
+    }
+    const window = {};
+    // Execute the exact serialized browser payload without a browser or any
+    // imported closure. Queue records without invoking their delivery callback.
+    runInNewContext(`(${observeBudgetTasks.toString()})()`, { window, PerformanceObserver: Observer });
+    const attribution = { name: 'unknown', containerType: 'window', containerId: '', containerName: '', containerSrc: '' };
+    observers[0].queued.push({ startTime: 90, duration: 132, name: 'self', attribution: [attribution] });
+    if (hasFrames) observers[1].queued.push({ startTime: 90, duration: 140, blockingDuration: 90,
+      renderStart: 95, styleAndLayoutStart: 120, scripts: [{ invoker: 'Window.requestAnimationFrame', duration: 28, forcedStyleAndLayoutDuration: 2 }] });
+    const snapshot = window.__budgetTasks.snapshot();
+    assert.equal(snapshot.hasFrames, hasFrames);
+    assert.equal(snapshot.tasks[0].duration, 132);
+    assert.deepEqual({ ...snapshot.tasks[0].attribution[0] }, attribution);
+    assert.equal(snapshot.frames.length, hasFrames ? 1 : 0);
+    if (hasFrames) assert.equal(snapshot.frames[0].scripts[0].forcedStyleAndLayoutDuration, 2);
+    assert.equal(window.__budgetTasks.snapshot().tasks.length, 1, 'drained entries are never duplicated');
+    assert.deepEqual({ ...observers[0].options }, { type: 'longtask', buffered: true });
+    observers[0].callback({ getEntries: () => [{ startTime: 450, duration: 125, name: 'self', attribution: [] }] });
+    assert.equal(window.__budgetTasks.snapshot().tasks.length, 2, 'delivered entries are retained too');
   }
 });

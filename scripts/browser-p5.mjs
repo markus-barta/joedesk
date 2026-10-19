@@ -534,9 +534,20 @@ try {
       const large = await b.push(snapshot);
       check('executor-health', `${viewport.name} ${theme}: very large ledger is accepted`, large.status === 200, large);
       await ev('window.__joedesk.refresh().then(() => true)');
+      // refresh finishes the reads; Settings still renders on its next frame.
+      // Wait for this ledger's exact bytes, rather than a frame or an old row.
+      const exactLedger = 'Ledger: 9007199254740991 bytes of 9007199254740991 bytes';
+      let ledgerWait = null;
+      try {
+        await waitFor(page, `(() => { const ledger = document.querySelector('#rtRows .rt-row:nth-child(4) [role="group"]'); return ledger?.title === ${J(exactLedger)} && ledger?.getAttribute('aria-label') === ${J(exactLedger)}; })()`, 5000);
+      } catch (error) { ledgerWait = error.message; }
       await settle(page);
-      const largeView = await ev(`(() => { const ledger = document.querySelector('#rtRows .rt-row:nth-child(4) [role="group"]'); return { text: ledger?.textContent, title: ledger?.title, name: ledger?.getAttribute('aria-label'), horizontal: __audit.horizontal(), clipping: __audit.clipping() }; })()`);
-      check('executor-health', `${viewport.name} ${theme}: very large TB values wrap without clipping and preserve exact bytes`, N(largeView.text) === 'ledger 9007,2 TB of 9007,2 TB' && largeView.title === 'Ledger: 9007199254740991 bytes of 9007199254740991 bytes' && largeView.name === largeView.title && largeView.horizontal.scroll <= largeView.horizontal.inner && !largeView.clipping.length, largeView);
+      const largeView = await ev(`(() => { const ledger = document.querySelector('#rtRows .rt-row:nth-child(4) [role="group"]'); return { present: Boolean(ledger), text: ledger?.textContent ?? null, title: ledger?.title ?? null, name: ledger?.getAttribute('aria-label') ?? null, horizontal: __audit.horizontal(), clipping: __audit.clipping() }; })()`);
+      const conditions = { rendered: largeView.present, exactBytesReady: ledgerWait === null, formattedTB: N(largeView.text) === 'ledger 9007,2 TB of 9007,2 TB',
+        exactTitle: largeView.title === exactLedger, exactAccessibleName: largeView.name === exactLedger,
+        noOverflow: largeView.horizontal.scroll <= largeView.horizontal.inner, noClipping: !largeView.clipping.length };
+      const failed = Object.keys(conditions).filter(k => !conditions[k]);
+      check('executor-health', `${viewport.name} ${theme}: very large TB values wrap without clipping and preserve exact bytes`, !failed.length, { failed, conditions, ledgerWait, ...largeView });
     }
   }
 
