@@ -1,6 +1,6 @@
 {
   "name": "joedesk",
-  "version": "26.09.21.12.00",
+  "version": "261016151218.0.0",
   "description": "JoeDesk paper-trading dashboard and inbox server",
   "type": "module",
   "private": true,
@@ -8,10 +8,17 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node scripts/check-package.mjs && node scripts/check-joe-layout.mjs && node scripts/check-fleet-config.mjs && node scripts/check-joe-trust.mjs && node scripts/check-joe-phone.mjs && node scripts/check-joe-history.mjs && node scripts/check-joe-learning.mjs && node scripts/check-position-contract.mjs && node scripts/check-position-display.mjs",
-    "test": "npm run test:contracts && node scripts/run-server-contract.mjs",
-    "test:contracts": "node --test test/contracts.mjs test/failure-fixtures.mjs test/time-vectors.mjs",
+    "check": "node scripts/check-release.mjs && node scripts/check-package.mjs && node scripts/check-joe-ui.mjs && node scripts/check-fleet-config.mjs && node scripts/check-position-contract.mjs",
+    "test": "npm run test:contracts && npm run test:ui && npm run test:release && node scripts/run-server-contract.mjs",
+    "test:release": "node --test --test-concurrency=2 test/release.mjs test/release-set.mjs",
+    "smoke:release": "node scripts/smoke-release.mjs",
+    "release:evidence": "node scripts/release-evidence.mjs",
+    "test:contracts": "node --test --test-concurrency=2 test/contracts.mjs test/failure-fixtures.mjs test/time-vectors.mjs",
+    "test:ui": "node --test --test-concurrency=2 test/ui-modules.mjs test/results-model.mjs test/settings-model.mjs",
     "test:contracts:browser": "node scripts/smoke-contracts-browser.mjs",
+    "test:results": "node scripts/run-results-gate.mjs",
+    "test:browser": "node scripts/browser-p3.mjs && npm run test:results && node scripts/browser-p5.mjs && node scripts/browser-p6.mjs",
+    "budget:reference": "node scripts/budget-reference.mjs",
     "start": "node server.mjs"
   }
 }

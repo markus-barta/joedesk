@@ -2,12 +2,20 @@
 /**
  * Package layout + version sync checks (no runtime deps).
  */
-import { readFile, access } from "node:fs/promises";
+import { readFile, readdir, access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+
+const UI_MODULES = ["app.js", "host.js", "ui.js", "terms.js", "format.js", "health.js", "feed.js", "events.js",
+  "desk.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js",
+  "settings.js", "settings-model.js", "fleet-write.js", "version-display.js"];
+const VENDOR_FILES = ['display.json', 'version.js', 'presentation.js', 'version-interaction.js', 'schemes.json', 'package.json', 'manifest.json'].map(n => `vendor/calver/${n}`);
+const CONTRACT_MODULES = ["index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "vienna-date.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
+  "manifest.json", "common.schema.json", "reason.schema.json", "data.schema.json", "history.schema.json", "results.schema.json",
+  "fleet-config.schema.json", "healthz.schema.json"];
 
 const REQUIRED = [
   "package.json",
@@ -15,35 +23,28 @@ const REQUIRED = [
   "validate.mjs",
   "fleet-config.mjs",
   "Dockerfile",
+  "time.mjs",
+  "market-calendar.json",
   "public/joe/index.html",
-  "public/joe/joe.js",
-  "public/joe/joe.css",
+  "public/joe/app.css",
   "public/joe/joe-version.js",
   "public/joe/data.schema.json",
   "public/joe/fleet-config.schema.json",
   "public/joe/fleet-config-actions.schema.json",
   "public/joe/fleet-config.example.json",
-  "public/joe/vendor/chart-4.4.8.umd.js",
-  "public/joe/vendor/chartjs-plugin-zoom-2.2.0.min.js",
-  "public/joe/vendor/gridstack-13.2.0-all.js",
-  "public/joe/vendor/gridstack-13.2.0.min.css",
-  "public/joe/vendor/hammer-2.0.8.min.js",
+  ...UI_MODULES.map(name => `public/joe/${name}`),
 ];
 
 const STATIC_ROUTES = [
   "index.html",
+  "app.css",
+  ...UI_MODULES,
   "data.schema.json",
   "fleet-config.schema.json",
   "fleet-config-actions.schema.json",
   "fleet-config.example.json",
-  "joe.css",
-  "joe.js",
   "joe-version.js",
-  "vendor/chart-4.4.8.umd.js",
-  "vendor/chartjs-plugin-zoom-2.2.0.min.js",
-  "vendor/gridstack-13.2.0-all.js",
-  "vendor/gridstack-13.2.0.min.css",
-  "vendor/hammer-2.0.8.min.js",
+  ...VENDOR_FILES,
 ];
 
 function fail(message) {
@@ -78,11 +79,16 @@ if (htmlFallbackVersion !== joeVersion.APP_VERSION || htmlFallbackVersion !== pk
 }
 
 const release = JSON.parse(await readFile(join(repoRoot, "release.json"), "utf8"));
-if (release.version !== joeVersion.APP_VERSION || release.version_scheme !== "calendar") {
-  fail("release metadata must match the calendar product version scheme and UI version");
+const prep = JSON.parse(await readFile(join(repoRoot, 'release/preparation.json'), 'utf8'));
+const docker = await readFile(join(repoRoot, 'Dockerfile'), 'utf8');
+if (!docker.includes(`FROM ${prep.runtime.image}\n`) || !docker.includes('RUN node scripts/check-release.mjs')) fail('Docker must verify the offline closure with the pinned runtime');
+const nix = await readFile(join(repoRoot, 'default.nix'), 'utf8');
+if (!nix.includes(prep.runtime.nixpkgs_revision) || !nix.includes(prep.runtime.nixpkgs_nar_hash) || !nix.includes('node scripts/check-release.mjs') || nix.includes('<nixpkgs>')) fail('Nix must pin its default input and verify the offline closure');
+if (release.version !== joeVersion.APP_VERSION || release.version_scheme !== 'inspr-calver-3' || joeVersion.VERSION_SCHEME !== release.version_scheme) {
+  fail("release metadata must match the CalVer3 candidate and UI version");
 }
-if (!/^\d{2}\.\d{2}\.\d{2}(?:\.\d{2}\.\d{2})?$/.test(joeVersion.APP_VERSION)) {
-  fail("JoeVersion.APP_VERSION must use calendar yy.mm.dd[.hh.mm]");
+if (!/^[1-9]\d{11}\.0\.0$/.test(joeVersion.APP_VERSION)) {
+  fail("JoeVersion.APP_VERSION must use canonical CalVer3");
 }
 if (!Number.isSafeInteger(release.release_sequence) || release.release_sequence < 1) {
   fail("release metadata must have a positive integer release_sequence");
@@ -106,14 +112,42 @@ for (const rel of STATIC_ROUTES) {
   }
 }
 
-const vendorLicenses = ["LICENSE.chartjs", "LICENSE.chartjs-plugin-zoom", "LICENSE.hammerjs"];
-for (const name of vendorLicenses) {
-  try {
-    await access(join(repoRoot, "public/joe/vendor", name), constants.R_OK);
-  } catch {
-    fail(`vendor license missing: public/joe/vendor/${name}`);
+// Versioned asset URLs: one release closure, every module mapped to this version.
+// Producers vendor contracts/ alone. Include ingress-only modules in this
+// boundary check too, even though the browser import map does not use them.
+for (const name of (await readdir(join(repoRoot, "contracts"))).filter(name => name.endsWith('.mjs'))) {
+  const source = await readFile(join(repoRoot, "contracts", name), "utf8");
+  for (const match of source.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?)(['"])([^'"]+)\1/g)) {
+    const specifier = match[2];
+    if (!specifier.startsWith('./') || specifier.split('/').includes('..')) {
+      fail(`contracts/${name} must import only ./ paths: ${specifier}`);
+    }
   }
 }
+const server = await readFile(join(repoRoot, "server.mjs"), "utf8");
+const serverModules = JSON.parse(server.match(/const UI_MODULES = (\[[^\]]+\]);/)[1]);
+if (JSON.stringify([...serverModules].sort()) !== JSON.stringify([...UI_MODULES].sort())) fail("server UI_MODULES must list exactly the UI modules");
+const shipped = (await readdir(join(repoRoot, "public/joe"))).filter(name => /\.(m?js|css|html)$/.test(name));
+const unlisted = shipped.filter(name => !STATIC_ROUTES.includes(name));
+if (unlisted.length) fail(`public/joe files without a route or check: ${unlisted.join(", ")}`);
+const importMap = JSON.parse(indexHtml.match(/<script type="importmap">([\s\S]*?)<\/script>/)?.[1] ?? "null");
+if (!importMap?.imports) fail("index.html needs an import map");
+const versioned = [...UI_MODULES, ...VENDOR_FILES, "time.mjs", "market-calendar.json", ...CONTRACT_MODULES.map(name => `contracts/${name}`)];
+for (const name of versioned) {
+  if (importMap.imports[`/joe/${name}`] !== `/joe/${name}?v=${pkg.version}`) fail(`import map must pin /joe/${name} to version ${pkg.version}`);
+}
+if (Object.keys(importMap.imports).length !== versioned.length) fail("import map lists an unknown module");
+for (const asset of ["app.css", "app.js"]) {
+  if (!indexHtml.includes(`./${asset}?v=${pkg.version}`)) fail(`index.html must load ./${asset}?v=${pkg.version}`);
+}
+if (/serviceWorker/.test(shipped.map(name => name).join(" ")) || /navigator\.serviceWorker/.test(await readFile(join(repoRoot, "public/joe/app.js"), "utf8"))) {
+  fail("no service worker may ship");
+}
+// No sample data ships: docs/examples stays out of public/.
+const examples = await readdir(join(repoRoot, "docs/examples"));
+const publicFiles = await readdir(join(repoRoot, "public"), { recursive: true });
+const leaked = publicFiles.filter(name => examples.some(example => name.endsWith(example)) || /sample/i.test(name));
+if (leaked.length) fail(`sample data under public/: ${leaked.join(", ")}`);
 
 console.log(JSON.stringify({
   ok: true,
@@ -121,5 +155,5 @@ console.log(JSON.stringify({
   version: pkg.version,
   joeVersion: joeVersion.APP_VERSION,
   staticAssets: STATIC_ROUTES.length,
-  vendorLicenses: vendorLicenses.length,
+  versionedModules: versioned.length,
 }, null, 2));

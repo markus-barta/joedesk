@@ -1,0 +1,19 @@
+{
+  "id": "results-closed-partial-without-reasons",
+  "provenance": "Synthetic closed partial day at the end of Vienna's 25-hour DST day; no production data.",
+  "feed": "results",
+  "payload": {
+    "schema": "inspr.joe.household.results.v2",
+    "seq": 102,
+    "generatedAt": "2026-10-25T22:59:59.999Z",
+    "currency": "EUR",
+    "timeZone": "Europe/Vienna",
+    "trackingStart": "2026-09-10",
+    "days": [{ "date": "2026-10-25", "desks": {}, "coverage": "partial" }],
+    "trades": [],
+    "benchmark": null
+  },
+  "receivedAt": "2026-10-25T23:00:00.000Z",
+  "expectedStatus": 422,
+  "expectedErrors": [{ "path": "$.days[0].partialReasons", "rule": "partialReasonsRequired" }]
+}

@@ -19,6 +19,17 @@ test('fixture table is exhaustive for a–j and declares every panel', () => {
   assert.equal(new Set(table.cases.map(c => c.id)).size, table.cases.length);
 });
 
+test('JOED-34 failure fixture: a closed partial day without reasons retains the accepted results', () => {
+  const fixture = read('failures/results-closed-partial-without-reasons.json');
+  const previous = baseline().results;
+  const accepted = acceptSnapshot(fixture.feed, fixture.payload, previous, fixture.receivedAt);
+  assert.equal(accepted.status, fixture.expectedStatus);
+  assert.equal(accepted.reason, 'contract_invalid');
+  assert.deepEqual(accepted.errors, fixture.expectedErrors);
+  assert.strictEqual(accepted.value, previous.value);
+  assert.equal(accepted.value.receivedAt, valid.results.receivedAt);
+});
+
 for (const entry of table.cases) test(`fixture ${entry.failureClass}: ${entry.id}`, () => {
   const fixture = read(entry.file);
   assert.equal(fixture.id, entry.id);

@@ -61,6 +61,8 @@ test('only the documented JSON Schema vocabulary is used; every field has exactl
   assert.equal(owners['data.receivedAt'], 'server');
   assert.equal(owners['data.totals.equity.amount'], 'pusher');
   assert.equal(owners['data.safety.executor.gatewayReachable'], 'paper executor 8470');
+  assert.equal(owners['data.safety.executor.ledgerBytes'], 'paper executor 8470');
+  assert.equal(owners['data.safety.executor.ledgerCapBytes'], 'paper executor 8470');
   assert.equal(owners['results.trades[].netEur.amount'], 'paper executor 8470');
   assert.equal(owners['history.points[].desks.j.money.equity.amount'], 'server');
   assert.equal(owners['fleet-config.desks.stage0.capEur'], 'server');
@@ -72,10 +74,76 @@ test('one closed reason enum is used everywhere, including field errors', () => 
     const data = copy(samples.data);
     data.totals.reasons = { equity: reason };
     assert.equal(validateContract('data', data).ok, true, reason);
+    assert.doesNotThrow(() => panelState({ value: data }, data.totals.equity, reason, at));
   }
   const data = copy(samples.data);
   data.totals.reasons = { equity: 'new-unreviewed-reason' };
   rejects(validateContract('data', data), 'enum', '$.totals.reasons.equity');
+});
+
+test('rev 7 executor: rev 6 payloads remain valid; the reason enum is append-only', () => {
+  assert.equal(CONTRACTS.revision, 7);
+  assert.equal(CONTRACTS.contracts.data, 'inspr.joe.household.v2');
+  assert.equal(REASONS.at(-2), 'executor_broker_disagreement');
+  assert.equal(REASONS.at(-1), 'results_capture_failed');
+  for (const [kind, payload] of Object.entries(samples)) {
+    assert.equal(validateContract(kind, payload).ok, true, kind);
+  }
+  const data = copy(samples.data);
+  data.safety.executor.status = 'degraded';
+  // The rev 6 pusher can report degraded without a reason or ledger fields.
+  delete data.safety.executor.reason;
+  assert.equal(validateContract('data', data).ok, true);
+  for (const reason of ['results_capture_failed', 'ledger_size_limit']) {
+    data.safety.executor.reason = reason;
+    assert.equal(validateContract('data', data).ok, true, reason);
+  }
+});
+
+test('rev 7 executor: ledger bytes and optional cap validate without hiding over-cap reports', () => {
+  for (const fields of [{}, { ledgerBytes: 0 }, { ledgerBytes: 3250000 },
+    { ledgerBytes: 0, ledgerCapBytes: 1 }, { ledgerBytes: 8000000, ledgerCapBytes: 8000000 },
+    { ledgerBytes: 9000000, ledgerCapBytes: 8000000 },
+    { ledgerBytes: Number.MAX_SAFE_INTEGER, ledgerCapBytes: Number.MAX_SAFE_INTEGER }]) {
+    const data = copy(samples.data);
+    Object.assign(data.safety.executor, fields, { status: 'degraded', reason: 'results_capture_failed' });
+    assert.equal(validateContract('data', data).ok, true, JSON.stringify(fields));
+    assert.equal(validateContract('data', ingress(data), { stage: 'ingress' }).ok, true);
+  }
+  const capOnly = copy(samples.data);
+  capOnly.safety.executor.ledgerCapBytes = 8000000;
+  rejects(validateContract('data', capOnly), 'required', '$.safety.executor.ledgerBytes');
+  rejects(validateContract('data', ingress(capOnly), { stage: 'ingress' }), 'required', '$.safety.executor.ledgerBytes');
+  for (const [key, minimum] of [['ledgerBytes', 0], ['ledgerCapBytes', 1]]) {
+    for (const value of [null, '8000000', true, {}, [], 1.5, Number.MAX_SAFE_INTEGER + 1, minimum - 1]) {
+      const data = copy(samples.data);
+      Object.assign(data.safety.executor, { ledgerBytes: 0, [key]: value });
+      const rule = value === minimum - 1 ? 'minimum' : 'type';
+      rejects(validateContract('data', data), rule, `$.safety.executor.${key}`);
+    }
+  }
+});
+
+test('missing feed retains false HALT with its original receipt rather than treating it as absent', () => {
+  const value = copy(samples.data); value.safety.halt = false;
+  const cell = panelStates({ data: { value, reason: 'feed_not_received' } }, later).halt;
+  assert.deepEqual(cell, { state: 'broken', ageSeconds: 30, reason: 'feed_not_received', value: false,
+    retained: true, valueReceivedAt: at });
+});
+
+test('history compaction metadata is valid without a reason; legacy compaction reasons still follow receipt age', () => {
+  const value = { ...copy(samples.history), compactedThrough: samples.history.points.at(-1).t };
+  assert.equal(validateContract('history', value).ok, true);
+  for (const legacy of [false, true]) {
+    if (legacy) value.reason = 'history_compacted';
+    for (const [elapsed, state, reason] of [[30000, 'fresh', null], [60000, 'stale', 'snapshot_stale']]) {
+      const now = new Date(Date.parse(value.receivedAt) + elapsed).toISOString();
+      const cell = panelStates({ history: { value } }, now).history;
+      assert.equal(cell.state, state); assert.equal(cell.reason, reason); assert.equal(cell.ageSeconds, elapsed / 1000);
+    }
+  }
+  delete value.compactedThrough;
+  rejects(validateContract('history', value), 'required', '$.compactedThrough');
 });
 
 test('paper is fixed, KEEP is excluded from results and cannot be removed from fleet policy', () => {
@@ -93,6 +161,230 @@ test('paper is fixed, KEEP is excluded from results and cannot be removed from f
     rejects(validateContract('data', data), 'keepExcluded', '$.positions.rows[0]');
   }
   rejects(validateContract('fleet-config', { ...samples['fleet-config'], mode: 'live' }), 'const', '$.mode');
+});
+
+test('results: full day/desk summaries reconcile counts and exact sums, including empty days and nulls', () => {
+  for (const coverage of [undefined, 'full']) {
+    const good = copy(samples.results);
+    if (coverage) good.days[0].coverage = coverage;
+    assert.equal(validateContract('results', good).ok, true);
+    for (const [field, value, rule] of [
+      ['trades', 2, 'dayTradeCount'], ['realisedNet', { amount: '-0.99', currency: 'EUR' }, 'dayNetSum'],
+      ['fees', { amount: '0.64000001', currency: 'EUR' }, 'dayFeeSum'],
+      ['realisedNet', null, 'dayNetSum'], ['fees', null, 'dayFeeSum'],
+    ]) {
+      const bad = copy(good); bad.days[0].desks.j[field] = value;
+      rejects(validateContract('results', bad), rule, `$.days[0].desks.j.${field}`);
+    }
+    const empty = copy(good); empty.days[0].desks.joe.fees.amount = '0.01';
+    rejects(validateContract('results', empty), 'dayFeeSum', '$.days[0].desks.joe.fees');
+  }
+});
+
+test('results: gross and day sums keep sub-cent decimals without rounding in acceptance', () => {
+  const exact = JSON.parse(readFileSync(new URL('../fixtures/results/exact-decimals.json', import.meta.url)));
+  assert.equal(validateContract('results', exact).ok, true);
+  const accepted = acceptSnapshot('results', ingress(exact), null, at);
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(accepted.value, exact);
+  assert.equal(exact.days[0].desks.j.realisedNet.amount, '0.0278');
+  assert.equal(exact.days[0].desks.j.fees.amount, '0.0118');
+  for (const [field, rounded, rule] of [['realisedNet', '0.02', 'dayNetSum'], ['fees', '0.02', 'dayFeeSum']]) {
+    const bad = ingress(exact); bad.seq++; bad.days[0].desks.j[field].amount = rounded;
+    const rejected = acceptSnapshot('results', bad, accepted, later);
+    rejects(rejected, rule, `$.days[0].desks.j.${field}`);
+    assert.strictEqual(rejected.value, accepted.value);
+  }
+  const roundedGross = copy(exact); roundedGross.trades[0].grossEur.amount = '0';
+  rejects(validateContract('results', roundedGross), 'netAfterFees', '$.trades[0]');
+});
+
+test('results: full days require every desk with closed trades, even when all desks are omitted', () => {
+  const accepted = acceptSnapshot('results', ingress(samples.results), null, at);
+  for (const coverage of [undefined, 'full']) for (const desk of ['j', 'joe', 'joel']) {
+    const good = ingress(samples.results); good.seq++;
+    if (coverage) good.days[0].coverage = coverage;
+    good.trades[0].desk = desk;
+    good.days[0].desks[desk] = copy(samples.results.days[0].desks.j);
+    if (desk !== 'j') delete good.days[0].desks.j;
+    assert.equal(validateContract('results', good, { stage: 'ingress' }).ok, true);
+    for (const omitAll of [false, true]) {
+      const bad = copy(good);
+      if (omitAll) bad.days[0].desks = {}; else delete bad.days[0].desks[desk];
+      const rejected = acceptSnapshot('results', bad, accepted, later);
+      rejects(rejected, 'dayDeskRequired', `$.days[0].desks.${desk}`);
+      assert.strictEqual(rejected.value, accepted.value);
+      bad.days[0].coverage = 'partial';
+      assert.equal(acceptSnapshot('results', bad, accepted, later).status, 200);
+    }
+  }
+  const noTrades = copy(samples.results); noTrades.trades = []; noTrades.days[0].desks = {};
+  assert.equal(validateContract('results', noTrades).ok, true);
+});
+
+test('results: Vienna fallback reconciles both repeated hours on 25 October on any host', () => {
+  const dst = JSON.parse(readFileSync(new URL('../fixtures/results/dst-weeks.json', import.meta.url)));
+  const accepted = acceptSnapshot('results', ingress(dst), null, dst.receivedAt);
+  assert.equal(accepted.status, 200);
+  assert.equal(dst.days[1].desks.joel.trades, 5);
+  for (const date of ['2026-10-24', '2026-10-26']) {
+    const wrongDay = ingress(dst); wrongDay.days[1].date = date;
+    rejects(validateContract('results', wrongDay, { stage: 'ingress' }), 'dayTradeCount', '$.days[1].desks.joel.trades');
+  }
+});
+
+test('results: trades without a days entry are skipped, while reported days still reconcile', () => {
+  const r = copy(samples.results);
+  const today = { ...copy(r.trades[0]), id: 'rt-before-daily-close', desk: 'joel',
+    openedAt: '2026-10-14T22:00:00.000Z', closedAt: '2026-10-14T22:00:00.000Z' };
+  r.trades.push(today);
+  assert.equal(validateContract('results', r).ok, true);
+  r.days.push({ date: '2026-10-15', desks: {} });
+  rejects(validateContract('results', r), 'dayDeskRequired', '$.days[1].desks.joel');
+  r.days[1].coverage = 'partial';
+  assert.equal(validateContract('results', r).ok, true);
+  r.days[0].desks.j.trades++;
+  rejects(validateContract('results', r), 'dayTradeCount', '$.days[0].desks.j.trades');
+  r.days = [];
+  assert.equal(validateContract('results', r).ok, true);
+});
+
+test('JOED-28 results: accept and warn only for missing closed Vienna dates, including the 25-hour DST day', () => {
+  for (const [receivedAt, closedAt, coverage, expected] of [
+    ['2026-10-16T12:00:00.000Z', '2026-10-15T15:00:00.000Z', null, ['2026-10-15']],
+    ['2026-10-15T21:59:59.999Z', '2026-10-15T15:00:00.000Z', null, []],
+    ['2026-10-15T22:00:00.000Z', '2026-10-15T15:00:00.000Z', null, ['2026-10-15']],
+    ['2026-10-16T12:00:00.000Z', '2026-10-15T15:00:00.000Z', 'partial', []],
+    ['2026-10-26T12:00:00.000Z', '2026-10-24T22:00:00.000Z', null, ['2026-10-25']],
+    ['2026-10-26T12:00:00.000Z', '2026-10-25T00:30:00.000Z', null, ['2026-10-25']],
+    ['2026-10-26T12:00:00.000Z', '2026-10-25T01:30:00.000Z', null, ['2026-10-25']],
+    ['2026-10-26T12:00:00.000Z', '2026-10-25T22:59:59.999Z', null, ['2026-10-25']],
+    ['2026-10-26T12:00:00.000Z', '2026-10-25T23:00:00.000Z', null, []],
+  ]) {
+    const value = ingress(samples.results);
+    value.trades.push({ ...copy(value.trades[0]), id: 'rt-missing-day', openedAt: closedAt, closedAt });
+    if (coverage) value.days.push({ date: '2026-10-15', coverage, desks: {}, partialReasons: ['history_gap'] });
+    const accepted = acceptSnapshot('results', value, null, receivedAt);
+    assert.equal(accepted.status, 200, closedAt);
+    assert.deepEqual(accepted.value.missingDays ?? [], expected, closedAt);
+    assert.equal(validateContract('results', accepted.value).ok, true);
+    assert.equal(Object.hasOwn(value, 'missingDays'), false);
+  }
+  const value = ingress(samples.results);
+  value.days = [];
+  for (const [i, date] of ['2026-10-15', '2026-10-13', '2026-10-15'].entries()) {
+    const closedAt = `${date}T15:00:00.000Z`;
+    value.trades.push({ ...copy(value.trades[0]), id: `rt-missing-${i}`, openedAt: closedAt, closedAt });
+  }
+  assert.deepEqual(acceptSnapshot('results', value, null, '2026-10-16T12:00:00.000Z').value.missingDays,
+    ['2026-10-13', '2026-10-14', '2026-10-15']);
+  for (const missingDays of [[], ['2026-10-15']]) {
+    rejects(acceptSnapshot('results', { ...value, missingDays }, null, '2026-10-16T12:00:00.000Z'), 'serverOwned', '$.missingDays');
+  }
+});
+
+test('JOED-28 results: served missing-day diagnostics reject duplicate dates', () => {
+  const value = { ...copy(samples.results), missingDays: ['2026-10-13', '2026-10-15'] };
+  assert.equal(validateContract('results', value).ok, true);
+  value.missingDays.push('2026-10-13');
+  rejects(validateContract('results', value), 'uniqueItems', '$.missingDays');
+});
+
+test('JOED-34 rev 6: partial reasons follow the server receipt Vienna day across midnight and both DST changes', () => {
+  for (const [receivedAt, today, yesterday] of [
+    ['2026-10-15T21:59:59.999Z', '2026-10-15', '2026-10-14'],
+    ['2026-10-15T22:00:00.000Z', '2026-10-16', '2026-10-15'],
+    ['2026-10-24T22:00:00.000Z', '2026-10-25', '2026-10-24'],
+    ['2026-10-25T00:30:00.000Z', '2026-10-25', '2026-10-24'],
+    ['2026-10-25T01:30:00.000Z', '2026-10-25', '2026-10-24'],
+    ['2026-10-25T22:59:59.999Z', '2026-10-25', '2026-10-24'],
+    ['2026-10-25T23:00:00.000Z', '2026-10-26', '2026-10-25'],
+    ['2027-03-27T23:00:00.000Z', '2027-03-28', '2027-03-27'],
+    ['2027-03-28T21:59:59.999Z', '2027-03-28', '2027-03-27'],
+    ['2027-03-28T22:00:00.000Z', '2027-03-29', '2027-03-28'],
+  ]) {
+    const value = ingress(samples.results);
+    value.generatedAt = new Date(Date.parse(receivedAt) - 1000).toISOString();
+    value.days = [{ date: today, desks: {}, coverage: 'partial' }];
+    value.trades[0].openedAt = value.trades[0].closedAt = `${yesterday}T12:00:00.000Z`;
+    for (const partialReasons of [undefined, ['fx_missing']]) {
+      if (partialReasons) value.days[0].partialReasons = partialReasons;
+      const accepted = acceptSnapshot('results', value, null, receivedAt);
+      assert.equal(accepted.status, 200, `${receivedAt}: ${JSON.stringify(accepted.errors)}`);
+      assert.deepEqual(accepted.value.days, value.days, 'receipt adds no invented cause');
+      assert.deepEqual(accepted.value.missingDays, [yesterday], 'missingDays shares the receipt date');
+      assert.ok(validateContract('results', accepted.value).ok, 'served uses the persisted receipt');
+
+      const closed = copy(value); closed.seq++;
+      closed.days.push({ date: yesterday, desks: {}, coverage: 'partial' });
+      const rejected = acceptSnapshot('results', closed, accepted, receivedAt);
+      rejects(rejected, 'partialReasonsRequired', '$.days[1].partialReasons');
+      assert.strictEqual(rejected.value, accepted.value);
+      rejects(validateContract('results', { ...closed, receivedAt }), 'partialReasonsRequired', '$.days[1].partialReasons');
+      rejects(validateContract('results', closed, { stage: 'ingress', receivedAt }), 'partialReasonsRequired', '$.days[1].partialReasons');
+      closed.days[1].partialReasons = ['history_gap'];
+      const repaired = acceptSnapshot('results', closed, accepted, receivedAt);
+      assert.equal(repaired.status, 200);
+      assert.deepEqual(repaired.value.missingDays ?? [], []);
+    }
+    value.days[0].partialReasons = [];
+    rejects(acceptSnapshot('results', value, null, receivedAt), 'minItems', '$.days[0].partialReasons');
+  }
+});
+
+test('results: explicit partial days skip reconciliation only for that day; coverage is a closed optional enum', () => {
+  const partial = JSON.parse(readFileSync(new URL('../fixtures/results/partial-day.json', import.meta.url)));
+  assert.equal(validateContract('results', partial).ok, true);
+  assert.equal(acceptSnapshot('results', ingress(partial), null, at).status, 200);
+  for (const coverage of [undefined, 'full']) {
+    const bad = copy(partial);
+    if (coverage) bad.days[0].coverage = coverage; else delete bad.days[0].coverage;
+    rejects(validateContract('results', bad), 'dayTradeCount', '$.days[0].desks.j.trades');
+  }
+  for (const coverage of ['windowed', '', null, true]) {
+    const bad = copy(partial); bad.days[0].coverage = coverage;
+    rejects(validateContract('results', bad), 'enum', '$.days[0].coverage');
+  }
+  const otherDay = copy(partial); otherDay.days[1].desks.j.trades = 1;
+  rejects(validateContract('results', otherDay), 'dayTradeCount', '$.days[1].desks.j.trades');
+  const badTrade = copy(partial); badTrade.trades[0].netEur.amount = '999';
+  rejects(validateContract('results', badTrade), 'netAfterFees', '$.trades[0]');
+});
+
+test('results: daily reconciliation uses Vienna close dates across midnight and the 25-hour DST day', () => {
+  const r = copy(samples.results);
+  r.days = ['2026-10-24', '2026-10-25', '2026-10-26'].map(date => {
+    const d = copy(r.days[0]); d.date = date;
+    d.desks.j.trades = 1;
+    return d;
+  });
+  r.trades = ['2026-10-24T21:59:59.999Z', '2026-10-24T22:00:00.000Z', '2026-10-25T23:00:00.000Z'].map((closedAt, i) => ({
+    ...copy(samples.results.trades[0]), id: `rt-midnight-${i}`, openedAt: closedAt, closedAt,
+  }));
+  assert.equal(validateContract('results', r).ok, true);
+  r.trades[1].closedAt = '2026-10-24T21:59:59.999Z'; r.trades[1].openedAt = r.trades[1].closedAt;
+  rejects(validateContract('results', r), 'dayTradeCount', '$.days[0].desks.j.trades');
+  rejects(validateContract('results', r), 'dayTradeCount', '$.days[1].desks.j.trades');
+});
+
+test('results: KEEP fixture excludes SXR8 and TSLA from both trade records and day totals', () => {
+  const { sourceTrades, snapshot } = JSON.parse(readFileSync(new URL('../fixtures/results-keep-exclusion.json', import.meta.url)));
+  assert.deepEqual(sourceTrades.filter(t => ['SXR8', 'TSLA'].includes(t.symbol)).map(t => t.symbol), ['SXR8', 'TSLA']);
+  assert.deepEqual(snapshot.trades, sourceTrades.filter(t => !['SXR8', 'TSLA'].includes(t.symbol)));
+  assert.equal(validateContract('results', snapshot).ok, true);
+  assert.deepEqual(snapshot.days[0].desks.joel, { equityClose: { amount: '5000', currency: 'EUR' },
+    realisedNet: { amount: '0', currency: 'EUR' }, fees: { amount: '0', currency: 'EUR' }, trades: 0 });
+  for (const t of sourceTrades.filter(t => ['SXR8', 'TSLA'].includes(t.symbol))) {
+    const bad = copy(snapshot); bad.trades.push(t);
+    rejects(validateContract('results', bad), 'keepExcluded', '$.trades[1].symbol');
+    bad.days[0].coverage = 'partial';
+    rejects(validateContract('results', bad), 'keepExcluded', '$.trades[1].symbol');
+  }
+  for (const [field, value, rule] of [['trades', 2, 'dayTradeCount'],
+    ['realisedNet', { amount: '303', currency: 'EUR' }, 'dayNetSum'], ['fees', { amount: '2', currency: 'EUR' }, 'dayFeeSum']]) {
+    const bad = copy(snapshot); bad.days[0].desks.joel[field] = value;
+    rejects(validateContract('results', bad), rule, `$.days[0].desks.joel.${field}`);
+  }
 });
 
 test('accepted receive time belongs to the server; old, unknown, invalid and replayed input keep last-good', () => {
@@ -124,6 +416,21 @@ test('accepted receive time belongs to the server; old, unknown, invalid and rep
     const unknown = acceptSnapshot(kind, { schema: 'future.v99' }, null, later);
     rejects(unknown, 'const', '$.schema', 'schema_unsupported');
     assert.equal(unknown.value, null);
+  }
+});
+
+test('clock-ahead tolerance: exactly five seconds is valid; one more millisecond retains last-good', () => {
+  for (const kind of ['data', 'history', 'results']) {
+    const original = ingress(samples[kind]);
+    const accepted = acceptSnapshot(kind, original, null, at);
+    const candidate = ingress(samples[kind]); candidate.seq++;
+    candidate.generatedAt = '2026-10-14T17:42:27.000Z';
+    assert.equal(acceptSnapshot(kind, candidate, accepted, at).status, 200, kind);
+    candidate.generatedAt = '2026-10-14T17:42:27.001Z';
+    const rejected = acceptSnapshot(kind, candidate, accepted, at);
+    rejects(rejected, 'clockAhead', '$.generatedAt', 'clock_ahead');
+    assert.strictEqual(rejected.value, accepted.value);
+    assert.equal(rejected.generatedAdvancedAt, accepted.generatedAdvancedAt);
   }
 });
 
@@ -235,12 +542,9 @@ test('healthz is an exact allowlist: nested money, identifiers, arbitrary text a
   }
 });
 
-test('production host remains inside the current canonical host gate', () => {
-  const source = readFileSync(new URL('../public/joe/joe.js', import.meta.url), 'utf8');
-  const start = source.indexOf('function isCanonicalJoeHost');
-  const end = source.indexOf('\n  var LAYOUT_KEY', start);
-  assert.ok(start >= 0 && end > start);
-  const isCanonical = new Function(`${source.slice(start, end)}; return isCanonicalJoeHost;`)();
+test('production host remains inside the current canonical host gate', async () => {
+  // P3 replaced the legacy board script with public/joe/host.js (ADR §8).
+  const { isCanonicalJoeHost: isCanonical } = await import('../public/joe/host.js');
   assert.equal(isCanonical('cs0.barta.cm'), true);
   assert.equal(isCanonical('CS0.BARTA.CM'), true);
   assert.equal(isCanonical('example.invalid'), false);
@@ -713,4 +1017,58 @@ test('fix3 low 5: carried valuation maps to null plus retained_values with its o
     assert.equal(states[name].ageSeconds, 30);
   }
   assert.equal(states['today.dayPnl'].state, 'fresh');
+});
+
+
+test('JOED-30 rev 5: optional canonical partial reasons, reserved code and empty desks accept through ingress', () => {
+  const codes = ['capture_gap', 'history_gap', 'broker_trade_count_mismatch', 'broker_realised_pnl_mismatch',
+    'unattributed_activity', 'avg_cost_mismatch', 'fx_disabled', 'fx_missing', 'broker_evidence_missing'];
+  assert.deepEqual(SCHEMAS.results.properties.days.items.properties.partialReasons.items.enum, codes);
+  for (const partialReasons of [undefined, ['history_gap'], ['avg_cost_mismatch'], codes]) {
+    const value = ingress(samples.results);
+    value.days[0] = { date: value.days[0].date, desks: {}, coverage: 'partial',
+      ...(partialReasons ? { partialReasons } : {}) };
+    for (const unattributedCount of partialReasons === codes ? [undefined, 1, 2] : [undefined]) {
+      if (unattributedCount !== undefined) value.days[0].unattributedCount = unattributedCount;
+      const accepted = acceptSnapshot('results', value, null, at);
+      assert.equal(accepted.status, 200, JSON.stringify(accepted.errors));
+      assert.deepEqual(accepted.value.days, value.days);
+      assert.equal(validateContract('results', accepted.value).ok, true);
+    }
+  }
+});
+
+test('JOED-30 rev 5: each partial-reason semantic violation returns a per-day 422 and retains last good', () => {
+  const value = ingress(samples.results);
+  value.days[0] = { date: value.days[0].date, desks: {}, coverage: 'partial', partialReasons: ['history_gap'] };
+  const good = acceptSnapshot('results', value, null, at).value;
+  for (const [mutate, rule, field] of [
+    [d => { delete d.coverage; }, 'partialCoverageRequired', 'partialReasons'],
+    [d => { d.coverage = 'full'; }, 'partialCoverageRequired', 'partialReasons'],
+    [d => { d.partialReasons = ['history_gap', 'capture_gap']; }, 'canonicalOrder', 'partialReasons'],
+    [d => { d.unattributedCount = 1; }, 'unattributedReasonRequired', 'unattributedCount'],
+    [d => { delete d.partialReasons; d.unattributedCount = 1; }, 'unattributedReasonRequired', 'unattributedCount'],
+  ]) {
+    const bad = copy(value); bad.seq++; mutate(bad.days[0]);
+    const accepted = acceptSnapshot('results', bad, { value: good }, later);
+    rejects(accepted, rule, `$.days[0].${field}`);
+    assert.strictEqual(accepted.value, good);
+  }
+});
+
+test('JOED-30 rev 5: reasons are nonempty, unique and closed; counts are positive integers', () => {
+  for (const [field, item, rule, path] of [
+    ['partialReasons', [], 'minItems', 'partialReasons'],
+    ['partialReasons', ['capture_gap', 'capture_gap'], 'uniqueItems', 'partialReasons'],
+    ['partialReasons', ['future_code'], 'enum', 'partialReasons[0]'],
+    ['partialReasons', [1], 'type', 'partialReasons[0]'],
+    ['unattributedCount', -1, 'minimum', 'unattributedCount'],
+    ['unattributedCount', 0, 'minimum', 'unattributedCount'],
+    ['unattributedCount', 1.5, 'type', 'unattributedCount'],
+    ['unattributedCount', null, 'type', 'unattributedCount'],
+  ]) {
+    const value = ingress(samples.results);
+    value.days[0] = { date: value.days[0].date, desks: {}, coverage: 'partial', partialReasons: ['unattributed_activity'], [field]: item };
+    rejects(acceptSnapshot('results', value, null, at), rule, `$.days[0].${path}`);
+  }
 });

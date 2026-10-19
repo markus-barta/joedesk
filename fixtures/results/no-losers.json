@@ -1,0 +1,228 @@
+{
+  "schema": "inspr.joe.household.results.v2",
+  "seq": 3,
+  "generatedAt": "2026-10-14T17:40:00.000Z",
+  "receivedAt": "2026-10-14T17:40:00.000Z",
+  "currency": "EUR",
+  "timeZone": "Europe/Vienna",
+  "trackingStart": "2026-09-10",
+  "days": [
+    {
+      "date": "2026-10-06",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    },
+    {
+      "date": "2026-10-07",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "5001.5001",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "1.5001",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "1.05",
+            "currency": "EUR"
+          },
+          "trades": 3
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    }
+  ],
+  "trades": [
+    {
+      "id": "rt-fixture-001",
+      "desk": "j",
+      "symbol": "KO",
+      "company": "Coca-Cola",
+      "side": "long",
+      "quantity": "2",
+      "openedAt": "2026-10-07T13:40:00.000Z",
+      "closedAt": "2026-10-07T14:10:00.000Z",
+      "entryPrice": {
+        "amount": "70",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "71.35",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "1.35",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "1",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-07T14:10:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-002",
+      "desk": "j",
+      "symbol": "T",
+      "company": "AT&T",
+      "side": "short",
+      "quantity": "1",
+      "openedAt": "2026-10-07T14:20:00.000Z",
+      "closedAt": "2026-10-07T15:00:00.000Z",
+      "entryPrice": {
+        "amount": "20",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "18.3",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.85",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "0.5",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-07T15:00:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-003",
+      "desk": "j",
+      "symbol": "PFE",
+      "company": "Pfizer",
+      "side": "long",
+      "quantity": "1",
+      "openedAt": "2026-10-07T15:30:00.000Z",
+      "closedAt": "2026-10-07T16:00:00.000Z",
+      "entryPrice": {
+        "amount": "30",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "30.7002",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "0.3501",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "0.0001",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-10-07T16:00:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    }
+  ],
+  "benchmark": null
+}

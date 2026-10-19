@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -14,25 +17,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - run: npm run check
       - name: Rebuild contracts, incident fixtures and time vectors
         run: npm run test:contracts
+      - name: Board UI modules (health, history continuity, formatting, host gate)
+        run: npm run test:ui
       - name: Server contract tests (disposable tmpfs container)
         run: |
           docker run --rm --network none --tmpfs /var/lib/joe-board \
-            -v "$PWD:/repo:ro" -w /repo node:22 \
-            node --test test/server-contract.mjs
+            -v "$PWD:/repo:ro" -w /repo node:22@sha256:0e5f906573693feaa1e21057ebdcfdb5bd5021f050b2dc7c9deceb629c7da2a8 \
+            node --test --test-concurrency=2 test/server-contract.mjs
+      - name: Release preparation, staged migration, smoke and SSO negatives (UTC)
+        env:
+          TZ: UTC
+        run: npm run test:release
 
   browser:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - name: Install Google Chrome
@@ -41,30 +54,121 @@ jobs:
           sudo apt-get install -y wget gnupg
           wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
           sudo apt-get install -y /tmp/google-chrome.deb
-      - name: Desktop smoke
+      - name: Board UI gate (390/1024/1440, light and dark, P1 fixtures, privacy)
         env:
           BROWSER_PATH: /usr/bin/google-chrome
-        run: node scripts/smoke-joe.mjs
-      - name: Mobile smoke
+          JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p3
+        run: node scripts/browser-p3.mjs
+      - name: Results gate (390/1024/1440, light and dark, results v2 fixtures, Vienna dates, budget)
+        if: always()
         env:
           BROWSER_PATH: /usr/bin/google-chrome
-          JOE_SMOKE_VIEWPORT: mobile
-        run: node scripts/smoke-joe.mjs
-      - name: Phone order smoke
+          JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p4
+        run: npm run test:results -- UTC Europe/Vienna America/New_York
+      - name: Settings gate (390/1024/1440, light and dark, Fleet Config fixtures, LIVE gate at the network layer, sweep)
+        if: always()
         env:
           BROWSER_PATH: /usr/bin/google-chrome
-          JOE_SMOKE_VIEWPORT: phone-order
-        run: node scripts/smoke-joe.mjs
-      - name: Privacy smoke
+          JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p5
+          TZ: UTC
+        run: node scripts/browser-p5.mjs
+      - name: Keep the screenshots for the visual check
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joedesk-p3-screenshots
+          path: ${{ runner.temp }}/joedesk-qa/p3
+      - name: Release carry-overs (390/1440, light and dark)
         env:
           BROWSER_PATH: /usr/bin/google-chrome
-          JOE_SMOKE_VIEWPORT: privacy
-        run: node scripts/smoke-joe.mjs
+          JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p6a
+          TZ: UTC
+        run: node scripts/browser-p6.mjs
+      - name: Keep the release screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joedesk-p6a-screenshots
+          path: ${{ runner.temp }}/joedesk-qa/p6a
+      - name: Keep the Results screenshots for the visual check
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joedesk-p4-screenshots
+          path: ${{ runner.temp }}/joedesk-qa/p4
+      - name: Keep the Settings screenshots for the visual check
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joedesk-p5-screenshots
+          path: ${{ runner.temp }}/joedesk-qa/p5
 
   docker:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - name: Build image
-        run: docker build -t joedesk:ci .
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Build two local OCI images with SBOM and maximal provenance
+        # OCI export never pushes to a registry. Keep outputs outside the context.
+        run: |
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")
+          export SOURCE_DATE_EPOCH
+          for build in first repeat; do
+            docker buildx build --file Dockerfile --platform linux/amd64 \
+              --no-cache --push=false --sbom=true --provenance=mode=max \
+              --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
+              --output "type=oci,dest=$RUNNER_TEMP/$build.oci.tar,rewrite-timestamp=true" .
+            mkdir "$RUNNER_TEMP/$build.oci"
+            tar -xf "$RUNNER_TEMP/$build.oci.tar" -C "$RUNNER_TEMP/$build.oci"
+          done
+      - name: Read and verify image, index, config and in-toto attestation blobs
+        run: |
+          node scripts/release-set.mjs image-evidence \
+            "$RUNNER_TEMP/first.oci" "$RUNNER_TEMP/repeat.oci" "$RUNNER_TEMP/image-evidence.json"
+      - name: Keep the OCI image and image evidence (no registry)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joedesk-oci-image
+          path: |
+            ${{ runner.temp }}/first.oci.tar
+            ${{ runner.temp }}/image-evidence.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+
+  release-set:
+    needs: [package, browser, docker]
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joedesk-oci-image
+          path: ${{ runner.temp }}/image-evidence
+      - name: Write and verify the exact commit release set
+        run: |
+          node scripts/release-set.mjs manifest \
+            "$RUNNER_TEMP/image-evidence/image-evidence.json" "$RUNNER_TEMP/release-set.json"
+          node scripts/verify-release-set.mjs "$RUNNER_TEMP/release-set.json" --commit "$GITHUB_SHA"
+          echo "Release-set evidence: $GITHUB_SHA (run $GITHUB_RUN_ID, attempt $GITHUB_RUN_ATTEMPT)" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joedesk-release-set
+          path: |
+            ${{ runner.temp }}/release-set.json
+            ${{ runner.temp }}/release-set.json.sha256
+          if-no-files-found: error
+          retention-days: 90

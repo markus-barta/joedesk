@@ -582,6 +582,12 @@
         "ageSeconds": 9,
         "reason": null
       }
+    },
+    "serverNow": "2026-10-14T17:42:22.000Z",
+    "gateway": {
+      "confirmed": true,
+      "checkAgeSeconds": 0,
+      "reason": null
     }
   }
 }

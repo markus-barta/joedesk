@@ -4,469 +4,365 @@
   <meta charset="utf-8">
   <base href="/joe/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark light">
-  <meta name="joe-data-endpoint" content="./data.json">
-  <meta name="joe-history-endpoint" content="./history.json">
+  <meta name="color-scheme" content="light dark">
   <title>JoeDesk</title>
   <script>
-    (function () {
-      try {
-        var stored = localStorage.getItem("joe-board-theme-v1");
-        var mode = stored === "light" || stored === "dark" || stored === "system" ? stored : "dark";
-        document.documentElement.dataset.themeMode = mode;
-        var resolved = mode === "system"
-          ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")
-          : mode;
-        document.documentElement.dataset.theme = resolved;
-      } catch (_) {
-        document.documentElement.dataset.theme = "dark";
-        document.documentElement.dataset.themeMode = "dark";
-      }
-    }());
+    // Apply a saved light or dark choice before the first paint; with nothing saved the page follows the system.
+    try { var m = localStorage.getItem("joe-board-theme-v1"); if (m === "light" || m === "dark") document.documentElement.dataset.theme = m; } catch (_) {}
   </script>
-  <link rel="stylesheet" href="./vendor/gridstack-13.2.0.min.css">
-  <link rel="stylesheet" href="./joe.css">
+  <script type="importmap">
+  { "imports": {
+    "/joe/app.js": "/joe/app.js?v=261016151218.0.0",
+    "/joe/host.js": "/joe/host.js?v=261016151218.0.0",
+    "/joe/ui.js": "/joe/ui.js?v=261016151218.0.0",
+    "/joe/terms.js": "/joe/terms.js?v=261016151218.0.0",
+    "/joe/format.js": "/joe/format.js?v=261016151218.0.0",
+    "/joe/health.js": "/joe/health.js?v=261016151218.0.0",
+    "/joe/feed.js": "/joe/feed.js?v=261016151218.0.0",
+    "/joe/events.js": "/joe/events.js?v=261016151218.0.0",
+    "/joe/desk.js": "/joe/desk.js?v=261016151218.0.0",
+    "/joe/history.js": "/joe/history.js?v=261016151218.0.0",
+    "/joe/history-model.js": "/joe/history-model.js?v=261016151218.0.0",
+    "/joe/history-worker.js": "/joe/history-worker.js?v=261016151218.0.0",
+    "/joe/chart.js": "/joe/chart.js?v=261016151218.0.0",
+    "/joe/results.js": "/joe/results.js?v=261016151218.0.0",
+    "/joe/results-model.js": "/joe/results-model.js?v=261016151218.0.0",
+    "/joe/theme.js": "/joe/theme.js?v=261016151218.0.0",
+    "/joe/settings.js": "/joe/settings.js?v=261016151218.0.0",
+    "/joe/settings-model.js": "/joe/settings-model.js?v=261016151218.0.0",
+    "/joe/version-display.js": "/joe/version-display.js?v=261016151218.0.0",
+    "/joe/vendor/calver/display.json": "/joe/vendor/calver/display.json?v=261016151218.0.0",
+    "/joe/vendor/calver/version.js": "/joe/vendor/calver/version.js?v=261016151218.0.0",
+    "/joe/vendor/calver/presentation.js": "/joe/vendor/calver/presentation.js?v=261016151218.0.0",
+    "/joe/vendor/calver/version-interaction.js": "/joe/vendor/calver/version-interaction.js?v=261016151218.0.0",
+    "/joe/vendor/calver/schemes.json": "/joe/vendor/calver/schemes.json?v=261016151218.0.0",
+    "/joe/vendor/calver/package.json": "/joe/vendor/calver/package.json?v=261016151218.0.0",
+    "/joe/vendor/calver/manifest.json": "/joe/vendor/calver/manifest.json?v=261016151218.0.0",
+    "/joe/fleet-write.js": "/joe/fleet-write.js?v=261016151218.0.0",
+    "/joe/time.mjs": "/joe/time.mjs?v=261016151218.0.0",
+    "/joe/market-calendar.json": "/joe/market-calendar.json?v=261016151218.0.0",
+    "/joe/contracts/index.mjs": "/joe/contracts/index.mjs?v=261016151218.0.0",
+    "/joe/contracts/read.mjs": "/joe/contracts/read.mjs?v=261016151218.0.0",
+    "/joe/contracts/schema-validator.mjs": "/joe/contracts/schema-validator.mjs?v=261016151218.0.0",
+    "/joe/contracts/semantics.mjs": "/joe/contracts/semantics.mjs?v=261016151218.0.0",
+    "/joe/contracts/vienna-date.mjs": "/joe/contracts/vienna-date.mjs?v=261016151218.0.0",
+    "/joe/contracts/decimal.mjs": "/joe/contracts/decimal.mjs?v=261016151218.0.0",
+    "/joe/contracts/gateway.mjs": "/joe/contracts/gateway.mjs?v=261016151218.0.0",
+    "/joe/contracts/panel-state.mjs": "/joe/contracts/panel-state.mjs?v=261016151218.0.0",
+    "/joe/contracts/manifest.json": "/joe/contracts/manifest.json?v=261016151218.0.0",
+    "/joe/contracts/common.schema.json": "/joe/contracts/common.schema.json?v=261016151218.0.0",
+    "/joe/contracts/reason.schema.json": "/joe/contracts/reason.schema.json?v=261016151218.0.0",
+    "/joe/contracts/data.schema.json": "/joe/contracts/data.schema.json?v=261016151218.0.0",
+    "/joe/contracts/history.schema.json": "/joe/contracts/history.schema.json?v=261016151218.0.0",
+    "/joe/contracts/results.schema.json": "/joe/contracts/results.schema.json?v=261016151218.0.0",
+    "/joe/contracts/fleet-config.schema.json": "/joe/contracts/fleet-config.schema.json?v=261016151218.0.0",
+    "/joe/contracts/healthz.schema.json": "/joe/contracts/healthz.schema.json?v=261016151218.0.0"
+  } }
+  </script>
+  <link rel="stylesheet" href="./app.css?v=261016151218.0.0">
+  <script defer src="./joe-version.js?v=261016151218.0.0"></script>
+  <script type="module" src="./app.js?v=261016151218.0.0"></script>
 </head>
-<body>
-<section class="gate" id="privateGate" hidden aria-labelledby="gateTitle">
-  <div class="gate-card">
-    <p class="kicker">Private household board</p>
-    <h1 id="gateTitle">Joe lives at home.</h1>
-    <p>This address does not publish the household trading desk or its paper results.</p>
-    <a href="http://hsb1.lan/joe/">Open the canonical board on hsb1.lan →</a>
+<body data-screen="desk">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-logo" viewBox="0 0 28 28"><rect x="1" y="14" width="7" height="12" rx="1.5" fill="currentColor" opacity=".92"/><rect x="10.5" y="10" width="7" height="16" rx="1.5" fill="currentColor"/><rect x="20" y="6" width="7" height="20" rx="1.5" fill="currentColor" opacity=".78"/><path d="M1 14h26" stroke="currentColor" stroke-width="1.2" opacity=".35"/></symbol>
+  <!-- One lucide-like set: 24 grid, 1.5 stroke, round caps and joins -->
+  <symbol id="i-paper" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></symbol>
+  <symbol id="i-live" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="2.4" fill="currentColor"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2.2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3M12 14.5v2"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+  <symbol id="i-up" viewBox="0 0 10 10"><path d="M5 1.4 9 8.4H1z" fill="currentColor"/></symbol>
+  <symbol id="i-down" viewBox="0 0 10 10"><path d="M5 8.6 1 1.6h8z" fill="currentColor"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.2 4.2L19 7"/></symbol>
+  <symbol id="i-ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.8 2.8L16 9.6"/></symbol>
+  <symbol id="i-half" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-ring" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 2.6"><circle cx="12" cy="12" r="9"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3z"/><path d="M12 7.8v5M12 16.2v.1"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+  <symbol id="i-chev-l" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m14.5 6-6 6 6 6"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m9.5 6 6 6-6 6"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9.5 6 6 6-6"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12h14M13.5 7l5 5-5 5"/></symbol>
+  <symbol id="i-long" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></symbol>
+  <symbol id="i-short" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10M17 9v8H9"/></symbol>
+  <symbol id="i-desk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="8" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="5" rx="1.6"/><rect x="13.5" y="11.5" width="7" height="9" rx="1.6"/><rect x="3.5" y="14.5" width="7" height="6" rx="1.6"/></symbol>
+  <symbol id="i-results" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="2.2"/><path d="M3.5 9.5h17M8 3v3M16 3v3"/><rect x="7" y="12.5" width="3" height="3" rx=".6"/><rect x="12" y="12.5" width="3" height="3" rx=".6"/></symbol>
+  <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 20.5h17"/><path d="m4.5 15.5 4.5-5 4 3 6.5-8"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 7h5m6 0h5M4 17h9m4 0h3"/><circle cx="12" cy="7" r="2.5"/><circle cx="15" cy="17" r="2.5"/></symbol>
+  <symbol id="i-work" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 5 12 2.5-6h4"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8v.2"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.2 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4M12 17v.1"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="m4 11 16-7-7 16-2-7z"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h11a5 5 0 0 1 0 10H8"/><path d="m8 5-4 4 4 4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3 19.5 6v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z"/></symbol>
+  <symbol id="i-keep" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"><path d="M12 3 19.5 6v5.5c0 4.5-3.2 8-7.5 9.5-4.3-1.5-7.5-5-7.5-9.5V6z"/><rect x="9" y="11" width="6" height="5" rx="1"/><path d="M10.2 11V9.6a1.8 1.8 0 0 1 3.6 0V11"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5v5M15 2.5v5M6.5 7.5h11V11a5.5 5.5 0 0 1-11 0zM12 16.5v5"/></symbol>
+  <symbol id="i-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></symbol>
+  <symbol id="i-feed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1.4" fill="currentColor"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 17a8.5 8.5 0 1 1 15 0"/><path d="m12 13 4-5"/><circle cx="12" cy="13.5" r="1.2" fill="currentColor"/></symbol>
+  <symbol id="i-wallet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5.5A1.5 1.5 0 0 0 17.5 4H5a2 2 0 0 0 0 4h14a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6"/><path d="M16.5 14h.1"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 21v-7M5 10V3M12 21v-9M12 8V3M19 21v-5M19 12V3M2.5 14h5M9.5 8h5M16.5 16h5"/></symbol>
+  <symbol id="i-alarm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.5 1.5M4.5 4.5 2.5 6.5M19.5 4.5l2 2"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M20.5 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 20.5 12z"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="15.5" r="4.5"/><path d="m11.2 12.3 8.3-8.3M16.5 7l2.5 2.5M14 9.5l2 2"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M3.5 6.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2.2-2.4 3.7M12 17.2v.1"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.5z"/><path d="M14 3v5h5M10 12.5 8.5 14l1.5 1.5M14 12.5l1.5 1.5-1.5 1.5"/></symbol>
+  <symbol id="i-log" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3.5 4v4.5H8M12 8v4.5l3 1.5"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 1.8-.9 1.4-2l-.4-1a1.6 1.6 0 0 1 1.5-2.2H17a4 4 0 0 0 4-4C21 6.8 17 3 12 3z"/><circle cx="7.5" cy="11" r="1" fill="currentColor"/><circle cx="10.5" cy="7.5" r="1" fill="currentColor"/><circle cx="15" cy="7.8" r="1" fill="currentColor"/></symbol>
+  <symbol id="i-about" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 11v5.5M12 7.8v.2"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m17 3 3 3-3 3"/><path d="M4 11V9a3 3 0 0 1 3-3h13M7 21l-3-3 3-3"/><path d="M20 13v2a3 3 0 0 1-3 3H4"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/></symbol>
+  <symbol id="i-scale" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v17M7 20.5h10M4.5 7.5h15M4.5 7.5 2 13.5a3 3 0 0 0 5 0zM19.5 7.5 17 13.5a3 3 0 0 0 5 0z"/></symbol>
+  <symbol id="i-equal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M8.5 10h7M8.5 14h7"/></symbol>
+  <symbol id="i-updown" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8 4-4 4M8 4l4 4M8 4v16M16 20l-4-4M16 20l4-4M16 20V4"/></symbol>
+  <symbol id="i-award" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="5.5"/><path d="m8.5 13.3-1.5 7.2 5-2.5 5 2.5-1.5-7.2"/></symbol>
+  <symbol id="i-dip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 7 6.5 6.5 4-4L21 17"/><path d="M15 17h6v-6"/></symbol>
+  <symbol id="i-days" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="2.2"/><path d="M3.5 9.5h17M8 3v3M16 3v3M8 14h.1M12 14h.1M16 14h.1M8 17.5h.1M12 17.5h.1"/></symbol>
+  <symbol id="i-receipt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3.5h14v17l-2.5-1.5-2.3 1.5-2.2-1.5-2.3 1.5-2.2-1.5L5 20.5z"/><path d="M9 8.5h6M9 12h6M9 15.5h3.5"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M6 12h12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 6v12M6 12h12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 12.5a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5l1-12.5M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/></symbol>
+  <symbol id="i-type" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7.5V5h14v2.5M12 5v14M9 19h6"/></symbol>
+  <symbol id="i-learning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/></symbol>
+  <symbol id="i-dot" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="currentColor"/></symbol>
+</svg>
+
+<section class="private" id="privateGate" hidden aria-labelledby="privateTitle">
+  <div class="private-card">
+    <svg class="i brand-i" aria-hidden="true"><use href="#i-logo"/></svg>
+    <h1 id="privateTitle">Joe lives at home.</h1>
+    <p>This address does not publish the household paper board or its results.</p>
+    <a class="btn" href="http://hsb1.lan/joe/">Open the board on hsb1.lan<svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></a>
   </div>
 </section>
+<noscript><section class="private"><div class="private-card"><h1>JavaScript is off.</h1><p>The household board needs JavaScript to read its paper data.</p></div></section></noscript>
 
-<main class="board-stage" id="dashboard" hidden>
-<div class="board-flipper" id="boardFlipper">
-<section class="shell board-face board-face--front" id="tradingBoard" aria-label="Household paper-trading board">
-  <header class="topline" aria-label="JoeDesk controls">
-    <div class="brand">
-      <svg class="brand-logo" width="28" height="28" viewBox="0 0 28 28" role="img" aria-label="JoeDesk">
-        <rect x="1" y="14" width="7" height="12" rx="1.5" fill="currentColor" opacity=".92"/>
-        <rect x="10.5" y="10" width="7" height="16" rx="1.5" fill="currentColor"/>
-        <rect x="20" y="6" width="7" height="20" rx="1.5" fill="currentColor" opacity=".78"/>
-        <path d="M1 14h26" stroke="currentColor" stroke-width="1.2" opacity=".35"/>
-      </svg>
-      <strong class="brand-wordmark">JoeDesk</strong>
-    </div>
-    <div class="toolbar" role="toolbar" aria-label="Board tools">
-      <span class="paper-mark">Paper only</span>
-      <button class="quiet-button fleet-open" id="fleetConfigOpen" type="button" aria-controls="fleetConfigBoard">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 12h10M9 17h6"/></svg>
-        Settings · Fleet Config
-      </button>
-      <details class="header-menu" id="layoutMenu" data-dismissable>
-        <summary class="header-menu-trigger header-icon-trigger" aria-haspopup="dialog" aria-label="Layout" title="Layout">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="3.5" y="3.5" width="7" height="7" rx="1"/>
-            <rect x="13.5" y="3.5" width="7" height="4" rx="1"/>
-            <rect x="13.5" y="10.5" width="7" height="10" rx="1"/>
-            <rect x="3.5" y="13.5" width="7" height="7" rx="1"/>
-          </svg>
-        </summary>
-        <div class="header-menu-panel" role="dialog" aria-label="Saved layouts">
-          <div class="layout-toolbar" id="layoutToolbar" aria-label="Saved layouts">
-            <label class="visually-hidden" for="layoutSelect">Saved layout</label>
-            <select class="layout-select" id="layoutSelect" aria-describedby="layoutStatus"></select>
-            <div class="layout-action-row layout-primary-actions">
-              <button class="quiet-button" id="saveLayout" type="button">Save</button>
-              <button class="quiet-button" id="saveAsLayout" type="button">Save as…</button>
-            </div>
-            <div class="layout-action-row layout-secondary-actions">
-              <button class="quiet-button" id="renameLayout" type="button">Rename</button>
-              <button class="quiet-button" id="deleteLayout" type="button">Delete</button>
-              <button class="quiet-button" id="resetLayout" type="button">Reset</button>
-            </div>
-            <div class="layout-inline-form" id="layoutInlineForm" hidden>
-              <label class="visually-hidden" for="layoutNameInput">Layout name</label>
-              <input class="layout-name-input" id="layoutNameInput" type="text" maxlength="48" autocomplete="off" placeholder="Layout name">
-              <button class="quiet-button" id="layoutFormConfirm" type="button">Confirm</button>
-              <button class="quiet-button" id="layoutFormCancel" type="button">Cancel</button>
-            </div>
-          </div>
-        </div>
-      </details>
-      <details class="header-menu" id="settingsMenu" data-dismissable data-settings-menu>
-        <summary class="header-menu-trigger header-icon-trigger" aria-haspopup="dialog" aria-label="Settings" title="Settings">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 7h5m6 0h5M4 17h9m4 0h3"/>
-            <circle cx="12" cy="7" r="2.5"/>
-            <circle cx="15" cy="17" r="2.5"/>
-          </svg>
-        </summary>
-        <div class="header-menu-panel settings-panel" role="dialog" aria-label="Board settings">
-          <button class="quiet-button settings-fleet-link" id="settingsFleetConfig" type="button">Limits, quota &amp; wake times → Fleet Config</button>
-          <p class="settings-scope">Appearance below is saved in this browser.</p>
-          <fieldset class="settings-group">
-            <legend>Grid</legend>
-            <label class="settings-field" for="settingsColumns">
-              <span class="settings-label">Columns</span>
-              <select id="settingsColumns">
-                <option value="12">12 columns</option>
-                <option value="6">6 columns</option>
-                <option value="3">3 columns</option>
-              </select>
-            </label>
-            <label class="settings-field" for="settingsCellHeight">
-              <span class="settings-label">Row height</span>
-              <span class="settings-input-wrap">
-                <input id="settingsCellHeight" type="number" min="48" max="140" step="1" inputmode="numeric">
-                <span class="settings-unit">px</span>
-              </span>
-            </label>
-            <label class="settings-field" for="settingsTilePadding">
-              <span class="settings-label">Tile padding</span>
-              <span class="settings-input-wrap">
-                <input id="settingsTilePadding" type="number" min="0" max="24" step="1" inputmode="numeric">
-                <span class="settings-unit">px</span>
-              </span>
-            </label>
-            <label class="settings-field" for="settingsTileGap">
-              <span class="settings-label">Tile gap</span>
-              <span class="settings-input-wrap">
-                <input id="settingsTileGap" type="number" min="0" max="24" step="1" inputmode="numeric">
-                <span class="settings-unit">px</span>
-              </span>
-            </label>
-          </fieldset>
-          <fieldset class="settings-group">
-            <legend>Theme</legend>
-            <div class="theme-choices" role="radiogroup" aria-label="Color theme">
-              <label class="theme-choice"><input type="radio" name="themeMode" id="themeLight" value="light"> Bright</label>
-              <label class="theme-choice"><input type="radio" name="themeMode" id="themeDark" value="dark"> Dark</label>
-              <label class="theme-choice"><input type="radio" name="themeMode" id="themeSystem" value="system"> System</label>
-            </div>
-          </fieldset>
-          <div class="settings-actions">
-            <button class="quiet-button" id="settingsCancel" type="button">Cancel</button>
-            <button class="quiet-button settings-apply" id="settingsApply" type="button">Apply</button>
-          </div>
-        </div>
-      </details>
-      <p class="layout-status header-status" id="layoutStatus" role="status" aria-live="polite"></p>
-    </div>
-  </header>
-  <div class="board-health" id="alarm" data-tone="checking" role="status" aria-live="polite">
-    <details class="board-health-info" id="boardHealthInfo">
-      <summary class="board-health-summary" aria-label="Read more about board status">
-        <span class="board-health-light" aria-hidden="true"></span>
-        <span class="board-health-copy"><strong id="alarmLabel">Checking</strong><span>: </span><span id="alarmReason">waiting for the first update</span></span>
-        <span class="board-health-more">read more</span>
-      </summary>
-      <div class="board-health-diagnostics">
-        <p id="alarmText">Waiting for the first snapshot.</p>
-        <a href="#desk-j">Accounting diagnostic</a>
-      </div>
-    </details>
+<div id="app">
+<header class="top">
+  <div class="page top-in">
+    <div class="brand"><svg class="i" aria-hidden="true"><use href="#i-logo"/></svg><span class="word">JoeDesk</span></div>
+    <span class="mode-label" id="modeLabel" role="status" aria-label="Mode: paper trading"><svg class="i" aria-hidden="true"><use href="#i-paper"/></svg>PAPER</span>
+    <nav class="nav seg" aria-label="Screens">
+      <button type="button" data-go="desk"><svg class="i" aria-hidden="true"><use href="#i-desk"/></svg>Desk</button>
+      <button type="button" data-go="results"><svg class="i" aria-hidden="true"><use href="#i-results"/></svg>Results</button>
+      <button type="button" data-go="history"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>History</button>
+      <button type="button" data-go="settings"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
+    </nav>
+    <button type="button" class="hdr-health" id="hdrHealth" data-go="desk" aria-label="Waiting for the board light. Open Desk."><svg class="i tone-none" aria-hidden="true"><use href="#i-ring"/></svg><span class="lbl"><b>Loading</b></span></button>
+    <button type="button" class="icon-btn theme-btn" id="themeBtn" aria-label="Switch to dark theme"><svg class="i sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="i moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
   </div>
+</header>
 
-  <section class="learning-strip" id="learningStrip" aria-label="Household decision summary">
-    <div class="learning-strip-head">
+<main class="page" id="main">
+  <section class="screen" id="scr-desk" aria-labelledby="deskTitle">
+    <h1 class="vh" id="deskTitle">Desk</h1>
+    <div class="health-wrap">
+      <div class="hstrip" id="health"></div>
+      <div class="pop" id="healthPop" role="dialog" aria-label="Board status details" tabindex="-1"></div>
+    </div>
+    <section class="card hero" id="deskHero" aria-label="Today">
+      <div class="hero-l" id="heroL"></div>
+      <div class="hero-r">
+        <div class="session" id="heroSession"></div>
+        <div class="chart hero-chart" id="heroChart"><div class="ctip" role="tooltip"></div></div>
+      </div>
+    </section>
+    <div class="sec-h"><h2>Desks</h2><span class="sub" id="desksSub"></span></div>
+    <div class="desk-grid" id="desks">
+      <article class="card dcard" id="desk-j" aria-label="Desk J"></article>
+      <article class="card dcard" id="desk-joe" aria-label="Desk Joe"></article>
+      <article class="card dcard" id="desk-joel" aria-label="Desk Joel"></article>
+    </div>
+    <div class="sec-h"><h2>Positions</h2><span class="sub" id="posSub"></span></div>
+    <div class="positions" id="positions"></div>
+    <div class="sec-h"><h2>Kept holdings</h2><span class="sub">Kept · not traded by any desk</span></div>
+    <div class="kept" id="kept"></div>
+  </section>
+
+  <section class="screen" id="scr-results" aria-labelledby="resTitle">
+    <div class="scr-h"><h1 id="resTitle">Results</h1><span class="sub">Vienna time · euro · closed trades after fees · kept holdings left out</span></div>
+    <div class="res-tools">
+      <div class="seg" role="group" aria-label="Period" id="periodSeg">
+        <button type="button" data-period="day" aria-pressed="false">Day</button>
+        <button type="button" data-period="week" aria-pressed="true">Week</button>
+        <button type="button" data-period="month" aria-pressed="false">Month</button>
+        <button type="button" data-period="ytd" aria-pressed="false"><span class="t-long">This year</span><span class="t-short">Year</span></button>
+        <button type="button" data-period="all" aria-pressed="false">All</button>
+      </div>
+      <div class="step" role="group" aria-label="Move period">
+        <button type="button" class="icon-btn" id="prevPer" aria-label="Previous period"><svg class="i" aria-hidden="true"><use href="#i-chev-l"/></svg></button>
+        <span class="step-label" id="perLabel" aria-live="polite"></span>
+        <button type="button" class="icon-btn" id="nextPer" aria-label="Next period"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></button>
+      </div>
+      <span class="grow"></span>
+      <div class="seg" role="group" aria-label="Desk" id="deskSeg"></div>
+    </div>
+    <section class="card rhero" id="rhero" aria-label="Result for the period">
+      <div class="rhero-l" id="rheroL"></div>
+      <div class="rhero-r">
+        <div class="legend" id="curveLegend"></div>
+        <div class="chart rchart" id="curve"><div class="res-status" id="resStatus"></div><div class="ctip" role="tooltip"></div></div>
+      </div>
+    </section>
+    <div class="tiles" id="tiles" role="list"></div>
+    <div class="sec-h"><h2 id="bdTitle">By desk</h2><span class="sub">Every desk and the total, on one scale</span></div>
+    <div class="bars" id="breakdown"></div>
+    <div class="sec-h"><h2>Calendar</h2><span class="sub">Closed-trade result per day, after fees · weeks start on Monday</span></div>
+    <section class="card calcard" aria-label="Result calendar">
       <div>
-        <span class="label">Decision pulse</span>
-        <strong id="learningStripSummary">Waiting for the first snapshot</strong>
+        <div class="cal-head">
+          <div class="step">
+            <button type="button" class="icon-btn" id="prevMonth" aria-label="Previous month"><svg class="i" aria-hidden="true"><use href="#i-chev-l"/></svg></button>
+            <h3 id="calTitle"></h3>
+            <button type="button" class="icon-btn" id="nextMonth" aria-label="Next month"><svg class="i" aria-hidden="true"><use href="#i-chev-r"/></svg></button>
+          </div>
+          <span class="sub" id="calSum"></span>
+        </div>
+        <div class="cal" id="cal" role="grid" aria-label="Result calendar"></div>
+        <div class="cal-legend" id="calLegend"></div>
       </div>
-      <span class="learning-strip-scope" id="learningStripScope">Paper · virtual desks only</span>
+      <div class="daypanel" id="daypanel" aria-live="polite"></div>
+    </section>
+  </section>
+
+  <section class="screen" id="scr-history" aria-labelledby="histTitle">
+    <div class="scr-h"><h1 id="histTitle">History</h1><span class="sub">Each desk’s money as observed · paper · euro</span></div>
+    <div class="hist-tools">
+      <div class="seg" role="group" aria-label="Desks" id="histDesks"></div>
+      <div class="seg" role="group" aria-label="Range" id="histRange">
+        <button type="button" data-range="1d" aria-pressed="false">Day</button>
+        <button type="button" data-range="1w" aria-pressed="true">Week</button>
+        <button type="button" data-range="1m" aria-pressed="false">Month</button>
+        <button type="button" data-range="all" aria-pressed="false">All</button>
+      </div>
+      <button type="button" class="btn quiet" id="resetZoom" disabled>Reset zoom</button>
     </div>
-    <div class="learning-strip-grid" id="learningStripGrid">
-      <p class="learning-strip-empty">The household rollup will appear when the paper snapshot arrives.</p>
+    <section class="card hcard" aria-label="Desk money over time">
+      <div class="legend" id="histLegend"></div>
+      <div class="hist-compare"><p id="histCompare"></p></div>
+      <div class="chart hist-chart" id="histChart"><div class="hist-status" id="histStatus"></div><div class="ctip" id="histTip" role="tooltip"></div></div>
+      <p class="hist-help"><span id="histBasis"></span> Vienna time · thin lines mark midnight · wheel or pinch to zoom · shift-drag to pan · JoeDesk keeps the last 14 days</p>
+    </section>
+    <div class="hist-cols">
+      <div>
+        <div class="sec-h" id="j-accounting"><span class="ico-sq"><svg class="i" aria-hidden="true"><use href="#i-book"/></svg></span><h2>J’s bookkeeping</h2><span class="sub">J and its sub-desks J2 to J5</span></div>
+        <div id="jAcct"></div>
+      </div>
+      <div>
+        <div class="sec-h"><span class="ico-sq"><svg class="i" aria-hidden="true"><use href="#i-log"/></svg></span><h2>Desk changes</h2><span class="sub">Seen by this browser while JoeDesk was open</span></div>
+        <ul class="events" id="events"></ul>
+      </div>
     </div>
   </section>
 
-  <section class="grid-stack" id="joeGrid" aria-label="Configurable household desk widgets">
-    <article class="grid-stack-item" gs-id="hero" gs-x="0" gs-y="0" gs-w="12" gs-h="3">
-      <div class="grid-stack-item-content widget hero-widget">
-        <div class="widget-drag" aria-label="Drag household summary"><span>Household · paper</span><span class="drag-dots" aria-hidden="true">•••</span></div>
-        <div class="hero-values">
-          <div class="hero-stat hero-net">
-            <span class="label">Virtual desk equity</span>
-            <strong class="flap" id="totalEquity">—</strong>
-            <span class="hero-meta" id="deskTotalsMeta">Waiting for desk accounting</span>
-            <span class="hero-secondary"><b>Virtual starting capital</b> <span id="virtualStartingCapital">€15,000</span></span>
-            <span class="hero-secondary"><b>IB paper account NAV</b> <span id="brokerEquity">—</span></span>
-            <span class="hero-meta" id="brokerAccountMeta">Whole account including KEEP · not virtual desk capital</span>
-          </div>
-          <div class="hero-stat"><span class="label">Day</span><strong id="totalDay">—</strong><small class="pnl-note" id="totalDayNote">Waiting for a verified source</small></div>
-          <div class="hero-stat"><span class="label">Open</span><strong id="totalOpen">—</strong><small class="pnl-note" id="totalOpenNote">Waiting for a verified source</small></div>
-          <div class="hero-stat"><span class="label">Freshness</span><strong id="freshValue">Checking</strong></div>
-        </div>
-        <div class="system-strip" aria-label="Safety status">
-          <span id="gatewaySignal" class="status-badge"><b>Gateway</b> <span id="gatewayValue">Checking</span></span>
-          <span id="haltSignal" class="status-badge"><b>HALT</b> <span id="haltValue">Checking</span></span>
-          <span class="source-line" id="sourceLine">Source unavailable</span>
-        </div>
-      </div>
-    </article>
-
-    <article class="grid-stack-item" id="desk-j" gs-id="desk-j" gs-x="0" gs-y="3" gs-w="4" gs-h="9"><div class="grid-stack-item-content widget desk-widget" data-desk="j"><div class="widget-drag"><span>Desk J</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="j"></div></div></article>
-    <article class="grid-stack-item" gs-id="desk-joe" gs-x="4" gs-y="3" gs-w="4" gs-h="9"><div class="grid-stack-item-content widget desk-widget" data-desk="joe"><div class="widget-drag"><span>Desk Joe</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="joe"></div></div></article>
-    <article class="grid-stack-item" gs-id="desk-joel" gs-x="8" gs-y="3" gs-w="4" gs-h="9"><div class="grid-stack-item-content widget desk-widget" data-desk="joel"><div class="widget-drag"><span>Desk Joel</span><span class="drag-dots">•••</span></div><div class="desk-slot" data-desk-slot="joel"></div></div></article>
-
-    <article class="grid-stack-item" gs-id="attribution" gs-x="0" gs-y="12" gs-w="4" gs-h="3">
-      <div class="grid-stack-item-content widget"><div class="widget-drag"><span>Day attribution</span><span class="drag-dots">•••</span></div><div class="widget-body attribution-body"><div id="attribution" class="attribution"></div></div></div>
-    </article>
-
-    <article class="grid-stack-item" gs-id="history" gs-x="4" gs-y="12" gs-w="8" gs-h="5">
-      <div class="grid-stack-item-content widget history-widget">
-        <div class="widget-drag"><span>History</span><span class="drag-dots">•••</span></div>
-        <div class="history-head">
-          <div class="history-controls">
-            <div class="control-section">
-              <span class="control-label" id="deskControlsLabel">Desks</span>
-              <div class="control-group" id="deskCompare" role="group" aria-labelledby="deskControlsLabel">
-                <button type="button" id="seriesAll" data-series-all aria-pressed="true">All bots</button>
-                <button type="button" data-series="j" aria-pressed="true">J</button>
-                <button type="button" data-series="joe" aria-pressed="true">Joe</button>
-                <button type="button" data-series="joel" aria-pressed="true">Joel</button>
-              </div>
-            </div>
-            <span class="control-divider" aria-hidden="true"></span>
-            <div class="control-section">
-              <span class="control-label" id="rangeControlsLabel">Range</span>
-              <div class="control-group" role="group" aria-labelledby="rangeControlsLabel">
-                <button type="button" data-range="1d" aria-pressed="false">1D</button>
-                <button type="button" data-range="1w" aria-pressed="false">1W</button>
-                <button type="button" data-range="1m" aria-pressed="false">1M</button>
-                <button type="button" data-range="all" aria-pressed="true">ALL</button>
-              </div>
-            </div>
-          </div>
-          <button class="quiet-button" id="resetZoom" type="button">Reset zoom</button>
-        </div>
-        <div class="history-evidence-legend" id="historyEvidenceLegend" role="group" aria-label="History line meaning">
-          <span><svg viewBox="0 0 28 8" width="28" height="8" aria-hidden="true" focusable="false"><line x1="1" y1="4" x2="27" y2="4"></line></svg>Observed</span>
-          <span><svg class="gap-fill" viewBox="0 0 28 8" width="28" height="8" aria-hidden="true" focusable="false"><line x1="1" y1="4" x2="27" y2="4"></line></svg>Gap fill / carried estimate (includes assumed €5,000 start)</span>
-        </div>
-        <p class="history-status" id="historyStatus" hidden role="status"><span id="historyStatusText"></span><button class="quiet-button" id="historyRetry" type="button">Retry</button></p>
-        <p class="history-help" id="historyHelp">Europe/Vienna time · Thin lines mark calendar boundaries; labels adapt to chart width · Wheel or pinch to zoom · Shift-drag to pan</p>
-        <p class="history-compare" id="historyBasisNotice" hidden role="status"></p>
-        <p class="history-compare" id="historyCompare" hidden></p>
-        <div class="history-canvas-wrap"><canvas id="historyChart" aria-label="Desk equity history chart" aria-describedby="historyEvidenceLegend historyHelp historyBasisNotice"></canvas><div class="empty-state" id="historyEmpty" hidden>History will fill as snapshots arrive.</div></div>
-        <section class="history-captured" id="historyCaptured" hidden aria-labelledby="historyCapturedTitle">
-          <div class="history-captured-head"><strong id="historyCapturedTitle">Captured J results</strong><span id="historyCapturedValue"></span></div>
-          <p id="historyCapturedMeta"></p>
-          <div class="history-captured-plot" id="historyCapturedPlot"></div>
-        </section>
-      </div>
-    </article>
-
-    <article class="grid-stack-item" gs-id="positions" gs-x="0" gs-y="17" gs-w="12" gs-h="5">
-      <div class="grid-stack-item-content widget positions-widget">
-        <div class="widget-drag"><span>Full positions</span><span class="drag-dots">•••</span></div>
-        <div class="positions-head"><p class="widget-note" id="positionsSummary">Waiting for position detail</p><div class="control-group" role="group" aria-label="Filter positions by desk"><button type="button" data-position-filter="all" aria-pressed="true">All</button><button type="button" data-position-filter="j" aria-pressed="false">J</button><button type="button" data-position-filter="joe" aria-pressed="false">Joe</button><button type="button" data-position-filter="joel" aria-pressed="false">Joel</button></div></div>
-        <div class="table-scroll"><table><thead><tr><th>Desk</th><th>Symbol</th><th>Side</th><th class="number">Qty</th><th class="number">Mark</th><th class="number">Market value</th><th class="number">Day P&amp;L</th><th class="number">Open P&amp;L</th><th>Updated</th></tr></thead><tbody id="positionsBody"><tr><td colspan="9" class="empty-cell">Position detail is not present in this snapshot.</td></tr></tbody></table></div>
-      </div>
-    </article>
-  </section>
-  <footer class="footer">
-    <span>Read-only household view · nothing here can place a trade</span>
-    <div class="footer-meta">
-      <span id="updatedAt">Waiting for data.json</span>
-      <details class="version" data-dismissable>
-        <summary><span class="version__label">v<span id="appVersion">26.09.21.12.00</span></span></summary>
-        <div class="version__panel" id="versionPanel" aria-label="Board version history"></div>
-      </details>
+  <section class="screen" id="scr-settings" aria-labelledby="setTitle">
+    <div class="scr-h"><h1 id="setTitle">Settings</h1><span class="sub" id="setSub"></span></div>
+    <p class="set-phone-note"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg><span>Read-only on a phone. Change fleet settings on a larger screen.</span></p>
+    <div class="set-grid">
+      <nav class="set-nav" id="setNav" aria-label="Settings sections"></nav>
+      <div class="set-main" id="setMain"></div>
     </div>
+  </section>
+
+  <footer class="foot">
+    <span id="footShield"></span>
+    <span class="foot-data"><svg class="i" aria-hidden="true"><use href="#i-feed"/></svg><span id="footData">No data yet</span> · version <span id="appVersion" class="product-version" data-product-version="261016151218.0.0" data-version-scheme="inspr-calver-3">261016151218.0.0</span><button type="button" id="versionMode" class="version-mode" aria-label="Show full SemVer version">SemVer</button></span>
   </footer>
-</section>
-
-<section class="shell board-face board-face--back fleet-config" id="fleetConfigBoard" aria-labelledby="fleetConfigTitle" aria-hidden="true" inert>
-  <div class="fleet-frame">
-    <header class="fleet-topline">
-      <div class="fleet-title-lockup">
-        <svg class="brand-logo" width="30" height="30" viewBox="0 0 28 28" aria-hidden="true">
-          <rect x="1" y="14" width="7" height="12" rx="1.5" fill="currentColor" opacity=".92"/>
-          <rect x="10.5" y="10" width="7" height="16" rx="1.5" fill="currentColor"/>
-          <rect x="20" y="6" width="7" height="20" rx="1.5" fill="currentColor" opacity=".78"/>
-          <path d="M1 14h26" stroke="currentColor" stroke-width="1.2" opacity=".35"/>
-        </svg>
-        <h1 id="fleetConfigTitle">JoeDesk <span>·</span> Fleet Config</h1>
-        <span class="fleet-revision">rev <span id="fleetRevision">Loading…</span></span>
-      </div>
-      <div class="fleet-actions" role="toolbar" aria-label="Fleet Config actions">
-        <button class="fleet-button" type="button" data-fleet-action="diff">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l4 4v14H7zM14 3v5h5"/></svg>
-          Diff · see changes
-        </button>
-        <button class="fleet-button" type="button" data-fleet-action="confirm">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
-          Confirm review
-        </button>
-        <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="propagate">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 11 16-7-7 16-2-7z"/></svg>
-          Propagate
-        </button>
-        <button class="fleet-button" id="fleetConfigClose" type="button" aria-controls="tradingBoard">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 9A7 7 0 0 1 18 6l2 1M17.9 15A7 7 0 0 1 6 18l-2-1"/></svg>
-          Flip back
-        </button>
-      </div>
-    </header>
-
-    <p class="fleet-kicker">Paper fleet settings · ELI10 first</p>
-    <section class="fleet-definition" aria-labelledby="fleetDefinitionTitle">
-      <h2 id="fleetDefinitionTitle">Where is this defined?</h2>
-      <dl>
-        <div><dt>Schema ID</dt><dd><a id="fleetSchemaId" href="./fleet-config.schema.json">Loading…</a></dd></div>
-        <div><dt>Saved revision</dt><dd id="fleetSourceRevision">Loading…</dd></div>
-        <div class="fleet-definition-path"><dt>File the board reads</dt><dd><code id="fleetSourcePath">Loading…</code><small>via /joe/fleet-config.json · <span id="fleetSourceKind">Checking source</span></small></dd></div>
-        <div><dt>Last propagate attempt</dt><dd id="fleetLastPropagate" role="status">Checking log…</dd></div>
-      </dl>
-    </section>
-
-    <div class="fleet-columns">
-      <nav class="fleet-panel fleet-navigation" aria-label="Fleet Config sections">
-        <h2>What do you want to change?</h2>
-        <div class="fleet-section-list">
-          <button class="fleet-section is-selected" type="button" data-fleet-section="desks" aria-pressed="true" aria-controls="fleetEliBody">
-            <strong>Desk limits</strong><small>Risk cap · busy-desk maximum · KEEP</small>
-            <span class="fleet-nav-value">€<b data-fleet-readout="stage0CapEur">—</b> cap · <b data-fleet-readout="maxBusyDesks">—</b> busy desks</span>
-            <span class="fleet-nav-detail" data-fleet-readout="keepSymbols" data-fleet-prefix="KEEP " data-fleet-join=" + ">KEEP —</span>
-          </button>
-          <button class="fleet-section" type="button" data-fleet-section="quota" aria-pressed="false" aria-controls="fleetEliBody">
-            <strong>Quota &amp; low-capacity behavior</strong><small>Reserves · GREEN / AMBER / RED</small>
-            <span class="fleet-nav-value">Grok <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">—</b> · Codex <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">—</b> reserved</span>
-          </button>
-          <button class="fleet-section" type="button" data-fleet-section="cadence" aria-pressed="false" aria-controls="fleetEliBody">
-            <strong>Wake times &amp; cadence</strong><small>Wake windows · US-open start · routine links</small>
-            <span class="fleet-nav-value">US-open <b data-fleet-readout="usOpenArm">—</b> · Vienna time</span>
-            <span class="fleet-nav-detail" id="fleetWakeSummary">Checking wake windows…</span>
-            <span class="fleet-nav-detail">Preview: <span data-fleet-readout="wakeWindows" data-fleet-window-count="true">—</span></span>
-          </button>
-          <button class="fleet-section" type="button" data-fleet-section="limits" aria-pressed="false" aria-controls="fleetEliBody"><strong>Limits home</strong><small>Quota · desk caps · wake times</small></button>
-          <button class="fleet-section" type="button" data-fleet-section="routines" aria-pressed="false" aria-controls="fleetEliBody">
-            <strong>Amy’s check-ins</strong><small>Morning, review &amp; close labels</small>
-          </button>
-        </div>
-        <details class="fleet-more">
-          <summary>Connections &amp; advanced settings</summary>
-          <div class="fleet-section-list">
-            <button class="fleet-section" type="button" data-fleet-section="paths" aria-pressed="false" aria-controls="fleetEliBody"><strong>Legacy Mac locations</strong><small>Historical mirrors · read-only</small></button>
-            <button class="fleet-section" type="button" data-fleet-section="tools" aria-pressed="false" aria-controls="fleetEliBody"><strong>Tools</strong><small>Declared connections, read-only</small></button>
-            <button class="fleet-section" type="button" data-fleet-section="secrets" aria-pressed="false" aria-controls="fleetEliBody"><strong>Secret slots</strong><small>Reference names only · REDACTED</small></button>
-          </div>
-        </details>
-        <p class="fleet-nav-note">Values show your preview. Technical shows saved values. Board colors and layout stay in this browser.</p>
-      </nav>
-
-      <section class="fleet-panel fleet-eli" aria-labelledby="fleetEliTitle">
-        <header class="fleet-eli-head">
-          <div><h2 id="fleetEliTitle">ELI10 · plain English</h2><p>Choose a setting. See what it does. Change it here.</p></div>
-          <span class="fleet-selected-label" id="fleetSelectedLabel">Selected: Desk limits</span>
-        </header>
-        <div class="fleet-eli-body" id="fleetEliBody">
-          <h3 id="fleetEliHeadline" tabindex="-1">Set the paper desks’ boundaries.</h3>
-          <p id="fleetEliIntro">Loading the saved configuration…</p>
-          <p class="fleet-load-status" id="fleetLoadStatus" role="status">Loading current Fleet Config…</p>
-          <div class="fleet-eli-status" id="fleetEliStatus" hidden>
-            <p><b class="fleet-status fleet-status--green">GREEN</b><span id="fleetGreenBehavior">Loading…</span></p>
-            <p><b class="fleet-status fleet-status--amber">AMBER</b><span id="fleetAmberBehavior">Loading…</span></p>
-            <p><b class="fleet-status fleet-status--red">RED</b><span id="fleetRedBehavior">Loading…</span></p>
-          </div>
-          <section class="fleet-limits" id="fleetLimitsHome" hidden aria-labelledby="fleetLimitsTitle">
-            <div class="fleet-limits-intro">
-              <div><span class="fleet-limits-kicker">PAPER ONLY · PREVIEW VALUES</span><h2 id="fleetLimitsTitle">Limits home</h2></div>
-              <p>Choose what to change. Edits stay in your preview until you review, confirm and propagate them.</p>
-            </div>
-            <div class="fleet-limits-links" role="group" aria-label="Edit fleet limits">
-              <button type="button" data-fleet-jump="quota" aria-controls="fleetEditFields"><strong>Capacity kept free</strong><span>Grok <b data-fleet-readout="grok.reservePct" data-fleet-suffix="%">10%</b> · Codex <b data-fleet-readout="codex.reservePct" data-fleet-suffix="%">10%</b></span><span>GREEN: <b data-fleet-readout="onGreen" data-fleet-humanize="true">—</b> · AMBER: <b data-fleet-readout="onAmber" data-fleet-humanize="true">—</b> · RED: <b data-fleet-readout="onRed" data-fleet-humanize="true">—</b></span><em>Edit quota →</em></button>
-              <button type="button" data-fleet-jump="desks" aria-controls="fleetEditFields"><strong>Desk limits</strong><span><b data-fleet-readout="maxBusyDesks">5</b> busy desks · Stage-0 €<b data-fleet-readout="stage0CapEur">250</b></span><em>Edit desks →</em></button>
-              <button type="button" data-fleet-jump="cadence" aria-controls="fleetEditFields"><strong>Wake schedule</strong><span>US-open <b data-fleet-readout="usOpenArm">15:35</b> Vienna · <b data-fleet-readout="wakeWindows" data-fleet-window-count="true">0 wake windows</b></span><em>Edit cadence →</em></button>
-            </div>
-          </section>
-
-          <p id="fleetQuotaExample" class="fleet-quota-example" hidden></p>
-          <div id="fleetSectionCoverage" class="fleet-section-coverage"></div>
-          <div class="fleet-edit-fields" id="fleetEditFields" aria-label="Selected config values"></div>
-          <div class="fleet-edit-strip" id="fleetEditStrip">
-            <div class="fleet-edit-actions">
-              <button class="fleet-button" type="button" data-fleet-action="diff">Review changes (Diff)</button>
-              <button class="fleet-button" type="button" data-fleet-action="save">Save preview</button>
-              <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="propagate">Propagate</button>
-            </div>
-            <p id="fleetPreviewNote" role="status">Preview only · No changes propagated</p>
-            <p class="fleet-flow-help">1. Edit → 2. Diff → 3. Confirm → 4. Propagate. Save preview keeps a draft in this browser; Propagate writes the shared file.</p>
-          </div>
-          <details class="fleet-explanation"><summary>How these settings apply</summary><div class="fleet-eli-sections" id="fleetEliSections"></div></details>
-          <details class="fleet-advanced" id="fleetTechnical">
-            <summary>Technical · exact keys &amp; saved values</summary>
-            <p>These are saved values. Edits above stay in your preview until propagated. Consumer reload is not confirmed by this board.</p>
-            <dl id="fleetTechnicalFields"></dl>
-          </details>
-          <div id="fleetSecretsDetail" hidden>
-            <div class="fleet-secret-slots" id="fleetSecretSlots" aria-hidden="true"></div>
-            <p class="fleet-secret-ops" id="fleetSecretOps">Janus/agenix ops stay off this plane. Rotate and inject AGE secrets in the host secret workflow; JoeDesk lists capability/path refs only. See <span>docs/joe-fleet-config-secrets.md</span>.</p>
-          </div>
-          <details class="fleet-sources" id="fleetSources">
-            <summary id="fleetSourcesTitle">Sources — one home per knob</summary>
-            <header>
-              <div>
-                <p id="fleetSourcesStatus">Loading the current Fleet Config revision…</p>
-                <p class="fleet-sources-help">Each row names a setting, its source file and key, and a button to reach its field.</p>
-              </div>
-              <span class="fleet-source-live">DEFINITIONS</span>
-            </header>
-            <ul id="fleetSourcesList" class="fleet-sources-list" aria-live="polite"></ul>
-            <p class="fleet-sources-boundary">Status files, desk journals and host secrets are evidence or safety boundaries, not board settings.</p>
-          </details>
-        </div>
-      </section>
-    </div>
-
-    <section class="fleet-action-log fleet-panel" aria-labelledby="fleetActionLogTitle">
-      <header class="fleet-action-log-head">
-        <div>
-          <h2 id="fleetActionLogTitle">Propagation log</h2>
-          <p>Durable SSO-attributed outcomes · changed keys only · secret values never logged</p>
-        </div>
-        <button class="fleet-button fleet-action-refresh" id="fleetActionLogRefresh" type="button">Refresh</button>
-      </header>
-      <ol class="fleet-action-list" id="fleetActionLog" aria-live="polite">
-        <li class="fleet-action-empty">No propagation attempts recorded yet.</li>
-      </ol>
-    </section>
-
-
-  </div>
-</section>
-</div>
 </main>
 
-<div class="fleet-toast" id="fleetToast" role="status" aria-live="polite" hidden></div>
+<!-- Settings: the fleet settings' edit bar (desktop and tablet; phones are read-only) -->
+<div class="editbar" id="editbar" role="region" aria-label="Fleet settings changes">
+  <div class="page editbar-in">
+    <p class="note" id="editNote" aria-live="polite"></p>
+    <div class="edit-btns">
+      <button type="button" class="btn quiet" id="discardBtn" disabled><svg class="i" aria-hidden="true"><use href="#i-undo"/></svg>Discard</button>
+      <button type="button" class="btn quiet" id="savePreview" disabled>Save draft</button>
+      <button type="button" class="btn" id="reviewBtn" disabled>Review changes</button>
+      <button type="button" class="btn primary" id="sendBtn" disabled><svg class="i" aria-hidden="true"><use href="#i-send"/></svg>Send to the desks</button>
+    </div>
+  </div>
+</div>
 
-<dialog class="fleet-diff-dialog" id="fleetDiffDialog" aria-labelledby="fleetDiffTitle" aria-describedby="fleetDiffHelp">
-  <div class="fleet-diff-card">
-    <p class="fleet-kicker">Revision <span id="fleetDiffBase">fc-000000</span></p>
-    <h2 id="fleetDiffTitle">Check what will change</h2>
-    <p id="fleetDiffHelp">Compare each Before and After value. Confirm marks this exact paper revision as reviewed. Nothing is shared until you select Propagate.</p>
-    <ul class="fleet-diff-list" id="fleetDiffList"></ul>
-    <label class="fleet-diff-review"><input id="fleetDiffReviewed" type="checkbox"> I checked every Before and After value above.</label>
-    <div class="fleet-diff-actions">
-      <button class="fleet-button" id="fleetDiffCancel" type="button">Keep editing</button>
-      <button class="fleet-button fleet-button--primary" type="button" data-fleet-action="confirm">Confirm this review</button>
+<nav class="bottom-nav" aria-label="Screens">
+  <button type="button" data-go="desk"><svg class="i" aria-hidden="true"><use href="#i-desk"/></svg>Desk</button>
+  <button type="button" data-go="results"><svg class="i" aria-hidden="true"><use href="#i-results"/></svg>Results</button>
+  <button type="button" data-go="history"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>History</button>
+  <button type="button" data-go="settings"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
+</nav>
+
+<!-- The LIVE gate: three fixed-size steps; it ends disabled and never sends anything -->
+<dialog class="dlg gate-dlg" id="gateDlg" aria-labelledby="gateTitle">
+  <div class="dlg-in gate">
+    <div class="dlg-h"><h2 id="gateTitle" tabindex="-1"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg>Switch to LIVE</h2><button type="button" class="icon-btn" data-close aria-label="Cancel and stay on paper"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <div class="dlg-b">
+      <ol class="trail" id="gateTrack" aria-label="Steps to live trading"></ol>
+      <div class="gate-step" data-step="1">
+        <h3><svg class="i" aria-hidden="true"><use href="#i-warn"/></svg>LIVE means real orders with real money</h3>
+        <ul>
+          <li><svg class="i" aria-hidden="true"><use href="#i-wallet"/></svg><span>Joe’s desks would place real orders on a live <button type="button" class="term" data-term="ib">Interactive Brokers</button> account. Losses would be real.</span></li>
+          <li><svg class="i" aria-hidden="true"><use href="#i-keep"/></svg><span>Kept holdings (SXR8, TSLA) stay untouched in either mode.</span></li>
+          <li><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg><span>This phase is paper only: the <button type="button" class="term" data-term="executor">paper executor</button> is paper-only by design, JoeDesk has no broker access, and the <button type="button" class="term" data-term="fleet">fleet settings</button> accept only paper.</span></li>
+          <li><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg><span>A switch needs Markus’s approval, given outside JoeDesk.</span></li>
+        </ul>
+      </div>
+      <div class="gate-step" data-step="2" hidden>
+        <h3><svg class="i" aria-hidden="true"><use href="#i-type"/></svg>Type the phrase to continue</h3>
+        <p>Type <span class="phrase">switch joe to live money</span> exactly.</p>
+        <label class="sub phrase-l" for="gatePhrase">Confirmation phrase</label>
+        <input class="inp" id="gatePhrase" type="text" autocomplete="off" spellcheck="false" autocapitalize="off">
+        <p class="match" id="gateMatch" aria-live="polite"></p>
+      </div>
+      <div class="gate-step" data-step="3" hidden>
+        <h3><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg>Waiting for Markus’s approval (out of band)</h3>
+        <p>JoeDesk does not send this request and cannot change the mode. Ask Markus directly; approval and any switch happen outside this board.</p>
+        <div class="final">
+          <button type="button" class="btn" id="liveFinal" disabled aria-describedby="liveWhy"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg>Switch to LIVE</button>
+          <span class="why" id="liveWhy">Locked in this phase: the fleet settings accept only paper, and the paper executor is paper-only by design.</span>
+        </div>
+      </div>
+    </div>
+    <div class="dlg-f">
+      <button type="button" class="btn quiet" id="gateBack">Back</button>
+      <span class="grow"></span>
+      <button type="button" class="btn" id="gateCancel">Cancel</button>
+      <button type="button" class="btn primary" id="gateNext">Continue</button>
     </div>
   </div>
 </dialog>
 
-<dialog class="layout-unsaved-dialog" id="layoutUnsavedDialog" aria-label="Unsaved layout changes" aria-describedby="layoutUnsavedMessage">
-  <form method="dialog" class="layout-unsaved-card">
-    <strong>Unsaved layout changes</strong>
-    <p id="layoutUnsavedMessage">Save your changes before switching layouts?</p>
-    <div class="layout-unsaved-actions">
-      <button class="quiet-button" id="layoutUnsavedSave" type="button">Save</button>
-      <button class="quiet-button" id="layoutUnsavedDiscard" type="button">Discard</button>
-      <button class="quiet-button" id="layoutUnsavedCancel" type="button">Cancel</button>
+<!-- Fleet settings review: Before and After, the review tick, then Confirm -->
+<dialog class="dlg" id="diffDlg" aria-labelledby="diffTitle">
+  <div class="dlg-in">
+    <div class="dlg-h"><h2 id="diffTitle" tabindex="-1">Check what will change</h2><span class="sub" id="diffBase"></span></div>
+    <div class="dlg-b">
+      <p class="ink2">Compare each Before and After value. Confirming marks this exact version as reviewed. Nothing reaches the desks until you choose Send to the desks.</p>
+      <ul class="diff" id="diffList"></ul>
+      <label class="check"><input type="checkbox" id="diffReviewed"><span>I checked every Before and After value above.</span></label>
     </div>
-  </form>
+    <div class="dlg-f">
+      <button type="button" class="btn" id="diffCancel">Keep editing</button>
+      <button type="button" class="btn primary" id="diffConfirm" disabled>Confirm review</button>
+    </div>
+  </div>
 </dialog>
 
-<noscript><div class="gate"><div class="gate-card"><h1>JavaScript is off.</h1><p>The household board needs JavaScript to read its local data snapshot.</p></div></div></noscript>
-<script src="./vendor/gridstack-13.2.0-all.js"></script>
-<script src="./vendor/chart-4.4.8.umd.js"></script>
-<script src="./vendor/hammer-2.0.8.min.js"></script>
-<script src="./vendor/chartjs-plugin-zoom-2.2.0.min.js"></script>
-<script src="./joe-version.js"></script>
-<script src="./joe.js"></script>
+<!-- Phone: a day's trades -->
+<dialog class="dlg sheet" id="daySheet" aria-labelledby="sheetTitle">
+  <div class="dlg-in">
+    <div class="dlg-h"><h2 id="sheetTitle" tabindex="-1"></h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+    <div class="dlg-b" id="sheetBody"></div>
+  </div>
+</dialog>
+</div>
+
+<div class="tip" id="tip" role="tooltip"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

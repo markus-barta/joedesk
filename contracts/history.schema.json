@@ -487,6 +487,10 @@
       "maxItems": 10000,
       "x-owner": "server"
     },
+    "compactedThrough": {
+      "$ref": "urn:joedesk:common:v2#/$defs/instant",
+      "x-owner": "server"
+    },
     "sizeBytes": {
       "type": "integer",
       "minimum": 0,

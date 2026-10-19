@@ -1,0 +1,390 @@
+{
+  "schema": "inspr.joe.household.results.v2",
+  "seq": 4,
+  "generatedAt": "2026-10-14T17:40:00.000Z",
+  "receivedAt": "2026-10-14T17:40:00.000Z",
+  "currency": "EUR",
+  "timeZone": "Europe/Vienna",
+  "trackingStart": "2026-09-10",
+  "days": [
+    {
+      "date": "2026-09-10",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "5010",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    },
+    {
+      "date": "2026-09-11",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "5030",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    },
+    {
+      "date": "2026-09-14",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "4990",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "-9.65",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0.35",
+            "currency": "EUR"
+          },
+          "trades": 1
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    },
+    {
+      "date": "2026-09-15",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    },
+    {
+      "date": "2026-09-16",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "5040",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "4.65",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0.35",
+            "currency": "EUR"
+          },
+          "trades": 1
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    },
+    {
+      "date": "2026-10-13",
+      "desks": {
+        "j": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joe": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "joel": {
+          "equityClose": {
+            "amount": "5000",
+            "currency": "EUR"
+          },
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      }
+    }
+  ],
+  "trades": [
+    {
+      "id": "rt-fixture-001",
+      "desk": "j",
+      "symbol": "INTC",
+      "company": "Intel",
+      "side": "long",
+      "quantity": "10",
+      "openedAt": "2026-09-11T14:00:00.000Z",
+      "closedAt": "2026-09-14T15:00:00.000Z",
+      "entryPrice": {
+        "amount": "24",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "22",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "-9.3",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "-9.65",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.465",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-09-14T15:00:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-fixture-002",
+      "desk": "j",
+      "symbol": "INTC",
+      "company": "Intel",
+      "side": "long",
+      "quantity": "10",
+      "openedAt": "2026-09-15T14:00:00.000Z",
+      "closedAt": "2026-09-16T15:00:00.000Z",
+      "entryPrice": {
+        "amount": "22",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "23",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "5",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "0.35",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "4.65",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.5",
+        "source": "fixture-close-rate",
+        "observedAt": "2026-09-16T15:00:00.000Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    }
+  ],
+  "benchmark": null
+}

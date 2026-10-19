@@ -20,13 +20,20 @@
     "contract_invalid",
     "sequence_replayed",
     "clock_regressed",
+    "clock_ahead",
+    "feed_not_received",
+    "market_closed",
+    "calendar_unavailable",
     "refresh_failed",
     "auth_required",
     "route_not_found",
     "source_not_authoritative",
     "history_size_limit",
+    "history_compacted",
     "ledger_size_limit",
     "history_write_failed",
-    "halt_on"
+    "halt_on",
+    "executor_broker_disagreement",
+    "results_capture_failed"
   ]
 }

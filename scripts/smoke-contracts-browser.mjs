@@ -11,7 +11,7 @@ const browser = process.env.BROWSER_PATH || (process.platform === 'darwin'
 await access(browser);
 const profile = await mkdtemp(join(tmpdir(), 'joed-contract-browser-'));
 const files = new Map();
-for (const name of ['index.mjs', 'schema-validator.mjs', 'semantics.mjs', 'decimal.mjs', 'gateway.mjs', 'accept.mjs', 'panel-state.mjs',
+for (const name of ['index.mjs', 'schema-validator.mjs', 'semantics.mjs', 'vienna-date.mjs', 'decimal.mjs', 'gateway.mjs', 'accept.mjs', 'panel-state.mjs',
   'manifest.json', 'data.schema.json', 'history.schema.json', 'results.schema.json',
   'fleet-config.schema.json', 'healthz.schema.json', 'common.schema.json', 'reason.schema.json']) {
   files.set(`/contracts/${name}`, await readFile(new URL(`../contracts/${name}`, import.meta.url)));
@@ -30,6 +30,14 @@ try {
     const old = validateContract(kind, {...payload, schema:'old.v0'});
     if (old.status !== 422 || !old.errors.some(e => e.rule === 'const' && e.path === '$.schema')) throw new Error('old schema rule missing');
   }
+  const results = structuredClone(samples.results); delete results.days[0].desks.j;
+  const missingDesk = validateContract('results', results);
+  if (missingDesk.status !== 422 || !missingDesk.errors.some(e => e.path === '$.days[0].desks.j' &&
+      e.rule === 'dayDeskRequired')) throw new Error('full-day trading desk was not required');
+  results.days[0].coverage = 'partial';
+  if (!validateContract('results', results).ok) throw new Error('partial day was reconciled');
+  results.days = [];
+  if (!validateContract('results', results).ok) throw new Error('unreported date was reconciled');
   const payload = structuredClone(samples.data); delete payload.receivedAt;
   const feed = acceptSnapshot('data', payload, null, samples.data.receivedAt);
   const rejected = acceptSnapshot('data', {...payload, schema:'old.v0'}, feed, samples.data.receivedAt);
@@ -62,7 +70,7 @@ try {
     proc.on('close', code => { clearTimeout(timer); code === 0 ? resolve(stdout) : reject(new Error(`Browser exited ${code}`)); });
   });
   assert.match(output, /<body>contract-browser-ok<\/body>/);
-  console.log('contract-browser-ok: five schemas, 422 + last-good, panel selectors, storage unavailable');
+  console.log('contract-browser-ok: five schemas, full-day/partial/unreported dates, 422 + last-good, panel selectors, storage unavailable');
 } finally {
   if (proc && proc.exitCode === null) proc.kill('SIGTERM');
   await new Promise(resolve => server.close(resolve));

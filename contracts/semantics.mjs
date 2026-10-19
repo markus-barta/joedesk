@@ -1,11 +1,15 @@
 import { decimalUnits } from './decimal.mjs';
 import { gatewayReason } from './gateway.mjs';
+import { viennaDay } from './vienna-date.mjs';
+import resultsSchema from './results.schema.json' with { type: 'json' };
+
+const PARTIAL_REASONS = resultsSchema.properties.days.items.properties.partialReasons.items.enum;
 
 const FIELDS = ['equity', 'dayPnl', 'openPnl', 'totalPnl'];
 const KEEP = ['SXR8', 'TSLA'];
 const DESKS = ['j', 'joe', 'joel'];
 
-export function checkSemantics(kind, payload, stage, errors) {
+export function checkSemantics(kind, payload, stage, errors, receivedAt) {
   const fail = (path, rule) => { if (errors.length < 32) errors.push({ path, rule }); };
   const eur = (money, path) => {
     if (money && money.currency !== 'EUR') fail(path, 'EUR');
@@ -95,8 +99,13 @@ export function checkSemantics(kind, payload, stage, errors) {
       }
     }
     if (payload.safety.halt && !payload.safety.haltReason) fail('$.safety.haltReason', 'reasonRequired');
+    const executor = payload.safety.executor;
+    if (executor && Object.hasOwn(executor, 'ledgerCapBytes') && !Object.hasOwn(executor, 'ledgerBytes')) {
+      fail('$.safety.executor.ledgerBytes', 'required');
+    }
   }
   if (kind === 'history') {
+    if (payload.reason === 'history_compacted' && !payload.compactedThrough) fail('$.compactedThrough', 'required');
     let previous = -Infinity;
     payload.points.forEach((p, i) => {
       if (Date.parse(p.t) <= previous) fail(`$.points[${i}].t`, 'strictOrder');
@@ -107,9 +116,13 @@ export function checkSemantics(kind, payload, stage, errors) {
     });
   }
   if (kind === 'results') {
+    if (stage === 'ingress' && Object.hasOwn(payload, 'missingDays')) fail('$.missingDays', 'serverOwned');
+    // Ingress gets the trusted server receipt from acceptSnapshot; served
+    // validation uses the persisted receipt, never a reader's current clock.
+    const receipt = stage === 'ingress' ? receivedAt : payload.receivedAt;
+    const today = receipt ? viennaDay(receipt) : null;
     const seen = new Set();
-    payload.days.forEach((day, i) => Object.values(day.desks).forEach(d =>
-      ['equityClose', 'realisedNet', 'fees'].forEach(f => eur(d[f], `$.days[${i}].${f}`))));
+    const closed = new Map();
     payload.trades.forEach((t, i) => {
       const at = `$.trades[${i}]`;
       if (seen.has(t.id)) fail(`${at}.id`, 'uniqueTrade');
@@ -121,6 +134,43 @@ export function checkSemantics(kind, payload, stage, errors) {
       if (t.entryPrice.currency !== t.exitPrice.currency || t.fx.base !== t.entryPrice.currency) fail(at, 'fxCurrency');
       if (decimalUnits(t.feesEur.amount) < 0n) fail(`${at}.feesEur`, 'nonnegative');
       if (decimalUnits(t.grossEur.amount) - decimalUnits(t.feesEur.amount) !== decimalUnits(t.netEur.amount)) fail(at, 'netAfterFees');
+      const key = `${viennaDay(t.closedAt)}|${t.desk}`;
+      const sum = closed.get(key) ?? { trades: 0, realisedNet: 0n, fees: 0n };
+      sum.trades++;
+      sum.realisedNet += decimalUnits(t.netEur.amount);
+      sum.fees += decimalUnits(t.feesEur.amount);
+      closed.set(key, sum);
+    });
+    // Partial days have incomplete numbers. Full days cover every
+    // desk that closed trades, including desks missing from the summary.
+    // Dates absent from days[] are not yet reconciled. Never round the sums.
+    payload.days.forEach((day, i) => {
+      const at = `$.days[${i}]`;
+      if (today && day.date < today && day.coverage === 'partial' && !day.partialReasons?.length)
+        fail(`${at}.partialReasons`, 'partialReasonsRequired');
+      if (day.partialReasons) {
+        if (day.coverage !== 'partial') fail(`${at}.partialReasons`, 'partialCoverageRequired');
+        if (day.partialReasons.some((reason, j, reasons) => j && PARTIAL_REASONS.indexOf(reason) <= PARTIAL_REASONS.indexOf(reasons[j - 1])))
+          fail(`${at}.partialReasons`, 'canonicalOrder');
+      }
+      if (Object.hasOwn(day, 'unattributedCount') && !day.partialReasons?.includes('unattributed_activity'))
+        fail(`${at}.unattributedCount`, 'unattributedReasonRequired');
+      Object.entries(day.desks).forEach(([id, d]) => {
+        ['equityClose', 'realisedNet', 'fees'].forEach(f => eur(d[f], `$.days[${i}].desks.${id}.${f}`));
+      });
+      if (day.coverage === 'partial') return;
+      for (const id of DESKS) {
+        const at = `$.days[${i}].desks.${id}`;
+        const d = day.desks[id];
+        const sum = closed.get(`${day.date}|${id}`) ?? { trades: 0, realisedNet: 0n, fees: 0n };
+        if (!d) {
+          if (sum.trades) fail(at, 'dayDeskRequired');
+          continue;
+        }
+        if (d.trades !== sum.trades) fail(`${at}.trades`, 'dayTradeCount');
+        if (!d.realisedNet || decimalUnits(d.realisedNet.amount) !== sum.realisedNet) fail(`${at}.realisedNet`, 'dayNetSum');
+        if (!d.fees || decimalUnits(d.fees.amount) !== sum.fees) fail(`${at}.fees`, 'dayFeeSum');
+      }
     });
   }
   if (kind === 'healthz') {
@@ -130,8 +180,12 @@ export function checkSemantics(kind, payload, stage, errors) {
       if (feed.state === 'fresh' && feed.reason) fail(`$.feeds.${key}`, 'freshWithReason');
       if (feed.state !== 'not reported' && feed.ageSeconds === null && feed.state !== 'broken') fail(`$.feeds.${key}.ageSeconds`, 'ageRequired');
     }
-    const coordinate = payload.version.slice(0, 12);
+    const coordinate = payload.versionScheme === 'calendar' ? payload.version.replaceAll('.', '').padEnd(12, '0') : payload.version.slice(0, 12);
+    const schemeShape = payload.versionScheme === 'calendar' ? /^\d{2}\.\d{2}\.\d{2}(?:\.\d{2}\.\d{2})?$/ : /^[1-9]\d{11}\.0\.0$/;
+    if (!schemeShape.test(payload.version)) fail('$.version', 'versionScheme');
     const instant = `20${coordinate.slice(0, 2)}-${coordinate.slice(2, 4)}-${coordinate.slice(4, 6)}T${coordinate.slice(6, 8)}:${coordinate.slice(8, 10)}:${coordinate.slice(10, 12)}.000Z`;
     if (!Number.isFinite(Date.parse(instant)) || new Date(instant).toISOString() !== instant) fail('$.version', 'calendarCoordinate');
+    if (payload.gateway?.confirmed && (payload.gateway.reason || payload.gateway.checkAgeSeconds === null || payload.gateway.checkAgeSeconds >= 60)) fail('$.gateway', 'contradictorySession');
+    if (payload.gateway && !payload.gateway.confirmed && !payload.gateway.reason) fail('$.gateway.reason', 'reasonRequired');
   }
 }
