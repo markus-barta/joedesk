@@ -42,7 +42,7 @@ export function ledgerSize(executor) {
 // Round only the display from exact units. The broker's original decimal
 // lexeme stays byte-for-byte in the tooltip and accessible name.
 export function cashAmount(value) {
-  return { text: `cash ${money(decimalUnits(value.amount), value.currency)}`, title: `Cash: ${value.currency} ${value.amount}` };
+  return { text: money(decimalUnits(value.amount), value.currency), title: `Cash: ${value.currency} ${value.amount}` };
 }
 
 function exactParts(units, d) {
@@ -74,9 +74,9 @@ export const pct = (n, d = 0, signed = false) => (n == null || !Number.isFinite(
 
 // Exact per-currency sums for native values (Kept holdings never convert).
 export function sumByCurrency(values) {
+  if (values.some(value => value == null)) return null;
   const sums = new Map();
   for (const value of values) {
-    if (!value) continue;
     sums.set(value.currency, (sums.get(value.currency) ?? 0n) + decimalUnits(value.amount));
   }
   return [...sums].map(([currency, units]) => ({ currency, amount: Number(units) / 1e8 }));

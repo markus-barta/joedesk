@@ -64,6 +64,8 @@ export const CELL_REASON = Object.freeze({
   halt_on: 'emergency stop is on',
   executor_broker_disagreement: 'executor and broker disagree',
   results_capture_failed: 'results capture failing — trading continues',
+  not_exact_yet: 'not exact yet',
+  source_unavailable: 'not reported by the broker',
 });
 export const cellReason = reason => CELL_REASON[reason] ?? 'not available';
 export const capital = text => text.charAt(0).toUpperCase() + text.slice(1);

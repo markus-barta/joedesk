@@ -2,7 +2,7 @@
 // and the one opaque tip. Everything returns escaped HTML strings.
 import { TERMS } from './terms.js';
 import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol, cashAmount } from './format.js';
-import { cellReason, capital } from './health.js';
+import { cellReason, capital, CELL_REASON } from './health.js';
 
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -233,18 +233,17 @@ export function stateCaption(cell, key, fresh = '', held) {
   return p.state === 'fresh' ? fresh : capital(p.text);
 }
 
-// Both account surfaces keep room for the longest normal cash report and
-// null explanations. Retained broken money is diagnostic only, never current.
-const CASH_SIZING = [
-  'cash not reported · results capture failing — trading continues',
-  'cash not reported · held back: the kept-holdings list disagrees',
-  'cash −€ 999.999,99 · results capture failing — trading continues',
-].map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
+// Each reason reserves its actual wrapping, including the session form at
+// 360 px: character count cannot predict how words wrap in a narrow column.
+// The label and Amy's caption have their own fixed rows in both surfaces.
+const CASH_SIZING = [...new Set(Object.values(CELL_REASON))].flatMap(why =>
+  [`not reported · ${why}`, `−€ 999.999,99 · ${why}`]
+).map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
 export function cashCaption(cell, key) {
   const value = cell?.state === 'broken' && cell.retained ? null : cell?.value;
   const why = cell?.reason ? cellReason(cell.reason) : null;
-  const view = value == null ? { text: `cash not reported · ${why ?? cellReason('feed_not_received')}`,
+  const view = value == null ? { text: `not reported · ${why ?? cellReason('feed_not_received')}`,
     title: `Cash not reported · ${why ?? cellReason('feed_not_received')}` } : cashAmount(value);
   if (value != null && why) { view.text += ` · ${why}`; view.title += ` · ${why}`; }
-  return `<span class="cash-reserve"><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}">${esc(view.text)}</span>${CASH_SIZING}</span>`;
+  return `<span class="cash-block"><span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span><span class="cash-reserve"><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}">${esc(view.text)}</span>${CASH_SIZING}</span></span>`;
 }

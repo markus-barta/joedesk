@@ -369,7 +369,7 @@ function runtimeHtml(ctx) {
   if (acct?.value == null && !hint) account = notReported(acct);
   else if (acct?.value == null) account = st('none', `${who} · total not reported${acct?.reason ? ` · ${esc(cellReason(acct.reason))}` : ''}`);
   else account = withState(acct, 'rt.account', 'ok', `${who} · ${money(amountOf(acct.value), acct.value.currency)} · checked ${ageSpan('rt.account.age', `${age(acct.ageSeconds)} ago`)}`, 'last good total');
-  rows.push(rtRow('wallet', term('paperacct'), `${rtReserve(account, ACCOUNT_SIZING)}<span class="account-cash-line">· ${cashCaption(states.paperCash, 'rt.cash')}</span>`, 'brokerAccount.accountHint'));
+  rows.push(rtRow('wallet', term('paperacct'), `${rtReserve(account, ACCOUNT_SIZING)}<span class="account-cash-line">${cashCaption(states.paperCash, 'rt.cash')}</span>`, 'brokerAccount.accountHint'));
   return rows.join('');
 }
 

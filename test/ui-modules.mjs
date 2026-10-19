@@ -30,7 +30,7 @@ const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus, headerHealth, executorProblem } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, executorProblem, keptHtml, positionsHtml } = await import('../public/joe/desk.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
 const { readdirSync } = await import('node:fs');
@@ -87,9 +87,9 @@ test('host gate: canonical hosts include the production host; others get the pri
 });
 
 test('cash formatting: exact broker lexemes display at two decimals without a floating-point round trip', () => {
-  for (const [amount, text] of [['12345.67890123', 'cash € 12.345,68'], ['1.00500000', 'cash € 1,01'],
-    ['-1.00500000', 'cash −€ 1,01'], ['0.00000001', 'cash € 0,00'], ['-0.00000001', 'cash € 0,00'],
-    ['9007199254740993.00500000', 'cash € 9.007.199.254.740.993,01'], ['12345.67000000', 'cash € 12.345,67']]) {
+  for (const [amount, text] of [['12345.67890123', '€ 12.345,68'], ['1.00500000', '€ 1,01'],
+    ['-1.00500000', '−€ 1,01'], ['0.00000001', '€ 0,00'], ['-0.00000001', '€ 0,00'],
+    ['9007199254740993.00500000', '€ 9.007.199.254.740.993,01'], ['12345.67000000', '€ 12.345,67']]) {
     const value = { amount, currency: 'EUR' };
     assert.deepEqual(format.cashAmount(value), { text, title: `Cash: EUR ${amount}` });
     assert.equal(value.amount, amount);
@@ -104,12 +104,12 @@ test('cash formatting: exact broker lexemes display at two decimals without a fl
 test('cash captions: null, omitted and broken retained values always explain why', () => {
   for (const key of ['hero.cash', 'rt.cash']) {
     const nullHtml = cashCaption({ state: 'broken', value: null, reason: 'gateway_unconfirmed' }, key);
-    assert.match(nullHtml, />cash not reported · broker connection not confirmed<\/span>/);
+    assert.match(nullHtml, />not reported · broker connection not confirmed<\/span>/);
     assert.match(nullHtml, /title="Cash not reported · broker connection not confirmed" aria-label="Cash not reported · broker connection not confirmed"/);
     const held = cashCaption({ state: 'broken', value: { amount: '12345.67890123', currency: 'EUR' },
       retained: true, reason: 'gateway_unconfirmed' }, key);
     assert.equal(held, nullHtml);
-    assert.match(cashCaption(null, key), />cash not reported · no data received yet<\/span>/);
+    assert.match(cashCaption(null, key), />not reported · no data received yet<\/span>/);
   }
 });
 
@@ -118,11 +118,58 @@ test('cash captions: stale values keep exact accessibility and their own reason 
   const reserve = html => html.slice(html.indexOf('<span class="cash-sizing"'));
   const fresh = cashCaption({ state: 'fresh', value }, 'hero.cash');
   const stale = cashCaption({ state: 'stale', value, reason: 'snapshot_stale' }, 'hero.cash');
-  const absent = cashCaption({ state: 'broken', value: null, reason: 'source_not_authoritative' }, 'hero.cash');
-  assert.match(stale, />cash € 12\.345,68 · updates are late<\/span>/);
+  const absent = cashCaption({ state: 'broken', value: null, reason: 'source_unavailable' }, 'hero.cash');
+  assert.match(stale, />€ 12\.345,68 · updates are late<\/span>/);
   assert.match(stale, /aria-label="Cash: EUR 12345\.67890123 · updates are late"/);
   assert.equal(reserve(stale), reserve(fresh));
   assert.equal(reserve(absent), reserve(fresh));
+});
+
+test('cash captions: Amy’s label and caption stay fixed; every null and stale reason reserves its own words', () => {
+  for (const [reason, why] of Object.entries(health.CELL_REASON)) {
+    for (const key of ['hero.cash', 'rt.cash']) {
+      const html = cashCaption({ state: 'broken', value: null, reason }, key);
+      assert.ok(html.includes('<span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span>'));
+      assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`not reported · ${why}`)}</span>`), reason);
+      assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`−€ 999.999,99 · ${why}`)}</span>`), reason);
+    }
+  }
+});
+
+test('position rows: null values expose their reasons visibly and in accessible dash names', () => {
+  const data = read('positions-null.json');
+  const cells = panelStates({ data: { value: data } }, data.receivedAt);
+  const ctx = { states: cells, feeds: { data: { value: data } }, now: data.receivedAt };
+  const kept = keptHtml(ctx), positions = positionsHtml(ctx).html;
+  for (const label of ['Quantity', 'Last price', 'Worth']) for (const why of ['not exact yet', 'not reported by the broker']) {
+    assert.ok(kept.includes(`title="${label}: not reported · ${why}" aria-label="${label}: not reported · ${why}">—</span>`));
+    assert.ok(kept.includes(`${label}: ${why}`));
+  }
+  assert.match(positions, /title="Last price: not reported · not reported by the broker"/);
+  assert.match(positions, /class="position-reasons">Last price: not reported by the broker/);
+  assert.doesNotMatch(kept.slice(kept.indexOf('<div class="prow"')), /<(?:button|a|input)\b|tabindex=/);
+  assert.match(kept, /data-keep="SXR8"/);
+  assert.match(kept, /data-keep="TSLA"/);
+  assert.equal(health.cellReason('not_exact_yet'), 'not exact yet');
+  assert.equal(health.cellReason('source_unavailable'), 'not reported by the broker');
+  assert.equal(health.cellReason('source_not_authoritative'), 'held back: the kept-holdings list disagrees');
+});
+
+test('kept worth: one null summand withholds the complete total rather than showing a partial sum', () => {
+  const data = read('valid.json').data;
+  const rows = data.positions.rows.filter(row => row.scope === 'keep');
+  for (const state of ['fresh', 'stale', 'broken']) {
+    const ctx = { states: { kept: { state, value: rows, reason: state === 'fresh' ? null : 'snapshot_stale', ageSeconds: 90 } } };
+    assert.match(keptHtml(ctx), /worth € 600,00 and \$ 200,00/i);
+    const incomplete = structuredClone(rows);
+    incomplete[0].marketValue = null;
+    incomplete[0].reasons = { marketValue: 'source_unavailable' };
+    ctx.states.kept.value = incomplete;
+    const html = keptHtml(ctx);
+    assert.match(html, /Worth not available · not reported by the broker/);
+    assert.doesNotMatch(html.slice(0, html.indexOf('<div class="prow"')), /worth \$ 200,00/i);
+    assert.equal(format.sumByCurrency(incomplete.map(row => row.marketValue)), null);
+  }
 });
 
 test('ledger size: decimal MB round half-even from exact integer bytes', () => {

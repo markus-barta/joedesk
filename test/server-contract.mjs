@@ -296,6 +296,26 @@ test('P2 retention: every retained cell keeps valueReceivedAt through nulls, rej
   assert.equal(corrupt.panels()['today.equity'].reason, 'contract_invalid');
 });
 
+test('rev 8 positions: per-field null reasons survive HTTP ingress, projection and restart', async t => {
+  const s = await setup(t);
+  const value = JSON.parse(readFileSync(new URL('../fixtures/positions-null.json', import.meta.url)));
+  delete value.receivedAt;
+  assert.equal((await s.push(value)).status, 200);
+  const wire = (await s.request('/joe/data.json')).body;
+  assert.deepEqual(wire.positions.rows, value.positions.rows);
+  assert.equal(validateContract('data', wire).ok, true);
+  const restart = createReadModel({ dataDir: s.dataDir, clock: () => at(9000) });
+  assert.deepEqual(restart.view().data.positions.rows, value.positions.rows);
+  assert.deepEqual(restart.panels().kept.value.map(row => [row.symbol, row.quantity, row.reasons.quantity]),
+    [['SXR8', null, 'not_exact_yet'], ['TSLA', null, 'source_unavailable']]);
+  const unreasoned = structuredClone(value); unreasoned.seq++;
+  delete unreasoned.positions.rows[1].reasons.quantity;
+  const rejected = await s.push(unreasoned);
+  assert.equal(rejected.status, 422);
+  assert.ok(rejected.body.errors.some(error => error.path === '$.positions.rows[1].quantity' && error.rule === 'reasonRequired'));
+  assert.deepEqual((await s.request('/joe/data.json')).body.positions.rows, value.positions.rows);
+});
+
 test('rev 8 cash: exact ingress, stale read and null retention survive restart independently of equity', async t => {
   const s = await setup(t);
   const value = snapshot(); value.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
@@ -305,7 +325,7 @@ test('rev 8 cash: exact ingress, stale read and null retention survive restart i
   s.time.ms = 90000;
   assert.equal(s.model.panels().paperCash.state, 'stale');
   const unavailable = snapshot(102, 90000);
-  unavailable.brokerAccount.cash = null; unavailable.brokerAccount.reasons = { cash: 'source_not_authoritative' };
+  unavailable.brokerAccount.cash = null; unavailable.brokerAccount.reasons = { cash: 'source_unavailable' };
   assert.equal((await s.push(unavailable)).status, 200);
   const restart = createReadModel({ dataDir: s.dataDir, clock: () => at(90000) });
   const panel = restart.panels().paperCash;
@@ -314,7 +334,7 @@ test('rev 8 cash: exact ingress, stale read and null retention survive restart i
   assert.equal(panel.value.amount, '12345.67890123');
   const wire = restart.view().data;
   assert.equal(wire.brokerAccount.cash, null);
-  assert.equal(wire.brokerAccount.reasons.cash, 'source_not_authoritative');
+  assert.equal(wire.brokerAccount.reasons.cash, 'source_unavailable');
   assert.deepEqual(wire.brokerAccount.equity, value.brokerAccount.equity);
   assert.equal(wire.brokerAccount.reason, undefined);
   assert.equal(validateContract('data', wire).ok, true);
@@ -1121,6 +1141,11 @@ test('P2 KEEP: accepted Fleet Config policy withholds affected money and measure
   assert.equal(point.desks.j.money.equity, null); assert.equal(point.totals.equity, null);
   assert.equal(point.desks.joe.money.equity.amount, '5000');
   assert.equal(states.paperAccount.value.amount, '28000');
+  const wire = (await s.request('/joe/data.json')).body;
+  for (const row of wire.positions.rows) for (const field of ['mark', 'marketValue']) {
+    assert.equal(row[field], null);
+    assert.equal(row.reasons[field], 'source_not_authoritative');
+  }
   const floor = structuredClone(config); floor.desks.keep = ['DEMO'];
   assert.equal(s.model.observeFleet(floor).ok, false);
 });

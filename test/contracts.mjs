@@ -86,8 +86,8 @@ test('one closed reason enum is used everywhere, including field errors', () => 
 test('rev 7 executor: rev 6 payloads remain valid; the reason enum is append-only', () => {
   assert.equal(CONTRACTS.revision, 8);
   assert.equal(CONTRACTS.contracts.data, 'inspr.joe.household.v2');
-  assert.equal(REASONS.at(-2), 'executor_broker_disagreement');
-  assert.equal(REASONS.at(-1), 'results_capture_failed');
+  assert.equal(REASONS.at(-4), 'executor_broker_disagreement');
+  assert.equal(REASONS.at(-3), 'results_capture_failed');
   for (const [kind, payload] of Object.entries(samples)) {
     assert.equal(validateContract(kind, payload).ok, true, kind);
   }
@@ -124,6 +124,72 @@ test('rev 7 executor: ledger bytes and optional cap validate without hiding over
       rejects(validateContract('data', data), rule, `$.safety.executor.${key}`);
     }
   }
+});
+
+const ROW_FIELDS = ['quantity', 'mark', 'marketValue', 'dayPnl', 'openPnl'];
+for (const field of ROW_FIELDS) test(`rev 8 positions: null ${field} requires its own closed reason in every scope`, () => {
+  for (const scope of ['stage0', 'keep', 'legacy']) {
+    const data = copy(samples.data), row = data.positions.rows[0];
+    row.scope = scope;
+    if (scope === 'keep') { row.desk = null; row.symbol = 'SXR8'; }
+    row[field] = null;
+    for (const stage of ['ingress', 'served']) {
+      const payload = stage === 'ingress' ? ingress(data) : data;
+      rejects(validateContract('data', payload, { stage }), 'reasonRequired', `$.positions.rows[0].${field}`);
+    }
+    for (const reason of ['not_exact_yet', 'source_unavailable', 'baseline_pending']) {
+      row.reasons = { [field]: reason };
+      assert.equal(validateContract('data', data).ok, true, `${scope}/${field}/${reason}`);
+    }
+    row.reasons[field] = 'unreviewed';
+    rejects(validateContract('data', data), 'enum', `$.positions.rows[0].reasons.${field}`);
+    row.reasons = { other: 'source_unavailable' };
+    rejects(validateContract('data', data), 'additionalProperties', '$.positions.rows[0].reasons');
+  }
+});
+
+test('rev 8 positions: panel reason applies only under the unchanged session-unavailable rule', () => {
+  const data = copy(samples.data), row = data.positions.rows[0];
+  for (const field of ROW_FIELDS) row[field] = null;
+  data.positions.reason = 'source_unavailable';
+  for (const field of ROW_FIELDS) rejects(validateContract('data', data), 'reasonRequired', `$.positions.rows[0].${field}`);
+  for (const scenario of ['down', 'missing', 'stale-check']) {
+    const unavailable = unavailableSession(copy(data));
+    if (scenario === 'missing') delete unavailable.safety.gateway;
+    if (scenario === 'stale-check') unavailable.safety.gateway = { apiSessionReady: true, checkedAt: '2026-10-14T17:40:22.000Z' };
+    assert.equal(validateContract('data', unavailable).ok, true, scenario);
+    delete unavailable.positions.reason;
+    for (const field of ROW_FIELDS) rejects(validateContract('data', unavailable), 'reasonRequired', `$.positions.rows[0].${field}`);
+    unavailable.positions.rows[0].reasons = Object.fromEntries(ROW_FIELDS.map(field => [field, 'source_unavailable']));
+    rejects(validateContract('data', unavailable), 'reasonRequired', '$.positions.reason');
+  }
+  const session = unavailableSession(copy(samples.data));
+  assert.equal(session.positions.rows[0].quantity, '2');
+  assert.equal(validateContract('data', session).ok, true, 'unconfirmed sessions still permit the reported quantity');
+  session.positions.rows[0].mark = copy(samples.data.positions.rows[0].mark);
+  session.positions.rows[0].reasons = { mark: 'source_unavailable' };
+  rejects(validateContract('data', session), 'sessionUnavailable', '$.positions.rows[0].mark');
+});
+
+test('rev 8 positions: reasoned rev 7 payloads stay valid; KEEP identity and reason ordering survive', () => {
+  assert.deepEqual(REASONS.slice(-2), ['not_exact_yet', 'source_unavailable']);
+  const data = JSON.parse(readFileSync(new URL('../fixtures/positions-null.json', import.meta.url)));
+  assert.equal(validateContract('data', data).ok, true);
+  assert.equal(Object.hasOwn(data.brokerAccount, 'cash'), false);
+  const rev7 = copy(data);
+  for (const row of rev7.positions.rows) {
+    if (row.quantity === null) row.quantity = '1';
+    for (const field of Object.keys(row.reasons)) row.reasons[field] = 'baseline_pending';
+  }
+  assert.equal(validateContract('data', rev7).ok, true, 'rev 7 shapes and existing reason codes remain accepted');
+  const kept = data.positions.rows.filter(row => row.scope === 'keep');
+  assert.deepEqual(kept.map(row => [row.symbol, row.side, row.desk]), [['SXR8', 'long', null], ['TSLA', 'long', null]]);
+  for (const field of ['symbol', 'side']) {
+    const bad = copy(data); delete bad.positions.rows[1][field];
+    rejects(validateContract('data', bad), 'required', `$.positions.rows[1].${field}`);
+  }
+  const bad = copy(data); bad.positions.rows[1].desk = 'j';
+  rejects(validateContract('data', bad), 'keepExcluded', '$.positions.rows[1]');
 });
 
 test('rev 8 cash: rev 7 payloads with or without the account still validate', () => {
@@ -196,7 +262,7 @@ test('rev 8 cash: fresh, stale, broken retention, gateway expiry and recovery fo
   assert.deepEqual(stale.paperCash.value, data.brokerAccount.cash);
   const missing = copy(data);
   missing.receivedAt = missing.generatedAt = later; missing.safety.gateway.checkedAt = later;
-  missing.brokerAccount.cash = null; missing.brokerAccount.reasons = { cash: 'source_not_authoritative' };
+  missing.brokerAccount.cash = null; missing.brokerAccount.reasons = { cash: 'source_unavailable' };
   const broken = panelStates({ data: { value: missing, generatedAdvancedAt: later } }, later, fresh);
   assert.equal(broken.paperCash.state, 'broken');
   assert.equal(broken.paperCash.retained, true);

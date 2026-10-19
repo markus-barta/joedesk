@@ -812,7 +812,7 @@
           "x-owner": "pusher"
         },
         "cash": {
-          "description": "Broker-reported EUR cash decimal lexeme for the paper account including KEEP, at the same scope and observation as equity. No float conversion or producer rounding.",
+          "description": "IB account summary TotalCashValue in base currency EUR, preserving the raw decimal lexeme at account level (the same scope as NAV, including KEEP) and the same observation as equity. Missing or non-EUR means null with reasons.cash; never derived, converted, rounded or passed through a float.",
           "anyOf": [
             {
               "$ref": "urn:joedesk:common:v2#/$defs/money"
@@ -923,7 +923,42 @@
                 "x-owner": "pusher"
               },
               "quantity": {
-                "$ref": "urn:joedesk:common:v2#/$defs/decimal",
+                "anyOf": [
+                  {
+                    "$ref": "urn:joedesk:common:v2#/$defs/decimal"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "x-owner": "pusher"
+              },
+              "reasons": {
+                "description": "Per-field null reasons. The existing positions.reason exception applies only while the API session is unconfirmed.",
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "quantity": {
+                    "$ref": "urn:joedesk:reason:v2",
+                    "x-owner": "pusher"
+                  },
+                  "mark": {
+                    "$ref": "urn:joedesk:reason:v2",
+                    "x-owner": "pusher"
+                  },
+                  "marketValue": {
+                    "$ref": "urn:joedesk:reason:v2",
+                    "x-owner": "pusher"
+                  },
+                  "dayPnl": {
+                    "$ref": "urn:joedesk:reason:v2",
+                    "x-owner": "pusher"
+                  },
+                  "openPnl": {
+                    "$ref": "urn:joedesk:reason:v2",
+                    "x-owner": "pusher"
+                  }
+                },
                 "x-owner": "pusher"
               },
               "mark": {

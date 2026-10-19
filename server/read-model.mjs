@@ -264,8 +264,12 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       if (value.positions && projection.positions.state === 'broken' &&
           (projection.positions.retained || projection.positions.value == null || projection.positions.reason === 'source_not_authoritative')) {
         value.positions.reason = projection.positions.reason;
-        value.positions.rows = value.positions.rows.map(row => ({ ...row,
-          ...Object.fromEntries(['mark', 'marketValue', 'dayPnl', 'openPnl'].filter(f => Object.hasOwn(row, f)).map(f => [f, null])) }));
+        value.positions.rows = value.positions.rows.map(row => {
+          const fields = ['mark', 'marketValue', 'dayPnl', 'openPnl'].filter(f => Object.hasOwn(row, f));
+          return { ...row, ...Object.fromEntries(fields.map(f => [f, null])),
+            reasons: { ...row.reasons, ...Object.fromEntries(fields.map(f => [f,
+              row[f] == null && row.reasons?.[f] ? row.reasons[f] : projection.positions.reason])) } };
+        });
       }
     }
     return { serverNow: now, feeds: feeds(), panels: selected, data: value };

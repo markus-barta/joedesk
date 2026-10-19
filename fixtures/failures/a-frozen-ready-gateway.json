@@ -143,7 +143,13 @@
           "scope": "stage0",
           "updatedAt": "2026-10-14T17:42:22.000Z",
           "dayPnl": null,
-          "openPnl": null
+          "openPnl": null,
+          "reasons": {
+            "mark": "gateway_unconfirmed",
+            "marketValue": "gateway_unconfirmed",
+            "dayPnl": "gateway_unconfirmed",
+            "openPnl": "gateway_unconfirmed"
+          }
         },
         {
           "desk": null,
@@ -155,7 +161,13 @@
           "scope": "keep",
           "updatedAt": "2026-10-14T17:42:22.000Z",
           "dayPnl": null,
-          "openPnl": null
+          "openPnl": null,
+          "reasons": {
+            "mark": "gateway_unconfirmed",
+            "marketValue": "gateway_unconfirmed",
+            "dayPnl": "gateway_unconfirmed",
+            "openPnl": "gateway_unconfirmed"
+          }
         },
         {
           "desk": null,
@@ -167,7 +179,13 @@
           "scope": "keep",
           "updatedAt": "2026-10-14T17:42:22.000Z",
           "dayPnl": null,
-          "openPnl": null
+          "openPnl": null,
+          "reasons": {
+            "mark": "gateway_unconfirmed",
+            "marketValue": "gateway_unconfirmed",
+            "dayPnl": "gateway_unconfirmed",
+            "openPnl": "gateway_unconfirmed"
+          }
         }
       ],
       "reason": "gateway_unconfirmed"
