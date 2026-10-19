@@ -104,7 +104,7 @@ try {
   }
   test('no browser errors', !page.errors.length);
   writeFileSync(join(output, 'results.json'), JSON.stringify({ checks, shots, presentation: 'integrated', candidate: active.version }, null, 2) + '\n');
-  writeFileSync(join(output, 'index.md'), `# JOED-26 P6a local screenshots\n\nSynthetic fixtures; one headless browser, no production connection. ${checks.length} regression checks passed.\n\nCandidate ${active.version}, sequence 24. Shared global presentation pinned to INSPR-486's reviewed 01b3080948c21899cbbacbfa3447da6799af1b56 bundle. Pretty draws six segments; canonical copy/UTC accessibility, SemVer, reduced motion and keyboard/touch are tested. Tick/coordinator review, producer/OPS compatibility and Markus's cutover remain outstanding.\n\n${shots.map(s => `- [${s}](./${s})`).join('\n')}\n`);
+  writeFileSync(join(output, 'index.md'), `# JOED-26 P6a local screenshots\n\nSynthetic fixtures; one headless browser, no production connection. ${checks.length} regression checks passed.\n\nCandidate ${active.version}, sequence ${active.release_sequence}. Shared global presentation pinned to INSPR-486's reviewed 01b3080948c21899cbbacbfa3447da6799af1b56 bundle. Pretty draws six segments; canonical copy/UTC accessibility, SemVer, reduced motion and keyboard/touch are tested. Tick/coordinator review, producer/OPS compatibility and Markus's cutover remain outstanding.\n\n${shots.map(s => `- [${s}](./${s})`).join('\n')}\n`);
   console.log(JSON.stringify({ checks: checks.length, screenshots: shots.length, presentation: 'integrated' }));
 } finally {
   await browser.close(); for (const board of boards) await board.close();

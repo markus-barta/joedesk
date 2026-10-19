@@ -1,6 +1,6 @@
 {
   "schema": "joedesk.runtime-closure.v1",
-  "candidate_version": "261016151218.0.0",
+  "candidate_version": "261019102825.0.0",
   "files": [
     {
       "path": "contracts/accept.mjs",
@@ -100,7 +100,7 @@
     {
       "path": "package.json",
       "size": 1355,
-      "sha256": "9da3ed8112d15ec3c0e03ad509809f89fc9f32b390f0fd93604c586142ca6405"
+      "sha256": "1224003d837e051b17c19772159220c7f5f2b935defe86147188ed9e4e98a622"
     },
     {
       "path": "public/joe/app.css",
@@ -190,12 +190,12 @@
     {
       "path": "public/joe/index.html",
       "size": 35194,
-      "sha256": "017434f80e2c9b366459578565c102f389d152a0f93f122ce8ec2a47e24fdcde"
+      "sha256": "88a97c26a4814cc21400cb1411ed5c6d4f8ad83308bfd1072a4e72f56bab5fe0"
     },
     {
       "path": "public/joe/joe-version.js",
-      "size": 13465,
-      "sha256": "064f4bf110cc5de736f6f827e59ce4cf63237f20ed22c75f26d01a32a2a36a93"
+      "size": 13562,
+      "sha256": "852b0791a041a3dd63bda8496ca4c35be8f3cc1cdbe67c2624362479cdfe8ead"
     },
     {
       "path": "public/joe/results-model.js",
@@ -284,8 +284,8 @@
     },
     {
       "path": "release/preparation.json",
-      "size": 6282,
-      "sha256": "53ce322be537e98c437e5ece20c3f3036af6ffdf91d9bef7ddf2b4025ff515cc"
+      "size": 6813,
+      "sha256": "3138a2a5b5b45554ed098e3d8ad4bff37bcfbeeac4a0549bb9c68745f7563ef1"
     },
     {
       "path": "release/versioning.mjs",
@@ -294,8 +294,8 @@
     },
     {
       "path": "release.json",
-      "size": 287,
-      "sha256": "490e842068dd1fd0a1de478a17abe8fe256adc4f9e8bf3f81fb0011ce581d8e9"
+      "size": 322,
+      "sha256": "1f4407b42eb0da31e6a1eadddb9d721cd260aa336f75c135014252cb0d9ff15d"
     },
     {
       "path": "server/health.mjs",
