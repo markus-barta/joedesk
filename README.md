@@ -801,6 +801,12 @@ widths, including “Stale 2 min” and “Loading”. Label evidence includes l
 glyph boxes, intact words, icon containment and no icon overlap, with an explicit
 check that only phone Loading hides its icon. At 360/390 in both themes it
 emits `header-{board-ok,needs-fix,data-delayed,broker-unsure,stale}` crops. It
+captures a static production-header clone outside the live header, with scripts
+running throughout; disabling scripts can consume a pending animation callback
+and strand the board's pending-frame flag (JOED-47). After the header loop at
+every width/theme, a refresh must increase the board's render count within 5 s.
+The large-TB check still requires its exact byte title and accessible name,
+formatted text and containment, and logs each failing condition. It
 measures exact 0 px movement outside the intrinsic pill within the
 same page and broker state, and compares every board-health sentence to its
 reserve. Node tests compare the six existing header labels (including Loading)

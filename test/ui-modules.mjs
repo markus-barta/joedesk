@@ -9,6 +9,7 @@ import { runInNewContext } from 'node:vm';
 import { headerHealth as frozenHeaderHealth } from './fixtures/header-health-c1c71a1.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from '../scripts/browser/budget.mjs';
+import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -227,6 +228,98 @@ test('header: capture leaves the header unchanged; ledger Needs fix carries its 
   Object.assign(b.feeds.data.value.safety.executor, { status: 'running' });
   delete b.feeds.data.value.safety.executor.reason;
   assert.deepEqual(view(), healthy);
+});
+
+// Execute the actual production scheduler. Only its render body and the native
+// frame queue are stand-ins; Blink consumes due callbacks even when disabled
+// scripting makes their JS invocation return without running (JOED-47).
+function headerFrameHarness(onRender = () => {}) {
+  const app = readFileSync(new URL('../public/joe/app.js', import.meta.url), 'utf8');
+  const schedule = app.match(/^  function schedule\(reason = 'tick'\) \{[\s\S]*?^  \}/m)?.[0];
+  assert.ok(schedule, 'use the production schedule(), not a rewritten copy');
+  let next = 0;
+  const queued = [];
+  const board = runInNewContext(`(() => {
+    let frame = 0, pending = null, renders = 0;
+    function render(reason) { frame = 0; renders++; onRender(reason); }
+    ${schedule}
+    return { schedule, state: () => ({ frame, renders }) };
+  })()`, { onRender, requestAnimationFrame: callback => { queued.push(callback); return ++next; } });
+  return { ...board, queued, due: (scriptsEnabled = true) => {
+    const callbacks = queued.splice(0);
+    if (scriptsEnabled) for (const callback of callbacks) callback();
+  } };
+}
+
+test('header crops: consuming a disabled rAF strands schedule(), deferring it preserves rendering', () => {
+  const dropped = headerFrameHarness();
+  dropped.schedule();
+  dropped.due(false);
+  assert.ok(dropped.state().frame > 0);
+  for (const reason of ['data', 'tick', 'fleet-config']) dropped.schedule(reason);
+  dropped.due();
+  assert.equal(dropped.state().renders, 0, 're-enabling scripts cannot replay the consumed callback');
+  assert.equal(dropped.queued.length, 0, 'refresh/tick cannot schedule while frame stays set');
+
+  const deferred = headerFrameHarness();
+  deferred.schedule();
+  // No frame is consumed during a true pause; it remains queued on resume.
+  assert.equal(deferred.queued.length, 1);
+  deferred.due();
+  deferred.schedule('data');
+  deferred.due();
+  assert.equal(deferred.state().renders, 2);
+  assert.equal(deferred.state().frame, 0);
+});
+
+test('header crops: exact serialized clone survives live renders and is removed on success or failure', async () => {
+  for (const fail of [false, true]) {
+    const liveButton = { innerHTML: 'live header' }, button = {
+      ...liveButton, attributes: { id: 'hdrHealth', title: 'previous title' },
+      setAttribute(key, value) { this.attributes[key] = value; },
+      removeAttribute(key) { delete this.attributes[key]; },
+    };
+    let mounted = null;
+    const copy = { style: {}, attributes: {},
+      querySelector: selector => { assert.equal(selector, '#hdrHealth'); return button; },
+      querySelectorAll: selector => { assert.equal(selector, '[id]'); return [button]; },
+      setAttribute(key, value) { this.attributes[key] = value; },
+      removeAttribute(key) { delete this.attributes[key]; },
+      remove() { mounted = null; },
+    };
+    const live = { cloneNode: deep => { assert.equal(deep, true); return copy; },
+      getBoundingClientRect: () => ({ left: 0, width: 390 }),
+      parentElement: { append: node => { mounted = node; } },
+    };
+    const document = { documentElement: { scrollHeight: 2000 },
+      querySelector: selector => selector === 'header.top' ? live : mounted,
+    };
+    const page = { evaluate: source => runInNewContext(source, { document, scrollX: 0 }) };
+    const board = headerFrameHarness(() => { liveButton.innerHTML = 'next live header'; });
+    const view = { html: '<b>Needs fix</b>', label: 'Needs fix. Open Desk.', title: null };
+    board.schedule('tick');
+    const capture = captureHeaderCrop(page, view, async selector => {
+      assert.equal(selector, '[data-joedesk-header-crop]');
+      assert.equal(mounted, copy);
+      assert.equal(copy.style.position, 'absolute');
+      assert.equal(copy.style.top, '2016px');
+      assert.equal(copy.style.width, '390px');
+      assert.equal(button.attributes.id, undefined, 'renders still find only the live header IDs');
+      assert.equal(button.attributes.title, undefined, 'no stale tooltip on the clone');
+      assert.equal(button.attributes['aria-label'], view.label);
+      assert.equal(copy.inert, true);
+      board.due();
+      assert.equal(liveButton.innerHTML, 'next live header');
+      assert.equal(button.innerHTML, view.html, 'capture keeps the requested production markup across a tick');
+      board.schedule('data'); board.due();
+      assert.equal(board.state().renders, 2, 'a refresh still renders while capture is in flight');
+      if (fail) throw new Error('capture failed');
+    });
+    if (fail) await assert.rejects(capture, /capture failed/);
+    else await capture;
+    assert.equal(mounted, null, 'the temporary header is always removed');
+    assert.equal(liveButton.innerHTML, 'next live header', 'cleanup never restores stale live markup');
+  }
 });
 
 test('Desk executor problem: precise capture/full-ledger sentences, optional sizes and recovery', () => {

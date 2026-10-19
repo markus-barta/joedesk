@@ -16,6 +16,7 @@ import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { designFleet, designActions, designSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
 import { pngColours } from './browser/pixels.mjs';
+import { captureHeaderCrop } from './browser/header-crop.mjs';
 
 // The page's own model, for the words and keys Settings must show.
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
@@ -501,20 +502,23 @@ try {
         check('executor-health', `${viewport.name} ${theme} header ${h.label}: original header and button heights`, measured.height.header === (viewport.mobile ? 54 : 58) && measured.height.button === (viewport.mobile ? 44 : 34), measured.height);
         if (viewport.mobile && headerCrops.has(h.reason)) {
           // A live tick may render between the synchronous measurement and
-          // screenshot. Pin the same production markup only for this crop.
-          await page.s('Emulation.setScriptExecutionDisabled', { value: true });
-          try {
-            await ev(`document.getElementById('hdrHealth').innerHTML = ${J(view.html)}`);
-            await crop('header.top', `${viewport.name}-${theme}-header-${headerCrops.get(h.reason)}`);
-          } finally {
-            await page.s('Emulation.setScriptExecutionDisabled', { value: false });
-          }
+          // screenshot. Pin a static copy; leave page work free to run.
+          await captureHeaderCrop(page, view, selector => crop(selector, `${viewport.name}-${theme}-header-${headerCrops.get(h.reason)}`));
         }
         if (viewport.width === 360) check('executor-health', `${theme} header ${h.label}: original 16 px inset at 360`, measured.inset.left === 16 && measured.inset.right === 16 && measured.inset.paddingLeft === '16px' && measured.inset.paddingRight === '16px', measured.inset);
         const moved = exactMoves(measured.before, measured.after);
         check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly 0 px movement outside the intrinsic pill in the same page and broker state`, !moved.length && measured.beforeBroker === measured.afterBroker && measured.afterBroker === brokerWord, { moved, beforeBroker: measured.beforeBroker, afterBroker: measured.afterBroker });
       }
       await ev(`document.getElementById('hdrHealth').innerHTML = ${J(header)}`);
+      // Guard every viewport/theme immediately after the header loop. A lost
+      // board frame must fail here, before the large-ledger render assertion.
+      const rendersBefore = await ev('(() => { const before = window.__joedesk.renders; return window.__joedesk.refresh().then(() => before); })()');
+      let renderWait = null;
+      try {
+        await waitFor(page, `window.__joedesk.renders > ${rendersBefore}`, 5000);
+      } catch (error) { renderWait = error.message; }
+      const rendersAfter = await ev('window.__joedesk.renders');
+      check('executor-health', `${viewport.name} ${theme}: board keeps rendering after the header crops`, renderWait === null && rendersAfter > rendersBefore, { rendersBefore, rendersAfter, renderWait });
       // Compare every real board-health sentence with the hidden reserve in
       // this font/column, then restore the real healthy sentence.
       const reserve = await ev(`(() => {
