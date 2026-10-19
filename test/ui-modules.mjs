@@ -24,12 +24,13 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const format = await import('../public/joe/format.js');
+const { cashCaption, stateCaption, reservedCaption } = await import('../public/joe/ui.js');
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus, headerHealth, executorProblem } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, executorProblem, heroLeft, keptHtml, positionsHtml } = await import('../public/joe/desk.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
 const { readdirSync } = await import('node:fs');
@@ -83,6 +84,167 @@ test('host gate: canonical hosts include the production host; others get the pri
     '100.127.255.255', 'hsb1.tail1234.ts.net', 'foo.hsb1.ts.net', 'hsb1.ts.net', 'cs0.barta.cm', 'cs0', 'CS0.BARTA.CM']) assert.ok(isCanonicalJoeHost(host), host);
   for (const host of ['example.com', '8.8.8.8', '100.63.255.255', '100.128.0.1', '100.64.0.256', '100.64.0.07', '192.168.1.10',
     '10.0.0.1', 'example.ts.net', 'hsb1.example.com', 'cs0.barta.com']) assert.ok(!isCanonicalJoeHost(host), host);
+});
+
+test('cash formatting: exact broker lexemes display at two decimals without a floating-point round trip', () => {
+  for (const [amount, text] of [['12345.67890123', '€ 12.345,68'], ['1.00500000', '€ 1,01'],
+    ['-1.00500000', '−€ 1,01'], ['0.00000001', '€ 0,00'], ['-0.00000001', '€ 0,00'],
+    ['9007199254740993.00500000', '€ 9.007.199.254.740.993,01'], ['12345.67000000', '€ 12.345,67']]) {
+    const value = { amount, currency: 'EUR' };
+    assert.deepEqual(format.cashAmount(value), { text, title: `Cash: EUR ${amount}` });
+    assert.equal(value.amount, amount);
+    for (const key of ['hero.cash', 'rt.cash']) {
+      const html = cashCaption({ state: 'fresh', value }, key);
+      assert.ok(html.includes(`title="Cash: EUR ${amount}" aria-label="Cash: EUR ${amount}"`));
+      assert.ok(html.includes(`>${text}</span>`));
+    }
+  }
+});
+
+test('cash captions: null, omitted and broken retained values always explain why', () => {
+  for (const key of ['hero.cash', 'rt.cash']) {
+    const nullHtml = cashCaption({ state: 'broken', value: null, reason: 'gateway_unconfirmed' }, key);
+    assert.match(nullHtml, />not reported · broker connection not confirmed<\/span>/);
+    assert.match(nullHtml, /title="Cash not reported · broker connection not confirmed" aria-label="Cash not reported · broker connection not confirmed"/);
+    const held = cashCaption({ state: 'broken', value: { amount: '12345.67890123', currency: 'EUR' },
+      retained: true, reason: 'gateway_unconfirmed' }, key);
+    assert.equal(held, nullHtml);
+    assert.match(cashCaption(null, key), />not reported · no data received yet<\/span>/);
+  }
+});
+
+test('cash captions: stale values keep exact accessibility and their own reason with the same reserve', () => {
+  const value = { amount: '12345.67890123', currency: 'EUR' };
+  const reserve = html => html.slice(html.indexOf('<span class="cash-sizing"'));
+  const fresh = cashCaption({ state: 'fresh', value }, 'hero.cash');
+  const stale = cashCaption({ state: 'stale', value, reason: 'snapshot_stale' }, 'hero.cash');
+  const absent = cashCaption({ state: 'broken', value: null, reason: 'source_unavailable' }, 'hero.cash');
+  assert.match(stale, />€ 12\.345,68 · updates are late<\/span>/);
+  assert.match(stale, /aria-label="Cash: EUR 12345\.67890123 · updates are late"/);
+  assert.equal(reserve(stale), reserve(fresh));
+  assert.equal(reserve(absent), reserve(fresh));
+});
+
+test('cash captions: Amy’s label and caption stay fixed; every null and stale reason reserves its own words', () => {
+  for (const [reason, why] of Object.entries(health.CELL_REASON)) {
+    for (const key of ['hero.cash', 'rt.cash']) {
+      const html = cashCaption({ state: 'broken', value: null, reason }, key);
+      assert.ok(html.includes('<span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span>'));
+      assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`not reported · ${why}`)}</span>`), reason);
+      assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`−€ 999.999,99 · ${why}`)}</span>`), reason);
+    }
+  }
+});
+
+test('hero captions: every reason reserves retained, stale, broken and null wording with real ages', () => {
+  const sizing = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
+  const html = reservedCaption('after fees', ['after fees']);
+  const phrases = sizing(html);
+  assert.ok(phrases.includes('after fees'));
+  assert.ok(phrases.includes('Not reported'));
+  assert.ok(phrases.includes('Unavailable · not available'));
+  for (const why of new Set(Object.values(health.CELL_REASON))) {
+    const escaped = format.esc(why), capital = health.capital(escaped);
+    assert.ok(phrases.includes(`Unavailable · ${escaped}`), why);
+    assert.ok(phrases.includes(`Not reported · ${escaped}`), why);
+    for (const ago of ['999 days ago', '23 h 59 min ago', 'age unknown']) {
+      assert.ok(phrases.includes(`Last good value, ${ago} · ${escaped}`), why);
+      assert.ok(phrases.includes(`As of ${ago} · ${escaped}`), why);
+      assert.ok(phrases.includes(`${capital} · as of ${ago}`), why);
+    }
+  }
+  for (const ago of ['999 days ago', '23 h 59 min ago', 'age unknown']) {
+    assert.ok(phrases.includes(`Last good value, ${ago}`));
+    assert.ok(phrases.includes(`As of ${ago}`));
+    assert.ok(phrases.includes(`Not available · as of ${ago}`));
+  }
+  assert.equal(phrases.length, new Set(phrases).size);
+  assert.ok(phrases.every(text => !text.includes('data-age')));
+  const visible = stateCaption({ state: 'broken', value: {}, retained: true, reason: 'gateway_unconfirmed', ageSeconds: 90 }, 'hero.open');
+  assert.match(reservedCaption(visible, ['after fees']), /<span class="account-caption"><span>Last good value, <span class="age" data-age="hero.open">1 min ago<\/span> · broker connection not confirmed<\/span>/);
+  assert.deepEqual(sizing(reservedCaption(visible, ['after fees'])), phrases, 'reserve stays identical across states');
+});
+
+test('hero captions: all four KPIs keep the same reserve through session loss and incomplete bookkeeping', () => {
+  const fresh = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
+  const session = board(fixture('a-gateway-up-but-dead'));
+  const incomplete = structuredClone(fresh);
+  incomplete.states['desks.j.equity'].value = null;
+  const kpis = ctx => [...heroLeft(ctx).matchAll(/<div class="kpi"[\s\S]*?<\/div>/g)].map(m => m[0]);
+  const reserve = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
+  const baseline = kpis(fresh);
+  assert.equal(baseline.length, 4);
+  for (const ctx of [fresh, session, incomplete]) {
+    const actual = kpis(ctx);
+    assert.equal(actual.length, 4);
+    actual.forEach((html, i) => {
+      assert.match(html, /<span class="c"><span class="account-caption">/);
+      assert.deepEqual(reserve(html), reserve(baseline[i]));
+      assert.ok(reserve(html).includes('Last good value, 999 days ago · broker connection not confirmed'));
+    });
+  }
+  assert.ok(reserve(baseline[2]).includes('started with € 15.000'));
+  assert.ok(reserve(baseline[2]).includes('J’s bookkeeping incomplete · desk total unavailable'));
+});
+
+test('position rows: omitted optional P&L stays a plain dash without a reason or title', () => {
+  for (const data of [valid.data, read('positions-null.json')]) {
+    const ctx = { states: panelStates({ data: { value: data } }, data.receivedAt), feeds: { data: { value: data } }, now: data.receivedAt };
+    const html = positionsHtml(ctx).html;
+    assert.match(html, /<div class="r"><span class="muted">—<\/span><\/div>/);
+    assert.doesNotMatch(html, /Open result:|Today’s result:|no data received yet/);
+  }
+  for (const field of ['dayPnl', 'openPnl']) for (const scope of ['stage0', 'keep']) {
+    const row = structuredClone(valid.data.positions.rows.find(r => r.scope === scope));
+    delete row.dayPnl; delete row.openPnl;
+    row.reasons = { [field]: 'not_exact_yet' };
+    const render = value => scope === 'keep' ? keptHtml({ states: { kept: { state: 'fresh', value: [value] } } })
+      : positionsHtml({ states: { positions: { state: 'fresh', value: [value] } }, feeds: {}, now: valid.data.receivedAt }).html;
+    assert.doesNotMatch(render(row), /not exact yet|no data received yet|Open result:|Today’s result:/, `${scope} absent ${field}`);
+    row[field] = null;
+    const html = render(row), label = field === 'openPnl' ? 'Open result' : 'Today’s result';
+    assert.ok(html.includes(`${label}: not exact yet`), `${scope} null ${field}`);
+    if (scope === 'stage0' && field === 'openPnl') assert.match(html, /title="Open result: not reported · not exact yet" aria-label="Open result: not reported · not exact yet">—<\/span>/);
+    row[field] = { amount: '1.25', currency: 'EUR' };
+    assert.doesNotMatch(render(row), /not exact yet|no data received yet|Open result:|Today’s result:/, `${scope} valued ${field}`);
+    if (scope === 'stage0' && field === 'openPnl') assert.match(render(row), /\+€ 1,25/);
+  }
+});
+
+test('position rows: null values expose their reasons visibly and in accessible dash names', () => {
+  const data = read('positions-null.json');
+  const cells = panelStates({ data: { value: data } }, data.receivedAt);
+  const ctx = { states: cells, feeds: { data: { value: data } }, now: data.receivedAt };
+  const kept = keptHtml(ctx), positions = positionsHtml(ctx).html;
+  for (const label of ['Quantity', 'Last price', 'Worth']) for (const why of ['not exact yet', 'not reported by the broker']) {
+    assert.ok(kept.includes(`title="${label}: not reported · ${why}" aria-label="${label}: not reported · ${why}">—</span>`));
+    assert.ok(kept.includes(`${label}: ${why}`));
+  }
+  assert.match(positions, /title="Last price: not reported · not reported by the broker"/);
+  assert.match(positions, /class="position-reasons">Last price: not reported by the broker/);
+  assert.doesNotMatch(kept.slice(kept.indexOf('<div class="prow"')), /<(?:button|a|input)\b|tabindex=/);
+  assert.match(kept, /data-keep="SXR8"/);
+  assert.match(kept, /data-keep="TSLA"/);
+  assert.equal(health.cellReason('not_exact_yet'), 'not exact yet');
+  assert.equal(health.cellReason('source_unavailable'), 'not reported by the broker');
+  assert.equal(health.cellReason('source_not_authoritative'), 'held back: the kept-holdings list disagrees');
+});
+
+test('kept worth: one null summand withholds the complete total rather than showing a partial sum', () => {
+  const data = read('valid.json').data;
+  const rows = data.positions.rows.filter(row => row.scope === 'keep');
+  for (const state of ['fresh', 'stale', 'broken']) {
+    const ctx = { states: { kept: { state, value: rows, reason: state === 'fresh' ? null : 'snapshot_stale', ageSeconds: 90 } } };
+    assert.match(keptHtml(ctx), /worth € 600,00 and \$ 200,00/i);
+    const incomplete = structuredClone(rows);
+    incomplete[0].marketValue = null;
+    incomplete[0].reasons = { marketValue: 'source_unavailable' };
+    ctx.states.kept.value = incomplete;
+    const html = keptHtml(ctx);
+    assert.match(html, /Worth not available · not reported by the broker/);
+    assert.doesNotMatch(html.slice(0, html.indexOf('<div class="prow"')), /worth \$ 200,00/i);
+    assert.equal(format.sumByCurrency(incomplete.map(row => row.marketValue)), null);
+  }
 });
 
 test('ledger size: decimal MB round half-even from exact integer bytes', () => {

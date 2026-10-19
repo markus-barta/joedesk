@@ -6,6 +6,7 @@
     "today.openPnl",
     "today.totalPnl",
     "paperAccount",
+    "paperCash",
     "desks.j.equity",
     "desks.j.dayPnl",
     "desks.j.openPnl",

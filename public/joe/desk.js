@@ -1,7 +1,7 @@
 // Desk: health line and details, Today, the three desks, positions and the
 // kept holdings. Every number comes from one panel-state cell; each cell shows
 // fresh, stale with age, not reported, or broken with its reason, on its own.
-import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption } from './ui.js';
+import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, STALE_AFTER_S } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
@@ -157,16 +157,18 @@ function sessionRing(now) {
   return `${svg}<div><b>${title}</b><span>${line}</span><span>${session}</span></div>`;
 }
 
-function heroLeft(ctx) {
+export function heroLeft(ctx) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
   const dayCell = states['today.dayPnl'];
   const day = cellView(dayCell, 'hero.day');
   const kpi = (termKey, label, name, key, opts) => {
     const v = cellView(states[name], key, opts);
-    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}</dt><dd>${v.html}<span class="c">${v.caption}</span></dd></div>`;
+    const caption = reservedCaption(v.caption, opts.captions ?? [opts.caption]);
+    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}</dt><dd>${v.html}<span class="c">${caption}</span>${key === 'hero.account' ? cashCaption(states.paperCash, 'hero.cash') : ''}</dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
+  const moneyCaptions = [`started with ${eur(15000, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
   const why = dayCell?.reason ? cellReason(dayCell.reason) : null;
   let say;
   if (day.n == null) {
@@ -187,7 +189,7 @@ function heroLeft(ctx) {
     <dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
       ${kpi('since', sinceLabel(data), 'today.totalPnl', 'hero.since', { caption: 'after fees' })}
-      ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: jIncomplete ? 'J’s bookkeeping incomplete · desk total unavailable' : `started with ${eur(15000, false, 0)}` })}
+      ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions })}
       ${kpi('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}
     </dl>`;
 }
@@ -253,7 +255,23 @@ function sectionState(cell, key, { fresh, held, missing, absent }) {
   return `<p class="pstate" data-state="${p.state}">${st(p.tone, text)}</p>`;
 }
 
-function positionsHtml(ctx) {
+const POSITION_FIELDS = { quantity: 'Quantity', mark: 'Last price', marketValue: 'Worth', dayPnl: 'Today’s result', openPnl: 'Open result' };
+const presentNull = (row, field) => Object.hasOwn(row, field) && row[field] === null;
+const rowReason = (row, field, cell) => cellReason(row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received');
+function positionValue(row, field, cell) {
+  const value = row[field];
+  if (value != null) return field === 'quantity' ? quantity(value) : money(amountOf(value), value.currency);
+  const label = `${POSITION_FIELDS[field]}: not reported · ${rowReason(row, field, cell)}`;
+  return `<span class="position-value" role="img" title="${esc(label)}" aria-label="${esc(label)}">—</span>`;
+}
+function positionReasons(row, cell) {
+  const missing = Object.entries(POSITION_FIELDS).filter(([field]) =>
+    presentNull(row, field) || (['mark', 'marketValue'].includes(field) && row[field] == null));
+  return missing.length ? `<span class="position-reasons">${missing.map(([field, label]) =>
+    `${esc(label)}: ${esc(rowReason(row, field, cell))}`).join(' · ')}</span>` : '';
+}
+
+export function positionsHtml(ctx) {
   const { states } = ctx;
   const cell = states.positions;
   const rows = cell?.value;
@@ -275,11 +293,11 @@ function positionsHtml(ctx) {
     const legacy = r.scope === 'legacy' ? ` · older holding, outside the ${term('stage0', 'first stage')}` : '';
     return `<div class="prow" data-desk="${esc(r.desk ?? '')}">
       ${symBadge(r.symbol, r.desk)}
-      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span>${r.desk ? `${inlineMark(r.desk)} ${LABEL[r.desk]}` : 'No desk'}${opened}${legacy}</span></div>
-      <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${quantity(r.quantity)}</div>
-      <div class="r c-px num">${money(amountOf(r.mark), cur)}</div>
-      <div class="c-worth"><span class="num">${money(value, r.marketValue?.currency ?? cur)}</span><span class="vbar">${value != null && max ? `<i data-v="${value}" data-cur="${esc(r.marketValue.currency)}" style="width:${(Math.abs(value) / max * 100).toFixed(3)}%"></i>` : ''}</span></div>
-      <div class="r">${pl(amountOf(r.openPnl), r.openPnl?.currency ?? cur)}</div>
+      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span>${r.desk ? `${inlineMark(r.desk)} ${LABEL[r.desk]}` : 'No desk'}${opened}${legacy}</span><span class="position-mobile">${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)} · worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell)}</div>
+      <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)}</div>
+      <div class="r c-px num">${positionValue(r, 'mark', cell)}</div>
+      <div class="c-worth"><span class="num">${positionValue(r, 'marketValue', cell)}</span><span class="vbar">${value != null && max ? `<i data-v="${value}" data-cur="${esc(r.marketValue.currency)}" style="width:${(Math.abs(value) / max * 100).toFixed(3)}%"></i>` : ''}</span></div>
+      <div class="r">${presentNull(r, 'openPnl') ? positionValue(r, 'openPnl', cell) : pl(amountOf(r.openPnl), r.openPnl?.currency ?? cur)}</div>
       <div class="r c-opened num">${r.updatedAt ? timeHM(r.updatedAt) : '—'}</div>
     </div>`;
   }).join('');
@@ -288,28 +306,31 @@ function positionsHtml(ctx) {
 
 // Kept holdings: the read-only caption, then the section's own state line with
 // what they are worth (in the past tense of their age when not fresh).
-function keptHtml(ctx) {
+export function keptHtml(ctx) {
   const { states } = ctx;
   const cell = states.kept;
   const rows = cell?.value;
   const nav = states.paperAccount?.value ? eur(amountOf(states.paperAccount.value)) : '—';
-  const worth = rows?.length ? sumByCurrency(rows.map(r => r.marketValue)).map(s => money(s.amount, s.currency)).join(' and ') : null;
+  const incomplete = rows?.filter(r => r.marketValue == null) ?? [];
+  const worth = rows?.length ? sumByCurrency(rows.map(r => r.marketValue))?.map(s => money(s.amount, s.currency)).join(' and ') : null;
+  const unavailableWorth = `Worth not available · ${[...new Set(incomplete.map(r => rowReason(r, 'marketValue', cell)))].map(esc).join(' · ')}`;
   const caption = `<p class="keep-cap">${icon('keep')}<span>Read-only. Left out of every desk result and of Results; counted in the ${term('paperacct', 'paper account')} (${nav}).</span></p>`;
   const p = statePhrase(cell, 'kept', 'last good values');
-  const fresh = worth ? `Worth ${worth} now, each in its own currency.` : 'Up to date.';
-  const state = rows && worth && p.state !== 'fresh'
+  const fresh = incomplete.length ? unavailableWorth : worth ? `Worth ${worth} now, each in its own currency.` : 'Up to date.';
+  const state = incomplete.length
+    ? `<p class="pstate" data-state="${p.state}">${st(p.state === 'fresh' ? 'none' : p.tone, `${p.text ? `${capital(p.text)} · ` : ''}${unavailableWorth}`)}</p>`
+    : rows && worth && p.state !== 'fresh'
     ? `<p class="pstate" data-state="${p.state}">${st(p.tone, `${capital(p.text)} · worth ${worth}, each in its own currency`)}</p>`
     : sectionState(cell, 'kept', { fresh, held: 'last good values', missing: 'Kept holdings are unavailable', absent: 'Kept holdings are not present in this snapshot.' });
   if (!rows) return `${caption}${state}`;
   if (!rows.length) return `${caption}${state}<p class="empty-line">${icon('info')}<span>No kept holdings in this snapshot.</span></p>`;
   return `${caption}${state}${[...rows].sort((a, b) => a.symbol.localeCompare(b.symbol)).map(r => {
-    const cur = r.mark?.currency ?? r.marketValue?.currency ?? 'EUR';
     return `<div class="prow" data-keep="${esc(r.symbol)}">
       ${symBadge(r.symbol)}
-      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span>${r.side === 'long' ? 'Long' : 'Short'} ${quantity(r.quantity)} · last price ${money(amountOf(r.mark), cur)}</span></div>
-      <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${quantity(r.quantity)}</div>
-      <div class="r c-px num">${money(amountOf(r.mark), cur)}</div>
-      <div class="c-worth num">${money(amountOf(r.marketValue), r.marketValue?.currency ?? cur)}</div>
+      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span>${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)}</span><span class="position-mobile">Worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell)}</div>
+      <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)}</div>
+      <div class="r c-px num">${positionValue(r, 'mark', cell)}</div>
+      <div class="c-worth num">${positionValue(r, 'marketValue', cell)}</div>
       <div class="r"><span class="kept-label">${icon('keep')}Kept · not traded by any desk</span></div>
     </div>`;
   }).join('')}`;

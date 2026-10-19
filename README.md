@@ -758,10 +758,81 @@ or “record incomplete”.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
-`contract_set_sha256`; an earlier digest does not cover revision-7 acceptance
+`contract_set_sha256`; an earlier digest does not cover revision-8 acceptance
 and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.
+
+Contract-set revision 8 (JOED-49) adds optional `brokerAccount.cash` as EUR
+`money|null`, owned by the pusher. Amy's definition is IB account summary
+`TotalCashValue` in base currency EUR: the raw decimal lexeme at account level,
+the same scope as NAV including KEEP (`paper-account-including-keep`), and the
+same `observedAt` as equity. Preserve the broker bytes: no float conversion or
+rounding in the producer or storage. Missing or non-EUR means null with a
+reason; never derive cash from NAV or desk totals, or convert another currency.
+`brokerAccount.reasons.cash` supplies cash's own closed null reason, following
+the per-field bags on desks/totals. `brokerAccount.reason` remains equity-only
+and cannot justify null cash. An explicitly null cash without its own reason
+fails with `reasonRequired`; a value with a reason is accepted, matching equity.
+Rev-7 payloads omitting cash or the whole account still validate when their
+position nulls carry reasons as described below. Old durable cell sets retain
+their sequence and last-good observations on restart. The data ID stays
+`inspr.joe.household.v2`, and the contract-set revision stays 8.
+
+Revision 8 also permits null `positions.rows[].quantity` and adds the closed
+per-row `reasons` object with optional `quantity`, `mark`, `marketValue`,
+`dayPnl` and `openPnl` reason refs. Every explicitly null field requires its own
+reason. The existing session exception is unchanged: `positions.reason` may
+justify row nulls while the API session is unconfirmed; it cannot justify
+them when the session is confirmed. Optional omitted money fields remain
+accepted. An omitted row `openPnl` shows a plain muted dash without a title or
+reason. Only explicitly present null `dayPnl` / `openPnl` fields add their
+per-field reason to the row. KEEP rows retain symbol, side, `scope: "keep"`
+and `desk: null`.
+This tightens rev-7 acceptance for unreasoned position nulls at Amy's request;
+no v2 producer has shipped, so no live producer payload is affected. The
+historical session fixtures still exercise their unchanged panel exception.
+The frozen-ready fixture also carries row reasons because its advancing-push
+test initially uses a still-confirmed check; its original payload observations
+and panel expectations stay unchanged. `fixtures/positions-null.json` adds
+reasoned KEEP nulls and a stage0 null mark.
+
+The reason enum appends `not_exact_yet` (the broker reports it, but it is not
+yet captured exactly) and `source_unavailable` (the broker did not report it,
+or did not report it in the required currency). Board copy is “not exact yet”
+and “not reported by the broker”. `source_not_authoritative` still means the
+kept-holdings list disagrees. Desk and KEEP null values show an accessible
+em dash plus visible per-row reasons; KEEP remains read-only. A missing
+market-value summand makes the entire kept worth unavailable with its reason,
+including stale and broken states; it never displays a partial total.
+
+The independent `paperCash` panel follows account freshness, retention and
+API-session checks. The read model withholds broken retained cash with its
+own reason; an unconfirmed session nulls cash alongside equity. Desk adds a
+cash block below the account total, and Settings appends it to the account
+row. Both use the label “Cash” and caption “cash · as the broker reports it”.
+They show two decimals using exact integer units for display only, with
+the untouched broker lexeme in title and accessible name. Null always reads
+“not reported · [reason]”; rev-7 omission reads “no data received yet”.
+Both surfaces reserve the actual wrapped value/stale/null reason forms,
+including the session reason at 360 px, and the caption's fixed rows. They wrap
+text and keep the existing header. P5's `cash` cases cover real ingress, stale, null, API-session loss,
+rev-7 omission and recovery at 1440/1024/390/360 in both themes, with exact
+component geometry checks, overflow/clipping assertions and
+`<width>-<theme>-{desk-hero,settings-account}-cash-{value,null}` crops.
+Browser results and visual approval remain with CI and the coordinator.
+All four hero KPI captions use that same grid/sizing mechanism, with fresh
+variants and every real retained/stale/broken/null phrase crossed with the
+closed cell reasons. Reserves come from the caption builder, including unknown
+ages, 999 days and 23 h 59 min. They share one grid cell, stay hidden from
+accessibility and reserve only the tallest actual wrapped form at each width.
+CSS column widths plus local font metrics estimate 3/2/4/5 reserved 16 px
+lines at 1440/1024/390/360 with DejaVu Sans, or 2/2/4/4 with SF/Arial. These
+are wrapping estimates; CI owns the rendered geometry and overflow result.
+P5's `positions` cases assert null KEEP quantity and values with visible and
+accessible reasons, a stage0 null mark, and no `button`, `a`, `input` or
+`[tabindex]` inside any `[data-keep]` row. At 1440/1024/390/360 in both themes,
+they check overflow/clipping and emit `<width>-<theme>-desk-kept-null` crops.
 
 Contract-set revision 7 keeps every revision-6 payload valid and the data ID
 `inspr.joe.household.v2`. The optional executor reason `results_capture_failed`

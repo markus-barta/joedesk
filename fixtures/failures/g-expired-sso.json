@@ -40,6 +40,12 @@
       "reason": "auth_required",
       "retained": true
     },
+    "paperCash": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "auth_required",
+      "retained": false
+    },
     "desks.j.equity": {
       "state": "broken",
       "ageSeconds": 609,

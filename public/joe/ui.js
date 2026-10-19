@@ -1,8 +1,8 @@
 // Shared pieces: icons from the inline sprite, terms, big numbers, desk marks
 // and the one opaque tip. Everything returns escaped HTML strings.
 import { TERMS } from './terms.js';
-import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol } from './format.js';
-import { cellReason, capital } from './health.js';
+import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol, cashAmount } from './format.js';
+import { cellReason, capital, CELL_REASON } from './health.js';
 
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -231,4 +231,37 @@ export function statePhrase(cell, key, held = 'last good value') {
 export function stateCaption(cell, key, fresh = '', held) {
   const p = statePhrase(cell, key, held);
   return p.state === 'fresh' ? fresh : capital(p.text);
+}
+
+// Use the real caption builder for every state/reason combination. Days and
+// hours exercise both long ages and the longest unbroken age token; unknown
+// ages have their own wording. Sizing copies never tick or enter accessibility.
+const CAPTION_SIZING = [...new Set([null, ...Object.keys(CELL_REASON)].flatMap(reason =>
+  [null, 999 * 86400, 23 * 3600 + 59 * 60].flatMap(ageSeconds => [
+    { state: 'not reported', value: null },
+    { state: 'broken', value: null },
+    { state: 'broken', value: {}, retained: true },
+    { state: 'stale', value: {} },
+    { state: 'broken', value: {} },
+  ].map(cell => stateCaption({ ...cell, reason, ageSeconds }, 'sizing').replace(AGE_RE, '$2')))
+))].map(text => `<span class="cash-sizing" aria-hidden="true">${text}</span>`).join('');
+export function reservedCaption(caption, freshCaptions) {
+  const fresh = [...new Set(freshCaptions)].map(text =>
+    `<span class="cash-sizing" aria-hidden="true">${stateCaption({ state: 'fresh' }, '', text)}</span>`).join('');
+  return `<span class="account-caption"><span>${caption}</span>${fresh}${CAPTION_SIZING}</span>`;
+}
+
+// Each reason reserves its actual wrapping, including the session form at
+// 360 px: character count cannot predict how words wrap in a narrow column.
+// The label and Amy's caption have their own fixed rows in both surfaces.
+const CASH_SIZING = [...new Set(Object.values(CELL_REASON))].flatMap(why =>
+  [`not reported · ${why}`, `−€ 999.999,99 · ${why}`]
+).map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
+export function cashCaption(cell, key) {
+  const value = cell?.state === 'broken' && cell.retained ? null : cell?.value;
+  const why = cell?.reason ? cellReason(cell.reason) : null;
+  const view = value == null ? { text: `not reported · ${why ?? cellReason('feed_not_received')}`,
+    title: `Cash not reported · ${why ?? cellReason('feed_not_received')}` } : cashAmount(value);
+  if (value != null && why) { view.text += ` · ${why}`; view.title += ` · ${why}`; }
+  return `<span class="cash-block"><span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span><span class="cash-reserve"><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}">${esc(view.text)}</span>${CASH_SIZING}</span></span>`;
 }

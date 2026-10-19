@@ -256,7 +256,7 @@ try {
       await editabilityChecks(tag, viewport, fleet);
       const rt = await runtime();
       const want = ['Paper · the board data and the fleet settings both say paper', 'Off · paper trading is not paused', 'Answering · checked 18 s ago (19:42:13)',
-        'Running · broker reachable · brakes off · checked 19:42:13', 'Last numbers 19:42:22 · 9 s old · refreshes every 15 s', 'Board OK · numbers are up to date', 'DU…0597 · € 31.482,75 · checked 9 s ago'];
+        'Running · broker reachable · brakes off · checked 19:42:13', 'Last numbers 19:42:22 · 9 s old · refreshes every 15 s', 'Board OK · numbers are up to date', 'DU…0597 · € 31.482,75 · checked 9 s ago Cash cash · as the broker reports it not reported · no data received yet'];
       const srcs = ['mode', 'safety.halt', 'safety.gateway', 'GET /v1/health on hsb0', 'generatedAt', 'boardHealth', 'brokerAccount.accountHint'];
       check('AC-25', `${tag}: Runtime state shows the seven rows with their sources`, J(rt.map(r => r.lab)) === J(RT_LABELS) && rt.every((r, i) => N(r.val) === N(want[i]) && r.src === srcs[i]), rt);
       if (viewport === VIEWPORTS[0] && theme === 'light') {
@@ -335,10 +335,130 @@ try {
       const tag = `${viewport.name} ${theme} without executor or account hint`;
       await openSettings(bare, viewport, theme);
       const rt = await runtime();
-      check('AC-25', `${tag}: absent proposed fields show "Not reported"`, rt[3].val === 'Not reported' && N(rt[6].val) === 'Account number not reported · € 31.482,75 · checked 9 s ago', rt);
+      check('AC-25', `${tag}: absent proposed fields show "Not reported"`, rt[3].val === 'Not reported' && N(rt[6].val) === 'Account number not reported · € 31.482,75 · checked 9 s ago Cash cash · as the broker reports it not reported · no data received yet', rt);
       await auditScreen(page, viewport, theme, 'settings (not reported)');
       await leakChecks(tag);
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-settings-not-reported`, 'Settings without the executor report or the account hint: "Not reported"');
+    }
+  }
+
+  // JOED-49: one real account observation through ingress, shared selectors
+  // and both surfaces. Browser execution/crops belong to PR CI.
+  if (run('cash')) {
+    const viewports = [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }];
+    const amount = '12345.67890123';
+    const crop = async (selector, name) => {
+      const clip = await ev(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
+      writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+      shots.push({ file: `${name}.png`, what: `Paper-account cash: ${name}` });
+    };
+    for (const viewport of viewports) for (const theme of THEMES) {
+      const { snapshot: base } = designSnapshot(NOW);
+      const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b);
+      let seq = base.seq, offset = 0;
+      const push = async (phase, seconds) => {
+        b.setNow(at(NOW, offset + seconds));
+        const next = phase === 'session' ? JSON.parse(readFileSync(new URL('../fixtures/failures/a-gateway-up-but-dead.json', import.meta.url))).payload : structuredClone(base);
+        next.seq = ++seq; next.generatedAt = b.clock(); next.safety.gateway.checkedAt = b.clock();
+        if (phase === 'session') next.safety.gateway.reason = 'gateway_unconfirmed';
+        if (['null', 'session', 'not-exact'].includes(phase)) {
+          next.brokerAccount.cash = null;
+          next.brokerAccount.reasons = { cash: phase === 'session' ? 'gateway_unconfirmed' : phase === 'not-exact' ? 'not_exact_yet' : 'source_unavailable' };
+        } else if (phase !== 'rev7') next.brokerAccount.cash = { amount, currency: 'EUR' };
+        const accepted = await b.push(next);
+        check('paper-cash', `${viewport.name} ${theme} ${phase}: real ingress accepts the snapshot`, accepted.status === 200, accepted);
+      };
+      for (const screen of ['desk', 'settings']) {
+        offset = screen === 'desk' ? 0 : 300;
+        await push('value', 0);
+        b.setNow(at(NOW, offset + 9));
+        await configure(page, viewport, theme);
+        await load(page, b.url, screen);
+        if (screen === 'settings') await waitFor(page, `document.querySelector('#rtRows [data-cash="rt.cash"]')`);
+        const selector = screen === 'desk' ? '#heroL [data-cell="hero.account"]' : '#rtRows .rt-row:last-child';
+        const cashKey = screen === 'desk' ? 'hero.cash' : 'rt.cash';
+        const surface = screen === 'desk' ? 'desk-hero-cash' : 'settings-account-cash';
+        // Compare the cash surface in its own account box. Earlier Settings
+        // rows have independent state copy; their movement is not cash layout.
+        const measure = () => ev(`(() => {
+          const parent = document.querySelector(${J(selector)}), p = parent.getBoundingClientRect();
+          const nodes = [parent, parent.querySelector('.cash-reserve'), parent.querySelector('[data-cash]')];
+          if (${J(screen)} === 'desk') nodes.push(document.getElementById('deskHero'));
+          return nodes.map((e, i) => { const r = e.getBoundingClientRect(); return { key: i, top: r.top - p.top, left: r.left - p.left, width: r.width, height: r.height }; });
+        })()`);
+        const baseline = await measure();
+        for (const phase of ['value', 'stale', 'null', 'not-exact', 'session', 'rev7', 'recovered']) {
+          if (phase === 'stale') b.setNow(at(NOW, offset + 90));
+          else if (phase !== 'value') await push(phase === 'recovered' ? 'value' : phase, 120 + ['null', 'not-exact', 'session', 'rev7', 'recovered'].indexOf(phase) * 30);
+          await ev('window.__joedesk.refresh().then(() => true)');
+          await settle(page);
+          const seen = await ev(`(() => {
+            const e = document.querySelector('[data-cash="${cashKey}"]'), parent = document.querySelector(${J(selector)});
+            const r = e.getBoundingClientRect(), p = parent.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(e);
+            const glyphs = [...range.getClientRects()].map(g => ({ left: g.left, right: g.right, top: g.top, bottom: g.bottom }));
+            const cs = getComputedStyle(e);
+            return { text: e.innerText.trim(), label: e.closest('.cash-block').querySelector('.cash-label').innerText, caption: e.closest('.cash-block').querySelector('.cash-caption').innerText, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'),
+              fits: glyphs.every(g => g.left >= p.left - 0.5 && g.right <= p.right + 0.5 && g.top >= p.top - 0.5 && g.bottom <= p.bottom + 0.5),
+              clipped: e.scrollWidth > e.clientWidth || e.scrollHeight > e.clientHeight, style: cs.fontStyle,
+              horizontal: __audit.horizontal(), clipping: __audit.clipping() };
+          })()`);
+          const tag = `${viewport.name} ${theme} ${screen} cash ${phase}`;
+          const hasValue = ['value', 'stale', 'recovered'].includes(phase);
+          const why = phase === 'stale' ? 'updates are late' : phase === 'session' ? 'broker connection not confirmed'
+            : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact yet' : 'not reported by the broker';
+          const expected = hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `not reported · ${why}`;
+          const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : `Cash not reported · ${why}`;
+          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme, independent null reason`, N(seen.text) === expected && seen.label === 'Cash' && seen.caption === 'cash · as the broker reports it' && seen.title === exact && seen.name === exact && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
+          check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
+          const after = await measure();
+          const moved = baseline.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== after[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: after[i]?.[k] })));
+          check('paper-cash', `${tag}: cash and account boxes have exactly 0 px shift`, !moved.length, moved);
+          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? '#deskHero' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
+        }
+      }
+    }
+  }
+
+  // Rev 8: partial position observations stay explicit and KEEP stays inert.
+  if (run('positions')) {
+    const nulls = JSON.parse(readFileSync(new URL('../fixtures/positions-null.json', import.meta.url)));
+    for (const viewport of [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }]) for (const theme of THEMES) {
+      const { snapshot } = designSnapshot(NOW);
+      snapshot.positions.rows = structuredClone(nulls.positions.rows);
+      for (const row of snapshot.positions.rows) row.updatedAt = NOW;
+      const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b); b.setNow(NOW);
+      const accepted = await b.push(snapshot);
+      const tag = `${viewport.name} ${theme} nullable positions`;
+      check('positions', `${tag}: real ingress accepts per-field null reasons`, accepted.status === 200, accepted);
+      b.setNow(at(NOW, 9));
+      await configure(page, viewport, theme); await load(page, b.url, 'desk');
+      await waitFor(page, `document.querySelectorAll('#kept [data-keep]').length === 2`);
+      const seen = await ev(`(() => ({
+        kept: [...document.querySelectorAll('#kept [data-keep]')].map(row => ({ symbol: row.dataset.keep,
+          text: row.innerText, reasons: row.querySelector('.position-reasons')?.innerText,
+          dashes: [...row.querySelectorAll('[aria-label]')].map(e => ({ text: e.innerText, title: e.title, name: e.getAttribute('aria-label') })),
+          interactive: row.querySelectorAll('button, a, input, [tabindex]').length })),
+        worth: document.querySelector('#kept .pstate').innerText,
+        desk: document.querySelector('#positions [data-desk="j"]')?.innerText,
+        mark: [...document.querySelectorAll('#positions [aria-label]')].some(e => e.getAttribute('aria-label') === 'Last price: not reported · not reported by the broker' && e.title === e.getAttribute('aria-label') && e.textContent === '—'),
+        horizontal: __audit.horizontal(), clipping: __audit.clipping()
+      }))()`);
+      for (const row of seen.kept) {
+        const why = row.symbol === 'SXR8' ? 'not exact yet' : 'not reported by the broker';
+        check('positions', `${tag} ${row.symbol}: quantity and values visibly explain their nulls`,
+          ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => row.reasons?.includes(`${label}: ${why}`)) &&
+          ['Quantity', 'Last price', 'Worth'].every(label => row.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · ${why}` && d.name === d.title)), row);
+        check('KEEP', `${tag} ${row.symbol}: no interactive element inside the kept row`, row.interactive === 0, row);
+      }
+      check('positions', `${tag}: a stage0 null mark has its accessible and visible reason`, seen.mark && seen.desk?.includes('Last price: not reported by the broker'), seen);
+      check('positions', `${tag}: no partial kept worth is presented as complete`, /Worth not available · not exact yet · not reported by the broker/.test(N(seen.worth)), seen.worth);
+      check('positions', `${tag}: no overflow or clipping`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
+      const clip = await ev(`(() => { const r = document.getElementById('kept').getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
+      const file = `${viewport.name}-${theme}-desk-kept-null.png`;
+      writeFileSync(join(QA_DIR, file), Buffer.from(data, 'base64'));
+      shots.push({ file, what: `Nullable KEEP rows and unavailable worth: ${tag}` });
     }
   }
 

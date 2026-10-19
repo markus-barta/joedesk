@@ -296,6 +296,97 @@ test('P2 retention: every retained cell keeps valueReceivedAt through nulls, rej
   assert.equal(corrupt.panels()['today.equity'].reason, 'contract_invalid');
 });
 
+test('rev 8 positions: per-field null reasons survive HTTP ingress, projection and restart', async t => {
+  const s = await setup(t);
+  const value = JSON.parse(readFileSync(new URL('../fixtures/positions-null.json', import.meta.url)));
+  delete value.receivedAt;
+  assert.equal((await s.push(value)).status, 200);
+  const wire = (await s.request('/joe/data.json')).body;
+  assert.deepEqual(wire.positions.rows, value.positions.rows);
+  assert.equal(validateContract('data', wire).ok, true);
+  const restart = createReadModel({ dataDir: s.dataDir, clock: () => at(9000) });
+  assert.deepEqual(restart.view().data.positions.rows, value.positions.rows);
+  assert.deepEqual(restart.panels().kept.value.map(row => [row.symbol, row.quantity, row.reasons.quantity]),
+    [['SXR8', null, 'not_exact_yet'], ['TSLA', null, 'source_unavailable']]);
+  const unreasoned = structuredClone(value); unreasoned.seq++;
+  delete unreasoned.positions.rows[1].reasons.quantity;
+  const rejected = await s.push(unreasoned);
+  assert.equal(rejected.status, 422);
+  assert.ok(rejected.body.errors.some(error => error.path === '$.positions.rows[1].quantity' && error.rule === 'reasonRequired'));
+  assert.deepEqual((await s.request('/joe/data.json')).body.positions.rows, value.positions.rows);
+});
+
+test('rev 8 cash: exact ingress, stale read and null retention survive restart independently of equity', async t => {
+  const s = await setup(t);
+  const value = snapshot(); value.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+  assert.equal((await s.push(value)).status, 200);
+  assert.equal((await s.request('/joe/data.json')).body.brokerAccount.cash.amount, '12345.67890123');
+  assert.equal(s.model.panels().paperCash.state, 'fresh');
+  s.time.ms = 90000;
+  assert.equal(s.model.panels().paperCash.state, 'stale');
+  const unavailable = snapshot(102, 90000);
+  unavailable.brokerAccount.cash = null; unavailable.brokerAccount.reasons = { cash: 'source_unavailable' };
+  assert.equal((await s.push(unavailable)).status, 200);
+  const restart = createReadModel({ dataDir: s.dataDir, clock: () => at(90000) });
+  const panel = restart.panels().paperCash;
+  assert.equal(panel.state, 'broken'); assert.equal(panel.retained, true);
+  assert.equal(panel.valueReceivedAt, at(0)); assert.equal(panel.ageSeconds, 90);
+  assert.equal(panel.value.amount, '12345.67890123');
+  const wire = restart.view().data;
+  assert.equal(wire.brokerAccount.cash, null);
+  assert.equal(wire.brokerAccount.reasons.cash, 'source_unavailable');
+  assert.deepEqual(wire.brokerAccount.equity, value.brokerAccount.equity);
+  assert.equal(wire.brokerAccount.reason, undefined);
+  assert.equal(validateContract('data', wire).ok, true);
+  const recovery = snapshot(103, 100000); recovery.brokerAccount.cash = value.brokerAccount.cash;
+  s.time.ms = 100000; assert.equal((await s.push(recovery)).status, 200);
+  assert.equal(s.model.panels().paperCash.state, 'fresh');
+  assert.equal(s.model.panels().paperCash.retained, false);
+});
+
+test('rev 8 cash: API check expiry and explicit session loss withhold the value exactly like equity', async t => {
+  const s = await setup(t);
+  const value = snapshot(101, 0, -20000); value.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+  assert.equal((await s.push(value)).status, 200);
+  s.time.ms = 40000;
+  let wire = (await s.request('/joe/data.json')).body;
+  assert.equal(wire.brokerAccount.equity, null); assert.equal(wire.brokerAccount.cash, null);
+  assert.equal(wire.brokerAccount.reason, 'gateway_unconfirmed');
+  assert.equal(wire.brokerAccount.reasons.cash, 'gateway_unconfirmed');
+  assert.equal(validateContract('data', wire).ok, true);
+  assert.equal(s.model.panels().paperCash.retained, true);
+  const dead = fixture('a-gateway-up-but-dead'); dead.seq = 102; dead.generatedAt = at(40000);
+  dead.safety.gateway.checkedAt = at(40000); dead.brokerAccount.cash = null;
+  dead.brokerAccount.reasons = { cash: 'gateway_unconfirmed' };
+  assert.equal((await s.push(dead)).status, 200);
+  const restart = createReadModel({ dataDir: s.dataDir, clock: () => at(40000) });
+  wire = restart.view().data;
+  assert.equal(wire.brokerAccount.cash, null);
+  assert.equal(restart.panels().paperCash.valueReceivedAt, at(0));
+});
+
+test('rev 8 cash: a rev 7 durable cell set preserves sequence and last-good cells on upgrade', async t => {
+  const s = await setup(t); assert.equal((await s.push(snapshot())).status, 200);
+  const file = join(s.dataDir, 'data-state.json');
+  const stored = JSON.parse(readFileSync(file)); delete stored.cells.paperCash;
+  atomicWrite(file, stored, 2 * 1024 * 1024);
+  const original = readFileSync(file, 'utf8');
+  s.time.ms = 10000;
+  const restart = createReadModel({ dataDir: s.dataDir, clock: () => at(s.time.ms) });
+  assert.equal(restart.hasData(), true);
+  assert.equal(restart.panels().paperAccount.value.amount, samples.data.brokerAccount.equity.amount);
+  assert.equal(restart.panels().paperCash.state, 'not reported');
+  assert.equal(readFileSync(file, 'utf8'), original);
+  assert.equal(restart.accept(snapshot()).reason, 'sequence_replayed');
+  assert.equal(restart.accept(snapshot(102, 10000)).ok, true);
+  const withCash = snapshot(103, 20000); withCash.brokerAccount.cash = { amount: '12.34000000', currency: 'EUR' };
+  s.time.ms = 20000;
+  assert.equal(restart.accept(withCash).ok, true);
+  const damaged = JSON.parse(readFileSync(file)); delete damaged.cells.paperCash;
+  atomicWrite(file, damaged, 2 * 1024 * 1024);
+  assert.equal(createReadModel({ dataDir: s.dataDir }).hasData(), false);
+});
+
 test('P2 gateway: persisted old-check progress invalidates every money, account and both position panels', async t => {
   for (const skew of [5000, -61000]) {
     const s = await setup(t);
@@ -1050,6 +1141,11 @@ test('P2 KEEP: accepted Fleet Config policy withholds affected money and measure
   assert.equal(point.desks.j.money.equity, null); assert.equal(point.totals.equity, null);
   assert.equal(point.desks.joe.money.equity.amount, '5000');
   assert.equal(states.paperAccount.value.amount, '28000');
+  const wire = (await s.request('/joe/data.json')).body;
+  for (const row of wire.positions.rows) for (const field of ['mark', 'marketValue']) {
+    assert.equal(row[field], null);
+    assert.equal(row.reasons[field], 'source_not_authoritative');
+  }
   const floor = structuredClone(config); floor.desks.keep = ['DEMO'];
   assert.equal(s.model.observeFleet(floor).ok, false);
 });

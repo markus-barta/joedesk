@@ -243,6 +243,12 @@
       "reason": "schema_unsupported",
       "retained": true
     },
+    "paperCash": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "schema_unsupported",
+      "retained": false
+    },
     "desks.j.equity": {
       "state": "broken",
       "ageSeconds": 609,
