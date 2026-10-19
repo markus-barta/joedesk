@@ -14,8 +14,8 @@
     },
     {
       "path": "contracts/data.schema.json",
-      "size": 28644,
-      "sha256": "e81b01af53b6953aedfb9e28105fe6bf1b148ce26476ff97018bf74f783c68d0"
+      "size": 28786,
+      "sha256": "84a9de4449d87a69ee620d0f37bd84d77b2de86cebb03fe2ef9e709161161d26"
     },
     {
       "path": "contracts/decimal.mjs",
@@ -50,7 +50,7 @@
     {
       "path": "contracts/manifest.json",
       "size": 932,
-      "sha256": "4b4828d76e513792bc6bfa15a1f279de3753c055c2c32d927c041e6e3aba58e4"
+      "sha256": "3246d0979f790ed33aec2bd66efb195ffab4ac6d916519d9b4e2f7b3601feb3f"
     },
     {
       "path": "contracts/panel-state.mjs",
@@ -64,8 +64,8 @@
     },
     {
       "path": "contracts/reason.schema.json",
-      "size": 1043,
-      "sha256": "74bb9c43bcf094d183fac21f09378978004a2dcf1ead9310fa523391fb0b0a10"
+      "size": 1064,
+      "sha256": "11dbe796c379dce9ee669aa724e29a3f45b0e5823902a8f3f68d2d3f82c65916"
     },
     {
       "path": "contracts/results.schema.json",
@@ -79,8 +79,8 @@
     },
     {
       "path": "contracts/semantics.mjs",
-      "size": 12700,
-      "sha256": "c1a77cce6aec15d7a955cd9afd05cc7fd116c59a8a49f50f1d1980555a30a989"
+      "size": 12877,
+      "sha256": "29e28436ec1400a27507308206591c64342890a6bf56c056589373b3a20dd6fc"
     },
     {
       "path": "contracts/vienna-date.mjs",
@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 30867,
-      "sha256": "32e2b96d3f100cf50aab98cad9291227c41a499f48be6c5164704a8eb00c6def"
+      "size": 31224,
+      "sha256": "dc1e8a5752769a177b1f0fd091f06e87cd8a9b7bfb253fabad36e42edef392db"
     },
     {
       "path": "public/joe/events.js",
@@ -164,8 +164,8 @@
     },
     {
       "path": "public/joe/health.js",
-      "size": 12289,
-      "sha256": "807abd37dd214066efe188d483016f4d8728ec2fc728329ebbc102bc89bcbc56"
+      "size": 12331,
+      "sha256": "f1c3f0a0a85b6a4c8b878cc245863d2f15f8b1911b9a079ce74e588531792ac6"
     },
     {
       "path": "public/joe/history-model.js",
@@ -275,7 +275,7 @@
     {
       "path": "release/contracts.json",
       "size": 1661,
-      "sha256": "94559bd7a273f635be24a127fae674283edb68fd435c8a80249d9f258a3aca4a"
+      "sha256": "5c20c38be4602f6c142ece1c1abc65172306d504aa0a74d098e10bb15f78ef17"
     },
     {
       "path": "release/data-migration.mjs",

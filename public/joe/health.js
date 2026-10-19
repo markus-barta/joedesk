@@ -66,6 +66,7 @@ export const CELL_REASON = Object.freeze({
   results_capture_failed: 'results capture failing — trading continues',
   not_exact_yet: 'not exact yet',
   source_unavailable: 'not reported by the broker',
+  desk_unmapped: 'not matched to a desk',
 });
 export const cellReason = reason => CELL_REASON[reason] ?? 'not available';
 export const capital = text => text.charAt(0).toUpperCase() + text.slice(1);

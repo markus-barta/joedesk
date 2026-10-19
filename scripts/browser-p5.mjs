@@ -420,9 +420,11 @@ try {
     }
   }
 
-  // Rev 8: partial position observations stay explicit and KEEP stays inert.
+  // Revs 8/9: partial observations and unmapped desk identity stay explicit;
+  // KEEP stays inert. Browser execution and crops belong to PR CI.
   if (run('positions')) {
     const nulls = JSON.parse(readFileSync(new URL('../fixtures/positions-null.json', import.meta.url)));
+    const unmapped = JSON.parse(readFileSync(new URL('../fixtures/positions-unmapped.json', import.meta.url)));
     for (const viewport of [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }]) for (const theme of THEMES) {
       const { snapshot } = designSnapshot(NOW);
       snapshot.positions.rows = structuredClone(nulls.positions.rows);
@@ -434,6 +436,22 @@ try {
       b.setNow(at(NOW, 9));
       await configure(page, viewport, theme); await load(page, b.url, 'desk');
       await waitFor(page, `document.querySelectorAll('#kept [data-keep]').length === 2`);
+      const figureSelectors = ['#deskHero', '#heroL .kpi', '#heroL .cash-reserve', '#desks', '.dcard'];
+      const figureBoxes = await rects(figureSelectors);
+      const figures = () => ev(`({ values: [...document.querySelectorAll('#heroL .display, #heroL .kpi dd > .bn, #heroL [data-cash], .dcard .dnums .v')].map(e => e.innerText), count: document.getElementById('posSub').innerText })`);
+      const before = await figures();
+      snapshot.seq++;
+      snapshot.positions.rows.unshift({ ...structuredClone(unmapped), updatedAt: NOW });
+      const withUnmapped = await b.push(snapshot);
+      check('desk-unmapped', `${tag}: real ingress accepts a null desk with its own reason`, withUnmapped.status === 200, withUnmapped);
+      await ev('window.__joedesk.refresh().then(() => true)'); await settle(page);
+      await waitFor(page, `document.querySelector('#positions [data-desk=""] .name > span[aria-label]')`);
+      const after = await figures();
+      check('desk-unmapped', `${tag}: desk counts, desk cards, Today and account figures exclude the unmapped row`, J(before) === J(after), { before, after });
+      const afterBoxes = await rects(figureSelectors);
+      const figureMovement = figureBoxes.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== afterBoxes[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: afterBoxes[i]?.[k] })));
+      if (figureBoxes.length !== afterBoxes.length) figureMovement.push({ count: [figureBoxes.length, afterBoxes.length] });
+      check('desk-unmapped', `${tag}: cash, KPI reserves and desk cards have exactly 0 px shift`, !figureMovement.length, figureMovement);
       const seen = await ev(`(() => ({
         kept: [...document.querySelectorAll('#kept [data-keep]')].map(row => ({ symbol: row.dataset.keep,
           text: row.innerText, reasons: row.querySelector('.position-reasons')?.innerText,
@@ -441,6 +459,11 @@ try {
           interactive: row.querySelectorAll('button, a, input, [tabindex]').length })),
         worth: document.querySelector('#kept .pstate').innerText,
         desk: document.querySelector('#positions [data-desk="j"]')?.innerText,
+        unmapped: (() => { const row = document.querySelector('#positions [data-desk=""]'), label = row.querySelector('.name > span[aria-label]');
+          return { text: row.innerText, reason: row.querySelector('.position-reasons')?.innerText, label: label.innerText, title: label.title, name: label.getAttribute('aria-label'),
+            colour: row.querySelector('.sym').getAttribute('style'), marks: row.querySelectorAll('.im, .dmark').length,
+            dashes: [...row.querySelectorAll('.position-value')].map(e => ({ text: e.textContent, title: e.title, name: e.getAttribute('aria-label') })) }; })(),
+        order: [...document.querySelectorAll('#positions .prow:not(.hd) .name > b')].map(e => e.innerText),
         mark: [...document.querySelectorAll('#positions [aria-label]')].some(e => e.getAttribute('aria-label') === 'Last price: not reported · not reported by the broker' && e.title === e.getAttribute('aria-label') && e.textContent === '—'),
         horizontal: __audit.horizontal(), clipping: __audit.clipping()
       }))()`);
@@ -452,6 +475,12 @@ try {
         check('KEEP', `${tag} ${row.symbol}: no interactive element inside the kept row`, row.interactive === 0, row);
       }
       check('positions', `${tag}: a stage0 null mark has its accessible and visible reason`, seen.mark && seen.desk?.includes('Last price: not reported by the broker'), seen);
+      const deskLabel = 'No desk · not matched to a desk', u = seen.unmapped;
+      check('desk-unmapped', `${tag}: visible name line, title and accessible name carry the desk reason without a desk colour or mark`,
+        u.label === deskLabel && u.title === deskLabel && u.name === deskLabel && !u.colour && u.marks === 0 && J(seen.order) === J(['DEMO', 'AAA']), seen);
+      check('desk-unmapped', `${tag}: all null values stay dashes with their own reasons`,
+        ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => u.reason?.includes(`${label}: not exact yet`)) &&
+        ['Quantity', 'Last price', 'Worth', 'Open result'].every(label => u.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · not exact yet` && d.name === d.title)), u);
       check('positions', `${tag}: no partial kept worth is presented as complete`, /Worth not available · not exact yet · not reported by the broker/.test(N(seen.worth)), seen.worth);
       check('positions', `${tag}: no overflow or clipping`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
       const clip = await ev(`(() => { const r = document.getElementById('kept').getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
@@ -459,6 +488,11 @@ try {
       const file = `${viewport.name}-${theme}-desk-kept-null.png`;
       writeFileSync(join(QA_DIR, file), Buffer.from(data, 'base64'));
       shots.push({ file, what: `Nullable KEEP rows and unavailable worth: ${tag}` });
+      const deskClip = await ev(`(() => { const r = document.querySelector('#positions [data-desk=""]').getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const deskCrop = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: deskClip });
+      const deskFile = `${viewport.name}-${theme}-desk-unmapped.png`;
+      writeFileSync(join(QA_DIR, deskFile), Buffer.from(deskCrop.data, 'base64'));
+      shots.push({ file: deskFile, what: `Unmapped desk position with its visible reason: ${tag}` });
     }
   }
 
