@@ -1,7 +1,7 @@
 // Shared pieces: icons from the inline sprite, terms, big numbers, desk marks
 // and the one opaque tip. Everything returns escaped HTML strings.
 import { TERMS } from './terms.js';
-import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol } from './format.js';
+import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol, cashAmount } from './format.js';
 import { cellReason, capital } from './health.js';
 
 export const $ = (selector, root = document) => root.querySelector(selector);
@@ -231,4 +231,20 @@ export function statePhrase(cell, key, held = 'last good value') {
 export function stateCaption(cell, key, fresh = '', held) {
   const p = statePhrase(cell, key, held);
   return p.state === 'fresh' ? fresh : capital(p.text);
+}
+
+// Both account surfaces keep room for the longest normal cash report and
+// null explanations. Retained broken money is diagnostic only, never current.
+const CASH_SIZING = [
+  'cash not reported · results capture failing — trading continues',
+  'cash not reported · held back: the kept-holdings list disagrees',
+  'cash −€ 999.999,99 · results capture failing — trading continues',
+].map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
+export function cashCaption(cell, key) {
+  const value = cell?.state === 'broken' && cell.retained ? null : cell?.value;
+  const why = cell?.reason ? cellReason(cell.reason) : null;
+  const view = value == null ? { text: `cash not reported · ${why ?? cellReason('feed_not_received')}`,
+    title: `Cash not reported · ${why ?? cellReason('feed_not_received')}` } : cashAmount(value);
+  if (value != null && why) { view.text += ` · ${why}`; view.title += ` · ${why}`; }
+  return `<span class="cash-reserve"><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}">${esc(view.text)}</span>${CASH_SIZING}</span>`;
 }

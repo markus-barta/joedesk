@@ -811,6 +811,30 @@
           ],
           "x-owner": "pusher"
         },
+        "cash": {
+          "description": "Broker-reported EUR cash decimal lexeme for the paper account including KEEP, at the same scope and observation as equity. No float conversion or producer rounding.",
+          "anyOf": [
+            {
+              "$ref": "urn:joedesk:common:v2#/$defs/money"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "x-owner": "pusher"
+        },
+        "reasons": {
+          "description": "Per-field reasons; cash uses reasons.cash. The existing reason field continues to describe equity only.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cash": {
+              "$ref": "urn:joedesk:reason:v2",
+              "x-owner": "pusher"
+            }
+          },
+          "x-owner": "pusher"
+        },
         "accountHint": {
           "type": "string",
           "minLength": 1,

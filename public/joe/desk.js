@@ -1,7 +1,7 @@
 // Desk: health line and details, Today, the three desks, positions and the
 // kept holdings. Every number comes from one panel-state cell; each cell shows
 // fresh, stale with age, not reported, or broken with its reason, on its own.
-import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption } from './ui.js';
+import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, cashCaption } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, STALE_AFTER_S } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
@@ -164,7 +164,8 @@ function heroLeft(ctx) {
   const day = cellView(dayCell, 'hero.day');
   const kpi = (termKey, label, name, key, opts) => {
     const v = cellView(states[name], key, opts);
-    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}</dt><dd>${v.html}<span class="c">${v.caption}</span></dd></div>`;
+    const caption = key === 'hero.account' ? `<span class="account-caption"><span>${v.caption}</span><span class="cash-sizing" aria-hidden="true">Last good value, 999 days ago · last update had an unknown format</span></span>` : v.caption;
+    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}</dt><dd>${v.html}<span class="c">${caption}</span>${key === 'hero.account' ? cashCaption(states.paperCash, 'hero.cash') : ''}</dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
   const why = dayCell?.reason ? cellReason(dayCell.reason) : null;

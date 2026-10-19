@@ -20,6 +20,7 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const format = await import('../public/joe/format.js');
+const { cashCaption } = await import('../public/joe/ui.js');
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
@@ -79,6 +80,45 @@ test('host gate: canonical hosts include the production host; others get the pri
     '100.127.255.255', 'hsb1.tail1234.ts.net', 'foo.hsb1.ts.net', 'hsb1.ts.net', 'cs0.barta.cm', 'cs0', 'CS0.BARTA.CM']) assert.ok(isCanonicalJoeHost(host), host);
   for (const host of ['example.com', '8.8.8.8', '100.63.255.255', '100.128.0.1', '100.64.0.256', '100.64.0.07', '192.168.1.10',
     '10.0.0.1', 'example.ts.net', 'hsb1.example.com', 'cs0.barta.com']) assert.ok(!isCanonicalJoeHost(host), host);
+});
+
+test('cash formatting: exact broker lexemes display at two decimals without a floating-point round trip', () => {
+  for (const [amount, text] of [['12345.67890123', 'cash € 12.345,68'], ['1.00500000', 'cash € 1,01'],
+    ['-1.00500000', 'cash −€ 1,01'], ['0.00000001', 'cash € 0,00'], ['-0.00000001', 'cash € 0,00'],
+    ['9007199254740993.00500000', 'cash € 9.007.199.254.740.993,01'], ['12345.67000000', 'cash € 12.345,67']]) {
+    const value = { amount, currency: 'EUR' };
+    assert.deepEqual(format.cashAmount(value), { text, title: `Cash: EUR ${amount}` });
+    assert.equal(value.amount, amount);
+    for (const key of ['hero.cash', 'rt.cash']) {
+      const html = cashCaption({ state: 'fresh', value }, key);
+      assert.ok(html.includes(`title="Cash: EUR ${amount}" aria-label="Cash: EUR ${amount}"`));
+      assert.ok(html.includes(`>${text}</span>`));
+    }
+  }
+});
+
+test('cash captions: null, omitted and broken retained values always explain why', () => {
+  for (const key of ['hero.cash', 'rt.cash']) {
+    const nullHtml = cashCaption({ state: 'broken', value: null, reason: 'gateway_unconfirmed' }, key);
+    assert.match(nullHtml, />cash not reported · broker connection not confirmed<\/span>/);
+    assert.match(nullHtml, /title="Cash not reported · broker connection not confirmed" aria-label="Cash not reported · broker connection not confirmed"/);
+    const held = cashCaption({ state: 'broken', value: { amount: '12345.67890123', currency: 'EUR' },
+      retained: true, reason: 'gateway_unconfirmed' }, key);
+    assert.equal(held, nullHtml);
+    assert.match(cashCaption(null, key), />cash not reported · no data received yet<\/span>/);
+  }
+});
+
+test('cash captions: stale values keep exact accessibility and their own reason with the same reserve', () => {
+  const value = { amount: '12345.67890123', currency: 'EUR' };
+  const reserve = html => html.slice(html.indexOf('<span class="cash-sizing"'));
+  const fresh = cashCaption({ state: 'fresh', value }, 'hero.cash');
+  const stale = cashCaption({ state: 'stale', value, reason: 'snapshot_stale' }, 'hero.cash');
+  const absent = cashCaption({ state: 'broken', value: null, reason: 'source_not_authoritative' }, 'hero.cash');
+  assert.match(stale, />cash € 12\.345,68 · updates are late<\/span>/);
+  assert.match(stale, /aria-label="Cash: EUR 12345\.67890123 · updates are late"/);
+  assert.equal(reserve(stale), reserve(fresh));
+  assert.equal(reserve(absent), reserve(fresh));
 });
 
 test('ledger size: decimal MB round half-even from exact integer bytes', () => {

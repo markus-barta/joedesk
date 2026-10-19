@@ -1,7 +1,7 @@
 {
   "schema": "joedesk.release-contracts.v1",
-  "contract_set_sha256": "3eaf443cf06579ab93d4ed32c0752f8a6fd6978b6086ba50a97f74faa00b0b9d",
-  "manifest_revision": 7,
+  "contract_set_sha256": "4a60bf59dd17a7c032e05b9c138552dc187ed02215185439b574e1648ea92191",
+  "manifest_revision": 8,
   "compatibility": {
     "data": [
       "inspr.joe.household.v2"
@@ -41,13 +41,13 @@
       "evidence": "test/release.mjs + test/server-contract.mjs"
     },
     "pusher": {
-      "required_contract_set_sha256": "3eaf443cf06579ab93d4ed32c0752f8a6fd6978b6086ba50a97f74faa00b0b9d",
+      "required_contract_set_sha256": "4a60bf59dd17a7c032e05b9c138552dc187ed02215185439b574e1648ea92191",
       "required_data_schema": "inspr.joe.household.v2",
       "deployment_pin": null,
       "status": "Amy JOED-20 real producer rehearsal/sign-off required"
     },
     "executor": {
-      "required_contract_set_sha256": "3eaf443cf06579ab93d4ed32c0752f8a6fd6978b6086ba50a97f74faa00b0b9d",
+      "required_contract_set_sha256": "4a60bf59dd17a7c032e05b9c138552dc187ed02215185439b574e1648ea92191",
       "reports_via": "pusher data.safety.executor",
       "deployment_pin": null,
       "status": "Amy executor/broker reconciliation required"

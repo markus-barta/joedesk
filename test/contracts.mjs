@@ -60,6 +60,8 @@ test('only the documented JSON Schema vocabulary is used; every field has exactl
   for (const [kind, schema] of Object.entries(SCHEMAS)) walk(schema, schema, schema['x-owner'], kind);
   assert.equal(owners['data.receivedAt'], 'server');
   assert.equal(owners['data.totals.equity.amount'], 'pusher');
+  assert.equal(owners['data.brokerAccount.cash.amount'], 'pusher');
+  assert.equal(owners['data.brokerAccount.reasons.cash'], 'pusher');
   assert.equal(owners['data.safety.executor.gatewayReachable'], 'paper executor 8470');
   assert.equal(owners['data.safety.executor.ledgerBytes'], 'paper executor 8470');
   assert.equal(owners['data.safety.executor.ledgerCapBytes'], 'paper executor 8470');
@@ -82,7 +84,7 @@ test('one closed reason enum is used everywhere, including field errors', () => 
 });
 
 test('rev 7 executor: rev 6 payloads remain valid; the reason enum is append-only', () => {
-  assert.equal(CONTRACTS.revision, 7);
+  assert.equal(CONTRACTS.revision, 8);
   assert.equal(CONTRACTS.contracts.data, 'inspr.joe.household.v2');
   assert.equal(REASONS.at(-2), 'executor_broker_disagreement');
   assert.equal(REASONS.at(-1), 'results_capture_failed');
@@ -122,6 +124,101 @@ test('rev 7 executor: ledger bytes and optional cap validate without hiding over
       rejects(validateContract('data', data), rule, `$.safety.executor.${key}`);
     }
   }
+});
+
+test('rev 8 cash: rev 7 payloads with or without the account still validate', () => {
+  const data = copy(samples.data);
+  assert.equal(Object.hasOwn(data.brokerAccount, 'cash'), false);
+  assert.equal(validateContract('data', data).ok, true);
+  delete data.brokerAccount;
+  assert.equal(validateContract('data', data).ok, true);
+  assert.equal(validateContract('data', ingress(data), { stage: 'ingress' }).ok, true);
+});
+
+test('rev 8 cash: exact EUR money or null with its own closed reason, never equity’s reason', () => {
+  for (const amount of ['0', '-0.00000001', '12345.67890123', '9007199254740993.00500000']) {
+    const data = copy(samples.data);
+    data.brokerAccount.cash = { amount, currency: 'EUR' };
+    assert.equal(validateContract('data', data).ok, true, amount);
+    const accepted = acceptSnapshot('data', ingress(data), null, at);
+    assert.equal(accepted.status, 200);
+    assert.equal(accepted.value.brokerAccount.cash.amount, amount);
+  }
+  const data = copy(samples.data);
+  data.brokerAccount.cash = null;
+  data.brokerAccount.reason = 'upstream_lost';
+  for (const stage of ['served', 'ingress']) {
+    const value = stage === 'ingress' ? ingress(data) : data;
+    rejects(validateContract('data', value, { stage }), 'reasonRequired', '$.brokerAccount.cash');
+  }
+  for (const reason of REASONS) {
+    data.brokerAccount.reasons = { cash: reason };
+    assert.equal(validateContract('data', data).ok, true, reason);
+  }
+  data.brokerAccount.reasons.cash = 'unreviewed';
+  rejects(validateContract('data', data), 'enum', '$.brokerAccount.reasons.cash');
+  data.brokerAccount.reasons = { equity: 'upstream_lost' };
+  rejects(validateContract('data', data), 'additionalProperties', '$.brokerAccount.reasons');
+});
+
+test('rev 8 cash: floats, malformed precision and foreign currency fail', () => {
+  for (const cash of [1.25, '1.25', { amount: 1.25, currency: 'EUR' },
+    { amount: '1.123456789', currency: 'EUR' }, { amount: '1e3', currency: 'EUR' },
+    { amount: '01.25', currency: 'EUR' }, { amount: '1', currency: 'USD' }]) {
+    const data = copy(samples.data); data.brokerAccount.cash = cash;
+    assert.equal(validateContract('data', data).ok, false, JSON.stringify(cash));
+  }
+});
+
+test('rev 8 cash: a value plus its reason mirrors equity acceptance and leaves equity independent', () => {
+  const data = copy(samples.data);
+  data.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+  data.brokerAccount.reasons = { cash: 'retained_values' };
+  assert.equal(validateContract('data', data).ok, true);
+  const states = panelStates({ data: { value: data } }, later);
+  assert.equal(states.paperAccount.state, 'fresh');
+  assert.equal(states.paperCash.state, 'broken');
+  assert.equal(states.paperCash.reason, 'retained_values');
+  data.brokerAccount.reason = 'retained_values';
+  assert.equal(validateContract('data', data).ok, true);
+});
+
+test('rev 8 cash: fresh, stale, broken retention, gateway expiry and recovery follow the account', () => {
+  const data = copy(samples.data);
+  data.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+  const feed = { value: data, generatedAdvancedAt: at };
+  const fresh = panelStates({ data: feed }, later);
+  assert.equal(fresh.paperCash.state, 'fresh');
+  assert.deepEqual(fresh.paperCash.value, data.brokerAccount.cash);
+  const stale = panelStates({ data: feed }, '2026-10-14T17:43:52.000Z', fresh);
+  assert.equal(stale.paperCash.state, 'stale');
+  assert.equal(stale.paperCash.reason, 'snapshot_stale');
+  assert.deepEqual(stale.paperCash.value, data.brokerAccount.cash);
+  const missing = copy(data);
+  missing.receivedAt = missing.generatedAt = later; missing.safety.gateway.checkedAt = later;
+  missing.brokerAccount.cash = null; missing.brokerAccount.reasons = { cash: 'source_not_authoritative' };
+  const broken = panelStates({ data: { value: missing, generatedAdvancedAt: later } }, later, fresh);
+  assert.equal(broken.paperCash.state, 'broken');
+  assert.equal(broken.paperCash.retained, true);
+  assert.equal(broken.paperCash.valueReceivedAt, at);
+  assert.equal(broken.paperAccount.state, 'fresh');
+  const expiredFeed = { ...feed, value: copy(data) };
+  expiredFeed.value.safety.gateway.checkedAt = '2026-10-14T17:42:12.000Z';
+  const expired = panelStates({ data: expiredFeed }, '2026-10-14T17:43:12.000Z', fresh);
+  assert.equal(expired.paperCash.reason, 'gateway_unconfirmed');
+  assert.equal(expired.paperCash.retained, true);
+  assert.equal(expired.paperCash.valueReceivedAt, at);
+  assert.equal(panelStates({ data: feed }, later, broken).paperCash.state, 'fresh');
+});
+
+test('rev 8 cash: an unconfirmed session requires cash null with its own reason', () => {
+  const data = copy(JSON.parse(readFileSync(new URL('../fixtures/failures/a-gateway-up-but-dead.json', import.meta.url))).payload);
+  data.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+  rejects(validateContract('data', data, { stage: 'ingress' }), 'sessionUnavailable', '$.brokerAccount.cash');
+  data.brokerAccount.cash = null;
+  rejects(validateContract('data', data, { stage: 'ingress' }), 'reasonRequired', '$.brokerAccount.cash');
+  data.brokerAccount.reasons = { cash: 'gateway_unconfirmed' };
+  assert.equal(validateContract('data', data, { stage: 'ingress' }).ok, true);
 });
 
 test('missing feed retains false HALT with its original receipt rather than treating it as absent', () => {

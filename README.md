@@ -749,10 +749,38 @@ or “record incomplete”.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
-`contract_set_sha256`; an earlier digest does not cover revision-7 acceptance
+`contract_set_sha256`; an earlier digest does not cover revision-8 acceptance
 and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.
+
+Contract-set revision 8 (JOED-49) adds optional `brokerAccount.cash` as EUR
+`money|null`, owned by the pusher. It is the paper account's broker-reported
+cash decimal lexeme, at the same `paper-account-including-keep` scope and
+`observedAt` as equity. Preserve the broker bytes: no float conversion or
+rounding in the producer or storage. The exact IB cash field remains Amy's
+mapping decision; this contract does not derive cash from NAV or desk totals.
+`brokerAccount.reasons.cash` supplies cash's own closed null reason, following
+the per-field bags on desks/totals. `brokerAccount.reason` remains equity-only
+and cannot justify null cash. An explicitly null cash without its own reason
+fails with `reasonRequired`; a value with a reason is accepted, matching equity.
+Rev-7 payloads omitting cash or the whole account still validate, and old
+durable cell sets retain their sequence and last-good observations on restart.
+The data ID stays `inspr.joe.household.v2`.
+
+The independent `paperCash` panel follows account freshness, retention and
+API-session checks. The read model withholds broken retained cash with its
+own reason; an unconfirmed session nulls cash alongside equity. Desk adds a
+cash caption below the account total, and Settings appends cash to the account
+row. Both show two decimals using exact integer units for display only, with
+the untouched broker lexeme in title and accessible name. Null always reads
+“cash not reported · [reason]”; rev-7 omission reads “no data received yet”.
+Both surfaces reserve value/stale/null space, wrap text and keep the existing
+header. P5's `cash` cases cover real ingress, stale, null, API-session loss,
+rev-7 omission and recovery at 1440/1024/390/360 in both themes, with exact
+component geometry checks, overflow/clipping assertions and
+`<width>-<theme>-{desk-hero,settings-account}-cash-{value,null}` crops.
+Browser results and visual approval remain with CI and the coordinator.
 
 Contract-set revision 7 keeps every revision-6 payload valid and the data ID
 `inspr.joe.household.v2`. The optional executor reason `results_capture_failed`

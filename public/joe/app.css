@@ -576,6 +576,11 @@ span.dbar, span.vbar { display: block; }
    dash with no sign, so without this its box would be shorter. */
 .hero-l .display { height: 61px; }
 .kpi .c { min-height: 2lh; }
+.cash-reserve, .account-caption { display: grid; min-width: 0; }
+.cash-reserve > span, .account-caption > span { grid-area: 1 / 1; min-width: 0; overflow-wrap: anywhere; }
+.cash-sizing { visibility: hidden; }
+.kpi .cash-reserve { font-size: 12px; font-weight: 400; line-height: 16px; letter-spacing: 0; color: var(--ink-3); }
+.account-cash-line { display: flex; gap: 4px; color: var(--ink-2); }
 /* The health line: the reason is one line at every width, with an ellipsis
    when it is longer (its title and Details give it whole), and no other fact
    wraps. So the line has fixed rows per width: one row from 1181 px; down to

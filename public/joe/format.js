@@ -39,6 +39,12 @@ export function ledgerSize(executor) {
   };
 }
 
+// Round only the display from exact units. The broker's original decimal
+// lexeme stays byte-for-byte in the tooltip and accessible name.
+export function cashAmount(value) {
+  return { text: `cash ${money(decimalUnits(value.amount), value.currency)}`, title: `Cash: ${value.currency} ${value.amount}` };
+}
+
 function exactParts(units, d) {
   const abs = roundUnits(units < 0n ? -units : units, d);
   return [String(abs / UNIT), String(abs % UNIT).padStart(8, '0').slice(0, d)];

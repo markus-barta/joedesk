@@ -243,6 +243,12 @@
       "reason": "contract_invalid",
       "retained": true
     },
+    "paperCash": {
+      "state": "broken",
+      "ageSeconds": 609,
+      "reason": "contract_invalid",
+      "retained": false
+    },
     "desks.j.equity": {
       "state": "broken",
       "ageSeconds": 609,

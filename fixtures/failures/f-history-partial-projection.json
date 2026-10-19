@@ -210,6 +210,12 @@
       "reason": "snapshot_stale",
       "retained": false
     },
+    "paperCash": {
+      "state": "not reported",
+      "ageSeconds": null,
+      "reason": null,
+      "retained": false
+    },
     "desks.j.equity": {
       "state": "stale",
       "ageSeconds": 609,
