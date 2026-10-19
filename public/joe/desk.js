@@ -1,7 +1,7 @@
 // Desk: health line and details, Today, the three desks, positions and the
 // kept holdings. Every number comes from one panel-state cell; each cell shows
 // fresh, stale with age, not reported, or broken with its reason, on its own.
-import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, cashCaption } from './ui.js';
+import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, STALE_AFTER_S } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
@@ -157,17 +157,18 @@ function sessionRing(now) {
   return `${svg}<div><b>${title}</b><span>${line}</span><span>${session}</span></div>`;
 }
 
-function heroLeft(ctx) {
+export function heroLeft(ctx) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
   const dayCell = states['today.dayPnl'];
   const day = cellView(dayCell, 'hero.day');
   const kpi = (termKey, label, name, key, opts) => {
     const v = cellView(states[name], key, opts);
-    const caption = key === 'hero.account' ? `<span class="account-caption"><span>${v.caption}</span><span class="cash-sizing" aria-hidden="true">Last good value, 999 days ago · last update had an unknown format</span></span>` : v.caption;
+    const caption = reservedCaption(v.caption, opts.captions ?? [opts.caption]);
     return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}</dt><dd>${v.html}<span class="c">${caption}</span>${key === 'hero.account' ? cashCaption(states.paperCash, 'hero.cash') : ''}</dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
+  const moneyCaptions = [`started with ${eur(15000, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
   const why = dayCell?.reason ? cellReason(dayCell.reason) : null;
   let say;
   if (day.n == null) {
@@ -188,7 +189,7 @@ function heroLeft(ctx) {
     <dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
       ${kpi('since', sinceLabel(data), 'today.totalPnl', 'hero.since', { caption: 'after fees' })}
-      ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: jIncomplete ? 'J’s bookkeeping incomplete · desk total unavailable' : `started with ${eur(15000, false, 0)}` })}
+      ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions })}
       ${kpi('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}
     </dl>`;
 }
@@ -255,6 +256,7 @@ function sectionState(cell, key, { fresh, held, missing, absent }) {
 }
 
 const POSITION_FIELDS = { quantity: 'Quantity', mark: 'Last price', marketValue: 'Worth', dayPnl: 'Today’s result', openPnl: 'Open result' };
+const presentNull = (row, field) => Object.hasOwn(row, field) && row[field] === null;
 const rowReason = (row, field, cell) => cellReason(row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received');
 function positionValue(row, field, cell) {
   const value = row[field];
@@ -264,7 +266,7 @@ function positionValue(row, field, cell) {
 }
 function positionReasons(row, cell) {
   const missing = Object.entries(POSITION_FIELDS).filter(([field]) =>
-    (Object.hasOwn(row, field) || ['mark', 'marketValue'].includes(field)) && row[field] == null);
+    presentNull(row, field) || (['mark', 'marketValue'].includes(field) && row[field] == null));
   return missing.length ? `<span class="position-reasons">${missing.map(([field, label]) =>
     `${esc(label)}: ${esc(rowReason(row, field, cell))}`).join(' · ')}</span>` : '';
 }
@@ -295,7 +297,7 @@ export function positionsHtml(ctx) {
       <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)}</div>
       <div class="r c-px num">${positionValue(r, 'mark', cell)}</div>
       <div class="c-worth"><span class="num">${positionValue(r, 'marketValue', cell)}</span><span class="vbar">${value != null && max ? `<i data-v="${value}" data-cur="${esc(r.marketValue.currency)}" style="width:${(Math.abs(value) / max * 100).toFixed(3)}%"></i>` : ''}</span></div>
-      <div class="r">${r.openPnl == null ? positionValue(r, 'openPnl', cell) : pl(amountOf(r.openPnl), r.openPnl.currency ?? cur)}</div>
+      <div class="r">${presentNull(r, 'openPnl') ? positionValue(r, 'openPnl', cell) : pl(amountOf(r.openPnl), r.openPnl?.currency ?? cur)}</div>
       <div class="r c-opened num">${r.updatedAt ? timeHM(r.updatedAt) : '—'}</div>
     </div>`;
   }).join('');

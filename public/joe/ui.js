@@ -233,6 +233,24 @@ export function stateCaption(cell, key, fresh = '', held) {
   return p.state === 'fresh' ? fresh : capital(p.text);
 }
 
+// Use the real caption builder for every state/reason combination. Days and
+// hours exercise both long ages and the longest unbroken age token; unknown
+// ages have their own wording. Sizing copies never tick or enter accessibility.
+const CAPTION_SIZING = [...new Set([null, ...Object.keys(CELL_REASON)].flatMap(reason =>
+  [null, 999 * 86400, 23 * 3600 + 59 * 60].flatMap(ageSeconds => [
+    { state: 'not reported', value: null },
+    { state: 'broken', value: null },
+    { state: 'broken', value: {}, retained: true },
+    { state: 'stale', value: {} },
+    { state: 'broken', value: {} },
+  ].map(cell => stateCaption({ ...cell, reason, ageSeconds }, 'sizing').replace(AGE_RE, '$2')))
+))].map(text => `<span class="cash-sizing" aria-hidden="true">${text}</span>`).join('');
+export function reservedCaption(caption, freshCaptions) {
+  const fresh = [...new Set(freshCaptions)].map(text =>
+    `<span class="cash-sizing" aria-hidden="true">${stateCaption({ state: 'fresh' }, '', text)}</span>`).join('');
+  return `<span class="account-caption"><span>${caption}</span>${fresh}${CAPTION_SIZING}</span>`;
+}
+
 // Each reason reserves its actual wrapping, including the session form at
 // 360 px: character count cannot predict how words wrap in a narrow column.
 // The label and Amy's caption have their own fixed rows in both surfaces.

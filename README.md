@@ -785,7 +785,10 @@ per-row `reasons` object with optional `quantity`, `mark`, `marketValue`,
 reason. The existing session exception is unchanged: `positions.reason` may
 justify row nulls while the API session is unconfirmed; it cannot justify
 them when the session is confirmed. Optional omitted money fields remain
-accepted. KEEP rows retain symbol, side, `scope: "keep"` and `desk: null`.
+accepted. An omitted row `openPnl` shows a plain muted dash without a title or
+reason. Only explicitly present null `dayPnl` / `openPnl` fields add their
+per-field reason to the row. KEEP rows retain symbol, side, `scope: "keep"`
+and `desk: null`.
 This tightens rev-7 acceptance for unreasoned position nulls at Amy's request;
 no v2 producer has shipped, so no live producer payload is affected. The
 historical session fixtures still exercise their unchanged panel exception.
@@ -818,6 +821,14 @@ rev-7 omission and recovery at 1440/1024/390/360 in both themes, with exact
 component geometry checks, overflow/clipping assertions and
 `<width>-<theme>-{desk-hero,settings-account}-cash-{value,null}` crops.
 Browser results and visual approval remain with CI and the coordinator.
+All four hero KPI captions use that same grid/sizing mechanism, with fresh
+variants and every real retained/stale/broken/null phrase crossed with the
+closed cell reasons. Reserves come from the caption builder, including unknown
+ages, 999 days and 23 h 59 min. They share one grid cell, stay hidden from
+accessibility and reserve only the tallest actual wrapped form at each width.
+CSS column widths plus local font metrics estimate 3/2/4/5 reserved 16 px
+lines at 1440/1024/390/360 with DejaVu Sans, or 2/2/4/4 with SF/Arial. These
+are wrapping estimates; CI owns the rendered geometry and overflow result.
 P5's `positions` cases assert null KEEP quantity and values with visible and
 accessible reasons, a stage0 null mark, and no `button`, `a`, `input` or
 `[tabindex]` inside any `[data-keep]` row. At 1440/1024/390/360 in both themes,

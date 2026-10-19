@@ -24,13 +24,13 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const format = await import('../public/joe/format.js');
-const { cashCaption } = await import('../public/joe/ui.js');
+const { cashCaption, stateCaption, reservedCaption } = await import('../public/joe/ui.js');
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus, headerHealth, executorProblem, keptHtml, positionsHtml } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, executorProblem, heroLeft, keptHtml, positionsHtml } = await import('../public/joe/desk.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
 const { readdirSync } = await import('node:fs');
@@ -133,6 +133,81 @@ test('cash captions: Amy’s label and caption stay fixed; every null and stale 
       assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`not reported · ${why}`)}</span>`), reason);
       assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`−€ 999.999,99 · ${why}`)}</span>`), reason);
     }
+  }
+});
+
+test('hero captions: every reason reserves retained, stale, broken and null wording with real ages', () => {
+  const sizing = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
+  const html = reservedCaption('after fees', ['after fees']);
+  const phrases = sizing(html);
+  assert.ok(phrases.includes('after fees'));
+  assert.ok(phrases.includes('Not reported'));
+  assert.ok(phrases.includes('Unavailable · not available'));
+  for (const why of new Set(Object.values(health.CELL_REASON))) {
+    const escaped = format.esc(why), capital = health.capital(escaped);
+    assert.ok(phrases.includes(`Unavailable · ${escaped}`), why);
+    assert.ok(phrases.includes(`Not reported · ${escaped}`), why);
+    for (const ago of ['999 days ago', '23 h 59 min ago', 'age unknown']) {
+      assert.ok(phrases.includes(`Last good value, ${ago} · ${escaped}`), why);
+      assert.ok(phrases.includes(`As of ${ago} · ${escaped}`), why);
+      assert.ok(phrases.includes(`${capital} · as of ${ago}`), why);
+    }
+  }
+  for (const ago of ['999 days ago', '23 h 59 min ago', 'age unknown']) {
+    assert.ok(phrases.includes(`Last good value, ${ago}`));
+    assert.ok(phrases.includes(`As of ${ago}`));
+    assert.ok(phrases.includes(`Not available · as of ${ago}`));
+  }
+  assert.equal(phrases.length, new Set(phrases).size);
+  assert.ok(phrases.every(text => !text.includes('data-age')));
+  const visible = stateCaption({ state: 'broken', value: {}, retained: true, reason: 'gateway_unconfirmed', ageSeconds: 90 }, 'hero.open');
+  assert.match(reservedCaption(visible, ['after fees']), /<span class="account-caption"><span>Last good value, <span class="age" data-age="hero.open">1 min ago<\/span> · broker connection not confirmed<\/span>/);
+  assert.deepEqual(sizing(reservedCaption(visible, ['after fees'])), phrases, 'reserve stays identical across states');
+});
+
+test('hero captions: all four KPIs keep the same reserve through session loss and incomplete bookkeeping', () => {
+  const fresh = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
+  const session = board(fixture('a-gateway-up-but-dead'));
+  const incomplete = structuredClone(fresh);
+  incomplete.states['desks.j.equity'].value = null;
+  const kpis = ctx => [...heroLeft(ctx).matchAll(/<div class="kpi"[\s\S]*?<\/div>/g)].map(m => m[0]);
+  const reserve = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
+  const baseline = kpis(fresh);
+  assert.equal(baseline.length, 4);
+  for (const ctx of [fresh, session, incomplete]) {
+    const actual = kpis(ctx);
+    assert.equal(actual.length, 4);
+    actual.forEach((html, i) => {
+      assert.match(html, /<span class="c"><span class="account-caption">/);
+      assert.deepEqual(reserve(html), reserve(baseline[i]));
+      assert.ok(reserve(html).includes('Last good value, 999 days ago · broker connection not confirmed'));
+    });
+  }
+  assert.ok(reserve(baseline[2]).includes('started with € 15.000'));
+  assert.ok(reserve(baseline[2]).includes('J’s bookkeeping incomplete · desk total unavailable'));
+});
+
+test('position rows: omitted optional P&L stays a plain dash without a reason or title', () => {
+  for (const data of [valid.data, read('positions-null.json')]) {
+    const ctx = { states: panelStates({ data: { value: data } }, data.receivedAt), feeds: { data: { value: data } }, now: data.receivedAt };
+    const html = positionsHtml(ctx).html;
+    assert.match(html, /<div class="r"><span class="muted">—<\/span><\/div>/);
+    assert.doesNotMatch(html, /Open result:|Today’s result:|no data received yet/);
+  }
+  for (const field of ['dayPnl', 'openPnl']) for (const scope of ['stage0', 'keep']) {
+    const row = structuredClone(valid.data.positions.rows.find(r => r.scope === scope));
+    delete row.dayPnl; delete row.openPnl;
+    row.reasons = { [field]: 'not_exact_yet' };
+    const render = value => scope === 'keep' ? keptHtml({ states: { kept: { state: 'fresh', value: [value] } } })
+      : positionsHtml({ states: { positions: { state: 'fresh', value: [value] } }, feeds: {}, now: valid.data.receivedAt }).html;
+    assert.doesNotMatch(render(row), /not exact yet|no data received yet|Open result:|Today’s result:/, `${scope} absent ${field}`);
+    row[field] = null;
+    const html = render(row), label = field === 'openPnl' ? 'Open result' : 'Today’s result';
+    assert.ok(html.includes(`${label}: not exact yet`), `${scope} null ${field}`);
+    if (scope === 'stage0' && field === 'openPnl') assert.match(html, /title="Open result: not reported · not exact yet" aria-label="Open result: not reported · not exact yet">—<\/span>/);
+    row[field] = { amount: '1.25', currency: 'EUR' };
+    assert.doesNotMatch(render(row), /not exact yet|no data received yet|Open result:|Today’s result:/, `${scope} valued ${field}`);
+    if (scope === 'stage0' && field === 'openPnl') assert.match(render(row), /\+€ 1,25/);
   }
 });
 
