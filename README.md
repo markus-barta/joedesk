@@ -136,6 +136,54 @@ look fresh. The next pusher sequence must exceed the snapshot's `seq`, with
 non-regressing generation/evidence times. If staging has aged before cutover,
 require a new accepted producer observation before the fresh-feed smoke passes.
 
+### Private preview captures for OPS (JOED-53)
+
+Run from the source checkout on the authorized **private host**, against the
+locally staged board via its trusted authenticated proxy. The CLI never adds an
+identity header or bypasses SSO. Keep the producer stopped for the snapshot
+check. Chrome/Chromium and Node 22+ must be available; `BROWSER_PATH` can select
+the browser. Do not launch a browser on the Mac during the daytime restriction.
+
+```sh
+capture_dir=$(mktemp -d)
+chmod 0700 "$capture_dir"
+node scripts/preview-capture.mjs --base-url http://127.0.0.1:PORT/joe/ --out "$capture_dir"
+```
+
+Replace `PORT` with the private proxy's local port. Defaults are
+`--widths 1440,390 --themes light,dark --screens desk,positions,settings,results`.
+Widths are unique integers from 320 to 3840; screens also accept `history`.
+Positions is a crop of Desk's `#positions`. Each selected combination writes
+`<screen>-<width>-<theme>.png` and a shared `summary.json`, all mode 0600.
+The directory must already exist, belong to the caller and have no group/other
+permission bits; existing output filenames and symlinks are refused. Use a new
+directory for each staged snapshot. Chrome's temporary private profile is
+created inside that directory and cleaned up by the shared browser helper.
+
+The selector table is `SECTIONS` in `scripts/preview-capture.mjs`: Desk hero,
+each desk card, position rows, kept rows, History chart/bookkeeping/events,
+Results hero/tiles/calendar/breakdown, and Settings mode/runtime, every field
+group, source/log, appearance and About. Desk captures also visit History to
+check it, then return to Desk. Only Results with the health feed's exact
+`not reported` / `feed_not_received` pair may be empty; its unavailable UI
+currently emits no panel `data-state` line, so the summary reports no observed
+state names there. Missing sections still fail.
+
+The summary uses an allow-list serializer: fixed section/screen/state names,
+widths, themes, booleans, counts, and only `/joe/healthz`'s `version` and
+`schemaVersion`. It contains no page text, money, quantities, symbols, account
+hints, URLs or error messages. Requests outside the base origin are blocked
+with CDP Fetch interception, including worker requests; any block fails the run.
+Exit 0 means all checks passed; exit 1 means capture/content/errors failed;
+exit 2 means invalid arguments or output permissions. Terminal lines are also
+value-free. CI alone uploads **synthetic** fixture images and the checked
+summary as `joedesk-preview-capture`.
+
+**Real screenshots go only to Amy: never commit or upload them. Trash the
+captures afterwards** (`trash "$capture_dir"`). Only the value-free summary
+belongs on tickets. This script is outside the shipped runtime closure and
+does not change contracts, release metadata or deployment approval.
+
 ### OPS-354 / P6b handoff
 
 OPS owns these exact nixcfg items through its existing review path:

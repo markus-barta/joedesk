@@ -49,8 +49,8 @@ export async function closeBrowserProcess(proc, requestClose, timeout = 3000) {
   } finally { proc.off('exit', onExit); }
 }
 
-export async function launch({ hostRules = '' } = {}) {
-  const profile = scratch('joed-p3-browser-');
+export async function launch({ hostRules = '', profileParent, commandTimeout = 0 } = {}) {
+  const profile = scratch('joed-p3-browser-', profileParent);
   const args = ['--headless=new', '--remote-debugging-pipe', '--no-first-run', '--no-default-browser-check', '--disable-gpu',
     '--disable-background-networking', '--disable-extensions', '--disable-sync', '--mute-audio', '--hide-scrollbars',
     '--disable-renderer-backgrounding', '--disable-background-timer-throttling', '--js-flags=--max-old-space-size=256',
@@ -67,6 +67,14 @@ export async function launch({ hostRules = '' } = {}) {
   proc.stderr.on('data', () => {});
   let buffer = '', id = 0;
   const pending = new Map(), listeners = new Set();
+  let stopped = false;
+  const disconnected = () => {
+    stopped = true;
+    for (const { reject } of pending.values()) reject(new Error('Browser disconnected'));
+    pending.clear();
+  };
+  proc.on('error', disconnected);
+  proc.on('exit', disconnected);
   proc.stdio[4].on('data', chunk => {
     buffer += chunk.toString('utf8');
     let end;
@@ -81,15 +89,20 @@ export async function launch({ hostRules = '' } = {}) {
     }
   });
   const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
+    if (stopped) { reject(new Error('Browser disconnected')); return; }
     const n = ++id;
-    pending.set(n, { resolve, reject, method });
+    const timer = commandTimeout ? setTimeout(() => {
+      pending.delete(n);
+      reject(new Error('Browser command timed out'));
+    }, commandTimeout) : null;
+    pending.set(n, { resolve: value => { clearTimeout(timer); resolve(value); }, reject: error => { clearTimeout(timer); reject(error); }, method });
     proc.stdio[3].write(`${JSON.stringify({ id: n, method, params, ...(sessionId ? { sessionId } : {}) })}\0`);
   });
   return {
     send, on: fn => listeners.add(fn), off: fn => listeners.delete(fn),
     async close() {
       await closeBrowserProcess(proc, () => send('Browser.close'));
-      await discard(profile, 'browser profile');
+      await discard(profile, 'browser profile', { strict: Boolean(profileParent) });
     },
   };
 }
@@ -109,17 +122,30 @@ export async function openPage(browser, { headers = {}, timeZone = process.env.T
   // the same request routing before they run.
   const children = new Set();
   let fetchPatterns = null;
+  let strictFetch = false;
+  const routing = { errors: 0 };
   await s('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
   browser.on(async m => {
-    if (m.method === 'Target.detachedFromTarget' && m.sessionId === sessionId) children.delete(m.params.sessionId);
-    if (m.method !== 'Target.attachedToTarget' || m.sessionId !== sessionId) return;
+    if (m.method === 'Target.detachedFromTarget' && (m.sessionId === sessionId || children.has(m.sessionId))) children.delete(m.params.sessionId);
+    if (m.method !== 'Target.attachedToTarget' || (m.sessionId !== sessionId && !(strictFetch && children.has(m.sessionId)))) return;
     const child = m.params.sessionId;
     children.add(child);
     try {
       await browser.send('Network.enable', {}, child);
       if (Object.keys(page.headers).length) await browser.send('Network.setExtraHTTPHeaders', { headers: page.headers }, child);
       if (fetchPatterns) await browser.send('Fetch.enable', { patterns: fetchPatterns }, child);
-    } catch { /* not a network-capable target */ }
+      if (strictFetch) {
+        await browser.send('Runtime.enable', {}, child);
+        await browser.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }, child);
+      }
+    } catch {
+      if (strictFetch) {
+        routing.errors++;
+        // Never run a target whose request interception could not be installed.
+        await browser.send('Target.closeTarget', { targetId: m.params.targetInfo.targetId }).catch(() => {});
+        return;
+      }
+    }
     await browser.send('Runtime.runIfWaitingForDebugger', {}, child).catch(() => {});
     if (timeZone && m.params.targetInfo.type === 'worker') {
       try {
@@ -145,12 +171,17 @@ export async function openPage(browser, { headers = {}, timeZone = process.env.T
   };
   const setHeaders = async next => { page.headers = next; await s('Network.setExtraHTTPHeaders', { headers: next }); };
   // Pause matching requests of the page and of every worker it starts.
-  const setFetch = async patterns => {
+  const setFetch = async (patterns, { strict = false } = {}) => {
     fetchPatterns = patterns;
+    strictFetch = strict;
     for (const target of [sessionId, ...children]) {
-      try { await browser.send(patterns ? 'Fetch.enable' : 'Fetch.disable', patterns ? { patterns } : {}, target); } catch { /* the worker has gone */ }
+      try { await browser.send(patterns ? 'Fetch.enable' : 'Fetch.disable', patterns ? { patterns } : {}, target); }
+      catch (error) {
+        if (strict) { routing.errors++; throw error; }
+        /* the worker has gone */
+      }
     }
   };
   const owns = id => id === sessionId || children.has(id);
-  return { s, evaluate, errors, requests, workerTimeZones, targetId, setHeaders, setFetch, owns };
+  return { s, evaluate, errors, requests, workerTimeZones, targetId, setHeaders, setFetch, owns, routing };
 }

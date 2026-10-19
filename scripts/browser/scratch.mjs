@@ -9,13 +9,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const made = new Set();
-export function scratch(prefix) {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
+export function scratch(prefix, parent = tmpdir()) {
+  const dir = mkdtempSync(join(parent, prefix));
   made.add(dir);
   return dir;
 }
 
-export async function discard(dir, what) {
+export async function discard(dir, what, { strict = false } = {}) {
   if (!made.has(dir)) return; // already discarded, or not made here: never removed
   if (process.env.CI === 'true') {
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
@@ -23,6 +23,9 @@ export async function discard(dir, what) {
     return;
   }
   const cleanup = spawnSync('trash', [dir], { stdio: 'ignore' });
-  if (cleanup.status !== 0) console.error(`${what} kept at ${dir}: trash failed`);
+  if (cleanup.status !== 0) {
+    if (strict) throw new Error('Private browser profile cleanup failed');
+    console.error(`${what} kept at ${dir}: trash failed`);
+  }
   else made.delete(dir);
 }
