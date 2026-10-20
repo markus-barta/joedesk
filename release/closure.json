@@ -104,13 +104,13 @@
     },
     {
       "path": "public/joe/app.css",
-      "size": 73726,
-      "sha256": "449c2798c7adfaf27b4315b157e39535ce555414fb7c3814f3e9aa65a4816ea4"
+      "size": 74506,
+      "sha256": "dd06c18b366fa1ea78d9243d41e097ecedf4ca4f66885ef7705fca01ceaf199a"
     },
     {
       "path": "public/joe/app.js",
-      "size": 16255,
-      "sha256": "1d2569d2a30e98b68631d76716314eabbd85b02120de3243299660546320eab4"
+      "size": 17514,
+      "sha256": "d5f7614e287c30affe4419336419209d5b4e5d05642113fea782e9dcc2280d8d"
     },
     {
       "path": "public/joe/chart.js",
@@ -189,8 +189,8 @@
     },
     {
       "path": "public/joe/index.html",
-      "size": 35226,
-      "sha256": "f2db24463f6a67f1b91bea198b2912016daf2c2b8f38b3a0a5c8fcf97e963c00"
+      "size": 35239,
+      "sha256": "c88db6838389e457ea0ccafe419c6bcc96e145b2b67431eec8939c59180ba48b"
     },
     {
       "path": "public/joe/joe-version.js",

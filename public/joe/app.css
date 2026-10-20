@@ -126,8 +126,12 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 /* ---------- Header (glass, the one ambient Paimos touch) ---------- */
 .top { position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--canvas) 74%, transparent); -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2); box-shadow: 0 1px 0 var(--line); }
 .top-in { height: 58px; display: flex; align-items: center; gap: 12px; }
-.brand { display: flex; align-items: center; gap: 9px; font-size: 15.5px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
+.brand { display: flex; flex: 0 1 auto; min-width: 24px; align-items: center; font-size: 15.5px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
 .brand .i { width: 24px; height: 24px; }
+/* Only the wordmark yields. Its inner span retains the font's natural width;
+   the fit observer hides the whole word whenever this flex slot is narrower. */
+.brand .word { min-width: 0; overflow: hidden; }
+.brand .word > span { display: block; width: max-content; padding-left: 9px; }
 .mode-label { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; border-radius: 7px; background: var(--paper-bg); color: var(--paper-ink); box-shadow: inset 0 0 0 1px var(--paper-line); font-size: 12px; font-weight: 650; letter-spacing: .08em; white-space: nowrap; flex: none; }
 .mode-label .i { width: 15px; height: 15px; }
 .mode-label.live { background: var(--live-bg); color: var(--live-ink); box-shadow: none; letter-spacing: .1em; }
@@ -142,12 +146,20 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .hdr-health { margin-left: auto; display: inline-flex; flex: none; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); white-space: nowrap; font-weight: 500; }
 @media (hover: hover) { .hdr-health:hover { background: var(--row-hover); color: var(--ink); } }
 .hdr-health b { font-weight: 600; color: var(--ink); }
-/* Reserve the widest status in the rendered font, including during Loading.
-   The hidden sizer shares the status cell and never enters the accessible name. */
-.hdr-health .lbl { display: inline-grid; column-gap: 7px; line-height: 1.1; text-align: left; white-space: nowrap; }
-.hdr-health .lbl::before { content: "Broker unsure"; visibility: hidden; font-weight: 600; grid-area: 1 / 1; }
-.hdr-health .lbl b { grid-area: 1 / 1; }
-.hdr-health .lbl-long { grid-area: 1 / 2; }
+/* Reserve both columns in the rendered font. Inline size containment makes
+   state text use the sizers' tracks without changing any header geometry. */
+.hdr-health .lbl { display: inline-grid; grid-template-columns: max-content max-content; column-gap: 7px; line-height: 1.1; text-align: left; white-space: nowrap; }
+.hdr-health .lbl::before { content: "Stale 23 h 59 min"; visibility: hidden; font-weight: 600; grid-area: 1 / 1; }
+.hdr-health .lbl::after { content: "· Broker unstable"; visibility: hidden; grid-area: 1 / 2; }
+.hdr-health .lbl b { grid-area: 1 / 1; contain: inline-size; }
+.hdr-health .lbl-long { grid-area: 1 / 2; contain: inline-size; }
+/* After the brand has yielded, tighten space only if the measured row still
+   needs it. No viewport or font-width estimate decides this density. */
+.top-in[data-tight] { gap: 2px; }
+.top-in[data-tight] .nav { margin-left: 0; }
+.top-in[data-tight] .nav button { padding-inline: 6px; }
+.top-in[data-tight] .hdr-health { padding-inline: 0; }
+.theme-btn { flex: none; }
 .icon-btn { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); }
 @media (hover: hover) { .icon-btn:hover { background: var(--row-hover); color: var(--ink); } }
 .icon-btn:disabled { color: var(--line-2); box-shadow: none; cursor: default; }
@@ -418,9 +430,9 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 }
 
 /* ---------- Compact header (phones and narrow windows) ----------
-   The desktop header needs up to about 930 px in a wide font. Up to 960 px the
-   header is the phone's: the nav moves to the bottom bar and the header's
-   buttons are 44 px. Above 700 px the light keeps its broker word. */
+   Up to 960 px the nav moves to the bottom bar and the header's buttons are
+   44 px. Above 700 px the light keeps its broker word. Within either layout,
+   the brand shrinks first; measured overflow selects tighter spacing. */
 @media (max-width: 960px) {
   .top-in { height: 54px; gap: 8px; }
   .nav { display: none; }
@@ -447,6 +459,9 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   :root { --gutter: 16px; }
   body { font-size: 15px; }
   .hdr-health .lbl-long { display: none; }
+  .hdr-health .lbl { grid-template-columns: max-content; }
+  .hdr-health .lbl::before { content: "Broker unsure"; }
+  .hdr-health .lbl::after { display: none; }
   .icon-btn { width: 44px; height: 44px; }
   .seg button { height: 44px; min-width: 44px; padding: 0 10px; }
   .btn { height: 44px; }
@@ -663,12 +678,6 @@ span.dbar, span.vbar { display: block; }
   .hdr-health { padding: 0; gap: 2px; }
   /* Loading keeps the icon's space so every status has the same width. */
   .hdr-health .i.tone-none { visibility: hidden; }
-  .brand, .theme-btn { flex: none; }
-}
-@media (max-width: 400px) {
-  /* The logo yields its wordmark on small phones, leaving PAPER and the
-     longest status fully visible with the original 16 px outer inset. */
-  .brand .word { display: none; }
 }
 
 /* ---------- Results (P4) ---------- */

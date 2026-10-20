@@ -141,26 +141,12 @@ const ABOVE_LOG = ['#set-mode', '#set-runtime', '.rt-row', ...M.GROUPS.map(g => 
 const rects = list => ev(`__audit.rects(${J(list)})`);
 // Serialized into the page for both real-ingress and synchronous label checks.
 function headerLayout() {
-  const row = document.querySelector('.top-in'), r = row.getBoundingClientRect(), css = getComputedStyle(row);
-  const items = ['.brand', '#modeLabel', '#hdrHealth', '#themeBtn'].map(selector => {
-    const e = row.querySelector(selector), box = e.getBoundingClientRect();
-    return { selector, visible: __audit.visible(e), left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height };
-  });
-  const overlaps = items.flatMap((a, i) => items.slice(i + 1).filter(b =>
-    Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top)).map(b => [a.selector, b.selector]));
-  const button = row.querySelector('#hdrHealth'), label = button.querySelector('.lbl'), word = label.querySelector('b');
-  const range = document.createRange(); range.selectNodeContents(word);
-  return { items, overlaps, paper: row.querySelector('#modeLabel').textContent.trim(),
-    inRow: items.every(b => b.visible && b.left >= r.left + parseFloat(css.paddingLeft) && b.right <= r.right - parseFloat(css.paddingRight) && b.top >= r.top && b.bottom <= r.bottom),
-    status: { height: label.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(label).lineHeight),
-      lines: range.getClientRects().length, nowrap: getComputedStyle(label).whiteSpace, word: word.textContent },
-    overflow: button.scrollWidth > button.clientWidth || label.scrollWidth > label.clientWidth,
-    horizontal: __audit.horizontal() };
+  return __audit.headerLayout();
 }
 function checkHeaderLayout(ac, tag, layout) {
   check(ac, `${tag}: the status is exactly one line box`, layout.status.lines === 1 && layout.status.nowrap === 'nowrap' && Math.abs(layout.status.height - layout.status.lineHeight) < 0.02, layout.status);
   check(ac, `${tag}: brand, PAPER, status and theme are visible, inside the header and do not overlap; no horizontal overflow`,
-    layout.paper === 'PAPER' && layout.inRow && !layout.overlaps.length && !layout.overflow && layout.horizontal.scroll <= layout.horizontal.inner, layout);
+    layout.paper === 'PAPER' && layout.inRow && !layout.overlaps.length && !layout.wordmarkClipped && !layout.overflow && layout.horizontal.scroll <= layout.horizontal.inner, layout);
 }
 const bar = () => ev(`[...document.querySelectorAll('#editbar, #editNote, .edit-btns, #editbar .btn')].map((e, i) => { const r = e.getBoundingClientRect(); return { key: (e.id || e.className) + '#' + i, top: r.top, left: r.left, height: r.height, width: r.width }; })`);
 const note = () => ev(`({ state: document.getElementById('editNote').dataset.state, text: document.getElementById('editNote').innerText.trim(), buttons: ['discardBtn', 'savePreview', 'reviewBtn', 'sendBtn'].map(id => !document.getElementById(id).disabled) })`);

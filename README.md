@@ -1093,6 +1093,15 @@ and accessible name retain exact byte counts. Settings health text reserves its
 space so state changes do not move later sections within that reserve. The header
 keeps its 16 px phone inset and existing heights. The icon and status share one
 line at every supported width; the longest status reserves its width (JOED-57).
+The brand's wordmark occupies the only shrinking flex slot, down to its 24 px
+icon. A `ResizeObserver` compares the word's natural rendered width with that
+slot and hides the whole word if it cannot fit. If the icon-only row still
+overflows, measured geometry selects tighter gaps and navigation/status
+padding. Neither decision estimates font metrics or uses a wordmark breakpoint;
+the PAPER pill, theme target, outer inset and header heights retain their sizes.
+Desktop reserves include the sweep's longest stale label and broker suffix;
+the phone reserve keeps “Broker unsure”. Hidden grid sizers and inline size
+containment keep both status columns fixed across label and broker changes.
 Loading alone hides its decorative icon at widths up to 700 px while retaining
 the icon's space; its accessible name stays unchanged.
 It introduces no new header labels. PR CI's P5
@@ -1100,7 +1109,14 @@ It introduces no new header labels. PR CI's P5
 rounding at 1440/1024/390/360 in both themes, with Settings executor-row, header
 and Desk explanation crops and no-overflow/no-clipping checks. It records
 Chrome’s actual rendered font and checks every existing label plus “Check” fits
-on one line at all four widths, including “Stale 2 min” and “Loading”. Label
+on one line at all four widths, including “Stale 2 min” and “Loading”. P3 reuses
+P5's header-layout measurement at all 109 widths from 360 to 1440 in 10 px
+steps, on every screen, in both themes and the normal and wide fonts. It checks
+one-line status height, row containment, overlap and complete wordmarks, then
+crosses eight labels with four broker words on Desk and requires zero movement
+of the header components, status button, label, word and main content. The old
+synthetic 23 h 59 min phone-label overflow exception remains; the live stale
+label (“Stale 2 min”) has no exception. Browser execution belongs to CI. Label
 evidence includes line and glyph boxes, intact words, icon containment and no
 icon overlap, with an explicit
 check that only phone Loading hides its icon. At 360/390 in both themes it
