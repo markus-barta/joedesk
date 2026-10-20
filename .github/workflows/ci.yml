@@ -80,13 +80,13 @@ jobs:
           node scripts/preview-capture.mjs --base-url http://127.0.0.1:1/joe/ --out "$bad_out" || status=$?
           test "$status" -eq 2
           test -z "$(ls -A "$bad_out")"
-      - name: Preview capture synthetic rev 9 (KEEP, unmapped row, absent Results, value-free summary)
+      - name: Preview capture proxy and actor tunnel smoke
         env:
           BROWSER_PATH: /usr/bin/google-chrome
           TZ: UTC
         run: |
-          install -d -m 0700 "$RUNNER_TEMP/joedesk-preview-capture"
-          node scripts/preview-capture-ci.mjs "$RUNNER_TEMP/joedesk-preview-capture"
+          install -d -m 0700 "$RUNNER_TEMP/joedesk-preview-capture/proxy" "$RUNNER_TEMP/joedesk-preview-capture/actor"
+          node scripts/preview-capture-ci.mjs "$RUNNER_TEMP/joedesk-preview-capture/proxy" "$RUNNER_TEMP/joedesk-preview-capture/actor"
       - name: Keep synthetic preview PNGs and value-free summary
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

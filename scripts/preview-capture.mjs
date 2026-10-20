@@ -11,7 +11,8 @@ import { VIEWPORTS, THEMES, configure, load, go, settle, screenshot } from './br
 const SCREENS = ['desk', 'positions', 'settings', 'results', 'history'];
 const DEFAULT_SCREENS = SCREENS.slice(0, 4);
 const STATES = ['fresh', 'stale', 'not reported', 'broken'];
-const COUNTERS = ['pageErrors', 'consoleErrors', 'blockedRequests', 'interceptionErrors', 'checkErrors'];
+const COUNTERS = ['pageErrors', 'consoleErrors', 'blockedRequests', 'interceptionErrors', 'checkErrors', 'writeBlocked'];
+const ACTOR = /^[a-z][a-z0-9-]{2,39}$/;
 const VERSION = /^(?:[1-9][0-9]{11}\.0\.0|[0-9]{2}\.[0-9]{2}\.[0-9]{2}(?:\.[0-9]{2}\.[0-9]{2})?)$/;
 
 // The single selector inventory. Non-empty requires actual content nodes,
@@ -44,6 +45,16 @@ export class CaptureError extends Error {
   constructor(message, exitCode = 1) { super(message); this.exitCode = exitCode; }
 }
 const usageError = message => { throw new CaptureError(message, 2); };
+function actorName(value) {
+  if (value == null) return null;
+  if (typeof value !== 'string' || value !== value.trim() || !ACTOR.test(value)) usageError('--actor must match /^[a-z][a-z0-9-]{2,39}$/');
+  return value;
+}
+function tunnelActor(baseUrl, value) {
+  const actor = actorName(value);
+  if (actor && !['127.0.0.1', '[::1]', 'localhost'].includes(new URL(baseUrl).hostname)) usageError('--actor requires a loopback --base-url (127.0.0.1, ::1 or localhost)');
+  return actor;
+}
 function list(value, allowed, label) {
   const values = value.split(',');
   if (!values.length || values.some(v => !allowed.includes(v)) || new Set(values).size !== values.length) usageError(`invalid ${label}`);
@@ -53,7 +64,7 @@ export function parseArgs(args) {
   const values = {};
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i];
-    if (!['--base-url', '--out', '--widths', '--themes', '--screens'].includes(key)) usageError('unknown argument; use --base-url, --out, --widths, --themes, --screens');
+    if (!['--base-url', '--out', '--widths', '--themes', '--screens', '--actor'].includes(key)) usageError('unknown argument; use --base-url, --out, --widths, --themes, --screens, --actor');
     if (Object.hasOwn(values, key)) usageError('duplicate argument');
     if (typeof args[i + 1] !== 'string' || !args[i + 1].trim() || args[i + 1].startsWith('--')) usageError('argument needs a value');
     values[key] = args[i + 1];
@@ -67,7 +78,7 @@ export function parseArgs(args) {
   if (widths.some(w => !/^[1-9][0-9]{2,3}$/.test(w) || Number(w) < 320 || Number(w) > 3840) || new Set(widths).size !== widths.length) usageError('--widths must be unique integers from 320 to 3840');
   if (values['--out'].includes('\0')) usageError('invalid --out');
   return {
-    baseUrl: base.href, out: resolve(values['--out']), widths: widths.map(Number),
+    baseUrl: base.href, out: resolve(values['--out']), widths: widths.map(Number), actor: tunnelActor(base.href, values['--actor']),
     themes: list(values['--themes'] ?? THEMES.join(','), THEMES, '--themes'),
     screens: list(values['--screens'] ?? DEFAULT_SCREENS.join(','), SCREENS, '--screens'),
   };
@@ -141,6 +152,7 @@ const count = n => Number.isSafeInteger(n) && n >= 0 ? n : 1;
 // Explicit construction at every level. Never spread a DOM/health/error
 // object, stringify it directly, or use its keys as output keys.
 export function serializeSummary(options, health, checks, totals = {}) {
+  const actor = actorName(options.actor);
   const screens = list(options.screens.join(','), SCREENS, 'summary screens');
   const themes = list(options.themes.join(','), THEMES, 'summary themes');
   const widths = options.widths.map(w => {
@@ -164,7 +176,7 @@ export function serializeSummary(options, health, checks, totals = {}) {
   const counts = Object.fromEntries(COUNTERS.map(k => [k, Math.max(count(totals[k] ?? 0), safeChecks.reduce((n, c) => n + c[k], 0))]));
   if (!version || !schemaVersion) counts.checkErrors = Math.max(1, counts.checkErrors);
   counts.failingSections = safeChecks.reduce((n, c) => n + c.sections.filter(s => !s.ok).length, 0);
-  return JSON.stringify({ screens, widths, themes, health: { version, schemaVersion }, permissionsValid: totals.permissionsValid === true, checks: safeChecks, counts }, null, 2) + '\n';
+  return JSON.stringify({ screens, widths, themes, actor, health: { version, schemaVersion }, permissionsValid: totals.permissionsValid === true, checks: safeChecks, counts }, null, 2) + '\n';
 }
 export function assertValueFree(summary) {
   // A strict round trip also rejects extra keys, unknown state/section names,
@@ -182,7 +194,8 @@ function logCheckError(log, step, error) {
   log(`preview-capture: step=${step} exception=${name}${process.env.CI === 'true' ? ` message=${JSON.stringify(error?.message ?? 'check failed')}` : ''}`);
 }
 
-export async function restrictOrigin(browser, page, baseUrl, counts) {
+export async function restrictOrigin(browser, page, baseUrl, counts, actor = null) {
+  actor = tunnelActor(baseUrl, actor);
   const origin = new URL(baseUrl).origin;
   const pending = new Set();
   const listener = m => {
@@ -190,8 +203,11 @@ export async function restrictOrigin(browser, page, baseUrl, counts) {
     let allowed = false;
     try { allowed = new URL(m.params.request.url).origin === origin; } catch { /* blocked */ }
     if (!allowed) counts.blockedRequests++;
-    const task = browser.send(allowed ? 'Fetch.continueRequest' : 'Fetch.failRequest', {
-      requestId: m.params.requestId, ...(!allowed ? { errorReason: 'BlockedByClient' } : {}),
+    const write = actor !== null && !['GET', 'HEAD'].includes(m.params.request.method);
+    if (write) counts.writeBlocked++;
+    const blocked = !allowed || write;
+    const task = browser.send(blocked ? 'Fetch.failRequest' : 'Fetch.continueRequest', {
+      requestId: m.params.requestId, ...(blocked ? { errorReason: 'BlockedByClient' } : {}),
     }, m.sessionId).catch(() => { counts.interceptionErrors++; });
     pending.add(task);
     task.finally(() => pending.delete(task));
@@ -222,6 +238,7 @@ async function readHealth(page, baseUrl) {
 
 export async function capture(options, { launchBrowser = launch, log = console.log } = {}) {
   // Validation and filename preflight precede even the browser profile write.
+  const actor = tunnelActor(options.baseUrl, options.actor);
   const output = privateOutput(options.out, namesFor(options));
   const oldMask = process.umask(0o077);
   const counts = Object.fromEntries(COUNTERS.map(k => [k, 0]));
@@ -233,7 +250,9 @@ export async function capture(options, { launchBrowser = launch, log = console.l
     step = 'downloads';
     await browser.send('Browser.setDownloadBehavior', { behavior: 'deny' });
     step = 'open-page';
-    page = await openPage(browser);
+    // openPage installs these headers on the page and on dedicated/nested
+    // workers before resuming them. Fetch stays on their owning page/frame.
+    page = await openPage(browser, actor ? { headers: { 'x-auth-request-user': actor } } : undefined);
     onError = m => {
       if (!page.owns(m.sessionId)) return;
       if (m.method === 'Runtime.exceptionThrown') counts.pageErrors++;
@@ -241,7 +260,7 @@ export async function capture(options, { launchBrowser = launch, log = console.l
     };
     browser.on(onError);
     step = 'restrict-origin';
-    restriction = await restrictOrigin(browser, page, options.baseUrl, counts);
+    restriction = await restrictOrigin(browser, page, options.baseUrl, counts, actor);
     for (const screen of options.screens) for (const width of options.widths) for (const theme of options.themes) {
       const before = { ...counts };
       const check = { screen, width, theme, sections: [] };
