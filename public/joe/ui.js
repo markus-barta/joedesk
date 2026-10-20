@@ -15,7 +15,7 @@ export const learnBtn = key => `<button type="button" class="learn" data-term="$
 export const term = (key, text) => `<button type="button" class="term" data-term="${key}">${esc(text ?? TERMS[key][0])}</button>`;
 
 const ST_ICON = { ok: 'ok', warn: 'half', bad: 'stop', none: 'ring' };
-export const st = (tone, html) => `<span class="st ${tone}">${icon(ST_ICON[tone])}<span>${html}</span></span>`;
+export const st = (tone, html, symbol = ST_ICON[tone]) => `<span class="st ${tone}">${icon(symbol)}<span>${html}</span></span>`;
 
 // A signed result: arrow icon, sign, small unit, tabular digits. Zero has no
 // sign or arrow; an unavailable value is a dash. Exact units (BigInt) format exactly.
@@ -221,6 +221,8 @@ export function statePhrase(cell, key, held = 'last good value') {
   const why = cell?.reason ? cellReason(cell.reason) : null;
   const ago = () => ageSpan(key, cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`);
   if (state === 'fresh') return { tone: 'ok', text: '', state };
+  if (cell?.value == null && cell?.reason === 'not_exact_yet') return { tone: 'none', icon: 'info',
+    text: `${state === 'not reported' ? 'not reported' : 'unavailable'} · ${esc(why)}`, state };
   if (state === 'not reported') return { tone: 'none', text: `not reported${why ? ` · ${esc(why)}` : ''}`, state };
   if (cell.value == null) return { tone: 'bad', text: `unavailable · ${esc(why ?? 'not available')}`, state };
   if (cell.retained) return { tone: 'warn', text: `${held}, ${ago()}${why ? ` · ${esc(why)}` : ''}`, state };

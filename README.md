@@ -1037,6 +1037,25 @@ themes. Browser execution and visual approval remain with CI/coordinator.
 The cash and KPI sizing reserves include the new short reason through
 `CELL_REASON`, with their existing geometry checks unchanged.
 
+JOED-57 treats null desk equity with `not_exact_yet` as deliberately uncaptured,
+so an otherwise healthy board stays **Board OK** and Details adds one neutral
+“Desk values are not exact yet” line. Other missing reasons stay red; retained
+values, broker checks, stuck desks and regular-session result warnings keep
+their existing rules. `NOT_EXACT_TONE` in `health.js` defaults to `green`;
+`yellow` opts into `values_not_exact` after those checks. Null not-exact cells
+use the neutral info SVG with existing tokens and spacing. Contracts remain
+revision 9 and the release coordinate is unchanged.
+
+The header status stays on one line at 360/390/1024/1440 px. A hidden CSS
+sizer reserves the longest existing status, “Broker unsure”, in the rendered
+font, so status changes move no header component. At widths up to 400 px the
+brand shows its logo and retains the accessible name “JoeDesk”; PAPER stays
+visible. P5's `not-exact` checks the real-ingress Board OK / Needs fix / recovery
+sequence in both themes at all four widths: status height equals one line box,
+no horizontal overflow, and the brand, PAPER, status and theme button stay
+inside the header with no intersecting bounds. Its exact 0 px checks include
+the status and its label. These browser assertions run in PR CI.
+
 The reason enum appends `not_exact_yet` (the broker reports it, but it is not
 yet captured exactly) and `source_unavailable` (the broker did not report it,
 or did not report it in the required currency). Board copy is “not exact yet”
@@ -1098,18 +1117,36 @@ values remain correct in TB and may wrap. A count
 without a cap shows only its size; neither field means no ledger text. The title
 and accessible name retain exact byte counts. Settings health text reserves its
 space so state changes do not move later sections within that reserve. The header
-keeps its desktop layout, 16 px phone inset and existing heights. On phones the
-icon shares the first label line; the next line uses the button's full inner
-width, without a sizing reserve or a forced line break (JOED-46). Loading alone
-hides its decorative icon at widths up to 700 px so the label uses the whole
-line; its accessible name and desktop appearance stay unchanged.
+keeps its 16 px phone inset and existing heights. The icon and status share one
+line at every supported width; the longest status reserves its width (JOED-57).
+The brand's wordmark occupies the only shrinking flex slot, down to its 24 px
+icon. A `ResizeObserver` compares the word's natural rendered width with that
+slot and hides the whole word if it cannot fit. If the icon-only row still
+overflows, measured geometry selects tighter gaps and navigation/status
+padding. Neither decision estimates font metrics or uses a wordmark breakpoint;
+the PAPER pill, theme target, outer inset and header heights retain their sizes.
+Desktop reserves include the sweep's longest stale label and broker suffix;
+the phone reserve keeps “Broker unsure”. Hidden grid sizers and inline size
+containment keep both status columns fixed across label and broker changes.
+Loading alone hides its decorative icon at widths up to 700 px while retaining
+the icon's space; its accessible name stays unchanged.
 It introduces no new header labels. PR CI's P5
 `executor` checks cover all three degraded wire combinations, recovery and ledger
 rounding at 1440/1024/390/360 in both themes, with Settings executor-row, header
 and Desk explanation crops and no-overflow/no-clipping checks. It records
-Chrome’s actual rendered font and checks every existing label fits at all four
-widths, including “Stale 2 min” and “Loading”. Label evidence includes line and
-glyph boxes, intact words, icon containment and no icon overlap, with an explicit
+Chrome’s actual rendered font and checks every existing label plus “Check” fits
+on one line at all four widths, including “Stale 2 min” and “Loading”. P3 reuses
+P5's header-layout measurement at all 109 widths from 360 to 1440 in 10 px
+steps, on every screen, in both themes and the normal and wide fonts. It checks
+one-line status height, row containment, overlap and complete wordmarks, then
+crosses eight labels with four broker words on Desk and requires zero movement
+of the header components, status button, label, word and main content. The old
+synthetic 23 h 59 min phone-label overflow exception remains; the live stale
+label (“Stale 2 min”) has no exception. History's legend entries allow the
+estimate note to wrap inside the chart card at 360 px; entries keep their
+single line when space permits. Browser execution belongs to CI. Label
+evidence includes line and glyph boxes, intact words, icon containment and no
+icon overlap, with an explicit
 check that only phone Loading hides its icon. At 360/390 in both themes it
 emits `header-{board-ok,needs-fix,data-delayed,broker-unsure,stale}` crops. It
 captures a static production-header clone outside the live header, with scripts
@@ -1118,7 +1155,7 @@ and strand the board's pending-frame flag (JOED-47). After the header loop at
 every width/theme, a refresh must increase the board's render count within 5 s.
 The large-TB check still requires its exact byte title and accessible name,
 formatted text and containment, and logs each failing condition. It
-measures exact 0 px movement outside the intrinsic pill within the
+measures exact 0 px movement including the reserved status within the
 same page and broker state, and compares every board-health sentence to its
 reserve. Node tests compare the six existing header labels (including Loading)
 and every broker word against a frozen c1c71a1 renderer fixture, including the

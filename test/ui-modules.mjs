@@ -24,7 +24,7 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const format = await import('../public/joe/format.js');
-const { cashCaption, stateCaption, reservedCaption } = await import('../public/joe/ui.js');
+const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await import('../public/joe/ui.js');
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
@@ -37,6 +37,7 @@ const { readdirSync } = await import('node:fs');
 const { periodOf, resultsToday } = await import('../public/joe/results.js');
 const { TERMS } = await import('../public/joe/terms.js');
 const { singleMissingDesk, coupledUnavailable } = await import('../scripts/browser/board.mjs');
+const { switchSetSnapshot } = await import('../scripts/browser/settings-fixtures.mjs');
 
 const read = file => JSON.parse(readFileSync(new URL(`../fixtures/${file}`, import.meta.url)));
 const valid = read('valid.json');
@@ -616,6 +617,124 @@ test('health: one null keeps a yellow grace, a cold load or old carry is red, HA
   const none = health.boardHealthPresentation({}, { data: { value: null, reason: 'feed_not_received' } }, valid.data.receivedAt);
   assert.deepEqual([none.tone, none.reason, none.label], ['red', 'no_snapshot', 'Needs fix']);
   assert.match(health.boardDiagnostics(h.states, h.feeds, h.now).join(' '), /emergency stop is on/);
+});
+
+let switchSet;
+function notExactBoard() {
+  const payload = structuredClone(switchSet ??= switchSetSnapshot());
+  const b = board({ feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) }, { cold: true });
+  assert.equal(b.feeds.data.status, 200);
+  return b;
+}
+
+test('health: not-exact switch values keep Board OK and one neutral Details fact without missing-money alarms', () => {
+  const b = notExactBoard();
+  assert.equal(health.NOT_EXACT_TONE, 'green');
+  assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'green', reason: 'board_ok' });
+  const p = health.boardHealthPresentation(b.states, b.feeds, b.now);
+  assert.deepEqual([p.label, p.statusTone, p.explanation], ['Board OK', 'ok', 'numbers are up to date']);
+  assert.match(headerHealth(b, p).html, /tone-ok/);
+  assert.equal(health.deskValuesNotExact(b.states), true);
+  assert.deepEqual(health.boardDiagnostics(b.states, b.feeds, b.now), []);
+  for (const id of ['j', 'joe', 'joel']) {
+    const html = cardStatus(id, ['dayPnl', 'openPnl', 'totalPnl'].map(field => [field, b.states[`desks.${id}.${field}`]]));
+    assert.match(html, /class="st none"/);
+    assert.match(html, /href="#i-info"/);
+    assert.match(html, /Numbers: unavailable · not exact yet/);
+    assert.doesNotMatch(html, /st bad|#i-stop/);
+  }
+});
+
+test('health: any other missing equity reason stays red, including a missing cell, mixed with not-exact values', () => {
+  for (const name of ['today.equity', 'desks.j.equity', 'desks.joe.equity', 'desks.joel.equity']) {
+    for (const reason of ['source_unavailable', 'all_desk_equity_unavailable', 'unavailable', null, undefined]) {
+      const b = notExactBoard();
+      b.states[name] = { ...b.states[name], reason };
+      assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'red', reason: 'equity_unavailable' }, `${name}: ${reason}`);
+    }
+    const b = notExactBoard(); delete b.states[name];
+    assert.equal(health.localBoardHealth(b.states, b.feeds, b.now).reason, 'equity_unavailable');
+  }
+});
+
+test('health: not-exact equity during regular hours is green when day and open results are current', () => {
+  const payload = ingress(valid.data);
+  for (const bag of [payload.totals, ...payload.desks.map(desk => desk.money)]) {
+    bag.equity = null;
+    bag.reasons = { ...bag.reasons, equity: 'not_exact_yet' };
+  }
+  const b = board({ feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) }, { cold: true });
+  assert.equal(b.feeds.data.status, 200);
+  assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'green', reason: 'board_ok' });
+});
+
+test('health: not-exact equity coexists with current equity and preserves retained-value grace', () => {
+  const b = notExactBoard(), name = 'desks.j.equity';
+  b.states[name] = { ...b.states[name], value: { amount: '5000', currency: 'EUR' }, reason: null, state: 'fresh' };
+  assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'green', reason: 'board_ok' });
+  b.states[name] = { ...b.states[name], reason: 'not_exact_yet', retained: true, ageSeconds: health.RETAINED_GRACE_S };
+  assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'yellow', reason: 'retained_values' });
+  b.states[name].ageSeconds++;
+  assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'red', reason: 'equity_unavailable' });
+  b.states[name].ageSeconds = null;
+  assert.equal(health.localBoardHealth(b.states, b.feeds, b.now).reason, 'equity_unavailable');
+});
+
+test('health: not-exact values still run gateway, stuck-desk, transport, feed and halt checks', () => {
+  const cases = [
+    [b => { b.states.gateway.state = 'broken'; }, 'yellow', 'gateway_unconfirmed'],
+    [b => { b.feeds.data.value.desks[0].state = 'stuck'; }, 'yellow', 'retained_values'],
+    [b => { b.feeds.data.reason = 'refresh_failed'; }, 'yellow', 'refresh_failed'],
+    [b => { b.feeds.data.reason = 'contract_invalid'; }, 'yellow', 'retained_values'],
+    [b => { b.now = at(b.feeds.data.value.receivedAt, 61); }, 'yellow', 'snapshot_stale'],
+    [b => { b.now = at(b.feeds.data.value.receivedAt, health.FEED_STOPPED_S); }, 'red', 'feed_disconnected'],
+    [b => { b.states.halt.value = true; }, 'red', 'halt_on'],
+    [b => { Object.assign(b.feeds.data.value.safety.gateway, { apiSessionReady: false, reason: 'gateway_down' }); }, 'red', 'gateway_down'],
+  ];
+  for (const [change, tone, reason] of cases) {
+    const b = notExactBoard(); change(b);
+    assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone, reason });
+  }
+  const payload = switchSetSnapshot(valid.data.generatedAt);
+  const rth = board({ feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) }, { cold: true });
+  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'day_pending');
+  rth.states['today.dayPnl'] = { value: { amount: '0', currency: 'EUR' }, retained: false };
+  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
+});
+
+test('health: the single NOT_EXACT_TONE constant can opt into yellow, after other checks', async () => {
+  const url = new URL('../public/joe/health.js', import.meta.url);
+  // Exercise the actual module with only its presentation policy changed;
+  // absolute imports mirror the browser route mapping without writing files.
+  const source = readFileSync(url, 'utf8').replace("export const NOT_EXACT_TONE = 'green';", "export const NOT_EXACT_TONE = 'yellow';")
+    .replace(/from '([^']+)'/g, (_, specifier) => `from '${new URL(mapped(specifier, url.href), url).href}'`);
+  const yellow = await import(`data:text/javascript,${encodeURIComponent(source)}`);
+  assert.equal(yellow.NOT_EXACT_TONE, 'yellow');
+  const b = notExactBoard();
+  assert.deepEqual(yellow.localBoardHealth(b.states, b.feeds, b.now), { tone: 'yellow', reason: 'values_not_exact' });
+  const p = yellow.boardHealthPresentation(b.states, b.feeds, b.now);
+  assert.deepEqual([p.statusTone, p.explanation], ['warn', 'desk values are not exact yet']);
+  b.states.gateway.state = 'broken';
+  assert.equal(yellow.localBoardHealth(b.states, b.feeds, b.now).reason, 'gateway_unconfirmed');
+  b.states['desks.j.equity'].reason = 'source_unavailable';
+  assert.equal(yellow.localBoardHealth(b.states, b.feeds, b.now).reason, 'equity_unavailable');
+  assert.equal(yellow.localBoardHealth({}, { data: null }, b.now).reason, 'no_snapshot');
+  const fresh = board(fixture('e-layout-storage-unavailable'));
+  assert.equal(yellow.localBoardHealth(fresh.states, fresh.feeds, fresh.now).tone, 'green');
+});
+
+test('cell presentation: null not-exact values use neutral info; other failures and retained values keep their tone', () => {
+  for (const state of ['broken', 'stale', 'not reported']) {
+    const p = statePhrase({ state, value: null, reason: 'not_exact_yet' }, 'test');
+    assert.deepEqual([p.tone, p.icon], ['none', 'info']);
+    assert.match(st(p.tone, p.text, p.icon), /class="st none".*href="#i-info"/);
+  }
+  for (const reason of ['source_unavailable', 'gateway_unconfirmed', null]) {
+    const p = statePhrase({ state: 'broken', value: null, reason }, 'test');
+    assert.equal(p.tone, 'bad');
+    assert.match(st(p.tone, p.text, p.icon), /href="#i-stop"/);
+  }
+  assert.equal(statePhrase({ state: 'broken', value: {}, retained: true, ageSeconds: 9, reason: 'not_exact_yet' }, 'test').tone, 'warn');
 });
 
 test('health: the 20-second-old check reads fresh, then broken, then stale (P3 copy sign-off)', () => {

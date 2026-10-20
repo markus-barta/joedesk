@@ -38,6 +38,28 @@
 
   window.__audit = {
     visible, parseColor,
+    // Shared by P3's full width/font sweep and P5's real-ingress checks.
+    headerLayout() {
+      const row = document.querySelector('.top-in'), r = row.getBoundingClientRect(), css = getComputedStyle(row);
+      const selectors = ['.brand', '#modeLabel', '#hdrHealth', '#themeBtn'];
+      if (visible(row.querySelector('.nav'))) selectors.push('.nav');
+      const items = selectors.map(selector => {
+        const e = row.querySelector(selector), box = e.getBoundingClientRect();
+        return { selector, visible: visible(e), left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height };
+      });
+      const overlaps = items.flatMap((a, i) => items.slice(i + 1).filter(b =>
+        Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top)).map(b => [a.selector, b.selector]));
+      const button = row.querySelector('#hdrHealth'), label = button.querySelector('.lbl'), word = label.querySelector('b');
+      const range = document.createRange(); range.selectNodeContents(word);
+      const mark = row.querySelector('.brand .word'), text = mark.firstElementChild;
+      return { items, overlaps, paper: row.querySelector('#modeLabel').textContent.trim(),
+        inRow: items.every(b => b.visible && b.left >= r.left + parseFloat(css.paddingLeft) - 0.02 && b.right <= r.right - parseFloat(css.paddingRight) + 0.02 && b.top >= r.top && b.bottom <= r.bottom),
+        wordmarkClipped: visible(mark) && text.getBoundingClientRect().width > mark.getBoundingClientRect().width + 0.02,
+        status: { height: label.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(label).lineHeight),
+          lines: range.getClientRects().length, nowrap: getComputedStyle(label).whiteSpace, word: word.textContent },
+        overflow: button.scrollWidth > button.clientWidth || label.scrollWidth > label.clientWidth,
+        horizontal: this.horizontal() };
+    },
     contrast() {
       const failures = [];
       for (const el of document.querySelectorAll('body *')) {
@@ -196,8 +218,13 @@
       const items = [...top.children].filter(visible);
       const headerFaults = () => {
         const rs = items.map(el => ({ id: name(el), ...box(el) }));
-        return rs.filter(r => r.left < row.left || r.right > row.right || r.top < row.top || r.bottom > row.bottom).map(r => `${r.id} leaves the row`)
+        const layout = this.headerLayout(), status = layout.status;
+        const faults = rs.filter(r => r.left < row.left || r.right > row.right || r.top < row.top || r.bottom > row.bottom).map(r => `${r.id} leaves the row`)
           .concat(rs.slice(1).filter((r, i) => r.left < rs[i].right - 0.5).map((r, i) => `${r.id} overlaps ${rs[i].id}`));
+        if (!layout.inRow || layout.overlaps.length || layout.paper !== 'PAPER') faults.push('header containment or overlap');
+        if (layout.wordmarkClipped) faults.push('partial wordmark');
+        if (status.lines !== 1 || status.nowrap !== 'nowrap' || Math.abs(status.height - status.lineHeight) >= 0.02) faults.push('status is not exactly one line box');
+        return faults;
       };
       const compact = innerWidth <= compactMax;
       const nav = document.querySelector('.top .nav'), bar = document.querySelector('.bottom-nav');
@@ -276,12 +303,12 @@
       const b = health.querySelector('b'), long = health.querySelector('.lbl-long'), lbl = health.querySelector('.lbl') ?? b;
       const keep = [b.textContent, long.textContent];
       const main = document.getElementById('main'), header = document.querySelector('header.top');
-      const still = () => [header, ...items.filter(el => el !== health), main].map(el => ({ id: name(el), ...box(el) }));
+      const still = () => [header, ...items, lbl, b, main].map(el => ({ id: name(el), ...box(el) }));
       const base = still();
       for (const label of light.labels) for (const word of light.brokers) {
         b.textContent = label; long.textContent = `· ${word}`;
         const faults = headerFaults();
-        still().forEach((r, i) => { if (['left', 'top', 'width', 'height'].some(k => Math.abs(r[k] - base[i][k]) > 0.5)) faults.push(`${r.id} moved`); });
+        still().forEach((r, i) => { if (['left', 'top', 'width', 'height'].some(k => r[k] !== base[i][k])) faults.push(`${r.id} moved`); });
         const h = box(health), hs = getComputedStyle(health);
         const lines = Math.round(lbl.getBoundingClientRect().height / parseFloat(getComputedStyle(lbl).lineHeight));
         for (const part of [b, long].filter(visible)) {
@@ -290,7 +317,13 @@
           const r = range.getBoundingClientRect();
           if (r.left < h.left + parseFloat(hs.paddingLeft) - 1 || r.right > h.right - parseFloat(hs.paddingRight) + 1 || r.top < h.top - 0.5 || r.bottom > h.bottom + 0.5) faults.push(`${part === b ? 'label' : 'broker word'} leaves the button`);
         }
-        if (lines > 2) faults.push(`${lines} lines`);
+        if (visible(long)) {
+          const range = document.createRange(); range.selectNodeContents(b);
+          const labelRight = range.getBoundingClientRect().right;
+          range.selectNodeContents(long);
+          if (labelRight > range.getBoundingClientRect().left + 0.02) faults.push('label overlaps broker word');
+        }
+        if (lines !== 1) faults.push(`${lines} lines`);
         if (faults.length) out.labels.push({ light: `${label} · ${word}`, faults });
       }
       b.textContent = keep[0]; long.textContent = keep[1];

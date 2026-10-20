@@ -51,4 +51,31 @@ export function designSnapshot(now = NOW, { hint = 'DU…0597', executor = true 
   return { snapshot, history };
 }
 
+// Rev-9 switch set: no partial desk totals, while account NAV/cash are known.
+// After hours, the existing regular-session result warnings do not apply.
+export function switchSetSnapshot(now = '2026-10-14T21:05:00.000Z') {
+  const { snapshot } = designSnapshot(now);
+  const fields = ['equity', 'dayPnl', 'openPnl', 'totalPnl'];
+  for (const bag of [snapshot.totals, ...snapshot.desks.map(desk => desk.money)]) {
+    for (const field of fields) bag[field] = null;
+    bag.reasons = Object.fromEntries(fields.map(field => [field, 'not_exact_yet']));
+  }
+  for (const source of Object.values(snapshot.pnlSources)) Object.assign(source, {
+    status: 'unavailable', method: null, observedAt: null, reason: 'not_exact_yet',
+  });
+  snapshot.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+  for (const row of snapshot.positions.rows) {
+    row.reasons = {};
+    for (const field of ['quantity', 'mark', 'marketValue', 'dayPnl', 'openPnl']) if (Object.hasOwn(row, field)) {
+      row[field] = null;
+      row.reasons[field] = 'not_exact_yet';
+    }
+  }
+  const unmapped = snapshot.positions.rows.find(row => row.scope === 'stage0');
+  unmapped.desk = null; unmapped.reasons.desk = 'desk_unmapped';
+  const checked = validateContract('data', snapshot, { stage: 'ingress' });
+  if (!checked.ok) throw new Error(`switch set invalid: ${JSON.stringify(checked.errors.slice(0, 5))}`);
+  return snapshot;
+}
+
 export { at, NOW };

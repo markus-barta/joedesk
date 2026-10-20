@@ -3,7 +3,7 @@
 // fresh, stale with age, not reported, or broken with its reason, on its own.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, NB } from './format.js';
-import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, STALE_AFTER_S } from './health.js';
+import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { drawChart, eurAxis } from './chart.js';
@@ -101,6 +101,7 @@ function healthPop(ctx, health) {
   }
   return `<h3>${icon(TONE_ICON[health.statusTone])}${esc(health.label)} · ${esc(health.explanation)}</h3>
     <p>${problems.length ? esc(problems.join(' ')) : 'No current problems.'}</p>
+    ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact yet', 'info')}</p>` : ''}
     ${rows.length ? `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
     <p>If a light turns yellow or red: reload once. If it stays, tell Amy what the light says and how old the data is.</p>
     <p><button type="button" class="btn quiet link" data-go="history" data-anchor="j-accounting">${icon('book')}J’s bookkeeping${icon('chev-r')}</button></p>`;
@@ -240,7 +241,7 @@ export function cardStatus(id, cells) {
   return groups.map((g, i) => {
     const p = statePhrase(g.cell, `card.${id}.${i}`, 'last good');
     const who = g.labels.length === cells.length ? 'Numbers' : g.labels.length === 2 ? `${g.labels[0]} and ${g.labels[1]}` : g.labels[0];
-    return st(p.tone, `${esc(who)}: ${p.text}`);
+    return st(p.tone, `${esc(who)}: ${p.text}`, p.icon);
   }).join('');
 }
 
@@ -252,7 +253,7 @@ function sectionState(cell, key, { fresh, held, missing, absent }) {
   const text = p.state === 'fresh' ? fresh
     : cell?.value == null ? (p.state === 'not reported' ? absent : `${missing}: ${esc(cellReason(cell?.reason ?? 'feed_not_received'))}.`)
       : capital(p.text);
-  return `<p class="pstate" data-state="${p.state}">${st(p.tone, text)}</p>`;
+  return `<p class="pstate" data-state="${p.state}">${st(p.tone, text, p.icon)}</p>`;
 }
 
 const POSITION_FIELDS = { quantity: 'Quantity', mark: 'Last price', marketValue: 'Worth', dayPnl: 'Today’s result', openPnl: 'Open result' };
@@ -322,9 +323,9 @@ export function keptHtml(ctx) {
   const p = statePhrase(cell, 'kept', 'last good values');
   const fresh = incomplete.length ? unavailableWorth : worth ? `Worth ${worth} now, each in its own currency.` : 'Up to date.';
   const state = incomplete.length
-    ? `<p class="pstate" data-state="${p.state}">${st(p.state === 'fresh' ? 'none' : p.tone, `${p.text ? `${capital(p.text)} · ` : ''}${unavailableWorth}`)}</p>`
+    ? `<p class="pstate" data-state="${p.state}">${st(p.state === 'fresh' ? 'none' : p.tone, `${p.text ? `${capital(p.text)} · ` : ''}${unavailableWorth}`, p.icon)}</p>`
     : rows && worth && p.state !== 'fresh'
-    ? `<p class="pstate" data-state="${p.state}">${st(p.tone, `${capital(p.text)} · worth ${worth}, each in its own currency`)}</p>`
+    ? `<p class="pstate" data-state="${p.state}">${st(p.tone, `${capital(p.text)} · worth ${worth}, each in its own currency`, p.icon)}</p>`
     : sectionState(cell, 'kept', { fresh, held: 'last good values', missing: 'Kept holdings are unavailable', absent: 'Kept holdings are not present in this snapshot.' });
   if (!rows) return `${caption}${state}`;
   if (!rows.length) return `${caption}${state}<p class="empty-line">${icon('info')}<span>No kept holdings in this snapshot.</span></p>`;

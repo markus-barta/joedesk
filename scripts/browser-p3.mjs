@@ -885,7 +885,7 @@ try {
   }
 
   if (run('sweep')) {
-  // 7c · AC-28 at every width: from 390 to 1440 px in 10 px steps, light and
+  // 7c · AC-28 at every width: from 360 to 1440 px in 10 px steps, light and
   // dark, in this machine's font and the wide one, every screen, resizing the
   // live page. The page never scrolls sideways, nothing reaches past its
   // right edge and no text overlaps other text. Up to COMPACT px the header
@@ -899,10 +899,10 @@ try {
   b.setNow(NOW);
   check('sweep', 'design snapshot accepted', (await b.push(snapshot)).status === 200);
   b.setNow(at(NOW, 9));
-  const widths = Array.from({ length: (1440 - 390) / 10 + 1 }, (_, i) => 390 + i * 10);
+  const widths = Array.from({ length: (1440 - 360) / 10 + 1 }, (_, i) => 360 + i * 10);
   // The header light's labels (health.js) and broker words (desk.js), and the
   // desk cards' longest state and heartbeat texts (desk.js).
-  const light = { labels: ['Loading', 'Board OK', 'Needs fix', `Stale ${fmt.age(86399)}`, 'Broker unsure', 'Data delayed'],
+  const light = { labels: ['Loading', 'Board OK', 'Needs fix', `Stale ${fmt.age(86399)}`, 'Broker unsure', 'Data delayed', `Stale ${fmt.age(179)}`, 'Check'],
     brokers: ['Broker OK', 'Broker unstable', 'Broker unsure', 'Broker down'],
     cards: [['Sitting out since 16:02', `${fmt.age(86399)} ago`], ['Not reported', `${fmt.age(86399)} old`], ['Working', `${fmt.age(5)} ago`]] };
   for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
@@ -935,10 +935,10 @@ try {
         if (labels.length < r.labels.length) deferredLight.push(`${tag} ${width}`);
         if (labels.length) fail.labels.push({ width, labels: labels.slice(0, 3) });
       }
-      const n = `${widths.length} widths from 390 to 1440 px`;
+      const n = `${widths.length} widths from 360 to 1440 px`;
       check('AC-28', `sweep ${tag}: no horizontal page scroll at any of ${n}`, !fail.scroll.length, fail.scroll.slice(0, 8));
       check('AC-28', `sweep ${tag}: nothing reaches past the page's right edge at any of ${n}`, !fail.past.length, fail.past.slice(0, 4));
-      check('header', `sweep ${tag}: the header's items stay in its row and never overlap at any of ${n}`, !fail.header.length, fail.header.slice(0, 4));
+      check('header', `sweep ${tag}: the status is exactly one line box; header items stay in the row without overlap or a partial wordmark at any of ${n}`, !fail.header.length, fail.header.slice(0, 4));
       check('header', `sweep ${tag}: one nav at every width, the bottom bar up to ${COMPACT} px and the header's above, all four screens in view`, !fail.nav.length, fail.nav.slice(0, 8));
       check('AC-30', `sweep ${tag}: the compact header's buttons and the bottom bar are 44 px targets up to ${COMPACT} px`, !fail.targets.length, fail.targets.slice(0, 4));
       check('header', `sweep ${tag}: icons are centred, with the phone light's icon aligned to its first line, at every width`, !fail.icons.length, fail.icons.slice(0, 4));
@@ -970,7 +970,7 @@ try {
     // Staged for the picture: the resize and clock renders keep these words.
     const html = h.innerHTML; Object.defineProperty(h, 'innerHTML', { configurable: true, get: () => html, set: () => {} }); })()`);
   await settle(page);
-  await shot(page, edge, `${edge.name}-light-desk-header-longest-wide`, `Desk at ${edge.name} px in the wide font, the longest light label put in: the desktop header keeps its row and the broker word moves under the label, inside the button`);
+  await shot(page, edge, `${edge.name}-light-desk-header-longest-wide`, `Desk at ${edge.name} px in the wide font, the longest light label put in: the brand yields and gaps tighten as needed; the status and broker word stay on one line inside the button`);
   }
 
   if (run('history')) {
@@ -1146,9 +1146,11 @@ one (\`no-shift\`, \`lines\`, \`clamp\`). See \`390-light-desk-clamps.png\`,
 
 Up to ${COMPACT} px the header is the phone's: brand, PAPER, the light (with its
 broker word above 700 px) and a 44 px theme button; the nav is the bottom bar.
-Above ${COMPACT} px it is the desktop header; when that is short of room, the
-light's broker word moves under its label, inside the button. Up to 900 px a
-kept holding has two lines. The sweep (\`sweep\`) walks every width from 390 to
+Above ${COMPACT} px it is the desktop header. The wordmark yields to its icon
+when its flex slot is too small; if needed, measured overflow tightens gaps
+and padding. The status and broker columns reserve their widest words in the
+rendered font and remain on one line. Up to 900 px a kept holding has two
+lines. The sweep (\`sweep\`) walks every width from 360 to
 1440 px in 10 px steps, light and dark, in this machine's font and the wide
 one, on every screen: no horizontal page scroll, nothing past the page's right
 edge, no text over other text, the header in one row with one nav, 44 px

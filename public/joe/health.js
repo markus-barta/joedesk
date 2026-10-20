@@ -11,9 +11,12 @@ export const STALE_AFTER_S = 60;
 export const FEED_STOPPED_S = 3 * STALE_AFTER_S;
 // Today's grace for carried equity: yellow for five minutes, never a red flash.
 export const RETAINED_GRACE_S = 300;
+// Deliberately uncaptured desk values are neutral; 'yellow' opts into a warning.
+export const NOT_EXACT_TONE = 'green';
 
 export const REASON_COPY = Object.freeze({
   board_ok: 'numbers are up to date',
+  values_not_exact: 'desk values are not exact yet',
   snapshot_stale: 'updates are late — reload; if still late, tell Amy',
   retained_values: 'numbers a bit old — carrying the last good values',
   gateway_degraded: 'the broker connection is unstable — reload; if it persists, tell Amy',
@@ -79,6 +82,8 @@ const DESKS = ['j', 'joe', 'joel'];
 const TRANSPORT = ['refresh_failed', 'auth_required', 'route_not_found'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
 const EQUITY_CELLS = ['today.equity', ...DESKS.map(id => `desks.${id}.equity`)];
+const notExact = cell => cell?.value == null && cell?.reason === 'not_exact_yet';
+export const deskValuesNotExact = states => EQUITY_CELLS.some(name => notExact(states[name]));
 // Today's carried valuation: equity and total result retained from a last good value.
 const CARRIED_CELLS = ['today.equity', 'today.totalPnl', ...DESKS.flatMap(id => [`desks.${id}.equity`, `desks.${id}.totalPnl`])];
 const current = cell => cell?.value != null && !cell.retained;
@@ -124,6 +129,7 @@ export function localBoardHealth(states, feeds, now) {
   if (frozen !== null && frozen >= FEED_STOPPED_S) return { tone: 'red', reason: 'producer_stuck' };
   const usable = EQUITY_CELLS.every(name => {
     const cell = states[name];
+    if (notExact(cell)) return true;
     if (cell?.value == null) return false;
     return !cell.retained || (cell.ageSeconds !== null && cell.ageSeconds <= RETAINED_GRACE_S);
   });
@@ -137,6 +143,7 @@ export function localBoardHealth(states, feeds, now) {
   if (data.desks.some(desk => desk.state === 'stuck')) return { tone: 'yellow', reason: 'retained_values' };
   if (isRTH(now) && !current(states['today.dayPnl'])) return { tone: 'yellow', reason: 'day_pending' };
   if (isRTH(now) && !current(states['today.openPnl'])) return { tone: 'yellow', reason: 'open_unavailable_rth' };
+  if (NOT_EXACT_TONE === 'yellow' && deskValuesNotExact(states)) return { tone: 'yellow', reason: 'values_not_exact' };
   return { tone: 'green', reason: 'board_ok' };
 }
 
@@ -179,7 +186,7 @@ export function boardDiagnostics(states, feeds, now) {
   for (const id of DESKS) {
     const cell = states[`desks.${id}.equity`];
     if (cell?.retained && cell.value) problems.push(`${LABEL[id]}’s money is carried from ${age(cell.ageSeconds)} ago (${cellReason(cell.reason)}).`);
-    else if (cell?.value == null && cell?.reason) problems.push(`${LABEL[id]}’s money is unavailable: ${cellReason(cell.reason)}.`);
+    else if (cell?.value == null && cell?.reason && !notExact(cell)) problems.push(`${LABEL[id]}’s money is unavailable: ${cellReason(cell.reason)}.`);
   }
   for (const desk of data.desks) if (desk.state === 'stuck') problems.push(`${desk.label} is stuck: ${desk.action}`);
   if (isRTH(now)) for (const [kind, field] of [['day', 'dayPnl'], ['open', 'openPnl']]) {
