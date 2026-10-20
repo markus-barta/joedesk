@@ -872,6 +872,67 @@ to a desk.”, with U+00A0 between the number and unit. An empty selected desk o
 today, including an empty-desk row, reads **No trades so far**, without Partial
 or “record incomplete”.
 
+JOED-40 prepares a real-producer CI slot in `fixtures/results/real/`. Only JOED
+adds files there, after Amy's paper-proof sign-off. Raw inputs and identity maps
+stay outside the checkout. Run:
+
+```sh
+node scripts/anonymize-results.mjs /private/input.json /private/new-output.json
+node scripts/anonymize-results.mjs --check /private/new-output.json
+```
+
+Both ingress producer snapshots and served snapshots use the existing offline
+Results contract validator, before and after anonymization. The schema-derived
+allow-list preserves constants/enums (including desk ids and reasons), symbols,
+currencies, dates/instants, decimals, quantities, FX rates, numbers, nulls and
+structure. It replaces trade `id` with `rt-anon-N`, optional `company` with
+`company-N`, and every FX `source` with `source-N`, deterministically in first-seen
+order per category. These are the only identifying/free-form string fields the
+current contract accepts. Account ids/hints, order/exec ids, permIds, orderRef,
+person/host fields and any other unknown string fail closed with a JSON path
+(exit 1); malformed JSON or other contract-invalid input exits 2. They cannot be
+silently added or stripped from this closed contract. Decimal strings are never
+converted or reformatted. A deep projection check preserves every other leaf.
+The CLI creates a new 0600 output, refuses overwrites/symlinks, and prints counts
+or paths only. `--check` requires canonical synthetic tokens in all free-form
+fields, preventing unrecognized name/id patterns from slipping through.
+
+`npm run test:contracts` (and `npm test`) validates every real JSON and its
+already-anonymous check; the empty slot logs `no real fixture yet`. P4's fixture
+list automatically includes the real files at 1440 and 390, light and dark,
+using their captured clock, the same model comparisons, explained-dash and
+complete-section assertions, and accessibility/layout audit as synthetic files.
+PR CI runs P4 in UTC, Europe/Vienna and America/New_York. No local browser is
+needed to prepare or validate the fixture.
+
+After OPS confirms exact deployed commits, the follow-up can run:
+
+```sh
+node scripts/set-deployment-pins.mjs --producer SHA40 --pusher SHA40 --executor SHA40
+```
+
+At least one flag is required; each can be used on its own. Every pin must be a
+40-hex **nixcfg** commit, confirmed by OPS. `--pusher` and `--executor` update
+`participants.pusher.deployment_pin` and `participants.executor.deployment_pin`;
+a missing or malformed participant fails without writing the manifest.
+`--producer` updates `participants.producer.deployment_pin`. Only when that flag
+is supplied and the producer participant is absent, the helper adds it in the
+pusher's shape: the requested `deployment_pin`, `required_contract_set_sha256`
+from the manifest's active set, `required_data_schema` set to
+`inspr.joe.household.results.v2`, and pending status
+`Amy JOED-20 real producer rehearsal/sign-off required`. The release checks
+permit this additional participant; no validator change is needed. The helper
+never creates a top-level `producers` key. Unknown/duplicate flags, missing
+values and invalid SHAs fail. Existing statuses, unrequested pins and activation
+wording stay untouched; recording a pin does not claim sign-off. No deployment
+pin is set by this tooling change.
+`release/contracts.json` **is inside** `release/closure.json`, whose
+bytes are pinned by `CLOSURE_SHA256` in `scripts/check-release.mjs`. A future pin
+change invalidates the current closure: prepare a new, later release reservation,
+closure file hashes and closure pin, and immutable release set through the normal
+reviewed release process. Never reseal or republish candidate `261019102825.0.0`
+with new bytes. This tooling leaves its closure, contracts and pins unchanged.
+
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
 `contract_set_sha256`; an earlier digest does not cover revision-9 acceptance
