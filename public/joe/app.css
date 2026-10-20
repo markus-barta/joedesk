@@ -139,12 +139,15 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .seg .i { color: var(--ink-3); }
 .seg button[aria-pressed="true"] .i, .seg button[aria-current="page"] .i { color: var(--accent-ink); }
 .nav { margin-left: 12px; }
-.hdr-health { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); white-space: nowrap; font-weight: 500; }
+.hdr-health { margin-left: auto; display: inline-flex; flex: none; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); white-space: nowrap; font-weight: 500; }
 @media (hover: hover) { .hdr-health:hover { background: var(--row-hover); color: var(--ink); } }
 .hdr-health b { font-weight: 600; color: var(--ink); }
-/* When the header is short of room, the broker word moves under the label,
-   inside the button, instead of pushing the page wider. */
-.hdr-health .lbl { display: inline-flex; flex-wrap: wrap; column-gap: 7px; line-height: 1.1; text-align: left; }
+/* Reserve the widest status in the rendered font, including during Loading.
+   The hidden sizer shares the status cell and never enters the accessible name. */
+.hdr-health .lbl { display: inline-grid; column-gap: 7px; line-height: 1.1; text-align: left; white-space: nowrap; }
+.hdr-health .lbl::before { content: "Broker unsure"; visibility: hidden; font-weight: 600; grid-area: 1 / 1; }
+.hdr-health .lbl b { grid-area: 1 / 1; }
+.hdr-health .lbl-long { grid-area: 1 / 2; }
 .icon-btn { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); }
 @media (hover: hover) { .icon-btn:hover { background: var(--row-hover); color: var(--ink); } }
 .icon-btn:disabled { color: var(--line-2); box-shadow: none; cursor: default; }
@@ -655,15 +658,17 @@ span.dbar, span.vbar { display: block; }
   .kpi .c { min-height: 3lh; }
   .positions .pstate { min-height: 48px; }
   .kept .pstate { min-height: 62px; }
-  /* The icon shares the first line; the next line has the button's full width.
-     Keep the 44 px target and the header's existing height and outer gaps. */
+  /* Keep the status and icon on one line, inside the existing 44 px target. */
   .top-in { gap: 6px; }
-  .hdr-health { display: block; align-content: center; padding: 0; min-width: 0; white-space: normal; line-height: 1.1; text-align: left; }
-  .hdr-health .i { float: left; margin-right: 2px; }
-  /* Loading uses the whole line; its decorative ring returns on desktop. */
-  .hdr-health .i.tone-none { display: none; }
-  .hdr-health .lbl { display: inline; }
+  .hdr-health { padding: 0; gap: 2px; }
+  /* Loading keeps the icon's space so every status has the same width. */
+  .hdr-health .i.tone-none { visibility: hidden; }
   .brand, .theme-btn { flex: none; }
+}
+@media (max-width: 400px) {
+  /* The logo yields its wordmark on small phones, leaving PAPER and the
+     longest status fully visible with the original 16 px outer inset. */
+  .brand .word { display: none; }
 }
 
 /* ---------- Results (P4) ---------- */

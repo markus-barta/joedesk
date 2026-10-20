@@ -139,6 +139,29 @@ const viewShot = async (name, what) => {
 const SHIFT = ['.set-sec', '.set-sec .sec-head', '.mode-panel', '.rt-row', '.field', '.field .f-k', '.field .f-in', '.wrow', '.tbl', 'footer.foot'];
 const ABOVE_LOG = ['#set-mode', '#set-runtime', '.rt-row', ...M.GROUPS.map(g => `#set-${g.id}`), '#setMain [data-row]', '#setMain [data-row] .f-in', '#set-how', '#set-source .sec-head'];
 const rects = list => ev(`__audit.rects(${J(list)})`);
+// Serialized into the page for both real-ingress and synchronous label checks.
+function headerLayout() {
+  const row = document.querySelector('.top-in'), r = row.getBoundingClientRect(), css = getComputedStyle(row);
+  const items = ['.brand', '#modeLabel', '#hdrHealth', '#themeBtn'].map(selector => {
+    const e = row.querySelector(selector), box = e.getBoundingClientRect();
+    return { selector, visible: __audit.visible(e), left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height };
+  });
+  const overlaps = items.flatMap((a, i) => items.slice(i + 1).filter(b =>
+    Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top)).map(b => [a.selector, b.selector]));
+  const button = row.querySelector('#hdrHealth'), label = button.querySelector('.lbl'), word = label.querySelector('b');
+  const range = document.createRange(); range.selectNodeContents(word);
+  return { items, overlaps, paper: row.querySelector('#modeLabel').textContent.trim(),
+    inRow: items.every(b => b.visible && b.left >= r.left + parseFloat(css.paddingLeft) && b.right <= r.right - parseFloat(css.paddingRight) && b.top >= r.top && b.bottom <= r.bottom),
+    status: { height: label.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(label).lineHeight),
+      lines: range.getClientRects().length, nowrap: getComputedStyle(label).whiteSpace, word: word.textContent },
+    overflow: button.scrollWidth > button.clientWidth || label.scrollWidth > label.clientWidth,
+    horizontal: __audit.horizontal() };
+}
+function checkHeaderLayout(ac, tag, layout) {
+  check(ac, `${tag}: the status is exactly one line box`, layout.status.lines === 1 && layout.status.nowrap === 'nowrap' && Math.abs(layout.status.height - layout.status.lineHeight) < 0.02, layout.status);
+  check(ac, `${tag}: brand, PAPER, status and theme are visible, inside the header and do not overlap; no horizontal overflow`,
+    layout.paper === 'PAPER' && layout.inRow && !layout.overlaps.length && !layout.overflow && layout.horizontal.scroll <= layout.horizontal.inner, layout);
+}
 const bar = () => ev(`[...document.querySelectorAll('#editbar, #editNote, .edit-btns, #editbar .btn')].map((e, i) => { const r = e.getBoundingClientRect(); return { key: (e.id || e.className) + '#' + i, top: r.top, left: r.left, height: r.height, width: r.width }; })`);
 const note = () => ev(`({ state: document.getElementById('editNote').dataset.state, text: document.getElementById('editNote').innerText.trim(), buttons: ['discardBtn', 'savePreview', 'reviewBtn', 'sendBtn'].map(id => !document.getElementById(id).disabled) })`);
 const toastText = () => ev(`(() => { const t = document.getElementById('toast'); return t.classList.contains('on') ? t.innerText.trim() : null; })()`);
@@ -353,7 +376,7 @@ try {
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
       shots.push({ file: `${name}.png`, what: `Rev-9 desk values not exact yet: ${name}` });
     };
-    const boxes = ['header.top', '#health', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .mini'];
+    const boxes = ['header.top', '.top-in > :not(nav)', '#hdrHealth .lbl', '#hdrHealth b', '#health', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .mini'];
     for (const viewport of [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }]) for (const theme of THEMES) {
       const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b);
       b.setNow(base.generatedAt);
@@ -387,11 +410,12 @@ try {
             cards: [...document.querySelectorAll('.mini-label .st')].map(e => ({ text: e.textContent.trim(), tone: e.className,
               icon: e.querySelector('use').getAttribute('href'), colour: getComputedStyle(e.querySelector('svg')).color, style: getComputedStyle(e).fontStyle })),
             nulls: [...document.querySelectorAll('.dnums .bn')].every(e => e.textContent === '—'),
-            horizontal: __audit.horizontal(), clipping: __audit.clipping(), gui: __audit.gui27() };
+            headerLayout: (${headerLayout.toString()})(), horizontal: __audit.horizontal(), clipping: __audit.clipping(), gui: __audit.gui27() };
         })()`);
         const words = neutral ? 'not exact yet' : 'not reported by the broker';
         check('not-exact', `${tag} ${i}: header word, tone and icon reflect the actual null reason`,
           seen.word === (neutral ? 'Board OK' : 'Needs fix') && seen.headerIcon === (neutral ? '#i-ok' : '#i-stop') && seen.headerColour === (neutral ? seen.ok : seen.bad), seen);
+        checkHeaderLayout('not-exact', `${tag} ${i} ${seen.word}`, seen.headerLayout);
         check('not-exact', `${tag} ${i}: all three desk cards use the neutral info icon only for not-exact values`, seen.cards.length === 3 && seen.nulls && seen.cards.every(c =>
           c.text === `Numbers: unavailable · ${words}` && c.tone === `st ${neutral ? 'none' : 'bad'}` && c.icon === (neutral ? '#i-info' : '#i-stop') && c.colour === (neutral ? seen.neutral : seen.bad) && c.style === 'normal'), seen.cards);
         check('not-exact', `${tag} ${i}: no overflow, clipping, italics or coloured edge accents`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length && !seen.gui.italics.length && !seen.gui.borders.length, seen);
@@ -591,9 +615,9 @@ try {
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
       shots.push({ file: `${name}.png`, what: `Executor health: ${name}` });
     };
-    // The original pill follows its label's intrinsic width. Other chrome and
-    // the reserved Settings rows still keep their boxes across state changes.
-    const geometrySelectors = ['header.top', '.top-in', '.top-in > :not(#hdrHealth)', '#setMain > .set-sec', '#rtRows .rt-row'];
+    // The longest label reserves the status width; every header component and
+    // the reserved Settings rows keep their boxes across state changes.
+    const geometrySelectors = ['header.top', '.top-in', '.top-in > *', '#hdrHealth .lbl', '#hdrHealth b', '#setMain > .set-sec', '#rtRows .rt-row'];
     const geometry = () => rects(geometrySelectors);
     const exactMoves = (before, after) => before.flatMap((a, i) => {
       const b = after[i];
@@ -661,7 +685,7 @@ try {
         check('executor-health', `${tag}: exact bytes in the ledger title and accessible name, only when reported`, c.ledger ? seen.ledger?.title === c.ledger && seen.ledger?.name === c.ledger : seen.ledger === null && !text.includes('ledger'), seen.ledger);
         if (c.name === 'healthy') check('executor-health', `${tag}: healthy copy is unchanged`, text === c.start, seen);
         const moved = exactMoves(baseline, await geometry());
-        check('executor-health', `${tag}: 0 px shift outside the intrinsic pill in the same page and broker state; header keeps its class`, !moved.length && seen.headerClass === headerClass && seen.brokerWord === brokerWord, { moved, brokerWord, seen: seen.brokerWord });
+        check('executor-health', `${tag}: exactly 0 px shift including the reserved status in the same page and broker state; header keeps its class`, !moved.length && seen.headerClass === headerClass && seen.brokerWord === brokerWord, { moved, brokerWord, seen: seen.brokerWord });
         const bounds = await ev(`({ horizontal: __audit.horizontal(), clipping: __audit.clipping() })`);
         check('executor-health', `${tag}: no overflow or clipping`, bounds.horizontal.scroll <= bounds.horizontal.inner && !bounds.clipping.length, bounds);
         if (['capture-degraded', 'ledger-full'].includes(c.name)) {
@@ -687,7 +711,7 @@ try {
       const header = await ev(`document.getElementById('hdrHealth').innerHTML`);
       const ctx = { feeds: { data: { value: snapshot } }, states: { gateway: { state: 'fresh' } } };
       const reference = headerHealth(ctx, { reason: 'board_ok', label: 'Board OK', statusTone: 'ok' });
-      for (const h of [...healthCases, { label: 'Loading', statusTone: 'none' }]) {
+      for (const h of [...healthCases, { label: 'Loading', statusTone: 'none' }, { label: 'Check', statusTone: 'warn' }]) {
         const view = headerHealth(ctx, h);
         // Measure both states in one synchronous page task. No stylesheet,
         // viewport, fixture or broker change, and no tick can interleave.
@@ -724,18 +748,18 @@ try {
           const first = row.querySelector('.brand').getBoundingClientRect(), last = document.getElementById('themeBtn').getBoundingClientRect();
           const items = [...row.children].filter(__audit.visible).map(e => e.getBoundingClientRect());
           const inRow = items.every((r, i) => r.left >= rowBox.left + parseFloat(rowCSS.paddingLeft) - 0.5 && r.right <= rowBox.right - parseFloat(rowCSS.paddingRight) + 0.5 && (!i || r.left >= items[i - 1].right - 0.5));
-          return { before, after, beforeBroker, afterBroker, inRow,
+          return { before, after, beforeBroker, afterBroker, inRow, headerLayout: (${headerLayout.toString()})(),
             label: { text: label.textContent, lineCount: lines.length, lines, glyphs, words, inside, ellipsis, cell: edges(cell), pill: edges(box), icon: edges(icon), iconVisible, iconInside, iconOverlap },
             height: { header: rowBox.height, button: box.height },
             inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: rowCSS.paddingLeft, paddingRight: rowCSS.paddingRight },
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
-        const evidence = { reason: h.reason ?? 'loading', label: measured.label, inRow: measured.inRow, height: measured.height, horizontal: measured.horizontal, clipping: measured.clipping };
+        const evidence = { reason: h.reason ?? h.label.toLowerCase(), label: measured.label, inRow: measured.inRow, height: measured.height, horizontal: measured.horizontal, clipping: measured.clipping };
         console.log(`executor-header ${viewport.name} ${theme}: ${J(evidence)}`);
-        const maxLines = viewport.mobile ? 2 : 1;
         const intactWords = measured.label.words.length > 0 && measured.label.words.every(word => word.lines.length === 1);
         const labelCheck = h.reason === 'ledger_size_limit' ? 'existing Needs fix label fits' : 'existing label fits';
-        check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: ${labelCheck}; no clipping, overlap or ellipsis`, measured.label.lineCount >= 1 && measured.label.lineCount <= maxLines && intactWords && measured.label.inside && measured.label.iconInside && !measured.label.iconOverlap.length && !measured.label.ellipsis && measured.inRow && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
+        check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: ${labelCheck} on one line; no clipping, overlap or ellipsis`, measured.label.lineCount === 1 && intactWords && measured.label.inside && measured.label.iconInside && !measured.label.iconOverlap.length && !measured.label.ellipsis && measured.inRow && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
+        checkHeaderLayout('executor-health', `${viewport.name} ${theme} header ${h.label}`, measured.headerLayout);
         check('executor-health', `${viewport.name} ${theme} header ${h.label}: only phone Loading hides its icon`, measured.label.iconVisible === !(h.label === 'Loading' && viewport.width <= 700), evidence);
         check('executor-health', `${viewport.name} ${theme} header ${h.label}: original header and button heights`, measured.height.header === (viewport.mobile ? 54 : 58) && measured.height.button === (viewport.mobile ? 44 : 34), measured.height);
         if (viewport.mobile && headerCrops.has(h.reason)) {
@@ -745,7 +769,7 @@ try {
         }
         if (viewport.width === 360) check('executor-health', `${theme} header ${h.label}: original 16 px inset at 360`, measured.inset.left === 16 && measured.inset.right === 16 && measured.inset.paddingLeft === '16px' && measured.inset.paddingRight === '16px', measured.inset);
         const moved = exactMoves(measured.before, measured.after);
-        check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly 0 px movement outside the intrinsic pill in the same page and broker state`, !moved.length && measured.beforeBroker === measured.afterBroker && measured.afterBroker === brokerWord, { moved, beforeBroker: measured.beforeBroker, afterBroker: measured.afterBroker });
+        check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly 0 px movement including the reserved status in the same page and broker state`, !moved.length && measured.beforeBroker === measured.afterBroker && measured.afterBroker === brokerWord, { moved, beforeBroker: measured.beforeBroker, afterBroker: measured.afterBroker });
       }
       await ev(`document.getElementById('hdrHealth').innerHTML = ${J(header)}`);
       // Guard every viewport/theme immediately after the header loop. A lost
