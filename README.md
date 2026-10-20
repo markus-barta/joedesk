@@ -101,8 +101,8 @@ coordinator signature/review and all producer/OPS/live gates remain separate.
 ### Recording adoption
 
 JOED writes `adoption/<active-version>.json` only after OPS's live checks and
-Markus's UI look. Use a normal reviewed PR to `rebuild/v2`. The record is outside
-the runtime closure and Docker COPY set: recording adoption requires no image
+the UI look by Markus or his recorded delegate. Use a normal reviewed PR to
+`rebuild/v2`. The record is outside the runtime closure and Docker COPY set: recording adoption requires no image
 change, rebuild, new release coordinate or change to published artifacts. Keep
 the original main merge, immutable release set and image digest. Run this from
 a checkout containing that merge and its descendants, not inside the image.
@@ -122,7 +122,15 @@ these fields (unknown keys at any level fail):
   the retained immutable artifact and compatible backup for rollback.
 - `live_checks`: exactly `joed_live_check`, `ops_t76_live`, `smoke_release`, and
   `spoof_check`, each `{ status: "pass", checked_at }`.
-- `markus_ui_look: { status: "confirmed", checked_at }`, and `adopted_at`.
+- `markus_ui_look`: exactly one of `{ status: "confirmed", checked_at }` for
+  Markus's own look, or `{ status: "delegated", checked_at, performed_by, delegation }`
+  for a completed delegated look. `performed_by` must match `/^[A-Z][A-Z0-9-]{1,31}$/`
+  (such as `"JOED"`); `delegation` is a non-empty string of at most 500 characters
+  naming where Markus's delegation is recorded (such as `"JOED-42 comment 2026-10-20:
+  Markus delegated the post-switch look to JOED"`). Use `delegated` only when
+  Markus's delegation is recorded on the ticket. Keep the field name and
+  `joedesk.adoption.v1` schema; existing confirmed records stay valid.
+- `adopted_at`.
 
 All times must be real UTC instants (`YYYY-MM-DDThh:mm:ss[.sss]Z`). Keep records
 value-free: no secrets, credential-bearing hostnames, IPs, account data or money.
