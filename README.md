@@ -1011,6 +1011,15 @@ themes. Browser execution and visual approval remain with CI/coordinator.
 The cash and KPI sizing reserves include the new short reason through
 `CELL_REASON`, with their existing geometry checks unchanged.
 
+JOED-57 treats null desk equity with `not_exact_yet` as deliberately uncaptured,
+so an otherwise healthy board stays **Board OK** and Details adds one neutral
+“Desk values are not exact yet” line. Other missing reasons stay red; retained
+values, broker checks, stuck desks and regular-session result warnings keep
+their existing rules. `NOT_EXACT_TONE` in `health.js` defaults to `green`;
+`yellow` opts into `values_not_exact` after those checks. Null not-exact cells
+use the neutral info SVG with existing tokens and spacing. Contracts remain
+revision 9 and the release coordinate is unchanged.
+
 The reason enum appends `not_exact_yet` (the broker reports it, but it is not
 yet captured exactly) and `source_unavailable` (the broker did not report it,
 or did not report it in the required currency). Board copy is “not exact yet”

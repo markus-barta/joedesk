@@ -13,7 +13,7 @@ import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, ACTOR, TOKEN, NOW, at } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
-import { designFleet, designActions, designSnapshot, longFleet } from './browser/settings-fixtures.mjs';
+import { designFleet, designActions, designSnapshot, switchSetSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
 import { pngColours } from './browser/pixels.mjs';
 import { captureHeaderCrop } from './browser/header-crop.mjs';
@@ -339,6 +339,79 @@ try {
       await auditScreen(page, viewport, theme, 'settings (not reported)');
       await leakChecks(tag);
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-settings-not-reported`, 'Settings without the executor report or the account hint: "Not reported"');
+    }
+  }
+
+  // JOED-57: rev-9 switch-set values are deliberately uncaptured. Use a cold
+  // page after hours, so no old values are retained and RTH warnings stay intact.
+  // Browser execution and crops belong to PR CI; never launch locally on Mac.
+  if (run('not-exact')) {
+    const base = switchSetSnapshot();
+    const crop = async (selector, name) => {
+      const clip = await ev(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
+      const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
+      writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
+      shots.push({ file: `${name}.png`, what: `Rev-9 desk values not exact yet: ${name}` });
+    };
+    const boxes = ['header.top', '#health', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .mini'];
+    for (const viewport of [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }]) for (const theme of THEMES) {
+      const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b);
+      b.setNow(base.generatedAt);
+      const accepted = await b.push(structuredClone(base));
+      const tag = `${viewport.name} ${theme} not-exact switch set`;
+      check('not-exact', `${tag}: real ingress accepts null desk values and account NAV/cash`, accepted.status === 200, accepted);
+      b.setNow(at(base.generatedAt, 9));
+      await configure(page, viewport, theme); await load(page, b.url, 'desk');
+      await waitFor(page, `document.querySelectorAll('.mini-label .st').length === 3`);
+      const baseline = await rects(boxes);
+      for (const [i, reason] of ['not_exact_yet', 'source_unavailable', 'not_exact_yet'].entries()) {
+        if (i) {
+          const next = structuredClone(base);
+          next.seq += i; next.generatedAt = at(base.generatedAt, i * 30);
+          next.safety.gateway.checkedAt = next.generatedAt;
+          for (const bag of [next.totals, ...next.desks.map(d => d.money)]) {
+            for (const field of Object.keys(bag.reasons)) bag.reasons[field] = reason;
+          }
+          for (const source of Object.values(next.pnlSources)) source.reason = reason;
+          b.setNow(next.generatedAt);
+          await b.push(next);
+          b.setNow(at(next.generatedAt, 9));
+          await ev('window.__joedesk.refresh().then(() => true)'); await settle(page);
+        }
+        const neutral = reason === 'not_exact_yet';
+        const seen = await ev(`(() => {
+          const probe = token => { const e = document.createElement('span'); e.style.color = 'var(' + token + ')'; document.body.append(e); const c = getComputedStyle(e).color; e.remove(); return c; };
+          const h = document.getElementById('hdrHealth'), hi = h.querySelector('svg');
+          return { word: h.querySelector('b').textContent, headerIcon: hi.querySelector('use').getAttribute('href'), headerColour: getComputedStyle(hi).color,
+            ok: probe('--ok'), bad: probe('--bad'), neutral: probe('--ink-3'),
+            cards: [...document.querySelectorAll('.mini-label .st')].map(e => ({ text: e.textContent.trim(), tone: e.className,
+              icon: e.querySelector('use').getAttribute('href'), colour: getComputedStyle(e.querySelector('svg')).color, style: getComputedStyle(e).fontStyle })),
+            nulls: [...document.querySelectorAll('.dnums .bn')].every(e => e.textContent === '—'),
+            horizontal: __audit.horizontal(), clipping: __audit.clipping(), gui: __audit.gui27() };
+        })()`);
+        const words = neutral ? 'not exact yet' : 'not reported by the broker';
+        check('not-exact', `${tag} ${i}: header word, tone and icon reflect the actual null reason`,
+          seen.word === (neutral ? 'Board OK' : 'Needs fix') && seen.headerIcon === (neutral ? '#i-ok' : '#i-stop') && seen.headerColour === (neutral ? seen.ok : seen.bad), seen);
+        check('not-exact', `${tag} ${i}: all three desk cards use the neutral info icon only for not-exact values`, seen.cards.length === 3 && seen.nulls && seen.cards.every(c =>
+          c.text === `Numbers: unavailable · ${words}` && c.tone === `st ${neutral ? 'none' : 'bad'}` && c.icon === (neutral ? '#i-info' : '#i-stop') && c.colour === (neutral ? seen.neutral : seen.bad) && c.style === 'normal'), seen.cards);
+        check('not-exact', `${tag} ${i}: no overflow, clipping, italics or coloured edge accents`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length && !seen.gui.italics.length && !seen.gui.borders.length, seen);
+        const after = await rects(boxes);
+        check('not-exact', `${tag} ${i}: header, hero and desk boxes have exactly 0 px shift`, J(baseline) === J(after), { before: baseline, after });
+        await click('#healthMore');
+        const details = await ev(`(() => {
+          const pop = document.getElementById('healthPop');
+          const notes = [...pop.querySelectorAll('.st')].filter(e => e.textContent.trim() === 'Desk values are not exact yet');
+          return { open: pop.classList.contains('on'), text: pop.innerText, notes: notes.map(e => ({ tone: e.className, icon: e.querySelector('use').getAttribute('href'), style: getComputedStyle(e).fontStyle })) };
+        })()`);
+        check('not-exact', `${tag} ${i}: Details has one neutral sentence and no false missing-money alarms`, details.open && (neutral
+          ? details.notes.length === 1 && details.notes[0].tone === 'st none' && details.notes[0].icon === '#i-info' && details.notes[0].style === 'normal' && !details.text.includes('money is unavailable')
+          : details.notes.length === 0 && details.text.includes('money is unavailable')), details);
+        await key('Escape');
+        if (i === 0) {
+          await crop('header.top', `header-not-exact-${viewport.name}-${theme}`);
+          await crop('#desks', `desk-not-exact-${viewport.name}-${theme}`);
+        }
+      }
     }
   }
 
