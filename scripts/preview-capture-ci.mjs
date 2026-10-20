@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CI only: synthetic rev 9 data behind a loopback trusted-proxy fixture.
+// CI only: synthetic rev 9 data through a trusted proxy and a direct tunnel.
 // Never point this helper at an OPS store or use its fixture identity on a host.
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -13,8 +13,9 @@ import { scratch, discard } from './browser/scratch.mjs';
 import { assertValueFree, passed } from './preview-capture.mjs';
 
 if (process.env.CI !== 'true') throw new Error('Synthetic preview browser smoke is CI-only');
-if (process.argv.length !== 3) throw new Error('Usage: node scripts/preview-capture-ci.mjs EXISTING_PRIVATE_OUTPUT');
+if (process.argv.length !== 4) throw new Error('Usage: node scripts/preview-capture-ci.mjs EXISTING_PRIVATE_PROXY_OUTPUT EXISTING_PRIVATE_ACTOR_OUTPUT');
 const out = resolve(process.argv[2]);
+const actorOut = resolve(process.argv[3]);
 const { snapshot, history } = designSnapshot();
 snapshot.positions.rows.push(read('fixtures/positions-unmapped.json'));
 assert.ok(snapshot.positions.rows.some(row => row.scope === 'keep'));
@@ -22,10 +23,13 @@ assert.ok(snapshot.positions.rows.some(row => row.reasons?.desk === 'desk_unmapp
 const board = await startBoard({ history, fleetConfig: designFleet(), fleetActions: designActions() });
 board.setNow(NOW);
 let injection = '';
+let workerInjection = '';
 let egress = 0;
+let writes = 0;
 let foreign;
 const external = createServer((_req, res) => { egress++; res.end('synthetic'); });
 const proxy = createServer((req, res) => {
+  if (!['GET', 'HEAD'].includes(req.method)) writes++;
   if (req.url === '/joe/preview-nested-worker.js') {
     res.writeHead(200, { 'content-type': 'application/javascript' });
     res.end('new Worker("/joe/preview-worker.js");');
@@ -33,14 +37,14 @@ const proxy = createServer((req, res) => {
   }
   if (req.url === '/joe/preview-worker.js') {
     res.writeHead(200, { 'content-type': 'application/javascript' });
-    res.end(`fetch(${JSON.stringify(foreign)}).catch(() => {});`);
+    res.end(workerInjection || `fetch(${JSON.stringify(foreign)}).catch(() => {});`);
     return;
   }
   if (req.url === '/joe/preview-redirect') {
     res.writeHead(302, { location: foreign }); res.end(); return;
   }
-  // The capture CLI supplies no identity header. Only this synthetic trusted
-  // boundary injects it, just as OPS must use its authorized private proxy.
+  // Keep the original no-actor smoke behind a synthetic trusted proxy. The
+  // actor smoke below talks directly to the board, without this boundary.
   const upstream = request(new URL(req.url, board.url), { method: req.method, headers: { ...req.headers, 'x-auth-request-user': ACTOR } }, answer => {
     const headers = { ...answer.headers };
     if (req.url === '/joe/' && injection) delete headers['content-length'];
@@ -56,15 +60,34 @@ const proxy = createServer((req, res) => {
 });
 const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const close = server => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); });
-async function run(dir, extra = []) {
+async function run(dir, extra = [], baseUrl = `http://127.0.0.1:${proxy.address().port}/joe/`) {
   const cli = fileURLToPath(new URL('./preview-capture.mjs', import.meta.url));
-  const child = spawn(process.execPath, [cli, '--base-url', `http://127.0.0.1:${proxy.address().port}/joe/`, '--out', dir, ...extra], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [cli, '--base-url', baseUrl, '--out', dir, ...extra], { stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { output += bytes; });
   const code = await new Promise((resolve, reject) => { child.on('error', reject); child.on('exit', resolve); });
   assert.ok(!output.includes('SYNTHETIC_PRIVATE'), 'page/console/URL data must not reach CLI output');
   process.stdout.write(output);
   return code;
+}
+function checkCapture(dir, actor) {
+  const summary = JSON.parse(readFileSync(join(dir, 'summary.json')));
+  assertValueFree(summary);
+  assert.ok(passed(summary));
+  assert.equal(summary.actor, actor);
+  assert.equal(summary.counts.writeBlocked, 0);
+  assert.equal(summary.checks.length, 16);
+  assert.ok(summary.checks.every(c => c.sections.every(s => s.ok)));
+  assert.ok(summary.checks.filter(c => c.screen === 'desk').every(c => c.sections.find(s => s.id === 'history').nonEmpty));
+  assert.ok(summary.checks.filter(c => c.screen === 'results').every(c => c.sections.find(s => s.id === 'results').allowedEmpty));
+  const files = readdirSync(dir);
+  assert.equal(files.filter(f => f.endsWith('.png')).length, 16);
+  assert.equal(files.length, 17, 'no unexpected capture/profile files');
+  assert.equal(statSync(dir).mode & 0o777, 0o700);
+  for (const file of files) {
+    assert.equal(statSync(join(dir, file)).mode & 0o777, 0o600);
+    if (file.endsWith('.png')) assert.ok(readFileSync(join(dir, file)).subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])));
+  }
 }
 const scratchDirs = [];
 try {
@@ -73,19 +96,15 @@ try {
   board.setNow(at(NOW, 9));
   // No results push: feed_not_received is the sole allowed empty record.
   assert.equal(await run(out), 0);
-  const summary = JSON.parse(readFileSync(join(out, 'summary.json')));
-  assertValueFree(summary);
-  assert.ok(passed(summary));
-  assert.equal(summary.checks.length, 16);
-  assert.ok(summary.checks.filter(c => c.screen === 'results').every(c => c.sections.find(s => s.id === 'results').allowedEmpty));
-  const files = readdirSync(out);
-  assert.equal(files.filter(f => f.endsWith('.png')).length, 16);
-  assert.equal(files.length, 17, 'no unexpected capture/profile files');
-  for (const file of files) {
-    assert.equal(statSync(join(out, file)).mode & 0o777, 0o600);
-    if (file.endsWith('.png')) assert.ok(readFileSync(join(out, file)).subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])));
-  }
+  checkCapture(out, null);
   console.log('synthetic preview: 16 PNGs, Results not received, value-free summary and 0600 files: ok');
+  assert.equal(await run(actorOut, ['--actor', 'joedesk-qa'], board.url), 0);
+  checkCapture(actorOut, 'joedesk-qa');
+  console.log('synthetic actor tunnel: direct board, every section including worker History, Results not received: ok');
+
+  const nonLoopback = scratch('joed-preview-non-loopback-'); scratchDirs.push(nonLoopback);
+  assert.equal(await run(nonLoopback, ['--actor', 'joedesk-qa'], 'http://example.invalid/joe/'), 2);
+  assert.deepEqual(readdirSync(nonLoopback), []);
 
   // Real CDP negatives on the runner; these files are never uploaded.
   foreign = `http://127.0.0.1:${external.address().port}/?account=SYNTHETIC_PRIVATE`;
@@ -107,6 +126,18 @@ try {
     if (negative === 'errors') { assert.ok(rejected.counts.pageErrors > 0); assert.ok(rejected.counts.consoleErrors > 0); }
     if (negative === 'empty') assert.ok(rejected.counts.failingSections > 0);
   }
+  const post = 'fetch("/joe/preview-write", { method: "POST", body: "SYNTHETIC_PRIVATE" }).catch(() => {});';
+  for (const source of [post, 'new Worker("/joe/preview-worker.js");', 'new Worker("/joe/preview-nested-worker.js");']) {
+    const dir = scratch('joed-preview-write-'); scratchDirs.push(dir);
+    injection = source; workerInjection = post;
+    assert.equal(await run(dir, ['--actor', 'joedesk-qa', '--screens', 'positions', '--widths', '390', '--themes', 'light']), 1);
+    const rejected = JSON.parse(readFileSync(join(dir, 'summary.json')));
+    assertValueFree(rejected);
+    assert.equal(rejected.actor, 'joedesk-qa');
+    assert.ok(rejected.counts.writeBlocked >= 1);
+    assert.equal(writes, 0, 'no write may reach the proxy or board');
+  }
+  console.log('synthetic actor negatives: non-loopback exit 2 with no files; page/worker/nested-worker POST blocked with exit 1: ok');
 } finally {
   await close(proxy); await close(external); await board.close();
   for (const dir of scratchDirs) await discard(dir, 'synthetic preview negative');

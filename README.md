@@ -179,21 +179,31 @@ look fresh. The next pusher sequence must exceed the snapshot's `seq`, with
 non-regressing generation/evidence times. If staging has aged before cutover,
 require a new accepted producer observation before the fresh-feed smoke passes.
 
-### Private preview captures for OPS (JOED-53)
+### Private preview captures for OPS (JOED-53, JOED-54)
 
-Run from the source checkout on the authorized **private host**, against the
-locally staged board via its trusted authenticated proxy. The CLI never adds an
-identity header or bypasses SSO. Keep the producer stopped for the snapshot
-check. Chrome/Chromium and Node 22+ must be available; `BROWSER_PATH` can select
-the browser. Do not launch a browser on the Mac during the daytime restriction.
+Run from the source checkout against the board on an authorized **private
+host**, through its trusted authenticated proxy or an operator SSH tunnel to
+the board container's port. The CLI sends `x-auth-request-user` only with an
+explicit `--actor` and a loopback `--base-url` (`127.0.0.1`, `::1` or
+`localhost`), and only to that base origin, including dedicated workers.
+Use `--actor joedesk-qa` for the tunnel so the Fleet Config audit never names
+a human. Actor names must match `/^[a-z][a-z0-9-]{2,39}$/`; other hosts are
+refused before browser launch or output writes. Keep the producer stopped for
+the staged snapshot check. Chrome/Chromium and Node 22+ must be available;
+`BROWSER_PATH` can select the browser. Do not launch a browser on the Mac
+during the daytime restriction.
 
 ```sh
 capture_dir=$(mktemp -d)
 chmod 0700 "$capture_dir"
-node scripts/preview-capture.mjs --base-url http://127.0.0.1:PORT/joe/ --out "$capture_dir"
+node scripts/preview-capture.mjs --base-url http://127.0.0.1:PORT/joe/ --out "$capture_dir" --actor joedesk-qa
 ```
 
-Replace `PORT` with the private proxy's local port. Defaults are
+Replace `PORT` with the operator tunnel's local port. Omit `--actor` when using
+the trusted authenticated proxy. With `--actor`, capture is **read-only by
+construction**: every method except GET/HEAD is failed by CDP Fetch before it
+reaches the server, counted as `writeBlocked`, and fails the run (exit 1).
+Without `--actor`, identity and method handling stay unchanged. Defaults are
 `--widths 1440,390 --themes light,dark --screens desk,positions,settings,results`.
 Widths are unique integers from 320 to 3840; screens also accept `history`.
 Positions is a crop of Desk's `#positions`. Each selected combination writes
@@ -215,7 +225,8 @@ counts as content when it has a real value, or every dash tile has its own
 explanation (for example, profit factor needs a losing trade).
 
 The summary uses an allow-list serializer: fixed section/screen/state names,
-widths, themes, booleans, counts, and only `/joe/healthz`'s `version` and
+widths, themes, the validated `actor` (or null), booleans, counts (including
+`writeBlocked`), and only `/joe/healthz`'s `version` and
 `schemaVersion`. It contains no page text, money, quantities, symbols, account
 hints, URLs or error messages. Requests outside the base origin are blocked
 with CDP Fetch interception, including worker requests; any block fails the run.
@@ -228,7 +239,7 @@ owning page/frame's Fetch session; workers resume after their runtime and
 nested-worker tracking are enabled. CI alone uploads **synthetic** fixture
 images and the checked summary as `joedesk-preview-capture`.
 
-**Real screenshots go only to Amy: never commit or upload them. Trash the
+**Real screenshots go only to JOED/Amy: never commit or upload them. Trash the
 captures afterwards** (`trash "$capture_dir"`). Only the value-free summary
 belongs on tickets. This script is outside the shipped runtime closure and
 does not change contracts, release metadata or deployment approval.

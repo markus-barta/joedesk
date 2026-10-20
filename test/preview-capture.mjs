@@ -43,8 +43,31 @@ test('preview CLI: defaults, custom widths and optional History use the shared t
   assert.deepEqual(options.widths, [1440, 390]);
   assert.deepEqual(options.themes, ['light', 'dark']);
   assert.deepEqual(options.screens, ['desk', 'positions', 'settings', 'results']);
+  assert.equal(options.actor, null);
   assert.equal(parseArgs(['--base-url', 'http://localhost:80/joe/', '--out', '/private/capture']).baseUrl, 'http://localhost/joe/');
   assert.deepEqual(parseArgs(['--out', '/private/capture', '--base-url', BASE, '--widths', '320,1024,3840', '--themes', 'dark', '--screens', 'history']).screens, ['history']);
+});
+
+test('preview actor: strict names, loopback IPv4/IPv6/localhost only; no actor keeps remote URLs available', async t => {
+  const dir = temporary(t);
+  for (const host of ['127.0.0.1:8080', '[::1]:8080', 'localhost:8080']) {
+    for (const actor of ['joe', 'joedesk-qa', 'a' + '9-'.repeat(19) + 'z']) {
+      assert.equal(parseArgs(['--base-url', `http://${host}/joe/`, '--out', dir, '--actor', actor]).actor, actor);
+    }
+  }
+  for (const actor of ['', 'ab', 'a'.repeat(41), '1joe', 'Joe', 'joe_qa', 'joe.qa', ' joe', 'joe ', 'joe\n', 'joe\r\n', 'joe\0qa', 'joe:qa']) {
+    assert.throws(() => parseArgs(['--base-url', BASE, '--out', dir, '--actor', actor]), e => e.exitCode === 2);
+  }
+  for (const host of ['example.invalid', '127.0.0.2', 'localhost.example.invalid', '[::ffff:127.0.0.1]']) {
+    const baseUrl = `http://${host}/joe/`;
+    assert.equal(parseArgs(['--base-url', baseUrl, '--out', dir]).actor, null);
+    assert.throws(() => parseArgs(['--base-url', baseUrl, '--out', dir, '--actor', 'joedesk-qa']), e => e.exitCode === 2 && /loopback/.test(e.message));
+    await assert.rejects(capture({ ...opts(dir), baseUrl, actor: 'joedesk-qa' }, { launchBrowser: () => assert.fail('browser must not launch') }), e => e.exitCode === 2);
+  }
+  const result = await execute(process.execPath, ['scripts/preview-capture.mjs', '--base-url', 'http://example.invalid/joe/', '--out', dir, '--actor', 'joedesk-qa']).catch(e => e);
+  assert.equal(result.code, 2);
+  assert.match(result.stderr, /loopback --base-url/);
+  assert.deepEqual(fs.readdirSync(dir), []);
 });
 
 test('preview CLI: rejects unknown, duplicate, missing and malformed arguments without echoing values', () => {
@@ -119,6 +142,14 @@ test('preview summary.json: allow-list drops a DOM dump full of money, quantitie
   const summary = JSON.parse(onDisk);
   assertValueFree(summary);
   assert.equal(passed(summary), true);
+  assert.equal(summary.actor, null);
+  assert.equal(summary.counts.writeBlocked, 0);
+  const actorSummary = JSON.parse(serializeSummary({ ...options, actor: 'joedesk-qa' }, HEALTH, checks, { permissionsValid: true, writeBlocked: 1 }));
+  assertValueFree(actorSummary);
+  assert.equal(actorSummary.actor, 'joedesk-qa');
+  assert.equal(actorSummary.counts.writeBlocked, 1);
+  assert.equal(passed(actorSummary), false);
+  assert.throws(() => serializeSummary({ ...options, actor: dump.url }, HEALTH, checks));
   assert.deepEqual(summary.health, { version: HEALTH.version, schemaVersion: HEALTH.schemaVersion });
 });
 
@@ -132,14 +163,68 @@ test('preview summary: rejects injected metadata/state strings and extra seriali
   assertValueFree(summary);
   const good = JSON.parse(serializeSummary(options, HEALTH, complete(options), { permissionsValid: true }));
   for (const mutate of [s => { s.text = 'PRIVATE'; }, s => { s.health.account = 'PRIVATE'; }, s => { s.checks[0].sections[0].states = ['PRIVATE']; },
-    s => { s.checks[0].sections[0].id = 'PRIVATE'; }, s => { s.checks[0].pageErrors = 'PRIVATE'; }]) {
+    s => { s.checks[0].sections[0].id = 'PRIVATE'; }, s => { s.checks[0].pageErrors = 'PRIVATE'; },
+    s => { s.actor = 'ACCOUNT_PRIVATE'; }, s => { s.counts.writeBlocked = 'PRIVATE'; }, s => { s.checks[0].writeBlocked = 'PRIVATE'; }]) {
     const copy = structuredClone(good); mutate(copy); assert.throws(() => assertValueFree(copy));
   }
-  for (const key of ['pageErrors', 'consoleErrors', 'blockedRequests', 'interceptionErrors', 'checkErrors']) {
+  for (const key of ['pageErrors', 'consoleErrors', 'blockedRequests', 'interceptionErrors', 'checkErrors', 'writeBlocked']) {
     assert.equal(passed(JSON.parse(serializeSummary(options, HEALTH, complete(options), { permissionsValid: true, [key]: 1 }))), false, key);
   }
   assert.equal(passed(JSON.parse(serializeSummary(options, HEALTH, complete(options).slice(1), { permissionsValid: true }))), false);
   assert.equal(passed(JSON.parse(serializeSummary(options, HEALTH, complete(options)))), false);
+});
+
+test('preview actor routing: only GET/HEAD continue, every write fails, foreign origins stay blocked', async () => {
+  const browser = fakeBrowser(), page = await openPage(browser, { headers: { 'x-auth-request-user': 'joedesk-qa' } });
+  const counts = { blockedRequests: 0, interceptionErrors: 0, writeBlocked: 0 };
+  const restriction = await restrictOrigin(browser, page, BASE, counts, 'joedesk-qa');
+  const requests = [
+    ...['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'CONNECT', 'TRACE', 'get', undefined].map(method => ({ url: BASE, method })),
+    { url: 'http://127.0.0.1:8081/joe/', method: 'GET' },
+    { url: 'https://external.test/', method: 'POST' },
+  ];
+  for (const [i, request] of requests.entries()) await browser.emit({ method: 'Fetch.requestPaused', sessionId: 'page', params: { requestId: String(i), request } });
+  await restriction.drain(); restriction.dispose();
+  assert.equal(counts.writeBlocked, 10);
+  assert.equal(counts.blockedRequests, 2);
+  assert.equal(counts.interceptionErrors, 0);
+  assert.deepEqual(browser.calls.filter(c => c.method === 'Fetch.continueRequest').map(c => c.params.requestId), ['0', '1']);
+  const failed = browser.calls.filter(c => c.method === 'Fetch.failRequest');
+  assert.equal(failed.length, 11);
+  assert.ok(failed.every(c => c.params.errorReason === 'BlockedByClient' && !Object.hasOwn(c.params, 'headers')));
+});
+
+test('preview actor capture: headers precede worker resume, writes fail on owning sessions, no-actor requests are unchanged', async t => {
+  for (const actor of [null, 'joedesk-qa']) {
+    const dir = temporary(t), browser = fakeBrowser(), send = browser.send.bind(browser);
+    let injected = false;
+    browser.send = async (method, params, sessionId) => {
+      if (method.startsWith('Fetch.') && ['worker', 'nested'].includes(sessionId)) assert.fail('workers have no Fetch domain');
+      if (method === 'Page.navigate' && !injected) {
+        injected = true;
+        for (const [id, parent, type] of [['worker', 'page', 'worker'], ['nested', 'worker', 'worker'], ['frame', 'page', 'iframe']]) {
+          await browser.emit({ method: 'Target.attachedToTarget', sessionId: parent, params: { sessionId: id, targetInfo: { type, targetId: id } } });
+          for (const verb of ['GET', 'HEAD', 'POST']) await browser.emit({ method: 'Fetch.requestPaused', sessionId: id === 'frame' ? id : 'page', params: { requestId: `${id}-${verb}`, request: { url: BASE + 'history.json', method: verb } } });
+        }
+      }
+      return send(method, params, sessionId);
+    };
+    assert.equal(await capture({ ...opts(dir), actor, screens: ['desk'], widths: [390], themes: ['light'] }, { launchBrowser: async () => browser, log: () => {} }), actor ? 1 : 0);
+    const summary = JSON.parse(fs.readFileSync(join(dir, 'summary.json')));
+    assertValueFree(summary);
+    assert.equal(summary.actor, actor);
+    assert.equal(summary.counts.writeBlocked, actor ? 3 : 0);
+    assert.equal(summary.checks[0].writeBlocked, actor ? 3 : 0);
+    assert.equal(summary.counts.interceptionErrors, 0);
+    assert.equal(browser.calls.filter(c => c.method === 'Fetch.failRequest').length, actor ? 3 : 0);
+    assert.equal(browser.calls.filter(c => c.method === 'Fetch.continueRequest').length, actor ? 6 : 9);
+    const headers = browser.calls.filter(c => c.method === 'Network.setExtraHTTPHeaders');
+    assert.deepEqual(headers.map(c => c.sessionId), actor ? ['page', 'worker', 'nested', 'frame'] : []);
+    for (const call of headers) {
+      assert.deepEqual(call.params.headers, { 'x-auth-request-user': actor });
+      if (call.sessionId !== 'page') assert.ok(browser.calls.indexOf(call) < browser.calls.findIndex(c => c.method === 'Runtime.runIfWaitingForDebugger' && c.sessionId === call.sessionId));
+    }
+  }
 });
 
 function dom({ empty = false, missing = false, state = 'fresh', nodes = true } = {}) {
