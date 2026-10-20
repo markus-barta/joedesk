@@ -911,13 +911,22 @@ After OPS confirms exact deployed commits, the follow-up can run:
 node scripts/set-deployment-pins.mjs --producer SHA40 --pusher SHA40 --executor SHA40
 ```
 
-`--producer` is required; the other flags are optional. The helper validates
-40-hex SHAs and changes only `producers.results.deployment_pin` and the requested
-`producers.pusher/executor.deployment_pin` fields, creating those entries when
-absent. The current manifest has legacy `participants.pusher/executor` entries;
-their pins, all status texts and activation wording stay untouched. It records
-pins only, without claiming sign-off. No deployment pin is set by this tooling
-change. `release/contracts.json` **is inside** `release/closure.json`, whose
+At least one flag is required; each can be used on its own. Every pin must be a
+40-hex **nixcfg** commit, confirmed by OPS. `--pusher` and `--executor` update
+`participants.pusher.deployment_pin` and `participants.executor.deployment_pin`;
+a missing or malformed participant fails without writing the manifest.
+`--producer` updates `participants.producer.deployment_pin`. Only when that flag
+is supplied and the producer participant is absent, the helper adds it in the
+pusher's shape: the requested `deployment_pin`, `required_contract_set_sha256`
+from the manifest's active set, `required_data_schema` set to
+`inspr.joe.household.results.v2`, and pending status
+`Amy JOED-20 real producer rehearsal/sign-off required`. The release checks
+permit this additional participant; no validator change is needed. The helper
+never creates a top-level `producers` key. Unknown/duplicate flags, missing
+values and invalid SHAs fail. Existing statuses, unrequested pins and activation
+wording stay untouched; recording a pin does not claim sign-off. No deployment
+pin is set by this tooling change.
+`release/contracts.json` **is inside** `release/closure.json`, whose
 bytes are pinned by `CLOSURE_SHA256` in `scripts/check-release.mjs`. A future pin
 change invalidates the current closure: prepare a new, later release reservation,
 closure file hashes and closure pin, and immutable release set through the normal
