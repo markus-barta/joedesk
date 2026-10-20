@@ -31,6 +31,12 @@ function good() {
     markus_ui_look: { status: 'confirmed', checked_at: instant }, adopted_at: instant,
   };
 }
+function delegated() {
+  const record = good();
+  record.markus_ui_look = { status: 'delegated', checked_at: instant, performed_by: 'JOED',
+    delegation: 'JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED' };
+  return record;
+}
 function put(record, field, value) {
   const names = field.split('.'), last = names.pop();
   let target = record;
@@ -98,13 +104,61 @@ test('adoption: missing active-version record fails after existing checks', asyn
   await assert.rejects(checkAdoptedRelease({ root }), { message: 'closure_payload_mismatch' });
 });
 
-test('adoption: valid synthetic archive record passes without Git and returns only fixed release metadata', async t => {
-  const root = temporary(t); writeRecord(root, good());
+for (const fixture of [good, delegated]) test(`adoption: valid ${fixture().markus_ui_look.status} synthetic archive record passes without Git and returns only fixed release metadata`, async t => {
+  const root = temporary(t), record = fixture(); writeRecord(root, record);
+  assert.equal(validateAdoption(record), record);
   assert.deepEqual(await checkAdoptedRelease({ root }), { ...checkRelease({ root }), authoritative: true, adopted: active.version });
   const result = cli(root, ['--require-adoption']);
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), await checkAdoptedRelease({ root }));
   assert.equal(result.stderr, '');
+});
+
+for (const field of ['status', 'checked_at', 'performed_by', 'delegation']) {
+  test(`adoption schema: delegated look requires ${field}`, () => {
+    const record = delegated(); delete record.markus_ui_look[field];
+    assert.throws(() => validateAdoption(record), { message: 'adoption_markus_ui_look_keys' });
+  });
+}
+
+test('adoption schema: both UI look shapes reject extra keys and mixed evidence', () => {
+  for (const fixture of [good, delegated]) {
+    const record = fixture(); record.markus_ui_look.extra = true;
+    assert.throws(() => validateAdoption(record), { message: 'adoption_markus_ui_look_keys' });
+  }
+  for (const field of ['performed_by', 'delegation']) {
+    const record = good(); record.markus_ui_look[field] = delegated().markus_ui_look[field];
+    assert.throws(() => validateAdoption(record), { message: 'adoption_markus_ui_look_keys' });
+  }
+});
+
+for (const [field, values] of [
+  ['performed_by', [null, 1, '', 'J', 'joed', 'J_oed', ' JOED', 'JOED ', 'JOED\n', '-JOED', 'J'.repeat(33)]],
+  ['delegation', [null, 1, '', ' ', '\n', 'JOED-42\ncomment', 'x'.repeat(501)]],
+]) test(`adoption schema: delegated look validates ${field}`, () => {
+  for (const value of values) {
+    const record = delegated(); record.markus_ui_look[field] = value;
+    assert.throws(() => validateAdoption(record), { message: `adoption_markus_ui_look_${field}_invalid` });
+  }
+});
+
+test('adoption schema: delegated look accepts performer and delegation length boundaries', () => {
+  for (const performed_by of ['JO', 'JOED-42', 'J'.repeat(32)]) {
+    for (const delegation of ['x', 'x'.repeat(500)]) {
+      const record = delegated(); Object.assign(record.markus_ui_look, { performed_by, delegation });
+      assert.equal(validateAdoption(record), record);
+    }
+  }
+});
+
+test('adoption schema: delegated look requires the same real UTC instant as confirmed', () => {
+  for (const checked_at of [null, 123, '2026-10-19', '2026-10-19T16:00:00+00:00', '2026-02-30T16:00:00.000Z',
+    '2026-10-19T24:00:00.000Z', '2026-10-19T16:00:00.00Z']) {
+    const record = delegated(); record.markus_ui_look.checked_at = checked_at;
+    assert.throws(() => validateAdoption(record), { message: 'adoption_markus_ui_look_checked_at_invalid' });
+  }
+  const record = delegated(); record.markus_ui_look.checked_at = '2026-10-19T16:00:00Z';
+  assert.equal(validateAdoption(record), record);
 });
 
 test('adoption: non-flag CLI bytes stay unchanged with absent, valid or malformed records and no adoption tools', t => {
@@ -163,7 +217,7 @@ for (const [field, values] of [
   ['deployment.operator_ticket', [null, 354, '', 'ops-354', 'OPS-0', 'OPS-0354', 'OPS-354 extra']],
   ['deployment.rollback_reference', [null, 1, '', ' ', '\n', 'x'.repeat(501)]],
   ...Object.keys(good().live_checks).map(name => [`live_checks.${name}.status`, [null, true, 'fail', 'pending']]),
-  ['markus_ui_look.status', [null, true, 'pass', 'pending']],
+  ['markus_ui_look.status', [null, true, 'pass', 'pending', 'skipped']],
 ]) test(`adoption schema: exact type and grammar for ${field}`, () => {
   for (const value of values) {
     const record = good(); put(record, field, value);

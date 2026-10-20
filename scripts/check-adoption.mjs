@@ -45,9 +45,14 @@ export function validateAdoption(record) {
     requireThat(record.live_checks[name].status === 'pass', `live_checks_${name}_status_invalid`);
     instant(record.live_checks[name].checked_at, `live_checks_${name}_checked_at`);
   }
-  keys(record.markus_ui_look, ['status', 'checked_at'], 'markus_ui_look');
-  requireThat(record.markus_ui_look.status === 'confirmed', 'markus_ui_look_status_invalid');
-  instant(record.markus_ui_look.checked_at, 'markus_ui_look_checked_at');
+  const look = record.markus_ui_look, delegated = look?.status === 'delegated';
+  keys(look, ['status', 'checked_at', ...(delegated ? ['performed_by', 'delegation'] : [])], 'markus_ui_look');
+  requireThat(look.status === 'confirmed' || delegated, 'markus_ui_look_status_invalid');
+  instant(look.checked_at, 'markus_ui_look_checked_at');
+  if (delegated) {
+    requireThat(typeof look.performed_by === 'string' && /^[A-Z][A-Z0-9-]{1,31}$/.test(look.performed_by), 'markus_ui_look_performed_by_invalid');
+    requireThat(text(look.delegation) && look.delegation.length <= 500, 'markus_ui_look_delegation_invalid');
+  }
   instant(record.adopted_at, 'adopted_at');
   return record;
 }
