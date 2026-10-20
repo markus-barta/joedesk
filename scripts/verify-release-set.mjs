@@ -28,7 +28,7 @@ export function validateReleaseSet(m) {
   requireThat(typeof m.source.repository === 'string' && /^[\w.-]+\/[\w.-]+$/.test(m.source.repository), 'source.repository: owner/repo required');
   for (const k of ['commit', 'tree']) requireThat(typeof m.source[k] === 'string' && oid.test(m.source[k]), `source.${k}: full Git SHA required`);
   requireThat(text(m.source.ref) && m.source.ref.startsWith('refs/'), 'source.ref: full ref required');
-  requireThat(['push', 'pull_request'].includes(m.source.event), 'source.event: push or pull_request required');
+  requireThat(['push', 'pull_request', 'workflow_dispatch'].includes(m.source.event), 'source.event: push, pull_request or workflow_dispatch required');
   keys(m.contracts, ['manifest_revision', 'contract_set_sha256', 'contracts_json_sha256'], 'contracts');
   requireThat(Number.isSafeInteger(m.contracts.manifest_revision) && m.contracts.manifest_revision > 0, 'contracts.manifest_revision: positive integer required');
   for (const [name, value] of Object.entries({ closure_sha256: m.closure_sha256,

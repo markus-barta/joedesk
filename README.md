@@ -374,7 +374,33 @@ nix-build --no-out-link
 # server:     $out/bin/joedesk-server
 ```
 
+## CI runners
+
+CI defaults to `ubuntu-latest`. Setting the repository variable
+`JOEDESK_AGM2=on` enables the `[self-hosted, agm2]` runner for same-repository
+pushes, manual dispatches and PRs whose head repository matches this repository.
+Fork PRs always run hosted. Keep the switch unset until OPS registers the runner
+and requires approval for all outside collaborators; `pull_request_target` is
+forbidden. Checkout explicitly cleans the workspace, and CI temporary files and
+npm's cache stay under `RUNNER_TEMP`.
+
+Chrome installation runs hosted-only. Self-hosted jobs resolve `chromium`,
+`chromium-browser`, then `google-chrome` from `PATH` once, export `BROWSER_PATH`,
+and fail clearly if none is installed.
+
+The Docker build requests neither host networking nor privileged build steps.
+Buildx's `docker-container` driver does create an internal privileged BuildKit
+helper; on agm2 it must remain inside the rootless daemon's user namespace,
+checked before builder setup. The self-hosted runner must provide Chromium,
+rootless Docker and the prerequisites for `actions/setup-node`. Actual agm2
+browser/OCI execution remains to be verified before enabling the switch.
+
 ## Test
+
+The workflow lint uses a pinned YAML parser in the checkout-only `test/` package;
+run `npm ci --prefix test --ignore-scripts --no-audit --no-fund` before the tests.
+It runs with `npm run test:contracts` and `npm test`. The sealed runtime package
+and its release reservation retain their existing dependency and version policy.
 
 The JOED-21/JOED-22 rebuild lives in
 [ADR 0001](docs/adr/0001-joedesk-architecture.md). The P2 server uses the offline

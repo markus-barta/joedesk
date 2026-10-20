@@ -8,6 +8,7 @@ import { decimalUnits } from '../contracts/decimal.mjs';
 import { panelState, panelStates, MONEY_FIELDS } from '../contracts/panel-state.mjs';
 // Checkout-only fixture tooling joins npm test/CI without changing the sealed package.
 import './results-fixtures.mjs';
+import './workflows.mjs';
 
 const samples = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const at = '2026-10-14T17:42:22.000Z';

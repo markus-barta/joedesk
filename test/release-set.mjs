@@ -43,6 +43,8 @@ test('release-set good fixture verifies the exact commit and stable key order; P
   assert.equal(m.version, committedRelease.version, 'use the committed reservation, never the generation clock');
   const main = createReleaseSet(evidence, { ...context, ref: 'refs/heads/main', event: 'push' }, root);
   assert.equal(main.source.event, 'push');
+  const manual = createReleaseSet(evidence, { ...context, ref: 'refs/heads/main', event: 'workflow_dispatch' }, root);
+  assert.equal(verifyReleaseSet(manual, { root, commit }).source.event, 'workflow_dispatch');
 });
 
 for (const [field, value, reason] of [
@@ -93,7 +95,7 @@ for (const [field, value, reason] of [
   ['release_sequence', '24', /release_sequence/], ['release_sequence', 0, /release_sequence/],
   ['contracts.manifest_revision', 6.1, /manifest_revision/], ['source.repository', 'repo', /repository/],
   ['source.commit', 'HEAD', /full Git SHA/], ['source.tree', 'a'.repeat(39), /full Git SHA/],
-  ['source.ref', 'main', /source.ref/], ['source.event', 'workflow_dispatch', /source.event/],
+  ['source.ref', 'main', /source.ref/], ['source.event', 'pull_request_target', /source.event/],
   ['image.platform', 'linux/arm64', /platform/], ['image.base_image', 'node:22-alpine', /immutable base/],
   ['sbom.format', 'spdx', /sbom.format/], ['provenance.format', 'unknown', /provenance.format/],
   ['reproducible.checked', 'true', /reproducible/], ['reproducible.identical', null, /reproducible/],
