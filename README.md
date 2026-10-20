@@ -1116,7 +1116,9 @@ one-line status height, row containment, overlap and complete wordmarks, then
 crosses eight labels with four broker words on Desk and requires zero movement
 of the header components, status button, label, word and main content. The old
 synthetic 23 h 59 min phone-label overflow exception remains; the live stale
-label (“Stale 2 min”) has no exception. Browser execution belongs to CI. Label
+label (“Stale 2 min”) has no exception. History's legend entries allow the
+estimate note to wrap inside the chart card at 360 px; entries keep their
+single line when space permits. Browser execution belongs to CI. Label
 evidence includes line and glyph boxes, intact words, icon containment and no
 icon overlap, with an explicit
 check that only phone Loading hides its icon. At 360/390 in both themes it
