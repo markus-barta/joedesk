@@ -2,10 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261021083537.0.0",
+    APP_VERSION: "261021113113.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 27,
+    RELEASE_SEQUENCE: 28,
     VERSION_HISTORY: [
+      {
+        version: "261021113113.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-21",
+        title: "Calmer broker check-ins",
+        changes: ["Show Broker unsure during a brief gap in the broker check-in.", "Keep missing money red when the broker check age is unknown or reaches three minutes."],
+      },
       {
         version: "261021083537.0.0",
         versionScheme: "inspr-calver-3",

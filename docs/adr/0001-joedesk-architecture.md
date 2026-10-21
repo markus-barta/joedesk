@@ -1366,26 +1366,35 @@ new bytes. Sequence 26 was published on `main` at
 `2026-10-21T08:15Z` (OPS-354 attempt 3). Its live verification used the documented
 smoke variant recorded on JOED-59.
 
-JOED-59 reserves `261021083537.0.0` once at `2026-10-21T08:35:37Z`, stable
+JOED-59 reserved `261021083537.0.0` once at `2026-10-21T08:35:37Z`, stable
 sequence 27, for smoke and health semantics on a settled v2 board. A valid,
 unrejected stored Fleet Config is current (`fresh`) with an honest informational
 receipt age. Release smoke polls health every 10 seconds for up to 150 seconds
 by default, requiring fresh data/history, current config and a gateway confirmation
 observed in the window before running the access probes. No contract changes are
-needed. `release/preparation.json` records sequence 26 as `previous_release`
-(`published-candidate`, disposition `deployed`, `deployed: true`, JOED-58) and
-`last_deployed_release`; this does not claim sequence-27 publication or adoption.
+needed. Sequence 27 was published on `main` at
+`040d6756e92dc7c4e05fcf63b865242819b3d0ce` and has been live on csb0 since
+`2026-10-21T11:22:48Z` (JOED-59).
+
+JOED-60 reserves `261021113113.0.0` once at `2026-10-21T11:31:13Z`, stable
+sequence 28, for the bounded yellow **Broker unsure** header when money is null
+only because the broker check is unconfirmed. The shared gateway panel's check
+age must be known and below 180 seconds; unknown or older checks keep missing
+equity red. Cell copy and the other red rules stay unchanged.
+`release/preparation.json` records sequence 27 as `previous_release`
+(`published-candidate`, disposition `deployed`, `deployed: true`, JOED-59) and
+`last_deployed_release`; this does not claim sequence-28 publication or adoption.
 The explicit sequence-23 → sequence-24 migration anchor and legacy inventory
 stay unchanged.
 Footer/About and `/joe/healthz` derive the current version from the active build;
-About lists the current build, deployed sequence 26, then legacy history; it
+About lists the current build, deployed sequences 27 and 26, then legacy history; it
 excludes both superseded, never-deployed publications.
 `check-release` still enforces a strictly later reservation, with CLI regressions
 covering equal/earlier coordinates after closure verification. Contract revision
 9 and its complete set `000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5`
-remain unchanged by the sequence-27 reservation, as do the pusher/executor
+remain unchanged by the sequence-28 reservation, as do the pusher/executor
 requirements, producer pins and null deployment pins. No retry release set is
-claimed for sequence 27; main-push CI produces it after publication. The custom legacy scheme is not relabelled as
+claimed for sequence 28; main-push CI produces it after publication. The custom legacy scheme is not relabelled as
 INSPR-CalVer1. JOED-19's owner decision supersedes JOED-13, whose v2 proposal is
 cancelled and consolidated into JOED-26. Published history stays intact.
 
