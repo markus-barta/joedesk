@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261021083537.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 27,
+  "source": {
+    "commit": "040d6756e92dc7c4e05fcf63b865242819b3d0ce",
+    "tree": "447a771342dfdaa58e37877ca32acee327c58db8"
+  },
+  "release_set_sha256": "bb51dc1debbfb0faf7687e60047777f506ff344c634222061b4510f4ad89214e",
+  "image_digest": "sha256:d69bc20f429c11ce2dce6d161fc9225e0b99ece1f1c1148bc285b07c8ffdd105",
+  "contract_set_sha256": "000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5",
+  "validation_run_id": "39582022064",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-10-21T11:22:48Z",
+    "operator_ticket": "OPS-354",
+    "rollback_reference": "OPS-354 / JOED-59: revert the csb0 board re-pin (nixcfg #1082) and switch csb0; pull_policy never reuses the retained sequence-26 image; v2 data store unchanged (board-only switch); pre-switch board backup taken 2026-10-21T11:21:53Z"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-10-21T11:25:19Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-10-21T11:23:52Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-10-21T11:23:50Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-10-21T11:25:19Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-10-21T11:24:00Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED (verbatim on JOED-42, 2026-10-20 ~10:00 Vienna); performed via the read-only actor-tunnel capture (JOED-54)"
+  },
+  "adopted_at": "2026-10-21T11:32:58Z"
+}
