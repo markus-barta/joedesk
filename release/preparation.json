@@ -1,13 +1,13 @@
 {
   "schema": "joedesk.release-preparation.v1",
-  "ticket": "JOED-58",
+  "ticket": "JOED-59",
   "status": "candidate",
   "reservation": {
     "version_scheme": "inspr-calver-3",
-    "version": "261021015923.0.0",
+    "version": "261021083537.0.0",
     "release_channel": "stable",
-    "release_sequence": 26,
-    "reserved_at": "2026-10-21T01:59:23Z"
+    "release_sequence": 27,
+    "reserved_at": "2026-10-21T08:35:37Z"
   },
   "anchor": {
     "legacy_scheme": "calendar",
@@ -134,16 +134,16 @@
   "previous_release": {
     "product": "JoeDesk",
     "version_scheme": "inspr-calver-3",
-    "version": "261019102825.0.0",
+    "version": "261021015923.0.0",
     "release_channel": "stable",
-    "release_sequence": 25,
+    "release_sequence": 26,
     "status": "published-candidate",
+    "note": "Went live 2026-10-21T08:15Z (OPS-354 attempt 3); verified by a documented smoke variant (JOED-59).",
     "source_branch": "main",
-    "source_commit": "d36b5295295a6901e36fdf2dc0d64353ddf88d0e",
-    "release_set_ticket": "JOED-50",
-    "disposition": "superseded-before-deployment",
-    "deployed": false,
-    "note": "Published rev 9 candidate; release set verified under JOED-50. The 2026-10-21 cut-over aborted in phase 1 before the swap; never deployed."
+    "source_commit": "6eacd6c707386cabe8245e1f97df2ef93965b394",
+    "release_set_ticket": "JOED-58",
+    "disposition": "deployed",
+    "deployed": true
   },
   "legacy_deployment_inventory": {
     "board_source_pin": "db621bf",
@@ -156,10 +156,10 @@
   },
   "last_deployed_release": {
     "product": "JoeDesk",
-    "version_scheme": "calendar",
-    "version": "26.09.21.12.00",
+    "version_scheme": "inspr-calver-3",
+    "version": "261021015923.0.0",
     "release_channel": "stable",
-    "release_sequence": 23,
-    "note": "Put the household decision pulse, KEEP scope, and short learning next steps above the detail cards."
+    "release_sequence": 26,
+    "note": "Went live 2026-10-21T08:15Z (OPS-354 attempt 3); verified by a documented smoke variant (JOED-59)."
   }
 }

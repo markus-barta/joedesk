@@ -29,6 +29,8 @@ const NOW = samples.data.receivedAt;
 const ingress = () => { const v = structuredClone(samples.data); delete v.receivedAt; return v; };
 const oldRelease = prep.previous_release, next = prep.reservation;
 const lastDeployed = prep.last_deployed_release;
+const legacyDeployed = { product: active.product, version_scheme: prep.anchor.legacy_scheme,
+  version: prep.anchor.last_legacy_version, release_channel: active.release_channel, release_sequence: prep.anchor.last_legacy_sequence };
 const audit = { schema: 'inspr.joe.fleet-config.actions.v1', entries: [
   { id: 'fa-123456-1234abcd', at: NOW, actor: 'fixture', revBefore: 'fc-000001', revAfter: 'fc-000002', changedKeys: ['desks.maxBusyDesks'], outcome: 'success', reason: 'propagated' },
   { id: 'fa-123457-1234abce', at: NOW, actor: 'fixture', revBefore: 'fc-000002', revAfter: null, changedKeys: [], outcome: 'failure', reason: 'revision_conflict' },
@@ -115,10 +117,10 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   assert.equal(compareReleases(next, oldRelease, prep.anchor), 1);
   assert.equal(compareReleases(oldRelease, next), -1, 'calendar successors share a coordinate space');
   assert.equal(compareReleases(lastDeployed, next, prep.anchor), -1);
-  assert.throws(() => compareReleases(lastDeployed, next), /anchor/);
-  assert.throws(() => compareReleases(lastDeployed, next, { ...prep.anchor, first_calendar_version: '260229120000.0.0' }), /calendar_date/);
+  assert.throws(() => compareReleases(legacyDeployed, next), /anchor/);
+  assert.throws(() => compareReleases(legacyDeployed, next, { ...prep.anchor, first_calendar_version: '260229120000.0.0' }), /calendar_date/);
   assert.throws(() => compareReleases({ ...oldRelease, version: '0.9.0', version_scheme: 'legacy' }, next, prep.anchor));
-  assert.throws(() => compareReleases(lastDeployed, { ...next, release_sequence: 23 }, prep.anchor));
+  assert.throws(() => compareReleases(legacyDeployed, { ...next, release_sequence: 23 }, prep.anchor));
   assert.throws(() => compareReleases(oldRelease, { ...next, release_channel: 'other' }, prep.anchor));
   for (const previous of [next, { ...next, version_scheme: 'inspr-calendar-v2' }]) assert.throws(() => reserveVersion(previous, next.reserved_at), /not_later/);
   assert.throws(() => reserveVersion(oldRelease, '2026-10-16T15:12:18+00:00'));
@@ -127,22 +129,24 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   const later = reserveVersion({ ...next, version_scheme: 'inspr-calendar-v2' }, laterUTC);
   assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, next.release_sequence + 1);
 });
-test('JOED-58: aborted cut-over candidate stays distinct from the last deployed release and active UI', () => {
-  assert.equal(prep.ticket, 'JOED-58');
-  assert.equal(next.release_sequence, 26);
-  assert.equal(oldRelease.version, '261019102825.0.0');
-  assert.equal(oldRelease.release_sequence, 25);
+test('JOED-59: smoke-fix candidate follows the deployed sequence 26; About preserves deployed history and excludes aborted candidates', () => {
+  assert.equal(prep.ticket, 'JOED-59');
+  assert.equal(next.release_sequence, 27);
+  assert.equal(active.status, 'candidate');
+  assert.equal(active.note, 'Smoke and health semantics for a settled v2 board (JOED-59)');
+  assert.equal(oldRelease.version, '261021015923.0.0');
+  assert.equal(oldRelease.release_sequence, 26);
   assert.equal(oldRelease.status, 'published-candidate');
   assert.equal(oldRelease.source_branch, 'main');
-  assert.equal(oldRelease.source_commit, 'd36b5295295a6901e36fdf2dc0d64353ddf88d0e');
-  assert.equal(oldRelease.release_set_ticket, 'JOED-50');
-  assert.equal(oldRelease.disposition, 'superseded-before-deployment');
-  assert.equal(oldRelease.deployed, false);
-  assert.equal(oldRelease.note, 'Published rev 9 candidate; release set verified under JOED-50. The 2026-10-21 cut-over aborted in phase 1 before the swap; never deployed.');
+  assert.equal(oldRelease.source_commit, '6eacd6c707386cabe8245e1f97df2ef93965b394');
+  assert.equal(oldRelease.release_set_ticket, 'JOED-58');
+  assert.equal(oldRelease.disposition, 'deployed');
+  assert.equal(oldRelease.deployed, true);
+  assert.equal(oldRelease.note, 'Went live 2026-10-21T08:15Z (OPS-354 attempt 3); verified by a documented smoke variant (JOED-59).');
   assert.deepEqual(prep.anchor, { legacy_scheme: 'calendar', last_legacy_version: '26.09.21.12.00',
     last_legacy_sequence: 23, first_calendar_version: '261016151218.0.0', first_calendar_sequence: 24 });
-  assert.equal(lastDeployed.version, prep.anchor.last_legacy_version);
-  assert.equal(lastDeployed.release_sequence, prep.anchor.last_legacy_sequence);
+  assert.equal(lastDeployed.version, oldRelease.version);
+  assert.equal(lastDeployed.release_sequence, oldRelease.release_sequence);
   const versionSource = fs.readFileSync(new URL('../public/joe/joe-version.js', import.meta.url), 'utf8');
   const ui = new Function('window', `${versionSource}; return window.JoeVersion;`)({});
   assert.equal(ui.APP_VERSION, active.version);
@@ -150,12 +154,13 @@ test('JOED-58: aborted cut-over candidate stays distinct from the last deployed 
   assert.equal(ui.VERSION_HISTORY[0].version, active.version);
   assert.equal(ui.VERSION_HISTORY[0].date, next.reserved_at.slice(0, 10));
   assert.equal(ui.VERSION_HISTORY[1].version, lastDeployed.version);
-  for (const version of [oldRelease.version, prep.anchor.first_calendar_version]) {
+  assert.equal(ui.VERSION_HISTORY[2].version, prep.anchor.last_legacy_version);
+  for (const version of ['261019102825.0.0', prep.anchor.first_calendar_version]) {
     assert.equal(ui.VERSION_HISTORY.some(r => r.version === version), false,
       'About must not imply either superseded candidate was deployed');
   }
 });
-test('JOED-58 check-release: accepts the retry reservation and rejects equal or earlier reservations after integrity verification', t => {
+test('JOED-59 check-release: accepts the smoke-fix reservation and rejects equal or earlier reservations after integrity verification', t => {
   const root = temporary(t), closure = read('release/closure.json');
   for (const name of [...closure.files.map(f => f.path), 'release/closure.json', 'scripts/check-release.mjs']) {
     const target = join(root, name); fs.mkdirSync(join(target, '..'), { recursive: true });
@@ -165,7 +170,7 @@ test('JOED-58 check-release: accepts the retry reservation and rejects equal or 
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.equal(JSON.parse(accepted.stdout).candidate, next.version);
-  for (const [version, reserved_at] of [['261019102825.0.0', '2026-10-19T10:28:25Z'], ['261019102824.0.0', '2026-10-19T10:28:24Z']]) {
+  for (const [version, reserved_at] of [['261021015923.0.0', '2026-10-21T01:59:23Z'], ['261021015922.0.0', '2026-10-21T01:59:22Z']]) {
     const invalid = structuredClone(prep);
     Object.assign(invalid.reservation, { version, reserved_at });
     fs.writeFileSync(join(root, 'release/preparation.json'), JSON.stringify(invalid, null, 2) + '\n');
