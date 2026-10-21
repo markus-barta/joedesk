@@ -164,8 +164,8 @@
     },
     {
       "path": "public/joe/health.js",
-      "size": 13206,
-      "sha256": "a9e00a084e5772c4d9fac4f00d6c2455553ac68120c56060cee5654330ed8c7f"
+      "size": 13560,
+      "sha256": "180f94df3e264e3febc7672d29285ea22690b11522c1c7f1e02ca7d60b5e2ade"
     },
     {
       "path": "public/joe/history-model.js",

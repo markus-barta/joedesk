@@ -23,6 +23,7 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
+const { isRTH } = await import('../time.mjs');
 const format = await import('../public/joe/format.js');
 const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await import('../public/joe/ui.js');
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
@@ -619,16 +620,16 @@ test('health: one null keeps a yellow grace, a cold load or old carry is red, HA
   assert.match(health.boardDiagnostics(h.states, h.feeds, h.now).join(' '), /emergency stop is on/);
 });
 
-function unconfirmedBoard(checkAge = 100) {
+function unconfirmedBoard(checkAge = 100, receiptAge = 9) {
   const payload = structuredClone(fixture('a-frozen-ready-gateway').payload);
-  payload.safety.gateway.checkedAt = at(payload.generatedAt, 9 - checkAge);
-  const b = board({ feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) }, { cold: true });
+  payload.safety.gateway.checkedAt = at(payload.generatedAt, receiptAge - checkAge);
+  const b = board({ feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, receiptAge) }, { cold: true });
   assert.equal(b.feeds.data.status, 200);
   return b;
 }
 
-test('health: unconfirmed null money is yellow Broker unsure at 66, 100 and 144 seconds, up to the stopped-check bound', () => {
-  for (const checkAge of [66, 100, 144, health.FEED_STOPPED_S - 0.001]) {
+test('health: unconfirmed null money is yellow Broker unsure at 66, 100, 144 and 179 seconds, up to the stopped-check bound', () => {
+  for (const checkAge of [66, 100, 144, 179, health.FEED_STOPPED_S - 0.001]) {
     const b = unconfirmedBoard(checkAge);
     assert.equal(b.states.gateway.ageSeconds, checkAge);
     for (const name of ['today.equity', 'desks.j.equity', 'desks.joe.equity', 'desks.joel.equity']) {
@@ -639,6 +640,83 @@ test('health: unconfirmed null money is yellow Broker unsure at 66, 100 and 144 
     assert.deepEqual([p.tone, p.reason, p.label, p.statusTone], ['yellow', 'gateway_unconfirmed', 'Broker unsure', 'warn']);
     assert.equal(p.explanation, 'the broker connection has not checked in — reload; if still old, tell Amy');
     assert.match(headerHealth(b, p).html, /tone-warn/);
+  }
+});
+
+test('health: a missing gateway on a cold load cannot use receipt age to excuse null money', () => {
+  const b = board(fixture('a-missing-gateway'), { cold: true });
+  assert.equal(b.feeds.data.status, 200);
+  assert.equal(b.feeds.data.value.safety.gateway, undefined);
+  assert.equal(b.states.gateway.ageSeconds, 9, 'the missing-gateway panel only carries receipt age');
+  assert.equal(b.states['today.equity'].value, null);
+  assert.deepEqual(health.boardHealthPresentation(b.states, b.feeds, b.now), {
+    tone: 'red', reason: 'equity_unavailable', label: 'Needs fix', statusTone: 'bad',
+    explanation: health.REASON_COPY.equity_unavailable,
+  });
+});
+
+test('health: invalid or absent real check timestamps cannot excuse null money even with a finite panel age', () => {
+  // Ranking must fail closed even if an inconsistent selector still has an age.
+  for (const checkedAt of [undefined, null, 'invalid', '2026-10-14T17:50:51Z',
+    '2026-02-30T17:50:51.000Z', at(valid.data.generatedAt, 3600)]) {
+    const b = unconfirmedBoard();
+    b.feeds.data.value.safety.gateway.checkedAt = checkedAt;
+    assert.equal(b.states.gateway.ageSeconds, 100);
+    assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'red', reason: 'equity_unavailable' }, String(checkedAt));
+  }
+});
+
+test('health: a 59-second OK broker with null unconfirmed money stays red in RTH and on Sunday', () => {
+  for (const [generatedAt, rth] of [['2026-10-14T17:52:22.000Z', true], ['2026-10-18T17:52:22.000Z', false]]) {
+    const payload = switchSetSnapshot(generatedAt);
+    payload.safety.gateway.checkedAt = at(generatedAt, -50);
+    for (const bag of [payload.totals, ...payload.desks.map(desk => desk.money)]) {
+      for (const field of ['equity', 'dayPnl', 'openPnl', 'totalPnl']) bag.reasons[field] = 'gateway_unconfirmed';
+    }
+    const b = board({ feed: 'data', payload, receivedAt: generatedAt, now: at(generatedAt, 9) }, { cold: true });
+    assert.equal(b.feeds.data.status, 200);
+    assert.equal(isRTH(b.now), rth);
+    assert.equal(b.states.gateway.ageSeconds, 59);
+    assert.equal(health.brokerState(b.states, b.feeds.data.value).word, 'OK');
+    assert.equal(b.states['today.equity'].value, null);
+    const p = health.boardHealthPresentation(b.states, b.feeds, b.now);
+    assert.deepEqual([p.tone, p.reason, p.label], ['red', 'equity_unavailable', 'Needs fix']);
+  }
+});
+
+test('health: a degraded broker cannot excuse null unconfirmed equity', () => {
+  const b = unconfirmedBoard();
+  Object.assign(b.feeds.data.value.safety.gateway, { apiSessionReady: false, reason: 'gateway_degraded' });
+  assert.equal(health.brokerState(b.states, b.feeds.data.value).word, 'degraded');
+  assert.equal(b.states['today.equity'].reason, 'gateway_unconfirmed');
+  assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'red', reason: 'equity_unavailable' });
+});
+
+test('health: excused null money ranks Broker unsure ahead of a late receipt at every allowed check age', () => {
+  for (const checkAge of [66, 100, 144, 179, health.FEED_STOPPED_S - 0.001, health.FEED_STOPPED_S, 200]) {
+    const b = unconfirmedBoard(checkAge, 61);
+    assert.equal(b.states.gateway.ageSeconds, checkAge);
+    assert.equal(health.brokerState(b.states, b.feeds.data.value).word, 'unsure');
+    assert.equal(health.dataAge(b.feeds, b.now).reason, 'snapshot_stale');
+    const p = health.boardHealthPresentation(b.states, b.feeds, b.now);
+    assert.deepEqual([p.tone, p.reason, p.label], checkAge < health.FEED_STOPPED_S
+      ? ['yellow', 'gateway_unconfirmed', 'Broker unsure'] : ['red', 'equity_unavailable', 'Needs fix'], String(checkAge));
+  }
+});
+
+test('health: one excused equity cell ranks Broker unsure ahead of other yellow warnings', () => {
+  const names = ['today.equity', 'desks.j.equity', 'desks.joe.equity', 'desks.joel.equity'];
+  const changes = [
+    b => { b.feeds.data.reason = 'refresh_failed'; },
+    b => { b.feeds.data.reason = 'contract_invalid'; },
+    b => { Object.assign(b.states['today.totalPnl'], { value: { amount: '100', currency: 'EUR' }, retained: true }); },
+    b => { b.feeds.data.value.desks[0].state = 'stuck'; },
+  ];
+  for (const name of names) for (const change of changes) {
+    const b = unconfirmedBoard();
+    for (const other of names) if (other !== name) b.states[other].reason = 'not_exact_yet';
+    change(b);
+    assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'yellow', reason: 'gateway_unconfirmed' }, name);
   }
 });
 

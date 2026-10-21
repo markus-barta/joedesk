@@ -2,6 +2,7 @@
 // reason copy) applied to the shared panel states. Freshness itself comes from
 // contracts/panel-state.mjs; this module only ranks what the states say.
 import { feedAge, panelState } from './contracts/panel-state.mjs';
+import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { isRTH } from './time.mjs';
 import { age } from './format.js';
 
@@ -127,17 +128,19 @@ export function localBoardHealth(states, feeds, now) {
   if (broker.word === 'down') return { tone: 'red', reason: 'gateway_down' };
   if (receipt !== null && receipt >= FEED_STOPPED_S) return { tone: 'red', reason: 'feed_disconnected' };
   if (frozen !== null && frozen >= FEED_STOPPED_S) return { tone: 'red', reason: 'producer_stuck' };
-  const gatewayAge = states.gateway?.ageSeconds;
-  // Missing money during a brief broker-check gap keeps the broker warning;
-  // an unknown or stopped check cannot excuse unavailable equity.
-  const briefBrokerGap = Number.isFinite(gatewayAge) && gatewayAge >= 0 && gatewayAge < FEED_STOPPED_S;
+  // Without a canonical real check, the panel age may only be receipt age.
+  // Otherwise retain the selector's elapsed/progress age for the actual check.
+  const gatewayAge = gatewayCheckAgeMs(data.safety.gateway, data.generatedAt) === null ? null : states.gateway?.ageSeconds;
+  const briefBrokerGap = broker.word === 'unsure' && Number.isFinite(gatewayAge) && gatewayAge >= 0 && gatewayAge < FEED_STOPPED_S;
+  const excused = cell => briefBrokerGap && cell?.value == null && cell?.reason === 'gateway_unconfirmed';
   const usable = EQUITY_CELLS.every(name => {
     const cell = states[name];
     if (notExact(cell)) return true;
-    if (cell?.value == null) return cell?.reason === 'gateway_unconfirmed' && briefBrokerGap;
+    if (cell?.value == null) return excused(cell);
     return !cell.retained || (cell.ageSeconds !== null && cell.ageSeconds <= RETAINED_GRACE_S);
   });
   if (!usable) return { tone: 'red', reason: 'equity_unavailable' };
+  if (EQUITY_CELLS.some(name => excused(states[name]))) return { tone: 'yellow', reason: 'gateway_unconfirmed' };
   if (broker.word === 'degraded') return { tone: 'yellow', reason: 'gateway_degraded' };
   if (transport) return { tone: 'yellow', reason: 'refresh_failed' };
   if (rejected) return { tone: 'yellow', reason: 'retained_values' };

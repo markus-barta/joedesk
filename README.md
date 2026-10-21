@@ -1113,13 +1113,17 @@ themes. Browser execution and visual approval remain with CI/coordinator.
 The cash and KPI sizing reserves include the new short reason through
 `CELL_REASON`, with their existing geometry checks unchanged.
 
-JOED-60 ranks null equity with `gateway_unconfirmed` as usable for the header's
-missing-equity check only while the shared gateway panel's check age is known
-and below 180 seconds (`FEED_STOPPED_S`). With a fresh feed, the header then shows
-yellow **Broker unsure**; the cells still say **Unavailable · broker connection
-not confirmed**. At 180 seconds or an unknown check age, missing equity stays red
-`equity_unavailable`. Other missing-equity reasons and the halt, ledger limit,
-broker-down, stopped-feed and stuck-producer red rules keep their precedence.
+JOED-60 excuses null equity with `gateway_unconfirmed` only while the broker
+state is `unsure`, the real gateway has a canonical `checkedAt`, and the shared
+gateway panel's check age is known and below 180 seconds (`FEED_STOPPED_S`).
+An excused cell makes the header show yellow **Broker unsure** immediately,
+ahead of stale-feed and other yellow warnings; the cells still say
+**Unavailable · broker connection not confirmed**. A missing or invalid real
+check, an unknown age, an age of 180 seconds or more, or null unconfirmed equity
+while the broker is `OK` or degraded stays red `equity_unavailable`. Receipt age
+never substitutes for a missing broker check. Other missing-equity reasons and
+the halt, ledger limit, broker-down, stopped-feed and stuck-producer red rules
+keep their precedence.
 
 JOED-57 treats null desk equity with `not_exact_yet` as deliberately uncaptured,
 so an otherwise healthy board stays **Board OK** and Details adds one neutral
