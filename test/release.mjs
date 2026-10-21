@@ -12,6 +12,8 @@ import { closeBrowserProcess } from '../scripts/browser/cdp.mjs';
 import { parseVersion, reserveVersion, compareReleases } from '../release/versioning.mjs';
 import { backupStore, restoreStore, migrateToV2, verifyBackup } from '../release/data-migration.mjs';
 import { createReadModel } from '../server/read-model.mjs';
+import { healthProjection } from '../server/health.mjs';
+import { atomicWrite } from '../server/storage.mjs';
 import { createJoeServer } from '../server.mjs';
 import { smokeRelease, PROTECTED_READS, APP_ORIGIN_HEADER } from '../scripts/smoke-release.mjs';
 import { validateContract } from '../contracts/index.mjs';
@@ -416,10 +418,150 @@ test('P6 smoke: SSO redirects are auth_required; wrong release, stale feeds, exp
     return new Response('', { status });
   } }), /auth_required/);
   await assert.rejects(smokeRelease(url, oldRelease, { allowUnreported: true, fetcher: async () => app(health) }), /release_mismatch/);
-  await assert.rejects(smokeRelease(url, active, { fetcher: async () => app({ ...health, snapshotAgeSeconds: 61 }) }), /feeds_not_ready/);
+  await assert.rejects(smokeRelease(url, active, { maxWaitSeconds: 0, fetcher: async () => app({ ...health, snapshotAgeSeconds: 61 }) }), /feeds_not_ready/);
   await assert.rejects(smokeRelease(url, active, { allowUnreported: true, fetcher: async () => app(health) }), /protected_read_exposed/);
   await assert.rejects(smokeRelease(url, active, { fetcher: async () => new Response(' '.repeat(16385), { headers: { [APP_ORIGIN_HEADER]: 'app' } }) }), /health_size_limit/);
   for (const base of ['https://board.example.invalid/', 'https://user:pass@board.example.invalid/joe/', 'https://board.example.invalid/joe/?token=redacted']) await assert.rejects(smokeRelease(base, active), /base_invalid/);
+});
+test('JOED-59 health: unchanged valid Fleet Config stays current with its original age across restart', t => {
+  const root = temporary(t), model = createReadModel({ dataDir: root, clock: () => NOW });
+  assert.equal(model.observeFleet(samples['fleet-config']).ok, true);
+  const later = new Date(Date.parse(NOW) + 86400000).toISOString();
+  const restarted = createReadModel({ dataDir: root, clock: () => later });
+  assert.equal(restarted.observeFleet(samples['fleet-config']).ok, true);
+  const health = healthProjection(restarted, active, later);
+  assert.deepEqual(health.feeds['fleet-config'], { state: 'fresh', ageSeconds: 86400, reason: null });
+  assert.equal(validateContract('healthz', health).ok, true);
+});
+test('JOED-59 health: absent, rejected, failed-refresh and clock-regressed Fleet Config keep their reasons', t => {
+  const model = createReadModel({ dataDir: temporary(t), clock: () => NOW });
+  const fleet = (m = model, now = NOW) => healthProjection(m, active, now).feeds['fleet-config'];
+  assert.deepEqual(fleet(), { state: 'not reported', ageSeconds: null, reason: 'feed_not_received' });
+  model.observeFleet(samples['fleet-config']);
+  model.observeFleet({ ...samples['fleet-config'], mode: 'live' });
+  assert.deepEqual(fleet(), { state: 'broken', ageSeconds: 0, reason: 'contract_invalid' });
+  model.observeFleet(samples['fleet-config']);
+  assert.deepEqual(fleet(model, new Date(Date.parse(NOW) - 1000).toISOString()), { state: 'broken', ageSeconds: null, reason: 'clock_regressed' });
+  let fail = false;
+  const failed = createReadModel({ dataDir: temporary(t), clock: () => NOW, write: (...args) => {
+    if (fail) throw new Error('synthetic write failure');
+    // Observe once with the normal storage implementation before failing writes.
+    atomicWrite(...args);
+  } });
+  failed.observeFleet(samples['fleet-config']); fail = true;
+  failed.observeFleet({ ...samples['fleet-config'], rev: 'fc-000002' });
+  assert.deepEqual(fleet(failed), { state: 'broken', ageSeconds: 0, reason: 'refresh_failed' });
+});
+
+function smokeFixture(transform = () => {}) {
+  const health = structuredClone(samples.healthz);
+  Object.assign(health, { version: active.version, versionScheme: active.version_scheme, snapshotAgeSeconds: 1,
+    gateway: { confirmed: false, checkAgeSeconds: 70, reason: 'gateway_unconfirmed' } });
+  for (const name of ['data', 'history', 'fleet-config']) health.feeds[name] = { state: 'fresh', ageSeconds: name === 'fleet-config' ? 86400 : 1, reason: null };
+  let elapsed = 0, polls = 0, probes = 0;
+  const waits = [];
+  return { waits, polls: () => polls, probes: () => probes,
+    options: { clock: () => elapsed, wait: async ms => { waits.push(ms); elapsed += ms; }, fetcher: async (url, init) => {
+      if (url.pathname === '/joe/healthz') {
+        assert.deepEqual(init.headers, { accept: 'application/json' });
+        const next = structuredClone(health); transform(next, ++polls);
+        assert.equal(validateContract('healthz', next).ok, true);
+        return Response.json(next, { headers: { [APP_ORIGIN_HEADER]: 'app' } });
+      }
+      probes++;
+      return new Response('{}', { status: 401 });
+    } },
+  };
+}
+test('JOED-59 smoke: settled config and a gateway confirmed on only the third poll pass; access probes run once', async () => {
+  const fixture = smokeFixture((health, poll) => {
+    if (poll === 3) health.gateway = { confirmed: true, checkAgeSeconds: 0, reason: null };
+  });
+  const result = await smokeRelease('https://board.example.invalid/joe/', active, fixture.options);
+  assert.equal(result.ok, true); assert.equal(result.feeds['fleet-config'].ageSeconds, 86400);
+  assert.equal(fixture.polls(), 3); assert.deepEqual(fixture.waits, [10000, 10000]);
+  assert.equal(fixture.probes(), 2 * (PROTECTED_READS.length + 4));
+});
+test('JOED-59 smoke: gateway confirmation is retained while waiting for fresh feeds', async () => {
+  const fixture = smokeFixture((health, poll) => {
+    if (poll === 1) {
+      health.gateway = { confirmed: true, checkAgeSeconds: 0, reason: null };
+      health.feeds.history = { state: 'stale', ageSeconds: 60, reason: 'snapshot_stale' };
+    }
+  });
+  assert.equal((await smokeRelease('https://board.example.invalid/joe/', active, fixture.options)).ok, true);
+  assert.equal(fixture.polls(), 2);
+});
+for (const fault of ['gateway never confirmed', 'fleet contract_invalid', 'fleet absent', 'data stale', 'history stale', 'snapshot stale']) {
+  test(`JOED-59 smoke: ${fault} times out as feeds_not_ready without access probes`, async () => {
+    const fixture = smokeFixture(health => {
+      if (fault !== 'gateway never confirmed') health.gateway = { confirmed: true, checkAgeSeconds: 0, reason: null };
+      if (fault === 'fleet contract_invalid') health.feeds['fleet-config'] = { state: 'broken', ageSeconds: 86400, reason: 'contract_invalid' };
+      if (fault === 'fleet absent') health.feeds['fleet-config'] = { state: 'not reported', ageSeconds: null, reason: 'feed_not_received' };
+      for (const name of ['data', 'history']) if (fault === `${name} stale`) health.feeds[name] = { state: 'stale', ageSeconds: 60, reason: 'snapshot_stale' };
+      if (fault === 'snapshot stale') health.snapshotAgeSeconds = 60;
+    });
+    await assert.rejects(smokeRelease('https://board.example.invalid/joe/', active, fixture.options), /^Error: feeds_not_ready$/);
+    assert.equal(fixture.polls(), 16); assert.deepEqual(fixture.waits, Array(15).fill(10000));
+    assert.equal(fixture.probes(), 0);
+  });
+}
+test('JOED-59 smoke: zero wait checks once; custom wait ends at its bound; allowUnreported still skips readiness', async () => {
+  for (const [maxWaitSeconds, polls, waits] of [[0, 1, []], [15, 3, [10000, 5000]]]) {
+    const fixture = smokeFixture();
+    await assert.rejects(smokeRelease('https://board.example.invalid/joe/', active, { ...fixture.options, maxWaitSeconds }), /feeds_not_ready/);
+    assert.equal(fixture.polls(), polls); assert.deepEqual(fixture.waits, waits);
+  }
+  const fixture = smokeFixture();
+  assert.equal((await smokeRelease('https://board.example.invalid/joe/', active, { ...fixture.options, allowUnreported: true })).ok, true);
+  assert.equal(fixture.polls(), 1); assert.deepEqual(fixture.waits, []);
+  for (const maxWaitSeconds of [-1, 601, 1.5, NaN, '150']) await assert.rejects(smokeRelease('https://board.example.invalid/joe/', active, { maxWaitSeconds }), /smoke_wait_invalid/);
+});
+test('JOED-59 smoke: later polls still enforce release, schema, origin and authentication checks', async () => {
+  for (const [failure, reason] of [['release', 'release_mismatch'], ['schema', 'health_contract_invalid'], ['origin', 'app_origin_not_proven'], ['auth', 'auth_required']]) {
+    const fixture = smokeFixture();
+    let polls = 0;
+    const fetcher = async (url, init) => {
+      if (++polls === 1) return fixture.options.fetcher(url, init);
+      if (failure === 'auth') return new Response('', { status: 302 });
+      const response = await fixture.options.fetcher(url, init), health = await response.json();
+      if (failure === 'release') health.version = oldRelease.version;
+      if (failure === 'schema') health.schema = 'unknown';
+      return Response.json(health, { headers: failure === 'origin' ? {} : { [APP_ORIGIN_HEADER]: 'app' } });
+    };
+    await assert.rejects(smokeRelease('https://board.example.invalid/joe/', active, { ...fixture.options, fetcher }), new RegExp(`^Error: ${reason}$`));
+    assert.equal(polls, 2); assert.equal(fixture.probes(), 0);
+  }
+});
+test('JOED-59 smoke CLI: positional invocation defaults to 150 seconds; wait flag is bounded and fail-closed', t => {
+  const preload = join(temporary(t), 'smoke-clock.mjs');
+  const fixture = structuredClone(samples.healthz);
+  Object.assign(fixture, { version: active.version, versionScheme: active.version_scheme, snapshotAgeSeconds: 1 });
+  for (const name of ['data', 'history', 'fleet-config']) fixture.feeds[name] = { state: 'fresh', ageSeconds: name === 'fleet-config' ? 86400 : 1, reason: null };
+  fs.writeFileSync(preload, `import timers from 'node:timers/promises';
+import { syncBuiltinESMExports } from 'node:module';
+let elapsed = 0;
+Object.defineProperty(globalThis, 'performance', { value: { now: () => elapsed } });
+timers.setTimeout = async ms => { elapsed += ms; };
+syncBuiltinESMExports();
+globalThis.fetch = async url => {
+  if (url.pathname !== '/joe/healthz') return new Response('{}', { status: 401 });
+  const health = ${JSON.stringify(fixture)};
+  health.gateway = elapsed === 150000 ? { confirmed: true, checkAgeSeconds: 0, reason: null }
+    : { confirmed: false, checkAgeSeconds: 70, reason: 'gateway_unconfirmed' };
+  return Response.json(health, { headers: { 'x-joedesk-origin': 'app' } });
+};\n`);
+  const run = (...flags) => spawnSync(process.execPath, ['--import', preload, 'scripts/smoke-release.mjs', 'https://board.example.invalid/joe/', active.version_scheme, active.version, ...flags], { encoding: 'utf8', timeout: 10000 });
+  const defaultCLI = run();
+  assert.equal(defaultCLI.status, 0, defaultCLI.stderr); assert.equal(JSON.parse(defaultCLI.stdout).ok, true);
+  for (const value of ['0', '20']) {
+    const failed = run('--max-wait-seconds', value);
+    assert.equal(failed.status, 1); assert.equal(failed.stderr.trim(), 'feeds_not_ready');
+  }
+  for (const flags of [['--max-wait-seconds', '-1'], ['--max-wait-seconds', '601'], ['--max-wait-seconds', '1.5'], ['--max-wait-seconds'], ['--unexpected', '0'], ['extra']]) {
+    const failed = run(...flags);
+    assert.equal(failed.status, 1); assert.equal(failed.stderr.trim(), 'release_smoke_failed');
+  }
 });
 test('P6 normal build verifies pinned offline bundle/closure; corruption, extra, missing and untracked fail', t => {
   execFileSync(process.execPath, ['scripts/check-release.mjs'], { stdio: 'pipe' });

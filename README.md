@@ -349,8 +349,18 @@ OPS owns these exact nixcfg items through its existing review path:
    `BASE_JOE_URL` is the public SSO route ending **exactly** in `/joe/`, with no
    credentials, query or fragment (for example `https://board.example.invalid/joe/`).
    It sends no cookies or authorization, follows no redirect, validates the exact health
-   allowlist and expected version/schema, requires fresh data/history/config
-   and a confirmed gateway. It probes all six reads, `/joe/`,
+   allowlist and expected version/schema on every health poll. By default it polls
+   every 10 seconds for up to 150 seconds: data and history must be fresh with
+   snapshot/feed ages below 60 seconds, Fleet Config must be current, and gateway
+   confirmation must have been observed in at least one poll. Set
+   `--max-wait-seconds N` (integer 0–600) to change the bound; 0 checks once.
+   Fleet Config is current (`fresh`) while a valid stored revision has no rejection;
+   its age is informational time since that revision was received/changed. It need
+   not change every minute. Missing/rejected config, stale data/history, or a gateway
+   never confirmed within the window fail with `feeds_not_ready`. These semantics
+   accommodate unchanged config and the gateway check cadence ([JOED-59](https://aeon.barta.cm/JOED-59)).
+   After readiness, it probes all six reads once anonymously and once with spoofed
+   identity, together with `/joe/`,
    `/joe/app.js?v=CANONICAL_VERSION`, and both near-health paths, first anonymously
    and again with well-formed synthetic `X-Auth-Request-User` and `X-Forwarded-User`.
    Every protected probe must lack `X-JoeDesk-Origin` and receive a 30x with a
@@ -620,7 +630,11 @@ retain their legacy probe responses. Static UI/assets remain behind external SSO
 
 `/joe/healthz` reports the actual `release.json` version/scheme, server clock,
 contract-set identifier, four feed states/receipt ages and gateway confirmation,
-check age and closed reason. Never-received feeds have null age and
+check age and closed reason. Fleet Config's `fresh` state means a current, valid
+stored document without rejection, independent of its informational receipt age;
+rejections and clock regression retain their failure states. The board light,
+Settings and desk cards do not use Fleet Config age to warn about timed staleness.
+Never-received feeds have null age and
 `feed_not_received`, including Results before its first accepted push. Data/history
 without observations return HTTP 503 with that reason, distinct from a missing
 route. Health has no money, identifiers, paths or diagnostic text. The historical
