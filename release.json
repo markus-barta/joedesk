@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261019102825.0.0",
+  "version": "261021015923.0.0",
   "release_channel": "stable",
-  "release_sequence": 25,
+  "release_sequence": 26,
   "status": "candidate",
-  "note": "Rev 8 cut-over candidate: paper-account cash, nullable position values with per-field reasons, and a stable hero in every state."
+  "note": "Rev 9 cut-over retry candidate: desk values that are not exact yet stay calm (JOED-57) and migrate-v2 normalizes a v1 Fleet Config (JOED-58)."
 }

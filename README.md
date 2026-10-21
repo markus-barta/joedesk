@@ -2,20 +2,27 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261019102825.0.0` (`inspr-calver-3`, stable sequence 25), reserved once at `2026-10-19T10:28:25Z` for the rev 8 cut-over (JOED-50): paper-account cash, nullable position values with per-field reasons, and the stable hero. `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. The last deployed release remains `calendar` / `26.09.21.12.00` / sequence 23. No deployment or authoritative live adoption is claimed by this branch.
+**Candidate version:** `261021015923.0.0` (`inspr-calver-3`, stable sequence 26), reserved once at `2026-10-21T01:59:23Z` for the rev 9 cut-over retry (JOED-58): desk values that are not exact yet stay calm (JOED-57), and migrate-v2 normalizes a v1 Fleet Config (JOED-58). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. The last deployed release remains `calendar` / `26.09.21.12.00` / sequence 23. No deployment or authoritative live adoption is claimed by this branch.
 
-The previous coordinate `261016151218.0.0` (stable sequence 24, rev 7) was
+The previous coordinate `261019102825.0.0` (stable sequence 25, rev 9) was
+published on `main` at `d36b5295295a6901e36fdf2dc0d64353ddf88d0e`; JOED-50
+records its verified release set. It was **never deployed**: the 2026-10-21
+cut-over aborted in phase 1 (`migrate-v2`) before the swap. It is superseded
+before deployment.
+
+The earlier coordinate `261016151218.0.0` (stable sequence 24, rev 7) was
 published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
-records its verified release set. It was **never deployed** and is superseded
-before deployment. Its immutable artifacts and legacy-to-calendar migration
-anchor remain history. `release/preparation.json` distinguishes that
+records its verified release set. It was also **never deployed**. Both
+publications' immutable artifacts and the legacy-to-calendar migration
+anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build
-followed by legacy history; the superseded publication is not a deployed entry.
+followed by legacy history; neither superseded publication is a deployed entry.
+Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-25 candidate has not been published. The candidate
+cutover**. The sequence-26 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -65,7 +72,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261019102825.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261021015923.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -1007,8 +1014,9 @@ pin is set by this tooling change.
 bytes are pinned by `CLOSURE_SHA256` in `scripts/check-release.mjs`. A future pin
 change invalidates the current closure: prepare a new, later release reservation,
 closure file hashes and closure pin, and immutable release set through the normal
-reviewed release process. Never reseal or republish candidate `261019102825.0.0`
-with new bytes. This tooling leaves its closure, contracts and pins unchanged.
+reviewed release process. Never reseal or republish `261016151218.0.0` or
+`261019102825.0.0` with new bytes. This tooling leaves contracts and pins unchanged;
+JOED-58 reserves sequence 26 for the cut-over retry's changed board bytes.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s

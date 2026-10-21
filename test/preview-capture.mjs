@@ -25,7 +25,8 @@ const [deskUI, historyUI, resultsUI, settingsUI, settingsModel, resultsModel, ui
 
 const execute = promisify(execFile);
 const BASE = 'http://127.0.0.1:8080/joe/';
-const HEALTH = { version: '261019102825.0.0', schemaVersion: 'joedesk.contracts.v2', resultsNotReceived: true };
+const activeRelease = JSON.parse(fs.readFileSync(new URL('../release.json', import.meta.url)));
+const HEALTH = { version: activeRelease.version, schemaVersion: 'joedesk.contracts.v2', resultsNotReceived: true };
 const PNG = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const opts = out => parseArgs(['--base-url', BASE, '--out', out]);
 function temporary(t) {

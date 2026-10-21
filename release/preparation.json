@@ -1,13 +1,13 @@
 {
   "schema": "joedesk.release-preparation.v1",
-  "ticket": "JOED-50",
+  "ticket": "JOED-58",
   "status": "candidate",
   "reservation": {
     "version_scheme": "inspr-calver-3",
-    "version": "261019102825.0.0",
+    "version": "261021015923.0.0",
     "release_channel": "stable",
-    "release_sequence": 25,
-    "reserved_at": "2026-10-19T10:28:25Z"
+    "release_sequence": 26,
+    "reserved_at": "2026-10-21T01:59:23Z"
   },
   "anchor": {
     "legacy_scheme": "calendar",
@@ -134,16 +134,16 @@
   "previous_release": {
     "product": "JoeDesk",
     "version_scheme": "inspr-calver-3",
-    "version": "261016151218.0.0",
+    "version": "261019102825.0.0",
     "release_channel": "stable",
-    "release_sequence": 24,
+    "release_sequence": 25,
     "status": "published-candidate",
     "source_branch": "main",
-    "source_commit": "dafe7909af04ba5ded3c4b55504ea10970e07e4d",
-    "release_set_ticket": "JOED-41",
+    "source_commit": "d36b5295295a6901e36fdf2dc0d64353ddf88d0e",
+    "release_set_ticket": "JOED-50",
     "disposition": "superseded-before-deployment",
     "deployed": false,
-    "note": "Published rev 7 candidate; release set verified under JOED-41. Never deployed."
+    "note": "Published rev 9 candidate; release set verified under JOED-50. The 2026-10-21 cut-over aborted in phase 1 before the swap; never deployed."
   },
   "legacy_deployment_inventory": {
     "board_source_pin": "db621bf",

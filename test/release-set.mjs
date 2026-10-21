@@ -12,6 +12,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const git = (args, cwd = root, input) => execFileSync('git', args, { cwd, input, stdio: ['pipe', 'pipe', 'pipe'] });
 const commit = git(['rev-parse', 'HEAD']).toString().trim();
 const committedRelease = JSON.parse(git(['show', `${commit}:release.json`]));
+const committedPreparation = JSON.parse(git(['show', `${commit}:release/preparation.json`]));
 const context = { repository: 'markus-barta/joedesk', commit, ref: 'refs/pull/49/merge', event: 'pull_request',
   run_id: '123456', run_attempt: '2', workflow: 'ci', server_url: 'https://github.com', generated_at: '2026-10-18T12:00:00.000Z' };
 const digest = n => 'sha256:' + n.repeat(64);
@@ -41,6 +42,7 @@ test('release-set good fixture verifies the exact commit and stable key order; P
   assert.deepEqual(m.validation_run.jobs, JOBS);
   assert.equal(m.generated_at, context.generated_at);
   assert.equal(m.version, committedRelease.version, 'use the committed reservation, never the generation clock');
+  assert.equal(m.release_sequence, committedRelease.release_sequence);
   const main = createReleaseSet(evidence, { ...context, ref: 'refs/heads/main', event: 'push' }, root);
   assert.equal(main.source.event, 'push');
   const manual = createReleaseSet(evidence, { ...context, ref: 'refs/heads/main', event: 'workflow_dispatch' }, root);
@@ -50,7 +52,7 @@ test('release-set good fixture verifies the exact commit and stable key order; P
 for (const [field, value, reason] of [
   ['source.commit', 'f'.repeat(40), /commit does not exist/],
   ['source.tree', 'f'.repeat(40), /source.tree/],
-  ['version', '261018120000.0.0', /version:/],
+  ['version', committedPreparation.previous_release.version, /version:/],
   ['version_scheme', 'inspr-calendar-v2', /version_scheme:/],
   ['release_channel', 'preview', /release_channel:/],
   ['release_sequence', committedRelease.release_sequence + 1, /release_sequence:/],
