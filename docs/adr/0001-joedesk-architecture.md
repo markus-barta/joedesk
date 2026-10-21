@@ -1346,19 +1346,34 @@ at `2026-10-16T15:12:18Z`, stable sequence 24. That rev 7 candidate was publishe
 on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d` and its release set
 verified under JOED-41, but it was never deployed.
 
-JOED-50 supersedes it before deployment with the rev 8 candidate
+JOED-50 superseded it before deployment with the initially rev 8 candidate
 `261019102825.0.0`, reserved once at `2026-10-19T10:28:25Z`, stable sequence 25.
 The changed artifact set includes paper-account cash, nullable position values
 with per-field reasons, and the stable hero; it cannot reuse sequence 24's
-immutable coordinate. `release/preparation.json` now records sequence 24 as
+immutable coordinate. It was published with contracts revision 9 on `main` at
+`d36b5295295a6901e36fdf2dc0d64353ddf88d0e`; JOED-50 records its verified release
+set. The 2026-10-21 cut-over aborted in phase 1 (`migrate-v2`) before the swap,
+so sequence 25 was never deployed either.
+
+JOED-58 supersedes it before deployment with the rev 9 retry candidate
+`261021015923.0.0`, reserved once at `2026-10-21T01:59:23Z`, stable sequence 26.
+JOED-57 keeps desk values calm when they are not exact yet; JOED-58 normalizes
+a v1 Fleet Config during migration with an audited update of required KEEP
+symbols. Those changed board bytes require a later coordinate; neither
+`261016151218.0.0` nor `261019102825.0.0` may be resealed or republished with
+new bytes. `release/preparation.json` now records sequence 25 as
 `previous_release`, including its publication and never-deployed disposition,
 and retains `calendar` / `26.09.21.12.00` / sequence 23 as `last_deployed_release`.
-The explicit sequence-23 → sequence-24 migration anchor stays unchanged.
+The explicit sequence-23 → sequence-24 migration anchor and legacy inventory
+stay unchanged.
 Footer/About and `/joe/healthz` derive the current version from the active build;
-About's legacy history excludes the superseded, never-deployed publication.
+About's legacy history excludes both superseded, never-deployed publications.
 `check-release` still enforces a strictly later reservation, with CLI regressions
 covering equal/earlier coordinates after closure verification. Contract revision
-8 and its complete set remain unchanged by JOED-50. The custom legacy scheme is not relabelled as
+9 and its complete set `000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5`
+remain unchanged by this retry reservation, as do the pusher/executor
+requirements, producer pins and null deployment pins. No retry release set is
+claimed; main-push CI produces it after publication. The custom legacy scheme is not relabelled as
 INSPR-CalVer1. JOED-19's owner decision supersedes JOED-13, whose v2 proposal is
 cancelled and consolidated into JOED-26. Published history stays intact.
 

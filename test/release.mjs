@@ -121,22 +121,24 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   for (const previous of [next, { ...next, version_scheme: 'inspr-calendar-v2' }]) assert.throws(() => reserveVersion(previous, next.reserved_at), /not_later/);
   assert.throws(() => reserveVersion(oldRelease, '2026-10-16T15:12:18+00:00'));
   assert.throws(() => reserveVersion(oldRelease, '2026-02-30T00:00:00Z'));
-  const later = reserveVersion({ ...oldRelease, version_scheme: 'inspr-calendar-v2' }, '2026-10-16T15:12:19Z');
-  assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, 25);
+  const laterUTC = new Date(Date.parse(next.reserved_at) + 1000).toISOString().replace('.000Z', 'Z');
+  const later = reserveVersion({ ...next, version_scheme: 'inspr-calendar-v2' }, laterUTC);
+  assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, next.release_sequence + 1);
 });
-test('JOED-50: published candidate history stays distinct from the last deployed release and active UI', () => {
-  assert.equal(prep.ticket, 'JOED-50');
-  assert.equal(next.release_sequence, 25);
-  assert.equal(oldRelease.version, '261016151218.0.0');
-  assert.equal(oldRelease.release_sequence, 24);
+test('JOED-58: aborted cut-over candidate stays distinct from the last deployed release and active UI', () => {
+  assert.equal(prep.ticket, 'JOED-58');
+  assert.equal(next.release_sequence, 26);
+  assert.equal(oldRelease.version, '261019102825.0.0');
+  assert.equal(oldRelease.release_sequence, 25);
   assert.equal(oldRelease.status, 'published-candidate');
   assert.equal(oldRelease.source_branch, 'main');
-  assert.equal(oldRelease.source_commit, 'dafe7909af04ba5ded3c4b55504ea10970e07e4d');
-  assert.equal(oldRelease.release_set_ticket, 'JOED-41');
+  assert.equal(oldRelease.source_commit, 'd36b5295295a6901e36fdf2dc0d64353ddf88d0e');
+  assert.equal(oldRelease.release_set_ticket, 'JOED-50');
   assert.equal(oldRelease.disposition, 'superseded-before-deployment');
   assert.equal(oldRelease.deployed, false);
+  assert.equal(oldRelease.note, 'Published rev 9 candidate; release set verified under JOED-50. The 2026-10-21 cut-over aborted in phase 1 before the swap; never deployed.');
   assert.deepEqual(prep.anchor, { legacy_scheme: 'calendar', last_legacy_version: '26.09.21.12.00',
-    last_legacy_sequence: 23, first_calendar_version: oldRelease.version, first_calendar_sequence: 24 });
+    last_legacy_sequence: 23, first_calendar_version: '261016151218.0.0', first_calendar_sequence: 24 });
   assert.equal(lastDeployed.version, prep.anchor.last_legacy_version);
   assert.equal(lastDeployed.release_sequence, prep.anchor.last_legacy_sequence);
   const versionSource = fs.readFileSync(new URL('../public/joe/joe-version.js', import.meta.url), 'utf8');
@@ -146,10 +148,12 @@ test('JOED-50: published candidate history stays distinct from the last deployed
   assert.equal(ui.VERSION_HISTORY[0].version, active.version);
   assert.equal(ui.VERSION_HISTORY[0].date, next.reserved_at.slice(0, 10));
   assert.equal(ui.VERSION_HISTORY[1].version, lastDeployed.version);
-  assert.equal(ui.VERSION_HISTORY.some(r => r.version === oldRelease.version), false,
-    'About must not imply the superseded candidate was deployed');
+  for (const version of [oldRelease.version, prep.anchor.first_calendar_version]) {
+    assert.equal(ui.VERSION_HISTORY.some(r => r.version === version), false,
+      'About must not imply either superseded candidate was deployed');
+  }
 });
-test('JOED-50 check-release: accepts the new reservation and rejects equal or earlier reservations after integrity verification', t => {
+test('JOED-58 check-release: accepts the retry reservation and rejects equal or earlier reservations after integrity verification', t => {
   const root = temporary(t), closure = read('release/closure.json');
   for (const name of [...closure.files.map(f => f.path), 'release/closure.json', 'scripts/check-release.mjs']) {
     const target = join(root, name); fs.mkdirSync(join(target, '..'), { recursive: true });
@@ -159,7 +163,7 @@ test('JOED-50 check-release: accepts the new reservation and rejects equal or ea
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.equal(JSON.parse(accepted.stdout).candidate, next.version);
-  for (const [version, reserved_at] of [['261016151218.0.0', '2026-10-16T15:12:18Z'], ['261016151217.0.0', '2026-10-16T15:12:17Z']]) {
+  for (const [version, reserved_at] of [['261019102825.0.0', '2026-10-19T10:28:25Z'], ['261019102824.0.0', '2026-10-19T10:28:24Z']]) {
     const invalid = structuredClone(prep);
     Object.assign(invalid.reservation, { version, reserved_at });
     fs.writeFileSync(join(root, 'release/preparation.json'), JSON.stringify(invalid, null, 2) + '\n');
