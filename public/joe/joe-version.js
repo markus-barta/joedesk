@@ -2,10 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261021015923.0.0",
+    APP_VERSION: "261021083537.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 26,
+    RELEASE_SEQUENCE: 27,
     VERSION_HISTORY: [
+      {
+        version: "261021083537.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-21",
+        title: "Reliable checks for a settled board",
+        changes: ["Keep valid Fleet Config current between changes.", "Wait for fresh data and history and an observed broker confirmation before release checks."],
+      },
       {
         version: "261021015923.0.0",
         versionScheme: "inspr-calver-3",

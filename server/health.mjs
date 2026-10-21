@@ -10,6 +10,10 @@ export function healthProjection(model, release, now) {
     let state = panelState(feed, feed.value, feed.value?.reason, now);
     if (!feed.value && !feed.reason) state = {
       state: 'not reported', ageSeconds: null, reason: feed.reason ?? 'feed_not_received' };
+    // Configuration remains current until rejected or replaced. Its receipt
+    // age describes the stored revision, not a producer update cadence.
+    if (name === 'fleet-config' && feed.value && !feed.reason && validateContract(name, feed.value).ok) state = {
+      state: 'fresh', ageSeconds: feedAge(feed, now), reason: null };
     if (feed.value && Date.parse(now) < Date.parse(feed.value.receivedAt ?? feed.receivedAt)) state = {
       state: 'broken', ageSeconds: null, reason: 'clock_regressed' };
     feeds[name] = { state: state.state, ageSeconds: state.ageSeconds, reason: state.reason };

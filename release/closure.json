@@ -1,6 +1,6 @@
 {
   "schema": "joedesk.runtime-closure.v1",
-  "candidate_version": "261021015923.0.0",
+  "candidate_version": "261021083537.0.0",
   "files": [
     {
       "path": "contracts/accept.mjs",
@@ -100,7 +100,7 @@
     {
       "path": "package.json",
       "size": 1355,
-      "sha256": "ad04199fa3a5e3e0feb871c9c7e5d916ac2b878e8bfb6c419863df4750c4b474"
+      "sha256": "5a1dbdbdf0cc877167a5006bf72cc4e6868971e8e88a790ab1d077ea5d0c4319"
     },
     {
       "path": "public/joe/app.css",
@@ -190,12 +190,12 @@
     {
       "path": "public/joe/index.html",
       "size": 35239,
-      "sha256": "096788175db8392cdbf71dd3f81cc1019b7340c7bec4f358314d7795ba87a160"
+      "sha256": "7abdfb7d74f29e35f333ecbe9153243163c0d856cd5a70ca61eae17627c79100"
     },
     {
       "path": "public/joe/joe-version.js",
-      "size": 13545,
-      "sha256": "939a5bfc1b89c51b2ccc502a75cc254d902adf694892ebabf4dba650ee4f3107"
+      "size": 13887,
+      "sha256": "6b66896cbc015a2465c8e840a060ed564de8c7974b7cdc0b000f79a23dbd4306"
     },
     {
       "path": "public/joe/results-model.js",
@@ -274,8 +274,8 @@
     },
     {
       "path": "release.json",
-      "size": 335,
-      "sha256": "395050984f9c72ca3db2fdee66bbded3d49578642c4656d5c80ac05fc903a6e6"
+      "size": 253,
+      "sha256": "e798469dac79e6970e955840b6c428800058cd87e5d1d64c8288a51ec026024b"
     },
     {
       "path": "release/contracts.json",
@@ -289,8 +289,8 @@
     },
     {
       "path": "release/preparation.json",
-      "size": 6873,
-      "sha256": "36e99f96e6b6860de6d51b777d2586655585a14c461058855e60a8937eebefda"
+      "size": 6819,
+      "sha256": "4a64188c866d25f5690a61dba2e7c4320715537c3a2f5827f6f393c1d05a77e7"
     },
     {
       "path": "release/versioning.mjs",
@@ -309,8 +309,8 @@
     },
     {
       "path": "server/health.mjs",
-      "size": 1699,
-      "sha256": "b57b6241fe29890f640a6eab159c6e9cbdb930ff8bf768f11b4f0a0f5693a5dd"
+      "size": 2033,
+      "sha256": "ca89baa56579ebd020238c32a979d177d6f5b693988eb1b5cff442b5621dfa3f"
     },
     {
       "path": "server/history.mjs",
