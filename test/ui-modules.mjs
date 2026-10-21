@@ -619,6 +619,83 @@ test('health: one null keeps a yellow grace, a cold load or old carry is red, HA
   assert.match(health.boardDiagnostics(h.states, h.feeds, h.now).join(' '), /emergency stop is on/);
 });
 
+function unconfirmedBoard(checkAge = 100) {
+  const payload = structuredClone(fixture('a-frozen-ready-gateway').payload);
+  payload.safety.gateway.checkedAt = at(payload.generatedAt, 9 - checkAge);
+  const b = board({ feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) }, { cold: true });
+  assert.equal(b.feeds.data.status, 200);
+  return b;
+}
+
+test('health: unconfirmed null money is yellow Broker unsure at 66, 100 and 144 seconds, up to the stopped-check bound', () => {
+  for (const checkAge of [66, 100, 144, health.FEED_STOPPED_S - 0.001]) {
+    const b = unconfirmedBoard(checkAge);
+    assert.equal(b.states.gateway.ageSeconds, checkAge);
+    for (const name of ['today.equity', 'desks.j.equity', 'desks.joe.equity', 'desks.joel.equity']) {
+      assert.deepEqual([b.states[name].value, b.states[name].reason], [null, 'gateway_unconfirmed']);
+      assert.equal(cellView(b.states[name], name).caption, 'Unavailable · broker connection not confirmed');
+    }
+    const p = health.boardHealthPresentation(b.states, b.feeds, b.now);
+    assert.deepEqual([p.tone, p.reason, p.label, p.statusTone], ['yellow', 'gateway_unconfirmed', 'Broker unsure', 'warn']);
+    assert.equal(p.explanation, 'the broker connection has not checked in — reload; if still old, tell Amy');
+    assert.match(headerHealth(b, p).html, /tone-warn/);
+  }
+});
+
+test('health: unconfirmed null money is red at 180 and 200 seconds or with an unknown check age', () => {
+  for (const checkAge of [health.FEED_STOPPED_S, 200]) {
+    const b = unconfirmedBoard(checkAge);
+    assert.equal(b.states.gateway.ageSeconds, checkAge);
+    assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'red', reason: 'equity_unavailable' });
+  }
+  // Unknown timing is a selector/ranking input, never an invalid wire timestamp.
+  for (const checkAge of [null, undefined, NaN, Infinity, -1]) {
+    const b = unconfirmedBoard(); b.states.gateway.ageSeconds = checkAge;
+    assert.equal(health.localBoardHealth(b.states, b.feeds, b.now).reason, 'equity_unavailable');
+  }
+  const b = unconfirmedBoard(); delete b.states.gateway;
+  assert.equal(health.localBoardHealth(b.states, b.feeds, b.now).reason, 'equity_unavailable');
+});
+
+test('health: broker-gap grace uses the shared gateway progress age, even while receipts advance', () => {
+  for (const checkAge of [144, health.FEED_STOPPED_S]) {
+    const b = unconfirmedBoard(66);
+    b.feeds.data.gatewayProgress = { checkedAt: b.feeds.data.value.safety.gateway.checkedAt,
+      advancedAt: b.now, initialAgeMs: checkAge * 1000 };
+    b.states = panelStates(b.feeds, b.now);
+    assert.equal(b.states.gateway.ageSeconds, checkAge);
+    assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), checkAge < health.FEED_STOPPED_S
+      ? { tone: 'yellow', reason: 'gateway_unconfirmed' } : { tone: 'red', reason: 'equity_unavailable' });
+  }
+});
+
+test('health: brief broker gaps keep other null-equity reasons red and not-exact values neutral', () => {
+  for (const name of ['today.equity', 'desks.j.equity', 'desks.joe.equity', 'desks.joel.equity']) {
+    for (const reason of ['source_unavailable', 'all_desk_equity_unavailable', 'family_projection_unavailable', 'gateway_down', null, undefined]) {
+      const b = unconfirmedBoard(); b.states[name].reason = reason;
+      assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'red', reason: 'equity_unavailable' }, `${name}: ${reason}`);
+    }
+    const b = unconfirmedBoard(); b.states[name].reason = 'not_exact_yet';
+    assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'yellow', reason: 'gateway_unconfirmed' });
+  }
+});
+
+test('health: brief broker gaps preserve halt, ledger, gateway-down, stopped-feed and stuck-producer red precedence', () => {
+  const cases = [
+    [b => { b.states.halt.value = true; }, 'halt_on'],
+    [b => { b.feeds.data.value.safety.executor.reason = 'ledger_size_limit'; }, 'ledger_size_limit'],
+    ...['gateway_down', 'upstream_lost'].map(reason => [b => {
+      Object.assign(b.feeds.data.value.safety.gateway, { apiSessionReady: false, reason });
+    }, 'gateway_down']),
+    [b => { b.now = at(b.feeds.data.value.receivedAt, health.FEED_STOPPED_S); }, 'feed_disconnected'],
+    [b => { b.feeds.data.generatedAdvancedAt = at(b.now, -health.FEED_STOPPED_S); }, 'producer_stuck'],
+  ];
+  for (const [change, reason] of cases) {
+    const b = unconfirmedBoard(); change(b);
+    assert.deepEqual(health.localBoardHealth(b.states, b.feeds, b.now), { tone: 'red', reason });
+  }
+});
+
 let switchSet;
 function notExactBoard() {
   const payload = structuredClone(switchSet ??= switchSetSnapshot());

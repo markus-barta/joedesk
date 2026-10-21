@@ -127,10 +127,14 @@ export function localBoardHealth(states, feeds, now) {
   if (broker.word === 'down') return { tone: 'red', reason: 'gateway_down' };
   if (receipt !== null && receipt >= FEED_STOPPED_S) return { tone: 'red', reason: 'feed_disconnected' };
   if (frozen !== null && frozen >= FEED_STOPPED_S) return { tone: 'red', reason: 'producer_stuck' };
+  const gatewayAge = states.gateway?.ageSeconds;
+  // Missing money during a brief broker-check gap keeps the broker warning;
+  // an unknown or stopped check cannot excuse unavailable equity.
+  const briefBrokerGap = Number.isFinite(gatewayAge) && gatewayAge >= 0 && gatewayAge < FEED_STOPPED_S;
   const usable = EQUITY_CELLS.every(name => {
     const cell = states[name];
     if (notExact(cell)) return true;
-    if (cell?.value == null) return false;
+    if (cell?.value == null) return cell?.reason === 'gateway_unconfirmed' && briefBrokerGap;
     return !cell.retained || (cell.ageSeconds !== null && cell.ageSeconds <= RETAINED_GRACE_S);
   });
   if (!usable) return { tone: 'red', reason: 'equity_unavailable' };
