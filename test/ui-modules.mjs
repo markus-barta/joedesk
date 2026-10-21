@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { headerHealth as frozenHeaderHealth } from './fixtures/header-health-c1c71a1.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
-import { CI_GUARD, REFERENCE_BUDGET } from '../scripts/browser/budget.mjs';
+import { CI_GUARD, REFERENCE_BUDGET, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
@@ -1353,6 +1353,154 @@ test('browser budget: setup stays separate while boundary-crossing and live task
   assert.deepEqual(details[3].events, [worker], 'the worker reply is attributed at receipt time');
   assert.deepEqual(details[1].frames, [frame], 'style/layout evidence is retained beside the task');
   assert.deepEqual(details[3].frames, []);
+});
+
+test('browser budget: a task-only breach then clean passes after one re-measure', () => {
+  const first = { patchBudget: true, historyBudget: true, taskBudget: false };
+  const clean = { ...first, taskBudget: true };
+  assert.deepEqual(decideTaskGuard(first, null, CI_GUARD), { ok: false, remeasure: true, remeasured: false, attempts: 1 });
+  assert.deepEqual(decideTaskGuard(first, clean, CI_GUARD), { ok: true, remeasure: false, remeasured: true, attempts: 2 });
+  assert.deepEqual(decideTaskGuard(clean, null, CI_GUARD), { ok: true, remeasure: false, remeasured: false, attempts: 1 });
+  assert.equal(first.taskBudget, false, 'the first breach is retained');
+});
+
+test('browser budget: a reproduced task breach or any second-attempt failure is final', () => {
+  const first = { patchBudget: true, historyBudget: true, taskBudget: false };
+  for (const second of [first, { ...first, taskBudget: true, patchBudget: false }]) {
+    assert.deepEqual(decideTaskGuard(first, second, CI_GUARD), { ok: false, remeasure: false, remeasured: true, attempts: 2 });
+  }
+});
+
+test('browser budget: patch, history, render, worker and push failures never re-measure', () => {
+  for (const key of ['patchBudget', 'historyBudget', 'renderBudget', 'worker', 'deskPushes', 'historyPushes', 'finite', 'notCompacted']) {
+    for (const taskBudget of [true, false]) {
+      const first = { [key]: false, taskBudget };
+      for (const second of [null, { [key]: true, taskBudget: true }]) {
+        assert.deepEqual(decideTaskGuard(first, second, CI_GUARD), { ok: false, remeasure: false, remeasured: false, attempts: 1 }, key);
+      }
+    }
+  }
+});
+
+test('browser budget: reference limits stay strict with no re-measure', () => {
+  for (const second of [null, { taskBudget: true }]) {
+    assert.deepEqual(decideTaskGuard({ taskBudget: false }, second, REFERENCE_BUDGET),
+      { ok: false, remeasure: false, remeasured: false, attempts: 1 });
+  }
+  assert.equal(REFERENCE_BUDGET.atMost, false);
+  assert.equal(CI_GUARD.atMost, true);
+});
+
+// Exercise the exact runner with synthetic CDP replies, without a browser,
+// servers or real time. Each load consumes one phase's scripted measurement.
+async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } = {}) {
+  let phase, sample, reads;
+  const loads = { cold: 0, live: 0 }, boards = [], checks = [];
+  const timings = (reason, count, ms) => Array.from({ length: count }, (_, i) => ({ reason, at: 200 + i * 20, ms }));
+  const page = {
+    async s() { return { identifier: 'observer' }; },
+    async evaluate(source) {
+      if (source.includes('tasks: window.__budgetTasks.snapshot()')) {
+        const task = { startTime: phase === 'cold' ? 210 : 150, duration: sample.taskMs ?? 60, attribution: [] };
+        return { timings: [...timings('history-worker', 3, 10), ...timings('history', 3, sample.historyMs ?? 10)],
+          tasks: { tasks: [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400 };
+      }
+      if (source.includes('timings.splice(0)')) {
+        reads++;
+        return { timings: reads === 2 ? timings('data', sample.pushes ?? 5, sample.patchMs ?? 10) : [], end: reads * 100 };
+      }
+      if (source.includes("filter(t => t.reason === 'history').length")) return 0;
+      assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()', source);
+    },
+  };
+  const context = { decideTaskGuard, observeBudgetTasks, attributeBudgetTasks,
+    max: list => list.length ? Math.max(...list) : NaN,
+    VIEWPORTS: [{ name: '390' }], NOW: '2026-10-14T17:42:22.000Z', ACTOR: 'fixture',
+    largeScenario: (now, points = 9000) => ({ snapshot: { seq: 1001 }, history: { receivedAt: now, points: Array(points) } }),
+    wideSnapshot: (snapshot, when, seq, shift) => ({ when, seq, shift }), at: (base, seconds) => `${base}/${seconds}`,
+    configure: async () => {}, go: async () => {}, settle: async () => {}, waitFor: async () => {},
+    load: async (page, url, panel) => {
+      phase = panel === 'desk' ? 'live' : 'cold';
+      const samples = phase === 'live' ? live : cold;
+      sample = samples[loads[phase]++];
+      assert.ok(sample, `unexpected extra ${phase} attempt`);
+      reads = 0;
+    },
+    fetch: async () => ({ json: async () => ({ points: Array(7209), sizeBytes: 6 * 1048576 }) }),
+  };
+  const execute = runInNewContext(`(${runBudget.toString()})`, context);
+  const traces = await execute({ page, limits,
+    newBoard: async ({ history }) => {
+      const board = { history, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
+        async push(payload) { this.pushes.push(payload); return { status: 200 }; } };
+      boards.push(board);
+      return board;
+    },
+    check: (ac, name, ok, detail) => checks.push({ name, ok, detail }),
+  });
+  return { traces, checks, loads, boards };
+}
+
+test('browser budget: cold and live re-measure on fresh boards, retaining both attributed rows and table attempts', async () => {
+  const { traces, checks, loads, boards } = await simulatedBudget({ cold: [{ taskMs: 129 }, {}], live: [{ taskMs: 137 }, {}] });
+  assert.deepEqual(loads, { cold: 2, live: 2 });
+  assert.equal(boards.length, 4);
+  assert.deepEqual(boards[0].history, boards[1].history);
+  assert.deepEqual(boards[2].history, boards[3].history);
+  assert.deepEqual(boards[2].pushes, boards[3].pushes, 'same sequence, times and workload on the fresh live board');
+  assert.equal(boards[2].pushes.length, 9, 'one setup push, five Desk updates, three History updates');
+  assert.ok(checks.every(c => c.ok));
+  assert.equal(traces.length, 4);
+  assert.ok(traces.every(r => r.attempts === 2 && r.remeasured));
+  assert.deepEqual(Array.from(traces, r => r.attempt), [1, 2, 1, 2]);
+  for (const [index, duration, phase] of [[0, 129, 'cold history'], [2, 137, 'desk updates']]) {
+    assert.equal(traces[index].offendingTasks[0].duration, duration);
+    assert.ok(traces[index].offendingTasks[0].phases.includes(phase));
+    assert.ok(traces[index].offendingTasks[0].events.length > 0);
+  }
+  const guards = checks.filter(c => 'taskBudget' in c.detail.conditions);
+  assert.equal(guards.length, 2);
+  assert.ok(guards.every(c => c.name.includes('; re-measured once after a breach)') && c.detail.attemptRows.length === 2));
+  const table = budgetTable(traces, CI_GUARD);
+  assert.match(table, /Attempt/);
+  assert.equal(table.match(/1\/2 \(re-measured\)/g).length, 2);
+  assert.equal(table.match(/2\/2 \(re-measured\)/g).length, 2);
+});
+
+test('browser budget: runBudget stops after reproduced breaches and does not retry other failed checks', async () => {
+  for (const sample of [{ taskMs: 129 }, { taskMs: 129, patchMs: 41 }, { taskMs: 129, historyMs: 126 }, { taskMs: 129, worker: false }, { taskMs: 129, pushes: 4 }]) {
+    const reproduced = sample.patchMs === undefined && sample.historyMs === undefined && sample.worker === undefined && sample.pushes === undefined;
+    const { checks, loads } = await simulatedBudget({ live: [sample, sample] });
+    assert.equal(loads.live, reproduced ? 2 : 1);
+    assert.ok(checks.some(c => !c.ok));
+    assert.ok(checks.filter(c => c.name.includes('live pushes')).every(c => c.detail.remeasured === reproduced));
+  }
+});
+
+test('browser budget: 124.9 ms tasks pass and 125 ms tasks breach despite CI atMost render semantics', async () => {
+  const clean = await simulatedBudget({ cold: [{ taskMs: 124.9, historyMs: 125 }], live: [{ taskMs: 124.9, patchMs: 40, historyMs: 125 }] });
+  assert.ok(clean.checks.every(c => c.ok));
+  assert.deepEqual(clean.loads, { cold: 1, live: 1 });
+  assert.doesNotMatch(budgetTable(clean.traces, CI_GUARD), /re-measured/);
+  const breach = await simulatedBudget({ cold: [{ taskMs: 125 }, { taskMs: 125 }], live: [{ taskMs: 125 }, { taskMs: 125 }] });
+  assert.deepEqual(breach.loads, { cold: 2, live: 2 });
+  assert.equal(breach.checks.filter(c => !c.ok && c.detail.failed.includes('taskBudget')).length, 2);
+  const reference = await simulatedBudget({ cold: [{ taskMs: 50, historyMs: 50 }], live: [{ taskMs: 50, patchMs: 16, historyMs: 50 }], limits: REFERENCE_BUDGET });
+  assert.deepEqual(reference.loads, { cold: 1, live: 1 });
+  assert.ok(reference.checks.some(c => c.detail.failed.includes('patchBudget')));
+  assert.ok(reference.checks.some(c => c.detail.failed.includes('renderBudget')));
+  assert.ok(reference.checks.some(c => c.detail.failed.includes('taskBudget')));
+});
+
+test('browser budget: runBudget statically allows at most one re-measure per viewport and phase', () => {
+  const source = runBudget.toString();
+  const runner = source.slice(source.indexOf('const runViewport ='), source.indexOf('const full ='));
+  assert.equal(runner.match(/await measure\(viewport\)/g).length, 2);
+  assert.match(runner, /const second = decision\.remeasure \? await measure\(viewport\) : null/);
+  assert.doesNotMatch(runner, /\bwhile\s*\(|runViewport\(/);
+  assert.equal(source.match(/for \(const viewport of VIEWPORTS\) await runViewport\(viewport, measure(?:Cold|Live)\)/g).length, 2);
+  assert.match(source, /const measureCold = async viewport => \{\s*const cold = await newBoard/);
+  assert.match(source, /const measureLive = async viewport => \{\s*const b = await newBoard/);
 });
 
 test('browser budget: observer snapshots drain undelivered entries once, with attribution and optional frame support', () => {
