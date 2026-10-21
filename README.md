@@ -171,8 +171,12 @@ node scripts/prepare-data.mjs restore --offline BACKUP NEW_RESTORE v1
 Before stopping writers, OPS can run the read-only `check-fleet` preflight on
 the live v1 store or a verified v1 backup. It reports `fleet ok`,
 `fleet normalizable (keep: +SXR8 +TSLA)` (only missing symbols are listed), or
-`fleet invalid: <path/rule list>`. It writes nothing and needs no `--offline`;
-invalid configurations exit 1, while valid/normalizable configurations exit 0.
+`fleet invalid: <path/rule list>`. A second line reports `actions ok` or
+`actions invalid`, checking the action log's JSON, schema and ability to accept
+the normalization row under the same ring rule as migration. These are codes
+only, never log values. It writes nothing and needs no `--offline`; either
+invalid result exits 1, while valid/normalizable configurations with valid
+action logs exit 0. An absent action log is valid and stays absent.
 A backup must also pass its manifest/digest checks. This is a Fleet Config
 preflight; the stopped-writer backup and full migration checks still apply.
 
@@ -190,14 +194,24 @@ rule (`fc-NNNNNN` plus one, refusing exhaustion) and sets `updatedAt` to the
 migration receipt. It appends exactly one valid action to
 `fleet-config-actions.json`: actor `migration`, `changedKeys: ["desks.keep"]`,
 the old/new revisions, receipt time, outcome `success`, reason `propagated`.
-The audit schema has no free-text summary field. Existing entries, including
-pending/failed actions, stay in order; a full audit fails closed rather than
-truncating history. An absent audit is created only when normalization changes
-the config. Already compliant config and audit files retain their exact bytes.
+The audit schema has no free-text summary field. Normalization follows the
+board's bounded ring of the last 200 actions, dropping only the oldest entries
+needed to fit the new row; retained entries, including pending/failed actions,
+stay in order. The verified v1 backup keeps the original log bytes unchanged,
+so migration loses no history. A full valid log never blocks normalization;
+bad JSON, schema or entries still fail closed as `migration_fleet_actions_invalid`.
+An absent audit is created only when normalization changes the config. Already
+compliant config and audit files retain their exact bytes.
 The board applies the same normalization when loading a stored v1 config in an
 otherwise v2 store, with an audit-first pending entry finalized after the config
-write. Its receipt is the board's load time. Subsequent loads/restarts add no
-actions or revisions; submitted settings still require the strict contract.
+write. Before appending, it searches from the end for the latest `migration`
+row for the stored revision with outcome `pending` or `failure`, reusing that
+row's ID when found. A config write failure records `failure`/`store_failed`
+with the unchanged revision, best effort, then fails the read. Repeated failing
+reads do not grow the log. Recovery finalizes the same row as
+`success`/`propagated`, with the new revision and this attempt's `updatedAt` as
+its receipt. Subsequent loads/restarts add no actions or revisions; submitted
+settings still require the strict contract.
 
 Migration establishes durable sequence/receipt state through the real server
 acceptance path. Legacy money/history cannot prove the v2

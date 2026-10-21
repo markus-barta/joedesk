@@ -6,6 +6,8 @@ import { checkSchema } from '../contracts/schema-validator.mjs';
 import { nextFleetRevision, withNextFleetRevision } from '../fleet-config.mjs';
 import actionSchema from '../public/joe/fleet-config-actions.schema.json' with { type: 'json' };
 
+export const FLEET_ACTION_LOG_MAX = actionSchema.properties.entries.maxItems;
+
 // The bounded validator expresses nullable revisions with anyOf.
 const auditSchema = structuredClone(actionSchema);
 for (const key of ['revBefore', 'revAfter']) {
@@ -62,8 +64,9 @@ export function appendFleetNormalizationAudit(log, before, after, receivedAt, { 
     changedKeys: ['desks.keep'],
     outcome: pending ? 'pending' : 'success',
     reason: pending ? 'write_started' : 'propagated',
-  }] };
-  // Never discard prior audit history to make room for normalization.
+  }].slice(-FLEET_ACTION_LOG_MAX) };
+  // Match the board's bounded ring, dropping only the oldest entries needed.
+  // Offline migration's verified v1 backup preserves the original log bytes.
   validateFleetActions(next);
   return next;
 }

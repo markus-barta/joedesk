@@ -284,8 +284,8 @@
     },
     {
       "path": "release/data-migration.mjs",
-      "size": 9894,
-      "sha256": "f9c86836568ccd7cdbe2c9bb1cadd0f57386b23038a55bd0a0d28c8bd5002b4d"
+      "size": 10667,
+      "sha256": "f31a4941411420f8bdc17e16c2462ce68ffe68fdc6069dba4a14a6dea7ba5fc9"
     },
     {
       "path": "release/preparation.json",
@@ -299,13 +299,13 @@
     },
     {
       "path": "server.mjs",
-      "size": 27444,
-      "sha256": "e4ff7b706bdf1582dde94f84272c94802fca0080eb4f3207c4f848a819859af3"
+      "size": 28396,
+      "sha256": "b48020740f76a5e70a1f321e49ef8f3628fecb2fd6012e45b5fd012ac4619686"
     },
     {
       "path": "server/fleet-normalization.mjs",
-      "size": 2967,
-      "sha256": "ca3eeca3760f432fe8f8a438e9a21745c45fa0aeddf2050f22711439a78885e5"
+      "size": 3160,
+      "sha256": "c239abefde0a08855ca6d7c5755fa9c886cfeaf3811cdc78e964bbef5bce1ab3"
     },
     {
       "path": "server/health.mjs",

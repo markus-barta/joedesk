@@ -8,11 +8,12 @@ const errorList = errors => errors.map(({ path, rule }) => `${path}/${rule}`).jo
 try {
   if (command === 'check-fleet' && process.argv.length === 4) {
     const result = checkFleet(offline);
-    if (!result.ok) {
+    if (result.errors.length) {
       console.log(`fleet invalid: ${errorList(result.errors)}`);
-      process.exitCode = 1;
     } else if (result.added.length) console.log(`fleet normalizable (keep: ${result.added.map(symbol => '+' + symbol).join(' ')})`);
     else console.log('fleet ok');
+    console.log(result.actionsOk ? 'actions ok' : 'actions invalid');
+    if (!result.ok) process.exitCode = 1;
   } else {
     if (offline !== '--offline') throw new Error('offline_writers_must_be_stopped');
     let result;
