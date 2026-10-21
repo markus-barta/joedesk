@@ -17,6 +17,7 @@ import { CONTRACTS, validateContract } from "./contracts/index.mjs";
 import { createReadModel } from "./server/read-model.mjs";
 import { healthProjection } from "./server/health.mjs";
 import { withNextFleetRevision } from "./fleet-config.mjs";
+import { normalizeFleetConfig, appendFleetNormalizationAudit, validateFleetActions } from "./server/fleet-normalization.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public", "joe");
@@ -124,7 +125,7 @@ function atomicWriteJson(file, obj, mode = 0o644) {
   fs.renameSync(tmp, file);
 }
 
-function parseFleetConfig(raw, source) {
+function parseFleetConfig(raw) {
   const parsed = JSON.parse(raw);
   const result = validateContract("fleet-config", parsed);
   if (!result.ok) {
@@ -134,17 +135,33 @@ function parseFleetConfig(raw, source) {
 }
 
 function readFleetConfig(source = {}) {
+  let raw;
   try {
-    const config = parseFleetConfig(fs.readFileSync(FLEET_CONFIG_FILE, "utf8"), FLEET_CONFIG_FILE);
-    source.path = FLEET_CONFIG_FILE;
-    source.kind = "stored";
-    return config;
+    raw = fs.readFileSync(FLEET_CONFIG_FILE, "utf8");
   } catch (err) {
     if (!err || err.code !== "ENOENT") throw err;
     source.path = FLEET_CONFIG_EXAMPLE;
     source.kind = "example";
-    return parseFleetConfig(fs.readFileSync(FLEET_CONFIG_EXAMPLE, "utf8"), FLEET_CONFIG_EXAMPLE);
+    return parseFleetConfig(fs.readFileSync(FLEET_CONFIG_EXAMPLE, "utf8"));
   }
+  const parsed = JSON.parse(raw);
+  const normalized = normalizeFleetConfig(parsed, clock());
+  const config = normalized.value;
+  if (normalized.added.length) {
+    const log = appendFleetNormalizationAudit(readFleetActionLog(), parsed, config, config.updatedAt, { pending: true });
+    // Match the board's audit-first write: a failed config write can never
+    // leave a false success. Finalization replaces this one pending entry.
+    writeFleetActionLog(log);
+    atomicWriteJson(FLEET_CONFIG_FILE, config);
+    const action = log.entries[log.entries.length - 1];
+    action.outcome = "success";
+    action.reason = "propagated";
+    validateFleetActions(log);
+    writeFleetActionLog(log);
+  }
+  source.path = FLEET_CONFIG_FILE;
+  source.kind = "stored";
+  return config;
 }
 
 function emptyFleetActionLog() {

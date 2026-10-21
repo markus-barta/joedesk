@@ -151,8 +151,8 @@ and matching backup, recording a new deployment event.
 
 ### Offline data preparation and rollback
 
-`scripts/prepare-data.mjs` requires explicit `--offline`, source and **new**
-destination paths. OPS must stop writers first. Backups copy only the known
+Mutating commands in `scripts/prepare-data.mjs` require explicit `--offline`,
+source and **new** destination paths. OPS must stop writers first. Backups copy only the known
 board data/config/audit files, retain exact bytes, use directory mode 0700 and
 file mode 0600, and record sizes/SHA256 in `backup-manifest.json`. Unknown files,
 symlinks, oversized input, incomplete backups and existing destinations fail
@@ -161,17 +161,46 @@ closed; nothing is deleted or overwritten.
 The command forms are:
 
 ```sh
+node scripts/prepare-data.mjs check-fleet V1_STORE_OR_BACKUP
 node scripts/prepare-data.mjs backup --offline SOURCE NEW_BACKUP v1
 node scripts/prepare-data.mjs verify --offline BACKUP
 node scripts/prepare-data.mjs migrate-v2 --offline V1_BACKUP NEW_V2_STORE V2_SNAPSHOT UTC_RECEIPT
 node scripts/prepare-data.mjs restore --offline BACKUP NEW_RESTORE v1
 ```
 
+Before stopping writers, OPS can run the read-only `check-fleet` preflight on
+the live v1 store or a verified v1 backup. It reports `fleet ok`,
+`fleet normalizable (keep: +SXR8 +TSLA)` (only missing symbols are listed), or
+`fleet invalid: <path/rule list>`. It writes nothing and needs no `--offline`;
+invalid configurations exit 1, while valid/normalizable configurations exit 0.
+A backup must also pass its manifest/digest checks. This is a Fleet Config
+preflight; the stopped-writer backup and full migration checks still apply.
+
 Migration accepts a real, validated v2 producer snapshot and an explicit UTC
-receipt (ISO form with milliseconds). It creates a separate v2 store, preserving
-compatible Fleet Config and its validated change log (`fleet-config-actions.json`)
-byte-for-byte, including pending/failed audit entries, and establishing durable sequence/receipt state through
-the real server acceptance path. Legacy money/history cannot prove the v2
+receipt (ISO form with milliseconds). It creates a separate v2 store. A v1
+Fleet Config with a valid symbol array can lack the v2 policy KEEP symbols:
+migration appends missing `SXR8`, then `TSLA`, keeping existing entries and
+their order. No duplicates or other invalid fields are repaired. The normalized
+config must pass the unchanged contract (contract set revision 9); any remaining
+violation fails closed as `migration_fleet_invalid`, with value-free path/rule
+detail. The CLI prints specific error codes, never payload values or paths.
+
+Only a changed config advances `rev` using the board's `withNextFleetRevision`
+rule (`fc-NNNNNN` plus one, refusing exhaustion) and sets `updatedAt` to the
+migration receipt. It appends exactly one valid action to
+`fleet-config-actions.json`: actor `migration`, `changedKeys: ["desks.keep"]`,
+the old/new revisions, receipt time, outcome `success`, reason `propagated`.
+The audit schema has no free-text summary field. Existing entries, including
+pending/failed actions, stay in order; a full audit fails closed rather than
+truncating history. An absent audit is created only when normalization changes
+the config. Already compliant config and audit files retain their exact bytes.
+The board applies the same normalization when loading a stored v1 config in an
+otherwise v2 store, with an audit-first pending entry finalized after the config
+write. Its receipt is the board's load time. Subsequent loads/restarts add no
+actions or revisions; submitted settings still require the strict contract.
+
+Migration establishes durable sequence/receipt state through the real server
+acceptance path. Legacy money/history cannot prove the v2
 decimal/evidence/basis contract: their original bytes remain in the v1 backup;
 they are never relabelled or used to fabricate historical observations. The v2
 board refuses to start in a directory containing legacy data/history. A v2

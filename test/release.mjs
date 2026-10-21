@@ -19,6 +19,7 @@ import { validateContract } from '../contracts/index.mjs';
 // Node-only tests run in the existing npm test / CI release suite.
 import './preview-capture.mjs';
 import './adoption.mjs';
+import './fleet-migration.mjs';
 
 const read = file => JSON.parse(fs.readFileSync(new URL('../' + file, import.meta.url)));
 const samples = read('fixtures/valid.json'), active = read('release.json'), prep = read('release/preparation.json');

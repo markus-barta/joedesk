@@ -5,17 +5,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { CONTRACTS, validateContract } from '../contracts/index.mjs';
 import { createReadModel } from '../server/read-model.mjs';
-import { checkSchema } from '../contracts/schema-validator.mjs';
-import actionSchema from '../public/joe/fleet-config-actions.schema.json' with { type: 'json' };
-
-// The bounded shared validator supports anyOf. Express the audit schema's
-// two nullable revision types in that equivalent vocabulary.
-const auditSchema = structuredClone(actionSchema);
-for (const key of ['revBefore', 'revAfter']) {
-  const field = auditSchema.$defs.action.properties[key];
-  field.anyOf = field.type.map(type => ({ type }));
-  delete field.type;
-}
+import { inspectFleetConfig, normalizeFleetConfig, fleetInvalid, validateFleetActions,
+  appendFleetNormalizationAudit } from '../server/fleet-normalization.mjs';
 
 const FILES = {
   v1: ['data.json', 'history.json', 'fleet-config.json', 'fleet-config-actions.json'],
@@ -115,6 +106,27 @@ export function restoreStore({ backup, destination, boardSchema }) {
   for (const f of manifest.files) write(destination, f.name, read(path.join(backup, f.name)));
   return { boardSchema, files: manifest.files.length };
 }
+
+function parseFleet(bytes) {
+  try { return JSON.parse(bytes); }
+  catch { throw fleetInvalid([{ path: '$', rule: 'json' }]); }
+}
+
+// Live-store preflight is deliberately read-only and needs no offline opt-in.
+// A backup still has to pass its complete existing integrity checks.
+export function checkFleet(source) {
+  directory(source);
+  if (fs.existsSync(path.join(source, 'backup-manifest.json'))) {
+    if (verifyBackup(source).boardSchema !== 'v1') throw new Error('migration_requires_v1_backup');
+  }
+  const bytes = read(path.join(source, 'fleet-config.json'));
+  let config;
+  try { config = parseFleet(bytes); }
+  catch (error) { return { ok: false, added: [], errors: error.detail }; }
+  const result = inspectFleetConfig(config);
+  return { ok: result.ok, added: result.added, errors: result.errors };
+}
+
 export function migrateToV2({ backup, destination, snapshot, receivedAt }) {
   const manifest = verifyBackup(backup);
   separateDestination(backup, destination);
@@ -122,25 +134,33 @@ export function migrateToV2({ backup, destination, snapshot, receivedAt }) {
   if (!validateContract('data', snapshot, { stage: 'ingress' }).ok) throw new Error('migration_requires_valid_v2_producer');
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(receivedAt ?? '') ||
       !Number.isFinite(Date.parse(receivedAt)) || new Date(receivedAt).toISOString() !== receivedAt) throw new Error('migration_receipt_required');
-  let fleet = null, fleetBytes = null;
+  let fleet = null, fleetBytes = null, originalFleet = null, changed = false;
   if (manifest.files.some(f => f.name === 'fleet-config.json')) {
     fleetBytes = read(path.join(backup, 'fleet-config.json'));
-    fleet = JSON.parse(fleetBytes);
-    if (!validateContract('fleet-config', fleet).ok) throw new Error('migration_fleet_invalid');
+    originalFleet = parseFleet(fleetBytes);
+    const normalized = normalizeFleetConfig(originalFleet, receivedAt);
+    fleet = normalized.value;
+    changed = normalized.added.length > 0;
+    if (changed) fleetBytes = JSON.stringify(fleet, null, 2) + '\n';
   }
   let actions = null;
   if (manifest.files.some(f => f.name === 'fleet-config-actions.json')) {
     actions = read(path.join(backup, 'fleet-config-actions.json'));
-    const errors = [];
-    checkSchema(auditSchema, JSON.parse(actions), {}, errors);
-    if (errors.length) throw new Error('migration_fleet_actions_invalid');
+    let log;
+    try { log = JSON.parse(actions); }
+    catch { throw new Error('migration_fleet_actions_invalid'); }
+    validateFleetActions(log);
+  }
+  if (changed) {
+    const log = actions ? JSON.parse(actions) : { schema: 'inspr.joe.fleet-config.actions.v1', entries: [] };
+    actions = JSON.stringify(appendFleetNormalizationAudit(log, originalFleet, fleet, receivedAt), null, 2) + '\n';
   }
   fs.mkdirSync(destination, { mode: 0o700 });
   // Legacy money, history and receipt ages cannot be proven under v2. Leave
   // those bytes in the verified v1 backup. Begin v2 only from producer evidence.
   if (fleet) write(destination, 'fleet-config.json', fleetBytes);
-  // Same audited format in both boards: preserve ordering, pending/failure
-  // entries and the original serialization byte-for-byte, without truncation.
+  // Unchanged config/log retain exact bytes. Normalization appends one action,
+  // preserving all prior entries, including pending/failure, without truncation.
   if (actions) write(destination, 'fleet-config-actions.json', actions);
   const model = createReadModel({ dataDir: destination, clock: () => receivedAt });
   if (fleet && !model.observeFleet(fleet).ok) throw new Error('migration_fleet_failed');
