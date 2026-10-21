@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261021083537.0.0` (`inspr-calver-3`, stable sequence 27), reserved once at `2026-10-21T08:35:37Z` for smoke and health semantics on a settled v2 board ([JOED-59](https://aeon.barta.cm/p/JOED/JOED-59)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261021113113.0.0` (`inspr-calver-3`, stable sequence 28), reserved once at `2026-10-21T11:31:13Z` for a calm header during a brief broker-check gap ([JOED-60](https://aeon.barta.cm/p/JOED/JOED-60)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261021015923.0.0` / sequence 26,
-published on `main` at `6eacd6c707386cabe8245e1f97df2ef93965b394` under JOED-58.
-It went live at `2026-10-21T08:15Z` (OPS-354 attempt 3), verified by the documented
-smoke variant recorded on JOED-59. `previous_release` and `last_deployed_release`
-both record that release. This history does not claim adoption for sequence 27.
+**Last deployed release:** `inspr-calver-3` / `261021083537.0.0` / sequence 27,
+published on `main` at `040d6756e92dc7c4e05fcf63b865242819b3d0ce` under JOED-59,
+live on csb0 since `2026-10-21T11:22:48Z`. `previous_release` and
+`last_deployed_release` both record that release. This history does not claim
+adoption for sequence 28. Sequence 26 (`261021015923.0.0`) was previously deployed
+at `2026-10-21T08:15Z` (OPS-354 attempt 3), with the documented smoke variant on JOED-59.
 
 The previous coordinate `261019102825.0.0` (stable sequence 25, rev 9) was
 published on `main` at `d36b5295295a6901e36fdf2dc0d64353ddf88d0e`; JOED-50
@@ -22,13 +23,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequence 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-27 candidate has not been published. The candidate
+cutover**. The sequence-28 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -78,7 +79,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261021083537.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261021113113.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -1037,8 +1038,10 @@ closure file hashes and closure pin, and immutable release set through the norma
 reviewed release process. Never reseal or republish `261016151218.0.0` or
 `261019102825.0.0` with new bytes. This tooling leaves contracts and pins unchanged;
 JOED-58 reserved sequence 26 for the cut-over retry's changed board bytes; that
-release is now deployed. JOED-59 reserves sequence 27 for the changed health and
-smoke semantics. Never reseal or republish sequence 26 with these new bytes.
+release was deployed. JOED-59 reserved sequence 27 for the changed health and
+smoke semantics; that release is now live. JOED-60 reserves sequence 28 for the
+bounded yellow broker-check warning. Never reseal or republish sequences 26 or
+27 with these new bytes.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
@@ -1110,14 +1113,26 @@ themes. Browser execution and visual approval remain with CI/coordinator.
 The cash and KPI sizing reserves include the new short reason through
 `CELL_REASON`, with their existing geometry checks unchanged.
 
+JOED-60 excuses null equity with `gateway_unconfirmed` only while the broker
+state is `unsure`, the real gateway has a canonical `checkedAt`, and the shared
+gateway panel's check age is known and below 180 seconds (`FEED_STOPPED_S`).
+An excused cell makes the header show yellow **Broker unsure** immediately,
+ahead of stale-feed and other yellow warnings; the cells still say
+**Unavailable · broker connection not confirmed**. A missing or invalid real
+check, an unknown age, an age of 180 seconds or more, or null unconfirmed equity
+while the broker is `OK` or degraded stays red `equity_unavailable`. Receipt age
+never substitutes for a missing broker check. Other missing-equity reasons and
+the halt, ledger limit, broker-down, stopped-feed and stuck-producer red rules
+keep their precedence.
+
 JOED-57 treats null desk equity with `not_exact_yet` as deliberately uncaptured,
 so an otherwise healthy board stays **Board OK** and Details adds one neutral
-“Desk values are not exact yet” line. Other missing reasons stay red; retained
-values, broker checks, stuck desks and regular-session result warnings keep
+“Desk values are not exact yet” line. Other missing reasons stay red except for
+the bounded broker-check gap above; retained values, stuck desks and regular-session result warnings keep
 their existing rules. `NOT_EXACT_TONE` in `health.js` defaults to `green`;
 `yellow` opts into `values_not_exact` after those checks. Null not-exact cells
-use the neutral info SVG with existing tokens and spacing. Contracts remain
-revision 9 and the release coordinate is unchanged.
+use the neutral info SVG with existing tokens and spacing. JOED-57 kept contracts
+at revision 9 and left its release coordinate unchanged.
 
 The header status stays on one line at 360/390/1024/1440 px. A hidden CSS
 sizer reserves the longest existing status, “Broker unsure”, in the rendered
