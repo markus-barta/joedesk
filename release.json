@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261021015923.0.0",
+  "version": "261021083537.0.0",
   "release_channel": "stable",
-  "release_sequence": 26,
+  "release_sequence": 27,
   "status": "candidate",
-  "note": "Rev 9 cut-over retry candidate: desk values that are not exact yet stay calm (JOED-57) and migrate-v2 normalizes a v1 Fleet Config (JOED-58)."
+  "note": "Smoke and health semantics for a settled v2 board (JOED-59)"
 }

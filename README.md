@@ -2,7 +2,13 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261021015923.0.0` (`inspr-calver-3`, stable sequence 26), reserved once at `2026-10-21T01:59:23Z` for the rev 9 cut-over retry (JOED-58): desk values that are not exact yet stay calm (JOED-57), and migrate-v2 normalizes a v1 Fleet Config (JOED-58). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. The last deployed release remains `calendar` / `26.09.21.12.00` / sequence 23. No deployment or authoritative live adoption is claimed by this branch.
+**Candidate version:** `261021083537.0.0` (`inspr-calver-3`, stable sequence 27), reserved once at `2026-10-21T08:35:37Z` for smoke and health semantics on a settled v2 board ([JOED-59](https://aeon.barta.cm/p/JOED/JOED-59)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+
+**Last deployed release:** `inspr-calver-3` / `261021015923.0.0` / sequence 26,
+published on `main` at `6eacd6c707386cabe8245e1f97df2ef93965b394` under JOED-58.
+It went live at `2026-10-21T08:15Z` (OPS-354 attempt 3), verified by the documented
+smoke variant recorded on JOED-59. `previous_release` and `last_deployed_release`
+both record that release. This history does not claim adoption for sequence 27.
 
 The previous coordinate `261019102825.0.0` (stable sequence 25, rev 9) was
 published on `main` at `d36b5295295a6901e36fdf2dc0d64353ddf88d0e`; JOED-50
@@ -15,14 +21,14 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build
-followed by legacy history; neither superseded publication is a deployed entry.
+`previous_release` from `last_deployed_release`. About lists the current build,
+deployed sequence 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-26 candidate has not been published. The candidate
+cutover**. The sequence-27 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -72,7 +78,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261021015923.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261021083537.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -349,8 +355,18 @@ OPS owns these exact nixcfg items through its existing review path:
    `BASE_JOE_URL` is the public SSO route ending **exactly** in `/joe/`, with no
    credentials, query or fragment (for example `https://board.example.invalid/joe/`).
    It sends no cookies or authorization, follows no redirect, validates the exact health
-   allowlist and expected version/schema, requires fresh data/history/config
-   and a confirmed gateway. It probes all six reads, `/joe/`,
+   allowlist and expected version/schema on every health poll. By default it polls
+   every 10 seconds for up to 150 seconds: data and history must be fresh with
+   snapshot/feed ages below 60 seconds, Fleet Config must be current, and gateway
+   confirmation must have been observed in at least one poll. Set
+   `--max-wait-seconds N` (integer 0–600) to change the bound; 0 checks once.
+   Fleet Config is current (`fresh`) while a valid stored revision has no rejection;
+   its age is informational time since that revision was received/changed. It need
+   not change every minute. Missing/rejected config, stale data/history, or a gateway
+   never confirmed within the window fail with `feeds_not_ready`. These semantics
+   accommodate unchanged config and the gateway check cadence ([JOED-59](https://aeon.barta.cm/p/JOED/JOED-59)).
+   After readiness, it probes all six reads once anonymously and once with spoofed
+   identity, together with `/joe/`,
    `/joe/app.js?v=CANONICAL_VERSION`, and both near-health paths, first anonymously
    and again with well-formed synthetic `X-Auth-Request-User` and `X-Forwarded-User`.
    Every protected probe must lack `X-JoeDesk-Origin` and receive a 30x with a
@@ -620,7 +636,11 @@ retain their legacy probe responses. Static UI/assets remain behind external SSO
 
 `/joe/healthz` reports the actual `release.json` version/scheme, server clock,
 contract-set identifier, four feed states/receipt ages and gateway confirmation,
-check age and closed reason. Never-received feeds have null age and
+check age and closed reason. Fleet Config's `fresh` state means a current, valid
+stored document without rejection, independent of its informational receipt age;
+rejections and clock regression retain their failure states. The board light,
+Settings and desk cards do not use Fleet Config age to warn about timed staleness.
+Never-received feeds have null age and
 `feed_not_received`, including Results before its first accepted push. Data/history
 without observations return HTTP 503 with that reason, distinct from a missing
 route. Health has no money, identifiers, paths or diagnostic text. The historical
@@ -1016,7 +1036,9 @@ change invalidates the current closure: prepare a new, later release reservation
 closure file hashes and closure pin, and immutable release set through the normal
 reviewed release process. Never reseal or republish `261016151218.0.0` or
 `261019102825.0.0` with new bytes. This tooling leaves contracts and pins unchanged;
-JOED-58 reserves sequence 26 for the cut-over retry's changed board bytes.
+JOED-58 reserved sequence 26 for the cut-over retry's changed board bytes; that
+release is now deployed. JOED-59 reserves sequence 27 for the changed health and
+smoke semantics. Never reseal or republish sequence 26 with these new bytes.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s

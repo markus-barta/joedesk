@@ -1340,8 +1340,8 @@ No push, deploy or review gate.
 
 ## JOED-26 / P6a repository preparation
 
-This addendum records repository preparation, with live adoption and cutover
-still pending. JOED-26 originally reserved `inspr-calver-3` / `261016151218.0.0`
+This addendum records repository preparation and deployment history; the current
+candidate still awaits publication and live adoption. JOED-26 originally reserved `inspr-calver-3` / `261016151218.0.0`
 at `2026-10-16T15:12:18Z`, stable sequence 24. That rev 7 candidate was published
 on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d` and its release set
 verified under JOED-41, but it was never deployed.
@@ -1355,25 +1355,37 @@ immutable coordinate. It was published with contracts revision 9 on `main` at
 set. The 2026-10-21 cut-over aborted in phase 1 (`migrate-v2`) before the swap,
 so sequence 25 was never deployed either.
 
-JOED-58 supersedes it before deployment with the rev 9 retry candidate
+JOED-58 superseded it before deployment with the rev 9 retry candidate
 `261021015923.0.0`, reserved once at `2026-10-21T01:59:23Z`, stable sequence 26.
 JOED-57 keeps desk values calm when they are not exact yet; JOED-58 normalizes
 a v1 Fleet Config during migration with an audited update of required KEEP
 symbols. Those changed board bytes require a later coordinate; neither
 `261016151218.0.0` nor `261019102825.0.0` may be resealed or republished with
-new bytes. `release/preparation.json` now records sequence 25 as
-`previous_release`, including its publication and never-deployed disposition,
-and retains `calendar` / `26.09.21.12.00` / sequence 23 as `last_deployed_release`.
+new bytes. Sequence 26 was published on `main` at
+`6eacd6c707386cabe8245e1f97df2ef93965b394` and went live at
+`2026-10-21T08:15Z` (OPS-354 attempt 3). Its live verification used the documented
+smoke variant recorded on JOED-59.
+
+JOED-59 reserves `261021083537.0.0` once at `2026-10-21T08:35:37Z`, stable
+sequence 27, for smoke and health semantics on a settled v2 board. A valid,
+unrejected stored Fleet Config is current (`fresh`) with an honest informational
+receipt age. Release smoke polls health every 10 seconds for up to 150 seconds
+by default, requiring fresh data/history, current config and a gateway confirmation
+observed in the window before running the access probes. No contract changes are
+needed. `release/preparation.json` records sequence 26 as `previous_release`
+(`published-candidate`, disposition `deployed`, `deployed: true`, JOED-58) and
+`last_deployed_release`; this does not claim sequence-27 publication or adoption.
 The explicit sequence-23 → sequence-24 migration anchor and legacy inventory
 stay unchanged.
 Footer/About and `/joe/healthz` derive the current version from the active build;
-About's legacy history excludes both superseded, never-deployed publications.
+About lists the current build, deployed sequence 26, then legacy history; it
+excludes both superseded, never-deployed publications.
 `check-release` still enforces a strictly later reservation, with CLI regressions
 covering equal/earlier coordinates after closure verification. Contract revision
 9 and its complete set `000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5`
-remain unchanged by this retry reservation, as do the pusher/executor
+remain unchanged by the sequence-27 reservation, as do the pusher/executor
 requirements, producer pins and null deployment pins. No retry release set is
-claimed; main-push CI produces it after publication. The custom legacy scheme is not relabelled as
+claimed for sequence 27; main-push CI produces it after publication. The custom legacy scheme is not relabelled as
 INSPR-CalVer1. JOED-19's owner decision supersedes JOED-13, whose v2 proposal is
 cancelled and consolidated into JOED-26. Published history stays intact.
 
