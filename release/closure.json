@@ -1,6 +1,6 @@
 {
   "schema": "joedesk.runtime-closure.v1",
-  "candidate_version": "261021083537.0.0",
+  "candidate_version": "261021113113.0.0",
   "files": [
     {
       "path": "contracts/accept.mjs",
@@ -100,7 +100,7 @@
     {
       "path": "package.json",
       "size": 1355,
-      "sha256": "5a1dbdbdf0cc877167a5006bf72cc4e6868971e8e88a790ab1d077ea5d0c4319"
+      "sha256": "a0436d93ee392ab4a27fafcc00cb78613a922a5d4d39337eed96487e6804aa62"
     },
     {
       "path": "public/joe/app.css",
@@ -164,8 +164,8 @@
     },
     {
       "path": "public/joe/health.js",
-      "size": 12858,
-      "sha256": "637748750ccb054ba66b0421de21fbd1161fb39a8916d5cd5787c2a8e7913c15"
+      "size": 13206,
+      "sha256": "a9e00a084e5772c4d9fac4f00d6c2455553ac68120c56060cee5654330ed8c7f"
     },
     {
       "path": "public/joe/history-model.js",
@@ -190,12 +190,12 @@
     {
       "path": "public/joe/index.html",
       "size": 35239,
-      "sha256": "7abdfb7d74f29e35f333ecbe9153243163c0d856cd5a70ca61eae17627c79100"
+      "sha256": "3db5c81bbb2e739cf41c10a9f2c11f5b1eaeae4bebbc00938cac5fbe9999c3e9"
     },
     {
       "path": "public/joe/joe-version.js",
-      "size": 13887,
-      "sha256": "6b66896cbc015a2465c8e840a060ed564de8c7974b7cdc0b000f79a23dbd4306"
+      "size": 14225,
+      "sha256": "5620ac3f045b83c00b45fe33d7cc9f8ce8e6df04e560bc188ab49f1db13922ec"
     },
     {
       "path": "public/joe/results-model.js",
@@ -274,8 +274,8 @@
     },
     {
       "path": "release.json",
-      "size": 253,
-      "sha256": "e798469dac79e6970e955840b6c428800058cd87e5d1d64c8288a51ec026024b"
+      "size": 244,
+      "sha256": "98961bea4ed8048fbfa127b60953080e1b541b9fae7525489216e606a425d600"
     },
     {
       "path": "release/contracts.json",
@@ -289,8 +289,8 @@
     },
     {
       "path": "release/preparation.json",
-      "size": 6819,
-      "sha256": "4a64188c866d25f5690a61dba2e7c4320715537c3a2f5827f6f393c1d05a77e7"
+      "size": 6721,
+      "sha256": "57e795902d5580a8431ea3f668767d36ea1caaa1e3318ee5b7910bfa14f1d6d3"
     },
     {
       "path": "release/versioning.mjs",
