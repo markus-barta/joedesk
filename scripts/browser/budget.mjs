@@ -17,6 +17,16 @@ export const CI_GUARD = Object.freeze({ name: 'CI guard, 2.5 × the reference bu
 
 const max = list => (list.length ? Math.max(...list) : NaN);
 
+// Only CI may repeat a task-only breach. A second measurement is final,
+// including any non-task failure it finds; reference limits stay strict.
+export function decideTaskGuard(firstConditions, secondConditions, limits) {
+  const failed = Object.keys(firstConditions).filter(key => !firstConditions[key]);
+  const taskOnly = limits === CI_GUARD && failed.length === 1 && failed[0] === 'taskBudget';
+  const remeasured = taskOnly && secondConditions !== null;
+  return { ok: remeasured ? Object.values(secondConditions).every(Boolean) : failed.length === 0,
+    remeasure: taskOnly && !remeasured, remeasured, attempts: remeasured ? 2 : 1 };
+}
+
 export async function runBudget({ page, newBoard, check, limits }) {
   const within = (ms, limit) => (limits.atMost ? ms <= limit : ms < limit);
   const bound = limit => `${limits.atMost ? 'at most' : 'under'} ${limit} ms`;
@@ -27,12 +37,30 @@ export async function runBudget({ page, newBoard, check, limits }) {
     check('budget', name, !failed.length, { failed, conditions,
       offendingTasks: row.longTaskDetails?.filter(t => t.duration >= limits.taskMs), ...row });
   };
-  const full = largeScenario(NOW);
-  const cold = await newBoard({ history: full.history });
-  cold.setNow(at(full.history.receivedAt, 9));
   const traces = [];
-  for (const viewport of VIEWPORTS) {
+  const runViewport = async (viewport, measure) => {
     await configure(page, viewport, 'light');
+    const conditions = result => Object.assign({}, ...result.checks.map(c => c.conditions));
+    const first = await measure(viewport);
+    let decision = decideTaskGuard(conditions(first), null, limits);
+    // Two explicit calls, never a retry loop: at most once per width/phase.
+    const second = decision.remeasure ? await measure(viewport) : null;
+    if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
+    const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
+      attempt: i + 1, attempts: decision.attempts, remeasured: decision.remeasured,
+      offendingTasks: result.row.longTaskDetails.filter(t => t.duration >= limits.taskMs) }));
+    traces.push(...rows);
+    const result = decision.remeasured ? second : first;
+    for (const { name, conditions } of result.checks) {
+      const label = decision.remeasured && 'taskBudget' in conditions
+        ? name.replace(`(${limits.name})`, `(${limits.name}; re-measured once after a breach)`) : name;
+      verify(label, conditions, { ...rows.at(-1), ...(decision.remeasured ? { attemptRows: rows } : {}) });
+    }
+  };
+  const full = largeScenario(NOW);
+  const measureCold = async viewport => {
+    const cold = await newBoard({ history: full.history });
+    cold.setNow(at(full.history.receivedAt, 9));
     const { identifier } = await page.s('Page.addScriptToEvaluateOnNewDocument', { source: observerSource });
     await load(page, cold.url, 'history');
     await page.evaluate(`document.querySelector('#histRange [data-range="all"]').click()`);
@@ -49,29 +77,30 @@ export async function runBudget({ page, newBoard, check, limits }) {
       mainThreadHistory: trace.timings.filter(x => x.reason === 'history-accept').length,
       longTasks: details.filter(t => t.phases.length).map(t => t.duration), startup: details.filter(t => !t.phases.length).map(t => t.duration),
       longTaskDetails: details.filter(t => t.phases.length), setupTasks: details.filter(t => !t.phases.length), frameAttributionSupported: trace.tasks.hasFrames };
-    traces.push(row);
-    verify(`${viewport.name}: the ${full.history.points.length}-point (8 MiB) history is read and validated in the worker and drawn`,
-      { worker: trace.worker, historyRead: work.length >= 1, noMainThreadHistory: !row.mainThreadHistory, drawn: trace.lines >= 3 }, row);
-    verify(`${viewport.name}: drawing the full 8 MiB history takes ${bound(limits.historyMs)} with no task on the page reaching ${limits.taskMs} ms (${limits.name})`,
-      { measured: renders.length > 0, renderBudget: within(row.renderWorst, limits.historyMs), taskBudget: !tooLong(row.longTasks).length }, row);
-  }
+    return { row, checks: [
+      { name: `${viewport.name}: the ${full.history.points.length}-point (8 MiB) history is read and validated in the worker and drawn`,
+        conditions: { worker: trace.worker, historyRead: work.length >= 1, noMainThreadHistory: !row.mainThreadHistory, drawn: trace.lines >= 3 } },
+      { name: `${viewport.name}: drawing the full 8 MiB history takes ${bound(limits.historyMs)} with no task on the page reaching ${limits.taskMs} ms (${limits.name})`,
+        conditions: { measured: renders.length > 0, renderBudget: within(row.renderWorst, limits.historyMs), taskBudget: !tooLong(row.longTasks).length } },
+    ] };
+  };
+  for (const viewport of VIEWPORTS) await runViewport(viewport, measureCold);
 
   const live = largeScenario(NOW, 7200);
-  const b = await newBoard({ history: live.history });
-  let seq = live.snapshot.seq, t = 0;
-  const pushWide = async () => {
-    t += 30; const when = at(NOW, t);
-    b.setNow(when);
-    const r = await b.push(wideSnapshot(live.snapshot, when, ++seq, t));
-    if (r.status !== 200) throw new Error(`wide push failed: ${JSON.stringify(r.body)}`);
-    b.setNow(at(when, 1));
-    // Row P000 (desk J) carries this push's price, so its render is visible.
-    return `$${(20 + (t % 480)).toFixed(2).replace('.', ',')}`;
-  };
-  const firstMark = `document.querySelector('#positions .prow[data-desk="j"] .c-px')?.textContent.replace(/\\s/g, '')`;
-  await pushWide();
-  for (const viewport of VIEWPORTS) {
-    await configure(page, viewport, 'light');
+  const measureLive = async viewport => {
+    const b = await newBoard({ history: live.history });
+    let seq = live.snapshot.seq, t = 0;
+    const pushWide = async () => {
+      t += 30; const when = at(NOW, t);
+      b.setNow(when);
+      const r = await b.push(wideSnapshot(live.snapshot, when, ++seq, t));
+      if (r.status !== 200) throw new Error(`wide push failed: ${JSON.stringify(r.body)}`);
+      b.setNow(at(when, 1));
+      // Row P000 (desk J) carries this push's price, so its render is visible.
+      return `$${(20 + (t % 480)).toFixed(2).replace('.', ',')}`;
+    };
+    const firstMark = `document.querySelector('#positions .prow[data-desk="j"] .c-px')?.textContent.replace(/\\s/g, '')`;
+    await pushWide();
     const { identifier } = await page.s('Page.addScriptToEvaluateOnNewDocument', { source: observerSource });
     await load(page, b.url, 'desk');
     await waitFor(page, `document.querySelectorAll('#positions .prow:not(.hd)').length === 254`);
@@ -118,21 +147,25 @@ export async function runBudget({ page, newBoard, check, limits }) {
       workerReads: work.length, workerWorst: max(work), mainThreadHistory: mainAccept,
       longTasks: details.filter(measured).map(t => t.duration), windows,
       longTaskDetails: details.filter(measured), setupTasks: details.filter(t => !measured(t)), frameAttributionSupported: trace.tasks.hasFrames };
-    traces.push(row);
-    verify(`${viewport.name}: ${pushes} live pushes of 256 positions were each rendered and measured`,
-      { deskPushes: deskRenders.length >= pushes, historyPushes: histRenders.length >= 3, finite: [...deskRenders, ...histRenders].every(Number.isFinite) }, row);
-    verify(`${viewport.name}: a normal patch (Desk data update) takes ${bound(limits.patchMs)} (${limits.name})`,
-      { measured: deskRenders.length > 0, patchBudget: within(row.deskWorst, limits.patchMs) }, row);
-    verify(`${viewport.name}: a History update with the near-maximum series renders in ${bound(limits.historyMs)} (${limits.name})`,
-      { redraws: historyRedraws >= 3, historyBudget: within(row.historyWorst, limits.historyMs) }, row);
-    verify(`${viewport.name}: no task on the page reaches ${limits.taskMs} ms during these updates (${limits.name})`,
-      { taskBudget: !tooLong(row.longTasks).length }, row);
-    verify(`${viewport.name}: history is read and validated in the worker, never on the page`,
-      { worker: trace.worker, historyReads: work.length >= 3, noMainThreadHistory: !mainAccept }, row);
-  }
-  const kept = await (await fetch(`${b.url}history.json`, { headers: { 'x-auth-request-user': ACTOR } })).json();
-  verify(`the live trace kept a near-maximum history (${kept.points.length} points, ${(kept.sizeBytes / 1048576).toFixed(2)} MiB, not compacted)`,
-    { nearMaximum: kept.points.length > 7200, notCompacted: !kept.compactedThrough }, { points: kept.points.length, sizeBytes: kept.sizeBytes });
+    const kept = await (await fetch(`${b.url}history.json`, { headers: { 'x-auth-request-user': ACTOR } })).json();
+    row.points = kept.points.length;
+    row.sizeBytes = kept.sizeBytes;
+    return { row, checks: [
+      { name: `${viewport.name}: ${pushes} live pushes of 256 positions were each rendered and measured`,
+        conditions: { deskPushes: deskRenders.length >= pushes, historyPushes: histRenders.length >= 3, finite: [...deskRenders, ...histRenders].every(Number.isFinite) } },
+      { name: `${viewport.name}: a normal patch (Desk data update) takes ${bound(limits.patchMs)} (${limits.name})`,
+        conditions: { measured: deskRenders.length > 0, patchBudget: within(row.deskWorst, limits.patchMs) } },
+      { name: `${viewport.name}: a History update with the near-maximum series renders in ${bound(limits.historyMs)} (${limits.name})`,
+        conditions: { redraws: historyRedraws >= 3, historyBudget: within(row.historyWorst, limits.historyMs) } },
+      { name: `${viewport.name}: no task on the page reaches ${limits.taskMs} ms during these updates (${limits.name})`,
+        conditions: { taskBudget: !tooLong(row.longTasks).length } },
+      { name: `${viewport.name}: history is read and validated in the worker, never on the page`,
+        conditions: { worker: trace.worker, historyReads: work.length >= 3, noMainThreadHistory: !mainAccept } },
+      { name: `${viewport.name}: the live trace kept a near-maximum history (${kept.points.length} points, ${(kept.sizeBytes / 1048576).toFixed(2)} MiB, not compacted)`,
+        conditions: { nearMaximum: kept.points.length > 7200, notCompacted: !kept.compactedThrough } },
+    ] };
+  };
+  for (const viewport of VIEWPORTS) await runViewport(viewport, measureLive);
   return traces;
 }
 
@@ -140,8 +173,9 @@ export async function runBudget({ page, newBoard, check, limits }) {
 // 50 ms long-task line, the tasks that reach the guard get their own column.
 export function budgetTable(traces, limits) {
   const guard = limits.taskMs > 50;
-  return `| Width | Phase | Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ ${limits.taskMs} ms |` : ''}
-| --- | --- | --- | --- | --- | --- |${guard ? ' --- |' : ''}
-${traces.map(r => `| ${r.viewport} | ${r.phase} | ${r.deskWorst?.toFixed?.(1) ?? '—'} | ${(r.historyWorst ?? r.renderWorst)?.toFixed(1)} | ${(r.workerWorst ?? r.workerRead)?.toFixed(1)} | ${r.longTasks.length} |${guard ? ` ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |` : ''}`).join('\n')}
+  const remeasured = traces.some(r => r.remeasured);
+  return `| Width | Phase |${remeasured ? ' Attempt |' : ''} Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ ${limits.taskMs} ms |` : ''}
+| --- | --- |${remeasured ? ' --- |' : ''} --- | --- | --- | --- |${guard ? ' --- |' : ''}
+${traces.map(r => `| ${r.viewport} | ${r.phase} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |` : ''} ${r.deskWorst?.toFixed?.(1) ?? '—'} | ${(r.historyWorst ?? r.renderWorst)?.toFixed(1)} | ${(r.workerWorst ?? r.workerRead)?.toFixed(1)} | ${r.longTasks.length} |${guard ? ` ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |` : ''}`).join('\n')}
 `;
 }

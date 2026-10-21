@@ -539,6 +539,7 @@ and worker-reply events, and long-animation-frame script/layout attribution
 where supported. Desk and History live-push windows begin after their setup
 settles; setup tasks remain in the trace separately, and tasks crossing into
 an update window still count. The CI guard remains 125 ms (2.5 × reference).
+The CI guard re-measures once on a task-only breach and fails if it reproduces; the reference budget never re-measures.
 Term-focus checks reacquire rebuilt terms and wait up to 2 s for each term's
 own tip and expanded state. The large-ledger Settings check waits up to 5 s
 for its exact-byte title and accessible name before measuring containment.

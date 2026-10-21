@@ -462,7 +462,9 @@ measured on a named reference device, mbp2606 or mbp2607, by
 names the device. CI runners are slower and vary from run to run, so CI
 enforces a regression guard of 2.5 × the reference budget on the same
 workload (`scripts/browser/budget.mjs`): a normal patch at most 40 ms, a
-History draw at most 125 ms, no task reaching 125 ms. Recorded reference:
+History draw at most 125 ms, no task reaching 125 ms.
+The CI guard re-measures once on a task-only breach and fails if it reproduces; the reference budget never re-measures.
+Recorded reference:
 mbp2607 (Apple M5 Max, 18 cores, HeadlessChrome 153.0.8010.12, Node
 v26.11.1) on 2026-10-15: Desk patch worst 7.7 ms, History draw worst
 11.3 ms (8 MiB cold) and 5.7 ms (live), no long task at 390, 1024 or 1440.
