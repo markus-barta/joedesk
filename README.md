@@ -2,7 +2,7 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261021083537.0.0` (`inspr-calver-3`, stable sequence 27), reserved once at `2026-10-21T08:35:37Z` for smoke and health semantics on a settled v2 board ([JOED-59](https://aeon.barta.cm/JOED-59)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261021083537.0.0` (`inspr-calver-3`, stable sequence 27), reserved once at `2026-10-21T08:35:37Z` for smoke and health semantics on a settled v2 board ([JOED-59](https://aeon.barta.cm/p/JOED/JOED-59)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
 **Last deployed release:** `inspr-calver-3` / `261021015923.0.0` / sequence 26,
 published on `main` at `6eacd6c707386cabe8245e1f97df2ef93965b394` under JOED-58.
@@ -364,7 +364,7 @@ OPS owns these exact nixcfg items through its existing review path:
    its age is informational time since that revision was received/changed. It need
    not change every minute. Missing/rejected config, stale data/history, or a gateway
    never confirmed within the window fail with `feeds_not_ready`. These semantics
-   accommodate unchanged config and the gateway check cadence ([JOED-59](https://aeon.barta.cm/JOED-59)).
+   accommodate unchanged config and the gateway check cadence ([JOED-59](https://aeon.barta.cm/p/JOED/JOED-59)).
    After readiness, it probes all six reads once anonymously and once with spoofed
    identity, together with `/joe/`,
    `/joe/app.js?v=CANONICAL_VERSION`, and both near-health paths, first anonymously
