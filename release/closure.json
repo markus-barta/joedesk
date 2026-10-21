@@ -1,6 +1,6 @@
 {
   "schema": "joedesk.runtime-closure.v1",
-  "candidate_version": "261019102825.0.0",
+  "candidate_version": "261021015923.0.0",
   "files": [
     {
       "path": "contracts/accept.mjs",
@@ -100,17 +100,17 @@
     {
       "path": "package.json",
       "size": 1355,
-      "sha256": "1224003d837e051b17c19772159220c7f5f2b935defe86147188ed9e4e98a622"
+      "sha256": "ad04199fa3a5e3e0feb871c9c7e5d916ac2b878e8bfb6c419863df4750c4b474"
     },
     {
       "path": "public/joe/app.css",
-      "size": 73547,
-      "sha256": "6ece9fe148a5beafa69f7ad2a9a4edd1754fe92436f19f9980c2f29e6d490594"
+      "size": 74542,
+      "sha256": "7dde90adabb5a1f514eb641e041cdb1046878b389dd2ec124c39fbf3976cce18"
     },
     {
       "path": "public/joe/app.js",
-      "size": 16255,
-      "sha256": "1d2569d2a30e98b68631d76716314eabbd85b02120de3243299660546320eab4"
+      "size": 17514,
+      "sha256": "d5f7614e287c30affe4419336419209d5b4e5d05642113fea782e9dcc2280d8d"
     },
     {
       "path": "public/joe/chart.js",
@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 31356,
-      "sha256": "9d4b1c1a66ed09e8fe7b4d65ad77003ce554edf2529a79c1263e6526e061a379"
+      "size": 31513,
+      "sha256": "3459e38e7571de0deec08840a73db14e849342d4b54bf3396f3a2630292e2593"
     },
     {
       "path": "public/joe/events.js",
@@ -164,8 +164,8 @@
     },
     {
       "path": "public/joe/health.js",
-      "size": 12331,
-      "sha256": "f1c3f0a0a85b6a4c8b878cc245863d2f15f8b1911b9a079ce74e588531792ac6"
+      "size": 12858,
+      "sha256": "637748750ccb054ba66b0421de21fbd1161fb39a8916d5cd5787c2a8e7913c15"
     },
     {
       "path": "public/joe/history-model.js",
@@ -189,13 +189,13 @@
     },
     {
       "path": "public/joe/index.html",
-      "size": 35194,
-      "sha256": "88a97c26a4814cc21400cb1411ed5c6d4f8ad83308bfd1072a4e72f56bab5fe0"
+      "size": 35239,
+      "sha256": "096788175db8392cdbf71dd3f81cc1019b7340c7bec4f358314d7795ba87a160"
     },
     {
       "path": "public/joe/joe-version.js",
-      "size": 13562,
-      "sha256": "852b0791a041a3dd63bda8496ca4c35be8f3cc1cdbe67c2624362479cdfe8ead"
+      "size": 13545,
+      "sha256": "939a5bfc1b89c51b2ccc502a75cc254d902adf694892ebabf4dba650ee4f3107"
     },
     {
       "path": "public/joe/results-model.js",
@@ -229,8 +229,8 @@
     },
     {
       "path": "public/joe/ui.js",
-      "size": 15784,
-      "sha256": "00de46b2580c721c717e392e44dfe615222c608d12bb8c728bbdc56e2d8281d8"
+      "size": 15999,
+      "sha256": "b2892a52c1b2dbb88f9fdb67ca384fab9a77a40bcf735cd7b984fd4404ef47c9"
     },
     {
       "path": "public/joe/vendor/calver/display.json",
@@ -273,19 +273,24 @@
       "sha256": "18d9f38ee4879d181f86161025e7a41275b0ed02d57a6318e2866894ea5d7301"
     },
     {
+      "path": "release.json",
+      "size": 335,
+      "sha256": "395050984f9c72ca3db2fdee66bbded3d49578642c4656d5c80ac05fc903a6e6"
+    },
+    {
       "path": "release/contracts.json",
       "size": 1661,
       "sha256": "5c20c38be4602f6c142ece1c1abc65172306d504aa0a74d098e10bb15f78ef17"
     },
     {
       "path": "release/data-migration.mjs",
-      "size": 9038,
-      "sha256": "adf07c3bd9b9ef5ec5848e843d8456f9d5205e71302d841c791d43f5c7d7af79"
+      "size": 10667,
+      "sha256": "f31a4941411420f8bdc17e16c2462ce68ffe68fdc6069dba4a14a6dea7ba5fc9"
     },
     {
       "path": "release/preparation.json",
-      "size": 6813,
-      "sha256": "3138a2a5b5b45554ed098e3d8ad4bff37bcfbeeac4a0549bb9c68745f7563ef1"
+      "size": 6873,
+      "sha256": "36e99f96e6b6860de6d51b777d2586655585a14c461058855e60a8937eebefda"
     },
     {
       "path": "release/versioning.mjs",
@@ -293,9 +298,14 @@
       "sha256": "5582bff82d1f2f5f5b9310d79fd8d6bb4b8ea559ca29556ab29fb7f25ed3b12d"
     },
     {
-      "path": "release.json",
-      "size": 322,
-      "sha256": "1f4407b42eb0da31e6a1eadddb9d721cd260aa336f75c135014252cb0d9ff15d"
+      "path": "server.mjs",
+      "size": 28396,
+      "sha256": "b48020740f76a5e70a1f321e49ef8f3628fecb2fd6012e45b5fd012ac4619686"
+    },
+    {
+      "path": "server/fleet-normalization.mjs",
+      "size": 3160,
+      "sha256": "c239abefde0a08855ca6d7c5755fa9c886cfeaf3811cdc78e964bbef5bce1ab3"
     },
     {
       "path": "server/health.mjs",
@@ -316,11 +326,6 @@
       "path": "server/storage.mjs",
       "size": 1283,
       "sha256": "a0d6912999919aa859f0c58c7763fe718ad72cb6fc090002e8f3a03fd103e37d"
-    },
-    {
-      "path": "server.mjs",
-      "size": 26688,
-      "sha256": "3445dafb5c91505d3313d840fb2cc4e4ec0d2f4dd57f5274c27daff7489c2e16"
     },
     {
       "path": "time.mjs",

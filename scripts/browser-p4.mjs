@@ -20,6 +20,7 @@ import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
 import { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } from './browser/results.mjs';
+import { realResultsFixtures } from './results-fixtures.mjs';
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -498,8 +499,8 @@ try {
 
   if (run('fixtures')) {
     // 2 · The results v2 fixtures: scratches, no losers, a drawdown, the empty record.
-    const { board, inputs } = await designBoard();
-    const viewports = [[VIEWPORTS[0], 'light'], [VIEWPORTS[1], 'dark'], [VIEWPORTS[2], 'light'], [VIEWPORTS[2], 'dark']];
+    const baseline = await designBoard();
+    const viewports = [[VIEWPORTS[0], 'light'], [VIEWPORTS[0], 'dark'], [VIEWPORTS[1], 'dark'], [VIEWPORTS[2], 'light'], [VIEWPORTS[2], 'dark']];
     const cases = [
       ['scratches', 'day', '2026-10-13', r => {
         const t = k => r.tiles.find(x => x.k === k);
@@ -517,10 +518,15 @@ try {
       ['empty', 'week', '2026-10-07', r => r.display === '—' && /^No trades last week\. Paper results start on 10.Sep 2026\.$/.test(r.say) && r.tiles.every(x => x.val.trim() === '—') &&
         r.tiles.find(x => x.k === 'trades').mean === 'No finished trades' && r.rows.every(x => x.val.trim() === '—' && x.facts === 'No trades') && r.curve?.aria === 'No change in this period' && r.curve.empty &&
         r.cal.cells.filter(c => c.day >= '2026-10-05' && c.day <= '2026-10-09').every(c => c.n === 'no trades'), 'The empty record: last week reads as the designed empty state'],
+      // Real files join the same model comparisons, complete-section/reason
+      // assertions and craft audit. Their own clock keeps captured dates exact.
+      ...realResultsFixtures().map(({ name, payload, now }) =>
+        [name, 'all', M.viennaDate(Date.parse(now)), () => true, 'Anonymized real producer Results', payload, now]),
     ];
-    for (const [name, period, anchor, ok, what] of cases) {
-      const payload = fixture(name);
-      await serve(served(payload, board));
+    for (const [name, period, anchor, ok, what, realPayload, now] of cases) {
+      const { board, inputs } = now ? await designBoard(now) : baseline;
+      const payload = realPayload ? { ...realPayload, receivedAt: realPayload.receivedAt ?? now } : fixture(name);
+      await serve(realPayload ? () => ({ body: payload, clock: board.clock }) : served(payload, board));
       for (const [viewport, theme] of viewports) {
         const tag = `${name} @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
@@ -534,6 +540,12 @@ try {
         const ix = M.indexResults(payload);
         const e = expected(ix, inputs, period, anchor, 'all');
         compare(tag, r, e);
+        check('AC-16', `${tag}: complete sections, explained dashes and no invented zeros`,
+          Boolean(r.say.trim()) && r.split.length === 4 && r.split.every(v => v.trim()) &&
+          r.tiles.length === 8 && r.tiles.every(t => t.val.trim() && t.mean.trim()) &&
+          r.rows.length === 4 && r.rows.every(row => row.val.trim() && row.facts.trim()) &&
+          r.cal.slots === 42 && r.cal.weeks === 6 && Boolean(r.curve),
+          { say: r.say, tiles: r.tiles.length, rows: r.rows.length });
         check(name === 'empty' ? 'AC-16' : 'AC-12', `${tag}: ${what}`, ok(r), { display: r.display, say: r.say, split: r.split, tiles: r.tiles.map(x => [x.k, x.val, x.mean]) });
         if (viewport.mobile && theme === 'dark') await page.evaluate('document.activeElement?.blur()');
         await auditScreen(page, viewport, theme, `results (${name})`);
@@ -541,6 +553,7 @@ try {
       }
     }
     // AC-16: before tracking starts (August) the design record is empty too.
+    const { board } = baseline;
     await serve(served(designResults(NOW), board));
     await configure(page, VIEWPORTS[0], 'light');
     await load(page, board.url, 'results');

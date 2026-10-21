@@ -1,0 +1,8 @@
+{
+  "name": "joedesk-ci-tests",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "yaml": "2.9.1"
+  }
+}

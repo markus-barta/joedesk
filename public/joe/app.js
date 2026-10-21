@@ -30,6 +30,25 @@ if (!isCanonicalJoeHost(location.hostname)) {
 }
 
 function start() {
+  // CSS shrinks only the brand before any essential item. Hide an incomplete
+  // wordmark, then tighten gaps if even the icon-only row needs more room.
+  // Visibility never changes sizes, so observing the result cannot oscillate.
+  const header = $('.top-in'), word = header.querySelector('.brand .word'), wordText = word.firstElementChild;
+  const fitHeader = () => {
+    header.removeAttribute('data-tight');
+    const row = header.getBoundingClientRect(), css = getComputedStyle(header);
+    if ($('#themeBtn').getBoundingClientRect().right > row.right - parseFloat(css.paddingRight) + 0.02) header.setAttribute('data-tight', '');
+    word.style.visibility = wordText.getBoundingClientRect().width > word.getBoundingClientRect().width + 0.02 ? 'hidden' : '';
+  };
+  // Apply size changes in the next frame, outside ResizeObserver delivery.
+  let headerFrame = 0;
+  const queueHeaderFit = () => {
+    if (!headerFrame) headerFrame = requestAnimationFrame(() => { headerFrame = 0; fitHeader(); });
+  };
+  const headerFit = new ResizeObserver(queueHeaderFit);
+  for (const el of [header, word, wordText, $('#hdrHealth'), header.querySelector('.nav')]) headerFit.observe(el);
+  document.fonts.addEventListener('loadingdone', queueHeaderFit);
+  fitHeader();
   const tips = initTips();
   trapDialogs();
   const events = createObservedEvents();

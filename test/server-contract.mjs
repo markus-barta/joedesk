@@ -477,7 +477,9 @@ test('P2 health: anonymous exact allowlist, never-received null ages and failed-
   const first = (await get()).body;
   assert.equal(validateContract('healthz', first).ok, true);
   assert.equal(first.versionScheme, activeRelease.version_scheme); assert.equal(first.version, activeRelease.version);
-  assert.notEqual(first.version, '261016151218.0.0', 'health reports the running candidate, not the superseded publication');
+  for (const version of ['261016151218.0.0', '261019102825.0.0']) {
+    assert.notEqual(first.version, version, 'health reports the running candidate, not a superseded publication');
+  }
   assert.equal(first.serverNow, at(0)); assert.equal(first.snapshotAgeSeconds, null);
   for (const [version, versionScheme] of [['261015150000.0.0', 'calendar'], ['26.10.15.15.00', 'inspr-calver-3'], ['26.02.30.15.00', 'calendar']]) {
     assert.equal(validateContract('healthz', { ...first, version, versionScheme }).ok, false);

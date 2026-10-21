@@ -2,20 +2,27 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261019102825.0.0` (`inspr-calver-3`, stable sequence 25), reserved once at `2026-10-19T10:28:25Z` for the rev 8 cut-over (JOED-50): paper-account cash, nullable position values with per-field reasons, and the stable hero. `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. The last deployed release remains `calendar` / `26.09.21.12.00` / sequence 23. No deployment or authoritative live adoption is claimed by this branch.
+**Candidate version:** `261021015923.0.0` (`inspr-calver-3`, stable sequence 26), reserved once at `2026-10-21T01:59:23Z` for the rev 9 cut-over retry (JOED-58): desk values that are not exact yet stay calm (JOED-57), and migrate-v2 normalizes a v1 Fleet Config (JOED-58). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. The last deployed release remains `calendar` / `26.09.21.12.00` / sequence 23. No deployment or authoritative live adoption is claimed by this branch.
 
-The previous coordinate `261016151218.0.0` (stable sequence 24, rev 7) was
+The previous coordinate `261019102825.0.0` (stable sequence 25, rev 9) was
+published on `main` at `d36b5295295a6901e36fdf2dc0d64353ddf88d0e`; JOED-50
+records its verified release set. It was **never deployed**: the 2026-10-21
+cut-over aborted in phase 1 (`migrate-v2`) before the swap. It is superseded
+before deployment.
+
+The earlier coordinate `261016151218.0.0` (stable sequence 24, rev 7) was
 published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
-records its verified release set. It was **never deployed** and is superseded
-before deployment. Its immutable artifacts and legacy-to-calendar migration
-anchor remain history. `release/preparation.json` distinguishes that
+records its verified release set. It was also **never deployed**. Both
+publications' immutable artifacts and the legacy-to-calendar migration
+anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build
-followed by legacy history; the superseded publication is not a deployed entry.
+followed by legacy history; neither superseded publication is a deployed entry.
+Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-25 candidate has not been published. The candidate
+cutover**. The sequence-26 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -33,8 +40,8 @@ use it; legacy history remains plain. The SemVer/Pretty switch is session-only;
 auto colors follow the actual product accent. Tooltip and accessible name
 carry the complete coordinate and UTC timestamp; English copy feedback uses
 the shared interaction helper. No runtime settings are fetched.
-`node scripts/check-release.mjs --require-adoption` still fails until the
-coordinator's immutable-publication and live gates are met.
+`node scripts/check-release.mjs --require-adoption` fails until a matching
+adoption record captures the coordinator's immutable-publication and live gates.
 
 Every `npm run check`, Docker build and Nix package build verifies the committed
 runtime closure offline: exact file set, regular files, byte counts and SHA256.
@@ -65,7 +72,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261019102825.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261021015923.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -98,10 +105,61 @@ this workflow requires only read-only contents permission and no new secrets,
 OIDC or attestation write grants. The BuildKit provenance is unsigned evidence;
 coordinator signature/review and all producer/OPS/live gates remain separate.
 
+### Recording adoption
+
+JOED writes `adoption/<active-version>.json` only after OPS's live checks and
+the UI look by Markus or his recorded delegate. Use a normal reviewed PR to
+`rebuild/v2`. The record is outside the runtime closure and Docker COPY set: recording adoption requires no image
+change, rebuild, new release coordinate or change to published artifacts. Keep
+the original main merge, immutable release set and image digest. Run this from
+a checkout containing that merge and its descendants, not inside the image.
+
+The strict `joedesk.adoption.v1` validator in `scripts/check-adoption.mjs` requires
+these fields (unknown keys at any level fail):
+
+- `schema`, `version`, `version_scheme`, `release_channel`, `release_sequence`;
+  the four coordinates must match `release.json` and the reservation.
+- `source: { commit, tree }` with full main-merge Git SHAs;
+  `release_set_sha256`, `image_digest`, `contract_set_sha256`, and
+  `validation_run_id` (a positive decimal string). Digests are lowercase SHA256;
+  `image_digest` includes `sha256:`. The contract digest matches `release/contracts.json`.
+- `decisions`: at least one distinct Desk question UUID.
+- `deployment: { deployed_at, operator_ticket, rollback_reference }`: UTC time,
+  an operator ticket key (such as `OPS-354`), and a value-free procedure/evidence reference identifying
+  the retained immutable artifact and compatible backup for rollback.
+- `live_checks`: exactly `joed_live_check`, `ops_t76_live`, `smoke_release`, and
+  `spoof_check`, each `{ status: "pass", checked_at }`.
+- `markus_ui_look`: exactly one of `{ status: "confirmed", checked_at }` for
+  Markus's own look, or `{ status: "delegated", checked_at, performed_by, delegation }`
+  for a completed delegated look. `performed_by` must match `/^[A-Z][A-Z0-9-]{1,31}$/`
+  (such as `"JOED"`); `delegation` is a non-empty string of at most 500 characters
+  naming where Markus's delegation is recorded (such as `"JOED-42 comment 2026-10-20:
+  Markus delegated the post-switch look to JOED"`). Use `delegated` only when
+  Markus's delegation is recorded on the ticket. Keep the field name and
+  `joedesk.adoption.v1` schema; existing confirmed records stay valid.
+- `adopted_at`.
+
+All times must be real UTC instants (`YYYY-MM-DDThh:mm:ss[.sss]Z`). Keep records
+value-free: no secrets, credential-bearing hostnames, IPs, account data or money.
+Verify the retained release-set bytes and committed source metadata as well:
+
+```sh
+node scripts/check-release.mjs --require-adoption --release-set /path/to/release-set.json
+```
+
+Without `--release-set`, the same command verifies the record, active coordinates,
+contracts and local Git source/tree/ancestry. With it, the shared release-set
+verifier also binds the exact manifest SHA256, commit, image and validation run.
+Success reports `adopted` and `authoritative: true`; normal checks retain their
+candidate output. Record the AGENTS-VERSIONING adoption outcome on the owning
+ticket: the presentation pin was reviewed and unchanged. Preserve previous
+records and releases; rollback selects the recorded prior immutable artifact
+and matching backup, recording a new deployment event.
+
 ### Offline data preparation and rollback
 
-`scripts/prepare-data.mjs` requires explicit `--offline`, source and **new**
-destination paths. OPS must stop writers first. Backups copy only the known
+Mutating commands in `scripts/prepare-data.mjs` require explicit `--offline`,
+source and **new** destination paths. OPS must stop writers first. Backups copy only the known
 board data/config/audit files, retain exact bytes, use directory mode 0700 and
 file mode 0600, and record sizes/SHA256 in `backup-manifest.json`. Unknown files,
 symlinks, oversized input, incomplete backups and existing destinations fail
@@ -110,17 +168,60 @@ closed; nothing is deleted or overwritten.
 The command forms are:
 
 ```sh
+node scripts/prepare-data.mjs check-fleet V1_STORE_OR_BACKUP
 node scripts/prepare-data.mjs backup --offline SOURCE NEW_BACKUP v1
 node scripts/prepare-data.mjs verify --offline BACKUP
 node scripts/prepare-data.mjs migrate-v2 --offline V1_BACKUP NEW_V2_STORE V2_SNAPSHOT UTC_RECEIPT
 node scripts/prepare-data.mjs restore --offline BACKUP NEW_RESTORE v1
 ```
 
+Before stopping writers, OPS can run the read-only `check-fleet` preflight on
+the live v1 store or a verified v1 backup. It reports `fleet ok`,
+`fleet normalizable (keep: +SXR8 +TSLA)` (only missing symbols are listed), or
+`fleet invalid: <path/rule list>`. A second line reports `actions ok` or
+`actions invalid`, checking the action log's JSON, schema and ability to accept
+the normalization row under the same ring rule as migration. These are codes
+only, never log values. It writes nothing and needs no `--offline`; either
+invalid result exits 1, while valid/normalizable configurations with valid
+action logs exit 0. An absent action log is valid and stays absent.
+A backup must also pass its manifest/digest checks. This is a Fleet Config
+preflight; the stopped-writer backup and full migration checks still apply.
+
 Migration accepts a real, validated v2 producer snapshot and an explicit UTC
-receipt (ISO form with milliseconds). It creates a separate v2 store, preserving
-compatible Fleet Config and its validated change log (`fleet-config-actions.json`)
-byte-for-byte, including pending/failed audit entries, and establishing durable sequence/receipt state through
-the real server acceptance path. Legacy money/history cannot prove the v2
+receipt (ISO form with milliseconds). It creates a separate v2 store. A v1
+Fleet Config with a valid symbol array can lack the v2 policy KEEP symbols:
+migration appends missing `SXR8`, then `TSLA`, keeping existing entries and
+their order. No duplicates or other invalid fields are repaired. The normalized
+config must pass the unchanged contract (contract set revision 9); any remaining
+violation fails closed as `migration_fleet_invalid`, with value-free path/rule
+detail. The CLI prints specific error codes, never payload values or paths.
+
+Only a changed config advances `rev` using the board's `withNextFleetRevision`
+rule (`fc-NNNNNN` plus one, refusing exhaustion) and sets `updatedAt` to the
+migration receipt. It appends exactly one valid action to
+`fleet-config-actions.json`: actor `migration`, `changedKeys: ["desks.keep"]`,
+the old/new revisions, receipt time, outcome `success`, reason `propagated`.
+The audit schema has no free-text summary field. Normalization follows the
+board's bounded ring of the last 200 actions, dropping only the oldest entries
+needed to fit the new row; retained entries, including pending/failed actions,
+stay in order. The verified v1 backup keeps the original log bytes unchanged,
+so migration loses no history. A full valid log never blocks normalization;
+bad JSON, schema or entries still fail closed as `migration_fleet_actions_invalid`.
+An absent audit is created only when normalization changes the config. Already
+compliant config and audit files retain their exact bytes.
+The board applies the same normalization when loading a stored v1 config in an
+otherwise v2 store, with an audit-first pending entry finalized after the config
+write. Before appending, it searches from the end for the latest `migration`
+row for the stored revision with outcome `pending` or `failure`, reusing that
+row's ID when found. A config write failure records `failure`/`store_failed`
+with the unchanged revision, best effort, then fails the read. Repeated failing
+reads do not grow the log. Recovery finalizes the same row as
+`success`/`propagated`, with the new revision and this attempt's `updatedAt` as
+its receipt. Subsequent loads/restarts add no actions or revisions; submitted
+settings still require the strict contract.
+
+Migration establishes durable sequence/receipt state through the real server
+acceptance path. Legacy money/history cannot prove the v2
 decimal/evidence/basis contract: their original bytes remain in the v1 backup;
 they are never relabelled or used to fabricate historical observations. The v2
 board refuses to start in a directory containing legacy data/history. A v2
@@ -135,6 +236,71 @@ actual UTC time that this snapshot was received for staging, recorded as
 look fresh. The next pusher sequence must exceed the snapshot's `seq`, with
 non-regressing generation/evidence times. If staging has aged before cutover,
 require a new accepted producer observation before the fresh-feed smoke passes.
+
+### Private preview captures for OPS (JOED-53, JOED-54)
+
+Run from the source checkout against the board on an authorized **private
+host**, through its trusted authenticated proxy or an operator SSH tunnel to
+the board container's port. The CLI sends `x-auth-request-user` only with an
+explicit `--actor` and a loopback `--base-url` (`127.0.0.1`, `::1` or
+`localhost`), and only to that base origin, including dedicated workers.
+Use `--actor joedesk-qa` for the tunnel so the Fleet Config audit never names
+a human. Actor names must match `/^[a-z][a-z0-9-]{2,39}$/`; other hosts are
+refused before browser launch or output writes. Keep the producer stopped for
+the staged snapshot check. Chrome/Chromium and Node 22+ must be available;
+`BROWSER_PATH` can select the browser. Do not launch a browser on the Mac
+during the daytime restriction.
+
+```sh
+capture_dir=$(mktemp -d)
+chmod 0700 "$capture_dir"
+node scripts/preview-capture.mjs --base-url http://127.0.0.1:PORT/joe/ --out "$capture_dir" --actor joedesk-qa
+```
+
+Replace `PORT` with the operator tunnel's local port. Omit `--actor` when using
+the trusted authenticated proxy. With `--actor`, capture is **read-only by
+construction**: every method except GET/HEAD is failed by CDP Fetch before it
+reaches the server, counted as `writeBlocked`, and fails the run (exit 1).
+Without `--actor`, identity and method handling stay unchanged. Defaults are
+`--widths 1440,390 --themes light,dark --screens desk,positions,settings,results`.
+Widths are unique integers from 320 to 3840; screens also accept `history`.
+Positions is a crop of Desk's `#positions`. Each selected combination writes
+`<screen>-<width>-<theme>.png` and a shared `summary.json`, all mode 0600.
+The directory must already exist, belong to the caller and have no group/other
+permission bits; existing output filenames and symlinks are refused. Use a new
+directory for each staged snapshot. Chrome's temporary private profile is
+created inside that directory and cleaned up by the shared browser helper.
+
+The selector table is `SECTIONS` in `scripts/preview-capture.mjs`: Desk hero,
+each desk card, position rows, kept rows, History chart/bookkeeping/events,
+Results hero/tiles/calendar/breakdown, and Settings mode/runtime, every field
+group, source/log, appearance and About. Desk captures also visit History to
+check it, then return to Desk. Only Results with the health feed's exact
+`not reported` / `feed_not_received` pair may be empty; its unavailable UI
+currently emits no panel `data-state` line, so the summary reports no observed
+state names there. Missing sections still fail. A received Results section
+counts as content when it has a real value, or every dash tile has its own
+explanation (for example, profit factor needs a losing trade).
+
+The summary uses an allow-list serializer: fixed section/screen/state names,
+widths, themes, the validated `actor` (or null), booleans, counts (including
+`writeBlocked`), and only `/joe/healthz`'s `version` and
+`schemaVersion`. It contains no page text, money, quantities, symbols, account
+hints, URLs or error messages. Requests outside the base origin are blocked
+with CDP Fetch interception, including worker requests; any block fails the run.
+Exit 0 means all checks passed; exit 1 means capture/content/errors failed;
+exit 2 means invalid arguments or output permissions. Terminal lines are also
+value-free: check exceptions print a fixed step id and exception class, with
+the message added only when `CI=true` for synthetic diagnostics. Exception
+messages never enter the summary. Dedicated-worker requests pause on their
+owning page/frame's Fetch session; workers resume after their runtime and
+nested-worker tracking are enabled. CI alone uploads **synthetic** fixture
+images and the checked summary as `joedesk-preview-capture`.
+
+**Real screenshots go only to JOED/Amy: never commit or upload them. Trash the
+captures afterwards** (`trash "$capture_dir"`). Only the value-free summary
+belongs on tickets. This script is outside the shipped runtime closure and
+does not change contracts, release metadata or deployment approval.
 
 ### OPS-354 / P6b handoff
 
@@ -258,7 +424,33 @@ nix-build --no-out-link
 # server:     $out/bin/joedesk-server
 ```
 
+## CI runners
+
+CI defaults to `ubuntu-latest`. Setting the repository variable
+`JOEDESK_AGM2=on` enables the `[self-hosted, agm2]` runner for same-repository
+pushes, manual dispatches and PRs whose head repository matches this repository.
+Fork PRs always run hosted. Keep the switch unset until OPS registers the runner
+and requires approval for all outside collaborators; `pull_request_target` is
+forbidden. Checkout explicitly cleans the workspace, and CI temporary files and
+npm's cache stay under `RUNNER_TEMP`.
+
+Chrome installation runs hosted-only. Self-hosted jobs resolve `chromium`,
+`chromium-browser`, then `google-chrome` from `PATH` once, export `BROWSER_PATH`,
+and fail clearly if none is installed.
+
+The Docker build requests neither host networking nor privileged build steps.
+Buildx's `docker-container` driver does create an internal privileged BuildKit
+helper; on agm2 it must remain inside the rootless daemon's user namespace,
+checked before builder setup. The self-hosted runner must provide Chromium,
+rootless Docker and the prerequisites for `actions/setup-node`. Actual agm2
+browser/OCI execution remains to be verified before enabling the switch.
+
 ## Test
+
+The workflow lint uses a pinned YAML parser in the checkout-only `test/` package;
+run `npm ci --prefix test --ignore-scripts --no-audit --no-fund` before the tests.
+It runs with `npm run test:contracts` and `npm test`. The sealed runtime package
+and its release reservation retain their existing dependency and version policy.
 
 The JOED-21/JOED-22 rebuild lives in
 [ADR 0001](docs/adr/0001-joedesk-architecture.md). The P2 server uses the offline
@@ -764,6 +956,68 @@ to a desk.”, with U+00A0 between the number and unit. An empty selected desk o
 today, including an empty-desk row, reads **No trades so far**, without Partial
 or “record incomplete”.
 
+JOED-40 prepares a real-producer CI slot in `fixtures/results/real/`. Only JOED
+adds files there, after Amy's paper-proof sign-off. Raw inputs and identity maps
+stay outside the checkout. Run:
+
+```sh
+node scripts/anonymize-results.mjs /private/input.json /private/new-output.json
+node scripts/anonymize-results.mjs --check /private/new-output.json
+```
+
+Both ingress producer snapshots and served snapshots use the existing offline
+Results contract validator, before and after anonymization. The schema-derived
+allow-list preserves constants/enums (including desk ids and reasons), symbols,
+currencies, dates/instants, decimals, quantities, FX rates, numbers, nulls and
+structure. It replaces trade `id` with `rt-anon-N`, optional `company` with
+`company-N`, and every FX `source` with `source-N`, deterministically in first-seen
+order per category. These are the only identifying/free-form string fields the
+current contract accepts. Account ids/hints, order/exec ids, permIds, orderRef,
+person/host fields and any other unknown string fail closed with a JSON path
+(exit 1); malformed JSON or other contract-invalid input exits 2. They cannot be
+silently added or stripped from this closed contract. Decimal strings are never
+converted or reformatted. A deep projection check preserves every other leaf.
+The CLI creates a new 0600 output, refuses overwrites/symlinks, and prints counts
+or paths only. `--check` requires canonical synthetic tokens in all free-form
+fields, preventing unrecognized name/id patterns from slipping through.
+
+`npm run test:contracts` (and `npm test`) validates every real JSON and its
+already-anonymous check; the empty slot logs `no real fixture yet`. P4's fixture
+list automatically includes the real files at 1440 and 390, light and dark,
+using their captured clock, the same model comparisons, explained-dash and
+complete-section assertions, and accessibility/layout audit as synthetic files.
+PR CI runs P4 in UTC, Europe/Vienna and America/New_York. No local browser is
+needed to prepare or validate the fixture.
+
+After OPS confirms exact deployed commits, the follow-up can run:
+
+```sh
+node scripts/set-deployment-pins.mjs --producer SHA40 --pusher SHA40 --executor SHA40
+```
+
+At least one flag is required; each can be used on its own. Every pin must be a
+40-hex **nixcfg** commit, confirmed by OPS. `--pusher` and `--executor` update
+`participants.pusher.deployment_pin` and `participants.executor.deployment_pin`;
+a missing or malformed participant fails without writing the manifest.
+`--producer` updates `participants.producer.deployment_pin`. Only when that flag
+is supplied and the producer participant is absent, the helper adds it in the
+pusher's shape: the requested `deployment_pin`, `required_contract_set_sha256`
+from the manifest's active set, `required_data_schema` set to
+`inspr.joe.household.results.v2`, and pending status
+`Amy JOED-20 real producer rehearsal/sign-off required`. The release checks
+permit this additional participant; no validator change is needed. The helper
+never creates a top-level `producers` key. Unknown/duplicate flags, missing
+values and invalid SHAs fail. Existing statuses, unrequested pins and activation
+wording stay untouched; recording a pin does not claim sign-off. No deployment
+pin is set by this tooling change.
+`release/contracts.json` **is inside** `release/closure.json`, whose
+bytes are pinned by `CLOSURE_SHA256` in `scripts/check-release.mjs`. A future pin
+change invalidates the current closure: prepare a new, later release reservation,
+closure file hashes and closure pin, and immutable release set through the normal
+reviewed release process. Never reseal or republish `261016151218.0.0` or
+`261019102825.0.0` with new bytes. This tooling leaves contracts and pins unchanged;
+JOED-58 reserves sequence 26 for the cut-over retry's changed board bytes.
+
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
 `contract_set_sha256`; an earlier digest does not cover revision-9 acceptance
@@ -834,6 +1088,25 @@ themes. Browser execution and visual approval remain with CI/coordinator.
 The cash and KPI sizing reserves include the new short reason through
 `CELL_REASON`, with their existing geometry checks unchanged.
 
+JOED-57 treats null desk equity with `not_exact_yet` as deliberately uncaptured,
+so an otherwise healthy board stays **Board OK** and Details adds one neutral
+“Desk values are not exact yet” line. Other missing reasons stay red; retained
+values, broker checks, stuck desks and regular-session result warnings keep
+their existing rules. `NOT_EXACT_TONE` in `health.js` defaults to `green`;
+`yellow` opts into `values_not_exact` after those checks. Null not-exact cells
+use the neutral info SVG with existing tokens and spacing. Contracts remain
+revision 9 and the release coordinate is unchanged.
+
+The header status stays on one line at 360/390/1024/1440 px. A hidden CSS
+sizer reserves the longest existing status, “Broker unsure”, in the rendered
+font, so status changes move no header component. At widths up to 400 px the
+brand shows its logo and retains the accessible name “JoeDesk”; PAPER stays
+visible. P5's `not-exact` checks the real-ingress Board OK / Needs fix / recovery
+sequence in both themes at all four widths: status height equals one line box,
+no horizontal overflow, and the brand, PAPER, status and theme button stay
+inside the header with no intersecting bounds. Its exact 0 px checks include
+the status and its label. These browser assertions run in PR CI.
+
 The reason enum appends `not_exact_yet` (the broker reports it, but it is not
 yet captured exactly) and `source_unavailable` (the broker did not report it,
 or did not report it in the required currency). Board copy is “not exact yet”
@@ -895,18 +1168,36 @@ values remain correct in TB and may wrap. A count
 without a cap shows only its size; neither field means no ledger text. The title
 and accessible name retain exact byte counts. Settings health text reserves its
 space so state changes do not move later sections within that reserve. The header
-keeps its desktop layout, 16 px phone inset and existing heights. On phones the
-icon shares the first label line; the next line uses the button's full inner
-width, without a sizing reserve or a forced line break (JOED-46). Loading alone
-hides its decorative icon at widths up to 700 px so the label uses the whole
-line; its accessible name and desktop appearance stay unchanged.
+keeps its 16 px phone inset and existing heights. The icon and status share one
+line at every supported width; the longest status reserves its width (JOED-57).
+The brand's wordmark occupies the only shrinking flex slot, down to its 24 px
+icon. A `ResizeObserver` compares the word's natural rendered width with that
+slot and hides the whole word if it cannot fit. If the icon-only row still
+overflows, measured geometry selects tighter gaps and navigation/status
+padding. Neither decision estimates font metrics or uses a wordmark breakpoint;
+the PAPER pill, theme target, outer inset and header heights retain their sizes.
+Desktop reserves include the sweep's longest stale label and broker suffix;
+the phone reserve keeps “Broker unsure”. Hidden grid sizers and inline size
+containment keep both status columns fixed across label and broker changes.
+Loading alone hides its decorative icon at widths up to 700 px while retaining
+the icon's space; its accessible name stays unchanged.
 It introduces no new header labels. PR CI's P5
 `executor` checks cover all three degraded wire combinations, recovery and ledger
 rounding at 1440/1024/390/360 in both themes, with Settings executor-row, header
 and Desk explanation crops and no-overflow/no-clipping checks. It records
-Chrome’s actual rendered font and checks every existing label fits at all four
-widths, including “Stale 2 min” and “Loading”. Label evidence includes line and
-glyph boxes, intact words, icon containment and no icon overlap, with an explicit
+Chrome’s actual rendered font and checks every existing label plus “Check” fits
+on one line at all four widths, including “Stale 2 min” and “Loading”. P3 reuses
+P5's header-layout measurement at all 109 widths from 360 to 1440 in 10 px
+steps, on every screen, in both themes and the normal and wide fonts. It checks
+one-line status height, row containment, overlap and complete wordmarks, then
+crosses eight labels with four broker words on Desk and requires zero movement
+of the header components, status button, label, word and main content. The old
+synthetic 23 h 59 min phone-label overflow exception remains; the live stale
+label (“Stale 2 min”) has no exception. History's legend entries allow the
+estimate note to wrap inside the chart card at 360 px; entries keep their
+single line when space permits. Browser execution belongs to CI. Label
+evidence includes line and glyph boxes, intact words, icon containment and no
+icon overlap, with an explicit
 check that only phone Loading hides its icon. At 360/390 in both themes it
 emits `header-{board-ok,needs-fix,data-delayed,broker-unsure,stale}` crops. It
 captures a static production-header clone outside the live header, with scripts
@@ -915,7 +1206,7 @@ and strand the board's pending-frame flag (JOED-47). After the header loop at
 every width/theme, a refresh must increase the board's render count within 5 s.
 The large-TB check still requires its exact byte title and accessible name,
 formatted text and containment, and logs each failing condition. It
-measures exact 0 px movement outside the intrinsic pill within the
+measures exact 0 px movement including the reserved status within the
 same page and broker state, and compares every board-health sentence to its
 reserve. Node tests compare the six existing header labels (including Loading)
 and every broker word against a frozen c1c71a1 renderer fixture, including the

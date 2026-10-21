@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,15 +15,22 @@ concurrency:
 
 jobs:
   package:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (vars.JOEDESK_AGM2 == 'on' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","agm2"]') || 'ubuntu-latest' }}
     timeout-minutes: 10
     steps:
+      - name: Keep temporary files under RUNNER_TEMP
+        run: |
+          printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nNPM_CONFIG_CACHE=%s/npm-cache\n' \
+            "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          clean: true
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
+      - name: Install checkout-only workflow lint dependency
+        run: npm ci --prefix test --ignore-scripts --no-audit --no-fund
       - run: npm run check
       - name: Rebuild contracts, incident fixtures and time vectors
         run: npm run test:contracts
@@ -39,39 +47,73 @@ jobs:
         run: npm run test:release
 
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (vars.JOEDESK_AGM2 == 'on' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","agm2"]') || 'ubuntu-latest' }}
     timeout-minutes: 45
     steps:
+      - name: Keep temporary files under RUNNER_TEMP
+        run: |
+          printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nNPM_CONFIG_CACHE=%s/npm-cache\n' \
+            "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          clean: true
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
       - name: Install Google Chrome
+        if: runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y wget gnupg
-          wget -q -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get install -y /tmp/google-chrome.deb
+          wget -q -O "$RUNNER_TEMP/google-chrome.deb" https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo apt-get install -y "$RUNNER_TEMP/google-chrome.deb"
+      - name: Resolve browser path
+        env:
+          RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          if [ "$RUNNER_KIND" = 'github-hosted' ]; then
+            browser_path=/usr/bin/google-chrome
+          elif ! browser_path=$(command -v chromium || command -v chromium-browser || command -v google-chrome); then
+            echo '::error::No browser found on the self-hosted runner; install chromium, chromium-browser or google-chrome.'
+            exit 1
+          fi
+          printf 'BROWSER_PATH=%s\n' "$browser_path" >> "$GITHUB_ENV"
       - name: Board UI gate (390/1024/1440, light and dark, P1 fixtures, privacy)
         env:
-          BROWSER_PATH: /usr/bin/google-chrome
           JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p3
         run: node scripts/browser-p3.mjs
       - name: Results gate (390/1024/1440, light and dark, results v2 fixtures, Vienna dates, budget)
         if: always()
         env:
-          BROWSER_PATH: /usr/bin/google-chrome
           JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p4
         run: npm run test:results -- UTC Europe/Vienna America/New_York
       - name: Settings gate (390/1024/1440, light and dark, Fleet Config fixtures, LIVE gate at the network layer, sweep)
         if: always()
         env:
-          BROWSER_PATH: /usr/bin/google-chrome
           JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p5
           TZ: UTC
         run: node scripts/browser-p5.mjs
+      - name: Preview capture refuses a 0755 output directory (exit 2, no files)
+        run: |
+          bad_out=$(mktemp -d "$RUNNER_TEMP/joedesk-preview-public.XXXXXX")
+          chmod 0755 "$bad_out"
+          status=0
+          node scripts/preview-capture.mjs --base-url http://127.0.0.1:1/joe/ --out "$bad_out" || status=$?
+          test "$status" -eq 2
+          test -z "$(ls -A "$bad_out")"
+      - name: Preview capture proxy and actor tunnel smoke
+        env:
+          TZ: UTC
+        run: |
+          install -d -m 0700 "$RUNNER_TEMP/joedesk-preview-capture/proxy" "$RUNNER_TEMP/joedesk-preview-capture/actor"
+          node scripts/preview-capture-ci.mjs "$RUNNER_TEMP/joedesk-preview-capture/proxy" "$RUNNER_TEMP/joedesk-preview-capture/actor"
+      - name: Keep synthetic preview PNGs and value-free summary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joedesk-preview-capture
+          path: ${{ runner.temp }}/joedesk-preview-capture
+          if-no-files-found: error
       - name: Keep the screenshots for the visual check
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -80,7 +122,6 @@ jobs:
           path: ${{ runner.temp }}/joedesk-qa/p3
       - name: Release carry-overs (390/1440, light and dark)
         env:
-          BROWSER_PATH: /usr/bin/google-chrome
           JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p6a
           TZ: UTC
         run: node scripts/browser-p6.mjs
@@ -104,15 +145,32 @@ jobs:
           path: ${{ runner.temp }}/joedesk-qa/p5
 
   docker:
-    runs-on: ubuntu-latest
+    runs-on: ${{ (vars.JOEDESK_AGM2 == 'on' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","agm2"]') || 'ubuntu-latest' }}
     timeout-minutes: 20
     steps:
+      - name: Keep temporary files under RUNNER_TEMP
+        run: |
+          printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nNPM_CONFIG_CACHE=%s/npm-cache\n' \
+            "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          clean: true
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
+      - name: Require rootless Docker on the self-hosted runner
+        if: runner.environment == 'self-hosted'
+        run: |
+          docker info --format '{{json .SecurityOptions}}' | node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            if (!JSON.parse(readFileSync(0, "utf8")).includes("name=rootless")) {
+              console.error("Self-hosted CI requires a rootless Docker daemon.");
+              process.exit(1);
+            }
+          '
+      # On self-hosted runners the docker-container driver's privileged BuildKit
+      # helper stays inside the rootless daemon's user namespace.
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Build two local OCI images with SBOM and maximal provenance
         # OCI export never pushes to a registry. Keep outputs outside the context.
@@ -145,11 +203,16 @@ jobs:
   release-set:
     needs: [package, browser, docker]
     if: ${{ success() }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ (vars.JOEDESK_AGM2 == 'on' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","agm2"]') || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
+      - name: Keep temporary files under RUNNER_TEMP
+        run: |
+          printf 'TMPDIR=%s\nTMP=%s\nTEMP=%s\nNPM_CONFIG_CACHE=%s/npm-cache\n' \
+            "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          clean: true
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:

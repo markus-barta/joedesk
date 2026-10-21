@@ -8,15 +8,14 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { reserveVersion, compareReleases } from '../release/versioning.mjs';
 
-export const CLOSURE_SHA256 = 'd0270d80991fe414beb078fb81769d6a2d22adab5c6fed79c11ffcf6c44c319a';
+export const CLOSURE_SHA256 = '3cd50b7164885655dbdc93101445a1266c92a6906abfcd21b44d91f2c0fda4c4';
 export const PRESENTATION_PIN = Object.freeze({
   source_commit: '01b3080948c21899cbbacbfa3447da6799af1b56',
   config_sha256: 'bf6aa144cd73dc97dc941f0f0914138b04ae0a28fbead5123465b15b1f2a2fd9',
   manifest_sha256: 'd4dcb8c05d0fcad7d60183156166c5a30f21e6abc1ac0c274ee3e0791e5ea912',
 });
-const root = fileURLToPath(new URL('../', import.meta.url));
+const repoRoot = fileURLToPath(new URL('../', import.meta.url));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const json = file => JSON.parse(fs.readFileSync(path.join(root, file)));
 function filesBelow(dir, prefix = '') {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e => {
     if (e.isSymbolicLink() || (!e.isDirectory() && !e.isFile())) throw new Error('closure_regular_files_required');
@@ -24,7 +23,8 @@ function filesBelow(dir, prefix = '') {
     return e.isDirectory() ? filesBelow(path.join(dir, e.name), name + '/') : [name];
   });
 }
-export function checkRelease() {
+export function checkRelease({ root = repoRoot } = {}) {
+  const json = file => JSON.parse(fs.readFileSync(path.join(root, file)));
   const bundleRoot = path.join(root, 'public/joe/vendor/calver');
   const manifestBytes = fs.readFileSync(path.join(bundleRoot, 'manifest.json'));
   if (sha(manifestBytes) !== PRESENTATION_PIN.manifest_sha256) throw new Error('presentation_manifest_pin_mismatch');
@@ -66,10 +66,28 @@ export function checkRelease() {
       JSON.stringify(json('contracts/manifest.json').compatibility) !== JSON.stringify(contract.compatibility)) throw new Error('contract_set_mismatch');
   for (const key of Object.keys(PRESENTATION_PIN)) if (prep.presentation[key] !== PRESENTATION_PIN[key]) throw new Error('presentation_pin_mismatch');
   if (prep.presentation.status !== 'integrated' || prep.status !== 'candidate') throw new Error('presentation_inactive');
-  if (process.argv.includes('--require-adoption')) throw new Error('adoption_pending_publication_and_live_gates');
   return { ok: true, candidate: reserved.version, contractSet: contract.contract_set_sha256, presentation: prep.presentation.status, authoritative: false };
 }
+
+export async function checkAdoptedRelease({ root = repoRoot, releaseSet } = {}) {
+  const result = checkRelease({ root });
+  // The normal Docker COPY set intentionally contains only this checker.
+  // Adoption tooling and records are checkout-only and loaded after all build checks.
+  const { checkAdoption } = await import('./check-adoption.mjs');
+  const json = file => JSON.parse(fs.readFileSync(path.join(root, file)));
+  const record = checkAdoption({ root, active: json('release.json'),
+    reservation: json('release/preparation.json').reservation, contractSet: result.contractSet, releaseSet });
+  return { ...result, adopted: record.version, authoritative: true };
+}
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { console.log(JSON.stringify(checkRelease())); }
+  try {
+    if (process.argv.includes('--require-adoption')) {
+      const args = process.argv.slice(2), flags = args.filter(arg => arg === '--require-adoption');
+      const rest = args.filter(arg => arg !== '--require-adoption');
+      if (flags.length !== 1 || !(rest.length === 0 ||
+          (rest.length === 2 && rest[0] === '--release-set' && rest[1] && !rest[1].startsWith('--')))) throw new Error('adoption_usage');
+      console.log(JSON.stringify(await checkAdoptedRelease({ releaseSet: rest[1] })));
+    } else console.log(JSON.stringify(checkRelease()));
+  }
   catch (error) { console.error(`release-check: ${error.message}`); process.exitCode = 1; }
 }

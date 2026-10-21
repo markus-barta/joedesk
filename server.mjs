@@ -17,6 +17,7 @@ import { CONTRACTS, validateContract } from "./contracts/index.mjs";
 import { createReadModel } from "./server/read-model.mjs";
 import { healthProjection } from "./server/health.mjs";
 import { withNextFleetRevision } from "./fleet-config.mjs";
+import { normalizeFleetConfig, appendFleetNormalizationAudit, validateFleetActions, FLEET_ACTION_LOG_MAX } from "./server/fleet-normalization.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public", "joe");
@@ -29,7 +30,6 @@ const FLEET_CONFIG_FILE = path.join(DATA_DIR, "fleet-config.json");
 const FLEET_ACTION_LOG_FILE = path.join(DATA_DIR, "fleet-config-actions.json");
 const FLEET_CONFIG_EXAMPLE = path.join(PUBLIC, "fleet-config.example.json");
 const FLEET_ACTION_LOG_SCHEMA = "inspr.joe.fleet-config.actions.v1";
-const FLEET_ACTION_LOG_MAX = 200;
 const FLEET_ACTOR = /^[A-Za-z0-9][A-Za-z0-9@._+-]{0,159}$/;
 const TOKEN_FILE = "/run/secrets/joe-board-push-token";
 const MAX_BODY = 262144;
@@ -124,7 +124,7 @@ function atomicWriteJson(file, obj, mode = 0o644) {
   fs.renameSync(tmp, file);
 }
 
-function parseFleetConfig(raw, source) {
+function parseFleetConfig(raw) {
   const parsed = JSON.parse(raw);
   const result = validateContract("fleet-config", parsed);
   if (!result.ok) {
@@ -134,17 +134,53 @@ function parseFleetConfig(raw, source) {
 }
 
 function readFleetConfig(source = {}) {
+  let raw;
   try {
-    const config = parseFleetConfig(fs.readFileSync(FLEET_CONFIG_FILE, "utf8"), FLEET_CONFIG_FILE);
-    source.path = FLEET_CONFIG_FILE;
-    source.kind = "stored";
-    return config;
+    raw = fs.readFileSync(FLEET_CONFIG_FILE, "utf8");
   } catch (err) {
     if (!err || err.code !== "ENOENT") throw err;
     source.path = FLEET_CONFIG_EXAMPLE;
     source.kind = "example";
-    return parseFleetConfig(fs.readFileSync(FLEET_CONFIG_EXAMPLE, "utf8"), FLEET_CONFIG_EXAMPLE);
+    return parseFleetConfig(fs.readFileSync(FLEET_CONFIG_EXAMPLE, "utf8"));
   }
+  const parsed = JSON.parse(raw);
+  const normalized = normalizeFleetConfig(parsed, clock());
+  const config = normalized.value;
+  if (normalized.added.length) {
+    let log = readFleetActionLog();
+    validateFleetActions(log);
+    // A failed or interrupted attempt belongs to this stored revision. Reuse
+    // its latest migration row so repeated reads cannot grow the action log.
+    let action = log.entries.findLast(entry => entry.actor === "migration" &&
+      entry.revBefore === parsed.rev && ["pending", "failure"].includes(entry.outcome));
+    if (action) {
+      Object.assign(action, { at: config.updatedAt, revAfter: config.rev,
+        changedKeys: ["desks.keep"], outcome: "pending", reason: "write_started" });
+    } else {
+      log = appendFleetNormalizationAudit(log, parsed, config, config.updatedAt, { pending: true });
+      action = log.entries[log.entries.length - 1];
+    }
+    // Match the board's audit-first write: a failed config write can never
+    // leave a false success. Finalization replaces this one pending entry.
+    try {
+      writeFleetActionLog(log);
+      atomicWriteJson(FLEET_CONFIG_FILE, config);
+    } catch (error) {
+      Object.assign(action, { revAfter: parsed.rev, outcome: "failure", reason: "store_failed" });
+      try {
+        validateFleetActions(log);
+        writeFleetActionLog(log);
+      } catch { /* Best effort: preserve the original store failure. */ }
+      throw error;
+    }
+    action.outcome = "success";
+    action.reason = "propagated";
+    validateFleetActions(log);
+    writeFleetActionLog(log);
+  }
+  source.path = FLEET_CONFIG_FILE;
+  source.kind = "stored";
+  return config;
 }
 
 function emptyFleetActionLog() {
@@ -155,11 +191,12 @@ function readFleetActionLog() {
   try {
     const parsed = JSON.parse(fs.readFileSync(FLEET_ACTION_LOG_FILE, "utf8"));
     if (!parsed || parsed.schema !== FLEET_ACTION_LOG_SCHEMA || !Array.isArray(parsed.entries)) {
-      throw new Error("invalid Fleet Config action log");
+      throw new Error("migration_fleet_actions_invalid");
     }
     return parsed;
   } catch (err) {
     if (err && err.code === "ENOENT") return emptyFleetActionLog();
+    if (err instanceof SyntaxError) throw new Error("migration_fleet_actions_invalid");
     throw err;
   }
 }
