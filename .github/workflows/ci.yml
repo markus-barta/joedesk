@@ -74,6 +74,8 @@ jobs:
         run: |
           if [ "$RUNNER_KIND" = 'github-hosted' ]; then
             browser_path=/usr/bin/google-chrome
+          elif [ -n "${BROWSER_PATH:-}" ] && [ -x "$BROWSER_PATH" ]; then
+            browser_path=$BROWSER_PATH
           elif ! browser_path=$(command -v chromium || command -v chromium-browser || command -v google-chrome); then
             echo '::error::No browser found on the self-hosted runner; install chromium, chromium-browser or google-chrome.'
             exit 1
