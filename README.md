@@ -451,9 +451,11 @@ and requires approval for all outside collaborators; `pull_request_target` is
 forbidden. Checkout explicitly cleans the workspace, and CI temporary files and
 npm's cache stay under `RUNNER_TEMP`.
 
-Chrome installation runs hosted-only. Self-hosted jobs resolve `chromium`,
-`chromium-browser`, then `google-chrome` from `PATH` once, export `BROWSER_PATH`,
-and fail clearly if none is installed.
+Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
+executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
+then `google-chrome` from `PATH`. They export the resolved `BROWSER_PATH` and fail
+clearly if no browser is available. Workflow shell tests resolve `bash` from
+`PATH`, including on NixOS runners.
 
 The Docker build requests neither host networking nor privileged build steps.
 Buildx's `docker-container` driver does create an internal privileged BuildKit

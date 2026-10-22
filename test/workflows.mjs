@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
@@ -74,7 +74,7 @@ test('CI preserves push/PR triggers, offers manual dispatch and keeps host packa
   for (const [id, job] of Object.entries(ci.jobs)) {
     const first = job.steps[0], output = join(dir, id);
     assert.equal(first.name, 'Keep temporary files under RUNNER_TEMP');
-    const result = spawnSync('/bin/bash', ['-e', '-o', 'pipefail', '-c', first.run], {
+    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', first.run], {
       encoding: 'utf8', env: { ...process.env, RUNNER_TEMP: dir, GITHUB_ENV: output },
     });
     assert.equal(result.status, 0, result.stderr);
@@ -97,23 +97,34 @@ test('CI preserves push/PR triggers, offers manual dispatch and keeps host packa
 });
 
 const browserStep = ci.jobs.browser.steps.find(step => step.name === 'Resolve browser path');
-test('browser resolution exports the hosted path or the first installed self-hosted browser without launching it', t => {
+test('browser resolution prefers executable BROWSER_PATH, falls back to PATH and keeps the hosted path without launching it', t => {
   assert.ok(browserStep, 'early browser resolution step required');
   assert.equal(browserStep.env.RUNNER_KIND, '${{ runner.environment }}');
   assert.ok(ci.jobs.browser.steps.indexOf(browserStep) < ci.jobs.browser.steps.findIndex(step => step.run?.includes('scripts/browser-p3.mjs')));
-  for (const [kind, installed, expected] of [
+  const bash = spawnSync('bash', ['--noprofile', '--norc', '-c', 'command -v bash'], { encoding: 'utf8' });
+  assert.equal(bash.status, 0, bash.stderr);
+  for (const [kind, installed, expected, configuredMode] of [
     ['github-hosted', ['chromium'], '/usr/bin/google-chrome'],
+    ['github-hosted', ['chromium'], '/usr/bin/google-chrome', 0o700],
     ['self-hosted', ['chromium', 'chromium-browser', 'google-chrome'], 'chromium'],
     ['self-hosted', ['chromium-browser', 'google-chrome'], 'chromium-browser'],
     ['self-hosted', ['google-chrome'], 'google-chrome'],
     ['self-hosted', [], null],
+    ['self-hosted', ['chromium'], 'configured browser', 0o700],
+    ['self-hosted', [], 'configured browser', 0o700],
+    ['self-hosted', ['chromium'], 'chromium', 0o600],
+    ['self-hosted', [], null, 0o600],
   ]) {
     const dir = scratch('joed-workflow-browser-');
     t.after(() => discard(dir, 'workflow browser resolution test'));
     const output = join(dir, 'github-output');
+    // Keep lookup isolated from host browsers while resolving bash from PATH.
+    symlinkSync(bash.stdout.trim(), join(dir, 'bash'));
     for (const binary of installed) writeFileSync(join(dir, binary), '#!/bin/sh\nexit 99\n', { mode: 0o700 });
-    const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', browserStep.run], {
-      encoding: 'utf8', env: { ...process.env, PATH: dir, RUNNER_KIND: kind, GITHUB_ENV: output },
+    const configuredPath = configuredMode === undefined ? '' : join(dir, 'configured browser');
+    if (configuredPath) writeFileSync(configuredPath, '#!/bin/sh\nexit 99\n', { mode: configuredMode });
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', browserStep.run], {
+      encoding: 'utf8', env: { ...process.env, PATH: dir, BROWSER_PATH: configuredPath, RUNNER_KIND: kind, GITHUB_ENV: output },
     });
     assert.equal(result.status, expected ? 0 : 1, result.stderr);
     if (expected) assert.equal(readFileSync(output, 'utf8'), `BROWSER_PATH=${kind === 'github-hosted' ? expected : join(dir, expected)}\n`);
@@ -137,7 +148,7 @@ test('Docker commands avoid privileged builds and host networking; self-hosted b
   const docker = join(dir, 'docker');
   for (const [security, expected] of [[['name=rootless', 'name=seccomp,profile=builtin'], 0], [['name=seccomp,profile=builtin'], 1]]) {
     writeFileSync(docker, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(security)}'\n`, { mode: 0o700 });
-    const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', preflight.run], {
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', preflight.run], {
       encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
     });
     assert.equal(result.status, expected, result.stderr);
