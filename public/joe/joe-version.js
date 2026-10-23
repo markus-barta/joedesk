@@ -2,10 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261023100632.0.0",
+    APP_VERSION: "261023155418.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 29,
+    RELEASE_SEQUENCE: 30,
     VERSION_HISTORY: [
+      {
+        version: "261023155418.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-23",
+        title: "Performance at a glance",
+        changes: ["Show Today and Since start side by side, in euros and percent, with desks ranked by result.", "Keep shared data status in one board caption, and explain Results metrics through small info buttons.", "Keep paired Results values inside their cards, chart tips opaque, and term underlines faint."],
+      },
       {
         version: "261023100632.0.0",
         versionScheme: "inspr-calver-3",

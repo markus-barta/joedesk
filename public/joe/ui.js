@@ -195,7 +195,7 @@ export const ageSpan = (key, text) => `<span class="age" data-age="${key}">${esc
 const AGE_RE = /<span class="age" data-age="([^"]+)">([^<]*)<\/span>/g;
 const structure = new WeakMap();
 const rebuilt = { tip: null, busy: false };
-const KEYS = ['data-term', 'data-say', 'data-go', 'data-hdesk', 'data-range', 'data-desk', 'data-day', 'data-period', 'data-field', 'data-themeopt', 'data-sec'];
+const KEYS = ['data-term', 'data-say', 'data-desk-disclosure', 'data-go', 'data-hdesk', 'data-range', 'data-desk', 'data-day', 'data-period', 'data-field', 'data-themeopt', 'data-sec'];
 function identity(node, root) {
   if (node.id) return { sel: `#${CSS.escape(node.id)}`, index: 0 };
   const attr = KEYS.find(k => node.hasAttribute(k));
@@ -211,9 +211,16 @@ export function patch(el, html) {
     const focused = active && active !== el && el.contains(active) ? identity(active, el) : null;
     const tipAnchor = rebuilt.tip?.anchor();
     const tipped = tipAnchor && el.contains(tipAnchor) ? identity(tipAnchor, el) : null;
+    const disclosures = [...el.querySelectorAll('.disclosure-body[id]')].map(body => ({ id: body.id, hidden: body.hidden }));
     rebuilt.busy = true;
     try { el.innerHTML = html; } finally { rebuilt.busy = false; }
     structure.set(el, key);
+    // Restore disclosure layout before measuring a rebuilt explanation anchor.
+    // Otherwise a collapsed body briefly opens and places the tip in that layout.
+    for (const body of disclosures) {
+      const again = el.querySelector(`#${CSS.escape(body.id)}`);
+      if (again) again.hidden = body.hidden;
+    }
     if (tipped) rebuilt.tip.moved(find(el, tipped));
     const again = find(el, focused);
     if (again) rebuilt.tip?.focus(again);
@@ -277,11 +284,19 @@ export function reservedCaption(caption, freshCaptions) {
 const CASH_SIZING = [...new Set(Object.values(CELL_REASON))].flatMap(why =>
   [`not reported · ${why}`, `−€ 999.999,99 · ${why}`]
 ).map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
-export function cashCaption(cell, key) {
+export function cashCaption(cell, key, { figure = false } = {}) {
   const value = cell?.state === 'broken' && cell.retained ? null : cell?.value;
   const why = cell?.reason ? cellReason(cell.reason) : null;
   const view = value == null ? { text: `not reported · ${why ?? cellReason('feed_not_received')}`,
     title: `Cash not reported · ${why ?? cellReason('feed_not_received')}` } : cashAmount(value);
   if (value != null && why) { view.text += ` · ${why}`; view.title += ` · ${why}`; }
+  if (figure) {
+    const amount = value == null ? '—' : cashAmount(value).text;
+    const reason = why ?? (value == null ? cellReason('feed_not_received') : '');
+    const state = value == null ? `not reported · ${esc(reason)}` : reason ? ` · ${esc(reason)}` : '';
+    return `<div class="kpi cash-kpi cash-block"><dt class="cash-label">Cash</dt><dd><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}"><span class="cash-amount${value == null ? ' muted' : ''}">${esc(amount)}</span>
+      <span class="cash-caption cash-reserve c"><span class="cash-description">cash · as the broker reports it</span>
+        <span class="cash-reason">${state}</span></span></span></dd></div>`;
+  }
   return `<span class="cash-block"><span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span><span class="cash-reserve"><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}">${esc(view.text)}</span>${CASH_SIZING}</span></span>`;
 }

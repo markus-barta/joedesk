@@ -16,12 +16,14 @@ import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, NOW, at, ACTOR, valid, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './browser/shots.mjs';
+import { setDeskDisclosures } from './browser/desk-disclosures.mjs';
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
 import { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } from './browser/results.mjs';
 import { realResultsFixtures } from './results-fixtures.mjs';
 import { P4_SCENARIOS, createP4Views, createP4ViewRecorder, p4ViewKey, selectP4Views, summarizeP4Views } from './results-gate-plan.mjs';
+import { TERMS } from '../public/joe/terms.js';
 
 // Fail on missing explicit zoneSensitive metadata before any browser or
 // server starts. A subset keeps every check in each selected view.
@@ -311,6 +313,26 @@ const SAY = ['#rheroL .say'];
 // included: a month's days change, its grid never does.
 const SLOTS = `[...document.querySelectorAll('#cal > *')].map((el, i) => { const r = el.getBoundingClientRect(); return { key: \`slot#\${i}\`, top: r.top + scrollY, left: r.left, height: r.height, width: r.width }; })`;
 const rects = async (page, list) => [...await page.evaluate(`__audit.rects(${JSON.stringify(list)})`), ...(list === SHIFT ? await page.evaluate(SLOTS) : [])];
+// Measure actual glyph bounds, not just scrollWidth: inline-flex numerals can
+// spill into a neighbour while their parent reports no scroll overflow.
+function metricGeometry() {
+  return [...document.querySelectorAll('#tiles .tile')].map(card => {
+    const box = card.getBoundingClientRect(), style = getComputedStyle(card), val = card.querySelector('.tval');
+    const left = box.left + parseFloat(style.paddingLeft), right = box.right - parseFloat(style.paddingRight);
+    const pairs = [...val.querySelectorAll('.pair-value')].map(el => {
+      const range = document.createRange(); range.selectNodeContents(el);
+      return { text: el.textContent, bounds: [...range.getClientRects()].filter(r => r.width).map(r => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom })) };
+    });
+    const values = val.getBoundingClientRect(), mean = card.querySelector('.tmean').getBoundingClientRect();
+    return { key: card.dataset.tile, pairs: pairs.length, ok: card.scrollWidth <= card.clientWidth && val.scrollWidth <= val.clientWidth && values.bottom <= mean.top + 0.5 &&
+      pairs.every(pair => pair.bounds.length && pair.bounds.every(r => r.left >= left - 0.5 && r.right <= right + 0.5 && r.top >= values.top - 0.5 && r.bottom <= values.bottom + 0.5)),
+      values: { left, right, top: values.top, bottom: values.bottom }, glyphs: pairs };
+  });
+}
+async function checkMetricGeometry(page, tag) {
+  const geometry = await page.evaluate(`(${metricGeometry.toString()})()`);
+  check('AC-36', `${tag}: both metric values fit inside their card and reserved rows without clipping or horizontal scroll`, geometry.length === 8 && geometry.every(g => g.ok), geometry.filter(g => !g.ok));
+}
 const click = async (page, selector) => { await page.evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`); await settle(page); };
 // The window as the phone shows it (a sheet sits at the bottom of the window, not of the page).
 const viewShot = async (page, name, what) => {
@@ -395,6 +417,30 @@ try {
       await load(page, board.url, 'results');
       await waitFor(page, `document.querySelector('#tiles .tile .tval .num')`);
       await auditScreen(page, viewport, theme, 'results');
+      await checkMetricGeometry(page, tag);
+      const help = await page.evaluate(`[...document.querySelectorAll('#tiles .metric-info')].map(b => ({ key: b.dataset.term, name: b.getAttribute('aria-label'), text: b.textContent, icon: b.querySelector('use')?.getAttribute('href'), title: b.closest('.tile').querySelector('h3').textContent }))`);
+      check('AC-39', `${tag}: all eight metric help controls are labeled info icons`, help.length === 8 && help.every(b => b.name === 'Learn about ' + b.title && !b.text.trim() && b.icon === '#i-info'), help);
+      await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
+      for (const helpButton of help) {
+        const selector = `#tiles [data-term="${helpButton.key}"]`;
+        await page.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center' }); document.activeElement?.blur()`);
+        await settle(page);
+        if (viewport.mobile) {
+          const target = await page.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+          await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [target] });
+          await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        } else {
+          await page.evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);
+          await key(page, 'Enter');
+        }
+        await settle(page);
+        const tip = await page.evaluate(`({ on: document.getElementById('tip').classList.contains('on'), pinned: document.getElementById('tip').classList.contains('pinned'), text: document.getElementById('tip').innerText, expanded: document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-expanded') })`);
+        check('AC-39', `${tag}: ${helpButton.title} info opens its existing explanation by ${viewport.mobile ? 'touch' : 'keyboard'}`, tip.on && tip.pinned && tip.expanded === 'true' && tip.text.startsWith(helpButton.title) && N(tip.text).includes(N(TERMS[helpButton.key][1])), tip);
+        await key(page, 'Escape');
+        check('AC-33', `${tag}: Escape closes ${helpButton.title} info and returns focus`, await page.evaluate(`!document.getElementById('tip').classList.contains('on') && document.activeElement === document.querySelector(${JSON.stringify(selector)})`));
+      }
+      await page.evaluate('document.activeElement?.blur(); window.scrollTo(0, 0)');
+      await settle(page);
       await shot(page, viewport, `${viewport.name}-${theme}-results`, 'Results, design record: this week, all desks');
       const base = await rects(page, SHIFT), baseSay = await rects(page, SAY);
       let moved = [];
@@ -402,6 +448,7 @@ try {
         await click(page, `#periodSeg [data-period="${period}"]`);
         await click(page, `#deskSeg [data-desk="${desk}"]`);
         const r = await page.evaluate(RES);
+        await checkMetricGeometry(page, `${tag} ${period} ${desk}`);
         const e = expected(ix, inputs, period, inputs.today, desk);
         compare(`${tag} ${period} ${desk}`, r, e);
         // AC-13: J, Joe, Joel and Total, the chosen one tinted.
@@ -753,6 +800,7 @@ try {
       if (!view('cards', font ? 'wide-font' : 'normal', viewport, theme)) continue;
       await configure(page, viewport, theme);
       await load(page, board.url, 'desk');
+      await setDeskDisclosures(page, true);
       if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
       check('P3-follow-up', `${tag}: fresh desk check-ins are hidden`, await page.evaluate(`![...document.querySelectorAll('.dcard .hb')].some(e => e.textContent.trim())`));
       board.setNow(at(NOW, 75)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
@@ -901,6 +949,7 @@ try {
         check('r1-exact', `${tag}: J's € 100.000,12345678 trade reads +€ 100.000,12 everywhere, rounded once`, N(j.split[0]) === N('+€ 100.000,12') && N(tileOf(j, 'besttrade').val) === N('+€ 100.000,12/—') &&
           N(tileOf(j, 'bestday').val) === N('+€ 100.000,12') && N(tileOf(j, 'avgtrade').val) === N('+€ 100.000,12'), { split: j.split, tiles: j.tiles.map(x => [x.k, x.val]) });
         const all = await open(board, 'week', 'all');
+        await checkMetricGeometry(page, tag);
         compare(`${tag} week all`, all, expected(ix, inputs, 'week', inputs.today, 'all'));
         check('r1-exact', `${tag}: the week's closed trades are their exact sum (100.000,12345678 − 99.999,98765432 + 2), rounded once`, N(all.split[0]) === N('+€ 2,14') && N(tileOf(all, 'besttrade').val) === N('+€ 100.000,12/−€ 99.999,99'), { split: all.split });
         const cal = Object.fromEntries(all.cal.cells.map(c => [c.day, c]));

@@ -1,6 +1,6 @@
 {
   "schema": "joedesk.runtime-closure.v1",
-  "candidate_version": "261023100632.0.0",
+  "candidate_version": "261023155418.0.0",
   "files": [
     {
       "path": "contracts/accept.mjs",
@@ -99,18 +99,18 @@
     },
     {
       "path": "package.json",
-      "size": 1376,
-      "sha256": "4e236b84ffd4844aecf3e4d0c9677aab46e1c80ee8b331e6d020514be0d25829"
+      "size": 1432,
+      "sha256": "48f6397c69ca57633a1612a1090ca2997b9908df0695c081dd9eab7194f3e4af"
     },
     {
       "path": "public/joe/app.css",
-      "size": 74311,
-      "sha256": "82910175da0cbfad63d9ec92a944a5abf8512eff7caece023337c6bda0dbd00e"
+      "size": 82066,
+      "sha256": "921e68936e85f9d2931e4ab235067c7d050d0d6cee3d44f34532c322bee1f4fd"
     },
     {
       "path": "public/joe/app.js",
-      "size": 18156,
-      "sha256": "089ca724887fafd2c3e6d920509f2c74c600ce51ded79b6923222a8e68ba45f4"
+      "size": 18504,
+      "sha256": "0c2cb92571e71d2a69e253d5207001ea4e956df2179d8a9054b56e4a8744e83d"
     },
     {
       "path": "public/joe/chart.js",
@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 31561,
-      "sha256": "ca7aac01450d0b12bc016e9da33ac79795fde1ec30a078ab339fbbfb0ec14e10"
+      "size": 41635,
+      "sha256": "f8ac7cfc0e4e0926fbfccd1f63432fc7b3be8b16443762fe81a84f4bcab116d5"
     },
     {
       "path": "public/joe/events.js",
@@ -189,13 +189,18 @@
     },
     {
       "path": "public/joe/index.html",
-      "size": 35475,
-      "sha256": "faac704308a55251f2a8a8ba38bc77a82ba4fbc0a63db74e03db74681dbe6bec"
+      "size": 36933,
+      "sha256": "30184d650030b7ff37f10ef3819f237de4504188715c0d92791d4023694bc5e0"
     },
     {
       "path": "public/joe/joe-version.js",
-      "size": 14584,
-      "sha256": "1d2498d59858784333c079f9c92318f6e3220a846b9b5239c82759f16d32bc97"
+      "size": 15064,
+      "sha256": "aa81a556ff71c9f8c658c34b358055daa9c1ed820a71f69995575cc800d4718f"
+    },
+    {
+      "path": "public/joe/performance.js",
+      "size": 1855,
+      "sha256": "511d9c1516df7774dd086299e76225059795badfa472a97f8a0ada199728aa23"
     },
     {
       "path": "public/joe/results-model.js",
@@ -204,8 +209,8 @@
     },
     {
       "path": "public/joe/results.js",
-      "size": 40244,
-      "sha256": "18303e07be0cd0430aec9a2e085f4473c2923cfd5e89125679f6df608bcdd3b1"
+      "size": 40605,
+      "sha256": "e30672c9c97506d69d25a63708ae6510f704d8ab9acc946a7f1153ead63dee82"
     },
     {
       "path": "public/joe/settings-model.js",
@@ -219,8 +224,8 @@
     },
     {
       "path": "public/joe/terms.js",
-      "size": 6484,
-      "sha256": "6e96e23a5016d2ebf7e79baa15e07128563808c4bc10a0aef914d5ca8e10d3a0"
+      "size": 6969,
+      "sha256": "9dbc632f217146c791d46c17efb36458b24a2a256b7ace4c39c60019b442d30f"
     },
     {
       "path": "public/joe/theme.js",
@@ -229,8 +234,8 @@
     },
     {
       "path": "public/joe/ui.js",
-      "size": 16986,
-      "sha256": "e2895b73e109abd301107b2d0fd0bf0013a4f51050a1fff91da6dce9e59a865f"
+      "size": 18282,
+      "sha256": "310367dffe093fac6277e6623bb97ee604cdb4fde2afb93065df1108629b81f6"
     },
     {
       "path": "public/joe/vendor/calver/display.json",
@@ -274,8 +279,8 @@
     },
     {
       "path": "release.json",
-      "size": 220,
-      "sha256": "02c486fbb092b9af08141b870e6b6fa3f3304bc96702b28586ba7c0ccf88d8f8"
+      "size": 227,
+      "sha256": "03b8bcba3dbc66e1a132d0abc76e28978fd942b9add44774febd522142b675ef"
     },
     {
       "path": "release/contracts.json",
@@ -290,7 +295,7 @@
     {
       "path": "release/preparation.json",
       "size": 6721,
-      "sha256": "cabf22cc03fd5fff45da6faf623e0d939f3c1be6a24626e30e7db2fe22d88e32"
+      "sha256": "412c317422e97acc023a57fe232b2dcdd3ecf0f3801900ca6fd1ba1fe5e7016d"
     },
     {
       "path": "release/versioning.mjs",
@@ -299,8 +304,8 @@
     },
     {
       "path": "server.mjs",
-      "size": 28396,
-      "sha256": "b48020740f76a5e70a1f321e49ef8f3628fecb2fd6012e45b5fd012ac4619686"
+      "size": 28414,
+      "sha256": "3636e7ba1d280dfefee27a3eead799c25d3f7be0c3eca6ec6623ef34dbe2d59f"
     },
     {
       "path": "server/fleet-normalization.mjs",

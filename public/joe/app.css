@@ -109,8 +109,7 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 /* Terms: plain word, the trade term on hover / focus / tap (opaque tip) */
 .term { position: relative; display: inline; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline dotted; text-decoration-color: color-mix(in srgb, var(--ink-3) 50%, transparent); text-underline-offset: 3px; text-decoration-thickness: 1px; cursor: help; }
 .term::after { content: ""; position: absolute; inset: -12px -12px; }
-.term:focus-visible, .term[aria-expanded="true"] { text-decoration-color: var(--ink); }
-@media (hover: hover) { .term:hover { text-decoration-color: var(--ink); } }
+/* Keep the dotted cue faint while hovered, focused or explaining a term. */
 .term:focus-visible { border-radius: 3px; outline-offset: 1px; }
 .learn { position: relative; display: inline-flex; align-items: center; gap: 5px; flex: none; height: 26px; padding: 0 9px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .learn .i { width: 13px; height: 13px; }
@@ -158,11 +157,11 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
    warning and every red state puts its sentence on the reserved line once. */
 .hdr-health[data-compact] .status-full { visibility: hidden; }
 .hdr-health[data-compact] .status-compact { visibility: visible; }
-.status-alert { height: 32px; display: flex; align-items: center; color: var(--bad); font-size: 12px; font-variant-numeric: tabular-nums; }
+.status-alert { height: 56px; display: flex; align-items: center; padding-block: 6px; color: var(--bad); font-size: inherit; font-variant-numeric: tabular-nums; }
 .status-alert[data-tone="warn"] { color: var(--warn); }
-.status-alert > button { position: relative; display: flex; align-items: center; width: 100%; height: 32px; padding: 0; border: 0; background: none; color: inherit; font: inherit; line-height: 18px; text-align: left; visibility: hidden; cursor: pointer; }
-.status-alert > button::after { content: ""; position: absolute; inset: -6px 0; }
-.status-alert > button > span { display: block; width: 100%; min-width: 0; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-alert > button { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; line-height: 20px; text-align: left; visibility: hidden; cursor: pointer; }
+.status-alert > button > .i { flex: none; width: 16px; height: 16px; }
+.status-alert > button > span { display: block; flex: 1; min-width: 0; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-alert[data-visible] > button { visibility: visible; }
 /* After the brand has yielded, tighten space only if the measured row still
    needs it. No viewport or font-width estimate decides this density. */
@@ -301,7 +300,7 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .rhero-r .legend { justify-content: space-between; min-height: 44px; align-content: flex-start; }
 .rchart { height: 272px; flex: none; margin-top: 10px; }
 .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
-.tile { padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 6px; height: 170px; min-width: 0; }
+.tile { padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 6px; height: 200px; min-width: 0; }
 .tile-top { display: flex; align-items: flex-start; gap: 9px; min-height: 38px; }
 .tile-top h3 { align-self: center; }
 .tile-top h3 { flex: 1; min-width: 0; font-size: 13.5px; line-height: 18px; font-weight: 600; }
@@ -427,7 +426,6 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 
 /* ---------- Middle widths ---------- */
 @media (max-width: 1180px) {
-  .hero { grid-template-columns: 1fr; }
   .rhero { grid-template-columns: 280px minmax(0, 1fr); gap: 0 24px; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .prow { grid-template-columns: 38px minmax(0, 1.4fr) 100px 100px minmax(120px, 1fr) 110px; }
@@ -513,7 +511,7 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .rhero-r .legend { flex-direction: column; align-items: flex-start; gap: 3px; }
   .rchart { height: 196px; }
   .tiles { grid-template-columns: 1fr; gap: 10px; }
-  .tile { height: 176px; padding: 12px 12px 8px; }
+  .tile { height: 200px; padding: 12px 12px 8px; }
   .tile-top { flex-wrap: wrap; min-height: 32px; }
   .tile .ico-sq { display: none; }
   .tval { font-size: 24px; line-height: 30px; }
@@ -551,19 +549,74 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .hdr-health .i { width: 16px; height: 16px; }
 .age { white-space: nowrap; }
 .btn.link { padding-left: 0; }
-.hero-l { min-width: 0; }
+.hero-l { display: contents; }
+.hero-primary { min-width: 0; container-type: inline-size; grid-column: 1; grid-row: 1; }
+.hero-r { grid-column: 2; grid-row: 1; }
+.hero-r .hero-chart { flex: 1; min-height: 196px; }
+.hero .kpis { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 0; }
+.hero .kpi dt { height: 20px; line-height: 20px; }
+.hero .kpi dd > .bn { display: flex; height: 28px; }
+/* Five caption lines inside every secondary cell, independent of state.
+   The hero itself has no reserved height. */
+.hero .kpi .c { height: 80px; min-height: 0; }
+.cash-kpi .cash-amount { display: block; height: 28px; }
+.cash-kpi .account-cash { display: block; }
+/* The broker caption occupies the first two of those five lines; state copy
+   follows inside the same caption. Specificity must beat .kpi .c's display. */
+.hero .cash-kpi .cash-reserve { display: grid; grid-template-rows: 32px minmax(0, 1fr); }
+.cash-kpi .cash-description { grid-area: 1 / 1; }
+.cash-kpi .cash-reason { grid-area: 2 / 1; }
+@media (min-width: 701px) and (max-width: 1180px) {
+  .hero .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .hero { grid-template-columns: 1fr; }
+  .hero-l { display: block; min-width: 0; }
+  .hero-r { grid-column: 1; grid-row: 2; }
+  .hero-r .hero-chart { flex: none; }
+  .hero .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 20px; }
+  .hero .kpi .c { height: 128px; }
+  /* Keep the phone's account, then Cash, then chart order for UX 3. */
+  .cash-kpi { grid-column: 1; margin-top: -12px; }
+}
+.performance-date { height: 20px; font-size: 12px; color: var(--ink-3); }
+.performance { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.performance .primary { min-width: 0; }
+.performance .hero-k { height: 32px; gap: 5px; white-space: nowrap; }
+.performance .display { font-size: clamp(22px, 7.4cqw, 44px); line-height: 52px; height: 61px; }
+.performance .since-primary .display { font-size: clamp(21px, 6.2cqw, 36px); }
+.pct-slot { height: 24px; line-height: 24px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.primary-caption { display: block; font-size: 12px; line-height: 16px; color: var(--ink-3); }
+.board-caption { height: 40px; margin: 4px 0 0; font-size: 12px; line-height: 18px; color: var(--ink-3); }
+.board-caption .st { align-items: flex-start; white-space: normal; }
+.board-caption .i { width: 13px; height: 13px; margin-top: 2px; }
+@media (min-width: 1181px) {
+  .board-caption { height: 18px; }
+}
+.cell-state { display: inline-flex; vertical-align: middle; margin-left: 3px; }
+.cell-state .i { width: 12px; height: 12px; }
+.tile .metric-info { width: 26px; height: 26px; padding: 0; justify-content: center; box-shadow: none; }
+.tile .metric-info .i { width: 15px; height: 15px; }
+.tile .metric-info::after { inset: -9px; }
+.tile .tval { height: 56px; flex: none; }
+.tile { container-type: inline-size; }
+/* Two fixed rows; a long exact numeral scales within its actual card width.
+   Leave room for the SVG arrow and slash even in the wider fallback font. */
+.tile .tval .pair-value { display: block; font-size: min(22px, calc((100cqw - 18px) / var(--characters) * 1.45)); line-height: 26px; }
+.tile .tval .sl { font-size: 14px; margin: 0 5px 0 0; }
 .kpi .c { min-height: 16px; }
 .session > div { min-width: 0; }
 .ring-t { font: 650 11px var(--font); fill: var(--ink); }
 .ring-s { font: 500 8.5px var(--font); fill: var(--ink-3); }
-/* A desk card's header: the state never runs under the heartbeat line. Short
-   of room, the heartbeat line takes two lines, inside the name and state's
-   height. A card narrower than 340 px (phones too) keeps "Checked in … ago"
+/* A desk card's status yields to a single-line check-in, with its full title.
+   A card narrower than 340 px (phones too) keeps "Checked in … ago"
    right-aligned on the name row and gives the state the row below. */
 .dcard { container-type: inline-size; }
-.dcard header { display: grid; grid-template-columns: 34px minmax(min-content, 1fr) auto; align-items: center; gap: 2px 11px; }
+.dcard header { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 2px 11px; }
 .dcard .who { min-width: 0; }
-.dcard .hb { white-space: normal; text-align: right; }
+.dcard .state { display: flex; min-width: 0; }
+.dcard .state > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dcard .hb { white-space: nowrap; text-align: right; }
 .dcard .hb.warn { color: var(--warn); }
 .dcard .hb .term, .dcard .hb .age { white-space: nowrap; }
 @container (max-width: 339.98px) {
@@ -1003,4 +1056,61 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .gate { height: 640px; }
   .dlg-f { padding: 12px 16px 16px; }
   .check { min-height: 44px; align-items: center; }
+}
+
+/* JOED-79: wrappers keep the existing grid/flex items above 480 px. */
+.account-section, .desk-section, .disclosure-body { display: contents; }
+.desk-disclosure, .compact-row, .phone-primary-note { display: none; }
+@media (max-width: 480px) {
+  #scr-desk.on { display: flex; flex-direction: column; }
+  #deskHero, #heroL { display: contents; }
+  #heroL .hero-primary { order: 1; padding: 14px; border-radius: 16px; background: var(--card); box-shadow: var(--shadow-card); }
+  #heroL .performance { gap: 12px; }
+  #heroL .display { height: 53px; margin-top: 0; }
+  #heroL .primary-caption { height: 48px; }
+  #heroL .since-primary > .primary-caption { display: none; }
+  #heroL .phone-primary-note { display: block; width: 100%; height: 48px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 12px; line-height: 16px; text-align: left; }
+  .phone-primary-note > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+  #heroL .say { height: 44px; line-height: 22px; margin-top: 0; }
+  #heroL .say > span { display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  #heroL .board-caption { height: 36px; line-height: 18px; margin: 0; }
+  .desks-heading { order: 2; margin: 16px 0 8px; gap: 0 8px; }
+  .desks-heading .sub { line-height: 18px; }
+  #desks { order: 3; gap: 8px; }
+  #desks .dcard { padding: 0; gap: 0; }
+  .compact-row { display: contents; }
+  .account-section { order: 4; }
+  #deskHero .hero-r { order: 5; display: block; }
+  .positions-section { order: 6; }
+  .kept-section { order: 7; }
+  .account-section, #deskHero .hero-r, .desk-section { display: block; margin-top: 12px; min-width: 0; border-radius: 14px; background: var(--card); box-shadow: var(--shadow-card); }
+  .desk-disclosure { display: grid; grid-template-columns: minmax(0, 1fr) 16px; align-items: center; gap: 0 8px; width: 100%; min-height: 76px; padding: 10px 12px; border: 0; border-radius: 14px; background: none; text-align: left; font-weight: 600; }
+  .desk-disclosure > .disclosure-chevron { grid-column: 2; grid-row: 1; width: 14px; height: 14px; color: var(--ink-3); }
+  .desk-disclosure[aria-expanded="true"] > .disclosure-chevron { transform: rotate(180deg); }
+  .disclosure-warning { display: flex; align-items: flex-start; gap: 4px; grid-column: 1 / -1; height: 28px; min-width: 0; font-size: 11px; line-height: 14px; font-weight: 400; color: var(--ink-2); }
+  .disclosure-warning > .i { flex: none; width: 12px; height: 12px; margin-top: 1px; }
+  /* Keep the warning reserve even when empty; reasons occupy one fixed line. */
+  .disclosure-warning .summary-text { display: block; flex: 1; min-width: 0; height: 14px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  #desks .desk-row { height: 92px; min-height: 92px; padding: 8px 10px; grid-template-columns: 24px minmax(0, 1fr) 82px 82px 12px; gap: 0 5px; font-variant-numeric: tabular-nums; }
+  .desk-row > .disclosure-chevron { grid-column: 5; }
+  .desk-row .dmark { width: 24px; height: 28px; background: none; }
+  .desk-row .dmark svg { width: 22px; height: 22px; }
+  .compact-identity { min-width: 0; }
+  .compact-identity strong { display: block; font-size: 14px; line-height: 18px; }
+  .compact-word { display: flex; align-items: center; gap: 2px; white-space: nowrap; font-size: 10px; line-height: 16px; font-weight: 400; }
+  .compact-word .i { width: 10px; height: 10px; flex: none; }
+  .compact-figure { min-width: 0; text-align: right; container-type: inline-size; }
+  .compact-label { display: flex; align-items: center; justify-content: flex-end; height: 16px; font-size: 10px; line-height: 16px; font-weight: 400; color: var(--ink-3); }
+  .compact-state { display: inline-flex; margin-left: 2px; }
+  .compact-state .i { width: 10px; height: 10px; }
+  .compact-figure .bn { font-size: min(13px, calc(100cqw / var(--digits) * 1.5)); line-height: 20px; letter-spacing: -.02em; }
+  .compact-figure .bn .ar { display: none; }
+  .disclosure-body { display: block; }
+  /* Header queries use the padded detail width, as the original card did. */
+  .desk-detail { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 14px; container-type: inline-size; }
+  #accountDetail { padding: 0 12px 12px; }
+  #heroL .kpis { margin-top: 0; }
+  #chartDetail { padding: 0 12px 12px; }
+  .positions-section .sec-h, .kept-section .sec-h { margin: 0 0 8px; }
+  #positionsDetail, #keptDetail { padding: 0 12px 12px; }
 }

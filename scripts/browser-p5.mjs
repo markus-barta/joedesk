@@ -11,9 +11,10 @@ import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, ACTOR, TOKEN, NOW, at } from './browser/board.mjs';
-import { VIEWPORTS, THEMES, configure, load, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
+import { VIEWPORTS, THEMES, configure, load as loadPage, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
+import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
-import { designFleet, designActions, designSnapshot, switchSetSnapshot, longFleet } from './browser/settings-fixtures.mjs';
+import { designFleet, designActions, designSnapshot, cashSessionSnapshot, switchSetSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
 import { pngColours } from './browser/pixels.mjs';
 import { captureHeaderCrop } from './browser/header-crop.mjs';
@@ -39,6 +40,10 @@ const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8
 const { results, shots, check, shot, auditScreen } = createGate(QA_DIR);
 const ONLY = (process.env.JOED_P5_ONLY ?? '').split(',').filter(Boolean);
 const run = name => !ONLY.length || ONLY.includes(name);
+async function load(page, url, screen = 'desk') {
+  await loadPage(page, url, screen);
+  if (screen === 'desk') await setDeskDisclosures(page, true);
+}
 const J = JSON.stringify;
 const N = text => String(text ?? '').replace(/[\s ]+/g, ' ').trim();
 const schema = JSON.parse(readFileSync(new URL('../contracts/fleet-config.schema.json', import.meta.url)));
@@ -389,6 +394,16 @@ try {
           await ev('window.__joedesk.refresh().then(() => true)'); await settle(page);
         }
         const neutral = reason === 'not_exact_yet';
+        if (viewport.width <= 480) {
+          await setDeskDisclosures(page, false);
+          const collapsed = await phoneDeskSnapshot(page).then(copyText);
+          const words = neutral ? 'not exact yet' : 'not reported by the broker';
+          const moneySections = collapsed.controls.filter(c => ['j', 'joe', 'joel', 'account'].includes(c.key));
+          check('phone-first', `${tag} ${i}: collapsed desk/account summaries expose unavailable money with the true icon and reason`,
+            moneySections.length === 4 && moneySections.every(c => c.hidden && c.expanded === 'false' && c.warning.includes(words) && c.icon === (neutral ? '#i-info' : '#i-stop')) &&
+            collapsed.horizontal.scroll <= collapsed.horizontal.inner, moneySections);
+          await setDeskDisclosures(page, true);
+        }
         const seen = await ev(`(() => {
           const probe = token => { const e = document.createElement('span'); e.style.color = 'var(' + token + ')'; document.body.append(e); const c = getComputedStyle(e).color; e.remove(); return c; };
           const h = document.getElementById('hdrHealth'), hi = h.querySelector('svg');
@@ -443,9 +458,8 @@ try {
       let seq = base.seq, offset = 0;
       const push = async (phase, seconds) => {
         b.setNow(at(NOW, offset + seconds));
-        const next = phase === 'session' ? JSON.parse(readFileSync(new URL('../fixtures/failures/a-gateway-up-but-dead.json', import.meta.url))).payload : structuredClone(base);
+        const next = phase === 'session' ? cashSessionSnapshot(base) : structuredClone(base);
         next.seq = ++seq; next.generatedAt = b.clock(); next.safety.gateway.checkedAt = b.clock();
-        if (phase === 'session') next.safety.gateway.reason = 'gateway_unconfirmed';
         if (['null', 'session', 'not-exact'].includes(phase)) {
           next.brokerAccount.cash = null;
           next.brokerAccount.reasons = { cash: phase === 'session' ? 'gateway_unconfirmed' : phase === 'not-exact' ? 'not_exact_yet' : 'source_unavailable' };
@@ -460,15 +474,15 @@ try {
         await configure(page, viewport, theme);
         await load(page, b.url, screen);
         if (screen === 'settings') await waitFor(page, `document.querySelector('#rtRows [data-cash="rt.cash"]')`);
-        const selector = screen === 'desk' ? '#heroL [data-cell="hero.account"]' : '#rtRows .rt-row:last-child';
+        const selector = screen === 'desk' ? '#heroL .cash-kpi' : '#rtRows .rt-row:last-child';
         const cashKey = screen === 'desk' ? 'hero.cash' : 'rt.cash';
         const surface = screen === 'desk' ? 'desk-hero-cash' : 'settings-account-cash';
-        // Compare the cash surface in its own account box. Earlier Settings
-        // rows have independent state copy; their movement is not cash layout.
+        // Cash now has its own Desk figure; track all four secondary cells too.
+        // Earlier Settings rows have independent state copy.
         const measure = () => ev(`(() => {
           const parent = document.querySelector(${J(selector)}), p = parent.getBoundingClientRect();
           const nodes = [parent, parent.querySelector('.cash-reserve'), parent.querySelector('[data-cash]')];
-          if (${J(screen)} === 'desk') nodes.push(document.getElementById('deskHero'));
+          if (${J(screen)} === 'desk') nodes.push(...document.querySelectorAll('#heroL .kpi'), document.getElementById('deskHero'));
           return nodes.map((e, i) => { const r = e.getBoundingClientRect(); return { key: i, top: r.top - p.top, left: r.left - p.left, width: r.width, height: r.height }; });
         })()`);
         const baseline = await measure();
@@ -491,14 +505,26 @@ try {
           const hasValue = ['value', 'stale', 'recovered'].includes(phase);
           const why = phase === 'stale' ? 'updates are late' : phase === 'session' ? 'broker connection not confirmed'
             : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact yet' : 'not reported by the broker';
-          const expected = hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `not reported · ${why}`;
+          const brokerCaption = 'cash · as the broker reports it';
+          const cashState = hasValue ? phase === 'stale' ? `· ${why}` : '' : `not reported · ${why}`;
+          const caption = screen === 'desk' ? `${brokerCaption}${cashState ? ` ${cashState}` : ''}` : brokerCaption;
+          const expected = screen === 'desk' ? `${hasValue ? '€ 12.345,68' : '—'} ${caption}`
+            : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `not reported · ${why}`;
           const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : `Cash not reported · ${why}`;
-          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme, independent null reason`, N(seen.text) === expected && seen.label === 'Cash' && seen.caption === 'cash · as the broker reports it' && seen.title === exact && seen.name === exact && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
+          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme, independent null reason`, N(seen.text) === expected && seen.label === 'Cash' && N(seen.caption) === caption && seen.title === exact && seen.name === exact && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
           check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
           const after = await measure();
           const moved = baseline.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== after[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: after[i]?.[k] })));
           check('paper-cash', `${tag}: cash and account boxes have exactly 0 px shift`, !moved.length, moved);
-          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? '#deskHero' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
+          if (screen === 'desk' && viewport.width <= 480) {
+            await setDeskDisclosures(page, false);
+            const collapsed = await phoneDeskSnapshot(page).then(copyText);
+            const account = collapsed.controls.find(c => c.key === 'account');
+            check('phone-first', `${tag}: collapsed Account carries every non-green cash reason`,
+              account.hidden && account.expanded === 'false' && (phase === 'value' || phase === 'recovered' || (Boolean(account.icon) && account.detail.includes(why))) && collapsed.horizontal.scroll <= collapsed.horizontal.inner, account);
+            await setDeskDisclosures(page, true);
+          }
+          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? viewport.width <= 480 ? '#accountSection' : '#deskHero' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
         }
       }
     }
@@ -520,6 +546,13 @@ try {
       b.setNow(at(NOW, 9));
       await configure(page, viewport, theme); await load(page, b.url, 'desk');
       await waitFor(page, `document.querySelectorAll('#kept [data-keep]').length === 2`);
+      if (viewport.width <= 480) {
+        await setDeskDisclosures(page, false);
+        const collapsed = await phoneDeskSnapshot(page).then(copyText);
+        const sections = collapsed.controls.filter(c => ['positions', 'kept'].includes(c.key));
+        check('phone-first', `${tag}: fresh panels with partial rows retain warnings and row reasons when collapsed`, sections.length === 2 && sections.every(c => c.hidden && Boolean(c.icon) && /not exact yet|not reported by the broker/.test(c.warning)), sections);
+        await setDeskDisclosures(page, true);
+      }
       const figureSelectors = ['#deskHero', '#heroL .kpi', '#heroL .cash-reserve', '#desks', '.dcard'];
       const figureBoxes = await rects(figureSelectors);
       const figures = () => ev(`({ values: [...document.querySelectorAll('#heroL .display, #heroL .kpi dd > .bn, #heroL [data-cash], .dcard .dnums .v')].map(e => e.innerText), count: document.getElementById('posSub').innerText })`);
@@ -1099,6 +1132,7 @@ try {
       // Desk keeps the safety floor: SXR8 and TSLA only under Kept holdings.
       await ev(`document.querySelector('.nav [data-go="desk"]')?.click() ?? document.querySelector('.bottom-nav [data-go="desk"]').click()`);
       await settle(page);
+      await setDeskDisclosures(page, true);
       const desk = await ev(`({ kept: [...document.querySelectorAll('#kept [data-keep]')].map(r => r.dataset.keep), positions: document.getElementById('positions').innerText })`);
       check('KEEP', `${tag}: with the settings unavailable, Desk still keeps SXR8 and TSLA under Kept holdings only`, J(desk.kept.sort()) === J(['SXR8', 'TSLA']) && !/\b(SXR8|TSLA)\b/.test(desk.positions), desk.kept);
     }

@@ -36,6 +36,8 @@ const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${n
 const ALL = ['j', 'joe', 'joel'];
 const E = euros => decimalUnits(String(euros));
 const today = '2026-10-14';
+// Markup-only sinks have no disclosure bodies or focusable descendants.
+const markupNode = () => ({ innerHTML: '', textContent: '', querySelectorAll: () => [] });
 // The snapshot's current desk equity, as the page reads it from Desk's cells.
 const ctxOf = (todayUnits = [null, null, null], extra = {}) => ({ today, todayUnits, nowMs: Date.parse('2026-10-14T17:42:22.000Z'), intraday: null, ...extra });
 const roll = (ix, p, anchor, desks = ALL, ctx = ctxOf()) => M.rollup(ix, M.periodOf(p, anchor, ctx.today, ix.meta.trackingStart), desks, ctx);
@@ -587,7 +589,7 @@ test('JOED-29 calendar rendering: phone cells keep signs and tints without arrow
   });
   // Capture the real calendar renderer's markup without starting a browser.
   const nodes = new Map(['calTitle', 'prevMonth', 'nextMonth', 'calSum', 'cal', 'calLegend', 'daypanel', 'daySheet']
-    .map(id => [`#${id}`, { innerHTML: '', textContent: '' }]));
+    .map(id => [`#${id}`, markupNode()]));
   globalThis.document = { querySelector: selector => nodes.get(selector), activeElement: null };
   const ix = M.indexResults(record([closeDay('2026-10-12', '5001'), closeDay('2026-10-13', '5001'), closeDay(today, '5000.97')], [
     tradeOf('rt-gain', 'j', '2026-10-12T15:00:00.000Z', '1'),
@@ -639,7 +641,7 @@ function calendarCapture(t) {
     Object.assign(page.RS, state);
   });
   const nodes = new Map(['calTitle', 'prevMonth', 'nextMonth', 'calSum', 'cal', 'calLegend', 'daypanel', 'daySheet', 'sheetTitle', 'sheetBody']
-    .map(id => [`#${id}`, { innerHTML: '', textContent: '' }]));
+    .map(id => [`#${id}`, markupNode()]));
   nodes.get('#daySheet').open = true;
   globalThis.document = { querySelector: selector => nodes.get(selector), activeElement: null };
   return (value, now, selected, desks = ALL, positions = []) => {
@@ -660,7 +662,7 @@ function heroCapture() {
     const view = { ix, today, trackingStart: ix?.meta.trackingStart, todayUnits, nowMs: Date.parse(now), ...inputs };
     const per = M.periodOf(period, anchor, today, view.trackingStart);
     const R = view.ix ? M.rollup(view.ix, per, desks, M.moneyContext(view.ix, view, per, desks)) : null;
-    const before = globalThis.document, node = { innerHTML: '' };
+    const before = globalThis.document, node = markupNode();
     globalThis.document = { querySelector: () => node };
     try { page.renderHero(view, per, desks, R); }
     finally {

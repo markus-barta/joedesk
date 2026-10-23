@@ -1,14 +1,17 @@
 // Desk: health line and details, Today, the three desks, positions and the
-// kept holdings. Every number comes from one panel-state cell; each cell shows
-// fresh, stale with age, not reported, or broken with its reason, on its own.
+// kept holdings. Every number keeps its panel state; matching snapshot captions
+// are shared once, while different ages and reasons stay beside their values.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption } from './ui.js';
-import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, NB } from './format.js';
+import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { drawChart, eurAxis } from './chart.js';
 import { intraday } from './history-model.js';
 import { learningLine } from './events.js';
+import { panelState } from './contracts/panel-state.mjs';
+import { decimalUnits, UNIT } from './contracts/decimal.mjs';
+import { STARTING_MONEY, todayPercent, sincePercent, rankDesks } from './performance.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -18,6 +21,81 @@ const STATE = {
   'sit-out': { tone: 'none', icon: 'pause', word: 'Sitting out' },
   stuck: { tone: 'bad', icon: 'stop', word: 'Stuck' },
 };
+
+// Phone disclosure choices last for this page visit only. No storage access,
+// account state or server write; desktop always exposes the complete content.
+const expanded = new Set();
+export function syncDeskDisclosures(phone = matchMedia('(max-width: 480px)').matches) {
+  for (const control of document.querySelectorAll('[data-desk-disclosure]')) {
+    const open = !phone || expanded.has(control.dataset.deskDisclosure);
+    control.setAttribute('aria-expanded', String(open));
+    document.getElementById(control.getAttribute('aria-controls')).hidden = !open;
+  }
+  const sentence = document.querySelector('#heroL .say > span');
+  if (sentence) {
+    sentence.dataset.clamp = phone ? '1' : '2';
+    sentence.parentElement.title = sentence.textContent;
+  }
+}
+export function toggleDeskDisclosure(key) {
+  if (expanded.has(key)) expanded.delete(key); else expanded.add(key);
+}
+
+// Rank the actual selector states, including retained values. A fresh panel
+// may still contain partial rows; those reasons join the same summary ranking.
+export function disclosureProblem(candidates) {
+  const severity = { bad: 3, warn: 2, none: 1 };
+  const problems = candidates.flatMap(([label, cell]) => {
+    const p = statePhrase(cell, '');
+    if (p.state === 'fresh') return [];
+    const state = cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
+      : p.state === 'not reported' ? 'not reported' : 'unavailable';
+    const reason = cell?.reason ?? (p.state === 'not reported' ? 'feed_not_received' : null);
+    // Unavailable money leads even when its honest not-exact icon is neutral;
+    // an old check-in must not obscure that the row's figures are unknown.
+    const priority = state === 'unavailable' ? 3 : severity[p.tone];
+    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, text: `${label}: ${state}${reason ? ` · ${cellReason(reason)}` : ''}` }];
+  });
+  problems.sort((a, b) => b.priority - a.priority || severity[b.tone] - severity[a.tone]);
+  if (!problems.length) return null;
+  const { priority, ...first } = problems[0];
+  return { ...first, detail: problems.map(p => p.text).join('; ') };
+}
+function problemHtml(problem) {
+  return problem ? `${icon(problem.icon, `i tone-${problem.tone}`)}<span class="summary-text" title="${esc(problem.detail)}" aria-hidden="true">${esc(problem.text)}</span><span class="vh">${esc(problem.detail)}</span>` : '';
+}
+function disclosureButton(key, label, bodyId, problem = null) {
+  return `<button type="button" class="desk-disclosure" data-desk-disclosure="${key}" aria-expanded="${expanded.has(key)}" aria-controls="${bodyId}"><span>${esc(label)}</span><span class="disclosure-warning">${problemHtml(problem)}</span>${icon('chev-d', 'i disclosure-chevron')}</button>`;
+}
+export function rowProblems(cell) {
+  return (cell?.value ?? []).flatMap(row => Object.entries(row.reasons ?? {}).map(([field, reason]) =>
+    [`${row.symbol} ${POSITION_FIELDS[field] ?? field}`, { state: 'broken', value: null, reason }]));
+}
+
+function deskProblem(ctx, id) {
+  const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
+  const cells = [['Today', ctx.states[`desks.${id}.dayPnl`]], ['Open positions', ctx.states[`desks.${id}.openPnl`]], ['Since start', ctx.states[`desks.${id}.totalPnl`]], ['History', ctx.states.history]];
+  if (desk?.state === 'stuck') cells.unshift(['Desk stuck', { state: 'broken', value: null }]);
+  if (desk?.learning?.status === 'blocked') cells.push(['Learning blocked', { state: 'broken', value: null }]);
+  const elapsed = ctx.feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(ctx.now) - Date.parse(ctx.feeds.data.generatedAdvancedAt)) : 0;
+  const heartbeat = desk?.heartbeatAt ? gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, ctx.feeds.data.value.generatedAt, elapsed) : null;
+  if (desk && (heartbeat == null || heartbeat / 1000 >= STALE_AFTER_S)) cells.unshift(['Check-in', { state: heartbeat == null ? 'not reported' : 'stale', value: heartbeat }]);
+  return disclosureProblem(cells);
+}
+export function compactDesk(ctx, id) {
+  const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
+  const info = STATE[desk?.state] ?? { tone: 'none', icon: 'ring', word: 'Not reported' };
+  const figure = (name, label) => {
+    const cell = ctx.states[`desks.${id}.${name}`], value = cellView(cell, `compact.${id}.${name}`);
+    const marker = cellIcon(cell).replace('cell-state', 'compact-state');
+    const characters = value.units === null ? 1 : eur(value.units, true).length;
+    return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${label}${marker}</span>${value.html}</span>`;
+  };
+  return `<button type="button" class="desk-disclosure desk-row" data-desk-disclosure="${id}" aria-expanded="${expanded.has(id)}" aria-controls="detail-${id}">
+    ${deskMark(id)}<span class="compact-identity"><strong>${esc(desk?.label ?? LABEL[id])}</strong><span class="compact-word tone-${info.tone}">${icon(info.icon)}${info.word}</span></span>
+    ${figure('dayPnl', 'Today')}${figure('totalPnl', 'Since start')}${icon('chev-d', 'i disclosure-chevron')}
+    <span class="disclosure-warning">${problemHtml(deskProblem(ctx, id))}</span></button>`;
+}
 
 // Accepted snapshots are immutable between reads. Format this snapshot-only
 // explanation once, rather than redoing ledger arithmetic on Desk live ticks.
@@ -40,7 +118,32 @@ export function executorProblem(data) {
 export function cellView(cell, key, { signed = true, caption = '' } = {}) {
   const value = cell?.value ?? null;
   const n = amountOf(value);
-  return { html: bn(n, value?.currency ?? 'EUR', signed), caption: stateCaption(cell, key, caption), state: cell?.state ?? 'not reported', n };
+  const units = value ? decimalUnits(value.amount) : null;
+  return { html: bn(units, value?.currency ?? 'EUR', signed), caption: stateCaption(cell, key, caption), state: cell?.state ?? 'not reported', n, units };
+}
+
+// One snapshot-level caption. A different reason, age, retention or missing
+// value remains local to its cell; only an identical state is shared.
+export function boardCaptionCell(ctx) {
+  const data = ctx.feeds.data?.value;
+  if (!data || !ctx.now) return null;
+  const cell = panelState(ctx.feeds.data, data, null, ctx.now);
+  return cell.state === 'fresh' ? null : cell;
+}
+export function sharesBoardCaption(cell, board) {
+  return Boolean(board && cell && ['state', 'reason', 'retained', 'ageSeconds'].every(k => cell[k] === board[k]) &&
+    (cell.value == null) === (board.value == null));
+}
+function cellIcon(cell) {
+  if (!cell || cell.state === 'fresh') return '';
+  const p = statePhrase(cell, '');
+  const label = `${capital(p.state)}${cell.reason ? ` · ${cellReason(cell.reason)}` : ''}`;
+  return `<span class="cell-state tone-${p.tone}" role="img" aria-label="${esc(label)}">${icon(p.icon ?? TONE_ICON[p.tone])}</span>`;
+}
+export function percentHtml(hundredths) {
+  if (hundredths === null) return '';
+  const sign = hundredths < 0n ? MINUS : hundredths > 0n ? '+' : '';
+  return `<span class="performance-pct${hundredths ? hundredths > 0n ? ' gain' : ' loss' : ''}">${sign}${digits(hundredths * UNIT / 100n, 2)}${NB}%</span>`;
 }
 
 function healthFacts(ctx, health) {
@@ -116,11 +219,6 @@ export function headerHealth(ctx, health) {
     label: `${health.tone === 'green' ? 'Live. Numbers are up to date' : status.sentence}. Open status details.`, title: status.sentence };
 }
 
-function sinceLabel(data) {
-  const starts = (data?.desks ?? []).map(d => d.accounting?.periodStart).filter(Boolean).sort();
-  return starts.length ? `Since ${dayDM(starts[0], NY)}` : 'Since start';
-}
-
 function sessionRing(now) {
   if (!now) {
     const svg = `<svg viewBox="0 0 64 64" role="img" aria-label="Market session ring: the board server’s time is not known yet"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--line)" stroke-width="5"/></svg>`;
@@ -163,36 +261,49 @@ export function heroLeft(ctx) {
   const data = feeds.data?.value;
   const dayCell = states['today.dayPnl'];
   const day = cellView(dayCell, 'hero.day');
+  const board = boardCaptionCell(ctx);
   const kpi = (termKey, label, name, key, opts) => {
     const v = cellView(states[name], key, opts);
-    const caption = reservedCaption(v.caption, opts.captions ?? [opts.caption]);
-    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}</dt><dd>${v.html}<span class="c">${caption}</span>${key === 'hero.account' ? cashCaption(states.paperCash, 'hero.cash') : ''}</dd></div>`;
+    const caption = reservedCaption(sharesBoardCaption(states[name], board) ? '' : v.caption, opts.captions ?? [opts.caption]);
+    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}${cellIcon(states[name])}</dt><dd>${v.html}<span class="c">${caption}</span></dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
-  const moneyCaptions = [`started with ${eur(15000, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
+  const moneyCaptions = [`started with ${eur(STARTING_MONEY, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
   const why = dayCell?.reason ? cellReason(dayCell.reason) : null;
+  const dayAmount = day.units === null ? null : eur(day.units < 0n ? -day.units : day.units);
   let say;
   if (day.n == null) {
     say = data ? `Today’s result is not available: ${esc(why ?? 'not reported')}.`
       : day.state === 'not reported' ? 'No numbers yet: no board data has arrived.' : `No numbers: ${esc(why ?? 'not available')}.`;
   } else if (day.state === 'fresh') {
     const who = 'J, Joe and Joel';
-    say = isZero(day.n) ? `Flat today for ${who}.` : `${day.n > 0 ? 'Up' : 'Down'} ${eur(Math.abs(day.n))} today across ${who}.`;
+    say = isZero(day.units) ? `Flat today for ${who}.` : `${day.units > 0n ? 'Up' : 'Down'} ${dayAmount} today across ${who}.`;
     const method = data?.pnlSources?.day?.method === 'session-open-estimate' ? dayMethodLabel(data.pnlSources.day) : null;
     if (method) say += ` ${method}.`;
   } else {
     // Not fresh: the amount, then this value's own state, age and reason.
-    say = `${isZero(day.n) ? 'Flat' : `${day.n > 0 ? 'Up' : 'Down'} ${eur(Math.abs(day.n))}`} today. ${day.caption}.`;
+    say = `${isZero(day.units) ? 'Flat' : `${day.units > 0n ? 'Up' : 'Down'} ${dayAmount}`} today.${sharesBoardCaption(dayCell, board) ? '' : ` ${day.caption}.`}`;
   }
-  return `<div class="hero-k">${icon('clock')}<span>${term('today')}${now ? ` · ${dayDDM(now, NY)}` : ''}</span></div>
-    <div class="display" data-cell="hero.day" data-state="${day.state}">${day.html}</div>
+  const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: 'after fees' });
+  return `<div class="hero-primary"><div class="performance-date">${now ? dayDDM(now, NY) : ''}</div><div class="performance">
+      <div class="primary" data-cell="hero.day" data-state="${day.state}"><div class="hero-k">${icon('clock')}${term('today')}${cellIcon(dayCell)}</div>
+        <div class="display">${day.html}</div><div class="pct-slot">${percentHtml(todayPercent(states, data?.pnlSources?.day))}</div>
+        <span class="c primary-caption"></span></div>
+      <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since')}${cellIcon(sinceCell)}</div>
+        <div class="display">${since.html}</div><div class="pct-slot">${percentHtml(sincePercent(states))}</div>
+        <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, ['after fees'])}</span>
+        <button type="button" class="phone-primary-note" data-say="since" aria-label="About Since start" aria-expanded="false"${sharesBoardCaption(sinceCell, board) ? ' disabled' : ''}><span data-clamp="3">${sharesBoardCaption(sinceCell, board) ? '&#160;' : stateCaption(sinceCell, 'hero.phone.since', 'after fees')}</span></button></div>
+    </div>
     <button type="button" class="say" data-say="today" aria-expanded="false"><span data-clamp="2">${say}</span></button>
-    <dl class="kpis">
+    <p class="board-caption">${board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : ''}</p></div>
+    <div class="account-section" id="accountSection">${disclosureButton('account', 'Account', 'accountDetail', disclosureProblem([
+      ['Open positions', states['today.openPnl']], ['Desks’ money', states['today.equity']], ['Paper account', states.paperAccount], ['Cash', states.paperCash], ['Broker', states.gateway],
+    ]))}<div class="disclosure-body" id="accountDetail"><dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
-      ${kpi('since', sinceLabel(data), 'today.totalPnl', 'hero.since', { caption: 'after fees' })}
       ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions })}
       ${kpi('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}
-    </dl>`;
+      ${cashCaption(states.paperCash, 'hero.cash', { figure: true })}
+    </dl></div></div>`;
 }
 
 function deskCard(ctx, id, maxDay, showBars) {
@@ -213,15 +324,16 @@ function deskCard(ctx, id, maxDay, showBars) {
   const sinceText = desk?.accounting?.periodStart ? `Since ${dayDM(desk.accounting.periodStart, NY)}` : 'Since start';
   const bar = showBars && dayV.n != null && !isZero(dayV.n)
     ? `<i data-v="${dayV.n}" style="${dayV.n > 0 ? 'left' : 'right'}:50%;width:${(Math.abs(dayV.n) / maxDay * 50).toFixed(3)}%;background:var(--${dayV.n > 0 ? 'gain' : 'loss'})"></i>` : '';
-  const num = (label, v, extra = '') => `<div data-state="${v.state}"><span class="k">${label}</span><span class="v">${v.html}</span>${extra}</div>`;
-  const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]]);
+  const board = boardCaptionCell(ctx);
+  const num = (label, v, cell, extra = '') => `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell)}</span><span class="v">${v.html}</span>${extra}</div>`;
+  const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]], board);
   const learning = learningLine(desk?.learning);
-  return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span>${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
+  return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(info.word + since)}">${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
       <p class="now">${desk ? esc(desk.action) : 'Waiting for the first valid snapshot.'}</p>
       <div class="dnums">
-        ${num(term('today'), dayV, `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
-        ${num(term('open'), openV)}
-        ${num(term('since', sinceText), sinceV)}
+        ${num(term('today'), dayV, states[`desks.${id}.dayPnl`], `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
+        ${num(term('open'), openV, states[`desks.${id}.openPnl`])}
+        ${num(term('since', sinceText), sinceV, states[`desks.${id}.totalPnl`])}
       </div>
       <div class="chart mini" id="mini-${id}"><div class="mini-label${status ? ' off' : ''}">${status || 'since start · last sessions'}</div></div>
       <footer>${icon('learning')}<span>${term('learning')}: ${learning ? esc(learning) : 'not reported'}${desk?.learning?.status === 'blocked' ? ' · blocked' : ''}</span></footer>`;
@@ -231,11 +343,11 @@ function deskCard(ctx, id, maxDay, showBars) {
 // reason. Numbers that share all three share a line. The lines sit in the
 // chart's own fixed box, so a fresh card keeps the approved spacing and a
 // change of state moves nothing.
-export function cardStatus(id, cells) {
+export function cardStatus(id, cells, board = null) {
   const groups = [];
   for (const [label, cell] of cells) {
-    if ((cell?.state ?? 'not reported') === 'fresh') continue;
-    const key = JSON.stringify([cell?.state, cell?.reason, cell?.retained, cell?.value == null, cell?.retained ? cell.valueReceivedAt : null]);
+    if ((cell?.state ?? 'not reported') === 'fresh' || sharesBoardCaption(cell, board)) continue;
+    const key = JSON.stringify([cell?.state, cell?.reason, cell?.ageSeconds, cell?.retained, cell?.value == null, cell?.retained ? cell.valueReceivedAt : null]);
     const group = groups.find(g => g.key === key);
     if (group) group.labels.push(label); else groups.push({ key, labels: [label], cell });
   }
@@ -345,7 +457,7 @@ export function keptHtml(ctx) {
 
 const chartKeys = new Map();
 function chartOnce(el, key, draw) {
-  if (!el) return;
+  if (!el || !el.clientWidth) return;
   if (chartKeys.get(el.id) === key && el.querySelector(':scope > svg')) return;
   chartKeys.set(el.id, key);
   draw();
@@ -418,8 +530,26 @@ export function renderDesk(ctx) {
   const maxDay = Math.max(...days.filter(v => v != null).map(Math.abs), 0.01);
   let redraw = false;
   for (const id of DESKS) {
-    const changed = patch($(`#desk-${id}`), deskCard(ctx, id, maxDay, showBars));
+    const card = $(`#desk-${id}`);
+    if (!card.querySelector('.desk-detail')) card.innerHTML = `<div class="compact-row"></div><div class="desk-detail disclosure-body" id="detail-${id}"></div>`;
+    patch(card.querySelector('.compact-row'), compactDesk(ctx, id));
+    const changed = patch(card.querySelector('.desk-detail'), deskCard(ctx, id, maxDay, showBars));
     if (changed) { chartKeys.delete(`mini-${id}`); redraw = true; }
+  }
+  patch($('#chartSummary'), problemHtml(disclosureProblem([
+    ['History', ctx.states.history], ...(!ctx.now ? [['Clock', { state: 'not reported', value: null }]]
+      : sessionBounds(ctx.now).reason === 'calendar_unavailable' ? [['Market hours', { state: 'broken', value: null, reason: 'calendar_unavailable' }]] : []),
+  ])));
+  $('#positionsTitle').textContent = `Positions · ${ctx.states.positions?.value?.length ?? '—'} open`;
+  $('#keptTitle').textContent = `Kept holdings · ${ctx.states.kept?.value?.length ?? '—'}`;
+  patch($('#positionsSummary'), problemHtml(disclosureProblem([['Positions', ctx.states.positions], ...rowProblems(ctx.states.positions)])));
+  patch($('#keptSummary'), problemHtml(disclosureProblem([['Kept holdings', ctx.states.kept], ...rowProblems(ctx.states.kept)])));
+  syncDeskDisclosures();
+  const grid = $('.desk-grid');
+  const currentOrder = [...grid.children].map(card => card.id.slice(5));
+  for (const [index, id] of rankDesks(ctx.states, currentOrder).entries()) {
+    const card = $(`#desk-${id}`);
+    if (grid.children[index] !== card) grid.insertBefore(card, grid.children[index]);
   }
   // Charts measure their boxes before the long sections below change, so an
   // update never forces a layout of the whole position list mid-render.
