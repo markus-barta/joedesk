@@ -43,14 +43,20 @@
     "pusher": {
       "required_contract_set_sha256": "000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5",
       "required_data_schema": "inspr.joe.household.v2",
-      "deployment_pin": null,
+      "deployment_pin": "0264b42f583641a446e90b606dc26ed7ef200f60",
       "status": "Amy JOED-20 real producer rehearsal/sign-off required"
     },
     "executor": {
       "required_contract_set_sha256": "000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5",
       "reports_via": "pusher data.safety.executor",
-      "deployment_pin": null,
+      "deployment_pin": "0264b42f583641a446e90b606dc26ed7ef200f60",
       "status": "Amy executor/broker reconciliation required"
+    },
+    "producer": {
+      "required_contract_set_sha256": "000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5",
+      "required_data_schema": "inspr.joe.household.results.v2",
+      "deployment_pin": "0264b42f583641a446e90b606dc26ed7ef200f60",
+      "status": "Amy JOED-20 real producer rehearsal/sign-off required"
     }
   },
   "activation": "blocked until exact downstream pins or declared compatibility proof; fixtures are not producer sign-off"

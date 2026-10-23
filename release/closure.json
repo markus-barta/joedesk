@@ -279,8 +279,8 @@
     },
     {
       "path": "release/contracts.json",
-      "size": 1661,
-      "sha256": "5c20c38be4602f6c142ece1c1abc65172306d504aa0a74d098e10bb15f78ef17"
+      "size": 2072,
+      "sha256": "e57d98d5968c0baa835f4a099d323c93eb5c435a4a81eed2509adf3644ae3b92"
     },
     {
       "path": "release/data-migration.mjs",
