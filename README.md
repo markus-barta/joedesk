@@ -554,13 +554,21 @@ BROWSER_PATH=/usr/bin/google-chrome node scripts/browser-p3.mjs
 ```
 
 `npm run test:results` runs the full P4 Results gate sequentially under **UTC**
-and **America/New_York**. `test:browser` includes this guard. CI includes Vienna
-too; run the same three-zone check with:
+and **America/New_York**. `test:browser` includes this guard. CI pushes to main
+run the full suite in all three zones; PRs and manual dispatch run full in
+Europe/Vienna and repeat only explicitly zone-sensitive scenarios in UTC and
+America/New_York, retaining every check in those scenarios.
+This avoids repeating zone-independent desk-card geometry and render budgets
+while keeping every date-bearing scenario in the three-zone matrix.
 
 ```bash
 npm run test:results -- UTC Europe/Vienna America/New_York
+# PR/manual-dispatch plan (full budget only in Vienna):
+npm run test:results -- --full Europe/Vienna --subset UTC America/New_York
 # One zone, same P4 suite (including the render budget):
 TZ=UTC node scripts/browser-p4.mjs
+# Only zone-sensitive scenarios in one host zone:
+TZ=UTC node scripts/browser-p4.mjs --zone-subset
 ```
 
 Each child process sets `TZ` for the injected board server and Chrome. The CDP
@@ -568,6 +576,17 @@ page also sets its requested zone explicitly, since macOS Chrome may keep the
 OS zone despite `TZ`; P4 checks the server, page and dedicated worker zones.
 Reports stay separate under `~/.local/share/joedesk-qa/p4/<zone>/index.md`
 (`JOED_QA_DIR` overrides the parent; slashes in zone names become hyphens).
+The parent index identifies full/subset mode for each zone and lists the
+selected scenarios; each zone index records its own mode and scenario list.
+The conservative subset is 12/14 scenario groups (85.7%); static loop counts
+omit nine desk-card and nine budget checks, leaving 4,936/4,954 baseline
+checks (99.6%) per subset and 14,826 rather than 14,862 per PR.
+At the measured 788 s full-matrix baseline (2026-10-23), weighting by check
+count estimates about 786 s (13.1 min) for P4; browser/fixture costs differ,
+so the PR run on agm2 must measure the actual runtime.
+Fourteen of 231 baseline screenshots differed across zones, all within the
+selected date-bearing families; differences limited to one width/theme are
+possible render noise, not grounds to drop those scenarios.
 Use an approved browser test host; an installed browser guard refusal is a
 blocked check and must be handed to the coordinator without bypassing it.
 

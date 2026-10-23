@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
+import { parseResultsGateArgs } from '../scripts/results-gate-plan.mjs';
+// Both lightweight suites join the existing contracts/CI path.
+import './results-gate.mjs';
 
 const GUARDED_RUNNER = '${{ (vars.JOEDESK_AGM2 == \'on\' && (github.event_name != \'pull_request\' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON(\'["self-hosted","agm2"]\') || \'ubuntu-latest\' }}';
 const directory = new URL('../.github/workflows/', import.meta.url);
@@ -67,6 +70,34 @@ test('runner expression stays hosted by default and for fork PRs even when opted
 });
 
 const ci = parse(workflows.get('ci.yml'));
+test('Results CI keeps full ×3 on main pushes and full Vienna plus UTC/NY subsets on PRs and dispatch', t => {
+  const step = ci.jobs.browser.steps.find(step => step.name?.startsWith('Results gate'));
+  assert.equal(step.if, 'always()');
+  assert.equal(step.env.JOED_QA_DIR, '${{ runner.temp }}/joedesk-qa/p4');
+  const artifact = ci.jobs.browser.steps.find(step => step.with?.name === 'joedesk-p4-screenshots');
+  assert.equal(artifact.if, 'always()');
+  assert.equal(artifact.with.path, '${{ runner.temp }}/joedesk-qa/p4');
+  const dir = scratch('joed-workflow-results-');
+  t.after(() => discard(dir, 'workflow Results matrix test'));
+  // Execute the workflow's real shell branches with a fake npm. No browser,
+  // server, package install or real npm invocation can run here.
+  writeFileSync(join(dir, 'npm'), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$JOED_RESULTS_COMMANDS"\n', { mode: 0o700 });
+  for (const event of ['push', 'pull_request', 'workflow_dispatch']) {
+    const output = join(dir, event);
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c',
+      step.run.replaceAll('${{ github.event_name }}', event)], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, JOED_RESULTS_COMMANDS: output },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const commands = readFileSync(output, 'utf8').trim().split('\n');
+    assert.equal(commands.length, 1, `${event}: one gate orchestrator`);
+    assert.ok(commands[0].startsWith('run test:results -- '));
+    assert.deepEqual(parseResultsGateArgs(commands[0].split(' ').slice(3)), event === 'push'
+      ? ['UTC', 'Europe/Vienna', 'America/New_York'].map(timeZone => ({ timeZone, mode: 'full' }))
+      : [{ timeZone: 'Europe/Vienna', mode: 'full' }, { timeZone: 'UTC', mode: 'subset' }, { timeZone: 'America/New_York', mode: 'subset' }]);
+  }
+});
+
 test('CI preserves push/PR triggers, offers manual dispatch and keeps host package installation hosted-only', t => {
   assert.deepEqual(ci.on, { push: { branches: ['main'] }, pull_request: null, workflow_dispatch: null });
   const dir = scratch('joed-workflow-env-');

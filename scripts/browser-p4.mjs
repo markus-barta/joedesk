@@ -21,6 +21,15 @@ import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
 import { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } from './browser/results.mjs';
 import { realResultsFixtures } from './results-fixtures.mjs';
+import { P4_SCENARIOS, selectP4Scenarios } from './results-gate-plan.mjs';
+
+// Fail on missing explicit zoneSensitive metadata before any browser or
+// server starts. A subset keeps every check in each selected scenario.
+const args = process.argv.slice(2);
+if (args.some(arg => arg !== '--zone-subset')) throw new Error('Usage: browser-p4.mjs [--zone-subset]');
+const zoneSubset = args.includes('--zone-subset');
+const selectedScenarios = selectP4Scenarios({ zoneSubset, only: (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean) });
+const selectedNames = new Set(selectedScenarios.map(s => s.name));
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -50,8 +59,10 @@ const check = (ac, name, ok, detail) => {
   if (!ok && ['phone-calendar', 'partial-days', 'period-hint', 'trade-amount'].includes(ac)) console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
 };
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
-const ONLY = (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean);
-const run = name => !ONLY.length || ONLY.includes(name);
+const run = name => {
+  if (!P4_SCENARIOS.some(s => s.name === name)) throw new Error(`Undeclared P4 scenario: ${name}`);
+  return selectedNames.has(name);
+};
 
 const N = text => String(text ?? '').replace(/[\s \u00ad]+/g, '');
 const NB = '\u00a0';
@@ -2381,6 +2392,9 @@ pushes and protected reads, then advance the injected clock to stale at 60 s;
 before the first push the feed says no data received yet. One
 headless browser, run sequentially; reduced motion for stable geometry.
 Host and browser time zone: ${expectedTimeZone}; dedicated worker zones are checked too.
+Run mode: **${zoneSubset ? 'subset' : 'full'}**${process.env.JOED_P4_ONLY ? ' (focused by JOED_P4_ONLY)' : ''}.
+Selected scenarios (${selectedScenarios.length}/${P4_SCENARIOS.length}):
+${selectedScenarios.map(s => `- \`${s.name}\` — ${s.reason}`).join('\n')}
 Compare with \`joed-19-joedesk-approved.html\` (Results).
 
 ## For the visual check
