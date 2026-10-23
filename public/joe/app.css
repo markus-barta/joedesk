@@ -143,16 +143,27 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .seg .i { color: var(--ink-3); }
 .seg button[aria-pressed="true"] .i, .seg button[aria-current="page"] .i { color: var(--accent-ink); }
 .nav { margin-left: 12px; }
-.hdr-health { margin-left: auto; display: inline-flex; flex: none; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); white-space: nowrap; font-weight: 500; }
+.hdr-health { margin-left: auto; display: inline-flex; flex: none; align-items: center; gap: 7px; width: clamp(220px, 25vw, 350px); height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--surface); color: var(--ink-2); white-space: nowrap; font-weight: 500; font-variant-numeric: tabular-nums; }
 @media (hover: hover) { .hdr-health:hover { background: var(--row-hover); color: var(--ink); } }
-.hdr-health b { font-weight: 600; color: var(--ink); }
-/* Reserve both columns in the rendered font. Inline size containment makes
-   state text use the sizers' tracks without changing any header geometry. */
-.hdr-health .lbl { display: inline-grid; grid-template-columns: max-content max-content; column-gap: 7px; line-height: 1.1; text-align: left; white-space: nowrap; }
-.hdr-health .lbl::before { content: "Stale 23 h 59 min"; visibility: hidden; font-weight: 600; grid-area: 1 / 1; }
-.hdr-health .lbl::after { content: "· Broker unstable"; visibility: hidden; grid-area: 1 / 2; }
-.hdr-health .lbl b { grid-area: 1 / 1; contain: inline-size; }
-.hdr-health .lbl-long { grid-area: 1 / 2; contain: inline-size; }
+.hdr-health b { display: grid; grid-template-columns: minmax(0, 1fr); font-weight: 600; color: inherit; line-height: 20px; height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Fixed tracks reserve the same width for every sentence and every age. */
+.hdr-health .lbl { flex: 1; min-width: 0; line-height: 20px; height: 20px; text-align: left; white-space: nowrap; overflow: hidden; }
+.hdr-health > .i { flex: none; }
+.hdr-health > .i.status-chevron { width: 12px; height: 12px; }
+.hdr-health .status-full, .hdr-health .status-compact { grid-area: 1 / 1; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hdr-health .status-compact { visibility: hidden; }
+.hdr-health[data-tone="warn"] { color: var(--warn); }
+.hdr-health[data-tone="bad"] { color: var(--bad); }
+/* A measured overflow or narrow header uses the short form. Every compact
+   warning and every red state puts its sentence on the reserved line once. */
+.hdr-health[data-compact] .status-full { visibility: hidden; }
+.hdr-health[data-compact] .status-compact { visibility: visible; }
+.status-alert { height: 32px; display: flex; align-items: center; color: var(--bad); font-size: 12px; font-variant-numeric: tabular-nums; }
+.status-alert[data-tone="warn"] { color: var(--warn); }
+.status-alert > button { position: relative; display: flex; align-items: center; width: 100%; height: 32px; padding: 0; border: 0; background: none; color: inherit; font: inherit; line-height: 18px; text-align: left; visibility: hidden; cursor: pointer; }
+.status-alert > button::after { content: ""; position: absolute; inset: -6px 0; }
+.status-alert > button > span { display: block; width: 100%; min-width: 0; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-alert[data-visible] > button { visibility: visible; }
 /* After the brand has yielded, tighten space only if the measured row still
    needs it. No viewport or font-width estimate decides this density. */
 .top-in[data-tight] { gap: 2px; }
@@ -209,10 +220,12 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .dot-live { transform-box: fill-box; transform-origin: center; }
 
 /* ---------- Desk ---------- */
-.hstrip { display: flex; align-items: center; gap: 6px 22px; flex-wrap: wrap; margin: 18px 0 14px; color: var(--ink-2); font-size: 13.5px; }
-.hstrip .btn { margin-left: auto; }
 .health-wrap { position: relative; }
-.pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 25; width: min(520px, 100%); background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-pop); padding: 16px 18px; opacity: 0; visibility: hidden; }
+.pop { position: absolute; right: var(--gutter); top: 4px; z-index: 25; width: min(560px, calc(100% - 2 * var(--gutter))); max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-pop); padding: 16px 18px; opacity: 0; visibility: hidden; }
+.health-facts { display: grid; gap: 8px; margin-top: 12px; }
+.health-facts .st { white-space: normal; align-items: flex-start; }
+.health-facts .st > .i { margin-top: 2px; }
+.health-facts .why > span { overflow-wrap: anywhere; }
 .pop.on { opacity: 1; visibility: visible; }
 .pop h3 { font-size: 14px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
 .pop p { color: var(--ink-2); margin-top: 8px; }
@@ -437,7 +450,7 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 @media (max-width: 960px) {
   .top-in { height: 54px; gap: 8px; }
   .nav { display: none; }
-  .hdr-health { padding: 0 8px; height: 44px; }
+  .hdr-health { width: min(350px, calc(100vw - 214px)); padding: 0 8px; height: 44px; }
   .top .icon-btn { width: 44px; height: 44px; }
   .bottom-nav { display: flex; position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 30; padding: 4px; border-radius: 22px; background: color-mix(in srgb, var(--surface) 90%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow-pop); }
   .bottom-nav button { flex: 1; height: 56px; border: 0; background: transparent; color: var(--ink-3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 600; border-radius: 18px; }
@@ -459,10 +472,7 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 @media (max-width: 700px) {
   :root { --gutter: 16px; }
   body { font-size: 15px; }
-  .hdr-health .lbl-long { display: none; }
-  .hdr-health .lbl { grid-template-columns: max-content; }
-  .hdr-health .lbl::before { content: "Broker unsure"; }
-  .hdr-health .lbl::after { display: none; }
+  .hdr-health { width: min(350px, calc(100vw - 202px)); }
   .icon-btn { width: 44px; height: 44px; }
   .seg button { height: 44px; min-width: 44px; padding: 0 10px; }
   .btn { height: 44px; }
@@ -471,8 +481,6 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .step .icon-btn { width: 44px; height: 44px; }
   .scr-h { margin-top: 18px; }
   .sec-h .sub { flex-basis: 100%; }
-  .hstrip { gap: 6px 16px; font-size: 13.5px; }
-  .hstrip .btn { margin-left: 0; }
   .hero { padding: 18px 16px 16px; }
   .display { font-size: 38px; line-height: 46px; }
   .kpis { grid-template-columns: 1fr 1fr; gap: 12px 16px; }
@@ -556,6 +564,7 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .dcard header { display: grid; grid-template-columns: 34px minmax(min-content, 1fr) auto; align-items: center; gap: 2px 11px; }
 .dcard .who { min-width: 0; }
 .dcard .hb { white-space: normal; text-align: right; }
+.dcard .hb.warn { color: var(--warn); }
 .dcard .hb .term, .dcard .hb .age { white-space: nowrap; }
 @container (max-width: 339.98px) {
   .dcard header { grid-template-columns: 34px minmax(0, 1fr) auto; }
@@ -606,21 +615,6 @@ span.dbar, span.vbar { display: block; }
 .cash-block, .cash-label, .cash-caption { display: block; min-width: 0; overflow-wrap: anywhere; }
 .kpi .cash-block { font-size: 12px; font-weight: 400; line-height: 16px; letter-spacing: 0; color: var(--ink-3); }
 .account-cash-line { display: flex; gap: 4px; color: var(--ink-2); }
-/* The health line: the reason is one line at every width, with an ellipsis
-   when it is longer (its title and Details give it whole), and no other fact
-   wraps. So the line has fixed rows per width: one row from 1181 px; down to
-   901 px the reason beside Details, the other facts on a row below; narrower,
-   one row per fact. No reason, state or font moves the page. */
-.hstrip { flex-wrap: nowrap; }
-.hstrip > * { flex: none; }
-.hstrip > .why { flex: 0 1 auto; min-width: 0; }
-.hstrip .why > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 1180px) {
-  .hstrip { flex-wrap: wrap; row-gap: 0; }
-  .hstrip > .why { flex: 1 1 0; }
-  .hstrip::after { content: ""; flex-basis: 100%; order: 1; }
-  .hstrip > .st:not(.why) { order: 2; margin-top: 6px; }
-}
 .facts-dl .jtotal { min-height: calc(2lh + 22px); }
 .icon-btn { flex: none; }
 .pop:focus-visible { border-radius: 14px; }
@@ -652,19 +646,6 @@ span.dbar, span.vbar { display: block; }
 .private-card p { color: var(--ink-2); }
 .private-card .btn { text-decoration: none; }
 [hidden] { display: none !important; }
-/* Up to 900 px the health line has one row per fact: the reason, the
-   broker, the emergency stop, then the data age beside Details, whose 44 px
-   on phones hold its two lines. */
-@media (max-width: 900px) {
-  .hstrip { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; row-gap: 6px; }
-  .hstrip::after { content: none; }
-  .hstrip > * { grid-column: 1 / -1; }
-  .hstrip > .st:not(.why) { order: 0; margin-top: 0; }
-  .hstrip > .st:nth-last-child(2) { grid-column: 1; }
-  .hstrip > .btn { grid-column: 2; margin-left: 0; }
-  .hstrip .st { white-space: normal; align-items: flex-start; }
-  .hstrip .st .i { margin-top: 2.5px; }
-}
 @media (max-width: 700px) {
   .hero-l .display { height: 53px; }
   /* The heartbeat's term keeps its row's height and gets an invisible 44 px hit area. */

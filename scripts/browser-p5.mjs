@@ -145,6 +145,7 @@ function headerLayout() {
 }
 function checkHeaderLayout(ac, tag, layout) {
   check(ac, `${tag}: the status is exactly one line box`, layout.status.lines === 1 && layout.status.nowrap === 'nowrap' && Math.abs(layout.status.height - layout.status.lineHeight) < 0.02, layout.status);
+  check(ac, `${tag}: the icon stays inside its target without text overlap; ages use tabular numerals`, layout.status.iconInside && !layout.status.iconOverlap && layout.status.tabular, layout.status);
   check(ac, `${tag}: brand, PAPER, status and theme are visible, inside the header and do not overlap; no horizontal overflow`,
     layout.paper === 'PAPER' && layout.inRow && !layout.overlaps.length && !layout.wordmarkClipped && !layout.overflow && layout.horizontal.scroll <= layout.horizontal.inner, layout);
 }
@@ -362,7 +363,7 @@ try {
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
       shots.push({ file: `${name}.png`, what: `Rev-9 desk values not exact yet: ${name}` });
     };
-    const boxes = ['header.top', '.top-in > :not(nav)', '#hdrHealth .lbl', '#hdrHealth b', '#health', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .mini'];
+    const boxes = ['header.top', '.top-in > :not(nav)', '#hdrHealth .lbl', '#hdrHealth b', '#statusAlert', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .mini'];
     for (const viewport of [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }]) for (const theme of THEMES) {
       const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b);
       b.setNow(base.generatedAt);
@@ -391,7 +392,7 @@ try {
         const seen = await ev(`(() => {
           const probe = token => { const e = document.createElement('span'); e.style.color = 'var(' + token + ')'; document.body.append(e); const c = getComputedStyle(e).color; e.remove(); return c; };
           const h = document.getElementById('hdrHealth'), hi = h.querySelector('svg');
-          return { word: h.querySelector('b').textContent, headerIcon: hi.querySelector('use').getAttribute('href'), headerColour: getComputedStyle(hi).color,
+          return { word: h.title, headerIcon: hi.querySelector('use').getAttribute('href'), headerColour: getComputedStyle(hi).color,
             ok: probe('--ok'), bad: probe('--bad'), neutral: probe('--ink-3'),
             cards: [...document.querySelectorAll('.mini-label .st')].map(e => ({ text: e.textContent.trim(), tone: e.className,
               icon: e.querySelector('use').getAttribute('href'), colour: getComputedStyle(e.querySelector('svg')).color, style: getComputedStyle(e).fontStyle })),
@@ -400,14 +401,14 @@ try {
         })()`);
         const words = neutral ? 'not exact yet' : 'not reported by the broker';
         check('not-exact', `${tag} ${i}: header word, tone and icon reflect the actual null reason`,
-          seen.word === (neutral ? 'Board OK' : 'Needs fix') && seen.headerIcon === (neutral ? '#i-ok' : '#i-stop') && seen.headerColour === (neutral ? seen.ok : seen.bad), seen);
+          (neutral ? /^Live · updated/.test(seen.word) : seen.word === 'Board numbers are missing') && seen.headerIcon === (neutral ? '#i-check' : '#i-stop') && seen.headerColour === (neutral ? seen.ok : seen.bad), seen);
         checkHeaderLayout('not-exact', `${tag} ${i} ${seen.word}`, seen.headerLayout);
         check('not-exact', `${tag} ${i}: all three desk cards use the neutral info icon only for not-exact values`, seen.cards.length === 3 && seen.nulls && seen.cards.every(c =>
           c.text === `Numbers: unavailable · ${words}` && c.tone === `st ${neutral ? 'none' : 'bad'}` && c.icon === (neutral ? '#i-info' : '#i-stop') && c.colour === (neutral ? seen.neutral : seen.bad) && c.style === 'normal'), seen.cards);
         check('not-exact', `${tag} ${i}: no overflow, clipping, italics or coloured edge accents`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length && !seen.gui.italics.length && !seen.gui.borders.length, seen);
         const after = await rects(boxes);
         check('not-exact', `${tag} ${i}: header, hero and desk boxes have exactly 0 px shift`, J(baseline) === J(after), { before: baseline, after });
-        await click('#healthMore');
+        await click('#hdrHealth');
         const details = await ev(`(() => {
           const pop = document.getElementById('healthPop');
           const notes = [...pop.querySelectorAll('.st')].filter(e => e.textContent.trim() === 'Desk values are not exact yet');
@@ -635,7 +636,7 @@ try {
       console.log(`executor-font ${viewport.name} ${theme}: ${J(fonts)}`);
       const baseline = await geometry();
       const headerClass = await ev(`document.getElementById('hdrHealth').className`);
-      const brokerWord = await ev(`document.querySelector('#hdrHealth .lbl-long').textContent`);
+      const brokerWord = await ev(`document.querySelector('#healthPop [data-term="broker"]').parentElement.textContent`);
       const { snapshot } = designSnapshot(NOW);
       const healthy = structuredClone(snapshot.safety.executor);
       const cases = [
@@ -653,20 +654,20 @@ try {
         const pushed = await b.push(snapshot);
         check('executor-health', `${tag}: the real inbox accepts the state`, pushed.status === 200, pushed);
         await ev('window.__joedesk.refresh().then(() => true)');
-        await waitFor(page, `document.querySelector('#hdrHealth b').textContent.trim() === ${J(c.label)} && document.querySelector('#rtRows .rt-row:nth-child(4) .val').innerText.includes(${J(c.start.split(' · ')[0])})`);
+        await waitFor(page, `document.getElementById('hdrHealth').dataset.tone === ${J(c.headerTone)} && document.querySelector('#rtRows .rt-row:nth-child(4) .val').innerText.includes(${J(c.start.split(' · ')[0])})`);
         await settle(page);
         const seen = await ev(`(() => {
           const row = document.querySelector('#rtRows .rt-row:nth-child(4)'), status = row.querySelector('.rt-reserve > .st'), h = document.getElementById('hdrHealth'), ledger = row.querySelector('[role="group"]');
           const probe = document.createElement('span'); probe.style.color = 'var(--${c.tone === 'ok' ? 'ok' : c.tone === 'bad' ? 'bad' : 'warn'})'; document.body.append(probe); const want = getComputedStyle(probe).color; probe.remove();
           probe.style.color = 'var(--${c.headerTone})'; document.body.append(probe); const headerWant = getComputedStyle(probe).color; probe.remove();
           return { text: row.querySelector('.val').innerText.trim(), tone: status.className, colour: getComputedStyle(status.querySelector('.i')).color, want, headerWant,
-            label: h.querySelector('b').textContent.trim(), brokerWord: h.querySelector('.lbl-long').textContent, headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
+            label: h.title, brokerWord: document.querySelector('#healthPop [data-term="broker"]').parentElement.textContent, headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
             name: h.getAttribute('aria-label'), title: h.getAttribute('title'), ledger: ledger && { title: ledger.title, name: ledger.getAttribute('aria-label') } };
         })()`);
         const text = N(seen.text);
-        const title = c.fields.reason === 'ledger_size_limit' ? REASON_COPY.ledger_size_limit : null;
-        check('executor-health', `${tag}: row copy, semantic tone and header label/tone`, text.startsWith(c.start) && text.endsWith(' · brakes off · checked 19:42:13') && seen.tone === `st ${c.tone}` && seen.colour === seen.want && seen.label === c.label && seen.headerTone.includes(`tone-${c.headerTone}`), seen);
-        check('executor-health', `${tag}: full accessible explanation and title; recovery clears the title`, seen.name === `${c.label}${title ? `: ${title}` : ''}, broker connection OK. Open Desk.` && seen.title === title, seen);
+        const title = seen.label;
+        check('executor-health', `${tag}: row copy, semantic tone and header label/tone`, text.startsWith(c.start) && text.endsWith(' · brakes off · checked 19:42:13') && seen.tone === `st ${c.tone}` && seen.colour === seen.want && (c.headerTone === 'ok' ? /^Live · updated/.test(seen.label) : seen.label === 'Trade record is full') && seen.headerTone.includes(`tone-${c.headerTone}`), seen);
+        check('executor-health', `${tag}: complete status sentence in the accessible name and title`, seen.name === `${c.headerTone === 'ok' ? 'Live. Numbers are up to date' : seen.label}. Open status details.` && seen.title === title, seen);
         check('executor-health', `${tag}: header keeps board health's semantic colour`, seen.headerColour === seen.headerWant, seen);
         check('executor-health', `${tag}: exact bytes in the ledger title and accessible name, only when reported`, c.ledger ? seen.ledger?.title === c.ledger && seen.ledger?.name === c.ledger : seen.ledger === null && !text.includes('ledger'), seen.ledger);
         if (c.name === 'healthy') check('executor-health', `${tag}: healthy copy is unchanged`, text === c.start, seen);
@@ -680,10 +681,11 @@ try {
           await crop('header.top', `${viewport.name}-${theme}-header-executor-${c.name}`);
         }
         await click('.nav [data-go="desk"]');
-        await click('#healthMore');
+        await click('#hdrHealth');
         const desk = await ev(`(() => {
           const pop = document.getElementById('healthPop');
-          return { open: pop.classList.contains('on'), problem: pop.querySelector('p').textContent, headerTone: document.documentElement.dataset.joeState,
+          // The status summary comes first; keep checking the diagnostic paragraph.
+          return { open: pop.classList.contains('on'), problem: pop.querySelector('p:not(.status-sentence)').textContent, headerTone: document.documentElement.dataset.joeState,
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
         check('executor-health', `${tag}: Desk explains executor health without changing the board tone`, desk.open && N(desk.problem) === (c.problem ?? 'No current problems.') && desk.headerTone === c.headerTone, desk);
@@ -691,80 +693,46 @@ try {
         if (['capture-degraded', 'ledger-full'].includes(c.name)) await crop('#healthPop', `${viewport.name}-${theme}-desk-executor-${c.name}`);
         await click('.nav [data-go="settings"]');
       }
-      // Every header label, including loading and the last stale age before
-      // the 180 s stopped-feed state, uses the existing production markup.
-      // Keep the baseline audits, frozen markup and 0 px movement check.
+      // The production status renderer: every ranked reason, in the same
+      // viewport/font. Fixed geometry, complete title/name, and one-line clamp.
       const header = await ev(`document.getElementById('hdrHealth').innerHTML`);
-      const ctx = { feeds: { data: { value: snapshot } }, states: { gateway: { state: 'fresh' } } };
-      const reference = headerHealth(ctx, { reason: 'board_ok', label: 'Board OK', statusTone: 'ok' });
-      for (const h of [...healthCases, { label: 'Loading', statusTone: 'none' }, { label: 'Check', statusTone: 'warn' }]) {
-        const view = headerHealth(ctx, h);
-        // Measure both states in one synchronous page task. No stylesheet,
-        // viewport, fixture or broker change, and no tick can interleave.
-        // Frozen pre-JOED-44 markup is covered by the Node unit test.
+      const ctx = { feeds: { data: { value: snapshot, receivedAt: NOW, generatedAdvancedAt: NOW } },
+        states: { gateway: { state: 'fresh', ageSeconds: 179 } }, now: at(NOW, 9) };
+      const reference = headerHealth(ctx, { reason: 'board_ok', tone: 'green', statusTone: 'ok' });
+      for (const h of healthCases) {
+        const view = headerHealth(ctx, { ...h, tone: h.statusTone === 'ok' ? 'green' : h.statusTone === 'bad' ? 'red' : 'yellow' });
         const measured = await ev(`(() => {
           const button = document.getElementById('hdrHealth');
           button.innerHTML = ${J(reference.html)};
-          const before = __audit.rects(${J(geometrySelectors)}), beforeBroker = button.querySelector('.lbl-long').textContent;
+          const before = __audit.rects(${J(geometrySelectors)});
           button.innerHTML = ${J(view.html)};
-          const after = __audit.rects(${J(geometrySelectors)}), afterBroker = button.querySelector('.lbl-long').textContent;
-          const label = button.querySelector('b');
-          const iconNode = button.querySelector('svg'), iconVisible = __audit.visible(iconNode);
-          const box = button.getBoundingClientRect(), cell = label.getBoundingClientRect(), css = getComputedStyle(button), icon = iconNode.getBoundingClientRect();
-          const range = document.createRange(), glyphs = [], words = [];
-          const edges = r => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
-          range.selectNodeContents(label);
-          const lines = [...range.getClientRects()].map(edges);
-          const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT);
-          for (let n; (n = walker.nextNode());) {
-            for (const match of n.textContent.matchAll(/\\S/gu)) {
-              range.setStart(n, match.index); range.setEnd(n, match.index + match[0].length);
-              glyphs.push({ glyph: match[0], ...edges(range.getBoundingClientRect()) });
-            }
-            for (const match of n.textContent.matchAll(/\\S+/gu)) {
-              range.setStart(n, match.index); range.setEnd(n, match.index + match[0].length);
-              words.push({ text: match[0], lines: [...range.getClientRects()].map(edges) });
-            }
-          }
-          const inside = glyphs.length > 0 && glyphs.every(r => r.left >= Math.max(cell.left, box.left + parseFloat(css.paddingLeft)) - 0.5 && r.right <= Math.min(cell.right, box.right - parseFloat(css.paddingRight)) + 0.5 && r.top >= box.top && r.bottom <= box.bottom);
-          const iconInside = !iconVisible || (icon.left >= box.left && icon.right <= box.right && icon.top >= box.top && icon.bottom <= box.bottom);
-          const iconOverlap = iconVisible ? glyphs.filter(r => Math.min(r.right, icon.right) - Math.max(r.left, icon.left) > 0.5 && Math.min(r.bottom, icon.bottom) - Math.max(r.top, icon.top) > 0.5) : [];
-          const ellipsis = css.textOverflow === 'ellipsis' || getComputedStyle(label).textOverflow === 'ellipsis' || /…|\\.\\.\\./u.test(label.textContent);
-          const row = document.querySelector('.top-in'), rowBox = row.getBoundingClientRect(), rowCSS = getComputedStyle(row);
+          button.title = ${J(view.title)}; button.setAttribute('aria-label', ${J(view.label)});
+          const after = __audit.rects(${J(geometrySelectors)}), label = button.querySelector('b');
+          const row = document.querySelector('.top-in'), rowBox = row.getBoundingClientRect();
           const first = row.querySelector('.brand').getBoundingClientRect(), last = document.getElementById('themeBtn').getBoundingClientRect();
-          const items = [...row.children].filter(__audit.visible).map(e => e.getBoundingClientRect());
-          const inRow = items.every((r, i) => r.left >= rowBox.left + parseFloat(rowCSS.paddingLeft) - 0.5 && r.right <= rowBox.right - parseFloat(rowCSS.paddingRight) + 0.5 && (!i || r.left >= items[i - 1].right - 0.5));
-          return { before, after, beforeBroker, afterBroker, inRow, headerLayout: (${headerLayout.toString()})(),
-            label: { text: label.textContent, lineCount: lines.length, lines, glyphs, words, inside, ellipsis, cell: edges(cell), pill: edges(box), icon: edges(icon), iconVisible, iconInside, iconOverlap },
-            height: { header: rowBox.height, button: box.height },
-            inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: rowCSS.paddingLeft, paddingRight: rowCSS.paddingRight },
+          const css = getComputedStyle(row);
+          return { before, after, headerLayout: (${headerLayout.toString()})(),
+            clamps: __audit.clamps().filter(c => c.text === label.innerText.trim().slice(0, 60)),
+            title: button.title, name: button.getAttribute('aria-label'), icon: button.querySelector(':scope > svg use').getAttribute('href'),
+            height: { header: rowBox.height, button: button.getBoundingClientRect().height },
+            inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: css.paddingLeft, paddingRight: css.paddingRight },
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
-        const evidence = { reason: h.reason ?? h.label.toLowerCase(), label: measured.label, inRow: measured.inRow, height: measured.height, horizontal: measured.horizontal, clipping: measured.clipping };
-        console.log(`executor-header ${viewport.name} ${theme}: ${J(evidence)}`);
-        const intactWords = measured.label.words.length > 0 && measured.label.words.every(word => word.lines.length === 1);
-        const labelCheck = h.reason === 'ledger_size_limit' ? 'existing Needs fix label fits' : 'existing label fits';
-        check('executor-health', `${viewport.name} ${theme} header ${measured.label.text}: ${labelCheck} on one line; no clipping, overlap or ellipsis`, measured.label.lineCount === 1 && intactWords && measured.label.inside && measured.label.iconInside && !measured.label.iconOverlap.length && !measured.label.ellipsis && measured.inRow && measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, evidence);
-        checkHeaderLayout('executor-health', `${viewport.name} ${theme} header ${h.label}`, measured.headerLayout);
-        check('executor-health', `${viewport.name} ${theme} header ${h.label}: only phone Loading hides its icon`, measured.label.iconVisible === !(h.label === 'Loading' && viewport.width <= 700), evidence);
-        check('executor-health', `${viewport.name} ${theme} header ${h.label}: original header and button heights`, measured.height.header === (viewport.mobile ? 54 : 58) && measured.height.button === (viewport.mobile ? 44 : 34), measured.height);
-        if (viewport.mobile && headerCrops.has(h.reason)) {
-          // A live tick may render between the synchronous measurement and
-          // screenshot. Pin a static copy; leave page work free to run.
-          await captureHeaderCrop(page, view, selector => crop(selector, `${viewport.name}-${theme}-header-${headerCrops.get(h.reason)}`));
-        }
-        if (viewport.width === 360) check('executor-health', `${theme} header ${h.label}: original 16 px inset at 360`, measured.inset.left === 16 && measured.inset.right === 16 && measured.inset.paddingLeft === '16px' && measured.inset.paddingRight === '16px', measured.inset);
-        const moved = exactMoves(measured.before, measured.after);
-        check('executor-health', `${viewport.name} ${theme} header ${h.label}: exactly 0 px movement including the reserved status in the same page and broker state`, !moved.length && measured.beforeBroker === measured.afterBroker && measured.afterBroker === brokerWord, { moved, beforeBroker: measured.beforeBroker, afterBroker: measured.afterBroker });
+        check('executor-health', `${viewport.name} ${theme} ${h.reason}: one line with complete accessible sentence and no overflow`,
+          measured.clamps.length === 1 && measured.clamps.every(c => c.ok) && measured.title === view.sentence && measured.name === view.label &&
+          measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, measured);
+        checkHeaderLayout('executor-health', `${viewport.name} ${theme} ${h.reason}`, measured.headerLayout);
+        check('executor-health', `${viewport.name} ${theme} ${h.reason}: header and button retain their heights`,
+          measured.height.header === (viewport.width <= 960 ? 54 : 58) && measured.height.button === (viewport.width <= 960 ? 44 : 34), measured.height);
+        check('executor-health', `${viewport.name} ${theme} ${h.reason}: exactly 0 px movement`, !exactMoves(measured.before, measured.after).length, measured);
+        if (viewport.width === 360) check('executor-health', `${theme} ${h.reason}: 16 px phone inset`, measured.inset.left === 16 && measured.inset.right === 16, measured.inset);
+        if (viewport.mobile && headerCrops.has(h.reason)) await captureHeaderCrop(page, view,
+          selector => crop(selector, `${viewport.name}-${theme}-header-${headerCrops.get(h.reason)}`));
       }
       await ev(`document.getElementById('hdrHealth').innerHTML = ${J(header)}`);
-      // Guard every viewport/theme immediately after the header loop. A lost
-      // board frame must fail here, before the large-ledger render assertion.
       const rendersBefore = await ev('(() => { const before = window.__joedesk.renders; return window.__joedesk.refresh().then(() => before); })()');
       let renderWait = null;
-      try {
-        await waitFor(page, `window.__joedesk.renders > ${rendersBefore}`, 5000);
-      } catch (error) { renderWait = error.message; }
+      try { await waitFor(page, `window.__joedesk.renders > ${rendersBefore}`, 5000); } catch (error) { renderWait = error.message; }
       const rendersAfter = await ev('window.__joedesk.renders');
       check('executor-health', `${viewport.name} ${theme}: board keeps rendering after the header crops`, renderWait === null && rendersAfter > rendersBefore, { rendersBefore, rendersAfter, renderWait });
       // Compare every real board-health sentence with the hidden reserve in

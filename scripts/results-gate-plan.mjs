@@ -37,8 +37,8 @@ export function validateP4Scenarios(scenarios) {
   }
 }
 
-// Counts are static successful-run check counts, reconciled to the 4,954-check
-// baseline in run 39793917962. A view is one fixture/interaction at one width
+// Counts are static successful-run check counts, reconciled to the 4,957-check
+// baseline in run 39929690916 (including fresh check-ins). A view is one fixture/interaction at one width
 // and theme; a workflow may also capture its sheet, tooltip or detail crop.
 // coverage describes what a view tests, independently of zone selection.
 // Repeated date assertions stay in the full run; the subset below covers
@@ -135,8 +135,8 @@ export function createP4Views(realFixtures = []) {
   for (const family of ['auth', 'invalid']) date('states', family, STANDARD.filter(([, t]) => t === 'light'), 1);
   date('states', 'kept-mismatch', PAIR, 1);
   date('vienna', 'dst-calendar', PAIR, w => w === '1440' ? 11 : 10);
-  layout('cards', 'normal', [['390', 'light'], ['390', 'dark']], 3, 'Literal heartbeat stress strings and desk-card hit areas.');
-  layout('cards', 'wide-font', [['390', 'light']], 3, 'Literal heartbeat stress strings in a wide font.');
+  layout('cards', 'normal', [['390', 'light'], ['390', 'dark']], 4, 'Fresh check-ins hidden, then stale heartbeat stress strings and desk-card hit areas.');
+  layout('cards', 'wide-font', [['390', 'light']], 4, 'Fresh check-ins hidden, then stale heartbeat stress strings in a wide font.');
   for (const family of ['basis', 'money-now']) {
     date('r1', family + '-inputs', [['', '']], 1);
     date('r1', family, PAIR, w => 40 + auditChecks(w));

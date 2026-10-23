@@ -129,20 +129,20 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   const later = reserveVersion({ ...next, version_scheme: 'inspr-calendar-v2' }, laterUTC);
   assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, next.release_sequence + 1);
 });
-test('JOED-60: broker-gap candidate follows the deployed sequence 27; About preserves deployed history and excludes aborted candidates', () => {
-  assert.equal(prep.ticket, 'JOED-60');
-  assert.equal(next.release_sequence, 28);
+test('JOED-70: calm status-line candidate follows the deployed sequence 28; About preserves deployed history and excludes aborted candidates', () => {
+  assert.equal(prep.ticket, 'JOED-70');
+  assert.equal(next.release_sequence, 29);
   assert.equal(active.status, 'candidate');
-  assert.equal(active.note, 'Calm header for a brief broker-check gap (JOED-60)');
-  assert.equal(oldRelease.version, '261021083537.0.0');
-  assert.equal(oldRelease.release_sequence, 27);
+  assert.equal(active.note, 'Calm status line (JOED-70)');
+  assert.equal(oldRelease.version, '261021113113.0.0');
+  assert.equal(oldRelease.release_sequence, 28);
   assert.equal(oldRelease.status, 'published-candidate');
   assert.equal(oldRelease.source_branch, 'main');
-  assert.equal(oldRelease.source_commit, '040d6756e92dc7c4e05fcf63b865242819b3d0ce');
-  assert.equal(oldRelease.release_set_ticket, 'JOED-59');
+  assert.equal(oldRelease.source_commit, 'a60f4c561b05fa26ee8fa1dd31ab725714399340');
+  assert.equal(oldRelease.release_set_ticket, 'JOED-60');
   assert.equal(oldRelease.disposition, 'deployed');
   assert.equal(oldRelease.deployed, true);
-  assert.equal(oldRelease.note, 'live on csb0 since 2026-10-21T11:22:48Z (JOED-59)');
+  assert.equal(oldRelease.note, 'live on csb0 since 2026-10-21T15:22:58Z (JOED-60)');
   assert.deepEqual(prep.anchor, { legacy_scheme: 'calendar', last_legacy_version: '26.09.21.12.00',
     last_legacy_sequence: 23, first_calendar_version: '261016151218.0.0', first_calendar_sequence: 24 });
   assert.equal(lastDeployed.version, oldRelease.version);
@@ -154,14 +154,15 @@ test('JOED-60: broker-gap candidate follows the deployed sequence 27; About pres
   assert.equal(ui.VERSION_HISTORY[0].version, active.version);
   assert.equal(ui.VERSION_HISTORY[0].date, next.reserved_at.slice(0, 10));
   assert.equal(ui.VERSION_HISTORY[1].version, lastDeployed.version);
-  assert.equal(ui.VERSION_HISTORY[2].version, '261021015923.0.0');
-  assert.equal(ui.VERSION_HISTORY[3].version, prep.anchor.last_legacy_version);
+  assert.equal(ui.VERSION_HISTORY[2].version, '261021083537.0.0');
+  assert.equal(ui.VERSION_HISTORY[3].version, '261021015923.0.0');
+  assert.equal(ui.VERSION_HISTORY[4].version, prep.anchor.last_legacy_version);
   for (const version of ['261019102825.0.0', prep.anchor.first_calendar_version]) {
     assert.equal(ui.VERSION_HISTORY.some(r => r.version === version), false,
       'About must not imply either superseded candidate was deployed');
   }
 });
-test('JOED-60 check-release: accepts the broker-gap reservation and rejects equal or earlier reservations after integrity verification', t => {
+test('JOED-70 check-release: accepts the calm status-line reservation and rejects equal or earlier reservations after integrity verification', t => {
   const root = temporary(t), closure = read('release/closure.json');
   for (const name of [...closure.files.map(f => f.path), 'release/closure.json', 'scripts/check-release.mjs']) {
     const target = join(root, name); fs.mkdirSync(join(target, '..'), { recursive: true });
@@ -171,7 +172,7 @@ test('JOED-60 check-release: accepts the broker-gap reservation and rejects equa
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.equal(JSON.parse(accepted.stdout).candidate, next.version);
-  for (const [version, reserved_at] of [['261021083537.0.0', '2026-10-21T08:35:37Z'], ['261021083536.0.0', '2026-10-21T08:35:36Z']]) {
+  for (const [version, reserved_at] of [['261021113113.0.0', '2026-10-21T11:31:13Z'], ['261021113112.0.0', '2026-10-21T11:31:12Z']]) {
     const invalid = structuredClone(prep);
     Object.assign(invalid.reservation, { version, reserved_at });
     fs.writeFileSync(join(root, 'release/preparation.json'), JSON.stringify(invalid, null, 2) + '\n');

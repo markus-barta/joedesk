@@ -2,14 +2,16 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261021113113.0.0` (`inspr-calver-3`, stable sequence 28), reserved once at `2026-10-21T11:31:13Z` for a calm header during a brief broker-check gap ([JOED-60](https://aeon.barta.cm/p/JOED/JOED-60)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261023100632.0.0` (`inspr-calver-3`, stable sequence 29), reserved once at `2026-10-23T10:06:32Z` for a calm status line ([JOED-70](https://aeon.barta.cm/p/JOED/JOED-70)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261021083537.0.0` / sequence 27,
-published on `main` at `040d6756e92dc7c4e05fcf63b865242819b3d0ce` under JOED-59,
-live on csb0 since `2026-10-21T11:22:48Z`. `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261021113113.0.0` / sequence 28,
+published on `main` at `a60f4c561b05fa26ee8fa1dd31ab725714399340` under JOED-60,
+live on csb0 since `2026-10-21T15:22:58Z`. `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 28. Sequence 26 (`261021015923.0.0`) was previously deployed
-at `2026-10-21T08:15Z` (OPS-354 attempt 3), with the documented smoke variant on JOED-59.
+adoption for sequence 29. Sequence 27 (`261021083537.0.0`) was previously deployed
+and has been live on csb0 since `2026-10-21T11:22:48Z` (JOED-59). Sequence 26
+(`261021015923.0.0`) was previously deployed at `2026-10-21T08:15Z` (OPS-354
+attempt 3), with the documented smoke variant on JOED-59.
 
 The previous coordinate `261019102825.0.0` (stable sequence 25, rev 9) was
 published on `main` at `d36b5295295a6901e36fdf2dc0d64353ddf88d0e`; JOED-50
@@ -23,13 +25,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-28 candidate has not been published. The candidate
+cutover**. The sequence-29 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -79,7 +81,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261021113113.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261023100632.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -671,9 +673,9 @@ The baseline inventory (run 39793917962, without real producer fixtures) is:
 | budget | 0 | 1 |
 | **Total** | **31** | **293** |
 
-The subset is **31/324 views and 588/4,954 checks (11.87%)**, enforced at
-**≤25%** by the lightweight inventory test. The PR plan performs **6,130**
-checks (4,954 + 2 × 588), compared with 14,174 in fix1 and 14,862 for full ×3.
+The subset is **31/324 views and 588/4,957 checks (11.86%)**, enforced at
+**≤25%** by the lightweight inventory test. The PR plan performs **6,133**
+checks (4,957 + 2 × 588), compared with 14,174 in fix1 and 14,871 for full ×3.
 The measured agm2 Results times were **788 s** for baseline, **779 s** for the
 group subset and **744 s** for fix1's 93.06% view subset. At approximately
 **263 s** per full Vienna run, weighting this subset by check count projects
@@ -682,7 +684,7 @@ not a measurement: setup and interactions have different costs. The
 coordinator's PR CI on agm2 measures the actual result; no local browser run
 is part of this change.
 
-The lightweight tests also preserve the full 4,954-check inventory, exact
+The lightweight tests also preserve the full 4,957-check inventory, exact
 measured variants, explicit booleans, setup dependencies, sequential zone
 orchestration and executed-count reconciliation.
 Use an approved browser test host; an installed browser guard refusal is a
@@ -1159,9 +1161,10 @@ reviewed release process. Never reseal or republish `261016151218.0.0` or
 `261019102825.0.0` with new bytes. This tooling leaves contracts and pins unchanged;
 JOED-58 reserved sequence 26 for the cut-over retry's changed board bytes; that
 release was deployed. JOED-59 reserved sequence 27 for the changed health and
-smoke semantics; that release is now live. JOED-60 reserves sequence 28 for the
-bounded yellow broker-check warning. Never reseal or republish sequences 26 or
-27 with these new bytes.
+smoke semantics; that release is now live. JOED-60 reserved sequence 28 for the
+bounded yellow broker-check warning; that release is now live. JOED-70 reserves
+sequence 29 for the calm status line. Never reseal or republish sequences 26,
+27 or 28 with these new bytes.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
@@ -1307,6 +1310,49 @@ means degraded health: results capture is failing and trading continues. Setting
 shows the reason in yellow. Desk’s health explanation adds “Paper executor
 degraded: results capture failing, trading continues (ledger 3,2 MB of 8,0 MB).”
 using the reported size; without ledger fields it omits the parentheses.
+
+JOED-70 replaces the earlier header pair, always-visible status strip, fresh
+card check-ins and footer data age with one shared header status button.
+Green reads “Live · updated 9 s ago” (on a phone, “Live · 9 s”), using receipt
+age and the existing age formatter. Yellow/red show the top-ranked problem;
+“Emergency stop is ON” keeps first priority. Health ranking, all thresholds,
+JOED-60's broker gap, `not_exact_yet`, and Settings runtime content stay intact.
+The control has a fixed width and tabular numerals. Fitting yellow sentences
+appear in the control. At compact widths (≤1100 px), or when measurement shows
+the full sentence would overflow, it switches to a short label and the reserved
+32 px line below the header displays the complete sentence and action in yellow.
+Red always uses that line. Each non-green sentence appears once outside Details;
+green may stay compact on narrow screens. The line ends in an ellipsis when
+necessary and retains a complete title. Its space stays reserved in green, so
+tone changes and ticks cannot move the content.
+
+The header button and visible problem line open the shared, opaque Details
+dialog on every screen. Its full sentence wraps at the top, in view on opening.
+It holds the former strip's numbers, broker check age, emergency-stop state,
+data time/age, and all their existing term explanations, plus each desk's
+check-in age. Escape closes the dialog and returns focus to its opener
+(an open term tip consumes the first Escape). Fresh desk check-ins are hidden;
+at the existing 60-second boundary they return in the stale tone. The footer
+retains the read-only paper-board promise and version. A polite live region
+announces each change of ranked tone/reason once, without announcing age ticks.
+
+`node --test test/status-line.mjs` is the small local presentation suite, also
+included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,
+checks all Details terms on native focus/hover in a focused page, verifies the
+sentence is visible once, opens Details from each status control, and stresses
+every status sentence in fixed boxes. Fixture health expectations include the
+active KEEP policy and the browser's retained state clock on failed reads.
+P5 keeps executor/ledger priority and neutral not-exact checks,
+with complete status names/titles, token colours, crops and zero-movement
+checks. P4 now exercises desk-card placement only after the check-ins become
+stale. P6 checks Details from all four screens, red halt visibility without
+interaction, one announcement per transition, silent ticks, and recovery.
+Full and browser validation runs on agm2 CI; local work runs only syntax,
+the small unit file, and `git diff --check`.
+
+The following paragraph records the earlier header presentation and its
+historical evidence; JOED-70 supersedes its header wording and layout.
+
 Capture failure and a degraded executor without a reason leave the header’s
 board-data tone and label unchanged; the board does not infer capture failure.
 The `ledger_size_limit` reason is red regardless of executor status: the header

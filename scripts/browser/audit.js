@@ -35,6 +35,18 @@
     return bg;
   }
   const ownText = el => [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.nodeValue).join('').trim();
+  // One visual line. An ellipsis fragment sits inside the text's band; a
+  // wrapped second line does not overlap it.
+  function lineBands(rects) {
+    const bands = [];
+    for (const rect of rects) {
+      if (rect.width <= 0) continue;
+      const band = bands.find(b => Math.min(b.bottom, rect.bottom) - Math.max(b.top, rect.top) > 0.5);
+      if (band) { band.top = Math.min(band.top, rect.top); band.bottom = Math.max(band.bottom, rect.bottom); }
+      else bands.push({ top: rect.top, bottom: rect.bottom });
+    }
+    return bands.length;
+  }
 
   window.__audit = {
     visible, parseColor,
@@ -49,14 +61,20 @@
       });
       const overlaps = items.flatMap((a, i) => items.slice(i + 1).filter(b =>
         Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top)).map(b => [a.selector, b.selector]));
-      const button = row.querySelector('#hdrHealth'), label = button.querySelector('.lbl'), word = label.querySelector('b');
+      const button = row.querySelector('#hdrHealth'), label = button.querySelector('.lbl'), word = [...label.querySelectorAll('b > span')].find(visible) ?? label.querySelector('b');
       const range = document.createRange(); range.selectNodeContents(word);
-      const mark = row.querySelector('.brand .word'), text = mark.firstElementChild;
+      const symbol = button.querySelector(':scope > svg'), icon = symbol.getBoundingClientRect(), target = button.getBoundingClientRect(), text = label.getBoundingClientRect();
+      const iconInside = !visible(symbol) || (icon.left >= target.left && icon.right <= target.right && icon.top >= target.top && icon.bottom <= target.bottom);
+      const iconOverlap = visible(symbol) && Math.min(icon.right, text.right) > Math.max(icon.left, text.left) && Math.min(icon.bottom, text.bottom) > Math.max(icon.top, text.top);
+      const mark = row.querySelector('.brand .word'), brandText = mark.firstElementChild;
       return { items, overlaps, paper: row.querySelector('#modeLabel').textContent.trim(),
         inRow: items.every(b => b.visible && b.left >= r.left + parseFloat(css.paddingLeft) - 0.02 && b.right <= r.right - parseFloat(css.paddingRight) + 0.02 && b.top >= r.top && b.bottom <= r.bottom),
-        wordmarkClipped: visible(mark) && text.getBoundingClientRect().width > mark.getBoundingClientRect().width + 0.02,
+        wordmarkClipped: visible(mark) && brandText.getBoundingClientRect().width > mark.getBoundingClientRect().width + 0.02,
         status: { height: label.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(label).lineHeight),
-          lines: range.getClientRects().length, nowrap: getComputedStyle(label).whiteSpace, word: word.textContent },
+          // Chromium may return the clipped text and its ellipsis as two
+          // rectangles. Rectangles that share a vertical band are one line.
+          lines: lineBands(range.getClientRects()), nowrap: getComputedStyle(label).whiteSpace, word: word.textContent,
+          iconInside, iconOverlap, tabular: getComputedStyle(button).fontVariantNumeric.includes('tabular-nums') },
         overflow: button.scrollWidth > button.clientWidth || label.scrollWidth > label.clientWidth,
         horizontal: this.horizontal() };
     },
@@ -116,9 +134,14 @@
         const whole = Math.abs(shown - Math.round(shown)) < 0.02 && Math.round(shown) >= 1 && Math.round(shown) <= lines;
         const ellipsis = lines === 1 ? cs.textOverflow === 'ellipsis' && cs.whiteSpace === 'nowrap' && cs.overflowX === 'hidden'
           : cs.webkitLineClamp === String(lines) && cs.overflowY === 'hidden';
-        const full = el.textContent.trim();
-        const given = lines === 1 ? el.closest('[title]')?.title === full : Boolean(el.closest('[data-say]'));
-        const truncated = lines === 1 ? el.scrollWidth > el.clientWidth + 0.5 : el.scrollHeight > el.clientHeight + 0.5;
+        const full = el.innerText.trim();
+        const complete = el.querySelector('.status-full')?.textContent ?? full;
+        const words = text => text?.replace(/\u00a0/g, ' ');
+        const given = lines === 1 ? words(el.closest('[title]')?.title) === words(complete) : Boolean(el.closest('[data-say]'));
+        // Header labels clip inside their own fixed grid track. The outer
+        // clamp cannot report the hidden overflow of that visible child.
+        const text = [...el.querySelectorAll('.status-full, .status-compact')].find(visible) ?? el;
+        const truncated = lines === 1 ? text.scrollWidth > text.clientWidth + 0.5 : el.scrollHeight > el.clientHeight + 0.5;
         return { ok: !cut && whole && ellipsis && given, text: full.slice(0, 60), lines, shown: Number(shown.toFixed(3)), cut, ellipsis, given, truncated };
       });
     },
@@ -211,7 +234,7 @@
       const past = [...document.querySelectorAll('body *')].filter(el => {
         if (el.closest('svg') && el.tagName.toLowerCase() !== 'svg') return false;
         const r = el.getBoundingClientRect();
-        return r.width > 0 && r.right > edge && !el.closest('.vh') && visible(el) && !inFixed(el);
+        return r.width > 0 && r.right > edge && !el.closest('.vh, [data-clamp]') && visible(el) && !inFixed(el);
       }).map(el => `${name(el)} ${Math.round(el.getBoundingClientRect().right)} > ${Math.round(edge)}`);
       const top = document.querySelector('.top-in'), cs = getComputedStyle(top), t = box(top);
       const row = { left: t.left + parseFloat(cs.paddingLeft) - 0.5, right: t.right - parseFloat(cs.paddingRight) + 0.5, top: t.top - 0.5, bottom: t.bottom + 0.5 };
@@ -224,6 +247,7 @@
         if (!layout.inRow || layout.overlaps.length || layout.paper !== 'PAPER') faults.push('header containment or overlap');
         if (layout.wordmarkClipped) faults.push('partial wordmark');
         if (status.lines !== 1 || status.nowrap !== 'nowrap' || Math.abs(status.height - status.lineHeight) >= 0.02) faults.push('status is not exactly one line box');
+        if (!status.iconInside || status.iconOverlap || !status.tabular) faults.push('status icon or numerals');
         return faults;
       };
       const compact = innerWidth <= compactMax;
@@ -263,12 +287,16 @@
           range.selectNodeContents(n);
           // The page, or the fixed chrome above it (header, bottom bar, Settings' edit bar).
           const layer = Boolean(n.parentElement.closest('header.top, .bottom-nav, .editbar'));
-          for (const q of range.getClientRects()) if (q.width > 0.5 && q.height > 0.5) boxes.push({ text: n.nodeValue.trim().slice(0, 30), layer, q });
+          for (const raw of range.getClientRects()) {
+            const clamp = n.parentElement.closest('[data-clamp]')?.getBoundingClientRect();
+            const q = clamp ? { left: Math.max(raw.left, clamp.left), right: Math.min(raw.right, clamp.right), top: raw.top, bottom: raw.bottom, width: Math.min(raw.right, clamp.right) - Math.max(raw.left, clamp.left), height: raw.height } : raw;
+            if (q.width > 0.5 && q.height > 0.5) boxes.push({ node: n, text: n.nodeValue.trim().slice(0, 30), layer, q });
+          }
         }
         const hits = [];
         for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
           const a = boxes[i], c = boxes[j];
-          if (a.layer !== c.layer) continue;
+          if (a.layer !== c.layer || a.node === c.node) continue;
           if (Math.min(a.q.right, c.q.right) - Math.max(a.q.left, c.q.left) > 1 && Math.min(a.q.bottom, c.q.bottom) - Math.max(a.q.top, c.q.top) > 2) hits.push(`${a.text} × ${c.text}`);
         }
         return hits;
@@ -279,9 +307,9 @@
       // no overlap, inside the card, at most two heartbeat lines, one height.
       for (const [state, ago] of light.cards) {
         const heads = [...document.querySelectorAll('.dcard header')];
-        const keep = heads.map(h => [h.querySelector('.state > span').textContent, h.querySelector('.hb .age')?.textContent]);
+        const keep = heads.map(h => [h.querySelector('.state > span').textContent, h.querySelector('.hb').innerHTML]);
         const before = heads.map(h => box(h).height);
-        heads.forEach(h => { h.querySelector('.state > span').textContent = state; const a = h.querySelector('.hb .age'); if (a) a.textContent = ago; });
+        heads.forEach(h => { h.querySelector('.state > span').textContent = state; h.querySelector('.hb').innerHTML = '<span class=term>Checked in</span> <span class=age></span>'; h.querySelector('.hb .age').textContent = ago; });
         heads.forEach((h, i) => {
           const card = box(h.closest('.dcard')), hb = h.querySelector('.hb'), lines = Math.round(box(hb).height / parseFloat(getComputedStyle(hb).lineHeight));
           const range = document.createRange();
@@ -298,35 +326,22 @@
           if (Math.abs(box(h).height - before[i]) > 0.5) faults.push(`height ${before[i]} → ${box(h).height}`);
           if (faults.length) out.cards.push({ card: h.closest('.dcard').id, texts: `${state} · ${ago}`, faults });
         });
-        heads.forEach((h, i) => { h.querySelector('.state > span').textContent = keep[i][0]; const a = h.querySelector('.hb .age'); if (a) a.textContent = keep[i][1]; });
+        heads.forEach((h, i) => { h.querySelector('.state > span').textContent = keep[i][0]; h.querySelector('.hb').innerHTML = keep[i][1]; });
       }
-      const b = health.querySelector('b'), long = health.querySelector('.lbl-long'), lbl = health.querySelector('.lbl') ?? b;
-      const keep = [b.textContent, long.textContent];
+      const b = health.querySelector('b'), lbl = health.querySelector('.lbl');
+      const spans = [...b.children], keep = spans.map(n => n.textContent), title = b.title;
       const main = document.getElementById('main'), header = document.querySelector('header.top');
       const still = () => [header, ...items, lbl, b, main].map(el => ({ id: name(el), ...box(el) }));
       const base = still();
-      for (const label of light.labels) for (const word of light.brokers) {
-        b.textContent = label; long.textContent = `· ${word}`;
+      for (const label of light.labels) {
+        spans.forEach(n => n.textContent = label); b.title = label;
         const faults = headerFaults();
         still().forEach((r, i) => { if (['left', 'top', 'width', 'height'].some(k => r[k] !== base[i][k])) faults.push(`${r.id} moved`); });
-        const h = box(health), hs = getComputedStyle(health);
-        const lines = Math.round(lbl.getBoundingClientRect().height / parseFloat(getComputedStyle(lbl).lineHeight));
-        for (const part of [b, long].filter(visible)) {
-          const range = document.createRange();
-          range.selectNodeContents(part);
-          const r = range.getBoundingClientRect();
-          if (r.left < h.left + parseFloat(hs.paddingLeft) - 1 || r.right > h.right - parseFloat(hs.paddingRight) + 1 || r.top < h.top - 0.5 || r.bottom > h.bottom + 0.5) faults.push(`${part === b ? 'label' : 'broker word'} leaves the button`);
-        }
-        if (visible(long)) {
-          const range = document.createRange(); range.selectNodeContents(b);
-          const labelRight = range.getBoundingClientRect().right;
-          range.selectNodeContents(long);
-          if (labelRight > range.getBoundingClientRect().left + 0.02) faults.push('label overlaps broker word');
-        }
-        if (lines !== 1) faults.push(`${lines} lines`);
-        if (faults.length) out.labels.push({ light: `${label} · ${word}`, faults });
+        const clamp = this.clamps().find(c => c.text === b.innerText.trim().slice(0, 60));
+        if (!clamp?.ok) faults.push('status lacks a whole line, ellipsis or full title');
+        if (faults.length) out.labels.push({ light: label, faults });
       }
-      b.textContent = keep[0]; long.textContent = keep[1];
+      spans.forEach((n, i) => n.textContent = keep[i]); b.title = title;
       return out;
     },
   };
