@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261023100632.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 29,
+  "source": {
+    "commit": "cdf843a587d1066d544beea92f7b8ceef5d103bf",
+    "tree": "e5f8d946252212d2821915ed8252f2d57647ff80"
+  },
+  "release_set_sha256": "a2553ec878958257d518551d03811359b4f083eaf2a31d9bdfad34308df91203",
+  "image_digest": "sha256:25b7e671b3788d26910c776e7126becad508e33310f6df772147b5fa5acd6b74",
+  "contract_set_sha256": "000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5",
+  "validation_run_id": "39966293196",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-10-23T14:53:28Z",
+    "operator_ticket": "OPS-354",
+    "rollback_reference": "OPS-354 / JOED-75: revert the csb0 board re-pin (nixcfg #1113, 186c84bf) and switch csb0; pull_policy never reuses the retained sequence-28 image; v2 data store unchanged (board-only switch); pre-switch board backup taken 2026-10-23T14:52:28Z"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-10-23T14:55:03Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-10-23T14:54:33Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-10-23T14:54:30Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-10-23T14:55:03Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-10-23T14:55:08Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; performed as a GET-only actor look of the served shell (UX 1 status control present, footer data age gone) plus the agm2 CI screenshots of the same build (main run 39966293196)"
+  },
+  "adopted_at": "2026-10-23T14:58:55Z"
+}
