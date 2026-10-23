@@ -1066,13 +1066,14 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   #deskHero, #heroL { display: contents; }
   #heroL .hero-primary { order: 1; padding: 14px; border-radius: 16px; background: var(--card); box-shadow: var(--shadow-card); }
   #heroL .performance { gap: 12px; }
+  #heroL .display { height: 53px; margin-top: 0; }
   #heroL .primary-caption { height: 48px; }
   #heroL .since-primary > .primary-caption { display: none; }
   #heroL .phone-primary-note { display: block; width: 100%; height: 48px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 12px; line-height: 16px; text-align: left; }
   .phone-primary-note > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
-  #heroL .say { height: 44px; line-height: 22px; }
+  #heroL .say { height: 44px; line-height: 22px; margin-top: 0; }
   #heroL .say > span { display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
-  #heroL .board-caption { height: 36px; line-height: 18px; }
+  #heroL .board-caption { height: 36px; line-height: 18px; margin: 0; }
   .desks-heading { order: 2; margin: 16px 0 8px; gap: 0 8px; }
   .desks-heading .sub { line-height: 18px; }
   #desks { order: 3; gap: 8px; }
@@ -1104,7 +1105,8 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .compact-figure .bn { font-size: min(13px, calc(100cqw / var(--digits) * 1.5)); line-height: 20px; letter-spacing: -.02em; }
   .compact-figure .bn .ar { display: none; }
   .disclosure-body { display: block; }
-  .desk-detail { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 14px; }
+  /* Header queries use the padded detail width, as the original card did. */
+  .desk-detail { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 14px; container-type: inline-size; }
   #accountDetail { padding: 0 12px 12px; }
   #heroL .kpis { margin-top: 0; }
   #chartDetail { padding: 0 12px 12px; }

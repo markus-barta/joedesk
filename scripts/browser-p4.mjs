@@ -16,6 +16,7 @@ import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, NOW, at, ACTOR, valid, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './browser/shots.mjs';
+import { setDeskDisclosures } from './browser/desk-disclosures.mjs';
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
@@ -799,6 +800,7 @@ try {
       if (!view('cards', font ? 'wide-font' : 'normal', viewport, theme)) continue;
       await configure(page, viewport, theme);
       await load(page, board.url, 'desk');
+      await setDeskDisclosures(page, true);
       if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
       check('P3-follow-up', `${tag}: fresh desk check-ins are hidden`, await page.evaluate(`![...document.querySelectorAll('.dcard .hb')].some(e => e.textContent.trim())`));
       board.setNow(at(NOW, 75)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);

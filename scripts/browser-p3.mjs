@@ -54,7 +54,7 @@ async function phoneFirstScreenChecks(page, viewport, theme, snapshot) {
   const d = await phoneDeskSnapshot(page).then(copyText);
   check('phone-first', `${tag}: primary euros/percent, one-line sentence and all ranked desk rows fit above the bottom navigation without scrolling`,
     d.primary.length === 2 && d.primary.every(p => /€/.test(p.euros) && /%/.test(p.pct)) && d.rows.length === 3 &&
-    d.rows.every(r => r.icon && r.state && r.top >= 0 && r.bottom <= Math.min(844, d.bottomBar.top)) &&
+    d.rows.every(r => r.icon && r.state && r.top >= 0 && r.bottom <= Math.min(844, d.bottomBar.top) - 8) &&
     d.sentence.bottom <= d.rows[0].top && await page.evaluate(`document.querySelector('#heroL .say > span').dataset.clamp === '1' && scrollY === 0`), d);
   const ranked = snapshot.desks.slice().sort((a, b) => {
     const x = decimalUnits(a.money.totalPnl.amount), y = decimalUnits(b.money.totalPnl.amount);

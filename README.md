@@ -1419,9 +1419,14 @@ its open count and Kept holdings its count. Since start retains a three-line
 phone caption whose complete text opens in the existing explanation tip;
 Today's one-line summary also opens its complete sentence there.
 
-CSS-only budget at 390×844: 54 px header + 56 px problem reserve + about
-299 px primary card + 64 px Desks heading + three 92 px rows and two 8 px
-gaps = about 765 px, just above the bottom navigation's 772 px top. The four
+CSS-only budget at 390×844: 54 px header + 56 px problem reserve +
+285 px primary card + 64 px Desks heading + three 92 px rows and two 8 px
+gaps = 751 px, leaving 21 px above the bottom navigation's 772 px top.
+The primary card is 14 + 20 + 32 + 0 + 53 + 24 + 48 + 0 + 44 + 0 + 36 + 14:
+padding, date, label, numeral margin, numeral, percent, caption, sentence
+margin, sentence target, board-caption margin, board caption and padding.
+The numeral, sentence and board-caption margins are explicitly zero on phones;
+money type sizes and the three-line Since start explanation are retained. The four
 76 px disclosure summaries, their margins, footer and bottom navigation
 allowance put the collapsed page at roughly 1,300–1,450 px. These are estimates,
 not browser measurements; CI owns rendered heights, both themes, 360/390 px,
@@ -1437,6 +1442,17 @@ not-exact/cash/partial-position cases separately check the collapsed warnings.
 The Positions preview capture opens its disclosure before taking the crop.
 `test/phone-first-screen.mjs` adds small, browser-free state/markup tests;
 the coordinator runs browser CI and review after this local handoff.
+
+Fix 1 corrects the disclosure handler's tooltip call so one native activation
+opens each detail and renders its charts. Missing Cash summaries use the same
+missing-feed reason as the figure; unavailable money takes priority over an
+old check-in while keeping its true neutral or error icon. Cash's value,
+broker caption and independent reason have explicit text separators even in
+a collapsed body. The padded full desk detail is the phone header's query
+container, preserving the name-row check-in and invisible 44 px term target.
+P4 opens those full cards before its unchanged header measurements; the shared
+clamp inventory now includes the phone's existing Since start explanation.
+P3 requires at least 8 px clearance above the navigation.
 
 Fix 3's best-effort CSS height budget at 1440 is about 480 px, versus about
 751 px before (the screenshot QA reported about 760 px). This assumes five

@@ -287,7 +287,9 @@ export function cashCaption(cell, key, { figure = false } = {}) {
     const amount = value == null ? '—' : cashAmount(value).text;
     const reason = why ?? (value == null ? cellReason('feed_not_received') : '');
     const state = value == null ? `not reported · ${esc(reason)}` : reason ? ` · ${esc(reason)}` : '';
-    return `<div class="kpi cash-kpi cash-block"><dt class="cash-label">Cash</dt><dd><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}"><span class="cash-amount${value == null ? ' muted' : ''}">${esc(amount)}</span><span class="cash-caption cash-reserve c"><span class="cash-description">cash · as the broker reports it</span><span class="cash-reason">${state}</span></span></span></dd></div>`;
+    return `<div class="kpi cash-kpi cash-block"><dt class="cash-label">Cash</dt><dd><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}"><span class="cash-amount${value == null ? ' muted' : ''}">${esc(amount)}</span>
+      <span class="cash-caption cash-reserve c"><span class="cash-description">cash · as the broker reports it</span>
+        <span class="cash-reason">${state}</span></span></span></dd></div>`;
   }
   return `<span class="cash-block"><span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span><span class="cash-reserve"><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}">${esc(view.text)}</span>${CASH_SIZING}</span></span>`;
 }

@@ -127,8 +127,13 @@ test('separate Cash figure preserves exact values and keeps unavailable wording 
     const hasValue = Boolean(cash.value && !cash.retained), caption = figure.querySelector('.cash-caption .cash-reason');
     assert.equal(figure.querySelector('.cash-amount').textContent, hasValue ? '€ 12.345,68' : '—');
     assert.equal(Boolean(figure.querySelector('.cash-amount.muted')), !hasValue);
+    const plain = actual.textContent.replace(/\s+/g, ' ').trim();
+    const captionText = figure.querySelector('.cash-caption').textContent.replace(/\s+/g, ' ').trim();
+    assert.equal(plain, `${hasValue ? '€ 12.345,68' : '—'} ${captionText}`, 'value and caption stay separate even while the Account body is collapsed');
+    const reasonText = caption.textContent.trim();
+    assert.equal(captionText, `cash · as the broker reports it${reasonText ? ` ${reasonText}` : ''}`);
     assert.equal(figure.querySelector('.cash-caption.c'), figure.querySelector('.cash-reserve'), 'the description and reason share the reserved caption block');
-    assert.equal(figure.querySelector('.cash-caption').children.length, 2, 'the fixed caption block needs no hidden sizing paragraphs');
+    assert.equal(figure.querySelector('.cash-caption').children.filter(n => typeof n !== 'string').length, 2, 'the fixed caption block needs no hidden sizing paragraphs');
     assert.equal(figure.querySelectorAll('.cash-sizing').length, 0);
     if (!hasValue) assert.match(caption.textContent, /^not reported · .+/);
     if (cash.reason === 'gateway_unconfirmed') assert.match(caption.textContent, /broker connection not confirmed/);

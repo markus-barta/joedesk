@@ -178,7 +178,7 @@ function start() {
   document.addEventListener('click', e => {
     const disclosure = e.target.closest('[data-desk-disclosure]');
     if (disclosure) {
-      tips.hide(true);
+      tips.hide();
       toggleDeskDisclosure(disclosure.dataset.deskDisclosure);
       render('disclosure');
       return;

@@ -44,16 +44,22 @@ export function toggleDeskDisclosure(key) {
 // Rank the actual selector states, including retained values. A fresh panel
 // may still contain partial rows; those reasons join the same summary ranking.
 export function disclosureProblem(candidates) {
+  const severity = { bad: 3, warn: 2, none: 1 };
   const problems = candidates.flatMap(([label, cell]) => {
     const p = statePhrase(cell, '');
     if (p.state === 'fresh') return [];
     const state = cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
       : p.state === 'not reported' ? 'not reported' : 'unavailable';
-    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], text: `${label}: ${state}${cell?.reason ? ` · ${cellReason(cell.reason)}` : ''}` }];
+    const reason = cell?.reason ?? (p.state === 'not reported' ? 'feed_not_received' : null);
+    // Unavailable money leads even when its honest not-exact icon is neutral;
+    // an old check-in must not obscure that the row's figures are unknown.
+    const priority = state === 'unavailable' ? 3 : severity[p.tone];
+    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, text: `${label}: ${state}${reason ? ` · ${cellReason(reason)}` : ''}` }];
   });
-  const severity = { bad: 3, warn: 2, none: 1 };
-  problems.sort((a, b) => severity[b.tone] - severity[a.tone]);
-  return problems.length ? { ...problems[0], detail: problems.map(p => p.text).join('; ') } : null;
+  problems.sort((a, b) => b.priority - a.priority || severity[b.tone] - severity[a.tone]);
+  if (!problems.length) return null;
+  const { priority, ...first } = problems[0];
+  return { ...first, detail: problems.map(p => p.text).join('; ') };
 }
 function problemHtml(problem) {
   return problem ? `${icon(problem.icon, `i tone-${problem.tone}`)}<span class="summary-text" title="${esc(problem.detail)}">${esc(problem.text)}</span>` : '';
