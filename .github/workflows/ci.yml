@@ -89,7 +89,12 @@ jobs:
         if: always()
         env:
           JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p4
-        run: npm run test:results -- UTC Europe/Vienna America/New_York
+        run: |
+          if [ '${{ github.event_name }}' = 'push' ]; then
+            npm run test:results -- UTC Europe/Vienna America/New_York
+          else
+            npm run test:results -- --full Europe/Vienna --subset UTC America/New_York
+          fi
       - name: Settings gate (390/1024/1440, light and dark, Fleet Config fixtures, LIVE gate at the network layer, sweep)
         if: always()
         env:

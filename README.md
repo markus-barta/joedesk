@@ -554,13 +554,22 @@ BROWSER_PATH=/usr/bin/google-chrome node scripts/browser-p3.mjs
 ```
 
 `npm run test:results` runs the full P4 Results gate sequentially under **UTC**
-and **America/New_York**. `test:browser` includes this guard. CI includes Vienna
-too; run the same three-zone check with:
+and **America/New_York**. `test:browser` includes this guard. CI pushes to main
+run the full suite in all three zones; PRs and manual dispatch run full in
+Europe/Vienna and repeat only explicitly zone-sensitive **views** in UTC and
+America/New_York, retaining every check in a selected view. A view identifies
+its group, fixture/interaction, width and theme; workflows can include their
+associated detail screenshots and crops. Check-only setup, boundary and
+geometry cases are also inventoried. Full mode retains every existing check.
 
 ```bash
 npm run test:results -- UTC Europe/Vienna America/New_York
+# PR/manual-dispatch plan (full budget only in Vienna):
+npm run test:results -- --full Europe/Vienna --subset UTC America/New_York
 # One zone, same P4 suite (including the render budget):
 TZ=UTC node scripts/browser-p4.mjs
+# Only zone-sensitive views in one host zone:
+TZ=UTC node scripts/browser-p4.mjs --zone-subset
 ```
 
 Each child process sets `TZ` for the injected board server and Chrome. The CDP
@@ -568,6 +577,114 @@ page also sets its requested zone explicitly, since macOS Chrome may keep the
 OS zone despite `TZ`; P4 checks the server, page and dedicated worker zones.
 Reports stay separate under `~/.local/share/joedesk-qa/p4/<zone>/index.md`
 (`JOED_QA_DIR` overrides the parent; slashes in zone names become hyphens).
+The parent index identifies each zone's mode, selected view count, static
+check count and share of full P4, plus sensitive/independent counts per group.
+The child index lists every selected view and reconciles its static check
+count against executed checks, including the shared craft audit. An omitted
+view or a check-count mismatch fails the gate. New anonymized real fixtures
+join the full inventory at all five fixture width/theme variants. They reuse
+existing date paths and do not automatically expand the zone subset.
+
+**Zone-subset rule (JOED-65 fix2):** repeat every host-zone check, the exact
+14 empirically differing width/theme variants from run 39793917962, and one
+**1440 light** representative per distinct date code path. Rendering another
+date through an already-covered helper does not add a zone variant. The
+explicit per-view `zoneSensitive` flag now records that selection; `coverage`
+still describes the view's actual assertions, including unselected date views.
+The full Vienna run and full ×3 main-push release net retain every check;
+`ci.yml` is unchanged.
+
+The source inventory comes from reading `public/joe/*.js` and searching
+`Intl`, `Date`, `wall`, `viennaDay`, `viennaDate`, `viennaMidnight`, the date/time
+formatters and their callers. These are the call-site families exercised by
+P4 Results and its shared board shell; Desk, History and Settings have their
+own P3/P5 gates rather than additional P4 copies. Shared zoned primitives live
+in `time.mjs` (served to the page and worker); `format.js` uses explicit Vienna
+wall parts, and Results date-only arithmetic uses UTC fields. The time-vector
+and Node suites still run under all three host zones in CI.
+
+`scripts/results-gate-plan.mjs` declares the following paths and representative
+views. A lightweight static test parses this declaration and the table, checks
+that the named helpers exist, and requires each representative to be selected
+exactly once. Each representative executes assertions, rather than relying on
+a screenshot alone.
+
+| Date code path | Source helper/call-site family | Representative view |
+| --- | --- | --- |
+| `wall-clock-formatters` | format.js: parts, timeHM, dateTimeFull; app.js: renderHeader | `design/matrix/1440/light` |
+| `calendar-day-labels` | results-model.js: fmtDM, fmtDDM, fmtDay; results.js: renderCalendar | `design/matrix/1440/light` |
+| `period-labels-and-stepping` | results-model.js: periodOf, rangeLabel, stepAnchor, addDays, monday, daysIn | `design/matrix/1440/light` |
+| `best-worst-day-labels` | results.js: dayTile | `r1/large-amounts/1440/light` |
+| `today-money-boundary` | results.js: resultsView; results-model.js: equityAt, moneyContext | `r1/money-now/1440/light` |
+| `basis-cut-date` | results.js: cutText; results-model.js: moneyContext, viennaMidnight | `r1/basis/1440/light` |
+| `chart-day-session-and-times` | results-model.js: dayWindow, intraday; results.js: renderCurve | `design/matrix/1440/light` |
+| `chart-period-midnights-and-gaps` | results-model.js: curve, viennaMidnight; results.js: renderCurve | `r1/time-axis/1440/light` |
+| `tracking-start-date` | results.js: startText, heroSentence, dayState | `fixtures/before-tracking/1440/light` |
+| `closed-partial-days` | results-model.js: countPartialDays; results.js: partialDay, dayWarning | `partial-days/calendar/1440/light` |
+| `open-today-partial` | results.js: dayWarning, dayContent | `partial-days/today-reason/1440/light` |
+| `missing-closed-and-open-days` | results.js: missingDayText, dayWarning, dayState | `missing-days/closed-open-recovery/1440/light` |
+| `period-partial-day-hints` | results.js: renderHero, renderCalendar; results-model.js: countPartialDays | `period-hint/partial/1440/light` |
+| `trade-open-close-and-held` | results.js: held, tradeRows; format.js: timeHM | `trade-amount/rows/1440/light` |
+| `open-position-today-time` | results.js: dayContent; results-model.js: viennaDate | `partial-days/desk-filtered-reasoned/1440/light` |
+| `receipt-ingress-clock` | feed.js: serverClock, createFeed; history-worker.js: serverClock, clockNow | `ingress/live-stale-recovery/1440/light` |
+| `stale-retained-ago` | results.js: renderStatus; format.js: age; ui.js: ageSpan | `states/stale-retained/1440/light` |
+| `worker-date-indexing` | history-worker.js: pollResults; results-model.js: indexResults, viennaDate | `ingress/live-stale-recovery/1440/light` |
+| `today-rollover-retained-receipt` | results.js: resultsToday, renderResults; results-model.js: addDays | `partial-days/retained-midnight/1440/light` |
+| `vienna-dst-and-2027-04-01` | results-model.js: viennaDate, marketHoliday; results.js: renderCalendar, tradeRows | `vienna/dst-calendar/1440/light` |
+
+`design/matrix/1440/light` switches all five periods, steps day/week/month,
+compares calendar labels and opens dated trades; its chart covers both day
+and longer-period date labels. `r1/time-axis/1440/light` covers gaps and the
+real period time axis; `vienna/dst-calendar/1440/light` uses the later
+**2027-04-01** clock and checks both DST changes, midnight trade assignment
+and the repeated hours. The retained-midnight fixture accepts its receipt
+on an open day and reads it after midnight. The open-position representative
+opens both the closed day and today, asserting the actual `11:15` time.
+
+Two representatives need a minimal pair of declared views: trade rows retain
+`trade-amount/ingress` (2 contract/acceptance checks before row rendering), and
+`period-hint/partial/1440/light` retains
+`period-hint/baseline/1440/light` (3 checks establishing the unhinted chart and
+geometry). Their dependencies are explicit in the plan. Independent state
+and partial-day transitions have selection guards; any necessary uncounted
+fixture setup still rejects failed ingress. No other width/theme is added for
+a path. The 14 measured variants are additional coverage and retain all their
+associated checks, even when a difference may be render noise.
+
+The baseline inventory (run 39793917962, without real producer fixtures) is:
+
+| Group | Sensitive views | Independent views |
+| --- | --- | --- |
+| host-timezone | 1 | 0 |
+| design | 2 | 12 |
+| fixtures | 1 | 20 |
+| states | 2 | 15 |
+| vienna | 1 | 1 |
+| cards | 0 | 3 |
+| r1 | 4 | 6 |
+| trade-amount | 2 | 7 |
+| phone-calendar | 0 | 6 |
+| ingress | 3 | 3 |
+| period-hint | 2 | 78 |
+| partial-days | 12 | 136 |
+| missing-days | 1 | 5 |
+| budget | 0 | 1 |
+| **Total** | **31** | **293** |
+
+The subset is **31/324 views and 588/4,954 checks (11.87%)**, enforced at
+**≤25%** by the lightweight inventory test. The PR plan performs **6,130**
+checks (4,954 + 2 × 588), compared with 14,174 in fix1 and 14,862 for full ×3.
+The measured agm2 Results times were **788 s** for baseline, **779 s** for the
+group subset and **744 s** for fix1's 93.06% view subset. At approximately
+**263 s** per full Vienna run, weighting this subset by check count projects
+**325 s (5.4 min)**, below the **450 s** target. This is an expected runtime,
+not a measurement: setup and interactions have different costs. The
+coordinator's PR CI on agm2 measures the actual result; no local browser run
+is part of this change.
+
+The lightweight tests also preserve the full 4,954-check inventory, exact
+measured variants, explicit booleans, setup dependencies, sequential zone
+orchestration and executed-count reconciliation.
 Use an approved browser test host; an installed browser guard refusal is a
 blocked check and must be handed to the coordinator without bypassing it.
 

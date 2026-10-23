@@ -21,6 +21,35 @@ import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
 import { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } from './browser/results.mjs';
 import { realResultsFixtures } from './results-fixtures.mjs';
+import { P4_SCENARIOS, createP4Views, createP4ViewRecorder, p4ViewKey, selectP4Views, summarizeP4Views } from './results-gate-plan.mjs';
+
+// Fail on missing explicit zoneSensitive metadata before any browser or
+// server starts. A subset keeps every check in each selected view.
+const args = process.argv.slice(2);
+if (args.some(arg => arg !== '--zone-subset')) throw new Error('Usage: browser-p4.mjs [--zone-subset]');
+const zoneSubset = args.includes('--zone-subset');
+const realFixtures = realResultsFixtures();
+const allViews = createP4Views(realFixtures.map(f => f.name));
+const selectedViews = selectP4Views({ zoneSubset, only: (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean) }, allViews);
+const selectedViewNames = new Set(selectedViews.map(v => v.name));
+const selectedNames = new Set(selectedViews.map(v => v.group));
+const selectedScenarios = P4_SCENARIOS.filter(s => selectedNames.has(s.name));
+const viewSummary = summarizeP4Views(selectedViews, allViews);
+const viewRecorder = createP4ViewRecorder(selectedViews.map(v => v.group === 'host-timezone' && !process.env.TZ ? { ...v, checks: 2 } : v));
+const view = (group, family, viewport, theme) => {
+  const name = p4ViewKey(group, family, viewport?.name, theme);
+  if (!allViews.some(v => v.name === name)) throw new Error(`Undeclared P4 view: ${name}`);
+  if (!selectedViewNames.has(name)) return false;
+  viewRecorder.enter(name);
+  return true;
+};
+const hasViews = (group, viewport, theme, families) => selectedViews.some(v =>
+  v.group === group && v.width === viewport.name && v.theme === theme && (!families || families.includes(v.family)));
+// Only actual setup dependencies remain mandatory. Independent transitions
+// below have their own selection guards, even inside a shared workflow.
+const requireView = (group, family, viewport, theme) => {
+  if (!view(group, family, viewport, theme)) throw new Error(`Missing dependent P4 view: ${p4ViewKey(group, family, viewport?.name, theme)}`);
+};
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -43,15 +72,23 @@ const { missingResultsDays } = await import('../contracts/vienna-date.mjs');
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p4');
 mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
-const { results, shots, check: gateCheck, shot, auditScreen } = createGate(QA_DIR);
+const { results, shots, check: gateCheck, shot, auditScreen: gateAuditScreen } = createGate(QA_DIR);
 const check = (ac, name, ok, detail) => {
+  viewRecorder.record();
   gateCheck(ac, name, ok, detail);
   // Preserve both geometry snapshots and every clipping row in the CI log.
   if (!ok && ['phone-calendar', 'partial-days', 'period-hint', 'trade-amount'].includes(ac)) console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
 };
+const auditScreen = async (...args) => {
+  const before = results.length;
+  await gateAuditScreen(...args);
+  viewRecorder.record(results.length - before);
+};
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
-const ONLY = (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean);
-const run = name => !ONLY.length || ONLY.includes(name);
+const run = name => {
+  if (!P4_SCENARIOS.some(s => s.name === name)) throw new Error(`Undeclared P4 scenario: ${name}`);
+  return selectedNames.has(name);
+};
 
 const N = text => String(text ?? '').replace(/[\s \u00ad]+/g, '');
 const NB = '\u00a0';
@@ -340,6 +377,7 @@ async function designBoard(now = NOW, fleetConfig = null, edit = null) {
 const reset = async () => { for (const s of ['#periodSeg [data-period="week"]', '#deskSeg [data-desk="all"]']) await click(page, s); };
 
 try {
+  requireView('host-timezone', 'hosts');
   check('host-timezone', 'the server uses the requested host zone', hostTimeZone === expectedTimeZone, { hostTimeZone, expectedTimeZone });
   const pageTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone');
   check('host-timezone', 'the page uses the requested host zone', pageTimeZone === expectedTimeZone, { pageTimeZone, expectedTimeZone });
@@ -351,6 +389,7 @@ try {
     const ix = M.indexResults({ ...record, receivedAt: record.receivedAt });
     await serve(served(record, board));
     for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      if (!view('design', 'matrix', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       await configure(page, viewport, theme);
       await load(page, board.url, 'results');
@@ -463,6 +502,7 @@ try {
     for (const [viewport, theme, period, desk, name, what] of [[VIEWPORTS[0], 'light', 'day', 'all', 'day', 'Day: today, all desks (intraday points from History)'],
       [VIEWPORTS[0], 'light', 'month', 'joe', 'month-joe', 'Month: October, Joe'], [VIEWPORTS[0], 'dark', 'all', 'all', 'all', 'All time: the tracking marker'],
       [VIEWPORTS[1], 'dark', 'ytd', 'joel', 'ytd-joel', 'This year, Joel'], [VIEWPORTS[2], 'light', 'month', 'all', 'month', 'Month on a phone']]) {
+      if (!view('design', name, viewport, theme)) continue;
       await configure(page, viewport, theme);
       await load(page, board.url, 'results');
       await waitFor(page, `document.querySelector('#tiles .tile .tval .num')`);
@@ -472,6 +512,7 @@ try {
     }
     // AC-11 in the wide font that stands in for Linux's.
     for (const [viewport, theme] of [[VIEWPORTS[2], 'light'], [VIEWPORTS[1], 'dark'], [VIEWPORTS[0], 'light']]) {
+      if (!view('design', 'wide-font', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme} wide font`;
       await configure(page, viewport, theme);
       await load(page, board.url, 'results');
@@ -520,7 +561,7 @@ try {
         r.cal.cells.filter(c => c.day >= '2026-10-05' && c.day <= '2026-10-09').every(c => c.n === 'no trades'), 'The empty record: last week reads as the designed empty state'],
       // Real files join the same model comparisons, complete-section/reason
       // assertions and craft audit. Their own clock keeps captured dates exact.
-      ...realResultsFixtures().map(({ name, payload, now }) =>
+      ...realFixtures.map(({ name, payload, now }) =>
         [name, 'all', M.viennaDate(Date.parse(now)), () => true, 'Anonymized real producer Results', payload, now]),
     ];
     for (const [name, period, anchor, ok, what, realPayload, now] of cases) {
@@ -528,6 +569,7 @@ try {
       const payload = realPayload ? { ...realPayload, receivedAt: realPayload.receivedAt ?? now } : fixture(name);
       await serve(realPayload ? () => ({ body: payload, clock: board.clock }) : served(payload, board));
       for (const [viewport, theme] of viewports) {
+        if (!view('fixtures', name, viewport, theme)) continue;
         const tag = `${name} @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
         await load(page, board.url, 'results');
@@ -553,15 +595,17 @@ try {
       }
     }
     // AC-16: before tracking starts (August) the design record is empty too.
-    const { board } = baseline;
-    await serve(served(designResults(NOW), board));
-    await configure(page, VIEWPORTS[0], 'light');
-    await load(page, board.url, 'results');
-    await click(page, '#periodSeg [data-period="month"]');
-    await click(page, '#prevPer'); await click(page, '#prevPer');
-    const aug = await page.evaluate(RES);
-    check('AC-16', '1440 light: August, before paper results start, is the designed empty state; days before tracking show only their date',
-      aug.display === '—' && /^No trades in August\. Paper results start on 10.Sep 2026\.$/.test(aug.say) && aug.cal.cells.filter(c => !M.isWeekend(c.day)).every(c => c.cls.includes('pre') && !c.n), { say: aug.say, cells: aug.cal.cells.slice(0, 3) });
+    if (view('fixtures', 'before-tracking', VIEWPORTS[0], 'light')) {
+      const { board } = baseline;
+      await serve(served(designResults(NOW), board));
+      await configure(page, VIEWPORTS[0], 'light');
+      await load(page, board.url, 'results');
+      await click(page, '#periodSeg [data-period="month"]');
+      await click(page, '#prevPer'); await click(page, '#prevPer');
+      const aug = await page.evaluate(RES);
+      check('AC-16', '1440 light: August, before paper results start, is the designed empty state; days before tracking show only their date',
+        aug.display === '—' && /^No trades in August\. Paper results start on 10.Sep 2026\.$/.test(aug.say) && aug.cal.cells.filter(c => !M.isWeekend(c.day)).every(c => c.cls.includes('pre') && !c.n), { say: aug.say, cells: aug.cal.cells.slice(0, 3) });
+    }
     await serve(null);
   }
 
@@ -571,58 +615,67 @@ try {
     const record = designResults(NOW);
     const shiftOf = async () => rects(page, SHIFT);
     for (const [viewport, theme] of VIEWPORTS.flatMap(v => THEMES.map(t => [v, t]))) {
+      if (!hasViews('states', viewport, theme, ['not-received', 'stale-retained', 'auth', 'invalid'])) continue;
       const tag = `${viewport.name} ${theme}`;
       await configure(page, viewport, theme);
-      await serve(null);
-      const firstPaint = await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `
-        new MutationObserver(function (_, observer) {
-          const say = document.querySelector('#rheroL .say');
-          if (say?.textContent) { window.__resultsFirstSay = say.textContent; observer.disconnect(); }
-        }).observe(document, { childList: true, subtree: true });` });
-      await load(page, board.url, 'results');
-      await page.s('Page.removeScriptToEvaluateOnNewDocument', firstPaint);
-      const nw = await page.evaluate(RES);
-      check('results-first-paint', `${tag}: first paint already says no data received yet`,
-        (await page.evaluate('window.__resultsFirstSay')) === 'Results are unavailable: no data received yet.');
-      check('AC-16', `${tag}: before the first push Results uses its existing unavailable state: reason, dashes, no zeros, dates kept`,
-        nw.say === 'Results are unavailable: no data received yet.' && nw.display === '—' && nw.split.every(x => x === '—') && nw.tiles.every(x => x.val.trim() === '—') &&
-        nw.rows.every(x => x.val.trim() === '—') && nw.cal.cells.length >= 28 && !/€\s?0,00/.test(`${nw.say}${nw.split.join('')}`) && nw.curve?.aria === 'Results are unavailable' && nw.curve.empty, nw);
-      const before = await shiftOf();
-      await click(page, '#periodSeg [data-period="month"]'); await click(page, '#deskSeg [data-desk="joel"]'); await click(page, '#prevPer');
-      check('AC-16', `${tag}: before the first push, period and desk switches still work and move nothing`, (await page.evaluate(RES)).label.startsWith('Last month') && !shifted(before, await shiftOf(), ['top', 'left', 'height']).length, shifted(before, await shiftOf()).slice(0, 3));
-      if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-not-received`, 'Results before the first accepted push: the existing unavailable state');
-      await reset();
+      if (view('states', 'not-received', viewport, theme)) {
+        await serve(null);
+        const firstPaint = await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `
+          new MutationObserver(function (_, observer) {
+            const say = document.querySelector('#rheroL .say');
+            if (say?.textContent) { window.__resultsFirstSay = say.textContent; observer.disconnect(); }
+          }).observe(document, { childList: true, subtree: true });` });
+        await load(page, board.url, 'results');
+        await page.s('Page.removeScriptToEvaluateOnNewDocument', firstPaint);
+        const nw = await page.evaluate(RES);
+        check('results-first-paint', `${tag}: first paint already says no data received yet`,
+          (await page.evaluate('window.__resultsFirstSay')) === 'Results are unavailable: no data received yet.');
+        check('AC-16', `${tag}: before the first push Results uses its existing unavailable state: reason, dashes, no zeros, dates kept`,
+          nw.say === 'Results are unavailable: no data received yet.' && nw.display === '—' && nw.split.every(x => x === '—') && nw.tiles.every(x => x.val.trim() === '—') &&
+          nw.rows.every(x => x.val.trim() === '—') && nw.cal.cells.length >= 28 && !/€\s?0,00/.test(`${nw.say}${nw.split.join('')}`) && nw.curve?.aria === 'Results are unavailable' && nw.curve.empty, nw);
+        const before = await shiftOf();
+        await click(page, '#periodSeg [data-period="month"]'); await click(page, '#deskSeg [data-desk="joel"]'); await click(page, '#prevPer');
+        check('AC-16', `${tag}: before the first push, period and desk switches still work and move nothing`, (await page.evaluate(RES)).label.startsWith('Last month') && !shifted(before, await shiftOf(), ['top', 'left', 'height']).length, shifted(before, await shiftOf()).slice(0, 3));
+        if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-not-received`, 'Results before the first accepted push: the existing unavailable state');
+        await reset();
+      }
       if (theme === 'dark') continue;
-      // Fresh, then stale: the record's own age, in the chart's box; nothing moves.
-      await serve(served(record, board));
-      await load(page, board.url, 'results');
-      const fresh = await page.evaluate(RES), freshRects = await shiftOf();
-      await serve(served(record, board, 300));
-      await page.evaluate('window.__joedesk.refresh()');
-      await waitFor(page, `document.getElementById('resStatus').innerText.length > 0`);
-      await settle(page);
-      const stale = await page.evaluate(RES);
-      check('panel-state', `${tag}: a record received 5 min ago says Stale with age in the chart's box and keeps its numbers`, /^Stale · Results as of 5.min ago · updates are late\.$/.test(stale.status) && stale.display === fresh.display &&
-        !shifted(freshRects, await shiftOf(), ['top', 'left', 'height']).length, { status: stale.status, display: [fresh.display, stale.display] });
-      if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-stale`, 'Results, the record received 5 min ago: its age and reason in the chart box');
-      await serve(() => ({ fail: 'ConnectionRefused' }));
-      await page.evaluate('window.__joedesk.refresh()');
-      await waitFor(page, `/refresh failed/.test(document.getElementById('resStatus').innerText)`);
-      await settle(page);
-      const kept = await page.evaluate(RES);
-      check('panel-state', `${tag}: a failed refresh keeps the last good record and says so`, /^Stale · Results refresh failed: update failed\. Showing the last good results from \d+.(s|min) ago\.$/.test(kept.status) && kept.display === fresh.display, kept.status);
-      if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-refresh-failed`, 'Results, refresh failed: the last good record kept, with its age');
-      // Unavailable from the first read: its own reason.
-      await serve(() => ({ status: 401, body: { ok: false, reason: 'auth_required' } }));
-      await load(page, board.url, 'results');
-      const auth = await page.evaluate(RES);
-      check('panel-state', `${tag}: a sign-in that expired before the first record says why, with dashes`, auth.say === 'Results are unavailable: sign-in expired — reload.' && auth.display === '—' && auth.tiles.every(x => x.val.trim() === '—'), auth.say);
-      // An invalid record is never shown: the contract rejects it.
-      const broken = structuredClone(record); broken.trades[0].netEur.amount = '999';
-      await serve(served(broken, board));
-      await load(page, board.url, 'results');
-      const invalid = await page.evaluate(RES);
-      check('panel-state', `${tag}: a record that breaks the contract (net ≠ gross − fees) is rejected, never shown`, invalid.say === 'Results are unavailable: last update was rejected.' && invalid.display === '—', invalid.say);
+      if (view('states', 'stale-retained', viewport, theme)) {
+        // Fresh, then stale: the record's own age, in the chart's box; nothing moves.
+        await serve(served(record, board));
+        await load(page, board.url, 'results');
+        const fresh = await page.evaluate(RES), freshRects = await shiftOf();
+        await serve(served(record, board, 300));
+        await page.evaluate('window.__joedesk.refresh()');
+        await waitFor(page, `document.getElementById('resStatus').innerText.length > 0`);
+        await settle(page);
+        const stale = await page.evaluate(RES);
+        check('panel-state', `${tag}: a record received 5 min ago says Stale with age in the chart's box and keeps its numbers`, /^Stale · Results as of 5.min ago · updates are late\.$/.test(stale.status) && stale.display === fresh.display &&
+          !shifted(freshRects, await shiftOf(), ['top', 'left', 'height']).length, { status: stale.status, display: [fresh.display, stale.display] });
+        if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-stale`, 'Results, the record received 5 min ago: its age and reason in the chart box');
+        await serve(() => ({ fail: 'ConnectionRefused' }));
+        await page.evaluate('window.__joedesk.refresh()');
+        await waitFor(page, `/refresh failed/.test(document.getElementById('resStatus').innerText)`);
+        await settle(page);
+        const kept = await page.evaluate(RES);
+        check('panel-state', `${tag}: a failed refresh keeps the last good record and says so`, /^Stale · Results refresh failed: update failed\. Showing the last good results from \d+.(s|min) ago\.$/.test(kept.status) && kept.display === fresh.display, kept.status);
+        if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-refresh-failed`, 'Results, refresh failed: the last good record kept, with its age');
+      }
+      if (view('states', 'auth', viewport, theme)) {
+        // Unavailable from the first read: its own reason.
+        await serve(() => ({ status: 401, body: { ok: false, reason: 'auth_required' } }));
+        await load(page, board.url, 'results');
+        const auth = await page.evaluate(RES);
+        check('panel-state', `${tag}: a sign-in that expired before the first record says why, with dashes`, auth.say === 'Results are unavailable: sign-in expired — reload.' && auth.display === '—' && auth.tiles.every(x => x.val.trim() === '—'), auth.say);
+      }
+      if (view('states', 'invalid', viewport, theme)) {
+        // An invalid record is never shown: the contract rejects it.
+        const broken = structuredClone(record); broken.trades[0].netEur.amount = '999';
+        await serve(served(broken, board));
+        await load(page, board.url, 'results');
+        const invalid = await page.evaluate(RES);
+        check('panel-state', `${tag}: a record that breaks the contract (net ≠ gross − fees) is rejected, never shown`, invalid.say === 'Results are unavailable: last update was rejected.' && invalid.display === '—', invalid.say);
+      }
     }
     // KEEP: a record that trades a symbol the accepted kept list protects is held back.
     const config = structuredClone(valid['fleet-config']);
@@ -630,6 +683,7 @@ try {
     const { board: keepBoard } = await designBoard(NOW, config);
     await serve(served(record, keepBoard));
     for (const [viewport, theme] of [[VIEWPORTS[0], 'light'], [VIEWPORTS[2], 'dark']]) {
+      if (!view('states', 'kept-mismatch', viewport, theme)) continue;
       await configure(page, viewport, theme);
       await load(page, keepBoard.url, 'results');
       const r = await page.evaluate(RES);
@@ -649,6 +703,7 @@ try {
     const ix = M.indexResults(payload);
     await serve(served(payload, board));
     for (const [viewport, theme] of [[VIEWPORTS[0], 'light'], [VIEWPORTS[2], 'dark']]) {
+      if (!view('vienna', 'dst-calendar', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       await configure(page, viewport, theme);
       await load(page, board.url, 'results');
@@ -695,6 +750,7 @@ try {
     const { board } = await designBoard();
     for (const [theme, font] of [['light', null], ['dark', null], ['light', WIDE_FONT]]) {
       const viewport = VIEWPORTS[2], tag = `390 ${theme}${font ? ' wide font' : ''}`;
+      if (!view('cards', font ? 'wide-font' : 'normal', viewport, theme)) continue;
       await configure(page, viewport, theme);
       await load(page, board.url, 'desk');
       if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
@@ -735,9 +791,10 @@ try {
       const CHANGE = Date.parse('2026-10-14T13:00:00.000Z');
       const { board, inputs } = await designBoard(NOW, null, ({ history }) => { for (const p of history.points) if (Date.parse(p.t) < CHANGE) p.desks.j.historyBasis = 'j.paper.v1'; });
       const record = designResults(NOW), ix = M.indexResults(record);
-      check('r1-basis', 'the page\'s inputs carry J\'s change of basis', inputs.cuts.length === 1 && inputs.cuts[0].desk === 'j' && inputs.cuts[0].at >= CHANGE && inputs.cuts[0].at < CHANGE + 300000, inputs.cuts);
+      if (view('r1', 'basis-inputs')) check('r1-basis', 'the page\'s inputs carry J\'s change of basis', inputs.cuts.length === 1 && inputs.cuts[0].desk === 'j' && inputs.cuts[0].at >= CHANGE && inputs.cuts[0].at < CHANGE + 300000, inputs.cuts);
       await serve(served(record, board));
       for (const [viewport, theme] of pair) {
+        if (!view('r1', 'basis', viewport, theme)) continue;
         const tag = `basis @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
         await load(page, board.url, 'results');
@@ -771,9 +828,10 @@ try {
       record.days.push({ date: inputs.today, desks: Object.fromEntries(DESKS.map(d => [d, close(d)])) });
       withTradeSummaries(record);
       const ix = M.indexResults(record);
-      check('r1-money-now', 'J has no money now; the record has a close for today', inputs.todayUnits[0] === null && ix.dates.at(-1) === inputs.today, inputs.todayUnits);
+      if (view('r1', 'money-now-inputs')) check('r1-money-now', 'J has no money now; the record has a close for today', inputs.todayUnits[0] === null && ix.dates.at(-1) === inputs.today, inputs.todayUnits);
       await serve(served(record, board));
       for (const [viewport, theme] of pair) {
+        if (!view('r1', 'money-now', viewport, theme)) continue;
         const tag = `no money now @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
         await load(page, board.url, 'results');
@@ -798,6 +856,7 @@ try {
       const payload = fixture('drawdown'), ix = M.indexResults(payload);
       await serve(served(payload, board));
       for (const [viewport, theme] of pair) {
+        if (!view('r1', 'time-axis', viewport, theme)) continue;
         const tag = `time axis @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
         await load(page, board.url, 'results');
@@ -830,6 +889,7 @@ try {
       const ix = M.indexResults(record);
       await serve(served(record, board));
       for (const [viewport, theme] of pair) {
+        if (!view('r1', 'large-amounts', viewport, theme)) continue;
         const tag = `large amounts @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
         await load(page, board.url, 'results');
@@ -861,6 +921,7 @@ try {
     await serve(null);
     const { board } = await designBoard();
     const { date, record } = tradeAmountResults(board.clock());
+    if (!view('trade-amount', 'ingress')) throw new Error('Trade view needs ingress checks');
     const checked = validateContract('results', record, { stage: 'ingress' });
     check('trade-amount', 'large results and price pairs form a valid ingress record', checked.ok, checked.errors);
     const pushed = await board.pushResults(record);
@@ -873,6 +934,7 @@ try {
     ];
     const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 780, mobile: true }];
     for (const viewport of viewports) for (const theme of THEMES) {
+      if (!view('trade-amount', 'rows', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`, root = viewport.mobile ? '#sheetBody' : '#daypanel .dp-list';
       const fallback = viewport.mobile && theme === 'dark';
       const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
@@ -1228,6 +1290,7 @@ try {
       }),
     });
     record.missingDays = missingResultsDays(record, at(board.clock(), -18));
+    if (!view('phone-calendar', 'contract')) throw new Error('Calendar view needs contract check');
     const checked = validateContract('results', record);
     check('phone-calendar', 'the focused phone record is a valid results v2 contract', checked.ok, checked.errors);
     // Change compact text without changing the maximum day's tint legend or
@@ -1305,6 +1368,7 @@ try {
       check('phone-calendar', `${tag}: every calendar amount fits without clipping`, !clipped.length, clipped);
     };
     for (const viewport of viewports) for (const theme of THEMES) {
+      if (!view('phone-calendar', 'months', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       await serve(served(baseline, board));
       await configure(page, viewport, theme);
@@ -1368,6 +1432,7 @@ try {
         JSON.stringify(sheetOpen) === JSON.stringify(sheetClosed), { before: sheetOpen, after: sheetClosed });
     }
     const desktop = VIEWPORTS.find(v => v.name === '1440');
+    requireView('phone-calendar', 'desktop', desktop, 'light');
     await configure(page, desktop, 'light');
     await load(page, board.url, 'results');
     await waitFor(page, `document.querySelector('#cal [data-day="2026-10-01"] .vs')?.textContent === '+1'`);
@@ -1392,6 +1457,7 @@ try {
     // the module worker and the fallback, including server rejection headers.
     await serve(null);
     for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      if (!view('ingress', 'live-stale-recovery', viewport, theme)) continue;
       const { board } = await designBoard();
       const record = designResults(NOW); delete record.receivedAt;
       const pushed = await board.pushResults(record);
@@ -1493,6 +1559,7 @@ try {
     const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 800, mobile: true },
       { name: '768', width: 768, height: 1024, mobile: false }];
     for (const viewport of viewports) for (const theme of THEMES) {
+      if (!view('period-hint', 'baseline', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       // Replacing snapshots changes coverage only; period switches then show
       // or hide the same hint without modifying the hero children or tiles.
@@ -1507,6 +1574,7 @@ try {
       if (!viewport.mobile) check('period-hint', `${tag}: original desktop hero column width is retained`,
         reserve.width === (viewport.width <= 1180 ? 280 : 340), reserve);
       if (viewport.name === '390') await crop(viewport, theme, 'no-hint');
+      requireView('period-hint', 'partial', viewport, theme);
       await push(partial);
       await waitFor(page, 'document.querySelector("#rheroL .say .st")?.textContent === "incl. 2 partial days"');
       check('period-hint', `${tag}: adding the hint leaves the chart SVG unchanged`, Boolean(baselineChart) && baselineChart === await chart());
@@ -1538,21 +1606,27 @@ try {
           wrapped.hintLine === 2 && Math.abs(wrapped.hintLeft - wrapped.firstLineLeft) <= .5, wrapped);
       }
       if (viewport.name !== '360') await crop(viewport, theme, 'hint');
+      // baseline → partial is the date-hint representative. The later
+      // wording and replacement variants remain in the full Vienna run.
+      if (!hasViews('period-hint', viewport, theme, ['literal-wording', 'empty', 'no-hint', 'unknown', 'unknown-full', 'cleared'])) continue;
       // Real sentence markup with wide amount/date forms, including a past
       // week with two-digit dates. Unknown and basis-change forms have no hint.
-      for (const sentence of ['Down €\u00a0999.999,99 in September 2025', 'Down €\u00a0999.999,99 in the week of 21\u00a0Sep']) {
-        await page.evaluate(`document.querySelector('#rheroL .say').firstChild.textContent = ${JSON.stringify(sentence + ' ')}`);
-        const p = await probe(), next = await rects(page, fixed), maxLines = lineLimit(viewport, p);
-        check('period-hint', `${tag}: longest realistic result sentence fits at most ${maxLines} lines and the hint never splits`,
-          p.hint === 'incl. 2 partial days' && !p.clipped && p.hintUnbroken && p.noMiddleDot && p.contentHeight <= maxLines * p.lineHeight + 1, p);
-        check('period-hint', `${tag}: long result wording moves hero children and tiles exactly 0 px`,
-          sameGeometry(geometry, next), { splitTopDeltaPx: splitDelta(geometry, next), sentence: p.sentence, before: geometry, after: next });
+      if (view('period-hint', 'literal-wording', viewport, theme)) {
+        for (const sentence of ['Down €\u00a0999.999,99 in September 2025', 'Down €\u00a0999.999,99 in the week of 21\u00a0Sep']) {
+          await page.evaluate(`document.querySelector('#rheroL .say').firstChild.textContent = ${JSON.stringify(sentence + ' ')}`);
+          const p = await probe(), next = await rects(page, fixed), maxLines = lineLimit(viewport, p);
+          check('period-hint', `${tag}: longest realistic result sentence fits at most ${maxLines} lines and the hint never splits`,
+            p.hint === 'incl. 2 partial days' && !p.clipped && p.hintUnbroken && p.noMiddleDot && p.contentHeight <= maxLines * p.lineHeight + 1, p);
+          check('period-hint', `${tag}: long result wording moves hero children and tiles exactly 0 px`,
+            sameGeometry(geometry, next), { splitTopDeltaPx: splitDelta(geometry, next), sentence: p.sentence, before: geometry, after: next });
+        }
       }
       // Restore actual renderer content before the next real snapshot.
       await click(page, '#periodSeg [data-period="week"]');
       await click(page, '#periodSeg [data-period="month"]');
       {
         // The longest eligible real path uses a wide tracking-start date.
+        requireView('period-hint', 'empty', viewport, theme);
         await push(empty);
         const prefix = 'No trades recorded this month. Paper results start on 30\u00a0Sep 2026';
         await waitFor(page, `document.querySelector('#rheroL .say').textContent.startsWith(${JSON.stringify(prefix)})`);
@@ -1583,12 +1657,14 @@ try {
           { splitTopDeltaPx: splitDelta(olderGeometry, olderPlainGeometry), sentence: olderPlain, before: olderGeometry, after: olderPlainGeometry });
         const noHint = withTradeSummaries(structuredClone(empty));
         for (const day of noHint.days) { delete day.coverage; delete day.partialReasons; }
+        requireView('period-hint', 'no-hint', viewport, theme);
         await push(noHint);
         await waitFor(page, 'document.querySelector("#rheroL .say").textContent.startsWith("No trades this month.")');
         const plain = await probe(), plainGeometry = await rects(page, fixed), plainMax = lineLimit(viewport, plain);
         check('period-hint', `${tag}: removing empty-period coverage keeps the full stop, fits ${plainMax} lines and moves hero children and tiles exactly 0 px`,
           !plain.hint && !plain.clipped && plain.sentence.endsWith('.') && plain.contentHeight <= plainMax * plain.lineHeight + 1 &&
           sameGeometry(next, plainGeometry), { sentence: plain, before: next, after: plainGeometry });
+        requireView('period-hint', 'unknown', viewport, theme);
         await push(unknown);
         await waitFor(page, 'document.querySelector("#rheroL .say").textContent.startsWith("The result this month is not known yet:")');
         const unknownCovered = await probe(), unknownGeometry = await rects(page, fixed);
@@ -1596,6 +1672,7 @@ try {
           !unknownCovered.hint && unknownCovered.sentence.endsWith('.') && unknownCovered.monthHint === 'incl. 2 partial days', unknownCovered);
         const unknownFull = withTradeSummaries(structuredClone(unknown));
         for (const day of unknownFull.days) { delete day.coverage; delete day.partialReasons; }
+        requireView('period-hint', 'unknown-full', viewport, theme);
         await push(unknownFull);
         await waitFor(page, '!document.querySelector("#calSum .st")');
         const unknownPlain = await probe(), unknownPlainGeometry = await rects(page, fixed);
@@ -1603,6 +1680,7 @@ try {
           !unknownPlain.hint && unknownPlain.sentence === unknownCovered.sentence && sameGeometry(unknownGeometry, unknownPlainGeometry),
           { sentence: unknownPlain, before: unknownGeometry, after: unknownPlainGeometry });
       }
+      requireView('period-hint', 'cleared', viewport, theme);
       await push(baseline);
       await waitFor(page, '!document.querySelector("#rheroL .say .st")');
       const cleared = await rects(page, fixed);
@@ -1629,8 +1707,11 @@ try {
     const growingDay = escalated;
     const reason = 'The trade history has a gap that covers this day.', reasonLabel = 'History gap';
     let seq = baseline.seq;
-    const replace = async (record, label) => {
-      check('partial-days', `${label}: accepted ingress`, (await board.pushResults({ ...record, seq: ++seq })).status === 200);
+    const replace = async (record, label, { setup = false } = {}) => {
+      const accepted = await board.pushResults({ ...record, seq: ++seq });
+      if (setup) {
+        if (accepted.status !== 200) throw new Error(`${label}: setup ingress rejected`);
+      } else check('partial-days', `${label}: accepted ingress`, accepted.status === 200);
       // A reason on today changes the panel but leaves calendar HTML intact.
       // refresh resolves after the worker/fallback read; then wait for paint.
       await page.evaluate('window.__joedesk.refresh().then(() => new Promise(requestAnimationFrame))');
@@ -1720,8 +1801,12 @@ try {
     };
     const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 800, mobile: true }];
     for (const viewport of viewports) for (const theme of THEMES) {
+      if (!hasViews('partial-days', viewport, theme)) continue;
+      const calendarSelected = view('partial-days', 'calendar', viewport, theme);
       const tag = `${viewport.name} ${theme}`;
-      check('partial-days', `${tag}: full baseline accepts`, (await board.pushResults({ ...baseline, seq: ++seq })).status === 200);
+      const accepted = await board.pushResults({ ...baseline, seq: ++seq });
+      if (calendarSelected) check('partial-days', `${tag}: full baseline accepts`, accepted.status === 200);
+      else if (accepted.status !== 200) throw new Error(`${tag}: setup baseline rejected`);
       const fallback = viewport.mobile && theme === 'dark';
       const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
       await configure(page, viewport, theme);
@@ -1731,65 +1816,71 @@ try {
       await click(page, `#cal [data-day="${partialTrade}"]`);
       if (viewport.mobile) await key(page, 'Escape');
       const before = await rects(page, SHIFT), full = await page.evaluate(RES), contentRects = await rects(page, contentSlots);
-      await replace(partial, tag);
-      const shown = await page.evaluate(RES), cells = await inspect(), cell = day => cells.find(c => c.day === day);
-      const trade = cell(partialTrade), old = cell(escalated), oldEmpty = cell(emptyEscalated);
-      check('partial-days', `${tag}: Partial inherits tint ink, keeps its slot and accessible reason`,
-        trade.markers === 1 && trade.half && trade.ink && trade.inside && trade.aligned && trade.note === 'Partial' &&
-        trade.noteVisible === !viewport.mobile && trade.aria.includes("; Partial: this day's record is incomplete") &&
-        trade.aria.includes(reasonLabel) && !trade.clipped, trade);
-      check('partial-days', `${tag}: partial trade keeps the exact amount and loss tint`,
-        N(trade.aria).includes(N('−€ 1,00 from 1 trade')) && /\bl[1-4]\b/.test(trade.cls) &&
-        shown.cal.cells.find(c => c.day === partialTrade).v === full.cal.cells.find(c => c.day === partialTrade).v, trade);
-      check('partial-days', `${tag}: both traded and empty old partial dates escalate to exactly one Stale marker`,
-        [old, oldEmpty].every(c => c.markers === 1 && c.half && c.ink && c.note === 'Stale' && c.noteInk &&
-          c.aria.includes(`Stale: still incomplete; ${reasonLabel}`) && !c.clipped), [old, oldEmpty]);
-      check('partial-days', `${tag}: missing-day Stale, open today and normal retain their states`,
-        cell(stale).markers === 1 && cell(stale).note === 'Stale' && cell(stale).aria.includes('daily summary missing') &&
-        cell(today).markers === 0 && !cell(today).aria.includes('Partial') && /\btoday\b/.test(cell(today).cls) &&
-        cell(normal).markers === 0 && cell(normal).note !== 'Partial', cells.filter(c => [stale, today, normal].includes(c.day)));
-      check('partial-days', `${tag}: adding warnings and the month hint moves outer and cell slots exactly 0 px`,
-        same(before, await rects(page, SHIFT)) && same(contentRects, await rects(page, contentSlots)));
-      check('partial-days', `${tag}: trade totals and the record status stay unchanged`,
-        shown.display === full.display && same(shown.split, full.split) && shown.status === full.status && !shown.status);
-      const month = await monthProbe();
-      check('partial-days', `${tag}: desktop month hint counts all 3 closed partial days, including 2 escalated, and never clips or wraps`,
-        month.visible === !viewport.mobile && (viewport.mobile || (month.hint === 'incl. 3 partial days' && !month.clipped && month.height <= 20 && month.hintUnbroken)), month);
-      check('partial-days', `${tag}: the month line has no middle dot and retains long-to-short wording`, month.noMiddleDot && month.wording, month);
-      check('partial-days', `${tag}: read uses the expected ${fallback ? 'fallback' : 'worker'}`,
-        await page.evaluate('window.__joedesk.worker()') === !fallback);
-      // The general mobile audit requires the standard 390 px/44 px targets.
-      // Like JOED-29, 360 keeps all focused checks without running that audit.
-      if (viewport.name !== '360') await auditScreen(page, viewport, theme, 'results (partial coverage)');
-      await shot(page, viewport, `${viewport.name}-${theme}-results-partial-days`, 'October: Partial 15th, Stale missing 13th, Stale incomplete 11th/14th, normal 12th, open today 16th');
-      if (!viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-partial-month-hint`, 'Desktop month summary: incl. 3 partial days, including 2 escalated, excluding today and missing-summary Stale');
-      if (viewport.name === '1440') await cropNoteView('#calSum', `${viewport.name}-${theme}-results-partial-month-line`,
-        'Calendar month line: warning icon separates incl. 3 partial days without a middle dot');
+      await replace(partial, tag, { setup: !calendarSelected });
+      if (calendarSelected) {
+        const shown = await page.evaluate(RES), cells = await inspect(), cell = day => cells.find(c => c.day === day);
+        const trade = cell(partialTrade), old = cell(escalated), oldEmpty = cell(emptyEscalated);
+        check('partial-days', `${tag}: Partial inherits tint ink, keeps its slot and accessible reason`,
+          trade.markers === 1 && trade.half && trade.ink && trade.inside && trade.aligned && trade.note === 'Partial' &&
+          trade.noteVisible === !viewport.mobile && trade.aria.includes("; Partial: this day's record is incomplete") &&
+          trade.aria.includes(reasonLabel) && !trade.clipped, trade);
+        check('partial-days', `${tag}: partial trade keeps the exact amount and loss tint`,
+          N(trade.aria).includes(N('−€ 1,00 from 1 trade')) && /\bl[1-4]\b/.test(trade.cls) &&
+          shown.cal.cells.find(c => c.day === partialTrade).v === full.cal.cells.find(c => c.day === partialTrade).v, trade);
+        check('partial-days', `${tag}: both traded and empty old partial dates escalate to exactly one Stale marker`,
+          [old, oldEmpty].every(c => c.markers === 1 && c.half && c.ink && c.note === 'Stale' && c.noteInk &&
+            c.aria.includes(`Stale: still incomplete; ${reasonLabel}`) && !c.clipped), [old, oldEmpty]);
+        check('partial-days', `${tag}: missing-day Stale, open today and normal retain their states`,
+          cell(stale).markers === 1 && cell(stale).note === 'Stale' && cell(stale).aria.includes('daily summary missing') &&
+          cell(today).markers === 0 && !cell(today).aria.includes('Partial') && /\btoday\b/.test(cell(today).cls) &&
+          cell(normal).markers === 0 && cell(normal).note !== 'Partial', cells.filter(c => [stale, today, normal].includes(c.day)));
+        check('partial-days', `${tag}: adding warnings and the month hint moves outer and cell slots exactly 0 px`,
+          same(before, await rects(page, SHIFT)) && same(contentRects, await rects(page, contentSlots)));
+        check('partial-days', `${tag}: trade totals and the record status stay unchanged`,
+          shown.display === full.display && same(shown.split, full.split) && shown.status === full.status && !shown.status);
+        const month = await monthProbe();
+        check('partial-days', `${tag}: desktop month hint counts all 3 closed partial days, including 2 escalated, and never clips or wraps`,
+          month.visible === !viewport.mobile && (viewport.mobile || (month.hint === 'incl. 3 partial days' && !month.clipped && month.height <= 20 && month.hintUnbroken)), month);
+        check('partial-days', `${tag}: the month line has no middle dot and retains long-to-short wording`, month.noMiddleDot && month.wording, month);
+        check('partial-days', `${tag}: read uses the expected ${fallback ? 'fallback' : 'worker'}`,
+          await page.evaluate('window.__joedesk.worker()') === !fallback);
+        // The general mobile audit requires the standard 390 px/44 px targets.
+        // Like JOED-29, 360 keeps all focused checks without running that audit.
+        if (viewport.name !== '360') await auditScreen(page, viewport, theme, 'results (partial coverage)');
+        await shot(page, viewport, `${viewport.name}-${theme}-results-partial-days`, 'October: Partial 15th, Stale missing 13th, Stale incomplete 11th/14th, normal 12th, open today 16th');
+        if (!viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-partial-month-hint`, 'Desktop month summary: incl. 3 partial days, including 2 escalated, excluding today and missing-summary Stale');
+        if (viewport.name === '1440') await cropNoteView('#calSum', `${viewport.name}-${theme}-results-partial-month-line`,
+          'Calendar month line: warning icon separates incl. 3 partial days without a middle dot');
+
+      }
 
       // Computed browser colours, every tint, including the neutral card's
       // composed background. Probes inherit the actual calendar's ancestors.
-      const contrasts = await page.evaluate(`(${(() => {
-        const rgb = c => c.match(/[\d.]+/g).map(Number);
-        const composite = (front, back) => { const a = front[3] ?? 1; return front.slice(0, 3).map((c, i) => c * a + back[i] * (1 - a)); };
-        const background = el => {
-          const chain = []; for (let p = el; p; p = p.parentElement) chain.unshift(p);
-          return chain.reduce((bg, p) => composite(rgb(getComputedStyle(p).backgroundColor), bg), [255, 255, 255]);
-        };
-        const luminance = cs => cs.slice(0, 3).map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4)
-          .reduce((s, c, i) => s + c * [.2126, .7152, .0722][i], 0);
-        return ['g1', 'g2', 'g3', 'g4', 'l1', 'l2', 'l3', 'l4', 'flat', 'none'].map(cls => {
-          const cell = document.querySelector('#cal .day-incomplete').cloneNode(true);
-          cell.className = 'cell ' + cls + ' day-incomplete'; cell.style.cssText = 'position:fixed;top:0;left:0;width:62px';
-          const marker = cell.querySelector('.day-warning'); marker.className = 'day-warning st' + (cls === 'none' ? ' warn' : '');
-          document.getElementById('cal').append(cell);
-          const fg = getComputedStyle(marker.querySelector('svg')).color, bg = background(cell), x = luminance(rgb(fg)), y = luminance(bg);
-          const ratio = (Math.max(x, y) + .05) / (Math.min(x, y) + .05);
-          cell.remove(); return { cls, fg, bg, ratio };
-        });
-      }).toString()})()`);
-      check('partial-days', `${tag}: every computed partial icon contrast is at least 3:1`, contrasts.every(c => c.ratio >= 3), contrasts);
+      if (view('partial-days', 'contrast', viewport, theme)) {
+        const contrasts = await page.evaluate(`(${(() => {
+          const rgb = c => c.match(/[\d.]+/g).map(Number);
+          const composite = (front, back) => { const a = front[3] ?? 1; return front.slice(0, 3).map((c, i) => c * a + back[i] * (1 - a)); };
+          const background = el => {
+            const chain = []; for (let p = el; p; p = p.parentElement) chain.unshift(p);
+            return chain.reduce((bg, p) => composite(rgb(getComputedStyle(p).backgroundColor), bg), [255, 255, 255]);
+          };
+          const luminance = cs => cs.slice(0, 3).map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4)
+            .reduce((s, c, i) => s + c * [.2126, .7152, .0722][i], 0);
+          return ['g1', 'g2', 'g3', 'g4', 'l1', 'l2', 'l3', 'l4', 'flat', 'none'].map(cls => {
+            const cell = document.querySelector('#cal .day-incomplete').cloneNode(true);
+            cell.className = 'cell ' + cls + ' day-incomplete'; cell.style.cssText = 'position:fixed;top:0;left:0;width:62px';
+            const marker = cell.querySelector('.day-warning'); marker.className = 'day-warning st' + (cls === 'none' ? ' warn' : '');
+            document.getElementById('cal').append(cell);
+            const fg = getComputedStyle(marker.querySelector('svg')).color, bg = background(cell), x = luminance(rgb(fg)), y = luminance(bg);
+            const ratio = (Math.max(x, y) + .05) / (Math.min(x, y) + .05);
+            cell.remove(); return { cls, fg, bg, ratio };
+          });
+        }).toString()})()`);
+        check('partial-days', `${tag}: every computed partial icon contrast is at least 3:1`, contrasts.every(c => c.ratio >= 3), contrasts);
+      }
 
       for (const hasTrades of [true, false]) {
+        if (!view('partial-days', hasTrades ? 'traded-detail' : 'empty-detail', viewport, theme)) continue;
         if (!hasTrades) await replace(empty, `${tag} empty`);
         const c = (await inspect()).find(c => c.day === partialTrade);
         if (!hasTrades) {
@@ -1835,50 +1926,57 @@ try {
         } else await shot(page, viewport, name, `Partial on 15 October: ${hasTrades ? 'exact money so far' : 'unknown amount and incomplete record'}`);
       }
 
-      await replace(missing, `${tag} missing handoff`);
-      const handoffBefore = await rects(page, SHIFT), handoffSlots = await rects(page, contentSlots);
-      const handoffStale = (await inspect()).find(c => c.day === partialTrade);
-      await replace(partial, `${tag} partial handoff`);
-      const handoffPartial = (await inspect()).find(c => c.day === partialTrade);
-      check('partial-days', `${tag}: JOED-28 Stale swaps to JOED-30 Partial at exactly 0 px`,
-        handoffStale.note === 'Stale' && handoffStale.aria.includes('daily summary missing') && handoffPartial.note === 'Partial' &&
-        handoffPartial.markers === 1 && handoffStale.value === handoffPartial.value &&
-        same(handoffBefore, await rects(page, SHIFT)) && same(handoffSlots, await rects(page, contentSlots)));
+      if (view('partial-days', 'missing-handoff', viewport, theme)) {
+        await replace(missing, `${tag} missing handoff`);
+        const handoffBefore = await rects(page, SHIFT), handoffSlots = await rects(page, contentSlots);
+        const handoffStale = (await inspect()).find(c => c.day === partialTrade);
+        await replace(partial, `${tag} partial handoff`);
+        const handoffPartial = (await inspect()).find(c => c.day === partialTrade);
+        check('partial-days', `${tag}: JOED-28 Stale swaps to JOED-30 Partial at exactly 0 px`,
+          handoffStale.note === 'Stale' && handoffStale.aria.includes('daily summary missing') && handoffPartial.note === 'Partial' &&
+          handoffPartial.markers === 1 && handoffStale.value === handoffPartial.value &&
+          same(handoffBefore, await rects(page, SHIFT)) && same(handoffSlots, await rects(page, contentSlots)));
+
+      }
 
       // Same 99 trade rows before and after: adding Partial/so far cannot
       // change the fixed 36 px header or the settled phone sheet's geometry.
-      await replace(largeFull, `${tag} full large summary`);
-      if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
-      const headerSelectors = viewport.mobile ? ['.dlg-h', '#sheetBody .dp-sum'] : ['.dp-head'];
-      const headerBefore = await rects(page, headerSelectors);
-      await replace(large, `${tag} partial large summary`);
-      const largeDetail = await page.evaluate(`(() => {
-        const root = document.querySelector(${JSON.stringify(viewport.mobile ? '#sheetBody' : '#daypanel')});
-        const sum = root.querySelector('.dp-sum'), header = root.querySelector('.dp-head'), amount = sum.querySelector('.dp-amount');
-        return { visible: sum.innerText, complete: sum.textContent, height: header?.getBoundingClientRect().height,
-          clipped: sum.scrollWidth > sum.clientWidth || Boolean(header && header.scrollWidth > header.clientWidth),
-          amountClipped: amount.getBoundingClientRect().right > sum.getBoundingClientRect().right };
-      })()`);
-      check('partial-days', `${tag}: worst summary keeps Partial, −€ 999.999,99 and so far; optional count drops first; 0 px`,
-        /^Partial·(?:99trades·)?−€999\.999,99sofar$/.test(N(largeDetail.visible)) &&
-        N(largeDetail.complete) === N('Partial · 99 trades · −€ 999.999,99 so far') && !largeDetail.clipped && !largeDetail.amountClipped &&
-        (viewport.mobile || largeDetail.height === 36) && same(headerBefore, await rects(page, headerSelectors)), largeDetail);
-      const largeName = `${viewport.name}-${theme}-results-partial-so-far`;
-      if (viewport.mobile) { await viewShot(page, largeName, 'Worst partial amount so far; trade count yields first'); await key(page, 'Escape'); }
-      else await shot(page, viewport, largeName, 'Worst partial amount so far in the fixed 36 px day header');
+      if (view('partial-days', 'large-summary', viewport, theme)) {
+        await replace(largeFull, `${tag} full large summary`);
+        if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
+        const headerSelectors = viewport.mobile ? ['.dlg-h', '#sheetBody .dp-sum'] : ['.dp-head'];
+        const headerBefore = await rects(page, headerSelectors);
+        await replace(large, `${tag} partial large summary`);
+        const largeDetail = await page.evaluate(`(() => {
+          const root = document.querySelector(${JSON.stringify(viewport.mobile ? '#sheetBody' : '#daypanel')});
+          const sum = root.querySelector('.dp-sum'), header = root.querySelector('.dp-head'), amount = sum.querySelector('.dp-amount');
+          return { visible: sum.innerText, complete: sum.textContent, height: header?.getBoundingClientRect().height,
+            clipped: sum.scrollWidth > sum.clientWidth || Boolean(header && header.scrollWidth > header.clientWidth),
+            amountClipped: amount.getBoundingClientRect().right > sum.getBoundingClientRect().right };
+        })()`);
+        check('partial-days', `${tag}: worst summary keeps Partial, −€ 999.999,99 and so far; optional count drops first; 0 px`,
+          /^Partial·(?:99trades·)?−€999\.999,99sofar$/.test(N(largeDetail.visible)) &&
+          N(largeDetail.complete) === N('Partial · 99 trades · −€ 999.999,99 so far') && !largeDetail.clipped && !largeDetail.amountClipped &&
+          (viewport.mobile || largeDetail.height === 36) && same(headerBefore, await rects(page, headerSelectors)), largeDetail);
+        const largeName = `${viewport.name}-${theme}-results-partial-so-far`;
+        if (viewport.mobile) { await viewShot(page, largeName, 'Worst partial amount so far; trade count yields first'); await key(page, 'Escape'); }
+        else await shot(page, viewport, largeName, 'Worst partial amount so far in the fixed 36 px day header');
 
-      await replace(emptyMonth, `${tag} no trades this month`);
-      const emptyMonthProbe = await monthProbe();
-      check('partial-days', `${tag}: an empty month with Partial says No trades recorded this month; hint fits`,
-        !viewport.mobile ? N(emptyMonthProbe.text) === N('No trades recorded this month incl. 3 partial days') && !emptyMonthProbe.clipped && emptyMonthProbe.height <= 20 && emptyMonthProbe.noMiddleDot && emptyMonthProbe.hintUnbroken
-          : !emptyMonthProbe.visible, emptyMonthProbe);
-      if (!viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-partial-empty-month-hint`, 'No trades recorded this month ◑ incl. 3 partial days');
+      }
+
+      if (view('partial-days', 'empty-month', viewport, theme)) {
+        await replace(emptyMonth, `${tag} no trades this month`);
+        const emptyMonthProbe = await monthProbe();
+        check('partial-days', `${tag}: an empty month with Partial says No trades recorded this month; hint fits`,
+          !viewport.mobile ? N(emptyMonthProbe.text) === N('No trades recorded this month incl. 3 partial days') && !emptyMonthProbe.clipped && emptyMonthProbe.height <= 20 && emptyMonthProbe.noMiddleDot && emptyMonthProbe.hintUnbroken
+            : !emptyMonthProbe.visible, emptyMonthProbe);
+        if (!viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-partial-empty-month-hint`, 'No trades recorded this month ◑ incl. 3 partial days');
+
+      }
 
       // Rev 5: 9 accepted codes render 8 sentences after FX dedup. All reason
       // variants use real ingress and the same worker/fallback paths above.
-      await replace(reasons, `${tag} nine reasons`);
       const reasonRoot = viewport.mobile ? '#sheetBody' : '#daypanel';
-      if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
       const reasonProbe = async (label = 'reasons') => {
         const detail = await page.evaluate(`(() => {
         const root = document.querySelector(${JSON.stringify(reasonRoot)}), note = root.querySelector('.dp-note');
@@ -1907,78 +2005,84 @@ try {
           detail.overflow.every(el => el.scrollWidth <= el.clientWidth), detail.overflow);
         return detail;
       };
-      let reasonDetail = await reasonProbe('nine reasons collapsed or panel');
-      await checkNoteGap(reasonRoot, `${tag} nine reasons collapsed`);
-      const expectedReasons = M.partialReasons(reasons.days.find(d => d.date === partialTrade)).map(r => r.text);
-      check('partial-days', `${tag}: canonical reason sentences wrap cleanly; FX disabled suppresses missing`,
-        reasonDetail.lead === 'Result may be incomplete.' && same(reasonDetail.lines.map(l => l.text), expectedReasons) &&
-        reasonDetail.lines.filter(l => l.visible).length === (viewport.mobile ? 2 : 8) && !reasonDetail.clipped &&
-        (!viewport.mobile ? !reasonDetail.button : reasonDetail.button.text === '+6 more' && reasonDetail.button.height >= 44 &&
-          reasonDetail.button.keyboard && reasonDetail.button.name === 'Show 6 more reasons'), reasonDetail);
-      const reasonsName = `${viewport.name}-${theme}-results-partial-nine-reasons`;
       const sheetGeometry = () => page.evaluate(`(() => { const r = document.getElementById('daySheet').getBoundingClientRect(); return { top: r.top, height: r.height }; })()`);
       let nineReasonHeight;
-      if (viewport.mobile) {
-        await viewShot(page, reasonsName + '-collapsed', 'Nine codes: two visible reason lines and +6 more');
-        const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
-          // Only the first two reason lines, visible before either reveal.
-          '#sheetBody .dp-note-lines > .dp-reason:nth-child(2)', '#sheetBody .dp-note-lines > .dp-reason:nth-child(3)'];
-        const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT), sheetBefore = await sheetGeometry();
-        const movedRects = (before, after) => {
-          const old = new Map(before.map(r => [r.key, r])), next = new Map(after.map(r => [r.key, r]));
-          return [...new Set([...old.keys(), ...next.keys()])].filter(key => !same(old.get(key), next.get(key))).map(key => {
-            const a = old.get(key), b = next.get(key);
-            return { key, before: a ?? null, after: b ?? null,
-              delta: a && b ? Object.fromEntries(['top', 'left', 'height', 'width'].map(k => [k, b[k] - a[k]])) : null };
-          });
-        };
-        const revealGeometry = async before => {
-          const after = await sheetGeometry(), fixedAfter = await rects(page, above), outerAfter = await rects(page, SHIFT);
-          return { unchanged: same(before, after) && same(fixedBefore, fixedAfter) && same(outerBefore, outerAfter),
-            sheet: { before, after, delta: { top: after.top - before.top, height: after.height - before.height } },
-            aboveMoved: movedRects(fixedBefore, fixedAfter), outerMoved: movedRects(outerBefore, outerAfter) };
-        };
-        nineReasonHeight = sheetBefore.height;
-        check('partial-days', `${tag}: geometry tracks exactly the two reasons visible before expansion`,
-          fixedBefore.filter(r => r.key.includes('.dp-reason:nth-child(')).length === 2, fixedBefore);
-        check('partial-days', `${tag}: nine-reason sheet is capped at 80vh`, nineReasonHeight <= viewport.height * .8, sheetBefore);
-        await page.evaluate('document.querySelector("#sheetBody .dp-reasons-more").focus({preventScroll:true})');
-        await key(page, 'Enter');
-        await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
-        reasonDetail = await reasonProbe('nine reasons keyboard-expanded');
-        let geometry = await revealGeometry(sheetBefore);
-        check('partial-days', `${tag}: keyboard reveal removes the button, focuses and politely announces all 8 reasons with 0 px sheet movement`,
-          reasonDetail.lines.length === 8 && reasonDetail.lines.every(l => l.visible) && !reasonDetail.button && reasonDetail.focused && reasonDetail.live === 'polite' && !reasonDetail.clipped &&
-          geometry.unchanged, { ...reasonDetail, geometry });
-        check('partial-days', `${tag}: keyboard-expanded sheet holds all content without scrolling when below the 80vh cap`,
-          reasonDetail.sheet.reservedHeight >= reasonDetail.sheet.cap || reasonDetail.sheet.scrollHeight <= reasonDetail.sheet.clientHeight, reasonDetail.sheet);
-        await checkReasonFocusRing(`${tag} nine reasons keyboard-expanded`);
-        await checkNoteGap(reasonRoot, `${tag} nine reasons keyboard-expanded`);
-        await key(page, 'Escape');
-        await click(page, `#cal [data-day="${partialTrade}"]`);
-        const reopened = await reasonProbe('nine reasons reopened'), pointerBefore = await sheetGeometry();
-        check('partial-days', `${tag}: reopening the sheet starts collapsed with the same full-content height`,
-          reopened.button?.text === '+6 more' && reopened.lines.filter(l => l.visible).length === 2 && same(sheetBefore, pointerBefore), reopened);
-        const target = await page.evaluate(`(() => { const r = document.querySelector('#sheetBody .dp-reasons-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
-        await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [target] });
-        await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-        await settle(page);
-        await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
-        reasonDetail = await reasonProbe('nine reasons pointer-expanded');
-        geometry = await revealGeometry(pointerBefore);
-        check('partial-days', `${tag}: a real pointer tap reveals all reasons and keeps sheet top, height and prior content exactly 0 px`,
-          reasonDetail.lines.length === 8 && reasonDetail.lines.every(l => l.visible) && !reasonDetail.button && reasonDetail.focused && !reasonDetail.clipped &&
-          geometry.unchanged, { ...reasonDetail, geometry });
-        check('partial-days', `${tag}: pointer-expanded sheet holds all content without scrolling when below the 80vh cap`,
-          reasonDetail.sheet.reservedHeight >= reasonDetail.sheet.cap || reasonDetail.sheet.scrollHeight <= reasonDetail.sheet.clientHeight, reasonDetail.sheet);
-        await checkNoteGap(reasonRoot, `${tag} nine reasons pointer-expanded`);
-        await viewShot(page, reasonsName + '-expanded', 'All eight reason sentences revealed in place');
-        if (viewport.name === '360') await cropNoteView('#daySheet', reasonsName + '-expanded-crop', 'All eight reasons plus a separate position paragraph after an exact 8 px gap');
-        await key(page, 'Escape');
-      } else await shot(page, viewport, reasonsName + '-panel', 'All eight reason sentences in canonical order');
+      if (view('partial-days', 'nine-reasons', viewport, theme)) {
+        await replace(reasons, `${tag} nine reasons`);
+        if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
+        let reasonDetail = await reasonProbe('nine reasons collapsed or panel');
+        await checkNoteGap(reasonRoot, `${tag} nine reasons collapsed`);
+        const expectedReasons = M.partialReasons(reasons.days.find(d => d.date === partialTrade)).map(r => r.text);
+        check('partial-days', `${tag}: canonical reason sentences wrap cleanly; FX disabled suppresses missing`,
+          reasonDetail.lead === 'Result may be incomplete.' && same(reasonDetail.lines.map(l => l.text), expectedReasons) &&
+          reasonDetail.lines.filter(l => l.visible).length === (viewport.mobile ? 2 : 8) && !reasonDetail.clipped &&
+          (!viewport.mobile ? !reasonDetail.button : reasonDetail.button.text === '+6 more' && reasonDetail.button.height >= 44 &&
+            reasonDetail.button.keyboard && reasonDetail.button.name === 'Show 6 more reasons'), reasonDetail);
+        const reasonsName = `${viewport.name}-${theme}-results-partial-nine-reasons`;
+        if (viewport.mobile) {
+          await viewShot(page, reasonsName + '-collapsed', 'Nine codes: two visible reason lines and +6 more');
+          const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
+            // Only the first two reason lines, visible before either reveal.
+            '#sheetBody .dp-note-lines > .dp-reason:nth-child(2)', '#sheetBody .dp-note-lines > .dp-reason:nth-child(3)'];
+          const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT), sheetBefore = await sheetGeometry();
+          const movedRects = (before, after) => {
+            const old = new Map(before.map(r => [r.key, r])), next = new Map(after.map(r => [r.key, r]));
+            return [...new Set([...old.keys(), ...next.keys()])].filter(key => !same(old.get(key), next.get(key))).map(key => {
+              const a = old.get(key), b = next.get(key);
+              return { key, before: a ?? null, after: b ?? null,
+                delta: a && b ? Object.fromEntries(['top', 'left', 'height', 'width'].map(k => [k, b[k] - a[k]])) : null };
+            });
+          };
+          const revealGeometry = async before => {
+            const after = await sheetGeometry(), fixedAfter = await rects(page, above), outerAfter = await rects(page, SHIFT);
+            return { unchanged: same(before, after) && same(fixedBefore, fixedAfter) && same(outerBefore, outerAfter),
+              sheet: { before, after, delta: { top: after.top - before.top, height: after.height - before.height } },
+              aboveMoved: movedRects(fixedBefore, fixedAfter), outerMoved: movedRects(outerBefore, outerAfter) };
+          };
+          nineReasonHeight = sheetBefore.height;
+          check('partial-days', `${tag}: geometry tracks exactly the two reasons visible before expansion`,
+            fixedBefore.filter(r => r.key.includes('.dp-reason:nth-child(')).length === 2, fixedBefore);
+          check('partial-days', `${tag}: nine-reason sheet is capped at 80vh`, nineReasonHeight <= viewport.height * .8, sheetBefore);
+          await page.evaluate('document.querySelector("#sheetBody .dp-reasons-more").focus({preventScroll:true})');
+          await key(page, 'Enter');
+          await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
+          reasonDetail = await reasonProbe('nine reasons keyboard-expanded');
+          let geometry = await revealGeometry(sheetBefore);
+          check('partial-days', `${tag}: keyboard reveal removes the button, focuses and politely announces all 8 reasons with 0 px sheet movement`,
+            reasonDetail.lines.length === 8 && reasonDetail.lines.every(l => l.visible) && !reasonDetail.button && reasonDetail.focused && reasonDetail.live === 'polite' && !reasonDetail.clipped &&
+            geometry.unchanged, { ...reasonDetail, geometry });
+          check('partial-days', `${tag}: keyboard-expanded sheet holds all content without scrolling when below the 80vh cap`,
+            reasonDetail.sheet.reservedHeight >= reasonDetail.sheet.cap || reasonDetail.sheet.scrollHeight <= reasonDetail.sheet.clientHeight, reasonDetail.sheet);
+          await checkReasonFocusRing(`${tag} nine reasons keyboard-expanded`);
+          await checkNoteGap(reasonRoot, `${tag} nine reasons keyboard-expanded`);
+          await key(page, 'Escape');
+          await click(page, `#cal [data-day="${partialTrade}"]`);
+          const reopened = await reasonProbe('nine reasons reopened'), pointerBefore = await sheetGeometry();
+          check('partial-days', `${tag}: reopening the sheet starts collapsed with the same full-content height`,
+            reopened.button?.text === '+6 more' && reopened.lines.filter(l => l.visible).length === 2 && same(sheetBefore, pointerBefore), reopened);
+          const target = await page.evaluate(`(() => { const r = document.querySelector('#sheetBody .dp-reasons-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+          await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [target] });
+          await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+          await settle(page);
+          await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
+          reasonDetail = await reasonProbe('nine reasons pointer-expanded');
+          geometry = await revealGeometry(pointerBefore);
+          check('partial-days', `${tag}: a real pointer tap reveals all reasons and keeps sheet top, height and prior content exactly 0 px`,
+            reasonDetail.lines.length === 8 && reasonDetail.lines.every(l => l.visible) && !reasonDetail.button && reasonDetail.focused && !reasonDetail.clipped &&
+            geometry.unchanged, { ...reasonDetail, geometry });
+          check('partial-days', `${tag}: pointer-expanded sheet holds all content without scrolling when below the 80vh cap`,
+            reasonDetail.sheet.reservedHeight >= reasonDetail.sheet.cap || reasonDetail.sheet.scrollHeight <= reasonDetail.sheet.clientHeight, reasonDetail.sheet);
+          await checkNoteGap(reasonRoot, `${tag} nine reasons pointer-expanded`);
+          await viewShot(page, reasonsName + '-expanded', 'All eight reason sentences revealed in place');
+          if (viewport.name === '360') await cropNoteView('#daySheet', reasonsName + '-expanded-crop', 'All eight reasons plus a separate position paragraph after an exact 8 px gap');
+          await key(page, 'Escape');
+        } else await shot(page, viewport, reasonsName + '-panel', 'All eight reason sentences in canonical order');
+
+      }
 
       for (const [record, suffix, sentence] of [[singleReason, 'single-reason', 'The trade history has a gap that covers this day.'],
         [counted, 'counted', "2\u00a0trades couldn't be matched to a desk."]]) {
+        if (!view('partial-days', suffix, viewport, theme)) continue;
         await replace(record, `${tag} ${suffix}`);
         if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
         const detail = await reasonProbe(suffix);
@@ -1991,65 +2095,68 @@ try {
         else await shot(page, viewport, `${viewport.name}-${theme}-results-partial-${suffix}`, sentence);
       }
 
-      await replace(threeReasons, `${tag} one more reason`);
-      if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
-      const singular = await reasonProbe('three reasons collapsed or panel');
-      check('partial-days', `${tag}: a single hidden reason has singular accessible copy`,
-        viewport.mobile ? singular.button?.text === '+1 more' && singular.button.name === 'Show 1 more reason' : !singular.button, singular);
-      if (viewport.mobile) {
-        // Three reasons are the two visible lines plus +1 more: exercise the
-        // below-cap reveal independently of the capped nine-reason sheet.
-        const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
-          '#sheetBody .dp-note-lines > .dp-reason:nth-child(2)', '#sheetBody .dp-note-lines > .dp-reason:nth-child(3)'];
-        const movedRects = (before, after) => {
-          const old = new Map(before.map(r => [r.key, r])), next = new Map(after.map(r => [r.key, r]));
-          return [...new Set([...old.keys(), ...next.keys()])].filter(key => !same(old.get(key), next.get(key))).map(key => {
-            const a = old.get(key), b = next.get(key);
-            return { key, before: a ?? null, after: b ?? null,
-              delta: a && b ? Object.fromEntries(['top', 'left', 'height', 'width'].map(k => [k, b[k] - a[k]])) : null };
-          });
-        };
-        const expected = M.partialReasons(threeReasons.days.find(d => d.date === partialTrade)).map(r => r.text);
-        for (const input of ['keyboard', 'pointer']) {
-          if (input === 'pointer') await click(page, `#cal [data-day="${partialTrade}"]`);
-          const collapsed = await reasonProbe(`three reasons ${input} collapsed`), sheetBefore = await sheetGeometry();
-          const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT);
-          check('partial-days', `${tag}: ${input} three-reason sheet starts below the 80vh cap with two visible lines and +1 more`,
-            collapsed.button?.text === '+1 more' && collapsed.button.name === 'Show 1 more reason' &&
-            collapsed.lines.filter(l => l.visible).length === 2 &&
-            fixedBefore.filter(r => r.key.includes('.dp-reason:nth-child(')).length === 2 &&
-            sheetBefore.height < collapsed.sheet.cap && collapsed.sheet.reservedHeight < collapsed.sheet.cap,
-            { ...collapsed, sheetBefore, above: fixedBefore, outer: outerBefore });
-          if (input === 'keyboard') {
-            await page.evaluate('document.querySelector("#sheetBody .dp-reasons-more").focus({preventScroll:true})');
-            await key(page, 'Enter');
-          } else {
-            const target = await page.evaluate(`(() => { const r = document.querySelector('#sheetBody .dp-reasons-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
-            await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [target] });
-            await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-            await settle(page);
-          }
-          await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
-          const expanded = await reasonProbe(`three reasons ${input}-expanded`), sheetAfter = await sheetGeometry();
-          const fixedAfter = await rects(page, above), outerAfter = await rects(page, SHIFT);
-          const geometry = {
-            unchanged: same(sheetBefore, sheetAfter) && same(fixedBefore, fixedAfter) && same(outerBefore, outerAfter),
-            sheet: { before: sheetBefore, after: sheetAfter,
-              delta: { top: sheetAfter.top - sheetBefore.top, height: sheetAfter.height - sheetBefore.height } },
-            aboveMoved: movedRects(fixedBefore, fixedAfter), outerMoved: movedRects(outerBefore, outerAfter),
+      if (view('partial-days', 'three-reasons', viewport, theme)) {
+        await replace(threeReasons, `${tag} one more reason`);
+        if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
+        const singular = await reasonProbe('three reasons collapsed or panel');
+        check('partial-days', `${tag}: a single hidden reason has singular accessible copy`,
+          viewport.mobile ? singular.button?.text === '+1 more' && singular.button.name === 'Show 1 more reason' : !singular.button, singular);
+        if (viewport.mobile) {
+          // Three reasons are the two visible lines plus +1 more: exercise the
+          // below-cap reveal independently of the capped nine-reason sheet.
+          const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
+            '#sheetBody .dp-note-lines > .dp-reason:nth-child(2)', '#sheetBody .dp-note-lines > .dp-reason:nth-child(3)'];
+          const movedRects = (before, after) => {
+            const old = new Map(before.map(r => [r.key, r])), next = new Map(after.map(r => [r.key, r]));
+            return [...new Set([...old.keys(), ...next.keys()])].filter(key => !same(old.get(key), next.get(key))).map(key => {
+              const a = old.get(key), b = next.get(key);
+              return { key, before: a ?? null, after: b ?? null,
+                delta: a && b ? Object.fromEntries(['top', 'left', 'height', 'width'].map(k => [k, b[k] - a[k]])) : null };
+            });
           };
-          check('partial-days', `${tag}: ${input} reveals all three reasons with sheet top, height and prior content exactly 0 px`,
-            expanded.lines.length === 3 && same(expanded.lines.map(l => l.text), expected) && expanded.lines.every(l => l.visible) &&
-            !expanded.button && expanded.focused && expanded.live === 'polite' && !expanded.clipped && geometry.unchanged,
-            { ...expanded, geometry });
-          check('partial-days', `${tag}: ${input}-expanded three-reason content is below the 80vh cap and fits the reserved body without scrolling`,
-            expanded.sheet.reservedHeight < expanded.sheet.cap && expanded.sheet.scrollHeight <= expanded.sheet.clientHeight, expanded.sheet);
-          if (input === 'keyboard') await checkReasonFocusRing(`${tag} three reasons keyboard-expanded`);
-          await key(page, 'Escape');
+          const expected = M.partialReasons(threeReasons.days.find(d => d.date === partialTrade)).map(r => r.text);
+          for (const input of ['keyboard', 'pointer']) {
+            if (input === 'pointer') await click(page, `#cal [data-day="${partialTrade}"]`);
+            const collapsed = await reasonProbe(`three reasons ${input} collapsed`), sheetBefore = await sheetGeometry();
+            const fixedBefore = await rects(page, above), outerBefore = await rects(page, SHIFT);
+            check('partial-days', `${tag}: ${input} three-reason sheet starts below the 80vh cap with two visible lines and +1 more`,
+              collapsed.button?.text === '+1 more' && collapsed.button.name === 'Show 1 more reason' &&
+              collapsed.lines.filter(l => l.visible).length === 2 &&
+              fixedBefore.filter(r => r.key.includes('.dp-reason:nth-child(')).length === 2 &&
+              sheetBefore.height < collapsed.sheet.cap && collapsed.sheet.reservedHeight < collapsed.sheet.cap,
+              { ...collapsed, sheetBefore, above: fixedBefore, outer: outerBefore });
+            if (input === 'keyboard') {
+              await page.evaluate('document.querySelector("#sheetBody .dp-reasons-more").focus({preventScroll:true})');
+              await key(page, 'Enter');
+            } else {
+              const target = await page.evaluate(`(() => { const r = document.querySelector('#sheetBody .dp-reasons-more').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+              await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [target] });
+              await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+              await settle(page);
+            }
+            await waitFor(page, '!document.querySelector("#sheetBody .dp-reasons-more") && !document.getElementById("dayReasonsExtra").hidden');
+            const expanded = await reasonProbe(`three reasons ${input}-expanded`), sheetAfter = await sheetGeometry();
+            const fixedAfter = await rects(page, above), outerAfter = await rects(page, SHIFT);
+            const geometry = {
+              unchanged: same(sheetBefore, sheetAfter) && same(fixedBefore, fixedAfter) && same(outerBefore, outerAfter),
+              sheet: { before: sheetBefore, after: sheetAfter,
+                delta: { top: sheetAfter.top - sheetBefore.top, height: sheetAfter.height - sheetBefore.height } },
+              aboveMoved: movedRects(fixedBefore, fixedAfter), outerMoved: movedRects(outerBefore, outerAfter),
+            };
+            check('partial-days', `${tag}: ${input} reveals all three reasons with sheet top, height and prior content exactly 0 px`,
+              expanded.lines.length === 3 && same(expanded.lines.map(l => l.text), expected) && expanded.lines.every(l => l.visible) &&
+              !expanded.button && expanded.focused && expanded.live === 'polite' && !expanded.clipped && geometry.unchanged,
+              { ...expanded, geometry });
+            check('partial-days', `${tag}: ${input}-expanded three-reason content is below the 80vh cap and fits the reserved body without scrolling`,
+              expanded.sheet.reservedHeight < expanded.sheet.cap && expanded.sheet.scrollHeight <= expanded.sheet.clientHeight, expanded.sheet);
+            if (input === 'keyboard') await checkReasonFocusRing(`${tag} three reasons keyboard-expanded`);
+            await key(page, 'Escape');
+          }
         }
+
       }
 
-      if (viewport.mobile) {
+      if (viewport.mobile && view('partial-days', 'growing-reasons', viewport, theme)) {
         await replace(growingReasons, `${tag} growing reasons below cap`);
         const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
           '#sheetBody .dp-note-lines > .dp-reason:nth-child(2)', '#sheetBody .dp-note-lines > .dp-reason:nth-child(3)'];
@@ -2139,6 +2246,7 @@ try {
       }
 
       for (const [record, kind] of [[partial, 'partial'], [filteredReasons, 'reasoned']]) {
+        if (!view('partial-days', `desk-filtered-${kind}`, viewport, theme)) continue;
         await replace(record, `${tag} ${kind} reason`);
         await click(page, '#deskSeg [data-desk="joe"]');
         for (const day of [partialTrade, today]) {
@@ -2159,42 +2267,49 @@ try {
         }
         await click(page, '#deskSeg [data-desk="all"]');
       }
-      await replace(todayWithoutReasons, `${tag} today without explicit reasons`);
-      for (const desk of ['all', 'joe', 'j']) {
-        await click(page, `#deskSeg [data-desk="${desk}"]`);
-        await click(page, `#cal [data-day="${today}"]`);
-        const detail = await page.evaluate(`(() => { const root = document.querySelector(${JSON.stringify(reasonRoot)}); return {
-          sum: root.querySelector('.dp-sum').innerText, note: root.querySelector('.dp-note')?.innerText ?? '',
-          reasons: root.querySelectorAll('.dp-note-lines, .dp-note-lead, .dp-reason, .dp-desk-note').length,
-          positions: [...root.querySelectorAll('.dp-position-note')].map(el => ({ tag: el.tagName, text: el.innerText })),
-          noteCount: root.querySelectorAll('.dp-note').length }; })()`);
-        const hasPosition = desk !== 'j';
-        check('partial-days', `${tag}: today without explicit reasons under ${desk} has no reason note and only its optional position paragraph`,
-          detail.sum === 'No trades so far' && detail.reasons === 0 && detail.noteCount === (hasPosition ? 1 : 0) &&
-          same(detail.positions, hasPosition ? [{ tag: 'P', text: 'Coca-Cola (KO, Joe), opened today at 11:15, is still open; it counts as Still open and on Desk.' }] : []), detail);
-        if (viewport.name === '360' && desk === 'all') await cropNoteView('#daySheet', `${viewport.name}-${theme}-results-partial-today-without-reasons-crop`, 'Today without explicit reasons: positions paragraph only');
-        if (viewport.mobile) await key(page, 'Escape');
+      if (view('partial-days', 'today-without-reasons', viewport, theme)) {
+        await replace(todayWithoutReasons, `${tag} today without explicit reasons`);
+        for (const desk of ['all', 'joe', 'j']) {
+          await click(page, `#deskSeg [data-desk="${desk}"]`);
+          await click(page, `#cal [data-day="${today}"]`);
+          const detail = await page.evaluate(`(() => { const root = document.querySelector(${JSON.stringify(reasonRoot)}); return {
+            sum: root.querySelector('.dp-sum').innerText, note: root.querySelector('.dp-note')?.innerText ?? '',
+            reasons: root.querySelectorAll('.dp-note-lines, .dp-note-lead, .dp-reason, .dp-desk-note').length,
+            positions: [...root.querySelectorAll('.dp-position-note')].map(el => ({ tag: el.tagName, text: el.innerText })),
+            noteCount: root.querySelectorAll('.dp-note').length }; })()`);
+          const hasPosition = desk !== 'j';
+          check('partial-days', `${tag}: today without explicit reasons under ${desk} has no reason note and only its optional position paragraph`,
+            detail.sum === 'No trades so far' && detail.reasons === 0 && detail.noteCount === (hasPosition ? 1 : 0) &&
+            same(detail.positions, hasPosition ? [{ tag: 'P', text: 'Coca-Cola (KO, Joe), opened today at 11:15, is still open; it counts as Still open and on Desk.' }] : []), detail);
+          if (viewport.name === '360' && desk === 'all') await cropNoteView('#daySheet', `${viewport.name}-${theme}-results-partial-today-without-reasons-crop`, 'Today without explicit reasons: positions paragraph only');
+          if (viewport.mobile) await key(page, 'Escape');
+        }
+        await click(page, '#deskSeg [data-desk="all"]');
       }
-      await click(page, '#deskSeg [data-desk="all"]');
-      await replace(reasons, `${tag} today reason`);
-      await click(page, `#cal [data-day="${today}"]`);
-      const todayDetail = await page.evaluate(`(() => { const root = document.querySelector(${JSON.stringify(reasonRoot)}); return { sum: root.querySelector('.dp-sum').innerText,
-        note: root.querySelector('.dp-note').innerText, markers: document.querySelectorAll('#cal [data-day="${today}"] .day-warning').length }; })()`);
-      check('partial-days', `${tag}: today keeps its known amount so far and reason without a Partial marker`,
-        /so far/.test(todayDetail.sum) && !/Partial/.test(todayDetail.sum) && todayDetail.markers === 0 &&
-        todayDetail.note.includes('The trade history has a gap that covers this day.'), todayDetail);
-      await checkNoteGap(reasonRoot, `${tag} today with explicit reasons`);
-      if (viewport.mobile) { await viewShot(page, `${viewport.name}-${theme}-results-partial-today-so-far`, 'Open Vienna day: exact known amount so far, without a Partial marker'); await key(page, 'Escape'); }
-      else await shot(page, viewport, `${viewport.name}-${theme}-results-partial-today-so-far`, 'Open Vienna day: exact known amount so far, without a Partial marker');
+
+      if (view('partial-days', 'today-reason', viewport, theme)) {
+        await replace(reasons, `${tag} today reason`);
+        await click(page, `#cal [data-day="${today}"]`);
+        const todayDetail = await page.evaluate(`(() => { const root = document.querySelector(${JSON.stringify(reasonRoot)}); return { sum: root.querySelector('.dp-sum').innerText,
+          note: root.querySelector('.dp-note').innerText, markers: document.querySelectorAll('#cal [data-day="${today}"] .day-warning').length }; })()`);
+        check('partial-days', `${tag}: today keeps its known amount so far and reason without a Partial marker`,
+          /so far/.test(todayDetail.sum) && !/Partial/.test(todayDetail.sum) && todayDetail.markers === 0 &&
+          todayDetail.note.includes('The trade history has a gap that covers this day.'), todayDetail);
+        await checkNoteGap(reasonRoot, `${tag} today with explicit reasons`);
+        if (viewport.mobile) { await viewShot(page, `${viewport.name}-${theme}-results-partial-today-so-far`, 'Open Vienna day: exact known amount so far, without a Partial marker'); await key(page, 'Escape'); }
+        else await shot(page, viewport, `${viewport.name}-${theme}-results-partial-today-so-far`, 'Open Vienna day: exact known amount so far, without a Partial marker');
+
+      }
 
       const todayDesk = reasons.trades.find(t => t.closedAt.startsWith(today)).desk;
       const emptyDesk = ['j', 'joe', 'joel'].find(d => d !== todayDesk);
       for (const emptyRow of [false, true]) {
+        if (!view('partial-days', emptyRow ? 'today-no-trades' : 'today-empty-filtered', viewport, theme)) continue;
         if (emptyRow) {
           await click(page, '#deskSeg [data-desk="all"]');
           await replace(emptyToday, `${tag} empty today row`);
         } else await click(page, `#deskSeg [data-desk="${emptyDesk}"]`);
-        if (viewport.mobile) await click(page, `#cal [data-day="${today}"]`);
+        await click(page, `#cal [data-day="${today}"]`);
         const noTrades = await page.evaluate(`(() => { const root = document.querySelector(${JSON.stringify(reasonRoot)}); return {
           sum: root.querySelector('.dp-sum').innerText, rows: root.querySelectorAll('.trow').length,
           markers: document.querySelectorAll('#cal [data-day="${today}"] .day-warning').length }; })()`);
@@ -2216,6 +2331,7 @@ try {
     await retainedBoard.pushResults(retained.record);
     retainedBoard.setNow('2026-10-16T12:00:00.000Z');
     for (const viewport of viewports) for (const theme of THEMES) {
+      if (!view('partial-days', 'retained-midnight', viewport, theme)) continue;
       const injection = viewport.mobile && theme === 'dark'
         ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
       await configure(page, viewport, theme);
@@ -2236,6 +2352,7 @@ try {
     // and missing records share trade money, so geometry can be compared.
     await serve(null);
     for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      if (!view('missing-days', 'closed-open-recovery', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       const { board } = await designBoard('2026-10-16T12:00:00.000Z');
       const record = structuredClone(valid.results); delete record.receivedAt;
@@ -2326,8 +2443,10 @@ try {
   if (run('budget')) {
     // 7 · The Results render budget's CI guard (ADR §9; the reference budget is
     // measured on a reference device by scripts/budget-reference.mjs).
+    if (!view('budget', 'render')) throw new Error('Budget view must run in full mode');
     budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
   }
+  requireView('host-timezone', 'hosts');
   if (process.env.TZ) check('host-timezone', 'dedicated workers use the requested host zone',
     page.workerTimeZones.length > 0 && page.workerTimeZones.every(zone => zone === expectedTimeZone),
     { workerTimeZones: page.workerTimeZones, expectedTimeZone });
@@ -2337,6 +2456,8 @@ try {
 }
 
 const failed = results.filter(r => !r.ok);
+const inventoryErrors = viewRecorder.errors();
+for (const error of inventoryErrors) console.error(`P4 view inventory: ${error}`);
 const byAc = new Map();
 for (const r of results) { const e = byAc.get(r.ac) ?? { pass: 0, fail: 0 }; e[r.ok ? 'pass' : 'fail']++; byAc.set(r.ac, e); }
 const lines = [...byAc].sort().map(([ac, e]) => `| ${ac} | ${e.pass} | ${e.fail} |`);
@@ -2381,6 +2502,13 @@ pushes and protected reads, then advance the injected clock to stale at 60 s;
 before the first push the feed says no data received yet. One
 headless browser, run sequentially; reduced motion for stable geometry.
 Host and browser time zone: ${expectedTimeZone}; dedicated worker zones are checked too.
+Run mode: **${zoneSubset ? 'subset' : 'full'}**${process.env.JOED_P4_ONLY ? ' (focused by JOED_P4_ONLY)' : ''}.
+Selected views: ${selectedViews.length}/${allViews.length}; static checks: ${viewSummary.checks}/${viewSummary.fullChecks} (${(100 * viewSummary.share).toFixed(2)}% of P4).
+${selectedViews.map(v => `- \`${v.name}\` — ${v.checks} static checks; ${viewRecorder.counts()[v.name] ?? 'not entered'} observed; zoneSensitive=${v.zoneSensitive}`).join('\n')}
+${inventoryErrors.length ? `View inventory errors:\n${inventoryErrors.map(e => `- ${e}`).join('\n')}\n` : ''}
+
+Selected groups (${selectedScenarios.length}/${P4_SCENARIOS.length}):
+${selectedScenarios.map(s => `- \`${s.name}\` — ${s.reason}`).join('\n')}
 Compare with \`joed-19-joedesk-approved.html\` (Results).
 
 ## For the visual check
@@ -2578,4 +2706,4 @@ ${budgetTrace ? resultsBudgetTable(budgetTrace, CI_GUARD) : 'Not run.\n'}
 ${shots.map(s => `- \`${s.file}\` — ${s.what}`).join('\n')}
 `);
 console.log(`${results.length - failed.length}/${results.length} browser checks passed; screenshots and index.md in ${QA_DIR}`);
-process.exit(failed.length ? 1 : 0);
+process.exit(failed.length || inventoryErrors.length ? 1 : 0);
