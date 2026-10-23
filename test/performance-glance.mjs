@@ -107,12 +107,14 @@ test('hero preserves all five figures and promotes Since start beside Today', ()
   assert.equal(doc.querySelector('[data-cell="hero.day"] .bn').textContent, '−€1,00');
 });
 
-test('separate Cash figure preserves exact values, reasons and stable caption reserves', () => {
-  const ctx = context(), reserve = html => htmlDocument(html).querySelector('.cash-kpi .cash-reserve').children.slice(1).map(el => el.textContent);
-  let baseline;
+test('separate Cash figure preserves exact values and keeps unavailable wording inside its caption', () => {
+  const ctx = context();
   for (const cash of [
     cell('12345.67890123'), cell('12345.67890123', { state: 'stale', reason: 'snapshot_stale' }),
+    cell(null, { state: 'not reported', reason: 'feed_not_received' }),
     cell(null, { state: 'broken', reason: 'gateway_unconfirmed' }),
+    cell(null, { state: 'broken', reason: 'source_unavailable' }),
+    cell(null, { state: 'broken', reason: 'not_exact_yet' }),
     cell('12345.67890123', { state: 'broken', retained: true, reason: 'gateway_unconfirmed' }),
   ]) {
     ctx.states.paperCash = cash;
@@ -120,11 +122,24 @@ test('separate Cash figure preserves exact values, reasons and stable caption re
     const actual = figure.querySelector('[data-cash="hero.cash"]');
     assert.equal(figure.querySelector('.cash-caption').textContent, 'cash · as the broker reports it');
     assert.equal(actual.getAttribute('aria-label'), actual.getAttribute('title'));
-    assert.equal(figure.querySelector('.cash-amount').textContent, cash.value && !cash.retained ? '€ 12.345,68' : 'not reported');
-    if (cash.reason) assert.match(actual.textContent, cash.reason === 'snapshot_stale' ? /updates are late/ : /broker connection not confirmed/);
-    baseline ??= reserve(html);
-    assert.deepEqual(reserve(html), baseline);
+    const hasValue = Boolean(cash.value && !cash.retained), caption = figure.querySelector('.cash-reserve');
+    assert.equal(figure.querySelector('.cash-amount').textContent, hasValue ? '€ 12.345,68' : '—');
+    assert.equal(Boolean(figure.querySelector('.cash-amount.muted')), !hasValue);
+    assert.equal(caption.children.length, 1, 'the fixed caption block needs no hidden sizing paragraphs');
+    assert.equal(figure.querySelectorAll('.cash-sizing').length, 0);
+    if (!hasValue) assert.match(caption.textContent, /^not reported · .+/);
+    if (cash.reason === 'gateway_unconfirmed') assert.match(caption.textContent, /broker connection not confirmed/);
+    if (cash.reason === 'snapshot_stale') assert.match(caption.textContent, /updates are late/);
   }
+});
+
+test('omitted Cash is a muted dash with the missing-data explanation in the caption', () => {
+  const ctx = context();
+  delete ctx.states.paperCash;
+  const figure = htmlDocument(heroLeft(ctx)).querySelector('.cash-kpi');
+  assert.equal(figure.querySelector('.cash-amount.muted').textContent, '—');
+  assert.equal(figure.querySelector('.cash-reserve').textContent, 'not reported · no data received yet');
+  assert.equal(figure.querySelector('[data-cash]').getAttribute('aria-label'), 'Cash not reported · no data received yet');
 });
 
 test('shared stale captions appear once, with local subtle state icons intact', () => {

@@ -104,8 +104,8 @@
     },
     {
       "path": "public/joe/app.css",
-      "size": 77626,
-      "sha256": "28e998e0c255142932f0b5223b50713adc658becd357f97099cee492200b70db"
+      "size": 77710,
+      "sha256": "c2ddb1d8d5e9680c0e462eec59525c656f4df70c7285b1713d75851ae9a52860"
     },
     {
       "path": "public/joe/app.js",
@@ -234,8 +234,8 @@
     },
     {
       "path": "public/joe/ui.js",
-      "size": 17850,
-      "sha256": "9175a63c94ed508d451195e55a2da3b02365c2fab972e859c2ad872e70bf7646"
+      "size": 17762,
+      "sha256": "85fd12bf5ee86df830b522511a8f146cbd424f1c887e8f4b33cbbb44a1f60dcb"
     },
     {
       "path": "public/joe/vendor/calver/display.json",

@@ -1287,27 +1287,25 @@ including stale and broken states; it never displays a partial total.
 
 The independent `paperCash` panel follows account freshness, retention and
 API-session checks. The read model withholds broken retained cash with its
-own reason; an unconfirmed session nulls cash alongside equity. Desk adds a
-cash block below the account total, and Settings appends it to the account
+own reason; an unconfirmed session nulls cash alongside equity. Desk has a
+separate supporting Cash figure, and Settings appends it to the account
 row. Both use the label “Cash” and caption “cash · as the broker reports it”.
 They show two decimals using exact integer units for display only, with
-the untouched broker lexeme in title and accessible name. Null always reads
-“not reported · [reason]”; rev-7 omission reads “no data received yet”.
-Both surfaces reserve the actual wrapped value/stale/null reason forms,
-including the session reason at 360 px, and the caption's fixed rows. They wrap
+the untouched broker lexeme in title and accessible name. Null Cash shows a
+muted dash in the Desk figure with “not reported · [reason]” in its caption;
+Settings retains that wording inline. Rev-7 omission reads “no data received yet”.
+Desk reserves fixed caption lines inside each cell; Settings reserves the actual
+wrapped value/stale/null reason forms, including the session reason at 360 px. They wrap
 text and keep the existing header. P5's `cash` cases cover real ingress, stale, null, API-session loss,
 rev-7 omission and recovery at 1440/1024/390/360 in both themes, with exact
 component geometry checks, overflow/clipping assertions and
 `<width>-<theme>-{desk-hero,settings-account}-cash-{value,null}` crops.
 Browser results and visual approval remain with CI and the coordinator.
-All four hero KPI captions use that same grid/sizing mechanism, with fresh
-variants and every real retained/stale/broken/null phrase crossed with the
-closed cell reasons. Reserves come from the caption builder, including unknown
-ages, 999 days and 23 h 59 min. They share one grid cell, stay hidden from
-accessibility and reserve only the tallest actual wrapped form at each width.
-CSS column widths plus local font metrics estimate 3/2/4/5 reserved 16 px
-lines at 1440/1024/390/360 with DejaVu Sans, or 2/2/4/4 with SF/Arial. These
-are wrapping estimates; CI owns the rendered geometry and overflow result.
+The three account/result captions retain their overlapping, accessibility-hidden
+caption samples, including unknown ages, 999 days and 23 h 59 min. All four
+secondary cells now use equal fixed caption blocks; Cash needs no hidden samples.
+The primary Since start caption retains its content-sized grid reserve.
+CI owns the rendered geometry and overflow result.
 P5's `positions` cases assert null KEEP quantity and values with visible and
 accessible reasons, a stage0 null mark, and no `button`, `a`, `input` or
 `[tabindex]` inside any `[data-keep]` row. At 1440/1024/390/360 in both themes,
@@ -1381,6 +1379,17 @@ empty right column. At phone widths the order stays primary results, secondary
 figures (Cash below Paper account), then clock and chart. Cash keeps its exact
 broker lexeme in its title/accessibility name, its independent missing/stale
 reason and a state-independent reserve; Settings keeps its existing cash layout.
+Each secondary cell reserves five 16 px caption lines (eight on phones) inside
+the cell, with a 20 px label and a 28 px value row. Cash's broker caption uses
+the first two reserved lines; missing Cash shows a muted em dash and puts
+“not reported · no data received yet” (or its own reason) below it. The hero
+has no reserved card height. Fix 4 removes Cash's hidden sizing paragraphs:
+the more-specific `.kpi .c` block display had defeated their grid overlap and
+inflated every stretched secondary cell. CI's 1440 primary/chart height of
+about 272 px plus the new 147 px secondary row, 10 px gap and 46 px padding
+predicts a hero near 475 px. At 1024 the 2×2 secondary grid is 291 px, giving
+`max(primary height, 272 px) + 347 px` (roughly 619–670 px, font-dependent).
+These are CSS estimates; browser height and zero-shift verification stay in CI.
 Desk check-ins stay on one line. A long status yields with an ellipsis and a
 complete native title; cards below 340 px retain the check-in on the name row.
 
