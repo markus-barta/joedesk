@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { P4_SCENARIOS, P4_VIEWS, P4_SUBSET_EXCEPTION, createP4Views, createP4ViewRecorder, p4ViewKey, validateP4Scenarios, validateP4Views, selectP4Scenarios, selectP4Views, summarizeP4Views, parseResultsGateArgs } from '../scripts/results-gate-plan.mjs';
+import { P4_SCENARIOS, P4_VIEWS, P4_DATE_PATHS, P4_ZONE_VARIANTS, P4_VIEW_DEPENDENCIES, createP4Views, createP4ViewRecorder, p4ViewKey, validateP4Scenarios, validateP4Views, selectP4Scenarios, selectP4Views, summarizeP4Views, parseResultsGateArgs } from '../scripts/results-gate-plan.mjs';
 import { runResultsGate } from '../scripts/run-results-gate.mjs';
 import { VIEWPORTS, THEMES } from '../scripts/browser/shots.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
@@ -22,7 +22,7 @@ test('P4 inventory covers executable groups and explicitly classifies every view
     for (const invalid of [missing, { ...missing, zoneSensitive: undefined }, { ...missing, zoneSensitive: 'true' }]) {
       assert.throws(() => validateP4Views(P4_VIEWS.map(v => v === view ? invalid : v)), /explicitly declare zoneSensitive/);
     }
-    if (['date', 'host'].includes(view.coverage)) {
+    if (view.coverage === 'host') {
       assert.throws(() => validateP4Views(P4_VIEWS.map(v => v === view ? { ...v, zoneSensitive: false } : v)), /must be zoneSensitive/);
     }
   }
@@ -52,18 +52,15 @@ test('P4 inventory covers executable groups and explicitly classifies every view
   }
   const matrixLoops = [...p4.matchAll(/for \(const viewport of (?:VIEWPORTS|viewports)\) for \(const theme of THEMES\) \{([^\n]*\n[^\n]*)/g)];
   assert.equal(matrixLoops.length, 8);
-  for (const [loop] of matrixLoops) assert.match(loop, /if \(!view\('/, 'every width/theme view needs a selection guard');
+  for (const [loop] of matrixLoops) assert.match(loop, /if \(!(?:view|hasViews)\('/, 'every width/theme view needs a selection guard');
   assert.ok(p4.indexOf('const selectedViews = selectP4Views(') < p4.indexOf('const browser = await launch('));
 });
 
-test('P4 subset keeps host zones, date-bearing representatives and all 14 differing screenshot variants', () => {
+test('P4 subset keeps host zones and all 14 differing screenshot variants', () => {
   const selected = selectP4Views({ zoneSubset: true });
   const subset = new Set(names(selected));
-  for (const group of P4_SCENARIOS.filter(s => s.zoneSensitive)) {
-    assert.ok(selected.some(v => v.group === group.name && ['host', 'date'].includes(v.coverage)), group.name);
-  }
   // Run 39793917962: retain the exact width/theme variants, including the
-  // single-variant differences. Matching screenshot bytes do not exempt dates.
+  // single-variant differences. Other date views are covered by code path.
   const differing = [
     ['1024-dark-results-partial-desk-filtered-partial-today', 'partial-days', 'desk-filtered-partial'],
     ['1024-dark-results-partial-desk-filtered-reasoned-today', 'partial-days', 'desk-filtered-reasoned'],
@@ -84,6 +81,10 @@ test('P4 subset keeps host zones, date-bearing representatives and all 14 differ
     const [width, theme] = screenshot.split('-');
     assert.ok(subset.has(p4ViewKey(group, family, width, theme)), screenshot);
   }
+  assert.deepEqual([...P4_ZONE_VARIANTS].sort(), differing.map(([screenshot, group, family]) => {
+    const [width, theme] = screenshot.split('-');
+    return p4ViewKey(group, family, width, theme);
+  }).sort());
   assert.deepEqual(selectP4Views(), P4_VIEWS, 'full mode drops no views or checks');
   assert.deepEqual(names(selectP4Scenarios({ zoneSubset: true, only: ['vienna', 'budget'] })), ['host-timezone', 'vienna']);
   assert.deepEqual(names(selectP4Scenarios({ only: ['budget'] })), ['host-timezone', 'budget']);
@@ -96,24 +97,69 @@ test('P4 subset keeps host zones, date-bearing representatives and all 14 differ
   }
   const tradeRows = selected.filter(v => v.group === 'trade-amount' && v.family === 'rows');
   assert.deepEqual(names(tradeRows), ['trade-amount/rows/1440/light']);
+  for (const name of P4_ZONE_VARIANTS) {
+    assert.throws(() => validateP4Views(P4_VIEWS.map(v => v.name === name ? { ...v, zoneSensitive: false } : v)), /date path|zone variant/);
+  }
 });
 
-test('P4 static counts reconcile to the baseline and record the honest exception to the 30% target', t => {
+test('every documented date code path declares exactly one exercised representative in the subset', () => {
+  // Static only: importing/parsing the plan and README never loads app code,
+  // starts a server, launches Chrome or computes dates via the host zone.
+  const plan = readFileSync(new URL('../scripts/results-gate-plan.mjs', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const declared = [...plan.matchAll(/\{ name: '([^']+)', source: '([^']+)', representative: '([^']+)' \}/g)]
+    .map(([, name, source, representative]) => ({ name, source, representative }));
+  const documented = [...readme.matchAll(/^\| `([^`]+)` \| (.+) \| `([^`]+)` \|$/gm)]
+    .map(([, name, , representative]) => ({ name, representative }));
+  assert.deepEqual(declared, P4_DATE_PATHS);
+  assert.ok(declared.length > 0);
+  assert.deepEqual(documented, declared.map(({ name, representative }) => ({ name, representative })));
+  assert.equal(new Set(declared.map(path => path.name)).size, declared.length);
+  const selected = selectP4Views({ zoneSubset: true });
+  for (const path of declared) {
+    const representatives = selected.filter(v => v.datePaths.includes(path.name));
+    assert.deepEqual(names(representatives), [path.representative], path.name);
+    assert.equal(representatives[0].width, '1440', path.name);
+    assert.equal(representatives[0].theme, 'light', path.name);
+    assert.ok(representatives[0].checks > 0, `${path.name}: actually asserted, not just a screenshot`);
+    for (const source of path.source.split('; ')) {
+      const [file, helpers] = source.split(': ');
+      const content = readFileSync(new URL(`../public/joe/${file}`, import.meta.url), 'utf8');
+      for (const helper of helpers.split(', ')) assert.match(content, new RegExp(`\\b${helper}\\b`), path.source);
+    }
+    assert.throws(() => validateP4Views(P4_VIEWS.map(v => v.name === path.representative ? { ...v, zoneSensitive: false } : v)), /date path/);
+    assert.throws(() => validateP4Views(P4_VIEWS.map(v => v.name === path.representative ? { ...v, datePaths: [] } : v)), /date path/);
+  }
+  for (const dependency of P4_VIEW_DEPENDENCIES) {
+    assert.ok(selected.some(v => v.name === dependency.requires), dependency.requires);
+    assert.throws(() => validateP4Views(P4_VIEWS.map(v => v.name === dependency.requires ? { ...v, zoneSensitive: false } : v)), /requires/);
+  }
+  const expected = new Set(['host-timezone/hosts', ...P4_ZONE_VARIANTS,
+    ...declared.map(path => path.representative), ...P4_VIEW_DEPENDENCIES.map(d => d.requires)]);
+  assert.deepEqual(names(selected).sort(), [...expected].sort(), 'no repeated date-bearing views without a named path, measured variant or dependency');
+  // Stateful families now guard independent transitions; keeping the old
+  // requireView calls would force the full workflow back into the subset.
+  assert.doesNotMatch(p4, /requireView\('(?:states|partial-days)'/);
+  assert.match(p4, /if \(calendarSelected\) \{/);
+  assert.match(p4, /if \(!hasViews\('period-hint'/);
+});
+
+test('P4 static counts reconcile to the full baseline and the subset stays at most 25%', t => {
   const full = summarizeP4Views(P4_VIEWS), subset = summarizeP4Views(selectP4Views({ zoneSubset: true }));
   assert.equal(full.checks, 4954);
-  assert.equal(subset.checks, 4610);
-  assert.ok(subset.checks < 4936, 'per-view selection improves on the 4936-check group subset');
-  if (subset.share > .3) {
-    assert.match(P4_SUBSET_EXCEPTION, /Date-bearing matrix checks/);
-    assert.match(P4_SUBSET_EXCEPTION, /period hints, partial\/today reasons, missing days/);
-    assert.equal(subset.checks, P4_VIEWS.filter(v => ['date', 'host'].includes(v.coverage)).reduce((n, v) => n + v.checks, 0));
-  } else assert.ok(subset.share <= .3);
+  assert.ok(subset.share <= .25, `${subset.checks}/${full.checks} exceeds 25%`);
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.ok(readme.includes(`**${subset.views}/${full.views} views and ${subset.checks.toLocaleString('en-US')}/${full.checks.toLocaleString('en-US')} checks (${(100 * subset.share).toFixed(2)}%)**`));
+  for (const group of subset.groups) assert.ok(readme.includes(`| ${group.name} | ${group.sensitive} | ${group.independent} |`));
+  assert.ok(P4_VIEWS.some(v => v.coverage === 'date' && !v.zoneSensitive), 'reused date paths run only in full Vienna');
   // New anonymized fixtures join every declared viewport and all their checks.
   const extended = createP4Views(['real-1']);
   assert.doesNotThrow(() => validateP4Views(extended));
   assert.equal(extended.length - P4_VIEWS.length, 5);
   assert.equal(summarizeP4Views(extended).checks - full.checks, 104);
-  assert.ok(selectP4Views({ zoneSubset: true }, extended).filter(v => v.family === 'real-1').every(v => v.zoneSensitive));
+  assert.equal(selectP4Views({}, extended).filter(v => v.family === 'real-1').length, 5);
+  assert.equal(selectP4Views({ zoneSubset: true }, extended).filter(v => v.family === 'real-1').length, 0);
+  assert.equal(summarizeP4Views(selectP4Views({ zoneSubset: true }, extended), extended).checks, subset.checks);
   t.diagnostic(JSON.stringify({ views: subset.views, fullViews: full.views, checks: subset.checks, share: subset.share, groups: subset.groups }));
 });
 
@@ -181,8 +227,9 @@ test('Results gate launches the planned modes sequentially with isolated zone ar
       assert.equal(section.includes('`trade-amount/rows/390/dark`'), run.mode === 'full');
     }
     assert.equal((index.match(/\| passed \|/g) ?? []).length, 3);
-    assert.ok(index.includes('4610/4954 checks (93.06% of P4)'));
-    assert.ok(index.includes(P4_SUBSET_EXCEPTION));
+    const subset = summarizeP4Views(selectP4Views({ zoneSubset: true }));
+    assert.ok(index.includes(`${subset.checks}/4954 checks (${(100 * subset.share).toFixed(2)}% of P4)`));
+    for (const path of P4_DATE_PATHS) assert.ok(index.includes(`| ${path.name} | \`${path.representative}\` |`));
     for (const g of summarizeP4Views(P4_VIEWS).groups) assert.ok(index.includes(`| ${g.name} | ${g.sensitive} | ${g.independent} |`));
   }
 });
@@ -204,6 +251,7 @@ test('Results gate validates all zones before launch and stops with the failing 
     assert.equal(launched, 1);
     const index = readFileSync(join(qaRoot, 'index.md'), 'utf8');
     assert.match(index, /\| Europe\/Vienna \| full \| \d+ \| 4954 \| 100\.00% \| failed \|/);
-    assert.match(index, /\| UTC \| subset \| \d+ \| 4610 \| 93\.06% \| not run \|/);
+    const subset = summarizeP4Views(selectP4Views({ zoneSubset: true }));
+    assert.ok(index.includes(`| UTC | subset | ${subset.views} | ${subset.checks} | ${(100 * subset.share).toFixed(2)}% | not run |`));
   }
 });

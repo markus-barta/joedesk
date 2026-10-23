@@ -1,5 +1,6 @@
 // Import-free metadata and planning: inspecting the gate must never launch a
 // browser. Groups retain the focused CLI; views below own subset selection.
+// Scenario flags describe date content, not a requirement to select the group.
 export const P4_SCENARIOS = [
   { name: 'host-timezone', zoneSensitive: true, reason: 'Server, page and dedicated worker host zones; always checked.' },
   { name: 'design', zoneSensitive: true, reason: 'Today, period boundaries, Vienna calendar days and dated trade panels (including the day screenshot).' },
@@ -39,9 +40,9 @@ export function validateP4Scenarios(scenarios) {
 // Counts are static successful-run check counts, reconciled to the 4,954-check
 // baseline in run 39793917962. A view is one fixture/interaction at one width
 // and theme; a workflow may also capture its sheet, tooltip or detail crop.
-// Pure layout views can contain incidental date cells: one representative in
-// their group retains those cells in the zone matrix. Date assertions never
-// become layout coverage merely because their screenshots matched.
+// coverage describes what a view tests, independently of zone selection.
+// Repeated date assertions stay in the full run; the subset below covers
+// each date code path once, plus measured variants and required setup.
 const DESKTOP = [['1440', 'light'], ['1440', 'dark'], ['1024', 'light'], ['1024', 'dark']];
 const STANDARD = [...DESKTOP, ['390', 'light'], ['390', 'dark']];
 const PHONE = [['390', 'light'], ['390', 'dark'], ['360', 'light'], ['360', 'dark']];
@@ -50,6 +51,56 @@ const ALL = [...STANDARD, ['360', 'light'], ['360', 'dark']];
 const HINT = [...ALL, ['768', 'light'], ['768', 'dark']];
 const auditChecks = width => ['390', '360'].includes(width) ? 19 : 17;
 export const p4ViewKey = (group, family, width = '', theme = '') => [group, family, width, theme].filter(Boolean).join('/');
+
+// Call-site families found in public/joe/*.js, scoped to Results and the
+// shared board shell it renders. Each path has ONE exercised representative.
+// Width/theme variations of the same helper are not additional date paths.
+export const P4_DATE_PATHS = [
+  { name: 'wall-clock-formatters', source: 'format.js: parts, timeHM, dateTimeFull; app.js: renderHeader', representative: 'design/matrix/1440/light' },
+  { name: 'calendar-day-labels', source: 'results-model.js: fmtDM, fmtDDM, fmtDay; results.js: renderCalendar', representative: 'design/matrix/1440/light' },
+  { name: 'period-labels-and-stepping', source: 'results-model.js: periodOf, rangeLabel, stepAnchor, addDays, monday, daysIn', representative: 'design/matrix/1440/light' },
+  { name: 'best-worst-day-labels', source: 'results.js: dayTile', representative: 'r1/large-amounts/1440/light' },
+  { name: 'today-money-boundary', source: 'results.js: resultsView; results-model.js: equityAt, moneyContext', representative: 'r1/money-now/1440/light' },
+  { name: 'basis-cut-date', source: 'results.js: cutText; results-model.js: moneyContext, viennaMidnight', representative: 'r1/basis/1440/light' },
+  { name: 'chart-day-session-and-times', source: 'results-model.js: dayWindow, intraday; results.js: renderCurve', representative: 'design/matrix/1440/light' },
+  { name: 'chart-period-midnights-and-gaps', source: 'results-model.js: curve, viennaMidnight; results.js: renderCurve', representative: 'r1/time-axis/1440/light' },
+  { name: 'tracking-start-date', source: 'results.js: startText, heroSentence, dayState', representative: 'fixtures/before-tracking/1440/light' },
+  { name: 'closed-partial-days', source: 'results-model.js: countPartialDays; results.js: partialDay, dayWarning', representative: 'partial-days/calendar/1440/light' },
+  { name: 'open-today-partial', source: 'results.js: dayWarning, dayContent', representative: 'partial-days/today-reason/1440/light' },
+  { name: 'missing-closed-and-open-days', source: 'results.js: missingDayText, dayWarning, dayState', representative: 'missing-days/closed-open-recovery/1440/light' },
+  { name: 'period-partial-day-hints', source: 'results.js: renderHero, renderCalendar; results-model.js: countPartialDays', representative: 'period-hint/partial/1440/light' },
+  { name: 'trade-open-close-and-held', source: 'results.js: held, tradeRows; format.js: timeHM', representative: 'trade-amount/rows/1440/light' },
+  { name: 'open-position-today-time', source: 'results.js: dayContent; results-model.js: viennaDate', representative: 'partial-days/desk-filtered-reasoned/1440/light' },
+  { name: 'receipt-ingress-clock', source: 'feed.js: serverClock, createFeed; history-worker.js: serverClock, clockNow', representative: 'ingress/live-stale-recovery/1440/light' },
+  { name: 'stale-retained-ago', source: 'results.js: renderStatus; format.js: age; ui.js: ageSpan', representative: 'states/stale-retained/1440/light' },
+  { name: 'worker-date-indexing', source: 'history-worker.js: pollResults; results-model.js: indexResults, viennaDate', representative: 'ingress/live-stale-recovery/1440/light' },
+  { name: 'today-rollover-retained-receipt', source: 'results.js: resultsToday, renderResults; results-model.js: addDays', representative: 'partial-days/retained-midnight/1440/light' },
+  { name: 'vienna-dst-and-2027-04-01', source: 'results-model.js: viennaDate, marketHoliday; results.js: renderCalendar, tradeRows', representative: 'vienna/dst-calendar/1440/light' },
+];
+
+// Exact differing width/theme views from run 39793917962 (14/231 screens).
+// Preserve their associated checks even if a difference was render noise.
+export const P4_ZONE_VARIANTS = [
+  'partial-days/desk-filtered-partial/1024/dark',
+  'partial-days/desk-filtered-reasoned/1024/dark',
+  'partial-days/today-no-trades/1024/dark',
+  'partial-days/traded-detail/1024/dark',
+  'partial-days/counted/1024/light',
+  'partial-days/single-reason/1024/light',
+  'ingress/live-stale-recovery/1440/dark',
+  'partial-days/desk-filtered-reasoned/1440/dark',
+  'partial-days/single-reason/1440/dark',
+  'design/day/1440/light',
+  'ingress/live-stale-recovery/1440/light',
+  'states/kept-mismatch/1440/light',
+  'states/stale-retained/1440/light',
+  'ingress/live-stale-recovery/390/dark',
+];
+
+export const P4_VIEW_DEPENDENCIES = [
+  { view: 'trade-amount/rows/1440/light', requires: 'trade-amount/ingress', reason: 'Validate the trade fixture before rendering its rows.' },
+  { view: 'period-hint/partial/1440/light', requires: 'period-hint/baseline/1440/light', reason: 'Compare the hint against its unhinted chart and geometry.' },
+];
 
 export function createP4Views(realFixtures = []) {
   const views = [];
@@ -60,7 +111,7 @@ export function createP4Views(realFixtures = []) {
     });
   };
   const date = (group, family, variants, checks) => add(group, family, variants, {
-    zoneSensitive: true, coverage: 'date', checks, reason: 'Date, Vienna day, today, period boundary or receipt/age behavior.',
+    zoneSensitive: false, coverage: 'date', checks, reason: 'Repeated date-path coverage in the full Vienna run.',
   });
   const layout = (group, family, variants, checks, reason) => add(group, family, variants, {
     zoneSensitive: false, coverage: 'layout', checks, reason,
@@ -126,13 +177,21 @@ export function createP4Views(realFixtures = []) {
   date('missing-days', 'closed-open-recovery', STANDARD, w => 13 + auditChecks(w));
   add('budget', 'render', [['', '']], { zoneSensitive: false, coverage: 'budget', checks: 9,
     reason: 'Worker/render performance budget; measured only in full runs.' });
+  for (const view of views) {
+    view.datePaths = P4_DATE_PATHS.filter(path => path.representative === view.name).map(path => path.name);
+    const measured = P4_ZONE_VARIANTS.includes(view.name);
+    const dependencies = P4_VIEW_DEPENDENCIES.filter(d => d.requires === view.name);
+    if (view.datePaths.length || measured || dependencies.length) {
+      view.zoneSensitive = true;
+      view.reason = [view.datePaths.length ? `Date paths: ${view.datePaths.join(', ')}.` : '',
+        measured ? 'Measured zone-variant screenshot (run 39793917962).' : '',
+        ...dependencies.map(d => `Setup for ${d.view}: ${d.reason}`)].filter(Boolean).join(' ');
+    }
+  }
   return views;
 }
 
 export const P4_VIEWS = createP4Views();
-// Explicit exception to the 30% target: the retained date-asserting views
-// dominate the baseline. Do not label them layout to satisfy a speed target.
-export const P4_SUBSET_EXCEPTION = 'Date-bearing matrix checks (including period hints, partial/today reasons, missing days and calendar/date comparisons) remain in every host zone; only pure layout views are excluded. Runtime improvement must be measured on agm2.';
 
 export function validateP4Views(views) {
   validateP4Scenarios(P4_SCENARIOS);
@@ -145,14 +204,23 @@ export function validateP4Views(views) {
     }
     if (!Number.isSafeInteger(view.checks) || view.checks < 0) throw new Error(`Invalid check count for ${view.name}`);
     if (!['host', 'date', 'layout', 'budget'].includes(view.coverage) || !view.reason) throw new Error(`Missing coverage/reason for ${view.name}`);
-    if (['host', 'date'].includes(view.coverage) && !view.zoneSensitive) throw new Error(`Date/host view must be zoneSensitive: ${view.name}`);
+    if (view.coverage === 'host' && !view.zoneSensitive) throw new Error(`Host view must be zoneSensitive: ${view.name}`);
     if (view.group === 'budget' && view.zoneSensitive) throw new Error('P4 budget runs only in the full gate');
     names.add(view.name);
   }
   if (!views.some(v => v.group === 'host-timezone' && v.zoneSensitive)) throw new Error('P4 host-timezone must always run');
-  for (const group of P4_SCENARIOS.filter(s => s.zoneSensitive)) {
-    if (!views.some(v => v.group === group.name && v.coverage === (group.name === 'host-timezone' ? 'host' : 'date') && v.zoneSensitive)) {
-      throw new Error(`P4 ${group.name} needs a date-bearing representative`);
+  for (const path of P4_DATE_PATHS) {
+    if (!views.some(v => v.name === path.representative && v.zoneSensitive && v.datePaths?.includes(path.name))) {
+      throw new Error(`P4 date path ${path.name} needs its declared representative: ${path.representative}`);
+    }
+  }
+  for (const name of P4_ZONE_VARIANTS) {
+    if (!views.some(v => v.name === name && v.zoneSensitive)) throw new Error(`P4 measured zone variant must run: ${name}`);
+  }
+  for (const dependency of P4_VIEW_DEPENDENCIES) {
+    if (views.some(v => v.name === dependency.view && v.zoneSensitive) &&
+      !views.some(v => v.name === dependency.requires && v.zoneSensitive)) {
+      throw new Error(`P4 ${dependency.view} requires ${dependency.requires}`);
     }
   }
 }

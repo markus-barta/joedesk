@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createP4Views, parseResultsGateArgs, selectP4Views, summarizeP4Views, P4_SUBSET_EXCEPTION } from './results-gate-plan.mjs';
+import { createP4Views, parseResultsGateArgs, selectP4Views, summarizeP4Views, P4_DATE_PATHS } from './results-gate-plan.mjs';
 import { realResultsFixtures } from './results-fixtures.mjs';
 
 const script = fileURLToPath(new URL('./browser-p4.mjs', import.meta.url));
@@ -28,7 +28,12 @@ export function runResultsGate(args, {
 ${process.env.JOED_P4_ONLY ? 'Focused by JOED_P4_ONLY.\n' : ''}
 Static subset: **${subset.views}/${allViews.length} views**, **${subset.checks}/${subset.fullChecks} checks (${(100 * subset.share).toFixed(2)}% of P4)**.
 Counts describe the successful baseline plan; each zone report records actual executed checks.
-${subset.share > .3 ? `30% target exception: ${P4_SUBSET_EXCEPTION}\n` : ''}
+Subset target: at most 25% of full P4 checks. Host-zone checks, measured screenshot variants and one representative per date code path repeat in UTC and New York.
+
+| Date code path | Representative view |
+| --- | --- |
+${P4_DATE_PATHS.map(path => `| ${path.name} | \`${path.representative}\` |`).join('\n')}
+
 | Group | Sensitive views | Independent views |
 | --- | --- | --- |
 ${subset.groups.map(g => `| ${g.name} | ${g.sensitive} | ${g.independent} |`).join('\n')}
