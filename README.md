@@ -677,15 +677,15 @@ zone subset.
 | budget | 0 | 1 |
 | **Total** | **31** | **298** |
 
-The subset is **31/329 views and 588/5,061 checks (11.62%)**, enforced at
-**≤25%** by the lightweight inventory test. The PR plan performs **6,237**
-checks (5,061 + 2 × 588), compared with 14,174 in fix1 and 15,183 for full ×3
+The subset is **31/329 views and 627/5,291 checks (11.85%)**, enforced at
+**≤25%** by the lightweight inventory test. The PR plan performs **6,545**
+checks (5,291 + 2 × 627), compared with 14,174 in fix1 and 15,873 for full ×3
 with the real fixture (14,871 for UX 1's synthetic baseline; 14,862 for the
 original synthetic baseline).
 The measured agm2 Results times were **788 s** for baseline, **779 s** for the
 group subset and **744 s** for fix1's 93.06% view subset. At approximately
 **263 s** per original baseline full Vienna run, weighting the current PR plan
-by that 4,954-check baseline projects **331 s (5.5 min)**, below the **450 s**
+by that 4,954-check baseline projects **347 s (5.8 min)**, below the **450 s**
 target. This is an expected runtime, not a measurement: setup and interactions
 have different costs. The coordinator's PR CI on agm2 measures the actual
 result; no local browser run is part of this change.
@@ -1327,7 +1327,8 @@ JOED-60's broker gap, `not_exact_yet`, and Settings runtime content stay intact.
 The control has a fixed width and tabular numerals. Fitting yellow sentences
 appear in the control. At compact widths (≤1100 px), or when measurement shows
 the full sentence would overflow, it switches to a short label and the reserved
-32 px line below the header displays the complete sentence and action in yellow.
+56 px line below the header displays the sentence and action in yellow, at body
+size with a status icon and space above the hero. Its button has a 44 px target.
 Red always uses that line. Each non-green sentence appears once outside Details;
 green may stay compact on narrow screens. The line ends in an ellipsis when
 necessary and retains a complete title. Its space stays reserved in green, so
@@ -1342,6 +1343,34 @@ check-in age. Escape closes the dialog and returns focus to its opener
 at the existing 60-second boundary they return in the stale tone. The footer
 retains the read-only paper-board promise and version. A polite live region
 announces each change of ranked tone/reason once, without announcing age ticks.
+
+JOED-77 puts Today and Since start beside each other as the two primary Desk
+figures, each with euros and a signed percentage to two decimals. Today uses
+`dayPnl / (equity - dayPnl) × 100`; Since start uses `totalPnl / 15000 × 100`.
+The existing aggregate practice-capital base is retained: neither the data
+contract nor fleet settings supplies a starting base. Individual desk percentages
+are omitted for the same reason; their term explanation says why. The History
+model's assumed € 5.000 is a chart estimate, not evidence of an individual base.
+All percentage arithmetic uses exact decimal BigInt units and rounds once;
+missing, nonpositive, retained, incompatible or not-exact inputs omit the
+percentage. An estimated session-open day also omits it. Desk cards rank by
+their since-start euro result, best first, retaining current order on ties and
+putting unavailable results last. Position rows keep their instrument currency:
+the current row contract supplies neither a separate EUR result nor a usable
+native-to-EUR rate (a rate from another row or the results record is not used).
+
+A snapshot state shared by money cells appears once in the hero's board caption.
+The cells keep subtle state icons. Different states, reasons, ages, missing
+values or retained observations keep their own explanations; positions and kept
+holdings retain their section state lines. Caption and percentage space stays
+reserved across ticks. Results' eight metric help controls are small info icons
+with names of the form “Learn about Typical win and loss”, opening the same
+explanations. Two-value metrics use two reserved numeral rows inside fixed-height
+cards, including unavailable and single-value states, without clipping or scroll.
+`test/performance-glance.mjs` covers exact percentage math, omissions, ranking and
+caption sharing. P3 preserves the Desk state/geometry checks with the new hero,
+order and shared caption; P4 checks all info controls and both value rows against
+their card bounds. Browser validation belongs to CI.
 
 `node --test test/status-line.mjs` is the small local presentation suite, also
 included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,

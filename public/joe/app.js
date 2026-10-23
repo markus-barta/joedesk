@@ -90,6 +90,7 @@ function start() {
     root.dataset.joeState = health.statusTone;
     const alert = $('#statusAlert');
     alert.dataset.tone = health.statusTone;
+    alert.querySelector('use').setAttribute('href', health.statusTone === 'warn' ? '#i-half' : '#i-stop');
     const alertText = $('#statusAlertText');
     if (alertText.textContent !== head.alert) alertText.textContent = head.alert;
     alertText.title = head.alert;

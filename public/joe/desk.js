@@ -1,14 +1,17 @@
 // Desk: health line and details, Today, the three desks, positions and the
-// kept holdings. Every number comes from one panel-state cell; each cell shows
-// fresh, stale with age, not reported, or broken with its reason, on its own.
+// kept holdings. Every number keeps its panel state; matching snapshot captions
+// are shared once, while different ages and reasons stay beside their values.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption } from './ui.js';
-import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, NB } from './format.js';
+import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { drawChart, eurAxis } from './chart.js';
 import { intraday } from './history-model.js';
 import { learningLine } from './events.js';
+import { panelState } from './contracts/panel-state.mjs';
+import { decimalUnits, UNIT } from './contracts/decimal.mjs';
+import { STARTING_MONEY, todayPercent, sincePercent, rankDesks } from './performance.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -40,7 +43,32 @@ export function executorProblem(data) {
 export function cellView(cell, key, { signed = true, caption = '' } = {}) {
   const value = cell?.value ?? null;
   const n = amountOf(value);
-  return { html: bn(n, value?.currency ?? 'EUR', signed), caption: stateCaption(cell, key, caption), state: cell?.state ?? 'not reported', n };
+  const units = value ? decimalUnits(value.amount) : null;
+  return { html: bn(units, value?.currency ?? 'EUR', signed), caption: stateCaption(cell, key, caption), state: cell?.state ?? 'not reported', n, units };
+}
+
+// One snapshot-level caption. A different reason, age, retention or missing
+// value remains local to its cell; only an identical state is shared.
+export function boardCaptionCell(ctx) {
+  const data = ctx.feeds.data?.value;
+  if (!data || !ctx.now) return null;
+  const cell = panelState(ctx.feeds.data, data, null, ctx.now);
+  return cell.state === 'fresh' ? null : cell;
+}
+export function sharesBoardCaption(cell, board) {
+  return Boolean(board && cell && ['state', 'reason', 'retained', 'ageSeconds'].every(k => cell[k] === board[k]) &&
+    (cell.value == null) === (board.value == null));
+}
+function cellIcon(cell) {
+  if (!cell || cell.state === 'fresh') return '';
+  const p = statePhrase(cell, '');
+  const label = `${capital(p.state)}${cell.reason ? ` · ${cellReason(cell.reason)}` : ''}`;
+  return `<span class="cell-state tone-${p.tone}" role="img" aria-label="${esc(label)}">${icon(p.icon ?? TONE_ICON[p.tone])}</span>`;
+}
+export function percentHtml(hundredths) {
+  if (hundredths === null) return '';
+  const sign = hundredths < 0n ? MINUS : hundredths > 0n ? '+' : '';
+  return `<span class="performance-pct${hundredths ? hundredths > 0n ? ' gain' : ' loss' : ''}">${sign}${digits(hundredths * UNIT / 100n, 2)}${NB}%</span>`;
 }
 
 function healthFacts(ctx, health) {
@@ -116,11 +144,6 @@ export function headerHealth(ctx, health) {
     label: `${health.tone === 'green' ? 'Live. Numbers are up to date' : status.sentence}. Open status details.`, title: status.sentence };
 }
 
-function sinceLabel(data) {
-  const starts = (data?.desks ?? []).map(d => d.accounting?.periodStart).filter(Boolean).sort();
-  return starts.length ? `Since ${dayDM(starts[0], NY)}` : 'Since start';
-}
-
 function sessionRing(now) {
   if (!now) {
     const svg = `<svg viewBox="0 0 64 64" role="img" aria-label="Market session ring: the board server’s time is not known yet"><circle cx="32" cy="32" r="26" fill="none" stroke="var(--line)" stroke-width="5"/></svg>`;
@@ -163,33 +186,42 @@ export function heroLeft(ctx) {
   const data = feeds.data?.value;
   const dayCell = states['today.dayPnl'];
   const day = cellView(dayCell, 'hero.day');
+  const board = boardCaptionCell(ctx);
   const kpi = (termKey, label, name, key, opts) => {
     const v = cellView(states[name], key, opts);
-    const caption = reservedCaption(v.caption, opts.captions ?? [opts.caption]);
-    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}</dt><dd>${v.html}<span class="c">${caption}</span>${key === 'hero.account' ? cashCaption(states.paperCash, 'hero.cash') : ''}</dd></div>`;
+    const caption = reservedCaption(sharesBoardCaption(states[name], board) ? '' : v.caption, opts.captions ?? [opts.caption]);
+    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}${cellIcon(states[name])}</dt><dd>${v.html}<span class="c">${caption}</span>${key === 'hero.account' ? cashCaption(states.paperCash, 'hero.cash') : ''}</dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
-  const moneyCaptions = [`started with ${eur(15000, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
+  const moneyCaptions = [`started with ${eur(STARTING_MONEY, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
   const why = dayCell?.reason ? cellReason(dayCell.reason) : null;
+  const dayAmount = day.units === null ? null : eur(day.units < 0n ? -day.units : day.units);
   let say;
   if (day.n == null) {
     say = data ? `Today’s result is not available: ${esc(why ?? 'not reported')}.`
       : day.state === 'not reported' ? 'No numbers yet: no board data has arrived.' : `No numbers: ${esc(why ?? 'not available')}.`;
   } else if (day.state === 'fresh') {
     const who = 'J, Joe and Joel';
-    say = isZero(day.n) ? `Flat today for ${who}.` : `${day.n > 0 ? 'Up' : 'Down'} ${eur(Math.abs(day.n))} today across ${who}.`;
+    say = isZero(day.units) ? `Flat today for ${who}.` : `${day.units > 0n ? 'Up' : 'Down'} ${dayAmount} today across ${who}.`;
     const method = data?.pnlSources?.day?.method === 'session-open-estimate' ? dayMethodLabel(data.pnlSources.day) : null;
     if (method) say += ` ${method}.`;
   } else {
     // Not fresh: the amount, then this value's own state, age and reason.
-    say = `${isZero(day.n) ? 'Flat' : `${day.n > 0 ? 'Up' : 'Down'} ${eur(Math.abs(day.n))}`} today. ${day.caption}.`;
+    say = `${isZero(day.units) ? 'Flat' : `${day.units > 0n ? 'Up' : 'Down'} ${dayAmount}`} today.${sharesBoardCaption(dayCell, board) ? '' : ` ${day.caption}.`}`;
   }
-  return `<div class="hero-k">${icon('clock')}<span>${term('today')}${now ? ` · ${dayDDM(now, NY)}` : ''}</span></div>
-    <div class="display" data-cell="hero.day" data-state="${day.state}">${day.html}</div>
+  const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: 'after fees' });
+  return `<div class="performance-date">${now ? dayDDM(now, NY) : ''}</div><div class="performance">
+      <div class="primary" data-cell="hero.day" data-state="${day.state}"><div class="hero-k">${icon('clock')}${term('today')}${cellIcon(dayCell)}</div>
+        <div class="display">${day.html}</div><div class="pct-slot">${percentHtml(todayPercent(states, data?.pnlSources?.day))}</div>
+        <span class="c primary-caption"></span></div>
+      <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since')}${cellIcon(sinceCell)}</div>
+        <div class="display">${since.html}</div><div class="pct-slot">${percentHtml(sincePercent(states))}</div>
+        <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, ['after fees'])}</span></div>
+    </div>
     <button type="button" class="say" data-say="today" aria-expanded="false"><span data-clamp="2">${say}</span></button>
+    <p class="board-caption">${board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : ''}</p>
     <dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
-      ${kpi('since', sinceLabel(data), 'today.totalPnl', 'hero.since', { caption: 'after fees' })}
       ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions })}
       ${kpi('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}
     </dl>`;
@@ -213,15 +245,16 @@ function deskCard(ctx, id, maxDay, showBars) {
   const sinceText = desk?.accounting?.periodStart ? `Since ${dayDM(desk.accounting.periodStart, NY)}` : 'Since start';
   const bar = showBars && dayV.n != null && !isZero(dayV.n)
     ? `<i data-v="${dayV.n}" style="${dayV.n > 0 ? 'left' : 'right'}:50%;width:${(Math.abs(dayV.n) / maxDay * 50).toFixed(3)}%;background:var(--${dayV.n > 0 ? 'gain' : 'loss'})"></i>` : '';
-  const num = (label, v, extra = '') => `<div data-state="${v.state}"><span class="k">${label}</span><span class="v">${v.html}</span>${extra}</div>`;
-  const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]]);
+  const board = boardCaptionCell(ctx);
+  const num = (label, v, cell, extra = '') => `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell)}</span><span class="v">${v.html}</span>${extra}</div>`;
+  const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]], board);
   const learning = learningLine(desk?.learning);
   return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span>${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
       <p class="now">${desk ? esc(desk.action) : 'Waiting for the first valid snapshot.'}</p>
       <div class="dnums">
-        ${num(term('today'), dayV, `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
-        ${num(term('open'), openV)}
-        ${num(term('since', sinceText), sinceV)}
+        ${num(term('today'), dayV, states[`desks.${id}.dayPnl`], `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
+        ${num(term('open'), openV, states[`desks.${id}.openPnl`])}
+        ${num(term('since', sinceText), sinceV, states[`desks.${id}.totalPnl`])}
       </div>
       <div class="chart mini" id="mini-${id}"><div class="mini-label${status ? ' off' : ''}">${status || 'since start · last sessions'}</div></div>
       <footer>${icon('learning')}<span>${term('learning')}: ${learning ? esc(learning) : 'not reported'}${desk?.learning?.status === 'blocked' ? ' · blocked' : ''}</span></footer>`;
@@ -231,11 +264,11 @@ function deskCard(ctx, id, maxDay, showBars) {
 // reason. Numbers that share all three share a line. The lines sit in the
 // chart's own fixed box, so a fresh card keeps the approved spacing and a
 // change of state moves nothing.
-export function cardStatus(id, cells) {
+export function cardStatus(id, cells, board = null) {
   const groups = [];
   for (const [label, cell] of cells) {
-    if ((cell?.state ?? 'not reported') === 'fresh') continue;
-    const key = JSON.stringify([cell?.state, cell?.reason, cell?.retained, cell?.value == null, cell?.retained ? cell.valueReceivedAt : null]);
+    if ((cell?.state ?? 'not reported') === 'fresh' || sharesBoardCaption(cell, board)) continue;
+    const key = JSON.stringify([cell?.state, cell?.reason, cell?.ageSeconds, cell?.retained, cell?.value == null, cell?.retained ? cell.valueReceivedAt : null]);
     const group = groups.find(g => g.key === key);
     if (group) group.labels.push(label); else groups.push({ key, labels: [label], cell });
   }
@@ -420,6 +453,12 @@ export function renderDesk(ctx) {
   for (const id of DESKS) {
     const changed = patch($(`#desk-${id}`), deskCard(ctx, id, maxDay, showBars));
     if (changed) { chartKeys.delete(`mini-${id}`); redraw = true; }
+  }
+  const grid = $('.desk-grid');
+  const currentOrder = [...grid.children].map(card => card.id.slice(5));
+  for (const [index, id] of rankDesks(ctx.states, currentOrder).entries()) {
+    const card = $(`#desk-${id}`);
+    if (grid.children[index] !== card) grid.insertBefore(card, grid.children[index]);
   }
   // Charts measure their boxes before the long sections below change, so an
   // update never forces a layout of the whole position list mid-render.

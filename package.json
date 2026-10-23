@@ -14,7 +14,7 @@
     "smoke:release": "node scripts/smoke-release.mjs",
     "release:evidence": "node scripts/release-evidence.mjs",
     "test:contracts": "node --test --test-concurrency=2 test/contracts.mjs test/failure-fixtures.mjs test/time-vectors.mjs",
-    "test:ui": "node --test --test-concurrency=2 test/ui-modules.mjs test/status-line.mjs test/results-model.mjs test/settings-model.mjs",
+    "test:ui": "node --test --test-concurrency=2 test/ui-modules.mjs test/status-line.mjs test/performance-glance.mjs test/results-model.mjs test/settings-model.mjs",
     "test:contracts:browser": "node scripts/smoke-contracts-browser.mjs",
     "test:results": "node scripts/run-results-gate.mjs",
     "test:browser": "node scripts/browser-p3.mjs && npm run test:results && node scripts/browser-p5.mjs && node scripts/browser-p6.mjs",

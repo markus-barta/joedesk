@@ -21,6 +21,7 @@
     "/joe/feed.js": "/joe/feed.js?v=261023100632.0.0",
     "/joe/events.js": "/joe/events.js?v=261023100632.0.0",
     "/joe/desk.js": "/joe/desk.js?v=261023100632.0.0",
+    "/joe/performance.js": "/joe/performance.js?v=261023100632.0.0",
     "/joe/history.js": "/joe/history.js?v=261023100632.0.0",
     "/joe/history-model.js": "/joe/history-model.js?v=261023100632.0.0",
     "/joe/history-worker.js": "/joe/history-worker.js?v=261023100632.0.0",
@@ -160,13 +161,13 @@
   </div>
   <div class="page health-wrap"><div class="pop" id="healthPop" role="dialog" aria-label="Board status details" tabindex="-1"></div></div>
 </header>
-<div class="page status-alert" id="statusAlert" aria-hidden="true"><button type="button" id="statusAlertControl" aria-expanded="false" aria-controls="healthPop" aria-haspopup="dialog"><span id="statusAlertText" data-clamp="1"></span></button></div>
+<div class="page status-alert" id="statusAlert" aria-hidden="true"><button type="button" id="statusAlertControl" aria-expanded="false" aria-controls="healthPop" aria-haspopup="dialog"><svg class="i" aria-hidden="true"><use href="#i-stop"/></svg><span id="statusAlertText" data-clamp="1"></span></button></div>
 <div class="vh" id="statusAnnouncement" aria-live="polite" aria-atomic="true"></div>
 
 <main class="page" id="main">
   <section class="screen" id="scr-desk" aria-labelledby="deskTitle">
     <h1 class="vh" id="deskTitle">Desk</h1>
-    <section class="card hero" id="deskHero" aria-label="Today">
+    <section class="card hero" id="deskHero" aria-label="Desk performance">
       <div class="hero-l" id="heroL"></div>
       <div class="hero-r">
         <div class="session" id="heroSession"></div>

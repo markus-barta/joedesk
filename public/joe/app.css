@@ -158,11 +158,11 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
    warning and every red state puts its sentence on the reserved line once. */
 .hdr-health[data-compact] .status-full { visibility: hidden; }
 .hdr-health[data-compact] .status-compact { visibility: visible; }
-.status-alert { height: 32px; display: flex; align-items: center; color: var(--bad); font-size: 12px; font-variant-numeric: tabular-nums; }
+.status-alert { height: 56px; display: flex; align-items: center; padding-block: 6px; color: var(--bad); font-size: inherit; font-variant-numeric: tabular-nums; }
 .status-alert[data-tone="warn"] { color: var(--warn); }
-.status-alert > button { position: relative; display: flex; align-items: center; width: 100%; height: 32px; padding: 0; border: 0; background: none; color: inherit; font: inherit; line-height: 18px; text-align: left; visibility: hidden; cursor: pointer; }
-.status-alert > button::after { content: ""; position: absolute; inset: -6px 0; }
-.status-alert > button > span { display: block; width: 100%; min-width: 0; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-alert > button { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; height: 44px; padding: 0; border: 0; background: none; color: inherit; font: inherit; line-height: 20px; text-align: left; visibility: hidden; cursor: pointer; }
+.status-alert > button > .i { flex: none; width: 16px; height: 16px; }
+.status-alert > button > span { display: block; flex: 1; min-width: 0; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-alert[data-visible] > button { visibility: visible; }
 /* After the brand has yielded, tighten space only if the measured row still
    needs it. No viewport or font-width estimate decides this density. */
@@ -301,7 +301,7 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .rhero-r .legend { justify-content: space-between; min-height: 44px; align-content: flex-start; }
 .rchart { height: 272px; flex: none; margin-top: 10px; }
 .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
-.tile { padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 6px; height: 170px; min-width: 0; }
+.tile { padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 6px; height: 200px; min-width: 0; }
 .tile-top { display: flex; align-items: flex-start; gap: 9px; min-height: 38px; }
 .tile-top h3 { align-self: center; }
 .tile-top h3 { flex: 1; min-width: 0; font-size: 13.5px; line-height: 18px; font-weight: 600; }
@@ -513,7 +513,7 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .rhero-r .legend { flex-direction: column; align-items: flex-start; gap: 3px; }
   .rchart { height: 196px; }
   .tiles { grid-template-columns: 1fr; gap: 10px; }
-  .tile { height: 176px; padding: 12px 12px 8px; }
+  .tile { height: 200px; padding: 12px 12px 8px; }
   .tile-top { flex-wrap: wrap; min-height: 32px; }
   .tile .ico-sq { display: none; }
   .tval { font-size: 24px; line-height: 30px; }
@@ -551,7 +551,29 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .hdr-health .i { width: 16px; height: 16px; }
 .age { white-space: nowrap; }
 .btn.link { padding-left: 0; }
-.hero-l { min-width: 0; }
+.hero-l { min-width: 0; container-type: inline-size; }
+.performance-date { height: 20px; font-size: 12px; color: var(--ink-3); }
+.performance { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.performance .primary { min-width: 0; }
+.performance .hero-k { height: 32px; gap: 5px; white-space: nowrap; }
+.performance .display { font-size: clamp(22px, 7.4cqw, 44px); line-height: 52px; height: 61px; }
+.performance .since-primary .display { font-size: clamp(21px, 6.2cqw, 36px); }
+.pct-slot { height: 24px; line-height: 24px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.primary-caption { display: block; font-size: 12px; line-height: 16px; color: var(--ink-3); }
+.board-caption { height: 40px; margin: 4px 0 0; font-size: 12px; line-height: 18px; color: var(--ink-3); }
+.board-caption .st { align-items: flex-start; white-space: normal; }
+.board-caption .i { width: 13px; height: 13px; margin-top: 2px; }
+.cell-state { display: inline-flex; vertical-align: middle; margin-left: 3px; }
+.cell-state .i { width: 12px; height: 12px; }
+.tile .metric-info { width: 26px; height: 26px; padding: 0; justify-content: center; box-shadow: none; }
+.tile .metric-info .i { width: 15px; height: 15px; }
+.tile .metric-info::after { inset: -9px; }
+.tile .tval { height: 56px; flex: none; }
+.tile { container-type: inline-size; }
+/* Two fixed rows; a long exact numeral scales within its actual card width.
+   Leave room for the SVG arrow and slash even in the wider fallback font. */
+.tile .tval .pair-value { display: block; font-size: min(22px, calc((100cqw - 18px) / var(--characters) * 1.45)); line-height: 26px; }
+.tile .tval .sl { font-size: 14px; margin: 0 5px 0 0; }
 .kpi .c { min-height: 16px; }
 .session > div { min-width: 0; }
 .ring-t { font: 650 11px var(--font); fill: var(--ink); }

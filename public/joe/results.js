@@ -3,7 +3,7 @@
 // its result-so-far chart, eight tiles, By desk, the calendar and a day's
 // trades. Before a valid push arrives Results shows its existing unavailable
 // state: dashes, never a zero or an estimate.
-import { $, $$, icon, term, learnBtn, deskMark, inlineMark, swatch, patch, bn, pl, st, symBadge, ageSpan, statePhrase, openDialog } from './ui.js';
+import { $, $$, icon, term, deskMark, inlineMark, swatch, patch, bn, pl, st, symBadge, ageSpan, statePhrase, openDialog } from './ui.js';
 import { TERMS } from './terms.js';
 import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age } from './format.js';
 import { cellReason, STALE_AFTER_S } from './health.js';
@@ -178,8 +178,11 @@ export function renderHero(view, per, desks, R) {
 }
 
 const TILE_ICON = { trades: 'repeat', won: 'target', avgtrade: 'equal', pf: 'scale', typical: 'updown', besttrade: 'award', dip: 'dip', bestday: 'days' };
-const tile = (k, val, mean, foot = 'From closed trades · after fees', tight = false) => `<article class="card tile" role="listitem" data-tile="${k}"><div class="tile-top"><span class="ico-sq">${icon(TILE_ICON[k])}</span><h3>${TERMS[k][0]}</h3>${learnBtn(k)}</div><div class="tval${tight ? ' tight' : ''}">${val}</div><p class="tmean">${mean}</p><div class="tfoot">${icon('receipt')}${foot}</div></article>`;
-const two = (a, b) => `${a}<span class="sl">/</span>${b}`;
+const tile = (k, val, mean, foot = 'From closed trades · after fees', tight = false) => `<article class="card tile" role="listitem" data-tile="${k}"><div class="tile-top"><span class="ico-sq">${icon(TILE_ICON[k])}</span><h3>${TERMS[k][0]}</h3><button type="button" class="learn metric-info" data-term="${k}" data-learn="1" aria-expanded="false" aria-label="Learn about ${TERMS[k][0]}">${icon('info')}</button></div><div class="tval${tight ? ' tight' : ''}">${val}</div><p class="tmean">${mean}</p><div class="tfoot">${icon('receipt')}${foot}</div></article>`;
+const two = (a, b) => {
+  const size = html => Math.max(1, html.replace(/<[^>]*>/g, '').length);
+  return `<span class="pair-value" style="--characters:${size(a)}">${a}</span><span class="pair-value" style="--characters:${size(b) + 1}"><span class="sl">/</span>${b}</span>`;
+};
 // Two signed amounts share a tile; long ones step the size down, never clip.
 const tightPair = (...values) => values.filter(v => v != null).reduce((n, v) => n + eur(v, true).length, 0) > 17;
 const tradeName = t => `${esc(t.symbol)} (${LABEL[t.desk]})`;

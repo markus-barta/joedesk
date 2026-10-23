@@ -118,7 +118,8 @@ export function createP4Views(realFixtures = []) {
   });
   add('host-timezone', 'hosts', [['', '']], { zoneSensitive: true, coverage: 'host', checks: 3,
     reason: 'Server, page and dedicated worker host zones; always checked.' });
-  date('design', 'matrix', STANDARD, w => w === '390' ? 150 : 145);
+  // JOED-77: 18 info/geometry checks plus geometry at 20 period/desk switches.
+  date('design', 'matrix', STANDARD, w => w === '390' ? 188 : 183);
   for (const [family, width, theme] of [['day', '1440', 'light'], ['month-joe', '1440', 'light'],
     ['all', '1440', 'dark'], ['ytd-joel', '1024', 'dark'], ['month', '390', 'light']]) {
     date('design', family, [[width, theme]], 0);
@@ -142,7 +143,7 @@ export function createP4Views(realFixtures = []) {
     date('r1', family, PAIR, w => 40 + auditChecks(w));
   }
   date('r1', 'time-axis', PAIR, 4);
-  date('r1', 'large-amounts', PAIR, w => 6 + auditChecks(w));
+  date('r1', 'large-amounts', PAIR, w => 7 + auditChecks(w));
   date('trade-amount', 'ingress', [['', '']], 2);
   date('trade-amount', 'rows', [['1440', 'light']], 35);
   layout('trade-amount', 'rows', ALL.filter(([w, t]) => w !== '1440' || t !== 'light'),
