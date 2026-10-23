@@ -477,7 +477,7 @@ test('P2 health: anonymous exact allowlist, never-received null ages and failed-
   const first = (await get()).body;
   assert.equal(validateContract('healthz', first).ok, true);
   assert.equal(first.versionScheme, activeRelease.version_scheme); assert.equal(first.version, activeRelease.version);
-  for (const version of ['261016151218.0.0', '261019102825.0.0', '261021015923.0.0', '261021083537.0.0']) {
+  for (const version of ['261016151218.0.0', '261019102825.0.0', '261021015923.0.0', '261021083537.0.0', '261021113113.0.0']) {
     assert.notEqual(first.version, version, 'health reports the running candidate, not a previous publication');
   }
   assert.equal(first.serverNow, at(0)); assert.equal(first.snapshotAgeSeconds, null);
