@@ -460,15 +460,15 @@ try {
         await configure(page, viewport, theme);
         await load(page, b.url, screen);
         if (screen === 'settings') await waitFor(page, `document.querySelector('#rtRows [data-cash="rt.cash"]')`);
-        const selector = screen === 'desk' ? '#heroL [data-cell="hero.account"]' : '#rtRows .rt-row:last-child';
+        const selector = screen === 'desk' ? '#heroL .cash-kpi' : '#rtRows .rt-row:last-child';
         const cashKey = screen === 'desk' ? 'hero.cash' : 'rt.cash';
         const surface = screen === 'desk' ? 'desk-hero-cash' : 'settings-account-cash';
-        // Compare the cash surface in its own account box. Earlier Settings
-        // rows have independent state copy; their movement is not cash layout.
+        // Cash now has its own Desk figure; keep tracking Paper account too.
+        // Earlier Settings rows have independent state copy.
         const measure = () => ev(`(() => {
           const parent = document.querySelector(${J(selector)}), p = parent.getBoundingClientRect();
           const nodes = [parent, parent.querySelector('.cash-reserve'), parent.querySelector('[data-cash]')];
-          if (${J(screen)} === 'desk') nodes.push(document.getElementById('deskHero'));
+          if (${J(screen)} === 'desk') nodes.push(document.querySelector('#heroL [data-cell="hero.account"]'), document.getElementById('deskHero'));
           return nodes.map((e, i) => { const r = e.getBoundingClientRect(); return { key: i, top: r.top - p.top, left: r.left - p.left, width: r.width, height: r.height }; });
         })()`);
         const baseline = await measure();

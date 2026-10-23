@@ -45,7 +45,11 @@ async function deskChecks(page, viewport, theme, expectedMini, snapshot) {
     const rest = [...document.querySelectorAll('main, .bottom-nav')].map(e => e.innerText).join(' ');
     return {
       header, boardOkElsewhere: /Board OK/.test(rest), strip: t('#healthPop .health-facts'), freshCheckins: [...document.querySelectorAll('.dcard .hb')].some(e => e.textContent.trim()),
-      display: t('#heroL .display'), kpis: [...document.querySelectorAll('#heroL .kpi')].map(k => ({ cell: k.dataset.cell, state: k.dataset.state, dt: k.querySelector('dt').innerText, value: k.querySelector('dd .bn')?.innerText, cap: k.querySelector('.c').innerText })),
+      display: t('#heroL .display'), kpis: [...document.querySelectorAll('#heroL .kpi')].map(k => ({ cell: k.dataset.cell, state: k.dataset.state, dt: k.querySelector('dt').innerText, value: k.querySelector('dd .bn, .cash-amount')?.innerText, cap: k.querySelector('.cash-caption')?.innerText ?? k.querySelector('.c').innerText })),
+      heroLayout: (() => {
+        const rect = e => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height }; };
+        return { hero: rect(document.getElementById('deskHero')), primary: rect(document.querySelector('.hero-primary')), right: rect(document.querySelector('.hero-r')), chart: rect(document.getElementById('heroChart')), row: rect(document.querySelector('#heroL .kpis')), figures: [...document.querySelectorAll('#heroL .kpi')].map(rect) };
+      })(),
       primary: [...document.querySelectorAll('#heroL .primary')].map(k => ({ cell: k.dataset.cell, label: k.querySelector('.term').textContent, value: k.querySelector('.bn').innerText, pct: k.querySelector('.performance-pct')?.textContent,
         top: k.getBoundingClientRect().top, left: k.getBoundingClientRect().left, width: k.getBoundingClientRect().width, size: parseFloat(getComputedStyle(k.querySelector('.display')).fontSize) })),
       order: [...document.querySelectorAll('.dcard')].map(c => c.id.slice(5)),
@@ -59,14 +63,19 @@ async function deskChecks(page, viewport, theme, expectedMini, snapshot) {
     }; })()`);
   check('AC-18', `${tag}: one live header control and no fresh card check-ins or visible status strip`, /Live/.test(d.header) && !d.boardOkElsewhere && !d.freshCheckins && !await page.evaluate(`Boolean(document.querySelector('#health, .hstrip, #footData'))`), d);
   const kpiNames = d.kpis.map(k => k.dt);
-  check('AC-19', `${tag}: five figures remain, with Today and Since start primary and the three supporting captions intact`, Boolean(d.display) && d.primary.length === 2 && d.primary.map(p => p.label).join() === 'Today,Since start' && d.kpis.length === 3 && kpiNames.join() === 'Open positions,Desks’ money,Paper account' &&
-    d.kpis[0].cap === 'still moving until closed' && /started with € 15\.000/.test(d.kpis[1].cap) && d.kpis[2].cap === 'includes the kept holdings' &&
+  check('AC-19', `${tag}: Today and Since start remain primary, with four supporting figures and their captions intact`, Boolean(d.display) && d.primary.length === 2 && d.primary.map(p => p.label).join() === 'Today,Since start' && d.kpis.length === 4 && kpiNames.join() === 'Open positions,Desks’ money,Paper account,Cash' &&
+    d.kpis[0].cap === 'still moving until closed' && /started with € 15\.000/.test(d.kpis[1].cap) && d.kpis[2].cap === 'includes the kept holdings' && d.kpis[3].cap === 'cash · as the broker reports it' &&
     await page.evaluate(`document.querySelector('[data-cell="hero.since"] .c').innerText === 'after fees'`), { primary: d.primary, kpis: d.kpis });
   const day = decimalUnits(snapshot.totals.dayPnl.amount), equity = decimalUnits(snapshot.totals.equity.amount), since = decimalUnits(snapshot.totals.totalPnl.amount);
   const percent = (result, base) => { const n = divRound(result * 10000n, base); return `${n < 0n ? '−' : n > 0n ? '+' : ''}${fmt.digits(n * UNIT / 100n)} %`; };
   check('AC-19', `${tag}: primary euros and percentages use the exact start-of-day and since-start bases`, d.primary[0].value.replace(/\s/g, '') === fmt.eur(day, true).replace(/\s/g, '') && d.primary[1].value.replace(/\s/g, '') === fmt.eur(since, true).replace(/\s/g, '') &&
     d.primary[0].pct === percent(day, equity - day) && d.primary[1].pct === percent(since, decimalUnits('15000')), d.primary);
-  check('AC-19', `${tag}: primary figures sit side by side at the same level, with Today larger`, d.primary[0].top === d.primary[1].top && d.primary[0].left + d.primary[0].width <= d.primary[1].left && d.primary[0].size > d.primary[1].size, d.primary);
+  const layout = d.heroLayout, close = (a, b) => Math.abs(a - b) <= 0.5;
+  const supportingLayout = viewport.mobile
+    ? layout.primary.bottom <= layout.row.top && layout.row.bottom <= layout.right.top && layout.figures[0].top === layout.figures[1].top && layout.figures[2].top > layout.figures[0].top && layout.figures[3].top > layout.figures[2].top
+    : close(layout.primary.top, layout.right.top) && layout.primary.right < layout.right.left && close(layout.primary.bottom, layout.chart.bottom) && layout.row.top >= Math.max(layout.primary.bottom, layout.right.bottom) && close(layout.row.left, layout.primary.left) && close(layout.row.right, layout.right.right) &&
+      (viewport.name === '1440' ? layout.hero.height <= 590 && layout.figures.every(f => close(f.top, layout.figures[0].top)) : close(layout.figures[0].top, layout.figures[1].top) && close(layout.figures[2].top, layout.figures[3].top) && layout.figures[2].top > layout.figures[0].top);
+  check('AC-19', `${tag}: primary figures share one level with Today larger; the secondary row spans both balanced columns (1440 hero ≤590 px), wraps 2×2 at 1024 and precedes the chart on phones`, d.primary[0].top === d.primary[1].top && d.primary[0].left + d.primary[0].width <= d.primary[1].left && d.primary[0].size > d.primary[1].size && supportingLayout, { primary: d.primary, layout });
   const ranked = snapshot.desks.map((desk, i) => ({ id: desk.id, i, result: decimalUnits(desk.money.totalPnl.amount) })).sort((a, b) => a.result === b.result ? a.i - b.i : a.result > b.result ? -1 : 1).map(desk => desk.id);
   check('AC-20', `${tag}: desks rank by exact since-start result, with no unsupported per-desk percentages`, d.order.join() === ranked.join() && await page.evaluate(`!document.querySelector('.dcard .performance-pct')`), { actual: d.order, expected: ranked });
   check('AC-20', `${tag}: desk state is icon + word`, d.states.length === 3 && d.states.every(s => s.icon && /^(Working|Sitting out|Stuck)/.test(s.text)), d.states);
@@ -644,7 +653,7 @@ try {
       await configure(page, viewport, theme);
       await load(page, b.url, 'desk');
       const tag = `${live ? 'LIVE rejected' : 'no snapshot'} @${viewport.name} ${theme}`;
-      const ui = await page.evaluate(`({ label: document.querySelector('#hdrHealth .status-full').textContent, display: document.querySelector('#heroL .display').innerText, caps: [...document.querySelectorAll('#heroL .kpi .c')].map(c => c.innerText), states: [...document.querySelectorAll('#heroL [data-cell]')].map(c => c.dataset.state), now: [...document.querySelectorAll('.dcard .now')].map(n => n.innerText), cards: [...document.querySelectorAll('.dcard .mini-label')].map(n => n.innerText), nums: [...document.querySelectorAll('.dcard .dnums > div')].map(d => d.dataset.state), positions: document.getElementById('positions').innerText, kept: document.querySelector('#kept .pstate').innerText, pop: document.getElementById('healthPop').textContent })`);
+      const ui = await page.evaluate(`({ label: document.querySelector('#hdrHealth .status-full').textContent, display: document.querySelector('#heroL .display').innerText, caps: [...document.querySelectorAll('#heroL .kpi[data-cell] .c')].map(c => c.innerText), states: [...document.querySelectorAll('#heroL [data-cell]')].map(c => c.dataset.state), now: [...document.querySelectorAll('.dcard .now')].map(n => n.innerText), cards: [...document.querySelectorAll('.dcard .mini-label')].map(n => n.innerText), nums: [...document.querySelectorAll('.dcard .dnums > div')].map(d => d.dataset.state), positions: document.getElementById('positions').innerText, kept: document.querySelector('#kept .pstate').innerText, pop: document.getElementById('healthPop').textContent })`);
       const [state, caption, cardLine, posLine, keptLine] = live
         ? ['broken', 'Unavailable · last update was rejected', 'Numbers: unavailable · last update was rejected', 'Position detail is unavailable: last update was rejected.', 'Kept holdings are unavailable: last update was rejected.']
         : ['not reported', 'Not reported · no data received yet', 'Numbers: not reported · no data received yet', 'Position detail is not present in this snapshot.', 'Kept holdings are not present in this snapshot.'];
@@ -1016,24 +1025,24 @@ try {
       check('AC-30', `sweep ${tag}: the compact header's buttons and the bottom bar are 44 px targets up to ${COMPACT} px`, !fail.targets.length, fail.targets.slice(0, 4));
       check('header', `sweep ${tag}: icons are centred, with the phone light's icon aligned to its first line, at every width`, !fail.icons.length, fail.icons.slice(0, 4));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
-      if (screen === 'desk') check('no-shift', `sweep ${tag}: each desk card's header keeps one box with its longest state and heartbeat texts, which never overlap (two heartbeat lines at most, under the state below 340 px)`, !fail.cards.length, fail.cards.slice(0, 4));
+      if (screen === 'desk') check('no-shift', `sweep ${tag}: each desk card's header keeps one box with its longest state and heartbeat texts, with one-line check-ins and a full status title; below 340 px the check-in shares the name row`, !fail.cards.length, fail.cards.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: ${light.labels.length} status sentences at every width: the fixed control gives its full sentence accessibly, nothing else in the header or the page moves`, !fail.labels.length, fail.labels.slice(0, 4));
       check('touch', `sweep ${tag}: read right after each resize, the pointer is touch up to 700 px (no hover, coarse) and a mouse above (hover, fine) at every one of ${n}`, !fail.pointer.length, fail.pointer.slice(0, 8));
     }
   }
   // For the visual check: the compact header (720, 800, 880) and, just above
   // it, the desktop header with the longest light label in the wide font;
-  // the three-column desk cards with the heartbeat under the state (1120).
+  // the three-column desk cards with check-ins on the name row (1120).
   for (const [width, theme, screen] of [[720, 'light', 'desk'], [800, 'dark', 'desk'], [880, 'light', 'desk'], [880, 'dark', 'history']]) {
     const viewport = { name: String(width), width, height: 900, mobile: false };
     await configure(page, viewport, theme);
     await load(page, b.url, screen);
-    await shot(page, viewport, `${width}-${theme}-${screen}-header`, `${screen[0].toUpperCase()}${screen.slice(1)} at ${width} px: the compact header (brand, PAPER, the light with its broker word, 44 px theme button) and the nav in the bottom bar${screen === 'desk' && width < 840 ? '; the two-column desk cards put the heartbeat under the state' : ''}`);
+    await shot(page, viewport, `${width}-${theme}-${screen}-header`, `${screen[0].toUpperCase()}${screen.slice(1)} at ${width} px: the compact header (brand, PAPER, the light with its broker word, 44 px theme button) and the nav in the bottom bar${screen === 'desk' && width < 840 ? '; the two-column desk cards put the check-in on the name row' : ''}`);
   }
   const cards = { name: '1120', width: 1120, height: 900, mobile: false };
   await configure(page, cards, 'light');
   await load(page, b.url, 'desk');
-  await shot(page, cards, '1120-light-desk-cards', 'Desk at 1120 px: the desktop header, and the three desk cards (under 340 px wide) with the heartbeat under the state');
+  await shot(page, cards, '1120-light-desk-cards', 'Desk at 1120 px: the desktop header, and the three desk cards (under 340 px wide) with the check-in on the name row');
   const edge = { name: String(COMPACT + 10), width: COMPACT + 10, height: 900, mobile: false };
   await configure(page, edge, 'light');
   await load(page, b.url, 'desk');
@@ -1230,9 +1239,9 @@ edge, no text over other text, the header in one row with one nav, 44 px
 targets and centred icons; on Desk every light label with every broker word
 moves nothing. Read right after each resize, the pointer is touch up to
 700 px and a mouse above, whatever pointer the host has (\`touch\`). A desk
-card's state never runs under its heartbeat line: short of room the heartbeat
-takes two lines in the same height, and a card under 340 px wide puts it
-under the state, as on phones. See
+card's state never runs under its heartbeat line: the state can end in an
+ellipsis with a complete title, while the check-in stays on one line. Under
+340 px it shares the name row, with the state below, as on phones. See
 \`720-light-desk-header.png\`, \`800-dark-desk-header.png\`,
 \`880-light-desk-header.png\`, \`880-dark-history-header.png\`,
 \`${COMPACT + 10}-light-desk-header-longest-wide.png\` and

@@ -105,6 +105,13 @@
         // P6 browser suite (full title and the field control's description;
         // the Saved line itself never takes focus).
         if (el.matches('[data-saved]')) continue;
+        // Desk status may yield to a one-line check-in. Require the complete
+        // native title and the actual ellipsis contract before accepting it.
+        if (el.matches('.dcard .state > span[title]')) {
+          const cs = getComputedStyle(el);
+          if (el.title !== el.textContent || cs.textOverflow !== 'ellipsis' || cs.whiteSpace !== 'nowrap' || cs.overflowX !== 'hidden') failures.push({ el: 'desk status', why: 'missing full title or ellipsis' });
+          continue;
+        }
         const cs = getComputedStyle(el);
         if (cs.textOverflow === 'ellipsis' && el.textContent.trim()) failures.push({ el: el.className || el.tagName, why: 'ellipsis' });
         const clips = /(hidden|clip|auto|scroll)/.test(cs.overflowX) && !el.classList.contains('vh') && el.id !== 'tip';
@@ -288,7 +295,7 @@
           // The page, or the fixed chrome above it (header, bottom bar, Settings' edit bar).
           const layer = Boolean(n.parentElement.closest('header.top, .bottom-nav, .editbar'));
           for (const raw of range.getClientRects()) {
-            const clamp = n.parentElement.closest('[data-clamp]')?.getBoundingClientRect();
+            const clamp = n.parentElement.closest('[data-clamp], .dcard .state > span[title]')?.getBoundingClientRect();
             const q = clamp ? { left: Math.max(raw.left, clamp.left), right: Math.min(raw.right, clamp.right), top: raw.top, bottom: raw.bottom, width: Math.min(raw.right, clamp.right) - Math.max(raw.left, clamp.left), height: raw.height } : raw;
             if (q.width > 0.5 && q.height > 0.5) boxes.push({ node: n, text: n.nodeValue.trim().slice(0, 30), layer, q });
           }
@@ -304,20 +311,20 @@
       const out = { scroll: document.documentElement.scrollWidth, inner: innerWidth, past, header: headerFaults(), nav: navOk, targets, icons, overlaps: texts(), labels: [], cards: [] };
       if (!light) return out;
       // Each desk card's header with the longest state and heartbeat texts:
-      // no overlap, inside the card, at most two heartbeat lines, one height.
+      // no overlap, inside the card, one heartbeat line and one fixed height.
       for (const [state, ago] of light.cards) {
         const heads = [...document.querySelectorAll('.dcard header')];
-        const keep = heads.map(h => [h.querySelector('.state > span').textContent, h.querySelector('.hb').innerHTML]);
+        const keep = heads.map(h => [h.querySelector('.state > span').textContent, h.querySelector('.hb').innerHTML, h.querySelector('.state > span').title]);
         const before = heads.map(h => box(h).height);
-        heads.forEach(h => { h.querySelector('.state > span').textContent = state; h.querySelector('.hb').innerHTML = '<span class=term>Checked in</span> <span class=age></span>'; h.querySelector('.hb .age').textContent = ago; });
+        heads.forEach(h => { h.querySelector('.state > span').textContent = state; h.querySelector('.state > span').title = state; h.querySelector('.hb').innerHTML = '<span class=term>Checked in</span> <span class=age></span>'; h.querySelector('.hb .age').textContent = ago; });
         heads.forEach((h, i) => {
           const card = box(h.closest('.dcard')), hb = h.querySelector('.hb'), lines = Math.round(box(hb).height / parseFloat(getComputedStyle(hb).lineHeight));
-          const range = document.createRange();
-          range.selectNodeContents(h.querySelector('.state'));
-          const s = range.getBoundingClientRect(), b = box(hb), faults = [];
+          const s = box(h.querySelector('.state')), b = box(hb), faults = [];
           if (Math.min(s.right, b.right) - Math.max(s.left, b.left) > 0.5 && Math.min(s.bottom, b.bottom) - Math.max(s.top, b.top) > 0.5) faults.push('state × heartbeat');
           if (s.right > card.right - 17.5 || b.right > card.right - 17.5) faults.push('leaves the card');
-          if (lines > 2) faults.push(`${lines} heartbeat lines`);
+          if (lines !== 1) faults.push(`${lines} heartbeat lines`);
+          const status = h.querySelector('.state > span'), css = getComputedStyle(status);
+          if (status.title !== state || css.textOverflow !== 'ellipsis' || css.overflowX !== 'hidden' || css.whiteSpace !== 'nowrap') faults.push('status must retain its full title and ellipsis');
           if (getComputedStyle(hb).gridColumnStart === '2') {
             const t = document.createRange();
             t.selectNodeContents(hb);
@@ -326,7 +333,7 @@
           if (Math.abs(box(h).height - before[i]) > 0.5) faults.push(`height ${before[i]} → ${box(h).height}`);
           if (faults.length) out.cards.push({ card: h.closest('.dcard').id, texts: `${state} · ${ago}`, faults });
         });
-        heads.forEach((h, i) => { h.querySelector('.state > span').textContent = keep[i][0]; h.querySelector('.hb').innerHTML = keep[i][1]; });
+        heads.forEach((h, i) => { h.querySelector('.state > span').textContent = keep[i][0]; h.querySelector('.hb').innerHTML = keep[i][1]; h.querySelector('.state > span').title = keep[i][2]; });
       }
       const b = health.querySelector('b'), lbl = health.querySelector('.lbl');
       const spans = [...b.children], keep = spans.map(n => n.textContent), title = b.title;

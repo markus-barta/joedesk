@@ -190,7 +190,7 @@ export function heroLeft(ctx) {
   const kpi = (termKey, label, name, key, opts) => {
     const v = cellView(states[name], key, opts);
     const caption = reservedCaption(sharesBoardCaption(states[name], board) ? '' : v.caption, opts.captions ?? [opts.caption]);
-    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}${cellIcon(states[name])}</dt><dd>${v.html}<span class="c">${caption}</span>${key === 'hero.account' ? cashCaption(states.paperCash, 'hero.cash') : ''}</dd></div>`;
+    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}${cellIcon(states[name])}</dt><dd>${v.html}<span class="c">${caption}</span></dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
   const moneyCaptions = [`started with ${eur(STARTING_MONEY, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
@@ -210,7 +210,7 @@ export function heroLeft(ctx) {
     say = `${isZero(day.units) ? 'Flat' : `${day.units > 0n ? 'Up' : 'Down'} ${dayAmount}`} today.${sharesBoardCaption(dayCell, board) ? '' : ` ${day.caption}.`}`;
   }
   const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: 'after fees' });
-  return `<div class="performance-date">${now ? dayDDM(now, NY) : ''}</div><div class="performance">
+  return `<div class="hero-primary"><div class="performance-date">${now ? dayDDM(now, NY) : ''}</div><div class="performance">
       <div class="primary" data-cell="hero.day" data-state="${day.state}"><div class="hero-k">${icon('clock')}${term('today')}${cellIcon(dayCell)}</div>
         <div class="display">${day.html}</div><div class="pct-slot">${percentHtml(todayPercent(states, data?.pnlSources?.day))}</div>
         <span class="c primary-caption"></span></div>
@@ -219,11 +219,12 @@ export function heroLeft(ctx) {
         <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, ['after fees'])}</span></div>
     </div>
     <button type="button" class="say" data-say="today" aria-expanded="false"><span data-clamp="2">${say}</span></button>
-    <p class="board-caption">${board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : ''}</p>
+    <p class="board-caption">${board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : ''}</p></div>
     <dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
       ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions })}
       ${kpi('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}
+      ${cashCaption(states.paperCash, 'hero.cash', { figure: true })}
     </dl>`;
 }
 
@@ -249,7 +250,7 @@ function deskCard(ctx, id, maxDay, showBars) {
   const num = (label, v, cell, extra = '') => `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell)}</span><span class="v">${v.html}</span>${extra}</div>`;
   const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]], board);
   const learning = learningLine(desk?.learning);
-  return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span>${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
+  return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(info.word + since)}">${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
       <p class="now">${desk ? esc(desk.action) : 'Waiting for the first valid snapshot.'}</p>
       <div class="dnums">
         ${num(term('today'), dayV, states[`desks.${id}.dayPnl`], `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}

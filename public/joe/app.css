@@ -426,7 +426,6 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 
 /* ---------- Middle widths ---------- */
 @media (max-width: 1180px) {
-  .hero { grid-template-columns: 1fr; }
   .rhero { grid-template-columns: 280px minmax(0, 1fr); gap: 0 24px; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .prow { grid-template-columns: 38px minmax(0, 1.4fr) 100px 100px minmax(120px, 1fr) 110px; }
@@ -436,11 +435,6 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .daypanel { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); margin-top: 18px; padding-top: 12px; }
   .brow { grid-template-columns: 130px minmax(0, 1fr) 100px 220px; }
   .nav button { padding: 0 10px; }
-}
-/* The stacked hero has room for all three supporting figures in one row.
-   Keep its chart within reach below the two primary results on tablets. */
-@media (min-width: 701px) and (max-width: 1180px) {
-  .hero .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 1100px) {
   .desk-grid { grid-template-columns: 1fr 1fr; }
@@ -555,7 +549,35 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .hdr-health .i { width: 16px; height: 16px; }
 .age { white-space: nowrap; }
 .btn.link { padding-left: 0; }
-.hero-l { min-width: 0; container-type: inline-size; }
+.hero-l { display: contents; }
+.hero-primary { min-width: 0; container-type: inline-size; grid-column: 1; grid-row: 1; }
+.hero-r { grid-column: 2; grid-row: 1; }
+.hero-r .hero-chart { flex: 1; min-height: 196px; }
+.hero .kpis { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 0; }
+.cash-kpi .cash-amount { display: block; height: 28px; }
+.cash-kpi dd { display: grid; }
+.cash-kpi .account-cash { display: block; }
+.cash-kpi .account-cash, .cash-kpi .cash-caption { grid-area: 1 / 1; }
+/* The caption immediately follows the amount; independent state copy keeps
+   its own reserve below it, just like the other three figures. */
+.cash-kpi .cash-reserve { margin-top: 16px; }
+.hero .cash-kpi .cash-caption { min-height: 16px; margin-top: 28px; align-self: start; }
+@media (min-width: 701px) and (max-width: 1180px) {
+  .hero .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .hero { grid-template-columns: 1fr; }
+  .hero-l { display: block; min-width: 0; }
+  .hero-r { grid-column: 1; grid-row: 2; }
+  .hero-r .hero-chart { flex: none; }
+  .hero .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 20px; }
+  /* Keep the phone's account, then Cash, then chart order for UX 3. */
+  .cash-kpi { grid-column: 1; margin-top: -12px; }
+  .cash-kpi dd { display: flex; flex-direction: column; margin: 0; font-size: 12px; line-height: 16px; font-weight: 400; color: var(--ink-3); }
+  .hero .cash-kpi .cash-caption { order: -1; margin-top: 0; }
+  .cash-kpi .cash-amount { display: inline; height: auto; }
+  .cash-kpi .cash-reserve { display: grid; margin-top: 0; }
+}
 .performance-date { height: 20px; font-size: 12px; color: var(--ink-3); }
 .performance { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 .performance .primary { min-width: 0; }
@@ -567,6 +589,9 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .board-caption { height: 40px; margin: 4px 0 0; font-size: 12px; line-height: 18px; color: var(--ink-3); }
 .board-caption .st { align-items: flex-start; white-space: normal; }
 .board-caption .i { width: 13px; height: 13px; margin-top: 2px; }
+@media (min-width: 1181px) {
+  .board-caption { height: 18px; }
+}
 .cell-state { display: inline-flex; vertical-align: middle; margin-left: 3px; }
 .cell-state .i { width: 12px; height: 12px; }
 .tile .metric-info { width: 26px; height: 26px; padding: 0; justify-content: center; box-shadow: none; }
@@ -582,14 +607,15 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .session > div { min-width: 0; }
 .ring-t { font: 650 11px var(--font); fill: var(--ink); }
 .ring-s { font: 500 8.5px var(--font); fill: var(--ink-3); }
-/* A desk card's header: the state never runs under the heartbeat line. Short
-   of room, the heartbeat line takes two lines, inside the name and state's
-   height. A card narrower than 340 px (phones too) keeps "Checked in … ago"
+/* A desk card's status yields to a single-line check-in, with its full title.
+   A card narrower than 340 px (phones too) keeps "Checked in … ago"
    right-aligned on the name row and gives the state the row below. */
 .dcard { container-type: inline-size; }
-.dcard header { display: grid; grid-template-columns: 34px minmax(min-content, 1fr) auto; align-items: center; gap: 2px 11px; }
+.dcard header { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 2px 11px; }
 .dcard .who { min-width: 0; }
-.dcard .hb { white-space: normal; text-align: right; }
+.dcard .state { display: flex; min-width: 0; }
+.dcard .state > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.dcard .hb { white-space: nowrap; text-align: right; }
 .dcard .hb.warn { color: var(--warn); }
 .dcard .hb .term, .dcard .hb .age { white-space: nowrap; }
 @container (max-width: 339.98px) {

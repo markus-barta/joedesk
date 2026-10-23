@@ -1373,11 +1373,31 @@ cards, including unavailable and single-value states, without clipping or scroll
 caption sharing. P3 preserves the Desk state/geometry checks with the new hero,
 order and shared caption; P4 checks all info controls and both value rows against
 their card bounds. Browser validation belongs to CI.
-At tablet widths (701–1180 px), the three supporting figures share one row to
-keep the chart reachable below the primary results. Chart tips retain the
-opaque theme surface. The taller stacked hero can place the chart's midpoint
-below the initial viewport; P3 scrolls the SVG into view before dispatching a
-real mouse hover and requires a visible, fully opaque tip with nonempty text.
+The hero keeps its primary results, sentence and board caption on the left,
+with the clock and chart on the right. Open positions, Desks’ money, Paper
+account and Cash share one row below both columns above 1180 px; at 701–1180 px
+they form a 2×2 grid. The chart fills the primary area's height, removing the
+empty right column. At phone widths the order stays primary results, secondary
+figures (Cash below Paper account), then clock and chart. Cash keeps its exact
+broker lexeme in its title/accessibility name, its independent missing/stale
+reason and a state-independent reserve; Settings keeps its existing cash layout.
+Desk check-ins stay on one line. A long status yields with an ellipsis and a
+complete native title; cards below 340 px retain the check-in on the name row.
+
+Fix 3's best-effort CSS height budget at 1440 is about 480 px, versus about
+751 px before (the screenshot QA reported about 760 px). This assumes five
+16 px lines for the primary reserve, four for the widened secondary captions
+(five before), and three for the former nested Cash reserve. The new budget
+is 46 px padding + 294 px primary/chart area + 10 px gap + 17 px divider/padding
++ 113 px secondary row. Actual font wrapping requires browser confirmation.
+P3 checks the actual height is at most 590 px at 1440, the row spans both
+columns and the chart ends with the primary area; its state/theme checks still
+require exactly 0 px shift. The card-header sweep requires one check-in line,
+an intact status title, no overlaps and a stable height. Check counts stay fixed.
+Chart tips retain the opaque theme surface. P3 scrolls the SVG into view before
+dispatching a real mouse hover and requires a visible, fully opaque tip with
+nonempty text. Browser execution and the cross-family gate remain with the
+coordinator; the local fix uses only syntax, focused unit and release checks.
 Term underlines stay faint, dotted, 1 px thick and 3 px
 below the text, including on hover, focus and while their explanation is open.
 
