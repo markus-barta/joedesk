@@ -170,20 +170,33 @@
     <section class="card hero" id="deskHero" aria-label="Desk performance">
       <div class="hero-l" id="heroL"></div>
       <div class="hero-r">
-        <div class="session" id="heroSession"></div>
-        <div class="chart hero-chart" id="heroChart"><div class="ctip" role="tooltip"></div></div>
+        <button type="button" class="desk-disclosure" data-desk-disclosure="chart" aria-expanded="false" aria-controls="chartDetail"><span>Today's chart</span><span id="chartSummary" class="disclosure-warning"></span><svg class="i disclosure-chevron" aria-hidden="true"><use href="#i-chev-d"/></svg></button>
+        <div class="disclosure-body" id="chartDetail">
+          <div class="session" id="heroSession"></div>
+          <div class="chart hero-chart" id="heroChart"><div class="ctip" role="tooltip"></div></div>
+        </div>
       </div>
     </section>
-    <div class="sec-h"><h2>Desks</h2><span class="sub" id="desksSub"></span></div>
+    <div class="sec-h desks-heading"><h2>Desks</h2><span class="sub" id="desksSub"></span></div>
     <div class="desk-grid" id="desks">
       <article class="card dcard" id="desk-j" aria-label="Desk J"></article>
       <article class="card dcard" id="desk-joe" aria-label="Desk Joe"></article>
       <article class="card dcard" id="desk-joel" aria-label="Desk Joel"></article>
     </div>
-    <div class="sec-h"><h2>Positions</h2><span class="sub" id="posSub"></span></div>
-    <div class="positions" id="positions"></div>
-    <div class="sec-h"><h2>Kept holdings</h2><span class="sub">Kept · not traded by any desk</span></div>
-    <div class="kept" id="kept"></div>
+    <div class="desk-section positions-section">
+      <button type="button" class="desk-disclosure" data-desk-disclosure="positions" aria-expanded="false" aria-controls="positionsDetail"><span id="positionsTitle">Positions</span><span id="positionsSummary" class="disclosure-warning"></span><svg class="i disclosure-chevron" aria-hidden="true"><use href="#i-chev-d"/></svg></button>
+      <div class="disclosure-body" id="positionsDetail">
+        <div class="sec-h"><h2>Positions</h2><span class="sub" id="posSub"></span></div>
+        <div class="positions" id="positions"></div>
+      </div>
+    </div>
+    <div class="desk-section kept-section">
+      <button type="button" class="desk-disclosure" data-desk-disclosure="kept" aria-expanded="false" aria-controls="keptDetail"><span id="keptTitle">Kept holdings</span><span id="keptSummary" class="disclosure-warning"></span><svg class="i disclosure-chevron" aria-hidden="true"><use href="#i-chev-d"/></svg></button>
+      <div class="disclosure-body" id="keptDetail">
+        <div class="sec-h"><h2>Kept holdings</h2><span class="sub">Kept · not traded by any desk</span></div>
+        <div class="kept" id="kept"></div>
+      </div>
+    </div>
   </section>
 
   <section class="screen" id="scr-results" aria-labelledby="resTitle">

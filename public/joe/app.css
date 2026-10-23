@@ -1057,3 +1057,60 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .dlg-f { padding: 12px 16px 16px; }
   .check { min-height: 44px; align-items: center; }
 }
+
+/* JOED-79: wrappers keep the existing grid/flex items above 480 px. */
+.account-section, .desk-section, .disclosure-body { display: contents; }
+.desk-disclosure, .compact-row, .phone-primary-note { display: none; }
+@media (max-width: 480px) {
+  #scr-desk.on { display: flex; flex-direction: column; }
+  #deskHero, #heroL { display: contents; }
+  #heroL .hero-primary { order: 1; padding: 14px; border-radius: 16px; background: var(--card); box-shadow: var(--shadow-card); }
+  #heroL .performance { gap: 12px; }
+  #heroL .display { height: 53px; margin-top: 0; }
+  #heroL .primary-caption { height: 48px; }
+  #heroL .since-primary > .primary-caption { display: none; }
+  #heroL .phone-primary-note { display: block; width: 100%; height: 48px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 12px; line-height: 16px; text-align: left; }
+  .phone-primary-note > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+  #heroL .say { height: 44px; line-height: 22px; margin-top: 0; }
+  #heroL .say > span { display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  #heroL .board-caption { height: 36px; line-height: 18px; margin: 0; }
+  .desks-heading { order: 2; margin: 16px 0 8px; gap: 0 8px; }
+  .desks-heading .sub { line-height: 18px; }
+  #desks { order: 3; gap: 8px; }
+  #desks .dcard { padding: 0; gap: 0; }
+  .compact-row { display: contents; }
+  .account-section { order: 4; }
+  #deskHero .hero-r { order: 5; display: block; }
+  .positions-section { order: 6; }
+  .kept-section { order: 7; }
+  .account-section, #deskHero .hero-r, .desk-section { display: block; margin-top: 12px; min-width: 0; border-radius: 14px; background: var(--card); box-shadow: var(--shadow-card); }
+  .desk-disclosure { display: grid; grid-template-columns: minmax(0, 1fr) 16px; align-items: center; gap: 0 8px; width: 100%; min-height: 76px; padding: 10px 12px; border: 0; border-radius: 14px; background: none; text-align: left; font-weight: 600; }
+  .desk-disclosure > .disclosure-chevron { grid-column: 2; grid-row: 1; width: 14px; height: 14px; color: var(--ink-3); }
+  .desk-disclosure[aria-expanded="true"] > .disclosure-chevron { transform: rotate(180deg); }
+  .disclosure-warning { display: flex; align-items: flex-start; gap: 4px; grid-column: 1 / -1; height: 28px; min-width: 0; font-size: 11px; line-height: 14px; font-weight: 400; color: var(--ink-2); }
+  .disclosure-warning > .i { flex: none; width: 12px; height: 12px; margin-top: 1px; }
+  /* Keep the warning reserve even when empty; reasons occupy one fixed line. */
+  .disclosure-warning .summary-text { display: block; flex: 1; min-width: 0; height: 14px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  #desks .desk-row { height: 92px; min-height: 92px; padding: 8px 10px; grid-template-columns: 24px minmax(0, 1fr) 82px 82px 12px; gap: 0 5px; font-variant-numeric: tabular-nums; }
+  .desk-row > .disclosure-chevron { grid-column: 5; }
+  .desk-row .dmark { width: 24px; height: 28px; background: none; }
+  .desk-row .dmark svg { width: 22px; height: 22px; }
+  .compact-identity { min-width: 0; }
+  .compact-identity strong { display: block; font-size: 14px; line-height: 18px; }
+  .compact-word { display: flex; align-items: center; gap: 2px; white-space: nowrap; font-size: 10px; line-height: 16px; font-weight: 400; }
+  .compact-word .i { width: 10px; height: 10px; flex: none; }
+  .compact-figure { min-width: 0; text-align: right; container-type: inline-size; }
+  .compact-label { display: flex; align-items: center; justify-content: flex-end; height: 16px; font-size: 10px; line-height: 16px; font-weight: 400; color: var(--ink-3); }
+  .compact-state { display: inline-flex; margin-left: 2px; }
+  .compact-state .i { width: 10px; height: 10px; }
+  .compact-figure .bn { font-size: min(13px, calc(100cqw / var(--digits) * 1.5)); line-height: 20px; letter-spacing: -.02em; }
+  .compact-figure .bn .ar { display: none; }
+  .disclosure-body { display: block; }
+  /* Header queries use the padded detail width, as the original card did. */
+  .desk-detail { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 14px; container-type: inline-size; }
+  #accountDetail { padding: 0 12px 12px; }
+  #heroL .kpis { margin-top: 0; }
+  #chartDetail { padding: 0 12px 12px; }
+  .positions-section .sec-h, .kept-section .sec-h { margin: 0 0 8px; }
+  #positionsDetail, #keptDetail { padding: 0 12px 12px; }
+}

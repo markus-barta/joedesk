@@ -1375,7 +1375,7 @@ The hero keeps its primary results, sentence and board caption on the left,
 with the clock and chart on the right. Open positions, Desks’ money, Paper
 account and Cash share one row below both columns above 1180 px; at 701–1180 px
 they form a 2×2 grid. The chart fills the primary area's height, removing the
-empty right column. At phone widths the order stays primary results, secondary
+empty right column. At 481–700 px the order stays primary results, secondary
 figures (Cash below Paper account), then clock and chart. Cash keeps its exact
 broker lexeme in its title/accessibility name, its independent missing/stale
 reason and a state-independent reserve; Settings keeps its existing cash layout.
@@ -1396,6 +1396,87 @@ predicts a hero near 475 px. At 1024 the 2×2 secondary grid is 291 px, giving
 These are CSS estimates; browser height and zero-shift verification stay in CI.
 Desk check-ins stay on one line. A long status yields with an ellipsis and a
 complete native title; cards below 340 px retain the check-in on the name row.
+
+JOED-79 changes only Desk at widths up to 480 px. The first screen contains
+the existing header status control and reserved red/yellow problem line,
+Today and Since start with euros and percentages, the one-line Today summary,
+and three ranked desk rows. Each row retains its desk mark, name, state word,
+Today and Since start euros, tones and state markers. Tapping it exposes the
+original complete card, including action, all three figures, chart and learning.
+The Account figures, today's clock/chart, Positions and Kept holdings have
+separate native button disclosures, initially collapsed. Buttons expose
+`aria-expanded` and `aria-controls`, support Enter/Space and have targets at
+least 44 px tall. Expansion survives ticks and navigation during the current
+page visit, with no additional browser storage or server writes. Resizing
+above 480 px exposes every original detail; returning restores phone choices.
+
+Collapsed summaries show the worst actual state and its short reason in one
+fixed-height line with an ellipsis. The complete set of reasons remains in
+their title and accessible button text. Partial/null row fields and
+unmatched desks count even when the overall position panel is fresh. Old or
+missing check-ins, stuck desks, blocked learning, unavailable history and
+unknown market hours stay visible in their affected summary. Positions shows
+its open count and Kept holdings its count. Since start retains a three-line
+phone caption whose complete text opens in the existing explanation tip;
+Today's one-line summary also opens its complete sentence there.
+
+CSS-only budget at 390×844: 54 px header + 56 px problem reserve +
+285 px primary card + 64 px Desks heading + three 92 px rows and two 8 px
+gaps = 751 px, leaving 21 px above the bottom navigation's 772 px top.
+The primary card is 14 + 20 + 32 + 0 + 53 + 24 + 48 + 0 + 44 + 0 + 36 + 14:
+padding, date, label, numeral margin, numeral, percent, caption, sentence
+margin, sentence target, board-caption margin, board caption and padding.
+The numeral, sentence and board-caption margins are explicitly zero on phones;
+money type sizes and the three-line Since start explanation are retained. The four
+76 px disclosure summaries, their margins, footer and bottom navigation
+allowance put the collapsed page at roughly 1,300–1,450 px. These are estimates,
+not browser measurements; CI owns rendered heights, both themes, 360/390 px,
+no horizontal scroll and zero movement on ticks. 1024/1440 retain their grids.
+
+P3/P5 explicitly open phone disclosures before the existing detailed checks:
+AC-19 supporting figures and captions, full desk states/bars/sparklines,
+positions, kept exclusion/inertness/worth, nullable rows, cash states, geometry
+and tick movement. P3 adds default collapsed 360/390 captures, first-screen
+bounds above the navigation, compact-to-full value/ranking parity, page height,
+Enter/Space expansion and exact zero-shift checks. P3 failure fixtures and P5
+not-exact/cash/partial-position cases separately check the collapsed warnings.
+The Positions preview capture opens its disclosure before taking the crop.
+`test/phone-first-screen.mjs` adds small, browser-free state/markup tests;
+the coordinator runs browser CI and review after this local handoff.
+
+Fix 1 corrects the disclosure handler's tooltip call so one native activation
+opens each detail and renders its charts. Missing Cash summaries use the same
+missing-feed reason as the figure; unavailable money takes priority over an
+old check-in while keeping its true neutral or error icon. Cash's value,
+broker caption and independent reason have explicit text separators even in
+a collapsed body. The padded full desk detail is the phone header's query
+container, preserving the name-row check-in and invisible 44 px term target.
+P4 opens those full cards before its unchanged header measurements; the shared
+clamp inventory now includes the phone's existing Since start explanation.
+P3 requires at least 8 px clearance above the navigation.
+
+Fix 2 retains the warning reserve while limiting its visible text to one
+14 px line. Rebuilding a section restores its disclosure bodies' visibility
+before handing focus and a pinned explanation to the replacement term.
+P3 opens the phone disclosures and scrolls the Account term into view before
+measuring its baseline and dispatching the pin click; Account now follows
+the expanded desks, so its old unscrolled click was outside the viewport.
+The P5 Cash session probe changes the connection on a clone of its baseline,
+preserving actions, learning and position identities. Replacing those with
+shorter fixture text had shrunk `.now` and `footer` in the expanded cards above
+Account. A failed session also requires null current desk/account money and
+position marks, independent reasons, unavailable result sources and no current
+money evidence; keeping the baseline's observations caused ingress to reject
+the probe with 422. The corrected clone meets that contract and retains every
+geometry assertion. Its Node test uses the real ingress preflight before
+checking isolation and the broker panel state.
+
+Fix round 3 also gives the Results tests' markup-only sinks an empty
+`querySelectorAll`: they have no disclosure bodies, while the real patcher now
+queries those bodies before a rebuild. That missing test DOM method caused
+35 rendering tests to throw before checking their markup. The runtime patcher
+and fixed-height summaries are unchanged; the existing real patch test still
+covers disclosure visibility and pin/focus handoff.
 
 Fix 3's best-effort CSS height budget at 1440 is about 480 px, versus about
 751 px before (the screenshot QA reported about 760 px). This assumes five

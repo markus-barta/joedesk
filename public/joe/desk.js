@@ -22,6 +22,81 @@ const STATE = {
   stuck: { tone: 'bad', icon: 'stop', word: 'Stuck' },
 };
 
+// Phone disclosure choices last for this page visit only. No storage access,
+// account state or server write; desktop always exposes the complete content.
+const expanded = new Set();
+export function syncDeskDisclosures(phone = matchMedia('(max-width: 480px)').matches) {
+  for (const control of document.querySelectorAll('[data-desk-disclosure]')) {
+    const open = !phone || expanded.has(control.dataset.deskDisclosure);
+    control.setAttribute('aria-expanded', String(open));
+    document.getElementById(control.getAttribute('aria-controls')).hidden = !open;
+  }
+  const sentence = document.querySelector('#heroL .say > span');
+  if (sentence) {
+    sentence.dataset.clamp = phone ? '1' : '2';
+    sentence.parentElement.title = sentence.textContent;
+  }
+}
+export function toggleDeskDisclosure(key) {
+  if (expanded.has(key)) expanded.delete(key); else expanded.add(key);
+}
+
+// Rank the actual selector states, including retained values. A fresh panel
+// may still contain partial rows; those reasons join the same summary ranking.
+export function disclosureProblem(candidates) {
+  const severity = { bad: 3, warn: 2, none: 1 };
+  const problems = candidates.flatMap(([label, cell]) => {
+    const p = statePhrase(cell, '');
+    if (p.state === 'fresh') return [];
+    const state = cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
+      : p.state === 'not reported' ? 'not reported' : 'unavailable';
+    const reason = cell?.reason ?? (p.state === 'not reported' ? 'feed_not_received' : null);
+    // Unavailable money leads even when its honest not-exact icon is neutral;
+    // an old check-in must not obscure that the row's figures are unknown.
+    const priority = state === 'unavailable' ? 3 : severity[p.tone];
+    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, text: `${label}: ${state}${reason ? ` · ${cellReason(reason)}` : ''}` }];
+  });
+  problems.sort((a, b) => b.priority - a.priority || severity[b.tone] - severity[a.tone]);
+  if (!problems.length) return null;
+  const { priority, ...first } = problems[0];
+  return { ...first, detail: problems.map(p => p.text).join('; ') };
+}
+function problemHtml(problem) {
+  return problem ? `${icon(problem.icon, `i tone-${problem.tone}`)}<span class="summary-text" title="${esc(problem.detail)}" aria-hidden="true">${esc(problem.text)}</span><span class="vh">${esc(problem.detail)}</span>` : '';
+}
+function disclosureButton(key, label, bodyId, problem = null) {
+  return `<button type="button" class="desk-disclosure" data-desk-disclosure="${key}" aria-expanded="${expanded.has(key)}" aria-controls="${bodyId}"><span>${esc(label)}</span><span class="disclosure-warning">${problemHtml(problem)}</span>${icon('chev-d', 'i disclosure-chevron')}</button>`;
+}
+export function rowProblems(cell) {
+  return (cell?.value ?? []).flatMap(row => Object.entries(row.reasons ?? {}).map(([field, reason]) =>
+    [`${row.symbol} ${POSITION_FIELDS[field] ?? field}`, { state: 'broken', value: null, reason }]));
+}
+
+function deskProblem(ctx, id) {
+  const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
+  const cells = [['Today', ctx.states[`desks.${id}.dayPnl`]], ['Open positions', ctx.states[`desks.${id}.openPnl`]], ['Since start', ctx.states[`desks.${id}.totalPnl`]], ['History', ctx.states.history]];
+  if (desk?.state === 'stuck') cells.unshift(['Desk stuck', { state: 'broken', value: null }]);
+  if (desk?.learning?.status === 'blocked') cells.push(['Learning blocked', { state: 'broken', value: null }]);
+  const elapsed = ctx.feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(ctx.now) - Date.parse(ctx.feeds.data.generatedAdvancedAt)) : 0;
+  const heartbeat = desk?.heartbeatAt ? gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, ctx.feeds.data.value.generatedAt, elapsed) : null;
+  if (desk && (heartbeat == null || heartbeat / 1000 >= STALE_AFTER_S)) cells.unshift(['Check-in', { state: heartbeat == null ? 'not reported' : 'stale', value: heartbeat }]);
+  return disclosureProblem(cells);
+}
+export function compactDesk(ctx, id) {
+  const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
+  const info = STATE[desk?.state] ?? { tone: 'none', icon: 'ring', word: 'Not reported' };
+  const figure = (name, label) => {
+    const cell = ctx.states[`desks.${id}.${name}`], value = cellView(cell, `compact.${id}.${name}`);
+    const marker = cellIcon(cell).replace('cell-state', 'compact-state');
+    const characters = value.units === null ? 1 : eur(value.units, true).length;
+    return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${label}${marker}</span>${value.html}</span>`;
+  };
+  return `<button type="button" class="desk-disclosure desk-row" data-desk-disclosure="${id}" aria-expanded="${expanded.has(id)}" aria-controls="detail-${id}">
+    ${deskMark(id)}<span class="compact-identity"><strong>${esc(desk?.label ?? LABEL[id])}</strong><span class="compact-word tone-${info.tone}">${icon(info.icon)}${info.word}</span></span>
+    ${figure('dayPnl', 'Today')}${figure('totalPnl', 'Since start')}${icon('chev-d', 'i disclosure-chevron')}
+    <span class="disclosure-warning">${problemHtml(deskProblem(ctx, id))}</span></button>`;
+}
+
 // Accepted snapshots are immutable between reads. Format this snapshot-only
 // explanation once, rather than redoing ledger arithmetic on Desk live ticks.
 const executorProblems = new WeakMap();
@@ -216,16 +291,19 @@ export function heroLeft(ctx) {
         <span class="c primary-caption"></span></div>
       <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since')}${cellIcon(sinceCell)}</div>
         <div class="display">${since.html}</div><div class="pct-slot">${percentHtml(sincePercent(states))}</div>
-        <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, ['after fees'])}</span></div>
+        <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, ['after fees'])}</span>
+        <button type="button" class="phone-primary-note" data-say="since" aria-label="About Since start" aria-expanded="false"${sharesBoardCaption(sinceCell, board) ? ' disabled' : ''}><span data-clamp="3">${sharesBoardCaption(sinceCell, board) ? '&#160;' : stateCaption(sinceCell, 'hero.phone.since', 'after fees')}</span></button></div>
     </div>
     <button type="button" class="say" data-say="today" aria-expanded="false"><span data-clamp="2">${say}</span></button>
     <p class="board-caption">${board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : ''}</p></div>
-    <dl class="kpis">
+    <div class="account-section" id="accountSection">${disclosureButton('account', 'Account', 'accountDetail', disclosureProblem([
+      ['Open positions', states['today.openPnl']], ['Desks’ money', states['today.equity']], ['Paper account', states.paperAccount], ['Cash', states.paperCash], ['Broker', states.gateway],
+    ]))}<div class="disclosure-body" id="accountDetail"><dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
       ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions })}
       ${kpi('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}
       ${cashCaption(states.paperCash, 'hero.cash', { figure: true })}
-    </dl>`;
+    </dl></div></div>`;
 }
 
 function deskCard(ctx, id, maxDay, showBars) {
@@ -379,7 +457,7 @@ export function keptHtml(ctx) {
 
 const chartKeys = new Map();
 function chartOnce(el, key, draw) {
-  if (!el) return;
+  if (!el || !el.clientWidth) return;
   if (chartKeys.get(el.id) === key && el.querySelector(':scope > svg')) return;
   chartKeys.set(el.id, key);
   draw();
@@ -452,9 +530,21 @@ export function renderDesk(ctx) {
   const maxDay = Math.max(...days.filter(v => v != null).map(Math.abs), 0.01);
   let redraw = false;
   for (const id of DESKS) {
-    const changed = patch($(`#desk-${id}`), deskCard(ctx, id, maxDay, showBars));
+    const card = $(`#desk-${id}`);
+    if (!card.querySelector('.desk-detail')) card.innerHTML = `<div class="compact-row"></div><div class="desk-detail disclosure-body" id="detail-${id}"></div>`;
+    patch(card.querySelector('.compact-row'), compactDesk(ctx, id));
+    const changed = patch(card.querySelector('.desk-detail'), deskCard(ctx, id, maxDay, showBars));
     if (changed) { chartKeys.delete(`mini-${id}`); redraw = true; }
   }
+  patch($('#chartSummary'), problemHtml(disclosureProblem([
+    ['History', ctx.states.history], ...(!ctx.now ? [['Clock', { state: 'not reported', value: null }]]
+      : sessionBounds(ctx.now).reason === 'calendar_unavailable' ? [['Market hours', { state: 'broken', value: null, reason: 'calendar_unavailable' }]] : []),
+  ])));
+  $('#positionsTitle').textContent = `Positions · ${ctx.states.positions?.value?.length ?? '—'} open`;
+  $('#keptTitle').textContent = `Kept holdings · ${ctx.states.kept?.value?.length ?? '—'}`;
+  patch($('#positionsSummary'), problemHtml(disclosureProblem([['Positions', ctx.states.positions], ...rowProblems(ctx.states.positions)])));
+  patch($('#keptSummary'), problemHtml(disclosureProblem([['Kept holdings', ctx.states.kept], ...rowProblems(ctx.states.kept)])));
+  syncDeskDisclosures();
   const grid = $('.desk-grid');
   const currentOrder = [...grid.children].map(card => card.id.slice(5));
   for (const [index, id] of rankDesks(ctx.states, currentOrder).entries()) {
