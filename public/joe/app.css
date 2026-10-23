@@ -109,8 +109,7 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 /* Terms: plain word, the trade term on hover / focus / tap (opaque tip) */
 .term { position: relative; display: inline; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline dotted; text-decoration-color: color-mix(in srgb, var(--ink-3) 50%, transparent); text-underline-offset: 3px; text-decoration-thickness: 1px; cursor: help; }
 .term::after { content: ""; position: absolute; inset: -12px -12px; }
-.term:focus-visible, .term[aria-expanded="true"] { text-decoration-color: var(--ink); }
-@media (hover: hover) { .term:hover { text-decoration-color: var(--ink); } }
+/* Keep the dotted cue faint while hovered, focused or explaining a term. */
 .term:focus-visible { border-radius: 3px; outline-offset: 1px; }
 .learn { position: relative; display: inline-flex; align-items: center; gap: 5px; flex: none; height: 26px; padding: 0 9px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .learn .i { width: 13px; height: 13px; }
@@ -437,6 +436,11 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .daypanel { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); margin-top: 18px; padding-top: 12px; }
   .brow { grid-template-columns: 130px minmax(0, 1fr) 100px 220px; }
   .nav button { padding: 0 10px; }
+}
+/* The stacked hero has room for all three supporting figures in one row.
+   Keep its chart within reach below the two primary results on tablets. */
+@media (min-width: 701px) and (max-width: 1180px) {
+  .hero .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 1100px) {
   .desk-grid { grid-template-columns: 1fr 1fr; }

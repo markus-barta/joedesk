@@ -1371,6 +1371,10 @@ cards, including unavailable and single-value states, without clipping or scroll
 caption sharing. P3 preserves the Desk state/geometry checks with the new hero,
 order and shared caption; P4 checks all info controls and both value rows against
 their card bounds. Browser validation belongs to CI.
+At tablet widths (701–1180 px), the three supporting figures share one row to
+keep the chart reachable below the primary results. Chart tips retain the
+opaque theme surface. Term underlines stay faint, dotted, 1 px thick and 3 px
+below the text, including on hover, focus and while their explanation is open.
 
 `node --test test/status-line.mjs` is the small local presentation suite, also
 included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,
