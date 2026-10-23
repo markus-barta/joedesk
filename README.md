@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261023100632.0.0` (`inspr-calver-3`, stable sequence 29), reserved once at `2026-10-23T10:06:32Z` for a calm status line ([JOED-70](https://aeon.barta.cm/p/JOED/JOED-70)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261023155418.0.0` (`inspr-calver-3`, stable sequence 30), reserved once at `2026-10-23T15:54:18Z` for performance at a glance ([JOED-77](https://aeon.barta.cm/p/JOED/JOED-77)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261021113113.0.0` / sequence 28,
-published on `main` at `a60f4c561b05fa26ee8fa1dd31ab725714399340` under JOED-60,
-live on csb0 since `2026-10-21T15:22:58Z`. `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261023100632.0.0` / sequence 29,
+published on `main` at `cdf843a587d1066d544beea92f7b8ceef5d103bf` under JOED-74,
+live on csb0 since `2026-10-23T14:53:28Z` (JOED-75). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 29. Sequence 27 (`261021083537.0.0`) was previously deployed
+adoption for sequence 30. Sequence 28 (`261021113113.0.0`) was previously deployed
+at `2026-10-21T15:22:58Z` (JOED-60). Sequence 27 (`261021083537.0.0`) was previously deployed
 and has been live on csb0 since `2026-10-21T11:22:48Z` (JOED-59). Sequence 26
 (`261021015923.0.0`) was previously deployed at `2026-10-21T08:15Z` (OPS-354
 attempt 3), with the documented smoke variant on JOED-59.
@@ -25,13 +26,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-29 candidate has not been published. The candidate
+cutover**. The sequence-30 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -81,7 +82,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261023100632.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261023155418.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -677,15 +678,15 @@ zone subset.
 | budget | 0 | 1 |
 | **Total** | **31** | **298** |
 
-The subset is **31/329 views and 588/5,061 checks (11.62%)**, enforced at
-**≤25%** by the lightweight inventory test. The PR plan performs **6,237**
-checks (5,061 + 2 × 588), compared with 14,174 in fix1 and 15,183 for full ×3
+The subset is **31/329 views and 627/5,291 checks (11.85%)**, enforced at
+**≤25%** by the lightweight inventory test. The PR plan performs **6,545**
+checks (5,291 + 2 × 627), compared with 14,174 in fix1 and 15,873 for full ×3
 with the real fixture (14,871 for UX 1's synthetic baseline; 14,862 for the
 original synthetic baseline).
 The measured agm2 Results times were **788 s** for baseline, **779 s** for the
 group subset and **744 s** for fix1's 93.06% view subset. At approximately
 **263 s** per original baseline full Vienna run, weighting the current PR plan
-by that 4,954-check baseline projects **331 s (5.5 min)**, below the **450 s**
+by that 4,954-check baseline projects **347 s (5.8 min)**, below the **450 s**
 target. This is an expected runtime, not a measurement: setup and interactions
 have different costs. The coordinator's PR CI on agm2 measures the actual
 result; no local browser run is part of this change.
@@ -1169,9 +1170,10 @@ reviewed release process. Never reseal or republish `261016151218.0.0` or
 JOED-58 reserved sequence 26 for the cut-over retry's changed board bytes; that
 release was deployed. JOED-59 reserved sequence 27 for the changed health and
 smoke semantics; that release is now live. JOED-60 reserved sequence 28 for the
-bounded yellow broker-check warning; that release is now live. JOED-70 reserves
-sequence 29 for the calm status line. Never reseal or republish sequences 26,
-27 or 28 with these new bytes.
+bounded yellow broker-check warning; that release is now live. JOED-70 reserved
+sequence 29 for the calm status line; that release is now live (JOED-75).
+JOED-77 reserves sequence 30 for performance at a glance. Never reseal or
+republish sequences 26, 27, 28 or 29 with these new bytes.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
@@ -1285,27 +1287,25 @@ including stale and broken states; it never displays a partial total.
 
 The independent `paperCash` panel follows account freshness, retention and
 API-session checks. The read model withholds broken retained cash with its
-own reason; an unconfirmed session nulls cash alongside equity. Desk adds a
-cash block below the account total, and Settings appends it to the account
+own reason; an unconfirmed session nulls cash alongside equity. Desk has a
+separate supporting Cash figure, and Settings appends it to the account
 row. Both use the label “Cash” and caption “cash · as the broker reports it”.
 They show two decimals using exact integer units for display only, with
-the untouched broker lexeme in title and accessible name. Null always reads
-“not reported · [reason]”; rev-7 omission reads “no data received yet”.
-Both surfaces reserve the actual wrapped value/stale/null reason forms,
-including the session reason at 360 px, and the caption's fixed rows. They wrap
+the untouched broker lexeme in title and accessible name. Null Cash shows a
+muted dash in the Desk figure with “not reported · [reason]” in its caption;
+Settings retains that wording inline. Rev-7 omission reads “no data received yet”.
+Desk reserves fixed caption lines inside each cell; Settings reserves the actual
+wrapped value/stale/null reason forms, including the session reason at 360 px. They wrap
 text and keep the existing header. P5's `cash` cases cover real ingress, stale, null, API-session loss,
 rev-7 omission and recovery at 1440/1024/390/360 in both themes, with exact
 component geometry checks, overflow/clipping assertions and
 `<width>-<theme>-{desk-hero,settings-account}-cash-{value,null}` crops.
 Browser results and visual approval remain with CI and the coordinator.
-All four hero KPI captions use that same grid/sizing mechanism, with fresh
-variants and every real retained/stale/broken/null phrase crossed with the
-closed cell reasons. Reserves come from the caption builder, including unknown
-ages, 999 days and 23 h 59 min. They share one grid cell, stay hidden from
-accessibility and reserve only the tallest actual wrapped form at each width.
-CSS column widths plus local font metrics estimate 3/2/4/5 reserved 16 px
-lines at 1440/1024/390/360 with DejaVu Sans, or 2/2/4/4 with SF/Arial. These
-are wrapping estimates; CI owns the rendered geometry and overflow result.
+The three account/result captions retain their overlapping, accessibility-hidden
+caption samples, including unknown ages, 999 days and 23 h 59 min. All four
+secondary cells now use equal fixed caption blocks; Cash needs no hidden samples.
+The primary Since start caption retains its content-sized grid reserve.
+CI owns the rendered geometry and overflow result.
 P5's `positions` cases assert null KEEP quantity and values with visible and
 accessible reasons, a stage0 null mark, and no `button`, `a`, `input` or
 `[tabindex]` inside any `[data-keep]` row. At 1440/1024/390/360 in both themes,
@@ -1327,7 +1327,8 @@ JOED-60's broker gap, `not_exact_yet`, and Settings runtime content stay intact.
 The control has a fixed width and tabular numerals. Fitting yellow sentences
 appear in the control. At compact widths (≤1100 px), or when measurement shows
 the full sentence would overflow, it switches to a short label and the reserved
-32 px line below the header displays the complete sentence and action in yellow.
+56 px line below the header displays the sentence and action in yellow, at body
+size with a status icon and space above the hero. Its button has a 44 px target.
 Red always uses that line. Each non-green sentence appears once outside Details;
 green may stay compact on narrow screens. The line ends in an ellipsis when
 necessary and retains a complete title. Its space stays reserved in green, so
@@ -1342,6 +1343,76 @@ check-in age. Escape closes the dialog and returns focus to its opener
 at the existing 60-second boundary they return in the stale tone. The footer
 retains the read-only paper-board promise and version. A polite live region
 announces each change of ranked tone/reason once, without announcing age ticks.
+
+JOED-77 puts Today and Since start beside each other as the two primary Desk
+figures, each with euros and a signed percentage to two decimals. Today uses
+`dayPnl / (equity - dayPnl) × 100`; Since start uses `totalPnl / 15000 × 100`.
+The existing aggregate practice-capital base is retained: neither the data
+contract nor fleet settings supplies a starting base. Individual desk percentages
+are omitted for the same reason; their term explanation says why. The History
+model's assumed € 5.000 is a chart estimate, not evidence of an individual base.
+All percentage arithmetic uses exact decimal BigInt units and rounds once;
+missing, nonpositive, retained, incompatible or not-exact inputs omit the
+percentage. An estimated session-open day also omits it. Desk cards rank by
+their since-start euro result, best first, retaining current order on ties and
+putting unavailable results last. Position rows keep their instrument currency:
+the current row contract supplies neither a separate EUR result nor a usable
+native-to-EUR rate (a rate from another row or the results record is not used).
+
+A snapshot state shared by money cells appears once in the hero's board caption.
+The cells keep subtle state icons. Different states, reasons, ages, missing
+values or retained observations keep their own explanations; positions and kept
+holdings retain their section state lines. Caption and percentage space stays
+reserved across ticks. Results' eight metric help controls are small info icons
+with names of the form “Learn about Typical win and loss”, opening the same
+explanations. Two-value metrics use two reserved numeral rows inside fixed-height
+cards, including unavailable and single-value states, without clipping or scroll.
+`test/performance-glance.mjs` covers exact percentage math, omissions, ranking and
+caption sharing. P3 preserves the Desk state/geometry checks with the new hero,
+order and shared caption; P4 checks all info controls and both value rows against
+their card bounds. Browser validation belongs to CI.
+The hero keeps its primary results, sentence and board caption on the left,
+with the clock and chart on the right. Open positions, Desks’ money, Paper
+account and Cash share one row below both columns above 1180 px; at 701–1180 px
+they form a 2×2 grid. The chart fills the primary area's height, removing the
+empty right column. At phone widths the order stays primary results, secondary
+figures (Cash below Paper account), then clock and chart. Cash keeps its exact
+broker lexeme in its title/accessibility name, its independent missing/stale
+reason and a state-independent reserve; Settings keeps its existing cash layout.
+Each secondary cell reserves five 16 px caption lines (eight on phones) inside
+the cell, with a 20 px label and a 28 px value row. Cash's broker caption uses
+the first two reserved lines; the same `.cash-caption` contains
+“not reported · no data received yet” (or its own reason) below the broker
+description when Cash is a muted em dash. AC-19 compares the four supporting
+captions through the shared copy normalizer, preserving the phone's nonbreaking
+space before middle dots; its Cash reason selector stays inside the caption.
+The fixed 80 px caption block (128 px on phones) remains state-independent. The hero
+has no reserved card height. Fix 4 removes Cash's hidden sizing paragraphs:
+the more-specific `.kpi .c` block display had defeated their grid overlap and
+inflated every stretched secondary cell. CI's 1440 primary/chart height of
+about 272 px plus the new 147 px secondary row, 10 px gap and 46 px padding
+predicts a hero near 475 px. At 1024 the 2×2 secondary grid is 291 px, giving
+`max(primary height, 272 px) + 347 px` (roughly 619–670 px, font-dependent).
+These are CSS estimates; browser height and zero-shift verification stay in CI.
+Desk check-ins stay on one line. A long status yields with an ellipsis and a
+complete native title; cards below 340 px retain the check-in on the name row.
+
+Fix 3's best-effort CSS height budget at 1440 is about 480 px, versus about
+751 px before (the screenshot QA reported about 760 px). This assumes five
+16 px lines for the primary reserve, four for the widened secondary captions
+(five before), and three for the former nested Cash reserve. The new budget
+is 46 px padding + 294 px primary/chart area + 10 px gap + 17 px divider/padding
++ 113 px secondary row. Actual font wrapping requires browser confirmation.
+P3 checks the actual height is at most 590 px at 1440, the row spans both
+columns and the chart ends with the primary area; its state/theme checks still
+require exactly 0 px shift. The card-header sweep requires one check-in line,
+an intact status title, no overlaps and a stable height. Check counts stay fixed.
+Chart tips retain the opaque theme surface. P3 scrolls the SVG into view before
+dispatching a real mouse hover and requires a visible, fully opaque tip with
+nonempty text. Browser execution and the cross-family gate remain with the
+coordinator; the local fix uses only syntax, focused unit and release checks.
+Term underlines stay faint, dotted, 1 px thick and 3 px
+below the text, including on hover, focus and while their explanation is open.
 
 `node --test test/status-line.mjs` is the small local presentation suite, also
 included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,

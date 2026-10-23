@@ -166,7 +166,7 @@ test('hero captions: every reason reserves retained, stale, broken and null word
   assert.deepEqual(sizing(reservedCaption(visible, ['after fees'])), phrases, 'reserve stays identical across states');
 });
 
-test('hero captions: all four KPIs keep the same reserve through session loss and incomplete bookkeeping', () => {
+test('hero captions: three supporting KPIs keep the same reserve through session loss and incomplete bookkeeping', () => {
   const fresh = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
   const session = board(fixture('a-gateway-up-but-dead'));
   const incomplete = structuredClone(fresh);
@@ -174,18 +174,18 @@ test('hero captions: all four KPIs keep the same reserve through session loss an
   const kpis = ctx => [...heroLeft(ctx).matchAll(/<div class="kpi"[\s\S]*?<\/div>/g)].map(m => m[0]);
   const reserve = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
   const baseline = kpis(fresh);
-  assert.equal(baseline.length, 4);
+  assert.equal(baseline.length, 3);
   for (const ctx of [fresh, session, incomplete]) {
     const actual = kpis(ctx);
-    assert.equal(actual.length, 4);
+    assert.equal(actual.length, 3);
     actual.forEach((html, i) => {
       assert.match(html, /<span class="c"><span class="account-caption">/);
       assert.deepEqual(reserve(html), reserve(baseline[i]));
       assert.ok(reserve(html).includes('Last good value, 999 days ago · broker connection not confirmed'));
     });
   }
-  assert.ok(reserve(baseline[2]).includes('started with € 15.000'));
-  assert.ok(reserve(baseline[2]).includes('J’s bookkeeping incomplete · desk total unavailable'));
+  assert.ok(reserve(baseline[1]).includes('started with € 15.000'));
+  assert.ok(reserve(baseline[1]).includes('J’s bookkeeping incomplete · desk total unavailable'));
 });
 
 test('position rows: omitted optional P&L stays a plain dash without a reason or title', () => {

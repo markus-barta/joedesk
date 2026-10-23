@@ -277,11 +277,17 @@ export function reservedCaption(caption, freshCaptions) {
 const CASH_SIZING = [...new Set(Object.values(CELL_REASON))].flatMap(why =>
   [`not reported · ${why}`, `−€ 999.999,99 · ${why}`]
 ).map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
-export function cashCaption(cell, key) {
+export function cashCaption(cell, key, { figure = false } = {}) {
   const value = cell?.state === 'broken' && cell.retained ? null : cell?.value;
   const why = cell?.reason ? cellReason(cell.reason) : null;
   const view = value == null ? { text: `not reported · ${why ?? cellReason('feed_not_received')}`,
     title: `Cash not reported · ${why ?? cellReason('feed_not_received')}` } : cashAmount(value);
   if (value != null && why) { view.text += ` · ${why}`; view.title += ` · ${why}`; }
+  if (figure) {
+    const amount = value == null ? '—' : cashAmount(value).text;
+    const reason = why ?? (value == null ? cellReason('feed_not_received') : '');
+    const state = value == null ? `not reported · ${esc(reason)}` : reason ? ` · ${esc(reason)}` : '';
+    return `<div class="kpi cash-kpi cash-block"><dt class="cash-label">Cash</dt><dd><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}"><span class="cash-amount${value == null ? ' muted' : ''}">${esc(amount)}</span><span class="cash-caption cash-reserve c"><span class="cash-description">cash · as the broker reports it</span><span class="cash-reason">${state}</span></span></span></dd></div>`;
+  }
   return `<span class="cash-block"><span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span><span class="cash-reserve"><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}">${esc(view.text)}</span>${CASH_SIZING}</span></span>`;
 }

@@ -151,7 +151,7 @@ test('P4 static counts reconcile to the baseline plus real fixtures and the subs
   const baseline = summarizeP4Views(P4_VIEWS), full = summarizeP4Views(fullViews, fullViews);
   const subsetViews = selectP4Views({ zoneSubset: true }, fullViews);
   const subset = summarizeP4Views(subsetViews, fullViews);
-  assert.equal(baseline.checks, 4957);
+  assert.equal(baseline.checks, 5187);
   assert.equal(full.views, baseline.views + 5 * realFixtureNames.length);
   assert.equal(full.checks, baseline.checks + 104 * realFixtureNames.length);
   for (const name of realFixtureNames) {
