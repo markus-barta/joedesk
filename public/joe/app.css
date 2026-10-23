@@ -560,13 +560,12 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
    The hero itself has no reserved height. */
 .hero .kpi .c { height: 80px; min-height: 0; }
 .cash-kpi .cash-amount { display: block; height: 28px; }
-.cash-kpi dd { display: grid; }
 .cash-kpi .account-cash { display: block; }
-.cash-kpi .account-cash, .cash-kpi .cash-caption { grid-area: 1 / 1; }
 /* The broker caption occupies the first two of those five lines; state copy
-   follows inside the same block. Specificity must beat .kpi .c's display. */
-.hero .cash-kpi .cash-reserve { display: grid; padding-top: 32px; }
-.hero .cash-kpi .cash-caption { height: 32px; margin-top: 28px; align-self: start; font-size: 12px; line-height: 16px; font-weight: 400; color: var(--ink-3); }
+   follows inside the same caption. Specificity must beat .kpi .c's display. */
+.hero .cash-kpi .cash-reserve { display: grid; grid-template-rows: 32px minmax(0, 1fr); }
+.cash-kpi .cash-description { grid-area: 1 / 1; }
+.cash-kpi .cash-reason { grid-area: 2 / 1; }
 @media (min-width: 701px) and (max-width: 1180px) {
   .hero .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

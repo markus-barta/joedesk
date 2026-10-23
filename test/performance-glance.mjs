@@ -5,6 +5,8 @@ import { test } from 'node:test';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { decimalUnits } from '../contracts/decimal.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
+import { copyText } from '../scripts/browser/shots.mjs';
+const { joinUnits } = await import('../public/joe/format.js');
 const { STARTING_MONEY, exactMoney, exactCell, percentOf, todayPercent, sincePercent, rankDesks } = await import('../public/joe/performance.js');
 const { boardCaptionCell, sharesBoardCaption, heroLeft, cardStatus, percentHtml, positionsHtml } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
@@ -120,12 +122,13 @@ test('separate Cash figure preserves exact values and keeps unavailable wording 
     ctx.states.paperCash = cash;
     const html = heroLeft(ctx), doc = htmlDocument(html), figure = doc.querySelector('.cash-kpi');
     const actual = figure.querySelector('[data-cash="hero.cash"]');
-    assert.equal(figure.querySelector('.cash-caption').textContent, 'cash · as the broker reports it');
+    assert.equal(figure.querySelector('.cash-caption .cash-description').textContent, 'cash · as the broker reports it');
     assert.equal(actual.getAttribute('aria-label'), actual.getAttribute('title'));
-    const hasValue = Boolean(cash.value && !cash.retained), caption = figure.querySelector('.cash-reserve');
+    const hasValue = Boolean(cash.value && !cash.retained), caption = figure.querySelector('.cash-caption .cash-reason');
     assert.equal(figure.querySelector('.cash-amount').textContent, hasValue ? '€ 12.345,68' : '—');
     assert.equal(Boolean(figure.querySelector('.cash-amount.muted')), !hasValue);
-    assert.equal(caption.children.length, 1, 'the fixed caption block needs no hidden sizing paragraphs');
+    assert.equal(figure.querySelector('.cash-caption.c'), figure.querySelector('.cash-reserve'), 'the description and reason share the reserved caption block');
+    assert.equal(figure.querySelector('.cash-caption').children.length, 2, 'the fixed caption block needs no hidden sizing paragraphs');
     assert.equal(figure.querySelectorAll('.cash-sizing').length, 0);
     if (!hasValue) assert.match(caption.textContent, /^not reported · .+/);
     if (cash.reason === 'gateway_unconfirmed') assert.match(caption.textContent, /broker connection not confirmed/);
@@ -138,8 +141,28 @@ test('omitted Cash is a muted dash with the missing-data explanation in the capt
   delete ctx.states.paperCash;
   const figure = htmlDocument(heroLeft(ctx)).querySelector('.cash-kpi');
   assert.equal(figure.querySelector('.cash-amount.muted').textContent, '—');
-  assert.equal(figure.querySelector('.cash-reserve').textContent, 'not reported · no data received yet');
+  assert.equal(figure.querySelector('.cash-caption .cash-reason').textContent, 'not reported · no data received yet');
   assert.equal(figure.querySelector('[data-cash]').getAttribute('aria-label'), 'Cash not reported · no data received yet');
+});
+
+test('AC-19 supporting captions and Cash explanation survive phone separator typography', () => {
+  const ctx = context();
+  delete ctx.states.paperCash;
+  for (const joinDot of [false, true]) {
+    const doc = htmlDocument(heroLeft(ctx));
+    const captions = doc.querySelectorAll('.kpi').map(figure => {
+      const cash = figure.querySelector('.cash-caption');
+      const caption = cash?.querySelector('.cash-description') ?? figure.querySelector('.account-caption').children[0];
+      return joinUnits(caption.textContent, { joinDot });
+    });
+    const reason = joinUnits(doc.querySelector('.cash-caption .cash-reason').textContent, { joinDot });
+    assert.deepEqual(copyText(captions), ['still moving until closed', 'started with € 15.000', 'includes the kept holdings', 'cash · as the broker reports it']);
+    assert.equal(copyText(reason), 'not reported · no data received yet');
+    if (joinDot) {
+      assert.match(captions[3], /cash\u00a0·/);
+      assert.match(reason, /reported\u00a0·/);
+    }
+  }
 });
 
 test('shared stale captions appear once, with local subtle state icons intact', () => {

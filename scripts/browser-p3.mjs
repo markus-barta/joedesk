@@ -45,8 +45,8 @@ async function deskChecks(page, viewport, theme, expectedMini, snapshot) {
     const rest = [...document.querySelectorAll('main, .bottom-nav')].map(e => e.innerText).join(' ');
     return {
       header, boardOkElsewhere: /Board OK/.test(rest), strip: t('#healthPop .health-facts'), freshCheckins: [...document.querySelectorAll('.dcard .hb')].some(e => e.textContent.trim()),
-      display: t('#heroL .display'), kpis: [...document.querySelectorAll('#heroL .kpi')].map(k => ({ cell: k.dataset.cell, state: k.dataset.state, dt: k.querySelector('dt').innerText, value: k.querySelector('dd .bn, .cash-amount')?.innerText, cap: k.querySelector('.cash-caption')?.innerText ?? k.querySelector('.c').innerText,
-        cashReason: k.querySelector('.cash-reserve')?.innerText.trim(), muted: Boolean(k.querySelector('.cash-amount.muted')) })),
+      display: t('#heroL .display'), kpis: [...document.querySelectorAll('#heroL .kpi')].map(k => ({ cell: k.dataset.cell, state: k.dataset.state, dt: k.querySelector('dt').innerText, value: k.querySelector('dd .bn, .cash-amount')?.innerText, cap: k.querySelector('.cash-caption .cash-description')?.innerText ?? k.querySelector('.c').innerText,
+        cashReason: k.querySelector('.cash-caption .cash-reason')?.innerText.trim(), muted: Boolean(k.querySelector('.cash-amount.muted')) })),
       heroLayout: (() => {
         const rect = e => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height }; };
         return { hero: rect(document.getElementById('deskHero')), primary: rect(document.querySelector('.hero-primary')), right: rect(document.querySelector('.hero-r')), chart: rect(document.getElementById('heroChart')), row: rect(document.querySelector('#heroL .kpis')), figures: [...document.querySelectorAll('#heroL .kpi')].map(rect), captions: [...document.querySelectorAll('#heroL .kpi .c')].map(rect) };
@@ -61,7 +61,7 @@ async function deskChecks(page, viewport, theme, expectedMini, snapshot) {
       keptCap: t('#kept .keep-cap'), keptState: t('#kept .pstate'), notJoe: document.body.innerText.includes('not traded by Joe'),
       mini: [...document.querySelectorAll('.chart.mini > svg')].map(s => ({ id: s.closest('.dcard').id.slice(5), estimates: s.querySelectorAll('[data-estimate]').length, values: (s.dataset.values ?? '').split(' ').filter(Boolean).map(Number) })),
       dbars: [...document.querySelectorAll('.dbar i[data-v]')].map(i => i.getAttribute('style')),
-    }; })()`);
+    }; })()`).then(copyText);
   check('AC-18', `${tag}: one live header control and no fresh card check-ins or visible status strip`, /Live/.test(d.header) && !d.boardOkElsewhere && !d.freshCheckins && !await page.evaluate(`Boolean(document.querySelector('#health, .hstrip, #footData'))`), d);
   const kpiNames = d.kpis.map(k => k.dt);
   check('AC-19', `${tag}: Today and Since start remain primary, with four supporting figures and their captions intact`, Boolean(d.display) && d.primary.length === 2 && d.primary.map(p => p.label).join() === 'Today,Since start' && d.kpis.length === 4 && kpiNames.join() === 'Open positions,Desks’ money,Paper account,Cash' &&

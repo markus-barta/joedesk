@@ -491,9 +491,13 @@ try {
           const hasValue = ['value', 'stale', 'recovered'].includes(phase);
           const why = phase === 'stale' ? 'updates are late' : phase === 'session' ? 'broker connection not confirmed'
             : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact yet' : 'not reported by the broker';
-          const expected = hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `${screen === 'desk' ? '— ' : ''}not reported · ${why}`;
+          const brokerCaption = 'cash · as the broker reports it';
+          const cashState = hasValue ? phase === 'stale' ? `· ${why}` : '' : `not reported · ${why}`;
+          const caption = screen === 'desk' ? `${brokerCaption}${cashState ? ` ${cashState}` : ''}` : brokerCaption;
+          const expected = screen === 'desk' ? `${hasValue ? '€ 12.345,68' : '—'} ${caption}`
+            : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `not reported · ${why}`;
           const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : `Cash not reported · ${why}`;
-          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme, independent null reason`, N(seen.text) === expected && seen.label === 'Cash' && seen.caption === 'cash · as the broker reports it' && seen.title === exact && seen.name === exact && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
+          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme, independent null reason`, N(seen.text) === expected && seen.label === 'Cash' && N(seen.caption) === caption && seen.title === exact && seen.name === exact && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
           check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
           const after = await measure();
           const moved = baseline.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== after[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: after[i]?.[k] })));

@@ -1381,8 +1381,12 @@ broker lexeme in its title/accessibility name, its independent missing/stale
 reason and a state-independent reserve; Settings keeps its existing cash layout.
 Each secondary cell reserves five 16 px caption lines (eight on phones) inside
 the cell, with a 20 px label and a 28 px value row. Cash's broker caption uses
-the first two reserved lines; missing Cash shows a muted em dash and puts
-“not reported · no data received yet” (or its own reason) below it. The hero
+the first two reserved lines; the same `.cash-caption` contains
+“not reported · no data received yet” (or its own reason) below the broker
+description when Cash is a muted em dash. AC-19 compares the four supporting
+captions through the shared copy normalizer, preserving the phone's nonbreaking
+space before middle dots; its Cash reason selector stays inside the caption.
+The fixed 80 px caption block (128 px on phones) remains state-independent. The hero
 has no reserved card height. Fix 4 removes Cash's hidden sizing paragraphs:
 the more-specific `.kpi .c` block display had defeated their grid overlap and
 inflated every stretched secondary cell. CI's 1440 primary/chart height of
