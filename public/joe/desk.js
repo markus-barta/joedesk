@@ -3,7 +3,7 @@
 // fresh, stale with age, not reported, or broken with its reason, on its own.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, NB } from './format.js';
-import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S } from './health.js';
+import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { drawChart, eurAxis } from './chart.js';
@@ -43,14 +43,11 @@ export function cellView(cell, key, { signed = true, caption = '' } = {}) {
   return { html: bn(n, value?.currency ?? 'EUR', signed), caption: stateCaption(cell, key, caption), state: cell?.state ?? 'not reported', n };
 }
 
-function healthStrip(ctx, health) {
+function healthFacts(ctx, health) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
-  // The reason is one line at every width: a longer one ends in an ellipsis,
-  // and its title and Details give it whole. The line keeps the same facts in
-  // every state, so its rows never change (app.css).
   const reason = esc(capital(health.reason === 'board_ok' ? 'numbers up to date' : health.explanation));
-  const facts = [`<span class="st ${health.statusTone} why" title="${reason}">${icon(TONE_ICON[health.statusTone])}<span data-clamp="1">${reason}</span></span>`];
+  const facts = [`<span class="st ${health.statusTone} why">${icon(TONE_ICON[health.statusTone])}<span>${reason}</span></span>`];
   if (data) {
     const broker = brokerState(states, data);
     const words = { OK: `checked ${ageSpan('strip.broker', `${age(states.gateway?.ageSeconds)} ago`)}`, degraded: 'unstable', down: 'down', unsure: 'has not checked in' };
@@ -64,8 +61,7 @@ function healthStrip(ctx, health) {
     facts.push(st('none', `${term('broker')} not reported`), st('none', `${term('halt')} not reported`));
     facts.push(why ? st('bad', `No data · ${esc(cellReason(why))}`) : st('none', 'No data yet'));
   }
-  const open = $('#healthPop')?.classList.contains('on') ? 'true' : 'false';
-  return `${facts.join('')}<button type="button" class="btn quiet" id="healthMore" aria-expanded="${open}" aria-controls="healthPop">Details${icon('chev-d')}</button>`;
+  return `<div class="health-facts">${facts.join('')}</div>`;
 }
 
 function dayMethodLabel(source) {
@@ -81,7 +77,7 @@ function openMethodLabel(source) {
   return source.method === 'ib-unrealized-pnl' ? 'Valued by Interactive Brokers' : source.method === 'owned-lots-current-mark-fx' ? 'Valued from the desks’ own purchases at the last price' : null;
 }
 
-function healthPop(ctx, health) {
+export function healthPop(ctx, health) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
   const problems = boardDiagnostics(states, feeds, now);
@@ -95,11 +91,18 @@ function healthPop(ctx, health) {
     rows.push(['Data', `${dateTimeFull(data.generatedAt)} · ${ageSpan('pop.data', `${age(receipt)} old`)} · refreshes every 15${NB}s`]);
     rows.push(['Broker connection', `${broker.word === 'OK' ? 'Answering' : broker.word === 'down' ? 'Down' : broker.word === 'degraded' ? 'Unstable' : 'Not confirmed'}${gateway?.reason ? ` · ${esc(cellReason(gateway.reason))}` : ''}${gateway?.checkedAt ? ` · checked ${timeHMS(gateway.checkedAt)}` : ' · no check reported'}`]);
     rows.push(['Emergency stop', data.safety.halt ? `On: ${esc(cellReason(data.safety.haltReason))}` : 'Off']);
+    rows.push([term('heartbeat'), data.desks.map(desk => {
+      const elapsed = feeds.data.generatedAdvancedAt ? Math.max(0, Date.parse(now) - Date.parse(feeds.data.generatedAdvancedAt)) : 0;
+      const ms = gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed);
+      return `${esc(desk.label)}: ${ms == null ? 'not reported' : `${ageSpan(`pop.hb.${desk.id}`, `${age(ms / 1000)} ago`)}`}`;
+    }).join(' · ')]);
     rows.push(['Today’s result', esc(dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Open positions', esc(openMethodLabel(data.pnlSources?.open) ?? `Not available · ${cellReason(data.pnlSources?.open?.reason ?? states['today.openPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Source', `${esc(data.source.label)} · paper only`]);
   }
-  return `<h3>${icon(TONE_ICON[health.statusTone])}${esc(health.label)} · ${esc(health.explanation)}</h3>
+  return `<h3>${icon(TONE_ICON[health.statusTone])}Board status details</h3>
+    <p class="status-sentence">${esc(statusPresentation(ctx, health).sentence)}</p>
+    ${healthFacts(ctx, health)}
     <p>${problems.length ? esc(problems.join(' ')) : 'No current problems.'}</p>
     ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact yet', 'info')}</p>` : ''}
     ${rows.length ? `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
@@ -108,12 +111,9 @@ function healthPop(ctx, health) {
 }
 
 export function headerHealth(ctx, health) {
-  const data = ctx.feeds.data?.value;
-  const broker = data ? brokerState(ctx.states, data) : { word: 'unsure', tone: 'warn' };
-  const words = { OK: 'Broker OK', degraded: 'Broker unstable', down: 'Broker down', unsure: 'Broker unsure' };
-  const title = health.reason === 'ledger_size_limit' ? health.explanation : null;
-  return { html: `${icon(TONE_ICON[health.statusTone], `i tone-${health.statusTone}`)}<span class="lbl"><b>${esc(health.label)}</b><span class="lbl-long">· ${words[broker.word]}</span></span>`,
-    label: `${health.label}${title ? `: ${title}` : ''}, broker connection ${broker.word === 'OK' ? 'OK' : broker.word}. Open Desk.`, title };
+  const status = statusPresentation(ctx, health);
+  return { ...status, html: `${icon(health.tone === 'green' ? 'check' : TONE_ICON[health.statusTone], `i tone-${health.statusTone}`)}<span class="lbl"><b data-clamp="1" title="${esc(status.sentence)}"><span class="status-full">${esc(status.sentence)}</span><span class="status-compact">${esc(status.compact)}</span></b></span>${icon('chev-d', 'i status-chevron')}`,
+    label: `${health.tone === 'green' ? 'Live. Numbers are up to date' : status.sentence}. Open status details.`, title: status.sentence };
 }
 
 function sinceLabel(data) {
@@ -203,8 +203,10 @@ function deskCard(ctx, id, maxDay, showBars) {
   const since = desk?.stateSince && desk.state !== 'working' ? ` since ${timeHM(desk.stateSince)}` : '';
   const elapsed = feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(now) - Date.parse(feeds.data.generatedAdvancedAt)) : 0;
   const hbMs = desk?.heartbeatAt ? gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed) : null;
-  const hb = hbMs != null ? `${term('heartbeat')} ${ageSpan(`hb.${id}`, `${age(hbMs / 1000)} ago`)}`
-    : data ? `Data ${ageSpan(`hb.${id}`, `${age(dataAge(feeds, now).receipt)} old`)}` : '';
+  const snapshotAge = dataAge(feeds, now).receipt;
+  const hb = hbMs != null ? hbMs / 1000 >= STALE_AFTER_S
+    ? `${term('heartbeat')} ${ageSpan(`hb.${id}`, `${age(hbMs / 1000)} ago`)}` : ''
+    : snapshotAge != null && snapshotAge >= STALE_AFTER_S ? `Data ${ageSpan(`hb.${id}`, `${age(snapshotAge)} old`)}` : '';
   const dayV = cellView(states[`desks.${id}.dayPnl`], `d.${id}.day`);
   const openV = cellView(states[`desks.${id}.openPnl`], `d.${id}.open`);
   const sinceV = cellView(states[`desks.${id}.totalPnl`], `d.${id}.since`);
@@ -214,7 +216,7 @@ function deskCard(ctx, id, maxDay, showBars) {
   const num = (label, v, extra = '') => `<div data-state="${v.state}"><span class="k">${label}</span><span class="v">${v.html}</span>${extra}</div>`;
   const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]]);
   const learning = learningLine(desk?.learning);
-  return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span>${info.word}${since}</span></div></div><span class="hb">${hb}</span></header>
+  return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span>${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
       <p class="now">${desk ? esc(desk.action) : 'Waiting for the first valid snapshot.'}</p>
       <div class="dnums">
         ${num(term('today'), dayV, `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
@@ -406,8 +408,6 @@ function drawMiniCharts(ctx, history) {
 
 export function renderDesk(ctx) {
   const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
-  patch($('#health'), healthStrip(ctx, health));
-  patch($('#healthPop'), healthPop(ctx, health));
   patch($('#heroL'), heroLeft(ctx));
   patch($('#heroSession'), sessionRing(ctx.now));
   const data = ctx.feeds.data?.value;

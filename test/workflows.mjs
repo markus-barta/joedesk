@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
+import { parseResultsGateArgs } from '../scripts/results-gate-plan.mjs';
+// Both lightweight suites join the existing contracts/CI path.
+import './results-gate.mjs';
 
 const GUARDED_RUNNER = '${{ (vars.JOEDESK_AGM2 == \'on\' && (github.event_name != \'pull_request\' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON(\'["self-hosted","agm2"]\') || \'ubuntu-latest\' }}';
 const directory = new URL('../.github/workflows/', import.meta.url);
@@ -67,6 +70,34 @@ test('runner expression stays hosted by default and for fork PRs even when opted
 });
 
 const ci = parse(workflows.get('ci.yml'));
+test('Results CI keeps full ×3 on main pushes and full Vienna plus UTC/NY subsets on PRs and dispatch', t => {
+  const step = ci.jobs.browser.steps.find(step => step.name?.startsWith('Results gate'));
+  assert.equal(step.if, 'always()');
+  assert.equal(step.env.JOED_QA_DIR, '${{ runner.temp }}/joedesk-qa/p4');
+  const artifact = ci.jobs.browser.steps.find(step => step.with?.name === 'joedesk-p4-screenshots');
+  assert.equal(artifact.if, 'always()');
+  assert.equal(artifact.with.path, '${{ runner.temp }}/joedesk-qa/p4');
+  const dir = scratch('joed-workflow-results-');
+  t.after(() => discard(dir, 'workflow Results matrix test'));
+  // Execute the workflow's real shell branches with a fake npm. No browser,
+  // server, package install or real npm invocation can run here.
+  writeFileSync(join(dir, 'npm'), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$JOED_RESULTS_COMMANDS"\n', { mode: 0o700 });
+  for (const event of ['push', 'pull_request', 'workflow_dispatch']) {
+    const output = join(dir, event);
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c',
+      step.run.replaceAll('${{ github.event_name }}', event)], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, JOED_RESULTS_COMMANDS: output },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const commands = readFileSync(output, 'utf8').trim().split('\n');
+    assert.equal(commands.length, 1, `${event}: one gate orchestrator`);
+    assert.ok(commands[0].startsWith('run test:results -- '));
+    assert.deepEqual(parseResultsGateArgs(commands[0].split(' ').slice(3)), event === 'push'
+      ? ['UTC', 'Europe/Vienna', 'America/New_York'].map(timeZone => ({ timeZone, mode: 'full' }))
+      : [{ timeZone: 'Europe/Vienna', mode: 'full' }, { timeZone: 'UTC', mode: 'subset' }, { timeZone: 'America/New_York', mode: 'subset' }]);
+  }
+});
+
 test('CI preserves push/PR triggers, offers manual dispatch and keeps host package installation hosted-only', t => {
   assert.deepEqual(ci.on, { push: { branches: ['main'] }, pull_request: null, workflow_dispatch: null });
   const dir = scratch('joed-workflow-env-');
@@ -74,7 +105,7 @@ test('CI preserves push/PR triggers, offers manual dispatch and keeps host packa
   for (const [id, job] of Object.entries(ci.jobs)) {
     const first = job.steps[0], output = join(dir, id);
     assert.equal(first.name, 'Keep temporary files under RUNNER_TEMP');
-    const result = spawnSync('/bin/bash', ['-e', '-o', 'pipefail', '-c', first.run], {
+    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', first.run], {
       encoding: 'utf8', env: { ...process.env, RUNNER_TEMP: dir, GITHUB_ENV: output },
     });
     assert.equal(result.status, 0, result.stderr);
@@ -97,23 +128,34 @@ test('CI preserves push/PR triggers, offers manual dispatch and keeps host packa
 });
 
 const browserStep = ci.jobs.browser.steps.find(step => step.name === 'Resolve browser path');
-test('browser resolution exports the hosted path or the first installed self-hosted browser without launching it', t => {
+test('browser resolution prefers executable BROWSER_PATH, falls back to PATH and keeps the hosted path without launching it', t => {
   assert.ok(browserStep, 'early browser resolution step required');
   assert.equal(browserStep.env.RUNNER_KIND, '${{ runner.environment }}');
   assert.ok(ci.jobs.browser.steps.indexOf(browserStep) < ci.jobs.browser.steps.findIndex(step => step.run?.includes('scripts/browser-p3.mjs')));
-  for (const [kind, installed, expected] of [
+  const bash = spawnSync('bash', ['--noprofile', '--norc', '-c', 'command -v bash'], { encoding: 'utf8' });
+  assert.equal(bash.status, 0, bash.stderr);
+  for (const [kind, installed, expected, configuredMode] of [
     ['github-hosted', ['chromium'], '/usr/bin/google-chrome'],
+    ['github-hosted', ['chromium'], '/usr/bin/google-chrome', 0o700],
     ['self-hosted', ['chromium', 'chromium-browser', 'google-chrome'], 'chromium'],
     ['self-hosted', ['chromium-browser', 'google-chrome'], 'chromium-browser'],
     ['self-hosted', ['google-chrome'], 'google-chrome'],
     ['self-hosted', [], null],
+    ['self-hosted', ['chromium'], 'configured browser', 0o700],
+    ['self-hosted', [], 'configured browser', 0o700],
+    ['self-hosted', ['chromium'], 'chromium', 0o600],
+    ['self-hosted', [], null, 0o600],
   ]) {
     const dir = scratch('joed-workflow-browser-');
     t.after(() => discard(dir, 'workflow browser resolution test'));
     const output = join(dir, 'github-output');
+    // Keep lookup isolated from host browsers while resolving bash from PATH.
+    symlinkSync(bash.stdout.trim(), join(dir, 'bash'));
     for (const binary of installed) writeFileSync(join(dir, binary), '#!/bin/sh\nexit 99\n', { mode: 0o700 });
-    const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', browserStep.run], {
-      encoding: 'utf8', env: { ...process.env, PATH: dir, RUNNER_KIND: kind, GITHUB_ENV: output },
+    const configuredPath = configuredMode === undefined ? '' : join(dir, 'configured browser');
+    if (configuredPath) writeFileSync(configuredPath, '#!/bin/sh\nexit 99\n', { mode: configuredMode });
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', browserStep.run], {
+      encoding: 'utf8', env: { ...process.env, PATH: dir, BROWSER_PATH: configuredPath, RUNNER_KIND: kind, GITHUB_ENV: output },
     });
     assert.equal(result.status, expected ? 0 : 1, result.stderr);
     if (expected) assert.equal(readFileSync(output, 'utf8'), `BROWSER_PATH=${kind === 'github-hosted' ? expected : join(dir, expected)}\n`);
@@ -137,7 +179,7 @@ test('Docker commands avoid privileged builds and host networking; self-hosted b
   const docker = join(dir, 'docker');
   for (const [security, expected] of [[['name=rootless', 'name=seccomp,profile=builtin'], 0], [['name=seccomp,profile=builtin'], 1]]) {
     writeFileSync(docker, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(security)}'\n`, { mode: 0o700 });
-    const result = spawnSync('/bin/bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', preflight.run], {
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', preflight.run], {
       encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
     });
     assert.equal(result.status, expected, result.stderr);

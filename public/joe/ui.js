@@ -38,6 +38,17 @@ export const symBadge = (symbol, desk) => `<span class="sym"${desk ? ` style="--
 export const swatch = (stroke, dash = '', width = 2) => `<svg viewBox="0 0 22 10" aria-hidden="true"><line x1="1" y1="5" x2="21" y2="5" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/></svg>`;
 export const isPhone = () => matchMedia('(max-width: 700px)').matches;
 
+// Both labels occupy the same fixed track, even while one is invisible, so
+// measuring the full sentence never changes the control's size or oscillates.
+export function fitStatusLine(control, line, narrow = matchMedia('(max-width: 1100px)').matches) {
+  const full = control.querySelector('.status-full');
+  const compact = control.dataset.tone === 'bad' || narrow || Boolean(full && full.scrollWidth > full.clientWidth + 0.5);
+  control.toggleAttribute('data-compact', compact);
+  const visible = control.dataset.tone === 'bad' || (control.dataset.tone === 'warn' && compact);
+  line.toggleAttribute('data-visible', visible);
+  line.setAttribute('aria-hidden', String(!visible));
+}
+
 // One shared, opaque tip. Hover or focus shows it, a click or tap pins it,
 // Escape closes it and keeps focus; scrolling closes it only if the anchor moved.
 // A clamped sentence (data-say) shows itself whole there on a click, tap or
@@ -45,7 +56,7 @@ export const isPhone = () => matchMedia('(max-width: 700px)').matches;
 const TRIGGER = '[data-term], [data-say]';
 export function initTips() {
   const tip = $('#tip');
-  let anchor = null, pinned = false, quiet = false, at = null;
+  let anchor = null, pinned = false, quiet = null, at = null;
   function place(el) {
     const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
     let y = r.bottom + 8;
@@ -88,7 +99,10 @@ export function initTips() {
   rebuilt.tip = {
     anchor: () => anchor,
     // Focus handed back by a rebuild is not a new focus: it leaves the tip as it was.
-    quiet() { quiet = true; },
+    focus(el) {
+      quiet = el;
+      try { el.focus({ preventScroll: true }); } finally { quiet = null; }
+    },
     moved(el) {
       if (!el || el.dataset.term !== anchor?.dataset.term || el.dataset.say !== anchor?.dataset.say) { hide(true); return; }
       anchor = el;
@@ -97,19 +111,23 @@ export function initTips() {
       place(el);
     },
   };
-  document.addEventListener('pointerover', e => {
+  const hover = e => {
     const el = e.target.closest?.('[data-term]');
     if (el && e.pointerType !== 'touch' && !(pinned && anchor !== el) && el !== anchor) show(el, false);
-  });
+  };
+  document.addEventListener('pointerover', hover);
+  // A scroll can dismiss a tip while the pointer remains over its term.
+  document.addEventListener('pointermove', hover);
   document.addEventListener('pointerout', e => {
     const el = e.target.closest?.('[data-term]');
     if (el && el === anchor && !el.contains(e.relatedTarget)) hide(false);
   });
-  document.addEventListener('focusin', e => {
+  // Capture native focus before a section can rebuild its focused term.
+  document.addEventListener('focus', e => {
     const el = e.target.closest?.(TRIGGER);
-    if (quiet) { quiet = false; return; }
+    if (quiet === e.target) return;
     if (el && el !== anchor) show(el, false);
-  });
+  }, true);
   document.addEventListener('focusout', e => {
     // A rebuild removing the focused term is not the user leaving it.
     if (rebuilt.busy) return;
@@ -130,12 +148,12 @@ export function initTips() {
     if (e.key !== 'Escape' || !anchor) return;
     const el = anchor;
     hide(true);
-    if (document.activeElement !== el) { quiet = true; el.focus(); }
+    if (document.activeElement !== el) rebuilt.tip.focus(el);
     // Escape closes the tip only; an open dialog stays open for the next Escape.
     if (el.closest('dialog[open]')) e.preventDefault();
     e.stopImmediatePropagation();
   }, true);
-  return { hide: () => hide(true) };
+  return { hide: root => { if (!root || root.contains(anchor)) hide(true); } };
 }
 
 // Dialogs open modal. Opened by a pointer, focus goes to the dialog's heading
@@ -198,7 +216,7 @@ export function patch(el, html) {
     structure.set(el, key);
     if (tipped) rebuilt.tip.moved(find(el, tipped));
     const again = find(el, focused);
-    if (again) { rebuilt.tip?.quiet(); again.focus({ preventScroll: true }); }
+    if (again) rebuilt.tip?.focus(again);
     return true;
   }
   // A sentence shown whole in the tip ticks there too.

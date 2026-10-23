@@ -154,7 +154,10 @@ test('real Results discovery picks up a file drop and rejects identifying or inv
 });
 
 test('deployment pin helper updates existing participants and adds the Results producer only on request', () => {
-  const manifest = read(new URL('../release/contracts.json', import.meta.url)), before = structuredClone(manifest);
+  const manifest = read(new URL('../release/contracts.json', import.meta.url));
+  // Exercise creation even after the deployment manifest has a pinned producer.
+  delete manifest.participants.producer;
+  const before = structuredClone(manifest);
   const producer = 'a'.repeat(40), pusher = 'b'.repeat(40), executor = 'C'.repeat(40);
   for (const args of [
     ['--pusher', pusher], ['--executor', executor], ['--producer', producer],
@@ -184,6 +187,8 @@ test('deployment pin helper updates existing participants and adds the Results p
 
 test('deployment pin helper fails closed on bad flags, SHAs and missing participants', () => {
   const manifest = read(new URL('../release/contracts.json', import.meta.url)), pin = 'a'.repeat(40);
+  // Failed creation must leave this producer-free input unchanged.
+  delete manifest.participants.producer;
   const before = structuredClone(manifest);
   for (const flag of ['--producer', '--pusher', '--executor']) {
     for (const args of [[flag], [flag, ''], [flag, 'a'.repeat(39)], [flag, 'a'.repeat(41)],

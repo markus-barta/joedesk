@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, ACTOR, NOW, at } from './browser/board.mjs';
 import { designSnapshot, longFleet } from './browser/settings-fixtures.mjs';
-import { VIEWPORTS, THEMES, configure, load, settle, waitFor, screenshot } from './browser/shots.mjs';
+import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor, screenshot } from './browser/shots.mjs';
 
 const output = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p6a');
 mkdirSync(output, { recursive: true });
@@ -25,16 +25,58 @@ try {
   const { snapshot, history } = designSnapshot(NOW);
   const board = await startBoard({ fleetConfig: fleet, history, fleetActions: [] }); boards.push(board);
   board.setNow(NOW); assert.equal((await board.push(snapshot)).status, 200); board.setNow(at(NOW, 9));
+  let statusSeconds=9;
   for (const viewport of VIEWPORTS.filter(v => v.name !== '1024')) for (const theme of THEMES) {
     const tag = `${viewport.name}-${theme}`;
     await configure(page, viewport, theme); await load(page, board.url, 'settings');
     await waitFor(page, `document.querySelector('#grp-amy [data-row]')`);
+    // The shared status opens the same Details from every screen. No navigation
+    // or content shift, every removed status term still explains itself.
+    const rectangles = `['.top-in', '#hdrHealth', '#statusAlert', 'main.page', 'footer.foot'].map(s => { const r=document.querySelector(s).getBoundingClientRect(); return [s,r.left,r.top+scrollY,r.width,r.height]; })`;
+    for (const screen of ['desk','results','history','settings']) {
+      await go(page, screen);
+      const before = await page.evaluate(rectangles);
+      const state = await page.evaluate(`({screen:document.body.dataset.screen, sentence:document.getElementById('hdrHealth').title, expanded:document.getElementById('hdrHealth').getAttribute('aria-expanded'), old:!!document.querySelector('#health,.hstrip,#footData')})`);
+      test(`${tag} ${screen}: one live status, no old strip or footer age`, /^Live · updated/.test(state.sentence) && state.expanded==='false' && !state.old);
+      await page.evaluate(`document.getElementById('hdrHealth').focus(); document.getElementById('hdrHealth').click()`); await settle(page);
+      test(`${tag} ${screen}: Details opens without navigation or movement`, await page.evaluate(`document.body.dataset.screen===${JSON.stringify(screen)} && document.getElementById('healthPop').classList.contains('on') && document.getElementById('hdrHealth').getAttribute('aria-expanded')==='true'`) && JSON.stringify(before)===JSON.stringify(await page.evaluate(rectangles)));
+      for (const term of ['broker','halt','datafrom','heartbeat']) {
+        const tip = await page.evaluate(`(() => { const e=document.querySelector('#healthPop [data-term="${term}"]'); e.focus(); return {text:document.getElementById('tip').textContent,on:document.getElementById('tip').classList.contains('on'),described:e.getAttribute('aria-describedby')}; })()`);
+        test(`${tag} ${screen}: ${term} still explains itself on focus in Details`, tip.on && tip.described==='tip' && tip.text.length>20);
+      }
+      // The first Escape dismisses a term tip; the next dismisses Details.
+      await page.s('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+      await page.s('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+      await page.s('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+      await page.s('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27}); await settle(page);
+      test(`${tag} ${screen}: Escape returns focus to the status button`, await page.evaluate(`!document.getElementById('healthPop').classList.contains('on') && document.activeElement.id==='hdrHealth' && document.getElementById('hdrHealth').getAttribute('aria-expanded')==='false'`));
+    }
+    await go(page, 'settings');
+    const baseline = await page.evaluate(rectangles);
+    await page.evaluate(`window.__statusAnnouncements=[]; window.__statusObserver=new MutationObserver(m=>window.__statusAnnouncements.push(...m.map(()=>document.getElementById('statusAnnouncement').textContent))); window.__statusObserver.observe(document.getElementById('statusAnnouncement'),{childList:true,subtree:true,characterData:true});`);
+    board.setNow(at(NOW,++statusSeconds)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+    test(`${tag}: age tick causes no status announcement or layout shift`, await page.evaluate('window.__statusAnnouncements.length===0') && JSON.stringify(baseline)===JSON.stringify(await page.evaluate(rectangles)));
+    const halted=structuredClone(snapshot); halted.seq++; halted.safety.halt=true; halted.safety.haltReason='halt_on';
+    test(`${tag}: halt snapshot accepted`,(await board.push(halted)).status===200);
+    await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+    test(`${tag}: halt announced once`,await page.evaluate(`window.__statusAnnouncements.length===1 && document.getElementById('statusAnnouncement').textContent.includes('Emergency stop is ON')`));
+    for(const screen of ['desk','results','history','settings']) {
+      await go(page,screen);
+      const red=await page.evaluate(`(() => {const e=document.getElementById('statusAlertText'),cs=getComputedStyle(e);return {sentence:document.getElementById('hdrHealth').title,text:e.textContent,title:e.title,visible:cs.visibility,lines:e.getBoundingClientRect().height/parseFloat(cs.lineHeight),expanded:document.getElementById('hdrHealth').getAttribute('aria-expanded')};})()`);
+      test(`${tag} ${screen}: emergency stop and action visible without opening Details, on one reserved line`,red.sentence==='Emergency stop is ON' && red.text.replaceAll('\u00a0',' ')==='Emergency stop is ON · The operator must check' && red.title.replaceAll('\u00a0',' ')===red.text.replaceAll('\u00a0',' ') && red.visible==='visible' && red.lines===1 && red.expanded==='false');
+    }
+    test(`${tag}: halt repeats on no navigation announcement`,await page.evaluate('window.__statusAnnouncements.length===1'));
+    await go(page,'settings'); test(`${tag}: tone change moves nothing`,JSON.stringify(baseline)===JSON.stringify(await page.evaluate(rectangles)));
+    snapshot.seq=halted.seq+1; test(`${tag}: recovery accepted`,(await board.push(snapshot)).status===200); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+    test(`${tag}: recovery announced once`,await page.evaluate(`window.__statusAnnouncements.length===2 && document.getElementById('statusAnnouncement').textContent==='Live. Numbers are up to date.'`));
+    await page.evaluate('window.__statusObserver.disconnect()');
+
     await page.evaluate(`document.getElementById('set-about').scrollIntoView({block:'center'})`); await settle(page);
     const version = await page.evaluate(`(() => { const e=document.getElementById('appVersion'); return {canonical:e.dataset.canonical,title:e.title,label:e.getAttribute('aria-label'),segments:[...e.children].filter(n=>['yy','mm','dd','hh','mi','ss'].includes(n.className)).length,tail:!!e.querySelector('.tail,.v'),seconds:e.querySelector('.ss').getBoundingClientRect().width,transition:e.querySelector('.ss').style.transition,all:[...document.querySelectorAll('[data-product-version]')].map(n=>n.dataset.canonical)}; })()`);
-    test(`${tag}: six-segment shared Pretty with hidden seconds and no decorative v/tail`, version.canonical === active.version && version.segments === 6 && !version.tail && version.seconds === 0 && version.all.length === 4 && version.all.filter(v=>v===active.version).length === 2 && version.all.includes(preparation.last_deployed_release.version) && version.all.includes('261021015923.0.0'));
+    test(`${tag}: six-segment shared Pretty with hidden seconds and no decorative v/tail`, version.canonical === active.version && version.segments === 6 && !version.tail && version.seconds === 0 && version.all.length === 5 && version.all.filter(v=>v===active.version).length === 2 && version.all.includes(preparation.last_deployed_release.version) && version.all.includes('261021083537.0.0') && version.all.includes('261021015923.0.0'));
     test(`${tag}: exact canonical coordinate and human UTC in tooltip and accessible name`, version.title.includes(active.version) && version.title.includes(expectedUTC) && version.label.includes(active.version) && version.label.includes(expectedUTC));
     const history = await page.evaluate(`[...document.querySelectorAll('#set-about .ver .t')].map(e => e.dataset.canonical ?? e.textContent)`);
-    test(`${tag}: About shows the current build, deployed sequences 27 and 26, and legacy history, without aborted publications`, history[0] === active.version && history[1] === preparation.last_deployed_release.version && history[2] === '261021015923.0.0' && history[3] === preparation.anchor.last_legacy_version && !['261019102825.0.0', preparation.anchor.first_calendar_version].some(v => history.includes(v)));
+    test(`${tag}: About shows the current build, deployed sequences 28, 27 and 26, and legacy history, without aborted publications`, history[0] === active.version && history[1] === preparation.last_deployed_release.version && history[2] === '261021083537.0.0' && history[3] === '261021015923.0.0' && history[4] === preparation.anchor.last_legacy_version && !['261019102825.0.0', preparation.anchor.first_calendar_version].some(v => history.includes(v)));
     await screenshot(page, viewport, join(output, `${tag}-version.png`)); shots.push(`${tag}-version.png`);
     await page.evaluate(`document.getElementById('appVersion').scrollIntoView({block:'center'})`); await settle(page);
     if (viewport.mobile) {

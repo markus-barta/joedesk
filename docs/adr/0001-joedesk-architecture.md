@@ -462,7 +462,9 @@ measured on a named reference device, mbp2606 or mbp2607, by
 names the device. CI runners are slower and vary from run to run, so CI
 enforces a regression guard of 2.5 × the reference budget on the same
 workload (`scripts/browser/budget.mjs`): a normal patch at most 40 ms, a
-History draw at most 125 ms, no task reaching 125 ms. Recorded reference:
+History draw at most 125 ms, no task reaching 125 ms.
+The CI guard re-measures once on a task-only breach and fails if it reproduces; the reference budget never re-measures.
+Recorded reference:
 mbp2607 (Apple M5 Max, 18 cores, HeadlessChrome 153.0.8010.12, Node
 v26.11.1) on 2026-10-15: Desk patch worst 7.7 ms, History draw worst
 11.3 ms (8 MiB cold) and 5.7 ms (live), no long task at 390, 1024 or 1440.
@@ -1376,25 +1378,34 @@ needed. Sequence 27 was published on `main` at
 `040d6756e92dc7c4e05fcf63b865242819b3d0ce` and has been live on csb0 since
 `2026-10-21T11:22:48Z` (JOED-59).
 
-JOED-60 reserves `261021113113.0.0` once at `2026-10-21T11:31:13Z`, stable
+JOED-60 reserved `261021113113.0.0` once at `2026-10-21T11:31:13Z`, stable
 sequence 28, for the bounded yellow **Broker unsure** header when money is null
 only because the broker check is unconfirmed. The shared gateway panel's check
 age must be known and below 180 seconds; unknown or older checks keep missing
 equity red. Cell copy and the other red rules stay unchanged.
-`release/preparation.json` records sequence 27 as `previous_release`
-(`published-candidate`, disposition `deployed`, `deployed: true`, JOED-59) and
-`last_deployed_release`; this does not claim sequence-28 publication or adoption.
+Sequence 28 was published on `main` at
+`a60f4c561b05fa26ee8fa1dd31ab725714399340` and has been live on csb0 since
+`2026-10-21T15:22:58Z` (JOED-60).
+
+JOED-70 reserves `261023100632.0.0` once at `2026-10-23T10:06:32Z`, stable
+sequence 29, for one calm status line. A neutral Live surface carries a small
+green mark; a red problem shows a short label in the header and the full
+sentence once on the reserved line. A desk with no heartbeat falls back to
+snapshot age, shown only when stale.
+`release/preparation.json` records sequence 28 as `previous_release`
+(`published-candidate`, disposition `deployed`, `deployed: true`, JOED-60) and
+`last_deployed_release`; this does not claim sequence-29 publication or adoption.
 The explicit sequence-23 → sequence-24 migration anchor and legacy inventory
 stay unchanged.
 Footer/About and `/joe/healthz` derive the current version from the active build;
-About lists the current build, deployed sequences 27 and 26, then legacy history; it
+About lists the current build, deployed sequences 28, 27 and 26, then legacy history; it
 excludes both superseded, never-deployed publications.
 `check-release` still enforces a strictly later reservation, with CLI regressions
 covering equal/earlier coordinates after closure verification. Contract revision
 9 and its complete set `000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5`
-remain unchanged by the sequence-28 reservation, as do the pusher/executor
+remain unchanged by the sequence-29 reservation, as do the pusher/executor
 requirements, producer pins and null deployment pins. No retry release set is
-claimed for sequence 28; main-push CI produces it after publication. The custom legacy scheme is not relabelled as
+claimed for sequence 29; main-push CI produces it after publication. The custom legacy scheme is not relabelled as
 INSPR-CalVer1. JOED-19's owner decision supersedes JOED-13, whose v2 proposal is
 cancelled and consolidated into JOED-26. Published history stays intact.
 

@@ -2,10 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261021113113.0.0",
+    APP_VERSION: "261023100632.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 28,
+    RELEASE_SEQUENCE: 29,
     VERSION_HISTORY: [
+      {
+        version: "261023100632.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-23",
+        title: "Calm status line",
+        changes: ["Show one calm status line: neutral Live, a short red label, and the problem sentence once.", "Fall back to snapshot age when a desk has no heartbeat, and show it only when stale."],
+      },
       {
         version: "261021113113.0.0",
         versionScheme: "inspr-calver-3",

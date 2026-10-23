@@ -1,6 +1,6 @@
 {
   "schema": "joedesk.runtime-closure.v1",
-  "candidate_version": "261021113113.0.0",
+  "candidate_version": "261023100632.0.0",
   "files": [
     {
       "path": "contracts/accept.mjs",
@@ -99,18 +99,18 @@
     },
     {
       "path": "package.json",
-      "size": 1355,
-      "sha256": "a0436d93ee392ab4a27fafcc00cb78613a922a5d4d39337eed96487e6804aa62"
+      "size": 1376,
+      "sha256": "4e236b84ffd4844aecf3e4d0c9677aab46e1c80ee8b331e6d020514be0d25829"
     },
     {
       "path": "public/joe/app.css",
-      "size": 74542,
-      "sha256": "7dde90adabb5a1f514eb641e041cdb1046878b389dd2ec124c39fbf3976cce18"
+      "size": 74311,
+      "sha256": "82910175da0cbfad63d9ec92a944a5abf8512eff7caece023337c6bda0dbd00e"
     },
     {
       "path": "public/joe/app.js",
-      "size": 17514,
-      "sha256": "d5f7614e287c30affe4419336419209d5b4e5d05642113fea782e9dcc2280d8d"
+      "size": 18156,
+      "sha256": "089ca724887fafd2c3e6d920509f2c74c600ce51ded79b6923222a8e68ba45f4"
     },
     {
       "path": "public/joe/chart.js",
@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 31513,
-      "sha256": "3459e38e7571de0deec08840a73db14e849342d4b54bf3396f3a2630292e2593"
+      "size": 31561,
+      "sha256": "ca7aac01450d0b12bc016e9da33ac79795fde1ec30a078ab339fbbfb0ec14e10"
     },
     {
       "path": "public/joe/events.js",
@@ -164,8 +164,8 @@
     },
     {
       "path": "public/joe/health.js",
-      "size": 13560,
-      "sha256": "180f94df3e264e3febc7672d29285ea22690b11522c1c7f1e02ca7d60b5e2ade"
+      "size": 15424,
+      "sha256": "bf6e46f8115813ca346306e353f52233c1282467ee19e2f3a455bd4582ee9198"
     },
     {
       "path": "public/joe/history-model.js",
@@ -189,13 +189,13 @@
     },
     {
       "path": "public/joe/index.html",
-      "size": 35239,
-      "sha256": "3db5c81bbb2e739cf41c10a9f2c11f5b1eaeae4bebbc00938cac5fbe9999c3e9"
+      "size": 35475,
+      "sha256": "faac704308a55251f2a8a8ba38bc77a82ba4fbc0a63db74e03db74681dbe6bec"
     },
     {
       "path": "public/joe/joe-version.js",
-      "size": 14225,
-      "sha256": "5620ac3f045b83c00b45fe33d7cc9f8ce8e6df04e560bc188ab49f1db13922ec"
+      "size": 14584,
+      "sha256": "1d2498d59858784333c079f9c92318f6e3220a846b9b5239c82759f16d32bc97"
     },
     {
       "path": "public/joe/results-model.js",
@@ -229,8 +229,8 @@
     },
     {
       "path": "public/joe/ui.js",
-      "size": 15999,
-      "sha256": "b2892a52c1b2dbb88f9fdb67ca384fab9a77a40bcf735cd7b984fd4404ef47c9"
+      "size": 16986,
+      "sha256": "e2895b73e109abd301107b2d0fd0bf0013a4f51050a1fff91da6dce9e59a865f"
     },
     {
       "path": "public/joe/vendor/calver/display.json",
@@ -274,13 +274,13 @@
     },
     {
       "path": "release.json",
-      "size": 244,
-      "sha256": "98961bea4ed8048fbfa127b60953080e1b541b9fae7525489216e606a425d600"
+      "size": 220,
+      "sha256": "02c486fbb092b9af08141b870e6b6fa3f3304bc96702b28586ba7c0ccf88d8f8"
     },
     {
       "path": "release/contracts.json",
-      "size": 1661,
-      "sha256": "5c20c38be4602f6c142ece1c1abc65172306d504aa0a74d098e10bb15f78ef17"
+      "size": 2127,
+      "sha256": "0f12d3ffd42edc586b1c10da86f72fc1a7b59f3e132c0111b6ae7e19083a147b"
     },
     {
       "path": "release/data-migration.mjs",
@@ -290,7 +290,7 @@
     {
       "path": "release/preparation.json",
       "size": 6721,
-      "sha256": "57e795902d5580a8431ea3f668767d36ea1caaa1e3318ee5b7910bfa14f1d6d3"
+      "sha256": "cabf22cc03fd5fff45da6faf623e0d939f3c1be6a24626e30e7db2fe22d88e32"
     },
     {
       "path": "release/versioning.mjs",

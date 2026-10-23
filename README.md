@@ -2,14 +2,16 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261021113113.0.0` (`inspr-calver-3`, stable sequence 28), reserved once at `2026-10-21T11:31:13Z` for a calm header during a brief broker-check gap ([JOED-60](https://aeon.barta.cm/p/JOED/JOED-60)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261023100632.0.0` (`inspr-calver-3`, stable sequence 29), reserved once at `2026-10-23T10:06:32Z` for a calm status line ([JOED-70](https://aeon.barta.cm/p/JOED/JOED-70)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261021083537.0.0` / sequence 27,
-published on `main` at `040d6756e92dc7c4e05fcf63b865242819b3d0ce` under JOED-59,
-live on csb0 since `2026-10-21T11:22:48Z`. `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261021113113.0.0` / sequence 28,
+published on `main` at `a60f4c561b05fa26ee8fa1dd31ab725714399340` under JOED-60,
+live on csb0 since `2026-10-21T15:22:58Z`. `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 28. Sequence 26 (`261021015923.0.0`) was previously deployed
-at `2026-10-21T08:15Z` (OPS-354 attempt 3), with the documented smoke variant on JOED-59.
+adoption for sequence 29. Sequence 27 (`261021083537.0.0`) was previously deployed
+and has been live on csb0 since `2026-10-21T11:22:48Z` (JOED-59). Sequence 26
+(`261021015923.0.0`) was previously deployed at `2026-10-21T08:15Z` (OPS-354
+attempt 3), with the documented smoke variant on JOED-59.
 
 The previous coordinate `261019102825.0.0` (stable sequence 25, rev 9) was
 published on `main` at `d36b5295295a6901e36fdf2dc0d64353ddf88d0e`; JOED-50
@@ -23,13 +25,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-28 candidate has not been published. The candidate
+cutover**. The sequence-29 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -79,7 +81,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261021113113.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261023100632.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -451,9 +453,11 @@ and requires approval for all outside collaborators; `pull_request_target` is
 forbidden. Checkout explicitly cleans the workspace, and CI temporary files and
 npm's cache stay under `RUNNER_TEMP`.
 
-Chrome installation runs hosted-only. Self-hosted jobs resolve `chromium`,
-`chromium-browser`, then `google-chrome` from `PATH` once, export `BROWSER_PATH`,
-and fail clearly if none is installed.
+Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
+executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
+then `google-chrome` from `PATH`. They export the resolved `BROWSER_PATH` and fail
+clearly if no browser is available. Workflow shell tests resolve `bash` from
+`PATH`, including on NixOS runners.
 
 The Docker build requests neither host networking nor privileged build steps.
 Buildx's `docker-container` driver does create an internal privileged BuildKit
@@ -539,6 +543,7 @@ and worker-reply events, and long-animation-frame script/layout attribution
 where supported. Desk and History live-push windows begin after their setup
 settles; setup tasks remain in the trace separately, and tasks crossing into
 an update window still count. The CI guard remains 125 ms (2.5 × reference).
+The CI guard re-measures once on a task-only breach and fails if it reproduces; the reference budget never re-measures.
 Term-focus checks reacquire rebuilt terms and wait up to 2 s for each term's
 own tip and expanded state. The large-ledger Settings check waits up to 5 s
 for its exact-byte title and accessible name before measuring containment.
@@ -551,13 +556,22 @@ BROWSER_PATH=/usr/bin/google-chrome node scripts/browser-p3.mjs
 ```
 
 `npm run test:results` runs the full P4 Results gate sequentially under **UTC**
-and **America/New_York**. `test:browser` includes this guard. CI includes Vienna
-too; run the same three-zone check with:
+and **America/New_York**. `test:browser` includes this guard. CI pushes to main
+run the full suite in all three zones; PRs and manual dispatch run full in
+Europe/Vienna and repeat only explicitly zone-sensitive **views** in UTC and
+America/New_York, retaining every check in a selected view. A view identifies
+its group, fixture/interaction, width and theme; workflows can include their
+associated detail screenshots and crops. Check-only setup, boundary and
+geometry cases are also inventoried. Full mode retains every existing check.
 
 ```bash
 npm run test:results -- UTC Europe/Vienna America/New_York
+# PR/manual-dispatch plan (full budget only in Vienna):
+npm run test:results -- --full Europe/Vienna --subset UTC America/New_York
 # One zone, same P4 suite (including the render budget):
 TZ=UTC node scripts/browser-p4.mjs
+# Only zone-sensitive views in one host zone:
+TZ=UTC node scripts/browser-p4.mjs --zone-subset
 ```
 
 Each child process sets `TZ` for the injected board server and Chrome. The CDP
@@ -565,6 +579,121 @@ page also sets its requested zone explicitly, since macOS Chrome may keep the
 OS zone despite `TZ`; P4 checks the server, page and dedicated worker zones.
 Reports stay separate under `~/.local/share/joedesk-qa/p4/<zone>/index.md`
 (`JOED_QA_DIR` overrides the parent; slashes in zone names become hyphens).
+The parent index identifies each zone's mode, selected view count, static
+check count and share of full P4, plus sensitive/independent counts per group.
+The child index lists every selected view and reconciles its static check
+count against executed checks, including the shared craft audit. An omitted
+view or a check-count mismatch fails the gate. New anonymized real fixtures
+join the full inventory at all five fixture width/theme variants. They reuse
+existing date paths and do not automatically expand the zone subset.
+
+**Zone-subset rule (JOED-65 fix2):** repeat every host-zone check, the exact
+14 empirically differing width/theme variants from run 39793917962, and one
+**1440 light** representative per distinct date code path. Rendering another
+date through an already-covered helper does not add a zone variant. The
+explicit per-view `zoneSensitive` flag now records that selection; `coverage`
+still describes the view's actual assertions, including unselected date views.
+The full Vienna run and full ×3 main-push release net retain every check;
+`ci.yml` is unchanged.
+
+The source inventory comes from reading `public/joe/*.js` and searching
+`Intl`, `Date`, `wall`, `viennaDay`, `viennaDate`, `viennaMidnight`, the date/time
+formatters and their callers. These are the call-site families exercised by
+P4 Results and its shared board shell; Desk, History and Settings have their
+own P3/P5 gates rather than additional P4 copies. Shared zoned primitives live
+in `time.mjs` (served to the page and worker); `format.js` uses explicit Vienna
+wall parts, and Results date-only arithmetic uses UTC fields. The time-vector
+and Node suites still run under all three host zones in CI.
+
+`scripts/results-gate-plan.mjs` declares the following paths and representative
+views. A lightweight static test parses this declaration and the table, checks
+that the named helpers exist, and requires each representative to be selected
+exactly once. Each representative executes assertions, rather than relying on
+a screenshot alone.
+
+| Date code path | Source helper/call-site family | Representative view |
+| --- | --- | --- |
+| `wall-clock-formatters` | format.js: parts, timeHM, dateTimeFull; app.js: renderHeader | `design/matrix/1440/light` |
+| `calendar-day-labels` | results-model.js: fmtDM, fmtDDM, fmtDay; results.js: renderCalendar | `design/matrix/1440/light` |
+| `period-labels-and-stepping` | results-model.js: periodOf, rangeLabel, stepAnchor, addDays, monday, daysIn | `design/matrix/1440/light` |
+| `best-worst-day-labels` | results.js: dayTile | `r1/large-amounts/1440/light` |
+| `today-money-boundary` | results.js: resultsView; results-model.js: equityAt, moneyContext | `r1/money-now/1440/light` |
+| `basis-cut-date` | results.js: cutText; results-model.js: moneyContext, viennaMidnight | `r1/basis/1440/light` |
+| `chart-day-session-and-times` | results-model.js: dayWindow, intraday; results.js: renderCurve | `design/matrix/1440/light` |
+| `chart-period-midnights-and-gaps` | results-model.js: curve, viennaMidnight; results.js: renderCurve | `r1/time-axis/1440/light` |
+| `tracking-start-date` | results.js: startText, heroSentence, dayState | `fixtures/before-tracking/1440/light` |
+| `closed-partial-days` | results-model.js: countPartialDays; results.js: partialDay, dayWarning | `partial-days/calendar/1440/light` |
+| `open-today-partial` | results.js: dayWarning, dayContent | `partial-days/today-reason/1440/light` |
+| `missing-closed-and-open-days` | results.js: missingDayText, dayWarning, dayState | `missing-days/closed-open-recovery/1440/light` |
+| `period-partial-day-hints` | results.js: renderHero, renderCalendar; results-model.js: countPartialDays | `period-hint/partial/1440/light` |
+| `trade-open-close-and-held` | results.js: held, tradeRows; format.js: timeHM | `trade-amount/rows/1440/light` |
+| `open-position-today-time` | results.js: dayContent; results-model.js: viennaDate | `partial-days/desk-filtered-reasoned/1440/light` |
+| `receipt-ingress-clock` | feed.js: serverClock, createFeed; history-worker.js: serverClock, clockNow | `ingress/live-stale-recovery/1440/light` |
+| `stale-retained-ago` | results.js: renderStatus; format.js: age; ui.js: ageSpan | `states/stale-retained/1440/light` |
+| `worker-date-indexing` | history-worker.js: pollResults; results-model.js: indexResults, viennaDate | `ingress/live-stale-recovery/1440/light` |
+| `today-rollover-retained-receipt` | results.js: resultsToday, renderResults; results-model.js: addDays | `partial-days/retained-midnight/1440/light` |
+| `vienna-dst-and-2027-04-01` | results-model.js: viennaDate, marketHoliday; results.js: renderCalendar, tradeRows | `vienna/dst-calendar/1440/light` |
+
+`design/matrix/1440/light` switches all five periods, steps day/week/month,
+compares calendar labels and opens dated trades; its chart covers both day
+and longer-period date labels. `r1/time-axis/1440/light` covers gaps and the
+real period time axis; `vienna/dst-calendar/1440/light` uses the later
+**2027-04-01** clock and checks both DST changes, midnight trade assignment
+and the repeated hours. The retained-midnight fixture accepts its receipt
+on an open day and reads it after midnight. The open-position representative
+opens both the closed day and today, asserting the actual `11:15` time.
+
+Two representatives need a minimal pair of declared views: trade rows retain
+`trade-amount/ingress` (2 contract/acceptance checks before row rendering), and
+`period-hint/partial/1440/light` retains
+`period-hint/baseline/1440/light` (3 checks establishing the unhinted chart and
+geometry). Their dependencies are explicit in the plan. Independent state
+and partial-day transitions have selection guards; any necessary uncounted
+fixture setup still rejects failed ingress. No other width/theme is added for
+a path. The 14 measured variants are additional coverage and retain all their
+associated checks, even when a difference may be render noise.
+
+The current inventory includes the real anonymized paper-proof fixture
+`fixtures/results/real/2026-10-22-paper-proof.json` (2026-10-19 through
+2026-10-22, two round trips). Its five views add 104 checks to the 4,957-check
+synthetic UX 1 baseline from run 39929690916; real fixtures stay out of the
+zone subset.
+
+| Group | Sensitive views | Independent views |
+| --- | --- | --- |
+| host-timezone | 1 | 0 |
+| design | 2 | 12 |
+| fixtures | 1 | 25 |
+| states | 2 | 15 |
+| vienna | 1 | 1 |
+| cards | 0 | 3 |
+| r1 | 4 | 6 |
+| trade-amount | 2 | 7 |
+| phone-calendar | 0 | 6 |
+| ingress | 3 | 3 |
+| period-hint | 2 | 78 |
+| partial-days | 12 | 136 |
+| missing-days | 1 | 5 |
+| budget | 0 | 1 |
+| **Total** | **31** | **298** |
+
+The subset is **31/329 views and 588/5,061 checks (11.62%)**, enforced at
+**≤25%** by the lightweight inventory test. The PR plan performs **6,237**
+checks (5,061 + 2 × 588), compared with 14,174 in fix1 and 15,183 for full ×3
+with the real fixture (14,871 for UX 1's synthetic baseline; 14,862 for the
+original synthetic baseline).
+The measured agm2 Results times were **788 s** for baseline, **779 s** for the
+group subset and **744 s** for fix1's 93.06% view subset. At approximately
+**263 s** per original baseline full Vienna run, weighting the current PR plan
+by that 4,954-check baseline projects **331 s (5.5 min)**, below the **450 s**
+target. This is an expected runtime, not a measurement: setup and interactions
+have different costs. The coordinator's PR CI on agm2 measures the actual
+result; no local browser run is part of this change.
+
+The lightweight tests also preserve the 4,957-check synthetic UX 1 baseline and
+104 additional checks per real fixture, exact measured variants, explicit
+booleans, setup dependencies, sequential zone orchestration and executed-count
+reconciliation.
 Use an approved browser test host; an installed browser guard refusal is a
 blocked check and must be handed to the coordinator without bypassing it.
 
@@ -1039,9 +1168,10 @@ reviewed release process. Never reseal or republish `261016151218.0.0` or
 `261019102825.0.0` with new bytes. This tooling leaves contracts and pins unchanged;
 JOED-58 reserved sequence 26 for the cut-over retry's changed board bytes; that
 release was deployed. JOED-59 reserved sequence 27 for the changed health and
-smoke semantics; that release is now live. JOED-60 reserves sequence 28 for the
-bounded yellow broker-check warning. Never reseal or republish sequences 26 or
-27 with these new bytes.
+smoke semantics; that release is now live. JOED-60 reserved sequence 28 for the
+bounded yellow broker-check warning; that release is now live. JOED-70 reserves
+sequence 29 for the calm status line. Never reseal or republish sequences 26,
+27 or 28 with these new bytes.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
@@ -1187,6 +1317,49 @@ means degraded health: results capture is failing and trading continues. Setting
 shows the reason in yellow. Desk’s health explanation adds “Paper executor
 degraded: results capture failing, trading continues (ledger 3,2 MB of 8,0 MB).”
 using the reported size; without ledger fields it omits the parentheses.
+
+JOED-70 replaces the earlier header pair, always-visible status strip, fresh
+card check-ins and footer data age with one shared header status button.
+Green reads “Live · updated 9 s ago” (on a phone, “Live · 9 s”), using receipt
+age and the existing age formatter. Yellow/red show the top-ranked problem;
+“Emergency stop is ON” keeps first priority. Health ranking, all thresholds,
+JOED-60's broker gap, `not_exact_yet`, and Settings runtime content stay intact.
+The control has a fixed width and tabular numerals. Fitting yellow sentences
+appear in the control. At compact widths (≤1100 px), or when measurement shows
+the full sentence would overflow, it switches to a short label and the reserved
+32 px line below the header displays the complete sentence and action in yellow.
+Red always uses that line. Each non-green sentence appears once outside Details;
+green may stay compact on narrow screens. The line ends in an ellipsis when
+necessary and retains a complete title. Its space stays reserved in green, so
+tone changes and ticks cannot move the content.
+
+The header button and visible problem line open the shared, opaque Details
+dialog on every screen. Its full sentence wraps at the top, in view on opening.
+It holds the former strip's numbers, broker check age, emergency-stop state,
+data time/age, and all their existing term explanations, plus each desk's
+check-in age. Escape closes the dialog and returns focus to its opener
+(an open term tip consumes the first Escape). Fresh desk check-ins are hidden;
+at the existing 60-second boundary they return in the stale tone. The footer
+retains the read-only paper-board promise and version. A polite live region
+announces each change of ranked tone/reason once, without announcing age ticks.
+
+`node --test test/status-line.mjs` is the small local presentation suite, also
+included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,
+checks all Details terms on native focus/hover in a focused page, verifies the
+sentence is visible once, opens Details from each status control, and stresses
+every status sentence in fixed boxes. Fixture health expectations include the
+active KEEP policy and the browser's retained state clock on failed reads.
+P5 keeps executor/ledger priority and neutral not-exact checks,
+with complete status names/titles, token colours, crops and zero-movement
+checks. P4 now exercises desk-card placement only after the check-ins become
+stale. P6 checks Details from all four screens, red halt visibility without
+interaction, one announcement per transition, silent ticks, and recovery.
+Full and browser validation runs on agm2 CI; local work runs only syntax,
+the small unit file, and `git diff --check`.
+
+The following paragraph records the earlier header presentation and its
+historical evidence; JOED-70 supersedes its header wording and layout.
+
 Capture failure and a degraded executor without a reason leave the header’s
 board-data tone and label unchanged; the board does not infer capture failure.
 The `ledger_size_limit` reason is red regardless of executor status: the header
