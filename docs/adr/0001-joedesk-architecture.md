@@ -1387,25 +1387,33 @@ Sequence 28 was published on `main` at
 `a60f4c561b05fa26ee8fa1dd31ab725714399340` and has been live on csb0 since
 `2026-10-21T15:22:58Z` (JOED-60).
 
-JOED-70 reserves `261023100632.0.0` once at `2026-10-23T10:06:32Z`, stable
+JOED-70 reserved `261023100632.0.0` once at `2026-10-23T10:06:32Z`, stable
 sequence 29, for one calm status line. A neutral Live surface carries a small
 green mark; a red problem shows a short label in the header and the full
 sentence once on the reserved line. A desk with no heartbeat falls back to
 snapshot age, shown only when stale.
-`release/preparation.json` records sequence 28 as `previous_release`
-(`published-candidate`, disposition `deployed`, `deployed: true`, JOED-60) and
-`last_deployed_release`; this does not claim sequence-29 publication or adoption.
+Sequence 29 was published on `main` at
+`cdf843a587d1066d544beea92f7b8ceef5d103bf` under JOED-74 and has been live on
+csb0 since `2026-10-23T14:53:28Z` (JOED-75).
+
+JOED-77 reserves `261023155418.0.0` once at `2026-10-23T15:54:18Z`, stable
+sequence 30, for performance at a glance. Today and Since start share the hero,
+with exact percentages where a base is known; desk cards rank by since-start
+result. Results metrics use info buttons and reserved rows for paired values.
+`release/preparation.json` records sequence 29 as `previous_release`
+(`published-candidate`, disposition `deployed`, `deployed: true`, JOED-74) and
+`last_deployed_release`; this does not claim sequence-30 publication or adoption.
 The explicit sequence-23 → sequence-24 migration anchor and legacy inventory
 stay unchanged.
 Footer/About and `/joe/healthz` derive the current version from the active build;
-About lists the current build, deployed sequences 28, 27 and 26, then legacy history; it
+About lists the current build, deployed sequences 29, 28, 27 and 26, then legacy history; it
 excludes both superseded, never-deployed publications.
 `check-release` still enforces a strictly later reservation, with CLI regressions
 covering equal/earlier coordinates after closure verification. Contract revision
 9 and its complete set `000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5`
-remain unchanged by the sequence-29 reservation, as do the pusher/executor
+remain unchanged by the sequence-30 reservation, as do the pusher/executor
 requirements, producer pins and null deployment pins. No retry release set is
-claimed for sequence 29; main-push CI produces it after publication. The custom legacy scheme is not relabelled as
+claimed for sequence 30; main-push CI produces it after publication. The custom legacy scheme is not relabelled as
 INSPR-CalVer1. JOED-19's owner decision supersedes JOED-13, whose v2 proposal is
 cancelled and consolidated into JOED-26. Published history stays intact.
 

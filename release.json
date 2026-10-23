@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261023100632.0.0",
+  "version": "261023155418.0.0",
   "release_channel": "stable",
-  "release_sequence": 29,
+  "release_sequence": 30,
   "status": "candidate",
-  "note": "Calm status line (JOED-70)"
+  "note": "Performance at a glance (JOED-77)"
 }
