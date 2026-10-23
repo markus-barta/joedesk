@@ -1461,14 +1461,22 @@ before handing focus and a pinned explanation to the replacement term.
 P3 opens the phone disclosures and scrolls the Account term into view before
 measuring its baseline and dispatching the pin click; Account now follows
 the expanded desks, so its old unscrolled click was outside the viewport.
-The P5 Cash session probe now changes the connection on a clone of its
-baseline. It previously replaced all desk actions with shorter fixture text
-and removed learning, shrinking `.now` and `footer` in the expanded cards
-above Account. Cash's own measured boxes were stable; the boxless phone
-`#deskHero` offset exposed that unrelated content change. The probe retains
-every geometry assertion and still exercises a failed broker connection.
-Focused Node tests cover fixture isolation, complete accessible reasons,
-disclosure visibility and pin/focus handoff through the real patch function.
+The P5 Cash session probe changes the connection on a clone of its baseline,
+preserving actions, learning and position identities. Replacing those with
+shorter fixture text had shrunk `.now` and `footer` in the expanded cards above
+Account. A failed session also requires null current desk/account money and
+position marks, independent reasons, unavailable result sources and no current
+money evidence; keeping the baseline's observations caused ingress to reject
+the probe with 422. The corrected clone meets that contract and retains every
+geometry assertion. Its Node test uses the real ingress preflight before
+checking isolation and the broker panel state.
+
+Fix round 3 also gives the Results tests' markup-only sinks an empty
+`querySelectorAll`: they have no disclosure bodies, while the real patcher now
+queries those bodies before a rebuild. That missing test DOM method caused
+35 rendering tests to throw before checking their markup. The runtime patcher
+and fixed-height summaries are unchanged; the existing real patch test still
+covers disclosure visibility and pin/focus handoff.
 
 Fix 3's best-effort CSS height budget at 1440 is about 480 px, versus about
 751 px before (the screenshot QA reported about 760 px). This assumes five

@@ -5,7 +5,8 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
-import { cashSessionSnapshot } from '../scripts/browser/settings-fixtures.mjs';
+import { cashSessionSnapshot, designSnapshot } from '../scripts/browser/settings-fixtures.mjs';
+import { preflightSnapshot } from '../scripts/browser/board.mjs';
 const { compactDesk, disclosureProblem, rowProblems, syncDeskDisclosures, toggleDeskDisclosure, heroLeft } = await import('../public/joe/desk.js');
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const cell = (state, reason = null, value = null, retained = false) => ({ state, reason, value, retained });
@@ -44,14 +45,30 @@ test('one-line summaries expose every independent reason in the accessible butto
   }
 });
 
-test('cash session fixture keeps expanded desk content constant while the connection fails', () => {
-  const base = structuredClone(valid.data), before = structuredClone(base);
+test('cash session fixture passes real ingress while preserving desk content and withholding current money', () => {
+  const base = designSnapshot().snapshot;
+  base.brokerAccount.cash = { amount: '12345.67890123', currency: 'EUR' };
+  const before = structuredClone(base);
   const session = cashSessionSnapshot(base);
-  const expected = structuredClone(base);
-  Object.assign(expected.safety.gateway, { apiSessionReady: false, reason: 'gateway_unconfirmed' });
-  assert.deepEqual(session, expected, 'actions, learning, positions and money must not change in the cash probe');
+  const accepted = preflightSnapshot('data', session, null, session.generatedAt);
+  assert.equal(accepted.status, 200);
   assert.deepEqual(base, before, 'the baseline is immutable');
-  const states = panelStates({ data: { value: session } }, session.receivedAt);
+  for (const [i, desk] of session.desks.entries()) {
+    const { money, moneyEvidence, ...content } = desk;
+    const { money: oldMoney, moneyEvidence: oldEvidence, ...oldContent } = base.desks[i];
+    assert.deepEqual(content, oldContent, 'actions, learning and other desk content remain identical');
+    assert.equal(moneyEvidence, undefined);
+    for (const field of ['equity', 'dayPnl', 'openPnl', 'totalPnl']) assert.equal(money[field], null);
+  }
+  assert.equal(session.brokerAccount.equity, null);
+  assert.equal(session.brokerAccount.cash, null);
+  for (const [i, row] of session.positions.rows.entries()) {
+    const { mark, marketValue, dayPnl, openPnl, ...content } = row;
+    const { mark: oldMark, marketValue: oldValue, dayPnl: oldDay, openPnl: oldOpen, ...oldContent } = base.positions.rows[i];
+    assert.deepEqual(content, oldContent, 'position identities and quantities remain identical');
+    assert.ok([mark, marketValue, dayPnl, openPnl].every(value => value == null));
+  }
+  const states = panelStates({ data: accepted }, session.generatedAt);
   assert.equal(states.gateway.state, 'broken');
   assert.equal(states.gateway.reason, 'gateway_unconfirmed');
 });

@@ -51,11 +51,32 @@ export function designSnapshot(now = NOW, { hint = 'DU…0597', executor = true 
   return { snapshot, history };
 }
 
-// The cash session probe changes the broker connection, keeping the same
-// desks/actions/learnings so its geometry assertion measures cash state only.
+// A dead broker session withholds current money and evidence. Keep the same
+// desks/actions/learnings so unrelated content cannot move the cash probe.
 export function cashSessionSnapshot(base) {
   const next = structuredClone(base);
-  Object.assign(next.safety.gateway, { apiSessionReady: false, reason: 'gateway_unconfirmed' });
+  const reason = 'gateway_unconfirmed';
+  Object.assign(next.safety.gateway, { apiSessionReady: false, reason });
+  for (const desk of next.desks) delete desk.moneyEvidence;
+  for (const bag of [next.totals, ...next.desks.map(desk => desk.money)]) {
+    for (const field of ['equity', 'dayPnl', 'openPnl', 'totalPnl']) {
+      if (!Object.hasOwn(bag, field)) continue;
+      bag[field] = null;
+      (bag.reasons ??= {})[field] = reason;
+    }
+  }
+  for (const source of Object.values(next.pnlSources)) Object.assign(source, { status: 'unavailable', reason });
+  Object.assign(next.brokerAccount, { equity: null, reason });
+  if (Object.hasOwn(next.brokerAccount, 'cash')) {
+    next.brokerAccount.cash = null;
+    (next.brokerAccount.reasons ??= {}).cash = reason;
+  }
+  next.positions.reason = reason;
+  for (const row of next.positions.rows) {
+    for (const field of ['mark', 'marketValue', 'dayPnl', 'openPnl']) {
+      if (Object.hasOwn(row, field)) row[field] = null;
+    }
+  }
   return next;
 }
 
