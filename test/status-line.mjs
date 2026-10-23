@@ -3,10 +3,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { builders } from './fixtures/preview-dom.mjs';
+import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
+import { copyText } from '../scripts/browser/shots.mjs';
 const { statusSentence, statusPresentation, boardHealthPresentation, REASON_COPY } = await import('../public/joe/health.js');
 const { headerHealth, healthPop } = await import('../public/joe/desk.js');
 const { fitStatusLine } = await import('../public/joe/ui.js');
+const { joinUnits } = await import('../public/joe/format.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
@@ -58,6 +60,13 @@ test('receipt age ticks and resets, while the announcement key stays stable', ()
   assert.equal(late.reason, 'snapshot_stale');
   assert.notEqual(late.announcementKey, first.announcementKey);
 });
+test('compact green copy remains recognizable after the browser joins its separator', () => {
+  const view = statusPresentation(context());
+  const rendered = joinUnits(view.compact, { joinDot: true });
+  assert.equal(rendered, 'Live · 9 s');
+  assert.match(copyText(rendered), /^Live ·/);
+  assert.equal(copyText(rendered), view.compact);
+});
 test('emergency stop keeps precedence over ledger, broker and stopped updates', () => {
   const ctx = context(200);
   ctx.states.halt.value = true;
@@ -81,6 +90,27 @@ test('header gives the complete sentence and opens Details, with no second broke
   assert.ok(details.indexOf('class="status-sentence"') < details.indexOf('class="health-facts"'), 'the complete sentence comes first in Details');
   for (const term of ['broker', 'halt', 'datafrom', 'heartbeat']) assert.ok(details.includes(`data-term="${term}"`));
   for (const words of ['Numbers up to date', 'Emergency stop', 'Data from', 'refreshes every 15']) assert.ok(details.includes(words), words);
+});
+test('Details retains executor diagnostics after the status summary without changing board health', () => {
+  const capture = 'Paper executor degraded: results capture failing, trading continues';
+  const cases = [
+    ['degraded-no-reason', { status: 'degraded' }, 'No current problems.', 'ok'],
+    ['capture-degraded', { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3250000, ledgerCapBytes: 8000000 }, `${capture} (ledger 3,2 MB of 8,0 MB).`, 'ok'],
+    ['ledger-full', { status: 'degraded', reason: 'ledger_size_limit', ledgerBytes: 9000000, ledgerCapBytes: 8000000 }, 'Trade record is full: new orders refused (ledger 9,0 MB of 8,0 MB).', 'bad'],
+    ['capture-bytes-only', { status: 'degraded', reason: 'results_capture_failed', ledgerBytes: 3350000 }, `${capture} (ledger 3,4 MB).`, 'ok'],
+    ['capture-no-ledger', { status: 'degraded', reason: 'results_capture_failed' }, `${capture}.`, 'ok'],
+    ['healthy', { status: 'running' }, 'No current problems.', 'ok'],
+  ];
+  for (const [name, executor, problem, tone] of cases) {
+    const ctx = context();
+    ctx.feeds.data.value.safety.executor = executor;
+    const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
+    const details = htmlDocument(healthPop(ctx, health));
+    assert.equal(details.querySelector('p').getAttribute('class'), 'status-sentence', name);
+    assert.equal(details.querySelector('.status-sentence').textContent, statusPresentation(ctx, health).sentence, name);
+    assert.equal(details.querySelector('p:not(.status-sentence)').textContent, problem, name);
+    assert.equal(health.statusTone, tone, name);
+  }
 });
 test('desk check-ins disappear while fresh and return at the existing 60-second bound', () => {
   const ctx = context(0), data = ctx.feeds.data.value;

@@ -1321,9 +1321,10 @@ The control has a fixed width and tabular numerals. Fitting yellow sentences
 appear in the control. At compact widths (≤1100 px), or when measurement shows
 the full sentence would overflow, it switches to a short label and the reserved
 32 px line below the header displays the complete sentence and action in yellow.
-Red always uses that line. The sentence appears once outside Details; the line
-ends in an ellipsis when necessary and retains a complete title. Its space stays
-reserved in green, so tone changes and ticks cannot move the content.
+Red always uses that line. Each non-green sentence appears once outside Details;
+green may stay compact on narrow screens. The line ends in an ellipsis when
+necessary and retains a complete title. Its space stays reserved in green, so
+tone changes and ticks cannot move the content.
 
 The header button and visible problem line open the shared, opaque Details
 dialog on every screen. Its full sentence wraps at the top, in view on opening.

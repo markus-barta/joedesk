@@ -684,7 +684,8 @@ try {
         await click('#hdrHealth');
         const desk = await ev(`(() => {
           const pop = document.getElementById('healthPop');
-          return { open: pop.classList.contains('on'), problem: pop.querySelector('p').textContent, headerTone: document.documentElement.dataset.joeState,
+          // The status summary comes first; keep checking the diagnostic paragraph.
+          return { open: pop.classList.contains('on'), problem: pop.querySelector('p:not(.status-sentence)').textContent, headerTone: document.documentElement.dataset.joeState,
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
         check('executor-health', `${tag}: Desk explains executor health without changing the board tone`, desk.open && N(desk.problem) === (c.problem ?? 'No current problems.') && desk.headerTone === c.headerTone, desk);

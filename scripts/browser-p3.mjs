@@ -546,9 +546,9 @@ try {
       const sameSentence = expectedStatus.reason === 'board_ok' ? /^Live · updated .+ ago$/.test(sentence)
         : expectedStatus.reason === 'gateway_unconfirmed' ? sentence.startsWith(expectedStatus.sentence.split(':')[0] + ':')
           : sentence === expectedStatus.sentence;
-      const visibleSentence = (expectedStatus.tone === 'green' && /^Live ·/.test(ui.compact)) ||
+      const visibleSentence = (expectedStatus.tone === 'green' && /^Live ·/.test(copyText(ui.compact))) ||
         (ui.visibleSentence.length === 1 && ui.visibleSentence[0].startsWith(ui.sentence) && ui.compact !== ui.sentence);
-      check('fixtures', `${tag}: original health rank ${label} becomes the complete visible status sentence`, ui.label === expectedStatus.reason && sameSentence && visibleSentence,
+      check('fixtures', `${tag}: original health rank ${label} keeps its status sentence (compact green allowed)`, ui.label === expectedStatus.reason && sameSentence && visibleSentence,
         { ui, expected: expectedStatus });
       check('fixtures', `${tag}: no panel or page blanks`, Object.keys(ui.cells).length === 5 && ui.desks.length === 3 && ui.desks.every(d => d.name && d.nums === 3) && ui.positions && ui.kept && ui.strip && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
       const expected = f.expected;
