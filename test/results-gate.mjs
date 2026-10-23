@@ -146,7 +146,7 @@ test('every documented date code path declares exactly one exercised representat
 
 test('P4 static counts reconcile to the full baseline and the subset stays at most 25%', t => {
   const full = summarizeP4Views(P4_VIEWS), subset = summarizeP4Views(selectP4Views({ zoneSubset: true }));
-  assert.equal(full.checks, 4954);
+  assert.equal(full.checks, 4957);
   assert.ok(subset.share <= .25, `${subset.checks}/${full.checks} exceeds 25%`);
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   assert.ok(readme.includes(`**${subset.views}/${full.views} views and ${subset.checks.toLocaleString('en-US')}/${full.checks.toLocaleString('en-US')} checks (${(100 * subset.share).toFixed(2)}%)**`));
@@ -228,7 +228,7 @@ test('Results gate launches the planned modes sequentially with isolated zone ar
     }
     assert.equal((index.match(/\| passed \|/g) ?? []).length, 3);
     const subset = summarizeP4Views(selectP4Views({ zoneSubset: true }));
-    assert.ok(index.includes(`${subset.checks}/4954 checks (${(100 * subset.share).toFixed(2)}% of P4)`));
+    assert.ok(index.includes(`${subset.checks}/4957 checks (${(100 * subset.share).toFixed(2)}% of P4)`));
     for (const path of P4_DATE_PATHS) assert.ok(index.includes(`| ${path.name} | \`${path.representative}\` |`));
     for (const g of summarizeP4Views(P4_VIEWS).groups) assert.ok(index.includes(`| ${g.name} | ${g.sensitive} | ${g.independent} |`));
   }
@@ -250,7 +250,7 @@ test('Results gate validates all zones before launch and stops with the failing 
     } }), childStatus ?? 1);
     assert.equal(launched, 1);
     const index = readFileSync(join(qaRoot, 'index.md'), 'utf8');
-    assert.match(index, /\| Europe\/Vienna \| full \| \d+ \| 4954 \| 100\.00% \| failed \|/);
+    assert.match(index, /\| Europe\/Vienna \| full \| \d+ \| 4957 \| 100\.00% \| failed \|/);
     const subset = summarizeP4Views(selectP4Views({ zoneSubset: true }));
     assert.ok(index.includes(`| UTC | subset | ${subset.views} | ${subset.checks} | ${(100 * subset.share).toFixed(2)}% | not run |`));
   }

@@ -35,6 +35,18 @@
     return bg;
   }
   const ownText = el => [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.nodeValue).join('').trim();
+  // One visual line. An ellipsis fragment sits inside the text's band; a
+  // wrapped second line does not overlap it.
+  function lineBands(rects) {
+    const bands = [];
+    for (const rect of rects) {
+      if (rect.width <= 0) continue;
+      const band = bands.find(b => Math.min(b.bottom, rect.bottom) - Math.max(b.top, rect.top) > 0.5);
+      if (band) { band.top = Math.min(band.top, rect.top); band.bottom = Math.max(band.bottom, rect.bottom); }
+      else bands.push({ top: rect.top, bottom: rect.bottom });
+    }
+    return bands.length;
+  }
 
   window.__audit = {
     visible, parseColor,
@@ -59,7 +71,9 @@
         inRow: items.every(b => b.visible && b.left >= r.left + parseFloat(css.paddingLeft) - 0.02 && b.right <= r.right - parseFloat(css.paddingRight) + 0.02 && b.top >= r.top && b.bottom <= r.bottom),
         wordmarkClipped: visible(mark) && brandText.getBoundingClientRect().width > mark.getBoundingClientRect().width + 0.02,
         status: { height: label.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(label).lineHeight),
-          lines: range.getClientRects().length, nowrap: getComputedStyle(label).whiteSpace, word: word.textContent,
+          // Chromium may return the clipped text and its ellipsis as two
+          // rectangles. Rectangles that share a vertical band are one line.
+          lines: lineBands(range.getClientRects()), nowrap: getComputedStyle(label).whiteSpace, word: word.textContent,
           iconInside, iconOverlap, tabular: getComputedStyle(button).fontVariantNumeric.includes('tabular-nums') },
         overflow: button.scrollWidth > button.clientWidth || label.scrollWidth > label.clientWidth,
         horizontal: this.horizontal() };
@@ -273,13 +287,13 @@
           for (const raw of range.getClientRects()) {
             const clamp = n.parentElement.closest('[data-clamp]')?.getBoundingClientRect();
             const q = clamp ? { left: Math.max(raw.left, clamp.left), right: Math.min(raw.right, clamp.right), top: raw.top, bottom: raw.bottom, width: Math.min(raw.right, clamp.right) - Math.max(raw.left, clamp.left), height: raw.height } : raw;
-            if (q.width > 0.5 && q.height > 0.5) boxes.push({ text: n.nodeValue.trim().slice(0, 30), layer, q });
+            if (q.width > 0.5 && q.height > 0.5) boxes.push({ node: n, text: n.nodeValue.trim().slice(0, 30), layer, q });
           }
         }
         const hits = [];
         for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
           const a = boxes[i], c = boxes[j];
-          if (a.layer !== c.layer) continue;
+          if (a.layer !== c.layer || a.node === c.node) continue;
           if (Math.min(a.q.right, c.q.right) - Math.max(a.q.left, c.q.left) > 1 && Math.min(a.q.bottom, c.q.bottom) - Math.max(a.q.top, c.q.top) > 2) hits.push(`${a.text} × ${c.text}`);
         }
         return hits;

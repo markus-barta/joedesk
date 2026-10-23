@@ -103,6 +103,7 @@ export function healthPop(ctx, health) {
   return `<h3>${icon(TONE_ICON[health.statusTone])}Board status details</h3>
     ${healthFacts(ctx, health)}
     <p>${problems.length ? esc(problems.join(' ')) : 'No current problems.'}</p>
+    <p class="status-sentence">${esc(statusPresentation(ctx, health).sentence)}</p>
     ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact yet', 'info')}</p>` : ''}
     ${rows.length ? `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
     <p>If a light turns yellow or red: reload once. If it stays, tell Amy what the light says and how old the data is.</p>
@@ -112,7 +113,7 @@ export function healthPop(ctx, health) {
 export function headerHealth(ctx, health) {
   const status = statusPresentation(ctx, health);
   return { ...status, html: `${icon(health.tone === 'green' ? 'check' : TONE_ICON[health.statusTone], `i tone-${health.statusTone}`)}<span class="lbl"><b data-clamp="1" title="${esc(status.sentence)}"><span class="status-full">${esc(status.sentence)}</span><span class="status-compact">${esc(status.compact)}</span></b></span>${icon('chev-d', 'i status-chevron')}`,
-    label: `${status.sentence}. Open status details.`, title: status.sentence };
+    label: `${health.tone === 'green' ? 'Live. Numbers are up to date' : status.sentence}. Open status details.`, title: status.sentence };
 }
 
 function sinceLabel(data) {
@@ -202,8 +203,10 @@ function deskCard(ctx, id, maxDay, showBars) {
   const since = desk?.stateSince && desk.state !== 'working' ? ` since ${timeHM(desk.stateSince)}` : '';
   const elapsed = feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(now) - Date.parse(feeds.data.generatedAdvancedAt)) : 0;
   const hbMs = desk?.heartbeatAt ? gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed) : null;
-  const hb = hbMs != null && hbMs / 1000 >= STALE_AFTER_S
-    ? `${term('heartbeat')} ${ageSpan(`hb.${id}`, `${age(hbMs / 1000)} ago`)}` : '';
+  const snapshotAge = dataAge(feeds, now).receipt;
+  const hb = hbMs != null ? hbMs / 1000 >= STALE_AFTER_S
+    ? `${term('heartbeat')} ${ageSpan(`hb.${id}`, `${age(hbMs / 1000)} ago`)}` : ''
+    : snapshotAge != null && snapshotAge >= STALE_AFTER_S ? `Data ${ageSpan(`hb.${id}`, `${age(snapshotAge)} old`)}` : '';
   const dayV = cellView(states[`desks.${id}.dayPnl`], `d.${id}.day`);
   const openV = cellView(states[`desks.${id}.openPnl`], `d.${id}.open`);
   const sinceV = cellView(states[`desks.${id}.totalPnl`], `d.${id}.since`);

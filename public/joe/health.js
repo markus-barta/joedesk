@@ -180,7 +180,14 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
   const sentence = statusSentence(health, { receipt, gatewayAge });
   const explanation = REASON_COPY[health.reason] ?? FALLBACK_COPY;
   const action = explanation.includes(' — ') ? capital(explanation.split(' — ')[1]) : '';
-  return { ...health, sentence, compact: health.tone === 'green' ? `Live · ${age(receipt)}` : sentence,
+  const short = {
+    values_not_exact: 'Not exact yet', snapshot_stale: 'Updates late', retained_values: 'Numbers a bit old',
+    gateway_degraded: 'Broker unstable', gateway_unconfirmed: 'Broker unsure', open_unavailable_rth: 'Prices pending',
+    day_pending: 'Result pending', refresh_failed: 'Update failed',
+  };
+  const control = health.tone === 'red' ? health.reason === 'halt_on' ? 'Emergency stop' : 'Problem' : sentence;
+  return { ...health, sentence, control,
+    compact: health.tone === 'green' ? `Live · ${age(receipt)}` : health.tone === 'red' ? control : short[health.reason] ?? 'Check details',
     alert: `${sentence}${action ? ` · ${action}` : ''}`,
     // Receipt/check ages tick; announcements change only with the ranked state.
     announcementKey: `${health.tone}:${health.reason}`,

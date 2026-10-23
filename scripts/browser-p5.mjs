@@ -392,7 +392,7 @@ try {
         const seen = await ev(`(() => {
           const probe = token => { const e = document.createElement('span'); e.style.color = 'var(' + token + ')'; document.body.append(e); const c = getComputedStyle(e).color; e.remove(); return c; };
           const h = document.getElementById('hdrHealth'), hi = h.querySelector('svg');
-          return { word: h.querySelector('.status-full').textContent, headerIcon: hi.querySelector('use').getAttribute('href'), headerColour: getComputedStyle(hi).color,
+          return { word: h.title, headerIcon: hi.querySelector('use').getAttribute('href'), headerColour: getComputedStyle(hi).color,
             ok: probe('--ok'), bad: probe('--bad'), neutral: probe('--ink-3'),
             cards: [...document.querySelectorAll('.mini-label .st')].map(e => ({ text: e.textContent.trim(), tone: e.className,
               icon: e.querySelector('use').getAttribute('href'), colour: getComputedStyle(e.querySelector('svg')).color, style: getComputedStyle(e).fontStyle })),
@@ -661,13 +661,13 @@ try {
           const probe = document.createElement('span'); probe.style.color = 'var(--${c.tone === 'ok' ? 'ok' : c.tone === 'bad' ? 'bad' : 'warn'})'; document.body.append(probe); const want = getComputedStyle(probe).color; probe.remove();
           probe.style.color = 'var(--${c.headerTone})'; document.body.append(probe); const headerWant = getComputedStyle(probe).color; probe.remove();
           return { text: row.querySelector('.val').innerText.trim(), tone: status.className, colour: getComputedStyle(status.querySelector('.i')).color, want, headerWant,
-            label: h.querySelector('.status-full').textContent.trim(), brokerWord: document.querySelector('#healthPop [data-term="broker"]').parentElement.textContent, headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
+            label: h.title, brokerWord: document.querySelector('#healthPop [data-term="broker"]').parentElement.textContent, headerTone: h.querySelector('svg').getAttribute('class'), headerColour: getComputedStyle(h.querySelector('svg')).color, headerClass: h.className,
             name: h.getAttribute('aria-label'), title: h.getAttribute('title'), ledger: ledger && { title: ledger.title, name: ledger.getAttribute('aria-label') } };
         })()`);
         const text = N(seen.text);
         const title = seen.label;
         check('executor-health', `${tag}: row copy, semantic tone and header label/tone`, text.startsWith(c.start) && text.endsWith(' · brakes off · checked 19:42:13') && seen.tone === `st ${c.tone}` && seen.colour === seen.want && (c.headerTone === 'ok' ? /^Live · updated/.test(seen.label) : seen.label === 'Trade record is full') && seen.headerTone.includes(`tone-${c.headerTone}`), seen);
-        check('executor-health', `${tag}: complete status sentence in the accessible name and title`, seen.name === `${seen.label}. Open status details.` && seen.title === title, seen);
+        check('executor-health', `${tag}: complete status sentence in the accessible name and title`, seen.name === `${c.headerTone === 'ok' ? 'Live. Numbers are up to date' : seen.label}. Open status details.` && seen.title === title, seen);
         check('executor-health', `${tag}: header keeps board health's semantic colour`, seen.headerColour === seen.headerWant, seen);
         check('executor-health', `${tag}: exact bytes in the ledger title and accessible name, only when reported`, c.ledger ? seen.ledger?.title === c.ledger && seen.ledger?.name === c.ledger : seen.ledger === null && !text.includes('ledger'), seen.ledger);
         if (c.name === 'healthy') check('executor-health', `${tag}: healthy copy is unchanged`, text === c.start, seen);
@@ -712,7 +712,7 @@ try {
           const css = getComputedStyle(row);
           return { before, after, headerLayout: (${headerLayout.toString()})(),
             clamps: __audit.clamps().filter(c => c.text === label.innerText.trim().slice(0, 60)),
-            title: button.title, name: button.getAttribute('aria-label'), icon: label.previousElementSibling.querySelector('use').getAttribute('href'),
+            title: button.title, name: button.getAttribute('aria-label'), icon: button.querySelector(':scope > svg use').getAttribute('href'),
             height: { header: rowBox.height, button: button.getBoundingClientRect().height },
             inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: css.paddingLeft, paddingRight: css.paddingRight },
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };

@@ -405,7 +405,7 @@ test('header: every ranked reason carries a complete sentence and the existing t
     const view = headerHealth(b, { reason, tone, statusTone });
     const sentence = health.statusPresentation(b, { reason, tone, statusTone }).sentence;
     assert.ok(view.html.includes(`tone-${statusTone}`));
-    assert.equal(view.label, `${sentence}. Open status details.`);
+    assert.equal(view.label, `${tone === 'green' ? 'Live. Numbers are up to date' : sentence}. Open status details.`);
     assert.equal(view.title, sentence);
     assert.doesNotMatch(view.html, /lbl-long|Board OK|Broker OK/);
   }
@@ -418,7 +418,7 @@ test('header: capture leaves the header unchanged; ledger Needs fix carries its 
   const view = () => headerHealth(b, health.boardHealthPresentation(b.states, b.feeds, b.now));
   const healthy = view();
   assert.match(healthy.html, /#i-check/);
-  assert.match(healthy.label, /^Live · updated .* ago\. Open status details\.$/);
+  assert.equal(healthy.label, 'Live. Numbers are up to date. Open status details.');
   assert.equal(healthy.title, healthy.sentence);
   Object.assign(b.feeds.data.value.safety.executor, { status: 'degraded', reason: 'results_capture_failed' });
   assert.deepEqual(view(), healthy);

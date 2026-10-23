@@ -143,17 +143,27 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .seg .i { color: var(--ink-3); }
 .seg button[aria-pressed="true"] .i, .seg button[aria-current="page"] .i { color: var(--accent-ink); }
 .nav { margin-left: 12px; }
-.hdr-health { margin-left: auto; display: inline-flex; flex: none; align-items: center; gap: 7px; width: clamp(220px, 25vw, 350px); height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); white-space: nowrap; font-weight: 500; font-variant-numeric: tabular-nums; }
+.hdr-health { margin-left: auto; display: inline-flex; flex: none; align-items: center; gap: 7px; width: clamp(220px, 25vw, 350px); height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--surface); color: var(--ink-2); white-space: nowrap; font-weight: 500; font-variant-numeric: tabular-nums; }
 @media (hover: hover) { .hdr-health:hover { background: var(--row-hover); color: var(--ink); } }
-.hdr-health b { display: block; font-weight: 600; color: inherit; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hdr-health b { display: block; font-weight: 600; color: inherit; line-height: 20px; height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed tracks reserve the same width for every sentence and every age. */
-.hdr-health .lbl { flex: 1; min-width: 0; line-height: 20px; text-align: left; white-space: nowrap; }
+.hdr-health .lbl { flex: 1; min-width: 0; line-height: 20px; height: 20px; text-align: left; white-space: nowrap; overflow: hidden; }
 .hdr-health > .i { flex: none; }
 .hdr-health > .i.status-chevron { width: 12px; height: 12px; }
-.status-compact { display: none; }
-.hdr-health[data-tone="ok"] { color: var(--ok); }
+.hdr-health .status-full, .hdr-health .status-compact { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hdr-health .status-compact { display: none; }
 .hdr-health[data-tone="warn"] { color: var(--warn); }
 .hdr-health[data-tone="bad"] { color: var(--bad); }
+/* The full sentence wraps the narrow pill (about 25vw just above 960 px, and
+   the phone). The short form stays one line; Details and the accessible name
+   keep the sentence. Red always uses the short form: the sentence is the
+   reserved line under the header, never a second copy in the control. */
+@media (max-width: 1100px) {
+  .hdr-health .status-full { display: none; }
+  .hdr-health .status-compact { display: block; }
+}
+.hdr-health[data-tone="bad"] .status-full { display: none; }
+.hdr-health[data-tone="bad"] .status-compact { display: block; }
 .status-alert { height: 32px; display: flex; align-items: center; color: var(--bad); font-size: 12px; font-variant-numeric: tabular-nums; }
 .status-alert > span { display: block; width: 100%; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; visibility: hidden; }
 .status-alert[data-tone="bad"] > span { visibility: visible; }
@@ -466,8 +476,6 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   :root { --gutter: 16px; }
   body { font-size: 15px; }
   .hdr-health { width: min(350px, calc(100vw - 202px)); }
-  .hdr-health .status-full { display: none; }
-  .hdr-health .status-compact { display: inline; }
   .icon-btn { width: 44px; height: 44px; }
   .seg button { height: 44px; min-width: 44px; padding: 0 10px; }
   .btn { height: 44px; }

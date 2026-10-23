@@ -671,9 +671,9 @@ The baseline inventory (run 39793917962, without real producer fixtures) is:
 | budget | 0 | 1 |
 | **Total** | **31** | **293** |
 
-The subset is **31/324 views and 588/4,954 checks (11.87%)**, enforced at
+The subset is **31/324 views and 588/4,957 checks (11.86%)**, enforced at
 **≤25%** by the lightweight inventory test. The PR plan performs **6,130**
-checks (4,954 + 2 × 588), compared with 14,174 in fix1 and 14,862 for full ×3.
+checks (4,957 + 2 × 588), compared with 14,174 in fix1 and 14,871 for full ×3.
 The measured agm2 Results times were **788 s** for baseline, **779 s** for the
 group subset and **744 s** for fix1's 93.06% view subset. At approximately
 **263 s** per full Vienna run, weighting this subset by check count projects
@@ -682,7 +682,7 @@ not a measurement: setup and interactions have different costs. The
 coordinator's PR CI on agm2 measures the actual result; no local browser run
 is part of this change.
 
-The lightweight tests also preserve the full 4,954-check inventory, exact
+The lightweight tests also preserve the full 4,957-check inventory, exact
 measured variants, explicit booleans, setup dependencies, sequential zone
 orchestration and executed-count reconciliation.
 Use an approved browser test host; an installed browser guard refusal is a

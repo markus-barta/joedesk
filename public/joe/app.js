@@ -79,7 +79,7 @@ function start() {
     const head = headerHealth(ctx, health);
     const btn = $('#hdrHealth');
     if (btn.innerHTML !== head.html) btn.innerHTML = head.html;
-    btn.setAttribute('aria-label', head.label);
+    if (btn.getAttribute('aria-label') !== head.label) btn.setAttribute('aria-label', head.label);
     btn.dataset.tone = health.statusTone;
     btn.dataset.reason = health.reason;
     if (btn.getAttribute('title') !== head.title) {
@@ -145,8 +145,9 @@ function start() {
   }
 
   // The board details are a dialog: opening moves focus into it, Tab stays
-  // inside, Escape (or a click outside) returns focus to the status button.
+  // inside. Escape returns focus; outside clicks keep their own destination.
   function openPop() {
+    tips.hide();
     const pop = $('#healthPop');
     pop.classList.add('on');
     pop.setAttribute('aria-modal', 'true');
@@ -157,7 +158,7 @@ function start() {
     const pop = $('#healthPop');
     const wasOpen = pop.classList.contains('on');
     pop.classList.remove('on');
-    tips.hide();
+    if (wasOpen) tips.hide(pop);
     pop.removeAttribute('aria-modal');
     $('#hdrHealth').setAttribute('aria-expanded', 'false');
     if (wasOpen && returnFocus) $('#hdrHealth').focus({ preventScroll: true });
@@ -172,7 +173,7 @@ function start() {
       if (pop.classList.contains('on')) closePop(true); else openPop();
       return;
     }
-    if (pop.classList.contains('on') && !e.target.closest('#healthPop')) closePop(true);
+    if (pop.classList.contains('on') && !e.target.closest('#healthPop')) closePop();
     if (e.target.closest('#histRetry')) feed.refreshHistory();
   });
   document.addEventListener('keydown', e => {

@@ -497,9 +497,12 @@ try {
   for (const [id, kind, label] of CASES) {
     const f = DERIVED[id] ? derive(id) : fixture(id);
     const expectedFeeds = { data: acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt) };
+    const previousStates = panelStates(expectedFeeds, valid.data.receivedAt);
     if (f.transportReason) expectedFeeds.data = { ...expectedFeeds.data, reason: f.transportReason };
     else if (f.feed === 'data') expectedFeeds.data = acceptSnapshot('data', f.payload, expectedFeeds.data, f.receivedAt);
-    const expectedStatus = statusPresentation({ states: f.expected, feeds: expectedFeeds, now: f.now });
+    // Stored fixture expectations omit values. Health needs the selector's
+    // real money and halt values, including retention from the prior snapshot.
+    const expectedStatus = statusPresentation({ states: panelStates(expectedFeeds, f.now, previousStates), feeds: expectedFeeds, now: f.now });
     const b = await newBoard({ fleetConfig: f.fleetConfig ?? null });
     b.setNow(valid.data.receivedAt);
     await b.push(ingress(valid.data));
@@ -520,7 +523,7 @@ try {
         await settle(page);
       }
       const ui = await page.evaluate(`(() => ({
-        label: document.querySelector('#hdrHealth').dataset.reason, sentence: document.querySelector('#hdrHealth .status-full').textContent,
+        label: document.querySelector('#hdrHealth').dataset.reason, sentence: document.querySelector('#hdrHealth').title,
         cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(k => [k.dataset.cell, { state: k.dataset.state, cap: k.querySelector('.c')?.innerText ?? '' }])),
         desks: [...document.querySelectorAll('.dcard')].map(c => ({ name: c.querySelector('h3')?.innerText, nums: c.querySelectorAll('.dnums > div').length, states: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), status: c.querySelector('.mini-label').innerText })),
         positions: document.getElementById('positions').innerText.trim(), kept: document.getElementById('kept').innerText.trim(), strip: document.querySelector('#healthPop .health-facts').textContent,

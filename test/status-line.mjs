@@ -73,7 +73,8 @@ test('header gives the complete sentence and opens Details, with no second broke
   const view = headerHealth(ctx, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now));
   assert.match(view.html, /#i-check/);
   assert.doesNotMatch(view.html, /Board OK|Broker OK|lbl-long/);
-  assert.equal(view.label, 'Live · updated 9 s ago. Open status details.');
+  assert.equal(view.label, 'Live. Numbers are up to date. Open status details.');
+  assert.equal(headerHealth({ ...ctx, now: at(ctx.now, 1) }, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now)).label, view.label);
   assert.equal(view.title, view.sentence);
   const details = healthPop(ctx, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now));
   for (const term of ['broker', 'halt', 'datafrom', 'heartbeat']) assert.ok(details.includes(`data-term="${term}"`));
@@ -98,4 +99,93 @@ test('broker sentence never presents receipt age as a real check', () => {
     const view = statusPresentation(ctx, { tone: 'yellow', reason: 'gateway_unconfirmed', statusTone: 'warn' });
     assert.equal(view.sentence, 'Broker unsure: no check reported');
   }
+});
+
+test('red controls use a short label; the complete sentence stays in the alert, Details and accessible name', () => {
+  const ctx = context();
+  for (const [tone, reason] of cases.filter(c => c[0] === 'red')) {
+    const health = { tone, reason, statusTone: 'bad', explanation: REASON_COPY[reason] };
+    const view = headerHealth(ctx, health);
+    assert.equal(view.control, reason === 'halt_on' ? 'Emergency stop' : 'Problem');
+    assert.equal(view.compact, view.control);
+    assert.ok(view.label.includes(view.sentence));
+    assert.ok(view.alert.startsWith(view.sentence));
+    assert.ok(healthPop(ctx, health).includes(view.sentence));
+    assert.match(view.html, new RegExp(`class="status-full">${view.sentence}<`));
+    assert.match(view.html, new RegExp(`class="status-compact">${view.control}<`));
+  }
+});
+
+test('yellow controls offer short narrow-screen copy and retain the complete sentence', () => {
+  const ctx = context();
+  for (const [tone, reason] of cases.filter(c => c[0] === 'yellow')) {
+    const health = { tone, reason, statusTone: 'warn', explanation: REASON_COPY[reason] };
+    const view = headerHealth(ctx, health);
+    assert.ok(view.compact.length <= 17, `${reason}: ${view.compact}`);
+    assert.equal(view.control, view.sentence);
+    assert.ok(view.label.includes(view.sentence));
+    assert.ok(healthPop(ctx, health).includes(view.sentence));
+  }
+});
+
+test('missing or invalid check-ins fall back to snapshot age only once it is stale', () => {
+  for (const heartbeatAt of [undefined, null, 'invalid']) {
+    const ctx = context(0);
+    ctx.feeds.data.value.desks[0].heartbeatAt = heartbeatAt;
+    for (const seconds of [0, 59, 60, 61]) {
+      const html = deskCard({ ...ctx, now: at(ctx.now, seconds) }, 'j', 100, false);
+      assert.equal(html.includes('Data <span class="age" data-age="hb.j"'), seconds >= 60);
+      assert.ok(!html.includes('data-term="heartbeat"'));
+    }
+  }
+  assert.ok(!deskCard({ feeds: {}, states: {}, now: valid.data.receivedAt }, 'j', 100, false).includes('data-age="hb.j"'));
+});
+
+test('term tips survive an unrelated Details close, and focus suppression cannot escape its synchronous handoff', async t => {
+  const { initTips, rebuilt } = await builders('ui.js', ['rebuilt']);
+  const listeners = new Map();
+  const emit = (type, target, extra = {}) => {
+    for (const fn of listeners.get(type) ?? []) fn({ target, pointerType: 'mouse', preventDefault() {}, stopImmediatePropagation() {}, ...extra });
+  };
+  const classes = new Set();
+  const body = { append(el) { el.parentElement = body; } };
+  const tip = { style: {}, parentElement: body, offsetWidth: 200, offsetHeight: 80,
+    classList: { add(...names) { names.forEach(n => classes.add(n)); }, remove(...names) { names.forEach(n => classes.delete(n)); },
+      toggle(name, yes) { if (yes) classes.add(name); else classes.delete(name); } } };
+  const doc = { body, activeElement: null, querySelector: () => tip, addEventListener(type, fn) { listeners.set(type, [...listeners.get(type) ?? [], fn]); } };
+  const globals = { document: doc, innerWidth: 1000, innerHeight: 800, addEventListener: (type, fn) => doc.addEventListener(type, fn) };
+  for (const [key, value] of Object.entries(globals)) {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    t.after(() => { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; });
+  }
+  const anchor = term => ({ dataset: { term }, attributes: {},
+    closest(selector) { return selector.includes('[data-term]') ? this : null; },
+    getBoundingClientRect: () => ({ left: 50, right: 100, top: 80, bottom: 100 }),
+    setAttribute(name, value) { this.attributes[name] = value; }, removeAttribute(name) { delete this.attributes[name]; },
+    focus() { if (doc.activeElement !== this) { doc.activeElement = this; emit('focusin', this); } },
+  });
+  const tips = initTips(), inside = anchor('broker'), outside = anchor('today');
+  const pop = { contains: el => el === inside };
+  inside.focus();
+  assert.ok(classes.has('on'));
+  assert.match(tip.innerHTML, /Broker connection/);
+  emit('click', outside); // capture-phase tip opens before the Details bubble handler
+  tips.hide(pop);
+  assert.ok(classes.has('on'));
+  assert.equal(outside.attributes['aria-expanded'], 'true');
+  assert.match(tip.innerHTML, /Today/);
+  tips.hide();
+  emit('pointermove', outside);
+  assert.ok(classes.has('on'), 'pointer movement restores a tip dismissed by scroll');
+  tips.hide();
+  rebuilt.tip.focus(inside);
+  rebuilt.tip.focus(inside); // no focus event: must not suppress the next user's focus
+  outside.focus();
+  assert.ok(classes.has('on'));
+  assert.equal(outside.attributes['aria-expanded'], 'true');
+  inside.focus();
+  tips.hide(pop);
+  assert.ok(!classes.has('on'));
+  assert.equal(inside.attributes['aria-expanded'], 'false');
 });
