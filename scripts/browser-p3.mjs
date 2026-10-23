@@ -153,14 +153,19 @@ async function deskChecks(page, viewport, theme, expectedMini, snapshot) {
   check('clamp', `${tag}: Escape closes the sentence's tip and keeps focus`, await page.evaluate(`!document.getElementById('tip').classList.contains('on') && document.activeElement?.dataset.say === 'today' && document.activeElement.getAttribute('aria-expanded') === 'false'`));
   await leaveSay(page);
 
-  // Hero chart crosshair tip is opaque.
+  // The taller, stacked hero can put the chart below a tablet's viewport.
+  // Hover the chart itself after scrolling it into view, as a user would.
   if (!viewport.mobile) {
+    await page.evaluate(`document.querySelector('#heroChart > svg').scrollIntoView({ block: 'center' })`);
+    await settle(page);
     const box = await page.evaluate(`(() => { const r = document.querySelector('#heroChart > svg').getBoundingClientRect(); return { x: r.left + r.width * 0.35, y: r.top + r.height / 2 }; })()`);
     await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
     await settle(page);
     const ctip = await page.evaluate(`(() => { const t = document.querySelector('#heroChart .ctip'); return { on: t.classList.contains('on'), ...__audit.opaque(t), text: t.innerText }; })()`);
-    check('AC-41', `${tag}: the chart tip is opaque`, ctip.on && ctip.bgAlpha === 1 && ctip.opacity === 1, ctip);
+    check('AC-41', `${tag}: the chart tip is opaque`, ctip.on && ctip.bgAlpha === 1 && ctip.opacity === 1 && ctip.visible === 'visible' && Boolean(ctip.text.trim()), ctip);
     await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
+    await page.evaluate('window.scrollTo(0, 0)');
+    await settle(page);
   }
 
   // Theme switch: the button sets data-theme, saves it, and moves nothing.
