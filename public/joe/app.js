@@ -3,16 +3,16 @@
 // changes anything is a reviewed paper draft of the fleet settings, sent only
 // from Settings (fleet-write.js).
 import { isCanonicalJoeHost } from './host.js';
-import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer } from './ui.js';
+import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch } from './ui.js';
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
-import { renderDesk, headerHealth, forgetCharts } from './desk.js';
+import { renderDesk, headerHealth, healthPop, forgetCharts } from './desk.js';
 import { renderHistory, historyChart, HS } from './history.js';
 import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
-import { boardHealthPresentation, dataAge, cellReason } from './health.js';
+import { boardHealthPresentation } from './health.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { initSettings, renderSettings, showSection, SECTIONS as SETTINGS_SECTIONS } from './settings.js';
-import { dateTimeFull, age, NB, joinUnits } from './format.js';
+import { NB, joinUnits } from './format.js';
 import { initVersionDisplay } from './version-display.js';
 
 const SCREENS = ['desk', 'results', 'history', 'settings'];
@@ -73,25 +73,31 @@ function start() {
     }
   }
 
+  let announcedStatus = null;
   function renderHeader(ctx) {
     const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
     const head = headerHealth(ctx, health);
     const btn = $('#hdrHealth');
     if (btn.innerHTML !== head.html) btn.innerHTML = head.html;
     btn.setAttribute('aria-label', head.label);
+    btn.dataset.tone = health.statusTone;
+    btn.dataset.reason = health.reason;
     if (btn.getAttribute('title') !== head.title) {
       if (head.title) btn.setAttribute('title', head.title);
       else btn.removeAttribute('title');
     }
     root.dataset.joeState = health.statusTone;
-    const data = ctx.feeds.data?.value;
-    const reason = ctx.feeds.data?.reason;
-    const failed = ['refresh_failed', 'auth_required', 'route_not_found'].includes(reason);
-    const meta = data
-      ? `Data from ${dateTimeFull(data.generatedAt)} · ${age(dataAge(ctx.feeds, ctx.now).receipt)} old · ${failed ? 'refresh failed' : `refreshes every 15${NB}s`}`
-      : reason && reason !== 'feed_not_received' ? `No data · ${cellReason(reason)}` : 'No data yet';
-    const node = $('#footData');
-    if (node.textContent !== meta) node.textContent = meta;
+    const alert = $('#statusAlert');
+    alert.dataset.tone = health.statusTone;
+    alert.setAttribute('aria-hidden', String(health.tone !== 'red'));
+    const alertText = $('#statusAlertText');
+    if (alertText.textContent !== head.alert) alertText.textContent = head.alert;
+    alertText.title = head.alert;
+    patch($('#healthPop'), healthPop(ctx, health));
+    if (announcedStatus !== head.announcementKey) {
+      $('#statusAnnouncement').textContent = head.announcement;
+      announcedStatus = head.announcementKey;
+    }
   }
 
   function render(reason) {
@@ -139,21 +145,22 @@ function start() {
   }
 
   // The board details are a dialog: opening moves focus into it, Tab stays
-  // inside, Escape (or a click outside) closes it and focus returns to Details.
+  // inside, Escape (or a click outside) returns focus to the status button.
   function openPop() {
     const pop = $('#healthPop');
     pop.classList.add('on');
     pop.setAttribute('aria-modal', 'true');
-    $('#healthMore')?.setAttribute('aria-expanded', 'true');
+    $('#hdrHealth').setAttribute('aria-expanded', 'true');
     pop.focus({ preventScroll: true });
   }
   function closePop(returnFocus = false) {
     const pop = $('#healthPop');
     const wasOpen = pop.classList.contains('on');
     pop.classList.remove('on');
+    tips.hide();
     pop.removeAttribute('aria-modal');
-    $('#healthMore')?.setAttribute('aria-expanded', 'false');
-    if (wasOpen && returnFocus) $('#healthMore')?.focus({ preventScroll: true });
+    $('#hdrHealth').setAttribute('aria-expanded', 'false');
+    if (wasOpen && returnFocus) $('#hdrHealth').focus({ preventScroll: true });
   }
   const focusables = el => $$('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])', el).filter(n => !n.disabled && n.getClientRects().length);
 
@@ -161,11 +168,11 @@ function start() {
     const goEl = e.target.closest('[data-go]');
     if (goEl) { go(goEl.dataset.go, goEl.dataset.anchor); return; }
     const pop = $('#healthPop');
-    if (e.target.closest('#healthMore')) {
+    if (e.target.closest('#hdrHealth')) {
       if (pop.classList.contains('on')) closePop(true); else openPop();
       return;
     }
-    if (pop.classList.contains('on') && !e.target.closest('#healthPop')) closePop();
+    if (pop.classList.contains('on') && !e.target.closest('#healthPop')) closePop(true);
     if (e.target.closest('#histRetry')) feed.refreshHistory();
   });
   document.addEventListener('keydown', e => {

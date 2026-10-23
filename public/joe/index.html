@@ -155,18 +155,17 @@
       <button type="button" data-go="history"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>History</button>
       <button type="button" data-go="settings"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
     </nav>
-    <button type="button" class="hdr-health" id="hdrHealth" data-go="desk" aria-label="Waiting for the board light. Open Desk."><svg class="i tone-none" aria-hidden="true"><use href="#i-ring"/></svg><span class="lbl"><b>Loading</b></span></button>
+    <button type="button" class="hdr-health" id="hdrHealth" aria-expanded="false" aria-controls="healthPop" aria-haspopup="dialog" aria-label="Loading board status. Open status details."><svg class="i tone-none" aria-hidden="true"><use href="#i-ring"/></svg><span class="lbl"><b>Loading</b></span></button>
     <button type="button" class="icon-btn theme-btn" id="themeBtn" aria-label="Switch to dark theme"><svg class="i sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="i moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
   </div>
+  <div class="page health-wrap"><div class="pop" id="healthPop" role="dialog" aria-label="Board status details" tabindex="-1"></div></div>
 </header>
+<div class="page status-alert" id="statusAlert" aria-hidden="true"><span id="statusAlertText" data-clamp="1"></span></div>
+<div class="vh" id="statusAnnouncement" aria-live="polite" aria-atomic="true"></div>
 
 <main class="page" id="main">
   <section class="screen" id="scr-desk" aria-labelledby="deskTitle">
     <h1 class="vh" id="deskTitle">Desk</h1>
-    <div class="health-wrap">
-      <div class="hstrip" id="health"></div>
-      <div class="pop" id="healthPop" role="dialog" aria-label="Board status details" tabindex="-1"></div>
-    </div>
     <section class="card hero" id="deskHero" aria-label="Today">
       <div class="hero-l" id="heroL"></div>
       <div class="hero-r">
@@ -273,7 +272,7 @@
 
   <footer class="foot">
     <span id="footShield"></span>
-    <span class="foot-data"><svg class="i" aria-hidden="true"><use href="#i-feed"/></svg><span id="footData">No data yet</span> · version <span id="appVersion" class="product-version" data-product-version="261021113113.0.0" data-version-scheme="inspr-calver-3">261021113113.0.0</span><button type="button" id="versionMode" class="version-mode" aria-label="Show full SemVer version">SemVer</button></span>
+    <span class="foot-data">Version <span id="appVersion" class="product-version" data-product-version="261021113113.0.0" data-version-scheme="inspr-calver-3">261021113113.0.0</span><button type="button" id="versionMode" class="version-mode" aria-label="Show full SemVer version">SemVer</button></span>
   </footer>
 </main>
 

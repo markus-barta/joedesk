@@ -745,15 +745,17 @@ try {
   }
 
   if (run('cards')) {
-    // 5 · Tick's P3 follow-up: at 390 the desk card keeps "Checked in … ago"
-    // right-aligned on the name row, with an invisible 44 px hit area.
-    const { board } = await designBoard();
+    // 5 · Fresh check-ins stay quiet; stale check-ins retain their original
+    // name-row placement and 44 px term target at 390 px.
     for (const [theme, font] of [['light', null], ['dark', null], ['light', WIDE_FONT]]) {
+      const { board } = await designBoard();
       const viewport = VIEWPORTS[2], tag = `390 ${theme}${font ? ' wide font' : ''}`;
       if (!view('cards', font ? 'wide-font' : 'normal', viewport, theme)) continue;
       await configure(page, viewport, theme);
       await load(page, board.url, 'desk');
       if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
+      check('P3-follow-up', `${tag}: fresh desk check-ins are hidden`, await page.evaluate(`![...document.querySelectorAll('.dcard .hb')].some(e => e.textContent.trim())`));
+      board.setNow(at(NOW, 75)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
       const cards = await page.evaluate(`[...document.querySelectorAll('.dcard header')].map(h => {
         const b = el => el.getBoundingClientRect(), name = b(h.querySelector('h3')), hb = b(h.querySelector('.hb')), head = b(h), state = b(h.querySelector('.state'));
         const term = h.querySelector('.hb .term'), r = b(term), a = getComputedStyle(term, '::after');

@@ -1307,6 +1307,41 @@ means degraded health: results capture is failing and trading continues. Setting
 shows the reason in yellow. Desk’s health explanation adds “Paper executor
 degraded: results capture failing, trading continues (ledger 3,2 MB of 8,0 MB).”
 using the reported size; without ledger fields it omits the parentheses.
+
+JOED-70 replaces the earlier header pair, always-visible status strip, fresh
+card check-ins and footer data age with one shared header status button.
+Green reads “Live · updated 9 s ago” (on a phone, “Live · 9 s”), using receipt
+age and the existing age formatter. Yellow/red show the top-ranked problem;
+“Emergency stop is ON” keeps first priority. Health ranking, all thresholds,
+JOED-60's broker gap, `not_exact_yet`, and Settings runtime content stay intact.
+The control has a fixed width and tabular numerals. A reserved 32 px line below
+the header displays only red problems and the action from `REASON_COPY`, with
+one-line truncation and a complete title. Its space remains reserved in other
+states, so tone changes and ticks cannot move the content.
+
+The header button opens the shared, opaque Details dialog on every screen.
+It holds the former strip's numbers, broker check age, emergency-stop state,
+data time/age, and all their existing term explanations, plus each desk's
+check-in age. Escape closes the dialog and returns focus to the header button
+(an open term tip consumes the first Escape). Fresh desk check-ins are hidden;
+at the existing 60-second boundary they return in the stale tone. The footer
+retains the read-only paper-board promise and version. A polite live region
+announces each change of ranked tone/reason once, without announcing age ticks.
+
+`node --test test/status-line.mjs` is the small local presentation suite, also
+included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,
+checks all Details terms on focus/hover and stresses every status sentence in
+fixed boxes. P5 keeps executor/ledger priority and neutral not-exact checks,
+with complete status names/titles, token colours, crops and zero-movement
+checks. P4 now exercises desk-card placement only after the check-ins become
+stale. P6 checks Details from all four screens, red halt visibility without
+interaction, one announcement per transition, silent ticks, and recovery.
+Full and browser validation runs on agm2 CI; local work runs only syntax,
+the small unit file, and `git diff --check`.
+
+The following paragraph records the earlier header presentation and its
+historical evidence; JOED-70 supersedes its header wording and layout.
+
 Capture failure and a degraded executor without a reason leave the header’s
 board-data tone and label unchanged; the board does not infer capture failure.
 The `ledger_size_limit` reason is red regardless of executor status: the header

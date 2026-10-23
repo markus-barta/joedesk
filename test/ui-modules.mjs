@@ -6,7 +6,6 @@ import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
-import { headerHealth as frozenHeaderHealth } from './fixtures/header-health-c1c71a1.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
 import { CI_GUARD, REFERENCE_BUDGET, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
@@ -399,32 +398,16 @@ test('health: capture leaves board health unchanged; the full ledger is red imme
   }
 });
 
-test('header: existing labels, ledger Needs fix and every broker word match frozen c1c71a1 markup', () => {
-  const cases = [
-    { reason: 'board_ok', label: 'Board OK' },
-    { reason: 'halt_on', label: 'Needs fix' },
-    { reason: 'ledger_size_limit', label: 'Needs fix', explanation: health.REASON_COPY.ledger_size_limit },
-    { reason: 'snapshot_stale', label: `Stale ${format.age(179)}` },
-    { reason: 'refresh_failed', label: 'Data delayed' },
-    { reason: 'gateway_unconfirmed', label: 'Broker unsure' },
-    { label: 'Loading' },
-  ];
-  const brokers = [
-    { word: 'OK', state: 'fresh', gateway: { apiSessionReady: true } },
-    { word: 'unstable', state: 'fresh', gateway: { apiSessionReady: false, reason: 'gateway_degraded' } },
-    { word: 'down', state: 'fresh', gateway: { apiSessionReady: false, reason: 'gateway_down' } },
-    { word: 'unsure', state: 'stale', gateway: { apiSessionReady: true } },
-    { word: 'unsure', state: 'not reported', gateway: null },
-  ];
-  for (const h of cases) for (const statusTone of ['ok', 'warn', 'bad', 'none']) for (const b of brokers) {
-    const ctx = { feeds: { data: { value: b.gateway ? { safety: { gateway: b.gateway } } : null } }, states: { gateway: { state: b.state } } };
-    const p = { ...h, statusTone }, tag = `${h.label} / ${statusTone} / ${b.word}${b.gateway ? '' : ' (no data)'}`;
-    const { html, label, title } = headerHealth(ctx, p);
-    const frozen = frozenHeaderHealth(ctx, p);
-    assert.equal(html, frozen.html, tag);
-    assert.equal(label, h.reason === 'ledger_size_limit' ? frozen.label.replace('Needs fix,', `Needs fix: ${h.explanation},`) : frozen.label, tag);
-    assert.ok(html.includes(`<span class="lbl-long">· Broker ${b.word}</span>`), tag);
-    assert.equal(title, h.reason === 'ledger_size_limit' ? h.explanation : null, tag);
+test('header: every ranked reason carries a complete sentence and the existing tone', () => {
+  const b = board(fixture('e-layout-storage-unavailable'));
+  for (const reason of Object.keys(health.REASON_COPY)) for (const tone of ['green', 'yellow', 'red']) {
+    const statusTone = { green: 'ok', yellow: 'warn', red: 'bad' }[tone];
+    const view = headerHealth(b, { reason, tone, statusTone });
+    const sentence = health.statusPresentation(b, { reason, tone, statusTone }).sentence;
+    assert.ok(view.html.includes(`tone-${statusTone}`));
+    assert.equal(view.label, `${sentence}. Open status details.`);
+    assert.equal(view.title, sentence);
+    assert.doesNotMatch(view.html, /lbl-long|Board OK|Broker OK/);
   }
 });
 
@@ -434,19 +417,19 @@ test('header: capture leaves the header unchanged; ledger Needs fix carries its 
   const b = board({ feed: 'data', payload, receivedAt: valid.data.receivedAt, now: valid.data.receivedAt });
   const view = () => headerHealth(b, health.boardHealthPresentation(b.states, b.feeds, b.now));
   const healthy = view();
-  assert.match(healthy.html, /<b>Board OK<\/b><span class="lbl-long">· Broker OK<\/span>/);
-  assert.equal(healthy.label, 'Board OK, broker connection OK. Open Desk.');
-  assert.equal(healthy.title, null);
+  assert.match(healthy.html, /#i-check/);
+  assert.match(healthy.label, /^Live · updated .* ago\. Open status details\.$/);
+  assert.equal(healthy.title, healthy.sentence);
   Object.assign(b.feeds.data.value.safety.executor, { status: 'degraded', reason: 'results_capture_failed' });
   assert.deepEqual(view(), healthy);
   delete b.feeds.data.value.safety.executor.reason;
   assert.deepEqual(view(), healthy);
   b.feeds.data.value.safety.executor.reason = 'ledger_size_limit';
   const header = view();
-  assert.ok(header.html.includes('<b>Needs fix</b>'));
+  assert.ok(header.html.includes('Trade record is full'));
   assert.ok(header.html.includes('tone-bad'));
-  assert.equal(header.title, 'trade record is full — new orders refused');
-  assert.equal(header.label, 'Needs fix: trade record is full — new orders refused, broker connection OK. Open Desk.');
+  assert.equal(header.title, 'Trade record is full');
+  assert.equal(header.label, 'Trade record is full. Open status details.');
   Object.assign(b.feeds.data.value.safety.executor, { status: 'running' });
   delete b.feeds.data.value.safety.executor.reason;
   assert.deepEqual(view(), healthy);

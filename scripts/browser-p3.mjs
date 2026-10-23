@@ -25,14 +25,15 @@ if (nodeModule.registerHooks) {
 export async function resolve(specifier, context, next) { return next(mapped(specifier, context.parentURL), context); }`)}`, import.meta.url);
 }
 const hm = await import('../public/joe/history-model.js');
-const { cellReason, CELL_REASON, HEALTH_LINES } = await import('../public/joe/health.js');
+const { cellReason, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
 const fmt = await import('../public/joe/format.js');
+const HEALTH_LINES = Object.keys(REASON_COPY).map(reason => statusSentence({ reason, tone: reason === 'board_ok' ? 'green' : 'red' }, { receipt: 9, gatewayAge: 179 }));
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
 mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
 const { results, shots, check, shot, auditScreen } = createGate(QA_DIR);
-const SHIFT_SELECTORS = ['header.top', '#health', '#deskHero', '#heroL .kpi', '#heroL .display', '.dcard', '.dcard .dnums > div', '.dcard .chart', '#positions', '.prow', '#kept', 'footer.foot'];
+const SHIFT_SELECTORS = ['header.top', '#statusAlert', '#deskHero', '#heroL .kpi', '#heroL .display', '.dcard', '.dcard .dnums > div', '.dcard .chart', '#positions', '.prow', '#kept', 'footer.foot'];
 
 async function deskChecks(page, viewport, theme, expectedMini) {
   const tag = `${viewport.name} ${theme} desk`;
@@ -41,7 +42,7 @@ async function deskChecks(page, viewport, theme, expectedMini) {
     const header = document.querySelector('header.top').innerText;
     const rest = [...document.querySelectorAll('main, .bottom-nav')].map(e => e.innerText).join(' ');
     return {
-      header, boardOkElsewhere: /Board OK/.test(rest), strip: t('#health'),
+      header, boardOkElsewhere: /Board OK/.test(rest), strip: t('#healthPop .health-facts'), freshCheckins: [...document.querySelectorAll('.dcard .hb')].some(e => e.textContent.trim()),
       display: t('#heroL .display'), kpis: [...document.querySelectorAll('#heroL .kpi')].map(k => ({ cell: k.dataset.cell, state: k.dataset.state, dt: k.querySelector('dt').innerText, value: k.querySelector('dd .bn')?.innerText, cap: k.querySelector('.c').innerText })),
       states: [...document.querySelectorAll('.dcard .state')].map(s => ({ icon: Boolean(s.querySelector('svg use')), text: s.innerText.trim() })),
       positions: [...document.querySelectorAll('#positions .prow:not(.hd) .name b')].map(b => b.textContent),
@@ -51,7 +52,7 @@ async function deskChecks(page, viewport, theme, expectedMini) {
       mini: [...document.querySelectorAll('.chart.mini > svg')].map(s => ({ estimates: s.querySelectorAll('[data-estimate]').length, values: (s.dataset.values ?? '').split(' ').filter(Boolean).map(Number) })),
       dbars: [...document.querySelectorAll('.dbar i[data-v]')].map(i => i.getAttribute('style')),
     }; })()`);
-  check('AC-18', `${tag}: Board OK only in the header; the Desk line starts with the reason`, /Board OK/.test(d.header) && !d.boardOkElsewhere && d.strip.startsWith('Numbers up to date'), { header: d.header, strip: d.strip.slice(0, 60) });
+  check('AC-18', `${tag}: one live header control and no fresh card check-ins or visible status strip`, /Live/.test(d.header) && !d.boardOkElsewhere && !d.freshCheckins && !await page.evaluate(`Boolean(document.querySelector('#health, .hstrip, #footData'))`), d);
   const kpiNames = d.kpis.map(k => k.dt);
   check('AC-19', `${tag}: Today shows five figures with their captions`, Boolean(d.display) && d.kpis.length === 4 && kpiNames[0] === 'Open positions' && /^Since 10 Sep$/.test(kpiNames[1]) && kpiNames[2] === 'Desks’ money' && kpiNames[3] === 'Paper account' &&
     d.kpis[0].cap === 'still moving until closed' && d.kpis[1].cap === 'after fees' && /started with € 15\.000/.test(d.kpis[2].cap) && d.kpis[3].cap === 'includes the kept holdings', d.kpis);
@@ -70,24 +71,25 @@ async function deskChecks(page, viewport, theme, expectedMini) {
 
   // Details popover: opaque, anchored, closes on Escape, moves nothing.
   const before = await page.evaluate(`__audit.rects(${JSON.stringify(SHIFT_SELECTORS)})`);
-  await page.evaluate(`document.getElementById('healthMore').click()`);
+  await page.evaluate(`document.getElementById('hdrHealth').click()`);
   await settle(page);
   const pop = await page.evaluate(`({ ...__audit.opaque(document.getElementById('healthPop')), text: document.getElementById('healthPop').innerText })`);
   check('AC-41', `${tag}: health details are opaque`, pop.bgAlpha === 1 && pop.opacity === 1 && pop.visible === 'visible', pop);
-  check('AC-18', `${tag}: details use today's copy`, /Board OK\s· numbers are up to date/.test(pop.text) && /If a light turns yellow or red: reload once/.test(pop.text), pop.text.slice(0, 200));
+  check('AC-18', `${tag}: details use today's copy`, /Numbers up to date/.test(pop.text) && /If a light turns yellow or red: reload once/.test(pop.text), pop.text.slice(0, 200));
   if (viewport.name !== '390' || theme === 'light') await shot(page, viewport, `${viewport.name}-${theme}-desk-details`, 'Desk with the health details open');
   const during = await page.evaluate(`__audit.rects(${JSON.stringify(SHIFT_SELECTORS)})`);
   check('AC-18', `${tag}: opening the details moves nothing`, !shifted(before, during).length, shifted(before, during).slice(0, 4));
+  await everyTerm(page, viewport, `${tag} Details`, '#healthPop');
   await page.s('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await page.s('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await settle(page);
-  check('AC-33', `${tag}: Escape closes the details and keeps focus`, await page.evaluate(`!document.getElementById('healthPop').classList.contains('on') && document.activeElement?.id === 'healthMore'`));
+  check('AC-33', `${tag}: Escape closes the details and keeps focus`, await page.evaluate(`!document.getElementById('healthPop').classList.contains('on') && document.activeElement?.id === 'hdrHealth'`));
   // The details dialog by keyboard: Enter moves focus in, Tab stays inside,
   // Escape closes and focus returns to Details.
-  await page.evaluate(`document.getElementById('healthMore').focus()`);
+  await page.evaluate(`document.getElementById('hdrHealth').focus()`);
   await key(page, 'Enter');
   await settle(page);
-  const opened = await page.evaluate(`({ on: document.getElementById('healthPop').classList.contains('on'), active: document.activeElement?.id, modal: document.getElementById('healthPop').getAttribute('aria-modal'), expanded: document.getElementById('healthMore').getAttribute('aria-expanded') })`);
+  const opened = await page.evaluate(`({ on: document.getElementById('healthPop').classList.contains('on'), active: document.activeElement?.id, modal: document.getElementById('healthPop').getAttribute('aria-modal'), expanded: document.getElementById('hdrHealth').getAttribute('aria-expanded') })`);
   const inside = [];
   for (const shift of [false, false, false, true, true]) {
     await key(page, 'Tab', shift ? 8 : 0);
@@ -95,9 +97,11 @@ async function deskChecks(page, viewport, theme, expectedMini) {
   }
   await key(page, 'Escape');
   await settle(page);
-  const closed = await page.evaluate(`({ on: document.getElementById('healthPop').classList.contains('on'), active: document.activeElement?.id, expanded: document.getElementById('healthMore').getAttribute('aria-expanded') })`);
+  // A focused term tip consumes Escape before the dialog does.
+  if (await page.evaluate(`document.getElementById('healthPop').classList.contains('on')`)) await key(page, 'Escape');
+  const closed = await page.evaluate(`({ on: document.getElementById('healthPop').classList.contains('on'), active: document.activeElement?.id, expanded: document.getElementById('hdrHealth').getAttribute('aria-expanded') })`);
   check('AC-33', `${tag}: the details dialog takes focus, keeps Tab inside, and Escape returns focus`, opened.on && opened.active === 'healthPop' && opened.modal === 'true' && opened.expanded === 'true' &&
-    inside.every(x => !x.startsWith('OUT:')) && !closed.on && closed.active === 'healthMore' && closed.expanded === 'false', { opened, inside, closed });
+    inside.every(x => !x.startsWith('OUT:')) && !closed.on && closed.active === 'hdrHealth' && closed.expanded === 'false', { opened, inside, closed });
 
   // Terms: hover or focus shows the tip, a click pins it, Escape closes it.
   const anchor = await page.evaluate(`(() => { const t = [...document.querySelectorAll('#heroL .term')].find(__audit.visible); t.scrollIntoView({ block: 'center' }); const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, text: t.textContent }; })()`);
@@ -187,10 +191,10 @@ async function key(page, name, modifiers = 0) {
 
 // AC-39 on every visible term, not a sample: keyboard focus shows its own
 // explanation; on desktop, hovering does too.
-async function everyTerm(page, viewport, tag) {
+async function everyTerm(page, viewport, tag, scope = '') {
   const focused = await page.evaluate(`(async () => {
     const out = [], heads = ${JSON.stringify(Object.fromEntries(Object.entries(TERMS).map(([key, entry]) => [key, entry[0]])))};
-    const visible = () => [...document.querySelectorAll('[data-term]')].filter(__audit.visible);
+    const visible = () => [...document.querySelectorAll(${JSON.stringify(`${scope} [data-term]`)})].filter(__audit.visible);
     // A tick can rebuild a section between terms. Keep identities (including
     // repeated terms), not nodes which may be detached by the next frame.
     const counts = new Map();
@@ -219,10 +223,10 @@ async function everyTerm(page, viewport, tag) {
   check('AC-39', `${tag}: all ${focused.length} terms explain themselves on keyboard focus`, focused.length > 0 && !badFocus.length,
     { failed: focused.length ? badFocus.slice(0, 4) : ['no visible terms'], count: focused.length });
   if (viewport.mobile) return;
-  const count = await page.evaluate(`[...document.querySelectorAll('[data-term]')].filter(__audit.visible).length`);
+  const count = await page.evaluate(`[...document.querySelectorAll(${JSON.stringify(`${scope} [data-term]`)})].filter(__audit.visible).length`);
   const badHover = [];
   for (let i = 0; i < count; i++) {
-    const box = await page.evaluate(`(() => { const t = [...document.querySelectorAll('[data-term]')].filter(__audit.visible)[${i}]; t.scrollIntoView({ block: 'center' }); const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, term: t.dataset.term }; })()`);
+    const box = await page.evaluate(`(() => { const t = [...document.querySelectorAll(${JSON.stringify(`${scope} [data-term]`)})].filter(__audit.visible)[${i}]; t.scrollIntoView({ block: 'center' }); const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, term: t.dataset.term }; })()`);
     await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
     const tip = await page.evaluate(`({ on: document.getElementById('tip').classList.contains('on'), head: document.getElementById('tip').querySelector('b')?.textContent })`);
     const failed = [!tip.on && 'tipOpen', tip.head !== TERMS[box.term][0] && 'ownHead'].filter(Boolean);
@@ -342,21 +346,21 @@ async function route(rules) {
   return async () => { await page.setFetch(null); browser.off(handler); };
 }
 // The two state lines that clamp, and the wide font that stands in for Linux's.
-const STATE_BOXES = ['#health', '#heroL .say'];
+const STATE_BOXES = ['#statusAlert', '#hdrHealth', '#heroL .say'];
 // The widest window with the compact header (app.css).
 const COMPACT = 960;
-const DESK_SHIFT = [...SHIFT_SELECTORS, '.hstrip', '#heroL .say', '#heroL .kpi .c', '#positions .pstate', '#kept .keep-cap', '#kept .pstate', '#kept .prow'];
+const DESK_SHIFT = [...SHIFT_SELECTORS, '#hdrHealth', '#heroL .say', '#heroL .kpi .c', '#positions .pstate', '#kept .keep-cap', '#kept .pstate', '#kept .prow'];
 const HIST_SHIFT = ['.hist-tools', '.hcard', '#histChart', '#histCompare', '.hist-help', '.hist-cols', '#jAcct', '#jAcct .facts-dl', '#events', 'footer.foot'];
 // Copy assertions treat phone NBSP-dot and desktop space-dot as the same
 // words. P6 separately asserts the actual nonbreaking DOM characters.
 const copyExpression = expression => `(${copyText.toString()})(${expression})`;
 const DESK_TEXT = copyExpression(`(() => ({
-  label: document.querySelector('#hdrHealth b').innerText, ring: document.querySelector('#heroSession b')?.innerText,
+  label: document.querySelector('#hdrHealth .status-full').textContent, ring: document.querySelector('#heroSession b')?.innerText,
   cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(c => [c.dataset.cell, { state: c.dataset.state, cap: c.querySelector('.c')?.innerText ?? null }])),
   cards: [...document.querySelectorAll('.dcard')].map(c => ({ lines: [...c.querySelectorAll('.mini-label .st')].map(n => n.innerText), label: c.querySelector('.mini-label').innerText, nums: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state) })),
   positions: document.querySelector('#positions .pstate')?.innerText, posState: document.querySelector('#positions .pstate')?.dataset.state,
   kept: document.querySelector('#kept .pstate')?.innerText, keptState: document.querySelector('#kept .pstate')?.dataset.state,
-  strip: document.getElementById('health').innerText, foot: document.getElementById('footData').innerText, say: document.querySelector('#heroL .say').innerText,
+  strip: document.querySelector('#healthPop .health-facts').textContent, alert: document.getElementById('statusAlertText').textContent, foot: document.querySelector('footer.foot').innerText, say: document.querySelector('#heroL .say').innerText,
 }))()`);
 const HIST_TEXT = copyExpression(`(() => ({ status: document.querySelector('#histStatus .st')?.innerText.trim() ?? '', state: document.querySelector('#histStatus .hist-state')?.dataset.state ?? 'fresh',
   retry: Boolean(document.getElementById('histRetry')), j: document.querySelector('#jAcct .facts-dl')?.innerText ?? '', lines: document.querySelectorAll('#histChart > svg path[stroke^="var(--desk-"]').length,
@@ -449,7 +453,7 @@ try {
     check('AC-33', `${tag}: keyboard focus stays on its term when the card is rebuilt`, focus.term === focusedTerm && focus.connected && focus.inCard && focus.tip, focus);
     await page.evaluate('document.activeElement.blur()');
     // Focus inside the open details dialog survives a rebuild of the dialog.
-    await page.evaluate(`document.getElementById('healthMore').focus()`);
+    await page.evaluate(`document.getElementById('hdrHealth').focus()`);
     await key(page, 'Enter');
     await key(page, 'Tab');
     const inPop = await page.evaluate(`document.activeElement?.textContent.trim()`);
@@ -492,6 +496,10 @@ try {
     Object.defineProperty(window, 'GridStack', { get() { throw new Error('no layout manager'); } });`;
   for (const [id, kind, label] of CASES) {
     const f = DERIVED[id] ? derive(id) : fixture(id);
+    const expectedFeeds = { data: acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt) };
+    if (f.transportReason) expectedFeeds.data = { ...expectedFeeds.data, reason: f.transportReason };
+    else if (f.feed === 'data') expectedFeeds.data = acceptSnapshot('data', f.payload, expectedFeeds.data, f.receivedAt);
+    const expectedStatus = statusPresentation({ states: f.expected, feeds: expectedFeeds, now: f.now });
     const b = await newBoard({ fleetConfig: f.fleetConfig ?? null });
     b.setNow(valid.data.receivedAt);
     await b.push(ingress(valid.data));
@@ -512,15 +520,19 @@ try {
         await settle(page);
       }
       const ui = await page.evaluate(`(() => ({
-        label: document.querySelector('#hdrHealth b').innerText,
+        label: document.querySelector('#hdrHealth').dataset.reason, sentence: document.querySelector('#hdrHealth .status-full').textContent,
         cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(k => [k.dataset.cell, { state: k.dataset.state, cap: k.querySelector('.c')?.innerText ?? '' }])),
         desks: [...document.querySelectorAll('.dcard')].map(c => ({ name: c.querySelector('h3')?.innerText, nums: c.querySelectorAll('.dnums > div').length, states: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), status: c.querySelector('.mini-label').innerText })),
-        positions: document.getElementById('positions').innerText.trim(), kept: document.getElementById('kept').innerText.trim(), strip: document.getElementById('health').innerText,
+        positions: document.getElementById('positions').innerText.trim(), kept: document.getElementById('kept').innerText.trim(), strip: document.querySelector('#healthPop .health-facts').textContent,
         say: document.querySelector('#heroL .say').innerText,
         sections: { positions: document.querySelector('#positions .pstate')?.dataset.state, kept: document.querySelector('#kept .pstate')?.dataset.state },
       }))()`);
       const tag = `${id} @${viewport.name}`;
-      check('fixtures', `${tag}: header light reads ${label}`, ui.label === label, ui.label);
+      const sentence = copyText(ui.sentence);
+      const sameSentence = expectedStatus.reason === 'board_ok' ? /^Live · updated .+ ago$/.test(sentence)
+        : expectedStatus.reason === 'gateway_unconfirmed' ? sentence.startsWith(expectedStatus.sentence.split(':')[0] + ':')
+          : sentence === expectedStatus.sentence;
+      check('fixtures', `${tag}: original health rank ${label} becomes the complete status sentence`, ui.label === expectedStatus.reason && sameSentence, { ui, expected: expectedStatus });
       check('fixtures', `${tag}: no panel or page blanks`, Object.keys(ui.cells).length === 5 && ui.desks.length === 3 && ui.desks.every(d => d.name && d.nums === 3) && ui.positions && ui.kept && ui.strip && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
       const expected = f.expected;
       const mismatch = Object.entries(CELL).filter(([key, panel]) => ui.cells[key].state !== expected[panel].state).map(([key, panel]) => ({ key, ui: ui.cells[key].state, want: expected[panel].state }));
@@ -559,13 +571,13 @@ try {
       await configure(page, viewport, theme);
       await load(page, b.url, 'desk');
       const tag = `${live ? 'LIVE rejected' : 'no snapshot'} @${viewport.name} ${theme}`;
-      const ui = await page.evaluate(`({ label: document.querySelector('#hdrHealth b').innerText, display: document.querySelector('#heroL .display').innerText, caps: [...document.querySelectorAll('#heroL .kpi .c')].map(c => c.innerText), states: [...document.querySelectorAll('#heroL [data-cell]')].map(c => c.dataset.state), now: [...document.querySelectorAll('.dcard .now')].map(n => n.innerText), cards: [...document.querySelectorAll('.dcard .mini-label')].map(n => n.innerText), nums: [...document.querySelectorAll('.dcard .dnums > div')].map(d => d.dataset.state), positions: document.getElementById('positions').innerText, kept: document.querySelector('#kept .pstate').innerText, pop: document.getElementById('healthPop').textContent })`);
+      const ui = await page.evaluate(`({ label: document.querySelector('#hdrHealth .status-full').textContent, display: document.querySelector('#heroL .display').innerText, caps: [...document.querySelectorAll('#heroL .kpi .c')].map(c => c.innerText), states: [...document.querySelectorAll('#heroL [data-cell]')].map(c => c.dataset.state), now: [...document.querySelectorAll('.dcard .now')].map(n => n.innerText), cards: [...document.querySelectorAll('.dcard .mini-label')].map(n => n.innerText), nums: [...document.querySelectorAll('.dcard .dnums > div')].map(d => d.dataset.state), positions: document.getElementById('positions').innerText, kept: document.querySelector('#kept .pstate').innerText, pop: document.getElementById('healthPop').textContent })`);
       const [state, caption, cardLine, posLine, keptLine] = live
         ? ['broken', 'Unavailable · last update was rejected', 'Numbers: unavailable · last update was rejected', 'Position detail is unavailable: last update was rejected.', 'Kept holdings are unavailable: last update was rejected.']
         : ['not reported', 'Not reported · no data received yet', 'Numbers: not reported · no data received yet', 'Position detail is not present in this snapshot.', 'Kept holdings are not present in this snapshot.'];
-      check(live ? 'AC-6' : 'nodata', `${tag}: NO DATA everywhere, in the selector's own state`, ui.label === 'Needs fix' && ui.display === '—' && ui.states.every(x => x === state) && ui.nums.every(x => x === state) &&
+      check(live ? 'AC-6' : 'nodata', `${tag}: NO DATA everywhere, in the selector's own state`, ui.label === 'No board data' && ui.display === '—' && ui.states.every(x => x === state) && ui.nums.every(x => x === state) &&
         ui.caps.every(c => norm(c) === caption) && ui.cards.every(c => norm(c) === cardLine) && ui.now.every(n => n === 'Waiting for the first valid snapshot.') && ui.positions.includes(posLine) && ui.kept === keptLine &&
-        /no board data — reload; if still empty, tell Amy/.test(ui.pop), ui);
+        /No board data — reload; if still empty, tell Amy/i.test(ui.pop), ui);
       if (!live && (viewport.name === '1440' || viewport.mobile)) await shot(page, viewport, `${viewport.name}-${theme}-desk-state-no-data`, 'Desk, NO DATA (no snapshot yet)');
       if (live) continue;
       await auditScreen(page, viewport, theme, 'desk (no data)');
@@ -605,9 +617,9 @@ try {
         const words = cellReason(reason);
         const ui = await page.evaluate(DESK_TEXT);
         const cellsOk = Object.values(ui.cells).every(c => c.state === 'broken') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => c.cap === `Unavailable · ${words}`);
-        check('cold', `${tag}: no clock, yet every panel shows broken with its reason`, ui.label === 'Needs fix' && ui.ring === 'Time not known' && cellsOk && ui.say === `No numbers: ${words}.` &&
+        check('cold', `${tag}: no clock, yet every panel shows broken with its reason`, ui.label === 'No board data' && ui.ring === 'Time not known' && cellsOk && ui.say === `No numbers: ${words}.` &&
           ui.cards.every(c => c.label === `Numbers: unavailable · ${words}` && c.nums.every(x => x === 'broken')) && ui.positions === `Position detail is unavailable: ${words}.` &&
-          ui.kept === `Kept holdings are unavailable: ${words}.` && ui.strip.includes(`No data · ${words}`) && ui.foot === `No data · ${words}` && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
+          ui.kept === `Kept holdings are unavailable: ${words}.` && ui.strip.includes(`No data · ${words}`) && !/Data from|refreshes every/.test(ui.foot) && ui.alert.startsWith('No board data') && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
         if (name === 'auth') {
           await auditScreen(page, viewport, theme, 'desk (cold, no clock)');
           if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-desk-state-cold-no-clock`, 'Desk, cold start: sign-in expired before any data or clock');
@@ -715,12 +727,12 @@ try {
     await load(page, b.url, 'desk');
     if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
     let ui = await page.evaluate(DESK_TEXT);
-    check('journey', `${tag} not reported: the health line and Today say that no data has arrived`, ui.label === 'Needs fix' && ui.cells['hero.day'].state === 'not reported' &&
-      /^No board data — reload; if still empty, tell Amy\s+Broker connection not reported\s+Emergency stop not reported\s+No data yet\s+Details$/.test(ui.strip.trim()) && ui.say === 'No numbers yet: no board data has arrived.', ui);
+    check('journey', `${tag} not reported: the health line and Today say that no data has arrived`, ui.label === 'No board data' && ui.cells['hero.day'].state === 'not reported' &&
+      ui.strip.includes('No board data — reload; if still empty, tell Amy') && ui.strip.includes('Broker connection not reported') && ui.strip.includes('Emergency stop not reported') && ui.alert.startsWith('No board data') && ui.say === 'No numbers yet: no board data has arrived.', ui);
     const boxes = [['not reported', await rects(STATE_BOXES)]];
     check('journey', `${tag}: fresh snapshot accepted`, (await b.push(base)).status === 200);
     b.setNow(at(NOW, 9));
-    await refresh(`document.querySelector('#hdrHealth b').innerText === 'Board OK' && [...document.querySelectorAll('#heroL [data-cell]')].every(c => c.dataset.state === 'fresh')`);
+    await refresh(`document.querySelector('#hdrHealth').dataset.reason === 'board_ok' && [...document.querySelectorAll('#heroL [data-cell]')].every(c => c.dataset.state === 'fresh')`);
     boxes.push(['fresh', await rects(STATE_BOXES)]);
     const desk0 = await rects(DESK_SHIFT);
     await go(page, 'history');
@@ -729,7 +741,7 @@ try {
 
     // Stale: no update for 75 s. Every panel says "as of" with its age and why.
     b.setNow(at(NOW, 75));
-    await refresh(`/^Stale/.test(document.querySelector('#hdrHealth b').innerText)`);
+    await refresh(`document.querySelector('#hdrHealth').dataset.reason === 'snapshot_stale'`);
     ui = await page.evaluate(DESK_TEXT);
     const late = /^As of 1\smin ago · updates are late\.?$/;
     check('journey', `${tag} stale: every number, card and section says as of 1 min and why`, Object.values(ui.cells).every(c => c.state === 'stale') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => late.test(c.cap)) &&
@@ -808,7 +820,7 @@ try {
     b.setNow(at(NOW, 125));
     await refresh(`[...document.querySelectorAll('#heroL [data-cell]')].every(c => c.dataset.state === 'fresh')`);
     ui = await page.evaluate(DESK_TEXT);
-    check('journey', `${tag} recovered: every panel is fresh again`, ui.label === 'Board OK' && ui.cards.every(c => !c.lines.length && c.nums.every(x => x === 'fresh')) && ui.posState === 'fresh' &&
+    check('journey', `${tag} recovered: every panel is fresh again`, /^Live · updated/.test(ui.label) && ui.cards.every(c => !c.lines.length && c.nums.every(x => x === 'fresh')) && ui.posState === 'fresh' &&
       /^Worth €\s12\.248,00 and \$\s441,20 now, each in its own currency\.$/.test(ui.kept), ui);
     check('no-shift', `${tag}: broken → recovered moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
     boxes.push(['recovered', await rects(STATE_BOXES)]);
@@ -825,20 +837,13 @@ try {
   }
 
   if (run('lines')) {
-  // 7b · The health line and Today's sentence at the edges of each layout
-  // (one row from 1181 px; from 901 px the reason beside Details, the other
-  // facts below; a row per fact below that), in this machine's font and the
-  // wide one. Every
-  // health reason with the longest broker, emergency-stop and data wordings,
-  // and Today's longest sentences, keep the boxes of the design state, show
-  // whole lines with an ellipsis, and never overflow the line.
+  // Every status sentence and age keeps fixed header/alert boxes; Today keeps two lines.
   const { snapshot, history } = scenario(NOW);
   const b = await newBoard({ history });
   b.setNow(NOW);
   check('lines', 'design snapshot accepted', (await b.push(snapshot)).status === 200);
   b.setNow(at(NOW, 9));
   const longest = fmt.age(86399);
-  const widest = ['Broker connection has not checked in', 'Emergency stop not reported', `Data from 19:42:22 · ${longest} old`];
   const sentences = [...new Set(Object.values(CELL_REASON))].map(why => `Down ${fmt.eur(88888.88)} today. Last good value, ${longest} ago · ${why}.`)
     .concat([`Down ${fmt.eur(88888.88)} today across J, Joe and Joel. Estimated from the session open at 15:30.`, 'Flat today for J, Joe and Joel.']);
   for (const width of [1440, 1181, 1180, 1024, 901, 900, 701, 700, 390]) for (const font of [null, WIDE_FONT]) {
@@ -848,16 +853,15 @@ try {
     await load(page, b.url, 'desk');
     if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
     const r = await page.evaluate(`(() => {
-      const strip = document.getElementById('health'), why = strip.querySelector('.why'), say = document.querySelector('#heroL .say [data-clamp]');
+      const strip = document.getElementById('statusAlert'), why = document.querySelector('#hdrHealth b'), say = document.querySelector('#heroL .say [data-clamp]');
       const boxes = () => __audit.rects(${JSON.stringify(STATE_BOXES)});
       const base = boxes();
-      strip.querySelectorAll(':scope > .st:not(.why) > span').forEach((fact, i) => { fact.textContent = ${JSON.stringify(widest)}[i]; });
       const out = [];
       const probe = what => {
         const edge = strip.getBoundingClientRect().right + 0.5;
         out.push({ what: what.slice(0, 50), rects: boxes(), clamps: __audit.clamps(), over: [...strip.children].some(c => c.getBoundingClientRect().right > edge) || strip.scrollWidth > strip.clientWidth + 0.5 });
       };
-      for (const line of ${JSON.stringify(HEALTH_LINES)}) { why.lastElementChild.textContent = line; why.title = line; probe(line); }
+      for (const line of ${JSON.stringify(HEALTH_LINES)}) { why.querySelectorAll('span').forEach(e => e.textContent = line); why.title = line; probe(line); }
       for (const text of ${JSON.stringify(sentences)}) { say.textContent = text; probe(text); }
       return { base, out };
     })()`);
@@ -875,7 +879,7 @@ try {
   const longSay = sentences.reduce((a, b) => (b.length > a.length ? b : a));
   await configure(page, VIEWPORTS[2], 'light');
   await load(page, b.url, 'desk');
-  await page.evaluate(`(() => { const why = document.querySelector('#health .why'); why.lastElementChild.textContent = ${JSON.stringify(longReason)}; why.title = ${JSON.stringify(longReason)};
+  await page.evaluate(`(() => { const why = document.querySelector('#hdrHealth b'); why.querySelectorAll('span').forEach(e => e.textContent = ${JSON.stringify(longReason)}); why.title = ${JSON.stringify(longReason)};
     document.querySelector('#heroL .say [data-clamp]').textContent = ${JSON.stringify(longSay)}; })()`);
   const clamped = await page.evaluate('__audit.clamps()');
   const longTip = await clickSay(page);
@@ -902,8 +906,7 @@ try {
   const widths = Array.from({ length: (1440 - 360) / 10 + 1 }, (_, i) => 360 + i * 10);
   // The header light's labels (health.js) and broker words (desk.js), and the
   // desk cards' longest state and heartbeat texts (desk.js).
-  const light = { labels: ['Loading', 'Board OK', 'Needs fix', `Stale ${fmt.age(86399)}`, 'Broker unsure', 'Data delayed', `Stale ${fmt.age(179)}`, 'Check'],
-    brokers: ['Broker OK', 'Broker unstable', 'Broker unsure', 'Broker down'],
+  const light = { labels: HEALTH_LINES.concat(['Live · 59 s', 'Live · 9 s']), brokers: [''],
     cards: [['Sitting out since 16:02', `${fmt.age(86399)} ago`], ['Not reported', `${fmt.age(86399)} old`], ['Working', `${fmt.age(5)} ago`]] };
   for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
     await configure(page, VIEWPORTS[0], theme);
@@ -928,11 +931,7 @@ try {
         if (r.icons.length) fail.icons.push({ width, icons: r.icons });
         if (r.overlaps.length) fail.overlaps.push({ width, overlaps: r.overlaps.slice(0, 3) });
         if (r.cards.length) fail.cards.push({ width, cards: r.cards.slice(0, 3) });
-        // Deferred (copy decision): on phones the longest stale label, with
-        // hours and minutes, is wider than the light's room; it is listed in
-        // index.md, and must not move or push anything else.
-        const labels = r.labels.filter(l => !(width <= 700 && l.light.startsWith(light.labels[3]) && l.faults.every(f => f === 'label leaves the button')));
-        if (labels.length < r.labels.length) deferredLight.push(`${tag} ${width}`);
+        const labels = r.labels;
         if (labels.length) fail.labels.push({ width, labels: labels.slice(0, 3) });
       }
       const n = `${widths.length} widths from 360 to 1440 px`;
@@ -944,7 +943,7 @@ try {
       check('header', `sweep ${tag}: icons are centred, with the phone light's icon aligned to its first line, at every width`, !fail.icons.length, fail.icons.slice(0, 4));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: each desk card's header keeps one box with its longest state and heartbeat texts, which never overlap (two heartbeat lines at most, under the state below 340 px)`, !fail.cards.length, fail.cards.slice(0, 4));
-      if (screen === 'desk') check('no-shift', `sweep ${tag}: ${light.labels.length} light labels × ${light.brokers.length} broker words at every width: the label stays inside its button (the deferred one aside), nothing else in the header or the page moves`, !fail.labels.length, fail.labels.slice(0, 4));
+      if (screen === 'desk') check('no-shift', `sweep ${tag}: ${light.labels.length} status sentences at every width: the fixed control gives its full sentence accessibly, nothing else in the header or the page moves`, !fail.labels.length, fail.labels.slice(0, 4));
       check('touch', `sweep ${tag}: read right after each resize, the pointer is touch up to 700 px (no hover, coarse) and a mouse above (hover, fine) at every one of ${n}`, !fail.pointer.length, fail.pointer.slice(0, 8));
     }
   }
@@ -965,7 +964,7 @@ try {
   await configure(page, edge, 'light');
   await load(page, b.url, 'desk');
   await page.evaluate(`(() => { document.documentElement.style.setProperty('--font', ${JSON.stringify(WIDE_FONT)}); const h = document.getElementById('hdrHealth');
-    h.querySelector('b').textContent = ${JSON.stringify(light.labels[3])}; h.querySelector('.lbl-long').textContent = '· Broker unstable';
+    h.querySelectorAll('b > span').forEach(e => e.textContent = ${JSON.stringify(light.labels[3])}); h.querySelector('b').title = ${JSON.stringify(light.labels[3])};
     h.querySelector('svg').setAttribute('class', 'i tone-warn'); h.querySelector('svg use').setAttribute('href', '#i-half');
     // Staged for the picture: the resize and clock renders keep these words.
     const html = h.innerHTML; Object.defineProperty(h, 'innerHTML', { configurable: true, get: () => html, set: () => {} }); })()`);

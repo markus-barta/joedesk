@@ -5,6 +5,7 @@ function mountHeaderCrop(view) {
   const copy = live.cloneNode(true), box = live.getBoundingClientRect();
   const button = copy.querySelector('#hdrHealth');
   button.innerHTML = view.html;
+  if (view.statusTone) button.dataset.tone = view.statusTone;
   button.setAttribute('aria-label', view.label);
   if (view.title) button.setAttribute('title', view.title);
   else button.removeAttribute('title');
