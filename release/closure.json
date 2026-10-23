@@ -104,13 +104,13 @@
     },
     {
       "path": "public/joe/app.css",
-      "size": 74113,
-      "sha256": "11c6c919a29c2d86ece11e45039be3820ffd9c5198bd4c3f5d872b505f48ebf6"
+      "size": 74311,
+      "sha256": "82910175da0cbfad63d9ec92a944a5abf8512eff7caece023337c6bda0dbd00e"
     },
     {
       "path": "public/joe/app.js",
-      "size": 17668,
-      "sha256": "c579da6f9b982747e51e5f6e10c1cf6223bb761374d2f1aa95639edd2e0b9a58"
+      "size": 18156,
+      "sha256": "089ca724887fafd2c3e6d920509f2c74c600ce51ded79b6923222a8e68ba45f4"
     },
     {
       "path": "public/joe/chart.js",
@@ -125,7 +125,7 @@
     {
       "path": "public/joe/desk.js",
       "size": 31561,
-      "sha256": "283026432eaf32d4093a164548516eddb756ab9a62c461820acbbca81eaf23c5"
+      "sha256": "ca7aac01450d0b12bc016e9da33ac79795fde1ec30a078ab339fbbfb0ec14e10"
     },
     {
       "path": "public/joe/events.js",
@@ -164,8 +164,8 @@
     },
     {
       "path": "public/joe/health.js",
-      "size": 15429,
-      "sha256": "3d193185a371a34b28bf359d7542c394f7355ed1c4fd3e4ab105214f97f01979"
+      "size": 15424,
+      "sha256": "bf6e46f8115813ca346306e353f52233c1282467ee19e2f3a455bd4582ee9198"
     },
     {
       "path": "public/joe/history-model.js",
@@ -189,8 +189,8 @@
     },
     {
       "path": "public/joe/index.html",
-      "size": 35349,
-      "sha256": "d1f51d1da60e8cec57d006763ce8cc60c854ca4a3a2a9c2e35f834e1acd5874d"
+      "size": 35475,
+      "sha256": "faac704308a55251f2a8a8ba38bc77a82ba4fbc0a63db74e03db74681dbe6bec"
     },
     {
       "path": "public/joe/joe-version.js",
@@ -229,8 +229,8 @@
     },
     {
       "path": "public/joe/ui.js",
-      "size": 16229,
-      "sha256": "f2da3ee6830290a3de91c54c4b9d3346c8a7c6290d1c936d843d2656cceb7f04"
+      "size": 16986,
+      "sha256": "e2895b73e109abd301107b2d0fd0bf0013a4f51050a1fff91da6dce9e59a865f"
     },
     {
       "path": "public/joe/vendor/calver/display.json",

@@ -181,9 +181,9 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
   const explanation = REASON_COPY[health.reason] ?? FALLBACK_COPY;
   const action = explanation.includes(' — ') ? capital(explanation.split(' — ')[1]) : '';
   const short = {
-    values_not_exact: 'Not exact yet', snapshot_stale: 'Updates late', retained_values: 'Numbers a bit old',
+    values_not_exact: 'Not exact yet', snapshot_stale: 'Updates late', retained_values: 'Older numbers',
     gateway_degraded: 'Broker unstable', gateway_unconfirmed: 'Broker unsure', open_unavailable_rth: 'Prices pending',
-    day_pending: 'Result pending', refresh_failed: 'Update failed',
+    day_pending: 'Result pending', refresh_failed: 'Data delayed',
   };
   const control = health.tone === 'red' ? health.reason === 'halt_on' ? 'Emergency stop' : 'Problem' : sentence;
   return { ...health, sentence, control,

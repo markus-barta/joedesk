@@ -145,28 +145,25 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .nav { margin-left: 12px; }
 .hdr-health { margin-left: auto; display: inline-flex; flex: none; align-items: center; gap: 7px; width: clamp(220px, 25vw, 350px); height: 34px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--surface); color: var(--ink-2); white-space: nowrap; font-weight: 500; font-variant-numeric: tabular-nums; }
 @media (hover: hover) { .hdr-health:hover { background: var(--row-hover); color: var(--ink); } }
-.hdr-health b { display: block; font-weight: 600; color: inherit; line-height: 20px; height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hdr-health b { display: grid; grid-template-columns: minmax(0, 1fr); font-weight: 600; color: inherit; line-height: 20px; height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed tracks reserve the same width for every sentence and every age. */
 .hdr-health .lbl { flex: 1; min-width: 0; line-height: 20px; height: 20px; text-align: left; white-space: nowrap; overflow: hidden; }
 .hdr-health > .i { flex: none; }
 .hdr-health > .i.status-chevron { width: 12px; height: 12px; }
-.hdr-health .status-full, .hdr-health .status-compact { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hdr-health .status-compact { display: none; }
+.hdr-health .status-full, .hdr-health .status-compact { grid-area: 1 / 1; display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hdr-health .status-compact { visibility: hidden; }
 .hdr-health[data-tone="warn"] { color: var(--warn); }
 .hdr-health[data-tone="bad"] { color: var(--bad); }
-/* The full sentence wraps the narrow pill (about 25vw just above 960 px, and
-   the phone). The short form stays one line; Details and the accessible name
-   keep the sentence. Red always uses the short form: the sentence is the
-   reserved line under the header, never a second copy in the control. */
-@media (max-width: 1100px) {
-  .hdr-health .status-full { display: none; }
-  .hdr-health .status-compact { display: block; }
-}
-.hdr-health[data-tone="bad"] .status-full { display: none; }
-.hdr-health[data-tone="bad"] .status-compact { display: block; }
+/* A measured overflow or narrow header uses the short form. Every compact
+   warning and every red state puts its sentence on the reserved line once. */
+.hdr-health[data-compact] .status-full { visibility: hidden; }
+.hdr-health[data-compact] .status-compact { visibility: visible; }
 .status-alert { height: 32px; display: flex; align-items: center; color: var(--bad); font-size: 12px; font-variant-numeric: tabular-nums; }
-.status-alert > span { display: block; width: 100%; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; visibility: hidden; }
-.status-alert[data-tone="bad"] > span { visibility: visible; }
+.status-alert[data-tone="warn"] { color: var(--warn); }
+.status-alert > button { position: relative; display: flex; align-items: center; width: 100%; height: 32px; padding: 0; border: 0; background: none; color: inherit; font: inherit; line-height: 18px; text-align: left; visibility: hidden; cursor: pointer; }
+.status-alert > button::after { content: ""; position: absolute; inset: -6px 0; }
+.status-alert > button > span { display: block; width: 100%; min-width: 0; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-alert[data-visible] > button { visibility: visible; }
 /* After the brand has yielded, tighten space only if the measured row still
    needs it. No viewport or font-width estimate decides this density. */
 .top-in[data-tight] { gap: 2px; }

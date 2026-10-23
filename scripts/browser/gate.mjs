@@ -59,8 +59,9 @@ export function createGate(QA_DIR) {
     // The health reason (one line) and Today's sentence (two lines) are the only
     // clamps: whole lines, an ellipsis when longer, the full text given.
     const clamps = await page.evaluate('__audit.clamps()');
-    if (screen.startsWith('desk')) check('clamp', `${tag}: the status, red alert when present, and Today's sentence show whole lines, end in an ellipsis and give their full text`, clamps.length === 2 + Number(await page.evaluate(`document.documentElement.dataset.joeState === 'bad'`)) && clamps.every(c => c.ok), clamps);
-    else check('clamp', `${tag}: only the shared status and red alert clamp outside Desk`, clamps.length === 1 + Number(await page.evaluate(`document.documentElement.dataset.joeState === 'bad'`)) && clamps.every(c => c.ok), clamps);
+    const statusLine = Number(await page.evaluate(`document.getElementById('statusAlert').hasAttribute('data-visible')`));
+    if (screen.startsWith('desk')) check('clamp', `${tag}: the status, problem line when present, and Today's sentence show whole lines, end in an ellipsis and give their full text`, clamps.length === 2 + statusLine && clamps.every(c => c.ok), clamps);
+    else check('clamp', `${tag}: only the shared status and problem line clamp outside Desk`, clamps.length === 1 + statusLine && clamps.every(c => c.ok), clamps);
     const text = await page.evaluate('__audit.text()');
     const plain = text.filter(t => !t.term).map(t => t.text).join(' ');
     const all = text.map(t => t.text).join(' ');

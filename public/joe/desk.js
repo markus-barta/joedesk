@@ -101,9 +101,9 @@ export function healthPop(ctx, health) {
     rows.push(['Source', `${esc(data.source.label)} · paper only`]);
   }
   return `<h3>${icon(TONE_ICON[health.statusTone])}Board status details</h3>
+    <p class="status-sentence">${esc(statusPresentation(ctx, health).sentence)}</p>
     ${healthFacts(ctx, health)}
     <p>${problems.length ? esc(problems.join(' ')) : 'No current problems.'}</p>
-    <p class="status-sentence">${esc(statusPresentation(ctx, health).sentence)}</p>
     ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact yet', 'info')}</p>` : ''}
     ${rows.length ? `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
     <p>If a light turns yellow or red: reload once. If it stays, tell Amy what the light says and how old the data is.</p>

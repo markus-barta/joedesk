@@ -3,7 +3,7 @@
 // changes anything is a reviewed paper draft of the fleet settings, sent only
 // from Settings (fleet-write.js).
 import { isCanonicalJoeHost } from './host.js';
-import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch } from './ui.js';
+import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts } from './desk.js';
@@ -39,6 +39,7 @@ function start() {
     const row = header.getBoundingClientRect(), css = getComputedStyle(header);
     if ($('#themeBtn').getBoundingClientRect().right > row.right - parseFloat(css.paddingRight) + 0.02) header.setAttribute('data-tight', '');
     word.style.visibility = wordText.getBoundingClientRect().width > word.getBoundingClientRect().width + 0.02 ? 'hidden' : '';
+    fitStatusLine($('#hdrHealth'), $('#statusAlert'));
   };
   // Apply size changes in the next frame, outside ResizeObserver delivery.
   let headerFrame = 0;
@@ -89,10 +90,10 @@ function start() {
     root.dataset.joeState = health.statusTone;
     const alert = $('#statusAlert');
     alert.dataset.tone = health.statusTone;
-    alert.setAttribute('aria-hidden', String(health.tone !== 'red'));
     const alertText = $('#statusAlertText');
     if (alertText.textContent !== head.alert) alertText.textContent = head.alert;
     alertText.title = head.alert;
+    fitStatusLine(btn, alert);
     patch($('#healthPop'), healthPop(ctx, health));
     if (announcedStatus !== head.announcementKey) {
       $('#statusAnnouncement').textContent = head.announcement;
@@ -146,12 +147,16 @@ function start() {
 
   // The board details are a dialog: opening moves focus into it, Tab stays
   // inside. Escape returns focus; outside clicks keep their own destination.
-  function openPop() {
+  let popFrom = $('#hdrHealth');
+  function openPop(from = $('#hdrHealth')) {
     tips.hide();
+    popFrom = from;
     const pop = $('#healthPop');
     pop.classList.add('on');
     pop.setAttribute('aria-modal', 'true');
+    pop.scrollTop = 0;
     $('#hdrHealth').setAttribute('aria-expanded', 'true');
+    $('#statusAlertControl').setAttribute('aria-expanded', 'true');
     pop.focus({ preventScroll: true });
   }
   function closePop(returnFocus = false) {
@@ -161,7 +166,11 @@ function start() {
     if (wasOpen) tips.hide(pop);
     pop.removeAttribute('aria-modal');
     $('#hdrHealth').setAttribute('aria-expanded', 'false');
-    if (wasOpen && returnFocus) $('#hdrHealth').focus({ preventScroll: true });
+    $('#statusAlertControl').setAttribute('aria-expanded', 'false');
+    if (wasOpen && returnFocus) {
+      const from = popFrom.id === 'statusAlertControl' && $('#statusAlert').getAttribute('aria-hidden') === 'true' ? $('#hdrHealth') : popFrom;
+      from.focus({ preventScroll: true });
+    }
   }
   const focusables = el => $$('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])', el).filter(n => !n.disabled && n.getClientRects().length);
 
@@ -169,8 +178,9 @@ function start() {
     const goEl = e.target.closest('[data-go]');
     if (goEl) { go(goEl.dataset.go, goEl.dataset.anchor); return; }
     const pop = $('#healthPop');
-    if (e.target.closest('#hdrHealth')) {
-      if (pop.classList.contains('on')) closePop(true); else openPop();
+    const statusControl = e.target.closest('#hdrHealth, #statusAlertControl');
+    if (statusControl) {
+      if (pop.classList.contains('on')) closePop(true); else openPop(statusControl);
       return;
     }
     if (pop.classList.contains('on') && !e.target.closest('#healthPop')) closePop();

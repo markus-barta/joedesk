@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { builders } from './fixtures/preview-dom.mjs';
 const { statusSentence, statusPresentation, boardHealthPresentation, REASON_COPY } = await import('../public/joe/health.js');
 const { headerHealth, healthPop } = await import('../public/joe/desk.js');
+const { fitStatusLine } = await import('../public/joe/ui.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
@@ -77,6 +78,7 @@ test('header gives the complete sentence and opens Details, with no second broke
   assert.equal(headerHealth({ ...ctx, now: at(ctx.now, 1) }, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now)).label, view.label);
   assert.equal(view.title, view.sentence);
   const details = healthPop(ctx, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now));
+  assert.ok(details.indexOf('class="status-sentence"') < details.indexOf('class="health-facts"'), 'the complete sentence comes first in Details');
   for (const term of ['broker', 'halt', 'datafrom', 'heartbeat']) assert.ok(details.includes(`data-term="${term}"`));
   for (const words of ['Numbers up to date', 'Emergency stop', 'Data from', 'refreshes every 15']) assert.ok(details.includes(words), words);
 });
@@ -123,6 +125,7 @@ test('yellow controls offer short narrow-screen copy and retain the complete sen
     const view = headerHealth(ctx, health);
     assert.ok(view.compact.length <= 17, `${reason}: ${view.compact}`);
     assert.equal(view.control, view.sentence);
+    assert.notEqual(view.compact, view.sentence, 'the short control must not repeat the sentence on the reserved line');
     assert.ok(view.label.includes(view.sentence));
     assert.ok(healthPop(ctx, health).includes(view.sentence));
   }
@@ -141,9 +144,9 @@ test('missing or invalid check-ins fall back to snapshot age only once it is sta
   assert.ok(!deskCard({ feeds: {}, states: {}, now: valid.data.receivedAt }, 'j', 100, false).includes('data-age="hb.j"'));
 });
 
-test('term tips survive an unrelated Details close, and focus suppression cannot escape its synchronous handoff', async t => {
+test('term tips capture native focus, survive an unrelated Details close, and suppress only synchronous handoff focus', async t => {
   const { initTips, rebuilt } = await builders('ui.js', ['rebuilt']);
-  const listeners = new Map();
+  const listeners = new Map(), captures = new Map();
   const emit = (type, target, extra = {}) => {
     for (const fn of listeners.get(type) ?? []) fn({ target, pointerType: 'mouse', preventDefault() {}, stopImmediatePropagation() {}, ...extra });
   };
@@ -152,7 +155,9 @@ test('term tips survive an unrelated Details close, and focus suppression cannot
   const tip = { style: {}, parentElement: body, offsetWidth: 200, offsetHeight: 80,
     classList: { add(...names) { names.forEach(n => classes.add(n)); }, remove(...names) { names.forEach(n => classes.delete(n)); },
       toggle(name, yes) { if (yes) classes.add(name); else classes.delete(name); } } };
-  const doc = { body, activeElement: null, querySelector: () => tip, addEventListener(type, fn) { listeners.set(type, [...listeners.get(type) ?? [], fn]); } };
+  const doc = { body, activeElement: null, querySelector: () => tip, addEventListener(type, fn, capture) {
+    listeners.set(type, [...listeners.get(type) ?? [], fn]); captures.set(type, capture);
+  } };
   const globals = { document: doc, innerWidth: 1000, innerHeight: 800, addEventListener: (type, fn) => doc.addEventListener(type, fn) };
   for (const [key, value] of Object.entries(globals)) {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
@@ -163,9 +168,10 @@ test('term tips survive an unrelated Details close, and focus suppression cannot
     closest(selector) { return selector.includes('[data-term]') ? this : null; },
     getBoundingClientRect: () => ({ left: 50, right: 100, top: 80, bottom: 100 }),
     setAttribute(name, value) { this.attributes[name] = value; }, removeAttribute(name) { delete this.attributes[name]; },
-    focus() { if (doc.activeElement !== this) { doc.activeElement = this; emit('focusin', this); } },
+    focus() { if (doc.activeElement !== this) { doc.activeElement = this; emit('focus', this); } },
   });
   const tips = initTips(), inside = anchor('broker'), outside = anchor('today');
+  assert.equal(captures.get('focus'), true, 'delegated native focus must be captured because it does not bubble');
   const pop = { contains: el => el === inside };
   inside.focus();
   assert.ok(classes.has('on'));
@@ -188,4 +194,32 @@ test('term tips survive an unrelated Details close, and focus suppression cannot
   tips.hide(pop);
   assert.ok(!classes.has('on'));
   assert.equal(inside.attributes['aria-expanded'], 'false');
+  for (const [term, heading] of Object.entries({ broker: 'Broker connection', halt: 'Emergency stop', datafrom: 'Data from', heartbeat: 'Checked in' })) {
+    const button = anchor(term);
+    button.focus();
+    assert.ok(classes.has('on'), `${term} opens on native focus without waiting for focusin`);
+    assert.equal(button.attributes['aria-expanded'], 'true');
+    assert.equal(button.attributes['aria-describedby'], 'tip');
+    assert.ok(tip.innerHTML.startsWith(`<b>${heading}</b>`), `${term} shows its own explanation`);
+    emit('focusout', button);
+    assert.ok(!classes.has('on'));
+  }
+});
+
+test('a compact non-green control puts the sentence on the reserved line; fitting warnings keep it in the control', () => {
+  const element = () => ({ attributes: new Map(),
+    toggleAttribute(key, value) { if (value) this.attributes.set(key, ''); else this.attributes.delete(key); },
+    setAttribute(key, value) { this.attributes.set(key, value); } });
+  const line = element(), control = Object.assign(element(), { dataset: {}, querySelector: () => full });
+  const full = { clientWidth: 240, scrollWidth: 240 };
+  for (const tone of ['ok', 'warn', 'bad']) for (const narrow of [false, true]) for (const overflow of [false, true]) {
+    control.dataset.tone = tone;
+    full.scrollWidth = overflow ? 241 : 240;
+    fitStatusLine(control, line, narrow);
+    const compact = tone === 'bad' || narrow || overflow;
+    const visible = tone === 'bad' || (tone === 'warn' && compact);
+    assert.equal(control.attributes.has('data-compact'), compact, `${tone}, narrow=${narrow}, overflow=${overflow}`);
+    assert.equal(line.attributes.has('data-visible'), visible);
+    assert.equal(line.attributes.get('aria-hidden'), String(!visible));
+  }
 });

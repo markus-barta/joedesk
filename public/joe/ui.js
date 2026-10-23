@@ -38,6 +38,17 @@ export const symBadge = (symbol, desk) => `<span class="sym"${desk ? ` style="--
 export const swatch = (stroke, dash = '', width = 2) => `<svg viewBox="0 0 22 10" aria-hidden="true"><line x1="1" y1="5" x2="21" y2="5" stroke="${stroke}" stroke-width="${width}" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/></svg>`;
 export const isPhone = () => matchMedia('(max-width: 700px)').matches;
 
+// Both labels occupy the same fixed track, even while one is invisible, so
+// measuring the full sentence never changes the control's size or oscillates.
+export function fitStatusLine(control, line, narrow = matchMedia('(max-width: 1100px)').matches) {
+  const full = control.querySelector('.status-full');
+  const compact = control.dataset.tone === 'bad' || narrow || Boolean(full && full.scrollWidth > full.clientWidth + 0.5);
+  control.toggleAttribute('data-compact', compact);
+  const visible = control.dataset.tone === 'bad' || (control.dataset.tone === 'warn' && compact);
+  line.toggleAttribute('data-visible', visible);
+  line.setAttribute('aria-hidden', String(!visible));
+}
+
 // One shared, opaque tip. Hover or focus shows it, a click or tap pins it,
 // Escape closes it and keeps focus; scrolling closes it only if the anchor moved.
 // A clamped sentence (data-say) shows itself whole there on a click, tap or
@@ -111,7 +122,8 @@ export function initTips() {
     const el = e.target.closest?.('[data-term]');
     if (el && el === anchor && !el.contains(e.relatedTarget)) hide(false);
   });
-  document.addEventListener('focusin', e => {
+  // Capture native focus before a section can rebuild its focused term.
+  document.addEventListener('focus', e => {
     const el = e.target.closest?.(TRIGGER);
     if (quiet === e.target) return;
     if (el && el !== anchor) show(el, false);

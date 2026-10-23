@@ -192,6 +192,9 @@ async function key(page, name, modifiers = 0) {
 // AC-39 on every visible term, not a sample: keyboard focus shows its own
 // explanation; on desktop, hovering does too.
 async function everyTerm(page, viewport, tag, scope = '') {
+  // Programmatic activeElement changes in an unfocused headless page need
+  // not dispatch native focus events. Give this keyboard test page focus.
+  await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
   const focused = await page.evaluate(`(async () => {
     const out = [], heads = ${JSON.stringify(Object.fromEntries(Object.entries(TERMS).map(([key, entry]) => [key, entry[0]])))};
     const visible = () => [...document.querySelectorAll(${JSON.stringify(`${scope} [data-term]`)})].filter(__audit.visible);
@@ -206,7 +209,7 @@ async function everyTerm(page, viewport, tag, scope = '') {
         t = visible().filter(e => e.dataset.term === term)[index];
         if (t && document.activeElement !== t) t.focus({ preventScroll: true });
         const tip = document.getElementById('tip');
-        const conditions = { connected: Boolean(t?.isConnected), focused: Boolean(t && document.activeElement === t),
+        const conditions = { pageFocused: document.hasFocus(), connected: Boolean(t?.isConnected), focused: Boolean(t && document.activeElement === t),
           tipOpen: tip.classList.contains('on'), ownHead: tip.querySelector('b')?.textContent === heads[term],
           expanded: t?.getAttribute('aria-expanded') === 'true' };
         seen = { term, index, head: tip.querySelector('b')?.textContent ?? null, expectedHead: heads[term],
@@ -496,13 +499,18 @@ try {
     Object.defineProperty(window, 'GridStack', { get() { throw new Error('no layout manager'); } });`;
   for (const [id, kind, label] of CASES) {
     const f = DERIVED[id] ? derive(id) : fixture(id);
-    const expectedFeeds = { data: acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt) };
+    const expectedFeeds = { 'fleet-config': { value: f.fleetConfig ?? valid['fleet-config'], receivedAt: valid.data.receivedAt },
+      data: acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt) };
     const previousStates = panelStates(expectedFeeds, valid.data.receivedAt);
     if (f.transportReason) expectedFeeds.data = { ...expectedFeeds.data, reason: f.transportReason };
     else if (f.feed === 'data') expectedFeeds.data = acceptSnapshot('data', f.payload, expectedFeeds.data, f.receivedAt);
     // Stored fixture expectations omit values. Health needs the selector's
     // real money and halt values, including retention from the prior snapshot.
-    const expectedStatus = statusPresentation({ states: panelStates(expectedFeeds, f.now, previousStates), feeds: expectedFeeds, now: f.now });
+    // A failed read has no new state response: the browser keeps its last
+    // state clock. Advancing the fixture server does not age that browser by
+    // ten minutes when the transport failure cannot deliver its new clock.
+    const expectedNow = f.transportReason ? valid.data.receivedAt : f.now;
+    const expectedStatus = statusPresentation({ states: panelStates(expectedFeeds, expectedNow, previousStates), feeds: expectedFeeds, now: expectedNow });
     const b = await newBoard({ fleetConfig: f.fleetConfig ?? null });
     b.setNow(valid.data.receivedAt);
     await b.push(ingress(valid.data));
@@ -524,6 +532,9 @@ try {
       }
       const ui = await page.evaluate(`(() => ({
         label: document.querySelector('#hdrHealth').dataset.reason, sentence: document.querySelector('#hdrHealth').title,
+        compact: (() => { const e = document.querySelector('#hdrHealth .status-compact'); return __audit.visible(e) ? e.textContent : null; })(),
+        visibleSentence: (() => { const full = document.querySelector('#hdrHealth .status-full'), line = document.getElementById('statusAlertText');
+          return [full, line].filter(__audit.visible).map(e => e.textContent); })(),
         cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(k => [k.dataset.cell, { state: k.dataset.state, cap: k.querySelector('.c')?.innerText ?? '' }])),
         desks: [...document.querySelectorAll('.dcard')].map(c => ({ name: c.querySelector('h3')?.innerText, nums: c.querySelectorAll('.dnums > div').length, states: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), status: c.querySelector('.mini-label').innerText })),
         positions: document.getElementById('positions').innerText.trim(), kept: document.getElementById('kept').innerText.trim(), strip: document.querySelector('#healthPop .health-facts').textContent,
@@ -535,7 +546,10 @@ try {
       const sameSentence = expectedStatus.reason === 'board_ok' ? /^Live · updated .+ ago$/.test(sentence)
         : expectedStatus.reason === 'gateway_unconfirmed' ? sentence.startsWith(expectedStatus.sentence.split(':')[0] + ':')
           : sentence === expectedStatus.sentence;
-      check('fixtures', `${tag}: original health rank ${label} becomes the complete status sentence`, ui.label === expectedStatus.reason && sameSentence, { ui, expected: expectedStatus });
+      const visibleSentence = (expectedStatus.tone === 'green' && /^Live ·/.test(ui.compact)) ||
+        (ui.visibleSentence.length === 1 && ui.visibleSentence[0].startsWith(ui.sentence) && ui.compact !== ui.sentence);
+      check('fixtures', `${tag}: original health rank ${label} becomes the complete visible status sentence`, ui.label === expectedStatus.reason && sameSentence && visibleSentence,
+        { ui, expected: expectedStatus });
       check('fixtures', `${tag}: no panel or page blanks`, Object.keys(ui.cells).length === 5 && ui.desks.length === 3 && ui.desks.every(d => d.name && d.nums === 3) && ui.positions && ui.kept && ui.strip && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
       const expected = f.expected;
       const mismatch = Object.entries(CELL).filter(([key, panel]) => ui.cells[key].state !== expected[panel].state).map(([key, panel]) => ({ key, ui: ui.cells[key].state, want: expected[panel].state }));
@@ -543,6 +557,30 @@ try {
         .filter(([desk, field, state]) => state !== expected[`desks.${desk}.${field}`].state);
       check('fixtures', `${tag}: every money cell shows its own panel state`, !mismatch.length && !deskMismatch.length, { mismatch, deskMismatch });
       check('fixtures', `${tag}: positions and kept holdings show their own panel states`, ui.sections.positions === expected.positions.state && ui.sections.kept === expected.kept.state, { ui: ui.sections, want: [expected.positions.state, expected.kept.state] });
+      if (expectedStatus.tone !== 'green') {
+        const openers = ['#hdrHealth', ...await page.evaluate(`document.getElementById('statusAlert').hasAttribute('data-visible') ? ['#statusAlertControl'] : []`)];
+        for (const selector of openers) {
+          const point = await page.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+          if (viewport.mobile) {
+            await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+            await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+          } else {
+            await page.s('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
+            await page.s('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
+          }
+          await settle(page);
+          const details = await page.evaluate(`(() => {
+            const pop = document.getElementById('healthPop'), sentence = pop.querySelector('.status-sentence'), r = sentence.getBoundingClientRect(), box = pop.getBoundingClientRect();
+            return { open: pop.classList.contains('on'), focused: document.activeElement === pop, sentence: sentence.textContent,
+              expected: document.getElementById('hdrHealth').title, visible: __audit.visible(sentence) && r.top >= box.top && r.bottom <= box.bottom && sentence.scrollWidth <= sentence.clientWidth,
+              expanded: document.querySelector(${JSON.stringify(selector)}).getAttribute('aria-expanded') };
+          })()`);
+          check('fixtures', `${tag}: ${selector} opens Details with the entire sentence in view`, details.open && details.focused && details.visible &&
+            details.sentence === details.expected && details.expanded === 'true', details);
+          await key(page, 'Escape');
+          check('AC-33', `${tag}: Escape from Details returns to ${selector}`, await page.evaluate(`!document.getElementById('healthPop').classList.contains('on') && document.activeElement === document.querySelector(${JSON.stringify(selector)})`));
+        }
+      }
       // Every desk number that is not fresh names its own reason on its card.
       const missingReasons = ui.desks.flatMap((d, i) => ['dayPnl', 'openPnl', 'totalPnl'].map(field => expected[`desks.${['j', 'joe', 'joel'][i]}.${field}`])
         .filter(cell => cell.state !== 'fresh').map(cell => (cell.reason ? cellReason(cell.reason) : 'not reported')).filter(words => !d.status.includes(words)).map(words => ({ desk: d.name, words, status: d.status })));

@@ -674,7 +674,7 @@ The baseline inventory (run 39793917962, without real producer fixtures) is:
 | **Total** | **31** | **293** |
 
 The subset is **31/324 views and 588/4,957 checks (11.86%)**, enforced at
-**≤25%** by the lightweight inventory test. The PR plan performs **6,130**
+**≤25%** by the lightweight inventory test. The PR plan performs **6,133**
 checks (4,957 + 2 × 588), compared with 14,174 in fix1 and 14,871 for full ×3.
 The measured agm2 Results times were **788 s** for baseline, **779 s** for the
 group subset and **744 s** for fix1's 93.06% view subset. At approximately
@@ -1317,15 +1317,19 @@ Green reads “Live · updated 9 s ago” (on a phone, “Live · 9 s”), using
 age and the existing age formatter. Yellow/red show the top-ranked problem;
 “Emergency stop is ON” keeps first priority. Health ranking, all thresholds,
 JOED-60's broker gap, `not_exact_yet`, and Settings runtime content stay intact.
-The control has a fixed width and tabular numerals. A reserved 32 px line below
-the header displays only red problems and the action from `REASON_COPY`, with
-one-line truncation and a complete title. Its space remains reserved in other
-states, so tone changes and ticks cannot move the content.
+The control has a fixed width and tabular numerals. Fitting yellow sentences
+appear in the control. At compact widths (≤1100 px), or when measurement shows
+the full sentence would overflow, it switches to a short label and the reserved
+32 px line below the header displays the complete sentence and action in yellow.
+Red always uses that line. The sentence appears once outside Details; the line
+ends in an ellipsis when necessary and retains a complete title. Its space stays
+reserved in green, so tone changes and ticks cannot move the content.
 
-The header button opens the shared, opaque Details dialog on every screen.
+The header button and visible problem line open the shared, opaque Details
+dialog on every screen. Its full sentence wraps at the top, in view on opening.
 It holds the former strip's numbers, broker check age, emergency-stop state,
 data time/age, and all their existing term explanations, plus each desk's
-check-in age. Escape closes the dialog and returns focus to the header button
+check-in age. Escape closes the dialog and returns focus to its opener
 (an open term tip consumes the first Escape). Fresh desk check-ins are hidden;
 at the existing 60-second boundary they return in the stale tone. The footer
 retains the read-only paper-board promise and version. A polite live region
@@ -1333,8 +1337,11 @@ announces each change of ranked tone/reason once, without announcing age ticks.
 
 `node --test test/status-line.mjs` is the small local presentation suite, also
 included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,
-checks all Details terms on focus/hover and stresses every status sentence in
-fixed boxes. P5 keeps executor/ledger priority and neutral not-exact checks,
+checks all Details terms on native focus/hover in a focused page, verifies the
+sentence is visible once, opens Details from each status control, and stresses
+every status sentence in fixed boxes. Fixture health expectations include the
+active KEEP policy and the browser's retained state clock on failed reads.
+P5 keeps executor/ledger priority and neutral not-exact checks,
 with complete status names/titles, token colours, crops and zero-movement
 checks. P4 now exercises desk-card placement only after the check-ins become
 stale. P6 checks Details from all four screens, red halt visibility without

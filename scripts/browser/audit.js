@@ -138,7 +138,10 @@
         const complete = el.querySelector('.status-full')?.textContent ?? full;
         const words = text => text?.replace(/\u00a0/g, ' ');
         const given = lines === 1 ? words(el.closest('[title]')?.title) === words(complete) : Boolean(el.closest('[data-say]'));
-        const truncated = lines === 1 ? el.scrollWidth > el.clientWidth + 0.5 : el.scrollHeight > el.clientHeight + 0.5;
+        // Header labels clip inside their own fixed grid track. The outer
+        // clamp cannot report the hidden overflow of that visible child.
+        const text = [...el.querySelectorAll('.status-full, .status-compact')].find(visible) ?? el;
+        const truncated = lines === 1 ? text.scrollWidth > text.clientWidth + 0.5 : el.scrollHeight > el.clientHeight + 0.5;
         return { ok: !cut && whole && ellipsis && given, text: full.slice(0, 60), lines, shown: Number(shown.toFixed(3)), cut, ellipsis, given, truncated };
       });
     },
