@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { P4_SCENARIOS, P4_VIEWS, P4_DATE_PATHS, P4_ZONE_VARIANTS, P4_VIEW_DEPENDENCIES, createP4Views, createP4ViewRecorder, p4ViewKey, validateP4Scenarios, validateP4Views, selectP4Scenarios, selectP4Views, summarizeP4Views, parseResultsGateArgs } from '../scripts/results-gate-plan.mjs';
 import { runResultsGate } from '../scripts/run-results-gate.mjs';
+import { realResultsFixtures } from '../scripts/results-fixtures.mjs';
 import { VIEWPORTS, THEMES } from '../scripts/browser/shots.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 
@@ -11,6 +12,8 @@ const p4 = readFileSync(new URL('../scripts/browser-p4.mjs', import.meta.url), '
 const names = scenarios => scenarios.map(s => s.name);
 const prArgs = ['--full', 'Europe/Vienna', '--subset', 'UTC', 'America/New_York'];
 const prPlan = [{ timeZone: 'Europe/Vienna', mode: 'full' }, { timeZone: 'UTC', mode: 'subset' }, { timeZone: 'America/New_York', mode: 'subset' }];
+const realFixtureNames = realResultsFixtures().map(f => f.name);
+const fullViews = createP4Views(realFixtureNames);
 
 test('P4 inventory covers executable groups and explicitly classifies every view before browser startup', () => {
   const executed = ['host-timezone', ...p4.matchAll(/if \(run\('([^']+)'\)\)/g)].map(entry => typeof entry === 'string' ? entry : entry[1]);
@@ -144,21 +147,30 @@ test('every documented date code path declares exactly one exercised representat
   assert.match(p4, /if \(!hasViews\('period-hint'/);
 });
 
-test('P4 static counts reconcile to the full baseline and the subset stays at most 25%', t => {
-  const full = summarizeP4Views(P4_VIEWS), subset = summarizeP4Views(selectP4Views({ zoneSubset: true }));
-  assert.equal(full.checks, 4957);
+test('P4 static counts reconcile to the baseline plus real fixtures and the subset stays at most 25%', t => {
+  const baseline = summarizeP4Views(P4_VIEWS), full = summarizeP4Views(fullViews, fullViews);
+  const subsetViews = selectP4Views({ zoneSubset: true }, fullViews);
+  const subset = summarizeP4Views(subsetViews, fullViews);
+  assert.equal(baseline.checks, 4957);
+  assert.equal(full.views, baseline.views + 5 * realFixtureNames.length);
+  assert.equal(full.checks, baseline.checks + 104 * realFixtureNames.length);
+  for (const name of realFixtureNames) {
+    assert.equal(fullViews.filter(v => v.family === name).length, 5);
+    assert.equal(subsetViews.filter(v => v.family === name).length, 0);
+  }
   assert.ok(subset.share <= .25, `${subset.checks}/${full.checks} exceeds 25%`);
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   assert.ok(readme.includes(`**${subset.views}/${full.views} views and ${subset.checks.toLocaleString('en-US')}/${full.checks.toLocaleString('en-US')} checks (${(100 * subset.share).toFixed(2)}%)**`));
   for (const group of subset.groups) assert.ok(readme.includes(`| ${group.name} | ${group.sensitive} | ${group.independent} |`));
   assert.ok(P4_VIEWS.some(v => v.coverage === 'date' && !v.zoneSensitive), 'reused date paths run only in full Vienna');
   // New anonymized fixtures join every declared viewport and all their checks.
-  const extended = createP4Views(['real-1']);
+  const nextFixture = `real-${realFixtureNames.length + 1}`;
+  const extended = createP4Views([...realFixtureNames, nextFixture]);
   assert.doesNotThrow(() => validateP4Views(extended));
-  assert.equal(extended.length - P4_VIEWS.length, 5);
-  assert.equal(summarizeP4Views(extended).checks - full.checks, 104);
-  assert.equal(selectP4Views({}, extended).filter(v => v.family === 'real-1').length, 5);
-  assert.equal(selectP4Views({ zoneSubset: true }, extended).filter(v => v.family === 'real-1').length, 0);
+  assert.equal(extended.length - fullViews.length, 5);
+  assert.equal(summarizeP4Views(extended, extended).checks - full.checks, 104);
+  assert.equal(selectP4Views({}, extended).filter(v => v.family === nextFixture).length, 5);
+  assert.equal(selectP4Views({ zoneSubset: true }, extended).filter(v => v.family === nextFixture).length, 0);
   assert.equal(summarizeP4Views(selectP4Views({ zoneSubset: true }, extended), extended).checks, subset.checks);
   t.diagnostic(JSON.stringify({ views: subset.views, fullViews: full.views, checks: subset.checks, share: subset.share, groups: subset.groups }));
 });
@@ -219,18 +231,18 @@ test('Results gate launches the planned modes sequentially with isolated zone ar
       assert.ok(index.includes(`| ${run.timeZone} | ${run.mode} |`));
       assert.ok(index.includes(`[zone index](${run.timeZone.replaceAll('/', '-')}/index.md)`));
       const section = index.split(`## ${run.timeZone} · ${run.mode}\n`)[1].split('\n## ')[0];
-      const views = selectP4Views({ zoneSubset: run.mode === 'subset' });
-      const summary = summarizeP4Views(views);
+      const views = selectP4Views({ zoneSubset: run.mode === 'subset' }, fullViews);
+      const summary = summarizeP4Views(views, fullViews);
       assert.equal(section.includes('`budget/render`'), run.mode === 'full');
       for (const name of names(views)) assert.ok(section.includes(`\`${name}\``));
       assert.ok(index.includes(`| ${run.timeZone} | ${run.mode} | ${views.length} | ${summary.checks} | ${(100 * summary.share).toFixed(2)}% |`));
       assert.equal(section.includes('`trade-amount/rows/390/dark`'), run.mode === 'full');
     }
     assert.equal((index.match(/\| passed \|/g) ?? []).length, 3);
-    const subset = summarizeP4Views(selectP4Views({ zoneSubset: true }));
-    assert.ok(index.includes(`${subset.checks}/4957 checks (${(100 * subset.share).toFixed(2)}% of P4)`));
+    const subset = summarizeP4Views(selectP4Views({ zoneSubset: true }, fullViews), fullViews);
+    assert.ok(index.includes(`${subset.checks}/${subset.fullChecks} checks (${(100 * subset.share).toFixed(2)}% of P4)`));
     for (const path of P4_DATE_PATHS) assert.ok(index.includes(`| ${path.name} | \`${path.representative}\` |`));
-    for (const g of summarizeP4Views(P4_VIEWS).groups) assert.ok(index.includes(`| ${g.name} | ${g.sensitive} | ${g.independent} |`));
+    for (const g of summarizeP4Views(fullViews, fullViews).groups) assert.ok(index.includes(`| ${g.name} | ${g.sensitive} | ${g.independent} |`));
   }
 });
 
@@ -250,8 +262,9 @@ test('Results gate validates all zones before launch and stops with the failing 
     } }), childStatus ?? 1);
     assert.equal(launched, 1);
     const index = readFileSync(join(qaRoot, 'index.md'), 'utf8');
-    assert.match(index, /\| Europe\/Vienna \| full \| \d+ \| 4957 \| 100\.00% \| failed \|/);
-    const subset = summarizeP4Views(selectP4Views({ zoneSubset: true }));
+    const full = summarizeP4Views(fullViews, fullViews);
+    assert.ok(index.includes(`| Europe/Vienna | full | ${full.views} | ${full.checks} | 100.00% | failed |`));
+    const subset = summarizeP4Views(selectP4Views({ zoneSubset: true }, fullViews), fullViews);
     assert.ok(index.includes(`| UTC | subset | ${subset.views} | ${subset.checks} | ${(100 * subset.share).toFixed(2)}% | not run |`));
   }
 });

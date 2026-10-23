@@ -653,13 +653,17 @@ fixture setup still rejects failed ingress. No other width/theme is added for
 a path. The 14 measured variants are additional coverage and retain all their
 associated checks, even when a difference may be render noise.
 
-The baseline inventory (run 39793917962, without real producer fixtures) is:
+The current inventory includes the real anonymized paper-proof fixture
+`fixtures/results/real/2026-10-22-paper-proof.json` (2026-10-19 through
+2026-10-22, two round trips). Its five views add 104 checks to the 4,957-check
+synthetic UX 1 baseline from run 39929690916; real fixtures stay out of the
+zone subset.
 
 | Group | Sensitive views | Independent views |
 | --- | --- | --- |
 | host-timezone | 1 | 0 |
 | design | 2 | 12 |
-| fixtures | 1 | 20 |
+| fixtures | 1 | 25 |
 | states | 2 | 15 |
 | vienna | 1 | 1 |
 | cards | 0 | 3 |
@@ -671,22 +675,25 @@ The baseline inventory (run 39793917962, without real producer fixtures) is:
 | partial-days | 12 | 136 |
 | missing-days | 1 | 5 |
 | budget | 0 | 1 |
-| **Total** | **31** | **293** |
+| **Total** | **31** | **298** |
 
-The subset is **31/324 views and 588/4,957 checks (11.86%)**, enforced at
-**≤25%** by the lightweight inventory test. The PR plan performs **6,133**
-checks (4,957 + 2 × 588), compared with 14,174 in fix1 and 14,871 for full ×3.
+The subset is **31/329 views and 588/5,061 checks (11.62%)**, enforced at
+**≤25%** by the lightweight inventory test. The PR plan performs **6,237**
+checks (5,061 + 2 × 588), compared with 14,174 in fix1 and 15,183 for full ×3
+with the real fixture (14,871 for UX 1's synthetic baseline; 14,862 for the
+original synthetic baseline).
 The measured agm2 Results times were **788 s** for baseline, **779 s** for the
 group subset and **744 s** for fix1's 93.06% view subset. At approximately
-**263 s** per full Vienna run, weighting this subset by check count projects
-**325 s (5.4 min)**, below the **450 s** target. This is an expected runtime,
-not a measurement: setup and interactions have different costs. The
-coordinator's PR CI on agm2 measures the actual result; no local browser run
-is part of this change.
+**263 s** per original baseline full Vienna run, weighting the current PR plan
+by that 4,954-check baseline projects **331 s (5.5 min)**, below the **450 s**
+target. This is an expected runtime, not a measurement: setup and interactions
+have different costs. The coordinator's PR CI on agm2 measures the actual
+result; no local browser run is part of this change.
 
-The lightweight tests also preserve the full 4,957-check inventory, exact
-measured variants, explicit booleans, setup dependencies, sequential zone
-orchestration and executed-count reconciliation.
+The lightweight tests also preserve the 4,957-check synthetic UX 1 baseline and
+104 additional checks per real fixture, exact measured variants, explicit
+booleans, setup dependencies, sequential zone orchestration and executed-count
+reconciliation.
 Use an approved browser test host; an installed browser guard refusal is a
 blocked check and must be handed to the coordinator without bypassing it.
 

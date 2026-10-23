@@ -1,0 +1,200 @@
+{
+  "schema": "inspr.joe.household.results.v2",
+  "seq": 6864,
+  "generatedAt": "2026-10-23T10:56:48.132Z",
+  "currency": "EUR",
+  "timeZone": "Europe/Vienna",
+  "trackingStart": "2026-10-19",
+  "days": [
+    {
+      "date": "2026-10-19",
+      "desks": {
+        "j": {
+          "equityClose": null,
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      },
+      "coverage": "partial",
+      "partialReasons": [
+        "capture_gap",
+        "fx_missing",
+        "broker_evidence_missing"
+      ]
+    },
+    {
+      "date": "2026-10-20",
+      "desks": {
+        "joe": {
+          "equityClose": null,
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      },
+      "coverage": "partial",
+      "partialReasons": [
+        "fx_missing",
+        "broker_evidence_missing"
+      ]
+    },
+    {
+      "date": "2026-10-21",
+      "desks": {
+        "joe": {
+          "equityClose": null,
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        },
+        "j": {
+          "equityClose": null,
+          "realisedNet": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "0",
+            "currency": "EUR"
+          },
+          "trades": 0
+        }
+      },
+      "coverage": "partial",
+      "partialReasons": [
+        "fx_missing",
+        "broker_evidence_missing"
+      ]
+    },
+    {
+      "date": "2026-10-22",
+      "desks": {
+        "joe": {
+          "equityClose": null,
+          "realisedNet": {
+            "amount": "-3.31807079",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "1.80233974",
+            "currency": "EUR"
+          },
+          "trades": 1
+        },
+        "j": {
+          "equityClose": null,
+          "realisedNet": {
+            "amount": "12.5517929",
+            "currency": "EUR"
+          },
+          "fees": {
+            "amount": "1.80307175",
+            "currency": "EUR"
+          },
+          "trades": 1
+        }
+      },
+      "coverage": "partial",
+      "partialReasons": [
+        "history_gap"
+      ]
+    }
+  ],
+  "trades": [
+    {
+      "id": "rt-anon-1",
+      "desk": "joe",
+      "symbol": "F",
+      "side": "long",
+      "quantity": "85",
+      "openedAt": "2026-10-22T14:31:41.000Z",
+      "closedAt": "2026-10-22T14:46:44.000Z",
+      "entryPrice": {
+        "amount": "11.98",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "11.96",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "-1.51573105",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "1.80233974",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "-3.31807079",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.89160650",
+        "source": "source-1",
+        "observedAt": "2026-10-22T20:05:00.619Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    },
+    {
+      "id": "rt-anon-2",
+      "desk": "j",
+      "symbol": "NVDA",
+      "side": "short",
+      "quantity": "5",
+      "openedAt": "2026-10-22T14:16:46.000Z",
+      "closedAt": "2026-10-22T14:56:07.000Z",
+      "entryPrice": {
+        "amount": "215.95",
+        "currency": "USD"
+      },
+      "exitPrice": {
+        "amount": "212.73",
+        "currency": "USD"
+      },
+      "grossEur": {
+        "amount": "14.35486465",
+        "currency": "EUR"
+      },
+      "feesEur": {
+        "amount": "1.80307175",
+        "currency": "EUR"
+      },
+      "netEur": {
+        "amount": "12.5517929",
+        "currency": "EUR"
+      },
+      "fx": {
+        "base": "USD",
+        "quote": "EUR",
+        "rate": "0.89160650",
+        "source": "source-1",
+        "observedAt": "2026-10-22T20:05:00.619Z"
+      },
+      "method": "execution-fifo-net-current-fx"
+    }
+  ],
+  "benchmark": null,
+  "receivedAt": "2026-10-23T10:56:48.339Z"
+}
