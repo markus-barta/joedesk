@@ -6,7 +6,7 @@ import { isCanonicalJoeHost } from './host.js';
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
-import { renderDesk, headerHealth, healthPop, forgetCharts } from './desk.js';
+import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure } from './desk.js';
 import { renderHistory, historyChart, HS } from './history.js';
 import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
 import { boardHealthPresentation } from './health.js';
@@ -176,6 +176,13 @@ function start() {
   const focusables = el => $$('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])', el).filter(n => !n.disabled && n.getClientRects().length);
 
   document.addEventListener('click', e => {
+    const disclosure = e.target.closest('[data-desk-disclosure]');
+    if (disclosure) {
+      tips.hide(true);
+      toggleDeskDisclosure(disclosure.dataset.deskDisclosure);
+      render('disclosure');
+      return;
+    }
     const goEl = e.target.closest('[data-go]');
     if (goEl) { go(goEl.dataset.go, goEl.dataset.anchor); return; }
     const pop = $('#healthPop');

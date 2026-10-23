@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
-import { VIEWPORTS, THEMES, configure, load, go, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
+import { VIEWPORTS, THEMES, configure, load as loadPage, go as goPage, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
+import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
@@ -28,14 +29,65 @@ const hm = await import('../public/joe/history-model.js');
 const { cellReason, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
 const fmt = await import('../public/joe/format.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
-const { boardCaptionCell, sharesBoardCaption } = await import('../public/joe/desk.js');
+const { boardCaptionCell, sharesBoardCaption, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
 const HEALTH_LINES = Object.keys(REASON_COPY).map(reason => statusSentence({ reason, tone: reason === 'board_ok' ? 'green' : 'red' }, { receipt: 9, gatewayAge: 179 }));
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
 mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
 const { results, shots, check, shot, auditScreen } = createGate(QA_DIR);
-const SHIFT_SELECTORS = ['header.top', '#statusAlert', '#deskHero', '#heroL .primary', '#heroL .pct-slot', '#heroL .board-caption', '#heroL .kpi', '#heroL .display', '.dcard', '.dcard .dnums > div', '.dcard .chart', '#positions', '.prow', '#kept', 'footer.foot'];
+const SHIFT_SELECTORS = ['header.top', '#statusAlert', '#deskHero', '.hero-primary', '#accountSection', '.hero-r', '.desk-row', '#heroL .primary', '#heroL .pct-slot', '#heroL .board-caption', '#heroL .kpi', '#heroL .display', '.dcard', '.dcard .dnums > div', '.dcard .chart', '#positions', '.prow', '#kept', 'footer.foot'];
+
+// Original checks read complete cards, charts and rows. Open their actual
+// phone controls first; initial/collapsed checks opt out explicitly below.
+async function load(page, url, screen = 'desk', { details = true } = {}) {
+  await loadPage(page, url, screen);
+  if (screen === 'desk' && details) await setDeskDisclosures(page, true);
+}
+async function go(page, screen) {
+  await goPage(page, screen);
+  if (screen === 'desk') await setDeskDisclosures(page, true);
+}
+
+async function phoneFirstScreenChecks(page, viewport, theme, snapshot) {
+  const tag = `${viewport.name} ${theme} phone first screen`;
+  const d = await phoneDeskSnapshot(page).then(copyText);
+  check('phone-first', `${tag}: primary euros/percent, one-line sentence and all ranked desk rows fit above the bottom navigation without scrolling`,
+    d.primary.length === 2 && d.primary.every(p => /€/.test(p.euros) && /%/.test(p.pct)) && d.rows.length === 3 &&
+    d.rows.every(r => r.icon && r.state && r.top >= 0 && r.bottom <= Math.min(844, d.bottomBar.top)) &&
+    d.sentence.bottom <= d.rows[0].top && await page.evaluate(`document.querySelector('#heroL .say > span').dataset.clamp === '1' && scrollY === 0`), d);
+  const ranked = snapshot.desks.slice().sort((a, b) => {
+    const x = decimalUnits(a.money.totalPnl.amount), y = decimalUnits(b.money.totalPnl.amount);
+    return x === y ? 0 : x > y ? -1 : 1;
+  }).map(desk => desk.id);
+  const compactMoney = text => text.replace(/\s/g, '');
+  check('phone-first', `${tag}: every compact row preserves the ranked card's Today and Since start values`,
+    d.rows.map(r => r.key).join() === ranked.join() && d.rows.every(r => r.values.length === 2 && r.values.every((v, i) => compactMoney(v) === compactMoney(r.detailValues[i]))), d.rows);
+  check('phone-first', `${tag}: all seven disclosures start collapsed with 44 px targets, no horizontal scroll and a collapsed page ≤1600 px`,
+    d.controls.length === 7 && d.controls.every(c => c.expanded === 'false' && c.hidden && !c.visible && c.height >= 44) && d.horizontal.scroll <= d.horizontal.inner && d.pageHeight <= 1600, d);
+  check('phone-first', `${tag}: missing Cash is visible in the collapsed Account summary with an icon and its reason`,
+    d.controls.find(c => c.key === 'account')?.warning.includes('Cash: not reported · no data received yet') && Boolean(d.controls.find(c => c.key === 'account')?.icon), d.controls);
+  await shot(page, viewport, `${viewport.name}-${theme}-desk-first-screen`, 'Phone Desk, default collapsed: status, Today, Since start and three ranked desk rows');
+  // Enter and Space use the native button, retain focus, and expose the body.
+  await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
+  for (const name of ['Enter', ' ']) {
+    await page.evaluate(`document.querySelector('[data-desk-disclosure="j"]').focus({ preventScroll: true })`);
+    if (name === 'Enter') await key(page, 'Enter');
+    else {
+      await page.s('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
+      await page.s('Input.dispatchKeyEvent', { type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
+      await settle(page);
+    }
+    check('phone-first', `${tag}: ${name === ' ' ? 'Space' : name} toggles aria-expanded and the matching full card while retaining focus`, await page.evaluate(`(() => {
+      const b = document.querySelector('[data-desk-disclosure="j"]'), open = b.getAttribute('aria-expanded') === 'true';
+      return open === ${name === 'Enter'} && document.getElementById('detail-j').hidden !== open && document.activeElement === b;
+    })()`));
+  }
+  await setDeskDisclosures(page, true);
+  const open = await phoneDeskSnapshot(page);
+  check('phone-first', `${tag}: one tap per section exposes every retained detail, including charts`, open.controls.every(c => c.expanded === 'true' && !c.hidden && c.visible) &&
+    await page.evaluate(`document.querySelectorAll('.mini > svg').length === 3 && document.querySelector('#heroChart > svg')`), open.controls);
+}
 
 async function deskChecks(page, viewport, theme, expectedMini, snapshot) {
   const tag = `${viewport.name} ${theme} desk`;
@@ -66,7 +118,7 @@ async function deskChecks(page, viewport, theme, expectedMini, snapshot) {
   const kpiNames = d.kpis.map(k => k.dt);
   check('AC-19', `${tag}: Today and Since start remain primary, with four supporting figures and their captions intact`, Boolean(d.display) && d.primary.length === 2 && d.primary.map(p => p.label).join() === 'Today,Since start' && d.kpis.length === 4 && kpiNames.join() === 'Open positions,Desks’ money,Paper account,Cash' &&
     d.kpis[0].cap === 'still moving until closed' && /started with €\s15\.000/.test(d.kpis[1].cap) && d.kpis[2].cap === 'includes the kept holdings' && d.kpis[3].cap === 'cash · as the broker reports it' &&
-    await page.evaluate(`document.querySelector('[data-cell="hero.since"] .c').innerText === 'after fees'`), { primary: d.primary, kpis: d.kpis });
+    await page.evaluate(`__audit.deskCaption(document.querySelector('[data-cell="hero.since"]')) === 'after fees'`), { primary: d.primary, kpis: d.kpis });
   check('AC-19', `${tag}: unreported Cash is a muted dash with its reason in the caption`, d.kpis[3].value === '—' && d.kpis[3].muted && d.kpis[3].cashReason === 'not reported · no data received yet', d.kpis[3]);
   const day = decimalUnits(snapshot.totals.dayPnl.amount), equity = decimalUnits(snapshot.totals.equity.amount), since = decimalUnits(snapshot.totals.totalPnl.amount);
   const percent = (result, base) => { const n = divRound(result * 10000n, base); return `${n < 0n ? '−' : n > 0n ? '+' : ''}${fmt.digits(n * UNIT / 100n)} %`; };
@@ -75,10 +127,10 @@ async function deskChecks(page, viewport, theme, expectedMini, snapshot) {
   const layout = d.heroLayout, close = (a, b) => Math.abs(a - b) <= 0.5;
   check('AC-19', `${tag}: all four secondary cells reserve the same caption height inside the row`, layout.captions.length === 4 && layout.captions.every(c => close(c.height, viewport.mobile ? 128 : 80)) && layout.figures.every(f => close(f.height, layout.figures[0].height)), { captions: layout.captions, figures: layout.figures });
   const supportingLayout = viewport.mobile
-    ? layout.primary.bottom <= layout.row.top && layout.row.bottom <= layout.right.top && layout.figures[0].top === layout.figures[1].top && layout.figures[2].top > layout.figures[0].top && layout.figures[3].top > layout.figures[2].top
+    ? layout.primary.bottom <= layout.row.top && layout.row.bottom <= layout.right.top && layout.figures[0].top === layout.figures[1].top && layout.figures[2].top > layout.figures[0].top && layout.figures[3].top > layout.figures[2].top && layout.row.top > await page.evaluate(`document.getElementById('desks').getBoundingClientRect().bottom`)
     : close(layout.primary.top, layout.right.top) && layout.primary.right < layout.right.left && close(layout.primary.bottom, layout.chart.bottom) && layout.row.top >= Math.max(layout.primary.bottom, layout.right.bottom) && close(layout.row.left, layout.primary.left) && close(layout.row.right, layout.right.right) && close(layout.hero.bottom, layout.row.bottom + 22) &&
       (viewport.name === '1440' ? layout.hero.height <= 590 && layout.figures.every(f => close(f.top, layout.figures[0].top)) : close(layout.figures[0].top, layout.figures[1].top) && close(layout.figures[2].top, layout.figures[3].top) && layout.figures[2].top > layout.figures[0].top);
-  check('AC-19', `${tag}: primary figures share one level with Today larger; the secondary row spans both balanced columns (1440 hero ≤590 px), wraps 2×2 at 1024 and precedes the chart on phones`, d.primary[0].top === d.primary[1].top && d.primary[0].left + d.primary[0].width <= d.primary[1].left && d.primary[0].size > d.primary[1].size && supportingLayout, { primary: d.primary, layout });
+  check('AC-19', `${tag}: primary figures share one level with Today larger; the secondary row spans both balanced columns (1440 hero ≤590 px), wraps 2×2 at 1024 and opens below Desks, before the chart on phones`, d.primary[0].top === d.primary[1].top && d.primary[0].left + d.primary[0].width <= d.primary[1].left && d.primary[0].size > d.primary[1].size && supportingLayout, { primary: d.primary, layout });
   const ranked = snapshot.desks.map((desk, i) => ({ id: desk.id, i, result: decimalUnits(desk.money.totalPnl.amount) })).sort((a, b) => a.result === b.result ? a.i - b.i : a.result > b.result ? -1 : 1).map(desk => desk.id);
   check('AC-20', `${tag}: desks rank by exact since-start result, with no unsupported per-desk percentages`, d.order.join() === ranked.join() && await page.evaluate(`!document.querySelector('.dcard .performance-pct')`), { actual: d.order, expected: ranked });
   check('AC-20', `${tag}: desk state is icon + word`, d.states.length === 3 && d.states.every(s => s.icon && /^(Working|Sitting out|Stuck)/.test(s.text)), d.states);
@@ -389,7 +441,7 @@ const HIST_SHIFT = ['.hist-tools', '.hcard', '#histChart', '#histCompare', '.his
 const copyExpression = expression => `(${copyText.toString()})(${expression})`;
 const DESK_TEXT = copyExpression(`(() => ({
   label: document.querySelector('#hdrHealth .status-full').textContent, ring: document.querySelector('#heroSession b')?.innerText,
-  cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(c => [c.dataset.cell, { state: c.dataset.state, cap: c.querySelector('.c')?.innerText ?? null }])),
+  cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(c => [c.dataset.cell, { state: c.dataset.state, cap: __audit.deskCaption(c) }])),
   cards: [...document.querySelectorAll('.dcard')].map(c => ({ id: c.id.slice(5), lines: [...c.querySelectorAll('.mini-label .st')].map(n => n.innerText), label: c.querySelector('.mini-label').innerText, nums: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), icons: c.querySelectorAll('.cell-state').length })),
   boardCaption: document.querySelector('#heroL .board-caption').innerText,
   positions: document.querySelector('#positions .pstate')?.innerText, posState: document.querySelector('#positions .pstate')?.dataset.state,
@@ -419,6 +471,17 @@ try {
   const served = await (await fetch(`${board.url}history.json`, { headers: { 'x-auth-request-user': ACTOR } })).json();
   const servedCols = hm.toColumns(served.points);
   const expectedMini = Object.fromEntries(['j', 'joe', 'joel'].map(id => [id, [...hm.sessionCloses(servedCols, id, 'totalPnl', 9).map(c => c.v), Number(snapshot.desks.find(d => d.id === id).money.totalPnl.amount)]]));
+  for (const viewport of [VIEWPORTS[2], { ...VIEWPORTS[2], name: '360', width: 360 }]) for (const theme of THEMES) {
+    await configure(page, viewport, theme);
+    await load(page, board.url, 'desk', { details: false });
+    await phoneFirstScreenChecks(page, viewport, theme, snapshot);
+    await setDeskDisclosures(page, false);
+    const selectors = ['header.top', '#statusAlert', '.hero-primary', '.desk-row', '#accountSection', '.hero-r', '.desk-section', 'footer.foot'];
+    const before = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+    await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+    const after = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+    check('phone-first', `${viewport.name} ${theme}: collapsed boxes have exactly 0 px shift on a refresh/tick`, JSON.stringify(before) === JSON.stringify(after), { before, after });
+  }
   for (const viewport of VIEWPORTS) for (const theme of THEMES) {
     await configure(page, viewport, theme);
     await load(page, board.url, 'desk');
@@ -564,16 +627,32 @@ try {
         await page.evaluate('window.__joedesk.refresh()');
         await settle(page);
       }
+      if (viewport.width <= 480) {
+        await setDeskDisclosures(page, false);
+        const collapsed = await phoneDeskSnapshot(page).then(copyText);
+        const summaryCells = {
+          account: [['Open positions', expectedCells['today.openPnl']], ['Desks’ money', expectedCells['today.equity']], ['Paper account', expectedCells.paperAccount], ['Cash', expectedCells.paperCash], ['Broker', expectedCells.gateway]],
+          positions: [['Positions', expectedCells.positions], ...rowProblems(expectedCells.positions)],
+          kept: [['Kept holdings', expectedCells.kept], ...rowProblems(expectedCells.kept)],
+        };
+        for (const [key, cells] of Object.entries(summaryCells)) {
+          const expected = disclosureProblem(cells), actual = collapsed.controls.find(c => c.key === key);
+          check('phone-first', `${viewport.name} ${theme} ${id}: collapsed ${key} shows the worst panel state and short reason`, actual.hidden && actual.expanded === 'false' &&
+            (expected ? actual.warning === expected.text && actual.icon === `#i-${expected.icon}` : !actual.warning && !actual.icon), { actual, expected });
+        }
+        check('phone-first', `${viewport.name} ${theme} ${id}: collapsed panels do not scroll horizontally`, collapsed.horizontal.scroll <= collapsed.horizontal.inner, collapsed.horizontal);
+        await setDeskDisclosures(page, true);
+      }
       const ui = await page.evaluate(`(() => ({
         label: document.querySelector('#hdrHealth').dataset.reason, sentence: document.querySelector('#hdrHealth').title,
         compact: (() => { const e = document.querySelector('#hdrHealth .status-compact'); return __audit.visible(e) ? e.textContent : null; })(),
         visibleSentence: (() => { const full = document.querySelector('#hdrHealth .status-full'), line = document.getElementById('statusAlertText');
           return [full, line].filter(__audit.visible).map(e => e.textContent); })(),
-        cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(k => [k.dataset.cell, { state: k.dataset.state, cap: k.querySelector('.c')?.innerText ?? '' }])),
+        cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(k => [k.dataset.cell, { state: k.dataset.state, cap: __audit.deskCaption(k) }])),
         desks: [...document.querySelectorAll('.dcard')].map(c => ({ id: c.id.slice(5), name: c.querySelector('h3')?.innerText, nums: c.querySelectorAll('.dnums > div').length, states: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), status: c.querySelector('.mini-label').innerText, icons: c.querySelectorAll('.cell-state').length })),
         boardCaption: document.querySelector('#heroL .board-caption').innerText,
         alertGeometry: (() => { const line = document.getElementById('statusAlert'), button = document.getElementById('statusAlertControl'), text = document.getElementById('statusAlertText');
-          const r = text.getBoundingClientRect(), hero = document.getElementById('deskHero').getBoundingClientRect();
+          const r = text.getBoundingClientRect(), hero = document.querySelector('.hero-primary').getBoundingClientRect();
           return { visible: line.hasAttribute('data-visible'), size: getComputedStyle(text).fontSize, bodySize: getComputedStyle(document.body).fontSize,
             icon: button.querySelector('use').getAttribute('href'), target: button.getBoundingClientRect().height, gap: hero.top - r.bottom }; })(),
         positions: document.getElementById('positions').innerText.trim(), kept: document.getElementById('kept').innerText.trim(), strip: document.querySelector('#healthPop .health-facts').textContent,
@@ -879,7 +958,7 @@ try {
     boxes.push(['broken', await rects(STATE_BOXES)]);
     const rebuiltSay = await page.evaluate(SAY_TIP);
     check('clamp', `${tag} broken: the pinned tip follows Today's rebuilt sentence`, sayWhole(rebuiltSay) && /waiting on the start-of-day value\.$/.test(rebuiltSay.say), { pinnedSay, rebuiltSay });
-    if (!font && viewport.name === '390' && theme === 'light') await shot(page, viewport, '390-light-desk-say-tip', `Desk, broken: Today's sentence at two lines${rebuiltSay.clamped ? ' with its ellipsis' : ''}, a tap shows it whole in the explanation tip`);
+    if (!font && viewport.name === '390' && theme === 'light') await shot(page, viewport, '390-light-desk-say-tip', `Desk, broken: Today's one-line phone sentence${rebuiltSay.clamped ? ' with its ellipsis' : ''}, a tap shows it whole in the explanation tip`);
     await key(page, 'Escape');
     await leaveSay(page);
     await auditScreen(page, viewport, theme, 'desk (broken numbers)');
@@ -944,6 +1023,7 @@ try {
       const base = boxes();
       const out = [];
       const probe = what => {
+        say.closest('[data-say]').title = say.textContent;
         const edge = strip.getBoundingClientRect().right + 0.5;
         out.push({ what: what.slice(0, 50), rects: boxes(), clamps: __audit.clamps(), over: [...strip.children].some(c => c.getBoundingClientRect().right > edge) || strip.scrollWidth > strip.clientWidth + 0.5 });
       };
@@ -955,7 +1035,7 @@ try {
     const bad = r.out.flatMap(o => o.clamps.filter(c => !c.ok).map(c => ({ what: o.what, ...c })));
     const cut = r.out.map(o => o.clamps.filter(c => c.truncated).length).reduce((a, n) => a + n, 0);
     check('lines', `${tag}: ${HEALTH_LINES.length} health reasons and ${sentences.length} sentences keep the design boxes of the health line and Today's sentence`, r.base.length === STATE_BOXES.length && r.out.length === HEALTH_LINES.length + sentences.length && !moved.length, moved.slice(0, 6));
-    check('lines', `${tag}: each shows whole lines with an ellipsis and gives its full text (${cut} clamped)`, r.out.every(o => o.clamps.length === 2) && !bad.length, bad.slice(0, 4));
+    check('lines', `${tag}: each shows whole lines with an ellipsis and gives its full text (${cut} clamped)`, r.out.every(o => o.clamps.length === (width <= 480 ? 3 : 2)) && !bad.length, bad.slice(0, 4));
     check('lines', `${tag}: nothing overflows the health line`, !r.out.some(o => o.over), r.out.filter(o => o.over).map(o => o.what).slice(0, 4));
   }
   // For the visual check: the longest health reason and Today's longest
@@ -966,11 +1046,12 @@ try {
   await configure(page, VIEWPORTS[2], 'light');
   await load(page, b.url, 'desk');
   await page.evaluate(`(() => { const why = document.querySelector('#hdrHealth b'); why.querySelectorAll('span').forEach(e => e.textContent = ${JSON.stringify(longReason)}); why.title = ${JSON.stringify(longReason)};
-    document.querySelector('#heroL .say [data-clamp]').textContent = ${JSON.stringify(longSay)}; })()`);
+    document.querySelector('#heroL .say [data-clamp]').textContent = ${JSON.stringify(longSay)};
+    document.querySelector('#heroL .say').title = ${JSON.stringify(longSay)}; })()`);
   const clamped = await page.evaluate('__audit.clamps()');
   const longTip = await clickSay(page);
-  check('lines', '390: the longest reason and sentence end in an ellipsis, and a tap shows the sentence whole', clamped.length === 2 && clamped.every(c => c.ok && c.truncated) && sayWhole(longTip) && longTip.say === norm(longSay), { clamped, longTip });
-  await shot(page, VIEWPORTS[2], '390-light-desk-clamps', 'Desk on a phone with the longest health reason and Today’s longest sentence put in: one line and two lines, each with its ellipsis; the tap shows the sentence whole (the reason is whole in its title and Details)');
+  check('lines', '390: the longest reason and sentence end in an ellipsis, and a tap shows the sentence whole', clamped.length === 3 && clamped.every(c => c.ok) && clamped.filter(c => c.lines === 1).every(c => c.truncated) && sayWhole(longTip) && longTip.say === norm(longSay), { clamped, longTip });
+  await shot(page, VIEWPORTS[2], '390-light-desk-clamps', 'Desk on a phone with the longest health reason and Today’s longest sentence put in: one line each, with ellipsis and the complete sentence on tap; Since start retains its own three-line caption and explanation');
   await leaveSay(page);
   }
 
@@ -1008,6 +1089,7 @@ try {
         const media = await pointerMedia(page);
         if (media !== (width <= 700 ? TOUCH : MOUSE)) fail.pointer.push({ width, media });
         await settle(page);
+        if (screen === 'desk') await setDeskDisclosures(page, true);
         const r = await page.evaluate(`__audit.sweep(${COMPACT}, ${screen === 'desk' ? JSON.stringify(light) : 'null'})`);
         if (r.scroll > r.inner) fail.scroll.push({ width, scroll: r.scroll });
         if (r.past.length) fail.past.push({ width, past: r.past.slice(0, 3) });
@@ -1219,13 +1301,19 @@ geometry. Compare with \`joed-19-joedesk-approved.html\`.
 ## State lines: clamps, no blank lines
 
 The health line's reason is one line at every width. A longer one ends in an
-ellipsis; its title and Details give it whole. Today's sentence is two lines at
-every width (one box, twice its line height). A longer one ends in an ellipsis,
+ellipsis; its title and Details give it whole. Today's sentence uses one line
+inside a 44 px target up to 480 px, and two lines above it. A longer one ends in an ellipsis,
 and a click, tap or keyboard focus shows it whole in the explanation tip. No
 blank lines are kept for longer states. Both boxes stay the same through not
 reported, fresh, stale, broken and recovered, in this machine's font and a wide
 one (\`no-shift\`, \`lines\`, \`clamp\`). See \`390-light-desk-clamps.png\`,
 \`390-light-desk-say-tip.png\` and \`390-dark-desk-state-a-gateway-up-but-dead.png\`.
+
+Default phone captures at 360/390 use the \`*-desk-first-screen.png\` suffix.
+All seven sections start collapsed; each compact row opens its original card.
+Detailed P3 checks open the relevant disclosures before reading or measuring
+them. P5 does the same for cash, nullable positions and kept holdings, and
+separately checks the collapsed summaries for every non-green state.
 
 ## Header at every width (AC-28)
 

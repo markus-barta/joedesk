@@ -1375,7 +1375,7 @@ The hero keeps its primary results, sentence and board caption on the left,
 with the clock and chart on the right. Open positions, Desks’ money, Paper
 account and Cash share one row below both columns above 1180 px; at 701–1180 px
 they form a 2×2 grid. The chart fills the primary area's height, removing the
-empty right column. At phone widths the order stays primary results, secondary
+empty right column. At 481–700 px the order stays primary results, secondary
 figures (Cash below Paper account), then clock and chart. Cash keeps its exact
 broker lexeme in its title/accessibility name, its independent missing/stale
 reason and a state-independent reserve; Settings keeps its existing cash layout.
@@ -1396,6 +1396,47 @@ predicts a hero near 475 px. At 1024 the 2×2 secondary grid is 291 px, giving
 These are CSS estimates; browser height and zero-shift verification stay in CI.
 Desk check-ins stay on one line. A long status yields with an ellipsis and a
 complete native title; cards below 340 px retain the check-in on the name row.
+
+JOED-79 changes only Desk at widths up to 480 px. The first screen contains
+the existing header status control and reserved red/yellow problem line,
+Today and Since start with euros and percentages, the one-line Today summary,
+and three ranked desk rows. Each row retains its desk mark, name, state word,
+Today and Since start euros, tones and state markers. Tapping it exposes the
+original complete card, including action, all three figures, chart and learning.
+The Account figures, today's clock/chart, Positions and Kept holdings have
+separate native button disclosures, initially collapsed. Buttons expose
+`aria-expanded` and `aria-controls`, support Enter/Space and have targets at
+least 44 px tall. Expansion survives ticks and navigation during the current
+page visit, with no additional browser storage or server writes. Resizing
+above 480 px exposes every original detail; returning restores phone choices.
+
+Collapsed summaries show the worst actual state and its short reason, with
+the complete set of reasons in their title. Partial/null row fields and
+unmatched desks count even when the overall position panel is fresh. Old or
+missing check-ins, stuck desks, blocked learning, unavailable history and
+unknown market hours stay visible in their affected summary. Positions shows
+its open count and Kept holdings its count. Since start retains a three-line
+phone caption whose complete text opens in the existing explanation tip;
+Today's one-line summary also opens its complete sentence there.
+
+CSS-only budget at 390×844: 54 px header + 56 px problem reserve + about
+299 px primary card + 64 px Desks heading + three 92 px rows and two 8 px
+gaps = about 765 px, just above the bottom navigation's 772 px top. The four
+76 px disclosure summaries, their margins, footer and bottom navigation
+allowance put the collapsed page at roughly 1,300–1,450 px. These are estimates,
+not browser measurements; CI owns rendered heights, both themes, 360/390 px,
+no horizontal scroll and zero movement on ticks. 1024/1440 retain their grids.
+
+P3/P5 explicitly open phone disclosures before the existing detailed checks:
+AC-19 supporting figures and captions, full desk states/bars/sparklines,
+positions, kept exclusion/inertness/worth, nullable rows, cash states, geometry
+and tick movement. P3 adds default collapsed 360/390 captures, first-screen
+bounds above the navigation, compact-to-full value/ranking parity, page height,
+Enter/Space expansion and exact zero-shift checks. P3 failure fixtures and P5
+not-exact/cash/partial-position cases separately check the collapsed warnings.
+The Positions preview capture opens its disclosure before taking the crop.
+`test/phone-first-screen.mjs` adds small, browser-free state/markup tests;
+the coordinator runs browser CI and review after this local handoff.
 
 Fix 3's best-effort CSS height budget at 1440 is about 480 px, versus about
 751 px before (the screenshot QA reported about 760 px). This assumes five

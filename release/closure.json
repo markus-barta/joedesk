@@ -99,18 +99,18 @@
     },
     {
       "path": "package.json",
-      "size": 1404,
-      "sha256": "8205d3a8f873d81c75dc5ec59108446d895d13847b62a185c725476ab4b51662"
+      "size": 1432,
+      "sha256": "48f6397c69ca57633a1612a1090ca2997b9908df0695c081dd9eab7194f3e4af"
     },
     {
       "path": "public/joe/app.css",
-      "size": 77566,
-      "sha256": "d5247c60b55109fcc89cd1a45e0b7b5df79a67657f3cd700ec1bc6c1d9de2231"
+      "size": 81817,
+      "sha256": "ec1f5a56a38b4408df310468bae33b8844ab6d44e2170cab17581e77e94e27ca"
     },
     {
       "path": "public/joe/app.js",
-      "size": 18263,
-      "sha256": "3d333b71035dbfdd7c8a47c9864c18c05ed4c1206750f5dc2600bd2259e0bd6e"
+      "size": 18508,
+      "sha256": "17ecc59cc85120f1c0727868199f36f68630fdfc5128e5a4ffdb7e84320ac947"
     },
     {
       "path": "public/joe/chart.js",
@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 34552,
-      "sha256": "77011ca759c0d63aa34ce66ea40d819ff8b22741b7ef1577e6e744226e03a67f"
+      "size": 41174,
+      "sha256": "dab93b39277a94d900e15d274f3b0b679e204fcd90787d843a8ba4a797517268"
     },
     {
       "path": "public/joe/events.js",
@@ -189,8 +189,8 @@
     },
     {
       "path": "public/joe/index.html",
-      "size": 35616,
-      "sha256": "8c646e4967fece56982426083c8548a0d047e6f5211ad631b5287bdd36f02fe1"
+      "size": 36933,
+      "sha256": "30184d650030b7ff37f10ef3819f237de4504188715c0d92791d4023694bc5e0"
     },
     {
       "path": "public/joe/joe-version.js",
@@ -234,8 +234,8 @@
     },
     {
       "path": "public/joe/ui.js",
-      "size": 17799,
-      "sha256": "6753c25d977a0593947b137ae697a97091ebd30dc73b9fdccef68a0829fd8117"
+      "size": 17823,
+      "sha256": "ed0dd45de68329f752ad285cfec0623e6fd467b3e7d9fe67dee42097e49a150b"
     },
     {
       "path": "public/joe/vendor/calver/display.json",

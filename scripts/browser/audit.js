@@ -50,6 +50,11 @@
 
   window.__audit = {
     visible, parseColor,
+    deskCaption(cell) {
+      const caption = matchMedia('(max-width: 480px)').matches && cell.dataset.cell === 'hero.since'
+        ? cell.querySelector('.phone-primary-note > span') : cell.querySelector('.c');
+      return caption?.innerText.trim() ?? '';
+    },
     // Shared by P3's full width/font sweep and P5's real-ingress checks.
     headerLayout() {
       const row = document.querySelector('.top-in'), r = row.getBoundingClientRect(), css = getComputedStyle(row);
@@ -110,6 +115,14 @@
         if (el.matches('.dcard .state > span[title]')) {
           const cs = getComputedStyle(el);
           if (el.title !== el.textContent || cs.textOverflow !== 'ellipsis' || cs.whiteSpace !== 'nowrap' || cs.overflowX !== 'hidden') failures.push({ el: 'desk status', why: 'missing full title or ellipsis' });
+          continue;
+        }
+        // Phone summaries retain the complete worst state in the accessible
+        // button text, and all reasons in the title. The existing card is one tap away.
+        if (el.matches('.disclosure-warning .summary-text')) {
+          const cs = getComputedStyle(el);
+          const words = text => text.replace(/\u00a0/g, ' ');
+          if (!words(el.title).includes(words(el.textContent)) || cs.webkitLineClamp !== '2' || cs.overflowY !== 'hidden') failures.push({ el: 'phone summary', why: 'missing full reason or clamp' });
           continue;
         }
         const cs = getComputedStyle(el);
@@ -295,8 +308,8 @@
           // The page, or the fixed chrome above it (header, bottom bar, Settings' edit bar).
           const layer = Boolean(n.parentElement.closest('header.top, .bottom-nav, .editbar'));
           for (const raw of range.getClientRects()) {
-            const clamp = n.parentElement.closest('[data-clamp], .dcard .state > span[title]')?.getBoundingClientRect();
-            const q = clamp ? { left: Math.max(raw.left, clamp.left), right: Math.min(raw.right, clamp.right), top: raw.top, bottom: raw.bottom, width: Math.min(raw.right, clamp.right) - Math.max(raw.left, clamp.left), height: raw.height } : raw;
+            const clamp = n.parentElement.closest('[data-clamp], .disclosure-warning .summary-text, .dcard .state > span[title]')?.getBoundingClientRect();
+            const q = clamp ? { left: Math.max(raw.left, clamp.left), right: Math.min(raw.right, clamp.right), top: Math.max(raw.top, clamp.top), bottom: Math.min(raw.bottom, clamp.bottom), width: Math.min(raw.right, clamp.right) - Math.max(raw.left, clamp.left), height: Math.min(raw.bottom, clamp.bottom) - Math.max(raw.top, clamp.top) } : raw;
             if (q.width > 0.5 && q.height > 0.5) boxes.push({ node: n, text: n.nodeValue.trim().slice(0, 30), layer, q });
           }
         }

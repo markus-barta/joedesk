@@ -11,7 +11,8 @@ import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, ACTOR, TOKEN, NOW, at } from './browser/board.mjs';
-import { VIEWPORTS, THEMES, configure, load, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
+import { VIEWPORTS, THEMES, configure, load as loadPage, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
+import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { designFleet, designActions, designSnapshot, switchSetSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
@@ -39,6 +40,10 @@ const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8
 const { results, shots, check, shot, auditScreen } = createGate(QA_DIR);
 const ONLY = (process.env.JOED_P5_ONLY ?? '').split(',').filter(Boolean);
 const run = name => !ONLY.length || ONLY.includes(name);
+async function load(page, url, screen = 'desk') {
+  await loadPage(page, url, screen);
+  if (screen === 'desk') await setDeskDisclosures(page, true);
+}
 const J = JSON.stringify;
 const N = text => String(text ?? '').replace(/[\s ]+/g, ' ').trim();
 const schema = JSON.parse(readFileSync(new URL('../contracts/fleet-config.schema.json', import.meta.url)));
@@ -389,6 +394,16 @@ try {
           await ev('window.__joedesk.refresh().then(() => true)'); await settle(page);
         }
         const neutral = reason === 'not_exact_yet';
+        if (viewport.width <= 480) {
+          await setDeskDisclosures(page, false);
+          const collapsed = await phoneDeskSnapshot(page).then(copyText);
+          const words = neutral ? 'not exact yet' : 'not reported by the broker';
+          const moneySections = collapsed.controls.filter(c => ['j', 'joe', 'joel', 'account'].includes(c.key));
+          check('phone-first', `${tag} ${i}: collapsed desk/account summaries expose unavailable money with the true icon and reason`,
+            moneySections.length === 4 && moneySections.every(c => c.hidden && c.expanded === 'false' && c.warning.includes(words) && c.icon === (neutral ? '#i-info' : '#i-stop')) &&
+            collapsed.horizontal.scroll <= collapsed.horizontal.inner, moneySections);
+          await setDeskDisclosures(page, true);
+        }
         const seen = await ev(`(() => {
           const probe = token => { const e = document.createElement('span'); e.style.color = 'var(' + token + ')'; document.body.append(e); const c = getComputedStyle(e).color; e.remove(); return c; };
           const h = document.getElementById('hdrHealth'), hi = h.querySelector('svg');
@@ -502,7 +517,15 @@ try {
           const after = await measure();
           const moved = baseline.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== after[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: after[i]?.[k] })));
           check('paper-cash', `${tag}: cash and account boxes have exactly 0 px shift`, !moved.length, moved);
-          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? '#deskHero' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
+          if (screen === 'desk' && viewport.width <= 480) {
+            await setDeskDisclosures(page, false);
+            const collapsed = await phoneDeskSnapshot(page).then(copyText);
+            const account = collapsed.controls.find(c => c.key === 'account');
+            check('phone-first', `${tag}: collapsed Account carries every non-green cash reason`,
+              account.hidden && account.expanded === 'false' && (phase === 'value' || phase === 'recovered' || (Boolean(account.icon) && account.detail.includes(why))) && collapsed.horizontal.scroll <= collapsed.horizontal.inner, account);
+            await setDeskDisclosures(page, true);
+          }
+          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? viewport.width <= 480 ? '#accountSection' : '#deskHero' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
         }
       }
     }
@@ -524,6 +547,13 @@ try {
       b.setNow(at(NOW, 9));
       await configure(page, viewport, theme); await load(page, b.url, 'desk');
       await waitFor(page, `document.querySelectorAll('#kept [data-keep]').length === 2`);
+      if (viewport.width <= 480) {
+        await setDeskDisclosures(page, false);
+        const collapsed = await phoneDeskSnapshot(page).then(copyText);
+        const sections = collapsed.controls.filter(c => ['positions', 'kept'].includes(c.key));
+        check('phone-first', `${tag}: fresh panels with partial rows retain warnings and row reasons when collapsed`, sections.length === 2 && sections.every(c => c.hidden && Boolean(c.icon) && /not exact yet|not reported by the broker/.test(c.warning)), sections);
+        await setDeskDisclosures(page, true);
+      }
       const figureSelectors = ['#deskHero', '#heroL .kpi', '#heroL .cash-reserve', '#desks', '.dcard'];
       const figureBoxes = await rects(figureSelectors);
       const figures = () => ev(`({ values: [...document.querySelectorAll('#heroL .display, #heroL .kpi dd > .bn, #heroL [data-cash], .dcard .dnums .v')].map(e => e.innerText), count: document.getElementById('posSub').innerText })`);
@@ -1103,6 +1133,7 @@ try {
       // Desk keeps the safety floor: SXR8 and TSLA only under Kept holdings.
       await ev(`document.querySelector('.nav [data-go="desk"]')?.click() ?? document.querySelector('.bottom-nav [data-go="desk"]').click()`);
       await settle(page);
+      await setDeskDisclosures(page, true);
       const desk = await ev(`({ kept: [...document.querySelectorAll('#kept [data-keep]')].map(r => r.dataset.keep), positions: document.getElementById('positions').innerText })`);
       check('KEEP', `${tag}: with the settings unavailable, Desk still keeps SXR8 and TSLA under Kept holdings only`, J(desk.kept.sort()) === J(['SXR8', 'TSLA']) && !/\b(SXR8|TSLA)\b/.test(desk.positions), desk.kept);
     }

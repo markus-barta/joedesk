@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { launch, openPage } from './browser/cdp.mjs';
 import { VIEWPORTS, THEMES, configure, load, go, settle, screenshot } from './browser/shots.mjs';
+import { setDeskDisclosures } from './browser/desk-disclosures.mjs';
 
 const SCREENS = ['desk', 'positions', 'settings', 'results', 'history'];
 const DEFAULT_SCREENS = SCREENS.slice(0, 4);
@@ -285,6 +286,7 @@ export async function capture(options, { launchBrowser = launch, log = console.l
         }
         step = 'capture-navigate';
         await go(page, screen === 'positions' ? 'desk' : screen);
+        if (screen === 'positions') await setDeskDisclosures(page, true);
         step = 'settle';
         await settle(page);
         step = 'screenshot';
