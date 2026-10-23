@@ -525,8 +525,12 @@ try {
     await configure(page, viewport, theme);
     await load(page, board.url, 'desk');
     const tag = `${viewport.name} ${theme}`;
+    // load() opens Account's phone disclosure. Scroll before the baseline so
+    // the pin click reaches its visible term below the expanded desk cards.
+    await page.evaluate(`document.querySelector('#heroL .kpi .term').scrollIntoView({ block: 'center' })`);
+    await settle(page);
     const before = await page.evaluate(`__audit.rects(${JSON.stringify(SHIFT_SELECTORS)})`);
-    // A pinned explanation in Today survives the rebuild of Today.
+    // A pinned explanation in the open Account survives the rebuild of Today.
     const term = await page.evaluate(`(() => { const t = document.querySelector('#heroL .kpi .term'); const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, term: t.dataset.term }; })()`);
     await page.s('Input.dispatchMouseEvent', { type: 'mousePressed', x: term.x, y: term.y, button: 'left', clickCount: 1 });
     await page.s('Input.dispatchMouseEvent', { type: 'mouseReleased', x: term.x, y: term.y, button: 'left', clickCount: 1 });

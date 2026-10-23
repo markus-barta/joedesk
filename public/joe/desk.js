@@ -62,7 +62,7 @@ export function disclosureProblem(candidates) {
   return { ...first, detail: problems.map(p => p.text).join('; ') };
 }
 function problemHtml(problem) {
-  return problem ? `${icon(problem.icon, `i tone-${problem.tone}`)}<span class="summary-text" title="${esc(problem.detail)}">${esc(problem.text)}</span>` : '';
+  return problem ? `${icon(problem.icon, `i tone-${problem.tone}`)}<span class="summary-text" title="${esc(problem.detail)}" aria-hidden="true">${esc(problem.text)}</span><span class="vh">${esc(problem.detail)}</span>` : '';
 }
 function disclosureButton(key, label, bodyId, problem = null) {
   return `<button type="button" class="desk-disclosure" data-desk-disclosure="${key}" aria-expanded="${expanded.has(key)}" aria-controls="${bodyId}"><span>${esc(label)}</span><span class="disclosure-warning">${problemHtml(problem)}</span>${icon('chev-d', 'i disclosure-chevron')}</button>`;

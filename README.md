@@ -1410,8 +1410,9 @@ least 44 px tall. Expansion survives ticks and navigation during the current
 page visit, with no additional browser storage or server writes. Resizing
 above 480 px exposes every original detail; returning restores phone choices.
 
-Collapsed summaries show the worst actual state and its short reason, with
-the complete set of reasons in their title. Partial/null row fields and
+Collapsed summaries show the worst actual state and its short reason in one
+fixed-height line with an ellipsis. The complete set of reasons remains in
+their title and accessible button text. Partial/null row fields and
 unmatched desks count even when the overall position panel is fresh. Old or
 missing check-ins, stuck desks, blocked learning, unavailable history and
 unknown market hours stay visible in their affected summary. Positions shows
@@ -1453,6 +1454,21 @@ container, preserving the name-row check-in and invisible 44 px term target.
 P4 opens those full cards before its unchanged header measurements; the shared
 clamp inventory now includes the phone's existing Since start explanation.
 P3 requires at least 8 px clearance above the navigation.
+
+Fix 2 retains the warning reserve while limiting its visible text to one
+14 px line. Rebuilding a section restores its disclosure bodies' visibility
+before handing focus and a pinned explanation to the replacement term.
+P3 opens the phone disclosures and scrolls the Account term into view before
+measuring its baseline and dispatching the pin click; Account now follows
+the expanded desks, so its old unscrolled click was outside the viewport.
+The P5 Cash session probe now changes the connection on a clone of its
+baseline. It previously replaced all desk actions with shorter fixture text
+and removed learning, shrinking `.now` and `footer` in the expanded cards
+above Account. Cash's own measured boxes were stable; the boxless phone
+`#deskHero` offset exposed that unrelated content change. The probe retains
+every geometry assertion and still exercises a failed broker connection.
+Focused Node tests cover fixture isolation, complete accessible reasons,
+disclosure visibility and pin/focus handoff through the real patch function.
 
 Fix 3's best-effort CSS height budget at 1440 is about 480 px, versus about
 751 px before (the screenshot QA reported about 760 px). This assumes five

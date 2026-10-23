@@ -51,6 +51,14 @@ export function designSnapshot(now = NOW, { hint = 'DU…0597', executor = true 
   return { snapshot, history };
 }
 
+// The cash session probe changes the broker connection, keeping the same
+// desks/actions/learnings so its geometry assertion measures cash state only.
+export function cashSessionSnapshot(base) {
+  const next = structuredClone(base);
+  Object.assign(next.safety.gateway, { apiSessionReady: false, reason: 'gateway_unconfirmed' });
+  return next;
+}
+
 // Rev-9 switch set: no partial desk totals, while account NAV/cash are known.
 // After hours, the existing regular-session result warnings do not apply.
 export function switchSetSnapshot(now = '2026-10-14T21:05:00.000Z') {

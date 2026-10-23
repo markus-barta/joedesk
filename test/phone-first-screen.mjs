@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
+import { cashSessionSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 const { compactDesk, disclosureProblem, rowProblems, syncDeskDisclosures, toggleDeskDisclosure, heroLeft } = await import('../public/joe/desk.js');
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const cell = (state, reason = null, value = null, retained = false) => ({ state, reason, value, retained });
@@ -27,6 +28,32 @@ test('summary selects the worst actual state and retains every independent reaso
   assert.match(p.detail, /Today: stale · updates are late/);
   assert.equal(disclosureProblem([['Today', cell('broken', 'baseline_pending', {}, true)]]).tone, 'warn');
   assert.equal(disclosureProblem([['Today', cell('broken', 'not_exact_yet')]]).icon, 'info');
+});
+
+test('one-line summaries expose every independent reason in the accessible button text', () => {
+  const ctx = context();
+  ctx.states['today.openPnl'] = cell('broken', 'not_exact_yet');
+  ctx.states.paperAccount = cell('stale', 'snapshot_stale', { amount: '12.34', currency: 'EUR' });
+  ctx.states.paperCash = cell('broken', 'gateway_unconfirmed');
+  const doc = htmlDocument(heroLeft(ctx)), warning = doc.querySelector('.disclosure-warning');
+  const summary = warning.querySelector('.summary-text'), accessible = warning.querySelector('.vh');
+  assert.equal(summary.getAttribute('aria-hidden'), 'true', 'do not announce the short reason twice');
+  assert.equal(accessible.textContent, summary.getAttribute('title'));
+  for (const label of ['Open positions: unavailable', 'Paper account: stale', 'Cash: unavailable']) {
+    assert.ok(accessible.textContent.includes(label));
+  }
+});
+
+test('cash session fixture keeps expanded desk content constant while the connection fails', () => {
+  const base = structuredClone(valid.data), before = structuredClone(base);
+  const session = cashSessionSnapshot(base);
+  const expected = structuredClone(base);
+  Object.assign(expected.safety.gateway, { apiSessionReady: false, reason: 'gateway_unconfirmed' });
+  assert.deepEqual(session, expected, 'actions, learning, positions and money must not change in the cash probe');
+  assert.deepEqual(base, before, 'the baseline is immutable');
+  const states = panelStates({ data: { value: session } }, session.receivedAt);
+  assert.equal(states.gateway.state, 'broken');
+  assert.equal(states.gateway.reason, 'gateway_unconfirmed');
 });
 
 test('fresh position panels expose null-field and unmatched-desk problems in the summary', () => {
@@ -162,6 +189,80 @@ test('native disclosure clicks use the real tooltip API and toggle the matching 
     assert.equal(doc.activeElement, control);
   }
   assert.equal(renders, 2);
+});
+
+test('real patches retain disclosure visibility and pin/focus on a rebuilt visible Account term', async t => {
+  const { initTips, patch } = await builders('ui.js', []);
+  const doc = htmlDocument('<div id="heroL"></div>'), root = doc.querySelector('#heroL');
+  const listeners = new Map(), classes = new Set(), measuredVisibility = [];
+  const emit = (type, target) => {
+    for (const fn of listeners.get(type) ?? []) fn({ target, preventDefault() {}, stopImmediatePropagation() {} });
+  };
+  const body = { append(el) { el.parentElement = body; } };
+  const tip = { style: {}, parentElement: body, offsetWidth: 200, offsetHeight: 80,
+    classList: { add(...names) { names.forEach(n => classes.add(n)); }, remove(...names) { names.forEach(n => classes.delete(n)); },
+      toggle(name, yes) { if (yes) classes.add(name); else classes.delete(name); } } };
+  const nativeQuery = doc.querySelector.bind(doc);
+  Object.assign(doc, { body, getElementById: id => nativeQuery(`#${id}`),
+    querySelector: selector => selector === '#tip' ? tip : nativeQuery(selector === '#heroL .say > span' ? '#heroL .say span' : selector),
+    addEventListener(type, fn) { listeners.set(type, [...listeners.get(type) ?? [], fn]); },
+  });
+  // Add the small native DOM surface used by patch/initTips to parsed markup.
+  // Geometry is a fixed test input; browser CI owns actual pixels and scrolling.
+  const decorate = node => {
+    node.hidden = node.getAttribute('hidden') !== null;
+    node.hasAttribute = key => node.getAttribute(key) !== null;
+    node.removeAttribute = key => { delete node.attributes[key]; };
+    node.contains = other => node === other || node.children.some(child => typeof child !== 'string' && child.contains(other));
+    const closest = node.closest.bind(node);
+    node.closest = selector => selector.includes(',') ? selector.split(',').map(s => closest(s.trim())).find(Boolean) ?? null : closest(selector);
+    node.getBoundingClientRect = () => {
+      measuredVisibility.push(doc.getElementById('accountDetail')?.hidden);
+      return { left: 50, right: 100, top: 80, bottom: 100 };
+    };
+    node.focus = () => { if (doc.activeElement !== node) { doc.activeElement = node; emit('focus', node); } };
+    for (const child of node.children) if (typeof child !== 'string') decorate(child);
+  };
+  const html = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(root), 'innerHTML');
+  Object.defineProperty(root, 'innerHTML', {
+    get() { return html.get.call(root); },
+    set(value) { html.set.call(root, value); decorate(root); },
+  });
+  for (const [key, value] of Object.entries({ document: doc, CSS: { escape: value => value }, innerWidth: 390, innerHeight: 844,
+    addEventListener: (type, fn) => doc.addEventListener(type, fn) })) {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    t.after(() => { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; });
+  }
+  const tips = initTips(), ctx = context();
+  patch(root, heroLeft(ctx)); syncDeskDisclosures(true);
+  t.after(() => { if (!doc.getElementById('accountDetail').hidden) toggleDeskDisclosure('account'); });
+  // A closed body must remain closed before the primary term is measured.
+  // Then the same handoff must work for a visible term inside the open body.
+  for (const open of [false, true]) {
+    if (open) { toggleDeskDisclosure('account'); syncDeskDisclosures(true); }
+    const old = doc.querySelector(open ? '#accountDetail .term' : '.hero-primary .term');
+    old.focus(); emit('click', old);
+    assert.ok(classes.has('pinned'));
+    measuredVisibility.length = 0;
+    ctx.states['today.dayPnl'] = cell('fresh', null, { amount: open ? '2' : '1', currency: 'EUR' });
+    assert.ok(patch(root, heroLeft(ctx)));
+    const again = doc.activeElement;
+    assert.notEqual(again, old);
+    assert.ok(!root.contains(old) && root.contains(again));
+    assert.equal(again.dataset.term, old.dataset.term);
+    assert.equal(Boolean(again.closest('#accountDetail')), open);
+    assert.equal(doc.getElementById('accountDetail').hidden, !open);
+    assert.deepEqual(measuredVisibility, [!open], 'tip geometry must see the restored disclosure layout');
+    assert.ok(classes.has('on') && classes.has('pinned'), 'focus handoff must not unpin the explanation');
+    assert.equal(again.getAttribute('aria-expanded'), 'true');
+    assert.equal(again.getAttribute('aria-describedby'), 'tip');
+    assert.equal(tip.style.left, '50px');
+    assert.equal(tip.style.top, '108px');
+    emit('scroll', doc);
+    assert.ok(classes.has('pinned'), 'an unchanged rebuilt anchor survives the scroll check');
+    tips.hide();
+  }
 });
 
 test('expanding measured chart boxes plots observed closes and current values on the first render', async t => {

@@ -211,9 +211,16 @@ export function patch(el, html) {
     const focused = active && active !== el && el.contains(active) ? identity(active, el) : null;
     const tipAnchor = rebuilt.tip?.anchor();
     const tipped = tipAnchor && el.contains(tipAnchor) ? identity(tipAnchor, el) : null;
+    const disclosures = [...el.querySelectorAll('.disclosure-body[id]')].map(body => ({ id: body.id, hidden: body.hidden }));
     rebuilt.busy = true;
     try { el.innerHTML = html; } finally { rebuilt.busy = false; }
     structure.set(el, key);
+    // Restore disclosure layout before measuring a rebuilt explanation anchor.
+    // Otherwise a collapsed body briefly opens and places the tip in that layout.
+    for (const body of disclosures) {
+      const again = el.querySelector(`#${CSS.escape(body.id)}`);
+      if (again) again.hidden = body.hidden;
+    }
     if (tipped) rebuilt.tip.moved(find(el, tipped));
     const again = find(el, focused);
     if (again) rebuilt.tip?.focus(again);

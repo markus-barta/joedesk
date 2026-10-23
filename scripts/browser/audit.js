@@ -117,12 +117,13 @@
           if (el.title !== el.textContent || cs.textOverflow !== 'ellipsis' || cs.whiteSpace !== 'nowrap' || cs.overflowX !== 'hidden') failures.push({ el: 'desk status', why: 'missing full title or ellipsis' });
           continue;
         }
-        // Phone summaries retain the complete worst state in the accessible
-        // button text, and all reasons in the title. The existing card is one tap away.
+        // Phone summaries reserve one line, with every reason in the native
+        // title and accessible button text. The existing card is one tap away.
         if (el.matches('.disclosure-warning .summary-text')) {
           const cs = getComputedStyle(el);
           const words = text => text.replace(/\u00a0/g, ' ');
-          if (!words(el.title).includes(words(el.textContent)) || cs.webkitLineClamp !== '2' || cs.overflowY !== 'hidden') failures.push({ el: 'phone summary', why: 'missing full reason or clamp' });
+          const full = el.parentElement.querySelector('.vh');
+          if (!words(el.title).includes(words(el.textContent)) || words(full?.textContent ?? '') !== words(el.title) || cs.textOverflow !== 'ellipsis' || cs.whiteSpace !== 'nowrap' || cs.height !== '14px' || cs.overflowY !== 'hidden') failures.push({ el: 'phone summary', why: 'missing full reason or fixed-line ellipsis' });
           continue;
         }
         const cs = getComputedStyle(el);

@@ -1089,7 +1089,8 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .desk-disclosure[aria-expanded="true"] > .disclosure-chevron { transform: rotate(180deg); }
   .disclosure-warning { display: flex; align-items: flex-start; gap: 4px; grid-column: 1 / -1; height: 28px; min-width: 0; font-size: 11px; line-height: 14px; font-weight: 400; color: var(--ink-2); }
   .disclosure-warning > .i { flex: none; width: 12px; height: 12px; margin-top: 1px; }
-  .disclosure-warning .summary-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+  /* Keep the warning reserve even when empty; reasons occupy one fixed line. */
+  .disclosure-warning .summary-text { display: block; flex: 1; min-width: 0; height: 14px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
   #desks .desk-row { height: 92px; min-height: 92px; padding: 8px 10px; grid-template-columns: 24px minmax(0, 1fr) 82px 82px 12px; gap: 0 5px; font-variant-numeric: tabular-nums; }
   .desk-row > .disclosure-chevron { grid-column: 5; }
   .desk-row .dmark { width: 24px; height: 28px; background: none; }

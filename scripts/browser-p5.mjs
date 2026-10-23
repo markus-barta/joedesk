@@ -14,7 +14,7 @@ import { startBoard, ACTOR, TOKEN, NOW, at } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
 import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
-import { designFleet, designActions, designSnapshot, switchSetSnapshot, longFleet } from './browser/settings-fixtures.mjs';
+import { designFleet, designActions, designSnapshot, cashSessionSnapshot, switchSetSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
 import { pngColours } from './browser/pixels.mjs';
 import { captureHeaderCrop } from './browser/header-crop.mjs';
@@ -458,9 +458,8 @@ try {
       let seq = base.seq, offset = 0;
       const push = async (phase, seconds) => {
         b.setNow(at(NOW, offset + seconds));
-        const next = phase === 'session' ? JSON.parse(readFileSync(new URL('../fixtures/failures/a-gateway-up-but-dead.json', import.meta.url))).payload : structuredClone(base);
+        const next = phase === 'session' ? cashSessionSnapshot(base) : structuredClone(base);
         next.seq = ++seq; next.generatedAt = b.clock(); next.safety.gateway.checkedAt = b.clock();
-        if (phase === 'session') next.safety.gateway.reason = 'gateway_unconfirmed';
         if (['null', 'session', 'not-exact'].includes(phase)) {
           next.brokerAccount.cash = null;
           next.brokerAccount.reasons = { cash: phase === 'session' ? 'gateway_unconfirmed' : phase === 'not-exact' ? 'not_exact_yet' : 'source_unavailable' };
