@@ -556,10 +556,11 @@ BROWSER_PATH=/usr/bin/google-chrome node scripts/browser-p3.mjs
 `npm run test:results` runs the full P4 Results gate sequentially under **UTC**
 and **America/New_York**. `test:browser` includes this guard. CI pushes to main
 run the full suite in all three zones; PRs and manual dispatch run full in
-Europe/Vienna and repeat only explicitly zone-sensitive scenarios in UTC and
-America/New_York, retaining every check in those scenarios.
-This avoids repeating zone-independent desk-card geometry and render budgets
-while keeping every date-bearing scenario in the three-zone matrix.
+Europe/Vienna and repeat only explicitly zone-sensitive **views** in UTC and
+America/New_York, retaining every check in a selected view. A view identifies
+its group, fixture/interaction, width and theme; workflows can include their
+associated detail screenshots and crops. Check-only setup, boundary and
+geometry cases are also inventoried. Full mode retains every existing check.
 
 ```bash
 npm run test:results -- UTC Europe/Vienna America/New_York
@@ -567,7 +568,7 @@ npm run test:results -- UTC Europe/Vienna America/New_York
 npm run test:results -- --full Europe/Vienna --subset UTC America/New_York
 # One zone, same P4 suite (including the render budget):
 TZ=UTC node scripts/browser-p4.mjs
-# Only zone-sensitive scenarios in one host zone:
+# Only zone-sensitive views in one host zone:
 TZ=UTC node scripts/browser-p4.mjs --zone-subset
 ```
 
@@ -576,17 +577,62 @@ page also sets its requested zone explicitly, since macOS Chrome may keep the
 OS zone despite `TZ`; P4 checks the server, page and dedicated worker zones.
 Reports stay separate under `~/.local/share/joedesk-qa/p4/<zone>/index.md`
 (`JOED_QA_DIR` overrides the parent; slashes in zone names become hyphens).
-The parent index identifies full/subset mode for each zone and lists the
-selected scenarios; each zone index records its own mode and scenario list.
-The conservative subset is 12/14 scenario groups (85.7%); static loop counts
-omit nine desk-card and nine budget checks, leaving 4,936/4,954 baseline
-checks (99.6%) per subset and 14,826 rather than 14,862 per PR.
-At the measured 788 s full-matrix baseline (2026-10-23), weighting by check
-count estimates about 786 s (13.1 min) for P4; browser/fixture costs differ,
-so the PR run on agm2 must measure the actual runtime.
-Fourteen of 231 baseline screenshots differed across zones, all within the
-selected date-bearing families; differences limited to one width/theme are
-possible render noise, not grounds to drop those scenarios.
+The parent index identifies each zone's mode, selected view count, static
+check count and share of full P4, plus sensitive/independent counts per group.
+The child index lists every selected view and reconciles its static check
+count against executed checks, including the shared craft audit. An omitted
+view or a check-count mismatch fails the gate. New anonymized real fixtures
+join the inventory and the subset at all five fixture width/theme variants.
+
+The baseline inventory (run 39793917962, without real producer fixtures) is:
+
+| Group | Sensitive views | Independent views |
+| --- | --- | --- |
+| host-timezone | 1 | 0 |
+| design | 11 | 3 |
+| fixtures | 21 | 0 |
+| states | 17 | 0 |
+| vienna | 2 | 0 |
+| cards | 0 | 3 |
+| r1 | 10 | 0 |
+| trade-amount | 2 | 7 |
+| phone-calendar | 6 | 0 |
+| ingress | 6 | 0 |
+| period-hint | 70 | 10 |
+| partial-days | 140 | 8 |
+| missing-days | 6 | 0 |
+| budget | 0 | 1 |
+| **Total** | **292** | **32** |
+
+**30% target exception (JOED-65 fix1):** the smallest subset under the brief's
+rule that every date-bearing view remains is **292/324 views and
+4,610/4,954 checks (93.06%)**. The 32 excluded views comprise desk-card and
+budget checks (18), wide-font geometry/audits (59), seven trade-row layout
+variants (219), injected literal-wording probes (40) and tint contrast (8).
+Trade rows retain their identical date cells in one representative view at
+1440 light; other date-bearing groups retain their date comparisons, today,
+partial-day counts and reasons, missing days, receipt ages and DST boundaries.
+Period hints alone contribute 1,402 retained checks; the design, partial-day
+and phone-calendar date assertions prevent an honest 30% subset. Lowering the
+number further requires an approved reduction or decomposition of that date
+coverage, rather than classifying the same assertions as layout.
+
+The preceding group-level subset was 4,936 checks and measured **779 s** on
+agm2 (run 39907700141), against a **788 s** full ×3 baseline. This view subset
+plans **14,174** checks per PR (4,954 + 2 × 4,610), versus 14,826 previously
+and 14,862 for full ×3. At approximately **263 s** per full Vienna run,
+weighting subsets by check count projects **752 s (12.5 min)**; the **450 s**
+runtime target is not met. Costs differ by fixture and interaction, so only
+PR CI on agm2 can establish the actual improvement. No local browser timing
+is required for this change.
+
+Fourteen of 231 baseline screenshots differed across zones. Their exact
+width/theme variants and all associated checks remain selected, including
+single-variant differences that might be render noise. The lightweight
+inventory tests enforce explicit boolean flags, date-bearing representatives,
+all 14 variants, the full baseline count, this target exception, and executed
+count reconciliation. Pushes to main still run the full suite in all three
+zones; the workflow selection remains unchanged from the preceding round.
 Use an approved browser test host; an installed browser guard refusal is a
 blocked check and must be handed to the coordinator without bypassing it.
 

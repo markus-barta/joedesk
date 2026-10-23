@@ -21,15 +21,33 @@ import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
 import { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } from './browser/results.mjs';
 import { realResultsFixtures } from './results-fixtures.mjs';
-import { P4_SCENARIOS, selectP4Scenarios } from './results-gate-plan.mjs';
+import { P4_SCENARIOS, createP4Views, createP4ViewRecorder, p4ViewKey, selectP4Views, summarizeP4Views } from './results-gate-plan.mjs';
 
 // Fail on missing explicit zoneSensitive metadata before any browser or
-// server starts. A subset keeps every check in each selected scenario.
+// server starts. A subset keeps every check in each selected view.
 const args = process.argv.slice(2);
 if (args.some(arg => arg !== '--zone-subset')) throw new Error('Usage: browser-p4.mjs [--zone-subset]');
 const zoneSubset = args.includes('--zone-subset');
-const selectedScenarios = selectP4Scenarios({ zoneSubset, only: (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean) });
-const selectedNames = new Set(selectedScenarios.map(s => s.name));
+const realFixtures = realResultsFixtures();
+const allViews = createP4Views(realFixtures.map(f => f.name));
+const selectedViews = selectP4Views({ zoneSubset, only: (process.env.JOED_P4_ONLY ?? '').split(',').filter(Boolean) }, allViews);
+const selectedViewNames = new Set(selectedViews.map(v => v.name));
+const selectedNames = new Set(selectedViews.map(v => v.group));
+const selectedScenarios = P4_SCENARIOS.filter(s => selectedNames.has(s.name));
+const viewSummary = summarizeP4Views(selectedViews, allViews);
+const viewRecorder = createP4ViewRecorder(selectedViews.map(v => v.group === 'host-timezone' && !process.env.TZ ? { ...v, checks: 2 } : v));
+const view = (group, family, viewport, theme) => {
+  const name = p4ViewKey(group, family, viewport?.name, theme);
+  if (!allViews.some(v => v.name === name)) throw new Error(`Undeclared P4 view: ${name}`);
+  if (!selectedViewNames.has(name)) return false;
+  viewRecorder.enter(name);
+  return true;
+};
+// Consecutive date-bearing fixtures share a stateful workflow. All remain
+// selected together; keep their individual check inventories explicit.
+const requireView = (group, family, viewport, theme) => {
+  if (!view(group, family, viewport, theme)) throw new Error(`Missing dependent P4 view: ${p4ViewKey(group, family, viewport?.name, theme)}`);
+};
 
 // The page's own model and formatting, for the numbers Results must show. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -52,11 +70,17 @@ const { missingResultsDays } = await import('../contracts/vienna-date.mjs');
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p4');
 mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
-const { results, shots, check: gateCheck, shot, auditScreen } = createGate(QA_DIR);
+const { results, shots, check: gateCheck, shot, auditScreen: gateAuditScreen } = createGate(QA_DIR);
 const check = (ac, name, ok, detail) => {
+  viewRecorder.record();
   gateCheck(ac, name, ok, detail);
   // Preserve both geometry snapshots and every clipping row in the CI log.
   if (!ok && ['phone-calendar', 'partial-days', 'period-hint', 'trade-amount'].includes(ac)) console.error(`PAYLOAD ${ac} ${name}: ${JSON.stringify(detail)}`);
+};
+const auditScreen = async (...args) => {
+  const before = results.length;
+  await gateAuditScreen(...args);
+  viewRecorder.record(results.length - before);
 };
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const run = name => {
@@ -351,6 +375,7 @@ async function designBoard(now = NOW, fleetConfig = null, edit = null) {
 const reset = async () => { for (const s of ['#periodSeg [data-period="week"]', '#deskSeg [data-desk="all"]']) await click(page, s); };
 
 try {
+  requireView('host-timezone', 'hosts');
   check('host-timezone', 'the server uses the requested host zone', hostTimeZone === expectedTimeZone, { hostTimeZone, expectedTimeZone });
   const pageTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone');
   check('host-timezone', 'the page uses the requested host zone', pageTimeZone === expectedTimeZone, { pageTimeZone, expectedTimeZone });
@@ -362,6 +387,7 @@ try {
     const ix = M.indexResults({ ...record, receivedAt: record.receivedAt });
     await serve(served(record, board));
     for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      if (!view('design', 'matrix', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       await configure(page, viewport, theme);
       await load(page, board.url, 'results');
@@ -474,6 +500,7 @@ try {
     for (const [viewport, theme, period, desk, name, what] of [[VIEWPORTS[0], 'light', 'day', 'all', 'day', 'Day: today, all desks (intraday points from History)'],
       [VIEWPORTS[0], 'light', 'month', 'joe', 'month-joe', 'Month: October, Joe'], [VIEWPORTS[0], 'dark', 'all', 'all', 'all', 'All time: the tracking marker'],
       [VIEWPORTS[1], 'dark', 'ytd', 'joel', 'ytd-joel', 'This year, Joel'], [VIEWPORTS[2], 'light', 'month', 'all', 'month', 'Month on a phone']]) {
+      if (!view('design', name, viewport, theme)) continue;
       await configure(page, viewport, theme);
       await load(page, board.url, 'results');
       await waitFor(page, `document.querySelector('#tiles .tile .tval .num')`);
@@ -483,6 +510,7 @@ try {
     }
     // AC-11 in the wide font that stands in for Linux's.
     for (const [viewport, theme] of [[VIEWPORTS[2], 'light'], [VIEWPORTS[1], 'dark'], [VIEWPORTS[0], 'light']]) {
+      if (!view('design', 'wide-font', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme} wide font`;
       await configure(page, viewport, theme);
       await load(page, board.url, 'results');
@@ -531,7 +559,7 @@ try {
         r.cal.cells.filter(c => c.day >= '2026-10-05' && c.day <= '2026-10-09').every(c => c.n === 'no trades'), 'The empty record: last week reads as the designed empty state'],
       // Real files join the same model comparisons, complete-section/reason
       // assertions and craft audit. Their own clock keeps captured dates exact.
-      ...realResultsFixtures().map(({ name, payload, now }) =>
+      ...realFixtures.map(({ name, payload, now }) =>
         [name, 'all', M.viennaDate(Date.parse(now)), () => true, 'Anonymized real producer Results', payload, now]),
     ];
     for (const [name, period, anchor, ok, what, realPayload, now] of cases) {
@@ -539,6 +567,7 @@ try {
       const payload = realPayload ? { ...realPayload, receivedAt: realPayload.receivedAt ?? now } : fixture(name);
       await serve(realPayload ? () => ({ body: payload, clock: board.clock }) : served(payload, board));
       for (const [viewport, theme] of viewports) {
+        if (!view('fixtures', name, viewport, theme)) continue;
         const tag = `${name} @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
         await load(page, board.url, 'results');
@@ -564,6 +593,7 @@ try {
       }
     }
     // AC-16: before tracking starts (August) the design record is empty too.
+    requireView('fixtures', 'before-tracking', VIEWPORTS[0], 'light');
     const { board } = baseline;
     await serve(served(designResults(NOW), board));
     await configure(page, VIEWPORTS[0], 'light');
@@ -584,6 +614,7 @@ try {
     for (const [viewport, theme] of VIEWPORTS.flatMap(v => THEMES.map(t => [v, t]))) {
       const tag = `${viewport.name} ${theme}`;
       await configure(page, viewport, theme);
+      requireView('states', 'not-received', viewport, theme);
       await serve(null);
       const firstPaint = await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `
         new MutationObserver(function (_, observer) {
@@ -604,6 +635,7 @@ try {
       if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-not-received`, 'Results before the first accepted push: the existing unavailable state');
       await reset();
       if (theme === 'dark') continue;
+      requireView('states', 'stale-retained', viewport, theme);
       // Fresh, then stale: the record's own age, in the chart's box; nothing moves.
       await serve(served(record, board));
       await load(page, board.url, 'results');
@@ -623,11 +655,13 @@ try {
       const kept = await page.evaluate(RES);
       check('panel-state', `${tag}: a failed refresh keeps the last good record and says so`, /^Stale · Results refresh failed: update failed\. Showing the last good results from \d+.(s|min) ago\.$/.test(kept.status) && kept.display === fresh.display, kept.status);
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-results-refresh-failed`, 'Results, refresh failed: the last good record kept, with its age');
+      requireView('states', 'auth', viewport, theme);
       // Unavailable from the first read: its own reason.
       await serve(() => ({ status: 401, body: { ok: false, reason: 'auth_required' } }));
       await load(page, board.url, 'results');
       const auth = await page.evaluate(RES);
       check('panel-state', `${tag}: a sign-in that expired before the first record says why, with dashes`, auth.say === 'Results are unavailable: sign-in expired — reload.' && auth.display === '—' && auth.tiles.every(x => x.val.trim() === '—'), auth.say);
+      requireView('states', 'invalid', viewport, theme);
       // An invalid record is never shown: the contract rejects it.
       const broken = structuredClone(record); broken.trades[0].netEur.amount = '999';
       await serve(served(broken, board));
@@ -642,6 +676,7 @@ try {
     await serve(served(record, keepBoard));
     for (const [viewport, theme] of [[VIEWPORTS[0], 'light'], [VIEWPORTS[2], 'dark']]) {
       await configure(page, viewport, theme);
+      if (!view('states', 'kept-mismatch', viewport, theme)) continue;
       await load(page, keepBoard.url, 'results');
       const r = await page.evaluate(RES);
       check('AC-9', `${viewport.name} ${theme}: a record that still trades a kept symbol (${record.trades[0].symbol}) is held back, no number derived`,
@@ -660,6 +695,7 @@ try {
     const ix = M.indexResults(payload);
     await serve(served(payload, board));
     for (const [viewport, theme] of [[VIEWPORTS[0], 'light'], [VIEWPORTS[2], 'dark']]) {
+      if (!view('vienna', 'dst-calendar', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       await configure(page, viewport, theme);
       await load(page, board.url, 'results');
@@ -706,6 +742,7 @@ try {
     const { board } = await designBoard();
     for (const [theme, font] of [['light', null], ['dark', null], ['light', WIDE_FONT]]) {
       const viewport = VIEWPORTS[2], tag = `390 ${theme}${font ? ' wide font' : ''}`;
+      if (!view('cards', font ? 'wide-font' : 'normal', viewport, theme)) continue;
       await configure(page, viewport, theme);
       await load(page, board.url, 'desk');
       if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
@@ -746,9 +783,10 @@ try {
       const CHANGE = Date.parse('2026-10-14T13:00:00.000Z');
       const { board, inputs } = await designBoard(NOW, null, ({ history }) => { for (const p of history.points) if (Date.parse(p.t) < CHANGE) p.desks.j.historyBasis = 'j.paper.v1'; });
       const record = designResults(NOW), ix = M.indexResults(record);
-      check('r1-basis', 'the page\'s inputs carry J\'s change of basis', inputs.cuts.length === 1 && inputs.cuts[0].desk === 'j' && inputs.cuts[0].at >= CHANGE && inputs.cuts[0].at < CHANGE + 300000, inputs.cuts);
+      if (view('r1', 'basis-inputs')) check('r1-basis', 'the page\'s inputs carry J\'s change of basis', inputs.cuts.length === 1 && inputs.cuts[0].desk === 'j' && inputs.cuts[0].at >= CHANGE && inputs.cuts[0].at < CHANGE + 300000, inputs.cuts);
       await serve(served(record, board));
       for (const [viewport, theme] of pair) {
+        if (!view('r1', 'basis', viewport, theme)) continue;
         const tag = `basis @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
         await load(page, board.url, 'results');
@@ -782,9 +820,10 @@ try {
       record.days.push({ date: inputs.today, desks: Object.fromEntries(DESKS.map(d => [d, close(d)])) });
       withTradeSummaries(record);
       const ix = M.indexResults(record);
-      check('r1-money-now', 'J has no money now; the record has a close for today', inputs.todayUnits[0] === null && ix.dates.at(-1) === inputs.today, inputs.todayUnits);
+      if (view('r1', 'money-now-inputs')) check('r1-money-now', 'J has no money now; the record has a close for today', inputs.todayUnits[0] === null && ix.dates.at(-1) === inputs.today, inputs.todayUnits);
       await serve(served(record, board));
       for (const [viewport, theme] of pair) {
+        if (!view('r1', 'money-now', viewport, theme)) continue;
         const tag = `no money now @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
         await load(page, board.url, 'results');
@@ -809,6 +848,7 @@ try {
       const payload = fixture('drawdown'), ix = M.indexResults(payload);
       await serve(served(payload, board));
       for (const [viewport, theme] of pair) {
+        if (!view('r1', 'time-axis', viewport, theme)) continue;
         const tag = `time axis @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
         await load(page, board.url, 'results');
@@ -841,6 +881,7 @@ try {
       const ix = M.indexResults(record);
       await serve(served(record, board));
       for (const [viewport, theme] of pair) {
+        if (!view('r1', 'large-amounts', viewport, theme)) continue;
         const tag = `large amounts @${viewport.name} ${theme}`;
         await configure(page, viewport, theme);
         await load(page, board.url, 'results');
@@ -872,6 +913,7 @@ try {
     await serve(null);
     const { board } = await designBoard();
     const { date, record } = tradeAmountResults(board.clock());
+    if (!view('trade-amount', 'ingress')) throw new Error('Trade view needs ingress checks');
     const checked = validateContract('results', record, { stage: 'ingress' });
     check('trade-amount', 'large results and price pairs form a valid ingress record', checked.ok, checked.errors);
     const pushed = await board.pushResults(record);
@@ -884,6 +926,7 @@ try {
     ];
     const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 780, mobile: true }];
     for (const viewport of viewports) for (const theme of THEMES) {
+      if (!view('trade-amount', 'rows', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`, root = viewport.mobile ? '#sheetBody' : '#daypanel .dp-list';
       const fallback = viewport.mobile && theme === 'dark';
       const injection = fallback ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
@@ -1239,6 +1282,7 @@ try {
       }),
     });
     record.missingDays = missingResultsDays(record, at(board.clock(), -18));
+    if (!view('phone-calendar', 'contract')) throw new Error('Calendar view needs contract check');
     const checked = validateContract('results', record);
     check('phone-calendar', 'the focused phone record is a valid results v2 contract', checked.ok, checked.errors);
     // Change compact text without changing the maximum day's tint legend or
@@ -1316,6 +1360,7 @@ try {
       check('phone-calendar', `${tag}: every calendar amount fits without clipping`, !clipped.length, clipped);
     };
     for (const viewport of viewports) for (const theme of THEMES) {
+      if (!view('phone-calendar', 'months', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       await serve(served(baseline, board));
       await configure(page, viewport, theme);
@@ -1379,6 +1424,7 @@ try {
         JSON.stringify(sheetOpen) === JSON.stringify(sheetClosed), { before: sheetOpen, after: sheetClosed });
     }
     const desktop = VIEWPORTS.find(v => v.name === '1440');
+    requireView('phone-calendar', 'desktop', desktop, 'light');
     await configure(page, desktop, 'light');
     await load(page, board.url, 'results');
     await waitFor(page, `document.querySelector('#cal [data-day="2026-10-01"] .vs')?.textContent === '+1'`);
@@ -1403,6 +1449,7 @@ try {
     // the module worker and the fallback, including server rejection headers.
     await serve(null);
     for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      if (!view('ingress', 'live-stale-recovery', viewport, theme)) continue;
       const { board } = await designBoard();
       const record = designResults(NOW); delete record.receivedAt;
       const pushed = await board.pushResults(record);
@@ -1504,6 +1551,7 @@ try {
     const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 800, mobile: true },
       { name: '768', width: 768, height: 1024, mobile: false }];
     for (const viewport of viewports) for (const theme of THEMES) {
+      if (!view('period-hint', 'baseline', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       // Replacing snapshots changes coverage only; period switches then show
       // or hide the same hint without modifying the hero children or tiles.
@@ -1518,6 +1566,7 @@ try {
       if (!viewport.mobile) check('period-hint', `${tag}: original desktop hero column width is retained`,
         reserve.width === (viewport.width <= 1180 ? 280 : 340), reserve);
       if (viewport.name === '390') await crop(viewport, theme, 'no-hint');
+      requireView('period-hint', 'partial', viewport, theme);
       await push(partial);
       await waitFor(page, 'document.querySelector("#rheroL .say .st")?.textContent === "incl. 2 partial days"');
       check('period-hint', `${tag}: adding the hint leaves the chart SVG unchanged`, Boolean(baselineChart) && baselineChart === await chart());
@@ -1551,19 +1600,22 @@ try {
       if (viewport.name !== '360') await crop(viewport, theme, 'hint');
       // Real sentence markup with wide amount/date forms, including a past
       // week with two-digit dates. Unknown and basis-change forms have no hint.
-      for (const sentence of ['Down €\u00a0999.999,99 in September 2025', 'Down €\u00a0999.999,99 in the week of 21\u00a0Sep']) {
-        await page.evaluate(`document.querySelector('#rheroL .say').firstChild.textContent = ${JSON.stringify(sentence + ' ')}`);
-        const p = await probe(), next = await rects(page, fixed), maxLines = lineLimit(viewport, p);
-        check('period-hint', `${tag}: longest realistic result sentence fits at most ${maxLines} lines and the hint never splits`,
-          p.hint === 'incl. 2 partial days' && !p.clipped && p.hintUnbroken && p.noMiddleDot && p.contentHeight <= maxLines * p.lineHeight + 1, p);
-        check('period-hint', `${tag}: long result wording moves hero children and tiles exactly 0 px`,
-          sameGeometry(geometry, next), { splitTopDeltaPx: splitDelta(geometry, next), sentence: p.sentence, before: geometry, after: next });
+      if (view('period-hint', 'literal-wording', viewport, theme)) {
+        for (const sentence of ['Down €\u00a0999.999,99 in September 2025', 'Down €\u00a0999.999,99 in the week of 21\u00a0Sep']) {
+          await page.evaluate(`document.querySelector('#rheroL .say').firstChild.textContent = ${JSON.stringify(sentence + ' ')}`);
+          const p = await probe(), next = await rects(page, fixed), maxLines = lineLimit(viewport, p);
+          check('period-hint', `${tag}: longest realistic result sentence fits at most ${maxLines} lines and the hint never splits`,
+            p.hint === 'incl. 2 partial days' && !p.clipped && p.hintUnbroken && p.noMiddleDot && p.contentHeight <= maxLines * p.lineHeight + 1, p);
+          check('period-hint', `${tag}: long result wording moves hero children and tiles exactly 0 px`,
+            sameGeometry(geometry, next), { splitTopDeltaPx: splitDelta(geometry, next), sentence: p.sentence, before: geometry, after: next });
+        }
       }
       // Restore actual renderer content before the next real snapshot.
       await click(page, '#periodSeg [data-period="week"]');
       await click(page, '#periodSeg [data-period="month"]');
       {
         // The longest eligible real path uses a wide tracking-start date.
+        requireView('period-hint', 'empty', viewport, theme);
         await push(empty);
         const prefix = 'No trades recorded this month. Paper results start on 30\u00a0Sep 2026';
         await waitFor(page, `document.querySelector('#rheroL .say').textContent.startsWith(${JSON.stringify(prefix)})`);
@@ -1594,12 +1646,14 @@ try {
           { splitTopDeltaPx: splitDelta(olderGeometry, olderPlainGeometry), sentence: olderPlain, before: olderGeometry, after: olderPlainGeometry });
         const noHint = withTradeSummaries(structuredClone(empty));
         for (const day of noHint.days) { delete day.coverage; delete day.partialReasons; }
+        requireView('period-hint', 'no-hint', viewport, theme);
         await push(noHint);
         await waitFor(page, 'document.querySelector("#rheroL .say").textContent.startsWith("No trades this month.")');
         const plain = await probe(), plainGeometry = await rects(page, fixed), plainMax = lineLimit(viewport, plain);
         check('period-hint', `${tag}: removing empty-period coverage keeps the full stop, fits ${plainMax} lines and moves hero children and tiles exactly 0 px`,
           !plain.hint && !plain.clipped && plain.sentence.endsWith('.') && plain.contentHeight <= plainMax * plain.lineHeight + 1 &&
           sameGeometry(next, plainGeometry), { sentence: plain, before: next, after: plainGeometry });
+        requireView('period-hint', 'unknown', viewport, theme);
         await push(unknown);
         await waitFor(page, 'document.querySelector("#rheroL .say").textContent.startsWith("The result this month is not known yet:")');
         const unknownCovered = await probe(), unknownGeometry = await rects(page, fixed);
@@ -1607,6 +1661,7 @@ try {
           !unknownCovered.hint && unknownCovered.sentence.endsWith('.') && unknownCovered.monthHint === 'incl. 2 partial days', unknownCovered);
         const unknownFull = withTradeSummaries(structuredClone(unknown));
         for (const day of unknownFull.days) { delete day.coverage; delete day.partialReasons; }
+        requireView('period-hint', 'unknown-full', viewport, theme);
         await push(unknownFull);
         await waitFor(page, '!document.querySelector("#calSum .st")');
         const unknownPlain = await probe(), unknownPlainGeometry = await rects(page, fixed);
@@ -1614,6 +1669,7 @@ try {
           !unknownPlain.hint && unknownPlain.sentence === unknownCovered.sentence && sameGeometry(unknownGeometry, unknownPlainGeometry),
           { sentence: unknownPlain, before: unknownGeometry, after: unknownPlainGeometry });
       }
+      requireView('period-hint', 'cleared', viewport, theme);
       await push(baseline);
       await waitFor(page, '!document.querySelector("#rheroL .say .st")');
       const cleared = await rects(page, fixed);
@@ -1731,6 +1787,7 @@ try {
     };
     const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 800, mobile: true }];
     for (const viewport of viewports) for (const theme of THEMES) {
+      if (!view('partial-days', 'calendar', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       check('partial-days', `${tag}: full baseline accepts`, (await board.pushResults({ ...baseline, seq: ++seq })).status === 200);
       const fallback = viewport.mobile && theme === 'dark';
@@ -1779,28 +1836,31 @@ try {
 
       // Computed browser colours, every tint, including the neutral card's
       // composed background. Probes inherit the actual calendar's ancestors.
-      const contrasts = await page.evaluate(`(${(() => {
-        const rgb = c => c.match(/[\d.]+/g).map(Number);
-        const composite = (front, back) => { const a = front[3] ?? 1; return front.slice(0, 3).map((c, i) => c * a + back[i] * (1 - a)); };
-        const background = el => {
-          const chain = []; for (let p = el; p; p = p.parentElement) chain.unshift(p);
-          return chain.reduce((bg, p) => composite(rgb(getComputedStyle(p).backgroundColor), bg), [255, 255, 255]);
-        };
-        const luminance = cs => cs.slice(0, 3).map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4)
-          .reduce((s, c, i) => s + c * [.2126, .7152, .0722][i], 0);
-        return ['g1', 'g2', 'g3', 'g4', 'l1', 'l2', 'l3', 'l4', 'flat', 'none'].map(cls => {
-          const cell = document.querySelector('#cal .day-incomplete').cloneNode(true);
-          cell.className = 'cell ' + cls + ' day-incomplete'; cell.style.cssText = 'position:fixed;top:0;left:0;width:62px';
-          const marker = cell.querySelector('.day-warning'); marker.className = 'day-warning st' + (cls === 'none' ? ' warn' : '');
-          document.getElementById('cal').append(cell);
-          const fg = getComputedStyle(marker.querySelector('svg')).color, bg = background(cell), x = luminance(rgb(fg)), y = luminance(bg);
-          const ratio = (Math.max(x, y) + .05) / (Math.min(x, y) + .05);
-          cell.remove(); return { cls, fg, bg, ratio };
-        });
-      }).toString()})()`);
-      check('partial-days', `${tag}: every computed partial icon contrast is at least 3:1`, contrasts.every(c => c.ratio >= 3), contrasts);
+      if (view('partial-days', 'contrast', viewport, theme)) {
+        const contrasts = await page.evaluate(`(${(() => {
+          const rgb = c => c.match(/[\d.]+/g).map(Number);
+          const composite = (front, back) => { const a = front[3] ?? 1; return front.slice(0, 3).map((c, i) => c * a + back[i] * (1 - a)); };
+          const background = el => {
+            const chain = []; for (let p = el; p; p = p.parentElement) chain.unshift(p);
+            return chain.reduce((bg, p) => composite(rgb(getComputedStyle(p).backgroundColor), bg), [255, 255, 255]);
+          };
+          const luminance = cs => cs.slice(0, 3).map(c => c / 255).map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4)
+            .reduce((s, c, i) => s + c * [.2126, .7152, .0722][i], 0);
+          return ['g1', 'g2', 'g3', 'g4', 'l1', 'l2', 'l3', 'l4', 'flat', 'none'].map(cls => {
+            const cell = document.querySelector('#cal .day-incomplete').cloneNode(true);
+            cell.className = 'cell ' + cls + ' day-incomplete'; cell.style.cssText = 'position:fixed;top:0;left:0;width:62px';
+            const marker = cell.querySelector('.day-warning'); marker.className = 'day-warning st' + (cls === 'none' ? ' warn' : '');
+            document.getElementById('cal').append(cell);
+            const fg = getComputedStyle(marker.querySelector('svg')).color, bg = background(cell), x = luminance(rgb(fg)), y = luminance(bg);
+            const ratio = (Math.max(x, y) + .05) / (Math.min(x, y) + .05);
+            cell.remove(); return { cls, fg, bg, ratio };
+          });
+        }).toString()})()`);
+        check('partial-days', `${tag}: every computed partial icon contrast is at least 3:1`, contrasts.every(c => c.ratio >= 3), contrasts);
+      }
 
       for (const hasTrades of [true, false]) {
+        requireView('partial-days', hasTrades ? 'traded-detail' : 'empty-detail', viewport, theme);
         if (!hasTrades) await replace(empty, `${tag} empty`);
         const c = (await inspect()).find(c => c.day === partialTrade);
         if (!hasTrades) {
@@ -1846,6 +1906,7 @@ try {
         } else await shot(page, viewport, name, `Partial on 15 October: ${hasTrades ? 'exact money so far' : 'unknown amount and incomplete record'}`);
       }
 
+      requireView('partial-days', 'missing-handoff', viewport, theme);
       await replace(missing, `${tag} missing handoff`);
       const handoffBefore = await rects(page, SHIFT), handoffSlots = await rects(page, contentSlots);
       const handoffStale = (await inspect()).find(c => c.day === partialTrade);
@@ -1858,6 +1919,7 @@ try {
 
       // Same 99 trade rows before and after: adding Partial/so far cannot
       // change the fixed 36 px header or the settled phone sheet's geometry.
+      requireView('partial-days', 'large-summary', viewport, theme);
       await replace(largeFull, `${tag} full large summary`);
       if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
       const headerSelectors = viewport.mobile ? ['.dlg-h', '#sheetBody .dp-sum'] : ['.dp-head'];
@@ -1878,6 +1940,7 @@ try {
       if (viewport.mobile) { await viewShot(page, largeName, 'Worst partial amount so far; trade count yields first'); await key(page, 'Escape'); }
       else await shot(page, viewport, largeName, 'Worst partial amount so far in the fixed 36 px day header');
 
+      requireView('partial-days', 'empty-month', viewport, theme);
       await replace(emptyMonth, `${tag} no trades this month`);
       const emptyMonthProbe = await monthProbe();
       check('partial-days', `${tag}: an empty month with Partial says No trades recorded this month; hint fits`,
@@ -1887,6 +1950,7 @@ try {
 
       // Rev 5: 9 accepted codes render 8 sentences after FX dedup. All reason
       // variants use real ingress and the same worker/fallback paths above.
+      requireView('partial-days', 'nine-reasons', viewport, theme);
       await replace(reasons, `${tag} nine reasons`);
       const reasonRoot = viewport.mobile ? '#sheetBody' : '#daypanel';
       if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
@@ -1990,6 +2054,7 @@ try {
 
       for (const [record, suffix, sentence] of [[singleReason, 'single-reason', 'The trade history has a gap that covers this day.'],
         [counted, 'counted', "2\u00a0trades couldn't be matched to a desk."]]) {
+        requireView('partial-days', suffix, viewport, theme);
         await replace(record, `${tag} ${suffix}`);
         if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
         const detail = await reasonProbe(suffix);
@@ -2002,6 +2067,7 @@ try {
         else await shot(page, viewport, `${viewport.name}-${theme}-results-partial-${suffix}`, sentence);
       }
 
+      requireView('partial-days', 'three-reasons', viewport, theme);
       await replace(threeReasons, `${tag} one more reason`);
       if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
       const singular = await reasonProbe('three reasons collapsed or panel');
@@ -2061,6 +2127,7 @@ try {
       }
 
       if (viewport.mobile) {
+        requireView('partial-days', 'growing-reasons', viewport, theme);
         await replace(growingReasons, `${tag} growing reasons below cap`);
         const above = ['.dlg-h', '#sheetBody .dp-sum', '#sheetBody .trow', '#sheetBody .dp-note-lead',
           '#sheetBody .dp-note-lines > .dp-reason:nth-child(2)', '#sheetBody .dp-note-lines > .dp-reason:nth-child(3)'];
@@ -2150,6 +2217,7 @@ try {
       }
 
       for (const [record, kind] of [[partial, 'partial'], [filteredReasons, 'reasoned']]) {
+        requireView('partial-days', `desk-filtered-${kind}`, viewport, theme);
         await replace(record, `${tag} ${kind} reason`);
         await click(page, '#deskSeg [data-desk="joe"]');
         for (const day of [partialTrade, today]) {
@@ -2170,6 +2238,7 @@ try {
         }
         await click(page, '#deskSeg [data-desk="all"]');
       }
+      requireView('partial-days', 'today-without-reasons', viewport, theme);
       await replace(todayWithoutReasons, `${tag} today without explicit reasons`);
       for (const desk of ['all', 'joe', 'j']) {
         await click(page, `#deskSeg [data-desk="${desk}"]`);
@@ -2187,6 +2256,7 @@ try {
         if (viewport.mobile) await key(page, 'Escape');
       }
       await click(page, '#deskSeg [data-desk="all"]');
+      requireView('partial-days', 'today-reason', viewport, theme);
       await replace(reasons, `${tag} today reason`);
       await click(page, `#cal [data-day="${today}"]`);
       const todayDetail = await page.evaluate(`(() => { const root = document.querySelector(${JSON.stringify(reasonRoot)}); return { sum: root.querySelector('.dp-sum').innerText,
@@ -2201,6 +2271,7 @@ try {
       const todayDesk = reasons.trades.find(t => t.closedAt.startsWith(today)).desk;
       const emptyDesk = ['j', 'joe', 'joel'].find(d => d !== todayDesk);
       for (const emptyRow of [false, true]) {
+        requireView('partial-days', emptyRow ? 'today-no-trades' : 'today-empty-filtered', viewport, theme);
         if (emptyRow) {
           await click(page, '#deskSeg [data-desk="all"]');
           await replace(emptyToday, `${tag} empty today row`);
@@ -2227,6 +2298,7 @@ try {
     await retainedBoard.pushResults(retained.record);
     retainedBoard.setNow('2026-10-16T12:00:00.000Z');
     for (const viewport of viewports) for (const theme of THEMES) {
+      if (!view('partial-days', 'retained-midnight', viewport, theme)) continue;
       const injection = viewport.mobile && theme === 'dark'
         ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
       await configure(page, viewport, theme);
@@ -2247,6 +2319,7 @@ try {
     // and missing records share trade money, so geometry can be compared.
     await serve(null);
     for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      if (!view('missing-days', 'closed-open-recovery', viewport, theme)) continue;
       const tag = `${viewport.name} ${theme}`;
       const { board } = await designBoard('2026-10-16T12:00:00.000Z');
       const record = structuredClone(valid.results); delete record.receivedAt;
@@ -2337,8 +2410,10 @@ try {
   if (run('budget')) {
     // 7 · The Results render budget's CI guard (ADR §9; the reference budget is
     // measured on a reference device by scripts/budget-reference.mjs).
+    if (!view('budget', 'render')) throw new Error('Budget view must run in full mode');
     budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
   }
+  requireView('host-timezone', 'hosts');
   if (process.env.TZ) check('host-timezone', 'dedicated workers use the requested host zone',
     page.workerTimeZones.length > 0 && page.workerTimeZones.every(zone => zone === expectedTimeZone),
     { workerTimeZones: page.workerTimeZones, expectedTimeZone });
@@ -2348,6 +2423,8 @@ try {
 }
 
 const failed = results.filter(r => !r.ok);
+const inventoryErrors = viewRecorder.errors();
+for (const error of inventoryErrors) console.error(`P4 view inventory: ${error}`);
 const byAc = new Map();
 for (const r of results) { const e = byAc.get(r.ac) ?? { pass: 0, fail: 0 }; e[r.ok ? 'pass' : 'fail']++; byAc.set(r.ac, e); }
 const lines = [...byAc].sort().map(([ac, e]) => `| ${ac} | ${e.pass} | ${e.fail} |`);
@@ -2393,7 +2470,11 @@ before the first push the feed says no data received yet. One
 headless browser, run sequentially; reduced motion for stable geometry.
 Host and browser time zone: ${expectedTimeZone}; dedicated worker zones are checked too.
 Run mode: **${zoneSubset ? 'subset' : 'full'}**${process.env.JOED_P4_ONLY ? ' (focused by JOED_P4_ONLY)' : ''}.
-Selected scenarios (${selectedScenarios.length}/${P4_SCENARIOS.length}):
+Selected views: ${selectedViews.length}/${allViews.length}; static checks: ${viewSummary.checks}/${viewSummary.fullChecks} (${(100 * viewSummary.share).toFixed(2)}% of P4).
+${selectedViews.map(v => `- \`${v.name}\` — ${v.checks} static checks; ${viewRecorder.counts()[v.name] ?? 'not entered'} observed; zoneSensitive=${v.zoneSensitive}`).join('\n')}
+${inventoryErrors.length ? `View inventory errors:\n${inventoryErrors.map(e => `- ${e}`).join('\n')}\n` : ''}
+
+Selected groups (${selectedScenarios.length}/${P4_SCENARIOS.length}):
 ${selectedScenarios.map(s => `- \`${s.name}\` — ${s.reason}`).join('\n')}
 Compare with \`joed-19-joedesk-approved.html\` (Results).
 
@@ -2592,4 +2673,4 @@ ${budgetTrace ? resultsBudgetTable(budgetTrace, CI_GUARD) : 'Not run.\n'}
 ${shots.map(s => `- \`${s.file}\` — ${s.what}`).join('\n')}
 `);
 console.log(`${results.length - failed.length}/${results.length} browser checks passed; screenshots and index.md in ${QA_DIR}`);
-process.exit(failed.length ? 1 : 0);
+process.exit(failed.length || inventoryErrors.length ? 1 : 0);

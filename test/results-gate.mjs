@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { P4_SCENARIOS, validateP4Scenarios, selectP4Scenarios, parseResultsGateArgs } from '../scripts/results-gate-plan.mjs';
+import { P4_SCENARIOS, P4_VIEWS, P4_SUBSET_EXCEPTION, createP4Views, createP4ViewRecorder, p4ViewKey, validateP4Scenarios, validateP4Views, selectP4Scenarios, selectP4Views, summarizeP4Views, parseResultsGateArgs } from '../scripts/results-gate-plan.mjs';
 import { runResultsGate } from '../scripts/run-results-gate.mjs';
+import { VIEWPORTS, THEMES } from '../scripts/browser/shots.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 
 const p4 = readFileSync(new URL('../scripts/browser-p4.mjs', import.meta.url), 'utf8');
@@ -11,52 +12,130 @@ const names = scenarios => scenarios.map(s => s.name);
 const prArgs = ['--full', 'Europe/Vienna', '--subset', 'UTC', 'America/New_York'];
 const prPlan = [{ timeZone: 'Europe/Vienna', mode: 'full' }, { timeZone: 'UTC', mode: 'subset' }, { timeZone: 'America/New_York', mode: 'subset' }];
 
-test('P4 inventory covers every scenario and requires an explicit boolean zoneSensitive before browser startup', () => {
+test('P4 inventory covers executable groups and explicitly classifies every view before browser startup', () => {
   const executed = ['host-timezone', ...p4.matchAll(/if \(run\('([^']+)'\)\)/g)].map(entry => typeof entry === 'string' ? entry : entry[1]);
-  assert.deepEqual(names(P4_SCENARIOS), executed, 'new executable scenarios must declare metadata');
+  assert.deepEqual(names(P4_SCENARIOS), executed, 'new executable groups must declare metadata');
   assert.doesNotThrow(() => validateP4Scenarios(P4_SCENARIOS));
-  for (const scenario of P4_SCENARIOS) {
-    const { zoneSensitive, ...missing } = scenario;
+  assert.doesNotThrow(() => validateP4Views(P4_VIEWS));
+  for (const view of P4_VIEWS) {
+    const { zoneSensitive, ...missing } = view;
     for (const invalid of [missing, { ...missing, zoneSensitive: undefined }, { ...missing, zoneSensitive: 'true' }]) {
-      assert.throws(() => validateP4Scenarios(P4_SCENARIOS.map(s => s === scenario ? invalid : s)), /explicitly declare zoneSensitive/);
+      assert.throws(() => validateP4Views(P4_VIEWS.map(v => v === view ? invalid : v)), /explicitly declare zoneSensitive/);
+    }
+    if (['date', 'host'].includes(view.coverage)) {
+      assert.throws(() => validateP4Views(P4_VIEWS.map(v => v === view ? { ...v, zoneSensitive: false } : v)), /must be zoneSensitive/);
     }
   }
-  assert.throws(() => validateP4Scenarios([...P4_SCENARIOS, P4_SCENARIOS[0]]), /unique name/);
-  assert.throws(() => validateP4Scenarios(P4_SCENARIOS.map(s => s.name === 'host-timezone' ? { ...s, zoneSensitive: false } : s)), /host-timezone/);
-  assert.throws(() => validateP4Scenarios(P4_SCENARIOS.map(s => s.name === 'budget' ? { ...s, zoneSensitive: true } : s)), /budget/);
-  assert.ok(p4.indexOf('const selectedScenarios = selectP4Scenarios(') < p4.indexOf('const browser = await launch('));
+  assert.throws(() => validateP4Views([...P4_VIEWS, P4_VIEWS[0]]), /unique declared name/);
+  assert.throws(() => validateP4Views(P4_VIEWS.filter(v => v.group !== 'host-timezone')), /host-timezone/);
+  assert.throws(() => validateP4Views(P4_VIEWS.map(v => v.group === 'budget' ? { ...v, zoneSensitive: true } : v)), /budget/);
+  // Literal guards cannot introduce an undeclared view family. Dynamic names
+  // are the fixture names, the five gallery cases, and normal/wide-font cards.
+  for (const [, group, family] of p4.matchAll(/(?:view|requireView)\('([^']+)', '([^']+)'/g)) {
+    assert.ok(P4_VIEWS.some(v => v.group === group && v.family === family), `${group}/${family}`);
+  }
+  const declaredFamilies = new Set([...p4.matchAll(/(?:view|requireView)\('([^']+)', '([^']+)'/g)].map(([, group, family]) => `${group}/${family}`));
+  for (const [group, families] of [
+    ['design', ['day', 'month-joe', 'all', 'ytd-joel', 'month']],
+    ['fixtures', ['scratches', 'no-losers', 'drawdown', 'empty']],
+    ['cards', ['normal', 'wide-font']],
+    ['partial-days', ['traded-detail', 'empty-detail', 'single-reason', 'counted', 'desk-filtered-partial', 'desk-filtered-reasoned', 'today-empty-filtered', 'today-no-trades']],
+  ]) for (const family of families) {
+    assert.ok(p4.includes(`'${family}'`) || family.startsWith('desk-filtered-'), family);
+    declaredFamilies.add(`${group}/${family}`);
+  }
+  for (const v of P4_VIEWS) assert.ok(declaredFamilies.has(`${v.group}/${v.family}`), `unwired inventory entry: ${v.name}`);
+  for (const [group, family] of [['design', 'matrix'], ['ingress', 'live-stale-recovery'], ['missing-days', 'closed-open-recovery']]) {
+    for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      assert.ok(P4_VIEWS.some(v => v.name === p4ViewKey(group, family, viewport.name, theme)), 'shared viewport/theme additions need metadata');
+    }
+  }
+  const matrixLoops = [...p4.matchAll(/for \(const viewport of (?:VIEWPORTS|viewports)\) for \(const theme of THEMES\) \{([^\n]*\n[^\n]*)/g)];
+  assert.equal(matrixLoops.length, 8);
+  for (const [loop] of matrixLoops) assert.match(loop, /if \(!view\('/, 'every width/theme view needs a selection guard');
+  assert.ok(p4.indexOf('const selectedViews = selectP4Views(') < p4.indexOf('const browser = await launch('));
 });
 
-test('P4 subset keeps host zones, every date-bearing group and all 14 differing baseline screenshots', () => {
-  const subset = new Set(names(selectP4Scenarios({ zoneSubset: true })));
-  for (const name of ['host-timezone', 'design', 'fixtures', 'states', 'vienna', 'r1', 'trade-amount',
-    'phone-calendar', 'ingress', 'period-hint', 'partial-days', 'missing-days']) assert.ok(subset.has(name), name);
-  assert.ok(subset.size > 0 && subset.size < P4_SCENARIOS.length);
-  assert.deepEqual(P4_SCENARIOS.filter(s => !subset.has(s.name)).map(s => s.name), ['cards', 'budget']);
-  // Run 39793917962: several differences occur at only one width/theme.
-  // Keep their complete parent scenarios, including every other screenshot
-  // and assertion, rather than treating render noise as a coverage exemption.
+test('P4 subset keeps host zones, date-bearing representatives and all 14 differing screenshot variants', () => {
+  const selected = selectP4Views({ zoneSubset: true });
+  const subset = new Set(names(selected));
+  for (const group of P4_SCENARIOS.filter(s => s.zoneSensitive)) {
+    assert.ok(selected.some(v => v.group === group.name && ['host', 'date'].includes(v.coverage)), group.name);
+  }
+  // Run 39793917962: retain the exact width/theme variants, including the
+  // single-variant differences. Matching screenshot bytes do not exempt dates.
   const differing = [
-    ['1024-dark-results-partial-desk-filtered-partial-today', 'partial-days'],
-    ['1024-dark-results-partial-desk-filtered-reasoned-today', 'partial-days'],
-    ['1024-dark-results-partial-today-no-trades', 'partial-days'],
-    ['1024-dark-results-partial-trade-panel', 'partial-days'],
-    ['1024-light-results-partial-counted', 'partial-days'],
-    ['1024-light-results-partial-single-reason', 'partial-days'],
-    ['1440-dark-results-ingress-live', 'ingress'],
-    ['1440-dark-results-partial-desk-filtered-reasoned-today', 'partial-days'],
-    ['1440-dark-results-partial-single-reason', 'partial-days'],
-    ['1440-light-results-day', 'design'],
-    ['1440-light-results-ingress-live', 'ingress'],
-    ['1440-light-results-kept-mismatch', 'states'],
-    ['1440-light-results-stale', 'states'],
-    ['390-dark-results-ingress-live', 'ingress'],
+    ['1024-dark-results-partial-desk-filtered-partial-today', 'partial-days', 'desk-filtered-partial'],
+    ['1024-dark-results-partial-desk-filtered-reasoned-today', 'partial-days', 'desk-filtered-reasoned'],
+    ['1024-dark-results-partial-today-no-trades', 'partial-days', 'today-no-trades'],
+    ['1024-dark-results-partial-trade-panel', 'partial-days', 'traded-detail'],
+    ['1024-light-results-partial-counted', 'partial-days', 'counted'],
+    ['1024-light-results-partial-single-reason', 'partial-days', 'single-reason'],
+    ['1440-dark-results-ingress-live', 'ingress', 'live-stale-recovery'],
+    ['1440-dark-results-partial-desk-filtered-reasoned-today', 'partial-days', 'desk-filtered-reasoned'],
+    ['1440-dark-results-partial-single-reason', 'partial-days', 'single-reason'],
+    ['1440-light-results-day', 'design', 'day'],
+    ['1440-light-results-ingress-live', 'ingress', 'live-stale-recovery'],
+    ['1440-light-results-kept-mismatch', 'states', 'kept-mismatch'],
+    ['1440-light-results-stale', 'states', 'stale-retained'],
+    ['390-dark-results-ingress-live', 'ingress', 'live-stale-recovery'],
   ];
-  for (const [screenshot, scenario] of differing) assert.ok(subset.has(scenario), screenshot);
-  assert.deepEqual(names(selectP4Scenarios()), names(P4_SCENARIOS));
+  for (const [screenshot, group, family] of differing) {
+    const [width, theme] = screenshot.split('-');
+    assert.ok(subset.has(p4ViewKey(group, family, width, theme)), screenshot);
+  }
+  assert.deepEqual(selectP4Views(), P4_VIEWS, 'full mode drops no views or checks');
   assert.deepEqual(names(selectP4Scenarios({ zoneSubset: true, only: ['vienna', 'budget'] })), ['host-timezone', 'vienna']);
   assert.deepEqual(names(selectP4Scenarios({ only: ['budget'] })), ['host-timezone', 'budget']);
-  assert.throws(() => selectP4Scenarios({ only: ['typo'] }), /Unknown P4 scenario/);
+  assert.throws(() => selectP4Views({ only: ['typo'] }), /Unknown P4 scenario/);
+  // A selected group contains both included and omitted views; group-level
+  // zoneSensitive must never override those individual declarations.
+  for (const group of ['design', 'trade-amount', 'period-hint', 'partial-days']) {
+    assert.ok(P4_VIEWS.some(v => v.group === group && !v.zoneSensitive));
+    assert.ok(selected.some(v => v.group === group));
+  }
+  const tradeRows = selected.filter(v => v.group === 'trade-amount' && v.family === 'rows');
+  assert.deepEqual(names(tradeRows), ['trade-amount/rows/1440/light']);
+});
+
+test('P4 static counts reconcile to the baseline and record the honest exception to the 30% target', t => {
+  const full = summarizeP4Views(P4_VIEWS), subset = summarizeP4Views(selectP4Views({ zoneSubset: true }));
+  assert.equal(full.checks, 4954);
+  assert.equal(subset.checks, 4610);
+  assert.ok(subset.checks < 4936, 'per-view selection improves on the 4936-check group subset');
+  if (subset.share > .3) {
+    assert.match(P4_SUBSET_EXCEPTION, /Date-bearing matrix checks/);
+    assert.match(P4_SUBSET_EXCEPTION, /period hints, partial\/today reasons, missing days/);
+    assert.equal(subset.checks, P4_VIEWS.filter(v => ['date', 'host'].includes(v.coverage)).reduce((n, v) => n + v.checks, 0));
+  } else assert.ok(subset.share <= .3);
+  // New anonymized fixtures join every declared viewport and all their checks.
+  const extended = createP4Views(['real-1']);
+  assert.doesNotThrow(() => validateP4Views(extended));
+  assert.equal(extended.length - P4_VIEWS.length, 5);
+  assert.equal(summarizeP4Views(extended).checks - full.checks, 104);
+  assert.ok(selectP4Views({ zoneSubset: true }, extended).filter(v => v.family === 'real-1').every(v => v.zoneSensitive));
+  t.diagnostic(JSON.stringify({ views: subset.views, fullViews: full.views, checks: subset.checks, share: subset.share, groups: subset.groups }));
+});
+
+test('P4 observed view counts detect dropped checks, omitted views and unselected work', () => {
+  const views = selectP4Views({ zoneSubset: true });
+  const recorder = createP4ViewRecorder(views);
+  assert.throws(() => recorder.record(), /outside a declared view/);
+  assert.throws(() => recorder.enter('budget/render'), /Unselected P4 view/);
+  for (const v of views) {
+    recorder.enter(v.name);
+    recorder.record(v.checks);
+  }
+  assert.deepEqual(recorder.errors(), []);
+  // Re-entering host checks later accumulates them rather than losing history.
+  recorder.enter(views[0].name);
+  recorder.record();
+  assert.match(recorder.errors().join('\n'), /expected 3 checks; observed 4/);
+  const incomplete = createP4ViewRecorder(views);
+  incomplete.enter(views[0].name);
+  incomplete.record(2);
+  assert.match(incomplete.errors().join('\n'), /expected 3 checks; observed 2/);
+  assert.match(incomplete.errors().join('\n'), /view not entered/);
 });
 
 test('Results gate CLI preserves positional/default full runs and parses explicit full/subset groups', () => {
@@ -94,10 +173,17 @@ test('Results gate launches the planned modes sequentially with isolated zone ar
       assert.ok(index.includes(`| ${run.timeZone} | ${run.mode} |`));
       assert.ok(index.includes(`[zone index](${run.timeZone.replaceAll('/', '-')}/index.md)`));
       const section = index.split(`## ${run.timeZone} · ${run.mode}\n`)[1].split('\n## ')[0];
-      assert.equal(section.includes('`budget`'), run.mode === 'full');
-      for (const name of names(selectP4Scenarios({ zoneSubset: run.mode === 'subset' }))) assert.ok(section.includes(`\`${name}\``));
+      const views = selectP4Views({ zoneSubset: run.mode === 'subset' });
+      const summary = summarizeP4Views(views);
+      assert.equal(section.includes('`budget/render`'), run.mode === 'full');
+      for (const name of names(views)) assert.ok(section.includes(`\`${name}\``));
+      assert.ok(index.includes(`| ${run.timeZone} | ${run.mode} | ${views.length} | ${summary.checks} | ${(100 * summary.share).toFixed(2)}% |`));
+      assert.equal(section.includes('`trade-amount/rows/390/dark`'), run.mode === 'full');
     }
     assert.equal((index.match(/\| passed \|/g) ?? []).length, 3);
+    assert.ok(index.includes('4610/4954 checks (93.06% of P4)'));
+    assert.ok(index.includes(P4_SUBSET_EXCEPTION));
+    for (const g of summarizeP4Views(P4_VIEWS).groups) assert.ok(index.includes(`| ${g.name} | ${g.sensitive} | ${g.independent} |`));
   }
 });
 
@@ -117,7 +203,7 @@ test('Results gate validates all zones before launch and stops with the failing 
     } }), childStatus ?? 1);
     assert.equal(launched, 1);
     const index = readFileSync(join(qaRoot, 'index.md'), 'utf8');
-    assert.match(index, /\| Europe\/Vienna \| full \| \d+ \| failed \|/);
-    assert.match(index, /\| UTC \| subset \| \d+ \| not run \|/);
+    assert.match(index, /\| Europe\/Vienna \| full \| \d+ \| 4954 \| 100\.00% \| failed \|/);
+    assert.match(index, /\| UTC \| subset \| \d+ \| 4610 \| 93\.06% \| not run \|/);
   }
 });
