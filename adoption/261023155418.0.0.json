@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261023155418.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 30,
+  "source": {
+    "commit": "d4eb662795ff6d0e910aa20797995070b26e5554",
+    "tree": "f714c10ffe11c4ed9b9f715d994b721b216de943"
+  },
+  "release_set_sha256": "2eb97014b4fb6aaa114c87586d9a10f024ad8deea6545c9bac5a45d39a9ee47c",
+  "image_digest": "sha256:3d1dbe28180174159baaf2725c7acb7d7508d3059fec49d9af044b34bfc0bcc8",
+  "contract_set_sha256": "000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5",
+  "validation_run_id": "40036561843",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-10-24T03:46:42Z",
+    "operator_ticket": "OPS-354",
+    "rollback_reference": "OPS-354 / JOED-78: revert the csb0 board re-pin (nixcfg #1115, 500f8574) and switch csb0; pull_policy never reuses the retained sequence-29 image; v2 data store unchanged (board-only switch); pre-switch board backup taken 2026-10-24T03:46:13Z"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-10-24T03:48:17Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-10-24T03:47:46Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-10-24T03:47:43Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-10-24T03:48:17Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-10-24T03:48:17Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; performed as a GET-only actor look of the served shell and app (UX 2/3 status control, percent formatting, disclosures and phone breakpoint present) plus the agm2 CI screenshots of the same build (main run 40036561843)"
+  },
+  "adopted_at": "2026-10-24T03:53:10Z"
+}
