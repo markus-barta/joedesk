@@ -10,6 +10,7 @@ import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, go as goPage, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
 import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
+import { focusTermTips } from './browser/term-focus.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
@@ -277,33 +278,8 @@ async function everyTerm(page, viewport, tag, scope = '') {
   // Programmatic activeElement changes in an unfocused headless page need
   // not dispatch native focus events. Give this keyboard test page focus.
   await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
-  const focused = await page.evaluate(`(async () => {
-    const out = [], heads = ${JSON.stringify(Object.fromEntries(Object.entries(TERMS).map(([key, entry]) => [key, entry[0]])))};
-    const visible = () => [...document.querySelectorAll(${JSON.stringify(`${scope} [data-term]`)})].filter(__audit.visible);
-    // A tick can rebuild a section between terms. Keep identities (including
-    // repeated terms), not nodes which may be detached by the next frame.
-    const counts = new Map();
-    const terms = visible().map(t => { const term = t.dataset.term, index = counts.get(term) ?? 0; counts.set(term, index + 1); return { term, index }; });
-    for (const { term, index } of terms) {
-      const until = Date.now() + 2000;
-      let seen, t;
-      do {
-        t = visible().filter(e => e.dataset.term === term)[index];
-        if (t && document.activeElement !== t) t.focus({ preventScroll: true });
-        const tip = document.getElementById('tip');
-        const conditions = { pageFocused: document.hasFocus(), connected: Boolean(t?.isConnected), focused: Boolean(t && document.activeElement === t),
-          tipOpen: tip.classList.contains('on'), ownHead: tip.querySelector('b')?.textContent === heads[term],
-          expanded: t?.getAttribute('aria-expanded') === 'true' };
-        seen = { term, index, head: tip.querySelector('b')?.textContent ?? null, expectedHead: heads[term],
-          expanded: t?.getAttribute('aria-expanded') ?? null, conditions, failed: Object.keys(conditions).filter(k => !conditions[k]) };
-        if (!seen.failed.length || Date.now() >= until) break;
-        await new Promise(r => setTimeout(r, 25));
-      } while (true);
-      out.push(seen);
-      t?.blur();
-    }
-    return out;
-  })()`);
+  const focused = await page.evaluate(`(${focusTermTips.toString()})(${JSON.stringify(scope)},
+    ${JSON.stringify(Object.fromEntries(Object.entries(TERMS).map(([key, entry]) => [key, entry[0]])))})`);
   const badFocus = focused.filter(f => f.failed.length);
   check('AC-39', `${tag}: all ${focused.length} terms explain themselves on keyboard focus`, focused.length > 0 && !badFocus.length,
     { failed: focused.length ? badFocus.slice(0, 4) : ['no visible terms'], count: focused.length });

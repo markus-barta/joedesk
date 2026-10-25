@@ -9,6 +9,7 @@ import { runInNewContext } from 'node:vm';
 import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
 import { CI_GUARD, REFERENCE_BUDGET, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
+import './browser-settled.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
