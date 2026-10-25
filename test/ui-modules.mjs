@@ -7,8 +7,10 @@ import * as nodeModule from 'node:module';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
-import { CI_GUARD, REFERENCE_BUDGET, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
+import { CI_GUARD, REFERENCE_BUDGET, TIMING_GUARDS, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
+import { createGate } from '../scripts/browser/gate.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
+import './browser-settled.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -30,14 +32,16 @@ const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus, headerHealth, executorProblem, heroLeft, keptHtml, positionsHtml } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
+const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
+const { deskCard } = await builders('desk.js', ['deskCard']);
 const { createFeed } = await import('../public/joe/feed.js');
 const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
 const { readdirSync } = await import('node:fs');
 const { periodOf, resultsToday } = await import('../public/joe/results.js');
 const { TERMS } = await import('../public/joe/terms.js');
 const { singleMissingDesk, coupledUnavailable } = await import('../scripts/browser/board.mjs');
-const { switchSetSnapshot } = await import('../scripts/browser/settings-fixtures.mjs');
+const { switchSetSnapshot, cashSessionSnapshot } = await import('../scripts/browser/settings-fixtures.mjs');
 
 const read = file => JSON.parse(readFileSync(new URL(`../fixtures/${file}`, import.meta.url)));
 const valid = read('valid.json');
@@ -219,7 +223,22 @@ test('position rows: null values expose their reasons visibly and in accessible 
   const kept = keptHtml(ctx), positions = positionsHtml(ctx).html;
   for (const label of ['Quantity', 'Last price', 'Worth']) for (const why of ['not exact yet', 'not reported by the broker']) {
     assert.ok(kept.includes(`title="${label}: not reported · ${why}" aria-label="${label}: not reported · ${why}">—</span>`));
-    assert.ok(kept.includes(`${label}: ${why}`));
+    assert.ok(kept.includes(`${label}: ${why}`) || htmlDocument(kept).querySelector('.pstate').textContent.includes(why), 'reason remains visible locally or once in the section');
+  }
+  const keptDoc = htmlDocument(kept), section = keptDoc.querySelector('.pstate').textContent;
+  for (const row of keptDoc.querySelectorAll('.prow')) {
+    const why = row.getAttribute('data-keep') === 'SXR8' ? 'not exact yet' : 'not reported by the broker';
+    const reasons = row.querySelector('.position-reasons')?.textContent ?? '';
+    for (const label of ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result']) {
+      assert.ok(reasons.includes(`${label}: ${why}`) || section.includes(why), `${label} is named in its row reason list unless the section explains it`);
+    }
+    assert.ok(row.querySelector('.position-notes'), 'every row keeps the same detail slot');
+    if (section.includes(why)) {
+      assert.equal(row.querySelector('.position-day')?.textContent, 'Today’s result: —');
+      assert.equal(row.querySelector('.position-day .position-value')?.getAttribute('aria-label'), `Today’s result: not reported · ${why}`);
+    } else {
+      assert.equal(row.querySelector('.position-day'), null, 'independent today’s result stays in the field list');
+    }
   }
   assert.match(positions, /title="Last price: not reported · not reported by the broker"/);
   assert.match(positions, /class="position-reasons">Last price: not reported by the broker/);
@@ -273,7 +292,8 @@ test('unmapped positions: visible reason, honest row count, neutral identity, la
   for (const field of ['Quantity', 'Last price', 'Worth', 'Open result']) {
     assert.ok(row.includes(`title="${field}: not reported · not exact yet" aria-label="${field}: not reported · not exact yet">—</span>`));
   }
-  for (const field of ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result']) assert.ok(row.includes(`${field}: not exact yet`));
+  assert.match(htmlDocument(rendered.html).querySelector('.pstate').textContent, /Prices unavailable · not exact yet/);
+  assert.doesNotMatch(row, /class="position-reasons"/, 'matching row reasons belong to the section; the unmatched desk explanation stays in the row');
   assert.equal(rendered.sub, '5 open · 1 not matched to a desk · each in its own currency');
   assert.equal(Number.parseInt(rendered.sub), [...rendered.html.matchAll(/<div class="prow" data-desk=/g)].length,
     'open count matches every listed row, including legacy and unmapped positions');
@@ -921,7 +941,9 @@ test('isolation: equity and total result unavailable together never show a fresh
 test('cells: fresh, stale with age, not reported and broken with reason all read plainly', () => {
   assert.equal(cellView({ state: 'fresh', value: { amount: '4.75', currency: 'EUR' }, reason: null }, 'k', { caption: 'after fees' }).caption, 'after fees');
   assert.equal(cellView({ state: 'not reported', value: null, reason: null }, 'k').caption, 'Not reported');
-  assert.equal(cellView({ state: 'broken', value: null, reason: 'upstream_lost' }, 'k').caption, 'Unavailable · broker connection down');
+  const unavailable = { state: 'broken', value: null, reason: 'upstream_lost' };
+  assert.equal(cellView(unavailable, 'k').caption, 'Unavailable · broker connection down', 'a standalone cell still explains its reason');
+  assert.equal(cellView(unavailable, 'k', { sharedReason: sharedSectionReason([unavailable, unavailable]) }).caption, 'Unavailable', 'a section supplies the repeated reason once');
   assert.equal(cellView(undefined, 'k').html, '<span class="bn muted">—</span>');
   for (const reason of JSON.parse(readFileSync(new URL('../contracts/reason.schema.json', import.meta.url))).enum) {
     assert.ok(health.CELL_REASON[reason], `closed reason ${reason} has plain copy`);
@@ -992,11 +1014,178 @@ test('desk cards: every affected number keeps its own state, age and reason', ()
   const text = lines.replace(/<[^>]+>/g, '');
   assert.match(text, /Today: unavailable · today’s result not available/);
   assert.match(text, /Open positions: last good, 2\smin ago · broker connection down/);
-  assert.match(text, /Since 10 Sep: last good, 5\smin ago · broker connection down/);
+  assert.match(text, /Since 10 Sep: last good, 5\smin ago$/);
+  assert.equal(text.match(/broker connection down/g).length, 1, 'the shared reason stays visible once while both ages remain');
   const same = cardStatus('j', [['Today', cell('stale', 'snapshot_stale', '1', '2026-10-14T17:43:30.000Z', false)], ['Open positions', cell('stale', 'snapshot_stale', '1', '2026-10-14T17:43:30.000Z', false)],
     ['Since start', cell('fresh', null, '1', '2026-10-14T17:44:50.000Z')]]);
   assert.match(same.replace(/<[^>]+>/g, ''), /^Today and Open positions: as of 1\smin ago · updates are late$/);
   assert.equal(cardStatus('j', [['Today', cell('fresh', null, '1', now)], ['Open positions', cell('fresh', null, '1', now)], ['Since start', cell('fresh', null, '1', now)]]), '');
+});
+
+test('section reasons: repeated readable reasons share once; single and fresh reasons stay local', () => {
+  const broken = reason => ({ state: 'broken', value: null, reason });
+  assert.equal(sharedSectionReason([broken('upstream_lost'), broken('gateway_down')]), 'broker connection down');
+  assert.equal(sharedSectionReason([broken('upstream_lost'), broken('not_exact_yet')]), null);
+  assert.equal(sharedSectionReason([broken('upstream_lost'), { ...broken('upstream_lost'), state: 'fresh' }, undefined]), null);
+  const cells = [broken('not_exact_yet'), broken('upstream_lost'), broken('gateway_down')];
+  const before = structuredClone(cells);
+  assert.equal(sharedSectionReason(cells), 'broker connection down');
+  assert.deepEqual(cells, before, 'presentation never changes selector states');
+  const summary = disclosureProblem(cells.map((cell, i) => [`Field ${i}`, cell]));
+  assert.equal(summary.detail.match(/broker connection down/g).length, 1);
+  assert.match(summary.detail, /Field 0: unavailable · not exact yet/);
+});
+
+test('broker down: Positions and Kept show one section reason and accessible field-specific dashes', () => {
+  const ctx = board(fixture('a-gateway-up-but-dead'));
+  for (const [name, html] of [['positions', positionsHtml(ctx).html], ['kept', keptHtml(ctx)]]) {
+    const doc = htmlDocument(html);
+    assert.equal(positionSectionReason(ctx.states[name]), 'broker connection down');
+    assert.match(doc.querySelector('.pstate').textContent, /Prices unavailable · broker connection down/);
+    assert.equal(doc.textContent.match(/broker connection down/g).length, 1, name);
+    assert.equal(doc.querySelectorAll('.position-reasons').length, 0, 'no repeated per-row reason list');
+    for (const dash of doc.querySelectorAll('.position-value')) {
+      assert.match(dash.getAttribute('aria-label'), /^(Last price|Worth|Today’s result|Open result): not reported · broker connection down$/);
+      assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
+      assert.equal(dash.textContent, '—');
+    }
+    const summary = disclosureProblem([[name, ctx.states[name]], ...rowProblems(ctx.states[name])]);
+    assert.match(summary.text, /broker connection down/);
+    assert.equal(summary.sharedReason, 'broker connection down', 'expanded summary can yield to the section line without losing the collapsed warning');
+  }
+});
+
+test('broker down: a different position reason remains on its own row and dash', () => {
+  const ctx = board(fixture('a-gateway-up-but-dead'));
+  for (const name of ['positions', 'kept']) {
+    ctx.states[name].value[0].reasons = { mark: 'not_exact_yet' };
+    const doc = htmlDocument(name === 'positions' ? positionsHtml(ctx).html : keptHtml(ctx));
+    assert.equal(doc.textContent.match(/broker connection down/g).length, 1);
+    assert.equal(doc.querySelectorAll('.position-reasons').length, 1);
+    assert.equal(doc.querySelector('.position-reasons').textContent, 'Last price: not exact yet');
+    assert.ok(doc.querySelectorAll('.position-value').some(dash => dash.getAttribute('aria-label') === 'Last price: not reported · not exact yet'));
+  }
+});
+
+test('position detail slots survive fresh, stale, broker-down and cash-session snapshots', () => {
+  const fresh = structuredClone(valid.data), cash = cashSessionSnapshot(ingress(fresh));
+  const context = (data, now) => ({ feeds: { data: { value: data } }, states: panelStates({ data: { value: data } }, now), now });
+  const contexts = [context(fresh, fresh.receivedAt), context(fresh, at(fresh.receivedAt, 90)),
+    board(fixture('a-gateway-up-but-dead')), context(cash, cash.generatedAt)];
+  for (const ctx of contexts) for (const name of ['positions', 'kept']) {
+    const doc = htmlDocument(name === 'positions' ? positionsHtml(ctx).html : keptHtml(ctx));
+    const rows = doc.querySelectorAll('.prow:not(.hd)');
+    assert.equal(rows.length, ctx.states[name].value.length);
+    for (const row of rows) {
+      assert.equal(row.querySelectorAll('.position-notes').length, 1, 'a missing field never inserts a new detail box');
+      assert.equal(row.querySelectorAll('.position-mobile').length, 1, 'a shorter dash never removes the phone summary box');
+      const notes = row.querySelector('.position-notes');
+      assert.equal(notes.getAttribute('aria-hidden'), notes.textContent ? null : 'true');
+      if (name === 'kept') assert.match(row.querySelector('.position-summary').textContent, /Long .* · last price /);
+    }
+  }
+});
+
+test('position reasons: today’s result keeps its name and dash when its reason is shared', () => {
+  const ctx = board(fixture('a-gateway-up-but-dead'));
+  for (const name of ['positions', 'kept']) {
+    const render = () => htmlDocument(name === 'positions' ? positionsHtml(ctx).html : keptHtml(ctx));
+    for (const row of render().querySelectorAll('.prow:not(.hd)')) {
+      assert.equal(row.querySelector('.position-reasons'), null, 'matching field reasons belong to the section');
+      const field = row.querySelector('.position-day'), dash = field?.querySelector('.position-value');
+      assert.equal(field?.textContent, 'Today’s result: —');
+      assert.equal(dash?.getAttribute('aria-label'), 'Today’s result: not reported · broker connection down');
+      assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
+      assert.equal(row.querySelector('.position-notes').getAttribute('aria-hidden'), null, 'populated detail stays accessible');
+      assert.doesNotMatch(row.textContent, /broker connection down/, 'the section owns its shared reason');
+      for (const dash of row.querySelectorAll('.position-value')) {
+        assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+        assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
+      }
+    }
+    ctx.states[name].value[0].reasons = { dayPnl: 'not_exact_yet' };
+    const different = render().querySelector('.prow:not(.hd)');
+    assert.equal(different.querySelector('.position-reasons').textContent, 'Today’s result: not exact yet');
+    assert.equal(different.querySelector('.position-day'), null);
+    assert.doesNotMatch(different.textContent, /broker connection down/);
+    delete ctx.states[name].value[0].dayPnl;
+    assert.equal(render().querySelector('.prow:not(.hd) .position-reasons'), null, 'omitted optional result has no missing-field reason');
+    assert.equal(render().querySelector('.prow:not(.hd) .position-notes').textContent, '');
+    assert.equal(render().querySelector('.prow:not(.hd) .position-notes').getAttribute('aria-hidden'), 'true', 'empty detail reserve stays out of accessibility');
+    ctx.states[name].value[0].dayPnl = { amount: '1.25', currency: 'EUR' };
+    assert.equal(render().querySelector('.prow:not(.hd) .position-reasons'), null, 'valued optional result has no missing-field reason');
+    assert.equal(render().querySelector('.prow:not(.hd) .position-notes').textContent, '');
+  }
+});
+
+test('broker down: opened Account explains its figures once inside its own body', () => {
+  for (const cold of [false, true]) {
+    const ctx = board(fixture('a-gateway-up-but-dead'), { cold });
+    const doc = htmlDocument(heroLeft(ctx)), body = doc.querySelector('#accountDetail');
+    for (const sizing of body.querySelectorAll('.cash-sizing')) sizing.remove();
+    assert.equal(body.querySelector('.account-state').textContent, 'Numbers unavailable · broker connection down');
+    assert.equal(body.querySelector('.account-state').getAttribute('aria-hidden'), null, 'the populated state line stays accessible');
+    assert.equal(body.textContent.match(/broker connection down/g).length, 1);
+    assert.ok(body.querySelector('.account-state use'), 'the body state retains its icon');
+    assert.equal(doc.querySelector('.collapsed-summary .summary-text').textContent.match(/broker connection down/g).length, 1);
+    assert.doesNotMatch(doc.querySelector('.expanded-summary')?.textContent ?? '', /broker connection down/);
+    ctx.states['today.openPnl'] = { state: 'broken', value: null, reason: 'not_exact_yet' };
+    assert.match(htmlDocument(heroLeft(ctx)).querySelector('#accountDetail').textContent, /Unavailable · not exact yet/);
+  }
+  const ctx = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
+  for (const seconds of [0, 90]) {
+    ctx.states = panelStates(ctx.feeds, at(valid.data.receivedAt, seconds));
+    const line = htmlDocument(heroLeft(ctx)).querySelector('.account-state');
+    if (seconds === 0) {
+      assert.equal(line.textContent, '', 'fresh figures keep an empty phone state reserve');
+      assert.equal(line.getAttribute('aria-hidden'), 'true', 'the empty reserve is hidden from accessibility');
+    } else {
+      assert.match(line.textContent, /updates are late/);
+      assert.equal(line.getAttribute('aria-hidden'), null, 'stale copy uses the same accessible state box');
+    }
+  }
+});
+
+test('broker down: hero, Cash and each desk explain the reason once and keep mixed ages', () => {
+  const ctx = board(fixture('a-gateway-up-but-dead'));
+  ctx.states['today.totalPnl'].ageSeconds = 150;
+  ctx.states['today.openPnl'].ageSeconds = 90;
+  const doc = htmlDocument(heroLeft(ctx));
+  assert.equal(doc.querySelector('.board-caption').textContent, 'Numbers unavailable · broker connection down');
+  assert.doesNotMatch(doc.querySelector('.say').textContent, /broker connection down/);
+  assert.match(doc.querySelector('[data-cell="hero.since"] .account-caption').children[0].textContent, /Last good value, 2\smin ago$/);
+  assert.match(doc.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, /Last good value, 1\smin ago$/);
+  assert.equal(doc.querySelector('.cash-reason').textContent, 'not reported');
+  assert.match(doc.querySelector('[data-cash="hero.cash"]').getAttribute('aria-label'), /Cash not reported · broker connection down/);
+  for (const caption of doc.querySelectorAll('.account-caption')) assert.doesNotMatch(caption.children[0].textContent, /broker connection down/);
+  assert.equal(doc.querySelector('.disclosure-warning .vh').textContent.match(/broker connection down/g).length, 1, 'collapsed Account retains one reason');
+  for (const id of ['j', 'joe', 'joel']) {
+    ctx.states[`desks.${id}.totalPnl`].ageSeconds = 150;
+    const card = htmlDocument(deskCard(ctx, id, 10, false));
+    const status = card.querySelector('.mini-label').textContent;
+    assert.equal(status.match(/broker connection down/g).length, 1, id);
+    assert.match(status, /Since start: last good, 2\smin ago$/);
+    const compact = htmlDocument(compactDesk(ctx, id));
+    assert.equal(compact.querySelector('.summary-text').textContent.match(/broker connection down/g).length, 1);
+    assert.equal(compact.querySelector('.vh').textContent.match(/broker connection down/g).length, 1);
+    assert.match(compact.querySelector('.expanded-summary .vh').textContent, /History: stale · updates are late/);
+    assert.match(compact.querySelector('.expanded-summary .vh').textContent, /Check-in: stale/);
+    assert.doesNotMatch(compact.querySelector('.expanded-summary .vh').textContent, /broker connection down/, 'independent warnings survive expansion without repeating the shared outage');
+    assert.equal(compact.querySelectorAll('.compact-state').length, 2);
+  }
+  ctx.states['today.openPnl'] = { state: 'broken', value: null, reason: 'not_exact_yet' };
+  const different = htmlDocument(heroLeft(ctx));
+  assert.equal(different.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Unavailable · not exact yet');
+  assert.equal(different.querySelector('[data-cell="hero.open"] .bn').getAttribute('aria-label'), 'Open positions: not reported · not exact yet');
+  const cold = board(fixture('a-gateway-up-but-dead'), { cold: true });
+  const coldHero = htmlDocument(heroLeft(cold));
+  assert.equal(coldHero.querySelector('.board-caption').textContent, 'Numbers unavailable · broker connection down');
+  for (const dash of coldHero.querySelectorAll('[data-cell] .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+  for (const id of ['j', 'joe', 'joel']) {
+    const card = htmlDocument(deskCard(cold, id, 10, false));
+    assert.equal(card.querySelector('.mini-label').textContent, 'Numbers: unavailable · broker connection down');
+    for (const dash of card.querySelectorAll('.dnums .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+  }
 });
 
 test('cold start: without the server clock every panel still shows its own state and reason', async () => {
@@ -1338,27 +1527,28 @@ test('browser budget: setup stays separate while boundary-crossing and live task
   assert.deepEqual(details[3].frames, []);
 });
 
-test('browser budget: a task-only breach then clean passes after one re-measure', () => {
-  const first = { patchBudget: true, historyBudget: true, taskBudget: false };
-  const clean = { ...first, taskBudget: true };
-  assert.deepEqual(decideTaskGuard(first, null, CI_GUARD), { ok: false, remeasure: true, remeasured: false, attempts: 1 });
-  assert.deepEqual(decideTaskGuard(first, clean, CI_GUARD), { ok: true, remeasure: false, remeasured: true, attempts: 2 });
-  assert.deepEqual(decideTaskGuard(clean, null, CI_GUARD), { ok: true, remeasure: false, remeasured: false, attempts: 1 });
-  assert.equal(first.taskBudget, false, 'the first breach is retained');
-});
-
-test('browser budget: a reproduced task breach or any second-attempt failure is final', () => {
-  const first = { patchBudget: true, historyBudget: true, taskBudget: false };
-  for (const second of [first, { ...first, taskBudget: true, patchBudget: false }]) {
-    assert.deepEqual(decideTaskGuard(first, second, CI_GUARD), { ok: false, remeasure: false, remeasured: true, attempts: 2 });
+test('browser budget: every timing-only combination gets one final re-measure, with no condition mutation', () => {
+  const keys = ['patchBudget', 'historyBudget', 'renderBudget', 'taskBudget'];
+  const clean = Object.freeze(Object.fromEntries(keys.map(key => [key, true])));
+  for (let mask = 1; mask < 1 << keys.length; mask++) {
+    const first = Object.freeze(Object.fromEntries(keys.map((key, i) => [key, !(mask & 1 << i)])));
+    assert.deepEqual(decideTaskGuard(first, null, CI_GUARD), { ok: false, remeasure: true, remeasured: false, attempts: 1 });
+    assert.deepEqual(decideTaskGuard(first, clean, CI_GUARD), { ok: true, remeasure: false, remeasured: true, attempts: 2 });
+    for (const second of [first, { ...clean, patchBudget: false }, { ...clean, worker: false }]) {
+      assert.deepEqual(decideTaskGuard(first, second, CI_GUARD), { ok: false, remeasure: false, remeasured: true, attempts: 2 });
+    }
+    assert.equal(Object.values(first).filter(value => !value).length, mask.toString(2).replaceAll('0', '').length);
   }
+  for (const second of [null, clean]) assert.deepEqual(decideTaskGuard(clean, second, CI_GUARD),
+    { ok: true, remeasure: false, remeasured: false, attempts: 1 });
 });
 
-test('browser budget: patch, history, render, worker and push failures never re-measure', () => {
-  for (const key of ['patchBudget', 'historyBudget', 'renderBudget', 'worker', 'deskPushes', 'historyPushes', 'finite', 'notCompacted']) {
-    for (const taskBudget of [true, false]) {
-      const first = { [key]: false, taskBudget };
-      for (const second of [null, { [key]: true, taskBudget: true }]) {
+test('browser budget: any non-timing or unknown failure prevents a re-measure even with timing breaches', () => {
+  for (const key of ['measured', 'worker', 'historyRead', 'noMainThreadHistory', 'drawn', 'deskPushes', 'historyPushes',
+    'finite', 'redraws', 'historyReads', 'nearMaximum', 'notCompacted', 'unknownBudget']) {
+    for (const timingOK of [true, false]) {
+      const first = { [key]: false, patchBudget: timingOK, historyBudget: timingOK, renderBudget: timingOK, taskBudget: timingOK };
+      for (const second of [null, Object.fromEntries(Object.keys(first).map(key => [key, true]))]) {
         assert.deepEqual(decideTaskGuard(first, second, CI_GUARD), { ok: false, remeasure: false, remeasured: false, attempts: 1 }, key);
       }
     }
@@ -1366,9 +1556,13 @@ test('browser budget: patch, history, render, worker and push failures never re-
 });
 
 test('browser budget: reference limits stay strict with no re-measure', () => {
-  for (const second of [null, { taskBudget: true }]) {
-    assert.deepEqual(decideTaskGuard({ taskBudget: false }, second, REFERENCE_BUDGET),
-      { ok: false, remeasure: false, remeasured: false, attempts: 1 });
+  const keys = ['patchBudget', 'historyBudget', 'renderBudget', 'taskBudget'];
+  for (let mask = 1; mask < 1 << keys.length; mask++) {
+    const first = Object.fromEntries(keys.map((key, i) => [key, !(mask & 1 << i)]));
+    for (const second of [null, Object.fromEntries(keys.map(key => [key, true]))]) {
+      assert.deepEqual(decideTaskGuard(first, second, REFERENCE_BUDGET),
+        { ok: false, remeasure: false, remeasured: false, attempts: 1 });
+    }
   }
   assert.equal(REFERENCE_BUDGET.atMost, false);
   assert.equal(CI_GUARD.atMost, true);
@@ -1396,7 +1590,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
       assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()', source);
     },
   };
-  const context = { decideTaskGuard, observeBudgetTasks, attributeBudgetTasks,
+  const context = { decideTaskGuard, TIMING_GUARDS, observeBudgetTasks, attributeBudgetTasks,
     max: list => list.length ? Math.max(...list) : NaN,
     VIEWPORTS: [{ name: '390' }], NOW: '2026-10-14T17:42:22.000Z', ACTOR: 'fixture',
     largeScenario: (now, points = 9000) => ({ snapshot: { seq: 1001 }, history: { receivedAt: now, points: Array(points) } }),
@@ -1425,7 +1619,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
 }
 
 test('browser budget: cold and live re-measure on fresh boards, retaining both attributed rows and table attempts', async () => {
-  const { traces, checks, loads, boards } = await simulatedBudget({ cold: [{ taskMs: 129 }, {}], live: [{ taskMs: 137 }, {}] });
+  const { traces, checks, loads, boards } = await simulatedBudget({ cold: [{ taskMs: 129, historyMs: 126 }, {}], live: [{ taskMs: 155, patchMs: 44.5, historyMs: 126 }, {}] });
   assert.deepEqual(loads, { cold: 2, live: 2 });
   assert.equal(boards.length, 4);
   assert.deepEqual(boards[0].history, boards[1].history);
@@ -1436,13 +1630,13 @@ test('browser budget: cold and live re-measure on fresh boards, retaining both a
   assert.equal(traces.length, 4);
   assert.ok(traces.every(r => r.attempts === 2 && r.remeasured));
   assert.deepEqual(Array.from(traces, r => r.attempt), [1, 2, 1, 2]);
-  for (const [index, duration, phase] of [[0, 129, 'cold history'], [2, 137, 'desk updates']]) {
+  for (const [index, duration, phase] of [[0, 129, 'cold history'], [2, 155, 'desk updates']]) {
     assert.equal(traces[index].offendingTasks[0].duration, duration);
     assert.ok(traces[index].offendingTasks[0].phases.includes(phase));
     assert.ok(traces[index].offendingTasks[0].events.length > 0);
   }
-  const guards = checks.filter(c => 'taskBudget' in c.detail.conditions);
-  assert.equal(guards.length, 2);
+  const guards = checks.filter(c => Object.keys(c.detail.conditions).some(key => TIMING_GUARDS.includes(key)));
+  assert.equal(guards.length, 4);
   assert.ok(guards.every(c => c.name.includes('; re-measured once after a breach)') && c.detail.attemptRows.length === 2));
   const table = budgetTable(traces, CI_GUARD);
   assert.match(table, /Attempt/);
@@ -1451,12 +1645,51 @@ test('browser budget: cold and live re-measure on fresh boards, retaining both a
 });
 
 test('browser budget: runBudget stops after reproduced breaches and does not retry other failed checks', async () => {
-  for (const sample of [{ taskMs: 129 }, { taskMs: 129, patchMs: 41 }, { taskMs: 129, historyMs: 126 }, { taskMs: 129, worker: false }, { taskMs: 129, pushes: 4 }]) {
-    const reproduced = sample.patchMs === undefined && sample.historyMs === undefined && sample.worker === undefined && sample.pushes === undefined;
+  for (const sample of [{ patchMs: 44.5 }, { historyMs: 126 }, { taskMs: 129 }, { taskMs: 155, patchMs: 44.5 },
+    { taskMs: 129, historyMs: 126 }, { taskMs: 155, patchMs: 44.5, worker: false }, { taskMs: 129, pushes: 4 }]) {
+    const reproduced = sample.worker === undefined && sample.pushes === undefined;
     const { checks, loads } = await simulatedBudget({ live: [sample, sample] });
     assert.equal(loads.live, reproduced ? 2 : 1);
     assert.ok(checks.some(c => !c.ok));
     assert.ok(checks.filter(c => c.name.includes('live pushes')).every(c => c.detail.remeasured === reproduced));
+  }
+});
+
+test('browser budget: timing-only breaches can clear once; any second measurement failure remains final', async () => {
+  for (const sample of [{ patchMs: 44.5 }, { historyMs: 126 }, { taskMs: 155, patchMs: 44.5 }]) {
+    const clean = await simulatedBudget({ live: [sample, {}] });
+    assert.equal(clean.loads.live, 2);
+    assert.ok(clean.checks.every(c => c.ok));
+    for (const second of [{ worker: false }, { pushes: 4 }, { historyMs: 126 }]) {
+      const failed = await simulatedBudget({ live: [sample, second] });
+      assert.equal(failed.loads.live, 2);
+      assert.ok(failed.checks.some(c => !c.ok));
+    }
+  }
+  const cold = await simulatedBudget({ cold: [{ historyMs: 126 }, {}] });
+  assert.equal(cold.loads.cold, 2);
+  assert.ok(cold.checks.every(c => c.ok));
+});
+
+test('browser budget: reproduced patch/task breaches print both measurements before long attribution is truncated', async () => {
+  const { checks } = await simulatedBudget({ live: [{ patchMs: 44.5, taskMs: 155 }, { patchMs: 42, taskMs: 140 }] });
+  const failures = checks.filter(c => !c.ok);
+  assert.equal(failures.length, 2);
+  const messages = [], original = console.error;
+  console.error = message => messages.push(message);
+  try {
+    const gate = createGate('unused');
+    for (const c of failures) {
+      assert.match(c.name, /; re-measured once after a breach\)/);
+      assert.equal(c.detail.attemptRows.length, 2);
+      // The real gate truncates JSON detail to 2400 characters. Simulate a
+      // busy trace to ensure the concise measurements survive that boundary.
+      gate.check('budget', c.name, c.ok, { ...c.detail, offendingTasks: [{ attribution: 'x'.repeat(4000) }] });
+    }
+  } finally { console.error = original; }
+  assert.equal(messages.length, 2);
+  for (const message of messages) {
+    assert.match(message, /"measurements":\[\{"attempt":1,"patchMs":44\.5,"historyMs":10,"taskMs":155\},\{"attempt":2,"patchMs":42,"historyMs":10,"taskMs":140\}\]/);
   }
 });
 

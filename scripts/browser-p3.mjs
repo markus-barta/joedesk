@@ -10,6 +10,7 @@ import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, go as goPage, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
 import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
+import { focusTermTips } from './browser/term-focus.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
@@ -63,6 +64,9 @@ async function phoneFirstScreenChecks(page, viewport, theme, snapshot) {
   const compactMoney = text => text.replace(/\s/g, '');
   check('phone-first', `${tag}: every compact row preserves the ranked card's Today and Since start values`,
     d.rows.map(r => r.key).join() === ranked.join() && d.rows.every(r => r.values.length === 2 && r.values.every((v, i) => compactMoney(v) === compactMoney(r.detailValues[i]))), d.rows);
+  check('phone-first', `${tag}: compact rows and their section end within 12 px of the reserved warning line, without a trailing detail gap`,
+    d.rows.length === 3 && d.rows.every(r => r.card.bottom - r.warningLineBottom >= 0 && r.card.bottom - r.warningLineBottom <= 12 && r.card.bottom === r.bottom) &&
+    d.desks.bottom - d.rows.at(-1).warningLineBottom <= 12 && d.desks.bottom === d.rows.at(-1).bottom, { desks: d.desks, rows: d.rows });
   check('phone-first', `${tag}: all seven disclosures start collapsed with 44 px targets, no horizontal scroll and a collapsed page ≤1600 px`,
     d.controls.length === 7 && d.controls.every(c => c.expanded === 'false' && c.hidden && !c.visible && c.height >= 44) && d.horizontal.scroll <= d.horizontal.inner && d.pageHeight <= 1600, d);
   check('phone-first', `${tag}: missing Cash is visible in the collapsed Account summary with an icon and its reason`,
@@ -277,33 +281,8 @@ async function everyTerm(page, viewport, tag, scope = '') {
   // Programmatic activeElement changes in an unfocused headless page need
   // not dispatch native focus events. Give this keyboard test page focus.
   await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
-  const focused = await page.evaluate(`(async () => {
-    const out = [], heads = ${JSON.stringify(Object.fromEntries(Object.entries(TERMS).map(([key, entry]) => [key, entry[0]])))};
-    const visible = () => [...document.querySelectorAll(${JSON.stringify(`${scope} [data-term]`)})].filter(__audit.visible);
-    // A tick can rebuild a section between terms. Keep identities (including
-    // repeated terms), not nodes which may be detached by the next frame.
-    const counts = new Map();
-    const terms = visible().map(t => { const term = t.dataset.term, index = counts.get(term) ?? 0; counts.set(term, index + 1); return { term, index }; });
-    for (const { term, index } of terms) {
-      const until = Date.now() + 2000;
-      let seen, t;
-      do {
-        t = visible().filter(e => e.dataset.term === term)[index];
-        if (t && document.activeElement !== t) t.focus({ preventScroll: true });
-        const tip = document.getElementById('tip');
-        const conditions = { pageFocused: document.hasFocus(), connected: Boolean(t?.isConnected), focused: Boolean(t && document.activeElement === t),
-          tipOpen: tip.classList.contains('on'), ownHead: tip.querySelector('b')?.textContent === heads[term],
-          expanded: t?.getAttribute('aria-expanded') === 'true' };
-        seen = { term, index, head: tip.querySelector('b')?.textContent ?? null, expectedHead: heads[term],
-          expanded: t?.getAttribute('aria-expanded') ?? null, conditions, failed: Object.keys(conditions).filter(k => !conditions[k]) };
-        if (!seen.failed.length || Date.now() >= until) break;
-        await new Promise(r => setTimeout(r, 25));
-      } while (true);
-      out.push(seen);
-      t?.blur();
-    }
-    return out;
-  })()`);
+  const focused = await page.evaluate(`(${focusTermTips.toString()})(${JSON.stringify(scope)},
+    ${JSON.stringify(Object.fromEntries(Object.entries(TERMS).map(([key, entry]) => [key, entry[0]])))})`);
   const badFocus = focused.filter(f => f.failed.length);
   check('AC-39', `${tag}: all ${focused.length} terms explain themselves on keyboard focus`, focused.length > 0 && !badFocus.length,
     { failed: focused.length ? badFocus.slice(0, 4) : ['no visible terms'], count: focused.length });
@@ -616,7 +595,7 @@ try {
     b.setNow(valid.data.receivedAt);
     await b.push(ingress(valid.data));
     if (!f.transportReason && f.feed === 'data') { b.setNow(f.receivedAt); const r = await b.push(f.payload, 'data', { status: f.expectedStatus, reason: f.expectedStatus === 200 ? null : f.expected['today.equity'].reason }); check('fixtures', `${id}: server status ${f.expectedStatus}`, r.status === f.expectedStatus, r.body); }
-    const viewports = id === 'e-layout-storage-unavailable' ? VIEWPORTS : id === 'a-gateway-up-but-dead' ? [VIEWPORTS[1], VIEWPORTS[2]] : [VIEWPORTS[1]];
+    const viewports = ['e-layout-storage-unavailable', 'a-gateway-up-but-dead'].includes(id) ? VIEWPORTS : [VIEWPORTS[1]];
     for (const viewport of viewports) {
       const theme = viewport.mobile ? 'dark' : 'light';
       await configure(page, viewport, theme);
@@ -643,6 +622,11 @@ try {
           const expected = disclosureProblem(cells), actual = collapsed.controls.find(c => c.key === key);
           check('phone-first', `${viewport.name} ${theme} ${id}: collapsed ${key} shows the worst panel state and short reason`, actual.hidden && actual.expanded === 'false' &&
             (expected ? actual.warning === expected.text && actual.icon === `#i-${expected.icon}` : !actual.warning && !actual.icon), { actual, expected });
+        }
+        if (id === 'a-gateway-up-but-dead') {
+          const warnings = collapsed.controls.filter(c => ['account', 'positions', 'kept', 'j', 'joe', 'joel'].includes(c.key));
+          check('fixtures', `${viewport.name} ${theme}: every collapsed outage section retains its icon and one broker-down reason in both short and accessible copy`, warnings.length === 6 &&
+            warnings.every(c => c.icon && (c.warning.match(/broker connection down/g) ?? []).length === 1 && (c.detail.match(/broker connection down/g) ?? []).length === 1), warnings);
         }
         check('phone-first', `${viewport.name} ${theme} ${id}: collapsed panels do not scroll horizontally`, collapsed.horizontal.scroll <= collapsed.horizontal.inner, collapsed.horizontal);
         await setDeskDisclosures(page, true);
@@ -715,7 +699,7 @@ try {
       const caps = norm([ui.boardCaption, ui.say, ...Object.values(ui.cells).map(c => c.cap)].join(' | '));
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age and reason`, /[Aa]s of \d+\s(s|min) ago · updates are (late|stuck)/.test(caps), caps);
       if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.cells['hero.account'].cap === 'Not reported', caps);
-      if (kind === 'broken') check('fixtures', `${tag}: broken shows its reason`, /Last good value, .* · |Unavailable · /.test(caps), caps);
+      if (kind === 'broken') check('fixtures', `${tag}: broken shows its reason locally or in the shared section line`, /Last good value, .* · |[Uu]navailable · /.test(caps), caps);
       if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso', 'p3-single-missing-desk'].includes(id) && (viewport.name !== '390' || ['e-layout-storage-unavailable', 'a-gateway-up-but-dead'].includes(id))) {
         await shot(page, viewport, `${viewport.name}-${theme}-desk-state-${id}`, `Desk, P1 fixture ${id} (${kind})`);
       }
@@ -724,6 +708,74 @@ try {
       if (f.transportReason === 'auth_required') await page.setHeaders({ 'x-auth-request-user': ACTOR });
       page.errors.length = 0;
     }
+  }
+  // JOED-81: reuse the accepted broker-down fixture for a live transition.
+  // Fresh and outage boxes must match at 1440/1024/phone in both themes.
+  for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+    const f = fixture('a-gateway-up-but-dead'), b = await newBoard();
+    b.setNow(valid.data.receivedAt);
+    await b.push(ingress(valid.data));
+    b.setNow(at(valid.data.receivedAt, 9));
+    await configure(page, viewport, theme);
+    await load(page, b.url, 'desk');
+    const before = await rects(DESK_SHIFT);
+    const phone = viewport.width <= 480;
+    if (phone) await setDeskDisclosures(page, false);
+    const collapsedBefore = phone ? await rects(DESK_SHIFT) : null;
+    b.setNow(f.receivedAt);
+    check('fixtures', 'broker-down transition fixture accepted', (await b.push(f.payload)).status === 200);
+    b.setNow(f.now);
+    await page.evaluate('window.__joedesk.refresh()');
+    await waitFor(page, `document.querySelector('#hdrHealth').dataset.reason === 'gateway_down'`);
+    await settle(page);
+    const tag = `broker down @${viewport.name} ${theme}`;
+    if (phone) {
+      const collapsed = await page.evaluate(`(() => {
+        const count = text => (text.match(/broker connection down/g) ?? []).length;
+        return { controls: [...document.querySelectorAll('[data-desk-disclosure]')]
+          .filter(b => ['account', 'j', 'joe', 'joel', 'positions', 'kept'].includes(b.dataset.deskDisclosure)).map(b => {
+            const body = document.getElementById(b.getAttribute('aria-controls')), summary = b.querySelector('.collapsed-summary .summary-text');
+            return { key: b.dataset.deskDisclosure, expanded: b.getAttribute('aria-expanded'), hidden: body.hidden,
+              visible: __audit.visible(b) && __audit.visible(summary), bodyVisible: __audit.visible(body),
+              icon: __audit.visible(b.querySelector('.collapsed-summary .i')), reason: count(summary?.innerText ?? ''), detail: count(summary?.title ?? '') };
+          }), horizontal: __audit.horizontal() };
+      })()`);
+      check('fixtures', `${tag}: each collapsed Account, desk, Positions and Kept summary visibly retains its icon and one shared reason`,
+        collapsed.controls.length === 6 && collapsed.controls.every(c => c.expanded === 'false' && c.hidden && !c.bodyVisible && c.visible && c.icon && c.reason === 1 && c.detail === 1), collapsed);
+      const changed = moves(collapsedBefore, await rects(DESK_SHIFT));
+      check('no-shift', `${tag}: collapsed fresh → broker down shifts 0 px and does not scroll horizontally`,
+        !changed.length && collapsed.horizontal.scroll <= collapsed.horizontal.inner, { changed, horizontal: collapsed.horizontal });
+      await setDeskDisclosures(page, true);
+    }
+    const d = await page.evaluate(`(() => {
+      const count = text => (text.match(/broker connection down/g) ?? []).length;
+      const text = selector => { const e = document.querySelector(selector); return __audit.visible(e) ? e.innerText : ''; };
+      return {
+        hero: count(text('#heroL .board-caption')),
+        cells: [...document.querySelectorAll('#heroL [data-cell]')].map(c => count(__audit.deskCaption(c))),
+        cash: count(text('#heroL .cash-reason')), say: count(text('#heroL .say')),
+        account: count(text('#accountDetail .account-state')),
+        cards: [...document.querySelectorAll('.dcard .mini-label')].map(c => __audit.visible(c) ? count(c.innerText) : 0),
+        opened: [...document.querySelectorAll('[data-desk-disclosure]')]
+          .filter(b => ['account', 'j', 'joe', 'joel', 'positions', 'kept'].includes(b.dataset.deskDisclosure)).map(b => {
+            const body = document.getElementById(b.getAttribute('aria-controls'));
+            return { key: b.dataset.deskDisclosure, expanded: b.getAttribute('aria-expanded'), visible: __audit.visible(body),
+              reason: count(body.innerText), summary: [...b.querySelectorAll('.summary-text')].filter(__audit.visible).reduce((n, s) => n + count(s.innerText), 0) };
+          }),
+        sections: ['positions', 'kept'].map(id => ({ id, reason: count(text('#' + id + ' .pstate')),
+          rows: [...document.querySelectorAll('#' + id + ' .prow:not(.hd)')].map(row => ({ reason: count(row.innerText),
+            dashes: [...row.querySelectorAll('.position-value')].filter(__audit.visible).map(dash => ({ label: dash.getAttribute('aria-label'), title: dash.title, text: dash.innerText })) })) })),
+        horizontal: __audit.horizontal(),
+      };
+    })()`);
+    check('fixtures', `${tag}: hero/account, each card, Positions and Kept have one shared reason with no per-cell or per-row repetition`,
+      d.hero === 1 && d.cells.every(n => n === 0) && d.cash === 0 && d.say === 0 && d.cards.length === 3 && d.cards.every(n => n === 1) &&
+      d.sections.every(s => s.reason === 1 && s.rows.length > 0 && s.rows.every(row => row.reason === 0 && row.dashes.length > 0 && row.dashes.every(dash =>
+        /^(Last price|Worth|Today’s result|Open result): not reported · broker connection down$/.test(dash.label) && dash.title === dash.label))), d);
+    if (phone) check('fixtures', `${tag}: opened Account, each desk, Positions and Kept visibly state the shared reason once in the body without repeating it in their summaries`,
+      d.account === 1 && d.opened.length === 6 && d.opened.every(c => c.expanded === 'true' && c.visible && c.reason === 1 && c.summary === 0), d.opened);
+    const changed = moves(before, await rects(DESK_SHIFT));
+    check('no-shift', `${tag}: fresh → broker down shifts 0 px and does not scroll horizontally`, !changed.length && d.horizontal.scroll <= d.horizontal.inner, { changed, horizontal: d.horizontal });
   }
   }
 

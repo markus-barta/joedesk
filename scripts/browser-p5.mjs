@@ -18,6 +18,7 @@ import { designFleet, designActions, designSnapshot, cashSessionSnapshot, switch
 import { designResults } from './browser/results.mjs';
 import { pngColours } from './browser/pixels.mjs';
 import { captureHeaderCrop } from './browser/header-crop.mjs';
+import { afterStableLayout } from './browser/settled-layout.mjs';
 
 // The page's own model, for the words and keys Settings must show.
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
@@ -152,7 +153,7 @@ function checkHeaderLayout(ac, tag, layout) {
   check(ac, `${tag}: the status is exactly one line box`, layout.status.lines === 1 && layout.status.nowrap === 'nowrap' && Math.abs(layout.status.height - layout.status.lineHeight) < 0.02, layout.status);
   check(ac, `${tag}: the icon stays inside its target without text overlap; ages use tabular numerals`, layout.status.iconInside && !layout.status.iconOverlap && layout.status.tabular, layout.status);
   check(ac, `${tag}: brand, PAPER, status and theme are visible, inside the header and do not overlap; no horizontal overflow`,
-    layout.paper === 'PAPER' && layout.inRow && !layout.overlaps.length && !layout.wordmarkClipped && !layout.overflow && layout.horizontal.scroll <= layout.horizontal.inner, layout);
+    layout.paper === 'PAPER' && layout.inRow && !layout.overlaps.length && !layout.wordmarkClipped && !layout.overflow && layout.horizontal.scroll <= layout.horizontal.client, layout);
 }
 const bar = () => ev(`[...document.querySelectorAll('#editbar, #editNote, .edit-btns, #editbar .btn')].map((e, i) => { const r = e.getBoundingClientRect(); return { key: (e.id || e.className) + '#' + i, top: r.top, left: r.left, height: r.height, width: r.width }; })`);
 const note = () => ev(`({ state: document.getElementById('editNote').dataset.state, text: document.getElementById('editNote').innerText.trim(), buttons: ['discardBtn', 'savePreview', 'reviewBtn', 'sendBtn'].map(id => !document.getElementById(id).disabled) })`);
@@ -496,7 +497,7 @@ try {
             const r = e.getBoundingClientRect(), p = parent.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(e);
             const glyphs = [...range.getClientRects()].map(g => ({ left: g.left, right: g.right, top: g.top, bottom: g.bottom }));
             const cs = getComputedStyle(e);
-            return { text: e.innerText.trim(), label: e.closest('.cash-block').querySelector('.cash-label').innerText, caption: e.closest('.cash-block').querySelector('.cash-caption').innerText, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'),
+            return { text: e.innerText.trim(), label: e.closest('.cash-block').querySelector('.cash-label').innerText, caption: e.closest('.cash-block').querySelector('.cash-caption').innerText, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'), section: document.querySelector('#heroL .board-caption')?.innerText ?? '',
               fits: glyphs.every(g => g.left >= p.left - 0.5 && g.right <= p.right + 0.5 && g.top >= p.top - 0.5 && g.bottom <= p.bottom + 0.5),
               clipped: e.scrollWidth > e.clientWidth || e.scrollHeight > e.clientHeight, style: cs.fontStyle,
               horizontal: __audit.horizontal(), clipping: __audit.clipping() };
@@ -506,12 +507,13 @@ try {
           const why = phase === 'stale' ? 'updates are late' : phase === 'session' ? 'broker connection not confirmed'
             : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact yet' : 'not reported by the broker';
           const brokerCaption = 'cash · as the broker reports it';
-          const cashState = hasValue ? phase === 'stale' ? `· ${why}` : '' : `not reported · ${why}`;
+          const shared = screen === 'desk' && ['stale', 'session'].includes(phase);
+          const cashState = hasValue ? phase === 'stale' && !shared ? `· ${why}` : '' : `not reported${shared ? '' : ` · ${why}`}`;
           const caption = screen === 'desk' ? `${brokerCaption}${cashState ? ` ${cashState}` : ''}` : brokerCaption;
           const expected = screen === 'desk' ? `${hasValue ? '€ 12.345,68' : '—'} ${caption}`
             : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `not reported · ${why}`;
           const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : `Cash not reported · ${why}`;
-          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme, independent null reason`, N(seen.text) === expected && seen.label === 'Cash' && N(seen.caption) === caption && seen.title === exact && seen.name === exact && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
+          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme and reason locally or once in the section`, N(seen.text) === expected && seen.label === 'Cash' && N(seen.caption) === caption && seen.title === exact && seen.name === exact && (!shared || seen.section.includes(why)) && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
           check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
           const after = await measure();
           const moved = baseline.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== after[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: after[i]?.[k] })));
@@ -577,7 +579,7 @@ try {
           text: row.innerText, reasons: row.querySelector('.position-reasons')?.innerText,
           dashes: [...row.querySelectorAll('[aria-label]')].map(e => ({ text: e.innerText, title: e.title, name: e.getAttribute('aria-label') })),
           interactive: row.querySelectorAll('button, a, input, [tabindex]').length, tracks: row.querySelectorAll('.vbar').length })),
-        worth: document.querySelector('#kept .pstate').innerText,
+        worth: document.querySelector('#kept .pstate').innerText, positionState: document.querySelector('#positions .pstate').innerText,
         desk: document.querySelector('#positions [data-desk="j"]')?.innerText,
         unmapped: (() => { const row = document.querySelector('#positions [data-desk=""]'), label = row.querySelector('.name > span[aria-label]');
           const track = row.querySelector('.vbar'), targets = [row, ...row.children, track];
@@ -595,7 +597,7 @@ try {
       for (const row of seen.kept) {
         const why = row.symbol === 'SXR8' ? 'not exact yet' : 'not reported by the broker';
         check('positions', `${tag} ${row.symbol}: quantity and values visibly explain their nulls`,
-          ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => row.reasons?.includes(`${label}: ${why}`)) &&
+          ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => row.reasons?.includes(`${label}: ${why}`) || seen.worth.includes(why)) &&
           ['Quantity', 'Last price', 'Worth'].every(label => row.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · ${why}` && d.name === d.title)), row);
         check('KEEP', `${tag} ${row.symbol}: no interactive element inside the kept row`, row.interactive === 0, row);
         check('positions', `${tag} ${row.symbol}: unknown KEEP worth has no bar track`, row.tracks === 0, row);
@@ -607,9 +609,11 @@ try {
       check('desk-unmapped', `${tag}: visible name line, title and accessible name carry the desk reason without a desk colour or mark`,
         u.label === deskLabel && u.title === deskLabel && u.name === deskLabel && !u.colour && u.marks === 0 && J(seen.order) === J(['DEMO', 'AAA']), seen);
       check('desk-unmapped', `${tag}: all null values stay dashes with their own reasons`,
-        ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => u.reason?.includes(`${label}: not exact yet`)) &&
+        ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => u.reason?.includes(`${label}: not exact yet`) || seen.positionState.includes('not exact yet')) &&
         ['Quantity', 'Last price', 'Worth', 'Open result'].every(label => u.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · not exact yet` && d.name === d.title)), u);
-      check('positions', `${tag}: no partial kept worth is presented as complete`, /Worth not available · not exact yet · not reported by the broker/.test(N(seen.worth)), seen.worth);
+      check('positions', `${tag}: no partial kept worth is presented as complete and both reasons stay visible`, /worth not available/i.test(N(seen.worth)) &&
+        ['not exact yet', 'not reported by the broker'].every(why => seen.worth.includes(why) || seen.kept.some(row => row.reasons?.includes(why))) &&
+        !/worth [€$]/i.test(N(seen.worth)), seen.worth);
       check('positions', `${tag}: no overflow or clipping`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
       const clip = await ev(`(() => { const r = document.getElementById('kept').getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
       const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
@@ -638,7 +642,7 @@ try {
     // The longest label reserves the status width; every header component and
     // the reserved Settings rows keep their boxes across state changes.
     const geometrySelectors = ['header.top', '.top-in', '.top-in > *', '#hdrHealth .lbl', '#hdrHealth b', '#setMain > .set-sec', '#rtRows .rt-row'];
-    const geometry = () => rects(geometrySelectors);
+    const geometry = () => ev(`(${afterStableLayout.toString()})(${J(geometrySelectors)}).then(layout => layout.boxes)`);
     const exactMoves = (before, after) => before.flatMap((a, i) => {
       const b = after[i];
       return !b || a.key !== b.key ? [{ key: a.key, missing: true }]
@@ -707,7 +711,7 @@ try {
         const moved = exactMoves(baseline, await geometry());
         check('executor-health', `${tag}: exactly 0 px shift including the reserved status in the same page and broker state; header keeps its class`, !moved.length && seen.headerClass === headerClass && seen.brokerWord === brokerWord, { moved, brokerWord, seen: seen.brokerWord });
         const bounds = await ev(`({ horizontal: __audit.horizontal(), clipping: __audit.clipping() })`);
-        check('executor-health', `${tag}: no overflow or clipping`, bounds.horizontal.scroll <= bounds.horizontal.inner && !bounds.clipping.length, bounds);
+        check('executor-health', `${tag}: no overflow or clipping`, bounds.horizontal.scroll <= bounds.horizontal.client && !bounds.clipping.length, bounds);
         if (['capture-degraded', 'ledger-full'].includes(c.name)) {
           if (viewport.width !== 360) await auditScreen(page, viewport, theme, `settings executor ${c.name}`);
           await crop('#rtRows .rt-row:nth-child(4)', `${viewport.name}-${theme}-settings-executor-${c.name}`);
@@ -722,7 +726,7 @@ try {
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
         check('executor-health', `${tag}: Desk explains executor health without changing the board tone`, desk.open && N(desk.problem) === (c.problem ?? 'No current problems.') && desk.headerTone === c.headerTone, desk);
-        check('executor-health', `${tag}: Desk explanation has no overflow or clipping`, desk.horizontal.scroll <= desk.horizontal.inner && !desk.clipping.length, desk);
+        check('executor-health', `${tag}: Desk explanation has no overflow or clipping`, desk.horizontal.scroll <= desk.horizontal.client && !desk.clipping.length, desk);
         if (['capture-degraded', 'ledger-full'].includes(c.name)) await crop('#healthPop', `${viewport.name}-${theme}-desk-executor-${c.name}`);
         await click('.nav [data-go="settings"]');
       }
@@ -734,7 +738,10 @@ try {
       const reference = headerHealth(ctx, { reason: 'board_ok', tone: 'green', statusTone: 'ok' });
       for (const h of healthCases) {
         const view = headerHealth(ctx, { ...h, tone: h.statusTone === 'ok' ? 'green' : h.statusTone === 'bad' ? 'red' : 'yellow' });
-        const measured = await ev(`(() => {
+        const measured = await ev(`(${afterStableLayout.toString()})(${J(geometrySelectors)}, layout => {
+          // Settle the live page first, then compare both synthetic labels in
+          // this same frame. An awaited frame between them lets a live tick
+          // replace the test's label with the board's real health state.
           const button = document.getElementById('hdrHealth');
           button.innerHTML = ${J(reference.html)};
           const before = __audit.rects(${J(geometrySelectors)});
@@ -749,11 +756,11 @@ try {
             title: button.title, name: button.getAttribute('aria-label'), icon: button.querySelector(':scope > svg use').getAttribute('href'),
             height: { header: rowBox.height, button: button.getBoundingClientRect().height },
             inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: css.paddingLeft, paddingRight: css.paddingRight },
-            horizontal: __audit.horizontal(), clipping: __audit.clipping() };
-        })()`);
+            horizontal: __audit.horizontal(), clipping: __audit.clipping(), settled: layout };
+        })`);
         check('executor-health', `${viewport.name} ${theme} ${h.reason}: one line with complete accessible sentence and no overflow`,
           measured.clamps.length === 1 && measured.clamps.every(c => c.ok) && measured.title === view.sentence && measured.name === view.label &&
-          measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, measured);
+          measured.horizontal.scroll <= measured.horizontal.client && !measured.clipping.length, measured);
         checkHeaderLayout('executor-health', `${viewport.name} ${theme} ${h.reason}`, measured.headerLayout);
         check('executor-health', `${viewport.name} ${theme} ${h.reason}: header and button retain their heights`,
           measured.height.header === (viewport.width <= 960 ? 54 : 58) && measured.height.button === (viewport.width <= 960 ? 44 : 34), measured.height);
@@ -798,7 +805,7 @@ try {
       const largeView = await ev(`(() => { const ledger = document.querySelector('#rtRows .rt-row:nth-child(4) [role="group"]'); return { present: Boolean(ledger), text: ledger?.textContent ?? null, title: ledger?.title ?? null, name: ledger?.getAttribute('aria-label') ?? null, horizontal: __audit.horizontal(), clipping: __audit.clipping() }; })()`);
       const conditions = { rendered: largeView.present, exactBytesReady: ledgerWait === null, formattedTB: N(largeView.text) === 'ledger 9007,2 TB of 9007,2 TB',
         exactTitle: largeView.title === exactLedger, exactAccessibleName: largeView.name === exactLedger,
-        noOverflow: largeView.horizontal.scroll <= largeView.horizontal.inner, noClipping: !largeView.clipping.length };
+        noOverflow: largeView.horizontal.scroll <= largeView.horizontal.client, noClipping: !largeView.clipping.length };
       const failed = Object.keys(conditions).filter(k => !conditions[k]);
       check('executor-health', `${viewport.name} ${theme}: very large TB values wrap without clipping and preserve exact bytes`, !failed.length, { failed, conditions, ledgerWait, ...largeView });
     }

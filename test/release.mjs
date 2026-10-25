@@ -129,20 +129,20 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   const later = reserveVersion({ ...next, version_scheme: 'inspr-calendar-v2' }, laterUTC);
   assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, next.release_sequence + 1);
 });
-test('JOED-77: performance candidate follows the deployed sequence 29; About preserves deployed history and excludes aborted candidates', () => {
-  assert.equal(prep.ticket, 'JOED-77');
-  assert.equal(next.release_sequence, 30);
+test('JOED-81: outage candidate follows the deployed sequence 30; About preserves deployed history and excludes aborted candidates', () => {
+  assert.equal(prep.ticket, 'JOED-81');
+  assert.equal(next.release_sequence, 31);
   assert.equal(active.status, 'candidate');
-  assert.equal(active.note, 'Performance at a glance (JOED-77)');
-  assert.equal(oldRelease.version, '261023100632.0.0');
-  assert.equal(oldRelease.release_sequence, 29);
+  assert.equal(active.note, 'Round 2: calmer outage view (JOED-81)');
+  assert.equal(oldRelease.version, '261023155418.0.0');
+  assert.equal(oldRelease.release_sequence, 30);
   assert.equal(oldRelease.status, 'published-candidate');
   assert.equal(oldRelease.source_branch, 'main');
-  assert.equal(oldRelease.source_commit, 'cdf843a587d1066d544beea92f7b8ceef5d103bf');
-  assert.equal(oldRelease.release_set_ticket, 'JOED-74');
+  assert.equal(oldRelease.source_commit, 'd4eb662795ff6d0e910aa20797995070b26e5554');
+  assert.equal(oldRelease.release_set_ticket, 'JOED-78');
   assert.equal(oldRelease.disposition, 'deployed');
   assert.equal(oldRelease.deployed, true);
-  assert.equal(oldRelease.note, 'live on csb0 since 2026-10-23T14:53:28Z (JOED-75)');
+  assert.equal(oldRelease.note, 'live on csb0 since 2026-10-24T03:46:42Z (JOED-78)');
   assert.deepEqual(prep.anchor, { legacy_scheme: 'calendar', last_legacy_version: '26.09.21.12.00',
     last_legacy_sequence: 23, first_calendar_version: '261016151218.0.0', first_calendar_sequence: 24 });
   assert.equal(lastDeployed.version, oldRelease.version);
@@ -154,16 +154,17 @@ test('JOED-77: performance candidate follows the deployed sequence 29; About pre
   assert.equal(ui.VERSION_HISTORY[0].version, active.version);
   assert.equal(ui.VERSION_HISTORY[0].date, next.reserved_at.slice(0, 10));
   assert.equal(ui.VERSION_HISTORY[1].version, lastDeployed.version);
-  assert.equal(ui.VERSION_HISTORY[2].version, '261021113113.0.0');
-  assert.equal(ui.VERSION_HISTORY[3].version, '261021083537.0.0');
-  assert.equal(ui.VERSION_HISTORY[4].version, '261021015923.0.0');
-  assert.equal(ui.VERSION_HISTORY[5].version, prep.anchor.last_legacy_version);
+  assert.equal(ui.VERSION_HISTORY[2].version, '261023100632.0.0');
+  assert.equal(ui.VERSION_HISTORY[3].version, '261021113113.0.0');
+  assert.equal(ui.VERSION_HISTORY[4].version, '261021083537.0.0');
+  assert.equal(ui.VERSION_HISTORY[5].version, '261021015923.0.0');
+  assert.equal(ui.VERSION_HISTORY[6].version, prep.anchor.last_legacy_version);
   for (const version of ['261019102825.0.0', prep.anchor.first_calendar_version]) {
     assert.equal(ui.VERSION_HISTORY.some(r => r.version === version), false,
       'About must not imply either superseded candidate was deployed');
   }
 });
-test('JOED-77 check-release: accepts the performance reservation and rejects equal or earlier reservations after integrity verification', t => {
+test('JOED-81 check-release: accepts the outage reservation and rejects equal or earlier reservations after integrity verification', t => {
   const root = temporary(t), closure = read('release/closure.json');
   for (const name of [...closure.files.map(f => f.path), 'release/closure.json', 'scripts/check-release.mjs']) {
     const target = join(root, name); fs.mkdirSync(join(target, '..'), { recursive: true });
@@ -173,7 +174,7 @@ test('JOED-77 check-release: accepts the performance reservation and rejects equ
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.equal(JSON.parse(accepted.stdout).candidate, next.version);
-  for (const [version, reserved_at] of [['261023100632.0.0', '2026-10-23T10:06:32Z'], ['261023100631.0.0', '2026-10-23T10:06:31Z']]) {
+  for (const [version, reserved_at] of [['261023155418.0.0', '2026-10-23T15:54:18Z'], ['261023155417.0.0', '2026-10-23T15:54:17Z']]) {
     const invalid = structuredClone(prep);
     Object.assign(invalid.reservation, { version, reserved_at });
     fs.writeFileSync(join(root, 'release/preparation.json'), JSON.stringify(invalid, null, 2) + '\n');

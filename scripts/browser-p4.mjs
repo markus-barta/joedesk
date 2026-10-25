@@ -67,6 +67,7 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 const M = await import('../public/joe/results-model.js');
 const hm = await import('../public/joe/history-model.js');
 const fmt = await import('../public/joe/format.js');
+const { percentHtml } = await import('../public/joe/desk.js');
 const { decimalUnits, unitsDecimal } = await import('../contracts/decimal.mjs');
 const { validateContract } = await import('../contracts/index.mjs');
 const { missingResultsDays } = await import('../contracts/vienna-date.mjs');
@@ -218,6 +219,19 @@ const RES = `(() => {
     label: t(document.querySelector('#perLabel .cur')), bd: t(document.getElementById('bdTitle')), legend: [...document.querySelectorAll('#curveLegend .lg')].map(t),
     prev: document.getElementById('prevPer').disabled, next: document.getElementById('nextPer').disabled,
     who: t(document.querySelector('#rheroL .hero-k')), display: t(document.querySelector('#rheroL .display')), say: t(document.querySelector('#rheroL .say')),
+    percent: (() => {
+      const slot = document.querySelector('#rheroL .period-percent-slot'), value = slot.querySelector('.performance-pct');
+      const bounds = slot.getBoundingClientRect(), range = document.createRange();
+      if (value) range.selectNodeContents(value);
+      const glyphs = value ? range.getBoundingClientRect() : null;
+      const euros = document.querySelector('#rheroL .display'), euroBox = euros.getBoundingClientRect();
+      range.selectNodeContents(euros);
+      const euroGlyphs = range.getBoundingClientRect();
+      return { text: t(value), explanation: slot.querySelector('.vh')?.textContent ?? '', tone: value?.className ?? '',
+        tabular: getComputedStyle(slot).fontVariantNumeric.includes('tabular-nums'),
+        fits: (!glyphs || glyphs.left >= bounds.left - 0.5 && glyphs.right <= bounds.right + 0.5) && slot.scrollWidth <= slot.clientWidth &&
+          euroGlyphs.left >= euroBox.left - 0.5 && euroGlyphs.right <= euroBox.right + 0.5 && euroBox.right <= bounds.left - 4 };
+    })(),
     split: [...document.querySelectorAll('#rheroL .split dd')].map(t), bench: t(document.querySelector('#rheroL .bench')),
     tiles: [...document.querySelectorAll('#tiles .tile')].map(el => ({ k: el.dataset.tile, val: t(el.querySelector('.tval')), mean: t(el.querySelector('.tmean')), head: t(el.querySelector('h3')) })),
     rows: [...document.querySelectorAll('#breakdown .brow')].map(el => ({ row: el.dataset.row, sel: el.classList.contains('sel'), bg: getComputedStyle(el).backgroundColor, val: t(el.querySelector('.val')), facts: el.querySelector('.facts').textContent, bar: el.querySelector('.track .b') ? Number(el.querySelector('.track .b').dataset.v) : null })),
@@ -241,10 +255,11 @@ function expected(ix, inputs, period, anchor, desk) {
   const per = M.periodOf(period, anchor, inputs.today, ix.meta.trackingStart);
   const ctx = desksOf => M.moneyContext(ix, inputs, per, desksOf);
   const R = M.rollup(ix, per, desks, ctx(desks));
-  return { per, R, rows: [...DESKS.map(d => M.rollup(ix, per, [d], ctx([d]))), M.rollup(ix, per, DESKS, ctx(DESKS))] };
+  return { per, R, percent: M.periodPercent(ix, inputs, per, desks, R),
+    rows: [...DESKS.map(d => M.rollup(ix, per, [d], ctx([d]))), M.rollup(ix, per, DESKS, ctx(DESKS))] };
 }
 
-function compare(tag, r, e) {
+function compare(tag, r, e, requirePercent = false) {
   const { per, R } = e;
   const none = R.empty;
   const facts = [];
@@ -253,6 +268,11 @@ function compare(tag, r, e) {
   want('by desk heading', r.bd, `By desk · ${per.head}`);
   want('chart legend', r.legend[0], `Result so far · ${per.head}`);
   want('net', r.display, none || R.net === null ? '—' : money(R.net));
+  want('period percentage (all desks only)', r.percent.text, percentHtml(e.percent).replace(/<[^>]+>/g, ''));
+  want('period percentage explanation', r.percent.explanation, e.percent === null ? '' : ' of the money at the period start');
+  want('period percentage tone', r.percent.tone, e.percent === null ? '' : `performance-pct${e.percent ? e.percent > 0n ? ' gain' : ' loss' : ''}`);
+  if (requirePercent && (e.percent === null || !r.percent.text.includes('%'))) facts.push({ what: 'standard All desks fixture must show a period percentage', got: r.percent });
+  if (!r.percent.tabular || !r.percent.fits) facts.push({ what: 'period percentage tabular numerals and bounds', got: r.percent });
   want('closed trades', r.split[0], none ? '—' : money(R.realised));
   want('still open', r.split[1], none || R.unreal === null ? '—' : money(R.unreal));
   want('before fees', r.split[2], none ? '—' : money(R.gross));
@@ -305,7 +325,7 @@ function calendarFacts(r, ix, desks, today, trackingStart) {
   return faults;
 }
 
-const SHIFT = ['.res-tools', '#periodSeg', '#deskSeg', '#prevPer', '#perLabel', '#nextPer', '#rhero', '#rheroL .hero-k', '#rheroL .display', '#rheroL .split', '#rheroL .bench',
+const SHIFT = ['.res-tools', '#periodSeg', '#deskSeg', '#prevPer', '#perLabel', '#nextPer', '#rhero', '#rheroL .hero-k', '#rheroL .result-figure', '#rheroL .display', '#rheroL .period-percent-slot', '#rheroL .split', '#rheroL .bench',
   '#curveLegend', '#curve', '.tile', '.tile .tval', '.tile .tfoot', '#bdTitle', '.brow', '.brow .val', '.brow .track', '.calcard', '.cal-head', '#calTitle', '#prevMonth', '#nextMonth',
   '.cal-legend', '#daypanel', '.dp-head', 'footer.foot'];
 const SAY = ['#rheroL .say'];
@@ -450,7 +470,7 @@ try {
         const r = await page.evaluate(RES);
         await checkMetricGeometry(page, `${tag} ${period} ${desk}`);
         const e = expected(ix, inputs, period, inputs.today, desk);
-        compare(`${tag} ${period} ${desk}`, r, e);
+        compare(`${tag} ${period} ${desk}`, r, e, desk === 'all');
         // AC-13: J, Joe, Joel and Total, the chosen one tinted.
         const tinted = r.rows.filter(x => x.sel);
         check('AC-13', `${tag} ${period} ${desk}: By desk lists J, Joe, Joel and Total; the chosen row is tinted`, r.rows.map(x => x.row).join() === 'j,joe,joel,all' && tinted.length === 1 && tinted[0].row === desk && tinted[0].bg !== 'rgba(0, 0, 0, 0)', r.rows.map(x => [x.row, x.sel, x.bg]));
@@ -1551,7 +1571,7 @@ try {
     await serve(null);
     const { board } = await designBoard('2026-10-16T12:00:00.000Z');
     const { baseline, partial, empty, unknown } = periodHintResults(board.clock());
-    const fixed = ['#rhero', '#rheroL .hero-k', '#rheroL .display', '#rheroL .split', '#rheroL .split dt', '#rheroL .split dd',
+    const fixed = ['#rhero', '#rheroL .hero-k', '#rheroL .result-figure', '#rheroL .display', '#rheroL .period-percent-slot', '#rheroL .split', '#rheroL .split dt', '#rheroL .split dd',
       '#rheroL .bench', '#curveLegend', '#curve', '.tile', '#calTitle', '#cal', '#calLegend'];
     const sameGeometry = (before, after) => JSON.stringify(before) === JSON.stringify(after);
     const splitDelta = (before, after) => after.find(r => r.key === '#rheroL .split#0').top - before.find(r => r.key === '#rheroL .split#0').top;

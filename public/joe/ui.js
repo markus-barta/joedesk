@@ -241,22 +241,24 @@ export function patch(el, html) {
 // The words for one panel state exactly as the shared selector gave it, with
 // that panel's own age and reason; never re-ranked or borrowed from another.
 // `held` names a retained value ("last good value", "last good positions").
-export function statePhrase(cell, key, held = 'last good value') {
+export function statePhrase(cell, key, held = 'last good value', sharedReason = null) {
   const state = cell?.state ?? 'not reported';
   const why = cell?.reason ? cellReason(cell.reason) : null;
+  const localWhy = why !== sharedReason ? why : null;
+  const suffix = localWhy ? ` · ${esc(localWhy)}` : '';
   const ago = () => ageSpan(key, cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`);
   if (state === 'fresh') return { tone: 'ok', text: '', state };
   if (cell?.value == null && cell?.reason === 'not_exact_yet') return { tone: 'none', icon: 'info',
-    text: `${state === 'not reported' ? 'not reported' : 'unavailable'} · ${esc(why)}`, state };
-  if (state === 'not reported') return { tone: 'none', text: `not reported${why ? ` · ${esc(why)}` : ''}`, state };
-  if (cell.value == null) return { tone: 'bad', text: `unavailable · ${esc(why ?? 'not available')}`, state };
-  if (cell.retained) return { tone: 'warn', text: `${held}, ${ago()}${why ? ` · ${esc(why)}` : ''}`, state };
-  if (state === 'stale') return { tone: 'warn', text: `as of ${ago()}${why ? ` · ${esc(why)}` : ''}`, state };
-  return { tone: 'bad', text: `${esc(why ?? 'not available')} · as of ${ago()}`, state };
+    text: `${state === 'not reported' ? 'not reported' : 'unavailable'}${suffix}`, state };
+  if (state === 'not reported') return { tone: 'none', text: `not reported${suffix}`, state };
+  if (cell.value == null) return { tone: 'bad', text: `unavailable${why ? suffix : ' · not available'}`, state };
+  if (cell.retained) return { tone: 'warn', text: `${held}, ${ago()}${suffix}`, state };
+  if (state === 'stale') return { tone: 'warn', text: `as of ${ago()}${suffix}`, state };
+  return { tone: 'bad', text: `${localWhy ? `${esc(localWhy)} · ` : why ? '' : 'not available · '}as of ${ago()}`, state };
 }
 // A caption: the designed one when fresh, otherwise the state's own words.
-export function stateCaption(cell, key, fresh = '', held) {
-  const p = statePhrase(cell, key, held);
+export function stateCaption(cell, key, fresh = '', held, sharedReason = null) {
+  const p = statePhrase(cell, key, held, sharedReason);
   return p.state === 'fresh' ? fresh : capital(p.text);
 }
 
@@ -284,7 +286,7 @@ export function reservedCaption(caption, freshCaptions) {
 const CASH_SIZING = [...new Set(Object.values(CELL_REASON))].flatMap(why =>
   [`not reported · ${why}`, `−€ 999.999,99 · ${why}`]
 ).map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
-export function cashCaption(cell, key, { figure = false } = {}) {
+export function cashCaption(cell, key, { figure = false, sharedReason = null } = {}) {
   const value = cell?.state === 'broken' && cell.retained ? null : cell?.value;
   const why = cell?.reason ? cellReason(cell.reason) : null;
   const view = value == null ? { text: `not reported · ${why ?? cellReason('feed_not_received')}`,
@@ -293,7 +295,8 @@ export function cashCaption(cell, key, { figure = false } = {}) {
   if (figure) {
     const amount = value == null ? '—' : cashAmount(value).text;
     const reason = why ?? (value == null ? cellReason('feed_not_received') : '');
-    const state = value == null ? `not reported · ${esc(reason)}` : reason ? ` · ${esc(reason)}` : '';
+    const localReason = reason !== sharedReason ? reason : '';
+    const state = value == null ? `not reported${localReason ? ` · ${esc(localReason)}` : ''}` : localReason ? ` · ${esc(localReason)}` : '';
     return `<div class="kpi cash-kpi cash-block"><dt class="cash-label">Cash</dt><dd><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}"><span class="cash-amount${value == null ? ' muted' : ''}">${esc(amount)}</span>
       <span class="cash-caption cash-reserve c"><span class="cash-description">cash · as the broker reports it</span>
         <span class="cash-reason">${state}</span></span></span></dd></div>`;
