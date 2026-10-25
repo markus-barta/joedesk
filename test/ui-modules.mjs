@@ -223,6 +223,15 @@ test('position rows: null values expose their reasons visibly and in accessible 
     assert.ok(kept.includes(`title="${label}: not reported · ${why}" aria-label="${label}: not reported · ${why}">—</span>`));
     assert.ok(kept.includes(`${label}: ${why}`) || htmlDocument(kept).querySelector('.pstate').textContent.includes(why), 'reason remains visible locally or once in the section');
   }
+  const keptDoc = htmlDocument(kept), section = keptDoc.querySelector('.pstate').textContent;
+  for (const row of keptDoc.querySelectorAll('.prow')) {
+    const why = row.getAttribute('data-keep') === 'SXR8' ? 'not exact yet' : 'not reported by the broker';
+    const reasons = row.querySelector('.position-reasons')?.textContent ?? '';
+    for (const label of ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result']) {
+      assert.ok(reasons.includes(`${label}: ${why}`) || section.includes(why), `${label} is named in its row reason list unless the section explains it`);
+    }
+    assert.equal(row.querySelector('.position-day'), null, 'today’s result has no separate state-dependent line');
+  }
   assert.match(positions, /title="Last price: not reported · not reported by the broker"/);
   assert.match(positions, /class="position-reasons">Last price: not reported by the broker/);
   assert.doesNotMatch(kept.slice(kept.indexOf('<div class="prow"')), /<(?:button|a|input)\b|tabindex=/);
@@ -1050,23 +1059,28 @@ test('broker down: a different position reason remains on its own row and dash',
   }
 });
 
-test('shared position reasons: a null today’s result keeps its name and dash in every row', () => {
+test('position reasons: today’s result stays in the field list unless its reason is shared', () => {
   const ctx = board(fixture('a-gateway-up-but-dead'));
   for (const name of ['positions', 'kept']) {
     const render = () => htmlDocument(name === 'positions' ? positionsHtml(ctx).html : keptHtml(ctx));
     for (const row of render().querySelectorAll('.prow:not(.hd)')) {
-      const field = row.querySelector('.position-day'), dash = field?.querySelector('.position-value');
-      assert.equal(field?.textContent, 'Today’s result: —');
-      assert.equal(dash?.getAttribute('aria-label'), 'Today’s result: not reported · broker connection down');
-      assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
-      assert.doesNotMatch(row.textContent, /broker connection down/, 'the dash names its field without repeating the section reason');
+      assert.equal(row.querySelector('.position-reasons'), null, 'matching field reasons belong to the section');
+      assert.equal(row.querySelector('.position-day'), null, 'no extra line changes row geometry');
+      assert.doesNotMatch(row.textContent, /broker connection down/, 'the section owns its shared reason');
+      for (const dash of row.querySelectorAll('.position-value')) {
+        assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+        assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
+      }
     }
     ctx.states[name].value[0].reasons = { dayPnl: 'not_exact_yet' };
     const different = render().querySelector('.prow:not(.hd)');
-    assert.equal(different.querySelector('.position-day').textContent, 'Today’s result: not exact yet · —');
-    assert.equal(different.querySelector('.position-day .position-value').getAttribute('aria-label'), 'Today’s result: not reported · not exact yet');
+    assert.equal(different.querySelector('.position-reasons').textContent, 'Today’s result: not exact yet');
+    assert.equal(different.querySelector('.position-day'), null);
+    assert.doesNotMatch(different.textContent, /broker connection down/);
     delete ctx.states[name].value[0].dayPnl;
-    assert.equal(render().querySelector('.prow:not(.hd) .position-day').textContent, '', 'omitted optional result leaves only the geometry reserve');
+    assert.equal(render().querySelector('.prow:not(.hd) .position-reasons'), null, 'omitted optional result has no missing-field reason');
+    ctx.states[name].value[0].dayPnl = { amount: '1.25', currency: 'EUR' };
+    assert.equal(render().querySelector('.prow:not(.hd) .position-reasons'), null, 'valued optional result has no missing-field reason');
   }
 });
 
@@ -1076,6 +1090,7 @@ test('broker down: opened Account explains its figures once inside its own body'
     const doc = htmlDocument(heroLeft(ctx)), body = doc.querySelector('#accountDetail');
     for (const sizing of body.querySelectorAll('.cash-sizing')) sizing.remove();
     assert.equal(body.querySelector('.account-state').textContent, 'Numbers unavailable · broker connection down');
+    assert.equal(body.querySelector('.account-state').getAttribute('aria-hidden'), null, 'the populated state line stays accessible');
     assert.equal(body.textContent.match(/broker connection down/g).length, 1);
     assert.ok(body.querySelector('.account-state use'), 'the body state retains its icon');
     assert.equal(doc.querySelector('.collapsed-summary .summary-text').textContent.match(/broker connection down/g).length, 1);
@@ -1084,7 +1099,17 @@ test('broker down: opened Account explains its figures once inside its own body'
     assert.match(htmlDocument(heroLeft(ctx)).querySelector('#accountDetail').textContent, /Unavailable · not exact yet/);
   }
   const ctx = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
-  assert.equal(htmlDocument(heroLeft(ctx)).querySelector('.account-state').textContent, '', 'fresh figures keep an empty phone state reserve');
+  for (const seconds of [0, 90]) {
+    ctx.states = panelStates(ctx.feeds, at(valid.data.receivedAt, seconds));
+    const line = htmlDocument(heroLeft(ctx)).querySelector('.account-state');
+    if (seconds === 0) {
+      assert.equal(line.textContent, '', 'fresh figures keep an empty phone state reserve');
+      assert.equal(line.getAttribute('aria-hidden'), 'true', 'the empty reserve is hidden from accessibility');
+    } else {
+      assert.match(line.textContent, /updates are late/);
+      assert.equal(line.getAttribute('aria-hidden'), null, 'stale copy uses the same accessible state box');
+    }
+  }
 });
 
 test('broker down: hero, Cash and each desk explain the reason once and keep mixed ages', () => {

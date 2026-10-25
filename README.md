@@ -1386,10 +1386,16 @@ Collapsed phone summaries retain the icon and short reason, with each distinct
 reason once in their complete accessible copy. Expanded summaries leave the
 shared reason to the section body while preserving independent warnings.
 Opened Account repeats the hero's shared reason once inside its own phone
-body, in a reserved state line; desktop keeps the existing hero caption.
-A null position's today's result keeps a named dash even when its reason
-belongs to the section. Its complete field and reason remain accessible; an
-empty line reserves its space when the optional field is omitted or valued.
+body, in a fixed 48 px state box (two 18 px lines plus 12 px padding), empty
+and hidden from accessibility when fresh; desktop keeps the existing hero
+caption. Grid layout prevents an inline status's baseline from growing this
+box. Desk reasons stay inside the fixed 84 px chart; Positions and Kept keep
+their existing state lines and phone reserves (48 px and 62 px respectively).
+A null position's today's result is named in its row's field reason list,
+unless that reason is shared by the section, just like the other fields.
+It adds no separate line or empty row reserve. Omitted or valued optional
+results add no missing-field reason; other visible dashes retain their complete
+field and reason in their accessible names and titles.
 `test/ui-modules.mjs` covers reason aliases, mixed ages, exceptions and labelled
 dashes. P3 reuses `a-gateway-up-but-dead` for section counts and a fresh-to-outage
 geometry check at 390/1024/1440 in both themes. The phone transition checks
