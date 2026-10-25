@@ -2,10 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261025144826.0.0",
+    APP_VERSION: "261025221940.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 31,
+    RELEASE_SEQUENCE: 32,
     VERSION_HISTORY: [
+      {
+        version: "261025221940.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-25",
+        title: "Exact desk and position values",
+        changes: ["Show exact desk money and position values, with percentages when their base is known.", "Explain unavailable values and retain each position's own observation age."],
+      },
       {
         version: "261025144826.0.0",
         versionScheme: "inspr-calver-3",

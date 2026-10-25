@@ -71,6 +71,9 @@ export const CELL_REASON = Object.freeze({
   not_exact_yet: 'not exact yet',
   source_unavailable: 'not reported by the broker',
   desk_unmapped: 'not matched to a desk',
+  sod_missing: 'start-of-day value missing',
+  ledger_unreconciled: 'desk ledger not reconciled',
+  position_stale: 'position update is old',
 });
 export const cellReason = reason => CELL_REASON[reason] ?? 'not available';
 export const capital = text => text.charAt(0).toUpperCase() + text.slice(1);

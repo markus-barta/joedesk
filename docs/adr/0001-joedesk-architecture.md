@@ -1404,24 +1404,37 @@ Sequence 30 was published on `main` at
 `d4eb662795ff6d0e910aa20797995070b26e5554` under JOED-78 and has been live on
 csb0 since `2026-10-24T03:46:42Z` (JOED-78).
 
-JOED-81 reserves `261025144826.0.0` once at `2026-10-25T14:48:26Z`, stable
+JOED-81 reserved `261025144826.0.0` once at `2026-10-25T14:48:26Z`, stable
 sequence 31, for Round 2: calmer outage view. Shared broker-outage reasons
 appear once per section; distinct field reasons, accessible dash labels and
-individual observation ages remain available. `release/preparation.json`
-records sequence 30 as `previous_release` (`published-candidate`, disposition
-`deployed`, `deployed: true`, JOED-78) and `last_deployed_release`; this does not
-claim sequence-31 publication or adoption.
+individual observation ages remain available. Sequence 31 retained contract
+revision 9 and its complete set
+`000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5`.
+It was published on `main` at `20c37cdd9c99547d79bb69b65764a9706d77905b`
+under JOED-84 and has been live on csb0 since `2026-10-25T21:22:26Z` (JOED-84).
+
+JOED-85's later development closure advances the contract set to revision 10
+for Amy's exact-money Phase B rules (see README), keeping every valid rev-9
+payload accepted. It adds optional desk DAY/OPEN evidence and three null
+reasons, reusing existing money FX and position callback timestamps. The
+participant digest requirements are candidate requirements; the retained
+producer pins/sign-off describe rev 9 only. JOED-85 reserves
+`261025221940.0.0` once at `2026-10-25T22:19:40Z`, stable sequence 32, for
+Phase B: exact desk money and position values (JOED-55). Its runtime closure
+is resealed for that candidate; the revision-10 contract set
+`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`,
+participant requirements and deployment pins stay unchanged by this reservation.
+`release/preparation.json` records sequence 31 as `previous_release`
+(`published-candidate`, disposition `deployed`, `deployed: true`, JOED-84) and
+`last_deployed_release`; this does not claim sequence-32 publication or adoption.
 The explicit sequence-23 → sequence-24 migration anchor and legacy inventory
-stay unchanged.
-Footer/About and `/joe/healthz` derive the current version from the active build;
-About lists the current build, deployed sequences 30, 29, 28, 27 and 26, then legacy history; it
-excludes both superseded, never-deployed publications.
-`check-release` still enforces a strictly later reservation, with CLI regressions
-covering equal/earlier coordinates after closure verification. Contract revision
-9 and its complete set `000045fb7843a16be95f6a7e42d46d4b4ecb34b0efd39fc987bee444817fc9d5`
-remain unchanged by the sequence-31 reservation, as do the pusher/executor
-requirements, producer pins and null deployment pins. No retry release set is
-claimed for sequence 31; main-push CI produces it after publication. The custom legacy scheme is not relabelled as
+stay unchanged. Footer/About and `/joe/healthz` derive the current version from
+the active build; About lists the current build, deployed sequences 31, 30,
+29, 28, 27 and 26, then legacy history. It excludes both superseded,
+never-deployed publications. `check-release` enforces a strictly later
+reservation, with CLI regressions covering equal/earlier coordinates after
+closure verification. No release set is claimed for sequence 32; main-push CI
+produces it after publication. The custom legacy scheme is not relabelled as
 INSPR-CalVer1. JOED-19's owner decision supersedes JOED-13, whose v2 proposal is
 cancelled and consolidated into JOED-26. Published history stays intact.
 

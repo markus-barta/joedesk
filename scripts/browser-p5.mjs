@@ -19,6 +19,7 @@ import { designResults } from './browser/results.mjs';
 import { pngColours } from './browser/pixels.mjs';
 import { captureHeaderCrop } from './browser/header-crop.mjs';
 import { afterStableLayout } from './browser/settled-layout.mjs';
+import { phaseBChecks } from './browser/phase-b.mjs';
 
 // The page's own model, for the words and keys Settings must show.
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
@@ -357,6 +358,9 @@ try {
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-settings-not-reported`, 'Settings without the executor report or the account hint: "Not reported"');
     }
   }
+
+  if (run('phase-b')) await phaseBChecks({ page, check, shot, auditScreen, mixed: true,
+    newBoard: async () => { const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b); return b; } });
 
   // JOED-57: rev-9 switch-set values are deliberately uncaptured. Use a cold
   // page after hours, so no old values are retained and RTH warnings stay intact.

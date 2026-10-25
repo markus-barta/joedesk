@@ -14,6 +14,7 @@ import { focusTermTips } from './browser/term-focus.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
+import { phaseBChecks } from './browser/phase-b.mjs';
 
 // The page's own history model, for the values its sparklines must plot. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -439,6 +440,7 @@ const unavailable = (r, words) => r.on && r.hero.includes(`Results are unavailab
 const norm = text => text?.replace(/\s+/g, ' ').trim();
 const moves = (a, b) => shifted(a, b, ['top', 'left', 'height']);
 try {
+  if (run('phase-b')) await phaseBChecks({ page, newBoard, check, shot, auditScreen });
   if (run('design')) {
   // 1 · The full design scenario at every viewport and theme.
   const { snapshot, history } = scenario(NOW);

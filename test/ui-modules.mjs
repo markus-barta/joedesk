@@ -78,7 +78,7 @@ test('format: Austrian digits, true minus, joined units, zero without sign', () 
   assert.equal(format.joinUnits('Paper · fixed', { joinDot: true }), 'Paper · fixed');
   assert.equal(format.joinUnits(' · checked', { joinDot: true }), ' · checked');
   assert.deepEqual(format.sumByCurrency([{ amount: '0.1', currency: 'EUR' }, { amount: '0.2', currency: 'EUR' }, { amount: '441.2', currency: 'USD' }]),
-    [{ currency: 'EUR', amount: 0.3 }, { currency: 'USD', amount: 441.2 }]);
+    [{ currency: 'EUR', units: 30000000n }, { currency: 'USD', units: 44120000000n }]);
   assert.equal(format.dayDDM('2026-10-14T17:42:22.000Z'), 'Wed 14 Oct');
   assert.equal(format.timeHMS('2026-10-14T17:42:22.000Z'), '19:42:22');
   assert.equal(format.timeHM('2026-10-28T13:30:00.000Z'), '14:30');
