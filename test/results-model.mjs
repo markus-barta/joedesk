@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
+import { htmlDocument } from './fixtures/preview-dom.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -22,6 +23,7 @@ const M = await import('../public/joe/results-model.js');
 const page = await import('../public/joe/results.js');
 const fmt = await import('../public/joe/format.js');
 const { bn } = await import('../public/joe/ui.js');
+const { STARTING_MONEY, percentOf, sincePercent } = await import('../public/joe/performance.js');
 const { decimalUnits, divRound, roundUnits, mulUnits, divUnits, unitsDecimal, unitsNumber } = await import('../contracts/decimal.mjs');
 const { validateContract } = await import('../contracts/index.mjs');
 const { missingResultsDays } = await import('../contracts/vienna-date.mjs');
@@ -672,6 +674,103 @@ function heroCapture() {
     return { html: node.innerHTML, sentence: node.innerHTML.match(/<p class="say">([\s\S]*?)<\/p>/)[1] };
   };
 }
+
+test('JOED-83: the period base adds the exact prior after-fee rollup, including open movement', () => {
+  const ix = M.indexResults(record([closeDay('2026-09-30', '5150.12345678')], [
+    tradeOf('rt-prior', 'j', '2026-09-30T15:00:00.000Z', '100', '10'),
+  ]));
+  const per = M.periodOf('month', today, today, ix.meta.trackingStart);
+  const inputs = ctxOf([E('5160.12845678'), E('5000'), E('5000')]);
+  const R = M.rollup(ix, per, ALL, M.moneyContext(ix, inputs, per, ALL));
+  assert.equal(R.units.net, E('10.005'));
+  assert.equal(M.periodBase(ix, inputs, per, ALL), E('15150.12345678'));
+  assert.equal(M.periodPercent(ix, inputs, per, ALL, R), percentOf(E('10.005'), E('15150.12345678')));
+  assert.notEqual(M.periodBase(ix, inputs, per, ALL), E('15100'), 'closed trades alone omit open movement');
+  const early = M.periodOf('month', '2026-09-10', today, ix.meta.trackingStart);
+  assert.equal(M.periodBase(ix, inputs, early, ALL), STARTING_MONEY, 'before tracking there is no prior result');
+});
+
+test('JOED-83: All time equals Desk Since start on the same exact aggregate result', () => {
+  const ix = M.indexResults(record([])), per = M.periodOf('all', today, today, ix.meta.trackingStart);
+  for (const amount of ['150', '-150', '0.75']) {
+    const net = E(amount), inputs = ctxOf([E('5000') + net, E('5000'), E('5000')]);
+    const R = M.rollup(ix, per, ALL, M.moneyContext(ix, inputs, per, ALL));
+    assert.equal(M.periodBase(ix, inputs, per, ALL), STARTING_MONEY);
+    assert.equal(M.periodPercent(ix, inputs, per, ALL, R), sincePercent({
+      'today.totalPnl': { state: 'fresh', value: eurOf(amount) },
+    }));
+  }
+});
+
+test('JOED-83: the percentage rounds once, half away from zero, without cent-rounding either input', () => {
+  const ix = M.indexResults(record([closeDay('2026-09-30', '10000')]));
+  const per = M.periodOf('month', today, today, ix.meta.trackingStart);
+  for (const [net, want] of [['2.99999999', 1n], ['3', 2n], ['-2.99999999', -1n], ['-3', -2n]]) {
+    const inputs = ctxOf([E('10000') + E(net), E('5000'), E('5000')]);
+    const R = M.rollup(ix, per, ALL, M.moneyContext(ix, inputs, per, ALL));
+    assert.equal(M.periodBase(ix, inputs, per, ALL), E('20000'));
+    assert.equal(M.periodPercent(ix, inputs, per, ALL, R), want, net);
+  }
+});
+
+test('JOED-83: individual desks, empty, cut, unknown and non-exact results omit the percentage', () => {
+  const ix = M.indexResults(record([])), per = M.periodOf('all', today, today, ix.meta.trackingStart);
+  const inputs = ctxOf([E('5150'), E('5000'), E('5000')]);
+  const R = M.rollup(ix, per, ALL, M.moneyContext(ix, inputs, per, ALL));
+  for (const desks of [['j'], ['joe'], ['joel'], ['j', 'joe'], ['j', 'j', 'joe']]) {
+    assert.equal(M.periodBase(ix, inputs, per, desks), null);
+    assert.equal(M.periodPercent(ix, inputs, per, desks, R), null);
+  }
+  for (const result of [null, { ...R, empty: true }, { ...R, cut: { desks: ['j'], at: 1 } },
+    { ...R, net: null }, { ...R, units: { ...R.units, net: null } }, { ...R, units: { ...R.units, net: 150 } }]) {
+    assert.equal(M.periodPercent(ix, inputs, per, ALL, result), null);
+  }
+  const unknown = ctxOf([null, E('5000'), E('5000')]);
+  assert.equal(M.periodPercent(ix, unknown, per, ALL, M.rollup(ix, per, ALL, unknown)), null);
+  assert.equal(M.periodBase(null, inputs, per, ALL), null);
+});
+
+test('JOED-83: an unknown, zero or negative base and a prior basis change omit the percentage', () => {
+  const inputs = ctxOf([E('5100'), E('5000'), E('5000')]);
+  for (const [j, joe, joel] of [[null, '5000', '5000'], ['0', '0', '0'], ['-0.01', '0', '0']]) {
+    const ix = M.indexResults(record([closeDay('2026-09-30', j, joe, joel)]));
+    const per = M.periodOf('month', today, today, ix.meta.trackingStart);
+    const R = M.rollup(ix, per, ALL, M.moneyContext(ix, inputs, per, ALL));
+    assert.equal(M.periodBase(ix, inputs, per, ALL), null);
+    assert.equal(M.periodPercent(ix, inputs, per, ALL, R), null);
+  }
+  const ix = M.indexResults(record([closeDay('2026-09-30', '5000')]));
+  const per = M.periodOf('month', today, today, ix.meta.trackingStart);
+  const withCut = { ...inputs, cuts: [{ desk: 'j', at: Date.parse('2026-09-30T12:00:00Z') }] };
+  const R = M.rollup(ix, per, ALL, M.moneyContext(ix, withCut, per, ALL));
+  assert.equal(R.cut, null, 'the selected period itself is comparable');
+  assert.equal(M.periodBase(ix, withCut, per, ALL), null, 'the aggregate prefix crosses a basis change');
+  assert.equal(M.periodPercent(ix, withCut, per, ALL, R), null);
+});
+
+test('JOED-83: the hero keeps Desk signs/tones and reads the percentage with its period-start meaning', () => {
+  const render = heroCapture(), now = '2026-10-14T17:42:22.000Z', value = record([]);
+  for (const [net, text, tone] of [['150', '+1,00 %', 'gain'], ['-150', '−1,00 %', 'loss'], ['0.01', '0,00 %', '']]) {
+    const { html } = render(value, now, 'all', today, ALL, [E('5000') + E(net), E('5000'), E('5000')]);
+    const doc = htmlDocument(html), percent = doc.querySelector('.performance-pct');
+    assert.equal(percent.textContent, text);
+    assert.equal(percent.getAttribute('class'), `performance-pct${tone ? ` ${tone}` : ''}`);
+    assert.equal(doc.querySelector('.period-percent-slot .vh').textContent, ' of the money at the period start');
+    assert.equal(doc.querySelector('.result-figure').getAttribute('role'), 'group');
+    assert.ok(doc.querySelector('.display .bn'));
+  }
+  for (const [source, desks, money, inputs] of [
+    [null, ALL, [E('5000'), E('5000'), E('5000')], {}],
+    [value, ['j'], [E('5150'), E('5000'), E('5000')], {}],
+    [value, ALL, [E('5000'), E('5000'), E('5000')], {}],
+    [value, ALL, [null, E('5000'), E('5000')], {}],
+    [value, ALL, [E('5150'), E('5000'), E('5000')], { cuts: [{ desk: 'j', at: Date.parse(now) }] }],
+  ]) {
+    const doc = htmlDocument(render(source, now, 'all', today, desks, money, inputs).html);
+    assert.equal(doc.querySelector('.performance-pct'), null);
+    assert.equal(doc.querySelector('.period-percent-slot').textContent, '', 'keep only the empty geometry reserve');
+  }
+});
 
 test('JOED-32 hero: only a sentence without a partial-day hint keeps its final full stop', t => {
   const render = heroCapture(t), now = '2026-10-16T12:00:00.000Z';

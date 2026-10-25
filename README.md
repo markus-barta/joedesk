@@ -1361,6 +1361,24 @@ putting unavailable results last. Position rows keep their instrument currency:
 the current row contract supplies neither a separate EUR result nor a usable
 native-to-EUR rate (a rate from another row or the results record is not used).
 
+JOED-83 adds the selected period's percentage beside the Results hero's euros
+for All desks. All time divides by `STARTING_MONEY` (€ 15.000), matching
+Desk's Since start for the same aggregate result. Other periods divide by
+`STARTING_MONEY + prior.units.net`: `prior` is the existing after-fee `rollup`
+from `trackingStart` through the day before the period starts, with the same
+money context and basis-change checks. This includes open-position movement;
+it does not sum closed trades alone or round either input to cents. Individual
+desks, empty periods, basis changes, unknown/non-exact results and unknown or
+nonpositive bases omit the percentage. The shared Desk formatter retains its
+two decimals, signs and tones, with “of the money at the period start” in the
+figure's accessible text and the formula in the existing Result explanation.
+Both figure columns reserve their width when the percentage is absent, with
+tabular numerals and fixed height. Results unit tests cover the exact base,
+rounding boundaries, Since start parity and omissions. P4's existing number
+comparison now checks percentage presence, value, tone, meaning and bounds
+for the standard fixture's All desks and individual-desk selections; its
+existing tick/filter geometry checks include the figure and percentage slot.
+
 A snapshot state shared by money cells appears once in the hero's board caption.
 The cells keep subtle state icons. Different states, reasons, ages, missing
 values or retained observations keep their own explanations; positions and kept

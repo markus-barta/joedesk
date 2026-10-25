@@ -7,6 +7,7 @@
 import { wall, marketSession, sessionBounds, zonedInstant, VIENNA, NY } from './time.mjs';
 import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
 import { basisKey, meaningful, rowAt } from './history-model.js';
+import { STARTING_MONEY, percentOf } from './performance.js';
 
 export const DESK_IDS = Object.freeze(['j', 'joe', 'joel']);
 const DESK_INDEX = Object.freeze({ j: 0, joe: 1, joel: 2 });
@@ -368,6 +369,24 @@ export function moneyContext(ix, inputs, per, desks) {
 const cents = units => Number(divRound(units, CENT)) / 100;
 const centsOf = (units, count) => Number(divRound(units, BigInt(count) * CENT)) / 100;
 const hundredths = (num, den) => Number(divRound(num * 100n, den)) / 100;
+
+// Aggregate money at the period start. Use the same after-fee equity rollup
+// as the hero, including open-position movement, without rounding its result.
+// There is no authoritative starting base for an individual desk (JOED-55).
+export function periodBase(ix, inputs, per, desks) {
+  if (!ix || desks.length !== DESK_IDS.length || !DESK_IDS.every(id => desks.includes(id))) return null;
+  if (per.p === 'all' || per.start <= ix.meta.trackingStart) return STARTING_MONEY;
+  const before = { p: 'all', start: ix.meta.trackingStart, end: addDays(per.start, -1) };
+  const prior = rollup(ix, before, desks, moneyContext(ix, inputs, before, desks));
+  if (prior.cut || prior.net === null || typeof prior.units.net !== 'bigint') return null;
+  const base = STARTING_MONEY + prior.units.net;
+  return base > 0n ? base : null;
+}
+
+export function periodPercent(ix, inputs, per, desks, result) {
+  if (!result || result.cut || result.empty || result.net == null || typeof result.units?.net !== 'bigint') return null;
+  return percentOf(result.units.net, periodBase(ix, inputs, per, desks));
+}
 
 // Every §4.2 number for one period and desk set. Display values are rounded
 // once from exact sums; the exact sums ride along as units. Day uses the

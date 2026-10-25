@@ -2,7 +2,7 @@
 // means, and the trade term behind it (spec r3 A1). Labels can be overridden at
 // the call site when the text carries live data ("Since 10 Sep").
 export const TERMS = Object.freeze({
-  result: ['Result', 'What the desks gained or lost, after fees.', 'Profit and loss (P&L)'],
+  result: ['Result', 'What the desks gained or lost, after fees. The percentage divides the period result by the money at the period start: the board’s established € 15.000 plus its exact after-fee result before this period. All time uses € 15.000, as Since start does. The percentage is omitted for an individual desk (no starting base is supplied), unknown or nonpositive starting money, an unknown result, a bookkeeping basis change or an empty period.', 'Profit and loss (P&L)'],
   today: ['Today', 'The result since today’s trading day began: midnight in New York, 06:00 in Vienna. The percentage divides this result by the desks’ money at the start of today (their money now minus today’s result). It is omitted when that base is missing, zero or not exact, or the day is estimated.', 'Day P&L'],
   open: ['Open positions', 'What the positions still held would gain or lose if they were closed at the current price. It keeps changing until they close.', 'Open P&L, unrealised'],
   since: ['Since start', 'The result since paper results became verified, after fees. J’s bookkeeping starts on its own date; Joe and Joel count from their start. The board’s percentage uses its established € 15.000 starting capital. Individual desk percentages are omitted: the data and fleet settings do not provide a starting base per desk. Cards are ordered by this euro result, best first; unavailable results come last.', 'Total P&L since start'],
