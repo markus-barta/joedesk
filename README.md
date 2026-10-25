@@ -1460,8 +1460,17 @@ phone caption whose complete text opens in the existing explanation tip;
 Today's one-line summary also opens its complete sentence there.
 
 CSS-only budget at 390×844: 54 px header + 56 px problem reserve +
-285 px primary card + 64 px Desks heading + three 92 px rows and two 8 px
-gaps = 751 px, leaving 21 px above the bottom navigation's 772 px top.
+285 px primary card + 64 px Desks heading + three 66 px rows and two 8 px
+gaps = 673 px, leaving 99 px above the bottom navigation's 772 px top.
+JOED-82 replaces each 92 px row's automatic tracks and 28 px warning reserve
+with explicit 36 px identity/money and 14 px warning tracks, plus 8 px padding
+at either end. The reserved warning line remains even when fresh; this keeps
+state and tone changes from moving the rows. The CSS gap from the end of that
+line to the card/section end is 8 px (previously about 25 px with stretched
+automatic tracks); the list itself has no
+trailing padding or collapsed-detail gap. P3 measures both gaps at 360/390 in
+both themes and retains its 44 px target, first-screen and zero-shift checks.
+These are CSS calculations; rendered measurements remain for agm2 CI.
 The primary card is 14 + 20 + 32 + 0 + 53 + 24 + 48 + 0 + 44 + 0 + 36 + 14:
 padding, date, label, numeral margin, numeral, percent, caption, sentence
 margin, sentence target, board-caption margin, board caption and padding.

@@ -24,7 +24,10 @@ export async function phoneDeskSnapshot(page) {
       bottomBar: rect(document.querySelector('.bottom-nav')),
       primary: [...document.querySelectorAll('#heroL .primary')].map(e => ({ ...rect(e), euros: e.querySelector('.display').innerText, pct: e.querySelector('.pct-slot').innerText })),
       sentence: rect(document.querySelector('#heroL .say')),
+      desks: rect(document.querySelector('#desks')),
       rows: rows.map(e => ({ ...rect(e), key: e.dataset.deskDisclosure, text: e.innerText, icon: Boolean(e.querySelector('.dmark svg')), state: e.querySelector('.compact-word').innerText,
+        card: rect(e.closest('.dcard')),
+        warningLineBottom: (() => { const w = e.querySelector('.disclosure-warning'); return rect(w).top + parseFloat(getComputedStyle(w).lineHeight); })(),
         values: [...e.querySelectorAll('.compact-figure')].map(v => v.querySelector('.bn').innerText),
         detailValues: [...document.querySelectorAll('#detail-' + e.dataset.deskDisclosure + ' .dnums .v .bn')].filter((v, i) => i !== 1).map(v => v.textContent) })),
       controls: controls.map(e => { const body = document.getElementById(e.getAttribute('aria-controls')), summary = e.querySelector('.summary-text');

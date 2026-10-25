@@ -1105,7 +1105,10 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
      summary reserve; a collapsed section always exposes its icon and reason. */
   .desk-disclosure[aria-expanded="true"] .collapsed-summary { display: none; }
   .desk-disclosure[aria-expanded="true"] .expanded-summary { display: contents; }
-  #desks .desk-row { height: 92px; min-height: 92px; padding: 8px 10px; grid-template-columns: 24px minmax(0, 1fr) 82px 82px 12px; gap: 0 5px; font-variant-numeric: tabular-nums; }
+  /* 36 px identity/money + one 14 px warning line + 8 px at either end.
+     Explicit tracks remove the old empty second warning line and stretch. */
+  #desks .desk-row { height: 66px; min-height: 66px; padding: 8px 10px; grid-template-columns: 24px minmax(0, 1fr) 82px 82px 12px; grid-template-rows: 36px 14px; gap: 0 5px; font-variant-numeric: tabular-nums; }
+  #desks .desk-row .disclosure-warning { height: 14px; }
   .desk-row > .disclosure-chevron { grid-column: 5; }
   .desk-row .dmark { width: 24px; height: 28px; background: none; }
   .desk-row .dmark svg { width: 22px; height: 22px; }
