@@ -41,6 +41,18 @@ export function toggleDeskDisclosure(key) {
   if (expanded.has(key)) expanded.delete(key); else expanded.add(key);
 }
 
+// Compare the reader's words: gateway_down and upstream_lost deliberately
+// describe the same problem. Only repeated, affected reasons can be shared.
+export function sharedSectionReason(cells) {
+  const counts = new Map();
+  for (const cell of cells) {
+    if (!cell?.reason || cell.state === 'fresh') continue;
+    const reason = cellReason(cell.reason);
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1]).find(([, count]) => count > 1)?.[0] ?? null;
+}
+
 // Rank the actual selector states, including retained values. A fresh panel
 // may still contain partial rows; those reasons join the same summary ranking.
 export function disclosureProblem(candidates) {
@@ -53,16 +65,30 @@ export function disclosureProblem(candidates) {
     const reason = cell?.reason ?? (p.state === 'not reported' ? 'feed_not_received' : null);
     // Unavailable money leads even when its honest not-exact icon is neutral;
     // an old check-in must not obscure that the row's figures are unknown.
-    const priority = state === 'unavailable' ? 3 : severity[p.tone];
-    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, text: `${label}: ${state}${reason ? ` · ${cellReason(reason)}` : ''}` }];
+    const priority = cell?.state === 'broken' || state === 'unavailable' ? 3 : severity[p.tone];
+    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, reason: reason ? cellReason(reason) : null, label: `${label}: ${state}` }];
   });
   problems.sort((a, b) => b.priority - a.priority || severity[b.tone] - severity[a.tone]);
   if (!problems.length) return null;
-  const { priority, ...first } = problems[0];
-  return { ...first, detail: problems.map(p => p.text).join('; ') };
+  const summarize = list => {
+    if (!list.length) return null;
+    const seen = new Set();
+    const detail = list.map(p => {
+      const suffix = p.reason && !seen.has(p.reason) ? ` · ${p.reason}` : '';
+      seen.add(p.reason);
+      return p.label + suffix;
+    }).join('; ');
+    const first = list[0];
+    return { tone: first.tone, icon: first.icon, text: first.label + (first.reason ? ` · ${first.reason}` : ''), detail };
+  };
+  const sharedReason = sharedSectionReason(candidates.map(([, cell]) => cell)) ??
+    candidates.filter(([, cell]) => Array.isArray(cell?.value)).map(([, cell]) => positionSectionReason(cell)).find(Boolean) ?? null;
+  return { ...summarize(problems), sharedReason,
+    expanded: sharedReason ? summarize(problems.filter(p => p.reason !== sharedReason)) : null };
 }
 function problemHtml(problem) {
-  return problem ? `${icon(problem.icon, `i tone-${problem.tone}`)}<span class="summary-text" title="${esc(problem.detail)}" aria-hidden="true">${esc(problem.text)}</span><span class="vh">${esc(problem.detail)}</span>` : '';
+  const html = p => p ? `${icon(p.icon, `i tone-${p.tone}`)}<span class="summary-text" title="${esc(p.detail)}" aria-hidden="true">${esc(p.text)}</span><span class="vh">${esc(p.detail)}</span>` : '';
+  return problem?.sharedReason ? `<span class="collapsed-summary">${html(problem)}</span><span class="expanded-summary">${html(problem.expanded)}</span>` : html(problem);
 }
 function disclosureButton(key, label, bodyId, problem = null) {
   return `<button type="button" class="desk-disclosure" data-desk-disclosure="${key}" aria-expanded="${expanded.has(key)}" aria-controls="${bodyId}"><span>${esc(label)}</span><span class="disclosure-warning">${problemHtml(problem)}</span>${icon('chev-d', 'i disclosure-chevron')}</button>`;
@@ -85,9 +111,10 @@ function deskProblem(ctx, id) {
 export function compactDesk(ctx, id) {
   const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
   const info = STATE[desk?.state] ?? { tone: 'none', icon: 'ring', word: 'Not reported' };
+  const shared = sharedSectionReason(['dayPnl', 'openPnl', 'totalPnl'].map(name => ctx.states[`desks.${id}.${name}`]));
   const figure = (name, label) => {
-    const cell = ctx.states[`desks.${id}.${name}`], value = cellView(cell, `compact.${id}.${name}`);
-    const marker = cellIcon(cell).replace('cell-state', 'compact-state');
+    const cell = ctx.states[`desks.${id}.${name}`], value = cellView(cell, `compact.${id}.${name}`, { label });
+    const marker = cellIcon(cell, shared).replace('cell-state', 'compact-state');
     const characters = value.units === null ? 1 : eur(value.units, true).length;
     return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${label}${marker}</span>${value.html}</span>`;
   };
@@ -115,11 +142,13 @@ export function executorProblem(data) {
 // One money cell: the value (or a dash) and a caption for exactly the state
 // the shared selector gave it, with this cell's own age and reason. A fresh
 // value keeps the designed caption.
-export function cellView(cell, key, { signed = true, caption = '' } = {}) {
+export function cellView(cell, key, { signed = true, caption = '', sharedReason = null, label = null } = {}) {
   const value = cell?.value ?? null;
   const n = amountOf(value);
   const units = value ? decimalUnits(value.amount) : null;
-  return { html: bn(units, value?.currency ?? 'EUR', signed), caption: stateCaption(cell, key, caption), state: cell?.state ?? 'not reported', n, units };
+  const missingLabel = `${label}: not reported${cell?.reason ? ` · ${cellReason(cell.reason)}` : ''}`;
+  const html = value == null && label ? `<span class="bn muted" role="img" title="${esc(missingLabel)}" aria-label="${esc(missingLabel)}">—</span>` : bn(units, value?.currency ?? 'EUR', signed);
+  return { html, caption: stateCaption(cell, key, caption, undefined, sharedReason), state: cell?.state ?? 'not reported', n, units };
 }
 
 // One snapshot-level caption. A different reason, age, retention or missing
@@ -134,10 +163,10 @@ export function sharesBoardCaption(cell, board) {
   return Boolean(board && cell && ['state', 'reason', 'retained', 'ageSeconds'].every(k => cell[k] === board[k]) &&
     (cell.value == null) === (board.value == null));
 }
-function cellIcon(cell) {
+function cellIcon(cell, sharedReason = null) {
   if (!cell || cell.state === 'fresh') return '';
   const p = statePhrase(cell, '');
-  const label = `${capital(p.state)}${cell.reason ? ` · ${cellReason(cell.reason)}` : ''}`;
+  const label = `${capital(p.state)}${cell.reason && cellReason(cell.reason) !== sharedReason ? ` · ${cellReason(cell.reason)}` : ''}`;
   return `<span class="cell-state tone-${p.tone}" role="img" aria-label="${esc(label)}">${icon(p.icon ?? TONE_ICON[p.tone])}</span>`;
 }
 export function percentHtml(hundredths) {
@@ -260,12 +289,13 @@ export function heroLeft(ctx) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
   const dayCell = states['today.dayPnl'];
-  const day = cellView(dayCell, 'hero.day');
   const board = boardCaptionCell(ctx);
+  const shared = data ? sharedSectionReason(['today.dayPnl', 'today.totalPnl', 'today.openPnl', 'today.equity', 'paperAccount', 'paperCash'].map(name => states[name])) : null;
+  const day = cellView(dayCell, 'hero.day', { sharedReason: shared, label: 'Today' });
   const kpi = (termKey, label, name, key, opts) => {
-    const v = cellView(states[name], key, opts);
+    const v = cellView(states[name], key, { ...opts, sharedReason: shared, label: label ?? { open: 'Open positions', desksmoney: 'Desks’ money', paperacct: 'Paper account' }[termKey] });
     const caption = reservedCaption(sharesBoardCaption(states[name], board) ? '' : v.caption, opts.captions ?? [opts.caption]);
-    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}${cellIcon(states[name])}</dt><dd>${v.html}<span class="c">${caption}</span></dd></div>`;
+    return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}${cellIcon(states[name], shared)}</dt><dd>${v.html}<span class="c">${caption}</span></dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
   const moneyCaptions = [`started with ${eur(STARTING_MONEY, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
@@ -273,7 +303,7 @@ export function heroLeft(ctx) {
   const dayAmount = day.units === null ? null : eur(day.units < 0n ? -day.units : day.units);
   let say;
   if (day.n == null) {
-    say = data ? `Today’s result is not available: ${esc(why ?? 'not reported')}.`
+    say = data ? `Today’s result is not available${why === shared ? '' : `: ${esc(why ?? 'not reported')}`}.`
       : day.state === 'not reported' ? 'No numbers yet: no board data has arrived.' : `No numbers: ${esc(why ?? 'not available')}.`;
   } else if (day.state === 'fresh') {
     const who = 'J, Joe and Joel';
@@ -284,25 +314,28 @@ export function heroLeft(ctx) {
     // Not fresh: the amount, then this value's own state, age and reason.
     say = `${isZero(day.units) ? 'Flat' : `${day.units > 0n ? 'Up' : 'Down'} ${dayAmount}`} today.${sharesBoardCaption(dayCell, board) ? '' : ` ${day.caption}.`}`;
   }
-  const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: 'after fees' });
+  const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: 'after fees', sharedReason: shared, label: 'Since start' });
+  const sharedCell = shared ? Object.values(states).find(cell => cell?.reason && cellReason(cell.reason) === shared && cell.state !== 'fresh') : null;
+  const boardText = [board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : '',
+    shared && (!board?.reason || cellReason(board.reason) !== shared) ? st(statePhrase(sharedCell, '').tone, `Numbers unavailable · ${esc(shared)}`, statePhrase(sharedCell, '').icon) : ''].filter(Boolean).join(' ');
   return `<div class="hero-primary"><div class="performance-date">${now ? dayDDM(now, NY) : ''}</div><div class="performance">
-      <div class="primary" data-cell="hero.day" data-state="${day.state}"><div class="hero-k">${icon('clock')}${term('today')}${cellIcon(dayCell)}</div>
+      <div class="primary" data-cell="hero.day" data-state="${day.state}"><div class="hero-k">${icon('clock')}${term('today')}${cellIcon(dayCell, shared)}</div>
         <div class="display">${day.html}</div><div class="pct-slot">${percentHtml(todayPercent(states, data?.pnlSources?.day))}</div>
         <span class="c primary-caption"></span></div>
-      <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since')}${cellIcon(sinceCell)}</div>
+      <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since')}${cellIcon(sinceCell, shared)}</div>
         <div class="display">${since.html}</div><div class="pct-slot">${percentHtml(sincePercent(states))}</div>
         <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, ['after fees'])}</span>
-        <button type="button" class="phone-primary-note" data-say="since" aria-label="About Since start" aria-expanded="false"${sharesBoardCaption(sinceCell, board) ? ' disabled' : ''}><span data-clamp="3">${sharesBoardCaption(sinceCell, board) ? '&#160;' : stateCaption(sinceCell, 'hero.phone.since', 'after fees')}</span></button></div>
+        <button type="button" class="phone-primary-note" data-say="since" aria-label="About Since start" aria-expanded="false"${sharesBoardCaption(sinceCell, board) ? ' disabled' : ''}><span data-clamp="3">${sharesBoardCaption(sinceCell, board) ? '&#160;' : stateCaption(sinceCell, 'hero.phone.since', 'after fees', undefined, shared)}</span></button></div>
     </div>
     <button type="button" class="say" data-say="today" aria-expanded="false"><span data-clamp="2">${say}</span></button>
-    <p class="board-caption">${board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : ''}</p></div>
+    <p class="board-caption">${boardText}</p></div>
     <div class="account-section" id="accountSection">${disclosureButton('account', 'Account', 'accountDetail', disclosureProblem([
       ['Open positions', states['today.openPnl']], ['Desks’ money', states['today.equity']], ['Paper account', states.paperAccount], ['Cash', states.paperCash], ['Broker', states.gateway],
-    ]))}<div class="disclosure-body" id="accountDetail"><dl class="kpis">
+    ]))}<div class="disclosure-body" id="accountDetail"><p class="pstate account-state"${shared ? '' : ' aria-hidden="true"'}>${shared ? st(statePhrase(sharedCell, '').tone, `Numbers unavailable · ${esc(shared)}`, statePhrase(sharedCell, '').icon) : ''}</p><dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
       ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions })}
       ${kpi('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}
-      ${cashCaption(states.paperCash, 'hero.cash', { figure: true })}
+      ${cashCaption(states.paperCash, 'hero.cash', { figure: true, sharedReason: shared })}
     </dl></div></div>`;
 }
 
@@ -318,14 +351,15 @@ function deskCard(ctx, id, maxDay, showBars) {
   const hb = hbMs != null ? hbMs / 1000 >= STALE_AFTER_S
     ? `${term('heartbeat')} ${ageSpan(`hb.${id}`, `${age(hbMs / 1000)} ago`)}` : ''
     : snapshotAge != null && snapshotAge >= STALE_AFTER_S ? `Data ${ageSpan(`hb.${id}`, `${age(snapshotAge)} old`)}` : '';
-  const dayV = cellView(states[`desks.${id}.dayPnl`], `d.${id}.day`);
-  const openV = cellView(states[`desks.${id}.openPnl`], `d.${id}.open`);
-  const sinceV = cellView(states[`desks.${id}.totalPnl`], `d.${id}.since`);
+  const shared = sharedSectionReason(['dayPnl', 'openPnl', 'totalPnl'].map(name => states[`desks.${id}.${name}`]));
+  const dayV = cellView(states[`desks.${id}.dayPnl`], `d.${id}.day`, { label: 'Today' });
+  const openV = cellView(states[`desks.${id}.openPnl`], `d.${id}.open`, { label: 'Open positions' });
+  const sinceV = cellView(states[`desks.${id}.totalPnl`], `d.${id}.since`, { label: 'Since start' });
   const sinceText = desk?.accounting?.periodStart ? `Since ${dayDM(desk.accounting.periodStart, NY)}` : 'Since start';
   const bar = showBars && dayV.n != null && !isZero(dayV.n)
     ? `<i data-v="${dayV.n}" style="${dayV.n > 0 ? 'left' : 'right'}:50%;width:${(Math.abs(dayV.n) / maxDay * 50).toFixed(3)}%;background:var(--${dayV.n > 0 ? 'gain' : 'loss'})"></i>` : '';
   const board = boardCaptionCell(ctx);
-  const num = (label, v, cell, extra = '') => `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell)}</span><span class="v">${v.html}</span>${extra}</div>`;
+  const num = (label, v, cell, extra = '') => `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell, shared)}</span><span class="v">${v.html}</span>${extra}</div>`;
   const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]], board);
   const learning = learningLine(desk?.learning);
   return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(info.word + since)}">${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
@@ -352,8 +386,11 @@ export function cardStatus(id, cells, board = null) {
     if (group) group.labels.push(label); else groups.push({ key, labels: [label], cell });
   }
   if (!groups.length) return '';
+  const seen = new Set();
   return groups.map((g, i) => {
-    const p = statePhrase(g.cell, `card.${id}.${i}`, 'last good');
+    const reason = g.cell?.reason ? cellReason(g.cell.reason) : null;
+    const p = statePhrase(g.cell, `card.${id}.${i}`, 'last good', seen.has(reason) ? reason : null);
+    seen.add(reason);
     const who = g.labels.length === cells.length ? 'Numbers' : g.labels.length === 2 ? `${g.labels[0]} and ${g.labels[1]}` : g.labels[0];
     return st(p.tone, `${esc(who)}: ${p.text}`, p.icon);
   }).join('');
@@ -362,28 +399,42 @@ export function cardStatus(id, cells, board = null) {
 // One reserved line per section for its own panel state: fresh says so, any
 // other state gives its age and reason. It never appears or disappears, so a
 // change of state moves nothing below it.
-function sectionState(cell, key, { fresh, held, missing, absent }) {
-  const p = statePhrase(cell, key, held);
-  const text = p.state === 'fresh' ? fresh
+function sectionState(cell, key, { fresh, held, missing, absent, sharedReason = null, detail = '' }) {
+  const p = statePhrase(cell, key, held, sharedReason);
+  const text = sharedReason ? `Prices unavailable · ${esc(sharedReason)}${p.text ? ` · ${p.text}` : ''}` : p.state === 'fresh' ? fresh
     : cell?.value == null ? (p.state === 'not reported' ? absent : `${missing}: ${esc(cellReason(cell?.reason ?? 'feed_not_received'))}.`)
       : capital(p.text);
-  return `<p class="pstate" data-state="${p.state}">${st(p.tone, text, p.icon)}</p>`;
+  const indicator = sharedReason && p.state === 'fresh' ? statePhrase(positionProblems(cell).find(c => cellReason(c.reason) === sharedReason), '') : p;
+  return `<p class="pstate" data-state="${p.state}">${st(indicator.tone, text + detail, indicator.icon)}</p>`;
 }
 
 const POSITION_FIELDS = { quantity: 'Quantity', mark: 'Last price', marketValue: 'Worth', dayPnl: 'Today’s result', openPnl: 'Open result' };
 const presentNull = (row, field) => Object.hasOwn(row, field) && row[field] === null;
 const rowReason = (row, field, cell) => cellReason(row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received');
+const missingPositionFields = row => Object.entries(POSITION_FIELDS).filter(([field]) =>
+  presentNull(row, field) || (['mark', 'marketValue'].includes(field) && row[field] == null));
+function positionProblems(cell) {
+  return (cell?.value ?? []).flatMap(row => missingPositionFields(row).map(([field]) =>
+    ({ state: 'broken', value: null, reason: row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received' })));
+}
+export function positionSectionReason(cell) {
+  return sharedSectionReason([cell, ...positionProblems(cell)]);
+}
 function positionValue(row, field, cell) {
   const value = row[field];
   if (value != null) return field === 'quantity' ? quantity(value) : money(amountOf(value), value.currency);
   const label = `${POSITION_FIELDS[field]}: not reported · ${rowReason(row, field, cell)}`;
   return `<span class="position-value" role="img" title="${esc(label)}" aria-label="${esc(label)}">—</span>`;
 }
-function positionReasons(row, cell) {
-  const missing = Object.entries(POSITION_FIELDS).filter(([field]) =>
-    presentNull(row, field) || (['mark', 'marketValue'].includes(field) && row[field] == null));
-  return missing.length ? `<span class="position-reasons">${missing.map(([field, label]) =>
+function positionReasons(row, cell, sharedReason = null) {
+  const missing = missingPositionFields(row).filter(([field]) => rowReason(row, field, cell) !== sharedReason);
+  const reasons = missing.length ? `<span class="position-reasons">${missing.map(([field, label]) =>
     `${esc(label)}: ${esc(rowReason(row, field, cell))}`).join(' · ')}</span>` : '';
+  // Today's result has no value column. Name a shared-reason null here,
+  // while independent reasons keep their existing field list.
+  const day = sharedReason && presentNull(row, 'dayPnl') && rowReason(row, 'dayPnl', cell) === sharedReason
+    ? `<span class="position-day">Today’s result: ${positionValue(row, 'dayPnl', cell)}</span>` : '';
+  return `<span class="position-notes"${reasons || day ? '' : ' aria-hidden="true"'}>${day}${reasons}</span>`;
 }
 
 export function positionsHtml(ctx) {
@@ -391,10 +442,11 @@ export function positionsHtml(ctx) {
   const cell = states.positions;
   const rows = cell?.value;
   const data = ctx.feeds.data?.value;
+  const shared = positionSectionReason(cell);
   const header = `<div class="prow hd"><span></span><span class="sub">Holding</span><span class="sub c-side">${term('side')}</span><span class="sub r c-px">${term('lastprice')}</span><span class="sub c-worth">${term('worth')}</span><span class="sub r">${term('open', 'Open result')}</span><span class="sub r c-opened">Updated</span></div>`;
   const observed = data?.positions?.observedAt ?? data?.generatedAt;
   const state = sectionState(cell, 'pos', { fresh: `Up to date · prices from ${observed ? timeHMS(observed) : 'the last snapshot'}`, held: 'last good positions',
-    missing: 'Position detail is unavailable', absent: 'Position detail is not present in this snapshot.' });
+    missing: 'Position detail is unavailable', absent: 'Position detail is not present in this snapshot.', sharedReason: shared });
   if (!rows) return { sub: 'Desk positions only · each in its own currency', html: state };
   if (!rows.length) return { sub: '0 open · desk positions only · each in its own currency', html: `${state}<p class="empty-line">${icon('info')}<span>No open positions.</span></p>` };
   const unmapped = row => row.scope === 'stage0' && row.desk === null;
@@ -411,7 +463,7 @@ export function positionsHtml(ctx) {
     const deskLabel = unmapped(r) ? `No desk · ${cellReason(r.reasons.desk)}` : null;
     return `<div class="prow" data-desk="${esc(r.desk ?? '')}">
       ${symBadge(r.symbol, r.desk)}
-      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span${deskLabel ? ` title="${esc(deskLabel)}" aria-label="${esc(deskLabel)}"` : ''}>${deskLabel ? esc(deskLabel) : r.desk ? `${inlineMark(r.desk)} ${LABEL[r.desk]}` : 'No desk'}${opened}${legacy}</span><span class="position-mobile">${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)} · worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell)}</div>
+      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span${deskLabel ? ` title="${esc(deskLabel)}" aria-label="${esc(deskLabel)}"` : ''}>${deskLabel ? esc(deskLabel) : r.desk ? `${inlineMark(r.desk)} ${LABEL[r.desk]}` : 'No desk'}${opened}${legacy}</span><span class="position-mobile">${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)} · worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell, shared)}</div>
       <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)}</div>
       <div class="r c-px num">${positionValue(r, 'mark', cell)}</div>
       <div class="c-worth"><span class="num">${positionValue(r, 'marketValue', cell)}</span><span class="vbar"${value == null ? ' style="visibility:hidden"' : ''}>${value != null && max ? `<i data-v="${value}" data-cur="${esc(r.marketValue.currency)}" style="width:${(Math.abs(value) / max * 100).toFixed(3)}%"></i>` : ''}</span></div>
@@ -429,14 +481,19 @@ export function keptHtml(ctx) {
   const { states } = ctx;
   const cell = states.kept;
   const rows = cell?.value;
+  const shared = positionSectionReason(cell);
   const nav = states.paperAccount?.value ? eur(amountOf(states.paperAccount.value)) : '—';
   const incomplete = rows?.filter(r => r.marketValue == null) ?? [];
   const worth = rows?.length ? sumByCurrency(rows.map(r => r.marketValue))?.map(s => money(s.amount, s.currency)).join(' and ') : null;
-  const unavailableWorth = `Worth not available · ${[...new Set(incomplete.map(r => rowReason(r, 'marketValue', cell)))].map(esc).join(' · ')}`;
+  const worthReasons = [...new Set(incomplete.map(r => rowReason(r, 'marketValue', cell)))].filter(reason => reason !== shared);
+  const unavailableWorth = `Worth not available${worthReasons.length ? ` · ${worthReasons.map(esc).join(' · ')}` : ''}`;
   const caption = `<p class="keep-cap">${icon('keep')}<span>Read-only. Left out of every desk result and of Results; counted in the ${term('paperacct', 'paper account')} (${nav}).</span></p>`;
-  const p = statePhrase(cell, 'kept', 'last good values');
+  const p = statePhrase(cell, 'kept', 'last good values', shared);
   const fresh = incomplete.length ? unavailableWorth : worth ? `Worth ${worth} now, each in its own currency.` : 'Up to date.';
-  const state = incomplete.length
+  const state = shared
+    ? sectionState(cell, 'kept', { held: 'last good values', sharedReason: shared,
+      detail: incomplete.length ? ' · worth not available' : worth ? ` · worth ${worth}, each in its own currency` : '' })
+    : incomplete.length
     ? `<p class="pstate" data-state="${p.state}">${st(p.state === 'fresh' ? 'none' : p.tone, `${p.text ? `${capital(p.text)} · ` : ''}${unavailableWorth}`, p.icon)}</p>`
     : rows && worth && p.state !== 'fresh'
     ? `<p class="pstate" data-state="${p.state}">${st(p.tone, `${capital(p.text)} · worth ${worth}, each in its own currency`, p.icon)}</p>`
@@ -446,7 +503,7 @@ export function keptHtml(ctx) {
   return `${caption}${state}${[...rows].sort((a, b) => a.symbol.localeCompare(b.symbol)).map(r => {
     return `<div class="prow" data-keep="${esc(r.symbol)}">
       ${symBadge(r.symbol)}
-      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span>${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)}</span><span class="position-mobile">Worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell)}</div>
+      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span class="position-summary">${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)}</span><span class="position-mobile">Worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell, shared)}</div>
       <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)}</div>
       <div class="r c-px num">${positionValue(r, 'mark', cell)}</div>
       <div class="c-worth num">${positionValue(r, 'marketValue', cell)}</div>

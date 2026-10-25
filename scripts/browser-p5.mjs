@@ -497,7 +497,7 @@ try {
             const r = e.getBoundingClientRect(), p = parent.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(e);
             const glyphs = [...range.getClientRects()].map(g => ({ left: g.left, right: g.right, top: g.top, bottom: g.bottom }));
             const cs = getComputedStyle(e);
-            return { text: e.innerText.trim(), label: e.closest('.cash-block').querySelector('.cash-label').innerText, caption: e.closest('.cash-block').querySelector('.cash-caption').innerText, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'),
+            return { text: e.innerText.trim(), label: e.closest('.cash-block').querySelector('.cash-label').innerText, caption: e.closest('.cash-block').querySelector('.cash-caption').innerText, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'), section: document.querySelector('#heroL .board-caption')?.innerText ?? '',
               fits: glyphs.every(g => g.left >= p.left - 0.5 && g.right <= p.right + 0.5 && g.top >= p.top - 0.5 && g.bottom <= p.bottom + 0.5),
               clipped: e.scrollWidth > e.clientWidth || e.scrollHeight > e.clientHeight, style: cs.fontStyle,
               horizontal: __audit.horizontal(), clipping: __audit.clipping() };
@@ -507,12 +507,13 @@ try {
           const why = phase === 'stale' ? 'updates are late' : phase === 'session' ? 'broker connection not confirmed'
             : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact yet' : 'not reported by the broker';
           const brokerCaption = 'cash · as the broker reports it';
-          const cashState = hasValue ? phase === 'stale' ? `· ${why}` : '' : `not reported · ${why}`;
+          const shared = screen === 'desk' && ['stale', 'session'].includes(phase);
+          const cashState = hasValue ? phase === 'stale' && !shared ? `· ${why}` : '' : `not reported${shared ? '' : ` · ${why}`}`;
           const caption = screen === 'desk' ? `${brokerCaption}${cashState ? ` ${cashState}` : ''}` : brokerCaption;
           const expected = screen === 'desk' ? `${hasValue ? '€ 12.345,68' : '—'} ${caption}`
             : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `not reported · ${why}`;
           const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : `Cash not reported · ${why}`;
-          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme, independent null reason`, N(seen.text) === expected && seen.label === 'Cash' && N(seen.caption) === caption && seen.title === exact && seen.name === exact && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
+          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme and reason locally or once in the section`, N(seen.text) === expected && seen.label === 'Cash' && N(seen.caption) === caption && seen.title === exact && seen.name === exact && (!shared || seen.section.includes(why)) && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
           check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
           const after = await measure();
           const moved = baseline.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== after[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: after[i]?.[k] })));
@@ -578,7 +579,7 @@ try {
           text: row.innerText, reasons: row.querySelector('.position-reasons')?.innerText,
           dashes: [...row.querySelectorAll('[aria-label]')].map(e => ({ text: e.innerText, title: e.title, name: e.getAttribute('aria-label') })),
           interactive: row.querySelectorAll('button, a, input, [tabindex]').length, tracks: row.querySelectorAll('.vbar').length })),
-        worth: document.querySelector('#kept .pstate').innerText,
+        worth: document.querySelector('#kept .pstate').innerText, positionState: document.querySelector('#positions .pstate').innerText,
         desk: document.querySelector('#positions [data-desk="j"]')?.innerText,
         unmapped: (() => { const row = document.querySelector('#positions [data-desk=""]'), label = row.querySelector('.name > span[aria-label]');
           const track = row.querySelector('.vbar'), targets = [row, ...row.children, track];
@@ -596,7 +597,7 @@ try {
       for (const row of seen.kept) {
         const why = row.symbol === 'SXR8' ? 'not exact yet' : 'not reported by the broker';
         check('positions', `${tag} ${row.symbol}: quantity and values visibly explain their nulls`,
-          ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => row.reasons?.includes(`${label}: ${why}`)) &&
+          ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => row.reasons?.includes(`${label}: ${why}`) || seen.worth.includes(why)) &&
           ['Quantity', 'Last price', 'Worth'].every(label => row.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · ${why}` && d.name === d.title)), row);
         check('KEEP', `${tag} ${row.symbol}: no interactive element inside the kept row`, row.interactive === 0, row);
         check('positions', `${tag} ${row.symbol}: unknown KEEP worth has no bar track`, row.tracks === 0, row);
@@ -608,9 +609,11 @@ try {
       check('desk-unmapped', `${tag}: visible name line, title and accessible name carry the desk reason without a desk colour or mark`,
         u.label === deskLabel && u.title === deskLabel && u.name === deskLabel && !u.colour && u.marks === 0 && J(seen.order) === J(['DEMO', 'AAA']), seen);
       check('desk-unmapped', `${tag}: all null values stay dashes with their own reasons`,
-        ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => u.reason?.includes(`${label}: not exact yet`)) &&
+        ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => u.reason?.includes(`${label}: not exact yet`) || seen.positionState.includes('not exact yet')) &&
         ['Quantity', 'Last price', 'Worth', 'Open result'].every(label => u.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · not exact yet` && d.name === d.title)), u);
-      check('positions', `${tag}: no partial kept worth is presented as complete`, /Worth not available · not exact yet · not reported by the broker/.test(N(seen.worth)), seen.worth);
+      check('positions', `${tag}: no partial kept worth is presented as complete and both reasons stay visible`, /worth not available/i.test(N(seen.worth)) &&
+        ['not exact yet', 'not reported by the broker'].every(why => seen.worth.includes(why) || seen.kept.some(row => row.reasons?.includes(why))) &&
+        !/worth [€$]/i.test(N(seen.worth)), seen.worth);
       check('positions', `${tag}: no overflow or clipping`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
       const clip = await ev(`(() => { const r = document.getElementById('kept').getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
       const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });

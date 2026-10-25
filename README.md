@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261023155418.0.0` (`inspr-calver-3`, stable sequence 30), reserved once at `2026-10-23T15:54:18Z` for performance at a glance ([JOED-77](https://aeon.barta.cm/p/JOED/JOED-77)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261025144826.0.0` (`inspr-calver-3`, stable sequence 31), reserved once at `2026-10-25T14:48:26Z` for Round 2: calmer outage view ([JOED-81](https://aeon.barta.cm/p/JOED/JOED-81)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261023100632.0.0` / sequence 29,
-published on `main` at `cdf843a587d1066d544beea92f7b8ceef5d103bf` under JOED-74,
-live on csb0 since `2026-10-23T14:53:28Z` (JOED-75). `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261023155418.0.0` / sequence 30,
+published on `main` at `d4eb662795ff6d0e910aa20797995070b26e5554` under JOED-78,
+live on csb0 since `2026-10-24T03:46:42Z` (JOED-78). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 30. Sequence 28 (`261021113113.0.0`) was previously deployed
+adoption for sequence 31. Sequence 29 (`261023100632.0.0`) was previously deployed
+at `2026-10-23T14:53:28Z` (JOED-75). Sequence 28 (`261021113113.0.0`) was previously deployed
 at `2026-10-21T15:22:58Z` (JOED-60). Sequence 27 (`261021083537.0.0`) was previously deployed
 and has been live on csb0 since `2026-10-21T11:22:48Z` (JOED-59). Sequence 26
 (`261021015923.0.0`) was previously deployed at `2026-10-21T08:15Z` (OPS-354
@@ -26,13 +27,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-30 candidate has not been published. The candidate
+cutover**. The sequence-31 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -82,7 +83,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261023155418.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261025144826.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -1172,8 +1173,9 @@ release was deployed. JOED-59 reserved sequence 27 for the changed health and
 smoke semantics; that release is now live. JOED-60 reserved sequence 28 for the
 bounded yellow broker-check warning; that release is now live. JOED-70 reserved
 sequence 29 for the calm status line; that release is now live (JOED-75).
-JOED-77 reserves sequence 30 for performance at a glance. Never reseal or
-republish sequences 26, 27, 28 or 29 with these new bytes.
+JOED-77 reserved sequence 30 for performance at a glance; that release is now
+live (JOED-78). JOED-81 reserves sequence 31 for Round 2: calmer outage view.
+Never reseal or republish sequences 26, 27, 28, 29 or 30 with these new bytes.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
@@ -1371,6 +1373,43 @@ cards, including unavailable and single-value states, without clipping or scroll
 caption sharing. P3 preserves the Desk state/geometry checks with the new hero,
 order and shared caption; P4 checks all info controls and both value rows against
 their card bounds. Browser validation belongs to CI.
+
+JOED-81 also shares repeated field reasons within each section. During a broker
+outage the hero/account caption says “Numbers unavailable · broker connection
+down”; Positions and Kept holdings each say “Prices unavailable · broker
+connection down”, with the section's age and incomplete-worth notice where
+applicable. Desk cards state the common reason once in their existing chart
+status; different observation ages remain on their own lines. A different row
+or cell reason stays beside that field. Every missing money or position value
+keeps its field and complete reason in its accessible name and title.
+Collapsed phone summaries retain the icon and short reason, with each distinct
+reason once in their complete accessible copy. Expanded summaries leave the
+shared reason to the section body while preserving independent warnings.
+Opened Account repeats the hero's shared reason once inside its own phone
+body, in a fixed 48 px state box (two 18 px lines plus 12 px padding), empty
+and hidden from accessibility when fresh; desktop keeps the existing hero
+caption. Grid layout prevents an inline status's baseline from growing this
+box. Desk reasons stay inside the fixed 84 px chart; Positions and Kept keep
+their existing state lines and phone reserves (48 px and 62 px respectively).
+A null position's today's result keeps “Today’s result: —” when its reason is
+shared by the section; the dash's name and title carry the complete reason.
+A different reason remains in the row's field reason list. Both use an
+always-present two-line detail reserve, empty and hidden from accessibility
+for omitted or valued optional results. Independent field reasons remain whole
+and can grow beyond that baseline. Phone position summaries reserve three
+12.5 px text lines for side/quantity, last price and worth; Kept reserves two
+lines for side/quantity and last price, and one for its phone worth summary.
+The read-only Kept caption reserves two lines on desktop and five on phones,
+including space for either its paper-account figure or dash. These reserves
+keep the fresh, stale, broker-down and cash-session templates from shrinking
+when values become shorter. Other visible dashes retain their complete field
+and reason in their accessible names and titles.
+`test/ui-modules.mjs` covers reason aliases, mixed ages, exceptions and labelled
+dashes. P3 reuses `a-gateway-up-but-dead` for section counts and a fresh-to-outage
+geometry check at 390/1024/1440 in both themes. The phone transition checks
+visible collapsed summaries first, then opens the disclosures and checks each
+body and its rows; expanded and collapsed geometry checks remain. Execution
+belongs to agm2 CI.
 The hero keeps its primary results, sentence and board caption on the left,
 with the clock and chart on the right. Open positions, Desks’ money, Paper
 account and Cash share one row below both columns above 1180 px; at 701–1180 px
