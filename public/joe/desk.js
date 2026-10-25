@@ -428,8 +428,13 @@ function positionValue(row, field, cell) {
 }
 function positionReasons(row, cell, sharedReason = null) {
   const missing = missingPositionFields(row).filter(([field]) => rowReason(row, field, cell) !== sharedReason);
-  return missing.length ? `<span class="position-reasons">${missing.map(([field, label]) =>
+  const reasons = missing.length ? `<span class="position-reasons">${missing.map(([field, label]) =>
     `${esc(label)}: ${esc(rowReason(row, field, cell))}`).join(' · ')}</span>` : '';
+  // Today's result has no value column. Name a shared-reason null here,
+  // while independent reasons keep their existing field list.
+  const day = sharedReason && presentNull(row, 'dayPnl') && rowReason(row, 'dayPnl', cell) === sharedReason
+    ? `<span class="position-day">Today’s result: ${positionValue(row, 'dayPnl', cell)}</span>` : '';
+  return `<span class="position-notes"${reasons || day ? '' : ' aria-hidden="true"'}>${day}${reasons}</span>`;
 }
 
 export function positionsHtml(ctx) {
@@ -498,7 +503,7 @@ export function keptHtml(ctx) {
   return `${caption}${state}${[...rows].sort((a, b) => a.symbol.localeCompare(b.symbol)).map(r => {
     return `<div class="prow" data-keep="${esc(r.symbol)}">
       ${symBadge(r.symbol)}
-      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span>${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)}</span><span class="position-mobile">Worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell, shared)}</div>
+      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span class="position-summary">${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)}</span><span class="position-mobile">Worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell, shared)}</div>
       <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)}</div>
       <div class="r c-px num">${positionValue(r, 'mark', cell)}</div>
       <div class="c-worth num">${positionValue(r, 'marketValue', cell)}</div>

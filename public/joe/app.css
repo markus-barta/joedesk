@@ -270,6 +270,10 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .prow .name { min-width: 0; }
 .prow .name .position-value { display: inline; color: inherit; font-size: inherit; }
 .prow .name .position-mobile { display: none; }
+/* Keep the row's detail slot when a shared reason removes its field list.
+   Independent reasons remain whole and may use more than this baseline. */
+.prow .name .position-notes { min-height: 2lh; }
+.kept .prow .name .position-summary { min-height: 2lh; }
 .prow .position-reasons { overflow-wrap: anywhere; }
 .prow .side { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
 .prow .r { text-align: right; }
@@ -282,7 +286,7 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .kept .sym { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
 .kept-label { display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; color: var(--ink-2); white-space: nowrap; }
 .kept [data-keep], .kept [data-keep] * { cursor: default; }
-.keep-cap { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); font-size: 13px; padding: 8px 0 6px; }
+.keep-cap { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); font-size: 13px; padding: 8px 0 6px; min-height: calc(2lh + 14px); }
 .keep-cap .i { color: var(--ink-3); margin-top: 2px; }
 
 /* ---------- Results ---------- */
@@ -488,7 +492,11 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .prow, .kept .prow { grid-template-columns: 38px minmax(0, 1fr) auto; gap: 2px 12px; }
   .prow .c-side, .prow .c-px, .prow .c-opened { display: none; }
   .prow .c-worth { display: none; }
-  .prow .name .position-mobile { display: block; }
+  /* Three labelled fields can take three lines at 360 px, regardless of
+     whether their values are figures or the shorter labelled dashes. */
+  .prow .name .position-mobile { display: block; min-height: 3lh; }
+  .kept .prow .name .position-mobile { min-height: 1lh; }
+  .keep-cap { min-height: calc(5lh + 14px); }
   .prow.hd { display: none; }
   .kept .prow { grid-template-columns: 38px minmax(0, 1fr); }
   .kept .prow .r { grid-column: 2; text-align: left; }

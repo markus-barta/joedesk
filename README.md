@@ -1391,11 +1391,19 @@ and hidden from accessibility when fresh; desktop keeps the existing hero
 caption. Grid layout prevents an inline status's baseline from growing this
 box. Desk reasons stay inside the fixed 84 px chart; Positions and Kept keep
 their existing state lines and phone reserves (48 px and 62 px respectively).
-A null position's today's result is named in its row's field reason list,
-unless that reason is shared by the section, just like the other fields.
-It adds no separate line or empty row reserve. Omitted or valued optional
-results add no missing-field reason; other visible dashes retain their complete
-field and reason in their accessible names and titles.
+A null position's today's result keeps “Today’s result: —” when its reason is
+shared by the section; the dash's name and title carry the complete reason.
+A different reason remains in the row's field reason list. Both use an
+always-present two-line detail reserve, empty and hidden from accessibility
+for omitted or valued optional results. Independent field reasons remain whole
+and can grow beyond that baseline. Phone position summaries reserve three
+12.5 px text lines for side/quantity, last price and worth; Kept reserves two
+lines for side/quantity and last price, and one for its phone worth summary.
+The read-only Kept caption reserves two lines on desktop and five on phones,
+including space for either its paper-account figure or dash. These reserves
+keep the fresh, stale, broker-down and cash-session templates from shrinking
+when values become shorter. Other visible dashes retain their complete field
+and reason in their accessible names and titles.
 `test/ui-modules.mjs` covers reason aliases, mixed ages, exceptions and labelled
 dashes. P3 reuses `a-gateway-up-but-dead` for section counts and a fresh-to-outage
 geometry check at 390/1024/1440 in both themes. The phone transition checks

@@ -39,7 +39,7 @@ const { readdirSync } = await import('node:fs');
 const { periodOf, resultsToday } = await import('../public/joe/results.js');
 const { TERMS } = await import('../public/joe/terms.js');
 const { singleMissingDesk, coupledUnavailable } = await import('../scripts/browser/board.mjs');
-const { switchSetSnapshot } = await import('../scripts/browser/settings-fixtures.mjs');
+const { switchSetSnapshot, cashSessionSnapshot } = await import('../scripts/browser/settings-fixtures.mjs');
 
 const read = file => JSON.parse(readFileSync(new URL(`../fixtures/${file}`, import.meta.url)));
 const valid = read('valid.json');
@@ -230,7 +230,13 @@ test('position rows: null values expose their reasons visibly and in accessible 
     for (const label of ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result']) {
       assert.ok(reasons.includes(`${label}: ${why}`) || section.includes(why), `${label} is named in its row reason list unless the section explains it`);
     }
-    assert.equal(row.querySelector('.position-day'), null, 'today’s result has no separate state-dependent line');
+    assert.ok(row.querySelector('.position-notes'), 'every row keeps the same detail slot');
+    if (section.includes(why)) {
+      assert.equal(row.querySelector('.position-day')?.textContent, 'Today’s result: —');
+      assert.equal(row.querySelector('.position-day .position-value')?.getAttribute('aria-label'), `Today’s result: not reported · ${why}`);
+    } else {
+      assert.equal(row.querySelector('.position-day'), null, 'independent today’s result stays in the field list');
+    }
   }
   assert.match(positions, /title="Last price: not reported · not reported by the broker"/);
   assert.match(positions, /class="position-reasons">Last price: not reported by the broker/);
@@ -1059,13 +1065,36 @@ test('broker down: a different position reason remains on its own row and dash',
   }
 });
 
-test('position reasons: today’s result stays in the field list unless its reason is shared', () => {
+test('position detail slots survive fresh, stale, broker-down and cash-session snapshots', () => {
+  const fresh = structuredClone(valid.data), cash = cashSessionSnapshot(ingress(fresh));
+  const context = (data, now) => ({ feeds: { data: { value: data } }, states: panelStates({ data: { value: data } }, now), now });
+  const contexts = [context(fresh, fresh.receivedAt), context(fresh, at(fresh.receivedAt, 90)),
+    board(fixture('a-gateway-up-but-dead')), context(cash, cash.generatedAt)];
+  for (const ctx of contexts) for (const name of ['positions', 'kept']) {
+    const doc = htmlDocument(name === 'positions' ? positionsHtml(ctx).html : keptHtml(ctx));
+    const rows = doc.querySelectorAll('.prow:not(.hd)');
+    assert.equal(rows.length, ctx.states[name].value.length);
+    for (const row of rows) {
+      assert.equal(row.querySelectorAll('.position-notes').length, 1, 'a missing field never inserts a new detail box');
+      assert.equal(row.querySelectorAll('.position-mobile').length, 1, 'a shorter dash never removes the phone summary box');
+      const notes = row.querySelector('.position-notes');
+      assert.equal(notes.getAttribute('aria-hidden'), notes.textContent ? null : 'true');
+      if (name === 'kept') assert.match(row.querySelector('.position-summary').textContent, /Long .* · last price /);
+    }
+  }
+});
+
+test('position reasons: today’s result keeps its name and dash when its reason is shared', () => {
   const ctx = board(fixture('a-gateway-up-but-dead'));
   for (const name of ['positions', 'kept']) {
     const render = () => htmlDocument(name === 'positions' ? positionsHtml(ctx).html : keptHtml(ctx));
     for (const row of render().querySelectorAll('.prow:not(.hd)')) {
       assert.equal(row.querySelector('.position-reasons'), null, 'matching field reasons belong to the section');
-      assert.equal(row.querySelector('.position-day'), null, 'no extra line changes row geometry');
+      const field = row.querySelector('.position-day'), dash = field?.querySelector('.position-value');
+      assert.equal(field?.textContent, 'Today’s result: —');
+      assert.equal(dash?.getAttribute('aria-label'), 'Today’s result: not reported · broker connection down');
+      assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
+      assert.equal(row.querySelector('.position-notes').getAttribute('aria-hidden'), null, 'populated detail stays accessible');
       assert.doesNotMatch(row.textContent, /broker connection down/, 'the section owns its shared reason');
       for (const dash of row.querySelectorAll('.position-value')) {
         assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
@@ -1079,8 +1108,11 @@ test('position reasons: today’s result stays in the field list unless its reas
     assert.doesNotMatch(different.textContent, /broker connection down/);
     delete ctx.states[name].value[0].dayPnl;
     assert.equal(render().querySelector('.prow:not(.hd) .position-reasons'), null, 'omitted optional result has no missing-field reason');
+    assert.equal(render().querySelector('.prow:not(.hd) .position-notes').textContent, '');
+    assert.equal(render().querySelector('.prow:not(.hd) .position-notes').getAttribute('aria-hidden'), 'true', 'empty detail reserve stays out of accessibility');
     ctx.states[name].value[0].dayPnl = { amount: '1.25', currency: 'EUR' };
     assert.equal(render().querySelector('.prow:not(.hd) .position-reasons'), null, 'valued optional result has no missing-field reason');
+    assert.equal(render().querySelector('.prow:not(.hd) .position-notes').textContent, '');
   }
 });
 
