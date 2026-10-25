@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261025144826.0.0` (`inspr-calver-3`, stable sequence 31), reserved once at `2026-10-25T14:48:26Z` for Round 2: calmer outage view ([JOED-81](https://aeon.barta.cm/p/JOED/JOED-81)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261025221940.0.0` (`inspr-calver-3`, stable sequence 32), reserved once at `2026-10-25T22:19:40Z` for Phase B: exact desk money and position values ([JOED-85](https://aeon.barta.cm/p/JOED/JOED-85), Phase B of JOED-55). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261023155418.0.0` / sequence 30,
-published on `main` at `d4eb662795ff6d0e910aa20797995070b26e5554` under JOED-78,
-live on csb0 since `2026-10-24T03:46:42Z` (JOED-78). `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261025144826.0.0` / sequence 31,
+published on `main` at `20c37cdd9c99547d79bb69b65764a9706d77905b` under JOED-84,
+live on csb0 since `2026-10-25T21:22:26Z` (JOED-84). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 31. Sequence 29 (`261023100632.0.0`) was previously deployed
+adoption for sequence 32. Sequence 30 (`261023155418.0.0`) was previously deployed
+at `2026-10-24T03:46:42Z` (JOED-78). Sequence 29 (`261023100632.0.0`) was previously deployed
 at `2026-10-23T14:53:28Z` (JOED-75). Sequence 28 (`261021113113.0.0`) was previously deployed
 at `2026-10-21T15:22:58Z` (JOED-60). Sequence 27 (`261021083537.0.0`) was previously deployed
 and has been live on csb0 since `2026-10-21T11:22:48Z` (JOED-59). Sequence 26
@@ -27,13 +28,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-31 candidate has not been published. The candidate
+cutover**. The sequence-32 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -83,7 +84,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261025144826.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261025221940.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -1174,8 +1175,10 @@ smoke semantics; that release is now live. JOED-60 reserved sequence 28 for the
 bounded yellow broker-check warning; that release is now live. JOED-70 reserved
 sequence 29 for the calm status line; that release is now live (JOED-75).
 JOED-77 reserved sequence 30 for performance at a glance; that release is now
-live (JOED-78). JOED-81 reserves sequence 31 for Round 2: calmer outage view.
-Never reseal or republish sequences 26, 27, 28, 29 or 30 with these new bytes.
+live (JOED-78). JOED-81 reserved sequence 31 for Round 2: calmer outage view;
+that release is now live (JOED-84). JOED-85 reserves sequence 32 for Phase B:
+exact desk money and position values (JOED-55).
+Never reseal or republish sequences 26, 27, 28, 29, 30 or 31 with these new bytes.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
@@ -1256,10 +1259,10 @@ P5's checks mixed values and exact
 recovery, at 1440/1024/390/360 in both themes through real ingress. Browser
 execution and visual verdict remain with PR CI on agm2 and the coordinator.
 
-This is a resealed development closure only. JOED-85 intentionally reserves no
-coordinate and keeps sequence 31 / `261025144826.0.0` metadata untouched while
-that separate release proceeds. The coordinator must reserve a later coordinate
-before publication of Phase B, then reseal and run the closure/coordinate gates.
+JOED-85 reserves sequence 32 / `261025221940.0.0` at
+`2026-10-25T22:19:40Z` for this Phase B candidate and reseals its runtime
+closure. Sequence 31 remains immutable deployed history. Publication,
+cross-family review and deployment gates remain with the coordinator.
 JOED-86 must vendor the complete revision-10 package and its digest before
 activation; existing deployment pins and prior producer sign-off prove rev 9
 only. PAPER remains the only mode; LIVE stays locked.
