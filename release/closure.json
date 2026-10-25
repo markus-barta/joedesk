@@ -124,8 +124,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 46752,
-      "sha256": "07c2a1f1447a37b8b365bbf83d9d1aaaed217d91e3805bb3ef8e3aeb85981795"
+      "size": 47148,
+      "sha256": "7ee14dc0077274f82348dcbf4281847c26bf3e418f8d872eba902d9a43e430c7"
     },
     {
       "path": "public/joe/events.js",
@@ -159,8 +159,8 @@
     },
     {
       "path": "public/joe/format.js",
-      "size": 6983,
-      "sha256": "df24adebf11be6a2f2ebc24465429d925c6ec72bd928f0ea648779fc8e331e66"
+      "size": 6952,
+      "sha256": "8049d28af34412f78c8364d11fc35f34dbe3ea4861955af3cc0e3ab97a88c8af"
     },
     {
       "path": "public/joe/health.js",

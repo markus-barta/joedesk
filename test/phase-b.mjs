@@ -144,12 +144,92 @@ test('exact money renders through the real selectors, with Today and Since start
   assert.equal(doc.querySelector('[data-cell="hero.since"] .bn').textContent, '+€150,00');
   assert.match(htmlDocument(deskCard(ctx, 'j', 50, true)).textContent, /\+€4,60/);
   const positions = htmlDocument(positionsHtml(ctx).html);
-  assert.match(positions.textContent, /\$\s*20,00/);
-  assert.match(positions.textContent, /\$\s*40,00/);
-  assert.match(positions.textContent, /\+\$\s*5,00/);
+  assert.match(positions.textContent, /\$\s*20,01/);
+  assert.match(positions.textContent, /\$\s*40,01/);
+  assert.match(positions.textContent, /\+\$\s*5,01/);
   const kept = htmlDocument(keptHtml(ctx));
   assert.equal(kept.querySelectorAll('[data-keep]').length, 2);
   for (const row of kept.querySelectorAll('[data-keep]')) assert.equal(row.querySelectorAll('button, a, input, [tabindex]').length, 0);
+});
+
+test('position and KEEP money round exact decimal units once, including signed ties and large amounts', () => {
+  for (const [amount, expected, signed] of [
+    ['1.00500000', '$ 1,01', '+$ 1,01'],
+    ['-1.00500000', '−$ 1,01', '−$ 1,01'],
+    ['1.00499999', '$ 1,00', '+$ 1,00'],
+    ['-1.00499999', '−$ 1,00', '−$ 1,00'],
+    ['1.00500001', '$ 1,01', '+$ 1,01'],
+    ['0.00499999', '$ 0,00', '$ 0,00'],
+    ['-0.00499999', '$ 0,00', '$ 0,00'],
+    ['0.00500000', '$ 0,01', '+$ 0,01'],
+    ['-0.00500000', '−$ 0,01', '−$ 0,01'],
+    ['9007199254740993.00500000', '$ 9.007.199.254.740.993,01', '+$ 9.007.199.254.740.993,01'],
+    ['-9007199254740993.00500000', '−$ 9.007.199.254.740.993,01', '−$ 9.007.199.254.740.993,01'],
+  ]) {
+    const data = structuredClone(exact);
+    const row = data.positions.rows[0], keep = data.positions.rows.find(r => r.symbol === 'TSLA');
+    for (const field of ['mark', 'marketValue', 'openPnl']) row[field] = { amount, currency: 'USD' };
+    for (const field of ['mark', 'marketValue']) keep[field] = { amount, currency: 'USD' };
+    data.brokerAccount.equity.amount = amount;
+    assert.equal(validateContract('data', data).ok, true, amount);
+    const ctx = context(data), position = htmlDocument(positionsHtml(ctx).html).querySelector('[data-desk="j"]');
+    assert.equal(position.querySelector('.c-px').textContent, expected, amount);
+    assert.equal(position.querySelector('.c-worth .num').textContent, expected, amount);
+    assert.equal(position.querySelector('.pl').textContent, signed, amount);
+    assert.ok(position.querySelector('.position-mobile').textContent.includes(`last price ${expected} · worth ${expected}`));
+    if (signed === '$ 0,00') assert.equal(position.querySelector('.pl .i'), null, 'rounded zero has no arrow');
+    const kept = htmlDocument(keptHtml(ctx)), holding = kept.querySelector('[data-keep="TSLA"]');
+    assert.equal(holding.querySelector('.c-px').textContent, expected, amount);
+    assert.equal(holding.querySelector('.c-worth').textContent, expected, amount);
+    assert.ok(holding.querySelector('.position-mobile').textContent.includes(`Worth ${expected}`));
+    assert.ok(kept.querySelector('.pstate').textContent.includes(expected), amount);
+    assert.ok(kept.querySelector('.keep-cap').textContent.includes(expected.replace('$', '€')), amount);
+  }
+});
+
+test('KEEP worth sums full precision per currency before rounding, including cancellation', () => {
+  for (const [amounts, expected] of [
+    [['0.50249999', '0.50250001'], '€ 1,01'],
+    [['0.004', '0.004'], '€ 0,01'],
+    [['-0.50249999', '-0.50250001'], '−€ 1,01'],
+    [['9007199254740993.00500000', '-9007199254740992'], '€ 1,01'],
+  ]) {
+    const data = structuredClone(exact);
+    data.positions.rows.filter(r => r.scope === 'keep').forEach((row, i) => {
+      for (const field of ['mark', 'marketValue']) row[field] = { amount: amounts[i], currency: 'EUR' };
+    });
+    assert.equal(validateContract('data', data).ok, true);
+    for (const state of ['fresh', 'stale', 'broken']) {
+      const ctx = context(data);
+      Object.assign(ctx.states.kept, { state, reason: state === 'fresh' ? null : 'snapshot_stale', ageSeconds: 90 });
+      const prefix = state === 'fresh' ? 'Worth' : 'worth';
+      assert.ok(htmlDocument(keptHtml(ctx)).querySelector('.pstate').textContent.includes(`${prefix} ${expected}`), `${state}: ${amounts.join(' + ')}`);
+    }
+  }
+});
+
+test('position worth bars use exact magnitudes on independent native-currency scales', () => {
+  for (const [amounts, widths] of [
+    [['9007199254740993.00500000', '-4503599627370496.50250000'], ['100', '50']],
+    [['0.00000001', '-0.00000003'], ['33.333', '100']],
+    [['0', '0'], [null, null]],
+  ]) {
+    const data = structuredClone(exact);
+    data.positions.rows.filter(r => r.desk).forEach((row, i) => { row.marketValue.amount = amounts[i]; });
+    const rows = htmlDocument(positionsHtml(context(data)).html).querySelectorAll('.prow[data-desk]');
+    rows.forEach((row, i) => {
+      const bar = row.querySelector('.vbar i');
+      if (widths[i] === null) assert.equal(bar, null);
+      else {
+        assert.equal(bar.getAttribute('style'), `width:${widths[i]}%`);
+        assert.equal(bar.dataset.v, amounts[i], 'data attribute preserves the source decimal');
+      }
+    });
+    data.positions.rows[1].mark.currency = data.positions.rows[1].marketValue.currency = data.positions.rows[1].openPnl.currency = 'EUR';
+    for (const row of htmlDocument(positionsHtml(context(data)).html).querySelectorAll('.prow[data-desk]')) {
+      assert.equal(row.querySelector('.vbar i')?.getAttribute('style') ?? null, widths[0] === null ? null : 'width:100%');
+    }
+  }
 });
 
 test('mixed rendering keeps exact desks visible, explains each failure and shares repeated reasons once', () => {
@@ -167,5 +247,5 @@ test('mixed rendering keeps exact desks visible, explains each failure and share
     assert.match(dash.getAttribute('aria-label'), /position update is old/);
     assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
   }
-  assert.match(positions.textContent, /\$\s*40,00/, 'fresh callbacks remain exact beside the stale row');
+  assert.match(positions.textContent, /\$\s*40,01/, 'fresh callbacks remain exact beside the stale row');
 });

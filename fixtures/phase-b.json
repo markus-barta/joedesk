@@ -254,17 +254,17 @@
           "side": "long",
           "quantity": "2",
           "mark": {
-            "amount": "20",
+            "amount": "20.00500000",
             "currency": "USD"
           },
           "marketValue": {
-            "amount": "40",
+            "amount": "40.01000000",
             "currency": "USD"
           },
           "scope": "stage0",
           "updatedAt": "2026-10-14T17:42:22.000Z",
           "openPnl": {
-            "amount": "5",
+            "amount": "5.00500000",
             "currency": "USD"
           }
         },
@@ -275,15 +275,15 @@
           "side": "long",
           "quantity": "3",
           "mark": {
-            "amount": "10",
+            "amount": "10.00500000",
             "currency": "USD"
           },
           "marketValue": {
-            "amount": "30",
+            "amount": "30.01500000",
             "currency": "USD"
           },
           "openPnl": {
-            "amount": "0",
+            "amount": "-0.00500000",
             "currency": "USD"
           },
           "scope": "stage0",
@@ -295,11 +295,11 @@
           "side": "long",
           "quantity": "1",
           "mark": {
-            "amount": "600",
+            "amount": "600.00500000",
             "currency": "EUR"
           },
           "marketValue": {
-            "amount": "600",
+            "amount": "600.00500000",
             "currency": "EUR"
           },
           "scope": "keep",
@@ -311,11 +311,11 @@
           "side": "long",
           "quantity": "1",
           "mark": {
-            "amount": "200",
+            "amount": "200.00500000",
             "currency": "USD"
           },
           "marketValue": {
-            "amount": "200",
+            "amount": "200.00500000",
             "currency": "USD"
           },
           "scope": "keep",
@@ -537,17 +537,17 @@
           "side": "long",
           "quantity": "2",
           "mark": {
-            "amount": "20",
+            "amount": "20.00500000",
             "currency": "USD"
           },
           "marketValue": {
-            "amount": "40",
+            "amount": "40.01000000",
             "currency": "USD"
           },
           "scope": "stage0",
           "updatedAt": "2026-10-14T17:42:22.000Z",
           "openPnl": {
-            "amount": "5",
+            "amount": "5.00500000",
             "currency": "USD"
           }
         },
@@ -575,11 +575,11 @@
           "side": "long",
           "quantity": "1",
           "mark": {
-            "amount": "600",
+            "amount": "600.00500000",
             "currency": "EUR"
           },
           "marketValue": {
-            "amount": "600",
+            "amount": "600.00500000",
             "currency": "EUR"
           },
           "scope": "keep",
@@ -591,11 +591,11 @@
           "side": "long",
           "quantity": "1",
           "mark": {
-            "amount": "200",
+            "amount": "200.00500000",
             "currency": "USD"
           },
           "marketValue": {
-            "amount": "200",
+            "amount": "200.00500000",
             "currency": "USD"
           },
           "scope": "keep",

@@ -1228,7 +1228,9 @@ withheld alongside the money it describes.
 The base finding comes from nixcfg `origin/main` (read-only),
 `hosts/hsb0/docker/joe-board-pusher/project.mjs:12` (`VIRTUAL_EQUITY = 5000`),
 `desk-ledger.mjs:404` (passes `virtualEquity: 5000` for each desk), and
-`family-ledger.mjs:622–623` (net PnL and equity including that capital).
+`family-ledger.mjs:440` (the `virtualEquity = 5000` default). That parameter
+becomes `virtualCapital` at line 456; lines 622–623 compute net PnL and equity
+including that capital.
 `public/joe/performance.js:6` keeps the established €15,000 aggregate base;
 neither data nor Fleet Config declares individual starting capital. Per-desk
 percentages therefore remain absent. Today/Since start aggregate percentages
@@ -1244,8 +1246,13 @@ per section and full accessible field explanations.
 `fixtures/phase-b.json` contains synthetic exact and mixed snapshots (one desk
 unreconciled, another missing SOD, a stale conid beside a fresh conid).
 `test/phase-b.mjs` covers old/new acceptance, FX, complete totals, null reasons,
-actual selectors/rendering, percentages, restart and session expiry. P3's
-`phase-b` scenario checks exact values; P5's checks mixed values and exact
+actual selectors/rendering, percentages, restart and session expiry. Position
+last price, worth and open result, kept rows and per-currency kept totals use
+exact decimal units through formatting: one half-away-from-zero rounding to
+cents, with no Number conversion of money. Half-cent fixture values exercise
+this path in unit tests and P3/P5; units also preserve large amounts and
+cancellation before rounding. P3's `phase-b` scenario checks exact values;
+P5's checks mixed values and exact
 recovery, at 1440/1024/390/360 in both themes through real ingress. Browser
 execution and visual verdict remain with PR CI on agm2 and the coordinator.
 

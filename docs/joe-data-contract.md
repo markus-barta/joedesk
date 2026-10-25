@@ -41,8 +41,10 @@ An unknown/stale rate or timestamp keeps that money null.
 
 The v1 seed is **€5,000 per desk**, not €15,000: nixcfg `origin/main`,
 `hosts/hsb0/docker/joe-board-pusher/project.mjs:12`, `desk-ledger.mjs:404`,
-and `family-ledger.mjs:622–623`. Since start is net PnL relative to that
-capital within the verified accounting scope. An unknown desk base means null
+and `family-ledger.mjs:440` (the `virtualEquity = 5000` default). The parameter
+becomes `virtualCapital` at line 456; lines 622–623 compute net PnL and equity
+including that capital. Since start is net PnL relative to that capital within
+the verified accounting scope. An unknown desk base means null
 with `not_exact_yet`; do not infer it. The board's `performance.js:6` retains
 the established **€15,000 aggregate** denominator. The contracts have no desk
 capital field, so per-desk percentages remain absent.
@@ -67,8 +69,12 @@ no per-desk cash property; omit it rather than sending a new `money.cash` key.
 No NAV, cash, KEEP worth or missing-field zero enters desk totals.
 
 The board renders present values and complete Today/Since start percentages
-through the existing exact-decimal path. New cell copy reads “start-of-day
-value missing”, “desk ledger not reconciled”, and “position update is old”.
+through the exact-decimal path. Position last price, worth and open result,
+kept rows and per-currency kept sums stay in exact units until one display
+rounding to cents, half away from zero. These money displays bypass Number; kept
+sums round only after addition, and a missing summand withholds the total.
+New cell copy reads “start-of-day value missing”, “desk ledger not reconciled”,
+and “position update is old”.
 Repeated reasons still appear once per section, with each null field's full
 accessible name. Synthetic exact/mixed snapshots live in `fixtures/phase-b.json`;
 unit and P3/P5 scenarios cover validation, display, mixed availability and

@@ -1,7 +1,7 @@
 // Display formatting only: English words, Austrian digits, Vienna time, true
-// minus. Money arrives as exact decimal strings; Number is used for display,
-// or exact BigInt units (10⁻⁸, contracts/decimal.mjs) where no Number may
-// stand in: those are rounded once, half away from zero, and never converted.
+// minus. Money arrives as exact decimal strings and is formatted from BigInt
+// units (10⁻⁸, contracts/decimal.mjs), rounded once, half away from zero.
+// Number remains available for chart geometry and non-money display.
 import { wall, VIENNA, NY } from './time.mjs';
 import { decimalUnits, roundUnits, UNIT } from './contracts/decimal.mjs';
 
@@ -79,7 +79,7 @@ export function sumByCurrency(values) {
   for (const value of values) {
     sums.set(value.currency, (sums.get(value.currency) ?? 0n) + decimalUnits(value.amount));
   }
-  return [...sums].map(([currency, units]) => ({ currency, amount: Number(units) / 1e8 }));
+  return [...sums].map(([currency, units]) => ({ currency, units }));
 }
 
 export function quantity(value) {
