@@ -616,7 +616,7 @@ try {
     b.setNow(valid.data.receivedAt);
     await b.push(ingress(valid.data));
     if (!f.transportReason && f.feed === 'data') { b.setNow(f.receivedAt); const r = await b.push(f.payload, 'data', { status: f.expectedStatus, reason: f.expectedStatus === 200 ? null : f.expected['today.equity'].reason }); check('fixtures', `${id}: server status ${f.expectedStatus}`, r.status === f.expectedStatus, r.body); }
-    const viewports = id === 'e-layout-storage-unavailable' ? VIEWPORTS : id === 'a-gateway-up-but-dead' ? [VIEWPORTS[1], VIEWPORTS[2]] : [VIEWPORTS[1]];
+    const viewports = ['e-layout-storage-unavailable', 'a-gateway-up-but-dead'].includes(id) ? VIEWPORTS : [VIEWPORTS[1]];
     for (const viewport of viewports) {
       const theme = viewport.mobile ? 'dark' : 'light';
       await configure(page, viewport, theme);
@@ -643,6 +643,11 @@ try {
           const expected = disclosureProblem(cells), actual = collapsed.controls.find(c => c.key === key);
           check('phone-first', `${viewport.name} ${theme} ${id}: collapsed ${key} shows the worst panel state and short reason`, actual.hidden && actual.expanded === 'false' &&
             (expected ? actual.warning === expected.text && actual.icon === `#i-${expected.icon}` : !actual.warning && !actual.icon), { actual, expected });
+        }
+        if (id === 'a-gateway-up-but-dead') {
+          const warnings = collapsed.controls.filter(c => ['account', 'positions', 'kept', 'j', 'joe', 'joel'].includes(c.key));
+          check('fixtures', `${viewport.name} ${theme}: every collapsed outage section retains its icon and one broker-down reason in both short and accessible copy`, warnings.length === 6 &&
+            warnings.every(c => c.icon && (c.warning.match(/broker connection down/g) ?? []).length === 1 && (c.detail.match(/broker connection down/g) ?? []).length === 1), warnings);
         }
         check('phone-first', `${viewport.name} ${theme} ${id}: collapsed panels do not scroll horizontally`, collapsed.horizontal.scroll <= collapsed.horizontal.inner, collapsed.horizontal);
         await setDeskDisclosures(page, true);
@@ -715,7 +720,7 @@ try {
       const caps = norm([ui.boardCaption, ui.say, ...Object.values(ui.cells).map(c => c.cap)].join(' | '));
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age and reason`, /[Aa]s of \d+\s(s|min) ago · updates are (late|stuck)/.test(caps), caps);
       if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.cells['hero.account'].cap === 'Not reported', caps);
-      if (kind === 'broken') check('fixtures', `${tag}: broken shows its reason`, /Last good value, .* · |Unavailable · /.test(caps), caps);
+      if (kind === 'broken') check('fixtures', `${tag}: broken shows its reason locally or in the shared section line`, /Last good value, .* · |[Uu]navailable · /.test(caps), caps);
       if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso', 'p3-single-missing-desk'].includes(id) && (viewport.name !== '390' || ['e-layout-storage-unavailable', 'a-gateway-up-but-dead'].includes(id))) {
         await shot(page, viewport, `${viewport.name}-${theme}-desk-state-${id}`, `Desk, P1 fixture ${id} (${kind})`);
       }
@@ -724,6 +729,44 @@ try {
       if (f.transportReason === 'auth_required') await page.setHeaders({ 'x-auth-request-user': ACTOR });
       page.errors.length = 0;
     }
+  }
+  // JOED-81: reuse the accepted broker-down fixture for a live transition.
+  // Fresh and outage boxes must match at 1440/1024/phone in both themes.
+  for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+    const f = fixture('a-gateway-up-but-dead'), b = await newBoard();
+    b.setNow(valid.data.receivedAt);
+    await b.push(ingress(valid.data));
+    b.setNow(at(valid.data.receivedAt, 9));
+    await configure(page, viewport, theme);
+    await load(page, b.url, 'desk');
+    const before = await rects(DESK_SHIFT);
+    b.setNow(f.receivedAt);
+    check('fixtures', 'broker-down transition fixture accepted', (await b.push(f.payload)).status === 200);
+    b.setNow(f.now);
+    await page.evaluate('window.__joedesk.refresh()');
+    await waitFor(page, `document.querySelector('#hdrHealth').dataset.reason === 'gateway_down'`);
+    await settle(page);
+    const tag = `broker down @${viewport.name} ${theme}`;
+    const d = await page.evaluate(`(() => {
+      const count = text => (text.match(/broker connection down/g) ?? []).length;
+      const text = selector => document.querySelector(selector).innerText;
+      return {
+        hero: count(text('#heroL .board-caption')),
+        cells: [...document.querySelectorAll('#heroL [data-cell]')].map(c => count(__audit.deskCaption(c))),
+        cash: count(text('#heroL .cash-reason')), say: count(text('#heroL .say')),
+        cards: [...document.querySelectorAll('.dcard .mini-label')].map(c => count(c.innerText)),
+        sections: ['positions', 'kept'].map(id => ({ id, reason: count(text('#' + id + ' .pstate')),
+          rows: [...document.querySelectorAll('#' + id + ' .prow:not(.hd)')].map(row => ({ reason: count(row.innerText),
+            dashes: [...row.querySelectorAll('.position-value')].map(dash => ({ label: dash.getAttribute('aria-label'), title: dash.title, text: dash.innerText })) })) })),
+        horizontal: __audit.horizontal(),
+      };
+    })()`);
+    check('fixtures', `${tag}: hero/account, each card, Positions and Kept have one shared reason with no per-cell or per-row repetition`,
+      d.hero === 1 && d.cells.every(n => n === 0) && d.cash === 0 && d.say === 0 && d.cards.length === 3 && d.cards.every(n => n === 1) &&
+      d.sections.every(s => s.reason === 1 && s.rows.length > 0 && s.rows.every(row => row.reason === 0 && row.dashes.length > 0 && row.dashes.every(dash =>
+        /^(Last price|Worth|Today’s result|Open result): not reported · broker connection down$/.test(dash.label) && dash.title === dash.label))), d);
+    const changed = moves(before, await rects(DESK_SHIFT));
+    check('no-shift', `${tag}: fresh → broker down shifts 0 px and does not scroll horizontally`, !changed.length && d.horizontal.scroll <= d.horizontal.inner, { changed, horizontal: d.horizontal });
   }
   }
 

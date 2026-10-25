@@ -30,7 +30,9 @@ const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus, headerHealth, executorProblem, heroLeft, keptHtml, positionsHtml } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
+const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
+const { deskCard } = await builders('desk.js', ['deskCard']);
 const { createFeed } = await import('../public/joe/feed.js');
 const { DATA_PANELS } = await import('../contracts/panel-state.mjs');
 const { readdirSync } = await import('node:fs');
@@ -219,7 +221,7 @@ test('position rows: null values expose their reasons visibly and in accessible 
   const kept = keptHtml(ctx), positions = positionsHtml(ctx).html;
   for (const label of ['Quantity', 'Last price', 'Worth']) for (const why of ['not exact yet', 'not reported by the broker']) {
     assert.ok(kept.includes(`title="${label}: not reported · ${why}" aria-label="${label}: not reported · ${why}">—</span>`));
-    assert.ok(kept.includes(`${label}: ${why}`));
+    assert.ok(kept.includes(`${label}: ${why}`) || htmlDocument(kept).querySelector('.pstate').textContent.includes(why), 'reason remains visible locally or once in the section');
   }
   assert.match(positions, /title="Last price: not reported · not reported by the broker"/);
   assert.match(positions, /class="position-reasons">Last price: not reported by the broker/);
@@ -273,7 +275,8 @@ test('unmapped positions: visible reason, honest row count, neutral identity, la
   for (const field of ['Quantity', 'Last price', 'Worth', 'Open result']) {
     assert.ok(row.includes(`title="${field}: not reported · not exact yet" aria-label="${field}: not reported · not exact yet">—</span>`));
   }
-  for (const field of ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result']) assert.ok(row.includes(`${field}: not exact yet`));
+  assert.match(htmlDocument(rendered.html).querySelector('.pstate').textContent, /Prices unavailable · not exact yet/);
+  assert.doesNotMatch(row, /class="position-reasons"/, 'matching row reasons belong to the section; the unmatched desk explanation stays in the row');
   assert.equal(rendered.sub, '5 open · 1 not matched to a desk · each in its own currency');
   assert.equal(Number.parseInt(rendered.sub), [...rendered.html.matchAll(/<div class="prow" data-desk=/g)].length,
     'open count matches every listed row, including legacy and unmapped positions');
@@ -921,7 +924,9 @@ test('isolation: equity and total result unavailable together never show a fresh
 test('cells: fresh, stale with age, not reported and broken with reason all read plainly', () => {
   assert.equal(cellView({ state: 'fresh', value: { amount: '4.75', currency: 'EUR' }, reason: null }, 'k', { caption: 'after fees' }).caption, 'after fees');
   assert.equal(cellView({ state: 'not reported', value: null, reason: null }, 'k').caption, 'Not reported');
-  assert.equal(cellView({ state: 'broken', value: null, reason: 'upstream_lost' }, 'k').caption, 'Unavailable · broker connection down');
+  const unavailable = { state: 'broken', value: null, reason: 'upstream_lost' };
+  assert.equal(cellView(unavailable, 'k').caption, 'Unavailable · broker connection down', 'a standalone cell still explains its reason');
+  assert.equal(cellView(unavailable, 'k', { sharedReason: sharedSectionReason([unavailable, unavailable]) }).caption, 'Unavailable', 'a section supplies the repeated reason once');
   assert.equal(cellView(undefined, 'k').html, '<span class="bn muted">—</span>');
   for (const reason of JSON.parse(readFileSync(new URL('../contracts/reason.schema.json', import.meta.url))).enum) {
     assert.ok(health.CELL_REASON[reason], `closed reason ${reason} has plain copy`);
@@ -992,11 +997,99 @@ test('desk cards: every affected number keeps its own state, age and reason', ()
   const text = lines.replace(/<[^>]+>/g, '');
   assert.match(text, /Today: unavailable · today’s result not available/);
   assert.match(text, /Open positions: last good, 2\smin ago · broker connection down/);
-  assert.match(text, /Since 10 Sep: last good, 5\smin ago · broker connection down/);
+  assert.match(text, /Since 10 Sep: last good, 5\smin ago$/);
+  assert.equal(text.match(/broker connection down/g).length, 1, 'the shared reason stays visible once while both ages remain');
   const same = cardStatus('j', [['Today', cell('stale', 'snapshot_stale', '1', '2026-10-14T17:43:30.000Z', false)], ['Open positions', cell('stale', 'snapshot_stale', '1', '2026-10-14T17:43:30.000Z', false)],
     ['Since start', cell('fresh', null, '1', '2026-10-14T17:44:50.000Z')]]);
   assert.match(same.replace(/<[^>]+>/g, ''), /^Today and Open positions: as of 1\smin ago · updates are late$/);
   assert.equal(cardStatus('j', [['Today', cell('fresh', null, '1', now)], ['Open positions', cell('fresh', null, '1', now)], ['Since start', cell('fresh', null, '1', now)]]), '');
+});
+
+test('section reasons: repeated readable reasons share once; single and fresh reasons stay local', () => {
+  const broken = reason => ({ state: 'broken', value: null, reason });
+  assert.equal(sharedSectionReason([broken('upstream_lost'), broken('gateway_down')]), 'broker connection down');
+  assert.equal(sharedSectionReason([broken('upstream_lost'), broken('not_exact_yet')]), null);
+  assert.equal(sharedSectionReason([broken('upstream_lost'), { ...broken('upstream_lost'), state: 'fresh' }, undefined]), null);
+  const cells = [broken('not_exact_yet'), broken('upstream_lost'), broken('gateway_down')];
+  const before = structuredClone(cells);
+  assert.equal(sharedSectionReason(cells), 'broker connection down');
+  assert.deepEqual(cells, before, 'presentation never changes selector states');
+  const summary = disclosureProblem(cells.map((cell, i) => [`Field ${i}`, cell]));
+  assert.equal(summary.detail.match(/broker connection down/g).length, 1);
+  assert.match(summary.detail, /Field 0: unavailable · not exact yet/);
+});
+
+test('broker down: Positions and Kept show one section reason and accessible field-specific dashes', () => {
+  const ctx = board(fixture('a-gateway-up-but-dead'));
+  for (const [name, html] of [['positions', positionsHtml(ctx).html], ['kept', keptHtml(ctx)]]) {
+    const doc = htmlDocument(html);
+    assert.equal(positionSectionReason(ctx.states[name]), 'broker connection down');
+    assert.match(doc.querySelector('.pstate').textContent, /Prices unavailable · broker connection down/);
+    assert.equal(doc.textContent.match(/broker connection down/g).length, 1, name);
+    assert.equal(doc.querySelectorAll('.position-reasons').length, 0, 'no repeated per-row reason list');
+    for (const dash of doc.querySelectorAll('.position-value')) {
+      assert.match(dash.getAttribute('aria-label'), /^(Last price|Worth|Today’s result|Open result): not reported · broker connection down$/);
+      assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
+      assert.equal(dash.textContent, '—');
+    }
+    const summary = disclosureProblem([[name, ctx.states[name]], ...rowProblems(ctx.states[name])]);
+    assert.match(summary.text, /broker connection down/);
+    assert.equal(summary.sharedReason, 'broker connection down', 'expanded summary can yield to the section line without losing the collapsed warning');
+  }
+});
+
+test('broker down: a different position reason remains on its own row and dash', () => {
+  const ctx = board(fixture('a-gateway-up-but-dead'));
+  for (const name of ['positions', 'kept']) {
+    ctx.states[name].value[0].reasons = { mark: 'not_exact_yet' };
+    const doc = htmlDocument(name === 'positions' ? positionsHtml(ctx).html : keptHtml(ctx));
+    assert.equal(doc.textContent.match(/broker connection down/g).length, 1);
+    assert.equal(doc.querySelectorAll('.position-reasons').length, 1);
+    assert.equal(doc.querySelector('.position-reasons').textContent, 'Last price: not exact yet');
+    assert.ok(doc.querySelectorAll('.position-value').some(dash => dash.getAttribute('aria-label') === 'Last price: not reported · not exact yet'));
+  }
+});
+
+test('broker down: hero, Cash and each desk explain the reason once and keep mixed ages', () => {
+  const ctx = board(fixture('a-gateway-up-but-dead'));
+  ctx.states['today.totalPnl'].ageSeconds = 150;
+  ctx.states['today.openPnl'].ageSeconds = 90;
+  const doc = htmlDocument(heroLeft(ctx));
+  assert.equal(doc.querySelector('.board-caption').textContent, 'Numbers unavailable · broker connection down');
+  assert.doesNotMatch(doc.querySelector('.say').textContent, /broker connection down/);
+  assert.match(doc.querySelector('[data-cell="hero.since"] .account-caption').children[0].textContent, /Last good value, 2\smin ago$/);
+  assert.match(doc.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, /Last good value, 1\smin ago$/);
+  assert.equal(doc.querySelector('.cash-reason').textContent, 'not reported');
+  assert.match(doc.querySelector('[data-cash="hero.cash"]').getAttribute('aria-label'), /Cash not reported · broker connection down/);
+  for (const caption of doc.querySelectorAll('.account-caption')) assert.doesNotMatch(caption.children[0].textContent, /broker connection down/);
+  assert.equal(doc.querySelector('.disclosure-warning .vh').textContent.match(/broker connection down/g).length, 1, 'collapsed Account retains one reason');
+  for (const id of ['j', 'joe', 'joel']) {
+    ctx.states[`desks.${id}.totalPnl`].ageSeconds = 150;
+    const card = htmlDocument(deskCard(ctx, id, 10, false));
+    const status = card.querySelector('.mini-label').textContent;
+    assert.equal(status.match(/broker connection down/g).length, 1, id);
+    assert.match(status, /Since start: last good, 2\smin ago$/);
+    const compact = htmlDocument(compactDesk(ctx, id));
+    assert.equal(compact.querySelector('.summary-text').textContent.match(/broker connection down/g).length, 1);
+    assert.equal(compact.querySelector('.vh').textContent.match(/broker connection down/g).length, 1);
+    assert.match(compact.querySelector('.expanded-summary .vh').textContent, /History: stale · updates are late/);
+    assert.match(compact.querySelector('.expanded-summary .vh').textContent, /Check-in: stale/);
+    assert.doesNotMatch(compact.querySelector('.expanded-summary .vh').textContent, /broker connection down/, 'independent warnings survive expansion without repeating the shared outage');
+    assert.equal(compact.querySelectorAll('.compact-state').length, 2);
+  }
+  ctx.states['today.openPnl'] = { state: 'broken', value: null, reason: 'not_exact_yet' };
+  const different = htmlDocument(heroLeft(ctx));
+  assert.equal(different.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Unavailable · not exact yet');
+  assert.equal(different.querySelector('[data-cell="hero.open"] .bn').getAttribute('aria-label'), 'Open positions: not reported · not exact yet');
+  const cold = board(fixture('a-gateway-up-but-dead'), { cold: true });
+  const coldHero = htmlDocument(heroLeft(cold));
+  assert.equal(coldHero.querySelector('.board-caption').textContent, 'Numbers unavailable · broker connection down');
+  for (const dash of coldHero.querySelectorAll('[data-cell] .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+  for (const id of ['j', 'joe', 'joel']) {
+    const card = htmlDocument(deskCard(cold, id, 10, false));
+    assert.equal(card.querySelector('.mini-label').textContent, 'Numbers: unavailable · broker connection down');
+    for (const dash of card.querySelectorAll('.dnums .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+  }
 });
 
 test('cold start: without the server clock every panel still shows its own state and reason', async () => {

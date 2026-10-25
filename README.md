@@ -1371,6 +1371,21 @@ cards, including unavailable and single-value states, without clipping or scroll
 caption sharing. P3 preserves the Desk state/geometry checks with the new hero,
 order and shared caption; P4 checks all info controls and both value rows against
 their card bounds. Browser validation belongs to CI.
+
+JOED-81 also shares repeated field reasons within each section. During a broker
+outage the hero/account caption says “Numbers unavailable · broker connection
+down”; Positions and Kept holdings each say “Prices unavailable · broker
+connection down”, with the section's age and incomplete-worth notice where
+applicable. Desk cards state the common reason once in their existing chart
+status; different observation ages remain on their own lines. A different row
+or cell reason stays beside that field. Every missing money or position value
+keeps its field and complete reason in its accessible name and title.
+Collapsed phone summaries retain the icon and short reason, with each distinct
+reason once in their complete accessible copy. Expanded summaries leave the
+shared reason to the section body while preserving independent warnings.
+`test/ui-modules.mjs` covers reason aliases, mixed ages, exceptions and labelled
+dashes. P3 reuses `a-gateway-up-but-dead` for section counts and a fresh-to-outage
+geometry check at 390/1024/1440 in both themes; execution belongs to agm2 CI.
 The hero keeps its primary results, sentence and board caption on the left,
 with the clock and chart on the right. Open positions, Desks’ money, Paper
 account and Cash share one row below both columns above 1180 px; at 701–1180 px

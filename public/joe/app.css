@@ -1061,6 +1061,8 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 /* JOED-79: wrappers keep the existing grid/flex items above 480 px. */
 .account-section, .desk-section, .disclosure-body { display: contents; }
 .desk-disclosure, .compact-row, .phone-primary-note { display: none; }
+.collapsed-summary { display: contents; }
+.expanded-summary { display: none; }
 @media (max-width: 480px) {
   #scr-desk.on { display: flex; flex-direction: column; }
   #deskHero, #heroL { display: contents; }
@@ -1088,9 +1090,13 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .desk-disclosure > .disclosure-chevron { grid-column: 2; grid-row: 1; width: 14px; height: 14px; color: var(--ink-3); }
   .desk-disclosure[aria-expanded="true"] > .disclosure-chevron { transform: rotate(180deg); }
   .disclosure-warning { display: flex; align-items: flex-start; gap: 4px; grid-column: 1 / -1; height: 28px; min-width: 0; font-size: 11px; line-height: 14px; font-weight: 400; color: var(--ink-2); }
-  .disclosure-warning > .i { flex: none; width: 12px; height: 12px; margin-top: 1px; }
+  .disclosure-warning .i { flex: none; width: 12px; height: 12px; margin-top: 1px; }
   /* Keep the warning reserve even when empty; reasons occupy one fixed line. */
   .disclosure-warning .summary-text { display: block; flex: 1; min-width: 0; height: 14px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+  /* Open sections explain their shared reason in the body. Keep the same
+     summary reserve; a collapsed section always exposes its icon and reason. */
+  .desk-disclosure[aria-expanded="true"] .collapsed-summary { display: none; }
+  .desk-disclosure[aria-expanded="true"] .expanded-summary { display: contents; }
   #desks .desk-row { height: 92px; min-height: 92px; padding: 8px 10px; grid-template-columns: 24px minmax(0, 1fr) 82px 82px 12px; gap: 0 5px; font-variant-numeric: tabular-nums; }
   .desk-row > .disclosure-chevron { grid-column: 5; }
   .desk-row .dmark { width: 24px; height: 28px; background: none; }
