@@ -740,6 +740,9 @@ try {
     await configure(page, viewport, theme);
     await load(page, b.url, 'desk');
     const before = await rects(DESK_SHIFT);
+    const phone = viewport.width <= 480;
+    if (phone) await setDeskDisclosures(page, false);
+    const collapsedBefore = phone ? await rects(DESK_SHIFT) : null;
     b.setNow(f.receivedAt);
     check('fixtures', 'broker-down transition fixture accepted', (await b.push(f.payload)).status === 200);
     b.setNow(f.now);
@@ -747,17 +750,42 @@ try {
     await waitFor(page, `document.querySelector('#hdrHealth').dataset.reason === 'gateway_down'`);
     await settle(page);
     const tag = `broker down @${viewport.name} ${theme}`;
+    if (phone) {
+      const collapsed = await page.evaluate(`(() => {
+        const count = text => (text.match(/broker connection down/g) ?? []).length;
+        return { controls: [...document.querySelectorAll('[data-desk-disclosure]')]
+          .filter(b => ['account', 'j', 'joe', 'joel', 'positions', 'kept'].includes(b.dataset.deskDisclosure)).map(b => {
+            const body = document.getElementById(b.getAttribute('aria-controls')), summary = b.querySelector('.collapsed-summary .summary-text');
+            return { key: b.dataset.deskDisclosure, expanded: b.getAttribute('aria-expanded'), hidden: body.hidden,
+              visible: __audit.visible(b) && __audit.visible(summary), bodyVisible: __audit.visible(body),
+              icon: __audit.visible(b.querySelector('.collapsed-summary .i')), reason: count(summary?.innerText ?? ''), detail: count(summary?.title ?? '') };
+          }), horizontal: __audit.horizontal() };
+      })()`);
+      check('fixtures', `${tag}: each collapsed Account, desk, Positions and Kept summary visibly retains its icon and one shared reason`,
+        collapsed.controls.length === 6 && collapsed.controls.every(c => c.expanded === 'false' && c.hidden && !c.bodyVisible && c.visible && c.icon && c.reason === 1 && c.detail === 1), collapsed);
+      const changed = moves(collapsedBefore, await rects(DESK_SHIFT));
+      check('no-shift', `${tag}: collapsed fresh → broker down shifts 0 px and does not scroll horizontally`,
+        !changed.length && collapsed.horizontal.scroll <= collapsed.horizontal.inner, { changed, horizontal: collapsed.horizontal });
+      await setDeskDisclosures(page, true);
+    }
     const d = await page.evaluate(`(() => {
       const count = text => (text.match(/broker connection down/g) ?? []).length;
-      const text = selector => document.querySelector(selector).innerText;
+      const text = selector => { const e = document.querySelector(selector); return __audit.visible(e) ? e.innerText : ''; };
       return {
         hero: count(text('#heroL .board-caption')),
         cells: [...document.querySelectorAll('#heroL [data-cell]')].map(c => count(__audit.deskCaption(c))),
         cash: count(text('#heroL .cash-reason')), say: count(text('#heroL .say')),
-        cards: [...document.querySelectorAll('.dcard .mini-label')].map(c => count(c.innerText)),
+        account: count(text('#accountDetail .account-state')),
+        cards: [...document.querySelectorAll('.dcard .mini-label')].map(c => __audit.visible(c) ? count(c.innerText) : 0),
+        opened: [...document.querySelectorAll('[data-desk-disclosure]')]
+          .filter(b => ['account', 'j', 'joe', 'joel', 'positions', 'kept'].includes(b.dataset.deskDisclosure)).map(b => {
+            const body = document.getElementById(b.getAttribute('aria-controls'));
+            return { key: b.dataset.deskDisclosure, expanded: b.getAttribute('aria-expanded'), visible: __audit.visible(body),
+              reason: count(body.innerText), summary: [...b.querySelectorAll('.summary-text')].filter(__audit.visible).reduce((n, s) => n + count(s.innerText), 0) };
+          }),
         sections: ['positions', 'kept'].map(id => ({ id, reason: count(text('#' + id + ' .pstate')),
           rows: [...document.querySelectorAll('#' + id + ' .prow:not(.hd)')].map(row => ({ reason: count(row.innerText),
-            dashes: [...row.querySelectorAll('.position-value')].map(dash => ({ label: dash.getAttribute('aria-label'), title: dash.title, text: dash.innerText })) })) })),
+            dashes: [...row.querySelectorAll('.position-value')].filter(__audit.visible).map(dash => ({ label: dash.getAttribute('aria-label'), title: dash.title, text: dash.innerText })) })) })),
         horizontal: __audit.horizontal(),
       };
     })()`);
@@ -765,6 +793,8 @@ try {
       d.hero === 1 && d.cells.every(n => n === 0) && d.cash === 0 && d.say === 0 && d.cards.length === 3 && d.cards.every(n => n === 1) &&
       d.sections.every(s => s.reason === 1 && s.rows.length > 0 && s.rows.every(row => row.reason === 0 && row.dashes.length > 0 && row.dashes.every(dash =>
         /^(Last price|Worth|Today’s result|Open result): not reported · broker connection down$/.test(dash.label) && dash.title === dash.label))), d);
+    if (phone) check('fixtures', `${tag}: opened Account, each desk, Positions and Kept visibly state the shared reason once in the body without repeating it in their summaries`,
+      d.account === 1 && d.opened.length === 6 && d.opened.every(c => c.expanded === 'true' && c.visible && c.reason === 1 && c.summary === 0), d.opened);
     const changed = moves(before, await rects(DESK_SHIFT));
     check('no-shift', `${tag}: fresh → broker down shifts 0 px and does not scroll horizontally`, !changed.length && d.horizontal.scroll <= d.horizontal.inner, { changed, horizontal: d.horizontal });
   }

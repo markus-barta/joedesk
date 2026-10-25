@@ -1385,9 +1385,17 @@ keeps its field and complete reason in its accessible name and title.
 Collapsed phone summaries retain the icon and short reason, with each distinct
 reason once in their complete accessible copy. Expanded summaries leave the
 shared reason to the section body while preserving independent warnings.
+Opened Account repeats the hero's shared reason once inside its own phone
+body, in a reserved state line; desktop keeps the existing hero caption.
+A null position's today's result keeps a named dash even when its reason
+belongs to the section. Its complete field and reason remain accessible; an
+empty line reserves its space when the optional field is omitted or valued.
 `test/ui-modules.mjs` covers reason aliases, mixed ages, exceptions and labelled
 dashes. P3 reuses `a-gateway-up-but-dead` for section counts and a fresh-to-outage
-geometry check at 390/1024/1440 in both themes; execution belongs to agm2 CI.
+geometry check at 390/1024/1440 in both themes. The phone transition checks
+visible collapsed summaries first, then opens the disclosures and checks each
+body and its rows; expanded and collapsed geometry checks remain. Execution
+belongs to agm2 CI.
 The hero keeps its primary results, sentence and board caption on the left,
 with the clock and chart on the right. Open positions, Desks’ money, Paper
 account and Cash share one row below both columns above 1180 px; at 701–1180 px

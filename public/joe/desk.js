@@ -331,7 +331,7 @@ export function heroLeft(ctx) {
     <p class="board-caption">${boardText}</p></div>
     <div class="account-section" id="accountSection">${disclosureButton('account', 'Account', 'accountDetail', disclosureProblem([
       ['Open positions', states['today.openPnl']], ['Desks’ money', states['today.equity']], ['Paper account', states.paperAccount], ['Cash', states.paperCash], ['Broker', states.gateway],
-    ]))}<div class="disclosure-body" id="accountDetail"><dl class="kpis">
+    ]))}<div class="disclosure-body" id="accountDetail"><p class="pstate account-state">${shared ? st(statePhrase(sharedCell, '').tone, `Numbers unavailable · ${esc(shared)}`, statePhrase(sharedCell, '').icon) : ''}</p><dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
       ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions })}
       ${kpi('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}
@@ -427,9 +427,12 @@ function positionValue(row, field, cell) {
   return `<span class="position-value" role="img" title="${esc(label)}" aria-label="${esc(label)}">—</span>`;
 }
 function positionReasons(row, cell, sharedReason = null) {
-  const missing = missingPositionFields(row).filter(([field]) => rowReason(row, field, cell) !== sharedReason);
-  return missing.length ? `<span class="position-reasons">${missing.map(([field, label]) =>
-    `${esc(label)}: ${esc(rowReason(row, field, cell))}`).join(' · ')}</span>` : '';
+  const missing = missingPositionFields(row).filter(([field]) => field !== 'dayPnl' && rowReason(row, field, cell) !== sharedReason);
+  const dayReason = rowReason(row, 'dayPnl', cell);
+  const day = presentNull(row, 'dayPnl')
+    ? `Today’s result: ${dayReason === sharedReason ? '' : `${esc(dayReason)} · `}${positionValue(row, 'dayPnl', cell)}` : '';
+  return `<span class="position-day">${day}</span>` + (missing.length ? `<span class="position-reasons">${missing.map(([field, label]) =>
+    `${esc(label)}: ${esc(rowReason(row, field, cell))}`).join(' · ')}</span>` : '');
 }
 
 export function positionsHtml(ctx) {

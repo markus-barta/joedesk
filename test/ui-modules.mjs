@@ -1050,6 +1050,43 @@ test('broker down: a different position reason remains on its own row and dash',
   }
 });
 
+test('shared position reasons: a null today’s result keeps its name and dash in every row', () => {
+  const ctx = board(fixture('a-gateway-up-but-dead'));
+  for (const name of ['positions', 'kept']) {
+    const render = () => htmlDocument(name === 'positions' ? positionsHtml(ctx).html : keptHtml(ctx));
+    for (const row of render().querySelectorAll('.prow:not(.hd)')) {
+      const field = row.querySelector('.position-day'), dash = field?.querySelector('.position-value');
+      assert.equal(field?.textContent, 'Today’s result: —');
+      assert.equal(dash?.getAttribute('aria-label'), 'Today’s result: not reported · broker connection down');
+      assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
+      assert.doesNotMatch(row.textContent, /broker connection down/, 'the dash names its field without repeating the section reason');
+    }
+    ctx.states[name].value[0].reasons = { dayPnl: 'not_exact_yet' };
+    const different = render().querySelector('.prow:not(.hd)');
+    assert.equal(different.querySelector('.position-day').textContent, 'Today’s result: not exact yet · —');
+    assert.equal(different.querySelector('.position-day .position-value').getAttribute('aria-label'), 'Today’s result: not reported · not exact yet');
+    delete ctx.states[name].value[0].dayPnl;
+    assert.equal(render().querySelector('.prow:not(.hd) .position-day').textContent, '', 'omitted optional result leaves only the geometry reserve');
+  }
+});
+
+test('broker down: opened Account explains its figures once inside its own body', () => {
+  for (const cold of [false, true]) {
+    const ctx = board(fixture('a-gateway-up-but-dead'), { cold });
+    const doc = htmlDocument(heroLeft(ctx)), body = doc.querySelector('#accountDetail');
+    for (const sizing of body.querySelectorAll('.cash-sizing')) sizing.remove();
+    assert.equal(body.querySelector('.account-state').textContent, 'Numbers unavailable · broker connection down');
+    assert.equal(body.textContent.match(/broker connection down/g).length, 1);
+    assert.ok(body.querySelector('.account-state use'), 'the body state retains its icon');
+    assert.equal(doc.querySelector('.collapsed-summary .summary-text').textContent.match(/broker connection down/g).length, 1);
+    assert.doesNotMatch(doc.querySelector('.expanded-summary')?.textContent ?? '', /broker connection down/);
+    ctx.states['today.openPnl'] = { state: 'broken', value: null, reason: 'not_exact_yet' };
+    assert.match(htmlDocument(heroLeft(ctx)).querySelector('#accountDetail').textContent, /Unavailable · not exact yet/);
+  }
+  const ctx = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
+  assert.equal(htmlDocument(heroLeft(ctx)).querySelector('.account-state').textContent, '', 'fresh figures keep an empty phone state reserve');
+});
+
 test('broker down: hero, Cash and each desk explain the reason once and keep mixed ages', () => {
   const ctx = board(fixture('a-gateway-up-but-dead'));
   ctx.states['today.totalPnl'].ageSeconds = 150;
