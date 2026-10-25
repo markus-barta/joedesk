@@ -1425,6 +1425,16 @@ claimed for sequence 31; main-push CI produces it after publication. The custom 
 INSPR-CalVer1. JOED-19's owner decision supersedes JOED-13, whose v2 proposal is
 cancelled and consolidated into JOED-26. Published history stays intact.
 
+JOED-85's later development closure advances the contract set to revision 10
+for Amy's exact-money Phase B rules (see README), keeping every valid rev-9
+payload accepted. It adds optional desk DAY/OPEN evidence and three null
+reasons, reusing existing money FX and position callback timestamps. The
+participant digest requirements are candidate requirements; the retained
+producer pins/sign-off describe rev 9 only. This work intentionally leaves
+sequence-31 release metadata unchanged and cannot be published under that
+coordinate. The coordinator reserves a later coordinate after the separate
+sequence-31 rollout, then reseals the closure for publication.
+
 The shared global-default pin is the merged/live, independently reviewed
 consumer bundle record on INSPR-486: source
 `01b3080948c21899cbbacbfa3447da6799af1b56`, config

@@ -260,6 +260,11 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       for (const [period, field] of [['day', 'dayPnl'], ['open', 'openPnl']]) {
         if (value.pnlSources?.[period] && state.feed.value.totals[field] != null && value.totals[field] == null) value.pnlSources[period] = {
           ...value.pnlSources[period], status: 'unavailable', reason: value.totals.reasons?.[field] ?? 'family_projection_unavailable' };
+        for (const desk of value.desks) {
+          const original = state.feed.value.desks.find(d => d.id === desk.id);
+          if (desk.pnlSources?.[period] && original.money[field] != null && desk.money[field] == null) desk.pnlSources[period] = {
+            ...desk.pnlSources[period], status: 'unavailable', reason: desk.money.reasons?.[field] ?? 'family_projection_unavailable' };
+        }
       }
       if (value.positions && projection.positions.state === 'broken' &&
           (projection.positions.retained || projection.positions.value == null || projection.positions.reason === 'source_not_authoritative')) {
