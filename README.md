@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261025144826.0.0` (`inspr-calver-3`, stable sequence 31), reserved once at `2026-10-25T14:48:26Z` for Round 2: calmer outage view ([JOED-81](https://aeon.barta.cm/p/JOED/JOED-81)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261025221940.0.0` (`inspr-calver-3`, stable sequence 32), reserved once at `2026-10-25T22:19:40Z` for Phase B: exact desk money and position values ([JOED-85](https://aeon.barta.cm/p/JOED/JOED-85), Phase B of JOED-55). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261023155418.0.0` / sequence 30,
-published on `main` at `d4eb662795ff6d0e910aa20797995070b26e5554` under JOED-78,
-live on csb0 since `2026-10-24T03:46:42Z` (JOED-78). `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261025144826.0.0` / sequence 31,
+published on `main` at `20c37cdd9c99547d79bb69b65764a9706d77905b` under JOED-84,
+live on csb0 since `2026-10-25T21:22:26Z` (JOED-84). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 31. Sequence 29 (`261023100632.0.0`) was previously deployed
+adoption for sequence 32. Sequence 30 (`261023155418.0.0`) was previously deployed
+at `2026-10-24T03:46:42Z` (JOED-78). Sequence 29 (`261023100632.0.0`) was previously deployed
 at `2026-10-23T14:53:28Z` (JOED-75). Sequence 28 (`261021113113.0.0`) was previously deployed
 at `2026-10-21T15:22:58Z` (JOED-60). Sequence 27 (`261021083537.0.0`) was previously deployed
 and has been live on csb0 since `2026-10-21T11:22:48Z` (JOED-59). Sequence 26
@@ -27,13 +28,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-31 candidate has not been published. The candidate
+cutover**. The sequence-32 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -83,7 +84,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261025144826.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261025221940.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -1174,15 +1175,97 @@ smoke semantics; that release is now live. JOED-60 reserved sequence 28 for the
 bounded yellow broker-check warning; that release is now live. JOED-70 reserved
 sequence 29 for the calm status line; that release is now live (JOED-75).
 JOED-77 reserved sequence 30 for performance at a glance; that release is now
-live (JOED-78). JOED-81 reserves sequence 31 for Round 2: calmer outage view.
-Never reseal or republish sequences 26, 27, 28, 29 or 30 with these new bytes.
+live (JOED-78). JOED-81 reserved sequence 31 for Round 2: calmer outage view;
+that release is now live (JOED-84). JOED-85 reserves sequence 32 for Phase B:
+exact desk money and position values (JOED-55).
+Never reseal or republish sequences 26, 27, 28, 29, 30 or 31 with these new bytes.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
-`contract_set_sha256`; an earlier digest does not cover revision-9 acceptance
+`contract_set_sha256`; an earlier digest does not cover revision-10 acceptance
 and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.
+
+### Phase B exact money (JOED-85, contract-set revision 10)
+
+The data ID stays `inspr.joe.household.v2`. Every valid revision-9 payload
+remains accepted, including the live Phase A null/`not_exact_yet` switch set.
+Revision 9 already allowed non-null desk money, native position values,
+per-value `money.fx` provenance and a position's callback `updatedAt`; these
+fields are reused. Revision 10 adds only optional pusher-owned
+`desks[].pnlSources` and the append-only reasons `sod_missing`,
+`ledger_unreconciled`, `position_stale`. The schema/manifest, validator and
+selector, complete contract digest and all participant requirements in
+`release/contracts.json`, runtime closure and its checker pin move together.
+Historical revision and release records remain unchanged.
+
+Amy's binding JOED-55 specification (2026-10-25T20:14Z) governs producer
+exactness; accepting a shape does not prove its underlying broker/ledger data.
+
+| Field | JOED-86 emission rule |
+| --- | --- |
+| Position `quantity`, `mark`, `marketValue`, `openPnl` | Exact broker portfolio callback values for that conid only while fresh. Money keeps its native currency. Keep the actual callback time in `updatedAt`; a new envelope or position-list completion never refreshes it. Stale callback: all affected fields null with their own `position_stale` reasons. Missing/unverified callback: null with `not_exact_yet` (or `source_unavailable` when not reported). |
+| Desk `money.equity`, `openPnl`, `totalPnl` | Current v1 FIFO desk ledger values, only when that desk reconciles with broker positions and has no unclaimed/pre_ledger rows. Unreconciled: null with `ledger_unreconciled`. Stale or otherwise unverified inputs stay null with their actual reason, never re-stamped carried v1 money. KEEP contributes nothing. |
+| Desk `money.dayPnl` | Current proven desk equity minus its saved, once-daily exact SOD at the agreed America/New_York midnight boundary, with no missed snapshot. Missing/reseeded SOD or a v1 `session_open_proxy`: null with `sod_missing`; do not promote an estimate to exact DAY. Ledger reconciliation and freshness gates also apply. |
+| J-family FX | Reuse `desks[j].money[field].fx` on each converted EUR value: actual `base`, `quote: "EUR"`, positive decimal `rate`, `source`, and actual `observedAt`. Carry the rate used by the calculation, not a later rate. Missing/stale rate or timestamp withholds the affected money. J rolls J and J2–J5 together. |
+| Desk since start (`totalPnl`) | The verified base is **€5,000 per desk**, **€15,000 aggregate**, not €15,000 per desk. If that desk's base is unknown, send null with `not_exact_yet`; never infer its base from current equity. Preserve any verified `accounting` period and `historyBasis`. |
+| `totals` | Exact decimal sum for each field only when all three desk inputs for that field are exact; otherwise null with the blocking reason. No partial sum, KEEP, or broker-account NAV is a desk total. |
+| Cash | Account-level `brokerAccount.cash` only: raw IB `TotalCashValue` in base EUR, same whole-account scope as NAV including KEEP. Keep missing/non-EUR/stale cash null with its own reason. There is no desk cash field: omit it (do not add `money.cash`, even as null). |
+
+For independent desk DAY/OPEN, each desk may send `pnlSources.day` / `.open`
+with the existing source shape (`status`, `method`, `currency: "EUR"`,
+`scope: "virtual-desks"`, `observedAt`, optional `periodStart`, `reason`,
+`detail`). The source applies only to its containing desk and overrides the
+corresponding top-level source. Exact desk DAY uses `sod-virtual-equity` with
+the real `periodStart`; exact desk OPEN uses `owned-lots-current-mark-fx`.
+Unavailable sources use `status: "unavailable"`, `method: null`,
+`observedAt: null`, and a closed reason, also present in the money reason bag.
+The aggregate source is unavailable when its total is null; exact sibling
+desks keep their own available evidence. Omitting the new sources keeps rev 9's
+all-or-nothing aggregate evidence rule. New unavailability reasons cannot
+accompany a non-null field and cannot fill cells from older retained values.
+Session/KEEP safety still overrides every source; served desk evidence is
+withheld alongside the money it describes.
+
+The base finding comes from nixcfg `origin/main` (read-only),
+`hosts/hsb0/docker/joe-board-pusher/project.mjs:12` (`VIRTUAL_EQUITY = 5000`),
+`desk-ledger.mjs:404` (passes `virtualEquity: 5000` for each desk), and
+`family-ledger.mjs:440` (the `virtualEquity = 5000` default). That parameter
+becomes `virtualCapital` at line 456; lines 622–623 compute net PnL and equity
+including that capital.
+`public/joe/performance.js:6` keeps the established €15,000 aggregate base;
+neither data nor Fleet Config declares individual starting capital. Per-desk
+percentages therefore remain absent. Today/Since start aggregate percentages
+already render when their complete exact inputs exist.
+
+KEEP SXR8 and TSLA remain account-level `scope: "keep"`, `desk: null`, inert
+and excluded from all desk money. Position DAY is not made exact merely by a
+portfolio callback: omit it or send a reasoned null until independently proven.
+The board shows the new reasons as “start-of-day value missing”, “desk ledger
+not reconciled”, and “position update is old”, preserving one repeated reason
+per section and full accessible field explanations.
+
+`fixtures/phase-b.json` contains synthetic exact and mixed snapshots (one desk
+unreconciled, another missing SOD, a stale conid beside a fresh conid).
+`test/phase-b.mjs` covers old/new acceptance, FX, complete totals, null reasons,
+actual selectors/rendering, percentages, restart and session expiry. Position
+last price, worth and open result, kept rows and per-currency kept totals use
+exact decimal units through formatting: one half-away-from-zero rounding to
+cents, with no Number conversion of money. Half-cent fixture values exercise
+this path in unit tests and P3/P5; units also preserve large amounts and
+cancellation before rounding. P3's `phase-b` scenario checks exact values;
+P5's checks mixed values and exact
+recovery, at 1440/1024/390/360 in both themes through real ingress. Browser
+execution and visual verdict remain with PR CI on agm2 and the coordinator.
+
+JOED-85 reserves sequence 32 / `261025221940.0.0` at
+`2026-10-25T22:19:40Z` for this Phase B candidate and reseals its runtime
+closure. Sequence 31 remains immutable deployed history. Publication,
+cross-family review and deployment gates remain with the coordinator.
+JOED-86 must vendor the complete revision-10 package and its digest before
+activation; existing deployment pins and prior producer sign-off prove rev 9
+only. PAPER remains the only mode; LIVE stays locked.
 
 Contract-set revision 8 (JOED-49) adds optional `brokerAccount.cash` as EUR
 `money|null`, owned by the pusher. Amy's definition is IB account summary

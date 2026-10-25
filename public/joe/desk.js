@@ -10,7 +10,7 @@ import { drawChart, eurAxis } from './chart.js';
 import { intraday } from './history-model.js';
 import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
-import { decimalUnits, UNIT } from './contracts/decimal.mjs';
+import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
 import { STARTING_MONEY, todayPercent, sincePercent, rankDesks } from './performance.js';
 
 const DESKS = ['j', 'joe', 'joel'];
@@ -422,7 +422,7 @@ export function positionSectionReason(cell) {
 }
 function positionValue(row, field, cell) {
   const value = row[field];
-  if (value != null) return field === 'quantity' ? quantity(value) : money(amountOf(value), value.currency);
+  if (value != null) return field === 'quantity' ? quantity(value) : money(decimalUnits(value.amount), value.currency);
   const label = `${POSITION_FIELDS[field]}: not reported · ${rowReason(row, field, cell)}`;
   return `<span class="position-value" role="img" title="${esc(label)}" aria-label="${esc(label)}">—</span>`;
 }
@@ -453,11 +453,17 @@ export function positionsHtml(ctx) {
   const deskOrder = row => unmapped(row) ? DESKS.length : DESKS.indexOf(row.desk);
   const sorted = [...rows].sort((a, b) => deskOrder(a) - deskOrder(b) || a.symbol.localeCompare(b.symbol));
   const maxByCurrency = new Map();
-  for (const r of sorted) { const v = Math.abs(amountOf(r.marketValue) ?? 0); const c = r.marketValue?.currency; if (c) maxByCurrency.set(c, Math.max(maxByCurrency.get(c) ?? 0, v)); }
+  for (const r of sorted) {
+    if (!r.marketValue) continue;
+    const units = decimalUnits(r.marketValue.amount), abs = units < 0n ? -units : units, currency = r.marketValue.currency;
+    if (abs > (maxByCurrency.get(currency) ?? 0n)) maxByCurrency.set(currency, abs);
+  }
   const today = ctx.now ? localDay(ctx.now, NY) : null;
   const body = sorted.map(r => {
     const cur = r.mark?.currency ?? r.marketValue?.currency ?? 'USD';
-    const value = amountOf(r.marketValue), max = maxByCurrency.get(r.marketValue?.currency) || 0;
+    const value = r.marketValue ? decimalUnits(r.marketValue.amount) : null, max = maxByCurrency.get(r.marketValue?.currency) ?? 0n;
+    // A bounded percent, rounded to three decimal places from exact money.
+    const width = value != null && max > 0n ? unitsDecimal(divRound((value < 0n ? -value : value) * 100000n, max) * (UNIT / 1000n)) : null;
     const opened = r.openedAt ? ` · opened ${localDay(r.openedAt, NY) === today ? `today ${timeHM(r.openedAt)}` : dayDDM(r.openedAt)}` : '';
     const legacy = r.scope === 'legacy' ? ` · older holding, outside the ${term('stage0', 'first stage')}` : '';
     const deskLabel = unmapped(r) ? `No desk · ${cellReason(r.reasons.desk)}` : null;
@@ -466,8 +472,8 @@ export function positionsHtml(ctx) {
       <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span${deskLabel ? ` title="${esc(deskLabel)}" aria-label="${esc(deskLabel)}"` : ''}>${deskLabel ? esc(deskLabel) : r.desk ? `${inlineMark(r.desk)} ${LABEL[r.desk]}` : 'No desk'}${opened}${legacy}</span><span class="position-mobile">${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)} · worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell, shared)}</div>
       <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)}</div>
       <div class="r c-px num">${positionValue(r, 'mark', cell)}</div>
-      <div class="c-worth"><span class="num">${positionValue(r, 'marketValue', cell)}</span><span class="vbar"${value == null ? ' style="visibility:hidden"' : ''}>${value != null && max ? `<i data-v="${value}" data-cur="${esc(r.marketValue.currency)}" style="width:${(Math.abs(value) / max * 100).toFixed(3)}%"></i>` : ''}</span></div>
-      <div class="r">${presentNull(r, 'openPnl') ? positionValue(r, 'openPnl', cell) : pl(amountOf(r.openPnl), r.openPnl?.currency ?? cur)}</div>
+      <div class="c-worth"><span class="num">${positionValue(r, 'marketValue', cell)}</span><span class="vbar"${value == null ? ' style="visibility:hidden"' : ''}>${width !== null ? `<i data-v="${esc(r.marketValue.amount)}" data-cur="${esc(r.marketValue.currency)}" style="width:${width}%"></i>` : ''}</span></div>
+      <div class="r">${presentNull(r, 'openPnl') ? positionValue(r, 'openPnl', cell) : pl(r.openPnl ? decimalUnits(r.openPnl.amount) : null, r.openPnl?.currency ?? cur)}</div>
       <div class="r c-opened num">${r.updatedAt ? timeHM(r.updatedAt) : '—'}</div>
     </div>`;
   }).join('');
@@ -482,9 +488,9 @@ export function keptHtml(ctx) {
   const cell = states.kept;
   const rows = cell?.value;
   const shared = positionSectionReason(cell);
-  const nav = states.paperAccount?.value ? eur(amountOf(states.paperAccount.value)) : '—';
+  const nav = states.paperAccount?.value ? eur(decimalUnits(states.paperAccount.value.amount)) : '—';
   const incomplete = rows?.filter(r => r.marketValue == null) ?? [];
-  const worth = rows?.length ? sumByCurrency(rows.map(r => r.marketValue))?.map(s => money(s.amount, s.currency)).join(' and ') : null;
+  const worth = rows?.length ? sumByCurrency(rows.map(r => r.marketValue))?.map(s => money(s.units, s.currency)).join(' and ') : null;
   const worthReasons = [...new Set(incomplete.map(r => rowReason(r, 'marketValue', cell)))].filter(reason => reason !== shared);
   const unavailableWorth = `Worth not available${worthReasons.length ? ` · ${worthReasons.map(esc).join(' · ')}` : ''}`;
   const caption = `<p class="keep-cap">${icon('keep')}<span>Read-only. Left out of every desk result and of Results; counted in the ${term('paperacct', 'paper account')} (${nav}).</span></p>`;

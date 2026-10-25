@@ -79,6 +79,7 @@ test('one closed reason enum is used everywhere, including field errors', () => 
   for (const reason of REASONS) {
     const data = copy(samples.data);
     data.totals.reasons = { equity: reason };
+    if (['sod_missing', 'ledger_unreconciled', 'position_stale'].includes(reason)) data.totals.equity = null;
     assert.equal(validateContract('data', data).ok, true, reason);
     assert.doesNotThrow(() => panelState({ value: data }, data.totals.equity, reason, at));
   }
@@ -88,10 +89,10 @@ test('one closed reason enum is used everywhere, including field errors', () => 
 });
 
 test('rev 7 executor: rev 6 payloads remain valid; the reason enum is append-only', () => {
-  assert.equal(CONTRACTS.revision, 9);
+  assert.equal(CONTRACTS.revision, 10);
   assert.equal(CONTRACTS.contracts.data, 'inspr.joe.household.v2');
-  assert.equal(REASONS.at(-5), 'executor_broker_disagreement');
-  assert.equal(REASONS.at(-4), 'results_capture_failed');
+  assert.equal(REASONS[29], 'executor_broker_disagreement');
+  assert.equal(REASONS[30], 'results_capture_failed');
   for (const [kind, payload] of Object.entries(samples)) {
     assert.equal(validateContract(kind, payload).ok, true, kind);
   }
@@ -176,7 +177,7 @@ test('rev 8 positions: panel reason applies only under the unchanged session-una
 });
 
 test('rev 8 positions: reasoned rev 7 payloads stay valid; KEEP identity and reason ordering survive', () => {
-  assert.deepEqual(REASONS.slice(-3, -1), ['not_exact_yet', 'source_unavailable']);
+  assert.deepEqual(REASONS.slice(31, 33), ['not_exact_yet', 'source_unavailable']);
   const data = JSON.parse(readFileSync(new URL('../fixtures/positions-null.json', import.meta.url)));
   assert.equal(validateContract('data', data).ok, true);
   assert.equal(Object.hasOwn(data.brokerAccount, 'cash'), false);
@@ -199,7 +200,7 @@ test('rev 8 positions: reasoned rev 7 payloads stay valid; KEEP identity and rea
 test('rev 9 positions: a stage0 null desk requires its own closed reason at ingress and on reads', () => {
   const data = copy(samples.data);
   data.positions.rows[0] = JSON.parse(readFileSync(new URL('../fixtures/positions-unmapped.json', import.meta.url)));
-  assert.equal(REASONS.at(-1), 'desk_unmapped');
+  assert.equal(REASONS[33], 'desk_unmapped');
   const accepted = acceptSnapshot('data', ingress(data), null, at);
   assert.equal(accepted.status, 200);
   assert.deepEqual(accepted.value.positions.rows[0], data.positions.rows[0], 'no guessing, dropping or rewriting');

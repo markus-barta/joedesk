@@ -1,15 +1,88 @@
 # Joe household data contract
 
-`/joe/` is a read-only projection of the paper-trading book. The browser reads
-`/joe/data.json` every 15 seconds. The dashboard itself never reads the raw
+`/joe/` is a read-only projection of the paper-trading book. The rebuilt browser
+reads `/joe/state.json` every 15 seconds. The dashboard itself never reads the raw
 `book.json`, contacts a broker, or places an order.
 
-The canonical JSON Schema is served as `/joe/data.schema.json`. A synthetic,
-non-secret example lives at `docs/examples/joe-data.sample.json`. The example is
-not copied into the public package as `data.json`; a missing live projection must
-produce an obvious `NO DATA` state rather than plausible-looking money.
+The active v2 JSON Schema is served as `/joe/contracts/data.schema.json`.
+The legacy v1 schema remains at `/joe/data.schema.json`, with its synthetic,
+non-secret example at `docs/examples/joe-data.sample.json`. The example is not
+copied into the public package as `data.json`; missing live data shows explicit
+unavailable states rather than plausible-looking money.
 
-## Projection rules
+## Exact v2 values (manifest revision 10, JOED-85)
+
+The active board consumes `inspr.joe.household.v2` through the self-contained
+`contracts/` validator. The v1 material below documents the legacy projection.
+Revision 10 accepts every valid revision-9 payload, including Phase A nulls;
+non-null money, `money.fx`, and position `updatedAt` already existed in rev 9.
+See README “Phase B exact money” for the complete JOED-86 emission table.
+
+Amy's JOED-55 rules (2026-10-25T20:14Z) make quantity, last price, worth and
+open result exact only from a fresh IB portfolio callback for that conid.
+Preserve its actual `updatedAt` and native money currency. A stale callback
+withholds the affected values with per-field `position_stale`; a missing
+callback uses `not_exact_yet` or `source_unavailable`. Fresh position coverage,
+account summaries or envelope generation cannot renew a conid callback's age.
+Position DAY still needs independent proof; otherwise omit it or use a reasoned
+null. KEEP SXR8/TSLA always have `scope: "keep"`, `desk: null`, no actions,
+and contribute only at account level.
+
+Desk equity, DAY, OPEN and since start come from the current v1 FIFO desk
+ledger only while that desk reconciles with broker positions, without any
+unclaimed/pre_ledger rows. Otherwise send null and `ledger_unreconciled`.
+Any stale input also withholds the affected money. DAY additionally needs a
+fixed, once-per-day exact SOD at America/New_York midnight with no missed
+snapshot. Missing/reseeded SOD and v1 session-open estimates stay null with
+`sod_missing`. A new envelope must never turn retained v1 money into fresh
+exact values. J-family conversion requires each converted EUR money's existing
+`fx` object: actual base, EUR quote, positive rate used, source and observedAt.
+An unknown/stale rate or timestamp keeps that money null.
+
+The v1 seed is **€5,000 per desk**, not €15,000: nixcfg `origin/main`,
+`hosts/hsb0/docker/joe-board-pusher/project.mjs:12`, `desk-ledger.mjs:404`,
+and `family-ledger.mjs:440` (the `virtualEquity = 5000` default). The parameter
+becomes `virtualCapital` at line 456; lines 622–623 compute net PnL and equity
+including that capital. Since start is net PnL relative to that capital within
+the verified accounting scope. An unknown desk base means null
+with `not_exact_yet`; do not infer it. The board's `performance.js:6` retains
+the established **€15,000 aggregate** denominator. The contracts have no desk
+capital field, so per-desk percentages remain absent.
+
+New optional `desks[].pnlSources.day` and `.open` reuse the top-level source
+shape, with `scope: "virtual-desks"` meaning KEEP-excluded desk money.
+Each entry applies only to its parent desk and overrides the corresponding
+aggregate entry. For a non-null value it needs `status: "available"`,
+`observedAt`, and method `sod-virtual-equity` (DAY, with exact `periodStart`)
+or `owned-lots-current-mark-fx` (OPEN). For null values use unavailable status,
+null method/observedAt and a closed reason, also in `money.reasons[field]`.
+Thus one unreconciled desk need not hide a reconciled sibling. Totals remain
+null until **every** desk input for that field is exact; never sum a subset.
+An unavailable aggregate source cannot mask an available desk source.
+Without scoped sources the existing aggregate-evidence rule stays unchanged.
+New reasons are append-only, require null values and withhold older retained
+calculations; broker-session and KEEP-policy safety remain authoritative.
+
+Cash is solely `brokerAccount.cash`, the raw EUR IB `TotalCashValue`, including
+KEEP. Missing, non-EUR or stale cash stays null with its own reason. There is
+no per-desk cash property; omit it rather than sending a new `money.cash` key.
+No NAV, cash, KEEP worth or missing-field zero enters desk totals.
+
+The board renders present values and complete Today/Since start percentages
+through the exact-decimal path. Position last price, worth and open result,
+kept rows and per-currency kept sums stay in exact units until one display
+rounding to cents, half away from zero. These money displays bypass Number; kept
+sums round only after addition, and a missing summand withholds the total.
+New cell copy reads “start-of-day value missing”, “desk ledger not reconciled”,
+and “position update is old”.
+Repeated reasons still appear once per section, with each null field's full
+accessible name. Synthetic exact/mixed snapshots live in `fixtures/phase-b.json`;
+unit and P3/P5 scenarios cover validation, display, mixed availability and
+recovery. The complete rev-10 contract digest and participant requirements are
+in `release/contracts.json`. Producers must re-vendor it before coordinated
+activation; fixture compatibility is not Amy's sign-off.
+
+## Legacy v1 projection rules
 
 The producer that can read `~/trading-team/shared/book.json` must emit exactly:
 
