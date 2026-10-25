@@ -64,6 +64,9 @@ async function phoneFirstScreenChecks(page, viewport, theme, snapshot) {
   const compactMoney = text => text.replace(/\s/g, '');
   check('phone-first', `${tag}: every compact row preserves the ranked card's Today and Since start values`,
     d.rows.map(r => r.key).join() === ranked.join() && d.rows.every(r => r.values.length === 2 && r.values.every((v, i) => compactMoney(v) === compactMoney(r.detailValues[i]))), d.rows);
+  check('phone-first', `${tag}: compact rows and their section end within 12 px of the reserved warning line, without a trailing detail gap`,
+    d.rows.length === 3 && d.rows.every(r => r.card.bottom - r.warningLineBottom >= 0 && r.card.bottom - r.warningLineBottom <= 12 && r.card.bottom === r.bottom) &&
+    d.desks.bottom - d.rows.at(-1).warningLineBottom <= 12 && d.desks.bottom === d.rows.at(-1).bottom, { desks: d.desks, rows: d.rows });
   check('phone-first', `${tag}: all seven disclosures start collapsed with 44 px targets, no horizontal scroll and a collapsed page ≤1600 px`,
     d.controls.length === 7 && d.controls.every(c => c.expanded === 'false' && c.hidden && !c.visible && c.height >= 44) && d.horizontal.scroll <= d.horizontal.inner && d.pageHeight <= 1600, d);
   check('phone-first', `${tag}: missing Cash is visible in the collapsed Account summary with an icon and its reason`,

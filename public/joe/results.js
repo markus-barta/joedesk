@@ -11,6 +11,7 @@ import { drawChart, eurAxis } from './chart.js';
 import { viennaDay } from './time.mjs';
 import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
 import { basisKey } from './history-model.js';
+import { percentHtml } from './desk.js';
 import * as M from './results-model.js';
 
 export { periodOf } from './results-model.js';
@@ -161,12 +162,19 @@ function heroSentence(view, per, R, partialDays) {
 
 export function renderHero(view, per, desks, R) {
   const none = !R || R.empty;
+  const percent = M.periodPercent(view.ix, view, per, desks, R);
+  const percentMarkup = percentHtml(percent);
+  const percentDigits = percent === null ? 1 : digits(percent * UNIT / 100n, 2).length + (percent ? 1 : 0) + 2;
+  const resultDigits = none || R.net === null ? 1 : eur(R.units.net, true).length;
   // Coverage qualifies a stated result, not an explanation of a missing one.
   const partialDays = view.ix && !R.cut && (R.empty || R.net !== null) ? M.countPartialDays(view.ix, per, view.today) : 0;
   const sentence = heroSentence(view, per, R, partialDays);
   patch($('#rheroL'), `
     <div class="hero-k">${icon('results')}<span>${term('result')} · ${esc(whoOf(desks))}</span></div>
-    <div class="display">${none || R.net === null ? D : bn(R.units.net)}</div>
+    <div class="result-figure" role="group" aria-label="Period result" style="--result-digits:${resultDigits};--percent-digits:${percentDigits}">
+      <div class="display">${none || R.net === null ? D : bn(R.units.net)}</div>
+      <div class="period-percent-slot">${percentMarkup}${percent === null ? '' : '<span class="vh"> of the money at the period start</span>'}</div>
+    </div>
     <p class="say">${esc(partialDays ? sentence.replace(/\.$/, '') : sentence)}${partialHint(partialDays)}</p>
     <dl class="split">
       <dt>${term('closed')}</dt><dd>${none ? '—' : pl(R.units.realised)}</dd>

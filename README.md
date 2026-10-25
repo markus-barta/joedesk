@@ -1361,6 +1361,24 @@ putting unavailable results last. Position rows keep their instrument currency:
 the current row contract supplies neither a separate EUR result nor a usable
 native-to-EUR rate (a rate from another row or the results record is not used).
 
+JOED-83 adds the selected period's percentage beside the Results hero's euros
+for All desks. All time divides by `STARTING_MONEY` (€ 15.000), matching
+Desk's Since start for the same aggregate result. Other periods divide by
+`STARTING_MONEY + prior.units.net`: `prior` is the existing after-fee `rollup`
+from `trackingStart` through the day before the period starts, with the same
+money context and basis-change checks. This includes open-position movement;
+it does not sum closed trades alone or round either input to cents. Individual
+desks, empty periods, basis changes, unknown/non-exact results and unknown or
+nonpositive bases omit the percentage. The shared Desk formatter retains its
+two decimals, signs and tones, with “of the money at the period start” in the
+figure's accessible text and the formula in the existing Result explanation.
+Both figure columns reserve their width when the percentage is absent, with
+tabular numerals and fixed height. Results unit tests cover the exact base,
+rounding boundaries, Since start parity and omissions. P4's existing number
+comparison now checks percentage presence, value, tone, meaning and bounds
+for the standard fixture's All desks and individual-desk selections; its
+existing tick/filter geometry checks include the figure and percentage slot.
+
 A snapshot state shared by money cells appears once in the hero's board caption.
 The cells keep subtle state icons. Different states, reasons, ages, missing
 values or retained observations keep their own explanations; positions and kept
@@ -1460,8 +1478,17 @@ phone caption whose complete text opens in the existing explanation tip;
 Today's one-line summary also opens its complete sentence there.
 
 CSS-only budget at 390×844: 54 px header + 56 px problem reserve +
-285 px primary card + 64 px Desks heading + three 92 px rows and two 8 px
-gaps = 751 px, leaving 21 px above the bottom navigation's 772 px top.
+285 px primary card + 64 px Desks heading + three 66 px rows and two 8 px
+gaps = 673 px, leaving 99 px above the bottom navigation's 772 px top.
+JOED-82 replaces each 92 px row's automatic tracks and 28 px warning reserve
+with explicit 36 px identity/money and 14 px warning tracks, plus 8 px padding
+at either end. The reserved warning line remains even when fresh; this keeps
+state and tone changes from moving the rows. The CSS gap from the end of that
+line to the card/section end is 8 px (previously about 25 px with stretched
+automatic tracks); the list itself has no
+trailing padding or collapsed-detail gap. P3 measures both gaps at 360/390 in
+both themes and retains its 44 px target, first-screen and zero-shift checks.
+These are CSS calculations; rendered measurements remain for agm2 CI.
 The primary card is 14 + 20 + 32 + 0 + 53 + 24 + 48 + 0 + 44 + 0 + 36 + 14:
 padding, date, label, numeral margin, numeral, percent, caption, sentence
 margin, sentence target, board-caption margin, board caption and padding.
