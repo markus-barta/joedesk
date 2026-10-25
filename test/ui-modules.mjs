@@ -7,7 +7,8 @@ import * as nodeModule from 'node:module';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
-import { CI_GUARD, REFERENCE_BUDGET, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
+import { CI_GUARD, REFERENCE_BUDGET, TIMING_GUARDS, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
+import { createGate } from '../scripts/browser/gate.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 import './browser-settled.mjs';
 
@@ -1339,27 +1340,28 @@ test('browser budget: setup stays separate while boundary-crossing and live task
   assert.deepEqual(details[3].frames, []);
 });
 
-test('browser budget: a task-only breach then clean passes after one re-measure', () => {
-  const first = { patchBudget: true, historyBudget: true, taskBudget: false };
-  const clean = { ...first, taskBudget: true };
-  assert.deepEqual(decideTaskGuard(first, null, CI_GUARD), { ok: false, remeasure: true, remeasured: false, attempts: 1 });
-  assert.deepEqual(decideTaskGuard(first, clean, CI_GUARD), { ok: true, remeasure: false, remeasured: true, attempts: 2 });
-  assert.deepEqual(decideTaskGuard(clean, null, CI_GUARD), { ok: true, remeasure: false, remeasured: false, attempts: 1 });
-  assert.equal(first.taskBudget, false, 'the first breach is retained');
-});
-
-test('browser budget: a reproduced task breach or any second-attempt failure is final', () => {
-  const first = { patchBudget: true, historyBudget: true, taskBudget: false };
-  for (const second of [first, { ...first, taskBudget: true, patchBudget: false }]) {
-    assert.deepEqual(decideTaskGuard(first, second, CI_GUARD), { ok: false, remeasure: false, remeasured: true, attempts: 2 });
+test('browser budget: every timing-only combination gets one final re-measure, with no condition mutation', () => {
+  const keys = ['patchBudget', 'historyBudget', 'renderBudget', 'taskBudget'];
+  const clean = Object.freeze(Object.fromEntries(keys.map(key => [key, true])));
+  for (let mask = 1; mask < 1 << keys.length; mask++) {
+    const first = Object.freeze(Object.fromEntries(keys.map((key, i) => [key, !(mask & 1 << i)])));
+    assert.deepEqual(decideTaskGuard(first, null, CI_GUARD), { ok: false, remeasure: true, remeasured: false, attempts: 1 });
+    assert.deepEqual(decideTaskGuard(first, clean, CI_GUARD), { ok: true, remeasure: false, remeasured: true, attempts: 2 });
+    for (const second of [first, { ...clean, patchBudget: false }, { ...clean, worker: false }]) {
+      assert.deepEqual(decideTaskGuard(first, second, CI_GUARD), { ok: false, remeasure: false, remeasured: true, attempts: 2 });
+    }
+    assert.equal(Object.values(first).filter(value => !value).length, mask.toString(2).replaceAll('0', '').length);
   }
+  for (const second of [null, clean]) assert.deepEqual(decideTaskGuard(clean, second, CI_GUARD),
+    { ok: true, remeasure: false, remeasured: false, attempts: 1 });
 });
 
-test('browser budget: patch, history, render, worker and push failures never re-measure', () => {
-  for (const key of ['patchBudget', 'historyBudget', 'renderBudget', 'worker', 'deskPushes', 'historyPushes', 'finite', 'notCompacted']) {
-    for (const taskBudget of [true, false]) {
-      const first = { [key]: false, taskBudget };
-      for (const second of [null, { [key]: true, taskBudget: true }]) {
+test('browser budget: any non-timing or unknown failure prevents a re-measure even with timing breaches', () => {
+  for (const key of ['measured', 'worker', 'historyRead', 'noMainThreadHistory', 'drawn', 'deskPushes', 'historyPushes',
+    'finite', 'redraws', 'historyReads', 'nearMaximum', 'notCompacted', 'unknownBudget']) {
+    for (const timingOK of [true, false]) {
+      const first = { [key]: false, patchBudget: timingOK, historyBudget: timingOK, renderBudget: timingOK, taskBudget: timingOK };
+      for (const second of [null, Object.fromEntries(Object.keys(first).map(key => [key, true]))]) {
         assert.deepEqual(decideTaskGuard(first, second, CI_GUARD), { ok: false, remeasure: false, remeasured: false, attempts: 1 }, key);
       }
     }
@@ -1367,9 +1369,13 @@ test('browser budget: patch, history, render, worker and push failures never re-
 });
 
 test('browser budget: reference limits stay strict with no re-measure', () => {
-  for (const second of [null, { taskBudget: true }]) {
-    assert.deepEqual(decideTaskGuard({ taskBudget: false }, second, REFERENCE_BUDGET),
-      { ok: false, remeasure: false, remeasured: false, attempts: 1 });
+  const keys = ['patchBudget', 'historyBudget', 'renderBudget', 'taskBudget'];
+  for (let mask = 1; mask < 1 << keys.length; mask++) {
+    const first = Object.fromEntries(keys.map((key, i) => [key, !(mask & 1 << i)]));
+    for (const second of [null, Object.fromEntries(keys.map(key => [key, true]))]) {
+      assert.deepEqual(decideTaskGuard(first, second, REFERENCE_BUDGET),
+        { ok: false, remeasure: false, remeasured: false, attempts: 1 });
+    }
   }
   assert.equal(REFERENCE_BUDGET.atMost, false);
   assert.equal(CI_GUARD.atMost, true);
@@ -1397,7 +1403,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
       assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()', source);
     },
   };
-  const context = { decideTaskGuard, observeBudgetTasks, attributeBudgetTasks,
+  const context = { decideTaskGuard, TIMING_GUARDS, observeBudgetTasks, attributeBudgetTasks,
     max: list => list.length ? Math.max(...list) : NaN,
     VIEWPORTS: [{ name: '390' }], NOW: '2026-10-14T17:42:22.000Z', ACTOR: 'fixture',
     largeScenario: (now, points = 9000) => ({ snapshot: { seq: 1001 }, history: { receivedAt: now, points: Array(points) } }),
@@ -1426,7 +1432,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
 }
 
 test('browser budget: cold and live re-measure on fresh boards, retaining both attributed rows and table attempts', async () => {
-  const { traces, checks, loads, boards } = await simulatedBudget({ cold: [{ taskMs: 129 }, {}], live: [{ taskMs: 137 }, {}] });
+  const { traces, checks, loads, boards } = await simulatedBudget({ cold: [{ taskMs: 129, historyMs: 126 }, {}], live: [{ taskMs: 155, patchMs: 44.5, historyMs: 126 }, {}] });
   assert.deepEqual(loads, { cold: 2, live: 2 });
   assert.equal(boards.length, 4);
   assert.deepEqual(boards[0].history, boards[1].history);
@@ -1437,13 +1443,13 @@ test('browser budget: cold and live re-measure on fresh boards, retaining both a
   assert.equal(traces.length, 4);
   assert.ok(traces.every(r => r.attempts === 2 && r.remeasured));
   assert.deepEqual(Array.from(traces, r => r.attempt), [1, 2, 1, 2]);
-  for (const [index, duration, phase] of [[0, 129, 'cold history'], [2, 137, 'desk updates']]) {
+  for (const [index, duration, phase] of [[0, 129, 'cold history'], [2, 155, 'desk updates']]) {
     assert.equal(traces[index].offendingTasks[0].duration, duration);
     assert.ok(traces[index].offendingTasks[0].phases.includes(phase));
     assert.ok(traces[index].offendingTasks[0].events.length > 0);
   }
-  const guards = checks.filter(c => 'taskBudget' in c.detail.conditions);
-  assert.equal(guards.length, 2);
+  const guards = checks.filter(c => Object.keys(c.detail.conditions).some(key => TIMING_GUARDS.includes(key)));
+  assert.equal(guards.length, 4);
   assert.ok(guards.every(c => c.name.includes('; re-measured once after a breach)') && c.detail.attemptRows.length === 2));
   const table = budgetTable(traces, CI_GUARD);
   assert.match(table, /Attempt/);
@@ -1452,12 +1458,51 @@ test('browser budget: cold and live re-measure on fresh boards, retaining both a
 });
 
 test('browser budget: runBudget stops after reproduced breaches and does not retry other failed checks', async () => {
-  for (const sample of [{ taskMs: 129 }, { taskMs: 129, patchMs: 41 }, { taskMs: 129, historyMs: 126 }, { taskMs: 129, worker: false }, { taskMs: 129, pushes: 4 }]) {
-    const reproduced = sample.patchMs === undefined && sample.historyMs === undefined && sample.worker === undefined && sample.pushes === undefined;
+  for (const sample of [{ patchMs: 44.5 }, { historyMs: 126 }, { taskMs: 129 }, { taskMs: 155, patchMs: 44.5 },
+    { taskMs: 129, historyMs: 126 }, { taskMs: 155, patchMs: 44.5, worker: false }, { taskMs: 129, pushes: 4 }]) {
+    const reproduced = sample.worker === undefined && sample.pushes === undefined;
     const { checks, loads } = await simulatedBudget({ live: [sample, sample] });
     assert.equal(loads.live, reproduced ? 2 : 1);
     assert.ok(checks.some(c => !c.ok));
     assert.ok(checks.filter(c => c.name.includes('live pushes')).every(c => c.detail.remeasured === reproduced));
+  }
+});
+
+test('browser budget: timing-only breaches can clear once; any second measurement failure remains final', async () => {
+  for (const sample of [{ patchMs: 44.5 }, { historyMs: 126 }, { taskMs: 155, patchMs: 44.5 }]) {
+    const clean = await simulatedBudget({ live: [sample, {}] });
+    assert.equal(clean.loads.live, 2);
+    assert.ok(clean.checks.every(c => c.ok));
+    for (const second of [{ worker: false }, { pushes: 4 }, { historyMs: 126 }]) {
+      const failed = await simulatedBudget({ live: [sample, second] });
+      assert.equal(failed.loads.live, 2);
+      assert.ok(failed.checks.some(c => !c.ok));
+    }
+  }
+  const cold = await simulatedBudget({ cold: [{ historyMs: 126 }, {}] });
+  assert.equal(cold.loads.cold, 2);
+  assert.ok(cold.checks.every(c => c.ok));
+});
+
+test('browser budget: reproduced patch/task breaches print both measurements before long attribution is truncated', async () => {
+  const { checks } = await simulatedBudget({ live: [{ patchMs: 44.5, taskMs: 155 }, { patchMs: 42, taskMs: 140 }] });
+  const failures = checks.filter(c => !c.ok);
+  assert.equal(failures.length, 2);
+  const messages = [], original = console.error;
+  console.error = message => messages.push(message);
+  try {
+    const gate = createGate('unused');
+    for (const c of failures) {
+      assert.match(c.name, /; re-measured once after a breach\)/);
+      assert.equal(c.detail.attemptRows.length, 2);
+      // The real gate truncates JSON detail to 2400 characters. Simulate a
+      // busy trace to ensure the concise measurements survive that boundary.
+      gate.check('budget', c.name, c.ok, { ...c.detail, offendingTasks: [{ attribution: 'x'.repeat(4000) }] });
+    }
+  } finally { console.error = original; }
+  assert.equal(messages.length, 2);
+  for (const message of messages) {
+    assert.match(message, /"measurements":\[\{"attempt":1,"patchMs":44\.5,"historyMs":10,"taskMs":155\},\{"attempt":2,"patchMs":42,"historyMs":10,"taskMs":140\}\]/);
   }
 });
 

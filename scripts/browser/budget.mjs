@@ -16,15 +16,18 @@ export const CI_GUARD = Object.freeze({ name: 'CI guard, 2.5 × the reference bu
   historyMs: 2.5 * REFERENCE_BUDGET.historyMs, taskMs: 2.5 * REFERENCE_BUDGET.taskMs, atMost: true });
 
 const max = list => (list.length ? Math.max(...list) : NaN);
+// renderBudget is the cold History draw; historyBudget is its live update.
+export const TIMING_GUARDS = Object.freeze(['patchBudget', 'historyBudget', 'renderBudget', 'taskBudget']);
 
-// Only CI may repeat a task-only breach. A second measurement is final,
-// including any non-task failure it finds; reference limits stay strict.
+// Only CI may repeat when every failed condition is a timing guard. The
+// second measurement is final, including any functional failure it finds;
+// reference limits stay strict. Keep the JOED-61 helper's calling contract.
 export function decideTaskGuard(firstConditions, secondConditions, limits) {
   const failed = Object.keys(firstConditions).filter(key => !firstConditions[key]);
-  const taskOnly = limits === CI_GUARD && failed.length === 1 && failed[0] === 'taskBudget';
-  const remeasured = taskOnly && secondConditions !== null;
+  const timingOnly = limits === CI_GUARD && failed.length > 0 && failed.every(key => TIMING_GUARDS.includes(key));
+  const remeasured = timingOnly && secondConditions !== null;
   return { ok: remeasured ? Object.values(secondConditions).every(Boolean) : failed.length === 0,
-    remeasure: taskOnly && !remeasured, remeasured, attempts: remeasured ? 2 : 1 };
+    remeasure: timingOnly && !remeasured, remeasured, attempts: remeasured ? 2 : 1 };
 }
 
 export async function runBudget({ page, newBoard, check, limits }) {
@@ -35,6 +38,11 @@ export async function runBudget({ page, newBoard, check, limits }) {
   const verify = (name, conditions, row) => {
     const failed = Object.keys(conditions).filter(k => !conditions[k]);
     check('budget', name, !failed.length, { failed, conditions,
+      // Put both concise measurements before the potentially large task
+      // attribution so the failure log's detail limit cannot hide either one.
+      ...(row.attemptRows ? { measurements: row.attemptRows.map(r => ({ attempt: r.attempt,
+        patchMs: r.deskWorst ?? null, historyMs: r.historyWorst ?? r.renderWorst,
+        taskMs: r.longTasks.length ? max(r.longTasks) : 0 })) } : {}),
       offendingTasks: row.longTaskDetails?.filter(t => t.duration >= limits.taskMs), ...row });
   };
   const traces = [];
@@ -52,7 +60,7 @@ export async function runBudget({ page, newBoard, check, limits }) {
     traces.push(...rows);
     const result = decision.remeasured ? second : first;
     for (const { name, conditions } of result.checks) {
-      const label = decision.remeasured && 'taskBudget' in conditions
+      const label = decision.remeasured && Object.keys(conditions).some(key => TIMING_GUARDS.includes(key))
         ? name.replace(`(${limits.name})`, `(${limits.name}; re-measured once after a breach)`) : name;
       verify(label, conditions, { ...rows.at(-1), ...(decision.remeasured ? { attemptRows: rows } : {}) });
     }
