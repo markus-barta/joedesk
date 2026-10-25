@@ -2,10 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261023155418.0.0",
+    APP_VERSION: "261025144826.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 30,
+    RELEASE_SEQUENCE: 31,
     VERSION_HISTORY: [
+      {
+        version: "261025144826.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-25",
+        title: "Calmer outage view",
+        changes: ["Explain a shared broker outage once per section, with labelled dashes and distinct reasons beside their fields.", "Keep each retained observation’s age and the icon and short reason in collapsed phone summaries."],
+      },
       {
         version: "261023155418.0.0",
         versionScheme: "inspr-calver-3",
