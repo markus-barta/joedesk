@@ -18,6 +18,7 @@ import { designFleet, designActions, designSnapshot, cashSessionSnapshot, switch
 import { designResults } from './browser/results.mjs';
 import { pngColours } from './browser/pixels.mjs';
 import { captureHeaderCrop } from './browser/header-crop.mjs';
+import { afterStableLayout } from './browser/settled-layout.mjs';
 
 // The page's own model, for the words and keys Settings must show.
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
@@ -152,7 +153,7 @@ function checkHeaderLayout(ac, tag, layout) {
   check(ac, `${tag}: the status is exactly one line box`, layout.status.lines === 1 && layout.status.nowrap === 'nowrap' && Math.abs(layout.status.height - layout.status.lineHeight) < 0.02, layout.status);
   check(ac, `${tag}: the icon stays inside its target without text overlap; ages use tabular numerals`, layout.status.iconInside && !layout.status.iconOverlap && layout.status.tabular, layout.status);
   check(ac, `${tag}: brand, PAPER, status and theme are visible, inside the header and do not overlap; no horizontal overflow`,
-    layout.paper === 'PAPER' && layout.inRow && !layout.overlaps.length && !layout.wordmarkClipped && !layout.overflow && layout.horizontal.scroll <= layout.horizontal.inner, layout);
+    layout.paper === 'PAPER' && layout.inRow && !layout.overlaps.length && !layout.wordmarkClipped && !layout.overflow && layout.horizontal.scroll <= layout.horizontal.client, layout);
 }
 const bar = () => ev(`[...document.querySelectorAll('#editbar, #editNote, .edit-btns, #editbar .btn')].map((e, i) => { const r = e.getBoundingClientRect(); return { key: (e.id || e.className) + '#' + i, top: r.top, left: r.left, height: r.height, width: r.width }; })`);
 const note = () => ev(`({ state: document.getElementById('editNote').dataset.state, text: document.getElementById('editNote').innerText.trim(), buttons: ['discardBtn', 'savePreview', 'reviewBtn', 'sendBtn'].map(id => !document.getElementById(id).disabled) })`);
@@ -638,7 +639,7 @@ try {
     // The longest label reserves the status width; every header component and
     // the reserved Settings rows keep their boxes across state changes.
     const geometrySelectors = ['header.top', '.top-in', '.top-in > *', '#hdrHealth .lbl', '#hdrHealth b', '#setMain > .set-sec', '#rtRows .rt-row'];
-    const geometry = () => rects(geometrySelectors);
+    const geometry = () => ev(`(${afterStableLayout.toString()})(${J(geometrySelectors)}).then(layout => layout.boxes)`);
     const exactMoves = (before, after) => before.flatMap((a, i) => {
       const b = after[i];
       return !b || a.key !== b.key ? [{ key: a.key, missing: true }]
@@ -707,7 +708,7 @@ try {
         const moved = exactMoves(baseline, await geometry());
         check('executor-health', `${tag}: exactly 0 px shift including the reserved status in the same page and broker state; header keeps its class`, !moved.length && seen.headerClass === headerClass && seen.brokerWord === brokerWord, { moved, brokerWord, seen: seen.brokerWord });
         const bounds = await ev(`({ horizontal: __audit.horizontal(), clipping: __audit.clipping() })`);
-        check('executor-health', `${tag}: no overflow or clipping`, bounds.horizontal.scroll <= bounds.horizontal.inner && !bounds.clipping.length, bounds);
+        check('executor-health', `${tag}: no overflow or clipping`, bounds.horizontal.scroll <= bounds.horizontal.client && !bounds.clipping.length, bounds);
         if (['capture-degraded', 'ledger-full'].includes(c.name)) {
           if (viewport.width !== 360) await auditScreen(page, viewport, theme, `settings executor ${c.name}`);
           await crop('#rtRows .rt-row:nth-child(4)', `${viewport.name}-${theme}-settings-executor-${c.name}`);
@@ -722,7 +723,7 @@ try {
             horizontal: __audit.horizontal(), clipping: __audit.clipping() };
         })()`);
         check('executor-health', `${tag}: Desk explains executor health without changing the board tone`, desk.open && N(desk.problem) === (c.problem ?? 'No current problems.') && desk.headerTone === c.headerTone, desk);
-        check('executor-health', `${tag}: Desk explanation has no overflow or clipping`, desk.horizontal.scroll <= desk.horizontal.inner && !desk.clipping.length, desk);
+        check('executor-health', `${tag}: Desk explanation has no overflow or clipping`, desk.horizontal.scroll <= desk.horizontal.client && !desk.clipping.length, desk);
         if (['capture-degraded', 'ledger-full'].includes(c.name)) await crop('#healthPop', `${viewport.name}-${theme}-desk-executor-${c.name}`);
         await click('.nav [data-go="settings"]');
       }
@@ -734,7 +735,10 @@ try {
       const reference = headerHealth(ctx, { reason: 'board_ok', tone: 'green', statusTone: 'ok' });
       for (const h of healthCases) {
         const view = headerHealth(ctx, { ...h, tone: h.statusTone === 'ok' ? 'green' : h.statusTone === 'bad' ? 'red' : 'yellow' });
-        const measured = await ev(`(() => {
+        const measured = await ev(`(${afterStableLayout.toString()})(${J(geometrySelectors)}, layout => {
+          // Settle the live page first, then compare both synthetic labels in
+          // this same frame. An awaited frame between them lets a live tick
+          // replace the test's label with the board's real health state.
           const button = document.getElementById('hdrHealth');
           button.innerHTML = ${J(reference.html)};
           const before = __audit.rects(${J(geometrySelectors)});
@@ -749,11 +753,11 @@ try {
             title: button.title, name: button.getAttribute('aria-label'), icon: button.querySelector(':scope > svg use').getAttribute('href'),
             height: { header: rowBox.height, button: button.getBoundingClientRect().height },
             inset: { left: first.left - rowBox.left, right: rowBox.right - last.right, paddingLeft: css.paddingLeft, paddingRight: css.paddingRight },
-            horizontal: __audit.horizontal(), clipping: __audit.clipping() };
-        })()`);
+            horizontal: __audit.horizontal(), clipping: __audit.clipping(), settled: layout };
+        })`);
         check('executor-health', `${viewport.name} ${theme} ${h.reason}: one line with complete accessible sentence and no overflow`,
           measured.clamps.length === 1 && measured.clamps.every(c => c.ok) && measured.title === view.sentence && measured.name === view.label &&
-          measured.horizontal.scroll <= measured.horizontal.inner && !measured.clipping.length, measured);
+          measured.horizontal.scroll <= measured.horizontal.client && !measured.clipping.length, measured);
         checkHeaderLayout('executor-health', `${viewport.name} ${theme} ${h.reason}`, measured.headerLayout);
         check('executor-health', `${viewport.name} ${theme} ${h.reason}: header and button retain their heights`,
           measured.height.header === (viewport.width <= 960 ? 54 : 58) && measured.height.button === (viewport.width <= 960 ? 44 : 34), measured.height);
@@ -798,7 +802,7 @@ try {
       const largeView = await ev(`(() => { const ledger = document.querySelector('#rtRows .rt-row:nth-child(4) [role="group"]'); return { present: Boolean(ledger), text: ledger?.textContent ?? null, title: ledger?.title ?? null, name: ledger?.getAttribute('aria-label') ?? null, horizontal: __audit.horizontal(), clipping: __audit.clipping() }; })()`);
       const conditions = { rendered: largeView.present, exactBytesReady: ledgerWait === null, formattedTB: N(largeView.text) === 'ledger 9007,2 TB of 9007,2 TB',
         exactTitle: largeView.title === exactLedger, exactAccessibleName: largeView.name === exactLedger,
-        noOverflow: largeView.horizontal.scroll <= largeView.horizontal.inner, noClipping: !largeView.clipping.length };
+        noOverflow: largeView.horizontal.scroll <= largeView.horizontal.client, noClipping: !largeView.clipping.length };
       const failed = Object.keys(conditions).filter(k => !conditions[k]);
       check('executor-health', `${viewport.name} ${theme}: very large TB values wrap without clipping and preserve exact bytes`, !failed.length, { failed, conditions, ledgerWait, ...largeView });
     }
