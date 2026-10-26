@@ -214,6 +214,22 @@ export function indexResults(value) {
     let last = -1;
     for (let i = 0; i < dates.length; i++) { if (close.state[i * 3 + desk]) last = i; close.entry[i * 3 + desk] = last; }
   }
+  // Prefix of the aggregate after-fee result, including open movement. Daily
+  // equity changes telescope to E(date) − initial equity; use the carried
+  // closes directly so an unknown close can recover at the next known one.
+  // Only All desks has an authoritative percentage base (JOED-55).
+  const netPrefix = dates.map((date, i) => {
+    if (date < value.trackingStart) return 0n;
+    let net = 0n;
+    for (let desk = 0; desk < 3; desk++) {
+      const at = close.entry[i * 3 + desk];
+      if (at < 0) continue;
+      const cell = at * 3 + desk;
+      if (close.state[cell] !== 1) return null;
+      net += close.amount[cell] - START_EQUITY;
+    }
+    return net;
+  });
   return {
     meta: { schema: value.schema, seq: value.seq, generatedAt: value.generatedAt, receivedAt: value.receivedAt, reason: value.reason ?? null,
       trackingStart: value.trackingStart, days: value.days.length, trades: n },
@@ -221,7 +237,7 @@ export function indexResults(value) {
     partialDays: new Set(value.days.filter(d => d.coverage === 'partial').map(d => d.date)),
     partialDetails: new Map(value.days.filter(d => d.coverage === 'partial').map(d => [d.date,
       { partialReasons: d.partialReasons, unattributedCount: d.unattributedCount }])),
-    dates, agg, close, trades, symbols: [...symbols.keys()], symbolDesks: Uint8Array.from(symbols.values()),
+    dates, agg, close, netPrefix, trades, symbols: [...symbols.keys()], symbolDesks: Uint8Array.from(symbols.values()),
   };
 }
 
@@ -370,16 +386,28 @@ const cents = units => Number(divRound(units, CENT)) / 100;
 const centsOf = (units, count) => Number(divRound(units, BigInt(count) * CENT)) / 100;
 const hundredths = (num, den) => Number(divRound(num * 100n, den)) / 100;
 
-// Aggregate money at the period start. Use the same after-fee equity rollup
-// as the hero, including open-position movement, without rounding its result.
-// There is no authoritative starting base for an individual desk (JOED-55).
+// Aggregate money at the period start, exactly as the prior after-fee rollup.
+// The index owns the immutable prefix; one binary search replaces a full
+// rollup on every switch. Live money and basis cuts are checked on every call.
 export function periodBase(ix, inputs, per, desks) {
   if (!ix || desks.length !== DESK_IDS.length || !DESK_IDS.every(id => desks.includes(id))) return null;
   if (per.p === 'all' || per.start <= ix.meta.trackingStart) return STARTING_MONEY;
   const before = { p: 'all', start: ix.meta.trackingStart, end: addDays(per.start, -1) };
-  const prior = rollup(ix, before, desks, moneyContext(ix, inputs, before, desks));
-  if (prior.cut || prior.net === null || typeof prior.units.net !== 'bigint') return null;
-  const base = STARTING_MONEY + prior.units.net;
+  const ctx = moneyContext(ix, inputs, before, desks);
+  if (ctx.cut) return null;
+  const startE = equityAt(ix, desks, addDays(before.start, -1), ctx);
+  if (startE === null) return null;
+  const end = before.end > ctx.today ? ctx.today : before.end;
+  let endE = startE;
+  if (before.start <= end) {
+    if (end === ctx.today) endE = equityAt(ix, desks, end, ctx);
+    else {
+      const i = upper(ix.dates, end) - 1, net = i < 0 ? 0n : ix.netPrefix[i];
+      endE = net === null ? null : STARTING_MONEY + net;
+    }
+  }
+  if (endE === null) return null;
+  const base = STARTING_MONEY + endE - startE;
   return base > 0n ? base : null;
 }
 
