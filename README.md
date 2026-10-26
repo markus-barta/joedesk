@@ -1452,6 +1452,8 @@ from `trackingStart` through the day before the period starts. JOED-89 caches
 that exact cumulative result in each record index's BigInt `netPrefix`, built
 once from carried equity closes. A date lookup replaces the full prior rollup
 on each switch; current money and basis-change checks still run on every call.
+Pre-tracking closes retain their exact value or unknown state across gaps at
+tracking start; periods starting before or at tracking still use the initial base.
 Unknown closes recover only with a later known close, and a new record gets a
 new prefix. `node scripts/benchmark-period-base.mjs` compares the old and new
 Node model paths over the 14,000-trade/288-day fixture and eleven switches;

@@ -749,6 +749,47 @@ test('JOED-83: an unknown, zero or negative base and a prior basis change omit t
   assert.equal(M.periodPercent(ix, withCut, per, ALL, R), null);
 });
 
+test('JOED-89: a tracking-start gap carries pre-tracking valued and unknown closes into the cached base', async t => {
+  for (const unknown of [null, ...ALL]) await t.test(unknown ? `unknown ${unknown} close` : 'valued close', () => {
+    const amounts = ALL.map(id => id === unknown ? null : id === 'j' ? '5100.12345678' : '5000');
+    const ix = M.indexResults(record([closeDay('2026-09-11', ...amounts), closeDay('2026-09-21', '5200')], [], '2026-09-14'));
+    const inputs = ctxOf(), per = M.periodOf('day', '2026-09-15', today, ix.meta.trackingStart);
+    const want = unknown ? null : E('15100.12345678');
+    assert.equal(priorRollupBase(ix, inputs, per, ALL), want, 'independent old rollup defines the expected base');
+    assert.equal(M.periodBase(ix, inputs, per, ALL), want, 'the latest indexed date is still before tracking starts');
+  });
+});
+
+test('JOED-89: tracking-start boundaries, sparse gaps and desk sets keep old-rollup base and percentage parity', () => {
+  const trackingStart = '2026-09-14', inputs = ctxOf([E('5300'), E('5000'), E('5000')]);
+  const deskSets = Array.from({ length: 8 }, (_, mask) => ALL.filter((_, i) => mask & (1 << i)));
+  deskSets.push([...ALL].reverse(), ['j', 'j', 'joe']);
+  const gaps = [[], ['2026-09-13'], [trackingStart], ['2026-09-13', trackingStart, '2026-09-16']];
+  const amounts = [['5100.12345678', '5000', '5000'], [null, '5000', '5000'], ['5000', null, '5000'],
+    ['5000', '5000', null], ['0', '0', '0'], ['-0.00000001', '0', '0']];
+  for (const closes of amounts) for (const gap of gaps) {
+    const days = [closeDay('2026-09-10', '5050'), closeDay('2026-09-11', ...closes),
+      ...gap.map(date => ({ date, desks: {} })), closeDay('2026-09-21', '5200')];
+    const trades = [tradeOf('rt-pre-tracking', 'j', '2026-09-12T15:00:00.000Z', '999.12345678')];
+    const ix = M.indexResults(record(days, trades, trackingStart));
+    for (const anchor of ['2026-09-10', '2026-09-13', trackingStart, '2026-09-15', '2026-09-17', '2026-09-21', '2026-09-22']) {
+      for (const kind of ['day', 'week', 'month', 'ytd', 'all']) for (const desks of deskSets) {
+        const per = M.periodOf(kind, anchor, today, trackingStart);
+        const result = M.rollup(ix, per, desks, M.moneyContext(ix, inputs, per, desks));
+        const label = `${closes.join(',')} gap=${gap.join(',')} ${kind} ${anchor} ${desks.join(',')}`;
+        assert.equal(M.periodBase(ix, inputs, per, desks), priorRollupBase(ix, inputs, per, desks), label);
+        assert.equal(M.periodPercent(ix, inputs, per, desks, result), priorRollupPercent(ix, inputs, per, desks, result), label);
+      }
+    }
+    const recovered = M.periodOf('day', '2026-09-22', today, trackingStart);
+    assert.equal(M.periodBase(ix, inputs, recovered, ALL), E('15200'), 'the next known close recovers the base');
+    for (const anchor of ['2026-09-13', trackingStart]) {
+      assert.equal(M.periodBase(ix, inputs, M.periodOf('day', anchor, today, trackingStart), ALL), STARTING_MONEY,
+        'periods before or at tracking start retain the authoritative initial base');
+    }
+  }
+});
+
 test('JOED-89: cached bases and percentages equal the old rollup for the large budget fixture and every desk set', () => {
   const value = largeResults(), ix = M.indexResults(value);
   assert.equal(value.trades.length, 14000);

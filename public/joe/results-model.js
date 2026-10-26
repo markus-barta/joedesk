@@ -217,9 +217,10 @@ export function indexResults(value) {
   // Prefix of the aggregate after-fee result, including open movement. Daily
   // equity changes telescope to E(date) − initial equity; use the carried
   // closes directly so an unknown close can recover at the next known one.
+  // Keep pre-tracking closes too: a query after tracking starts may carry
+  // one through a gap with no later indexed date, including an unknown.
   // Only All desks has an authoritative percentage base (JOED-55).
-  const netPrefix = dates.map((date, i) => {
-    if (date < value.trackingStart) return 0n;
+  const netPrefix = dates.map((_, i) => {
     let net = 0n;
     for (let desk = 0; desk < 3; desk++) {
       const at = close.entry[i * 3 + desk];
