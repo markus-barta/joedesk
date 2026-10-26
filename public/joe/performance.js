@@ -2,6 +2,7 @@
 // fleet contracts have no starting-capital field: retain the board's established
 // aggregate practice capital, never infer individual bases from current equity.
 import { decimalUnits, divRound } from './contracts/decimal.mjs';
+import { NOT_EXACT_REASONS } from './board-state.js';
 
 export const STARTING_MONEY = decimalUnits('15000');
 
@@ -11,7 +12,7 @@ export function exactMoney(value) {
 }
 
 export function exactCell(cell) {
-  if (!cell || cell.retained || !['fresh', 'stale'].includes(cell.state) || cell.reason === 'not_exact_yet') return null;
+  if (!cell || cell.retained || !['fresh', 'stale'].includes(cell.state) || NOT_EXACT_REASONS.has(cell.reason)) return null;
   return exactMoney(cell.value);
 }
 
@@ -33,7 +34,7 @@ export function todayPercent(states, source) {
 export const sincePercent = states => percentOf(exactCell(states['today.totalPnl']), STARTING_MONEY);
 
 export function rankDesks(states, order) {
-  return order.map((id, index) => ({ id, index, result: exactMoney(states[`desks.${id}.totalPnl`]?.value) }))
+  return order.map((id, index) => ({ id, index, result: exactCell(states[`desks.${id}.totalPnl`]) }))
     .sort((a, b) => a.result === b.result ? a.index - b.index
       : a.result === null ? 1 : b.result === null ? -1 : a.result > b.result ? -1 : 1)
     .map(d => d.id);

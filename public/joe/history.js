@@ -3,6 +3,7 @@
 import { $, $$, icon, term, st, pl, inlineMark, swatch, ageSpan, patch, isPhone, statePhrase, stateCaption } from './ui.js';
 import { esc, amountOf, eur, pct, age, dayDDM, dayDM, timeHM, money, NB } from './format.js';
 import { cellReason } from './health.js';
+import { exactCell } from './performance.js';
 import { drawChart, eurAxis } from './chart.js';
 import { DESK_IDS, ASSUMED_BASELINE, continuitySeries, sharedWindowCompare, basisNotice, toColumns, rangeWindow } from './history-model.js';
 import { viennaDay, zonedInstant, VIENNA, NY } from './time.mjs';
@@ -198,7 +199,8 @@ function bookkeepingHtml(ctx) {
   const cell = ctx.states['desks.j.totalPnl'];
   const since = acc ? dayDM(acc.periodStart, NY) : null;
   const caption = stateCaption(cell, 'jacct', '');
-  const value = `${cell?.value ? pl(amountOf(cell.value)) : '<span class="muted">—</span>'}${caption ? ` <span class="cap" data-state="${cell?.state ?? 'not reported'}">· ${caption}</span>` : ''}`;
+  const result = exactCell(cell);
+  const value = `${result !== null ? pl(result) : '<span class="muted">—</span>'}${caption ? ` <span class="cap" data-state="${cell?.state ?? 'not reported'}">· ${caption}</span>` : ''}`;
   return `<dl class="facts-dl">
       <dt>Counted from</dt><dd>${since ? `${since} (New York date)` : 'Not reported'}</dd>
       <dt>How it is counted</dt><dd>${acc ? `${term('bookkeeping')}: oldest purchase first, after fees, dollars turned into euros at the rate seen at the time` : 'Not reported'}</dd>

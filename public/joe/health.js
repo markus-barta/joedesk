@@ -87,6 +87,8 @@ export const deskValuesNotExact = states => EQUITY_CELLS.some(name => notExact(s
 // Today's carried valuation: equity and total result retained from a last good value.
 const CARRIED_CELLS = ['today.equity', 'today.totalPnl', ...DESKS.flatMap(id => [`desks.${id}.equity`, `desks.${id}.totalPnl`])];
 const current = cell => cell?.value != null && !cell.retained;
+// Board totals may be hidden while their observations remain usable for health.
+const observation = cell => cell?.health ?? { available: cell?.value != null, retained: cell?.retained, ageSeconds: cell?.ageSeconds };
 
 // Broker connection: API session readiness and its check age, never a port.
 export function brokerState(states, data) {
@@ -131,12 +133,13 @@ export function localBoardHealth(states, feeds, now) {
   // Otherwise retain the selector's elapsed/progress age for the actual check.
   const gatewayAge = gatewayCheckAgeMs(data.safety.gateway, data.generatedAt) === null ? null : states.gateway?.ageSeconds;
   const briefBrokerGap = broker.word === 'unsure' && Number.isFinite(gatewayAge) && gatewayAge >= 0 && gatewayAge < FEED_STOPPED_S;
-  const excused = cell => briefBrokerGap && cell?.value == null && cell?.reason === 'gateway_unconfirmed';
+  const excused = cell => briefBrokerGap && !observation(cell).available && cell?.reason === 'gateway_unconfirmed';
   const usable = EQUITY_CELLS.every(name => {
     const cell = states[name];
     if (notExact(cell)) return true;
-    if (cell?.value == null) return excused(cell);
-    return !cell.retained || (cell.ageSeconds !== null && cell.ageSeconds <= RETAINED_GRACE_S);
+    const seen = observation(cell);
+    if (!seen.available) return excused(cell);
+    return !seen.retained || (Number.isFinite(seen.ageSeconds) && seen.ageSeconds >= 0 && seen.ageSeconds <= RETAINED_GRACE_S);
   });
   if (!usable) return { tone: 'red', reason: 'equity_unavailable' };
   if (EQUITY_CELLS.some(name => excused(states[name]))) return { tone: 'yellow', reason: 'gateway_unconfirmed' };
@@ -145,7 +148,7 @@ export function localBoardHealth(states, feeds, now) {
   if (rejected) return { tone: 'yellow', reason: 'retained_values' };
   if (receipt >= STALE_AFTER_S || frozen >= STALE_AFTER_S) return { tone: 'yellow', reason: 'snapshot_stale' };
   if (broker.word !== 'OK') return { tone: 'yellow', reason: 'gateway_unconfirmed' };
-  if (CARRIED_CELLS.some(name => states[name]?.retained)) return { tone: 'yellow', reason: 'retained_values' };
+  if (CARRIED_CELLS.some(name => observation(states[name]).retained)) return { tone: 'yellow', reason: 'retained_values' };
   if (data.desks.some(desk => desk.state === 'stuck')) return { tone: 'yellow', reason: 'retained_values' };
   if (isRTH(now) && !current(states['today.dayPnl'])) return { tone: 'yellow', reason: 'day_pending' };
   if (isRTH(now) && !current(states['today.openPnl'])) return { tone: 'yellow', reason: 'open_unavailable_rth' };

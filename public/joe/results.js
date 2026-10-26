@@ -12,6 +12,7 @@ import { viennaDay } from './time.mjs';
 import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
 import { basisKey } from './history-model.js';
 import { percentHtml } from './desk.js';
+import { exactCell } from './performance.js';
 import * as M from './results-model.js';
 
 export { periodOf } from './results-model.js';
@@ -37,10 +38,7 @@ export function resultsView(ctx) {
   // symbol is not authoritative, so nothing is derived from it.
   const keep = [...new Set([...KEEP_FLOOR, ...(ctx.feeds['fleet-config']?.value?.desks.keep ?? [])])];
   if (ix && M.keptInRecord(ix, keep).length) { ix = null; reason = 'source_not_authoritative'; }
-  const todayUnits = DESKS.map(id => {
-    const c = ctx.states[`desks.${id}.equity`];
-    return c?.value && !c.retained ? decimalUnits(c.value.amount) : null;
-  });
+  const todayUnits = DESKS.map(id => exactCell(ctx.states[`desks.${id}.equity`]));
   const desksNow = ctx.feeds.data?.value?.desks ?? [];
   const current = Object.fromEntries(DESKS.map((id, i) => [id, todayUnits[i] === null ? null : desksNow.find(d => d.id === id) ?? null]));
   const nowMs = ctx.now ? Date.parse(ctx.now) : null, cols = ctx.feeds.history?.value?.columns ?? null;

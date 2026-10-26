@@ -24,6 +24,7 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
+const { boardStates } = await import('../public/joe/board-state.js');
 const { isRTH } = await import('../time.mjs');
 const format = await import('../public/joe/format.js');
 const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await import('../public/joe/ui.js');
@@ -50,7 +51,7 @@ const at = (base, seconds) => new Date(Date.parse(base) + seconds * 1000).toISOS
 
 // The browser's view of the server: the shared acceptance and selector, with
 // the previous accepted cells as retained last-good values.
-function board(fixture, { cold = false } = {}) {
+function board(fixture, { cold = false, display = false } = {}) {
   const feeds = { 'fleet-config': { value: structuredClone(valid['fleet-config']), receivedAt: valid.data.receivedAt },
     results: { value: null, reason: 'feed_not_received' }, history: { value: structuredClone(valid.history) } };
   let previous = {};
@@ -61,10 +62,10 @@ function board(fixture, { cold = false } = {}) {
   if (fixture.transportReason) feeds[fixture.feed] = { ...feeds[fixture.feed], reason: fixture.transportReason };
   else if (fixture.feed === 'data') feeds.data = acceptSnapshot('data', fixture.payload, feeds.data ?? null, fixture.receivedAt);
   if (fixture.fleetConfig) feeds['fleet-config'].value = fixture.fleetConfig;
-  return { feeds, states: panelStates(feeds, fixture.now, previous), now: fixture.now };
+  return { feeds, states: (display ? boardStates : panelStates)(feeds, fixture.now, previous), now: fixture.now };
 }
 const fixture = id => read(`failures/${id}.json`);
-const presentation = (id, opts) => { const b = board(fixture(id), opts); return health.boardHealthPresentation(b.states, b.feeds, b.now); };
+const presentation = (id, opts) => { const b = board(fixture(id), { ...opts, display: true }); return health.boardHealthPresentation(b.states, b.feeds, b.now); };
 
 test('format: Austrian digits, true minus, joined units, zero without sign', () => {
   assert.equal(format.money(-4.05, 'EUR', true), '−€ 4,05');
@@ -611,8 +612,9 @@ test('health: one null keeps a yellow grace, a cold load or old carry is red, HA
   assert.equal(presentation('b-incomplete-family', { cold: true }).reason, 'equity_unavailable');
   const late = { ...fixture('b-incomplete-family'), now: at(fixture('b-incomplete-family').receivedAt, 40) };
   assert.equal(presentation('b-incomplete-family').tone, 'yellow');
-  const b = board(late);
-  assert.equal(b.states['today.equity'].retained, true);
+  const b = board(late, { display: true });
+  assert.equal(b.states['today.equity'].value, null);
+  assert.equal(b.states['desks.j.equity'].retained, true);
   const halted = ingress(valid.data);
   halted.seq = 102; halted.generatedAt = at(valid.data.receivedAt, 30); halted.safety.gateway.checkedAt = halted.generatedAt;
   halted.safety.halt = true; halted.safety.haltReason = 'halt_on';
@@ -904,9 +906,12 @@ test('health: the 20-second-old check reads fresh, then broken, then stale (P3 c
   assert.equal(fresh.b.states['today.equity'].state, 'fresh');
   assert.equal(fresh.p.reason, 'board_ok');
   const broken = view(45);
+  broken.b.states = boardStates(broken.b.feeds, broken.b.now, broken.b.states);
   assert.deepEqual([broken.b.states['today.equity'].state, broken.b.states['today.equity'].reason], ['broken', 'gateway_unconfirmed']);
   assert.deepEqual([broken.p.label, broken.p.reason], ['Broker unsure', 'gateway_unconfirmed']);
-  assert.match(cellView(broken.b.states['today.equity'], 'k').caption, /^Last good value, .* · broker connection not confirmed$/);
+  assert.equal(broken.b.states['today.equity'].value, null);
+  assert.equal(cellView(broken.b.states['today.equity'], 'k').caption, 'Unavailable · broker connection not confirmed');
+  assert.match(cellView(broken.b.states['desks.j.equity'], 'k').caption, /^Last good value, .* · broker connection not confirmed$/);
   const stale = view(61);
   assert.equal(stale.b.states['today.equity'].state, 'stale');
   assert.deepEqual([stale.p.label, stale.p.reason], ['Stale 1 min', 'snapshot_stale']);
@@ -914,7 +919,7 @@ test('health: the 20-second-old check reads fresh, then broken, then stale (P3 c
 });
 
 test('isolation: a single missing desk keeps its siblings fresh with their own ages; the light stays yellow', () => {
-  const b = board(singleMissingDesk());
+  const b = board(singleMissingDesk(), { display: true });
   assert.equal(b.feeds.data.status, 200);
   assert.deepEqual([b.states['desks.j.equity'].state, b.states['desks.j.equity'].retained], ['broken', true]);
   assert.deepEqual([b.states['today.equity'].state, b.states['today.equity'].reason], ['broken', 'family_projection_unavailable']);
@@ -922,20 +927,21 @@ test('isolation: a single missing desk keeps its siblings fresh with their own a
   assert.equal(b.states['desks.j.totalPnl'].state, 'fresh');
   const p = health.boardHealthPresentation(b.states, b.feeds, b.now);
   assert.deepEqual([p.tone, p.reason], ['yellow', 'retained_values']);
-  const cold = board(singleMissingDesk(), { cold: true });
+  const cold = board(singleMissingDesk(), { cold: true, display: true });
   assert.equal(health.boardHealthPresentation(cold.states, cold.feeds, cold.now).reason, 'equity_unavailable');
   assert.equal(cellView(cold.states['desks.joe.equity'], 'k').state, 'fresh');
 });
 
 test('isolation: equity and total result unavailable together never show a fresh result', () => {
-  const b = board(coupledUnavailable());
+  const b = board(coupledUnavailable(), { display: true });
   assert.equal(b.feeds.data.status, 200);
   for (const name of ['today.equity', 'today.totalPnl', 'desks.j.equity', 'desks.j.totalPnl', 'desks.joel.totalPnl']) {
-    assert.deepEqual([b.states[name].state, b.states[name].reason, b.states[name].retained], ['broken', 'all_desk_equity_unavailable', true], name);
+    assert.deepEqual([b.states[name].state, b.states[name].reason, b.states[name].retained], ['broken', 'all_desk_equity_unavailable', name === 'desks.j.equity'], name);
   }
   assert.equal(b.states['today.dayPnl'].state, 'fresh');
-  assert.match(cellView(b.states['today.totalPnl'], 'k').caption, /^Last good value, .* · desks’ money not available$/);
-  assert.equal(health.boardHealthPresentation(b.states, b.feeds, b.now).reason, 'retained_values');
+  assert.equal(cellView(b.states['today.totalPnl'], 'k').caption, 'Unavailable · desks’ money not available');
+  const p = health.boardHealthPresentation(b.states, b.feeds, b.now);
+  assert.deepEqual([p.tone, p.reason], ['yellow', 'retained_values']);
 });
 
 test('cells: fresh, stale with age, not reported and broken with reason all read plainly', () => {
