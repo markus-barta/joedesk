@@ -116,7 +116,7 @@ export function compactDesk(ctx, id) {
     const cell = ctx.states[`desks.${id}.${name}`], value = cellView(cell, `compact.${id}.${name}`, { label });
     const marker = cellIcon(cell, shared).replace('cell-state', 'compact-state');
     const characters = value.units === null ? 1 : eur(value.units, true).length;
-    return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${label}${marker}</span>${value.html}</span>`;
+    return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${label}${marker}${name === 'dayPnl' ? dayEstimateMark(ctx, id) : ''}</span>${value.html}</span>`;
   };
   return `<button type="button" class="desk-disclosure desk-row" data-desk-disclosure="${id}" aria-expanded="${expanded.has(id)}" aria-controls="detail-${id}">
     ${deskMark(id)}<span class="compact-identity"><strong>${esc(desk?.label ?? LABEL[id])}</strong><span class="compact-word tone-${info.tone}">${icon(info.icon)}${info.word}</span></span>
@@ -203,6 +203,12 @@ function dayMethodLabel(source) {
   if (source.method === 'session-open-estimate') return `Estimated from the session open${start ? ` at ${start}` : ''}`;
   if (source.method === 'ib-daily-pnl') return 'Reported by Interactive Brokers';
   return null;
+}
+function dayEstimateMark(ctx, id) {
+  const data = ctx.feeds.data?.value, desk = data?.desks.find(d => d.id === id);
+  const source = desk?.pnlSources?.day ?? data?.pnlSources?.day;
+  if (ctx.states[`desks.${id}.dayPnl`]?.value == null || source?.status !== 'available' || source.method !== 'session-open-estimate') return '';
+  return `<span class="estimate-mark" role="img" aria-label="${esc(`Today: ${dayMethodLabel(source)}`)}" title="${esc(dayMethodLabel(source))}">Estimated</span>`;
 }
 function openMethodLabel(source) {
   if (!source || source.status !== 'available') return null;
@@ -367,7 +373,7 @@ function deskCard(ctx, id, maxDay, showBars) {
   return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(info.word + since)}">${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
       <p class="now">${desk ? esc(desk.action) : 'Waiting for the first valid snapshot.'}</p>
       <div class="dnums">
-        ${num(term('today'), dayV, states[`desks.${id}.dayPnl`], `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
+        ${num(term('today') + dayEstimateMark(ctx, id), dayV, states[`desks.${id}.dayPnl`], `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
         ${num(term('open'), openV, states[`desks.${id}.openPnl`])}
         ${num(term('since', sinceText), sinceV, states[`desks.${id}.totalPnl`])}
       </div>

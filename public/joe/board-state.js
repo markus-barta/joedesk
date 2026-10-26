@@ -1,8 +1,10 @@
 // Board display policy layered over the unchanged producer contract selector.
 import { panelStates, MONEY_FIELDS } from './contracts/panel-state.mjs';
+import { nyDay } from './time.mjs';
+import { validInstant } from './contracts/schema-validator.mjs';
 
 export const RETENTION_SECONDS = 60 * 60;
-export const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale']);
+export const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale', 'baseline_pending', 'day_pnl_unavailable']);
 const DESKS = ['j', 'joe', 'joel'];
 const positionKey = row => JSON.stringify([row.scope, row.desk, row.symbol]);
 const unavailable = (cell, reason = cell.reason) => ({ ...cell, state: cell.state === 'fresh' ? 'broken' : cell.state, value: null, retained: false, reason });
@@ -18,20 +20,31 @@ export function boardStates(feeds, now, previous = {}) {
     const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
     const bag = desk?.money ?? data?.totals;
     const period = field === 'dayPnl' ? 'day' : field === 'openPnl' ? 'open' : null;
-    return bag?.reasons?.[field] ?? (period ? (desk?.pnlSources?.[period] ?? data?.pnlSources?.[period])?.reason : null);
+    return [bag?.reasons?.[field], period ? (desk?.pnlSources?.[period] ?? data?.pnlSources?.[period])?.reason : null];
   };
   const numeric = ['paperAccount', 'paperCash', 'positions', 'kept',
     ...MONEY_FIELDS.flatMap(field => [`today.${field}`, ...DESKS.map(id => `desks.${id}.${field}`)])];
   for (const name of numeric) {
     const cell = states[name], field = name.split('.').at(-1);
-    const sourceReason = name === 'paperAccount' ? data?.brokerAccount?.reason
-      : name === 'paperCash' ? data?.brokerAccount?.reasons?.cash
-        : ['positions', 'kept'].includes(name) ? data?.positions?.reason : fieldReason(name, field);
+    const sourceReasons = name === 'paperAccount' ? [data?.brokerAccount?.reason]
+      : name === 'paperCash' ? [data?.brokerAccount?.reasons?.cash]
+        : ['positions', 'kept'].includes(name) ? [data?.positions?.reason] : fieldReason(name, field);
     // Scoped exactness failures still apply when a feed/gateway failure masks
     // their reason in the shared selector. An outage cannot restore an amount.
-    const inexact = NOT_EXACT_REASONS.has(cell.reason) || NOT_EXACT_REASONS.has(sourceReason);
+    const inexact = [cell.reason, ...sourceReasons, cell.retained ? previous[name]?.reason : null]
+      .some(reason => NOT_EXACT_REASONS.has(reason));
     const expired = cell.retained && (cell.ageSeconds == null || cell.ageSeconds >= RETENTION_SECONDS);
-    if (inexact || expired) states[name] = unavailable(cell);
+    // Today belongs to the observation's NY date, even if a real outage or
+    // stopped feed spans midnight. Receipt time cannot freshen old evidence.
+    let differentDay = false;
+    if (field === 'dayPnl' && cell.value != null) {
+      const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
+      const observedAt = cell.retained ? previous[name]?.valueObservedAt ?? cell.valueReceivedAt
+        : (desk?.pnlSources?.day ?? data?.pnlSources?.day)?.observedAt ?? data?.generatedAt ?? cell.valueReceivedAt;
+      cell.valueObservedAt = observedAt;
+      differentDay = !validInstant(observedAt) || nyDay(observedAt) !== nyDay(now);
+    }
+    if (inexact || expired || differentDay) states[name] = unavailable(cell, cell.reason ?? (differentDay ? 'day_pnl_unavailable' : null));
   }
   // An outage can retain an older position list, but current per-field
   // exactness failures still invalidate those same older fields.

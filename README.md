@@ -1225,6 +1225,22 @@ When Today is a broken dash, its local caption states the reason unless the
 board's state line already explains it. This includes pending start-of-day
 results and every revision-10 exactness reason; repeated section reasons stay shared.
 
+Release 34 (JOED-93 follow-up: JOED-98/94/95) also treats revision-9
+`baseline_pending` and `day_pnl_unavailable` as missing exactness, never as
+last-good. The server clears the cell's durable last-good when any of these
+six reasons arrives, even alongside a value or behind another reason; only
+a new exact observation restores retention. The board also rejects retained
+cells whose previous reason identifies uncertain evidence.
+Today belongs to the observation's America/New_York date: a missing baseline,
+an outage over New York midnight or a late receipt of yesterday's observation
+shows a dash with its reason on the hero, every desk card and phone row.
+Since start and other outage retention keep their existing rules. Internal
+Today observation dates persist across server restart without changing the
+producer contract. Session-open estimates say **Estimated** beside desktop and
+phone desk Today figures, with the hero's full explanation in the accessible
+label. Marks occupy the existing label line without changing money or target
+geometry; CI checks exact/estimate transitions at 390/1024/1440 in both themes.
+
 | Field | JOED-86 emission rule |
 | --- | --- |
 | Position `quantity`, `mark`, `marketValue`, `openPnl` | Exact broker portfolio callback values for that conid only while fresh. Money keeps its native currency. Keep the actual callback time in `updatedAt`; a new envelope or position-list completion never refreshes it. Stale callback: all affected fields null with their own `position_stale` reasons. Missing/unverified callback: null with `not_exact_yet` (or `source_unavailable` when not reported). |

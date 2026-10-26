@@ -9,7 +9,8 @@ import { validateContract } from '../contracts/index.mjs';
 import { decimalUnits, unitsDecimal } from '../contracts/decimal.mjs';
 const { boardStates, NOT_EXACT_REASONS, RETENTION_SECONDS } = await import('../public/joe/board-state.js');
 const { exactCell, rankDesks, todayPercent, sincePercent } = await import('../public/joe/performance.js');
-const { cellView, heroLeft, keptHtml, positionsHtml } = await import('../public/joe/desk.js');
+const { cellView, heroLeft, keptHtml, positionsHtml, compactDesk } = await import('../public/joe/desk.js');
+const { deskCard } = await builders('desk.js', ['deskCard']);
 const { resultsView } = await import('../public/joe/results.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { localBoardHealth, statusPresentation, cellReason, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
@@ -36,6 +37,103 @@ function missing(reason) {
   assert.equal(validateContract('data', data).ok, true);
   return data;
 }
+
+test('JOED-98: retained cells carrying an exactness reason cannot return through a later outage', () => {
+  for (const reason of NOT_EXACT_REASONS) {
+    const prior = Object.fromEntries(Object.entries(previous).map(([name, cell]) => [name, { ...cell, reason }]));
+    const data = missing('source_unavailable');
+    data.brokerAccount.equity = data.brokerAccount.cash = null;
+    data.brokerAccount.reason = 'source_unavailable'; data.brokerAccount.reasons = { cash: 'source_unavailable' };
+    const states = boardStates({ data: { value: data } }, at(600), prior);
+    for (const name of ['paperAccount', 'paperCash', ...MONEY_FIELDS.flatMap(f => DESKS.map(id => `desks.${id}.${f}`))]) {
+      assert.equal(states[name].value, null, `${reason}: ${name}`);
+      assert.equal(states[name].retained, false, name);
+    }
+  }
+});
+
+for (const id of ['b-weekend-no-sod', 'j-ny-midnight-gap']) test(`JOED-94 ${id}: all desk Today cells dash with their reason; Since start stays exact`, () => {
+  const fixture = JSON.parse(readFileSync(new URL(`../fixtures/failures/${id}.json`, import.meta.url)));
+  const feed = acceptSnapshot('data', fixture.payload, null, fixture.receivedAt);
+  assert.equal(feed.status, 200);
+  const feeds = { data: feed }, now = fixture.now, states = boardStates(feeds, now, previous);
+  const view = { feeds, now, states };
+  for (const desk of DESKS) {
+    const day = states[`desks.${desk}.dayPnl`];
+    assert.equal(day.value, null); assert.equal(day.retained, false);
+    assert.equal(day.reason, fixture.payload.desks.find(d => d.id === desk).money.reasons.dayPnl);
+    assert.notEqual(states[`desks.${desk}.totalPnl`].value, null);
+    const card = htmlDocument(deskCard(view, desk, 50, true));
+    assert.equal(card.querySelector('.dnums .bn').textContent, '—');
+    const phone = htmlDocument(compactDesk(view, desk));
+    assert.equal(phone.querySelector('[data-compact-value="dayPnl"] .bn').textContent, '—');
+    assert.match(phone.querySelector('.vh').textContent, new RegExp(cellReason(day.reason)));
+  }
+  assert.equal(todayPercent(states), null);
+  assert.notEqual(sincePercent(states), null);
+});
+
+// Test both sides of UTC midnight, Vienna midnight and NY midnight, including
+// NY DST offsets. This policy is independent of the test runner's local zone.
+for (const midnight of ['2026-10-15T04:00:00.000Z', '2026-11-03T05:00:00.000Z']) test(`JOED-94: Today expires at NY midnight ${midnight}, including a real outage`, () => {
+  const before = new Date(Date.parse(midnight) - 10000).toISOString();
+  const data = structuredClone(exact); data.generatedAt = data.receivedAt = data.safety.gateway.checkedAt = before;
+  for (const sources of [data.pnlSources, ...data.desks.map(d => d.pnlSources)]) sources.day.observedAt = before;
+  const feeds = { data: { value: data } }, prior = boardStates(feeds, before);
+  const outage = missing('source_unavailable');
+  outage.generatedAt = outage.receivedAt = outage.safety.gateway.checkedAt = new Date(Date.parse(midnight) - 5000).toISOString();
+  for (const current of [feeds, { data: { value: outage } }]) {
+    const sameDay = boardStates(current, before, prior);
+    assert.notEqual(sameDay['desks.j.dayPnl'].value, null);
+    const states = boardStates(current, midnight, prior), view = { states, feeds: current, now: midnight };
+    for (const desk of DESKS) {
+      assert.equal(states[`desks.${desk}.dayPnl`].value, null, desk);
+      assert.equal(states[`desks.${desk}.dayPnl`].retained, false);
+      assert.equal(states[`desks.${desk}.dayPnl`].reason, current === feeds ? 'day_pnl_unavailable' : 'source_unavailable');
+      assert.equal(htmlDocument(deskCard(view, desk, 50, true)).querySelector('.dnums .bn').textContent, '—');
+      assert.equal(htmlDocument(compactDesk(view, desk)).querySelector('[data-compact-value="dayPnl"] .bn').textContent, '—');
+      assert.notEqual(states[`desks.${desk}.equity`].value, null, 'other outage last-good stays');
+    }
+    assert.equal(states['today.dayPnl'].value, null);
+    assert.equal(todayPercent(states), null);
+    if (current === feeds) assert.notEqual(sincePercent(states), null, 'Since start has no day boundary');
+  }
+  const delayed = structuredClone(data); delayed.generatedAt = delayed.receivedAt = delayed.safety.gateway.checkedAt = midnight;
+  const states = boardStates({ data: { value: delayed } }, midnight, prior);
+  assert.equal(states['desks.j.dayPnl'].value, null, 'a new receipt cannot refresh an old observed date');
+  for (const sources of [delayed.pnlSources, ...delayed.desks.map(d => d.pnlSources)]) sources.day.observedAt = midnight;
+  assert.notEqual(boardStates({ data: { value: delayed } }, midnight, prior)['desks.j.dayPnl'].value, null, 'a new-day exact observation recovers');
+});
+
+test('JOED-94: UTC and Vienna midnight do not expire the same New York day', () => {
+  for (const [before, now] of [['2026-10-14T21:59:59.000Z', '2026-10-14T22:00:00.000Z'], ['2026-10-14T23:59:59.000Z', '2026-10-15T00:00:00.000Z']]) {
+    const data = structuredClone(exact); data.generatedAt = data.receivedAt = data.safety.gateway.checkedAt = before;
+    for (const sources of [data.pnlSources, ...data.desks.map(d => d.pnlSources)]) sources.day.observedAt = before;
+    const states = boardStates({ data: { value: data } }, now);
+    for (const desk of DESKS) assert.notEqual(states[`desks.${desk}.dayPnl`].value, null);
+  }
+});
+
+test('JOED-95: session estimates are visible and accessible beside all desktop and phone Today figures; exact recovery removes the marks', () => {
+  const fixture = JSON.parse(readFileSync(new URL('../fixtures/failures/b-session-open-estimate.json', import.meta.url)));
+  const feed = acceptSnapshot('data', fixture.payload, null, fixture.receivedAt);
+  assert.equal(feed.status, 200);
+  const feeds = { data: feed }, now = fixture.now, view = { feeds, now, states: boardStates(feeds, now) };
+  assert.match(heroLeft(view), /Estimated from the session open/);
+  for (const desk of DESKS) for (const render of [v => deskCard(v, desk, 50, true), v => compactDesk(v, desk)]) {
+    const estimated = htmlDocument(render(view)), exactDoc = htmlDocument(render(ctx(exact, 0)));
+    const marks = estimated.querySelectorAll('.estimate-mark');
+    assert.equal(marks.length, 1);
+    assert.equal(marks[0].textContent, 'Estimated');
+    assert.equal(marks[0].getAttribute('role'), 'img');
+    assert.match(marks[0].getAttribute('aria-label'), /^Today: Estimated from the session open at /);
+    assert.equal(exactDoc.querySelectorAll('.estimate-mark').length, 0);
+    assert.equal(estimated.querySelectorAll('button').length, exactDoc.querySelectorAll('button').length, 'no new interaction targets');
+  }
+  assert.equal(todayPercent(view.states, feed.value.pnlSources.day), null, 'estimate percentage policy stays unchanged');
+  const unavailable = { ...view, states: boardStates({ data: { value: missing('baseline_pending') } }, at(30), view.states) };
+  for (const desk of DESKS) assert.equal(htmlDocument(compactDesk(unavailable, desk)).querySelectorAll('.estimate-mark').length, 0, 'no estimate mark on a dash');
+});
 
 for (const id of ['b-weekend-no-sod', 'j-ny-midnight-gap']) test(`${id}: dashed Today shows its reason in its local caption`, () => {
   const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));

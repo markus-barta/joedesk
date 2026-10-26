@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { validateContract, CONTRACTS, REASONS } from '../contracts/index.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
@@ -8,10 +9,11 @@ import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { createReadModel } from '../server/read-model.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
-const { heroLeft, positionsHtml, keptHtml, positionSectionReason } = await import('../public/joe/desk.js');
+const { heroLeft, positionsHtml, keptHtml, positionSectionReason, cellView } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { todayPercent, sincePercent } = await import('../public/joe/performance.js');
 const { cellReason } = await import('../public/joe/health.js');
+const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
 
 const read = name => JSON.parse(readFileSync(new URL(`../fixtures/${name}.json`, import.meta.url)));
 const { exact, mixed } = read('phase-b');
@@ -26,6 +28,118 @@ const rejects = (data, path, rule) => {
   assert.equal(result.ok, false);
   assert.ok(result.errors.some(e => e.path === path && e.rule === rule), JSON.stringify(result.errors));
 };
+
+for (const reason of NOT_EXACT_REASONS) test(`JOED-98 ${reason}: uncertain observations clear durable last-good, with and without an older exact value`, async t => {
+  const dataDir = scratch('joed-98-');
+  t.after(() => discard(dataDir, 'JOED-98 unit store'));
+  let now = exact.receivedAt, seq = exact.seq;
+  let model = createReadModel({ dataDir, clock: () => now });
+  const names = ['paperAccount', 'paperCash', ...fields.flatMap(field => [`today.${field}`, ...['j', 'joe', 'joel'].map(id => `desks.${id}.${field}`)])];
+  function push(data, seconds) {
+    now = new Date(Date.parse(exact.receivedAt) + seconds * 1000).toISOString();
+    const payload = ingress(data); payload.seq = ++seq;
+    payload.generatedAt = payload.safety.gateway.checkedAt = now;
+    const accepted = model.accept(payload);
+    assert.equal(accepted.status, 200, JSON.stringify(accepted));
+  }
+  const unsure = structuredClone(exact);
+  unsure.brokerAccount.reason = reason; unsure.brokerAccount.reasons = { cash: reason };
+  for (const bag of [unsure.totals, ...unsure.desks.map(d => d.money)]) {
+    bag.reasons = Object.fromEntries(fields.map(f => [f, reason]));
+    // Rev 10 already rejects value + these three reasons in money bags.
+    // The rev-9 reasons still allow values, the latent JOED-93 failure.
+    if (['sod_missing', 'ledger_unreconciled', 'position_stale'].includes(reason)) for (const field of fields) bag[field] = null;
+  }
+  if (unsure.totals.dayPnl == null) for (const sources of [unsure.pnlSources, ...unsure.desks.map(d => d.pnlSources)]) {
+    for (const source of Object.values(sources)) Object.assign(source, { status: 'unavailable', method: null, observedAt: null, reason });
+  }
+  const outage = structuredClone(exact);
+  outage.brokerAccount.equity = outage.brokerAccount.cash = null;
+  outage.brokerAccount.reason = 'source_unavailable'; outage.brokerAccount.reasons = { cash: 'source_unavailable' };
+  for (const bag of [outage.totals, ...outage.desks.map(d => d.money)]) for (const field of fields) {
+    bag[field] = null; (bag.reasons ??= {})[field] = 'source_unavailable';
+  }
+  for (const sources of [outage.pnlSources, ...outage.desks.map(d => d.pnlSources)]) for (const source of Object.values(sources)) {
+    Object.assign(source, { status: 'unavailable', method: null, observedAt: null, reason: 'source_unavailable' });
+  }
+  for (const start of [0, 1200]) {
+    if (start) push(exact, start); // exact → unsure → outage, as well as cold unsure → outage
+    push(unsure, start + 10);
+    const stored = JSON.parse(readFileSync(join(dataDir, 'data-state.json')));
+    for (const name of names) assert.deepEqual(stored.cells[name], { value: null, valueReceivedAt: null }, name);
+    model = createReadModel({ dataDir, clock: () => now });
+    push(outage, start + 610);
+    for (const m of [model, createReadModel({ dataDir, clock: () => now })]) {
+      const view = m.view(), shown = boardStates(view.feeds, now, view.panels);
+      for (const name of names) {
+        assert.equal(view.panels[name].value, null, name);
+        assert.equal(shown[name].value, null, name);
+        assert.equal(shown[name].retained, false, name);
+        assert.equal(shown[name].reason, 'source_unavailable', name);
+      }
+    }
+  }
+  push(exact, 2400); push(outage, 3000);
+  const view = model.view(), shown = boardStates(view.feeds, now, view.panels);
+  for (const name of ['paperAccount', 'paperCash', 'desks.j.equity', 'desks.j.dayPnl']) {
+    assert.notEqual(shown[name].value, null, name);
+    assert.equal(shown[name].retained, true, name);
+    assert.match(cellView(shown[name]).caption, /Last good value.*10\smin ago/);
+  }
+});
+
+test('JOED-94: durable Today observation dates survive later receipts, outages and restart across NY midnight', async t => {
+  const dataDir = scratch('joed-94-');
+  t.after(() => discard(dataDir, 'JOED-94 unit store'));
+  const before = '2026-10-15T03:59:50.000Z', after = '2026-10-15T04:00:10.000Z';
+  let now = before;
+  const model = createReadModel({ dataDir, clock: () => now });
+  const first = ingress(exact); first.generatedAt = first.safety.gateway.checkedAt = before;
+  for (const sources of [first.pnlSources, ...first.desks.map(d => d.pnlSources)]) sources.day.observedAt = before;
+  assert.equal(model.accept(first).status, 200);
+  // A late receipt with the original observation cannot move Today into tomorrow.
+  now = after; const late = structuredClone(first); late.seq++; late.generatedAt = late.safety.gateway.checkedAt = after;
+  assert.equal(model.accept(late).status, 200);
+  const outage = structuredClone(late); outage.seq++;
+  for (const bag of [outage.totals, ...outage.desks.map(d => d.money)]) {
+    bag.dayPnl = null; (bag.reasons ??= {}).dayPnl = 'source_unavailable';
+  }
+  for (const sources of [outage.pnlSources, ...outage.desks.map(d => d.pnlSources)]) {
+    Object.assign(sources.day, { status: 'unavailable', method: null, observedAt: null, reason: 'source_unavailable' });
+  }
+  assert.equal(model.accept(outage).status, 200);
+  const restarted = createReadModel({ dataDir, clock: () => now });
+  for (const m of [model, restarted]) {
+    const view = m.view(), states = boardStates(view.feeds, now, view.panels);
+    for (const id of ['j', 'joe', 'joel']) {
+      const name = `desks.${id}.dayPnl`;
+      assert.equal(view.panels[name].valueObservedAt, before);
+      assert.equal(view.panels[name].retained, true, 'contract retention stays unchanged');
+      assert.equal(states[name].value, null, 'board rejects the previous NY day');
+      assert.equal(states[name].reason, 'source_unavailable');
+      assert.notEqual(states[`desks.${id}.totalPnl`].value, null, 'Since start remains current');
+    }
+  }
+});
+
+test('JOED-98: scoped source exactness still clears last-good when a bag reason masks it', async t => {
+  const dataDir = scratch('joed-98-source-');
+  t.after(() => discard(dataDir, 'JOED-98 scoped source store'));
+  let now = exact.receivedAt;
+  const model = createReadModel({ dataDir, clock: () => now });
+  assert.equal(model.accept(ingress(exact)).status, 200);
+  const unsure = ingress(exact); unsure.seq++;
+  now = unsure.generatedAt = unsure.safety.gateway.checkedAt = '2026-10-14T17:42:32.000Z';
+  for (const bag of [unsure.totals, ...unsure.desks.map(d => d.money)]) (bag.reasons ??= {}).dayPnl = 'source_unavailable';
+  for (const sources of [unsure.pnlSources, ...unsure.desks.map(d => d.pnlSources)]) sources.day.reason = 'not_exact_yet';
+  assert.equal(model.accept(unsure).status, 200);
+  const stored = JSON.parse(readFileSync(join(dataDir, 'data-state.json')));
+  const states = boardStates(model.feeds(), now, model.panels());
+  for (const name of ['today.dayPnl', ...['j', 'joe', 'joel'].map(id => `desks.${id}.dayPnl`)]) {
+    assert.equal(stored.cells[name].value, null);
+    assert.equal(states[name].value, null);
+  }
+});
 
 test('rev 10 is additive: rev 9 exact, null switch-set and reasoned-position payloads still validate', () => {
   assert.equal(CONTRACTS.revision, 10);

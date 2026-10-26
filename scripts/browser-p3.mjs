@@ -716,6 +716,47 @@ try {
       page.errors.length = 0;
     }
   }
+  // JOED-95: change only the method, keeping every figure and box identical.
+  // CI owns execution; the local night worker only prepares these assertions.
+  {
+    const b = await newBoard(), estimate = ingress(valid.data), recovery = ingress(valid.data);
+    let seq = valid.data.seq;
+    estimate.pnlSources.day = structuredClone(fixture('b-session-open-estimate').payload.pnlSources.day);
+    b.setNow(valid.data.receivedAt); await b.push(ingress(valid.data));
+    for (const viewport of VIEWPORTS.filter(v => [390, 1024, 1440].includes(v.width))) for (const theme of THEMES) {
+      b.setNow(at(valid.data.receivedAt, 9));
+      await configure(page, viewport, theme); await load(page, b.url, 'desk');
+      const selectors = [...DESK_SHIFT, '.dnums .k', '.dnums .v', '.compact-label', '.compact-figure .bn'];
+      const before = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+      estimate.seq = ++seq; b.setNow(valid.data.receivedAt);
+      check('fixtures', 'JOED-95 estimate accepted', (await b.push(estimate)).status === 200);
+      b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+      const after = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+      const marks = await page.evaluate(`(() => {
+        const visible = [...document.querySelectorAll('.estimate-mark')].filter(e => __audit.visible(e));
+        return visible.map(e => {
+          const r=e.getBoundingClientRect(), label=e.parentElement, box=label.getBoundingClientRect();
+          const today=label.querySelector('.term');
+          const range=document.createRange(); if(!today) range.selectNode(label.firstChild);
+          const text=(today ?? range).getBoundingClientRect();
+          return { text:e.textContent, label:e.getAttribute('aria-label'), role:e.getAttribute('role'),
+            contained:r.left>=box.left && r.right<=box.right && r.top>=box.top && r.bottom<=box.bottom,
+            separate:r.right<=text.left || r.left>=text.right };
+        });
+      })()`);
+      const tag = `${viewport.name} ${theme}`;
+      check('fixtures', `${tag}: estimated Today cells say Estimated visibly, accessibly, without overlapping Today`,
+        marks.length === (viewport.mobile ? 6 : 3) && marks.every(m => m.text === 'Estimated' && m.role === 'img' && m.label.startsWith('Today: Estimated from the session open') && m.contained && m.separate), marks);
+      check('no-shift', `${tag}: exact → estimate has exactly 0 px layout shift`, JSON.stringify(before) === JSON.stringify(after), shifted(before, after));
+      recovery.seq = ++seq; b.setNow(valid.data.receivedAt); await b.push(recovery);
+      b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+      check('no-shift', `${tag}: estimate → exact has exactly 0 px layout shift and removes all estimate marks`,
+        JSON.stringify(before) === JSON.stringify(await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`)) &&
+        await page.evaluate(`document.querySelectorAll('.estimate-mark').length === 0`));
+      if (viewport.mobile) check('fixtures', `${tag}: estimate marks preserve the 44 px phone disclosure targets`,
+        await page.evaluate(`[...document.querySelectorAll('.desk-row')].every(e => e.getBoundingClientRect().height >= 44)`));
+    }
+  }
   // JOED-81: reuse the accepted broker-down fixture for a live transition.
   // Fresh and outage boxes must match at 1440/1024/phone in both themes.
   for (const viewport of VIEWPORTS) for (const theme of THEMES) {

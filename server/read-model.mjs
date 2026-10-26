@@ -19,6 +19,24 @@ const RESULTS_CAP = CONTRACTS.limits.results + 4096;
 const ROLLOVER_RESEND_MAX_SKEW_MS = 5 * 60 * 1000;
 const isMissing = error => error.code === 'ENOENT';
 const failed = (status, reason) => ({ ok: false, status, reason });
+// Board retention policy, independent of the immutable rev-10 selector.
+// Keep aligned with public/joe/board-state.js, including rev-9 missing SOD.
+const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale', 'baseline_pending', 'day_pnl_unavailable']);
+function exactnessFailure(data, name, cell = {}) {
+  const field = name.split('.').at(-1);
+  const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
+  const bag = desk?.money ?? data?.totals;
+  const period = field === 'dayPnl' ? 'day' : field === 'openPnl' ? 'open' : null;
+  const reasons = name === 'paperAccount' ? [data?.brokerAccount?.reason]
+    : name === 'paperCash' ? [data?.brokerAccount?.reasons?.cash]
+      : ['positions', 'kept'].includes(name) ? [data?.positions?.reason]
+        : [bag?.reasons?.[field], period ? (desk?.pnlSources?.[period] ?? data?.pnlSources?.[period])?.reason : null];
+  return [cell.reason, ...reasons].some(reason => NOT_EXACT_REASONS.has(reason));
+}
+function dayObservedAt(data, name) {
+  const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
+  return (desk?.pnlSources?.day ?? data?.pnlSources?.day)?.observedAt ?? data?.generatedAt ?? null;
+}
 // JSON object order is immaterial. Hash only the validated ingress payload;
 // the server's receipt is deliberately excluded when comparing a stored value.
 const payloadDigest = value => createHash('sha256').update(JSON.stringify(value, (_key, entry) =>
@@ -69,6 +87,11 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
           !validInstant(state.gatewayProgress.advancedAt) || !Number.isFinite(state.gatewayProgress.initialAgeMs) || state.gatewayProgress.initialAgeMs < 0))) {
       throw new Error('contract_invalid');
     }
+    // Older stores may have saved an explicitly uncertain observation. The
+    // current snapshot still carries enough evidence to discard that cell.
+    for (const name of DATA_PANELS) if (exactnessFailure(state.feed.value, name)) {
+      state.cells[name] = { value: null, valueReceivedAt: null };
+    }
   } catch (error) { state = null; if (!isMissing(error)) { storageInvalid = true; rejections.data = 'contract_invalid'; } }
   try {
     const stored = readJson(historyFile, HISTORY_CAP);
@@ -104,7 +127,15 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     history: { value: history, reason: rejections.history ?? (history ? null : 'feed_not_received') },
     results: { ...results?.feed, reason: rejections.results ?? (results ? null : 'feed_not_received') },
     'fleet-config': { value: fleet?.value, receivedAt: fleet?.receivedAt, reason: rejections['fleet-config'] ?? (fleet ? null : 'feed_not_received') } });
-  const panels = (now = clock()) => panelStates(feeds(), now, state?.cells ?? {});
+  const panels = (now = clock()) => {
+    const selected = panelStates(feeds(), now, state?.cells ?? {});
+    for (const name of DATA_PANELS.filter(n => n.endsWith('.dayPnl'))) {
+      const cell = selected[name];
+      cell.valueObservedAt = cell.retained ? state?.cells[name]?.valueObservedAt ?? cell.valueReceivedAt
+        : dayObservedAt(state?.feed.value, name);
+    }
+    return selected;
+  };
   function persistReasons() {
     const reasons = durableReasons();
     const encoded = JSON.stringify(reasons);
@@ -186,7 +217,12 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     // their original receipt, including false HALT and known-empty row sets.
     const cells = Object.fromEntries(DATA_PANELS.map(name => {
       const cell = selected[name];
-      return [name, { value: cell.value ?? null, valueReceivedAt: cell.valueReceivedAt ?? null }];
+      // Even value + reason is legal in rev 9 for some fields. It is never
+      // last-good, and must invalidate an older exact observation too.
+      if (exactnessFailure(accepted.value, name, cell)) return [name, { value: null, valueReceivedAt: null }];
+      return [name, { value: cell.value ?? null, valueReceivedAt: cell.valueReceivedAt ?? null,
+        ...(name.endsWith('.dayPnl') ? { valueObservedAt: cell.retained ? state?.cells[name]?.valueObservedAt ?? cell.valueReceivedAt
+          : dayObservedAt(accepted.value, name) } : {}) }];
     }));
     const next = { format: FORMAT, feed: { value: accepted.value, generatedAdvancedAt: accepted.generatedAdvancedAt }, gatewayProgress, cells };
     let stateSyncFailed = false;
