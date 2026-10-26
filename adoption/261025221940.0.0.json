@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261025221940.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 32,
+  "source": {
+    "commit": "8be38581c6a97200df93a7084cdd05ebf051476c",
+    "tree": "a02e79143abba2738f4f31ea2e3f5d50f43c5f57"
+  },
+  "release_set_sha256": "5d0f9c6f84e94f6c00c3e436799607edbba366010c9318b26a4cb343589b5f00",
+  "image_digest": "sha256:b792d7a857d7376af98a80b27dcbd6f64eb6275f44bb100e22314b543cf0c955",
+  "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+  "validation_run_id": "40244463429",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-10-26T01:13:15Z",
+    "operator_ticket": "JOED-87",
+    "rollback_reference": "JOED-87: revert the csb0 board re-pin (nixcfg #1138, e13ceabb) and switch csb0 to rollback generation 051licih with the retained sequence-31 image 85536109a76f (pull_policy never); board-only switch, hsb0 untouched, the rev 9 pusher is accepted by rev 10"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-10-26T01:14:58Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-10-26T01:14:20Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-10-26T01:14:20Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-10-26T01:14:58Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-10-26T01:14:58Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; performed as a GET-only actor look of the served shell and app (served state accepted from the rev 9 pusher under contracts rev 10; desks, paper account and all four feeds present) plus the agm2 CI screenshots of the same build (main run 40244463429)"
+  },
+  "adopted_at": "2026-10-26T01:16:59Z"
+}
