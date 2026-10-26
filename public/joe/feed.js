@@ -1,10 +1,10 @@
 // Transport: the board server's state, history, closed-trade record and fleet
 // settings, read through
-// the shared acceptRead boundary and ranked only by the shared panelStates
-// selector. The clock is the server's, anchored to a monotonic timer, so a
+// the shared acceptRead boundary and selector, then the board display policy.
+// The clock is the server's, anchored to a monotonic timer, so a
 // wrong browser clock cannot make old data look fresh.
 import { acceptRead } from './contracts/read.mjs';
-import { panelStates } from './contracts/panel-state.mjs';
+import { boardStates } from './board-state.js';
 import { toColumns, sessionCloses, DESK_IDS } from './history-model.js';
 import { indexResults } from './results-model.js';
 import { acceptActions } from './settings-model.js';
@@ -211,9 +211,9 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   function select() {
     const at = now();
     const input = Object.fromEntries(Object.entries(feeds).filter(([, feed]) => feed));
-    if (at) return { now: at, feeds: input, states: panelStates(input, at, serverPanels), fleetSource, actions };
+    if (at) return { now: at, feeds: input, states: boardStates(input, at, serverPanels), fleetSource, actions };
     const undated = Object.fromEntries(Object.entries(input).map(([key, feed]) => [key, feed.value == null ? feed : { value: null, reason: feed.reason ?? null }]));
-    return { now: null, feeds: undated, states: panelStates(undated, NO_CLOCK, {}), fleetSource, actions };
+    return { now: null, feeds: undated, states: boardStates(undated, NO_CLOCK, {}), fleetSource, actions };
   }
   // Every first read (state, history, closed-trade record, fleet settings) has
   // answered, with a value or a reason; the page then marks itself ready.

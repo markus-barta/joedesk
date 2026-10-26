@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261025221940.0.0` (`inspr-calver-3`, stable sequence 32), reserved once at `2026-10-25T22:19:40Z` for Phase B: exact desk money and position values ([JOED-85](https://aeon.barta.cm/p/JOED/JOED-85), Phase B of JOED-55). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261026070713.0.0` (`inspr-calver-3`, stable sequence 33), reserved once at `2026-10-26T07:07:13Z` for Results speed fix ([JOED-89](https://aeon.barta.cm/p/JOED/JOED-89)) and honest last values ([JOED-91](https://aeon.barta.cm/p/JOED/JOED-91), release [JOED-90](https://aeon.barta.cm/p/JOED/JOED-90)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261025144826.0.0` / sequence 31,
-published on `main` at `20c37cdd9c99547d79bb69b65764a9706d77905b` under JOED-84,
-live on csb0 since `2026-10-25T21:22:26Z` (JOED-84). `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261025221940.0.0` / sequence 32,
+published on `main` at `8be38581c6a97200df93a7084cdd05ebf051476c` under JOED-87,
+live on csb0 since `2026-10-26T01:13:15Z` (JOED-87). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 32. Sequence 30 (`261023155418.0.0`) was previously deployed
+adoption for sequence 33. Sequence 31 (`261025144826.0.0`) was previously deployed
+at `2026-10-25T21:22:26Z` (JOED-84). Sequence 30 (`261023155418.0.0`) was previously deployed
 at `2026-10-24T03:46:42Z` (JOED-78). Sequence 29 (`261023100632.0.0`) was previously deployed
 at `2026-10-23T14:53:28Z` (JOED-75). Sequence 28 (`261021113113.0.0`) was previously deployed
 at `2026-10-21T15:22:58Z` (JOED-60). Sequence 27 (`261021083537.0.0`) was previously deployed
@@ -28,13 +29,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-32 candidate has not been published. The candidate
+cutover**. The sequence-33 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -84,7 +85,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261025221940.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261026070713.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -1176,9 +1177,10 @@ bounded yellow broker-check warning; that release is now live. JOED-70 reserved
 sequence 29 for the calm status line; that release is now live (JOED-75).
 JOED-77 reserved sequence 30 for performance at a glance; that release is now
 live (JOED-78). JOED-81 reserved sequence 31 for Round 2: calmer outage view;
-that release is now live (JOED-84). JOED-85 reserves sequence 32 for Phase B:
-exact desk money and position values (JOED-55).
-Never reseal or republish sequences 26, 27, 28, 29, 30 or 31 with these new bytes.
+that release is now live (JOED-84). JOED-85 reserved sequence 32 for Phase B:
+exact desk money and position values (JOED-55); that release is now live (JOED-87).
+JOED-90 reserves sequence 33 for Results speed fix (JOED-89).
+Never reseal or republish sequences 26, 27, 28, 29, 30, 31 or 32 with these new bytes.
 
 JOED-20 producers must re-vendor the complete self-contained `contracts/`
 directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
@@ -1202,6 +1204,25 @@ Historical revision and release records remain unchanged.
 
 Amy's binding JOED-55 specification (2026-10-25T20:14Z) governs producer
 exactness; accepting a shape does not prove its underlying broker/ledger data.
+
+Amy's board display rule (JOED-91, 2026-10-26, release 33) is applied in
+`public/joe/board-state.js` after the unchanged contract selector.
+`not_exact_yet`, `sod_missing`, `ledger_unreconciled` and `position_stale`
+always show a dash, including when a feed or gateway failure masks the scoped
+reason. An outage may retain individual last-good observations with their own
+age and reason, for strictly less than 60 minutes from their original receipt;
+an unknown age or age ≥ 60 minutes shows a dash. Retained inputs never feed
+board totals, since-start figures, ranking, Results' current money, kept-worth
+sums or percentage bars. Independent exact siblings stay usable. Recovery
+shows the new exact observation. Withholding derived amounts preserves value-free
+health evidence: retained equity keeps the existing five-minute yellow grace,
+while missing or older equity and higher-priority health failures keep their
+existing red rules. Existing caption reserves and CSS are unchanged;
+rendered pixel verification remains a coordinator gate. This board-only policy
+does not change revision 10 or require producer re-vendoring.
+When Today is a broken dash, its local caption states the reason unless the
+board's state line already explains it. This includes pending start-of-day
+results and every revision-10 exactness reason; repeated section reasons stay shared.
 
 | Field | JOED-86 emission rule |
 | --- | --- |
@@ -1259,9 +1280,11 @@ P5's checks mixed values and exact
 recovery, at 1440/1024/390/360 in both themes through real ingress. Browser
 execution and visual verdict remain with PR CI on agm2 and the coordinator.
 
-JOED-85 reserves sequence 32 / `261025221940.0.0` at
-`2026-10-25T22:19:40Z` for this Phase B candidate and reseals its runtime
-closure. Sequence 31 remains immutable deployed history. Publication,
+JOED-85 reserved sequence 32 / `261025221940.0.0` at
+`2026-10-25T22:19:40Z` for Phase B; that release is now live (JOED-87).
+JOED-90 reserves sequence 33 / `261026070713.0.0` at
+`2026-10-26T07:07:13Z` for Results speed fix (JOED-89) and reseals its runtime
+closure. Sequence 32 remains immutable deployed history. Publication,
 cross-family review and deployment gates remain with the coordinator.
 JOED-86 must vendor the complete revision-10 package and its digest before
 activation; existing deployment pins and prior producer sign-off prove rev 9
@@ -1447,10 +1470,18 @@ native-to-EUR rate (a rate from another row or the results record is not used).
 JOED-83 adds the selected period's percentage beside the Results hero's euros
 for All desks. All time divides by `STARTING_MONEY` (€ 15.000), matching
 Desk's Since start for the same aggregate result. Other periods divide by
-`STARTING_MONEY + prior.units.net`: `prior` is the existing after-fee `rollup`
-from `trackingStart` through the day before the period starts, with the same
-money context and basis-change checks. This includes open-position movement;
-it does not sum closed trades alone or round either input to cents. Individual
+`STARTING_MONEY + prior.units.net`, equivalent to the after-fee `rollup`
+from `trackingStart` through the day before the period starts. JOED-89 caches
+that exact cumulative result in each record index's BigInt `netPrefix`, built
+once from carried equity closes. A date lookup replaces the full prior rollup
+on each switch; current money and basis-change checks still run on every call.
+Pre-tracking closes retain their exact value or unknown state across gaps at
+tracking start; periods starting before or at tracking still use the initial base.
+Unknown closes recover only with a later known close, and a new record gets a
+new prefix. `node scripts/benchmark-period-base.mjs` compares the old and new
+Node model paths over the 14,000-trade/288-day fixture and eleven switches;
+browser render-budget validation remains in CI. The base includes open-position
+movement without summing closed trades alone or rounding either input to cents. Individual
 desks, empty periods, basis changes, unknown/non-exact results and unknown or
 nonpositive bases omit the percentage. The shared Desk formatter retains its
 two decimals, signs and tones, with “of the money at the period start” in the

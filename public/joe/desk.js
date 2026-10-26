@@ -11,7 +11,7 @@ import { intraday } from './history-model.js';
 import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
-import { STARTING_MONEY, todayPercent, sincePercent, rankDesks } from './performance.js';
+import { STARTING_MONEY, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -300,6 +300,8 @@ export function heroLeft(ctx) {
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
   const moneyCaptions = [`started with ${eur(STARTING_MONEY, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
   const why = dayCell?.reason ? cellReason(dayCell.reason) : null;
+  // A dashed Today needs its own state/reason unless the section says it.
+  const dayCaption = day.state === 'broken' && day.units === null && !sharesBoardCaption(dayCell, board) && (!shared || why !== shared) ? day.caption : '';
   const dayAmount = day.units === null ? null : eur(day.units < 0n ? -day.units : day.units);
   let say;
   if (day.n == null) {
@@ -321,7 +323,7 @@ export function heroLeft(ctx) {
   return `<div class="hero-primary"><div class="performance-date">${now ? dayDDM(now, NY) : ''}</div><div class="performance">
       <div class="primary" data-cell="hero.day" data-state="${day.state}"><div class="hero-k">${icon('clock')}${term('today')}${cellIcon(dayCell, shared)}</div>
         <div class="display">${day.html}</div><div class="pct-slot">${percentHtml(todayPercent(states, data?.pnlSources?.day))}</div>
-        <span class="c primary-caption"></span></div>
+        <span class="c primary-caption">${dayCaption}</span></div>
       <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since')}${cellIcon(sinceCell, shared)}</div>
         <div class="display">${since.html}</div><div class="pct-slot">${percentHtml(sincePercent(states))}</div>
         <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, ['after fees'])}</span>
@@ -356,7 +358,7 @@ function deskCard(ctx, id, maxDay, showBars) {
   const openV = cellView(states[`desks.${id}.openPnl`], `d.${id}.open`, { label: 'Open positions' });
   const sinceV = cellView(states[`desks.${id}.totalPnl`], `d.${id}.since`, { label: 'Since start' });
   const sinceText = desk?.accounting?.periodStart ? `Since ${dayDM(desk.accounting.periodStart, NY)}` : 'Since start';
-  const bar = showBars && dayV.n != null && !isZero(dayV.n)
+  const bar = showBars && exactCell(states[`desks.${id}.dayPnl`]) !== null && dayV.n != null && !isZero(dayV.n)
     ? `<i data-v="${dayV.n}" style="${dayV.n > 0 ? 'left' : 'right'}:50%;width:${(Math.abs(dayV.n) / maxDay * 50).toFixed(3)}%;background:var(--${dayV.n > 0 ? 'gain' : 'loss'})"></i>` : '';
   const board = boardCaptionCell(ctx);
   const num = (label, v, cell, extra = '') => `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell, shared)}</span><span class="v">${v.html}</span>${extra}</div>`;
@@ -463,7 +465,7 @@ export function positionsHtml(ctx) {
     const cur = r.mark?.currency ?? r.marketValue?.currency ?? 'USD';
     const value = r.marketValue ? decimalUnits(r.marketValue.amount) : null, max = maxByCurrency.get(r.marketValue?.currency) ?? 0n;
     // A bounded percent, rounded to three decimal places from exact money.
-    const width = value != null && max > 0n ? unitsDecimal(divRound((value < 0n ? -value : value) * 100000n, max) * (UNIT / 1000n)) : null;
+    const width = !cell.retained && value != null && max > 0n ? unitsDecimal(divRound((value < 0n ? -value : value) * 100000n, max) * (UNIT / 1000n)) : null;
     const opened = r.openedAt ? ` · opened ${localDay(r.openedAt, NY) === today ? `today ${timeHM(r.openedAt)}` : dayDDM(r.openedAt)}` : '';
     const legacy = r.scope === 'legacy' ? ` · older holding, outside the ${term('stage0', 'first stage')}` : '';
     const deskLabel = unmapped(r) ? `No desk · ${cellReason(r.reasons.desk)}` : null;
@@ -488,9 +490,9 @@ export function keptHtml(ctx) {
   const cell = states.kept;
   const rows = cell?.value;
   const shared = positionSectionReason(cell);
-  const nav = states.paperAccount?.value ? eur(decimalUnits(states.paperAccount.value.amount)) : '—';
+  const navUnits = exactCell(states.paperAccount), nav = navUnits === null ? '—' : eur(navUnits);
   const incomplete = rows?.filter(r => r.marketValue == null) ?? [];
-  const worth = rows?.length ? sumByCurrency(rows.map(r => r.marketValue))?.map(s => money(s.units, s.currency)).join(' and ') : null;
+  const worth = !cell?.retained && rows?.length ? sumByCurrency(rows.map(r => r.marketValue))?.map(s => money(s.units, s.currency)).join(' and ') : null;
   const worthReasons = [...new Set(incomplete.map(r => rowReason(r, 'marketValue', cell)))].filter(reason => reason !== shared);
   const unavailableWorth = `Worth not available${worthReasons.length ? ` · ${worthReasons.map(esc).join(' · ')}` : ''}`;
   const caption = `<p class="keep-cap">${icon('keep')}<span>Read-only. Left out of every desk result and of Results; counted in the ${term('paperacct', 'paper account')} (${nav}).</span></p>`;
@@ -498,11 +500,11 @@ export function keptHtml(ctx) {
   const fresh = incomplete.length ? unavailableWorth : worth ? `Worth ${worth} now, each in its own currency.` : 'Up to date.';
   const state = shared
     ? sectionState(cell, 'kept', { held: 'last good values', sharedReason: shared,
-      detail: incomplete.length ? ' · worth not available' : worth ? ` · worth ${worth}, each in its own currency` : '' })
+      detail: cell.retained ? ' · worth —' : incomplete.length ? ' · worth not available' : worth ? ` · worth ${worth}, each in its own currency` : '' })
     : incomplete.length
     ? `<p class="pstate" data-state="${p.state}">${st(p.state === 'fresh' ? 'none' : p.tone, `${p.text ? `${capital(p.text)} · ` : ''}${unavailableWorth}`, p.icon)}</p>`
-    : rows && worth && p.state !== 'fresh'
-    ? `<p class="pstate" data-state="${p.state}">${st(p.tone, `${capital(p.text)} · worth ${worth}, each in its own currency`, p.icon)}</p>`
+    : rows && (worth || cell.retained) && p.state !== 'fresh'
+    ? `<p class="pstate" data-state="${p.state}">${st(p.tone, `${capital(p.text)} · worth ${worth ? `${worth}, each in its own currency` : '—'}`, p.icon)}</p>`
     : sectionState(cell, 'kept', { fresh, held: 'last good values', missing: 'Kept holdings are unavailable', absent: 'Kept holdings are not present in this snapshot.' });
   if (!rows) return `${caption}${state}`;
   if (!rows.length) return `${caption}${state}<p class="empty-line">${icon('info')}<span>No kept holdings in this snapshot.</span></p>`;
@@ -588,7 +590,7 @@ export function renderDesk(ctx) {
   const data = ctx.feeds.data?.value;
   const working = data ? data.desks.filter(d => d.state === 'working').length : 0;
   $('#desksSub').textContent = data ? `${working} of 3 working · kept holdings left out` : 'Waiting for the first valid snapshot';
-  const days = DESKS.map(id => amountOf(ctx.states[`desks.${id}.dayPnl`]?.value));
+  const days = DESKS.map(id => exactCell(ctx.states[`desks.${id}.dayPnl`]) === null ? null : amountOf(ctx.states[`desks.${id}.dayPnl`].value));
   const showBars = days.every(v => v != null);
   const maxDay = Math.max(...days.filter(v => v != null).map(Math.abs), 0.01);
   let redraw = false;
