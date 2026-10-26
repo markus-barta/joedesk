@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261025221940.0.0",
+  "version": "261026070713.0.0",
   "release_channel": "stable",
-  "release_sequence": 32,
+  "release_sequence": 33,
   "status": "candidate",
-  "note": "Phase B: exact desk money and position values (JOED-55)"
+  "note": "Results speed fix (JOED-89)"
 }
