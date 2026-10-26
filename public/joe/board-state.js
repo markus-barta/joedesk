@@ -6,6 +6,10 @@ export const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledge
 const DESKS = ['j', 'joe', 'joel'];
 const positionKey = row => JSON.stringify([row.scope, row.desk, row.symbol]);
 const unavailable = (cell, reason = cell.reason) => ({ ...cell, state: cell.state === 'fresh' ? 'broken' : cell.state, value: null, retained: false, reason });
+// Hiding a derived amount does not erase the observation's health/grace.
+// Keep only value-free evidence; calculations and rendering still see null.
+const withheld = (cell, reason = cell.reason) => ({ ...unavailable(cell, reason),
+  health: { available: cell.value != null, retained: cell.retained, ageSeconds: cell.ageSeconds } });
 
 export function boardStates(feeds, now, previous = {}) {
   const states = panelStates(feeds, now, previous);
@@ -48,11 +52,11 @@ export function boardStates(feeds, now, previous = {}) {
   for (const field of MONEY_FIELDS) {
     const name = `today.${field}`, cell = states[name];
     const blocked = DESKS.map(id => states[`desks.${id}.${field}`]).find(c => c.retained || c.value == null);
-    if (cell.retained || (cell.value != null && blocked)) states[name] = unavailable(cell, cell.reason ?? blocked?.reason);
+    if (cell.retained || (cell.value != null && blocked)) states[name] = withheld(cell, cell.reason ?? blocked?.reason);
   }
   for (const id of DESKS) {
     const name = `desks.${id}.totalPnl`;
-    if (states[name].retained) states[name] = unavailable(states[name]);
+    if (states[name].retained) states[name] = withheld(states[name]);
   }
   return states;
 }

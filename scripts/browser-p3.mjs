@@ -567,6 +567,7 @@ try {
   // ADR deferred P3 rows, derived from valid.json; expected states come from
   // the shared selector followed by the board display policy.
   const DERIVED = { 'p3-single-missing-desk': singleMissingDesk, 'p3-coupled-unavailable': coupledUnavailable };
+  const RETAINED_GRACE_CASES = new Set(['b-incomplete-family', 'b-equity-null-gateway-ready', ...Object.keys(DERIVED)]);
   const derive = id => {
     const f = DERIVED[id]();
     const feeds = { 'fleet-config': { value: valid['fleet-config'], receivedAt: valid.data.receivedAt }, data: acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt) };
@@ -593,6 +594,8 @@ try {
     const expectedCells = boardStates(expectedFeeds, expectedNow, previousStates);
     const expectedContext = { states: expectedCells, feeds: expectedFeeds, now: expectedNow };
     const expectedStatus = statusPresentation(expectedContext);
+    if (RETAINED_GRACE_CASES.has(id)) check('fixtures', `${id}: withheld totals preserve the yellow retained-value grace`,
+      expectedStatus.tone === 'yellow' && expectedStatus.reason === 'retained_values' && expectedStatus.label === label, expectedStatus);
     const boardCaption = boardCaptionCell(expectedContext);
     const b = await newBoard({ fleetConfig: f.fleetConfig ?? null });
     b.setNow(valid.data.receivedAt);
@@ -651,6 +654,7 @@ try {
         sections: { positions: document.querySelector('#positions .pstate')?.dataset.state, kept: document.querySelector('#kept .pstate')?.dataset.state },
       }))()`);
       const tag = `${id} @${viewport.name}`;
+      if (RETAINED_GRACE_CASES.has(id)) check('fixtures', `${tag}: the page keeps the retained-value warning inside the grace`, ui.label === 'retained_values', ui.label);
       const sentence = copyText(ui.sentence);
       const sameSentence = expectedStatus.reason === 'board_ok' ? /^Live · updated .+ ago$/.test(sentence)
         : expectedStatus.reason === 'gateway_unconfirmed' ? sentence.startsWith(expectedStatus.sentence.split(':')[0] + ':')

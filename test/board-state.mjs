@@ -11,6 +11,7 @@ const { exactCell, rankDesks, todayPercent, sincePercent } = await import('../pu
 const { cellView, heroLeft, keptHtml, positionsHtml } = await import('../public/joe/desk.js');
 const { resultsView } = await import('../public/joe/results.js');
 const { createFeed } = await import('../public/joe/feed.js');
+const { localBoardHealth, statusPresentation, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
 const { bookkeepingHtml } = await builders('history.js', ['bookkeepingHtml']);
 const exact = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
 const DESKS = ['j', 'joe', 'joel'];
@@ -71,6 +72,98 @@ for (const reason of ['source_unavailable', 'gateway_down', 'upstream_lost']) te
   for (const key of ['day', 'since', 'open', 'equity']) assert.equal(hero.querySelector(`[data-cell="hero.${key}"] .bn`).textContent, '—');
   assert.equal(hero.querySelectorAll('.performance-pct').length, 0);
   assert.equal(htmlDocument(bookkeepingHtml(view)).querySelector('.jtotal .muted').textContent, '—');
+});
+
+test('withheld totals keep retained equity yellow, including failed and rejected refreshes, without exposing derived amounts', () => {
+  for (const [feedReason, reason] of [[null, 'retained_values'], ['refresh_failed', 'refresh_failed'], ['contract_invalid', 'retained_values']]) {
+    const view = ctx(missing('source_unavailable'), 30, feedReason);
+    assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'yellow', reason });
+    const status = statusPresentation(view);
+    assert.equal(status.label, 'Data delayed');
+    assert.equal(status.statusTone, 'warn');
+    assert.equal(view.states['desks.j.equity'].retained, true);
+    assert.match(cellView(view.states['desks.j.equity'], 'equity').caption, /Last good value/);
+    for (const field of MONEY_FIELDS) assert.equal(view.states[`today.${field}`].value, null, field);
+    for (const id of DESKS) assert.equal(view.states[`desks.${id}.totalPnl`].value, null, id);
+    assert.equal(todayPercent(view.states), null);
+    assert.equal(sincePercent(view.states), null);
+    assert.deepEqual(resultsView(view).todayUnits, [null, null, null]);
+  }
+});
+
+test('retained equity keeps the inclusive five-minute grace while fresh receipts advance; 60-minute display expiry stays independent', () => {
+  for (const seconds of [RETAINED_GRACE_S - 0.001, RETAINED_GRACE_S, RETAINED_GRACE_S + 0.001, RETENTION_SECONDS]) {
+    const data = missing('source_unavailable');
+    data.generatedAt = data.receivedAt = data.safety.gateway.checkedAt = at(seconds - 9);
+    assert.equal(validateContract('data', data).ok, true);
+    const view = ctx(data, seconds);
+    assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), seconds <= RETAINED_GRACE_S
+      ? { tone: 'yellow', reason: 'retained_values' } : { tone: 'red', reason: 'equity_unavailable' });
+    assert.equal(view.states['today.equity'].value, null);
+    assert.equal(view.states['desks.j.equity'].value !== null, seconds < RETENTION_SECONDS);
+  }
+});
+
+test('withheld retained equity in a broker gap preserves transport and rejection warning precedence', () => {
+  const data = missing('source_unavailable');
+  data.safety.gateway.checkedAt = exact.receivedAt;
+  for (const [feedReason, reason] of [[null, 'gateway_unconfirmed'], ['refresh_failed', 'refresh_failed'], ['contract_invalid', 'retained_values']]) {
+    const view = ctx(data, 65, feedReason);
+    assert.equal(view.states['today.equity'].value, null);
+    assert.equal(view.states['desks.j.equity'].retained, true);
+    assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'yellow', reason });
+  }
+});
+
+test('grace never excuses cold, undated or independently missing equity', () => {
+  const data = missing('source_unavailable'), feeds = { data: { value: data } }, now = at(30);
+  const check = states => assert.deepEqual(localBoardHealth(states, feeds, now), { tone: 'red', reason: 'equity_unavailable' });
+  check(boardStates(feeds, now));
+  for (const name of ['today.equity', 'desks.j.equity']) {
+    const undated = { ...previous, [name]: { ...previous[name], valueReceivedAt: null } };
+    check(boardStates(feeds, now, undated));
+  }
+  for (const desk of data.desks) desk.money = structuredClone(exact.desks.find(d => d.id === desk.id).money);
+  check(boardStates(feeds, now));
+});
+
+test('a withheld current household amount does not make a retained desk red; hidden since-start carries still warn', () => {
+  const data = structuredClone(exact);
+  data.desks[0].money.equity = null;
+  data.desks[0].money.reasons = { equity: 'source_unavailable' };
+  let view = ctx(data);
+  assert.equal(view.states['today.equity'].value, null);
+  assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'yellow', reason: 'retained_values' });
+  data.desks[0].money = structuredClone(exact.desks[0].money);
+  for (const bag of [data.totals, data.desks[0].money]) {
+    bag.totalPnl = null; bag.reasons = { totalPnl: 'source_unavailable' };
+  }
+  view = ctx(data);
+  assert.equal(view.states['today.totalPnl'].value, null);
+  assert.equal(view.states['desks.j.totalPnl'].value, null);
+  assert.equal(view.states['today.equity'].retained, false);
+  assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'yellow', reason: 'retained_values' });
+});
+
+test('retained grace preserves halt, ledger, broker-down, stopped-feed and frozen-producer precedence', () => {
+  const cases = [
+    [view => { Object.assign(view.feeds.data.value.safety, { halt: true, haltReason: 'halt_on' }); }, 'halt_on'],
+    [view => { view.feeds.data.value.safety.executor.reason = 'ledger_size_limit'; }, 'ledger_size_limit'],
+    [view => { Object.assign(view.feeds.data.value.safety.gateway, { apiSessionReady: false, reason: 'gateway_down' }); }, 'gateway_down'],
+    [view => { view.now = at(20 + FEED_STOPPED_S); }, 'feed_disconnected'],
+    [view => {
+      const data = view.feeds.data.value;
+      data.generatedAt = data.receivedAt = data.safety.gateway.checkedAt = at(FEED_STOPPED_S - 9);
+      view.feeds.data.generatedAdvancedAt = exact.receivedAt;
+      view.now = at(FEED_STOPPED_S);
+    }, 'producer_stuck'],
+  ];
+  for (const [change, reason] of cases) {
+    const view = ctx(missing('source_unavailable'));
+    change(view);
+    view.states = boardStates(view.feeds, view.now, previous);
+    assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'red', reason });
+  }
 });
 
 test('60-minute cutoff uses the last-good receipt, expires on ticks, and recovery shows fresh values', () => {
@@ -171,6 +264,7 @@ test('the actual feed adapter applies board policy on reads, failed refreshes, a
     await feed.refresh();
     assert.equal(feed.select().states['desks.j.equity'].retained, true);
     assert.equal(feed.select().states['today.equity'].value, null);
+    assert.deepEqual(localBoardHealth(feed.select().states, feed.select().feeds, feed.select().now), { tone: 'yellow', reason: 'refresh_failed' });
     elapsed = RETENTION_SECONDS * 1000;
     assert.equal(feed.select().states['desks.j.equity'].value, null);
   } finally { globalThis.fetch = realFetch; }

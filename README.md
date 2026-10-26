@@ -1214,7 +1214,10 @@ age and reason, for strictly less than 60 minutes from their original receipt;
 an unknown age or age ≥ 60 minutes shows a dash. Retained inputs never feed
 board totals, since-start figures, ranking, Results' current money, kept-worth
 sums or percentage bars. Independent exact siblings stay usable. Recovery
-shows the new exact observation. Existing caption reserves and CSS are unchanged;
+shows the new exact observation. Withholding derived amounts preserves value-free
+health evidence: retained equity keeps the existing five-minute yellow grace,
+while missing or older equity and higher-priority health failures keep their
+existing red rules. Existing caption reserves and CSS are unchanged;
 rendered pixel verification remains a coordinator gate. This board-only policy
 does not change revision 10 or require producer re-vendoring.
 

@@ -114,8 +114,8 @@
     },
     {
       "path": "public/joe/board-state.js",
-      "size": 3587,
-      "sha256": "f9cdd70e1c3908f9564035bfa73a23a7de18bd467b3ca0d669183d01f09ea3b3"
+      "size": 3916,
+      "sha256": "d2da55a0d02276c0c066ff5a06312f4a0a35188a13132dfe9c63aae6b698780b"
     },
     {
       "path": "public/joe/chart.js",
@@ -169,8 +169,8 @@
     },
     {
       "path": "public/joe/health.js",
-      "size": 15566,
-      "sha256": "66ef90377aa736582903f2d47531526c11e5ab67b3370c9af1eb88295dbbeafa"
+      "size": 15868,
+      "sha256": "6372ac93ac6e6296c07968e592abd66ea8be001f0fa910b26e7d30256aa827e7"
     },
     {
       "path": "public/joe/history-model.js",
