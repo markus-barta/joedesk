@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261026070713.0.0` (`inspr-calver-3`, stable sequence 33), reserved once at `2026-10-26T07:07:13Z` for Results speed fix ([JOED-89](https://aeon.barta.cm/p/JOED/JOED-89)) and honest last values ([JOED-91](https://aeon.barta.cm/p/JOED/JOED-91), release [JOED-90](https://aeon.barta.cm/p/JOED/JOED-90)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261026232616.0.0` (`inspr-calver-3`, stable sequence 34), reserved once at `2026-10-26T23:26:16Z` for follow-up review fixes ([JOED-93](https://aeon.barta.cm/p/JOED/JOED-93), release [JOED-97](https://aeon.barta.cm/p/JOED/JOED-97)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261025221940.0.0` / sequence 32,
-published on `main` at `8be38581c6a97200df93a7084cdd05ebf051476c` under JOED-87,
-live on csb0 since `2026-10-26T01:13:15Z` (JOED-87). `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261026070713.0.0` / sequence 33,
+published on `main` at `e96ff9a55c8809045c5e5d3491796579669a3531` under JOED-90,
+live on csb0 since `2026-10-26T20:06:06Z` (JOED-90). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 33. Sequence 31 (`261025144826.0.0`) was previously deployed
+adoption for sequence 34. Sequence 32 (`261025221940.0.0`) was previously deployed
+at `2026-10-26T01:13:15Z` (JOED-87). Sequence 31 (`261025144826.0.0`) was previously deployed
 at `2026-10-25T21:22:26Z` (JOED-84). Sequence 30 (`261023155418.0.0`) was previously deployed
 at `2026-10-24T03:46:42Z` (JOED-78). Sequence 29 (`261023100632.0.0`) was previously deployed
 at `2026-10-23T14:53:28Z` (JOED-75). Sequence 28 (`261021113113.0.0`) was previously deployed
@@ -29,13 +30,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-33 candidate has not been published. The candidate
+cutover**. The sequence-34 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -85,7 +86,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261026070713.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261026232616.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -1863,3 +1864,12 @@ Open **Settings · Fleet Config** on the board, or **Limits, quota & wake times*
 The original flip exposed 20 fields, omitted editable AMBER and wake windows, displayed fixed example prose, and separated explanations from a bottom edit strip. This IA moves the editor next to its explanation, reads summaries from the configuration, and exposes every saved section key in Technical. AMBER and wake-window controls share that human path. Sources is collapsed below the editor and maps each knob to the file actually read, including the starter example. Reserve percentages also have a plain-number example that follows the draft value.
 
 **Where is this defined?** remains above the section navigation and shows the schema ID, saved revision, actual file used by the board, and latest propagation attempt/outcome. `GET /joe/fleet-config.json` reports `X-Joe-Fleet-Source-Path` and `X-Joe-Fleet-Source-Kind` (`example` or `stored`) from the successful file read, including on 304 responses. Thus the untouched starter example is distinguishable from `/var/lib/joe-board/fleet-config.json`. Missing provenance or failed reads are shown as unknown/unavailable, never inferred from the declared Mac path. The action log supplies propagation evidence; `updatedAt` is not treated as a successful propagation. Writing the shared file does not confirm that Amy, Mac or desk consumers reloaded it.
+
+### Release 34 preparation (JOED-97)
+
+JOED-97 reserves `261026232616.0.0` once at `2026-10-26T23:26:16Z`, stable sequence 34,
+for follow-up review fixes (JOED-93: JOED-98, JOED-94 and JOED-95).
+The prior release is sequence 33, deployed on csb0 at `2026-10-26T20:06:06Z`.
+The runtime closure is resealed for this candidate. The revision-10 contract set,
+shared presentation pin, legacy anchor and historical artifacts remain unchanged.
+Publication, deployment, browser validation and cross-family approval remain coordinator work.

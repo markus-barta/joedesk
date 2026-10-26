@@ -2,10 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261026070713.0.0",
+    APP_VERSION: "261026232616.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 33,
+    RELEASE_SEQUENCE: 34,
     VERSION_HISTORY: [
+      {
+        version: "261026232616.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-26",
+        title: "Honest desk values",
+        changes: ["Keep uncertain values out of last-good history and Today within its New York day.", "Mark estimated desk Today values wherever they appear."],
+      },
       {
         version: "261026070713.0.0",
         versionScheme: "inspr-calver-3",
