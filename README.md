@@ -1220,6 +1220,9 @@ while missing or older equity and higher-priority health failures keep their
 existing red rules. Existing caption reserves and CSS are unchanged;
 rendered pixel verification remains a coordinator gate. This board-only policy
 does not change revision 10 or require producer re-vendoring.
+When Today is a broken dash, its local caption states the reason unless the
+board's state line already explains it. This includes pending start-of-day
+results and every revision-10 exactness reason; repeated section reasons stay shared.
 
 | Field | JOED-86 emission rule |
 | --- | --- |

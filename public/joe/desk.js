@@ -300,6 +300,8 @@ export function heroLeft(ctx) {
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
   const moneyCaptions = [`started with ${eur(STARTING_MONEY, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
   const why = dayCell?.reason ? cellReason(dayCell.reason) : null;
+  // A dashed Today needs its own state/reason unless the section says it.
+  const dayCaption = day.state === 'broken' && day.units === null && !sharesBoardCaption(dayCell, board) && (!shared || why !== shared) ? day.caption : '';
   const dayAmount = day.units === null ? null : eur(day.units < 0n ? -day.units : day.units);
   let say;
   if (day.n == null) {
@@ -321,7 +323,7 @@ export function heroLeft(ctx) {
   return `<div class="hero-primary"><div class="performance-date">${now ? dayDDM(now, NY) : ''}</div><div class="performance">
       <div class="primary" data-cell="hero.day" data-state="${day.state}"><div class="hero-k">${icon('clock')}${term('today')}${cellIcon(dayCell, shared)}</div>
         <div class="display">${day.html}</div><div class="pct-slot">${percentHtml(todayPercent(states, data?.pnlSources?.day))}</div>
-        <span class="c primary-caption"></span></div>
+        <span class="c primary-caption">${dayCaption}</span></div>
       <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since')}${cellIcon(sinceCell, shared)}</div>
         <div class="display">${since.html}</div><div class="pct-slot">${percentHtml(sincePercent(states))}</div>
         <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, ['after fees'])}</span>

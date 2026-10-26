@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { panelStates, MONEY_FIELDS } from '../contracts/panel-state.mjs';
+import { acceptSnapshot } from '../contracts/accept.mjs';
 import { validateContract } from '../contracts/index.mjs';
 import { decimalUnits, unitsDecimal } from '../contracts/decimal.mjs';
 const { boardStates, NOT_EXACT_REASONS, RETENTION_SECONDS } = await import('../public/joe/board-state.js');
@@ -11,7 +12,7 @@ const { exactCell, rankDesks, todayPercent, sincePercent } = await import('../pu
 const { cellView, heroLeft, keptHtml, positionsHtml } = await import('../public/joe/desk.js');
 const { resultsView } = await import('../public/joe/results.js');
 const { createFeed } = await import('../public/joe/feed.js');
-const { localBoardHealth, statusPresentation, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
+const { localBoardHealth, statusPresentation, cellReason, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
 const { bookkeepingHtml } = await builders('history.js', ['bookkeepingHtml']);
 const exact = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
 const DESKS = ['j', 'joe', 'joel'];
@@ -35,6 +36,57 @@ function missing(reason) {
   assert.equal(validateContract('data', data).ok, true);
   return data;
 }
+
+for (const id of ['b-weekend-no-sod', 'j-ny-midnight-gap']) test(`${id}: dashed Today shows its reason in its local caption`, () => {
+  const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
+  const fixture = JSON.parse(readFileSync(new URL(`../fixtures/failures/${id}.json`, import.meta.url)));
+  const payload = structuredClone(valid.data); delete payload.receivedAt;
+  const first = acceptSnapshot('data', payload, null, valid.data.receivedAt);
+  const feeds = { data: acceptSnapshot('data', fixture.payload, first, fixture.receivedAt) };
+  assert.equal(first.status, 200);
+  assert.equal(feeds.data.status, 200);
+  const now = fixture.now, prior = boardStates({ data: first }, valid.data.receivedAt);
+  const states = boardStates(feeds, now, prior), day = states['today.dayPnl'];
+  assert.equal(day.state, 'broken');
+  assert.equal(day.value, null);
+  const hero = htmlDocument(heroLeft({ states, feeds, now }));
+  const today = hero.querySelector('[data-cell="hero.day"]');
+  assert.equal(today.querySelector('.bn').textContent, '—');
+  assert.equal(today.querySelector('.primary-caption').textContent, `Unavailable · ${cellReason(day.reason)}`);
+  assert.equal(today.querySelector('.bn').getAttribute('aria-label'), `Today: not reported · ${cellReason(day.reason)}`);
+});
+
+for (const reason of NOT_EXACT_REASONS) test(`${reason}: dashed hero reasons stay local unless the section explains them`, () => {
+  const dayOnly = structuredClone(exact), mixed = missing('source_unavailable');
+  for (const data of [dayOnly, mixed]) {
+    for (const bag of [data.totals, ...data.desks.map(d => d.money)]) {
+      bag.dayPnl = null; (bag.reasons ??= {}).dayPnl = reason;
+    }
+    for (const sources of [data.pnlSources, ...data.desks.map(d => d.pnlSources)]) {
+      Object.assign(sources.day, { status: 'unavailable', method: null, observedAt: null, reason });
+    }
+    assert.equal(validateContract('data', data).ok, true);
+  }
+  for (const data of [dayOnly, mixed, missing(reason)]) {
+    const view = ctx(data), hero = htmlDocument(heroLeft(view));
+    // Hidden sizing copies contain every reason and must not count as evidence.
+    for (const node of hero.querySelectorAll('.cash-sizing')) node.remove();
+    const section = hero.querySelector('.board-caption').textContent;
+    const dayCaption = hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent;
+    if (data === dayOnly || data === mixed) assert.equal(dayCaption, `Unavailable · ${cellReason(reason)}`);
+    else {
+      assert.equal(dayCaption, '', 'a shared reason is not repeated on Today');
+      assert.equal(section, `Numbers unavailable · ${cellReason(reason)}`);
+    }
+    for (const node of hero.querySelectorAll('[data-cell]')) {
+      if (node.dataset.state !== 'broken') continue;
+      assert.equal(node.querySelector('.bn').textContent, '—');
+      const name = { day: 'dayPnl', since: 'totalPnl', open: 'openPnl', equity: 'equity' }[node.dataset.cell.split('.')[1]];
+      const why = cellReason(view.states[`today.${name}`].reason);
+      assert.ok(node.querySelector('.c').textContent.includes(why) || section.includes(why), `${node.dataset.cell}: ${why}`);
+    }
+  }
+});
 
 for (const reason of NOT_EXACT_REASONS) test(`${reason}: previous accepted money never fills the dash, even behind a feed/gateway failure`, () => {
   const data = missing(reason);
