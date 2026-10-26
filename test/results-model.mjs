@@ -460,7 +460,7 @@ test('today’s money: only the snapshot’s current equity; a close in the reco
   assert.equal(roll(ix, 'week', today, ALL, ctxOf([E('5020'), null, E('5000')])).net, null, 'one desk without money now leaves the sum unknown');
   assert.equal(roll(ix, 'week', today, ALL, ctxOf([E('5020'), E('5000'), E('5000')])).net, 20);
   // The page passes no money now for a retained (last good) equity cell, nor for a missing one.
-  const cell = (amount, retained) => ({ value: { amount, currency: 'EUR' }, retained });
+  const cell = (amount, retained) => ({ state: retained ? 'broken' : 'fresh', value: { amount, currency: 'EUR' }, retained });
   const v = page.resultsView({ now: '2026-10-14T17:42:22.000Z', feeds: {},
     states: { results: { value: { ...ix.meta, index: ix }, reason: null }, 'desks.j.equity': cell('5020', true), 'desks.joe.equity': cell('5000', false), 'desks.joel.equity': { value: null, retained: false } } });
   assert.deepEqual(v.todayUnits, [null, E('5000'), null]);

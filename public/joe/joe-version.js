@@ -11,7 +11,7 @@
         versionScheme: "inspr-calver-3",
         date: "2026-10-26",
         title: "Faster Results",
-        changes: ["Keep switching Results periods fast as the trade history grows."],
+        changes: ["Keep switching Results periods fast as the trade history grows.", "Show a dash for values that are not exact; keep outage values out of totals and hide them after an hour."],
       },
       {
         version: "261025221940.0.0",

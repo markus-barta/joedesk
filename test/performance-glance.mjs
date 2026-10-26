@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { decimalUnits } from '../contracts/decimal.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
+const { boardStates } = await import('../public/joe/board-state.js');
 import { copyText } from '../scripts/browser/shots.mjs';
 const { joinUnits } = await import('../public/joe/format.js');
 const { STARTING_MONEY, exactMoney, exactCell, percentOf, todayPercent, sincePercent, rankDesks } = await import('../public/joe/performance.js');
@@ -194,9 +195,12 @@ test('different reasons, ages, retained observations and missing values keep loc
   }
   const differingAges = htmlDocument(cardStatus('j', [['Today', { ...original, ageSeconds: 90 }], ['Open positions', { ...original, ageSeconds: 150 }]], board));
   assert.equal(differingAges.querySelectorAll('.st').length, 2, 'different local ages never collapse into one caption');
-  ctx.states['today.openPnl'] = { ...original, state: 'broken', reason: 'open_pnl_unavailable', retained: true };
+  const data = ctx.feeds.data.value;
+  data.totals.openPnl = null; (data.totals.reasons ??= {}).openPnl = 'open_pnl_unavailable';
+  ctx.states = boardStates(ctx.feeds, ctx.now, ctx.states);
   const doc = htmlDocument(heroLeft(ctx));
-  assert.match(doc.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, /Last good value, 1 min ago · open result not available/);
+  assert.equal(doc.querySelector('[data-cell="hero.open"] .bn').textContent, '—');
+  assert.match(doc.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, /Unavailable · open result not available/);
 });
 
 test('no snapshot keeps every original missing explanation and omits both percentages', () => {

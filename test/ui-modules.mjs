@@ -24,6 +24,7 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
+const { boardStates } = await import('../public/joe/board-state.js');
 const { isRTH } = await import('../time.mjs');
 const format = await import('../public/joe/format.js');
 const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await import('../public/joe/ui.js');
@@ -904,9 +905,12 @@ test('health: the 20-second-old check reads fresh, then broken, then stale (P3 c
   assert.equal(fresh.b.states['today.equity'].state, 'fresh');
   assert.equal(fresh.p.reason, 'board_ok');
   const broken = view(45);
+  broken.b.states = boardStates(broken.b.feeds, broken.b.now, broken.b.states);
   assert.deepEqual([broken.b.states['today.equity'].state, broken.b.states['today.equity'].reason], ['broken', 'gateway_unconfirmed']);
   assert.deepEqual([broken.p.label, broken.p.reason], ['Broker unsure', 'gateway_unconfirmed']);
-  assert.match(cellView(broken.b.states['today.equity'], 'k').caption, /^Last good value, .* · broker connection not confirmed$/);
+  assert.equal(broken.b.states['today.equity'].value, null);
+  assert.equal(cellView(broken.b.states['today.equity'], 'k').caption, 'Unavailable · broker connection not confirmed');
+  assert.match(cellView(broken.b.states['desks.j.equity'], 'k').caption, /^Last good value, .* · broker connection not confirmed$/);
   const stale = view(61);
   assert.equal(stale.b.states['today.equity'].state, 'stale');
   assert.deepEqual([stale.p.label, stale.p.reason], ['Stale 1 min', 'snapshot_stale']);
@@ -929,13 +933,14 @@ test('isolation: a single missing desk keeps its siblings fresh with their own a
 
 test('isolation: equity and total result unavailable together never show a fresh result', () => {
   const b = board(coupledUnavailable());
+  b.states = boardStates(b.feeds, b.now, b.states);
   assert.equal(b.feeds.data.status, 200);
   for (const name of ['today.equity', 'today.totalPnl', 'desks.j.equity', 'desks.j.totalPnl', 'desks.joel.totalPnl']) {
-    assert.deepEqual([b.states[name].state, b.states[name].reason, b.states[name].retained], ['broken', 'all_desk_equity_unavailable', true], name);
+    assert.deepEqual([b.states[name].state, b.states[name].reason, b.states[name].retained], ['broken', 'all_desk_equity_unavailable', name === 'desks.j.equity'], name);
   }
   assert.equal(b.states['today.dayPnl'].state, 'fresh');
-  assert.match(cellView(b.states['today.totalPnl'], 'k').caption, /^Last good value, .* · desks’ money not available$/);
-  assert.equal(health.boardHealthPresentation(b.states, b.feeds, b.now).reason, 'retained_values');
+  assert.equal(cellView(b.states['today.totalPnl'], 'k').caption, 'Unavailable · desks’ money not available');
+  assert.equal(health.boardHealthPresentation(b.states, b.feeds, b.now).reason, 'equity_unavailable');
 });
 
 test('cells: fresh, stale with age, not reported and broken with reason all read plainly', () => {

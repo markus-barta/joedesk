@@ -28,6 +28,7 @@ if (nodeModule.registerHooks) {
 export async function resolve(specifier, context, next) { return next(mapped(specifier, context.parentURL), context); }`)}`, import.meta.url);
 }
 const hm = await import('../public/joe/history-model.js');
+const { boardStates } = await import('../public/joe/board-state.js');
 const { cellReason, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
 const fmt = await import('../public/joe/format.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
@@ -564,14 +565,14 @@ try {
     ['p3-single-missing-desk', 'broken', 'Data delayed'], ['p3-coupled-unavailable', 'broken', 'Data delayed'],
   ];
   // ADR deferred P3 rows, derived from valid.json; expected states come from
-  // the shared selector exactly as the P1 fixture runner computes them.
+  // the shared selector followed by the board display policy.
   const DERIVED = { 'p3-single-missing-desk': singleMissingDesk, 'p3-coupled-unavailable': coupledUnavailable };
   const derive = id => {
     const f = DERIVED[id]();
     const feeds = { 'fleet-config': { value: valid['fleet-config'], receivedAt: valid.data.receivedAt }, data: acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt) };
     const previous = panelStates(feeds, valid.data.receivedAt);
     feeds.data = acceptSnapshot('data', f.payload, feeds.data, f.receivedAt);
-    return { ...f, id, expectedStatus: 200, expected: panelStates(feeds, f.now, previous) };
+    return { ...f, id, expectedStatus: 200, expected: boardStates(feeds, f.now, previous) };
   };
   const STORAGE_OFF = `Object.defineProperty(window, 'localStorage', { get() { throw new Error('storage unavailable'); } });
     Object.defineProperty(window, 'sessionStorage', { get() { throw new Error('storage unavailable'); } });
@@ -589,7 +590,7 @@ try {
     // state clock. Advancing the fixture server does not age that browser by
     // ten minutes when the transport failure cannot deliver its new clock.
     const expectedNow = f.transportReason ? valid.data.receivedAt : f.now;
-    const expectedCells = panelStates(expectedFeeds, expectedNow, previousStates);
+    const expectedCells = boardStates(expectedFeeds, expectedNow, previousStates);
     const expectedContext = { states: expectedCells, feeds: expectedFeeds, now: expectedNow };
     const expectedStatus = statusPresentation(expectedContext);
     const boardCaption = boardCaptionCell(expectedContext);
@@ -661,7 +662,7 @@ try {
       if (ui.alertGeometry.visible) check('fixtures', `${tag}: the one-line problem has body-size text, a status icon, a 44 px target and clear space above the hero`,
         ui.alertGeometry.size === ui.alertGeometry.bodySize && ui.alertGeometry.icon === (expectedStatus.statusTone === 'warn' ? '#i-half' : '#i-stop') && ui.alertGeometry.target >= 44 && ui.alertGeometry.gap >= 12, ui.alertGeometry);
       check('fixtures', `${tag}: no panel or page blanks`, Object.keys(ui.cells).length === 5 && ui.desks.length === 3 && ui.desks.every(d => d.name && d.nums === 3) && ui.positions && ui.kept && ui.strip && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
-      const expected = f.expected;
+      const expected = expectedCells;
       const mismatch = Object.entries(CELL).filter(([key, panel]) => ui.cells[key].state !== expected[panel].state).map(([key, panel]) => ({ key, ui: ui.cells[key].state, want: expected[panel].state }));
       const deskMismatch = ui.desks.flatMap(d => ['dayPnl', 'openPnl', 'totalPnl'].map((f2, k) => [d.id, f2, d.states[k]]))
         .filter(([desk, field, state]) => state !== expected[`desks.${desk}.${field}`].state);
@@ -897,8 +898,8 @@ try {
   }
 
   if (run('passthrough')) {
-  // 6 · HIGH regression: P1 states pass through unchanged. A replayed push
-  // keeps its last good values as stale (never broken), with their own age.
+  // 6 · A replay retains individual observations as stale with their age;
+  // totals and since-start stay unavailable under the board display policy.
   {
     const b = await newBoard();
     b.setNow(NOW);
@@ -920,9 +921,11 @@ try {
       const wrong = Object.entries(CELL).filter(([k, panel]) => ui.cells[k].state !== server.panels[panel].state || server.panels[panel].state !== 'stale').map(([k, panel]) => ({ k, ui: ui.cells[k].state, p1: server.panels[panel].state }));
       check('passthrough', `${tag}: every cell keeps the selector's stale state`, !wrong.length && ui.cards.every(c => c.nums.every(x => x === 'stale')) && ui.posState === 'stale' && ui.keptState === 'stale', { wrong, cards: ui.cards });
       const caps = Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').map(([, c]) => c.cap);
-      check('passthrough', `${tag}: the shared replay caption says last good and its age once; sections retain their own captions`, /^Last good value, 3\d\ss ago · last update repeated an old one$/.test(ui.boardCaption) && caps.every(c => c === '') &&
-        ui.cards.every(c => c.label === 'since start · last sessions' && c.icons === 3) && /^Last good positions, 3\d\ss ago · last update repeated an old one$/.test(ui.positions) &&
-        /^Last good values, 3\d\ss ago · last update repeated an old one · worth €\s12\.248,00 and \$\s441,20, each in its own currency$/.test(ui.kept), { caps, cards: ui.cards.map(c => c.label), positions: ui.positions, kept: ui.kept });
+      check('passthrough', `${tag}: retained observations keep their age; totals, since-start and the kept sum show dashes`, /^Last good value, 3\d\ss ago · last update repeated an old one$/.test(ui.boardCaption) &&
+        caps.filter(c => c === 'Unavailable').length === 3 && caps.filter(c => c === '').length === 1 &&
+        ui.cards.every(c => /^Since .+: unavailable · last update repeated an old one$/.test(c.label) && c.icons === 3) &&
+        /^Last good positions, 3\d\ss ago · last update repeated an old one$/.test(ui.positions) &&
+        /^Last good values, 3\d\ss ago · last update repeated an old one · worth —$/.test(ui.kept), { caps, cards: ui.cards.map(c => c.label), positions: ui.positions, kept: ui.kept });
       if (viewport.name === '1024') await shot(page, viewport, `${viewport.name}-${theme}-desk-state-replayed`, 'Desk, replayed push: last good values stay stale with their age');
     }
   }
@@ -1007,10 +1010,10 @@ try {
     const [j, joe, joel] = ['j', 'joe', 'joel'].map(id => ui.cards.find(c => c.id === id));
     const today = /^Today: last good, 1\smin ago · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
     check('journey', `${tag} broken: each affected desk number has its own line, age and reason`, j.lines.length === 3 && today.test(j.lines[0]) && open.test(j.lines[1]) &&
-      /^Since 10\sSep: last good, 3\d\ss ago · carrying the last good value$/.test(j.lines[2]) && [joe, joel].every(c => c.lines.length === 2 && today.test(c.lines[0]) && open.test(c.lines[1])) &&
+      /^Since 10\sSep: unavailable · carrying the last good value$/.test(j.lines[2]) && [joe, joel].every(c => c.lines.length === 2 && today.test(c.lines[0]) && open.test(c.lines[1])) &&
       JSON.stringify(j.nums) === '["broken","broken","broken"]' && [joe, joel].every(c => JSON.stringify(c.nums) === '["broken","broken","fresh"]'), ui.cards);
-    check('journey', `${tag} broken: Today's numbers keep their own ages and reasons`, ui.cells['hero.day'].state === 'broken' && /Last good value, 1\smin ago · waiting on the start-of-day value/.test(ui.say) &&
-      /^Last good value, 3\d\ss ago · open result not available$/.test(ui.cells['hero.open'].cap) && /^Last good value, 3\d\ss ago · desk total incomplete$/.test(ui.cells['hero.since'].cap) &&
+    check('journey', `${tag} broken: unavailable totals keep their own reasons`, ui.cells['hero.day'].state === 'broken' && /Today’s result is not available: waiting on the start-of-day value\./.test(ui.say) &&
+      /^Unavailable · open result not available$/.test(ui.cells['hero.open'].cap) && /^Unavailable · desk total incomplete$/.test(ui.cells['hero.since'].cap) &&
       ui.cells['hero.equity'].state === 'fresh' && ui.cells['hero.account'].state === 'fresh', { cells: ui.cells, say: ui.say });
     check('no-shift', `${tag}: stale → broken moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
     boxes.push(['broken', await rects(STATE_BOXES)]);
@@ -1023,7 +1026,7 @@ try {
     if (!font && (viewport.name !== '1024' || theme === 'light')) await shot(page, viewport, `${viewport.name}-${theme}-desk-state-per-field`, 'Desk, numbers broken field by field: each with its own age and reason');
     await go(page, 'history');
     h = await page.evaluate(HIST_TEXT);
-    check('journey', `${tag} broken: J's result in History keeps its own age and reason`, /Last good value, 3\d\ss ago · carrying the last good value/.test(h.j) && h.state === 'fresh', h);
+    check('journey', `${tag} broken: J's unavailable since-start result in History keeps its reason`, /—.*Unavailable · carrying the last good value/.test(h.j) && h.state === 'fresh', h);
     // History's own read fails: the last good series stays, with why and Retry.
     const unroute = await route([{ path: 'history.json', status: 503, body: '{"ok":false,"reason":"history_size_limit"}' }]);
     await page.evaluate('window.__joedesk.refresh()');

@@ -2,7 +2,7 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261026070713.0.0` (`inspr-calver-3`, stable sequence 33), reserved once at `2026-10-26T07:07:13Z` for Results speed fix ([JOED-89](https://aeon.barta.cm/p/JOED/JOED-89), release [JOED-90](https://aeon.barta.cm/p/JOED/JOED-90)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261026070713.0.0` (`inspr-calver-3`, stable sequence 33), reserved once at `2026-10-26T07:07:13Z` for Results speed fix ([JOED-89](https://aeon.barta.cm/p/JOED/JOED-89)) and honest last values ([JOED-91](https://aeon.barta.cm/p/JOED/JOED-91), release [JOED-90](https://aeon.barta.cm/p/JOED/JOED-90)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
 
 **Last deployed release:** `inspr-calver-3` / `261025221940.0.0` / sequence 32,
 published on `main` at `8be38581c6a97200df93a7084cdd05ebf051476c` under JOED-87,
@@ -1204,6 +1204,19 @@ Historical revision and release records remain unchanged.
 
 Amy's binding JOED-55 specification (2026-10-25T20:14Z) governs producer
 exactness; accepting a shape does not prove its underlying broker/ledger data.
+
+Amy's board display rule (JOED-91, 2026-10-26, release 33) is applied in
+`public/joe/board-state.js` after the unchanged contract selector.
+`not_exact_yet`, `sod_missing`, `ledger_unreconciled` and `position_stale`
+always show a dash, including when a feed or gateway failure masks the scoped
+reason. An outage may retain individual last-good observations with their own
+age and reason, for strictly less than 60 minutes from their original receipt;
+an unknown age or age ≥ 60 minutes shows a dash. Retained inputs never feed
+board totals, since-start figures, ranking, Results' current money, kept-worth
+sums or percentage bars. Independent exact siblings stay usable. Recovery
+shows the new exact observation. Existing caption reserves and CSS are unchanged;
+rendered pixel verification remains a coordinator gate. This board-only policy
+does not change revision 10 or require producer re-vendoring.
 
 | Field | JOED-86 emission rule |
 | --- | --- |

@@ -133,7 +133,7 @@ test('JOED-90: Results speed candidate follows the deployed sequence 32; About p
   assert.equal(prep.ticket, 'JOED-90');
   assert.equal(next.release_sequence, 33);
   assert.equal(active.status, 'candidate');
-  assert.equal(active.note, 'Results speed fix (JOED-89)');
+  assert.equal(active.note, 'Results speed fix (JOED-89) and honest last values (JOED-91)');
   assert.equal(oldRelease.version, '261025221940.0.0');
   assert.equal(oldRelease.release_sequence, 32);
   assert.equal(oldRelease.status, 'published-candidate');

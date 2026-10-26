@@ -5,5 +5,5 @@
   "release_channel": "stable",
   "release_sequence": 33,
   "status": "candidate",
-  "note": "Results speed fix (JOED-89)"
+  "note": "Results speed fix (JOED-89) and honest last values (JOED-91)"
 }
