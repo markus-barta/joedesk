@@ -1447,10 +1447,18 @@ native-to-EUR rate (a rate from another row or the results record is not used).
 JOED-83 adds the selected period's percentage beside the Results hero's euros
 for All desks. All time divides by `STARTING_MONEY` (€ 15.000), matching
 Desk's Since start for the same aggregate result. Other periods divide by
-`STARTING_MONEY + prior.units.net`: `prior` is the existing after-fee `rollup`
-from `trackingStart` through the day before the period starts, with the same
-money context and basis-change checks. This includes open-position movement;
-it does not sum closed trades alone or round either input to cents. Individual
+`STARTING_MONEY + prior.units.net`, equivalent to the after-fee `rollup`
+from `trackingStart` through the day before the period starts. JOED-89 caches
+that exact cumulative result in each record index's BigInt `netPrefix`, built
+once from carried equity closes. A date lookup replaces the full prior rollup
+on each switch; current money and basis-change checks still run on every call.
+Pre-tracking closes retain their exact value or unknown state across gaps at
+tracking start; periods starting before or at tracking still use the initial base.
+Unknown closes recover only with a later known close, and a new record gets a
+new prefix. `node scripts/benchmark-period-base.mjs` compares the old and new
+Node model paths over the 14,000-trade/288-day fixture and eleven switches;
+browser render-budget validation remains in CI. The base includes open-position
+movement without summing closed trades alone or rounding either input to cents. Individual
 desks, empty periods, basis changes, unknown/non-exact results and unknown or
 nonpositive bases omit the percentage. The shared Desk formatter retains its
 two decimals, signs and tones, with “of the money at the period start” in the

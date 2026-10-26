@@ -31,8 +31,9 @@ const { acceptRead } = await import('../contracts/read.mjs');
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
 const hm = await import('../public/joe/history-model.js');
-const { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } = await import('../scripts/browser/results.mjs');
+const { designResults, largeResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } = await import('../scripts/browser/results.mjs');
 const { scenario, preflightSnapshot } = await import('../scripts/browser/board.mjs');
+const { priorRollupBase, priorRollupPercent } = await import('./fixtures/period-base-reference.mjs');
 
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const ALL = ['j', 'joe', 'joel'];
@@ -746,6 +747,113 @@ test('JOED-83: an unknown, zero or negative base and a prior basis change omit t
   assert.equal(R.cut, null, 'the selected period itself is comparable');
   assert.equal(M.periodBase(ix, withCut, per, ALL), null, 'the aggregate prefix crosses a basis change');
   assert.equal(M.periodPercent(ix, withCut, per, ALL, R), null);
+});
+
+test('JOED-89: a tracking-start gap carries pre-tracking valued and unknown closes into the cached base', async t => {
+  for (const unknown of [null, ...ALL]) await t.test(unknown ? `unknown ${unknown} close` : 'valued close', () => {
+    const amounts = ALL.map(id => id === unknown ? null : id === 'j' ? '5100.12345678' : '5000');
+    const ix = M.indexResults(record([closeDay('2026-09-11', ...amounts), closeDay('2026-09-21', '5200')], [], '2026-09-14'));
+    const inputs = ctxOf(), per = M.periodOf('day', '2026-09-15', today, ix.meta.trackingStart);
+    const want = unknown ? null : E('15100.12345678');
+    assert.equal(priorRollupBase(ix, inputs, per, ALL), want, 'independent old rollup defines the expected base');
+    assert.equal(M.periodBase(ix, inputs, per, ALL), want, 'the latest indexed date is still before tracking starts');
+  });
+});
+
+test('JOED-89: tracking-start boundaries, sparse gaps and desk sets keep old-rollup base and percentage parity', () => {
+  const trackingStart = '2026-09-14', inputs = ctxOf([E('5300'), E('5000'), E('5000')]);
+  const deskSets = Array.from({ length: 8 }, (_, mask) => ALL.filter((_, i) => mask & (1 << i)));
+  deskSets.push([...ALL].reverse(), ['j', 'j', 'joe']);
+  const gaps = [[], ['2026-09-13'], [trackingStart], ['2026-09-13', trackingStart, '2026-09-16']];
+  const amounts = [['5100.12345678', '5000', '5000'], [null, '5000', '5000'], ['5000', null, '5000'],
+    ['5000', '5000', null], ['0', '0', '0'], ['-0.00000001', '0', '0']];
+  for (const closes of amounts) for (const gap of gaps) {
+    const days = [closeDay('2026-09-10', '5050'), closeDay('2026-09-11', ...closes),
+      ...gap.map(date => ({ date, desks: {} })), closeDay('2026-09-21', '5200')];
+    const trades = [tradeOf('rt-pre-tracking', 'j', '2026-09-12T15:00:00.000Z', '999.12345678')];
+    const ix = M.indexResults(record(days, trades, trackingStart));
+    for (const anchor of ['2026-09-10', '2026-09-13', trackingStart, '2026-09-15', '2026-09-17', '2026-09-21', '2026-09-22']) {
+      for (const kind of ['day', 'week', 'month', 'ytd', 'all']) for (const desks of deskSets) {
+        const per = M.periodOf(kind, anchor, today, trackingStart);
+        const result = M.rollup(ix, per, desks, M.moneyContext(ix, inputs, per, desks));
+        const label = `${closes.join(',')} gap=${gap.join(',')} ${kind} ${anchor} ${desks.join(',')}`;
+        assert.equal(M.periodBase(ix, inputs, per, desks), priorRollupBase(ix, inputs, per, desks), label);
+        assert.equal(M.periodPercent(ix, inputs, per, desks, result), priorRollupPercent(ix, inputs, per, desks, result), label);
+      }
+    }
+    const recovered = M.periodOf('day', '2026-09-22', today, trackingStart);
+    assert.equal(M.periodBase(ix, inputs, recovered, ALL), E('15200'), 'the next known close recovers the base');
+    for (const anchor of ['2026-09-13', trackingStart]) {
+      assert.equal(M.periodBase(ix, inputs, M.periodOf('day', anchor, today, trackingStart), ALL), STARTING_MONEY,
+        'periods before or at tracking start retain the authoritative initial base');
+    }
+  }
+});
+
+test('JOED-89: cached bases and percentages equal the old rollup for the large budget fixture and every desk set', () => {
+  const value = largeResults(), ix = M.indexResults(value);
+  assert.equal(value.trades.length, 14000);
+  assert.equal(value.days.length, 288);
+  const inputs = ctxOf([E('4987.42'), E('4983.46'), E('5026.30')]);
+  const deskSets = Array.from({ length: 8 }, (_, mask) => ALL.filter((_, i) => mask & (1 << i)));
+  deskSets.push([...ALL].reverse(), ['j', 'j', 'joe']);
+  const anchors = [M.addDays(ix.meta.trackingStart, -1), ix.meta.trackingStart, ...ix.dates, today, M.addDays(today, 1)];
+  for (const anchor of anchors) for (const kind of ['day', 'week', 'month', 'ytd', 'all']) {
+    const per = M.periodOf(kind, anchor, today, ix.meta.trackingStart);
+    for (const desks of deskSets) {
+      const result = M.rollup(ix, per, desks, M.moneyContext(ix, inputs, per, desks));
+      const label = `${kind} ${anchor} ${desks.join(',')}`;
+      assert.equal(M.periodBase(ix, inputs, per, desks), priorRollupBase(ix, inputs, per, desks), label);
+      assert.equal(M.periodPercent(ix, inputs, per, desks, result), priorRollupPercent(ix, inputs, per, desks, result), label);
+    }
+  }
+});
+
+test('JOED-89: the exact prefix carries sparse closes, recovers from unknowns, transfers and belongs to one index', () => {
+  const days = [closeDay('2026-09-11', '5000.00000001'), closeDay('2026-09-14', null),
+    { date: '2026-09-15', desks: {} }, closeDay('2026-09-16', '100000000000.12345678', '-99999999999.99999999'),
+    closeDay('2026-09-17', '-10000'), closeDay('2026-09-18', '-10000.00000001')];
+  // A trade-only date also carries the latest close, not its realised result.
+  const value = record(days, [tradeOf('rt-only', 'j', '2026-09-12T15:00:00.000Z', '123.45678901', '0.00000001')]);
+  const ix = M.indexResults(value), copy = structuredClone(ix, { transfer: M.transferables(ix) });
+  assert.deepEqual(copy.netPrefix, [E('0.00000001'), E('0.00000001'), null, null, E('-9999.87654321'), E('-15000'), E('-15000.00000001')]);
+  const inputs = ctxOf([E('5001'), E('5000'), E('5000')]);
+  for (let anchor = '2026-09-01'; anchor <= '2026-09-22'; anchor = M.addDays(anchor, 1)) {
+    const per = M.periodOf('day', anchor, today, copy.meta.trackingStart);
+    assert.equal(M.periodBase(copy, inputs, per, ALL), priorRollupBase(copy, inputs, per, ALL), anchor);
+    const result = M.rollup(copy, per, ALL, M.moneyContext(copy, inputs, per, ALL));
+    assert.equal(M.periodPercent(copy, inputs, per, ALL, result), priorRollupPercent(copy, inputs, per, ALL, result), anchor);
+  }
+  const per = M.periodOf('day', '2026-09-17', today, copy.meta.trackingStart);
+  assert.equal(M.periodBase(copy, inputs, per, ALL), E('5000.12345679'), 'huge cancelling values keep every decimal');
+  const replacement = M.indexResults(record([closeDay('2026-09-16', '5005')]));
+  assert.equal(M.periodBase(replacement, inputs, per, ALL), E('15005'));
+  assert.equal(M.periodBase(copy, inputs, per, ALL), E('5000.12345679'), 'a new record cannot reuse or overwrite the old prefix');
+  const huge = M.indexResults(record([closeDay('2026-09-16', '100000000000.12345678')]));
+  assert.equal(M.periodBase(huge, inputs, per, ALL), E('100000010000.12345678'), 'a base beyond 64-bit units does not wrap');
+  assert.equal(M.periodBase(huge, inputs, per, ALL), priorRollupBase(huge, inputs, per, ALL));
+});
+
+test('JOED-89: repeated cached lookups recheck cuts, live money and the board date', () => {
+  const ix = M.indexResults(record([closeDay('2026-09-30', '5000.12345678'), closeDay(today, '9000')]));
+  const per = M.periodOf('month', today, today, ix.meta.trackingStart);
+  const future = M.periodOf('day', M.addDays(today, 1), today, ix.meta.trackingStart);
+  const inputs = ctxOf([E('5100.00000001'), E('5000'), E('5000')]);
+  const variants = [inputs,
+    { ...inputs, cuts: [{ desk: 'j', at: M.viennaMidnight('2026-09-30') }] },
+    { ...inputs, cuts: [{ desk: 'joe', at: M.viennaMidnight('2026-10-01') }] },
+    { ...inputs, todayUnits: [E('5200.00000002'), E('5000'), E('5000')] },
+    { ...inputs, todayUnits: [null, E('5000'), E('5000')] },
+    { ...inputs, today: '2026-09-30' },
+    { ...inputs, today: '2026-09-09', todayUnits: [null, null, null] },
+    { ...inputs, today: '2026-09-08' }, inputs];
+  for (const current of variants) for (const selected of [per, future]) {
+    assert.equal(M.periodBase(ix, current, selected, ALL), priorRollupBase(ix, current, selected, ALL));
+    const result = M.rollup(ix, selected, ALL, M.moneyContext(ix, current, selected, ALL));
+    assert.equal(M.periodPercent(ix, current, selected, ALL, result), priorRollupPercent(ix, current, selected, ALL, result));
+  }
+  assert.equal(M.periodBase(ix, inputs, per, ALL), E('15000.12345678'));
+  assert.equal(M.periodBase(ix, inputs, future, ALL), E('15100.00000001'), 'a stored close never replaces live equity');
 });
 
 test('JOED-83: the hero keeps Desk signs/tones and reads the percentage with its period-start meaning', () => {
