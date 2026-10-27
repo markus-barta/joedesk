@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261026232616.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 34,
+  "source": {
+    "commit": "a3a3683d6bbb05818ae99291b96e983000fb9cd4",
+    "tree": "41097a85b0def6e33b21c2078d41f2f171263199"
+  },
+  "release_set_sha256": "af0e23abbbda7a8fe55b74f796e30e3f441bfd7b5a3b62a82a5f78f8a20e3afa",
+  "image_digest": "sha256:f8c20d3ee9c32f6ceef9209c0220b0e4c5a383366cbe18d63603616f699f2276",
+  "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+  "validation_run_id": "40438699549",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-10-27T03:30:43Z",
+    "operator_ticket": "JOED-97",
+    "rollback_reference": "JOED-97: revert the csb0 board re-pin (nixcfg #1145, 342ef792) and switch csb0 to rollback generation 3iiqk8b0 with the retained sequence-33 image b7dbd41b52f9 (pull_policy never); board-only switch, hsb0 untouched; pre-switch board backup board-pre-34-20261027T033009Z.tar"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-10-27T03:33:30Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-10-27T03:32:12Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-10-27T03:32:12Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-10-27T03:33:30Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-10-27T03:33:32Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; performed as a GET-only actor look of the served shell and app (served state from the hsb0 pusher; desks and all four feeds present; release 34 estimate mark, phone Today column and New York day guard served) plus the agm2 CI screenshots of the same build (main run 40438699549)"
+  },
+  "adopted_at": "2026-10-27T03:35:25Z"
+}
