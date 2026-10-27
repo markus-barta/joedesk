@@ -719,40 +719,81 @@ try {
   // JOED-95: change only the method, keeping every figure and box identical.
   // CI owns execution; the local night worker only prepares these assertions.
   {
-    const b = await newBoard(), estimate = ingress(valid.data), recovery = ingress(valid.data);
-    let seq = valid.data.seq;
-    estimate.pnlSources.day = structuredClone(fixture('b-session-open-estimate').payload.pnlSources.day);
-    b.setNow(valid.data.receivedAt); await b.push(ingress(valid.data));
-    for (const viewport of VIEWPORTS.filter(v => [390, 1024, 1440].includes(v.width))) for (const theme of THEMES) {
+    const estimateViewports = [...VIEWPORTS, { ...VIEWPORTS[2], name: '360', width: 360 }];
+    const estimateMarks = `(() => {
+      const visible = [...document.querySelectorAll('.estimate-mark')].filter(e => __audit.visible(e));
+      return visible.map(e => {
+        const r = e.getBoundingClientRect(), label = e.parentElement, box = label.getBoundingClientRect();
+        // Measure every other label child, including the state icon. Text
+        // nodes need a Range; the absolutely positioned mark is excluded.
+        const content = [...label.childNodes].filter(n => n !== e &&
+          (n.nodeType === 3 ? n.textContent.trim() : n.nodeType === 1 && __audit.visible(n))).map(n => {
+          if (n.nodeType === 1) return n.getBoundingClientRect();
+          const range = document.createRange(); range.selectNode(n); return range.getBoundingClientRect();
+        });
+        return { text:e.textContent, label:e.getAttribute('aria-label'), role:e.getAttribute('role'), size:parseFloat(getComputedStyle(e).fontSize), title:e.getAttribute('title'),
+          contained:[r, ...content].every(c => c.left >= box.left && c.right <= box.right && c.top >= box.top && c.bottom <= box.bottom),
+          separate:content.length > 0 && content.every(c => r.right <= c.left || r.left >= c.right || r.bottom <= c.top || r.top >= c.bottom) };
+      });
+    })()`;
+    for (const viewport of estimateViewports) for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
+      const b = await newBoard(), estimate = ingress(valid.data), recovery = ingress(valid.data);
+      let seq = valid.data.seq;
+      estimate.pnlSources.day = structuredClone(fixture('b-session-open-estimate').payload.pnlSources.day);
+      b.setNow(valid.data.receivedAt); await b.push(ingress(valid.data));
       b.setNow(at(valid.data.receivedAt, 9));
       await configure(page, viewport, theme); await load(page, b.url, 'desk');
+      if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
       const selectors = [...DESK_SHIFT, '.dnums .k', '.dnums .v', '.compact-label', '.compact-figure .bn'];
       const before = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
       estimate.seq = ++seq; b.setNow(valid.data.receivedAt);
       check('fixtures', 'JOED-95 estimate accepted', (await b.push(estimate)).status === 200);
       b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
       const after = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
-      const marks = await page.evaluate(`(() => {
-        const visible = [...document.querySelectorAll('.estimate-mark')].filter(e => __audit.visible(e));
-        return visible.map(e => {
-          const r=e.getBoundingClientRect(), label=e.parentElement, box=label.getBoundingClientRect();
-          const today=label.querySelector('.term');
-          const range=document.createRange(); if(!today) range.selectNode(label.firstChild);
-          const text=(today ?? range).getBoundingClientRect();
-          return { text:e.textContent, label:e.getAttribute('aria-label'), role:e.getAttribute('role'), size:parseFloat(getComputedStyle(e).fontSize), title:e.getAttribute('title'),
-            contained:r.left>=box.left && r.right<=box.right && r.top>=box.top && r.bottom<=box.bottom,
-            separate:r.right<=text.left || r.left>=text.right };
-        });
-      })()`);
-      const tag = `${viewport.name} ${theme}`;
-      check('fixtures', `${tag}: estimated Today cells say Estimated visibly, accessibly, without overlapping Today`,
-        marks.length === (viewport.mobile ? 6 : 3) && marks.every(m => m.text === 'Estimated' && m.role === 'img' && m.label.startsWith('Estimated from the session open') && m.size >= 10 && !m.title && m.contained && m.separate), marks);
+      const tag = `${viewport.name} ${theme}${font ? ' wide font' : ''}`;
+      const checkMarks = async state => {
+        const marks = await page.evaluate(estimateMarks);
+        check('fixtures', `${tag}: ${state} estimated Today cells say Estimated visibly, accessibly, without overlapping the complete label and state icon`,
+          marks.length === (viewport.mobile ? 6 : 3) && marks.every(m => m.text === 'Estimated' && m.role === 'img' && m.label.startsWith('Estimated from the session open') && m.size >= 10 && !m.title && m.contained && m.separate), marks);
+      };
+      await checkMarks('fresh');
       check('no-shift', `${tag}: exact → estimate has exactly 0 px layout shift`, JSON.stringify(before) === JSON.stringify(after), shifted(before, after));
       recovery.seq = ++seq; b.setNow(valid.data.receivedAt); await b.push(recovery);
       b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
       check('no-shift', `${tag}: estimate → exact has exactly 0 px layout shift and removes all estimate marks`,
         JSON.stringify(before) === JSON.stringify(await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`)) &&
         await page.evaluate(`document.querySelectorAll('.estimate-mark').length === 0`));
+      if (viewport.mobile) {
+        estimate.seq = ++seq; b.setNow(valid.data.receivedAt); await b.push(estimate);
+        b.setNow(at(valid.data.receivedAt, 70)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+        check('fixtures', `${tag}: stale estimate really has a stale Today icon`,
+          await page.evaluate(`document.querySelector('#desk-j .dnums > div').dataset.state === 'stale' && document.querySelector('#desk-j .compact-state[aria-label^="Stale"]') !== null`));
+        await checkMarks('stale');
+        const stale = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+        const outage = structuredClone(estimate); outage.seq = ++seq;
+        outage.generatedAt = outage.safety.gateway.checkedAt = at(valid.data.receivedAt, 80);
+        for (const bag of [outage.totals, ...outage.desks.map(d => d.money)]) {
+          bag.dayPnl = null; (bag.reasons ??= {}).dayPnl = 'source_unavailable';
+        }
+        for (const sources of [outage.pnlSources, ...outage.desks.map(d => d.pnlSources)].filter(Boolean)) Object.assign(sources.day, {
+          status: 'unavailable', observedAt: null, reason: 'source_unavailable',
+        });
+        b.setNow(at(valid.data.receivedAt, 80));
+        check('fixtures', `${tag}: estimate outage accepted`, (await b.push(outage)).status === 200);
+        b.setNow(at(valid.data.receivedAt, 85)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+        check('fixtures', `${tag}: outage really keeps the estimate with a broken Today icon`,
+          await page.evaluate(`document.querySelector('#desk-j .dnums > div').dataset.state === 'broken' && document.querySelector('#desk-j .compact-state[aria-label^="Broken"]') !== null && document.querySelector('#desk-j .compact-figure .bn').textContent !== '—'`));
+        await checkMarks('kept during outage');
+        const kept = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+        check('no-shift', `${tag}: stale → kept estimate has exactly 0 px layout shift`, JSON.stringify(stale) === JSON.stringify(kept), shifted(stale, kept));
+        const restoredEstimate = structuredClone(estimate); restoredEstimate.seq = ++seq;
+        restoredEstimate.generatedAt = restoredEstimate.safety.gateway.checkedAt = at(valid.data.receivedAt, 90);
+        b.setNow(at(valid.data.receivedAt, 90));
+        check('fixtures', `${tag}: estimate recovery accepted`, (await b.push(restoredEstimate)).status === 200);
+        b.setNow(at(valid.data.receivedAt, 160)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+        const restored = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+        check('no-shift', `${tag}: kept → stale estimate has exactly 0 px layout shift`, JSON.stringify(kept) === JSON.stringify(restored), shifted(kept, restored));
+      }
       if (viewport.mobile) check('fixtures', `${tag}: estimate marks preserve the 44 px phone disclosure targets`,
         await page.evaluate(`[...document.querySelectorAll('.desk-row')].every(e => e.getBoundingClientRect().height >= 44)`));
     }

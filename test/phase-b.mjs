@@ -62,7 +62,7 @@ test('JOED-97 M1: replay the browser journey through the read model before asser
   }
 });
 
-for (const reason of NOT_EXACT_REASONS) test(`JOED-97 L2 ${reason}: startup discards uncertain stored cells hidden behind a later outage`, async t => {
+test('JOED-97 L2: first load of a release-33 store drops kept day/equity once, including behind a later outage', async t => {
   const dataDir = scratch('joed-97-upgrade-');
   t.after(() => discard(dataDir, 'JOED-97 upgrade store'));
   let now = exact.receivedAt;
@@ -78,16 +78,36 @@ for (const reason of NOT_EXACT_REASONS) test(`JOED-97 L2 ${reason}: startup disc
   }
   assert.equal(model.accept(outage).status, 200);
   const file = join(dataDir, 'data-state.json'), stored = JSON.parse(readFileSync(file));
-  stored.cells['desks.j.equity'].reason = reason;
-  stored.cells['desks.j.dayPnl'].valueSource.reason = reason;
+  // Release 33 wrote exactly these two keys: no reason or provenance exists
+  // with which to distinguish an uncertain last-good from an exact one.
+  for (const [name, cell] of Object.entries(stored.cells)) stored.cells[name] = {
+    value: cell.value, valueReceivedAt: cell.valueReceivedAt,
+  };
   writeFileSync(file, JSON.stringify(stored));
   model = createReadModel({ dataDir, clock: () => now });
-  for (const name of ['desks.j.equity', 'desks.j.dayPnl']) assert.equal(model.panels()[name].value, null, name);
-  assert.notEqual(model.panels()['desks.joe.equity'].value, null, 'unaffected exact last-good survives upgrade');
+  const cleared = Object.keys(stored.cells).filter(name => /\.(?:dayPnl|equity)$/.test(name));
+  for (const name of cleared) assert.equal(model.panels()[name].value, null, name);
+  assert.notEqual(model.panels()['desks.j.openPnl'].value, null, 'unrelated last-good survives upgrade');
+  assert.notEqual(model.panels().paperAccount.value, null, 'account observation survives upgrade');
+  const upgradedBytes = readFileSync(file, 'utf8'), upgraded = JSON.parse(upgradedBytes);
+  assert.deepEqual(upgraded.feed, stored.feed, 'sequence and accepted snapshot are unchanged');
+  for (const name of cleared) assert.equal(upgraded.cells[name].value, null, 'cleanup is persisted before another snapshot');
+  model = createReadModel({ dataDir, clock: () => now });
+  assert.equal(readFileSync(file, 'utf8'), upgradedBytes, 'second startup does not repeat the upgrade');
+  for (const name of cleared) assert.equal(model.panels()[name].value, null, 'restart cannot recover the old cells');
   now = outage.generatedAt = outage.safety.gateway.checkedAt = at(exact.receivedAt, 1200); outage.seq++;
   assert.equal(model.accept(outage).status, 200);
-  const restarted = createReadModel({ dataDir, clock: () => now });
-  for (const name of ['desks.j.equity', 'desks.j.dayPnl']) assert.equal(restarted.panels()[name].value, null, 'cleanup survives subsequent retention and restart');
+  model = createReadModel({ dataDir, clock: () => now });
+  for (const name of cleared) assert.equal(model.panels()[name].value, null, 'cleanup survives subsequent retention and restart');
+  const recovery = ingress(exact); recovery.seq = outage.seq + 1;
+  now = recovery.generatedAt = recovery.safety.gateway.checkedAt = at(exact.receivedAt, 1230);
+  assert.equal(model.accept(recovery).status, 200);
+  now = outage.generatedAt = outage.safety.gateway.checkedAt = at(exact.receivedAt, 1260); outage.seq = recovery.seq + 1;
+  assert.equal(model.accept(outage).status, 200);
+  const recoveredBytes = readFileSync(file, 'utf8');
+  model = createReadModel({ dataDir, clock: () => now });
+  assert.equal(readFileSync(file, 'utf8'), recoveredBytes, 'release-34 provenance prevents another cleanup');
+  for (const name of cleared) assert.notEqual(model.panels()[name].value, null, 'new exact values retain normally after upgrade');
 });
 
 test('JOED-97 L4: retained estimates keep their original source and mark through outage and restart, until expiry or exact recovery', async t => {
@@ -161,7 +181,8 @@ for (const reason of NOT_EXACT_REASONS) test(`JOED-98 ${reason}: uncertain obser
     if (start) push(exact, start); // exact → unsure → outage, as well as cold unsure → outage
     push(unsure, start + 10);
     const stored = JSON.parse(readFileSync(join(dataDir, 'data-state.json')));
-    for (const name of names) assert.deepEqual(stored.cells[name], { value: null, valueReceivedAt: null }, name);
+    for (const name of names) assert.deepEqual(stored.cells[name], { value: null, valueReceivedAt: null,
+      ...(name.endsWith('.dayPnl') ? { valueObservedAt: null, valueSource: null } : {}) }, name);
     model = createReadModel({ dataDir, clock: () => now });
     push(outage, start + 610);
     for (const m of [model, createReadModel({ dataDir, clock: () => now })]) {

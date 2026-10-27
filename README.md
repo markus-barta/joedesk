@@ -1218,7 +1218,7 @@ sums or percentage bars. Independent exact siblings stay usable. Recovery
 shows the new exact observation. Withholding derived amounts preserves value-free
 health evidence: retained equity keeps the existing five-minute yellow grace,
 while missing or older equity and higher-priority health failures keep their
-existing red rules. Existing caption reserves and CSS are unchanged;
+existing red rules. Existing caption reserves stay fixed;
 rendered pixel verification remains a coordinator gate. This board-only policy
 does not change revision 10 or require producer re-vendoring.
 When Today is a broken dash, its local caption states the reason unless the
@@ -1229,8 +1229,13 @@ Release 34 (JOED-93 follow-up: JOED-98/94/95) also treats revision-9
 `baseline_pending` and `day_pnl_unavailable` as missing exactness, never as
 last-good. The server clears the cell's durable last-good when any of these
 six reasons arrives, even alongside a value or behind another reason; only
-a new exact observation restores retention. Startup also checks the latest
-snapshot and each stored last-good's own reason and saved Today source reason.
+a new exact observation restores retention. Startup checks the latest snapshot.
+On first load of a pre-release-34 store (Today cells have no `valueSource` key),
+the server also drops kept day/equity last-goods: release 33 stored only
+`{value, valueReceivedAt}`, so their historical exactness cannot be proven.
+This one-time cleanup costs at most 60 minutes of last-good display. It is
+persisted immediately with explicit Today provenance keys; current observations,
+unrelated cells and sequence metadata survive, and new exact values retain normally.
 The board withholds current scoped exactness failures even when gateway or
 feed failures mask their reason; historical exactness is enforced by the server.
 Today belongs to the observation's America/New_York date: a missing baseline,
@@ -1244,8 +1249,15 @@ without changing the producer contract. Session-open estimates say **Estimated**
 phone desk Today figures, with the hero's full explanation in the accessible
 label, without repeating “Today” in the phone row's accessible name. A retained
 estimate keeps its mark during an outage. Marks use 10 px text with space
-reserved in the existing label line. They have no hover title. Money and target
-geometry stay fixed; CI checks exact/estimate transitions at 390/1024/1440 in both themes.
+reserved in the label. Desktop cards keep the mark beside Today; expanded
+phone cards reserve a 30 px label box in every state and put the mark below
+Today, keeping it clear of the state icon at 360 px. The compact phone Today column is 96 px (48 px for
+the mark, 48 px for Today plus its state icon), taking 14 px from the flexible
+identity column; Since start stays 82 px. They have no hover title. Detail values
+and dashes use the same 26 px block flex box, avoiding the inline money baseline's
+extra 4 px. Money and target geometry stay fixed across states; CI checks
+exact/estimate transitions at 360/390/1024/1440 and stale/kept estimates at
+360/390, in both themes and normal/wide fonts, against the complete label content.
 
 | Field | JOED-86 emission rule |
 | --- | --- |

@@ -44,7 +44,8 @@ test('JOED-98: current scoped exactness failures withhold values even when the g
     data.brokerAccount.equity = data.brokerAccount.cash = null;
     data.brokerAccount.reason = reason; data.brokerAccount.reasons = { cash: reason };
     data.safety.gateway.apiSessionReady = false; data.safety.gateway.reason = 'gateway_down';
-    // Production passes the server's selection for this same snapshot.
+    // Exercise the board's own guard; production's server already clears
+    // these last-good cells before passing its selection to the board.
     const prior = panelStates({ data: { value: data } }, at(30), previous);
     const states = boardStates({ data: { value: data } }, at(600), prior);
     for (const name of ['paperAccount', 'paperCash', ...MONEY_FIELDS.flatMap(f => DESKS.map(id => `desks.${id}.${f}`))]) {

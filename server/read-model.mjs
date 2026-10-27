@@ -22,7 +22,7 @@ const failed = (status, reason) => ({ ok: false, status, reason });
 // Board retention policy, independent of the immutable rev-10 selector.
 // Keep aligned with public/joe/board-state.js, including rev-9 missing SOD.
 const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale', 'baseline_pending', 'day_pnl_unavailable']);
-function exactnessFailure(data, name, cell = {}) {
+function exactnessFailure(data, name) {
   const field = name.split('.').at(-1);
   const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
   const bag = desk?.money ?? data?.totals;
@@ -31,7 +31,7 @@ function exactnessFailure(data, name, cell = {}) {
     : name === 'paperCash' ? [data?.brokerAccount?.reasons?.cash]
       : ['positions', 'kept'].includes(name) ? [data?.positions?.reason]
         : [bag?.reasons?.[field], period ? (desk?.pnlSources?.[period] ?? data?.pnlSources?.[period])?.reason : null];
-  return [cell.reason, cell.valueSource?.reason, ...reasons].some(reason => NOT_EXACT_REASONS.has(reason));
+  return reasons.some(reason => NOT_EXACT_REASONS.has(reason));
 }
 function daySource(data, name) {
   const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
@@ -90,11 +90,23 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
           !validInstant(state.gatewayProgress.advancedAt) || !Number.isFinite(state.gatewayProgress.initialAgeMs) || state.gatewayProgress.initialAgeMs < 0))) {
       throw new Error('contract_invalid');
     }
-    // Older stores may have saved an explicitly uncertain observation. The
-    // latest snapshot and each stored last-good are independent evidence:
-    // a later outage must not mask an exactness reason on the stored cell.
-    for (const name of DATA_PANELS) if (exactnessFailure(state.feed.value, name, state.cells[name])) {
+    // Pre-34 stores have no Today provenance and cannot prove the exactness
+    // of last-goods hidden by a later outage. Drop kept day/equity once,
+    // preserving current observations, receipt/sequence and unrelated cells.
+    const dayPanels = DATA_PANELS.filter(name => name.endsWith('.dayPnl'));
+    const legacyLastGoods = dayPanels.every(name => !Object.hasOwn(state.cells[name], 'valueSource'));
+    const selected = legacyLastGoods ? panelStates({ data: state.feed }, clock(), state.cells) : null;
+    for (const name of DATA_PANELS) if (exactnessFailure(state.feed.value, name) ||
+        (legacyLastGoods && /\.(?:dayPnl|equity)$/.test(name) && selected[name].retained)) {
       state.cells[name] = { value: null, valueReceivedAt: null };
+    }
+    if (legacyLastGoods) {
+      // Explicit null provenance marks the upgraded shape, even when all
+      // Today cells are empty. Persist before serving; a restart cannot undo it.
+      for (const name of dayPanels) Object.assign(state.cells[name], {
+        valueObservedAt: state.cells[name].valueReceivedAt, valueSource: null,
+      });
+      write(stateFile, state, STATE_CAP);
     }
   } catch (error) { state = null; if (!isMissing(error)) { storageInvalid = true; rejections.data = 'contract_invalid'; } }
   try {
@@ -224,7 +236,8 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       const cell = selected[name];
       // Even value + reason is legal in rev 9 for some fields. It is never
       // last-good, and must invalidate an older exact observation too.
-      if (exactnessFailure(accepted.value, name, cell)) return [name, { value: null, valueReceivedAt: null }];
+      if (exactnessFailure(accepted.value, name)) return [name, { value: null, valueReceivedAt: null,
+        ...(name.endsWith('.dayPnl') ? { valueObservedAt: null, valueSource: null } : {}) }];
       return [name, { value: cell.value ?? null, valueReceivedAt: cell.valueReceivedAt ?? null,
         ...(name.endsWith('.dayPnl') ? { valueObservedAt: cell.retained ? state?.cells[name]?.valueObservedAt ?? cell.valueReceivedAt
           : dayObservedAt(accepted.value, name),
