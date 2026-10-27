@@ -95,18 +95,22 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     // preserving current observations, receipt/sequence and unrelated cells.
     const dayPanels = DATA_PANELS.filter(name => name.endsWith('.dayPnl'));
     const legacyLastGoods = dayPanels.every(name => !Object.hasOwn(state.cells[name], 'valueSource'));
-    const selected = legacyLastGoods ? panelStates({ data: state.feed }, clock(), state.cells) : null;
     for (const name of DATA_PANELS) if (exactnessFailure(state.feed.value, name) ||
-        (legacyLastGoods && /\.(?:dayPnl|equity)$/.test(name) && selected[name].retained)) {
+        (legacyLastGoods && /\.(?:dayPnl|equity)$/.test(name) && state.cells[name].value != null &&
+          state.cells[name].valueReceivedAt !== state.feed.value.receivedAt)) {
       state.cells[name] = { value: null, valueReceivedAt: null };
     }
     if (legacyLastGoods) {
-      // Explicit null provenance marks the upgraded shape, even when all
-      // Today cells are empty. Persist before serving; a restart cannot undo it.
+      // Explicit provenance keys mark the upgraded shape, even when all
+      // Today cells are empty. Current observations keep their source and date.
       for (const name of dayPanels) Object.assign(state.cells[name], {
-        valueObservedAt: state.cells[name].valueReceivedAt, valueSource: null,
+        valueObservedAt: state.cells[name].value == null ? null : dayObservedAt(state.feed.value, name),
+        valueSource: state.cells[name].value == null ? null : daySource(state.feed.value, name),
       });
-      write(stateFile, state, STATE_CAP);
+      // Best effort: keep the cleaned memory if storage fails. The next
+      // accepted snapshot persists it; otherwise next boot repeats the clean.
+      try { write(stateFile, state, STATE_CAP); }
+      catch { console.error('read-model: upgrade_write_failed'); }
     }
   } catch (error) { state = null; if (!isMissing(error)) { storageInvalid = true; rejections.data = 'contract_invalid'; } }
   try {

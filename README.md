@@ -1231,11 +1231,14 @@ last-good. The server clears the cell's durable last-good when any of these
 six reasons arrives, even alongside a value or behind another reason; only
 a new exact observation restores retention. Startup checks the latest snapshot.
 On first load of a pre-release-34 store (Today cells have no `valueSource` key),
-the server also drops kept day/equity last-goods: release 33 stored only
-`{value, valueReceivedAt}`, so their historical exactness cannot be proven.
-This one-time cleanup costs at most 60 minutes of last-good display. It is
-persisted immediately with explicit Today provenance keys; current observations,
-unrelated cells and sequence metadata survive, and new exact values retain normally.
+the server also drops non-null day/equity cells from earlier receipts: release 33
+stored only `{value, valueReceivedAt}`, so their historical exactness cannot be proven.
+This one-time cleanup costs at most 60 minutes of last-good display. The server
+attempts to persist it at startup with explicit Today provenance keys. If that
+write fails, it logs a value-free line and keeps serving the cleaned in-memory
+store; the next accepted snapshot persists the cleanup, or the next boot repeats
+it. Current observations keep their Today source and observation date; unrelated
+cells and sequence metadata survive, and new exact values retain normally.
 The board withholds current scoped exactness failures even when gateway or
 feed failures mask their reason; historical exactness is enforced by the server.
 Today belongs to the observation's America/New_York date: a missing baseline,

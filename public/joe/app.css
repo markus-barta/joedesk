@@ -1142,9 +1142,9 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .disclosure-body { display: block; }
   /* Header queries use the padded detail width, as the original card did. */
   .desk-detail { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 14px; container-type: inline-size; }
-  /* At 360 px the detail's equal columns cannot fit Today, an icon and
-     Estimated on one line. Reserve a second label line in every state. */
-  .desk-detail .dnums .k { height: 30px; padding-right: 0; }
+  /* The phone Today column cannot fit its label, icon and Estimated on one
+     line. Reserve a second label line in every state, keeping its padding. */
+  .desk-detail .dnums .k { height: 30px; }
   .desk-detail .dnums .estimate-mark { top: auto; bottom: 0; left: 0; right: auto; transform: none; }
   #accountDetail { padding: 0 12px 12px; }
   /* Two 18 px state lines plus the pstate's 12 px padding, even when empty.

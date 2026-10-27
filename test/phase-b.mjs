@@ -7,6 +7,7 @@ import { acceptSnapshot } from '../contracts/accept.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { createReadModel } from '../server/read-model.mjs';
+import { atomicWrite } from '../server/storage.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { scenario, NOW, at, advance } from '../scripts/browser/board.mjs';
@@ -20,6 +21,14 @@ const read = name => JSON.parse(readFileSync(new URL(`../fixtures/${name}.json`,
 const { exact, mixed } = read('phase-b');
 const fields = ['equity', 'dayPnl', 'openPnl', 'totalPnl'];
 const ingress = value => { const data = structuredClone(value); delete data.receivedAt; return data; };
+const release33Store = file => {
+  const stored = JSON.parse(readFileSync(file));
+  for (const [name, cell] of Object.entries(stored.cells)) stored.cells[name] = {
+    value: cell.value, valueReceivedAt: cell.valueReceivedAt,
+  };
+  writeFileSync(file, JSON.stringify(stored));
+  return stored;
+};
 const context = data => {
   const feeds = { data: { value: data } }, now = data.receivedAt;
   return { feeds, now, states: panelStates(feeds, now) };
@@ -108,6 +117,119 @@ test('JOED-97 L2: first load of a release-33 store drops kept day/equity once, i
   model = createReadModel({ dataDir, clock: () => now });
   assert.equal(readFileSync(file, 'utf8'), recoveredBytes, 'release-34 provenance prevents another cleanup');
   for (const name of cleared) assert.notEqual(model.panels()[name].value, null, 'new exact values retain normally after upgrade');
+});
+
+for (const committed of [false, true]) test(`JOED-97 fix3 L1: upgrade write failure (committed=${committed}) keeps the cleaned store and accepts snapshots`, async t => {
+  const dataDir = scratch('joed-97-upgrade-write-');
+  t.after(() => discard(dataDir, 'JOED-97 upgrade write failure'));
+  let now = exact.receivedAt;
+  let model = createReadModel({ dataDir, clock: () => now });
+  assert.equal(model.accept(ingress(exact)).status, 200);
+  const outage = ingress(exact); outage.seq++;
+  now = outage.generatedAt = outage.safety.gateway.checkedAt = at(now, 20);
+  for (const bag of [outage.totals, ...outage.desks.map(d => d.money)]) {
+    bag.dayPnl = bag.equity = null;
+    bag.reasons = { dayPnl: 'source_unavailable', equity: 'source_unavailable' };
+  }
+  for (const sources of [outage.pnlSources, ...outage.desks.map(d => d.pnlSources)]) {
+    Object.assign(sources.day, { status: 'unavailable', method: null, observedAt: null, reason: 'source_unavailable' });
+  }
+  assert.equal(model.accept(outage).status, 200);
+  const file = join(dataDir, 'data-state.json'), legacy = release33Store(file);
+  const dropped = Object.keys(legacy.cells).filter(name => /\.(?:dayPnl|equity)$/.test(name));
+  for (const name of dropped) assert.notEqual(legacy.cells[name].value, null, 'fixture has an older last-good');
+  const logs = [], logger = t.mock.method(console, 'error', (...args) => logs.push(args));
+  let writes = 0;
+  model = createReadModel({ dataDir, clock: () => now, write: (...args) => {
+    if (++writes === 1) {
+      if (committed) atomicWrite(...args);
+      throw Object.assign(new Error('private write detail must not be logged'), { committed });
+    }
+    return atomicWrite(...args);
+  } });
+  logger.mock.restore();
+  assert.deepEqual(logs, [['read-model: upgrade_write_failed']], 'one value-free diagnostic');
+  assert.deepEqual(model.view().feeds.data.value, legacy.feed.value, 'valid snapshot stays loaded');
+  assert.equal(model.view().feeds.data.reason, null);
+  for (const name of dropped) assert.equal(model.panels()[name].value, null, 'cleaned memory survives the failure');
+  assert.deepEqual(model.panels()['desks.j.openPnl'].value, legacy.cells['desks.j.openPnl'].value);
+  now = outage.generatedAt = outage.safety.gateway.checkedAt = at(now, 20); outage.seq++;
+  assert.equal(model.accept(outage).status, 200, 'upgrade failure does not block acceptance');
+  const persisted = JSON.parse(readFileSync(file));
+  for (const name of dropped) assert.equal(persisted.cells[name].value, null, 'next acceptance persists the cleaned cells');
+  model = createReadModel({ dataDir, clock: () => now });
+  assert.equal(model.view().feeds.data.value.seq, outage.seq);
+  for (const name of dropped) assert.equal(model.panels()[name].value, null, 'dropped cells stay gone after restart');
+});
+
+test('JOED-97 fix3 L2: legacy cleanup uses receipt identity independently of clock and gateway progress', async t => {
+  const dataDir = scratch('joed-97-upgrade-receipts-');
+  t.after(() => discard(dataDir, 'JOED-97 receipt cleanup'));
+  let now = exact.receivedAt;
+  const model = createReadModel({ dataDir, clock: () => now });
+  assert.equal(model.accept(ingress(exact)).status, 200);
+  const skewed = ingress(exact); skewed.seq++;
+  skewed.generatedAt = at(now, 1); // advancing producer, frozen gateway check
+  now = at(now, 61);
+  assert.equal(model.accept(skewed).status, 200);
+  assert.equal(model.panels()['today.dayPnl'].reason, 'gateway_unconfirmed');
+  assert.equal(model.panels()['today.dayPnl'].valueReceivedAt, exact.receivedAt);
+  const file = join(dataDir, 'data-state.json'), legacy = release33Store(file);
+  // A current observation must survive even if the boot clock is regressed
+  // or a session problem would make the live selector call it retained.
+  const current = 'desks.j.equity';
+  legacy.cells[current].valueReceivedAt = legacy.feed.value.receivedAt;
+  for (const bootTime of [exact.receivedAt, now, at(now, 3600)]) {
+    writeFileSync(file, JSON.stringify(legacy));
+    let clockCalls = 0;
+    createReadModel({ dataDir, clock: () => { clockCalls++; return bootTime; } });
+    assert.equal(clockCalls, 0, 'startup cleanup never consults the clock');
+    const upgraded = JSON.parse(readFileSync(file));
+    assert.deepEqual(upgraded.feed, legacy.feed);
+    assert.deepEqual(upgraded.gatewayProgress, legacy.gatewayProgress);
+    assert.deepEqual(upgraded.cells[current], legacy.cells[current], 'current receipt survives');
+    for (const name of Object.keys(legacy.cells).filter(name => /\.(?:dayPnl|equity)$/.test(name) && name !== current)) {
+      assert.equal(upgraded.cells[name].value, null, name);
+      assert.equal(upgraded.cells[name].valueReceivedAt, null, name);
+    }
+    assert.deepEqual(upgraded.cells['desks.j.openPnl'], legacy.cells['desks.j.openPnl'], 'unrelated last-good survives');
+  }
+});
+
+test('JOED-97 fix3 L2: upgrading a current legacy Today estimate preserves its source, date and next-outage mark', async t => {
+  const dataDir = scratch('joed-97-upgrade-estimate-');
+  t.after(() => discard(dataDir, 'JOED-97 legacy estimate'));
+  const fixture = read('failures/b-session-open-estimate');
+  let now = at(fixture.receivedAt, 5);
+  let model = createReadModel({ dataDir, clock: () => now });
+  assert.equal(model.accept(fixture.payload).status, 200);
+  const file = join(dataDir, 'data-state.json'), legacy = release33Store(file);
+  model = createReadModel({ dataDir, clock: () => now });
+  const upgraded = JSON.parse(readFileSync(file));
+  for (const name of Object.keys(upgraded.cells).filter(name => name.endsWith('.dayPnl'))) {
+    assert.deepEqual(upgraded.cells[name].value, legacy.cells[name].value);
+    assert.equal(upgraded.cells[name].valueReceivedAt, now);
+    assert.equal(upgraded.cells[name].valueObservedAt, fixture.payload.pnlSources.day.observedAt);
+    assert.deepEqual(upgraded.cells[name].valueSource, fixture.payload.pnlSources.day);
+  }
+  const outage = structuredClone(fixture.payload); outage.seq++;
+  now = outage.generatedAt = outage.safety.gateway.checkedAt = at(now, 20);
+  for (const bag of [outage.totals, ...outage.desks.map(d => d.money)]) {
+    bag.dayPnl = null; (bag.reasons ??= {}).dayPnl = 'source_unavailable';
+  }
+  Object.assign(outage.pnlSources.day, { status: 'unavailable', observedAt: null, reason: 'source_unavailable' });
+  assert.equal(model.accept(outage).status, 200);
+  model = createReadModel({ dataDir, clock: () => now });
+  const view = model.view(), ctx = { feeds: view.feeds, now, states: boardStates(view.feeds, now, view.panels) };
+  for (const id of ['j', 'joe', 'joel']) {
+    const cell = ctx.states[`desks.${id}.dayPnl`];
+    assert.equal(cell.retained, true);
+    assert.equal(cell.valueObservedAt, fixture.payload.pnlSources.day.observedAt);
+    assert.deepEqual(cell.valueSource, fixture.payload.pnlSources.day);
+    for (const html of [deskCard(ctx, id, 50, true), compactDesk(ctx, id)]) {
+      assert.equal(htmlDocument(html).querySelectorAll('.estimate-mark').length, 1);
+    }
+  }
 });
 
 test('JOED-97 L4: retained estimates keep their original source and mark through outage and restart, until expiry or exact recovery', async t => {
