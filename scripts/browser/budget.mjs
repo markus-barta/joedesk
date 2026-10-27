@@ -16,7 +16,8 @@ export const CI_GUARD = Object.freeze({ name: 'CI guard, 2.5 × the reference bu
   historyMs: 2.5 * REFERENCE_BUDGET.historyMs, taskMs: 2.5 * REFERENCE_BUDGET.taskMs, atMost: true });
 
 const max = list => (list.length ? Math.max(...list) : NaN);
-// renderBudget is the cold History draw; historyBudget is its live update.
+// renderBudget is the cold History draw or a Results switch;
+// historyBudget is History's live update.
 export const TIMING_GUARDS = Object.freeze(['patchBudget', 'historyBudget', 'renderBudget', 'taskBudget']);
 
 // Only CI may repeat when every failed condition is a timing guard. The
