@@ -11,6 +11,7 @@ import { CI_GUARD, REFERENCE_BUDGET, TIMING_GUARDS, decideTaskGuard, runBudget, 
 import { createGate } from '../scripts/browser/gate.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 import './browser-settled.mjs';
+import './browser-group-timing.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))

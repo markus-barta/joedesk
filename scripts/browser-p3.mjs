@@ -15,6 +15,7 @@ import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/bu
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { phaseBChecks } from './browser/phase-b.mjs';
+import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
 
 // The page's own history model, for the values its sparklines must plot. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -39,6 +40,7 @@ const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-
 mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
 const { results, shots, check, shot, auditScreen } = createGate(QA_DIR);
+const timing = createGroupTiming({ results, shots });
 const SHIFT_SELECTORS = ['header.top', '#statusAlert', '#deskHero', '.hero-primary', '#accountSection', '.hero-r', '.desk-row', '#heroL .primary', '#heroL .pct-slot', '#heroL .board-caption', '#heroL .kpi', '#heroL .display', '.dcard', '.dcard .dnums > div', '.dcard .chart', '#positions', '.prow', '#kept', 'footer.foot'];
 
 // Original checks read complete cards, charts and rows. Open their actual
@@ -380,7 +382,11 @@ async function resultsChecks(page, viewport, theme) {
 // JOED_P3_ONLY=journey,cold runs only those sections (local iteration); the
 // gate itself always runs everything.
 const ONLY = (process.env.JOED_P3_ONLY ?? '').split(',').filter(Boolean);
-const run = name => !ONLY.length || ONLY.includes(name);
+const run = name => {
+  const selected = !ONLY.length || ONLY.includes(name);
+  if (selected) timing.enter(name);
+  return selected;
+};
 
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
 // The performance reference: this browser build on this machine, recorded with every trace.
@@ -1436,9 +1442,11 @@ try {
   }
   }
 } finally {
+  timing.enter('cleanup');
   await browser.close();
   for (const b of boards) await b.close();
 }
+const timePerGroup = groupTimingTable(timing.finish());
 
 const failed = results.filter(r => !r.ok);
 const byAc = new Map();
@@ -1520,6 +1528,9 @@ ${budgetTrace ? budgetTable(budgetTrace, CI_GUARD) : 'Not run.\n'}
 ## Screenshots (\`<viewport>-<theme>-<surface>.png\`)
 
 ${shots.map(s => `- \`${s.file}\` — ${s.what}`).join('\n')}
+
+${timePerGroup}
 `);
 console.log(`${results.length - failed.length}/${results.length} browser checks passed; screenshots and index.md in ${QA_DIR}`);
+console.log(timePerGroup);
 process.exit(failed.length ? 1 : 0);

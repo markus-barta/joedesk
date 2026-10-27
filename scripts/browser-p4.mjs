@@ -18,6 +18,7 @@ import { startBoard, scenario, NOW, at, ACTOR, valid, measureHistory } from './b
 import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './browser/shots.mjs';
 import { setDeskDisclosures } from './browser/desk-disclosures.mjs';
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
+import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
 import { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } from './browser/results.mjs';
@@ -76,6 +77,7 @@ const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-
 mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
 const { results, shots, check: gateCheck, shot, auditScreen: gateAuditScreen } = createGate(QA_DIR);
+const timing = createGroupTiming({ results, shots });
 const check = (ac, name, ok, detail) => {
   viewRecorder.record();
   gateCheck(ac, name, ok, detail);
@@ -90,7 +92,9 @@ const auditScreen = async (...args) => {
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const run = name => {
   if (!P4_SCENARIOS.some(s => s.name === name)) throw new Error(`Undeclared P4 scenario: ${name}`);
-  return selectedNames.has(name);
+  const selected = selectedNames.has(name);
+  if (selected) timing.enter(name);
+  return selected;
 };
 
 const N = text => String(text ?? '').replace(/[\s \u00ad]+/g, '');
@@ -419,6 +423,7 @@ async function designBoard(now = NOW, fleetConfig = null, edit = null) {
 const reset = async () => { for (const s of ['#periodSeg [data-period="week"]', '#deskSeg [data-desk="all"]']) await click(page, s); };
 
 try {
+  timing.enter('host-timezone');
   requireView('host-timezone', 'hosts');
   check('host-timezone', 'the server uses the requested host zone', hostTimeZone === expectedTimeZone, { hostTimeZone, expectedTimeZone });
   const pageTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone');
@@ -2517,14 +2522,17 @@ try {
     if (!view('budget', 'render')) throw new Error('Budget view must run in full mode');
     budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
   }
+  timing.enter('host-timezone');
   requireView('host-timezone', 'hosts');
   if (process.env.TZ) check('host-timezone', 'dedicated workers use the requested host zone',
     page.workerTimeZones.length > 0 && page.workerTimeZones.every(zone => zone === expectedTimeZone),
     { workerTimeZones: page.workerTimeZones, expectedTimeZone });
 } finally {
+  timing.enter('cleanup');
   await browser.close();
   for (const b of boards) await b.close();
 }
+const timePerGroup = groupTimingTable(timing.finish());
 
 const failed = results.filter(r => !r.ok);
 const inventoryErrors = viewRecorder.errors();
@@ -2775,6 +2783,9 @@ ${budgetTrace ? resultsBudgetTable(budgetTrace, CI_GUARD) : 'Not run.\n'}
 ## Screenshots (\`<viewport>-<theme>-<surface>.png\`)
 
 ${shots.map(s => `- \`${s.file}\` — ${s.what}`).join('\n')}
+
+${timePerGroup}
 `);
 console.log(`${results.length - failed.length}/${results.length} browser checks passed; screenshots and index.md in ${QA_DIR}`);
+console.log(timePerGroup);
 process.exit(failed.length || inventoryErrors.length ? 1 : 0);
