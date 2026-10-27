@@ -46,6 +46,6 @@ Wall time: ${seconds(totalMs)} s (setup through cleanup). Repeated blocks are su
 
 | Group | Seconds | Checks | Screenshots | Share |
 | --- | ---: | ---: | ---: | ---: |
-${groups.map(g => `| ${g.name} | ${seconds(g.ms)} | ${g.checks} | ${g.screenshots} | ${(totalMs ? g.ms / totalMs * 100 : 0).toFixed(1)}% |`).join('\n')}
+${groups.map(g => `| ${g.name} | ${seconds(g.ms)} | ${g.checks} | ${g.screenshots} | ${totalMs ? `${(g.ms / totalMs * 100).toFixed(1)}%` : '—'} |`).join('\n')}
 `;
 }

@@ -463,9 +463,10 @@ names the device. CI runners are slower and vary from run to run, so CI
 enforces a regression guard of 2.5 × the reference budget on the same
 workload (`scripts/browser/budget.mjs`): a normal patch at most 40 ms, a
 History draw at most 125 ms, no task reaching 125 ms.
-The Board and Results CI guards re-measure a viewport once only when every
-failed condition is a render-time or long-task limit. The second measurement
-is final; a reproduced breach or any functional failure still fails. Both
+The Board and Results CI guards re-measure once per viewport (the Board:
+per viewport and phase), only when every failed condition is a render-time
+or long-task limit. The second measurement is final; a reproduced breach or
+any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
 40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
 and render-count failures never trigger a re-measure. The reference budget

@@ -106,7 +106,7 @@ test('group timing: zero wall time is finite and finish fixes the reporting boun
   const timing = createGroupTiming({ results: [], shots: [], now: () => clock });
   timing.enter('empty');
   const report = timing.finish();
-  assert.match(groupTimingTable(report), /\| empty \| 0\.000 \| 0 \| 0 \| 0\.0% \|/);
+  assert.match(groupTimingTable(report), /\| empty \| 0\.000 \| 0 \| 0 \| — \|/);
   assert.doesNotMatch(groupTimingTable(report), /NaN|Infinity/);
   clock = 9999;
   assert.strictEqual(timing.finish(), report);

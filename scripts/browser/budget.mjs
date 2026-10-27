@@ -43,7 +43,7 @@ export async function runBudget({ page, newBoard, check, limits }) {
       // attribution so the failure log's detail limit cannot hide either one.
       ...(row.attemptRows ? { measurements: row.attemptRows.map(r => ({ attempt: r.attempt,
         patchMs: r.deskWorst ?? null, historyMs: r.historyWorst ?? r.renderWorst,
-        taskMs: r.longTasks.length ? max(r.longTasks) : 0 })) } : {}),
+        taskMs: r.longTasks.length ? max(r.longTasks) : null })) } : {}),
       offendingTasks: row.longTaskDetails?.filter(t => t.duration >= limits.taskMs), ...row });
   };
   const traces = [];
@@ -183,8 +183,8 @@ export async function runBudget({ page, newBoard, check, limits }) {
 export function budgetTable(traces, limits) {
   const guard = limits.taskMs > 50;
   const remeasured = traces.some(r => r.remeasured);
-  return `| Width | Phase |${remeasured ? ' Attempt |' : ''} Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ ${limits.taskMs} ms |` : ''}
-| --- | --- |${remeasured ? ' --- |' : ''} --- | --- | --- | --- |${guard ? ' --- |' : ''}
-${traces.map(r => `| ${r.viewport} | ${r.phase} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |` : ''} ${r.deskWorst?.toFixed?.(1) ?? '—'} | ${(r.historyWorst ?? r.renderWorst)?.toFixed(1)} | ${(r.workerWorst ?? r.workerRead)?.toFixed(1)} | ${r.longTasks.length} |${guard ? ` ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |` : ''}`).join('\n')}
+  return `| Width | Phase |${remeasured ? ' Attempt |' : ''} Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long task worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ ${limits.taskMs} ms |` : ''}
+| --- | --- |${remeasured ? ' --- |' : ''} --- | --- | --- | --- | --- |${guard ? ' --- |' : ''}
+${traces.map(r => `| ${r.viewport} | ${r.phase} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |` : ''} ${r.deskWorst?.toFixed?.(1) ?? '—'} | ${(r.historyWorst ?? r.renderWorst)?.toFixed(1)} | ${(r.workerWorst ?? r.workerRead)?.toFixed(1)} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} |${guard ? ` ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |` : ''}`).join('\n')}
 `;
 }

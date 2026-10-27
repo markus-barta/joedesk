@@ -13,6 +13,8 @@ import { createGate } from '../scripts/browser/gate.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 import './browser-settled.mjs';
 import './browser-group-timing.mjs';
+import './theme-geometry.mjs';
+import './board-sweep-plan.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -1588,7 +1590,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
       if (source.includes('tasks: window.__budgetTasks.snapshot()')) {
         const task = { startTime: phase === 'cold' ? 210 : 150, duration: sample.taskMs ?? 60, attribution: [] };
         return { timings: [...timings('history-worker', 3, 10), ...timings('history', 3, sample.historyMs ?? 10)],
-          tasks: { tasks: [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400 };
+          tasks: { tasks: sample.taskMs === null ? [] : [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400 };
       }
       if (source.includes('timings.splice(0)')) {
         reads++;
@@ -1850,6 +1852,26 @@ test('Results budget: attempts are independent per viewport and both measurement
   assert.equal(messages.length, 2);
   for (const message of messages) assert.match(message,
     /"measurements":\[\{"attempt":1,"switchMs":42\.5,"taskMs":155\},\{"attempt":2,"switchMs":41\.2,"taskMs":140\}\]/);
+});
+
+test('browser budgets: absent long-task duration is null in both attempts and a dash in tables', async () => {
+  const board = await simulatedBudget({ cold: [{ historyMs: 126, taskMs: null }, { taskMs: null }],
+    live: [{ patchMs: 41, taskMs: null }, { taskMs: null }] });
+  const results = await simulatedResultsBudget({ samples: { 1024: [{ switchMs: 42.5 }, {}] } });
+  assert.deepEqual(board.loads, { cold: 2, live: 2 });
+  assert.deepEqual(results.loads, { 1024: 2 });
+  for (const run of [board, results]) {
+    assert.ok(run.checks.every(c => c.ok));
+    const measurements = run.checks.flatMap(c => c.detail.measurements ?? []);
+    assert.ok(measurements.length > 0);
+    assert.ok(measurements.every(m => m.taskMs === null));
+    assert.ok(run.traces.every(r => r.longTasks.length === 0));
+  }
+  for (const table of [budgetTable(board.traces, CI_GUARD), resultsBudgetTable(results.traces, CI_GUARD)]) {
+    assert.match(table, /Long task worst \(ms\)/);
+    const rows = table.trim().split('\n').slice(2);
+    assert.ok(rows.every(row => /\| — \| 0 \| 0 \|$/.test(row)), table);
+  }
 });
 
 test('browser budget: observer snapshots drain undelivered entries once, with attribution and optional frame support', () => {

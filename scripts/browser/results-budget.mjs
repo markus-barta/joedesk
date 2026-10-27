@@ -82,7 +82,7 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve })
         check('budget', label, !failed.length, { failed, conditions,
           // Keep both concise samples ahead of potentially large task lists.
           ...(decision.remeasured ? { measurements: rows.map(r => ({ attempt: r.attempt,
-            switchMs: r.switchWorst, taskMs: r.longTasks.length ? max(r.longTasks) : 0 })) } : {}),
+            switchMs: r.switchWorst, taskMs: r.longTasks.length ? max(r.longTasks) : null })) } : {}),
           ...rows.at(-1), ...(decision.remeasured ? { attemptRows: rows } : {}) });
       }
     }
@@ -92,8 +92,8 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve })
 
 export function resultsBudgetTable(traces, limits) {
   const remeasured = traces.some(r => r.remeasured);
-  return `| Width | Record |${remeasured ? ' Attempt |' : ''} Results render worst (ms) | Renders | Long tasks (≥ 50 ms) | Tasks ≥ ${limits.taskMs} ms |
-| --- | --- |${remeasured ? ' --- |' : ''} --- | --- | --- | --- |
-${traces.map(r => `| ${r.viewport} | ${r.phase} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |` : ''} ${r.switchWorst.toFixed(1)} | ${r.switches} | ${r.longTasks.length} | ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |`).join('\n')}
+  return `| Width | Record |${remeasured ? ' Attempt |' : ''} Results render worst (ms) | Renders | Long task worst (ms) | Long tasks (≥ 50 ms) | Tasks ≥ ${limits.taskMs} ms |
+| --- | --- |${remeasured ? ' --- |' : ''} --- | --- | --- | --- | --- |
+${traces.map(r => `| ${r.viewport} | ${r.phase} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |` : ''} ${r.switchWorst.toFixed(1)} | ${r.switches} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} | ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |`).join('\n')}
 `;
 }
