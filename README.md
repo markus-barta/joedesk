@@ -556,18 +556,41 @@ the timing table. `scripts/browser/group-timing.mjs` exposes
 `createGroupTiming({ results, shots, now? })` with `enter(name)` and `finish()`,
 plus `groupTimingTable(report)`. Its fake-clock tests run directly with
 `node --test test/browser-group-timing.mjs` and through `test/ui-modules.mjs`.
+
+The Board width sweep defaults to `--full`: both themes, both fonts and all
+four screens at every 10 px from 360 to 1440 plus the code-derived boundary widths (116 widths total). CI PRs pass `--subset`: light
+keeps the full grid and dark uses the code-derived viewport breakpoints and
+their ±10 px neighbors, plus 360/1024/1440. Pushes to main and manual dispatch
+keep `--full`. Both plans retain 137 sweep checks and six screenshots; the
+resize/measure rounds are 1,856 full and 1,088 subset with the current code.
+`scripts/board-sweep-plan.mjs` derives boundaries from `app.css` viewport
+`@media` queries, `public/joe/*.js` `matchMedia` queries and P3's `COMPACT`.
+The 339.98 px card container query and history.js clientWidth thresholds describe elements rather than viewports;
+the full light grid still covers their geometry. Every run's QA index records
+the plan and actual selected widths, including when `JOED_P3_ONLY` skips the
+sweep. Checks keep their full-grid inventory names across plans; execution
+reconciliation verifies checks, captures and each theme/font/screen/width.
+`test/theme-geometry.mjs` statically enforces theme-independent geometry:
+colour/shadow tokens may only feed painting, with two named exceptions for
+the root `color-scheme` palette hint and the equal-size sun/moon swap.
+It and `test/board-sweep-plan.mjs` join the existing UI unit suite.
+
 The budget trace keeps timestamped long-task attribution, overlapping render
 and worker-reply events, and long-animation-frame script/layout attribution
 where supported. Desk and History live-push windows begin after their setup
 settles; setup tasks remain in the trace separately, and tasks crossing into
 an update window still count. The CI guard remains 125 ms (2.5 × reference).
-The Board and Results CI guards re-measure a viewport once only when every
-failed condition is a render-time or long-task limit. The second measurement
-is final; a reproduced breach or any functional failure still fails. Both
+The Board and Results CI guards re-measure once per viewport (the Board:
+per viewport and phase), only when every failed condition is a render-time
+or long-task limit. The second measurement is final; a reproduced breach or
+any functional failure still fails. Both
 attempts appear in the trace, table and failure detail. Results keeps its
 40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
 and render-count failures never trigger a re-measure. The reference budget
 never re-measures and its limits stay unchanged.
+When no long task was observed, concise attempt diagnostics report
+`taskMs: null`; tables show “—” for the worst long-task duration, while the
+task count remains zero. A zero-duration group's share is also “—”.
 Term-focus checks reacquire rebuilt terms and wait up to 2 s for each term's
 own tip and expanded state. The large-ledger Settings check waits up to 5 s
 for its exact-byte title and accessible name before measuring containment.
