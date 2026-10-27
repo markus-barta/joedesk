@@ -12,7 +12,7 @@ import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
 import { STARTING_MONEY, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
-import { outageValue } from './board-state.js';
+import { outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -157,7 +157,7 @@ export function cellView(cell, key, { signed = true, caption = '', sharedReason 
 export function boardCaptionCell(ctx) {
   const data = ctx.feeds.data?.value;
   if (!data || !ctx.now) return null;
-  const cell = panelState(ctx.feeds.data, data, null, ctx.now);
+  const cell = withGenerationAge(panelState(ctx.feeds.data, data, null, ctx.now), ctx.feeds.data, ctx.now);
   return cell.state === 'fresh' ? null : cell;
 }
 export function sharesBoardCaption(cell, board) {

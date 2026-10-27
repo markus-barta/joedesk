@@ -1274,8 +1274,9 @@ Individual observations keep their stale value, caption, age and reason below
 the same 60-minute age limit; at the limit they become dashes with
 their reason. A frozen producer ages from the last advancing generation
 (`generatedAdvancedAt`); new receipts, rejected pushes and failed reads cannot
-renew that age, re-show an expired value or defer expiry. These
-inputs never feed totals, since-start, percentages, ranking, relative bars,
+renew that age, re-show an expired value or defer expiry. The hero's board caption
+uses the same generation clock as the individual value captions, including after
+the values expire. These inputs never feed totals, since-start, percentages, ranking, relative bars,
 kept-worth sums or Results' current money and period percentage. Results
 explains the late/stuck DATA feed or retained DATA outage inside its existing chart status box,
 including after the retained value expires to a dash, even

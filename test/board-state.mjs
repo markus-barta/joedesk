@@ -618,7 +618,7 @@ test('JOED-96: rejected pushes and failed reads cannot re-show a frozen generati
   const numeric = ['paperAccount', 'paperCash', 'positions', 'kept',
     ...MONEY_FIELDS.flatMap(field => [`today.${field}`, ...DESKS.map(id => `desks.${id}.${field}`)])];
   for (const reason of ['contract_invalid', 'sequence_replayed', 'refresh_failed']) {
-    for (const seconds of [60, 299, 300, 301, 3599, 3600, 3601, 7200]) {
+    for (const seconds of [60, 299, 300, 301, 600, 3599, 3600, 3601, 3700, 7200]) {
       const data = structuredClone(exact); data.receivedAt = at(seconds - 10);
       const feeds = { data: { value: data, generatedAdvancedAt: exact.receivedAt } };
       const before = boardStates(feeds, at(seconds), previous);
@@ -634,6 +634,10 @@ test('JOED-96: rejected pushes and failed reads cannot re-show a frozen generati
       }
       assert.deepEqual(localBoardHealth(states, feeds, at(seconds)), localBoardHealth(raw, feeds, at(seconds)),
         'truthful display age does not change selector health or retained grace');
+      const hero = htmlDocument(heroLeft({ feeds, now: at(seconds), states }));
+      assert.equal(hero.querySelector('.board-caption').textContent,
+        `Last good value, ${age(seconds)} ago · ${cellReason(reason)}`,
+        'the hero caption uses the same generation clock before and after value expiry');
       const equity = states['desks.j.equity'];
       if (seconds < 3600) {
         assert.equal(equity.retained, true);
