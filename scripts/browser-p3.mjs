@@ -1228,8 +1228,8 @@ try {
   sweepRan = true;
   const beforeSweep = { checks: results.length, screenshots: shots.length };
   const rounds = [];
-  // 7c · AC-28: the full 360–1440 px grid in light; in dark, the same grid
-  // or PR boundaries, per sweepPlan. Both fonts, every screen, resizing the
+  // 7c · AC-28: the 360–1440 px grid ∪ boundaries in full; PRs keep the light grid
+  // and dark boundaries, per sweepPlan. Both fonts, every screen, resizing the
   // live page. The page never scrolls sideways, nothing reaches past its
   // right edge and no text overlaps other text. Up to COMPACT px the header
   // is the phone's (the nav in the bottom bar, 44 px buttons, the light's
@@ -1275,9 +1275,9 @@ try {
         const labels = r.labels;
         if (labels.length) fail.labels.push({ width, labels: labels.slice(0, 3) });
       }
-      // Stable check identities describe the full inventory. The QA plan
+      // Stable check identities describe the original 10 px grid. The QA plan
       // table records actual width coverage, including the dark PR subset.
-      const n = `${sweepPlan.fullWidths.length} widths from 360 to 1440 px`;
+      const n = `${sweepPlan.gridWidths.length} widths from 360 to 1440 px`;
       check('AC-28', `sweep ${tag}: no horizontal page scroll at any of ${n}`, !fail.scroll.length, fail.scroll.slice(0, 8));
       check('AC-28', `sweep ${tag}: nothing reaches past the page's right edge at any of ${n}`, !fail.past.length, fail.past.slice(0, 4));
       check('header', `sweep ${tag}: the status is exactly one line box; header items stay in the row without overlap or a partial wordmark at any of ${n}`, !fail.header.length, fail.header.slice(0, 4));

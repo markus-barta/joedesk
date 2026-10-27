@@ -52,7 +52,7 @@ function parseCSS(source) {
 }
 
 // The two existing theme controls are components, not theme-state selectors.
-// Everything else mentioning a theme/scheme, including future theme names,
+// Any selector mentioning theme/scheme (a heuristic, not all future names)
 // is conservatively guarded, as are the common .dark/.light spellings.
 const themeState = prelude => /theme|color-scheme|[.#](?:dark|light)\b/i.test(prelude.replace(/\.theme-(?:btn|seg)\b/g, ''));
 const references = value => [...value.matchAll(/var\(\s*(--[\w-]+)/g)].map(m => m[1]);

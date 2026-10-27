@@ -7,9 +7,9 @@ export function parseBoardSweepArgs(args) {
 
 export function createBoardSweepPlan({ mode = 'full', css, javascript, compact }) {
   if (!['full', 'subset'].includes(mode)) throw new Error(`Unknown Board sweep mode: ${mode}`);
-  const fullWidths = Array.from({ length: (1440 - 360) / 10 + 1 }, (_, i) => 360 + i * 10);
-  // Only viewport queries belong here: the 339.98 px card @container query
-  // describes a card's box, not a viewport. The full light grid still tests it.
+  const gridWidths = Array.from({ length: (1440 - 360) / 10 + 1 }, (_, i) => 360 + i * 10);
+  // Only viewport queries belong here: card @container and history.js clientWidth thresholds
+  // describe element boxes, not viewports. The full light grid still tests their geometry.
   const queries = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/@media\b([^{}]+)/g)].map(m => m[1]);
   const cssQueryCount = queries.length;
   for (const source of javascript) {
@@ -34,10 +34,11 @@ export function createBoardSweepPlan({ mode = 'full', css, javascript, compact }
   }
   const boundaryWidths = [...new Set([360, 1024, 1440, ...[...breakpoints].flatMap(w => [w - 10, w, w + 10])])]
     .filter(w => w >= 360 && w <= 1440).sort((a, b) => a - b);
+  const fullWidths = [...new Set([...gridWidths, ...boundaryWidths])].sort((a, b) => a - b);
   const variants = ['light', 'dark'].flatMap(theme => [false, true].flatMap(wide =>
     ['desk', 'results', 'history', 'settings'].map(screen => ({ theme, wide, screen,
-      widths: mode === 'subset' && theme === 'dark' ? boundaryWidths : fullWidths }))));
-  return { mode, fullWidths, boundaryWidths, breakpoints: [...breakpoints].sort((a, b) => a - b), variants,
+      widths: mode === 'full' ? fullWidths : theme === 'dark' ? boundaryWidths : gridWidths }))));
+  return { mode, gridWidths, fullWidths, boundaryWidths, breakpoints: [...breakpoints].sort((a, b) => a - b), variants,
     // One fixture check, then eight checks per screen plus two for Desk.
     checks: 1 + variants.reduce((n, v) => n + 8 + (v.screen === 'desk' ? 2 : 0), 0),
     screenshots: 6, rounds: variants.reduce((n, v) => n + v.widths.length, 0) };
@@ -61,10 +62,11 @@ export function boardSweepTable(plan, ran) {
   return `## Width sweep plan
 
 Plan: **${plan.mode}**; ${ran ? 'executed' : 'not selected (JOED_P3_ONLY)'}. Both fonts and all four screens.
-Light: ${plan.fullWidths.length} widths, 360–1440 px in 10 px steps.
-Dark: ${plan.mode === 'full' ? 'the same full grid' : `${plan.boundaryWidths.length} boundary widths: ${plan.boundaryWidths.join(', ')} px`}.
+Light: ${plan.mode === 'full' ? `${plan.fullWidths.length} widths: the ${plan.gridWidths.length}-width 360–1440 px grid in 10 px steps ∪ the boundary widths below` : `${plan.gridWidths.length} widths, 360–1440 px in 10 px steps`}.
+Dark: ${plan.mode === 'full' ? 'the same grid ∪ boundary widths' : `${plan.boundaryWidths.length} boundary widths only`}.
+Boundary widths (${plan.boundaryWidths.length}): ${plan.boundaryWidths.join(', ')} px.
 Boundaries: app.css viewport @media queries and public/joe/*.js matchMedia queries, each ±10 px, plus COMPACT and 360/1024/1440.
-Card @container queries describe card widths, not viewport widths; the full light grid covers them.
+Card @container queries and history.js clientWidth thresholds describe element widths; the full light grid covers their geometry.
 Expected sweep: ${plan.checks} checks, ${plan.screenshots} screenshots, ${plan.rounds} resize/measure rounds.
 Check names retain the full-grid inventory description in both plans; this table records the widths actually selected.
 `;
