@@ -119,7 +119,7 @@ test('JOED-97 L2: first load of a release-33 store drops kept day/equity once, i
   for (const name of cleared) assert.notEqual(model.panels()[name].value, null, 'new exact values retain normally after upgrade');
 });
 
-for (const committed of [false, true]) test(`JOED-97 fix3 L1: upgrade write failure (committed=${committed}) keeps the cleaned store and accepts snapshots`, async t => {
+for (const committed of [false, true]) for (const code of ['ENOSPC', 'EACCES', undefined, null]) test(`JOED-97 fix3 L1: upgrade write failure (committed=${committed}, code=${code}) keeps the cleaned store and accepts snapshots`, async t => {
   const dataDir = scratch('joed-97-upgrade-write-');
   t.after(() => discard(dataDir, 'JOED-97 upgrade write failure'));
   let now = exact.receivedAt;
@@ -143,12 +143,13 @@ for (const committed of [false, true]) test(`JOED-97 fix3 L1: upgrade write fail
   model = createReadModel({ dataDir, clock: () => now, write: (...args) => {
     if (++writes === 1) {
       if (committed) atomicWrite(...args);
-      throw Object.assign(new Error('private write detail must not be logged'), { committed });
+      if (code === null) throw null; // even a non-Error failure stays best effort
+      throw Object.assign(new Error('private write detail must not be logged'), { committed, code });
     }
     return atomicWrite(...args);
   } });
   logger.mock.restore();
-  assert.deepEqual(logs, [['read-model: upgrade_write_failed']], 'one value-free diagnostic');
+  assert.deepEqual(logs, [['read-model: upgrade_write_failed', code ?? 'unknown']], 'one value-free diagnostic with the error code, never the message or path');
   assert.deepEqual(model.view().feeds.data.value, legacy.feed.value, 'valid snapshot stays loaded');
   assert.equal(model.view().feeds.data.reason, null);
   for (const name of dropped) assert.equal(model.panels()[name].value, null, 'cleaned memory survives the failure');
@@ -502,6 +503,18 @@ test('exact money renders through the real selectors, with Today and Since start
   const kept = htmlDocument(keptHtml(ctx));
   assert.equal(kept.querySelectorAll('[data-keep]').length, 2);
   for (const row of kept.querySelectorAll('[data-keep]')) assert.equal(row.querySelectorAll('button, a, input, [tabindex]').length, 0);
+});
+
+test('JOED-97 fix4: detail sizing counts the displayed signed amount, including grouping and rounding', () => {
+  for (const [amount, digits] of [['150', 9], ['-1234567.895', 15], ['0', 6], [null, 1]]) {
+    const data = structuredClone(exact);
+    data.desks[0].money.totalPnl = amount === null ? null : { amount, currency: 'EUR' };
+    if (amount === null) data.desks[0].money.reasons = { totalPnl: 'source_unavailable' };
+    const doc = htmlDocument(deskCard(context(data), 'j', 50, false));
+    const value = doc.querySelectorAll('.dnums .v')[2];
+    assert.equal(value.getAttribute('style'), `--digits:${digits}`, `width budget for ${amount}`);
+    assert.equal(value.querySelectorAll('.bn').length, 1);
+  }
 });
 
 test('position and KEEP money round exact decimal units once, including signed ties and large amounts', () => {

@@ -1910,3 +1910,11 @@ The prior release is sequence 33, deployed on csb0 at `2026-10-26T20:06:06Z`.
 The runtime closure is resealed for this candidate. The revision-10 contract set,
 shared presentation pin, legacy anchor and historical artifacts remain unchanged.
 Publication, deployment, browser validation and cross-family approval remain coordinator work.
+
+Fix 4 keeps the detail money in fixed 26 px flex lines and sizes its type from
+each column and the complete formatted amount, with room for the arrow and
+trailing glyph spacing. At 390 px the detail's equal columns are 102 px wide;
+the full-size anonymous flex text could exceed that width. The collapsed
+summary's separate 96 px Today track does not determine these columns.
+Upgrade-write failure diagnostics include the filesystem error code (or
+`unknown`), without logging the error message, path or stored values.

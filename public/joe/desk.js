@@ -366,7 +366,10 @@ function deskCard(ctx, id, maxDay, showBars) {
   const bar = showBars && exactCell(states[`desks.${id}.dayPnl`]) !== null && dayV.n != null && !isZero(dayV.n)
     ? `<i data-v="${dayV.n}" style="${dayV.n > 0 ? 'left' : 'right'}:50%;width:${(Math.abs(dayV.n) / maxDay * 50).toFixed(3)}%;background:var(--${dayV.n > 0 ? 'gain' : 'loss'})"></i>` : '';
   const board = boardCaptionCell(ctx);
-  const num = (label, v, cell, extra = '') => `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell, shared)}</span><span class="v">${v.html}</span>${extra}</div>`;
+  const num = (label, v, cell, extra = '') => {
+    const characters = v.units === null ? 1 : eur(v.units, true).length;
+    return `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell, shared)}</span><span class="v" style="--digits:${characters}">${v.html}</span>${extra}</div>`;
+  };
   const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]], board);
   const learning = learningLine(desk?.learning);
   return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(info.word + since)}">${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>

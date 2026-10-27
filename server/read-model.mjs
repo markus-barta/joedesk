@@ -110,7 +110,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       // Best effort: keep the cleaned memory if storage fails. The next
       // accepted snapshot persists it; otherwise next boot repeats the clean.
       try { write(stateFile, state, STATE_CAP); }
-      catch { console.error('read-model: upgrade_write_failed'); }
+      catch (error) { console.error('read-model: upgrade_write_failed', error?.code ?? 'unknown'); }
     }
   } catch (error) { state = null; if (!isMissing(error)) { storageInvalid = true; rejections.data = 'contract_invalid'; } }
   try {

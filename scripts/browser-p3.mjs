@@ -755,6 +755,13 @@ try {
         const marks = await page.evaluate(estimateMarks);
         check('fixtures', `${tag}: ${state} estimated Today cells say Estimated visibly, accessibly, without overlapping the complete label and state icon`,
           marks.length === (viewport.mobile ? 6 : 3) && marks.every(m => m.text === 'Estimated' && m.role === 'img' && m.label.startsWith('Estimated from the session open') && m.size >= 10 && !m.title && m.contained && m.separate), marks);
+        const money = await page.evaluate(`Array.from(document.querySelectorAll('.dnums .v > .bn'), el => {
+          const range = document.createRange(); range.selectNodeContents(el);
+          const text = range.getBoundingClientRect(), box = el.getBoundingClientRect();
+          return { text: el.textContent, left: text.left - box.left, right: box.right - text.right, height: box.height };
+        })`);
+        check('AC-36', `${tag}: ${state} detail amounts fit their fixed lines`, money.length === 9 &&
+          money.every(m => m.left >= 0 && m.right >= 0 && m.height === 26), money);
       };
       await checkMarks('fresh');
       check('no-shift', `${tag}: exact → estimate has exactly 0 px layout shift`, JSON.stringify(before) === JSON.stringify(after), shifted(before, after));
