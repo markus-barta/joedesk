@@ -1,13 +1,13 @@
 {
   "schema": "joedesk.release-preparation.v1",
-  "ticket": "JOED-97",
+  "ticket": "JOED-99",
   "status": "candidate",
   "reservation": {
     "version_scheme": "inspr-calver-3",
-    "version": "261026232616.0.0",
+    "version": "261027124551.0.0",
     "release_channel": "stable",
-    "release_sequence": 34,
-    "reserved_at": "2026-10-26T23:26:16Z"
+    "release_sequence": 35,
+    "reserved_at": "2026-10-27T12:45:51Z"
   },
   "anchor": {
     "legacy_scheme": "calendar",
@@ -134,14 +134,14 @@
   "previous_release": {
     "product": "JoeDesk",
     "version_scheme": "inspr-calver-3",
-    "version": "261026070713.0.0",
+    "version": "261026232616.0.0",
     "release_channel": "stable",
-    "release_sequence": 33,
+    "release_sequence": 34,
     "status": "published-candidate",
-    "note": "live on csb0 since 2026-10-26T20:06:06Z (JOED-90)",
+    "note": "live on csb0 since 2026-10-27T03:30:43Z (JOED-97)",
     "source_branch": "main",
-    "source_commit": "e96ff9a55c8809045c5e5d3491796579669a3531",
-    "release_set_ticket": "JOED-90",
+    "source_commit": "a3a3683d6bbb05818ae99291b96e983000fb9cd4",
+    "release_set_ticket": "JOED-97",
     "disposition": "deployed",
     "deployed": true
   },
@@ -157,9 +157,9 @@
   "last_deployed_release": {
     "product": "JoeDesk",
     "version_scheme": "inspr-calver-3",
-    "version": "261026070713.0.0",
+    "version": "261026232616.0.0",
     "release_channel": "stable",
-    "release_sequence": 33,
-    "note": "live on csb0 since 2026-10-26T20:06:06Z (JOED-90)"
+    "release_sequence": 34,
+    "note": "live on csb0 since 2026-10-27T03:30:43Z (JOED-97)"
   }
 }

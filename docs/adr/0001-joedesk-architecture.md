@@ -1510,3 +1510,12 @@ deployed release, from main `e96ff9a55c8809045c5e5d3491796579669a3531`, live on 
 aborted publications remain excluded. Reseal only the new candidate's runtime
 closure; preserve revision-10 contracts and the approved presentation bundle.
 This preparation grants no publication or deployment approval.
+
+## Release 35 candidate (JOED-99)
+
+Reserve `261027124551.0.0` at `2026-10-27T12:45:51Z` as `inspr-calver-3`, stable sequence 35,
+for the stopped-pusher outage policy (JOED-96). Prior deployed sequence 34 is
+`261026232616.0.0`, main `a3a3683d6bbb05818ae99291b96e983000fb9cd4`, live since
+`2026-10-27T03:30:43Z` (JOED-97). About orders 35, 34 through 26, then legacy.
+Contracts revision 10 and the approved presentation bundle remain unchanged.
+This local preparation grants no publication or deployment approval.

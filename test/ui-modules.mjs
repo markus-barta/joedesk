@@ -317,15 +317,20 @@ test('unmapped positions: visible reason, honest row count, neutral identity, la
 test('kept worth: one null summand withholds the complete total rather than showing a partial sum', () => {
   const data = read('valid.json').data;
   const rows = data.positions.rows.filter(row => row.scope === 'keep');
-  for (const state of ['fresh', 'stale', 'broken']) {
-    const ctx = { states: { kept: { state, value: rows, reason: state === 'fresh' ? null : 'snapshot_stale', ageSeconds: 90 } } };
-    assert.match(keptHtml(ctx), /worth € 600,00 and \$ 200,00/i);
+  for (const [state, reason] of [['fresh', null], ['stale', 'snapshot_stale'], ['broken', 'snapshot_stale'], ['broken', 'source_unavailable']]) {
+    const ctx = { states: { kept: { state, value: rows, reason, ageSeconds: 90 } } };
+    if (reason === 'snapshot_stale') assert.match(keptHtml(ctx), /worth —/);
+    else assert.match(keptHtml(ctx), /worth € 600,00 and \$ 200,00/i);
     const incomplete = structuredClone(rows);
     incomplete[0].marketValue = null;
     incomplete[0].reasons = { marketValue: 'source_unavailable' };
     ctx.states.kept.value = incomplete;
     const html = keptHtml(ctx);
-    assert.match(html, /Worth not available · not reported by the broker/);
+    if (reason === 'source_unavailable') {
+      const status = htmlDocument(html).querySelector('.pstate').textContent;
+      assert.match(status, /worth not available/);
+      assert.equal(status.match(/not reported by the broker/g)?.length, 1, 'the shared failure reason appears once');
+    } else assert.match(html, /Worth not available · not reported by the broker/);
     assert.doesNotMatch(html.slice(0, html.indexOf('<div class="prow"')), /worth \$ 200,00/i);
     assert.equal(format.sumByCurrency(incomplete.map(row => row.marketValue)), null);
   }

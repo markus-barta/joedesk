@@ -1079,14 +1079,22 @@ try {
     ui = await page.evaluate(DESK_TEXT);
     const late = /^As of 1\smin ago · updates are late\.?$/;
     check('journey', `${tag} stale: one board caption gives the matching age/reason; every number retains its state and icon`, Object.values(ui.cells).every(c => c.state === 'stale') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => c.cap === '') && late.test(ui.boardCaption) &&
-      / today\.$/.test(ui.say) && ui.cards.every(c => c.label === 'since start · last sessions' && c.icons === 3) && /^As of 1\smin ago · updates are late$/.test(ui.positions) &&
-      /^As of 1\smin ago · updates are late · worth €\s12\.248,00 and \$\s441,20, each in its own currency$/.test(ui.kept), ui);
-    check('no-shift', `${tag}: fresh → stale moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
+      ui.say === 'Today’s result is not available.' && ui.cards.every(c => c.label === 'since start · last sessions' && c.icons === 3) && /^As of 1\smin ago · updates are late$/.test(ui.positions) &&
+      /^As of 1\smin ago · updates are late · worth —$/.test(ui.kept), ui);
+    const staleDerived = await page.evaluate(`(() => ({
+      totals: ['day', 'since', 'open', 'equity'].map(k => document.querySelector('[data-cell="hero.' + k + '"] .bn').textContent),
+      since: [...document.querySelectorAll('.dcard .dnums > div:last-child .bn')].map(e => e.textContent),
+      percentages: document.querySelectorAll('#heroL .performance-pct').length,
+      bars: document.querySelectorAll('.dcard .dbar i, #positions .vbar i').length
+    }))()`);
+    check('no-shift', `${tag}: fresh → stale hides derived amounts and moves nothing on Desk`,
+      staleDerived.totals.length === 4 && staleDerived.totals.every(v => v === '—') && staleDerived.since.length === 3 && staleDerived.since.every(v => v === '—') && staleDerived.percentages === 0 && staleDerived.bars === 0 &&
+      !moves(desk0, await rects(DESK_SHIFT)).length, { derived: staleDerived, moves: moves(desk0, await rects(DESK_SHIFT)).slice(0, 5) });
     boxes.push(['stale', await rects(STATE_BOXES)]);
     if (!font && viewport.name !== '1024') await shot(page, viewport, `${viewport.name}-${theme}-desk-state-stale`, 'Desk, stale: every panel with its age and reason');
     await go(page, 'history');
     let h = await page.evaluate(HIST_TEXT);
-    check('journey', `${tag} stale: History and J's result say as of 1 min and why`, h.state === 'stale' && /^History as of 1\smin ago · updates are late\.$/.test(h.status) && !h.retry && /J since 10\sSep\s+[+−]?€\s[\d.,]+\s·\sAs of 1\smin ago · updates are late/.test(h.j), h);
+    check('journey', `${tag} stale: History keeps its age; J's since-start result is a dash with why`, h.state === 'stale' && /^History as of 1\smin ago · updates are late\.$/.test(h.status) && !h.retry && /J since 10\sSep\s+—\s·\sUnavailable · updates are late/.test(h.j), h);
     check('no-shift', `${tag}: fresh → stale moves nothing on History`, !moves(hist0, await rects(HIST_SHIFT)).length, moves(hist0, await rects(HIST_SHIFT)).slice(0, 5));
     await go(page, 'desk');
     // Today's sentence pinned whole in the tip stays pinned through the

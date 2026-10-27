@@ -12,6 +12,7 @@ const { exactCell, rankDesks, todayPercent, sincePercent } = await import('../pu
 const { cellView, heroLeft, keptHtml, positionsHtml, compactDesk } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { resultsView } = await import('../public/joe/results.js');
+const { age } = await import('../public/joe/format.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { localBoardHealth, statusPresentation, cellReason, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
 const { bookkeepingHtml } = await builders('history.js', ['bookkeepingHtml']);
@@ -439,5 +440,262 @@ test('the actual feed adapter applies board policy on reads, failed refreshes, a
     assert.deepEqual(localBoardHealth(feed.select().states, feed.select().feeds, feed.select().now), { tone: 'yellow', reason: 'refresh_failed' });
     elapsed = RETENTION_SECONDS * 1000;
     assert.equal(feed.select().states['desks.j.equity'].value, null);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+// JOED-96: a DATA stall follows the same numeric policy as an outage, while
+// preserving the shared selector's original state, reason and health evidence.
+for (const frozen of [false, true]) test(`JOED-96 ${frozen ? 'producer_frozen' : 'snapshot_stale'}: marked values, no derived numbers, cell-age expiry, recovery`, () => {
+  const reason = frozen ? 'producer_frozen' : 'snapshot_stale';
+  for (const seconds of [60, 3539, 3540, 3541, 3599, 3600, 3601]) {
+    const feeds = { data: { value: exact, ...(frozen ? { generatedAdvancedAt: at(-60) } : {}) } };
+    const now = at(seconds), raw = panelStates(feeds, now, previous);
+    const states = boardStates(feeds, now, previous), view = { feeds, now, states };
+    const name = 'desks.j.equity', cell = states[name];
+    assert.equal(cell.state, 'stale'); assert.equal(cell.reason, reason); assert.equal(cell.retained, false);
+    assert.equal(cell.ageSeconds, raw[name].ageSeconds, 'original caption age is preserved');
+    assert.equal(cell.ageSeconds, seconds + (frozen ? 60 : 0), 'expiry uses the independently known generation age');
+    assert.deepEqual(localBoardHealth(states, feeds, now), localBoardHealth(raw, feeds, now), 'header health is unchanged');
+    if (cell.ageSeconds < RETENTION_SECONDS) {
+      assert.deepEqual(cell.value, exact.desks[0].money.equity);
+      assert.match(htmlDocument(cellView(cell, 'equity').caption).textContent, /As of .*ago · updates are (late|stuck)/);
+      assert.deepEqual(states['today.equity'].health, { available: true, retained: false, ageSeconds: raw['today.equity'].ageSeconds });
+      assert.notEqual(states.positions.value, null);
+      assert.notEqual(states.kept.value, null);
+      assert.equal(htmlDocument(positionsHtml(view).html).querySelectorAll('.vbar i').length, 0);
+      const kept = htmlDocument(keptHtml(view));
+      assert.match(kept.querySelector('.pstate').textContent, /updates are (late|stuck) · worth —$/);
+      assert.match(kept.querySelector('.keep-cap').textContent, /paper account \(—\)/);
+      for (const id of DESKS) {
+        assert.equal(htmlDocument(deskCard(view, id, 50, true)).querySelectorAll('.dbar i').length, 0);
+        assert.notEqual(states[`desks.${id}.dayPnl`].value, null, 'individual Today remains visible');
+      }
+    } else {
+      for (const name of ['paperAccount', 'paperCash', 'positions', 'kept', ...DESKS.flatMap(id => MONEY_FIELDS.map(f => `desks.${id}.${f}`))]) {
+        assert.equal(states[name].value, null, name);
+        assert.equal(states[name].reason, reason, name);
+      }
+      assert.match(cellView(cell, 'equity', { label: 'Equity' }).html, /—/);
+      assert.match(cellView(cell, 'equity').caption, /updates are (late|stuck)/);
+    }
+    for (const field of MONEY_FIELDS) assert.equal(states[`today.${field}`].value, null, field);
+    for (const id of DESKS) assert.equal(states[`desks.${id}.totalPnl`].value, null, id);
+    assert.equal(exactCell(cell), null);
+    assert.equal(todayPercent(states), null); assert.equal(sincePercent(states), null);
+    assert.deepEqual(rankDesks(states, ['joe', 'j', 'joel']), ['joe', 'j', 'joel']);
+    assert.deepEqual(resultsView(view).todayUnits, [null, null, null]);
+    const hero = htmlDocument(heroLeft(view));
+    assert.equal(hero.querySelectorAll('.performance-pct').length, 0);
+    for (const key of ['day', 'since', 'open', 'equity']) assert.equal(hero.querySelector(`[data-cell="hero.${key}"] .bn`).textContent, '—');
+  }
+  // Re-sends keep arriving, but cannot renew the frozen generation's age.
+  if (frozen) {
+    for (const seconds of [3599, 3600, 3601, 7200]) {
+      const data = structuredClone(exact); data.receivedAt = at(seconds - 10);
+      const feeds = { data: { value: data, generatedAdvancedAt: exact.receivedAt } };
+      const states = boardStates(feeds, at(seconds), previous);
+      assert.equal(states['desks.j.equity'].ageSeconds, seconds);
+      assert.equal(states['desks.j.equity'].value === null, seconds >= 3600, 'a recent re-send cannot defer expiry');
+      assert.equal(exactCell(states['desks.j.equity']), null, 'frozen receipt still cannot feed derived money');
+    }
+  }
+  const data = structuredClone(exact);
+  data.generatedAt = data.receivedAt = data.safety.gateway.checkedAt = at(3610);
+  for (const source of [data.pnlSources.day, ...data.desks.map(d => d.pnlSources.day)]) source.observedAt = at(3610);
+  const recovered = ctx(data, 3610);
+  for (const field of MONEY_FIELDS) assert.notEqual(exactCell(recovered.states[`today.${field}`]), null, field);
+  assert.notEqual(todayPercent(recovered.states), null); assert.notEqual(sincePercent(recovered.states), null);
+  assert.ok(resultsView(recovered).todayUnits.every(v => typeof v === 'bigint'));
+  assert.ok(htmlDocument(keptHtml(recovered)).querySelector('.pstate').textContent.includes('Worth'));
+  assert.ok(htmlDocument(positionsHtml(recovered).html).querySelectorAll('.vbar i').length > 0);
+});
+
+test('JOED-96: a stale sibling withholds a current total with its health evidence', () => {
+  const data = structuredClone(exact);
+  data.desks[0].money.reasons = { equity: 'snapshot_stale' };
+  const view = ctx(data, 0);
+  assert.notEqual(view.states['desks.j.equity'].value, null);
+  assert.equal(view.states['today.equity'].value, null);
+  assert.equal(view.states['today.equity'].reason, 'snapshot_stale');
+  assert.deepEqual(view.states['today.equity'].health, { available: true, retained: false, ageSeconds: 0 });
+});
+
+test('JOED-96: sequence_replayed retains the existing advisory and retention policy', () => {
+  const feeds = { data: { value: exact, reason: 'sequence_replayed' } };
+  for (const seconds of [30, 3600]) {
+    const raw = panelStates(feeds, at(seconds), previous), view = { feeds, now: at(seconds), states: boardStates(feeds, at(seconds), previous) };
+    assert.equal(view.states['desks.j.equity'].state, raw['desks.j.equity'].state);
+    assert.equal(view.states['desks.j.equity'].retained, seconds < 3600 ? raw['desks.j.equity'].retained : false);
+    assert.equal(view.states['desks.j.equity'].value !== null, seconds < 3600);
+    assert.equal(exactCell(view.states['desks.j.equity']), null, 'retained replay was already excluded');
+  }
+  const advisory = { state: 'stale', value: exact.desks[0].money.equity, reason: 'sequence_replayed', retained: false };
+  assert.notEqual(exactCell(advisory), null, 'non-retained advisory remains usable');
+});
+
+test('JOED-96: Results withholds money now and period percent and explains the DATA stall in its existing status slot', async t => {
+  const M = await import('../public/joe/results-model.js');
+  const { renderStatus, RS } = await builders('results.js', ['renderStatus']);
+  const record = JSON.parse(readFileSync(new URL('../fixtures/results/no-losers.json', import.meta.url)));
+  const ix = M.indexResults(record), savedDesk = RS.desk;
+  const document = htmlDocument('<div id="resStatus" class="res-status"></div>');
+  const savedDocument = globalThis.document;
+  globalThis.document = document;
+  // The simple DOM is enough for the real status builder, with no browser.
+  try {
+    for (const reason of ['snapshot_stale', 'producer_frozen']) {
+      const view = ctx(exact, 90); view.states.results = { state: 'fresh', value: { index: ix }, reason: null, retained: false, ageSeconds: 0 };
+      if (reason === 'producer_frozen') for (const id of DESKS) view.states[`desks.${id}.equity`].reason = reason;
+      const results = resultsView(view), per = M.periodOf('week', results.today, results.today, results.trackingStart);
+      const R = M.rollup(ix, per, DESKS, M.moneyContext(ix, results, per, DESKS));
+      assert.equal(R.net, null); assert.equal(M.periodPercent(ix, results, per, DESKS, R), null);
+      const fresh = ctx(exact, 0); fresh.states.results = view.states.results;
+      const freshResults = resultsView(fresh), freshPer = M.periodOf('week', freshResults.today, freshResults.today, freshResults.trackingStart);
+      const freshR = M.rollup(ix, freshPer, DESKS, M.moneyContext(ix, freshResults, freshPer, DESKS));
+      assert.notEqual(freshR.net, null); assert.notEqual(M.periodPercent(ix, freshResults, freshPer, DESKS, freshR), null);
+      RS.desk = 'all'; renderStatus(results);
+      assert.match(document.querySelector('#resStatus').textContent, /Desks’ money is not available: updates are (late|stuck)\./);
+      assert.equal(document.querySelectorAll('.res-state').length, 1);
+      results.cell = { ...results.cell, state: 'stale', reason: 'snapshot_stale', ageSeconds: 90 };
+      renderStatus(results);
+      assert.match(document.querySelector('#resStatus').textContent, /^Stale · Results as of .*updates are late\. Desks’ money is not available: updates are (late|stuck)\.$/);
+      results.cell = freshResults.cell;
+      results.moneyCells = DESKS.map(() => ({ state: 'fresh', reason: null }));
+      renderStatus(results); assert.equal(document.querySelector('#resStatus').textContent, '', 'fresh recovery clears the DATA warning');
+      results.moneyCells[0] = { state: 'stale', reason };
+      RS.desk = 'joe'; renderStatus(results);
+      assert.equal(document.querySelector('#resStatus').textContent, '', 'an unselected stale desk does not warn for a fresh desk');
+    }
+  } finally { RS.desk = savedDesk; if (savedDocument === undefined) delete globalThis.document; else globalThis.document = savedDocument; }
+});
+
+test('JOED-96: Results explains retained and expired DATA outages in the existing status slot, scoped to the selected desks', async () => {
+  const M = await import('../public/joe/results-model.js');
+  const { renderStatus, RS } = await builders('results.js', ['renderStatus']);
+  const record = JSON.parse(readFileSync(new URL('../fixtures/results/no-losers.json', import.meta.url)));
+  const ix = M.indexResults(record), savedDesk = RS.desk, savedDocument = globalThis.document;
+  globalThis.document = htmlDocument('<div id="resStatus" class="res-status"></div>');
+  try {
+    for (const reason of ['refresh_failed', 'contract_invalid', 'gateway_down']) for (const seconds of [30, 3599, 3600, 3601, 7200]) {
+      const data = structuredClone(exact);
+      if (reason === 'gateway_down') Object.assign(data.safety.gateway, { apiSessionReady: false, reason });
+      const view = ctx(data, seconds, reason === 'gateway_down' ? null : reason);
+      view.states.results = { state: 'fresh', value: { index: ix }, reason: null, retained: false, ageSeconds: 0 };
+      const results = resultsView(view), per = M.periodOf('week', results.today, results.today, results.trackingStart);
+      assert.ok(results.moneyCells.every(cell => cell.reason === reason && (seconds < 3600
+        ? cell.retained && cell.value != null && !cell.outageExpired
+        : !cell.retained && cell.value === null && cell.outageExpired)));
+      assert.deepEqual(results.todayUnits, [null, null, null]);
+      const R = M.rollup(ix, per, DESKS, M.moneyContext(ix, results, per, DESKS));
+      assert.equal(R.net, null); assert.equal(M.periodPercent(ix, results, per, DESKS, R), null);
+      RS.desk = 'all'; renderStatus(results);
+      const status = document.querySelector('#resStatus');
+      const warning = `Desks’ money is not available: ${cellReason(reason)}.`;
+      assert.equal(status.textContent, warning);
+      assert.equal(status.querySelectorAll('.res-state').length, 1);
+      results.cell = { ...results.cell, state: 'stale', reason: 'snapshot_stale', ageSeconds: 90 };
+      renderStatus(results);
+      assert.ok(status.textContent.startsWith('Stale · Results as of '));
+      assert.ok(status.textContent.endsWith(warning), 'both feed warnings share the same status box');
+      const fresh = ctx(exact, 0); fresh.states.results = view.states.results;
+      const recovered = resultsView(fresh);
+      renderStatus(recovered);
+      assert.equal(status.textContent, '', 'fresh recovery clears the outage explanation');
+      assert.ok(recovered.todayUnits.every(value => typeof value === 'bigint'));
+      recovered.moneyCells[0] = results.moneyCells[0];
+      RS.desk = 'joe'; renderStatus(recovered);
+      assert.equal(status.textContent, '', 'an outage in an unselected desk does not warn');
+      RS.desk = 'j'; renderStatus(recovered);
+      assert.equal(status.textContent, warning);
+    }
+  } finally {
+    RS.desk = savedDesk;
+    if (savedDocument === undefined) delete globalThis.document; else globalThis.document = savedDocument;
+  }
+});
+
+test('JOED-96: rejected pushes and failed reads cannot re-show a frozen generation or renew its caption age', () => {
+  const numeric = ['paperAccount', 'paperCash', 'positions', 'kept',
+    ...MONEY_FIELDS.flatMap(field => [`today.${field}`, ...DESKS.map(id => `desks.${id}.${field}`)])];
+  for (const reason of ['contract_invalid', 'sequence_replayed', 'refresh_failed']) {
+    for (const seconds of [60, 299, 300, 301, 600, 3599, 3600, 3601, 3700, 7200]) {
+      const data = structuredClone(exact); data.receivedAt = at(seconds - 10);
+      const feeds = { data: { value: data, generatedAdvancedAt: exact.receivedAt } };
+      const before = boardStates(feeds, at(seconds), previous);
+      feeds.data.reason = reason;
+      const raw = panelStates(feeds, at(seconds), previous);
+      const states = boardStates(feeds, at(seconds), previous);
+      for (const name of numeric) {
+        const cell = states[name];
+        assert.equal(cell.ageSeconds, seconds, `${name}: original generation receipt owns the clock`);
+        assert.equal(cell.reason, reason);
+        assert.equal(cell.value === null, before[name].value === null, `${name}: rejection cannot restore an expired amount`);
+        if (seconds >= 3600) assert.equal(cell.outageExpired, true, name);
+      }
+      assert.deepEqual(localBoardHealth(states, feeds, at(seconds)), localBoardHealth(raw, feeds, at(seconds)),
+        'truthful display age does not change selector health or retained grace');
+      const hero = htmlDocument(heroLeft({ feeds, now: at(seconds), states }));
+      assert.equal(hero.querySelector('.board-caption').textContent,
+        `Last good value, ${age(seconds)} ago · ${cellReason(reason)}`,
+        'the hero caption uses the same generation clock before and after value expiry');
+      const equity = states['desks.j.equity'];
+      if (seconds < 3600) {
+        assert.equal(equity.retained, true);
+        assert.equal(htmlDocument(cellView(equity, 'frozen').caption).textContent,
+          `Last good value, ${age(seconds)} ago · ${cellReason(reason)}`);
+      } else {
+        assert.equal(equity.retained, false);
+        assert.match(cellView(equity, 'frozen', { label: 'Equity' }).html, /—/);
+      }
+      assert.deepEqual(resultsView({ feeds, now: at(seconds), states }).todayUnits, [null, null, null]);
+    }
+  }
+  // If the retained value is older than the current generation, keep its
+  // own earlier receipt rather than replacing it with the generation clock.
+  const data = missing('source_unavailable');
+  const feeds = { data: { value: data, generatedAdvancedAt: at(20), reason: 'contract_invalid' } };
+  const states = boardStates(feeds, at(120), previous);
+  assert.equal(states['desks.j.equity'].ageSeconds, 120);
+});
+
+test('JOED-96: cold and warm feed reads preserve the frozen clock through rejection, failed refresh and tick expiry', async t => {
+  const realFetch = globalThis.fetch;
+  let seconds = 3599, rejectedPush = false, failedRead = false, elapsed = 0;
+  t.mock.method(performance, 'now', () => elapsed);
+  try {
+    globalThis.fetch = async url => {
+      const stateRead = String(url).includes('state.json');
+      const data = structuredClone(exact); data.receivedAt = at(seconds - 10);
+      const dataFeed = { value: data, generatedAdvancedAt: exact.receivedAt, reason: rejectedPush ? 'contract_invalid' : null };
+      const body = stateRead ? { serverNow: at(seconds), feeds: { data: dataFeed },
+        panels: panelStates({ data: dataFeed }, at(seconds), previous) } : { reason: 'feed_not_received' };
+      return new Response(JSON.stringify(body), { status: stateRead && !failedRead ? 200 : 503,
+        headers: { 'X-Joe-Server-Now': at(seconds) } });
+    };
+    const warm = createFeed(() => {});
+    await warm.refresh();
+    assert.equal(warm.select().states['desks.j.equity'].ageSeconds, 3599);
+    assert.notEqual(warm.select().states['desks.j.equity'].value, null);
+    rejectedPush = true;
+    for (const feed of [warm, createFeed(() => {})]) {
+      await feed.refresh();
+      const cell = feed.select().states['desks.j.equity'];
+      assert.equal(cell.reason, 'contract_invalid');
+      assert.equal(cell.ageSeconds, 3599, 'cold clients also have the generation receipt');
+      assert.notEqual(cell.value, null);
+    }
+    elapsed = 1000;
+    assert.equal(warm.select().states['desks.j.equity'].ageSeconds, 3600);
+    assert.equal(warm.select().states['desks.j.equity'].value, null, 'tick expiry uses the original receipt');
+    seconds = 7200; elapsed = 2000;
+    const cold = createFeed(() => {});
+    await cold.refresh();
+    assert.equal(cold.select().states['desks.j.equity'].ageSeconds, 7200);
+    assert.equal(cold.select().states['desks.j.equity'].value, null, 'an expired frozen generation cannot reappear on cold load');
+    failedRead = true;
+    await cold.refresh();
+    assert.equal(cold.select().states['desks.j.equity'].reason, 'refresh_failed');
+    assert.equal(cold.select().states['desks.j.equity'].ageSeconds, 7200);
+    assert.equal(cold.select().states['desks.j.equity'].value, null, 'failed refresh preserves the generation watermark');
   } finally { globalThis.fetch = realFetch; }
 });

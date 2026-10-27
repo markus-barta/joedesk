@@ -1140,7 +1140,10 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .compact-label .estimate-mark { left: 0; right: auto; }
   .compact-state { display: inline-flex; margin-left: 2px; }
   .compact-state .i { width: 10px; height: 10px; }
-  .compact-figure .bn { font-size: min(13px, calc(100cqw / var(--digits) * 1.5)); line-height: 20px; letter-spacing: -.02em; }
+  /* A dash and a currency amount must use the same 20 px money track.
+     Inline-flex's baseline (including the half-size currency) otherwise
+     changes the figure's height and moves its centred label by 0.75 px. */
+  .compact-figure .bn { display: flex; justify-content: flex-end; height: 20px; font-size: min(13px, calc(100cqw / var(--digits) * 1.5)); line-height: 20px; letter-spacing: -.02em; }
   .compact-figure .bn .ar { display: none; }
   .disclosure-body { display: block; }
   /* Header queries use the padded detail width, as the original card did. */

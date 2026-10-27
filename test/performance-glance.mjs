@@ -63,7 +63,7 @@ test('unknown, not-exact, retained, mismatched and estimated Today inputs omit %
   ]) assert.equal(todayPercent({ ...states, [key]: { ...states[key], ...extra } }), null, `${key}: ${JSON.stringify(extra)}`);
   assert.equal(todayPercent(states, { method: 'session-open-estimate' }), null);
   const stale = Object.fromEntries(Object.entries(states).map(([k, c]) => [k, { ...c, state: 'stale', reason: 'snapshot_stale' }]));
-  assert.equal(todayPercent(stale), 500n, 'an exact stale observation stays usable with its state caption');
+  assert.equal(todayPercent(stale), null, 'a stopped feed keeps its state caption but cannot supply a percentage');
 });
 
 test('Since start retains established aggregate capital and suppresses unknown results', () => {
