@@ -1229,17 +1229,23 @@ Release 34 (JOED-93 follow-up: JOED-98/94/95) also treats revision-9
 `baseline_pending` and `day_pnl_unavailable` as missing exactness, never as
 last-good. The server clears the cell's durable last-good when any of these
 six reasons arrives, even alongside a value or behind another reason; only
-a new exact observation restores retention. The board also rejects retained
-cells whose previous reason identifies uncertain evidence.
+a new exact observation restores retention. Startup also checks the latest
+snapshot and each stored last-good's own reason and saved Today source reason.
+The board withholds current scoped exactness failures even when gateway or
+feed failures mask their reason; historical exactness is enforced by the server.
 Today belongs to the observation's America/New_York date: a missing baseline,
 an outage over New York midnight or a late receipt of yesterday's observation
 shows a dash with its reason on the hero, every desk card and phone row.
+When the board detects yesterday's observation itself, it says “waiting on
+the start-of-day value”; an existing outage reason still takes precedence.
 Since start and other outage retention keep their existing rules. Internal
-Today observation dates persist across server restart without changing the
-producer contract. Session-open estimates say **Estimated** beside desktop and
+Today observation dates and source metadata persist across server restart
+without changing the producer contract. Session-open estimates say **Estimated** beside desktop and
 phone desk Today figures, with the hero's full explanation in the accessible
-label. Marks occupy the existing label line without changing money or target
-geometry; CI checks exact/estimate transitions at 390/1024/1440 in both themes.
+label, without repeating “Today” in the phone row's accessible name. A retained
+estimate keeps its mark during an outage. Marks use 10 px text with space
+reserved in the existing label line. They have no hover title. Money and target
+geometry stay fixed; CI checks exact/estimate transitions at 390/1024/1440 in both themes.
 
 | Field | JOED-86 emission rule |
 | --- | --- |

@@ -104,8 +104,8 @@
     },
     {
       "path": "public/joe/app.css",
-      "size": 84514,
-      "sha256": "d5082020056740c57f8eaab3f569f92b67e6bfcb994d2a06c2ac71a353373552"
+      "size": 84699,
+      "sha256": "013a413a6ea92bb8cb22d0ea3f551229c28877ba999dc001c54dcac0f5a0dc0a"
     },
     {
       "path": "public/joe/app.js",
@@ -114,8 +114,8 @@
     },
     {
       "path": "public/joe/board-state.js",
-      "size": 4888,
-      "sha256": "ab576e37e8741b7a5ca1b19506ecdab9dcec16e871be2c39bc39079632bcd9a7"
+      "size": 4983,
+      "sha256": "e64c9b3bdd5a0e327c09064e1e936279f54c94dd200bb3920a6c5f661e54df83"
     },
     {
       "path": "public/joe/chart.js",
@@ -129,8 +129,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 48194,
-      "sha256": "9082871d4b39810dbe8ce0557f7de1bf899ed454af3e31e8fdec19b9dc1bf757"
+      "size": 48046,
+      "sha256": "94a86630b46974b46b3e5c678a575e979884c1d9a968345bbd871332743bed7e"
     },
     {
       "path": "public/joe/events.js",
@@ -329,8 +329,8 @@
     },
     {
       "path": "server/read-model.mjs",
-      "size": 20453,
-      "sha256": "07c4398aa94d247816021430ddcc41b158bd9f5fd34abc9a4b8fb0d3bed47623"
+      "size": 20881,
+      "sha256": "5e92d9d1ed7b61c61316a8f87b487f9467ce0d98a09ce627f9585b4739c58de2"
     },
     {
       "path": "server/storage.mjs",

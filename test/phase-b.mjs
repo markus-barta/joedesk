@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { validateContract, CONTRACTS, REASONS } from '../contracts/index.mjs';
@@ -9,7 +9,8 @@ import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { createReadModel } from '../server/read-model.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
-const { heroLeft, positionsHtml, keptHtml, positionSectionReason, cellView } = await import('../public/joe/desk.js');
+import { scenario, NOW, at, advance } from '../scripts/browser/board.mjs';
+const { heroLeft, positionsHtml, keptHtml, positionSectionReason, cellView, compactDesk } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { todayPercent, sincePercent } = await import('../public/joe/performance.js');
 const { cellReason } = await import('../public/joe/health.js');
@@ -28,6 +29,100 @@ const rejects = (data, path, rule) => {
   assert.equal(result.ok, false);
   assert.ok(result.errors.some(e => e.path === path && e.rule === rule), JSON.stringify(result.errors));
 };
+
+test('JOED-97 M1: replay the browser journey through the read model before asserting its Today wording', async t => {
+  const dataDir = scratch('joed-97-journey-');
+  t.after(() => discard(dataDir, 'JOED-97 journey replay'));
+  let now = NOW;
+  const model = createReadModel({ dataDir, clock: () => now, write: () => {} });
+  const base = scenario(NOW).snapshot;
+  assert.equal(model.accept(base).status, 200);
+  const B = advance(base, at(NOW, 80), base.seq + 1);
+  B.pnlSources.day.status = 'unavailable';
+  for (const bag of [B.totals, ...B.desks.map(d => d.money)]) { bag.dayPnl = null; bag.reasons = { dayPnl: 'baseline_pending' }; }
+  now = at(NOW, 80); assert.equal(model.accept(B).status, 200);
+  const C = advance(B, at(NOW, 110), base.seq + 2);
+  C.pnlSources.open.status = 'unavailable';
+  for (const bag of [C.totals, ...C.desks.map(d => d.money)]) { bag.openPnl = null; bag.reasons = { dayPnl: 'baseline_pending', openPnl: 'open_pnl_unavailable' }; }
+  C.desks[0].money.totalPnl = null; C.desks[0].money.reasons.totalPnl = 'retained_values';
+  C.totals.totalPnl = null; C.totals.reasons.totalPnl = 'family_projection_unavailable';
+  now = at(NOW, 110); assert.equal(model.accept(C).status, 200);
+  now = at(NOW, 115);
+  const view = model.view(), states = boardStates(view.feeds, now, view.panels), ctx = { feeds: view.feeds, now, states };
+  const journey = readFileSync(new URL('../scripts/browser-p3.mjs', import.meta.url), 'utf8');
+  const todayPattern = new RegExp(journey.match(/const today = \/(.+)\/, open = /)[1]);
+  for (const id of ['j', 'joe', 'joel']) {
+    const card = htmlDocument(deskCard(ctx, id, 50, true));
+    const lines = card.querySelectorAll('.mini-label .st');
+    const text = card.querySelector('.mini-label').textContent;
+    assert.ok(text.startsWith('Today: unavailable · waiting on the start-of-day value'), text);
+    assert.equal(states[`desks.${id}.dayPnl`].value, null);
+    assert.equal(states[`desks.${id}.openPnl`].retained, true);
+    assert.ok(todayPattern.test(lines[0].textContent), text);
+  }
+});
+
+for (const reason of NOT_EXACT_REASONS) test(`JOED-97 L2 ${reason}: startup discards uncertain stored cells hidden behind a later outage`, async t => {
+  const dataDir = scratch('joed-97-upgrade-');
+  t.after(() => discard(dataDir, 'JOED-97 upgrade store'));
+  let now = exact.receivedAt;
+  let model = createReadModel({ dataDir, clock: () => now });
+  assert.equal(model.accept(ingress(exact)).status, 200);
+  const outage = ingress(exact); outage.seq++;
+  now = outage.generatedAt = outage.safety.gateway.checkedAt = at(exact.receivedAt, 600);
+  for (const bag of [outage.totals, ...outage.desks.map(d => d.money)]) for (const field of fields) {
+    bag[field] = null; (bag.reasons ??= {})[field] = 'source_unavailable';
+  }
+  for (const sources of [outage.pnlSources, ...outage.desks.map(d => d.pnlSources)]) for (const source of Object.values(sources)) {
+    Object.assign(source, { status: 'unavailable', method: null, observedAt: null, reason: 'source_unavailable' });
+  }
+  assert.equal(model.accept(outage).status, 200);
+  const file = join(dataDir, 'data-state.json'), stored = JSON.parse(readFileSync(file));
+  stored.cells['desks.j.equity'].reason = reason;
+  stored.cells['desks.j.dayPnl'].valueSource.reason = reason;
+  writeFileSync(file, JSON.stringify(stored));
+  model = createReadModel({ dataDir, clock: () => now });
+  for (const name of ['desks.j.equity', 'desks.j.dayPnl']) assert.equal(model.panels()[name].value, null, name);
+  assert.notEqual(model.panels()['desks.joe.equity'].value, null, 'unaffected exact last-good survives upgrade');
+  now = outage.generatedAt = outage.safety.gateway.checkedAt = at(exact.receivedAt, 1200); outage.seq++;
+  assert.equal(model.accept(outage).status, 200);
+  const restarted = createReadModel({ dataDir, clock: () => now });
+  for (const name of ['desks.j.equity', 'desks.j.dayPnl']) assert.equal(restarted.panels()[name].value, null, 'cleanup survives subsequent retention and restart');
+});
+
+test('JOED-97 L4: retained estimates keep their original source and mark through outage and restart, until expiry or exact recovery', async t => {
+  const dataDir = scratch('joed-97-estimate-');
+  t.after(() => discard(dataDir, 'JOED-97 estimate store'));
+  const fixture = read('failures/b-session-open-estimate');
+  let now = fixture.receivedAt;
+  let model = createReadModel({ dataDir, clock: () => now });
+  assert.equal(model.accept(fixture.payload).status, 200);
+  const outage = structuredClone(fixture.payload); outage.seq++;
+  now = outage.generatedAt = outage.safety.gateway.checkedAt = at(fixture.receivedAt, 20);
+  for (const bag of [outage.totals, ...outage.desks.map(d => d.money)]) {
+    bag.dayPnl = null; (bag.reasons ??= {}).dayPnl = 'source_unavailable';
+  }
+  Object.assign(outage.pnlSources.day, { status: 'unavailable', observedAt: null, reason: 'source_unavailable' });
+  assert.equal(model.accept(outage).status, 200);
+  model = createReadModel({ dataDir, clock: () => now });
+  const render = () => {
+    const view = model.view();
+    return { feeds: view.feeds, now, states: boardStates(view.feeds, now, view.panels) };
+  };
+  for (const id of ['j', 'joe', 'joel']) {
+    const ctx = render();
+    assert.equal(ctx.states[`desks.${id}.dayPnl`].retained, true);
+    assert.deepEqual(ctx.states[`desks.${id}.dayPnl`].valueSource, fixture.payload.pnlSources.day);
+    for (const html of [deskCard(ctx, id, 50, true), compactDesk(ctx, id)]) assert.equal(htmlDocument(html).querySelectorAll('.estimate-mark').length, 1);
+  }
+  now = at(fixture.receivedAt, 3600);
+  assert.equal(htmlDocument(compactDesk(render(), 'j')).querySelectorAll('.estimate-mark').length, 0, 'expired estimate is a dash');
+  const recovery = ingress(exact); recovery.seq = outage.seq + 1;
+  recovery.generatedAt = recovery.safety.gateway.checkedAt = now;
+  assert.equal(model.accept(recovery).status, 200);
+  assert.equal(htmlDocument(compactDesk(render(), 'j')).querySelectorAll('.estimate-mark').length, 0, 'exact recovery clears the mark');
+  assert.notEqual(render().states['desks.j.dayPnl'].value, null);
+});
 
 for (const reason of NOT_EXACT_REASONS) test(`JOED-98 ${reason}: uncertain observations clear durable last-good, with and without an older exact value`, async t => {
   const dataDir = scratch('joed-98-');

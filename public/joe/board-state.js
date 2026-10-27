@@ -31,7 +31,7 @@ export function boardStates(feeds, now, previous = {}) {
         : ['positions', 'kept'].includes(name) ? [data?.positions?.reason] : fieldReason(name, field);
     // Scoped exactness failures still apply when a feed/gateway failure masks
     // their reason in the shared selector. An outage cannot restore an amount.
-    const inexact = [cell.reason, ...sourceReasons, cell.retained ? previous[name]?.reason : null]
+    const inexact = [cell.reason, ...sourceReasons]
       .some(reason => NOT_EXACT_REASONS.has(reason));
     const expired = cell.retained && (cell.ageSeconds == null || cell.ageSeconds >= RETENTION_SECONDS);
     // Today belongs to the observation's NY date, even if a real outage or
@@ -39,12 +39,14 @@ export function boardStates(feeds, now, previous = {}) {
     let differentDay = false;
     if (field === 'dayPnl' && cell.value != null) {
       const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
+      cell.valueSource = cell.retained ? previous[name]?.valueSource ?? null
+        : (desk?.pnlSources?.day ?? data?.pnlSources?.day) ?? null;
       const observedAt = cell.retained ? previous[name]?.valueObservedAt ?? cell.valueReceivedAt
         : (desk?.pnlSources?.day ?? data?.pnlSources?.day)?.observedAt ?? data?.generatedAt ?? cell.valueReceivedAt;
       cell.valueObservedAt = observedAt;
       differentDay = !validInstant(observedAt) || nyDay(observedAt) !== nyDay(now);
     }
-    if (inexact || expired || differentDay) states[name] = unavailable(cell, cell.reason ?? (differentDay ? 'day_pnl_unavailable' : null));
+    if (inexact || expired || differentDay) states[name] = unavailable(cell, cell.reason ?? (differentDay ? 'baseline_pending' : null));
   }
   // An outage can retain an older position list, but current per-field
   // exactness failures still invalidate those same older fields.

@@ -739,14 +739,14 @@ try {
           const today=label.querySelector('.term');
           const range=document.createRange(); if(!today) range.selectNode(label.firstChild);
           const text=(today ?? range).getBoundingClientRect();
-          return { text:e.textContent, label:e.getAttribute('aria-label'), role:e.getAttribute('role'),
+          return { text:e.textContent, label:e.getAttribute('aria-label'), role:e.getAttribute('role'), size:parseFloat(getComputedStyle(e).fontSize), title:e.getAttribute('title'),
             contained:r.left>=box.left && r.right<=box.right && r.top>=box.top && r.bottom<=box.bottom,
             separate:r.right<=text.left || r.left>=text.right };
         });
       })()`);
       const tag = `${viewport.name} ${theme}`;
       check('fixtures', `${tag}: estimated Today cells say Estimated visibly, accessibly, without overlapping Today`,
-        marks.length === (viewport.mobile ? 6 : 3) && marks.every(m => m.text === 'Estimated' && m.role === 'img' && m.label.startsWith('Today: Estimated from the session open') && m.contained && m.separate), marks);
+        marks.length === (viewport.mobile ? 6 : 3) && marks.every(m => m.text === 'Estimated' && m.role === 'img' && m.label.startsWith('Estimated from the session open') && m.size >= 10 && !m.title && m.contained && m.separate), marks);
       check('no-shift', `${tag}: exact → estimate has exactly 0 px layout shift`, JSON.stringify(before) === JSON.stringify(after), shifted(before, after));
       recovery.seq = ++seq; b.setNow(valid.data.receivedAt); await b.push(recovery);
       b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
@@ -1032,7 +1032,7 @@ try {
     check('clamp', `${tag} stale: a click or tap shows Today's sentence whole`, sayWhole(pinnedSay), pinnedSay);
 
     // Broken, field by field: Joe's Today stops at +80 s, Joe's open result
-    // and J's total at +110 s, so each keeps a different age and reason.
+    // and J's total at +110 s. Today is unavailable; open keeps its age.
     // (The contract makes Today's and the open result's evidence all or
     // nothing across the desks; equity and the total may stop desk by desk.)
     const B = advance(base, at(NOW, 80), base.seq + 1);
@@ -1053,7 +1053,7 @@ try {
     await refresh(`document.getElementById('desk-joe').innerText.includes('open result not available')`);
     ui = await page.evaluate(DESK_TEXT);
     const [j, joe, joel] = ['j', 'joe', 'joel'].map(id => ui.cards.find(c => c.id === id));
-    const today = /^Today: last good, 1\smin ago · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
+    const today = /^Today: unavailable · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
     check('journey', `${tag} broken: each affected desk number has its own line, age and reason`, j.lines.length === 3 && today.test(j.lines[0]) && open.test(j.lines[1]) &&
       /^Since 10\sSep: unavailable · carrying the last good value$/.test(j.lines[2]) && [joe, joel].every(c => c.lines.length === 2 && today.test(c.lines[0]) && open.test(c.lines[1])) &&
       JSON.stringify(j.nums) === '["broken","broken","broken"]' && [joe, joel].every(c => JSON.stringify(c.nums) === '["broken","broken","fresh"]'), ui.cards);

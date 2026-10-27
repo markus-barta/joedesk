@@ -31,11 +31,14 @@ function exactnessFailure(data, name, cell = {}) {
     : name === 'paperCash' ? [data?.brokerAccount?.reasons?.cash]
       : ['positions', 'kept'].includes(name) ? [data?.positions?.reason]
         : [bag?.reasons?.[field], period ? (desk?.pnlSources?.[period] ?? data?.pnlSources?.[period])?.reason : null];
-  return [cell.reason, ...reasons].some(reason => NOT_EXACT_REASONS.has(reason));
+  return [cell.reason, cell.valueSource?.reason, ...reasons].some(reason => NOT_EXACT_REASONS.has(reason));
+}
+function daySource(data, name) {
+  const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
+  return (desk?.pnlSources?.day ?? data?.pnlSources?.day) ?? null;
 }
 function dayObservedAt(data, name) {
-  const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
-  return (desk?.pnlSources?.day ?? data?.pnlSources?.day)?.observedAt ?? data?.generatedAt ?? null;
+  return daySource(data, name)?.observedAt ?? data?.generatedAt ?? null;
 }
 // JSON object order is immaterial. Hash only the validated ingress payload;
 // the server's receipt is deliberately excluded when comparing a stored value.
@@ -88,8 +91,9 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       throw new Error('contract_invalid');
     }
     // Older stores may have saved an explicitly uncertain observation. The
-    // current snapshot still carries enough evidence to discard that cell.
-    for (const name of DATA_PANELS) if (exactnessFailure(state.feed.value, name)) {
+    // latest snapshot and each stored last-good are independent evidence:
+    // a later outage must not mask an exactness reason on the stored cell.
+    for (const name of DATA_PANELS) if (exactnessFailure(state.feed.value, name, state.cells[name])) {
       state.cells[name] = { value: null, valueReceivedAt: null };
     }
   } catch (error) { state = null; if (!isMissing(error)) { storageInvalid = true; rejections.data = 'contract_invalid'; } }
@@ -133,6 +137,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       const cell = selected[name];
       cell.valueObservedAt = cell.retained ? state?.cells[name]?.valueObservedAt ?? cell.valueReceivedAt
         : dayObservedAt(state?.feed.value, name);
+      cell.valueSource = cell.retained ? state?.cells[name]?.valueSource ?? null : daySource(state?.feed.value, name);
     }
     return selected;
   };
@@ -222,7 +227,8 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       if (exactnessFailure(accepted.value, name, cell)) return [name, { value: null, valueReceivedAt: null }];
       return [name, { value: cell.value ?? null, valueReceivedAt: cell.valueReceivedAt ?? null,
         ...(name.endsWith('.dayPnl') ? { valueObservedAt: cell.retained ? state?.cells[name]?.valueObservedAt ?? cell.valueReceivedAt
-          : dayObservedAt(accepted.value, name) } : {}) }];
+          : dayObservedAt(accepted.value, name),
+          valueSource: cell.retained ? state?.cells[name]?.valueSource ?? null : daySource(accepted.value, name) } : {}) }];
     }));
     const next = { format: FORMAT, feed: { value: accepted.value, generatedAdvancedAt: accepted.generatedAdvancedAt }, gatewayProgress, cells };
     let stateSyncFailed = false;

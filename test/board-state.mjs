@@ -38,12 +38,14 @@ function missing(reason) {
   return data;
 }
 
-test('JOED-98: retained cells carrying an exactness reason cannot return through a later outage', () => {
+test('JOED-98: current scoped exactness failures withhold values even when the gateway masks their reason', () => {
   for (const reason of NOT_EXACT_REASONS) {
-    const prior = Object.fromEntries(Object.entries(previous).map(([name, cell]) => [name, { ...cell, reason }]));
-    const data = missing('source_unavailable');
+    const data = missing(reason);
     data.brokerAccount.equity = data.brokerAccount.cash = null;
-    data.brokerAccount.reason = 'source_unavailable'; data.brokerAccount.reasons = { cash: 'source_unavailable' };
+    data.brokerAccount.reason = reason; data.brokerAccount.reasons = { cash: reason };
+    data.safety.gateway.apiSessionReady = false; data.safety.gateway.reason = 'gateway_down';
+    // Production passes the server's selection for this same snapshot.
+    const prior = panelStates({ data: { value: data } }, at(30), previous);
     const states = boardStates({ data: { value: data } }, at(600), prior);
     for (const name of ['paperAccount', 'paperCash', ...MONEY_FIELDS.flatMap(f => DESKS.map(id => `desks.${id}.${f}`))]) {
       assert.equal(states[name].value, null, `${reason}: ${name}`);
@@ -89,7 +91,7 @@ for (const midnight of ['2026-10-15T04:00:00.000Z', '2026-11-03T05:00:00.000Z'])
     for (const desk of DESKS) {
       assert.equal(states[`desks.${desk}.dayPnl`].value, null, desk);
       assert.equal(states[`desks.${desk}.dayPnl`].retained, false);
-      assert.equal(states[`desks.${desk}.dayPnl`].reason, current === feeds ? 'day_pnl_unavailable' : 'source_unavailable');
+      assert.equal(states[`desks.${desk}.dayPnl`].reason, current === feeds ? 'baseline_pending' : 'source_unavailable');
       assert.equal(htmlDocument(deskCard(view, desk, 50, true)).querySelector('.dnums .bn').textContent, '—');
       assert.equal(htmlDocument(compactDesk(view, desk)).querySelector('[data-compact-value="dayPnl"] .bn').textContent, '—');
       assert.notEqual(states[`desks.${desk}.equity`].value, null, 'other outage last-good stays');
@@ -97,6 +99,10 @@ for (const midnight of ['2026-10-15T04:00:00.000Z', '2026-11-03T05:00:00.000Z'])
     assert.equal(states['today.dayPnl'].value, null);
     assert.equal(todayPercent(states), null);
     if (current === feeds) assert.notEqual(sincePercent(states), null, 'Since start has no day boundary');
+    if (current === feeds) {
+      assert.match(htmlDocument(heroLeft(view)).querySelector('.say').textContent, /Today’s result is not available: waiting on the start-of-day value\./);
+      assert.match(htmlDocument(deskCard(view, 'j', 50, true)).textContent, /Today: unavailable · waiting on the start-of-day value/);
+    }
   }
   const delayed = structuredClone(data); delayed.generatedAt = delayed.receivedAt = delayed.safety.gateway.checkedAt = midnight;
   const states = boardStates({ data: { value: delayed } }, midnight, prior);
@@ -126,11 +132,26 @@ test('JOED-95: session estimates are visible and accessible beside all desktop a
     assert.equal(marks.length, 1);
     assert.equal(marks[0].textContent, 'Estimated');
     assert.equal(marks[0].getAttribute('role'), 'img');
-    assert.match(marks[0].getAttribute('aria-label'), /^Today: Estimated from the session open at /);
+    assert.match(marks[0].getAttribute('aria-label'), /^Estimated from the session open at /);
+    assert.equal(marks[0].getAttribute('title'), null, 'no unreachable hover explanation');
     assert.equal(exactDoc.querySelectorAll('.estimate-mark').length, 0);
     assert.equal(estimated.querySelectorAll('button').length, exactDoc.querySelectorAll('button').length, 'no new interaction targets');
   }
   assert.equal(todayPercent(view.states, feed.value.pnlSources.day), null, 'estimate percentage policy stays unchanged');
+  // Follow name-from-content semantics for the phone button's descendants.
+  const accessibleName = node => typeof node === 'string' ? node
+    : node.getAttribute('aria-hidden') === 'true' ? ''
+      : node.getAttribute('aria-label') ?? node.children.map(accessibleName).join(' ');
+  for (const desk of DESKS) {
+    const phone = htmlDocument(compactDesk(view, desk));
+    assert.equal(accessibleName(phone.querySelector('.desk-row')).match(/\bToday\b/g)?.length, 1, 'Today is spoken once');
+  }
+  const outageFeeds = { data: { value: missing('source_unavailable') } };
+  const outage = { feeds: outageFeeds, now: at(30), states: boardStates(outageFeeds, at(30), view.states) };
+  for (const desk of DESKS) for (const render of [v => deskCard(v, desk, 50, true), v => compactDesk(v, desk)]) {
+    assert.equal(outage.states[`desks.${desk}.dayPnl`].retained, true);
+    assert.equal(htmlDocument(render(outage)).querySelectorAll('.estimate-mark').length, 1, 'last-good estimate keeps its mark');
+  }
   const unavailable = { ...view, states: boardStates({ data: { value: missing('baseline_pending') } }, at(30), view.states) };
   for (const desk of DESKS) assert.equal(htmlDocument(compactDesk(unavailable, desk)).querySelectorAll('.estimate-mark').length, 0, 'no estimate mark on a dash');
 });

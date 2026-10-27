@@ -205,10 +205,9 @@ function dayMethodLabel(source) {
   return null;
 }
 function dayEstimateMark(ctx, id) {
-  const data = ctx.feeds.data?.value, desk = data?.desks.find(d => d.id === id);
-  const source = desk?.pnlSources?.day ?? data?.pnlSources?.day;
-  if (ctx.states[`desks.${id}.dayPnl`]?.value == null || source?.status !== 'available' || source.method !== 'session-open-estimate') return '';
-  return `<span class="estimate-mark" role="img" aria-label="${esc(`Today: ${dayMethodLabel(source)}`)}" title="${esc(dayMethodLabel(source))}">Estimated</span>`;
+  const cell = ctx.states[`desks.${id}.dayPnl`], source = cell?.valueSource;
+  if (cell?.value == null || source?.status !== 'available' || source.method !== 'session-open-estimate') return '';
+  return `<span class="estimate-mark" role="img" aria-label="${esc(dayMethodLabel(source))}">Estimated</span>`;
 }
 function openMethodLabel(source) {
   if (!source || source.status !== 'available') return null;
