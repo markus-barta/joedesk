@@ -116,7 +116,7 @@ export function compactDesk(ctx, id) {
     const cell = ctx.states[`desks.${id}.${name}`], value = cellView(cell, `compact.${id}.${name}`, { label });
     const marker = cellIcon(cell, shared).replace('cell-state', 'compact-state');
     const characters = value.units === null ? 1 : eur(value.units, true).length;
-    return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${label}${marker}</span>${value.html}</span>`;
+    return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${label}${marker}${name === 'dayPnl' ? dayEstimateMark(ctx, id) : ''}</span>${value.html}</span>`;
   };
   return `<button type="button" class="desk-disclosure desk-row" data-desk-disclosure="${id}" aria-expanded="${expanded.has(id)}" aria-controls="detail-${id}">
     ${deskMark(id)}<span class="compact-identity"><strong>${esc(desk?.label ?? LABEL[id])}</strong><span class="compact-word tone-${info.tone}">${icon(info.icon)}${info.word}</span></span>
@@ -203,6 +203,11 @@ function dayMethodLabel(source) {
   if (source.method === 'session-open-estimate') return `Estimated from the session open${start ? ` at ${start}` : ''}`;
   if (source.method === 'ib-daily-pnl') return 'Reported by Interactive Brokers';
   return null;
+}
+function dayEstimateMark(ctx, id) {
+  const cell = ctx.states[`desks.${id}.dayPnl`], source = cell?.valueSource;
+  if (cell?.value == null || source?.status !== 'available' || source.method !== 'session-open-estimate') return '';
+  return `<span class="estimate-mark" role="img" aria-label="${esc(dayMethodLabel(source))}">Estimated</span>`;
 }
 function openMethodLabel(source) {
   if (!source || source.status !== 'available') return null;
@@ -361,13 +366,16 @@ function deskCard(ctx, id, maxDay, showBars) {
   const bar = showBars && exactCell(states[`desks.${id}.dayPnl`]) !== null && dayV.n != null && !isZero(dayV.n)
     ? `<i data-v="${dayV.n}" style="${dayV.n > 0 ? 'left' : 'right'}:50%;width:${(Math.abs(dayV.n) / maxDay * 50).toFixed(3)}%;background:var(--${dayV.n > 0 ? 'gain' : 'loss'})"></i>` : '';
   const board = boardCaptionCell(ctx);
-  const num = (label, v, cell, extra = '') => `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell, shared)}</span><span class="v">${v.html}</span>${extra}</div>`;
+  const num = (label, v, cell, extra = '') => {
+    const characters = v.units === null ? 1 : eur(v.units, true).length;
+    return `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell, shared)}</span><span class="v" style="--digits:${characters}">${v.html}</span>${extra}</div>`;
+  };
   const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]], board);
   const learning = learningLine(desk?.learning);
   return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(info.word + since)}">${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
       <p class="now">${desk ? esc(desk.action) : 'Waiting for the first valid snapshot.'}</p>
       <div class="dnums">
-        ${num(term('today'), dayV, states[`desks.${id}.dayPnl`], `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
+        ${num(term('today') + dayEstimateMark(ctx, id), dayV, states[`desks.${id}.dayPnl`], `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
         ${num(term('open'), openV, states[`desks.${id}.openPnl`])}
         ${num(term('since', sinceText), sinceV, states[`desks.${id}.totalPnl`])}
       </div>

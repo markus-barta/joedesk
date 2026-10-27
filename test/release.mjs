@@ -129,20 +129,20 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   const later = reserveVersion({ ...next, version_scheme: 'inspr-calendar-v2' }, laterUTC);
   assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, next.release_sequence + 1);
 });
-test('JOED-90: Results speed candidate follows the deployed sequence 32; About preserves deployed history and excludes aborted candidates', () => {
-  assert.equal(prep.ticket, 'JOED-90');
-  assert.equal(next.release_sequence, 33);
+test('JOED-97: follow-up fixes candidate follows the deployed sequence 33; About preserves deployed history and excludes aborted candidates', () => {
+  assert.equal(prep.ticket, 'JOED-97');
+  assert.equal(next.release_sequence, 34);
   assert.equal(active.status, 'candidate');
-  assert.equal(active.note, 'Results speed fix (JOED-89) and honest last values (JOED-91)');
-  assert.equal(oldRelease.version, '261025221940.0.0');
-  assert.equal(oldRelease.release_sequence, 32);
+  assert.equal(active.note, 'Follow-up review fixes (JOED-93)');
+  assert.equal(oldRelease.version, '261026070713.0.0');
+  assert.equal(oldRelease.release_sequence, 33);
   assert.equal(oldRelease.status, 'published-candidate');
   assert.equal(oldRelease.source_branch, 'main');
-  assert.equal(oldRelease.source_commit, '8be38581c6a97200df93a7084cdd05ebf051476c');
-  assert.equal(oldRelease.release_set_ticket, 'JOED-87');
+  assert.equal(oldRelease.source_commit, 'e96ff9a55c8809045c5e5d3491796579669a3531');
+  assert.equal(oldRelease.release_set_ticket, 'JOED-90');
   assert.equal(oldRelease.disposition, 'deployed');
   assert.equal(oldRelease.deployed, true);
-  assert.equal(oldRelease.note, 'live on csb0 since 2026-10-26T01:13:15Z (JOED-87)');
+  assert.equal(oldRelease.note, 'live on csb0 since 2026-10-26T20:06:06Z (JOED-90)');
   assert.deepEqual(prep.anchor, { legacy_scheme: 'calendar', last_legacy_version: '26.09.21.12.00',
     last_legacy_sequence: 23, first_calendar_version: '261016151218.0.0', first_calendar_sequence: 24 });
   assert.equal(lastDeployed.version, oldRelease.version);
@@ -155,19 +155,20 @@ test('JOED-90: Results speed candidate follows the deployed sequence 32; About p
   assert.equal(ui.VERSION_HISTORY[0].version, active.version);
   assert.equal(ui.VERSION_HISTORY[0].date, next.reserved_at.slice(0, 10));
   assert.equal(ui.VERSION_HISTORY[1].version, lastDeployed.version);
-  assert.equal(ui.VERSION_HISTORY[2].version, '261025144826.0.0');
-  assert.equal(ui.VERSION_HISTORY[3].version, '261023155418.0.0');
-  assert.equal(ui.VERSION_HISTORY[4].version, '261023100632.0.0');
-  assert.equal(ui.VERSION_HISTORY[5].version, '261021113113.0.0');
-  assert.equal(ui.VERSION_HISTORY[6].version, '261021083537.0.0');
-  assert.equal(ui.VERSION_HISTORY[7].version, '261021015923.0.0');
-  assert.equal(ui.VERSION_HISTORY[8].version, prep.anchor.last_legacy_version);
+  assert.equal(ui.VERSION_HISTORY[2].version, '261025221940.0.0');
+  assert.equal(ui.VERSION_HISTORY[3].version, '261025144826.0.0');
+  assert.equal(ui.VERSION_HISTORY[4].version, '261023155418.0.0');
+  assert.equal(ui.VERSION_HISTORY[5].version, '261023100632.0.0');
+  assert.equal(ui.VERSION_HISTORY[6].version, '261021113113.0.0');
+  assert.equal(ui.VERSION_HISTORY[7].version, '261021083537.0.0');
+  assert.equal(ui.VERSION_HISTORY[8].version, '261021015923.0.0');
+  assert.equal(ui.VERSION_HISTORY[9].version, prep.anchor.last_legacy_version);
   for (const version of ['261019102825.0.0', prep.anchor.first_calendar_version]) {
     assert.equal(ui.VERSION_HISTORY.some(r => r.version === version), false,
       'About must not imply either superseded candidate was deployed');
   }
 });
-test('JOED-90 check-release: accepts the Results speed reservation and rejects equal or earlier reservations after integrity verification', t => {
+test('JOED-97 check-release: accepts the follow-up fixes reservation and rejects equal or earlier reservations after integrity verification', t => {
   const root = temporary(t), closure = read('release/closure.json');
   for (const name of [...closure.files.map(f => f.path), 'release/closure.json', 'scripts/check-release.mjs']) {
     const target = join(root, name); fs.mkdirSync(join(target, '..'), { recursive: true });
@@ -177,7 +178,7 @@ test('JOED-90 check-release: accepts the Results speed reservation and rejects e
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.equal(JSON.parse(accepted.stdout).candidate, next.version);
-  for (const [version, reserved_at] of [['261025221940.0.0', '2026-10-25T22:19:40Z'], ['261025221939.0.0', '2026-10-25T22:19:39Z']]) {
+  for (const [version, reserved_at] of [['261026070713.0.0', '2026-10-26T07:07:13Z'], ['261026070712.0.0', '2026-10-26T07:07:12Z']]) {
     const invalid = structuredClone(prep);
     Object.assign(invalid.reservation, { version, reserved_at });
     fs.writeFileSync(join(root, 'release/preparation.json'), JSON.stringify(invalid, null, 2) + '\n');

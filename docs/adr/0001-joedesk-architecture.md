@@ -1493,3 +1493,13 @@ directory ownership/swap/rollback, the exact token-only `/joe/inbox` and
 `/joe/inbox/results` edge exceptions (separate routers, no SSO, never prefix
 matches), staging receipt
 and pusher-sequence rules, and the public smoke's exact route/outputs/exit codes.
+
+## Release 34 candidate (JOED-97)
+
+Reserve `261026232616.0.0` at `2026-10-26T23:26:16Z` as `inspr-calver-3`, stable sequence 34,
+for the JOED-93 follow-up fixes. Sequence 33 (`261026070713.0.0`) is the prior
+deployed release, from main `e96ff9a55c8809045c5e5d3491796579669a3531`, live on csb0 since
+`2026-10-26T20:06:06Z` (JOED-90). About lists 34, 33, 32 through 26, then legacy history;
+aborted publications remain excluded. Reseal only the new candidate's runtime
+closure; preserve revision-10 contracts and the approved presentation bundle.
+This preparation grants no publication or deployment approval.
