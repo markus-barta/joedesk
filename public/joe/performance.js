@@ -2,7 +2,7 @@
 // fleet contracts have no starting-capital field: retain the board's established
 // aggregate practice capital, never infer individual bases from current equity.
 import { decimalUnits, divRound } from './contracts/decimal.mjs';
-import { NOT_EXACT_REASONS } from './board-state.js';
+import { NOT_EXACT_REASONS, outageValue } from './board-state.js';
 
 export const STARTING_MONEY = decimalUnits('15000');
 
@@ -12,7 +12,7 @@ export function exactMoney(value) {
 }
 
 export function exactCell(cell) {
-  if (!cell || cell.retained || !['fresh', 'stale'].includes(cell.state) || NOT_EXACT_REASONS.has(cell.reason)) return null;
+  if (!cell || outageValue(cell) || !['fresh', 'stale'].includes(cell.state) || NOT_EXACT_REASONS.has(cell.reason)) return null;
   return exactMoney(cell.value);
 }
 

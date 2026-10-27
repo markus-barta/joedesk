@@ -1268,6 +1268,19 @@ When Today is a broken dash, its local caption states the reason unless the
 board's state line already explains it. This includes pending start-of-day
 results and every revision-10 exactness reason; repeated section reasons stay shared.
 
+Release 35 (JOED-96, Markus Desk f3b46a8d) extends this outage policy to a
+stopped DATA feed (`snapshot_stale`) or frozen producer (`producer_frozen`).
+Individual observations keep their stale value, caption, age and reason below
+the same 60-minute receipt-time limit; at the limit they become dashes with
+their reason. A frozen producer keeps its generation-age caption even when
+new receipts arrive; receipt time remains the display-expiry clock. These
+inputs never feed totals, since-start, percentages, ranking, relative bars,
+kept-worth sums or Results' current money and period percentage. Results
+explains the late/stuck DATA feed inside its existing chart status box, even
+when the closed-trade record is fresh. Fresh DATA restores current money and
+derived figures together. Replays retain their existing advisory policy;
+header health and retained-value grace are unchanged.
+
 Release 34 (JOED-93 follow-up: JOED-98/94/95) also treats revision-9
 `baseline_pending` and `day_pnl_unavailable` as missing exactness, never as
 last-good. The server clears the cell's durable last-good when any of these

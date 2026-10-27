@@ -13,6 +13,7 @@ import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
 import { basisKey } from './history-model.js';
 import { percentHtml } from './desk.js';
 import { exactCell } from './performance.js';
+import { stoppedData } from './board-state.js';
 import * as M from './results-model.js';
 
 export { periodOf } from './results-model.js';
@@ -39,10 +40,11 @@ export function resultsView(ctx) {
   const keep = [...new Set([...KEEP_FLOOR, ...(ctx.feeds['fleet-config']?.value?.desks.keep ?? [])])];
   if (ix && M.keptInRecord(ix, keep).length) { ix = null; reason = 'source_not_authoritative'; }
   const todayUnits = DESKS.map(id => exactCell(ctx.states[`desks.${id}.equity`]));
+  const moneyCells = DESKS.map(id => ctx.states[`desks.${id}.equity`]);
   const desksNow = ctx.feeds.data?.value?.desks ?? [];
   const current = Object.fromEntries(DESKS.map((id, i) => [id, todayUnits[i] === null ? null : desksNow.find(d => d.id === id) ?? null]));
   const nowMs = ctx.now ? Date.parse(ctx.now) : null, cols = ctx.feeds.history?.value?.columns ?? null;
-  return { today, cell, ix, reason, trackingStart: ix?.meta.trackingStart ?? null, todayUnits, nowMs, cols,
+  return { today, cell, ix, reason, trackingStart: ix?.meta.trackingStart ?? null, todayUnits, moneyCells, nowMs, cols,
     cuts: M.basisCuts(cols, current, nowMs), basis: DESKS.map(id => (current[id] ? basisKey(current[id]) : '')).join('|'), positions: ctx.states.positions?.value ?? [] };
 }
 
@@ -126,7 +128,7 @@ export function renderResults(ctx) {
   const view = resultsView(ctx);
   const { today, ix } = view;
   if (!RS.moved || !RS.anchor) { RS.anchor = RS.sel = today; RS.cal = M.ymOf(today); }
-  const sig = [ix, view.cols, view.reason, view.cell?.state, today, view.todayUnits.join(), view.basis, view.positions.map(p => `${p.desk}|${p.symbol}|${p.company}|${p.openedAt}`).join(),
+  const sig = [ix, view.cols, view.reason, view.cell?.state, today, view.todayUnits.join(), view.moneyCells.map(c => c?.reason).join(), view.basis, view.positions.map(p => `${p.desk}|${p.symbol}|${p.company}|${p.openedAt}`).join(),
     JSON.stringify(RS), $('#curve').clientWidth, $('#daySheet')?.open];
   if (last && sig.every((v, i) => v === last[i])) { renderStatus(view); return; }
   last = sig;
@@ -527,14 +529,22 @@ export function openDaySheet(view, k, { pointer = false } = {}) {
 function renderStatus(view) {
   const cell = view.cell, el = $('#resStatus');
   if (!el) return;
-  if (!view.ix || !cell || cell.state === 'fresh') { patch(el, ''); return; }
+  // The current-money input has its own feed. Explain its absence even when
+  // the closed-trade record is fresh, inside the existing fixed chart box.
+  const data = deskSet().map(id => view.moneyCells?.[DESKS.indexOf(id)]).find(stoppedData);
+  const dataText = data ? `Desks’ money is not available: ${esc(cellReason(data.reason))}.` : '';
+  if (!view.ix || !cell) { patch(el, ''); return; }
+  if (cell.state === 'fresh') {
+    patch(el, dataText ? `<div class="res-state" data-state="stale">${st('warn', dataText)}</div>` : '');
+    return;
+  }
   const p = statePhrase(cell, 'res', 'last good results');
   const why = cell.reason ? esc(cellReason(cell.reason)) : null;
   const ago = () => ageSpan('res', cell.ageSeconds == null ? 'an unknown time' : `${age(cell.ageSeconds)} ago`);
   const text = cell.retained ? `${cell.reason === 'sequence_replayed' ? 'Results update not used' : 'Results refresh failed'}: ${why ?? 'not available'}. Showing the last good results from ${ago()}.`
     : p.state === 'stale' ? `Results as of ${ago()}${why ? ` · ${why}` : ''}.` : `Results: ${why ?? 'not available'} · as of ${ago()}.`;
   const stale = p.state === 'stale' || cell.ageSeconds >= STALE_AFTER_S;
-  patch(el, `<div class="res-state" data-state="${p.state}">${st(p.tone, `${stale ? 'Stale · ' : ''}${text}`)}</div>`);
+  patch(el, `<div class="res-state" data-state="${p.state}">${st(p.tone, `${stale ? 'Stale · ' : ''}${text}${dataText ? ` ${dataText}` : ''}`)}</div>`);
 }
 
 // ---------- The hero chart: result so far, from € 0 ----------

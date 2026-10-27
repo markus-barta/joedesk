@@ -1534,7 +1534,7 @@ try {
     await serve(null);
     for (const viewport of VIEWPORTS) for (const theme of THEMES) {
       if (!view('ingress', 'live-stale-recovery', viewport, theme)) continue;
-      const { board } = await designBoard();
+      const { board, snapshot } = await designBoard();
       const record = designResults(NOW); delete record.receivedAt;
       const pushed = await board.pushResults(record);
       check('results-ingress', `${viewport.name} ${theme}: the real results inbox accepts v2`, pushed.status === 200, pushed);
@@ -1551,8 +1551,8 @@ try {
       await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, `/updates are late/.test(document.getElementById('resStatus').innerText)`);
       const stale = await page.evaluate(RES);
-      check('results-ingress', `${viewport.name} ${theme}: at 60 s the real feed is stale, keeps its numbers and moves nothing`,
-        /^Stale · Results as of 1.min ago · updates are late\.$/.test(stale.status) && stale.display === live.display &&
+      check('results-ingress', `${viewport.name} ${theme}: at 60 s stopped DATA withholds money now and percent, explains why and moves nothing`,
+        /^Stale · Results as of 1.min ago · updates are late\. Desks’ money is not available: updates are late\.$/.test(stale.status) && stale.display === '—' && stale.percent.text === '' && stale.split[1] === '—' &&
         !shifted(before, await rects(page, SHIFT), ['top', 'left', 'height']).length, stale.status);
       if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-ingress-stale`, 'Results stale 60 seconds after its last accepted push');
       const bad = structuredClone(record); bad.seq++; bad.generatedAt = board.clock(); bad.trades[0].netEur.amount = '999';
@@ -1562,13 +1562,17 @@ try {
       await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, `/last update was rejected/.test(document.getElementById('resStatus').innerText)`);
       const retained = await page.evaluate(RES);
-      check('results-ingress', `${viewport.name} ${theme}: rejection header keeps last good numbers with their original age`,
-        /last good results from 1.min ago/.test(retained.status) && retained.display === live.display, retained.status);
+      check('results-ingress', `${viewport.name} ${theme}: rejection header keeps the record and its age while stopped DATA still withholds money now`,
+        /last good results from 1.min ago/.test(retained.status) && retained.status.includes('Desks’ money is not available: updates are late.') && retained.display === '—' && retained.percent.text === '', retained.status);
       const next = { ...record, seq: record.seq + 1, generatedAt: board.clock() };
-      check('results-ingress', `${viewport.name} ${theme}: a new accepted push recovers`, (await board.pushResults(next)).status === 200);
+      const dataRecovery = await board.push({ ...snapshot, seq: snapshot.seq + 1, generatedAt: board.clock(),
+        safety: { ...snapshot.safety, gateway: { ...snapshot.safety.gateway, checkedAt: board.clock() } } });
+      check('results-ingress', `${viewport.name} ${theme}: new accepted DATA and Results pushes recover`, dataRecovery.status === 200 && (await board.pushResults(next)).status === 200);
       await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, `document.getElementById('resStatus').innerText.length === 0`);
-      check('results-ingress', `${viewport.name} ${theme}: recovery clears the rejection`, !(await page.evaluate(RES)).status);
+      const recovered = await page.evaluate(RES);
+      check('results-ingress', `${viewport.name} ${theme}: recovery clears both warnings and restores money and percent`,
+        !recovered.status && recovered.display === live.display && recovered.percent.text === live.percent.text, recovered.status);
     }
   }
 

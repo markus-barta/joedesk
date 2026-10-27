@@ -4,6 +4,10 @@ import { nyDay } from './time.mjs';
 import { validInstant } from './contracts/schema-validator.mjs';
 
 export const RETENTION_SECONDS = 60 * 60;
+// DATA-feed stalls follow the outage policy without changing selector health
+// or the existing stale captions. Replays keep their existing advisory policy.
+export const stoppedData = cell => ['snapshot_stale', 'producer_frozen'].includes(cell?.reason);
+export const outageValue = cell => Boolean(cell?.retained || stoppedData(cell));
 export const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale', 'baseline_pending', 'day_pnl_unavailable']);
 const DESKS = ['j', 'joe', 'joel'];
 const positionKey = row => JSON.stringify([row.scope, row.desk, row.symbol]);
@@ -33,7 +37,11 @@ export function boardStates(feeds, now, previous = {}) {
     // their reason in the shared selector. An outage cannot restore an amount.
     const inexact = [cell.reason, ...sourceReasons]
       .some(reason => NOT_EXACT_REASONS.has(reason));
-    const expired = cell.retained && (cell.ageSeconds == null || cell.ageSeconds >= RETENTION_SECONDS);
+    // Frozen receipts can advance while generation does not. Keep their
+    // existing generation-age caption, but expire by the value's receipt clock.
+    const valueAge = stoppedData(cell) ? (validInstant(cell.valueReceivedAt)
+      ? Math.max(0, (Date.parse(now) - Date.parse(cell.valueReceivedAt)) / 1000) : null) : cell.ageSeconds;
+    const expired = outageValue(cell) && (valueAge == null || valueAge >= RETENTION_SECONDS);
     // Today belongs to the observation's NY date, even if a real outage or
     // stopped feed spans midnight. Receipt time cannot freshen old evidence.
     let differentDay = false;
@@ -63,15 +71,15 @@ export function boardStates(feeds, now, previous = {}) {
     }) };
   }
   // Totals and since-start are derived figures. Never display a carried
-  // result or combine exact siblings with a retained/missing input.
+  // result or combine exact siblings with an outage/missing input.
   for (const field of MONEY_FIELDS) {
     const name = `today.${field}`, cell = states[name];
-    const blocked = DESKS.map(id => states[`desks.${id}.${field}`]).find(c => c.retained || c.value == null);
-    if (cell.retained || (cell.value != null && blocked)) states[name] = withheld(cell, cell.reason ?? blocked?.reason);
+    const blocked = DESKS.map(id => states[`desks.${id}.${field}`]).find(c => outageValue(c) || c.value == null);
+    if (outageValue(cell) || (cell.value != null && blocked)) states[name] = withheld(cell, cell.reason ?? blocked?.reason);
   }
   for (const id of DESKS) {
     const name = `desks.${id}.totalPnl`;
-    if (states[name].retained) states[name] = withheld(states[name]);
+    if (outageValue(states[name])) states[name] = withheld(states[name]);
   }
   return states;
 }

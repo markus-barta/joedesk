@@ -12,6 +12,7 @@ import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
 import { STARTING_MONEY, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
+import { outageValue } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -161,7 +162,7 @@ export function boardCaptionCell(ctx) {
 }
 export function sharesBoardCaption(cell, board) {
   return Boolean(board && cell && ['state', 'reason', 'retained', 'ageSeconds'].every(k => cell[k] === board[k]) &&
-    (cell.value == null) === (board.value == null));
+    (cell.health?.available ?? (cell.value != null)) === (board.value != null));
 }
 function cellIcon(cell, sharedReason = null) {
   if (!cell || cell.state === 'fresh') return '';
@@ -473,7 +474,7 @@ export function positionsHtml(ctx) {
     const cur = r.mark?.currency ?? r.marketValue?.currency ?? 'USD';
     const value = r.marketValue ? decimalUnits(r.marketValue.amount) : null, max = maxByCurrency.get(r.marketValue?.currency) ?? 0n;
     // A bounded percent, rounded to three decimal places from exact money.
-    const width = !cell.retained && value != null && max > 0n ? unitsDecimal(divRound((value < 0n ? -value : value) * 100000n, max) * (UNIT / 1000n)) : null;
+    const width = !outageValue(cell) && value != null && max > 0n ? unitsDecimal(divRound((value < 0n ? -value : value) * 100000n, max) * (UNIT / 1000n)) : null;
     const opened = r.openedAt ? ` · opened ${localDay(r.openedAt, NY) === today ? `today ${timeHM(r.openedAt)}` : dayDDM(r.openedAt)}` : '';
     const legacy = r.scope === 'legacy' ? ` · older holding, outside the ${term('stage0', 'first stage')}` : '';
     const deskLabel = unmapped(r) ? `No desk · ${cellReason(r.reasons.desk)}` : null;
@@ -500,7 +501,7 @@ export function keptHtml(ctx) {
   const shared = positionSectionReason(cell);
   const navUnits = exactCell(states.paperAccount), nav = navUnits === null ? '—' : eur(navUnits);
   const incomplete = rows?.filter(r => r.marketValue == null) ?? [];
-  const worth = !cell?.retained && rows?.length ? sumByCurrency(rows.map(r => r.marketValue))?.map(s => money(s.units, s.currency)).join(' and ') : null;
+  const worth = !outageValue(cell) && rows?.length ? sumByCurrency(rows.map(r => r.marketValue))?.map(s => money(s.units, s.currency)).join(' and ') : null;
   const worthReasons = [...new Set(incomplete.map(r => rowReason(r, 'marketValue', cell)))].filter(reason => reason !== shared);
   const unavailableWorth = `Worth not available${worthReasons.length ? ` · ${worthReasons.map(esc).join(' · ')}` : ''}`;
   const caption = `<p class="keep-cap">${icon('keep')}<span>Read-only. Left out of every desk result and of Results; counted in the ${term('paperacct', 'paper account')} (${nav}).</span></p>`;
@@ -508,10 +509,10 @@ export function keptHtml(ctx) {
   const fresh = incomplete.length ? unavailableWorth : worth ? `Worth ${worth} now, each in its own currency.` : 'Up to date.';
   const state = shared
     ? sectionState(cell, 'kept', { held: 'last good values', sharedReason: shared,
-      detail: cell.retained ? ' · worth —' : incomplete.length ? ' · worth not available' : worth ? ` · worth ${worth}, each in its own currency` : '' })
+      detail: outageValue(cell) ? ' · worth —' : incomplete.length ? ' · worth not available' : worth ? ` · worth ${worth}, each in its own currency` : '' })
     : incomplete.length
     ? `<p class="pstate" data-state="${p.state}">${st(p.state === 'fresh' ? 'none' : p.tone, `${p.text ? `${capital(p.text)} · ` : ''}${unavailableWorth}`, p.icon)}</p>`
-    : rows && (worth || cell.retained) && p.state !== 'fresh'
+    : rows && (worth || outageValue(cell)) && p.state !== 'fresh'
     ? `<p class="pstate" data-state="${p.state}">${st(p.tone, `${capital(p.text)} · worth ${worth ? `${worth}, each in its own currency` : '—'}`, p.icon)}</p>`
     : sectionState(cell, 'kept', { fresh, held: 'last good values', missing: 'Kept holdings are unavailable', absent: 'Kept holdings are not present in this snapshot.' });
   if (!rows) return `${caption}${state}`;
