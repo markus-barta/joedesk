@@ -1273,13 +1273,20 @@ stopped DATA feed (`snapshot_stale`) or frozen producer (`producer_frozen`).
 Individual observations keep their stale value, caption, age and reason below
 the same 60-minute age limit; at the limit they become dashes with
 their reason. A frozen producer ages from the last advancing generation
-(`generatedAdvancedAt`); new receipts cannot renew that age or defer expiry. These
+(`generatedAdvancedAt`); new receipts, rejected pushes and failed reads cannot
+renew that age, re-show an expired value or defer expiry. These
 inputs never feed totals, since-start, percentages, ranking, relative bars,
 kept-worth sums or Results' current money and period percentage. Results
-explains the late/stuck DATA feed or retained DATA outage inside its existing chart status box, even
+explains the late/stuck DATA feed or retained DATA outage inside its existing chart status box,
+including after the retained value expires to a dash, even
 when the closed-trade record is fresh. Fresh DATA restores current money and
 derived figures together. Replays retain their existing advisory policy;
 header health and retained-value grace are unchanged.
+
+Phone desk summaries reserve the same 16 px label and 20 px money lines for
+amounts and dashes. Currency baselines cannot change the summary height when
+a stale estimate becomes a kept estimate or changes back; the estimate mark
+and state icon stay in the label's existing box.
 
 Release 34 (JOED-93 follow-up: JOED-98/94/95) also treats revision-9
 `baseline_pending` and `day_pnl_unavailable` as missing exactness, never as

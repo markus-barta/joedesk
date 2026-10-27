@@ -531,7 +531,8 @@ function renderStatus(view) {
   if (!el) return;
   // The current-money input has its own feed. Explain its absence even when
   // the closed-trade record is fresh, inside the existing fixed chart box.
-  const data = deskSet().map(id => view.moneyCells?.[DESKS.indexOf(id)]).find(outageValue);
+  const data = deskSet().map(id => view.moneyCells?.[DESKS.indexOf(id)])
+    .find(cell => outageValue(cell) || cell?.outageExpired);
   const dataText = data ? `Desks’ money is not available: ${esc(cellReason(data.reason))}.` : '';
   if (!view.ix || !cell) { patch(el, ''); return; }
   if (cell.state === 'fresh') {

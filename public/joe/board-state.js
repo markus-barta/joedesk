@@ -15,11 +15,13 @@ const unavailable = (cell, reason = cell.reason) => ({ ...cell, state: cell.stat
 // Hiding a derived amount does not erase the observation's health/grace.
 // Keep only value-free evidence; calculations and rendering still see null.
 const withheld = (cell, reason = cell.reason) => ({ ...unavailable(cell, reason),
-  health: { available: cell.value != null, retained: cell.retained, ageSeconds: cell.ageSeconds } });
+  health: cell.health ?? { available: cell.value != null, retained: cell.retained, ageSeconds: cell.ageSeconds } });
 
 export function boardStates(feeds, now, previous = {}) {
   const states = panelStates(feeds, now, previous);
   const data = feeds.data?.value;
+  const generationAge = validInstant(feeds.data?.generatedAdvancedAt)
+    ? Math.max(0, (Date.parse(now) - Date.parse(feeds.data.generatedAdvancedAt)) / 1000) : null;
   const fieldReason = (name, field) => {
     const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
     const bag = desk?.money ?? data?.totals;
@@ -37,8 +39,13 @@ export function boardStates(feeds, now, previous = {}) {
     // their reason in the shared selector. An outage cannot restore an amount.
     const inexact = [cell.reason, ...sourceReasons]
       .some(reason => NOT_EXACT_REASONS.has(reason));
-    // The selector ages a frozen generation from generatedAdvancedAt, so
-    // re-sending it cannot renew either its caption or its expiry clock.
+    // Rejection takes precedence over producer_frozen in the selector. It
+    // must not reset a retained observation to the most recent re-send's age.
+    // Keep the selector's health/grace separate from the display clock.
+    if (cell.retained && cell.ageSeconds != null && generationAge >= 60 && generationAge > cell.ageSeconds) {
+      cell.health = { available: cell.value != null, retained: cell.retained, ageSeconds: cell.ageSeconds };
+      cell.ageSeconds = generationAge;
+    }
     const expired = outageValue(cell) && (cell.ageSeconds == null || cell.ageSeconds >= RETENTION_SECONDS);
     // Today belongs to the observation's NY date, even if a real outage or
     // stopped feed spans midnight. Receipt time cannot freshen old evidence.
@@ -52,7 +59,11 @@ export function boardStates(feeds, now, previous = {}) {
       cell.valueObservedAt = observedAt;
       differentDay = !validInstant(observedAt) || nyDay(observedAt) !== nyDay(now);
     }
-    if (inexact || expired || differentDay) states[name] = unavailable(cell, cell.reason ?? (differentDay ? 'baseline_pending' : null));
+    if (inexact || expired || differentDay) states[name] = {
+      ...unavailable(cell, cell.reason ?? (differentDay ? 'baseline_pending' : null)),
+      // Value-free evidence for Results after unavailable() clears retained.
+      ...(expired ? { outageExpired: true } : {}),
+    };
   }
   // An outage can retain an older position list, but current per-field
   // exactness failures still invalidate those same older fields.
