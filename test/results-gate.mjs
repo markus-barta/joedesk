@@ -151,7 +151,7 @@ test('P4 static counts reconcile to the baseline plus real fixtures and the subs
   const baseline = summarizeP4Views(P4_VIEWS), full = summarizeP4Views(fullViews, fullViews);
   const subsetViews = selectP4Views({ zoneSubset: true }, fullViews);
   const subset = summarizeP4Views(subsetViews, fullViews);
-  assert.equal(baseline.checks, 5187);
+  assert.equal(baseline.checks, 5195);
   assert.equal(full.views, baseline.views + 5 * realFixtureNames.length);
   assert.equal(full.checks, baseline.checks + 104 * realFixtureNames.length);
   for (const name of realFixtureNames) {
@@ -194,6 +194,46 @@ test('P4 observed view counts detect dropped checks, omitted views and unselecte
   incomplete.record(2);
   assert.match(incomplete.errors().join('\n'), /expected 3 checks; observed 2/);
   assert.match(incomplete.errors().join('\n'), /view not entered/);
+});
+
+test('retained-midnight DATA acceptance belongs to each selected view, never the preceding today view', async () => {
+  // Execute the actual push/selection/check statements without launching a
+  // browser. Stop before page setup; the two existing layout checks are
+  // accounted for below so the real inventory can reconcile every view.
+  const start = p4.indexOf('    const freshData = await retainedBoard.push(freshSnapshot);');
+  const end = p4.indexOf('      const injection =', start);
+  assert.ok(start >= 0 && end > start);
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const acceptance = new AsyncFunction('retainedBoard', 'freshSnapshot', 'viewports', 'THEMES', 'view', 'check', 'finishView',
+    p4.slice(start, end) + 'finishView();\n}');
+  const viewports = [...VIEWPORTS, { name: '360', mobile: true }];
+  for (const zoneSubset of [false, true]) {
+    const views = selectP4Views({ zoneSubset, only: ['partial-days'] }).filter(v =>
+      ['today-no-trades', 'retained-midnight'].includes(v.family));
+    const recorder = createP4ViewRecorder(views), selected = new Set(names(views));
+    for (const v of views.filter(v => v.family === 'today-no-trades')) {
+      assert.equal(v.checks, 2);
+      recorder.enter(v.name); recorder.record(2);
+    }
+    const retained = views.filter(v => v.family === 'retained-midnight');
+    assert.equal(retained.length, zoneSubset ? 1 : 8);
+    for (const v of retained) assert.equal(v.checks, 3);
+    let pushes = 0, checks = 0;
+    const snapshot = { seq: 2 };
+    await acceptance({ push: async payload => {
+      assert.equal(payload, snapshot); pushes++; return { status: 200 };
+    } }, snapshot, viewports, THEMES, (group, family, viewport, theme) => {
+      const name = p4ViewKey(group, family, viewport.name, theme);
+      if (!selected.has(name)) return false;
+      recorder.enter(name); return true;
+    }, (group, name, ok, response) => {
+      assert.equal(group, 'partial-days'); assert.equal(ok, true);
+      assert.equal(response.status, 200); checks++; recorder.record();
+    }, () => recorder.record(2));
+    assert.equal(pushes, 1, 'DATA setup stays shared');
+    assert.equal(checks, retained.length, 'every selected retained view checks DATA acceptance');
+    assert.deepEqual(recorder.errors(), [], zoneSubset ? 'subset inventory' : 'full inventory');
+  }
 });
 
 test('Results gate CLI preserves positional/default full runs and parses explicit full/subset groups', () => {

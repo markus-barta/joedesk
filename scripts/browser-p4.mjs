@@ -2416,9 +2416,9 @@ try {
     freshSnapshot.seq = retainedSnapshot.seq + 1;
     freshSnapshot.positions.rows.find(p => p.scope === 'stage0').openedAt = '2026-10-15T09:15:00.000Z';
     const freshData = await retainedBoard.push(freshSnapshot);
-    check('partial-days', 'retained Results after midnight has fresh DATA for its still-open position', freshData.status === 200, freshData);
     for (const viewport of viewports) for (const theme of THEMES) {
       if (!view('partial-days', 'retained-midnight', viewport, theme)) continue;
+      check('partial-days', `${viewport.name} ${theme}: retained Results after midnight has fresh DATA for its still-open position`, freshData.status === 200, freshData);
       const injection = viewport.mobile && theme === 'dark'
         ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
       await configure(page, viewport, theme);

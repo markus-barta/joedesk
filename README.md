@@ -725,9 +725,9 @@ zone subset.
 | budget | 0 | 1 |
 | **Total** | **31** | **298** |
 
-The subset is **31/329 views and 627/5,291 checks (11.85%)**, enforced at
-**≤25%** by the lightweight inventory test. The PR plan performs **6,545**
-checks (5,291 + 2 × 627), compared with 14,174 in fix1 and 15,873 for full ×3
+The subset is **31/329 views and 628/5,299 checks (11.85%)**, enforced at
+**≤25%** by the lightweight inventory test. The PR plan performs **6,555**
+checks (5,299 + 2 × 628), compared with 14,174 in fix1 and 15,897 for full ×3
 with the real fixture (14,871 for UX 1's synthetic baseline; 14,862 for the
 original synthetic baseline).
 The measured agm2 Results times were **788 s** for baseline, **779 s** for the
