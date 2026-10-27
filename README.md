@@ -543,6 +543,19 @@ copy, panel states, honest chart scales, contrast, 44 px targets, clipping
 and the two clamped state lines, layout shift in this machine's font and a
 wide one, terms, privacy stub) and writes screenshots plus an
 `index.md` to `~/.local/share/joedesk-qa/p3` (`JOED_QA_DIR` overrides it).
+P3, P4 and P5 print a **Time per group** table after their summary and include
+the same table in their QA `index.md`, in full and subset modes. It reports
+wall seconds, checks, screenshots and share of total time, slowest group first.
+Repeated blocks (such as P3's `design`) are summed; only selected blocks enter
+the timing helper. The window starts before browser launch and ends after
+cleanup; module imports and report writing are excluded. `setup` and `cleanup`
+have their own rows, as do P4's mandatory `host-timezone` checks and P5's final
+`network` check. Counts come from the existing append-only logs, including
+shared audits and direct captures; no check details or screenshot paths enter
+the timing table. `scripts/browser/group-timing.mjs` exposes
+`createGroupTiming({ results, shots, now? })` with `enter(name)` and `finish()`,
+plus `groupTimingTable(report)`. Its fake-clock tests run directly with
+`node --test test/browser-group-timing.mjs` and through `test/ui-modules.mjs`.
 The budget trace keeps timestamped long-task attribution, overlapping render
 and worker-reply events, and long-animation-frame script/layout attribution
 where supported. Desk and History live-push windows begin after their setup

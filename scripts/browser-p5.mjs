@@ -20,6 +20,7 @@ import { pngColours } from './browser/pixels.mjs';
 import { captureHeaderCrop } from './browser/header-crop.mjs';
 import { afterStableLayout } from './browser/settled-layout.mjs';
 import { phaseBChecks } from './browser/phase-b.mjs';
+import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
 
 // The page's own model, for the words and keys Settings must show.
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
@@ -40,8 +41,13 @@ const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-
 mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
 const { results, shots, check, shot, auditScreen } = createGate(QA_DIR);
+const timing = createGroupTiming({ results, shots });
 const ONLY = (process.env.JOED_P5_ONLY ?? '').split(',').filter(Boolean);
-const run = name => !ONLY.length || ONLY.includes(name);
+const run = name => {
+  const selected = !ONLY.length || ONLY.includes(name);
+  if (selected) timing.enter(name);
+  return selected;
+};
 async function load(page, url, screen = 'desk') {
   await loadPage(page, url, screen);
   if (screen === 'desk') await setDeskDisclosures(page, true);
@@ -1405,6 +1411,7 @@ try {
   }
 
   // ---------- 10 · Every write the page made, across the whole run ----------
+  timing.enter('network');
   {
     const writes = page.requests.filter(r => r.method !== 'GET' && r.method !== 'HEAD');
     const bad = writes.filter(r => { const path = new URL(r.url).pathname; let body = null; try { body = JSON.parse(r.postData ?? 'null'); } catch { /* not JSON */ }
@@ -1412,9 +1419,11 @@ try {
     check('AC-5', `network: all ${writes.length} writes of the run were Send to the desks (${sends} sends): POST ${PROPAGATE}, a paper draft of a named version; nothing to the inbox`, !bad.length && writes.length === sends && !page.requests.some(r => /\/joe\/inbox/.test(r.url)), bad.slice(0, 3));
   }
 } finally {
+  timing.enter('cleanup');
   await browser.close();
   for (const b of boards) await b.close();
 }
+const timePerGroup = groupTimingTable(timing.finish());
 
 const failed = results.filter(r => !r.ok);
 const byAc = new Map();
@@ -1655,6 +1664,9 @@ ${failed.length ? `### Failures\n\n${failed.map(f => `- ${f.ac} ${f.name}: \`${J
 ## Screenshots (\`<viewport>-<theme>-<surface>.png\`)
 
 ${shots.map(s => `- \`${s.file}\` — ${s.what}`).join('\n')}
+
+${timePerGroup}
 `);
 console.log(`${results.length - failed.length}/${results.length} browser checks passed; screenshots and index.md in ${QA_DIR}`);
+console.log(timePerGroup);
 process.exit(failed.length ? 1 : 0);
