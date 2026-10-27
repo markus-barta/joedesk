@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261026232616.0.0` (`inspr-calver-3`, stable sequence 34), reserved once at `2026-10-26T23:26:16Z` for follow-up review fixes ([JOED-93](https://aeon.barta.cm/p/JOED/JOED-93), release [JOED-97](https://aeon.barta.cm/p/JOED/JOED-97)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261027124551.0.0` (`inspr-calver-3`, stable sequence 35), reserved once at `2026-10-27T12:45:51Z` for a stopped pusher counting as an outage ([JOED-96](https://aeon.barta.cm/p/JOED/JOED-96), release [JOED-99](https://aeon.barta.cm/p/JOED/JOED-99)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261026070713.0.0` / sequence 33,
-published on `main` at `e96ff9a55c8809045c5e5d3491796579669a3531` under JOED-90,
-live on csb0 since `2026-10-26T20:06:06Z` (JOED-90). `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261026232616.0.0` / sequence 34,
+published on `main` at `a3a3683d6bbb05818ae99291b96e983000fb9cd4` under JOED-97,
+live on csb0 since `2026-10-27T03:30:43Z` (JOED-97). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 34. Sequence 32 (`261025221940.0.0`) was previously deployed
+adoption for sequence 35. Sequence 33 (`261026070713.0.0`) was previously deployed
+at `2026-10-26T20:06:06Z` (JOED-90). Sequence 32 (`261025221940.0.0`) was previously deployed
 at `2026-10-26T01:13:15Z` (JOED-87). Sequence 31 (`261025144826.0.0`) was previously deployed
 at `2026-10-25T21:22:26Z` (JOED-84). Sequence 30 (`261023155418.0.0`) was previously deployed
 at `2026-10-24T03:46:42Z` (JOED-78). Sequence 29 (`261023100632.0.0`) was previously deployed
@@ -30,13 +31,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-34 candidate has not been published. The candidate
+cutover**. The sequence-35 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -86,7 +87,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261026232616.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261027124551.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -543,12 +544,54 @@ copy, panel states, honest chart scales, contrast, 44 px targets, clipping
 and the two clamped state lines, layout shift in this machine's font and a
 wide one, terms, privacy stub) and writes screenshots plus an
 `index.md` to `~/.local/share/joedesk-qa/p3` (`JOED_QA_DIR` overrides it).
+P3, P4 and P5 print a **Time per group** table after their summary and include
+the same table in their QA `index.md`, in full and subset modes. It reports
+wall seconds, checks, screenshots and share of total time, slowest group first.
+Repeated blocks (such as P3's `design`) are summed; only selected blocks enter
+the timing helper. The window starts before browser launch and ends after
+cleanup; module imports and report writing are excluded. `setup` and `cleanup`
+have their own rows, as do P4's mandatory `host-timezone` checks and P5's final
+`network` check. Counts come from the existing append-only logs, including
+shared audits and direct captures; no check details or screenshot paths enter
+the timing table. `scripts/browser/group-timing.mjs` exposes
+`createGroupTiming({ results, shots, now? })` with `enter(name)` and `finish()`,
+plus `groupTimingTable(report)`. Its fake-clock tests run directly with
+`node --test test/browser-group-timing.mjs` and through `test/ui-modules.mjs`.
+
+The Board width sweep defaults to `--full`: both themes, both fonts and all
+four screens at every 10 px from 360 to 1440 plus the code-derived boundary widths (116 widths total). CI PRs pass `--subset`: light
+keeps the full grid and dark uses the code-derived viewport breakpoints and
+their ±10 px neighbors, plus 360/1024/1440. Pushes to main and manual dispatch
+keep `--full`. Both plans retain 137 sweep checks and six screenshots; the
+resize/measure rounds are 1,856 full and 1,088 subset with the current code.
+`scripts/board-sweep-plan.mjs` derives boundaries from `app.css` viewport
+`@media` queries, `public/joe/*.js` `matchMedia` queries and P3's `COMPACT`.
+The 339.98 px card container query and history.js clientWidth thresholds describe elements rather than viewports;
+the full light grid still covers their geometry. Every run's QA index records
+the plan and actual selected widths, including when `JOED_P3_ONLY` skips the
+sweep. Checks keep their full-grid inventory names across plans; execution
+reconciliation verifies checks, captures and each theme/font/screen/width.
+`test/theme-geometry.mjs` statically enforces theme-independent geometry:
+colour/shadow tokens may only feed painting, with two named exceptions for
+the root `color-scheme` palette hint and the equal-size sun/moon swap.
+It and `test/board-sweep-plan.mjs` join the existing UI unit suite.
+
 The budget trace keeps timestamped long-task attribution, overlapping render
 and worker-reply events, and long-animation-frame script/layout attribution
 where supported. Desk and History live-push windows begin after their setup
 settles; setup tasks remain in the trace separately, and tasks crossing into
 an update window still count. The CI guard remains 125 ms (2.5 × reference).
-The CI guard re-measures once on a task-only breach and fails if it reproduces; the reference budget never re-measures.
+The Board and Results CI guards re-measure once per viewport (the Board:
+per viewport and phase), only when every failed condition is a render-time
+or long-task limit. The second measurement is final; a reproduced breach or
+any functional failure still fails. Both
+attempts appear in the trace, table and failure detail. Results keeps its
+40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
+and render-count failures never trigger a re-measure. The reference budget
+never re-measures and its limits stay unchanged.
+When no long task was observed, concise attempt diagnostics report
+`taskMs: null`; tables show “—” for the worst long-task duration, while the
+task count remains zero. A zero-duration group's share is also “—”.
 Term-focus checks reacquire rebuilt terms and wait up to 2 s for each term's
 own tip and expanded state. The large-ledger Settings check waits up to 5 s
 for its exact-byte title and accessible name before measuring containment.
@@ -682,9 +725,9 @@ zone subset.
 | budget | 0 | 1 |
 | **Total** | **31** | **298** |
 
-The subset is **31/329 views and 627/5,291 checks (11.85%)**, enforced at
-**≤25%** by the lightweight inventory test. The PR plan performs **6,545**
-checks (5,291 + 2 × 627), compared with 14,174 in fix1 and 15,873 for full ×3
+The subset is **31/329 views and 628/5,299 checks (11.85%)**, enforced at
+**≤25%** by the lightweight inventory test. The PR plan performs **6,555**
+checks (5,299 + 2 × 628), compared with 14,174 in fix1 and 15,897 for full ×3
 with the real fixture (14,871 for UX 1's synthetic baseline; 14,862 for the
 original synthetic baseline).
 The measured agm2 Results times were **788 s** for baseline, **779 s** for the
@@ -1224,6 +1267,27 @@ does not change revision 10 or require producer re-vendoring.
 When Today is a broken dash, its local caption states the reason unless the
 board's state line already explains it. This includes pending start-of-day
 results and every revision-10 exactness reason; repeated section reasons stay shared.
+
+Release 35 (JOED-96, Markus Desk f3b46a8d) extends this outage policy to a
+stopped DATA feed (`snapshot_stale`) or frozen producer (`producer_frozen`).
+Individual observations keep their stale value, caption, age and reason below
+the same 60-minute age limit; at the limit they become dashes with
+their reason. A frozen producer ages from the last advancing generation
+(`generatedAdvancedAt`); new receipts, rejected pushes and failed reads cannot
+renew that age, re-show an expired value or defer expiry. The hero's board caption
+uses the same generation clock as the individual value captions, including after
+the values expire. These inputs never feed totals, since-start, percentages, ranking, relative bars,
+kept-worth sums or Results' current money and period percentage. Results
+explains the late/stuck DATA feed or retained DATA outage inside its existing chart status box,
+including after the retained value expires to a dash, even
+when the closed-trade record is fresh. Fresh DATA restores current money and
+derived figures together. Replays retain their existing advisory policy;
+header health and retained-value grace are unchanged.
+
+Phone desk summaries reserve the same 16 px label and 20 px money lines for
+amounts and dashes. Currency baselines cannot change the summary height when
+a stale estimate becomes a kept estimate or changes back; the estimate mark
+and state icon stay in the label's existing box.
 
 Release 34 (JOED-93 follow-up: JOED-98/94/95) also treats revision-9
 `baseline_pending` and `day_pnl_unavailable` as missing exactness, never as
@@ -1918,3 +1982,10 @@ the full-size anonymous flex text could exceed that width. The collapsed
 summary's separate 96 px Today track does not determine these columns.
 Upgrade-write failure diagnostics include the filesystem error code (or
 `unknown`), without logging the error message, path or stored values.
+
+### Release 35 preparation (JOED-99)
+
+Reserve `261027124551.0.0` at `2026-10-27T12:45:51Z`, stable sequence 35, for JOED-96.
+Sequence 34 is deployed from main `a3a3683d6bbb05818ae99291b96e983000fb9cd4`.
+Keep revision-10 contracts, the shared presentation pin and historical artifacts.
+The coordinator owns browser validation, review, publication and deployment.

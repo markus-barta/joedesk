@@ -18,6 +18,7 @@ import { startBoard, scenario, NOW, at, ACTOR, valid, measureHistory } from './b
 import { VIEWPORTS, THEMES, configure, load, go, settle, waitFor } from './browser/shots.mjs';
 import { setDeskDisclosures } from './browser/desk-disclosures.mjs';
 import { createGate, shifted, proportional, WIDE_FONT } from './browser/gate.mjs';
+import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
 import { CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from './browser/results-budget.mjs';
 import { designResults, withTradeSummaries, partialDaysResults, periodHintResults, tradeAmountResults, retainedPartialResults } from './browser/results.mjs';
@@ -76,6 +77,7 @@ const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-
 mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
 const { results, shots, check: gateCheck, shot, auditScreen: gateAuditScreen } = createGate(QA_DIR);
+const timing = createGroupTiming({ results, shots });
 const check = (ac, name, ok, detail) => {
   viewRecorder.record();
   gateCheck(ac, name, ok, detail);
@@ -90,7 +92,9 @@ const auditScreen = async (...args) => {
 const fixture = name => JSON.parse(readFileSync(new URL(`../fixtures/results/${name}.json`, import.meta.url)));
 const run = name => {
   if (!P4_SCENARIOS.some(s => s.name === name)) throw new Error(`Undeclared P4 scenario: ${name}`);
-  return selectedNames.has(name);
+  const selected = selectedNames.has(name);
+  if (selected) timing.enter(name);
+  return selected;
 };
 
 const N = text => String(text ?? '').replace(/[\s \u00ad]+/g, '');
@@ -419,6 +423,7 @@ async function designBoard(now = NOW, fleetConfig = null, edit = null) {
 const reset = async () => { for (const s of ['#periodSeg [data-period="week"]', '#deskSeg [data-desk="all"]']) await click(page, s); };
 
 try {
+  timing.enter('host-timezone');
   requireView('host-timezone', 'hosts');
   check('host-timezone', 'the server uses the requested host zone', hostTimeZone === expectedTimeZone, { hostTimeZone, expectedTimeZone });
   const pageTimeZone = await page.evaluate('Intl.DateTimeFormat().resolvedOptions().timeZone');
@@ -1529,7 +1534,7 @@ try {
     await serve(null);
     for (const viewport of VIEWPORTS) for (const theme of THEMES) {
       if (!view('ingress', 'live-stale-recovery', viewport, theme)) continue;
-      const { board } = await designBoard();
+      const { board, snapshot } = await designBoard();
       const record = designResults(NOW); delete record.receivedAt;
       const pushed = await board.pushResults(record);
       check('results-ingress', `${viewport.name} ${theme}: the real results inbox accepts v2`, pushed.status === 200, pushed);
@@ -1546,8 +1551,8 @@ try {
       await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, `/updates are late/.test(document.getElementById('resStatus').innerText)`);
       const stale = await page.evaluate(RES);
-      check('results-ingress', `${viewport.name} ${theme}: at 60 s the real feed is stale, keeps its numbers and moves nothing`,
-        /^Stale · Results as of 1.min ago · updates are late\.$/.test(stale.status) && stale.display === live.display &&
+      check('results-ingress', `${viewport.name} ${theme}: at 60 s stopped DATA withholds money now and percent, explains why and moves nothing`,
+        /^Stale · Results as of 1.min ago · updates are late\. Desks’ money is not available: updates are late\.$/.test(stale.status) && stale.display === '—' && stale.percent.text === '' && stale.split[1] === '—' &&
         !shifted(before, await rects(page, SHIFT), ['top', 'left', 'height']).length, stale.status);
       if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-results-ingress-stale`, 'Results stale 60 seconds after its last accepted push');
       const bad = structuredClone(record); bad.seq++; bad.generatedAt = board.clock(); bad.trades[0].netEur.amount = '999';
@@ -1557,13 +1562,17 @@ try {
       await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, `/last update was rejected/.test(document.getElementById('resStatus').innerText)`);
       const retained = await page.evaluate(RES);
-      check('results-ingress', `${viewport.name} ${theme}: rejection header keeps last good numbers with their original age`,
-        /last good results from 1.min ago/.test(retained.status) && retained.display === live.display, retained.status);
+      check('results-ingress', `${viewport.name} ${theme}: rejection header keeps the record and its age while stopped DATA still withholds money now`,
+        /last good results from 1.min ago/.test(retained.status) && retained.status.includes('Desks’ money is not available: updates are late.') && retained.display === '—' && retained.percent.text === '', retained.status);
       const next = { ...record, seq: record.seq + 1, generatedAt: board.clock() };
-      check('results-ingress', `${viewport.name} ${theme}: a new accepted push recovers`, (await board.pushResults(next)).status === 200);
+      const dataRecovery = await board.push({ ...snapshot, seq: snapshot.seq + 1, generatedAt: board.clock(),
+        safety: { ...snapshot.safety, gateway: { ...snapshot.safety.gateway, checkedAt: board.clock() } } });
+      check('results-ingress', `${viewport.name} ${theme}: new accepted DATA and Results pushes recover`, dataRecovery.status === 200 && (await board.pushResults(next)).status === 200);
       await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, `document.getElementById('resStatus').innerText.length === 0`);
-      check('results-ingress', `${viewport.name} ${theme}: recovery clears the rejection`, !(await page.evaluate(RES)).status);
+      const recovered = await page.evaluate(RES);
+      check('results-ingress', `${viewport.name} ${theme}: recovery clears both warnings and restores money and percent`,
+        !recovered.status && recovered.display === live.display && recovered.percent.text === live.percent.text, recovered.status);
     }
   }
 
@@ -2396,13 +2405,20 @@ try {
     // Preserve the legacy default line through a revision-6-valid path: the
     // original receipt was on the still-open day, now retained after midnight.
     const retained = retainedPartialResults();
-    const { board: retainedBoard } = await designBoard(retained.receivedAt, null, ({ snapshot }) => {
+    const { board: retainedBoard, snapshot: retainedSnapshot } = await designBoard(retained.receivedAt, null, ({ snapshot }) => {
       snapshot.positions.rows.find(p => p.scope === 'stage0').openedAt = '2026-10-15T09:15:00.000Z';
     });
     await retainedBoard.pushResults(retained.record);
     retainedBoard.setNow('2026-10-16T12:00:00.000Z');
+    // The Results record crosses midnight; DATA must still describe the
+    // current open position, rather than an expired 14-hour-old observation.
+    const freshSnapshot = scenario(retainedBoard.clock()).snapshot;
+    freshSnapshot.seq = retainedSnapshot.seq + 1;
+    freshSnapshot.positions.rows.find(p => p.scope === 'stage0').openedAt = '2026-10-15T09:15:00.000Z';
+    const freshData = await retainedBoard.push(freshSnapshot);
     for (const viewport of viewports) for (const theme of THEMES) {
       if (!view('partial-days', 'retained-midnight', viewport, theme)) continue;
+      check('partial-days', `${viewport.name} ${theme}: retained Results after midnight has fresh DATA for its still-open position`, freshData.status === 200, freshData);
       const injection = viewport.mobile && theme === 'dark'
         ? await page.s('Page.addScriptToEvaluateOnNewDocument', { source: 'globalThis.Worker = undefined;' }) : null;
       await configure(page, viewport, theme);
@@ -2517,14 +2533,17 @@ try {
     if (!view('budget', 'render')) throw new Error('Budget view must run in full mode');
     budgetTrace = await runResultsBudget({ page, newBoard, check, limits: CI_GUARD, serve: async (body, board) => { await serve(served(body, board)); return () => serve(null); } });
   }
+  timing.enter('host-timezone');
   requireView('host-timezone', 'hosts');
   if (process.env.TZ) check('host-timezone', 'dedicated workers use the requested host zone',
     page.workerTimeZones.length > 0 && page.workerTimeZones.every(zone => zone === expectedTimeZone),
     { workerTimeZones: page.workerTimeZones, expectedTimeZone });
 } finally {
+  timing.enter('cleanup');
   await browser.close();
   for (const b of boards) await b.close();
 }
+const timePerGroup = groupTimingTable(timing.finish());
 
 const failed = results.filter(r => !r.ok);
 const inventoryErrors = viewRecorder.errors();
@@ -2775,6 +2794,9 @@ ${budgetTrace ? resultsBudgetTable(budgetTrace, CI_GUARD) : 'Not run.\n'}
 ## Screenshots (\`<viewport>-<theme>-<surface>.png\`)
 
 ${shots.map(s => `- \`${s.file}\` — ${s.what}`).join('\n')}
+
+${timePerGroup}
 `);
 console.log(`${results.length - failed.length}/${results.length} browser checks passed; screenshots and index.md in ${QA_DIR}`);
+console.log(timePerGroup);
 process.exit(failed.length || inventoryErrors.length ? 1 : 0);

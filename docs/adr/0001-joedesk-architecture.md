@@ -463,7 +463,14 @@ names the device. CI runners are slower and vary from run to run, so CI
 enforces a regression guard of 2.5 × the reference budget on the same
 workload (`scripts/browser/budget.mjs`): a normal patch at most 40 ms, a
 History draw at most 125 ms, no task reaching 125 ms.
-The CI guard re-measures once on a task-only breach and fails if it reproduces; the reference budget never re-measures.
+The Board and Results CI guards re-measure once per viewport (the Board:
+per viewport and phase), only when every failed condition is a render-time
+or long-task limit. The second measurement is final; a reproduced breach or
+any functional failure still fails. Both
+attempts appear in the trace, table and failure detail. Results keeps its
+40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
+and render-count failures never trigger a re-measure. The reference budget
+never re-measures and its limits stay unchanged.
 Recorded reference:
 mbp2607 (Apple M5 Max, 18 cores, HeadlessChrome 153.0.8010.12, Node
 v26.11.1) on 2026-10-15: Desk patch worst 7.7 ms, History draw worst
@@ -1503,3 +1510,12 @@ deployed release, from main `e96ff9a55c8809045c5e5d3491796579669a3531`, live on 
 aborted publications remain excluded. Reseal only the new candidate's runtime
 closure; preserve revision-10 contracts and the approved presentation bundle.
 This preparation grants no publication or deployment approval.
+
+## Release 35 candidate (JOED-99)
+
+Reserve `261027124551.0.0` at `2026-10-27T12:45:51Z` as `inspr-calver-3`, stable sequence 35,
+for the stopped-pusher outage policy (JOED-96). Prior deployed sequence 34 is
+`261026232616.0.0`, main `a3a3683d6bbb05818ae99291b96e983000fb9cd4`, live since
+`2026-10-27T03:30:43Z` (JOED-97). About orders 35, 34 through 26, then legacy.
+Contracts revision 10 and the approved presentation bundle remain unchanged.
+This local preparation grants no publication or deployment approval.

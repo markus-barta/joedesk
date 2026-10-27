@@ -564,11 +564,15 @@ test('KEEP worth sums full precision per currency before rounding, including can
       for (const field of ['mark', 'marketValue']) row[field] = { amount: amounts[i], currency: 'EUR' };
     });
     assert.equal(validateContract('data', data).ok, true);
-    for (const state of ['fresh', 'stale', 'broken']) {
+    for (const [state, reason] of [['fresh', null], ['stale', 'snapshot_stale'], ['broken', 'snapshot_stale'], ['broken', 'source_unavailable']]) {
       const ctx = context(data);
-      Object.assign(ctx.states.kept, { state, reason: state === 'fresh' ? null : 'snapshot_stale', ageSeconds: 90 });
+      Object.assign(ctx.states.kept, { state, reason, ageSeconds: 90 });
       const prefix = state === 'fresh' ? 'Worth' : 'worth';
-      assert.ok(htmlDocument(keptHtml(ctx)).querySelector('.pstate').textContent.includes(`${prefix} ${expected}`), `${state}: ${amounts.join(' + ')}`);
+      const worth = htmlDocument(keptHtml(ctx)).querySelector('.pstate').textContent;
+      if (reason === 'snapshot_stale') {
+        assert.match(worth, /worth —/);
+        assert.ok(!worth.includes(expected), `${state}: stale worth is withheld`);
+      } else assert.ok(worth.includes(`${prefix} ${expected}`), `${state}: ${amounts.join(' + ')}`);
     }
   }
 });

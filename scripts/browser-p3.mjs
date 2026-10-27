@@ -2,7 +2,7 @@
 // P3 browser gate: the real board server, P1 fixtures and one headless browser
 // at 390/1024/1440 in light and dark (AC-1, 2, 5–9, 18–21, 28–34, 36, 38–47).
 // One browser, one page, run sequentially; screenshots go to the QA folder.
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir, cpus } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
@@ -15,6 +15,18 @@ import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/bu
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { phaseBChecks } from './browser/phase-b.mjs';
+import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
+import { parseBoardSweepArgs, createBoardSweepPlan, boardSweepErrors, boardSweepTable } from './board-sweep-plan.mjs';
+
+// The widest window with the compact header (app.css). Plan before any side
+// effects, so invalid CLI options or unhandled breakpoints fail immediately.
+const COMPACT = 960;
+const joeDirectory = new URL('../public/joe/', import.meta.url);
+const sweepPlan = createBoardSweepPlan({ mode: parseBoardSweepArgs(process.argv.slice(2)), compact: COMPACT,
+  css: readFileSync(new URL('app.css', joeDirectory), 'utf8'),
+  javascript: readdirSync(joeDirectory).filter(name => name.endsWith('.js')).map(name => readFileSync(new URL(name, joeDirectory), 'utf8')) });
+let sweepRan = false;
+const sweepErrors = [];
 
 // The page's own history model, for the values its sparklines must plot. The
 // server serves time.mjs and contracts/ from the repo root; mirror that here.
@@ -39,6 +51,7 @@ const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-
 mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
 const { results, shots, check, shot, auditScreen } = createGate(QA_DIR);
+const timing = createGroupTiming({ results, shots });
 const SHIFT_SELECTORS = ['header.top', '#statusAlert', '#deskHero', '.hero-primary', '#accountSection', '.hero-r', '.desk-row', '#heroL .primary', '#heroL .pct-slot', '#heroL .board-caption', '#heroL .kpi', '#heroL .display', '.dcard', '.dcard .dnums > div', '.dcard .chart', '#positions', '.prow', '#kept', 'footer.foot'];
 
 // Original checks read complete cards, charts and rows. Open their actual
@@ -380,7 +393,11 @@ async function resultsChecks(page, viewport, theme) {
 // JOED_P3_ONLY=journey,cold runs only those sections (local iteration); the
 // gate itself always runs everything.
 const ONLY = (process.env.JOED_P3_ONLY ?? '').split(',').filter(Boolean);
-const run = name => !ONLY.length || ONLY.includes(name);
+const run = name => {
+  const selected = !ONLY.length || ONLY.includes(name);
+  if (selected) timing.enter(name);
+  return selected;
+};
 
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
 // The performance reference: this browser build on this machine, recorded with every trace.
@@ -413,8 +430,6 @@ async function route(rules) {
 }
 // The two state lines that clamp, and the wide font that stands in for Linux's.
 const STATE_BOXES = ['#statusAlert', '#hdrHealth', '#heroL .say'];
-// The widest window with the compact header (app.css).
-const COMPACT = 960;
 const DESK_SHIFT = [...SHIFT_SELECTORS, '#hdrHealth', '#heroL .say', '#heroL .kpi .c', '#positions .pstate', '#kept .keep-cap', '#kept .pstate', '#kept .prow'];
 const HIST_SHIFT = ['.hist-tools', '.hcard', '#histChart', '#histCompare', '.hist-help', '.hist-cols', '#jAcct', '#jAcct .facts-dl', '#events', 'footer.foot'];
 // Copy assertions treat phone NBSP-dot and desktop space-dot as the same
@@ -1064,14 +1079,22 @@ try {
     ui = await page.evaluate(DESK_TEXT);
     const late = /^As of 1\smin ago · updates are late\.?$/;
     check('journey', `${tag} stale: one board caption gives the matching age/reason; every number retains its state and icon`, Object.values(ui.cells).every(c => c.state === 'stale') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => c.cap === '') && late.test(ui.boardCaption) &&
-      / today\.$/.test(ui.say) && ui.cards.every(c => c.label === 'since start · last sessions' && c.icons === 3) && /^As of 1\smin ago · updates are late$/.test(ui.positions) &&
-      /^As of 1\smin ago · updates are late · worth €\s12\.248,00 and \$\s441,20, each in its own currency$/.test(ui.kept), ui);
-    check('no-shift', `${tag}: fresh → stale moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
+      ui.say === 'Today’s result is not available.' && ui.cards.every(c => c.label === 'since start · last sessions' && c.icons === 3) && /^As of 1\smin ago · updates are late$/.test(ui.positions) &&
+      /^As of 1\smin ago · updates are late · worth —$/.test(ui.kept), ui);
+    const staleDerived = await page.evaluate(`(() => ({
+      totals: ['day', 'since', 'open', 'equity'].map(k => document.querySelector('[data-cell="hero.' + k + '"] .bn').textContent),
+      since: [...document.querySelectorAll('.dcard .dnums > div:last-child .bn')].map(e => e.textContent),
+      percentages: document.querySelectorAll('#heroL .performance-pct').length,
+      bars: document.querySelectorAll('.dcard .dbar i, #positions .vbar i').length
+    }))()`);
+    check('no-shift', `${tag}: fresh → stale hides derived amounts and moves nothing on Desk`,
+      staleDerived.totals.length === 4 && staleDerived.totals.every(v => v === '—') && staleDerived.since.length === 3 && staleDerived.since.every(v => v === '—') && staleDerived.percentages === 0 && staleDerived.bars === 0 &&
+      !moves(desk0, await rects(DESK_SHIFT)).length, { derived: staleDerived, moves: moves(desk0, await rects(DESK_SHIFT)).slice(0, 5) });
     boxes.push(['stale', await rects(STATE_BOXES)]);
     if (!font && viewport.name !== '1024') await shot(page, viewport, `${viewport.name}-${theme}-desk-state-stale`, 'Desk, stale: every panel with its age and reason');
     await go(page, 'history');
     let h = await page.evaluate(HIST_TEXT);
-    check('journey', `${tag} stale: History and J's result say as of 1 min and why`, h.state === 'stale' && /^History as of 1\smin ago · updates are late\.$/.test(h.status) && !h.retry && /J since 10\sSep\s+[+−]?€\s[\d.,]+\s·\sAs of 1\smin ago · updates are late/.test(h.j), h);
+    check('journey', `${tag} stale: History keeps its age; J's since-start result is a dash with why`, h.state === 'stale' && /^History as of 1\smin ago · updates are late\.$/.test(h.status) && !h.retry && /J since 10\sSep\s+—\s·\sUnavailable · updates are late/.test(h.j), h);
     check('no-shift', `${tag}: fresh → stale moves nothing on History`, !moves(hist0, await rects(HIST_SHIFT)).length, moves(hist0, await rects(HIST_SHIFT)).slice(0, 5));
     await go(page, 'desk');
     // Today's sentence pinned whole in the tip stays pinned through the
@@ -1210,8 +1233,11 @@ try {
   }
 
   if (run('sweep')) {
-  // 7c · AC-28 at every width: from 360 to 1440 px in 10 px steps, light and
-  // dark, in this machine's font and the wide one, every screen, resizing the
+  sweepRan = true;
+  const beforeSweep = { checks: results.length, screenshots: shots.length };
+  const rounds = [];
+  // 7c · AC-28: the 360–1440 px grid ∪ boundaries in full; PRs keep the light grid
+  // and dark boundaries, per sweepPlan. Both fonts, every screen, resizing the
   // live page. The page never scrolls sideways, nothing reaches past its
   // right edge and no text overlaps other text. Up to COMPACT px the header
   // is the phone's (the nav in the bottom bar, 44 px buttons, the light's
@@ -1224,7 +1250,6 @@ try {
   b.setNow(NOW);
   check('sweep', 'design snapshot accepted', (await b.push(snapshot)).status === 200);
   b.setNow(at(NOW, 9));
-  const widths = Array.from({ length: (1440 - 360) / 10 + 1 }, (_, i) => 360 + i * 10);
   // The header light's labels (health.js) and broker words (desk.js), and the
   // desk cards' longest state and heartbeat texts (desk.js).
   const light = { labels: HEALTH_LINES.concat(['Live · 59 s', 'Live · 9 s']), brokers: [''],
@@ -1234,6 +1259,7 @@ try {
     await load(page, b.url, 'desk');
     if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
     for (const screen of ['desk', 'results', 'history', 'settings']) {
+      const widths = sweepPlan.variants.find(v => v.theme === theme && v.wide === Boolean(font) && v.screen === screen).widths;
       await go(page, screen);
       const tag = `${theme}${font ? ' wide font' : ''} ${screen}`;
       const fail = { scroll: [], past: [], header: [], nav: [], targets: [], icons: [], overlaps: [], labels: [], cards: [], pointer: [] };
@@ -1245,6 +1271,7 @@ try {
         await settle(page);
         if (screen === 'desk') await setDeskDisclosures(page, true);
         const r = await page.evaluate(`__audit.sweep(${COMPACT}, ${screen === 'desk' ? JSON.stringify(light) : 'null'})`);
+        rounds.push(`${theme}/${Boolean(font)}/${screen}/${width}`);
         if (r.scroll > r.inner) fail.scroll.push({ width, scroll: r.scroll });
         if (r.past.length) fail.past.push({ width, past: r.past.slice(0, 3) });
         if (r.header.length) fail.header.push({ width, header: r.header });
@@ -1256,7 +1283,9 @@ try {
         const labels = r.labels;
         if (labels.length) fail.labels.push({ width, labels: labels.slice(0, 3) });
       }
-      const n = `${widths.length} widths from 360 to 1440 px`;
+      // Stable check identities describe the original 10 px grid. The QA plan
+      // table records actual width coverage, including the dark PR subset.
+      const n = `${sweepPlan.gridWidths.length} widths from 360 to 1440 px`;
       check('AC-28', `sweep ${tag}: no horizontal page scroll at any of ${n}`, !fail.scroll.length, fail.scroll.slice(0, 8));
       check('AC-28', `sweep ${tag}: nothing reaches past the page's right edge at any of ${n}`, !fail.past.length, fail.past.slice(0, 4));
       check('header', `sweep ${tag}: the status is exactly one line box; header items stay in the row without overlap or a partial wordmark at any of ${n}`, !fail.header.length, fail.header.slice(0, 4));
@@ -1292,6 +1321,8 @@ try {
     const html = h.innerHTML; Object.defineProperty(h, 'innerHTML', { configurable: true, get: () => html, set: () => {} }); })()`);
   await settle(page);
   await shot(page, edge, `${edge.name}-light-desk-header-longest-wide`, `Desk at ${edge.name} px in the wide font, the longest light label put in: the brand yields and gaps tighten as needed; the status and broker word stay on one line inside the button`);
+  sweepErrors.push(...boardSweepErrors(sweepPlan, { checks: results.length - beforeSweep.checks,
+    screenshots: shots.length - beforeSweep.screenshots, rounds }));
   }
 
   if (run('history')) {
@@ -1436,9 +1467,13 @@ try {
   }
   }
 } finally {
+  timing.enter('cleanup');
   await browser.close();
   for (const b of boards) await b.close();
 }
+const timePerGroup = groupTimingTable(timing.finish());
+const sweepCoverage = boardSweepTable(sweepPlan, sweepRan);
+for (const error of sweepErrors) console.error(`P3 sweep inventory: ${error}`);
 
 const failed = results.filter(r => !r.ok);
 const byAc = new Map();
@@ -1451,6 +1486,9 @@ an injected clock (Wed 14 Oct 2026, 19:42:31 Vienna), a synthetic test-only
 scenario for the design views and the P1 failure fixtures for the panel
 states. One headless browser, run sequentially; reduced motion for stable
 geometry. Compare with \`joed-19-joedesk-approved.html\`.
+
+${sweepCoverage}
+${sweepErrors.length ? `Sweep inventory errors:\n${sweepErrors.map(error => `- ${error}`).join('\n')}\n` : ''}
 
 ## State lines: clamps, no blank lines
 
@@ -1477,9 +1515,8 @@ Above ${COMPACT} px it is the desktop header. The wordmark yields to its icon
 when its flex slot is too small; if needed, measured overflow tightens gaps
 and padding. The status and broker columns reserve their widest words in the
 rendered font and remain on one line. Up to 900 px a kept holding has two
-lines. The sweep (\`sweep\`) walks every width from 360 to
-1440 px in 10 px steps, light and dark, in this machine's font and the wide
-one, on every screen: no horizontal page scroll, nothing past the page's right
+lines. The sweep (\`sweep\`) uses the width plan above in this machine's font
+and the wide one, on every screen: no horizontal page scroll, nothing past the page's right
 edge, no text over other text, the header in one row with one nav, 44 px
 targets and centred icons; on Desk every light label with every broker word
 moves nothing. Read right after each resize, the pointer is touch up to
@@ -1520,6 +1557,10 @@ ${budgetTrace ? budgetTable(budgetTrace, CI_GUARD) : 'Not run.\n'}
 ## Screenshots (\`<viewport>-<theme>-<surface>.png\`)
 
 ${shots.map(s => `- \`${s.file}\` — ${s.what}`).join('\n')}
+
+${timePerGroup}
 `);
 console.log(`${results.length - failed.length}/${results.length} browser checks passed; screenshots and index.md in ${QA_DIR}`);
-process.exit(failed.length ? 1 : 0);
+console.log(timePerGroup);
+console.log(sweepCoverage);
+process.exit(failed.length || sweepErrors.length ? 1 : 0);

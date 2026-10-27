@@ -174,7 +174,7 @@ export function createP4Views(realFixtures = []) {
   date('partial-days', 'today-empty-filtered', ALL, 1);
   date('partial-days', 'today-no-trades', ALL, 2);
   layout('partial-days', 'contrast', ALL, 1, 'Computed color contrast of cloned tint cells; no date calculation.');
-  date('partial-days', 'retained-midnight', ALL, 2);
+  date('partial-days', 'retained-midnight', ALL, 3);
   date('missing-days', 'closed-open-recovery', STANDARD, w => 13 + auditChecks(w));
   add('budget', 'render', [['', '']], { zoneSensitive: false, coverage: 'budget', checks: 9,
     reason: 'Worker/render performance budget; measured only in full runs.' });

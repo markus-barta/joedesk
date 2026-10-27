@@ -8,9 +8,13 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
 import { CI_GUARD, REFERENCE_BUDGET, TIMING_GUARDS, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
+import { runResultsBudget, resultsBudgetTable } from '../scripts/browser/results-budget.mjs';
 import { createGate } from '../scripts/browser/gate.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 import './browser-settled.mjs';
+import './browser-group-timing.mjs';
+import './theme-geometry.mjs';
+import './board-sweep-plan.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -313,15 +317,20 @@ test('unmapped positions: visible reason, honest row count, neutral identity, la
 test('kept worth: one null summand withholds the complete total rather than showing a partial sum', () => {
   const data = read('valid.json').data;
   const rows = data.positions.rows.filter(row => row.scope === 'keep');
-  for (const state of ['fresh', 'stale', 'broken']) {
-    const ctx = { states: { kept: { state, value: rows, reason: state === 'fresh' ? null : 'snapshot_stale', ageSeconds: 90 } } };
-    assert.match(keptHtml(ctx), /worth € 600,00 and \$ 200,00/i);
+  for (const [state, reason] of [['fresh', null], ['stale', 'snapshot_stale'], ['broken', 'snapshot_stale'], ['broken', 'source_unavailable']]) {
+    const ctx = { states: { kept: { state, value: rows, reason, ageSeconds: 90 } } };
+    if (reason === 'snapshot_stale') assert.match(keptHtml(ctx), /worth —/);
+    else assert.match(keptHtml(ctx), /worth € 600,00 and \$ 200,00/i);
     const incomplete = structuredClone(rows);
     incomplete[0].marketValue = null;
     incomplete[0].reasons = { marketValue: 'source_unavailable' };
     ctx.states.kept.value = incomplete;
     const html = keptHtml(ctx);
-    assert.match(html, /Worth not available · not reported by the broker/);
+    if (reason === 'source_unavailable') {
+      const status = htmlDocument(html).querySelector('.pstate').textContent;
+      assert.match(status, /worth not available/);
+      assert.equal(status.match(/not reported by the broker/g)?.length, 1, 'the shared failure reason appears once');
+    } else assert.match(html, /Worth not available · not reported by the broker/);
     assert.doesNotMatch(html.slice(0, html.indexOf('<div class="prow"')), /worth \$ 200,00/i);
     assert.equal(format.sumByCurrency(incomplete.map(row => row.marketValue)), null);
   }
@@ -1586,7 +1595,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
       if (source.includes('tasks: window.__budgetTasks.snapshot()')) {
         const task = { startTime: phase === 'cold' ? 210 : 150, duration: sample.taskMs ?? 60, attribution: [] };
         return { timings: [...timings('history-worker', 3, 10), ...timings('history', 3, sample.historyMs ?? 10)],
-          tasks: { tasks: [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400 };
+          tasks: { tasks: sample.taskMs === null ? [] : [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400 };
       }
       if (source.includes('timings.splice(0)')) {
         reads++;
@@ -1723,6 +1732,151 @@ test('browser budget: runBudget statically allows at most one re-measure per vie
   assert.equal(source.match(/for \(const viewport of VIEWPORTS\) await runViewport\(viewport, measure(?:Cold|Live)\)/g).length, 2);
   assert.match(source, /const measureCold = async viewport => \{\s*const cold = await newBoard/);
   assert.match(source, /const measureLive = async viewport => \{\s*const b = await newBoard/);
+});
+
+// Run the Results orchestration against scripted page replies. Navigation
+// consumes a sample, so an unexpected third measurement fails immediately.
+async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUARD } = {}) {
+  let viewport, sample, unserved = false;
+  const loads = Object.fromEntries(Object.keys(samples).map(width => [width, 0])), checks = [], observers = [];
+  const page = {
+    async s(method, params) {
+      observers.push({ method, params });
+      return { identifier: 'results-observer' };
+    },
+    async evaluate(source) {
+      if (source.includes('timings: window.__joedesk.timings.slice()')) {
+        return { timings: [
+          ...Array.from({ length: sample.renders ?? 11 }, () => ({ reason: 'results-period', ms: sample.switchMs ?? 10 })),
+          ...Array.from({ length: sample.mainThreadResults ?? 0 }, () => ({ reason: 'results-accept', ms: 1 })),
+        ], worker: sample.worker ?? true, long: sample.taskMs === undefined ? [] : [[110, sample.taskMs]] };
+      }
+      if (source.includes("find(t => t.reason === 'results-worker')")) return 100;
+      assert.ok(source === 'window.__joedesk.timings.length = 0' || source.includes('.click()'), source);
+    },
+  };
+  const context = { decideTaskGuard, TIMING_GUARDS, TextEncoder,
+    max: list => list.length ? Math.max(...list) : NaN,
+    VIEWPORTS: Object.keys(samples).map(name => ({ name })), NOW: '2026-10-27T04:00:00.000Z',
+    scenario: () => ({ snapshot: {}, history: {} }), at: (base, seconds) => `${base}/${seconds}`,
+    largeResults: () => ({ trades: Array(9000).fill({}), days: Array(1000).fill({}) }),
+    configure: async (page, width) => { viewport = width.name; },
+    load: async (page, url, panel) => {
+      assert.equal(panel, 'results');
+      sample = samples[viewport][loads[viewport]++];
+      assert.ok(sample, `unexpected extra Results measurement at ${viewport}`);
+    }, settle: async () => {}, waitFor: async () => {},
+  };
+  const execute = runInNewContext(`(${runResultsBudget.toString()})`, context);
+  const traces = await execute({ page, limits,
+    newBoard: async () => ({ url: 'http://fixture/', setNow() {}, async push() { return { status: 200 }; } }),
+    serve: async () => async () => { unserved = true; },
+    check: (ac, name, ok, detail) => checks.push({ name, ok, detail }),
+  });
+  assert.equal(unserved, true, 'the Results interceptor is removed');
+  assert.equal(observers.filter(o => o.method === 'Page.addScriptToEvaluateOnNewDocument').length,
+    Object.values(loads).reduce((sum, count) => sum + count, 0), 'each attempt installs a fresh observer');
+  assert.equal(observers.filter(o => o.method === 'Page.removeScriptToEvaluateOnNewDocument').length,
+    observers.filter(o => o.method === 'Page.addScriptToEvaluateOnNewDocument').length);
+  return { traces, checks, loads };
+}
+
+test('Results budget: each timing-only breach re-measures once and the second sample decides', async () => {
+  for (const first of [{ switchMs: 42.5 }, { taskMs: 125 }, { switchMs: 41.2, taskMs: 155 }]) {
+    const clean = await simulatedResultsBudget({ samples: { 1024: [first, {}] } });
+    assert.deepEqual(clean.loads, { 1024: 2 });
+    assert.equal(clean.checks.length, 3, 'only the final attempt emits checks');
+    assert.ok(clean.checks.every(c => c.ok));
+    assert.deepEqual(Array.from(clean.traces, r => [r.attempt, r.attempts, r.remeasured]), [[1, 2, true], [2, 2, true]]);
+    for (const second of [first, { worker: false }, { mainThreadResults: 1 }, { renders: 10 }, { switchMs: 43 }, { taskMs: 150 }]) {
+      const failed = await simulatedResultsBudget({ samples: { 1024: [first, second] } });
+      assert.deepEqual(failed.loads, { 1024: 2 });
+      assert.ok(failed.checks.some(c => !c.ok), 'every second-attempt failure is final');
+    }
+  }
+});
+
+test('Results budget: functional failures prevent re-measure even alongside timing breaches', async () => {
+  for (const functional of [{ worker: false }, { mainThreadResults: 1 }, { renders: 10 }, { renders: 0 }]) {
+    for (const timing of [{}, { switchMs: 42.5 }, { taskMs: 125 }, { switchMs: 42.5, taskMs: 125 }]) {
+      const { loads, checks, traces } = await simulatedResultsBudget({ samples: { 1024: [{ ...functional, ...timing }] } });
+      assert.deepEqual(loads, { 1024: 1 });
+      assert.ok(checks.some(c => !c.ok));
+      assert.equal(traces[0].remeasured, false);
+      assert.equal(traces[0].attempts, 1);
+    }
+  }
+});
+
+test('Results budget: reference limits and CI-shaped copies never re-measure; boundaries stay strict', async () => {
+  for (const sample of [{ switchMs: 16 }, { taskMs: 50 }, { switchMs: 40, taskMs: 125 }]) {
+    const { loads, checks } = await simulatedResultsBudget({ samples: { 1024: [sample] }, limits: REFERENCE_BUDGET });
+    assert.deepEqual(loads, { 1024: 1 });
+    assert.ok(checks.some(c => !c.ok));
+  }
+  const copy = await simulatedResultsBudget({ samples: { 1024: [{ switchMs: 41 }] }, limits: { ...CI_GUARD } });
+  assert.deepEqual(copy.loads, { 1024: 1 }, 'eligibility requires CI_GUARD identity');
+  assert.ok(copy.checks.some(c => !c.ok));
+  for (const [limits, sample] of [[CI_GUARD, { switchMs: 40, taskMs: 124.9 }],
+    [REFERENCE_BUDGET, { switchMs: 15.9, taskMs: 49.9 }]]) {
+    const clean = await simulatedResultsBudget({ samples: { 1024: [sample] }, limits });
+    assert.deepEqual(clean.loads, { 1024: 1 });
+    assert.ok(clean.checks.every(c => c.ok));
+    assert.doesNotMatch(resultsBudgetTable(clean.traces, limits), /Attempt|re-measured/);
+  }
+});
+
+test('Results budget: attempts are independent per viewport and both measurements appear in the table and failure log', async () => {
+  const { loads, checks, traces } = await simulatedResultsBudget({ samples: {
+    390: [{}], 1024: [{ switchMs: 42.5, taskMs: 155 }, { switchMs: 41.2, taskMs: 140 }],
+    1440: [{ taskMs: 125 }, {}],
+  } });
+  assert.deepEqual(loads, { 390: 1, 1024: 2, 1440: 2 });
+  assert.equal(checks.length, 9);
+  assert.equal(traces.length, 5);
+  assert.deepEqual(Array.from(traces, r => r.viewport), ['390', '1024', '1024', '1440', '1440']);
+  const table = resultsBudgetTable(traces, CI_GUARD);
+  assert.match(table, /Attempt/);
+  assert.match(table, /1\/1/);
+  assert.equal(table.match(/1\/2 \(re-measured\)/g).length, 2);
+  assert.equal(table.match(/2\/2 \(re-measured\)/g).length, 2);
+  assert.match(table, /42\.5/);
+  assert.match(table, /41\.2/);
+  const failures = checks.filter(c => !c.ok);
+  assert.equal(failures.length, 2);
+  const messages = [], original = console.error;
+  console.error = message => messages.push(message);
+  try {
+    const gate = createGate('unused');
+    for (const c of failures) {
+      assert.match(c.name, /; re-measured once after a breach\)/);
+      assert.equal(c.detail.attemptRows.length, 2);
+      gate.check('budget', c.name, c.ok, { ...c.detail, longTasks: Array(1000).fill(140) });
+    }
+  } finally { console.error = original; }
+  assert.equal(messages.length, 2);
+  for (const message of messages) assert.match(message,
+    /"measurements":\[\{"attempt":1,"switchMs":42\.5,"taskMs":155\},\{"attempt":2,"switchMs":41\.2,"taskMs":140\}\]/);
+});
+
+test('browser budgets: absent long-task duration is null in both attempts and a dash in tables', async () => {
+  const board = await simulatedBudget({ cold: [{ historyMs: 126, taskMs: null }, { taskMs: null }],
+    live: [{ patchMs: 41, taskMs: null }, { taskMs: null }] });
+  const results = await simulatedResultsBudget({ samples: { 1024: [{ switchMs: 42.5 }, {}] } });
+  assert.deepEqual(board.loads, { cold: 2, live: 2 });
+  assert.deepEqual(results.loads, { 1024: 2 });
+  for (const run of [board, results]) {
+    assert.ok(run.checks.every(c => c.ok));
+    const measurements = run.checks.flatMap(c => c.detail.measurements ?? []);
+    assert.ok(measurements.length > 0);
+    assert.ok(measurements.every(m => m.taskMs === null));
+    assert.ok(run.traces.every(r => r.longTasks.length === 0));
+  }
+  for (const table of [budgetTable(board.traces, CI_GUARD), resultsBudgetTable(results.traces, CI_GUARD)]) {
+    assert.match(table, /Long task worst \(ms\)/);
+    const rows = table.trim().split('\n').slice(2);
+    assert.ok(rows.every(row => /\| — \| 0 \| 0 \|$/.test(row)), table);
+  }
 });
 
 test('browser budget: observer snapshots drain undelivered entries once, with attribution and optional frame support', () => {

@@ -2,10 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261026232616.0.0",
+    APP_VERSION: "261027124551.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 34,
+    RELEASE_SEQUENCE: 35,
     VERSION_HISTORY: [
+      {
+        version: "261027124551.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-27",
+        title: "Old data stops counting",
+        changes: ["Keep late or frozen feed values visibly marked and out of totals and percentages.", "Show a dash after an hour; explain unavailable current money on Results."],
+      },
       {
         version: "261026232616.0.0",
         versionScheme: "inspr-calver-3",
