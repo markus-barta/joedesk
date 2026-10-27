@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261026232616.0.0` (`inspr-calver-3`, stable sequence 34), reserved once at `2026-10-26T23:26:16Z` for follow-up review fixes ([JOED-93](https://aeon.barta.cm/p/JOED/JOED-93), release [JOED-97](https://aeon.barta.cm/p/JOED/JOED-97)). `release.json` is authoritative for this candidate's builds; package, UI and `/joe/healthz` report that running version. This candidate has not been published or deployed.
+**Candidate version:** `261027124551.0.0` (`inspr-calver-3`, stable sequence 35), reserved once at `2026-10-27T12:45:51Z` for a stopped pusher counting as an outage ([JOED-96](https://aeon.barta.cm/p/JOED/JOED-96), release [JOED-99](https://aeon.barta.cm/p/JOED/JOED-99)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261026070713.0.0` / sequence 33,
-published on `main` at `e96ff9a55c8809045c5e5d3491796579669a3531` under JOED-90,
-live on csb0 since `2026-10-26T20:06:06Z` (JOED-90). `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261026232616.0.0` / sequence 34,
+published on `main` at `a3a3683d6bbb05818ae99291b96e983000fb9cd4` under JOED-97,
+live on csb0 since `2026-10-27T03:30:43Z` (JOED-97). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 34. Sequence 32 (`261025221940.0.0`) was previously deployed
+adoption for sequence 35. Sequence 33 (`261026070713.0.0`) was previously deployed
+at `2026-10-26T20:06:06Z` (JOED-90). Sequence 32 (`261025221940.0.0`) was previously deployed
 at `2026-10-26T01:13:15Z` (JOED-87). Sequence 31 (`261025144826.0.0`) was previously deployed
 at `2026-10-25T21:22:26Z` (JOED-84). Sequence 30 (`261023155418.0.0`) was previously deployed
 at `2026-10-24T03:46:42Z` (JOED-78). Sequence 29 (`261023100632.0.0`) was previously deployed
@@ -30,13 +31,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-34 candidate has not been published. The candidate
+cutover**. The sequence-35 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -86,7 +87,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261026232616.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261027124551.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -1960,3 +1961,10 @@ the full-size anonymous flex text could exceed that width. The collapsed
 summary's separate 96 px Today track does not determine these columns.
 Upgrade-write failure diagnostics include the filesystem error code (or
 `unknown`), without logging the error message, path or stored values.
+
+### Release 35 preparation (JOED-99)
+
+Reserve `261027124551.0.0` at `2026-10-27T12:45:51Z`, stable sequence 35, for JOED-96.
+Sequence 34 is deployed from main `a3a3683d6bbb05818ae99291b96e983000fb9cd4`.
+Keep revision-10 contracts, the shared presentation pin and historical artifacts.
+The coordinator owns browser validation, review, publication and deployment.
