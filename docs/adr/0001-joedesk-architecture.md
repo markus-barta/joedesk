@@ -463,7 +463,13 @@ names the device. CI runners are slower and vary from run to run, so CI
 enforces a regression guard of 2.5 × the reference budget on the same
 workload (`scripts/browser/budget.mjs`): a normal patch at most 40 ms, a
 History draw at most 125 ms, no task reaching 125 ms.
-The CI guard re-measures once on a task-only breach and fails if it reproduces; the reference budget never re-measures.
+The Board and Results CI guards re-measure a viewport once only when every
+failed condition is a render-time or long-task limit. The second measurement
+is final; a reproduced breach or any functional failure still fails. Both
+attempts appear in the trace, table and failure detail. Results keeps its
+40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
+and render-count failures never trigger a re-measure. The reference budget
+never re-measures and its limits stay unchanged.
 Recorded reference:
 mbp2607 (Apple M5 Max, 18 cores, HeadlessChrome 153.0.8010.12, Node
 v26.11.1) on 2026-10-15: Desk patch worst 7.7 ms, History draw worst

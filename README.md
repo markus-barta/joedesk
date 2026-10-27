@@ -548,7 +548,13 @@ and worker-reply events, and long-animation-frame script/layout attribution
 where supported. Desk and History live-push windows begin after their setup
 settles; setup tasks remain in the trace separately, and tasks crossing into
 an update window still count. The CI guard remains 125 ms (2.5 × reference).
-The CI guard re-measures once on a task-only breach and fails if it reproduces; the reference budget never re-measures.
+The Board and Results CI guards re-measure a viewport once only when every
+failed condition is a render-time or long-task limit. The second measurement
+is final; a reproduced breach or any functional failure still fails. Both
+attempts appear in the trace, table and failure detail. Results keeps its
+40 ms switch-render guard and rejects tasks reaching 125 ms; worker/main-thread
+and render-count failures never trigger a re-measure. The reference budget
+never re-measures and its limits stay unchanged.
 Term-focus checks reacquire rebuilt terms and wait up to 2 s for each term's
 own tip and expanded state. The large-ledger Settings check waits up to 5 s
 for its exact-byte title and accessible name before measuring containment.
