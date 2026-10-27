@@ -37,11 +37,9 @@ export function boardStates(feeds, now, previous = {}) {
     // their reason in the shared selector. An outage cannot restore an amount.
     const inexact = [cell.reason, ...sourceReasons]
       .some(reason => NOT_EXACT_REASONS.has(reason));
-    // Frozen receipts can advance while generation does not. Keep their
-    // existing generation-age caption, but expire by the value's receipt clock.
-    const valueAge = stoppedData(cell) ? (validInstant(cell.valueReceivedAt)
-      ? Math.max(0, (Date.parse(now) - Date.parse(cell.valueReceivedAt)) / 1000) : null) : cell.ageSeconds;
-    const expired = outageValue(cell) && (valueAge == null || valueAge >= RETENTION_SECONDS);
+    // The selector ages a frozen generation from generatedAdvancedAt, so
+    // re-sending it cannot renew either its caption or its expiry clock.
+    const expired = outageValue(cell) && (cell.ageSeconds == null || cell.ageSeconds >= RETENTION_SECONDS);
     // Today belongs to the observation's NY date, even if a real outage or
     // stopped feed spans midnight. Receipt time cannot freshen old evidence.
     let differentDay = false;

@@ -13,7 +13,7 @@ import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
 import { basisKey } from './history-model.js';
 import { percentHtml } from './desk.js';
 import { exactCell } from './performance.js';
-import { stoppedData } from './board-state.js';
+import { outageValue } from './board-state.js';
 import * as M from './results-model.js';
 
 export { periodOf } from './results-model.js';
@@ -531,7 +531,7 @@ function renderStatus(view) {
   if (!el) return;
   // The current-money input has its own feed. Explain its absence even when
   // the closed-trade record is fresh, inside the existing fixed chart box.
-  const data = deskSet().map(id => view.moneyCells?.[DESKS.indexOf(id)]).find(stoppedData);
+  const data = deskSet().map(id => view.moneyCells?.[DESKS.indexOf(id)]).find(outageValue);
   const dataText = data ? `Desks’ money is not available: ${esc(cellReason(data.reason))}.` : '';
   if (!view.ix || !cell) { patch(el, ''); return; }
   if (cell.state === 'fresh') {

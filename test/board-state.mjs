@@ -444,9 +444,9 @@ test('the actual feed adapter applies board policy on reads, failed refreshes, a
 
 // JOED-96: a DATA stall follows the same numeric policy as an outage, while
 // preserving the shared selector's original state, reason and health evidence.
-for (const frozen of [false, true]) test(`JOED-96 ${frozen ? 'producer_frozen' : 'snapshot_stale'}: marked values, no derived numbers, receipt-clock expiry, recovery`, () => {
+for (const frozen of [false, true]) test(`JOED-96 ${frozen ? 'producer_frozen' : 'snapshot_stale'}: marked values, no derived numbers, cell-age expiry, recovery`, () => {
   const reason = frozen ? 'producer_frozen' : 'snapshot_stale';
-  for (const seconds of [60, 3599, 3600, 3601]) {
+  for (const seconds of [60, 3539, 3540, 3541, 3599, 3600, 3601]) {
     const feeds = { data: { value: exact, ...(frozen ? { generatedAdvancedAt: at(-60) } : {}) } };
     const now = at(seconds), raw = panelStates(feeds, now, previous);
     const states = boardStates(feeds, now, previous), view = { feeds, now, states };
@@ -454,7 +454,7 @@ for (const frozen of [false, true]) test(`JOED-96 ${frozen ? 'producer_frozen' :
     assert.equal(cell.state, 'stale'); assert.equal(cell.reason, reason); assert.equal(cell.retained, false);
     assert.equal(cell.ageSeconds, raw[name].ageSeconds, 'original caption age is preserved');
     assert.deepEqual(localBoardHealth(states, feeds, now), localBoardHealth(raw, feeds, now), 'header health is unchanged');
-    if (seconds < RETENTION_SECONDS) {
+    if (cell.ageSeconds < RETENTION_SECONDS) {
       assert.deepEqual(cell.value, exact.desks[0].money.equity);
       assert.match(htmlDocument(cellView(cell, 'equity').caption).textContent, /As of .*ago · updates are (late|stuck)/);
       assert.deepEqual(states['today.equity'].health, { available: true, retained: false, ageSeconds: raw['today.equity'].ageSeconds });
@@ -486,15 +486,16 @@ for (const frozen of [false, true]) test(`JOED-96 ${frozen ? 'producer_frozen' :
     assert.equal(hero.querySelectorAll('.performance-pct').length, 0);
     for (const key of ['day', 'since', 'open', 'equity']) assert.equal(hero.querySelector(`[data-cell="hero.${key}"] .bn`).textContent, '—');
   }
-  // New receipts do not reset the generation-age caption, but do reset the
-  // same receipt-time expiry clock that retained observations use.
+  // Re-sends keep arriving, but cannot renew the frozen generation's age.
   if (frozen) {
-    const data = structuredClone(exact); data.receivedAt = at(3590);
-    const feeds = { data: { value: data, generatedAdvancedAt: exact.receivedAt } };
-    const states = boardStates(feeds, at(3600), previous);
-    assert.equal(states['desks.j.equity'].ageSeconds, 3600);
-    assert.notEqual(states['desks.j.equity'].value, null, 'value was received only ten seconds ago');
-    assert.equal(exactCell(states['desks.j.equity']), null, 'frozen receipt still cannot feed derived money');
+    for (const seconds of [3599, 3600, 3601, 7200]) {
+      const data = structuredClone(exact); data.receivedAt = at(seconds - 10);
+      const feeds = { data: { value: data, generatedAdvancedAt: exact.receivedAt } };
+      const states = boardStates(feeds, at(seconds), previous);
+      assert.equal(states['desks.j.equity'].ageSeconds, seconds);
+      assert.equal(states['desks.j.equity'].value === null, seconds >= 3600, 'a recent re-send cannot defer expiry');
+      assert.equal(exactCell(states['desks.j.equity']), null, 'frozen receipt still cannot feed derived money');
+    }
   }
   const data = structuredClone(exact);
   data.generatedAt = data.receivedAt = data.safety.gateway.checkedAt = at(3610);
@@ -564,4 +565,47 @@ test('JOED-96: Results withholds money now and period percent and explains the D
       assert.equal(document.querySelector('#resStatus').textContent, '', 'an unselected stale desk does not warn for a fresh desk');
     }
   } finally { RS.desk = savedDesk; if (savedDocument === undefined) delete globalThis.document; else globalThis.document = savedDocument; }
+});
+
+test('JOED-96: Results explains retained DATA outages in the existing status slot, scoped to the selected desks', async () => {
+  const M = await import('../public/joe/results-model.js');
+  const { renderStatus, RS } = await builders('results.js', ['renderStatus']);
+  const record = JSON.parse(readFileSync(new URL('../fixtures/results/no-losers.json', import.meta.url)));
+  const ix = M.indexResults(record), savedDesk = RS.desk, savedDocument = globalThis.document;
+  globalThis.document = htmlDocument('<div id="resStatus" class="res-status"></div>');
+  try {
+    for (const reason of ['refresh_failed', 'contract_invalid', 'gateway_down']) {
+      const data = structuredClone(exact);
+      if (reason === 'gateway_down') Object.assign(data.safety.gateway, { apiSessionReady: false, reason });
+      const view = ctx(data, 30, reason === 'gateway_down' ? null : reason);
+      view.states.results = { state: 'fresh', value: { index: ix }, reason: null, retained: false, ageSeconds: 0 };
+      const results = resultsView(view), per = M.periodOf('week', results.today, results.today, results.trackingStart);
+      assert.ok(results.moneyCells.every(cell => cell.retained && cell.reason === reason));
+      assert.deepEqual(results.todayUnits, [null, null, null]);
+      const R = M.rollup(ix, per, DESKS, M.moneyContext(ix, results, per, DESKS));
+      assert.equal(R.net, null); assert.equal(M.periodPercent(ix, results, per, DESKS, R), null);
+      RS.desk = 'all'; renderStatus(results);
+      const status = document.querySelector('#resStatus');
+      const warning = `Desks’ money is not available: ${cellReason(reason)}.`;
+      assert.equal(status.textContent, warning);
+      assert.equal(status.querySelectorAll('.res-state').length, 1);
+      results.cell = { ...results.cell, state: 'stale', reason: 'snapshot_stale', ageSeconds: 90 };
+      renderStatus(results);
+      assert.ok(status.textContent.startsWith('Stale · Results as of '));
+      assert.ok(status.textContent.endsWith(warning), 'both feed warnings share the same status box');
+      const fresh = ctx(exact, 0); fresh.states.results = view.states.results;
+      const recovered = resultsView(fresh);
+      renderStatus(recovered);
+      assert.equal(status.textContent, '', 'fresh recovery clears the outage explanation');
+      assert.ok(recovered.todayUnits.every(value => typeof value === 'bigint'));
+      recovered.moneyCells[0] = results.moneyCells[0];
+      RS.desk = 'joe'; renderStatus(recovered);
+      assert.equal(status.textContent, '', 'an outage in an unselected desk does not warn');
+      RS.desk = 'j'; renderStatus(recovered);
+      assert.equal(status.textContent, warning);
+    }
+  } finally {
+    RS.desk = savedDesk;
+    if (savedDocument === undefined) delete globalThis.document; else globalThis.document = savedDocument;
+  }
 });

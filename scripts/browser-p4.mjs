@@ -2405,11 +2405,18 @@ try {
     // Preserve the legacy default line through a revision-6-valid path: the
     // original receipt was on the still-open day, now retained after midnight.
     const retained = retainedPartialResults();
-    const { board: retainedBoard } = await designBoard(retained.receivedAt, null, ({ snapshot }) => {
+    const { board: retainedBoard, snapshot: retainedSnapshot } = await designBoard(retained.receivedAt, null, ({ snapshot }) => {
       snapshot.positions.rows.find(p => p.scope === 'stage0').openedAt = '2026-10-15T09:15:00.000Z';
     });
     await retainedBoard.pushResults(retained.record);
     retainedBoard.setNow('2026-10-16T12:00:00.000Z');
+    // The Results record crosses midnight; DATA must still describe the
+    // current open position, rather than an expired 14-hour-old observation.
+    const freshSnapshot = scenario(retainedBoard.clock()).snapshot;
+    freshSnapshot.seq = retainedSnapshot.seq + 1;
+    freshSnapshot.positions.rows.find(p => p.scope === 'stage0').openedAt = '2026-10-15T09:15:00.000Z';
+    const freshData = await retainedBoard.push(freshSnapshot);
+    check('partial-days', 'retained Results after midnight has fresh DATA for its still-open position', freshData.status === 200, freshData);
     for (const viewport of viewports) for (const theme of THEMES) {
       if (!view('partial-days', 'retained-midnight', viewport, theme)) continue;
       const injection = viewport.mobile && theme === 'dark'

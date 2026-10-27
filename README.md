@@ -1271,12 +1271,12 @@ results and every revision-10 exactness reason; repeated section reasons stay sh
 Release 35 (JOED-96, Markus Desk f3b46a8d) extends this outage policy to a
 stopped DATA feed (`snapshot_stale`) or frozen producer (`producer_frozen`).
 Individual observations keep their stale value, caption, age and reason below
-the same 60-minute receipt-time limit; at the limit they become dashes with
-their reason. A frozen producer keeps its generation-age caption even when
-new receipts arrive; receipt time remains the display-expiry clock. These
+the same 60-minute age limit; at the limit they become dashes with
+their reason. A frozen producer ages from the last advancing generation
+(`generatedAdvancedAt`); new receipts cannot renew that age or defer expiry. These
 inputs never feed totals, since-start, percentages, ranking, relative bars,
 kept-worth sums or Results' current money and period percentage. Results
-explains the late/stuck DATA feed inside its existing chart status box, even
+explains the late/stuck DATA feed or retained DATA outage inside its existing chart status box, even
 when the closed-trade record is fresh. Fresh DATA restores current money and
 derived figures together. Replays retain their existing advisory policy;
 header health and retained-value grace are unchanged.
