@@ -1,20 +1,35 @@
 // Shared P3/P5 CI scenarios. No browser is launched by importing this module.
 import { readFileSync } from 'node:fs';
-import { configure, load, waitFor, VIEWPORTS, THEMES } from './shots.mjs';
+import { configure, load, settle, waitFor, VIEWPORTS, THEMES } from './shots.mjs';
+import { WIDE_FONT } from './gate.mjs';
 import { setDeskDisclosures } from './desk-disclosures.mjs';
 import { ingress, at } from './board.mjs';
 
 const fixtures = JSON.parse(readFileSync(new URL('../../fixtures/phase-b.json', import.meta.url)));
 export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, mixed = false }) {
-  for (const viewport of [...VIEWPORTS, { ...VIEWPORTS[2], name: '360', width: 360 }]) for (const theme of THEMES) {
+  for (const viewport of [...VIEWPORTS, { ...VIEWPORTS[2], name: '360', width: 360 }]) for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
     const data = fixtures[mixed ? 'mixed' : 'exact'];
     const b = await newBoard(); b.setNow(data.generatedAt);
     const accepted = await b.push(ingress(data));
-    const tag = `${viewport.name} ${theme} Phase B ${mixed ? 'mixed' : 'exact'}`;
+    const fontTag = font ? '-wide' : '';
+    const tag = `${viewport.name} ${theme}${fontTag} Phase B ${mixed ? 'mixed' : 'exact'}`;
     check('phase-b', `${tag}: real ingress accepts rev 10`, accepted.status === 200, accepted.body);
     await configure(page, viewport, theme);
     await load(page, b.url);
     await setDeskDisclosures(page, true);
+    if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
+    const geometry = () => page.evaluate(`__audit.rects(['.dnums > div', '.dnums .v', '.dnums .v > .bn'])`);
+    const before = await geometry();
+    const moneyContained = async state => {
+      const money = await page.evaluate(`Array.from(document.querySelectorAll('.dnums .v > .bn'), el => {
+        const range = document.createRange(); range.selectNodeContents(el);
+        const text = range.getBoundingClientRect(), box = el.getBoundingClientRect();
+        return { text: el.textContent, left: text.left - box.left, right: box.right - text.right, height: box.height };
+      })`);
+      check('AC-36', `${tag} ${state}: every detail amount fits its own fixed line`, money.length === 9 &&
+        money.every(m => m.left >= 0 && m.right >= 0 && m.height === 26), money);
+    };
+    await moneyContained('initial');
     const inspect = () => page.evaluate(`(() => {
       const text = selector => document.querySelector(selector)?.innerText.replace(/\\s/g, '') ?? '';
       return {
@@ -40,14 +55,18 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
         result.nulls.length > 0 && result.nulls.every(n => n.text === '—' && n.label === n.title && /position update is old/.test(n.label)) &&
         /position update is old/.test(result.positionReason) && result.positions.includes('$40,01') && !result.positions.includes('$30,02'), result);
       if (viewport.width !== 360) await auditScreen(page, viewport, theme, 'desk Phase B mixed');
-      await shot(page, viewport, `${viewport.name}-${theme}-desk-phase-b-mixed`, 'Synthetic ledger, SOD and per-conid callback failures beside exact values');
+      await shot(page, viewport, `${viewport.name}-${theme}${fontTag}-desk-phase-b-mixed`, 'Synthetic ledger, SOD and per-conid callback failures beside exact values');
       const recovered = ingress(fixtures.exact); recovered.seq++; recovered.generatedAt = at(data.generatedAt, 30);
       b.setNow(recovered.generatedAt);
       const recovery = await b.push(recovered);
       check('phase-b', `${tag}: exact recovery accepted`, recovery.status === 200, recovery.body);
       await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, `document.querySelectorAll('#heroL .performance-pct').length === 2`);
+      await settle(page);
       result = await inspect();
+      await moneyContained('recovered');
+      check('no-shift', `${tag}: mixed to recovered detail money has exactly 0 px layout shift`,
+        JSON.stringify(before) === JSON.stringify(await geometry()));
     }
     check('phase-b', `${tag}: exact totals render Today and Since start in euros and percent`,
       result.day === '+€50,00' && result.since === '+€150,00' && result.percentages.join() === '+0,33%,+1,00%', result);
@@ -59,6 +78,6 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
     // The shared audit's phone geometry is explicitly the 390 px reference.
     // The 360 px case above asserts its actual overflow and field behavior.
     if (viewport.width !== 360) await auditScreen(page, viewport, theme, `desk Phase B ${mixed ? 'recovered' : 'exact'}`);
-    await shot(page, viewport, `${viewport.name}-${theme}-desk-phase-b-${mixed ? 'recovered' : 'exact'}`, 'Synthetic exact desk money and native position values; KEEP is account-level');
+    await shot(page, viewport, `${viewport.name}-${theme}${fontTag}-desk-phase-b-${mixed ? 'recovered' : 'exact'}`, 'Synthetic exact desk money and native position values; KEEP is account-level');
   }
 }

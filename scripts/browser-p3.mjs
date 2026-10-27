@@ -716,6 +716,95 @@ try {
       page.errors.length = 0;
     }
   }
+  // JOED-95: change only the method, keeping every figure and box identical.
+  // CI owns execution; the local night worker only prepares these assertions.
+  {
+    const estimateViewports = [...VIEWPORTS, { ...VIEWPORTS[2], name: '360', width: 360 }];
+    const estimateMarks = `(() => {
+      const visible = [...document.querySelectorAll('.estimate-mark')].filter(e => __audit.visible(e));
+      return visible.map(e => {
+        const r = e.getBoundingClientRect(), label = e.parentElement, box = label.getBoundingClientRect();
+        // Measure every other label child, including the state icon. Text
+        // nodes need a Range; the absolutely positioned mark is excluded.
+        const content = [...label.childNodes].filter(n => n !== e &&
+          (n.nodeType === 3 ? n.textContent.trim() : n.nodeType === 1 && __audit.visible(n))).map(n => {
+          if (n.nodeType === 1) return n.getBoundingClientRect();
+          const range = document.createRange(); range.selectNode(n); return range.getBoundingClientRect();
+        });
+        return { text:e.textContent, label:e.getAttribute('aria-label'), role:e.getAttribute('role'), size:parseFloat(getComputedStyle(e).fontSize), title:e.getAttribute('title'),
+          contained:[r, ...content].every(c => c.left >= box.left && c.right <= box.right && c.top >= box.top && c.bottom <= box.bottom),
+          separate:content.length > 0 && content.every(c => r.right <= c.left || r.left >= c.right || r.bottom <= c.top || r.top >= c.bottom) };
+      });
+    })()`;
+    for (const viewport of estimateViewports) for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
+      const b = await newBoard(), estimate = ingress(valid.data), recovery = ingress(valid.data);
+      let seq = valid.data.seq;
+      estimate.pnlSources.day = structuredClone(fixture('b-session-open-estimate').payload.pnlSources.day);
+      b.setNow(valid.data.receivedAt); await b.push(ingress(valid.data));
+      b.setNow(at(valid.data.receivedAt, 9));
+      await configure(page, viewport, theme); await load(page, b.url, 'desk');
+      if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
+      const selectors = [...DESK_SHIFT, '.dnums .k', '.dnums .v', '.compact-label', '.compact-figure .bn'];
+      const before = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+      estimate.seq = ++seq; b.setNow(valid.data.receivedAt);
+      check('fixtures', 'JOED-95 estimate accepted', (await b.push(estimate)).status === 200);
+      b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+      const after = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+      const tag = `${viewport.name} ${theme}${font ? ' wide font' : ''}`;
+      const checkMarks = async state => {
+        const marks = await page.evaluate(estimateMarks);
+        check('fixtures', `${tag}: ${state} estimated Today cells say Estimated visibly, accessibly, without overlapping the complete label and state icon`,
+          marks.length === (viewport.mobile ? 6 : 3) && marks.every(m => m.text === 'Estimated' && m.role === 'img' && m.label.startsWith('Estimated from the session open') && m.size >= 10 && !m.title && m.contained && m.separate), marks);
+        const money = await page.evaluate(`Array.from(document.querySelectorAll('.dnums .v > .bn'), el => {
+          const range = document.createRange(); range.selectNodeContents(el);
+          const text = range.getBoundingClientRect(), box = el.getBoundingClientRect();
+          return { text: el.textContent, left: text.left - box.left, right: box.right - text.right, height: box.height };
+        })`);
+        check('AC-36', `${tag}: ${state} detail amounts fit their fixed lines`, money.length === 9 &&
+          money.every(m => m.left >= 0 && m.right >= 0 && m.height === 26), money);
+      };
+      await checkMarks('fresh');
+      check('no-shift', `${tag}: exact → estimate has exactly 0 px layout shift`, JSON.stringify(before) === JSON.stringify(after), shifted(before, after));
+      recovery.seq = ++seq; b.setNow(valid.data.receivedAt); await b.push(recovery);
+      b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+      check('no-shift', `${tag}: estimate → exact has exactly 0 px layout shift and removes all estimate marks`,
+        JSON.stringify(before) === JSON.stringify(await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`)) &&
+        await page.evaluate(`document.querySelectorAll('.estimate-mark').length === 0`));
+      if (viewport.mobile) {
+        estimate.seq = ++seq; b.setNow(valid.data.receivedAt); await b.push(estimate);
+        b.setNow(at(valid.data.receivedAt, 70)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+        check('fixtures', `${tag}: stale estimate really has a stale Today icon`,
+          await page.evaluate(`document.querySelector('#desk-j .dnums > div').dataset.state === 'stale' && document.querySelector('#desk-j .compact-state[aria-label^="Stale"]') !== null`));
+        await checkMarks('stale');
+        const stale = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+        const outage = structuredClone(estimate); outage.seq = ++seq;
+        outage.generatedAt = outage.safety.gateway.checkedAt = at(valid.data.receivedAt, 80);
+        for (const bag of [outage.totals, ...outage.desks.map(d => d.money)]) {
+          bag.dayPnl = null; (bag.reasons ??= {}).dayPnl = 'source_unavailable';
+        }
+        for (const sources of [outage.pnlSources, ...outage.desks.map(d => d.pnlSources)].filter(Boolean)) Object.assign(sources.day, {
+          status: 'unavailable', observedAt: null, reason: 'source_unavailable',
+        });
+        b.setNow(at(valid.data.receivedAt, 80));
+        check('fixtures', `${tag}: estimate outage accepted`, (await b.push(outage)).status === 200);
+        b.setNow(at(valid.data.receivedAt, 85)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+        check('fixtures', `${tag}: outage really keeps the estimate with a broken Today icon`,
+          await page.evaluate(`document.querySelector('#desk-j .dnums > div').dataset.state === 'broken' && document.querySelector('#desk-j .compact-state[aria-label^="Broken"]') !== null && document.querySelector('#desk-j .compact-figure .bn').textContent !== '—'`));
+        await checkMarks('kept during outage');
+        const kept = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+        check('no-shift', `${tag}: stale → kept estimate has exactly 0 px layout shift`, JSON.stringify(stale) === JSON.stringify(kept), shifted(stale, kept));
+        const restoredEstimate = structuredClone(estimate); restoredEstimate.seq = ++seq;
+        restoredEstimate.generatedAt = restoredEstimate.safety.gateway.checkedAt = at(valid.data.receivedAt, 90);
+        b.setNow(at(valid.data.receivedAt, 90));
+        check('fixtures', `${tag}: estimate recovery accepted`, (await b.push(restoredEstimate)).status === 200);
+        b.setNow(at(valid.data.receivedAt, 160)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+        const restored = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
+        check('no-shift', `${tag}: kept → stale estimate has exactly 0 px layout shift`, JSON.stringify(kept) === JSON.stringify(restored), shifted(kept, restored));
+      }
+      if (viewport.mobile) check('fixtures', `${tag}: estimate marks preserve the 44 px phone disclosure targets`,
+        await page.evaluate(`[...document.querySelectorAll('.desk-row')].every(e => e.getBoundingClientRect().height >= 44)`));
+    }
+  }
   // JOED-81: reuse the accepted broker-down fixture for a live transition.
   // Fresh and outage boxes must match at 1440/1024/phone in both themes.
   for (const viewport of VIEWPORTS) for (const theme of THEMES) {
@@ -991,7 +1080,7 @@ try {
     check('clamp', `${tag} stale: a click or tap shows Today's sentence whole`, sayWhole(pinnedSay), pinnedSay);
 
     // Broken, field by field: Joe's Today stops at +80 s, Joe's open result
-    // and J's total at +110 s, so each keeps a different age and reason.
+    // and J's total at +110 s. Today is unavailable; open keeps its age.
     // (The contract makes Today's and the open result's evidence all or
     // nothing across the desks; equity and the total may stop desk by desk.)
     const B = advance(base, at(NOW, 80), base.seq + 1);
@@ -1012,7 +1101,7 @@ try {
     await refresh(`document.getElementById('desk-joe').innerText.includes('open result not available')`);
     ui = await page.evaluate(DESK_TEXT);
     const [j, joe, joel] = ['j', 'joe', 'joel'].map(id => ui.cards.find(c => c.id === id));
-    const today = /^Today: last good, 1\smin ago · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
+    const today = /^Today: unavailable · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
     check('journey', `${tag} broken: each affected desk number has its own line, age and reason`, j.lines.length === 3 && today.test(j.lines[0]) && open.test(j.lines[1]) &&
       /^Since 10\sSep: unavailable · carrying the last good value$/.test(j.lines[2]) && [joe, joel].every(c => c.lines.length === 2 && today.test(c.lines[0]) && open.test(c.lines[1])) &&
       JSON.stringify(j.nums) === '["broken","broken","broken"]' && [joe, joel].every(c => JSON.stringify(c.nums) === '["broken","broken","fresh"]'), ui.cards);
