@@ -66,7 +66,10 @@ export function fitStatusLine(control, line, narrow = matchMedia('(max-width: 11
 const TRIGGER = '[data-term], [data-say]';
 export function initTips() {
   const tip = $('#tip');
-  let anchor = null, pinned = false, quiet = null, at = null;
+  let anchor = null, pinned = false, quiet = null, at = null, dismissal = null;
+  const cancelDismissal = () => { clearTimeout(dismissal); dismissal = null; };
+  const overTip = el => el === tip || el?.closest?.('#tip') === tip;
+  const inHoverRegion = el => overTip(el) || Boolean(anchor && el && anchor.contains(el));
   function place(el) {
     const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
     let y = r.bottom + 8;
@@ -88,10 +91,14 @@ export function initTips() {
   }
   function show(el, pin) {
     if (!fill(el)) return;
+    cancelDismissal();
     // Inside an open dialog the tip joins it, so it shows above the dialog.
     const host = el.closest('dialog[open]') ?? document.body;
     if (tip.parentElement !== host) host.append(tip);
-    if (anchor && anchor !== el) anchor.setAttribute('aria-expanded', 'false');
+    if (anchor && anchor !== el) {
+      anchor.setAttribute('aria-expanded', 'false');
+      anchor.removeAttribute('aria-describedby');
+    }
     anchor = el; pinned = Boolean(pin);
     tip.classList.toggle('pinned', pinned);
     place(el);
@@ -99,6 +106,7 @@ export function initTips() {
     el.setAttribute('aria-expanded', 'true'); el.setAttribute('aria-describedby', 'tip');
   }
   function hide(force) {
+    cancelDismissal();
     if (pinned && !force) return;
     tip.classList.remove('on', 'pinned');
     if (anchor) { anchor.setAttribute('aria-expanded', 'false'); anchor.removeAttribute('aria-describedby'); }
@@ -123,14 +131,17 @@ export function initTips() {
   };
   const hover = e => {
     const el = e.target.closest?.('[data-term]');
+    if (overTip(e.target) || (anchor && el === anchor)) cancelDismissal();
     if (el && e.pointerType !== 'touch' && !(pinned && anchor !== el) && el !== anchor) show(el, false);
   };
   document.addEventListener('pointerover', hover);
   // A scroll can dismiss a tip while the pointer remains over its term.
   document.addEventListener('pointermove', hover);
   document.addEventListener('pointerout', e => {
-    const el = e.target.closest?.('[data-term]');
-    if (el && el === anchor && !el.contains(e.relatedTarget)) hide(false);
+    if (!anchor || pinned || !inHoverRegion(e.target) || inHoverRegion(e.relatedTarget)) return;
+    // Leave time to cross the positioning gap between the term and its tip.
+    cancelDismissal();
+    dismissal = setTimeout(() => hide(false), 150);
   });
   // Capture native focus before a section can rebuild its focused term.
   document.addEventListener('focus', e => {

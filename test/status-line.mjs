@@ -269,6 +269,125 @@ test('term tips capture native focus, survive an unrelated Details close, and su
   assert.deepEqual(TERMS.today, original);
 });
 
+async function termTipFixture(t) {
+  const { initTips } = await import('../public/joe/ui.js');
+  const listeners = new Map(), classes = new Set();
+  const body = { append(el) { el.parentElement = this; } };
+  const tip = { style: {}, parentElement: body, offsetWidth: 200, offsetHeight: 80,
+    contains(el) { return el === this || el?.parentElement === this; },
+    closest(selector) { return selector === '#tip' ? this : null; },
+    classList: { add(...xs) { xs.forEach(x => classes.add(x)); }, remove(...xs) { xs.forEach(x => classes.delete(x)); },
+      toggle(x, yes) { yes ? classes.add(x) : classes.delete(x); } } };
+  const doc = { body, activeElement: null, querySelector: () => tip,
+    addEventListener(type, fn) { listeners.set(type, [...listeners.get(type) ?? [], fn]); } };
+  const descriptors = new Map();
+  for (const [key, value] of Object.entries({ document: doc, innerWidth: 1000, innerHeight: 800,
+    addEventListener: (type, fn) => doc.addEventListener(type, fn) })) {
+    descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  }
+  const emit = (type, target, extra = {}) => {
+    for (const fn of listeners.get(type) ?? []) fn({ target, pointerType: 'mouse', preventDefault() {}, stopImmediatePropagation() {}, ...extra });
+  };
+  const anchor = term => ({ dataset: { term }, attrs: {},
+    closest(selector) { return selector.includes('[data-term]') ? this : null; },
+    contains(el) { return el === this || el?.parentElement === this; },
+    getBoundingClientRect: () => ({ left: 50, right: 100, top: 80, bottom: 100 }),
+    setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; },
+    focus() { doc.activeElement = this; emit('focus', this); } });
+  const api = initTips();
+  t.after(() => {
+    api.hide();
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];
+    }
+  });
+  return { emit, anchor, tip, classes, doc, api };
+}
+
+test('switching a pinned term clears its old ARIA description through dismissal', async t => {
+  const { emit, anchor, tip, classes, api } = await termTipFixture(t);
+  const today = anchor('today'), broker = anchor('broker');
+  emit('click', today);
+  assert.equal(today.attrs['aria-describedby'], 'tip');
+  broker.focus();
+  assert.equal(today.attrs['aria-expanded'], 'false');
+  assert.equal(today.attrs['aria-describedby'], undefined, 'Today must not describe itself with Broker content');
+  assert.equal(broker.attrs['aria-describedby'], 'tip');
+  assert.ok(tip.innerHTML.startsWith('<b>Broker connection</b>'));
+  api.hide();
+  assert.ok(!classes.has('on'));
+  for (const button of [today, broker]) {
+    assert.equal(button.attrs['aria-expanded'], 'false');
+    assert.equal(button.attrs['aria-describedby'], undefined);
+  }
+});
+
+test('hover tips stay open across the gap and over their content, then dismiss outside the region', async t => {
+  const { emit, anchor, tip, classes, doc } = await termTipFixture(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const today = anchor('today'), broker = anchor('broker');
+  const text = { parentElement: tip, closest: selector => tip.closest(selector) };
+  const outside = { closest: () => null };
+  emit('pointerover', today);
+  assert.ok(classes.has('on'));
+  assert.ok(!classes.has('pinned'));
+  emit('pointerout', today, { relatedTarget: outside }); // cross the 8px positioning gap
+  assert.ok(classes.has('on'), 'the gap must allow time to reach the tip');
+  t.mock.timers.tick(50);
+  emit('pointerover', text, { relatedTarget: outside });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'entering tip content cancels gap dismissal');
+  emit('pointerout', text, { relatedTarget: tip });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'moving within the tip stays in the region');
+  emit('pointerout', tip, { relatedTarget: today });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'returning directly to the trigger stays in the region');
+  emit('pointerout', today, { relatedTarget: text });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'moving directly onto the tip stays in the region');
+  emit('pointerout', text, { relatedTarget: outside });
+  t.mock.timers.tick(1000);
+  assert.ok(!classes.has('on'), 'leaving the whole region dismisses the unpinned tip');
+  assert.equal(today.attrs['aria-describedby'], undefined);
+
+  emit('pointerover', today);
+  emit('pointerout', today, { relatedTarget: outside });
+  t.mock.timers.tick(50);
+  emit('pointerover', today);
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'returning to the same trigger cancels dismissal');
+  emit('pointerout', today, { relatedTarget: outside });
+  emit('click', today);
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('pinned'), 'pinning cancels a pending hover dismissal');
+  emit('pointerout', today, { relatedTarget: outside });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'a pinned tip survives leaving the region');
+  emit('click', outside);
+  assert.ok(!classes.has('on'), 'outside click still dismisses a pinned tip');
+
+  emit('pointerover', today);
+  emit('pointerout', today, { relatedTarget: outside });
+  broker.focus();
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'an old hover timer must not dismiss a newly focused term');
+  emit('focusout', broker);
+  doc.activeElement = null;
+  assert.ok(!classes.has('on'), 'leaving keyboard focus still dismisses the tip');
+  emit('pointerover', today);
+  emit('keydown', today, { key: 'Escape' });
+  assert.ok(!classes.has('on'), 'Escape closes an unpinned tip');
+  assert.equal(doc.activeElement, today, 'Escape returns focus without reopening the tip');
+  emit('click', today);
+  emit('keydown', today, { key: 'Escape' });
+  assert.ok(!classes.has('on'), 'Escape also closes a pinned tip');
+
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.tip\.on\s*\{[^}]*pointer-events:\s*auto\s*;/, 'every visible tip must receive pointer events');
+});
+
 test('a compact non-green control puts the sentence on the reserved line; fitting warnings keep it in the control', () => {
   const element = () => ({ attributes: new Map(),
     toggleAttribute(key, value) { if (value) this.attributes.set(key, ''); else this.attributes.delete(key); },
