@@ -457,10 +457,13 @@ function positionReasons(row, cell, sharedReason = null) {
   return `<span class="position-notes"${reasons || day ? '' : ' aria-hidden="true"'}>${day}${reasons}</span>`;
 }
 
+// Unknown quantity remains unknown; only an exact, confirmed zero is flat.
+const openPositionRows = cell => cell?.value?.filter(row => row.quantity == null || decimalUnits(row.quantity) !== 0n);
+
 export function positionsHtml(ctx) {
   const { states } = ctx;
   const cell = states.positions;
-  const rows = cell?.value;
+  const rows = openPositionRows(cell);
   const data = ctx.feeds.data?.value;
   const shared = positionSectionReason(cell);
   const header = `<div class="prow hd"><span></span><span class="sub">Holding</span><span class="sub c-side">${term('side')}</span><span class="sub r c-px">${term('lastprice')}</span><span class="sub c-worth">${term('worth')}</span><span class="sub r">${term('open', 'Open result')}</span><span class="sub r c-opened">Updated</span></div>`;
@@ -623,7 +626,7 @@ export function renderDesk(ctx) {
     ['History', ctx.states.history], ...(!ctx.now ? [['Clock', { state: 'not reported', value: null }]]
       : sessionBounds(ctx.now).reason === 'calendar_unavailable' ? [['Market hours', { state: 'broken', value: null, reason: 'calendar_unavailable' }]] : []),
   ])));
-  $('#positionsTitle').textContent = `Positions · ${ctx.states.positions?.value?.length ?? '—'} open`;
+  $('#positionsTitle').textContent = `Positions · ${openPositionRows(ctx.states.positions)?.length ?? '—'} open`;
   $('#keptTitle').textContent = `Kept holdings · ${ctx.states.kept?.value?.length ?? '—'}`;
   patch($('#positionsSummary'), problemHtml(disclosureProblem([['Positions', ctx.states.positions], ...rowProblems(ctx.states.positions)])));
   patch($('#keptSummary'), problemHtml(disclosureProblem([['Kept holdings', ctx.states.kept], ...rowProblems(ctx.states.kept)])));

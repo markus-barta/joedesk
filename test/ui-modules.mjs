@@ -15,6 +15,7 @@ import './browser-settled.mjs';
 import './browser-group-timing.mjs';
 import './theme-geometry.mjs';
 import './board-sweep-plan.mjs';
+import './position-claims.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))

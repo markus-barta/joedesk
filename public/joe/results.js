@@ -5,7 +5,7 @@
 // state: dashes, never a zero or an estimate.
 import { $, $$, icon, term, deskMark, inlineMark, swatch, patch, bn, pl, st, symBadge, ageSpan, statePhrase, openDialog } from './ui.js';
 import { TERMS } from './terms.js';
-import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age } from './format.js';
+import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age, quantity } from './format.js';
 import { cellReason, STALE_AFTER_S } from './health.js';
 import { drawChart, eurAxis } from './chart.js';
 import { viennaDay } from './time.mjs';
@@ -44,8 +44,14 @@ export function resultsView(ctx) {
   const desksNow = ctx.feeds.data?.value?.desks ?? [];
   const current = Object.fromEntries(DESKS.map((id, i) => [id, todayUnits[i] === null ? null : desksNow.find(d => d.id === id) ?? null]));
   const nowMs = ctx.now ? Date.parse(ctx.now) : null, cols = ctx.feeds.history?.value?.columns ?? null;
+  const positionsCell = ctx.states.positions;
+  // A current contribution note needs current, nonzero desk holdings. Retained
+  // observations stay on Desk with their own age/reason, outside this claim.
+  const positions = positionsCell?.state === 'fresh' && !outageValue(positionsCell)
+    ? (positionsCell.value ?? []).filter(p => p.scope === 'stage0' && DESKS.includes(p.desk) && !keep.includes(p.symbol)
+      && p.quantity != null && decimalUnits(p.quantity) !== 0n) : [];
   return { today, cell, ix, reason, trackingStart: ix?.meta.trackingStart ?? null, todayUnits, moneyCells, nowMs, cols,
-    cuts: M.basisCuts(cols, current, nowMs), basis: DESKS.map(id => (current[id] ? basisKey(current[id]) : '')).join('|'), positions: ctx.states.positions?.value ?? [] };
+    cuts: M.basisCuts(cols, current, nowMs), basis: DESKS.map(id => (current[id] ? basisKey(current[id]) : '')).join('|'), positionsCell, positions };
 }
 
 export function stepPeriod(dir, view) {
@@ -387,7 +393,7 @@ const metaSuffix = '<span class="meta-sep" aria-hidden="true"> ·</span>';
 function tradeRows(ts) {
   return ts.map(t => `<div class="trow" data-trade="${esc(t.id)}">
     ${symBadge(t.symbol, t.desk)}
-    <div class="name" lang="en"><b class="word">${esc(t.symbol)}</b>${t.company ? ` · ${tradeWords(t.company)}` : ''}<span class="meta"><span class="meta-unit">${inlineMark(t.desk)} ${LABEL[t.desk]}${metaSuffix}</span> <span class="meta-unit">${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(t.quantity.replace('.', ','))}${metaSuffix}</span> <span class="meta-unit">closed ${timeHM(new Date(t.closedAt).toISOString())}${metaSuffix}</span> <span class="meta-unit">${held(t)}</span></span></div>
+    <div class="name" lang="en"><b class="word">${esc(t.symbol)}</b>${t.company ? ` · ${tradeWords(t.company)}` : ''}<span class="meta"><span class="meta-unit">${inlineMark(t.desk)} ${LABEL[t.desk]}${metaSuffix}</span> <span class="meta-unit">${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(quantity(t.quantity))}${metaSuffix}</span> <span class="meta-unit">closed ${timeHM(new Date(t.closedAt).toISOString())}${metaSuffix}</span> <span class="meta-unit">${held(t)}</span></span></div>
     <div class="px"><span class="ln"><span>${price(t.entry)}</span><span>${icon('arrow')}${price(t.exit)}</span></span><span class="fee">fees ${eur(t.units.fees)}</span></div>
     <div class="net">${pl(t.units.net)}</div>
   </div>`).join('');
