@@ -285,7 +285,7 @@ async function leaveSay(page) {
 const sayWhole = t => t.on && t.pinned && t.head === 'Today' && t.expanded === 'true' && t.say.length > 10 && t.tip === `Today ${t.say}`;
 
 async function key(page, name, modifiers = 0) {
-  const code = { Enter: 13, Tab: 9, Escape: 27 }[name];
+  const code = { Enter: 13, Tab: 9, Escape: 27, ArrowRight: 39 }[name];
   await page.s('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode: code, modifiers, ...(name === 'Enter' ? { text: '\r' } : {}) });
   await page.s('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code: name, windowsVirtualKeyCode: code, modifiers });
 }
@@ -344,6 +344,28 @@ async function historyChecks(page, viewport, theme) {
   await settle(page);
   const parts = await page.evaluate(`({ compare: document.getElementById('histCompare').innerText, j: document.getElementById('jAcct').innerText, capt: Boolean(document.querySelector('#jAcct svg.capt')), events: document.querySelectorAll('#events li').length, legend: document.getElementById('histLegend').innerText })`);
   check('AC-21', `${tag}: compare, J's bookkeeping, captured results and desk changes`, /^From .* J [+−]?\d/.test(parts.compare) && /Counted from/.test(parts.j) && parts.capt && parts.events >= 1 && /Estimated gap/.test(parts.legend), parts);
+  await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
+  // The last range button precedes the chart; Reset zoom is disabled here.
+  await page.evaluate(`document.querySelector('#histRange [data-range="all"]').focus()`);
+  await key(page, 'Tab');
+  const firstAnnouncement = await page.evaluate(`document.getElementById('histLive').textContent`);
+  await key(page, 'ArrowRight');
+  await settle(page);
+  const inspection = await page.evaluate(`(() => {
+    const chart = document.getElementById('histChart'), tip = document.getElementById('histTip'), live = document.getElementById('histLive');
+    return { focused: document.activeElement === chart, stops: chart.querySelectorAll('[tabindex="0"]').length,
+      name: chart.getAttribute('aria-label'), description: document.getElementById(chart.getAttribute('aria-describedby'))?.textContent,
+      polite: live.getAttribute('aria-live'), atomic: live.getAttribute('aria-atomic'), on: tip.classList.contains('on'),
+      visible: tip.innerText, announced: live.textContent };
+  })()`);
+  const normalizeInspection = text => text.replace(/\s+/g, ' ').trim();
+  check('JOED-121', `${tag}: Tab reaches the chart and Right exposes identical visible and politely announced history values`,
+    inspection.focused && inspection.stops === 0 && /Each desk’s money/.test(inspection.name) && /Left and Right/.test(inspection.description) &&
+    inspection.polite === 'polite' && inspection.atomic === 'true' && inspection.on && inspection.announced !== firstAnnouncement && /Vienna time/.test(inspection.announced) &&
+    ['J', 'Joe', 'Joel'].every(desk => new RegExp(desk + ' .*?(observed|estimated|no value here)').test(inspection.announced)) &&
+    normalizeInspection(inspection.visible) === normalizeInspection(inspection.announced), inspection);
+  await key(page, 'Escape');
+  await page.evaluate('document.activeElement?.blur()');
   if (!viewport.mobile) {
     const box = await page.evaluate(`(() => { const r = document.querySelector('#histChart').getBoundingClientRect(); return { x: r.left + r.width * 0.6, y: r.top + r.height / 2 }; })()`);
     await page.s('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240 });

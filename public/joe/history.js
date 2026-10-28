@@ -108,12 +108,23 @@ function historyHit(observed, gaps, x) {
   return p && Math.abs(p.x - x) <= OBSERVATION_INTERVAL_MS ? { x: p.x, v: p.y } : null;
 }
 
+// One wording for the visible tooltip and the polite keyboard announcement.
+export function historyPointDetails(near, x, desks) {
+  const at = new Date(Math.round(x)).toISOString();
+  const lines = [`${dayDDM(at)}, ${timeHM(at)} Vienna time`, ...desks.map((id, i) => {
+    const p = near[i];
+    return `${LABEL[id]} ${p ? `${eur(p.v)} ${p.estimated ? 'estimated' : 'observed'}` : 'no value here'}`;
+  })];
+  return { text: lines.join('\n'), html: `<b>${esc(lines[0])}</b>${lines.slice(1).map(line => `<br>${esc(line)}`).join('')}` };
+}
+
 export function historyChart(ctx) {
   const el = $('#histChart');
   const top = Math.ceil($('#histStatus')?.offsetHeight ?? 0);
+  const inspection = { description: 'histInspectHelp', live: $('#histLive'), points: [] };
   if (!ctx.now) {
     HS.full = null;
-    return drawChart(el, { series: [], xDomain: [0, 1], empty: true, pad: { t: 12 + top }, emptyText: 'Waiting for the board server’s clock', label: 'Each desk’s money: the board server’s time is not known yet' });
+    return drawChart(el, { series: [], xDomain: [0, 1], empty: true, inspect: inspection, pad: { t: 12 + top }, emptyText: 'Waiting for the board server’s clock', label: 'Each desk’s money: the board server’s time is not known yet' });
   }
   const cell = ctx.states.history;
   const cols = cell?.value?.columns ?? EMPTY;
@@ -161,15 +172,9 @@ export function historyChart(ctx) {
     empty: !HS.desks.length, emptyText: 'Choose a desk to draw its line',
     label: `Each desk’s money, ${RANGE_WORD[HS.range]}${HS.zoom ? ', zoomed' : ''}`,
     isPanning: () => Boolean(ctx.panning?.()),
+    inspect: { ...inspection, points: [x0, x1, ...model.flatMap(m => [...m.observed.map(p => p.x), ...m.gaps.flatMap(g => g.map(p => p.x))])] },
     hitTest: xv => model.map((m, i) => historyHit(hitPoints[i], m.gaps, xv)),
-    tipFmt: (near, xv) => {
-      const at = new Date(Math.round(xv)).toISOString();
-      return `<b>${dayDDM(at)}, ${timeHM(at)}</b>${model.map(({ id }, i) => {
-        const p = near[i];
-        if (!p) return `<br>${LABEL[id]} <span class="t2">no value here</span>`;
-        return `<br>${LABEL[id]} ${eur(p.v)}${p.estimated ? ' <span class="t2">estimate</span>' : ''}`;
-      }).join('')}`;
-    },
+    tipFmt: (near, xv) => historyPointDetails(near, xv, HS.desks),
   });
   // The drawn window, for the zoom and pan checks.
   const svg = el.querySelector(':scope > svg');
