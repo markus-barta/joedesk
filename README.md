@@ -560,11 +560,12 @@ plus `groupTimingTable(report)`. Its fake-clock tests run directly with
 `node --test test/browser-group-timing.mjs` and through `test/ui-modules.mjs`.
 
 The Board width sweep defaults to `--full`: both themes, both fonts and all
-four screens at every 10 px from 360 to 1440 plus the code-derived boundary widths (116 widths total). CI PRs pass `--subset`: light
+four screens at every 10 px from 360 to 1440 plus the code-derived boundary widths (119 widths total). CI PRs pass `--subset`: light
 keeps the full grid and dark uses the code-derived viewport breakpoints and
 their ±10 px neighbors, plus 360/1024/1440. Pushes to main and manual dispatch
 keep `--full`. Both plans retain 137 sweep checks and six screenshots; the
-resize/measure rounds are 1,856 full and 1,088 subset with the current code.
+resize/measure rounds are 1,904 full and 1,112 subset with the current code,
+including JOED-140's 382 px calendar breakpoint and its 372/392 px neighbors.
 `scripts/board-sweep-plan.mjs` derives boundaries from `app.css` viewport
 `@media` queries, `public/joe/*.js` `matchMedia` queries and P3's `COMPACT`.
 The 339.98 px card container query and history.js clientWidth thresholds describe elements rather than viewports;
