@@ -1,11 +1,12 @@
 // Focused board policy checks: no server process, browser or full-suite runner.
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import fs, { readFileSync } from 'node:fs';
+import { createReadModel } from '../server/read-model.mjs';
 import { test } from 'node:test';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { panelStates, MONEY_FIELDS } from '../contracts/panel-state.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
-import { validateContract } from '../contracts/index.mjs';
+import { validateContract, CONTRACTS } from '../contracts/index.mjs';
 import { decimalUnits, unitsDecimal } from '../contracts/decimal.mjs';
 const { boardStates, NOT_EXACT_REASONS, RETENTION_SECONDS } = await import('../public/joe/board-state.js');
 const { exactCell, rankDesks, todayPercent, sincePercent } = await import('../public/joe/performance.js');
@@ -699,3 +700,158 @@ test('JOED-96: cold and warm feed reads preserve the frozen clock through reject
     assert.equal(cold.select().states['desks.j.equity'].value, null, 'failed refresh preserves the generation watermark');
   } finally { globalThis.fetch = realFetch; }
 });
+
+for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_values cannot freshen observations or derived amounts (seeded=${seeded})`, () => {
+  for (const seconds of [30, 3599, 3600, 3660]) {
+    const data = structuredClone(exact);
+    data.generatedAt = data.receivedAt = data.safety.gateway.checkedAt = at(seconds);
+    for (const bag of [data.totals, ...data.desks.map(d => d.money)])
+      bag.reasons = Object.fromEntries(MONEY_FIELDS.map(field => [field, 'retained_values']));
+    data.brokerAccount.reason = 'retained_values'; data.brokerAccount.reasons = { cash: 'retained_values' };
+    assert.equal(validateContract('data', data).ok, true);
+    const states = boardStates({ data: { value: data } }, at(seconds), seeded ? previous : {});
+    for (const name of ['desks.j.equity', 'paperAccount', 'paperCash']) {
+      assert.equal(states[name].value != null, seeded && seconds < 3600, name);
+      assert.equal(states[name].retained, seeded && seconds < 3600, name);
+      if (seeded) assert.equal(states[name].ageSeconds, seconds, name);
+    }
+    for (const name of ['today.equity', 'today.dayPnl', 'today.openPnl', 'today.totalPnl', 'desks.j.totalPnl'])
+      assert.equal(states[name].value, null, name);
+  }
+});
+
+// Memory-only server acceptance/restart checks run in the existing CI unit file.
+{
+  const read = file => JSON.parse(fs.readFileSync(new URL(`../fixtures/${file}`, import.meta.url)));
+  const fixture = read('valid.json').data, exact = read('phase-b.json').exact;
+  const at = seconds => new Date(Date.parse(fixture.receivedAt) + seconds * 1000).toISOString();
+  const bytes = value => Buffer.byteLength(JSON.stringify(value));
+  const ingress = value => { const copy = structuredClone(value); delete copy.receivedAt; return copy; };
+  function harness(t) {
+    const files = new Map(), fds = new Map();
+    let seconds = 0, nextFd = 1000000;
+    for (const name of ['openSync', 'fstatSync', 'readFileSync', 'closeSync']) {
+      const original = fs[name];
+      t.mock.method(fs, name, (key, ...args) => {
+        if (name === 'openSync' && files.has(String(key))) { const fd = nextFd++; fds.set(fd, String(key)); return fd; }
+        if (fds.has(key)) {
+          const body = files.get(fds.get(key));
+          if (name === 'fstatSync') return { size: Buffer.byteLength(body) };
+          if (name === 'readFileSync') return body;
+          if (name === 'closeSync') return fds.delete(key);
+        }
+        return original(key, ...args);
+      });
+    }
+    const options = { dataDir: '/nonexistent-joed120-memory', clock: () => at(seconds),
+      write: (file, value) => files.set(file, JSON.stringify(value)) };
+    const stored = name => files.get(`${options.dataDir}/${name}-state.json`);
+    return { model: createReadModel(options), restart: () => createReadModel(options),
+      time: value => { seconds = value; }, stored,
+      replaceState: value => files.set(`${options.dataDir}/data-state.json`, JSON.stringify(value)),
+      cells: model => boardStates(model.feeds(), at(seconds), model.panels()) };
+  }
+  function retained(value, seconds, seq) {
+    const copy = ingress(value);
+    copy.seq = seq; copy.generatedAt = copy.safety.gateway.checkedAt = at(seconds);
+    for (const bag of [copy.totals, ...copy.desks.map(d => d.money)])
+      bag.reasons = Object.fromEntries(MONEY_FIELDS.map(field => [field, 'retained_values']));
+    copy.brokerAccount.reason = 'retained_values'; copy.brokerAccount.reasons = { cash: 'retained_values' };
+    return copy;
+  }
+
+  test('JOED-120 F1: frozen re-send then advancing outage never resurrects expired last-good, including restart', t => {
+    const h = harness(t), candidate = ingress(fixture);
+    assert.equal(h.model.accept(candidate).status, 200);
+    const original = JSON.parse(h.stored('data')).cells;
+    h.time(4000); candidate.seq++;
+    assert.equal(h.model.accept(candidate).status, 200);
+    assert.equal(h.cells(h.model)['desks.j.equity'].value, null);
+    const saved = JSON.parse(h.stored('data'));
+    assert.deepEqual(saved.cells, original, 'a frozen generation cannot renew any observation/source');
+    h.time(4030);
+    const dead = read('failures/a-gateway-up-but-dead.json').payload;
+    dead.seq = candidate.seq + 1; dead.generatedAt = dead.safety.gateway.checkedAt = at(4030);
+    assert.equal(h.model.accept(dead).status, 200);
+    for (const model of [h.model, h.restart()]) for (const name of ['desks.j.equity', 'paperAccount']) {
+      assert.equal(h.cells(model)[name].value, null, name);
+      assert.equal(h.cells(model)[name].ageSeconds, 4030, name);
+    }
+  });
+
+  for (const seeded of [false, true]) test(`JOED-120 F2: non-null retained_values uses only verified last-good (seeded=${seeded})`, t => {
+    const h = harness(t);
+    if (seeded) assert.equal(h.model.accept(ingress(exact)).status, 200);
+    for (const seconds of [30, 120, 3599, 3600, 3660]) {
+      h.time(seconds);
+      const candidate = retained(exact, seconds, exact.seq + seconds);
+      assert.equal(validateContract('data', candidate, { stage: 'ingress' }).ok, true);
+      assert.equal(h.model.accept(candidate).status, 200);
+      const saved = JSON.parse(h.stored('data'));
+      for (const name of ['desks.j.equity', 'paperAccount', 'paperCash']) {
+        assert.equal(saved.cells[name].valueReceivedAt, seeded ? at(0) : null, name);
+        for (const model of [h.model, h.restart()]) {
+          const cell = h.cells(model)[name];
+          assert.equal(cell.value != null, seeded && seconds < 3600, name);
+          if (seeded) assert.equal(cell.ageSeconds, seconds, name);
+        }
+      }
+      const states = h.cells(h.model);
+      for (const name of ['today.equity', 'today.dayPnl', 'today.openPnl', 'today.totalPnl', 'desks.j.totalPnl'])
+        assert.equal(states[name].value, null, name);
+      assert.equal(h.model.view().data.desks[0].money.equity, null, 'served projection withholds reasoned current input');
+      assert.equal(h.model.feeds().history.value.points.at(-1).desks.j.money.equity, null);
+    }
+  });
+
+  test('JOED-120 F2: restart discards legacy saved cells promoted from a non-null retained_values candidate', t => {
+    const h = harness(t);
+    assert.equal(h.model.accept(ingress(exact)).status, 200);
+    const saved = JSON.parse(h.stored('data'));
+    h.time(30);
+    saved.feed.value = { ...retained(exact, 30, exact.seq + 1), receivedAt: at(30) };
+    saved.feed.generatedAdvancedAt = at(30);
+    for (const cell of Object.values(saved.cells)) if (cell.value != null) cell.valueReceivedAt = at(30);
+    h.replaceState(saved);
+    const cold = h.restart();
+    assert.equal(cold.hasData(), true);
+    for (const name of ['desks.j.equity', 'paperAccount', 'paperCash']) assert.equal(h.cells(cold)[name].value, null, name);
+  });
+
+  function boundary(seq, limit) {
+    const candidate = ingress(fixture), points = [];
+    candidate.seq = seq; candidate.desks[0].action = 'x';
+    candidate.desks.find(d => d.id === 'j').backfill = { status: 'BEST_AVAILABLE', fullTotalAvailable: false,
+      capturedSubtotal: { realizedPnl: null, method: null, fromInclusive: candidate.generatedAt,
+        throughInclusive: candidate.generatedAt, points, pointsTruncated: false, executionCount: 0, commissionCount: 0 },
+      coverage: { fromInclusive: candidate.generatedAt, toExclusive: candidate.generatedAt, gapCount: 1 },
+      missingOpeningLotCount: 1, orphanCommissionCount: 0 };
+    const point = { at: candidate.generatedAt, realizedPnl: { amount: '0', currency: 'EUR',
+      fx: { base: 'USD', quote: 'EUR', rate: '1', source: 'x'.repeat(80), observedAt: candidate.generatedAt } } };
+    const servedBytes = () => bytes({ ...candidate, receivedAt: at(0) });
+    while (servedBytes() + bytes(point) + 1 <= limit) points.push(structuredClone(point));
+    candidate.desks[0].action += 'x'.repeat(limit - servedBytes());
+    assert.equal(servedBytes(), limit);
+    assert.equal(validateContract('data', candidate, { stage: 'ingress' }).ok, true);
+    return candidate;
+  }
+
+  test('JOED-120 F3: inclusive served-size limit persists; one byte over preserves state, history and sequence through restart', t => {
+    const h = harness(t), candidate = boundary(fixture.seq, CONTRACTS.limits.data);
+    assert.equal(h.model.accept(candidate).status, 200);
+    assert.equal(bytes(h.model.view().data), CONTRACTS.limits.data);
+    assert.equal(validateContract('data', h.model.view().data).ok, true);
+    assert.equal(h.restart().hasData(), true);
+    const saved = h.stored('data'), history = h.stored('history');
+    candidate.seq++; candidate.desks[0].action += 'x';
+    const result = h.model.accept(candidate);
+    assert.equal(result.status, 422);
+    assert.equal(result.reason, 'contract_invalid');
+    assert.deepEqual(result.errors, [{ path: '$', rule: 'maxBytes' }]);
+    assert.equal(h.stored('data'), saved); assert.equal(h.stored('history'), history);
+    const cold = h.restart();
+    assert.equal(cold.hasData(), true); assert.equal(cold.feeds().data.value.seq, fixture.seq);
+    candidate.desks[0].action = candidate.desks[0].action.slice(0, -1);
+    assert.equal(cold.accept(candidate).status, 200, 'rejected sequence is still available');
+  });
+}
