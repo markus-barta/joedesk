@@ -1055,7 +1055,22 @@ padding, with the missing-day warning aligned at the same right offset.
 An amount that rounds to zero shows an unsigned `0` and keeps its day tint;
 an exactly zero day stays flat.
 The cell's accessible label and the day sheet retain the exact amount.
-Desktop calendar amounts and the week column keep their existing formatting.
+The Results calendar is a named group of date buttons, each with its full
+date, result/state and selected state. At 382 CSS px and below it becomes a
+three-column agenda with full dates so every day retains a 44 px target. The
+383 px boundary and the 390/393 px reference phones keep seven columns. The
+42 slots preserve the calendar's height across month changes. Period labels
+wrap between the 44 px arrows at 320 CSS px, including the reflow equivalent
+of a 640 px desktop window at 200% zoom. Day trades form a list with named
+Entry price, Exit price and Net after fees groups in both panel and sheet.
+The sheet's labelled, focusable scroll region follows Close in the tab order
+with an inset focus ring in both themes.
+Page Down/End can reach long trade lists, and Escape restores the selected day.
+JOED-140 unit regressions cover markup, the production focus trap and CSS
+constraints. P4 adds browser assertions for the 320/360/382/383/390/393 px
+layouts, overflow and stable period-control geometry, and keyboard scrolling
+with an unclipped focus ring through 99 complete trades; CI runs those assertions.
+Desktop week summaries are named groups identifying the week's start date.
 The focused `phone-calendar` browser scenario measures the full signed form
 set at 360/390 in light/dark against fractional amount-box widths, also
 requiring `scrollWidth ≤ clientWidth`. Signed `999k` probes are INFO only;

@@ -10,6 +10,7 @@
 // JOED-31 adds trade-amount: full amounts beside long prices in panel/sheet.
 // One headless browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import assert from 'node:assert/strict';
 import { homedir, cpus } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
@@ -365,10 +366,106 @@ const viewShot = async (page, name, what) => {
   shots.push({ file: `${name}.png`, what });
 };
 const key = async (page, name) => {
-  await page.s('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode: name === 'Escape' ? 27 : 13, ...(name === 'Enter' ? { text: '\r' } : {}) });
-  await page.s('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code: name, windowsVirtualKeyCode: name === 'Escape' ? 27 : 13 });
+  const windowsVirtualKeyCode = { Escape: 27, Enter: 13, Tab: 9, PageDown: 34, End: 35 }[name];
+  assert.ok(windowsVirtualKeyCode, `unsupported test key: ${name}`);
+  await page.s('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode, ...(name === 'Enter' ? { text: '\r' } : {}) });
+  await page.s('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code: name, windowsVirtualKeyCode });
   await settle(page);
 };
+
+// Hard assertions extend the existing view without changing its inventory of
+// reported checks. Failures stop CI; no existing assertion is replaced.
+async function assertNarrowResults(page, viewport, theme) {
+  try {
+    for (const [width, mobile, scale] of [[320, true, 1], [360, true, 1], [382, true, 1], [383, true, 1], [390, true, 1], [393, true, 1], [320, false, 2], [383, false, 1]]) {
+      // The 320 px desktop case is the CSS reflow equivalent of a 640 px
+      // window at 200% zoom; 383 px desktop also covers a classic scrollbar.
+      await configure(page, { name: String(width), width, height: 844, mobile }, theme, { scale });
+      let baseline = null;
+      for (const period of ['day', 'week', 'month', 'ytd', 'all']) {
+        await click(page, `#periodSeg [data-period="${period}"]`);
+        const geometry = await page.evaluate(`(() => {
+          const step = document.querySelector('.res-tools .step'), label = document.getElementById('perLabel');
+          const controls = [...step.querySelectorAll('button')].map(el => el.getBoundingClientRect().toJSON());
+          const days = [...document.querySelectorAll('#cal [data-day]')].map(el => el.getBoundingClientRect().toJSON());
+          const cal = document.getElementById('cal'), root = document.documentElement;
+          return { width: innerWidth, clientWidth: root.clientWidth, scrollWidth: root.scrollWidth,
+            step: step.getBoundingClientRect().toJSON(), controls, days,
+            columns: getComputedStyle(cal).gridTemplateColumns.split(' ').length,
+            agenda: getComputedStyle(cal.querySelector('.agenda-date')).display !== 'none',
+            labelFits: label.scrollWidth <= label.clientWidth,
+            calRole: document.getElementById('cal').getAttribute('role'),
+            orphanHeaders: document.querySelectorAll('#cal [role="columnheader"]').length,
+            targetFailures: __audit.targets().filter(t => t.el.includes('cell')) };
+        })()`);
+        assert.equal(geometry.width, width);
+        assert.ok(geometry.scrollWidth <= geometry.clientWidth, `${width} ${period}: no document overflow, excluding scrollbar`);
+        assert.ok(geometry.step.left >= 0 && geometry.step.right <= geometry.clientWidth, `${width} ${period}: stepper fits`);
+        assert.ok(geometry.labelFits, `${width} ${period}: full label wraps without clipping`);
+        assert.ok(geometry.controls.every(r => r.width >= 44 && r.height >= 44 && r.left >= 0 && r.right <= geometry.clientWidth), 'period arrow targets');
+        assert.ok(geometry.days.length >= 28 && geometry.days.every(r => r.width >= 44 && r.height >= 44 && r.left >= 0 && r.right <= geometry.clientWidth), `${width}: calendar targets fit`);
+        assert.equal(geometry.columns, width <= 382 ? 3 : 7, `${width}: calendar column count`);
+        assert.equal(geometry.agenda, width <= 382, `${width}: full agenda dates only below seven-column boundary`);
+        assert.deepEqual(geometry.targetFailures, [], `${width}: existing calendar target audit`);
+        assert.equal(geometry.calRole, 'group');
+        assert.equal(geometry.orphanHeaders, 0);
+        const layout = await rects(page, ['.res-tools', '.res-tools .step', '#prevPer', '#perLabel', '#nextPer', '.brow']);
+        if (baseline === null) baseline = layout;
+        else assert.deepEqual(layout, baseline, `${width} ${period}: controls and desk rows shift exactly 0 px across all five periods`);
+      }
+    }
+  } finally {
+    await configure(page, viewport, theme);
+    await reset();
+    await page.evaluate('window.scrollTo(0, 0)');
+    await settle(page);
+  }
+}
+
+async function assertLongSheetKeyboard(page, day) {
+  await page.evaluate(`document.querySelector('#cal [data-day="${day}"]').focus()`);
+  await key(page, 'Enter');
+  assert.equal(await page.evaluate('document.activeElement?.hasAttribute("data-close")'), true, 'keyboard opening focuses Close');
+  assert.equal(await page.evaluate('document.querySelectorAll("#sheetBody .trow").length'), 99);
+  await key(page, 'Tab');
+  assert.equal(await page.evaluate('document.activeElement?.id'), 'sheetBody', 'Tab enters scroll body');
+  const assertFocusRing = async () => {
+    const focus = await page.evaluate(`(() => {
+      const body = document.getElementById('sheetBody'), sheet = document.getElementById('daySheet');
+      const css = getComputedStyle(body), r = body.getBoundingClientRect(), d = sheet.getBoundingClientRect();
+      const width = parseFloat(css.outlineWidth), offset = parseFloat(css.outlineOffset), extent = width + offset;
+      const ring = { top: r.top - extent, bottom: r.bottom + extent, left: r.left - extent, right: r.right + extent };
+      const rgb = color => color.match(/[\\d.]+/g).map(Number);
+      const luminance = color => rgb(color).slice(0, 3).map(c => c / 255)
+        .map(c => c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4)
+        .reduce((sum, c, i) => sum + c * [.2126, .7152, .0722][i], 0);
+      const foreground = luminance(css.outlineColor), background = luminance(getComputedStyle(sheet).backgroundColor);
+      return { visible: document.activeElement === body && body.matches(':focus-visible'),
+        style: css.outlineStyle, width, offset, color: css.outlineColor, shadow: css.boxShadow,
+        contrast: (Math.max(foreground, background) + .05) / (Math.min(foreground, background) + .05),
+        contained: [r, d, { top: 0, bottom: innerHeight, left: 0, right: document.documentElement.clientWidth }]
+          .every(box => ring.top >= box.top && ring.bottom <= box.bottom && ring.left >= box.left && ring.right <= box.right) };
+    })()`);
+    assert.ok(focus.visible && focus.style === 'solid' && focus.width >= 2 && focus.width + focus.offset <= 0 &&
+      !['transparent', 'rgba(0, 0, 0, 0)'].includes(focus.color) && focus.shadow === 'none' && focus.contrast >= 3 && focus.contained,
+      `sheet body focus ring is visible, inset and unclipped: ${JSON.stringify(focus)}`);
+  };
+  await assertFocusRing();
+  await key(page, 'PageDown');
+  await waitFor(page, 'document.getElementById("sheetBody").scrollTop > 0');
+  await key(page, 'End');
+  await waitFor(page, `(() => {
+    const body = document.getElementById('sheetBody'), last = body.querySelector('.trow:last-child');
+    const b = body.getBoundingClientRect(), r = last.getBoundingClientRect();
+    return body.scrollTop > 0 && r.top >= b.top && r.bottom <= b.bottom + 1;
+  })()`);
+  await assertFocusRing();
+  await key(page, 'Tab');
+  assert.equal(await page.evaluate('document.activeElement?.hasAttribute("data-close")'), true, 'Tab wraps back to Close');
+  await key(page, 'Escape');
+  assert.equal(await page.evaluate('document.getElementById("daySheet").open'), false);
+  assert.equal(await page.evaluate('document.activeElement?.dataset.day'), day, 'Escape returns focus to selected day');
+}
 
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
 const engine = await browser.send('Browser.getVersion');
@@ -442,6 +539,7 @@ try {
       await load(page, board.url, 'results');
       await waitFor(page, `document.querySelector('#tiles .tile .tval .num')`);
       await auditScreen(page, viewport, theme, 'results');
+      if (viewport.mobile) await assertNarrowResults(page, viewport, theme);
       await checkMetricGeometry(page, tag);
       const help = await page.evaluate(`[...document.querySelectorAll('#tiles .metric-info')].map(b => ({ key: b.dataset.term, name: b.getAttribute('aria-label'), text: b.textContent, icon: b.querySelector('use')?.getAttribute('href'), title: b.closest('.tile').querySelector('h3').textContent }))`);
       check('AC-39', `${tag}: all eight metric help controls are labeled info icons`, help.length === 8 && help.every(b => b.name === 'Learn about ' + b.title && !b.text.trim() && b.icon === '#i-info'), help);
@@ -1450,6 +1548,8 @@ try {
       await configure(page, viewport, theme);
       await load(page, board.url, 'results');
       await waitFor(page, `document.querySelector('#cal [data-day="2026-10-01"] .vs')?.textContent === '+4,1'`);
+      assert.equal(await page.evaluate('getComputedStyle(document.getElementById("cal")).gridTemplateColumns.split(" ").length'),
+        viewport.width <= 382 ? 3 : 7, `${tag}: phone-calendar measures the expected agenda or seven-column layout`);
       const before = await geometry();
       await serve(served(record, board));
       await page.evaluate('window.__joedesk.refresh()');
@@ -2023,6 +2123,7 @@ try {
       // change the fixed 36 px header or the settled phone sheet's geometry.
       if (view('partial-days', 'large-summary', viewport, theme)) {
         await replace(largeFull, `${tag} full large summary`);
+        if (viewport.mobile) await assertLongSheetKeyboard(page, partialTrade);
         if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
         const headerSelectors = viewport.mobile ? ['.dlg-h', '#sheetBody .dp-sum'] : ['.dp-head'];
         const headerBefore = await rects(page, headerSelectors);
