@@ -242,6 +242,12 @@ test('term tips capture native focus, survive an unrelated Details close, and su
     emit('focusout', button);
     assert.ok(!classes.has('on'));
   }
+  emit('click', outside);
+  emit('keydown', outside, { key: 'Escape' });
+  rebuilt.tip.focus(outside);
+  assert.ok(!classes.has('on'), 'a quiet rebuild handoff must preserve Escape dismissal');
+  outside.focus();
+  assert.ok(classes.has('on'), 'an explicit refocus after the handoff reopens the explanation');
   // Exercise the real tip render and its accessible description, not only
   // the time calculation. Rendering must never mutate the frozen dictionary.
   const { TERMS } = await import('../public/joe/terms.js');
@@ -312,7 +318,13 @@ async function termTipFixture(t) {
     contains(el) { return el === this || el?.parentElement === this; },
     getBoundingClientRect: () => ({ left: 50, right: 100, top: 80, bottom: 100 }),
     setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; },
-    focus() { doc.activeElement = this; emit('focus', this); } });
+    focus() {
+      if (doc.activeElement === this) return;
+      const previous = doc.activeElement;
+      doc.activeElement = this;
+      if (previous) emit('focusout', previous, { relatedTarget: this });
+      emit('focus', this);
+    } });
   const api = initTips();
   t.after(() => {
     api.hide();
@@ -322,6 +334,35 @@ async function termTipFixture(t) {
   });
   return { emit, anchor, tip, classes, doc, api, hit };
 }
+
+for (const same of [true, false]) test(`after pin and Escape, focusing ${same ? 'the same' : 'another'} term shows its explanation`, async t => {
+  const { emit, anchor, tip, classes, doc } = await termTipFixture(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const first = anchor('today'), next = same ? first : anchor('broker');
+  const originalFocus = first.focus;
+  first.focus(); // native pointer focus precedes the click
+  emit('click', first);
+  assert.ok(classes.has('on') && classes.has('pinned'));
+  emit('keydown', first, { key: 'Escape' });
+  assert.equal(doc.activeElement, first, 'Escape keeps focus on the term');
+  assert.ok(!classes.has('on'));
+  assert.equal(first.attrs['aria-expanded'], 'false');
+  assert.equal(first.attrs['aria-describedby'], undefined);
+  t.mock.timers.tick(1000);
+  assert.ok(!classes.has('on'), 'Escape stays closed until a new interaction');
+  next.focus(); // the browser emits no focus event for the already-focused term
+  assert.equal(doc.activeElement, next);
+  assert.ok(classes.has('on'));
+  assert.ok(!classes.has('pinned'), 'refocusing opens an unpinned explanation');
+  assert.equal(next.attrs['aria-expanded'], 'true');
+  assert.equal(next.attrs['aria-describedby'], 'tip');
+  assert.ok(tip.innerHTML.startsWith(`<b>${same ? 'Today' : 'Broker connection'}</b>`));
+  assert.equal(first.focus, originalFocus, 'reopening or leaving restores the original focus method');
+  if (!same) {
+    assert.equal(first.attrs['aria-expanded'], 'false');
+    assert.equal(first.attrs['aria-describedby'], undefined);
+  }
+});
 
 test('hovering the next term under an unpinned tip immediately shows its own heading', async t => {
   const { emit, anchor, tip, classes, hit } = await termTipFixture(t);

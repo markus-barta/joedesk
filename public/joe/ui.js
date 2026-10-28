@@ -67,6 +67,7 @@ const TRIGGER = '[data-term], [data-say]';
 export function initTips() {
   const tip = $('#tip');
   let anchor = null, pinned = false, quiet = null, at = null, dismissal = null;
+  let restoreFocus = null;
   const cancelDismissal = () => { clearTimeout(dismissal); dismissal = null; };
   const overTip = el => el === tip || el?.closest?.('#tip') === tip;
   const inHoverRegion = el => overTip(el) || Boolean(anchor && el && anchor.contains(el));
@@ -103,6 +104,7 @@ export function initTips() {
   }
   function show(el, pin) {
     if (!fill(el)) return;
+    restoreFocus?.();
     cancelDismissal();
     // Inside an open dialog the tip joins it, so it shows above the dialog.
     const host = el.closest('dialog[open]') ?? document.body;
@@ -120,10 +122,28 @@ export function initTips() {
   function hide(force) {
     cancelDismissal();
     if (pinned && !force) return;
+    restoreFocus?.();
     tip.classList.remove('on', 'pinned');
     if (anchor) { anchor.setAttribute('aria-expanded', 'false'); anchor.removeAttribute('aria-describedby'); }
     anchor = null; pinned = false;
     if (tip.parentElement !== document.body) document.body.append(tip);
+  }
+  function reopenOnRefocus(el) {
+    // Calling focus() on the active element emits no native focus event.
+    // Watch only the Escape-dismissed control until it reopens or loses focus;
+    // preserve the native call and the rebuild's quiet focus handoff.
+    const own = Object.getOwnPropertyDescriptor(el, 'focus'), focus = el.focus;
+    restoreFocus = () => {
+      if (own) Object.defineProperty(el, 'focus', own);
+      else delete el.focus;
+      restoreFocus = null;
+    };
+    Object.defineProperty(el, 'focus', { configurable: true, writable: true, enumerable: own?.enumerable ?? false,
+      value: function (...args) {
+        const result = focus.apply(this, args);
+        if (this === el && quiet !== el && document.activeElement === el) show(el, false);
+        return result;
+      } });
   }
   // A rebuilt section hands an open tip to the same term in the new markup.
   rebuilt.tip = {
@@ -172,6 +192,7 @@ export function initTips() {
   document.addEventListener('focusout', e => {
     // A rebuild removing the focused term is not the user leaving it.
     if (rebuilt.busy) return;
+    restoreFocus?.();
     const el = e.target.closest?.(TRIGGER);
     if (el && el === anchor) hide(false);
   });
@@ -190,6 +211,7 @@ export function initTips() {
     const el = anchor;
     hide(true);
     if (document.activeElement !== el) rebuilt.tip.focus(el);
+    reopenOnRefocus(el);
     // Escape closes the tip only; an open dialog stays open for the next Escape.
     if (el.closest('dialog[open]')) e.preventDefault();
     e.stopImmediatePropagation();

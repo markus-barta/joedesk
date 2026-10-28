@@ -1782,6 +1782,9 @@ box remains part of the hover region. Crossing the trigger-to-tip gap allows
 150 ms; entering another term switches immediately, and moving elsewhere or
 pressing another control closes it. Tips leave the header Details control clear;
 opening Details closes the tip. Switching terms clears the old ARIA description.
+Escape leaves the explanation closed and keeps focus on its term. Explicitly
+focusing that same term again reopens its explanation, as focusing another term
+does; the browser emits no new focus event for an already-focused control.
 
 `node --test test/status-line.mjs` is the small local presentation suite, also
 included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,
