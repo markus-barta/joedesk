@@ -1519,3 +1519,16 @@ for the stopped-pusher outage policy (JOED-96). Prior deployed sequence 34 is
 `2026-10-27T03:30:43Z` (JOED-97). About orders 35, 34 through 26, then legacy.
 Contracts revision 10 and the approved presentation bundle remain unchanged.
 This local preparation grants no publication or deployment approval.
+
+## Release 36 candidate (JOED-106)
+
+Reserve `261028081016.0.0` at `2026-10-28T08:10:16Z` as `inspr-calver-3`, stable sequence 36,
+for honest not-exact dashes that keep the board green (JOED-103), Today help
+that resolves New York midnight to the correct Vienna time (JOED-104), and
+desk reordering that preserves keyboard focus and open tips (JOED-105).
+Prior deployed sequence 35 is `261027124551.0.0`, main
+`2d36c7b439c679fc37b05940890652aa9414e200`, live since
+`2026-10-27T20:18:18Z` (JOED-99). About orders 36, 35 through 26, then legacy.
+Reseal only this candidate's runtime closure. Contracts revision 10 and the
+approved presentation bundle remain unchanged. This local preparation grants
+no publication or deployment approval.

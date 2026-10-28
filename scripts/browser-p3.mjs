@@ -14,7 +14,7 @@ import { focusTermTips } from './browser/term-focus.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
-import { phaseBChecks } from './browser/phase-b.mjs';
+import { phaseBChecks, deskRankingFocusChecks } from './browser/phase-b.mjs';
 import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
 import { parseBoardSweepArgs, createBoardSweepPlan, boardSweepErrors, boardSweepTable } from './board-sweep-plan.mjs';
 
@@ -40,7 +40,7 @@ if (nodeModule.registerHooks) {
 export async function resolve(specifier, context, next) { return next(mapped(specifier, context.parentURL), context); }`)}`, import.meta.url);
 }
 const hm = await import('../public/joe/history-model.js');
-const { boardStates } = await import('../public/joe/board-state.js');
+const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
 const { cellReason, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
 const fmt = await import('../public/joe/format.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
@@ -456,7 +456,10 @@ const unavailable = (r, words) => r.on && r.hero.includes(`Results are unavailab
 const norm = text => text?.replace(/\s+/g, ' ').trim();
 const moves = (a, b) => shifted(a, b, ['top', 'left', 'height']);
 try {
-  if (run('phase-b')) await phaseBChecks({ page, newBoard, check, shot, auditScreen });
+  if (run('phase-b')) {
+    await phaseBChecks({ page, newBoard, check, shot, auditScreen });
+    await deskRankingFocusChecks({ page, newBoard, check });
+  }
   if (run('design')) {
   // 1 · The full design scenario at every viewport and theme.
   const { snapshot, history } = scenario(NOW);
@@ -721,7 +724,13 @@ try {
       const caps = norm([ui.boardCaption, ui.say, ...Object.values(ui.cells).map(c => c.cap)].join(' | '));
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age and reason`, /[Aa]s of \d+\s(s|min) ago · updates are (late|stuck)/.test(caps), caps);
       if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.cells['hero.account'].cap === 'Not reported', caps);
-      if (kind === 'broken') check('fixtures', `${tag}: broken shows its reason locally or in the shared section line`, /Last good value, .* · |[Uu]navailable · /.test(caps), caps);
+      if (kind === 'broken') {
+        const notExactReasons = [...new Set(Object.values(CELL).map(panel => expectedCells[panel])
+          .filter(cell => cell.state === 'broken' && NOT_EXACT_REASONS.has(cell.reason)).map(cell => cell.reason))];
+        check('fixtures', `${tag}: broken shows its reason locally or in the shared section line`, notExactReasons.length
+          ? notExactReasons.every(reason => caps.includes(`Not exact yet · ${cellReason(reason)}`))
+          : /Last good value, .* · |[Uu]navailable · /.test(caps), caps);
+      }
       if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso', 'p3-single-missing-desk'].includes(id) && (viewport.name !== '390' || ['e-layout-storage-unavailable', 'a-gateway-up-but-dead'].includes(id))) {
         await shot(page, viewport, `${viewport.name}-${theme}-desk-state-${id}`, `Desk, P1 fixture ${id} (${kind})`);
       }
@@ -1124,7 +1133,7 @@ try {
     await refresh(`document.getElementById('desk-joe').innerText.includes('open result not available')`);
     ui = await page.evaluate(DESK_TEXT);
     const [j, joe, joel] = ['j', 'joe', 'joel'].map(id => ui.cards.find(c => c.id === id));
-    const today = /^Today: unavailable · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
+    const today = /^Today: not exact yet · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
     check('journey', `${tag} broken: each affected desk number has its own line, age and reason`, j.lines.length === 3 && today.test(j.lines[0]) && open.test(j.lines[1]) &&
       /^Since 10\sSep: unavailable · carrying the last good value$/.test(j.lines[2]) && [joe, joel].every(c => c.lines.length === 2 && today.test(c.lines[0]) && open.test(c.lines[1])) &&
       JSON.stringify(j.nums) === '["broken","broken","broken"]' && [joe, joel].every(c => JSON.stringify(c.nums) === '["broken","broken","fresh"]'), ui.cards);

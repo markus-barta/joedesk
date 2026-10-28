@@ -1,7 +1,7 @@
 // Desk: health line and details, Today, the three desks, positions and the
 // kept holdings. Every number keeps its panel state; matching snapshot captions
 // are shared once, while different ages and reasons stay beside their values.
-import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption } from './ui.js';
+import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
@@ -12,7 +12,7 @@ import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
 import { STARTING_MONEY, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
-import { outageValue, withGenerationAge } from './board-state.js';
+import { NOT_EXACT_REASONS, outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -61,13 +61,15 @@ export function disclosureProblem(candidates) {
   const problems = candidates.flatMap(([label, cell]) => {
     const p = statePhrase(cell, '');
     if (p.state === 'fresh') return [];
-    const state = cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
+    const inexact = cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason);
+    const state = inexact ? 'not exact yet' : cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
       : p.state === 'not reported' ? 'not reported' : 'unavailable';
     const reason = cell?.reason ?? (p.state === 'not reported' ? 'feed_not_received' : null);
     // Unavailable money leads even when its honest not-exact icon is neutral;
     // an old check-in must not obscure that the row's figures are unknown.
     const priority = cell?.state === 'broken' || state === 'unavailable' ? 3 : severity[p.tone];
-    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, reason: reason ? cellReason(reason) : null, label: `${label}: ${state}` }];
+    const why = reason ? cellReason(reason) : null;
+    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, why, reason: why === state ? null : why, label: `${label}: ${state}` }];
   });
   problems.sort((a, b) => b.priority - a.priority || severity[b.tone] - severity[a.tone]);
   if (!problems.length) return null;
@@ -85,7 +87,7 @@ export function disclosureProblem(candidates) {
   const sharedReason = sharedSectionReason(candidates.map(([, cell]) => cell)) ??
     candidates.filter(([, cell]) => Array.isArray(cell?.value)).map(([, cell]) => positionSectionReason(cell)).find(Boolean) ?? null;
   return { ...summarize(problems), sharedReason,
-    expanded: sharedReason ? summarize(problems.filter(p => p.reason !== sharedReason)) : null };
+    expanded: sharedReason ? summarize(problems.filter(p => p.why !== sharedReason)) : null };
 }
 function problemHtml(problem) {
   const html = p => p ? `${icon(p.icon, `i tone-${p.tone}`)}<span class="summary-text" title="${esc(p.detail)}" aria-hidden="true">${esc(p.text)}</span><span class="vh">${esc(p.detail)}</span>` : '';
@@ -621,9 +623,13 @@ export function renderDesk(ctx) {
   syncDeskDisclosures();
   const grid = $('.desk-grid');
   const currentOrder = [...grid.children].map(card => card.id.slice(5));
-  for (const [index, id] of rankDesks(ctx.states, currentOrder).entries()) {
-    const card = $(`#desk-${id}`);
-    if (grid.children[index] !== card) grid.insertBefore(card, grid.children[index]);
+  // Re-ranking must not detach a focused phone row or a term's open tip.
+  // Values still refresh; apply the latest ranking once the user leaves.
+  if (!interactionWithin(grid)) {
+    for (const [index, id] of rankDesks(ctx.states, currentOrder).entries()) {
+      const card = $(`#desk-${id}`);
+      if (grid.children[index] !== card) grid.insertBefore(card, grid.children[index]);
+    }
   }
   // Charts measure their boxes before the long sections below change, so an
   // update never forces a layout of the whole position list mid-render.
