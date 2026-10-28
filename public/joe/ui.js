@@ -70,11 +70,23 @@ export function initTips() {
   const cancelDismissal = () => { clearTimeout(dismissal); dismissal = null; };
   const overTip = el => el === tip || el?.closest?.('#tip') === tip;
   const inHoverRegion = el => overTip(el) || Boolean(anchor && el && anchor.contains(el));
+  const inBox = (r, e) => e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+  const overTipBox = e => Boolean(anchor && inBox(tip.getBoundingClientRect(), e));
+  const inGap = e => {
+    const a = anchor.getBoundingClientRect(), b = tip.getBoundingClientRect();
+    return inBox({ left: Math.min(a.left, b.left), right: Math.max(a.right, b.right),
+      top: Math.min(a.bottom, b.bottom), bottom: Math.max(a.top, b.top) }, e);
+  };
+  const delayDismissal = () => { cancelDismissal(); dismissal = setTimeout(() => hide(false), 150); };
   function place(el) {
     const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+    const x = Math.max(10, Math.min(innerWidth - w - 10, el.dataset.learn ? r.right - w : r.left));
     let y = r.bottom + 8;
     if (y + h > innerHeight - 10) y = Math.max(10, r.top - h - 8);
-    tip.style.left = `${Math.max(10, Math.min(innerWidth - w - 10, el.dataset.learn ? r.right - w : r.left))}px`;
+    // A tip flipped above its term must leave the sticky Details control clear.
+    const health = document.getElementById?.('hdrHealth')?.getBoundingClientRect();
+    if (health && x < health.right && x + w > health.left && y < health.bottom && y + h > health.top) y = health.bottom + 8;
+    tip.style.left = `${x}px`;
     tip.style.top = `${y}px`;
     at = { x: r.left, y: r.top };
   }
@@ -130,19 +142,27 @@ export function initTips() {
     },
   };
   const hover = e => {
+    if (e.pointerType === 'touch') return;
     const el = e.target.closest?.('[data-term]');
-    if (overTip(e.target) || (anchor && el === anchor)) cancelDismissal();
-    if (el && e.pointerType !== 'touch' && !(pinned && anchor !== el) && el !== anchor) show(el, false);
+    // Unpinned tips pass events through. Another trigger beneath the tip wins
+    // immediately; otherwise its visible box still belongs to the hover region.
+    if (el && el !== anchor && !pinned) { show(el, false); return; }
+    if (!anchor || pinned) return;
+    if (inHoverRegion(e.target) || overTipBox(e)) cancelDismissal();
+    else if (inGap(e)) delayDismissal();
+    else hide(false);
   };
   document.addEventListener('pointerover', hover);
   // A scroll can dismiss a tip while the pointer remains over its term.
   document.addEventListener('pointermove', hover);
   document.addEventListener('pointerout', e => {
-    if (!anchor || pinned || !inHoverRegion(e.target) || inHoverRegion(e.relatedTarget)) return;
+    if (!anchor || pinned || !inHoverRegion(e.target) || inHoverRegion(e.relatedTarget) || overTipBox(e)) return;
     // Leave time to cross the positioning gap between the term and its tip.
-    cancelDismissal();
-    dismissal = setTimeout(() => hide(false), 150);
+    delayDismissal();
   });
+  document.addEventListener('pointerdown', e => {
+    if (anchor && !pinned && !inHoverRegion(e.target)) hide(false);
+  }, true);
   // Capture native focus before a section can rebuild its focused term.
   document.addEventListener('focus', e => {
     const el = e.target.closest?.(TRIGGER);
@@ -163,7 +183,7 @@ export function initTips() {
   document.addEventListener('click', e => {
     const el = e.target.closest(TRIGGER);
     if (el) { if (anchor === el && pinned) hide(true); else show(el, true); e.preventDefault(); return; }
-    if (pinned && !e.target.closest('#tip')) hide(true);
+    if (!overTip(e.target)) hide(true);
   }, true);
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape' || !anchor) return;

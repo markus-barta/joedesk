@@ -274,11 +274,13 @@ async function termTipFixture(t) {
   const listeners = new Map(), classes = new Set();
   const body = { append(el) { el.parentElement = this; } };
   const tip = { style: {}, parentElement: body, offsetWidth: 200, offsetHeight: 80,
+    getBoundingClientRect() { const left = parseFloat(this.style.left), top = parseFloat(this.style.top);
+      return { left, top, right: left + this.offsetWidth, bottom: top + this.offsetHeight }; },
     contains(el) { return el === this || el?.parentElement === this; },
     closest(selector) { return selector === '#tip' ? this : null; },
     classList: { add(...xs) { xs.forEach(x => classes.add(x)); }, remove(...xs) { xs.forEach(x => classes.delete(x)); },
       toggle(x, yes) { yes ? classes.add(x) : classes.delete(x); } } };
-  const doc = { body, activeElement: null, querySelector: () => tip,
+  const doc = { body, activeElement: null, querySelector: () => tip, getElementById: () => null,
     addEventListener(type, fn) { listeners.set(type, [...listeners.get(type) ?? [], fn]); } };
   const descriptors = new Map();
   for (const [key, value] of Object.entries({ document: doc, innerWidth: 1000, innerHeight: 800,
@@ -287,7 +289,23 @@ async function termTipFixture(t) {
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   const emit = (type, target, extra = {}) => {
-    for (const fn of listeners.get(type) ?? []) fn({ target, pointerType: 'mouse', preventDefault() {}, stopImmediatePropagation() {}, ...extra });
+    let stopped = false;
+    const event = { target, pointerType: 'mouse', defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() { stopped = true; }, ...extra };
+    for (const fn of listeners.get(type) ?? []) { fn(event); if (stopped) break; }
+    return event;
+  };
+  // Resolve the real stylesheet's tip hit-testing policy for an overlapping
+  // box; Node has no layout engine. Pointer coordinates are supplied by tests.
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  const hit = underneath => {
+    let events = 'auto';
+    for (const [, suffix, declarations] of css.matchAll(/\.tip(\.[\w-]+)?\s*\{([^}]+)\}/g)) {
+      if (suffix && !classes.has(suffix.slice(1))) continue;
+      const value = declarations.match(/pointer-events:\s*(\w+)\s*;/)?.[1];
+      if (value) events = value;
+    }
+    return classes.has('on') && events !== 'none' ? tip : underneath;
   };
   const anchor = term => ({ dataset: { term }, attrs: {},
     closest(selector) { return selector.includes('[data-term]') ? this : null; },
@@ -302,8 +320,66 @@ async function termTipFixture(t) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];
     }
   });
-  return { emit, anchor, tip, classes, doc, api };
+  return { emit, anchor, tip, classes, doc, api, hit };
 }
+
+test('hovering the next term under an unpinned tip immediately shows its own heading', async t => {
+  const { emit, anchor, tip, classes, hit } = await termTipFixture(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const broker = anchor('broker'), halt = anchor('halt'), datafrom = anchor('datafrom');
+  halt.getBoundingClientRect = () => ({ left: 50, right: 100, top: 120, bottom: 140 });
+  datafrom.getBoundingClientRect = () => ({ left: 50, right: 100, top: 160, bottom: 180 });
+  emit('pointerover', broker);
+  for (const [previous, next, heading] of [[broker, halt, 'Emergency stop'], [halt, datafrom, 'Data from']]) {
+    const { top, bottom } = next.getBoundingClientRect(), clientY = (top + bottom) / 2;
+    const box = tip.getBoundingClientRect();
+    assert.ok(clientY > box.top && clientY < box.bottom, 'the next trigger really overlaps the preceding tip box');
+    const target = hit(next); // next term lies beneath the preceding tip
+    emit('pointerout', previous, { relatedTarget: target, clientX: 70, clientY });
+    emit('pointerover', target, { clientX: 70, clientY });
+    emit('pointermove', target, { clientX: 70, clientY });
+    assert.ok(tip.innerHTML.startsWith(`<b>${heading}</b>`), 'handover must not wait for a dismissal timer');
+    assert.equal(previous.attrs['aria-describedby'], undefined);
+    assert.equal(next.attrs['aria-describedby'], 'tip');
+    t.mock.timers.tick(1000);
+    assert.ok(classes.has('on'), 'the preceding term timer must not close the new tip');
+  }
+  emit('pointermove', { closest: () => null }, { clientX: 2, clientY: 2 });
+  assert.ok(!classes.has('on'), 'moving away from the tip and gap dismisses immediately before dialog Escape');
+});
+
+test('an unpinned tip lets another control receive its press and action, then closes', async t => {
+  const { emit, anchor, tip, classes, doc, hit } = await termTipFixture(t);
+  const broker = anchor('broker'), control = { closest: () => null };
+  let actions = 0;
+  doc.addEventListener('click', event => { if (event.target === control && !event.defaultPrevented) actions++; });
+  for (const open of [() => emit('pointerover', broker), () => broker.focus()]) {
+    open();
+    emit('pointermove', hit(control), { clientX: 70, clientY: 130 });
+    assert.ok(classes.has('on'), 'hovering the tip box preserves it despite click-through hit-testing');
+    const target = hit(control);
+    const press = emit('pointerdown', target, { clientX: 70, clientY: 130 });
+    assert.equal(press.defaultPrevented, false);
+    assert.ok(!classes.has('on'), 'outside press closes the unpinned tip before the control action');
+    emit('click', target);
+    assert.equal(broker.attrs['aria-describedby'], undefined);
+  }
+  assert.equal(actions, 2, 'hover- and focus-opened tips must let the control action run');
+  emit('pointerover', broker);
+  emit('click', control); // keyboard/programmatic activation has no pointerdown
+  assert.ok(!classes.has('on'), 'non-pointer control activation also closes the tip');
+  emit('click', broker);
+  assert.equal(hit(control), tip, 'a deliberately pinned tip retains its own hit-testing');
+});
+
+test('an unpinned tip flipped upward leaves the header Details control clear', async t => {
+  const { emit, anchor, tip, doc } = await termTipFixture(t);
+  globalThis.innerHeight = 190;
+  const header = { left: 40, right: 300, top: 0, bottom: 58 };
+  doc.getElementById = id => id === 'hdrHealth' ? { getBoundingClientRect: () => header } : null;
+  emit('pointerover', anchor('broker'));
+  assert.ok(tip.getBoundingClientRect().top >= header.bottom + 8);
+});
 
 test('switching a pinned term clears its old ARIA description through dismissal', async t => {
   const { emit, anchor, tip, classes, api } = await termTipFixture(t);
@@ -329,6 +405,16 @@ test('hover tips stay open across the gap and over their content, then dismiss o
   const today = anchor('today'), broker = anchor('broker');
   const text = { parentElement: tip, closest: selector => tip.closest(selector) };
   const outside = { closest: () => null };
+  emit('pointerover', today);
+  emit('pointerout', today, { relatedTarget: outside, clientX: 70, clientY: 104 });
+  emit('pointermove', outside, { clientX: 70, clientY: 104 });
+  t.mock.timers.tick(50);
+  assert.ok(classes.has('on'), 'crossing the actual gap preserves the tip briefly');
+  emit('pointermove', outside, { clientX: 70, clientY: 130 });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'the tip box stays hovered when the event targets content beneath it');
+  emit('pointermove', outside, { clientX: 2, clientY: 2 });
+  assert.ok(!classes.has('on'), 'moving elsewhere dismisses without a delay');
   emit('pointerover', today);
   assert.ok(classes.has('on'));
   assert.ok(!classes.has('pinned'));
@@ -385,7 +471,9 @@ test('hover tips stay open across the gap and over their content, then dismiss o
   assert.ok(!classes.has('on'), 'Escape also closes a pinned tip');
 
   const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
-  assert.match(css, /\.tip\.on\s*\{[^}]*pointer-events:\s*auto\s*;/, 'every visible tip must receive pointer events');
+  assert.match(css, /\.tip\s*\{[^}]*pointer-events:\s*none\s*;/, 'unpinned tips must let underlying controls receive clicks');
+  assert.doesNotMatch(css, /\.tip\.on\s*\{[^}]*pointer-events:\s*auto\s*;/);
+  assert.match(css, /\.tip\.pinned\s*\{[^}]*pointer-events:\s*auto\s*;/);
 });
 
 test('a compact non-green control puts the sentence on the reserved line; fitting warnings keep it in the control', () => {
