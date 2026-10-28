@@ -3,6 +3,8 @@
 import { TERMS } from './terms.js';
 import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol, cashAmount } from './format.js';
 import { cellReason, capital, CELL_REASON } from './health.js';
+import { NOT_EXACT_REASONS } from './board-state.js';
+import { nyDay, zonedInstant, wall, NY, VIENNA } from './time.mjs';
 
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -10,7 +12,15 @@ export const icon = (id, cls = 'i') => `<svg class="${cls}" aria-hidden="true"><
 // Entries added at run time (each fleet setting's Learn tip) beside the fixed dictionary.
 const added = new Map();
 export const addTerms = entries => { for (const [key, entry] of Object.entries(entries)) added.set(key, entry); };
-const entryOf = key => TERMS[key] ?? added.get(key);
+const entryOf = key => {
+  const entry = TERMS[key] ?? added.get(key);
+  if (key !== 'today') return entry;
+  // Resolve at each tip render, including after midnight. Intl supplies both
+  // zones' offsets at NY midnight itself, even on a clock-change Sunday.
+  const midnight = zonedInstant(nyDay(new Date().toISOString()), '00:00:00', NY);
+  const viennaTime = wall(midnight, VIENNA).slice(11, 16);
+  return [entry[0], entry[1].replace('{nyMidnightVienna}', viennaTime), entry[2]];
+};
 export const learnBtn = key => `<button type="button" class="learn" data-term="${esc(key)}" data-learn="1" aria-expanded="false" aria-label="Learn: ${esc(entryOf(key)[0])}">${icon('book')}Learn</button>`;
 export const term = (key, text) => `<button type="button" class="term" data-term="${key}">${esc(text ?? TERMS[key][0])}</button>`;
 
@@ -195,6 +205,12 @@ export const ageSpan = (key, text) => `<span class="age" data-age="${key}">${esc
 const AGE_RE = /<span class="age" data-age="([^"]+)">([^<]*)<\/span>/g;
 const structure = new WeakMap();
 const rebuilt = { tip: null, busy: false };
+// Keep an interacting region stationary, even when a pointer-pinned tip has
+// no keyboard focus. The next render after leaving may apply its new order.
+export function interactionWithin(root) {
+  const anchor = rebuilt.tip?.anchor();
+  return root.contains(document.activeElement) || Boolean(anchor && root.contains(anchor));
+}
 const KEYS = ['data-term', 'data-say', 'data-desk-disclosure', 'data-go', 'data-hdesk', 'data-range', 'data-desk', 'data-day', 'data-period', 'data-field', 'data-themeopt', 'data-sec'];
 function identity(node, root) {
   if (node.id) return { sel: `#${CSS.escape(node.id)}`, index: 0 };
@@ -247,9 +263,9 @@ export function statePhrase(cell, key, held = 'last good value', sharedReason = 
   const localWhy = why !== sharedReason ? why : null;
   const suffix = localWhy ? ` · ${esc(localWhy)}` : '';
   const ago = () => ageSpan(key, cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`);
+  if (cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason)) return { tone: 'none', icon: 'info',
+    text: `not exact yet${localWhy === 'not exact yet' ? '' : suffix}`, state };
   if (state === 'fresh') return { tone: 'ok', text: '', state };
-  if (cell?.value == null && cell?.reason === 'not_exact_yet') return { tone: 'none', icon: 'info',
-    text: `${state === 'not reported' ? 'not reported' : 'unavailable'}${suffix}`, state };
   if (state === 'not reported') return { tone: 'none', text: `not reported${suffix}`, state };
   if (cell.value == null) return { tone: 'bad', text: `unavailable${why ? suffix : ' · not available'}`, state };
   if (cell.retained) return { tone: 'warn', text: `${held}, ${ago()}${suffix}`, state };

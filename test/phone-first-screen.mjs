@@ -31,6 +31,19 @@ test('summary selects the worst actual state and retains every independent reaso
   assert.equal(disclosureProblem([['Today', cell('broken', 'not_exact_yet')]]).icon, 'info');
 });
 
+test('opened not-exact desk summaries leave shared reasons in the body and keep independent problems', () => {
+  for (const reason of ['not_exact_yet', 'sod_missing']) {
+    const candidates = ['Today', 'Open positions', 'Since start'].map(label => [label, cell('broken', reason)]);
+    const p = disclosureProblem(candidates);
+    assert.equal(p.icon, 'info');
+    assert.equal(p.expanded, null, `${reason}: no repeated detail in the expanded header`);
+    assert.equal(p.sharedReason, reason === 'not_exact_yet' ? 'not exact yet' : 'start-of-day value missing');
+    assert.equal(p.text, reason === 'not_exact_yet' ? 'Today: not exact yet' : 'Today: not exact yet · start-of-day value missing');
+    const mixed = disclosureProblem([...candidates, ['History', cell('stale', 'snapshot_stale', {})]]);
+    assert.equal(mixed.expanded.detail, 'History: stale · updates are late');
+  }
+});
+
 test('one-line summaries expose every independent reason in the accessible button text', () => {
   const ctx = context();
   ctx.states['today.openPnl'] = cell('broken', 'not_exact_yet');
@@ -40,7 +53,7 @@ test('one-line summaries expose every independent reason in the accessible butto
   const summary = warning.querySelector('.summary-text'), accessible = warning.querySelector('.vh');
   assert.equal(summary.getAttribute('aria-hidden'), 'true', 'do not announce the short reason twice');
   assert.equal(accessible.textContent, summary.getAttribute('title'));
-  for (const label of ['Open positions: unavailable', 'Paper account: stale', 'Cash: unavailable']) {
+  for (const label of ['Open positions: not exact yet', 'Paper account: stale', 'Cash: unavailable']) {
     assert.ok(accessible.textContent.includes(label));
   }
 });
@@ -78,7 +91,7 @@ test('fresh position panels expose null-field and unmatched-desk problems in the
   const p = disclosureProblem([['Positions', c], ...rowProblems(c)]);
   assert.equal(p.tone, 'bad');
   assert.match(p.text, /AAA desk: unavailable/);
-  assert.match(p.detail, /AAA Worth: unavailable · not exact yet/);
+  assert.match(p.detail, /AAA Worth: not exact yet/);
   assert.deepEqual(rowProblems(cell('broken')), []);
 });
 
@@ -102,7 +115,7 @@ test('unavailable money leads an old check-in without losing its neutral not-exa
     for (const name of ['dayPnl', 'openPnl', 'totalPnl']) ctx.states[`desks.${desk.id}.${name}`] = cell('broken', reason);
     const doc = htmlDocument(compactDesk(ctx, desk.id));
     const summary = doc.querySelector('.disclosure-warning .summary-text');
-    assert.match(summary.textContent, reason === 'not_exact_yet' ? /Today: unavailable · not exact yet/ : /Today: unavailable · not reported by the broker/);
+    assert.match(summary.textContent, reason === 'not_exact_yet' ? /Today: not exact yet/ : /Today: unavailable · not reported by the broker/);
     assert.equal(doc.querySelector('.disclosure-warning use').getAttribute('href'), reason === 'not_exact_yet' ? '#i-info' : '#i-stop');
     assert.match(summary.getAttribute('title'), /Check-in: stale/);
   }

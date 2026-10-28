@@ -103,7 +103,7 @@ for (const midnight of ['2026-10-15T04:00:00.000Z', '2026-11-03T05:00:00.000Z'])
     if (current === feeds) assert.notEqual(sincePercent(states), null, 'Since start has no day boundary');
     if (current === feeds) {
       assert.match(htmlDocument(heroLeft(view)).querySelector('.say').textContent, /Today’s result is not available: waiting on the start-of-day value\./);
-      assert.match(htmlDocument(deskCard(view, 'j', 50, true)).textContent, /Today: unavailable · waiting on the start-of-day value/);
+      assert.match(htmlDocument(deskCard(view, 'j', 50, true)).textContent, /Today: not exact yet · waiting on the start-of-day value/);
     }
   }
   const delayed = structuredClone(data); delayed.generatedAt = delayed.receivedAt = delayed.safety.gateway.checkedAt = midnight;
@@ -173,7 +173,7 @@ for (const id of ['b-weekend-no-sod', 'j-ny-midnight-gap']) test(`${id}: dashed 
   const hero = htmlDocument(heroLeft({ states, feeds, now }));
   const today = hero.querySelector('[data-cell="hero.day"]');
   assert.equal(today.querySelector('.bn').textContent, '—');
-  assert.equal(today.querySelector('.primary-caption').textContent, `Unavailable · ${cellReason(day.reason)}`);
+  assert.equal(today.querySelector('.primary-caption').textContent, `Not exact yet · ${cellReason(day.reason)}`);
   assert.equal(today.querySelector('.bn').getAttribute('aria-label'), `Today: not reported · ${cellReason(day.reason)}`);
 });
 
@@ -194,7 +194,7 @@ for (const reason of NOT_EXACT_REASONS) test(`${reason}: dashed hero reasons sta
     for (const node of hero.querySelectorAll('.cash-sizing')) node.remove();
     const section = hero.querySelector('.board-caption').textContent;
     const dayCaption = hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent;
-    if (data === dayOnly || data === mixed) assert.equal(dayCaption, `Unavailable · ${cellReason(reason)}`);
+    if (data === dayOnly || data === mixed) assert.equal(dayCaption, `Not exact yet${reason === 'not_exact_yet' ? '' : ` · ${cellReason(reason)}`}`);
     else {
       assert.equal(dayCaption, '', 'a shared reason is not repeated on Today');
       assert.equal(section, `Numbers unavailable · ${cellReason(reason)}`);
@@ -204,7 +204,7 @@ for (const reason of NOT_EXACT_REASONS) test(`${reason}: dashed hero reasons sta
       assert.equal(node.querySelector('.bn').textContent, '—');
       const name = { day: 'dayPnl', since: 'totalPnl', open: 'openPnl', equity: 'equity' }[node.dataset.cell.split('.')[1]];
       const why = cellReason(view.states[`today.${name}`].reason);
-      assert.ok(node.querySelector('.c').textContent.includes(why) || section.includes(why), `${node.dataset.cell}: ${why}`);
+      assert.ok(node.querySelector('.c').textContent.toLowerCase().includes(why) || section.includes(why), `${node.dataset.cell}: ${why}`);
     }
   }
 });
