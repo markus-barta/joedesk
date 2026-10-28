@@ -88,8 +88,9 @@ export function sumByCurrency(values) {
 }
 
 export function quantity(value) {
-  const n = Number(value);
-  return Number.isInteger(n) ? digits(n, 0) : String(value).replace('.', ',');
+  // Keep every accepted digit, including fractional precision, without a float.
+  const [whole, fraction] = String(value).split('.');
+  return whole.replace('-', MINUS).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (fraction === undefined ? '' : `,${fraction}`);
 }
 
 // Wall-clock parts per instant and zone. A position list repeats the same few
