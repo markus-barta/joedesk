@@ -1785,6 +1785,11 @@ opening Details closes the tip. Switching terms clears the old ARIA description.
 Escape leaves the explanation closed and keeps focus on its term. Explicitly
 focusing that same term again reopens its explanation, as focusing another term
 does; the browser emits no new focus event for an already-focused control.
+When native focus scrolls an offscreen term into view, its explanation follows
+the anchor through the first frame, including stationary-pointer boundary
+events caused by that scroll. Subsequent scrolling still closes a moved tip.
+The focused Node regression replays AC-39's hero click, Escape and desk focus
+with the pointer left at the click point, including the initial focus scroll.
 
 `node --test test/status-line.mjs` is the small local presentation suite, also
 included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,

@@ -68,6 +68,7 @@ export function initTips() {
   const tip = $('#tip');
   let anchor = null, pinned = false, quiet = null, at = null, dismissal = null;
   let restoreFocus = null;
+  let focusPlacement = null;
   const cancelDismissal = () => { clearTimeout(dismissal); dismissal = null; };
   const overTip = el => el === tip || el?.closest?.('#tip') === tip;
   const inHoverRegion = el => overTip(el) || Boolean(anchor && el && anchor.contains(el));
@@ -104,6 +105,7 @@ export function initTips() {
   }
   function show(el, pin) {
     if (!fill(el)) return;
+    focusPlacement = null;
     restoreFocus?.();
     cancelDismissal();
     // Inside an open dialog the tip joins it, so it shows above the dialog.
@@ -122,11 +124,26 @@ export function initTips() {
   function hide(force) {
     cancelDismissal();
     if (pinned && !force) return;
+    focusPlacement = null;
     restoreFocus?.();
     tip.classList.remove('on', 'pinned');
     if (anchor) { anchor.setAttribute('aria-expanded', 'false'); anchor.removeAttribute('aria-describedby'); }
     anchor = null; pinned = false;
     if (tip.parentElement !== document.body) document.body.append(tip);
+  }
+  function showFocused(el) {
+    show(el, false);
+    if (anchor !== el) return;
+    // Native focus fires before scrolling an offscreen control into view.
+    // Follow that initial scroll through the next frame; later scrolling
+    // still dismisses a moved anchor. Layout can also retarget a stationary
+    // pointer during this handoff, which is not a new hover interaction.
+    const placement = focusPlacement = {};
+    requestAnimationFrame(() => {
+      if (focusPlacement !== placement) return;
+      if (anchor && document.activeElement === anchor) place(anchor);
+      focusPlacement = null;
+    });
   }
   function reopenOnRefocus(el) {
     // Calling focus() on the active element emits no native focus event.
@@ -141,7 +158,7 @@ export function initTips() {
     Object.defineProperty(el, 'focus', { configurable: true, writable: true, enumerable: own?.enumerable ?? false,
       value: function (...args) {
         const result = focus.apply(this, args);
-        if (this === el && quiet !== el && document.activeElement === el) show(el, false);
+        if (this === el && quiet !== el && document.activeElement === el) showFocused(el);
         return result;
       } });
   }
@@ -163,6 +180,8 @@ export function initTips() {
   };
   const hover = e => {
     if (e.pointerType === 'touch') return;
+    if (focusPlacement && e.type === 'pointerover') return;
+    focusPlacement = null;
     const el = e.target.closest?.('[data-term]');
     // Unpinned tips pass events through. Another trigger beneath the tip wins
     // immediately; otherwise its visible box still belongs to the hover region.
@@ -176,18 +195,20 @@ export function initTips() {
   // A scroll can dismiss a tip while the pointer remains over its term.
   document.addEventListener('pointermove', hover);
   document.addEventListener('pointerout', e => {
+    if (focusPlacement) return;
     if (!anchor || pinned || !inHoverRegion(e.target) || inHoverRegion(e.relatedTarget) || overTipBox(e)) return;
     // Leave time to cross the positioning gap between the term and its tip.
     delayDismissal();
   });
   document.addEventListener('pointerdown', e => {
+    focusPlacement = null;
     if (anchor && !pinned && !inHoverRegion(e.target)) hide(false);
   }, true);
   // Capture native focus before a section can rebuild its focused term.
   document.addEventListener('focus', e => {
     const el = e.target.closest?.(TRIGGER);
     if (quiet === e.target) return;
-    if (el && el !== anchor) show(el, false);
+    if (el && el !== anchor) showFocused(el);
   }, true);
   document.addEventListener('focusout', e => {
     // A rebuild removing the focused term is not the user leaving it.
@@ -198,6 +219,7 @@ export function initTips() {
   });
   addEventListener('scroll', () => {
     if (!anchor || !at) return;
+    if (focusPlacement && document.activeElement === anchor) { place(anchor); return; }
     const r = anchor.getBoundingClientRect();
     if (Math.abs(r.left - at.x) > 1 || Math.abs(r.top - at.y) > 1) hide(true);
   }, { passive: true, capture: true });

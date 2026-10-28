@@ -188,7 +188,8 @@ test('term tips capture native focus, survive an unrelated Details close, and su
   const doc = { body, activeElement: null, querySelector: () => tip, addEventListener(type, fn, capture) {
     listeners.set(type, [...listeners.get(type) ?? [], fn]); captures.set(type, capture);
   } };
-  const globals = { document: doc, innerWidth: 1000, innerHeight: 800, addEventListener: (type, fn) => doc.addEventListener(type, fn) };
+  const globals = { document: doc, innerWidth: 1000, innerHeight: 800, requestAnimationFrame() {},
+    addEventListener: (type, fn) => doc.addEventListener(type, fn) };
   for (const [key, value] of Object.entries(globals)) {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
@@ -277,7 +278,7 @@ test('term tips capture native focus, survive an unrelated Details close, and su
 
 async function termTipFixture(t) {
   const { initTips } = await import('../public/joe/ui.js');
-  const listeners = new Map(), classes = new Set();
+  const listeners = new Map(), classes = new Set(), frames = [];
   const body = { append(el) { el.parentElement = this; } };
   const tip = { style: {}, parentElement: body, offsetWidth: 200, offsetHeight: 80,
     getBoundingClientRect() { const left = parseFloat(this.style.left), top = parseFloat(this.style.top);
@@ -290,13 +291,14 @@ async function termTipFixture(t) {
     addEventListener(type, fn) { listeners.set(type, [...listeners.get(type) ?? [], fn]); } };
   const descriptors = new Map();
   for (const [key, value] of Object.entries({ document: doc, innerWidth: 1000, innerHeight: 800,
+    requestAnimationFrame: fn => frames.push(fn),
     addEventListener: (type, fn) => doc.addEventListener(type, fn) })) {
     descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
   const emit = (type, target, extra = {}) => {
     let stopped = false;
-    const event = { target, pointerType: 'mouse', defaultPrevented: false,
+    const event = { type, target, pointerType: 'mouse', defaultPrevented: false,
       preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() { stopped = true; }, ...extra };
     for (const fn of listeners.get(type) ?? []) { fn(event); if (stopped) break; }
     return event;
@@ -332,8 +334,79 @@ async function termTipFixture(t) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];
     }
   });
-  return { emit, anchor, tip, classes, doc, api, hit };
+  return { emit, anchor, tip, classes, doc, api, hit, frame: () => frames.splice(0).forEach(fn => fn()) };
 }
+
+for (const width of [1024, 1440, 390]) test(`AC-39 at ${width}: focus survives its native scroll with the pointer at the hero click`, async t => {
+  const { emit, anchor, tip, classes, doc, frame } = await termTipFixture(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  globalThis.innerWidth = width;
+  globalThis.innerHeight = width === 1024 ? 768 : width === 1440 ? 1000 : 844;
+  const hero = anchor('today'), desk = anchor('today');
+  const pointer = { clientX: 75, clientY: 90 };
+  // The fresh design fixture omits heartbeat terms: both selectors find Today,
+  // but they are distinct controls. The 1024 hero has two supporting KPI rows;
+  // unlike __audit.visible, native focus must bring an offscreen desk into view.
+  let deskTop = width === 1024 ? 820 : 600;
+  desk.getBoundingClientRect = () => ({ left: 50, right: 100, top: deskTop, bottom: deskTop + 20 });
+  emit('pointerover', hero, pointer);
+  emit('pointerdown', hero, pointer);
+  hero.focus();
+  emit('click', hero, pointer);
+  frame();
+  emit('keydown', hero, { key: 'Escape' });
+  frame();
+  assert.ok(!classes.has('on'));
+  assert.equal(doc.activeElement, hero);
+
+  desk.focus(); // focus event runs before the native focus algorithm scrolls
+  assert.equal(doc.activeElement, desk);
+  assert.equal(desk.attrs['aria-expanded'], 'true', 'the new control is expanded synchronously');
+  if (width === 1024) {
+    deskTop = 374; // input geometry, not a browser pixel measurement
+    emit('scroll', doc);
+    assert.ok(classes.has('on'), 'the focus scroll itself must preserve the newly opened tip');
+    const background = { closest: () => null };
+    emit('pointerout', hero, { ...pointer, relatedTarget: background });
+    emit('pointerover', background, { ...pointer, relatedTarget: hero });
+  }
+  frame(); // settle() paints twice and then waits 30 ms
+  frame();
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'focus-induced scrolling must not dismiss its explanation');
+  assert.ok(!classes.has('pinned'));
+  assert.equal(desk.attrs['aria-expanded'], 'true');
+  assert.equal(desk.attrs['aria-describedby'], 'tip');
+  assert.equal(hero.attrs['aria-expanded'], 'false');
+  assert.equal(hero.attrs['aria-describedby'], undefined);
+  assert.ok(tip.innerHTML.startsWith('<b>Today</b>'));
+  const box = tip.getBoundingClientRect();
+  assert.equal(box.top, deskTop + 28, 'tip is placed against the anchor after native scrolling');
+  assert.ok(box.bottom <= innerHeight - 10 && box.top >= 10, 'tip follows the final visible anchor');
+  deskTop -= 20;
+  emit('scroll', doc);
+  assert.ok(!classes.has('on'), 'a later scroll still dismisses a moved anchor');
+});
+
+test('the initial focus frame yields to pointer movement, outside press and Escape', async t => {
+  const { emit, anchor, tip, classes, frame } = await termTipFixture(t);
+  const today = anchor('today'), broker = anchor('broker');
+  today.focus();
+  emit('pointermove', broker, { clientX: 75, clientY: 90 });
+  frame();
+  assert.ok(tip.innerHTML.startsWith('<b>Broker connection</b>'), 'a real move still switches terms immediately');
+  assert.equal(broker.attrs['aria-describedby'], 'tip');
+  assert.equal(today.attrs['aria-describedby'], undefined);
+  broker.focus();
+  today.focus();
+  emit('keydown', today, { key: 'Escape' });
+  frame();
+  assert.ok(!classes.has('on'), 'a queued focus placement never reopens an Escape-dismissed tip');
+  today.focus();
+  emit('pointerdown', { closest: () => null });
+  frame();
+  assert.ok(!classes.has('on'), 'an outside press cancels the focus handoff before the control action');
+});
 
 for (const same of [true, false]) test(`after pin and Escape, focusing ${same ? 'the same' : 'another'} term shows its explanation`, async t => {
   const { emit, anchor, tip, classes, doc } = await termTipFixture(t);
