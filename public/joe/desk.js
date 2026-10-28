@@ -54,6 +54,13 @@ export function sharedSectionReason(cells) {
   return [...counts].sort((a, b) => b[1] - a[1]).find(([, count]) => count > 1)?.[0] ?? null;
 }
 
+// Shared hero and Account lines use the same not-exact words as the cards.
+export function sharedSectionPhrase(cell) {
+  return cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason)
+    ? `Numbers: ${statePhrase(cell, '').text}`
+    : `Numbers unavailable · ${esc(cellReason(cell.reason))}`;
+}
+
 // Rank the actual selector states, including retained values. A fresh panel
 // may still contain partial rows; those reasons join the same summary ranking.
 export function disclosureProblem(candidates) {
@@ -327,7 +334,7 @@ export function heroLeft(ctx) {
   const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: 'after fees', sharedReason: shared, label: 'Since start' });
   const sharedCell = shared ? Object.values(states).find(cell => cell?.reason && cellReason(cell.reason) === shared && cell.state !== 'fresh') : null;
   const boardText = [board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : '',
-    shared && (!board?.reason || cellReason(board.reason) !== shared) ? st(statePhrase(sharedCell, '').tone, `Numbers unavailable · ${esc(shared)}`, statePhrase(sharedCell, '').icon) : ''].filter(Boolean).join(' ');
+    shared && (!board?.reason || cellReason(board.reason) !== shared) ? st(statePhrase(sharedCell, '').tone, sharedSectionPhrase(sharedCell), statePhrase(sharedCell, '').icon) : ''].filter(Boolean).join(' ');
   return `<div class="hero-primary"><div class="performance-date">${now ? dayDDM(now, NY) : ''}</div><div class="performance">
       <div class="primary" data-cell="hero.day" data-state="${day.state}"><div class="hero-k">${icon('clock')}${term('today')}${cellIcon(dayCell, shared)}</div>
         <div class="display">${day.html}</div><div class="pct-slot">${percentHtml(todayPercent(states, data?.pnlSources?.day))}</div>
@@ -341,7 +348,7 @@ export function heroLeft(ctx) {
     <p class="board-caption">${boardText}</p></div>
     <div class="account-section" id="accountSection">${disclosureButton('account', 'Account', 'accountDetail', disclosureProblem([
       ['Open positions', states['today.openPnl']], ['Desks’ money', states['today.equity']], ['Paper account', states.paperAccount], ['Cash', states.paperCash], ['Broker', states.gateway],
-    ]))}<div class="disclosure-body" id="accountDetail"><p class="pstate account-state"${shared ? '' : ' aria-hidden="true"'}>${shared ? st(statePhrase(sharedCell, '').tone, `Numbers unavailable · ${esc(shared)}`, statePhrase(sharedCell, '').icon) : ''}</p><dl class="kpis">
+    ]))}<div class="disclosure-body" id="accountDetail"><p class="pstate account-state"${shared ? '' : ' aria-hidden="true"'}>${shared ? st(statePhrase(sharedCell, '').tone, sharedSectionPhrase(sharedCell), statePhrase(sharedCell, '').icon) : ''}</p><dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
       ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions })}
       ${kpi('paperacct', null, 'paperAccount', 'hero.account', { signed: false, caption: 'includes the kept holdings' })}

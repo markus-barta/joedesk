@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261028081016.0.0",
+  "version": "261028202622.0.0",
   "release_channel": "stable",
-  "release_sequence": 36,
+  "release_sequence": 37,
   "status": "candidate",
-  "note": "Honest dashes stay green, correct Today time, focus kept (JOED-103/104/105)"
+  "note": "Sweep fixes: honest last-good, header and settings states, history tooltips and keyboard access, results robustness (JOED-108)"
 }

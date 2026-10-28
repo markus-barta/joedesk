@@ -77,6 +77,102 @@ async function listen(t, dataDir, clock = () => NOW) {
   return `http://127.0.0.1:${server.address().port}/joe/`;
 }
 
+test('JOED-118: an uninitialized installation may keep using the starter across restart', async t => {
+  const root = temporary(t);
+  for (let boot = 0; boot < 2; boot++) {
+    const base = await listen(t, root);
+    const response = await fetch(base + 'fleet-config.json', { headers: { 'x-auth-request-user': 'fixture' } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-joe-fleet-source-kind'), 'example');
+    assert.deepEqual(await response.json(), json('public/joe/fleet-config.example.json'));
+    assert.equal(fs.existsSync(join(root, 'fleet-config.json')), false);
+  }
+});
+
+for (const [first, rev] of [['read', 'fc-000019'], ['propagate', 'fc-000019'],
+  ['restart', 'fc-000019'], ['restart', 'fc-000000']]) test(`JOED-118: missing accepted policy ${rev} fails closed on ${first}; restoration preserves receipt`, async t => {
+  const root = temporary(t), config = fleet(['SXR8', 'TSLA', 'DEMO']);
+  config.rev = rev;
+  config.desks.maxBusyDesks = 1;
+  config.desks.stage0.capEur = 1;
+  const file = join(root, 'fleet-config.json'), offline = join(root, 'fleet-config.offline.json');
+  fs.writeFileSync(file, JSON.stringify(config));
+  let base = await listen(t, root);
+  const receipt = fs.readFileSync(join(root, 'fleet-receipt.json'));
+  fs.renameSync(file, offline); // This test's own file, restored below.
+  if (first === 'restart') base = await listen(t, root, () => new Date(Date.parse(NOW) + 60000).toISOString());
+  const request = (route, init = {}) => fetch(base + route, { ...init,
+    headers: { 'x-auth-request-user': 'fixture', ...init.headers } });
+  const state = async () => (await request('state.json')).json();
+  const propagate = candidate => request('fleet-config/propagate', { method: 'POST', headers: {
+    'content-type': 'application/json', origin: new URL(base).origin, 'sec-fetch-site': 'same-origin',
+  }, body: JSON.stringify({ baseRev: candidate.rev, config: candidate }) });
+  const starter = json('public/joe/fleet-config.example.json'); starter.desks.maxBusyDesks = 2;
+  const changed = structuredClone(config); changed.desks.maxBusyDesks = 2;
+  const assertUnavailable = async () => {
+    const view = await state();
+    assert.deepEqual(view.feeds['fleet-config'].value, config);
+    assert.equal(view.feeds['fleet-config'].receivedAt, NOW);
+    assert.equal(view.feeds['fleet-config'].reason, 'refresh_failed');
+    assert.equal(view.panels['fleet-config'].state, 'broken');
+    assert.equal(view.panels['fleet-config'].retained, true);
+    assert.deepEqual(fs.readFileSync(join(root, 'fleet-receipt.json')), receipt);
+    assert.equal(fs.existsSync(file), false);
+  };
+  if (first === 'restart') await assertUnavailable(); // Before a settings read.
+  if (first === 'propagate') {
+    const response = await propagate(starter);
+    assert.equal(response.status, 503);
+    await response.body?.cancel();
+    await assertUnavailable();
+  }
+  for (const headers of [{}, { 'if-none-match': `"${config.rev}"` }]) {
+    const response = await request('fleet-config.json', { headers });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).reason, 'refresh_failed');
+    await assertUnavailable();
+  }
+  for (const candidate of [starter, changed]) {
+    const response = await propagate(candidate);
+    assert.equal(response.status, 503);
+    await response.body?.cancel();
+    await assertUnavailable();
+  }
+  const accepted = await request('inbox', { method: 'POST',
+    headers: { authorization: 'Bearer joed-58-fixture' }, body: JSON.stringify(ingress()) });
+  assert.equal(accepted.status, 200); await accepted.body?.cancel();
+  assert.equal((await state()).panels['desks.j.equity'].reason, 'source_not_authoritative',
+    'the extra accepted KEEP symbol must still constrain incoming money');
+  fs.renameSync(offline, file);
+  const restored = await request('fleet-config.json', { headers: { 'if-none-match': `"${config.rev}"` } });
+  assert.equal(restored.status, 304);
+  const recovered = (await state()).feeds['fleet-config'];
+  assert.deepEqual(recovered.value, config); assert.equal(recovered.reason, null);
+  assert.equal(recovered.receivedAt, NOW);
+  assert.deepEqual(fs.readFileSync(join(root, 'fleet-receipt.json')), receipt);
+  const propagated = await propagate(changed);
+  assert.equal(propagated.status, 200); await propagated.body?.cancel();
+  assert.equal(JSON.parse(fs.readFileSync(file)).desks.maxBusyDesks, 2);
+});
+
+test('JOED-118: the read model rejects starter replacement of accepted policy, including after restart', t => {
+  const root = temporary(t), config = fleet(['SXR8', 'TSLA', 'DEMO']);
+  config.desks.maxBusyDesks = 1;
+  const starter = json('public/joe/fleet-config.example.json');
+  let model = createReadModel({ dataDir: root, clock: () => NOW });
+  assert.equal(model.observeFleet(config).ok, true);
+  const receipt = fs.readFileSync(join(root, 'fleet-receipt.json'));
+  for (let boot = 0; boot < 2; boot++) {
+    if (boot) model = createReadModel({ dataDir: root, clock: () => NOW });
+    assert.equal(model.observeFleet(starter).ok, false);
+    assert.deepEqual(model.feeds()['fleet-config'].value, config);
+    assert.equal(model.feeds()['fleet-config'].reason, 'refresh_failed');
+    assert.deepEqual(fs.readFileSync(join(root, 'fleet-receipt.json')), receipt);
+    assert.equal(model.observeFleet(config).ok, true);
+    assert.equal(model.feeds()['fleet-config'].reason, null);
+  }
+});
+
 for (const [name, keep, expected] of cases) test(`JOED-58 migration: ${name}; one revision and valid audit; restart retains policy`, t => {
   const config = fleet(keep), original = structuredClone(config);
   const paths = legacy(temporary(t), config);

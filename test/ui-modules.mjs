@@ -35,6 +35,7 @@ const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await im
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
+const { HS, historyChart, downsample, historyPointDetails } = await import('../public/joe/history.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
 const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
@@ -1390,6 +1391,252 @@ test('history: empty, leading, internal and trailing gaps are dotted; solid is o
   const outage = hm.continuitySeries(hm.toColumns([pt(iso(0), { j: 5000 }), pt(iso(10), { j: 5001 })]), 'j', '1d', T0 + 3 * 864e5);
   assert.deepEqual(outage.observed, []);
   assert.ok(outage.gaps.length && outage.gaps.every(g => g.every(p => p.y === 5001)), 'a range wholly inside an outage holds the last value dotted');
+});
+
+test('history: long null gaps keep every marker without quadratic deduplication', () => {
+  const n = 9000;
+  const cols = hm.toColumns(Array.from({ length: n }, (_, i) => pt(iso(i / 2), { j: i === 0 ? 10 : i === n - 1 ? 20 : null })));
+  const originalSome = Array.prototype.some;
+  let visits = 0, result;
+  try {
+    Array.prototype.some = function (predicate, thisArg) {
+      return originalSome.call(this, (value, i, array) => { visits++; return predicate.call(thisArg, value, i, array); });
+    };
+    result = hm.continuitySeries(cols, 'j', 'all', cols.t.at(-1));
+  } finally { Array.prototype.some = originalSome; }
+  const gap = result.gaps[0];
+  assert.equal(gap.length, n);
+  assert.equal(new Set(gap.map(p => p.x)).size, n);
+  assert.deepEqual(gap.map(p => p.x), [...cols.t]);
+  assert.deepEqual([gap[0].y, gap.at(-1).y], [10, 20]);
+  assert.ok(gap[0].observedBoundary && gap.at(-1).observedBoundary);
+  assert.ok(gap.slice(1, -1).every(p => p.estimated && p.assumption === 'interpolated' && p.y > 10 && p.y < 20));
+  assert.ok(visits <= n * 4, `marker deduplication visited ${visits} elements for ${n} rows`);
+});
+
+// Exercise the real SVG renderer and pointer handler without launching a browser.
+function historyPointer(t, points, { width = 300, range = '1d', zoom = null, end = Date.parse(points.at(-1)?.t ?? iso(10)), panning = () => false } = {}) {
+  const saved = { document: globalThis.document, matchMedia: globalThis.matchMedia, state: { ...HS } };
+  t.after(() => { globalThis.document = saved.document; globalThis.matchMedia = saved.matchMedia; Object.assign(HS, saved.state); });
+  globalThis.document = htmlDocument('<div id="histChart"><div id="histStatus"></div><div class="ctip"></div></div><div id="histLive" aria-live="polite" aria-atomic="true"></div>');
+  globalThis.matchMedia = () => ({ matches: true });
+  Object.assign(HS, { desks: hm.DESK_IDS.slice(), range, zoom });
+  const el = document.querySelector('#histChart'), tip = el.querySelector('.ctip');
+  Object.assign(el, { clientWidth: width, clientHeight: 250, getBoundingClientRect: () => ({ left: 0 }) });
+  const matches = el.matches.bind(el);
+  let focusVisible = false;
+  el.matches = selector => selector === ':focus-visible' ? focusVisible : matches(selector);
+  Object.assign(tip, { offsetWidth: 80, offsetHeight: 40, classList: { add() { tip.on = true; }, remove() { tip.on = false; } } });
+  const columns = hm.toColumns(points);
+  const scale = historyChart({ now: new Date(end).toISOString(), states: { history: { value: { columns } } }, panning });
+  const live = document.querySelector('#histLive');
+  return { el, tip, live, columns, scale, focus(keyboard = true) { focusVisible = keyboard; document.activeElement = el; el.onfocus(); }, key(key, extra = {}) {
+    let prevented = false;
+    el.onkeydown({ key, target: el, preventDefault() { prevented = true; }, ...extra });
+    return prevented;
+  }, hover(x) {
+    el.onpointermove({ clientX: scale.X(x), target: { closest: () => null } });
+    return tip.innerHTML;
+  } };
+}
+
+test('history: dense tooltip hits original observations omitted by drawing thinning', t => {
+  const points = Array.from({ length: 9000 }, (_, i) => pt(iso(i / 2), Object.fromEntries(hm.DESK_IDS.map(id => [id, (10 + i / 1000).toFixed(3)]))));
+  const { columns, scale, tip, live, hover, focus, key } = historyPointer(t, points, { range: '1w' });
+  const original = hm.continuitySeries(columns, 'j', '1w', columns.t.at(-1)).observed.map(p => ({ x: p.x, v: p.y }));
+  const thinned = downsample(original, scale.x0, scale.x1, 300);
+  assert.ok(thinned.length < original.length);
+  const p = original.find(p => thinned.every(q => Math.abs(q.x - p.x) > hm.OBSERVATION_INTERVAL_MS));
+  assert.ok(p, 'fixture has an observation over five minutes from any drawing point');
+  const html = hover(p.x);
+  assert.equal(tip.on, true);
+  assert.doesNotMatch(html, /no value here|estimate/);
+  for (const label of ['J', 'Joe', 'Joel']) assert.ok(html.includes(`${label} ${format.eur(p.v)}`), `${label} shows the original observed value`);
+  focus(); key('Home');
+  // The window starts with one baseline sample before the original observations.
+  for (let i = 0; i <= original.indexOf(p); i++) key('ArrowRight');
+  assert.equal(tip.innerHTML, html, 'keyboard reaches the same original observation omitted by SVG thinning');
+  assert.match(live.textContent, /observed/);
+});
+
+test('history: gap interiors interpolate and mark estimates even near observed endpoints', t => {
+  const points = [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(10), { j: 20, joe: 20, joel: 20 })];
+  const { hover } = historyPointer(t, points, { width: 1000, zoom: [T0, T0 + 10 * 60000] });
+  for (const minute of [1, 5, 9]) {
+    const html = hover(T0 + minute * 60000);
+    assert.equal((html.match(/estimate/g) ?? []).length, 3);
+    for (const label of ['J', 'Joe', 'Joel']) assert.ok(html.includes(`${label} ${format.eur(10 + minute)}`));
+  }
+  for (const [minute, value] of [[0, 10], [10, 20]]) {
+    const html = hover(T0 + minute * 60000);
+    assert.doesNotMatch(html, /estimate/);
+    assert.ok(html.includes(`J ${format.eur(value)}`), 'an actual endpoint remains observed');
+  }
+});
+
+test('history: entirely estimated windows expose carry and baseline tooltips', t => {
+  const points = [pt(iso(0), { j: 10, joe: 20 }), pt(iso(1), { j: 11, joe: 21 })];
+  const { el, tip, hover, scale } = historyPointer(t, points, { end: T0 + 3 * 864e5 });
+  assert.equal(el.querySelectorAll('[data-estimate]').length, 3);
+  const html = hover((scale.x0 + scale.x1) / 2);
+  assert.equal(tip.on, true);
+  assert.equal((html.match(/estimate/g) ?? []).length, 3);
+  for (const [label, value] of [['J', 11], ['Joe', 21], ['Joel', 5000]]) assert.ok(html.includes(`${label} ${format.eur(value)}`));
+  el.onpointerleave();
+  assert.equal(tip.on, false);
+});
+
+test('history: an unobserved desk estimate stays visible beside observed siblings', t => {
+  const { hover, tip } = historyPointer(t, [pt(iso(0), { j: 10, joe: 20 }), pt(iso(1), { j: 11, joe: 21 })], { zoom: [T0, T0 + 60000] });
+  const html = hover(T0 + 60000);
+  assert.equal(tip.on, true);
+  assert.ok(html.includes(`J ${format.eur(11)}`));
+  assert.ok(html.includes(`Joe ${format.eur(21)}`));
+  assert.ok(html.includes(`Joel ${format.eur(5000)} estimated`));
+  assert.equal((html.match(/estimate/g) ?? []).length, 1);
+});
+
+test('history: one focus stop inspects original points with arrows, ends and larger page steps', t => {
+  const points = Array.from({ length: 31 }, (_, i) => pt(iso(i), { j: 10 + i, joe: 20 + i, joel: 30 + i }));
+  const h = historyPointer(t, points, { zoom: [T0, T0 + 30 * 60000] });
+  assert.equal(h.el.getAttribute('tabindex'), '0');
+  assert.equal(h.el.getAttribute('role'), 'application', 'arrow inspection is scoped to the focused chart for screen readers');
+  assert.equal(h.el.getAttribute('aria-describedby'), 'histStatus histInspectHelp');
+  const shell = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  assert.match(shell.querySelector('#histInspectHelp').textContent, /Left and Right.*Home and End.*Page Up and Page Down.*Escape.*Tab/);
+  assert.equal(shell.querySelector('#histLive').getAttribute('aria-live'), 'polite');
+  assert.equal(shell.querySelector('#histLive').getAttribute('aria-atomic'), 'true');
+  assert.equal(shell.querySelector('#histInspectHelp').getAttribute('class'), 'vh');
+  assert.equal(shell.querySelector('#histLive').getAttribute('class'), 'vh');
+  assert.equal(shell.querySelector('#histTip').getAttribute('aria-hidden'), 'true', 'the visible duplicate is not announced twice');
+  assert.match(h.el.getAttribute('aria-label'), /Each desk’s money/);
+  assert.equal(h.el.querySelectorAll('[tabindex]').length, 0);
+  assert.equal(h.el.querySelector('svg').getAttribute('aria-hidden'), 'true');
+  h.focus();
+  const value = n => assert.match(h.live.textContent, new RegExp(`J ${format.eur(10 + n)} observed`));
+  value(0);
+  assert.equal(h.live.textContent, h.tip.textContent.replace(/(?<=Vienna time|observed|estimated)(?=J)/g, '\n'), 'tooltip and live region share words');
+  assert.equal(h.key('ArrowRight'), true); value(1);
+  h.key('PageDown'); value(11);
+  h.key('PageUp'); value(1);
+  h.key('ArrowLeft'); value(0);
+  h.key('ArrowLeft'); value(0);
+  h.key('End'); value(30);
+  h.key('ArrowRight'); value(30);
+  h.key('Home'); value(0);
+  assert.equal(document.activeElement, h.el);
+  assert.equal(h.key('Tab'), false, 'native Tab leaves the chart');
+  assert.equal(h.key('ArrowRight', { ctrlKey: true }), false);
+  assert.equal(h.key('End', { target: h.el.querySelector('#histStatus') }), false, 'descendant controls keep their keys');
+});
+
+for (const mode of ['mouse', 'touch', 'shift-drag']) test(`history: ${mode} focus leaves pointer inspection alone; arrows can start keyboard inspection`, t => {
+  let panning = false;
+  const h = historyPointer(t, [pt(iso(0), { j: 10 }), pt(iso(1), { j: 11 }), pt(iso(2), { j: 12 })],
+    { zoom: [T0, T0 + 2 * 60000], panning: () => panning });
+  h.hover(T0 + 2 * 60000);
+  if (mode === 'touch') h.el.onpointerleave();
+  panning = mode === 'shift-drag';
+  const pointerState = () => ({ html: h.tip.innerHTML, on: h.tip.on, left: h.tip.style.left, top: h.tip.style.top,
+    crosshair: h.el.querySelector('.xh').getAttribute('x1'), visible: h.el.querySelector('.xh').getAttribute('visibility'), live: h.live.textContent });
+  const before = pointerState();
+  h.focus(false);
+  assert.deepEqual(pointerState(), before, 'pointer focus neither moves the tip nor writes an announcement');
+  if (panning) {
+    h.hover(T0);
+    assert.deepEqual(pointerState(), before, 'shift-drag does not activate or move the inspection cursor');
+  }
+  historyChart({ now: iso(2), states: { history: { value: { columns: h.columns } } }, panning: () => panning });
+  assert.equal(h.tip.on, false, 'a focused redraw does not pin a keyboard tip after pointer focus');
+  assert.equal(h.live.textContent, '', 'pointer redraws stay silent');
+  panning = false;
+  h.key('ArrowRight');
+  assert.equal(h.tip.on, true);
+  assert.match(h.live.textContent, /J €\s11,00 observed/, 'arrow keys start inspection after a click or tap');
+});
+
+test('history: synthetic edges that repeat the same minute and snapped values are skipped', t => {
+  const points = [0.1, 0.8, 1.1, 1.8, 2.1].map((minute, i) => pt(iso(minute), { j: 10 + i, joe: 20 + i, joel: 30 + i }));
+  const h = historyPointer(t, points, { zoom: [T0 + 0.5 * 60000, T0 + 1.9 * 60000] });
+  h.focus();
+  assert.match(h.live.textContent, /J €\s11,00 observed/);
+  const first = h.live.textContent, html = h.tip.innerHTML, x = h.el.querySelector('.xh').getAttribute('x1');
+  h.key('ArrowRight');
+  assert.notEqual(h.live.textContent, first, 'first Right announces a different point');
+  assert.notEqual(h.tip.innerHTML, html);
+  assert.notEqual(h.el.querySelector('.xh').getAttribute('x1'), x, 'crosshair moves with the announcement');
+  assert.match(h.live.textContent, /J €\s12,00 observed/);
+  h.key('End');
+  assert.match(h.live.textContent, /J €\s13,00 observed/);
+  h.key('ArrowLeft');
+  assert.match(h.live.textContent, /J €\s12,00 observed/, 'last Left also skips the redundant edge; original same-minute observations stay reachable');
+});
+
+test('history: estimated edges with different values remain inspection points', t => {
+  const h = historyPointer(t, [pt(iso(0), { j: 10 }), pt(iso(10), { j: 20 })], { zoom: [T0 + 6000, T0 + 10 * 60000 - 6000] });
+  h.focus();
+  assert.match(h.live.textContent, /J €\s10,10 estimated/);
+  h.key('ArrowRight');
+  assert.match(h.live.textContent, /J €\s15,00 estimated/);
+  h.key('End');
+  assert.match(h.live.textContent, /J €\s19,90 estimated/);
+});
+
+test('history: shared point wording names observed, estimated and absent values without inventing money', () => {
+  const details = historyPointDetails([{ v: 10 }, { v: 15, estimated: true }, null], T0, ['j', 'joe', 'joel']);
+  const rendered = htmlDocument(`<div>${details.html}</div>`).querySelector('div');
+  assert.equal(details.text, `${format.dayDDM(new Date(T0).toISOString())}, ${format.timeHM(new Date(T0).toISOString())} Vienna time\nJ ${format.eur(10)} observed\nJoe ${format.eur(15)} estimated\nJoel no value here`);
+  assert.equal(rendered.textContent, details.text.replaceAll('\n', ''));
+  assert.equal((details.text.match(/€/g) ?? []).length, 2, 'missing stays without an amount');
+});
+
+test('history: keyboard crosses a gap through the same estimated point as the pointer', t => {
+  const h = historyPointer(t, [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(10), { j: 20, joe: 20, joel: 20 })], { zoom: [T0, T0 + 10 * 60000] });
+  h.focus();
+  assert.match(h.live.textContent, /observed/);
+  h.key('ArrowRight');
+  assert.match(h.live.textContent, /J €\s15,00 estimated/);
+  assert.equal((h.live.textContent.match(/estimated/g) ?? []).length, 3);
+  const keyboard = h.tip.innerHTML;
+  assert.equal(h.hover(T0 + 5 * 60000), keyboard);
+  h.key('End');
+  assert.match(h.live.textContent, /J €\s20,00 observed/);
+});
+
+test('history: Escape and blur dismiss inspection; focused redraw retains its point and focus', t => {
+  const h = historyPointer(t, [pt(iso(0), { j: 10 }), pt(iso(1), { j: 11 })], { zoom: [T0, T0 + 60000] });
+  h.focus(); h.key('End');
+  const announcement = h.live.textContent;
+  h.el.onpointerleave();
+  assert.equal(h.tip.on, true, 'keyboard tip survives pointer departure');
+  const ctx = { now: iso(1), states: { history: { value: { columns: h.columns } } } };
+  historyChart(ctx);
+  assert.equal(document.activeElement, h.el);
+  assert.equal(h.tip.on, true);
+  assert.equal(h.live.textContent, announcement);
+  assert.equal(h.key('Escape'), true);
+  assert.equal(h.tip.on, false);
+  assert.equal(h.live.textContent, '');
+  assert.equal(document.activeElement, h.el, 'Escape leaves focus available for Tab');
+  historyChart(ctx);
+  assert.equal(h.tip.on, false, 'redraw does not reopen dismissed inspection');
+  h.key('Home');
+  assert.equal(h.tip.on, true, 'navigation can resume after Escape');
+  document.activeElement = null; h.el.onblur();
+  assert.equal(h.tip.on, false);
+  assert.equal(h.live.textContent, '');
+  HS.desks = [];
+  historyChart(ctx);
+  assert.equal(h.el.getAttribute('tabindex'), '-1');
+  assert.equal(h.el.onkeydown, null);
+  HS.desks = ['j'];
+  historyChart(ctx); h.focus();
+  assert.match(h.live.textContent, /J €/);
+  assert.doesNotMatch(h.live.textContent, /Joe|Joel/);
+  historyChart({ ...ctx, now: null });
+  assert.equal(h.el.getAttribute('tabindex'), '-1');
+  assert.equal(h.el.onkeydown, null);
+  assert.equal(h.live.textContent, '');
 });
 
 test('history: basis breaks exclude older records and compare stays on observed, compatible points', () => {

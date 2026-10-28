@@ -1532,3 +1532,16 @@ Prior deployed sequence 35 is `261027124551.0.0`, main
 Reseal only this candidate's runtime closure. Contracts revision 10 and the
 approved presentation bundle remain unchanged. This local preparation grants
 no publication or deployment approval.
+
+## Release 37 candidate (JOED-122)
+
+Reserve `261028202622.0.0` at `2026-10-28T20:26:22Z` as `inspr-calver-3`, stable sequence 37,
+for the JOED-108 sweep fixes (JOED-107 and JOED-114–121): honest last-good
+observations, clear header and settings states, history tooltips and keyboard
+access, and robust Results handling. Prior deployed sequence 36 is
+`261028081016.0.0`, main `b186308269ab9c05247c6b0f0e4b35fac4bc0ce7`, live since
+`2026-10-28T20:23:05Z` (JOED-106). About orders 37, 36 through 26, then legacy;
+aborted publications remain excluded. Reseal only this candidate's runtime
+closure. Contracts revision 10, the approved presentation bundle, legacy anchor
+and historical artifacts remain unchanged. This local preparation grants no
+publication or deployment approval.

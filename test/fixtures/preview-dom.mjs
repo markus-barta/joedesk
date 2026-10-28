@@ -25,11 +25,35 @@ export async function builders(file, names) {
 const decode = text => text.replace(/&(?:amp|lt|gt|quot|#39|nbsp);/g,
   value => ({ '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&nbsp;': '\u00a0' })[value]);
 const voids = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+function classList(element) {
+  const read = () => new Set((element.getAttribute('class') ?? '').match(/[^\t\n\f\r ]+/g) ?? []);
+  const write = tokens => {
+    if (tokens.size || element.getAttribute('class') !== null) element.setAttribute('class', [...tokens].join(' '));
+  };
+  const validate = value => {
+    const token = String(value);
+    if (!token) throw new DOMException('Empty class token', 'SyntaxError');
+    if (/[\t\n\f\r ]/.test(token)) throw new DOMException('Whitespace in class token', 'InvalidCharacterError');
+    return token;
+  };
+  return {
+    add(...values) { const tokens = values.map(validate), current = read(); tokens.forEach(t => current.add(t)); write(current); },
+    remove(...values) { const tokens = values.map(validate), current = read(); tokens.forEach(t => current.delete(t)); write(current); },
+    contains(value) { return read().has(validate(value)); },
+    toggle(value, force) {
+      const token = validate(value), current = read(), present = current.has(token);
+      const next = force === undefined ? !present : Boolean(force);
+      if (next !== present) { if (next) current.add(token); else current.delete(token); write(current); }
+      return next;
+    },
+  };
+}
 class Element {
   constructor(tagName = 'document', attributes = {}, parentElement = null) {
     const dataset = Object.fromEntries(Object.entries(attributes).filter(([key]) => key.startsWith('data-'))
       .map(([key, value]) => [key.slice(5).replace(/-([a-z])/g, (_match, letter) => letter.toUpperCase()), value]));
     Object.assign(this, { tagName, attributes, dataset, parentElement, children: [], style: {}, clientWidth: 0, clientHeight: 0 });
+    this.classList = classList(this);
   }
   get id() { return this.getAttribute('id'); }
   get textContent() { return this.children.map(n => typeof n === 'string' ? decode(n) : n.textContent).join(''); }

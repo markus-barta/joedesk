@@ -20,10 +20,15 @@ export function axis(lo, hi, n = 4, base = 0, zero = false) {
 export const eurAxis = (t, step) => `${t < 0 ? MINUS : ''}€${NB}${digits(t, step < 1 ? 2 : 0)}`;
 
 const drawn = new Set();
+const cursors = new WeakMap();
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // series: [{ pts:[{x,v}], color, w, live, area, endDot, dotted }]; gaps are
-// drawn by the caller as dotted series. Returns the scale for hit-testing.
+// drawn by the caller as dotted series. Optional hitTest(x) supplies one hit
+// per non-dotted, hittable series independently of the drawing points.
+// inspect supplies original cursor timestamps, an instruction id and a live
+// region; its tipFmt returns { html, text } with shared visible/spoken words.
+// Returns the scale for hit-testing.
 export function drawChart(el, o) {
   const W = el.clientWidth, H = el.clientHeight;
   if (!W || !H) return null;
@@ -31,8 +36,22 @@ export function drawChart(el, o) {
   const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
   const values = (o.yValues ?? o.series.flatMap(s => s.pts.map(p => p.v)).concat(o.include || [])).filter(Number.isFinite);
   const tip = el.querySelector('.ctip');
+  const live = o.inspect?.live;
+  const cursor = cursors.get(el) ?? { x: null, active: false };
+  cursors.set(el, cursor);
+  if (o.inspect) {
+    el.onkeydown = null; el.onfocus = null; el.onblur = null;
+    if (tip) { tip.classList.remove('on'); tip.style.left = '0px'; tip.style.top = '0px'; }
+    el.setAttribute('tabindex', '-1');
+    el.setAttribute('role', 'application');
+    el.setAttribute('aria-roledescription', 'interactive chart');
+    el.setAttribute('aria-label', o.label);
+    el.setAttribute('aria-describedby', o.inspect.description);
+  }
   el.querySelector(':scope > svg')?.remove();
   if (!values.length || o.empty) {
+    cursor.active = false;
+    if (live) live.textContent = '';
     el.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.emptyText || 'No data')}"><text x="${pad.l + pw / 2}" y="${pad.t + ph / 2}" text-anchor="middle">${esc(o.emptyText || 'No data')}</text></svg>`);
     el.onpointermove = null; el.onpointerleave = null;
     return null;
@@ -82,33 +101,64 @@ export function drawChart(el, o) {
   g += `<line class="xh" x1="0" x2="0" y1="${pad.t}" y2="${pad.t + ph}" stroke="var(--ink-3)" stroke-dasharray="2 3" visibility="hidden"/>${hits.map(i => `<circle class="xd" r="4" fill="var(--surface)" stroke="${o.series[i].color}" stroke-width="2" visibility="hidden"/>`).join('')}`;
   // A result chart is zero-based; given a base it also keeps the money chart's minimum span.
   const attrs = o.zero ? `data-zero="1" data-ylo="${ax.lo}" data-yhi="${ax.hi}"${o.base ? ` data-base="${o.base}"` : ''}` : `data-ylo="${ax.lo}" data-yhi="${ax.hi}" data-base="${o.base}"`;
-  el.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 ${W} ${H}" ${attrs} role="img" aria-label="${esc(o.label)}">${g}</svg>`);
+  el.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 ${W} ${H}" ${attrs} role="img" aria-label="${esc(o.label)}"${o.inspect ? ' aria-hidden="true"' : ''}>${g}</svg>`);
   if (first) for (const p of el.querySelectorAll('[data-draw]')) { const len = Math.ceil(p.getTotalLength()); p.style.setProperty('--len', len); p.setAttribute('stroke-dasharray', `${len} ${len}`); }
   const scale = { X, Y, pad, pw, ph, W, H, x0, x1, ax };
   if (!tip || !o.tipFmt) { el.onpointermove = null; el.onpointerleave = null; return scale; }
   const xh = el.querySelector('.xh'), xds = [...el.querySelectorAll('.xd')];
-  el.onpointermove = e => {
-    if (o.isPanning?.()) return;
-    if (e.target.closest?.('.hist-status, .mini-label')) { el.onpointerleave(); return; }
-    const r = el.getBoundingClientRect(), mx = e.clientX - r.left, xv = x0 + (mx - pad.l) / pw * (x1 - x0);
-    if (mx < pad.l - 4 || mx > pad.l + pw + 4) { el.onpointerleave(); return; }
-    const near = hits.map(i => {
+  const show = (xv, announce = false) => {
+    const near = o.hitTest ? o.hitTest(xv) : hits.map(i => {
       let best = null;
       for (const p of o.series[i].pts) if (p.v !== null && p.v !== undefined && (!best || Math.abs(p.x - xv) < Math.abs(best.x - xv))) best = p;
       return best;
     });
     const anchor = near.find(Boolean);
-    if (!anchor) return;
-    const cx = X(anchor.x);
+    if (!anchor && !announce) return;
+    const cx = X(anchor?.x ?? xv);
     xh.setAttribute('x1', cx); xh.setAttribute('x2', cx); xh.setAttribute('visibility', 'visible');
-    xds.forEach((d, i) => { if (!near[i]) { d.setAttribute('visibility', 'hidden'); return; } d.setAttribute('cx', X(near[i].x)); d.setAttribute('cy', Y(near[i].v)); d.setAttribute('visibility', 'visible'); });
-    tip.innerHTML = o.tipFmt(near, xv);
+    xds.forEach((d, i) => { if (!near[i] || near[i].estimated) { d.setAttribute('visibility', 'hidden'); return; } d.setAttribute('cx', X(near[i].x)); d.setAttribute('cy', Y(near[i].v)); d.setAttribute('visibility', 'visible'); });
+    const content = o.tipFmt(near, xv);
+    tip.innerHTML = typeof content === 'string' ? content : content.html;
+    if (announce && live && live.textContent !== content.text) live.textContent = content.text;
     tip.classList.add('on');
     const tw = tip.offsetWidth, th = tip.offsetHeight;
     tip.style.left = `${Math.max(0, Math.min(W - tw, cx + 12 > W - tw ? cx - tw - 12 : cx + 12))}px`;
-    tip.style.top = `${Math.max(0, Math.min(H - th, Y(anchor.v) - th - 10))}px`;
+    tip.style.top = `${Math.max(0, Math.min(H - th, (anchor ? Y(anchor.v) : pad.t + ph / 2) - th - 10))}px`;
   };
   // A hidden tip goes back to the corner so it can never widen the page.
-  el.onpointerleave = () => { tip.classList.remove('on'); tip.style.left = '0px'; tip.style.top = '0px'; xh.setAttribute('visibility', 'hidden'); xds.forEach(d => d.setAttribute('visibility', 'hidden')); };
+  const hide = () => { tip.classList.remove('on'); tip.style.left = '0px'; tip.style.top = '0px'; xh.setAttribute('visibility', 'hidden'); xds.forEach(d => d.setAttribute('visibility', 'hidden')); };
+  el.onpointermove = e => {
+    if (o.isPanning?.()) return;
+    if (e.target.closest?.('.hist-status, .mini-label')) { el.onpointerleave(); return; }
+    const r = el.getBoundingClientRect(), mx = e.clientX - r.left, xv = x0 + (mx - pad.l) / pw * (x1 - x0);
+    if (mx < pad.l - 4 || mx > pad.l + pw + 4) { el.onpointerleave(); return; }
+    cursor.active = false;
+    if (live) live.textContent = '';
+    show(xv);
+  };
+  el.onpointerleave = () => { if (!cursor.active) hide(); };
+  if (o.inspect) {
+    const points = [...new Set(o.inspect.points.filter(x => x >= x0 && x <= x1))].sort((a, b) => a - b);
+    if (!points.length) return scale;
+    el.setAttribute('tabindex', '0');
+    let index = points.findIndex(x => cursor.x !== null && x >= cursor.x);
+    if (index < 0) index = cursor.x === null ? 0 : points.length - 1;
+    const inspect = () => { cursor.active = true; cursor.x = points[index]; show(cursor.x, true); };
+    const dismiss = () => { cursor.active = false; hide(); if (live) live.textContent = ''; };
+    el.onfocus = () => { if (el.matches(':focus-visible')) inspect(); };
+    el.onblur = dismiss;
+    el.onkeydown = e => {
+      if (e.target !== el || e.altKey || e.ctrlKey || e.metaKey) return;
+      const step = Math.max(10, Math.ceil(points.length / 10));
+      const next = { ArrowLeft: index - 1, ArrowRight: index + 1, Home: 0, End: points.length - 1, PageUp: index - step, PageDown: index + step };
+      if (e.key === 'Escape') { e.preventDefault(); dismiss(); return; }
+      if (!(e.key in next)) return;
+      e.preventDefault();
+      index = Math.max(0, Math.min(points.length - 1, next[e.key]));
+      inspect();
+    };
+    if (cursor.active && document.activeElement === el) inspect();
+    else if (live) live.textContent = '';
+  }
   return scale;
 }
