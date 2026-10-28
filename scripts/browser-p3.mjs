@@ -345,8 +345,8 @@ async function historyChecks(page, viewport, theme) {
   const parts = await page.evaluate(`({ compare: document.getElementById('histCompare').innerText, j: document.getElementById('jAcct').innerText, capt: Boolean(document.querySelector('#jAcct svg.capt')), events: document.querySelectorAll('#events li').length, legend: document.getElementById('histLegend').innerText })`);
   check('AC-21', `${tag}: compare, J's bookkeeping, captured results and desk changes`, /^From .* J [+−]?\d/.test(parts.compare) && /Counted from/.test(parts.j) && parts.capt && parts.events >= 1 && /Estimated gap/.test(parts.legend), parts);
   await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
-  // The last range button precedes the chart; Reset zoom is disabled here.
-  await page.evaluate(`document.querySelector('#histRange [data-range="all"]').focus()`);
+  // The legend's last term is the final tab stop before the chart.
+  await page.evaluate(`Array.from(document.querySelectorAll('#histLegend [data-term]')).at(-1).focus()`);
   await key(page, 'Tab');
   const firstAnnouncement = await page.evaluate(`document.getElementById('histLive').textContent`);
   await key(page, 'ArrowRight');
@@ -354,7 +354,7 @@ async function historyChecks(page, viewport, theme) {
   const inspection = await page.evaluate(`(() => {
     const chart = document.getElementById('histChart'), tip = document.getElementById('histTip'), live = document.getElementById('histLive');
     return { focused: document.activeElement === chart, stops: chart.querySelectorAll('[tabindex="0"]').length,
-      name: chart.getAttribute('aria-label'), description: document.getElementById(chart.getAttribute('aria-describedby'))?.textContent,
+      name: chart.getAttribute('aria-label'), description: chart.getAttribute('aria-describedby').split(/\\s+/).map(id => document.getElementById(id)?.textContent).join(' '),
       polite: live.getAttribute('aria-live'), atomic: live.getAttribute('aria-atomic'), on: tip.classList.contains('on'),
       visible: tip.innerText, announced: live.textContent };
   })()`);

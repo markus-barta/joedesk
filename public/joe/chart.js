@@ -145,7 +145,7 @@ export function drawChart(el, o) {
     if (index < 0) index = cursor.x === null ? 0 : points.length - 1;
     const inspect = () => { cursor.active = true; cursor.x = points[index]; show(cursor.x, true); };
     const dismiss = () => { cursor.active = false; hide(); if (live) live.textContent = ''; };
-    el.onfocus = inspect;
+    el.onfocus = () => { if (el.matches(':focus-visible')) inspect(); };
     el.onblur = dismiss;
     el.onkeydown = e => {
       if (e.target !== el || e.altKey || e.ctrlKey || e.metaKey) return;
