@@ -760,6 +760,60 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
     return copy;
   }
 
+  test('JOED-120: advancing JOED-95 estimate transitions keep their method and original anchor during outage', t => {
+    const h = harness(t), estimate = ingress(fixture), recovery = ingress(fixture);
+    estimate.pnlSources.day = read('failures/b-session-open-estimate.json').payload.pnlSources.day;
+    let seq = fixture.seq;
+    assert.equal(h.model.accept(ingress(fixture)).status, 200);
+    // Same sequence as the browser fixture: exact -> estimate -> exact ->
+    // estimate -> stale -> null outage. A method change advances generation.
+    for (const [candidate, seconds, method] of [[estimate, 1, 'session-open-estimate'],
+      [recovery, 2, 'sod-virtual-equity'], [estimate, 3, 'session-open-estimate']]) {
+      candidate.seq = ++seq; candidate.generatedAt = at(seconds); h.time(seconds);
+      assert.equal(h.model.accept(candidate).status, 200);
+      for (const name of ['today.dayPnl', ...DESKS.map(id => `desks.${id}.dayPnl`)]) {
+        assert.equal(JSON.parse(h.stored('data')).cells[name].valueSource.method, method, name);
+      }
+    }
+    h.time(70);
+    for (const desk of DESKS) assert.equal(h.cells(h.model)[`desks.${desk}.dayPnl`].state, 'stale');
+    const outage = structuredClone(estimate); outage.seq = ++seq;
+    outage.generatedAt = outage.safety.gateway.checkedAt = at(80);
+    for (const bag of [outage.totals, ...outage.desks.map(d => d.money)]) {
+      bag.dayPnl = null; (bag.reasons ??= {}).dayPnl = 'source_unavailable';
+    }
+    for (const sources of [outage.pnlSources, ...outage.desks.map(d => d.pnlSources)].filter(Boolean)) {
+      Object.assign(sources.day, { status: 'unavailable', observedAt: null, reason: 'source_unavailable' });
+    }
+    h.time(80); assert.equal(h.model.accept(outage).status, 200); h.time(85);
+    for (const model of [h.model, h.restart()]) {
+      const states = h.cells(model), view = { feeds: model.feeds(), states, now: at(85) };
+      assert.equal(states['today.dayPnl'].value, null, 'derived household Today stays withheld');
+      for (const name of DESKS.map(id => `desks.${id}.dayPnl`)) {
+        const cell = states[name];
+        assert.equal(cell.state, 'broken', name);
+        assert.equal(cell.retained, true, name);
+        assert.equal(cell.valueReceivedAt, at(3), name);
+        assert.equal(cell.ageSeconds, 82, name);
+        assert.equal(cell.valueSource.method, 'session-open-estimate', name);
+        assert.equal(cell.valueObservedAt, estimate.pnlSources.day.observedAt, name);
+      }
+      for (const desk of DESKS) for (const render of [v => deskCard(v, desk, 50, true), v => compactDesk(v, desk)]) {
+        const marks = htmlDocument(render(view)).querySelectorAll('.estimate-mark');
+        assert.equal(marks.length, 1, `${desk}: kept desktop/phone Today has its estimate mark`);
+        assert.equal(marks[0].textContent, 'Estimated');
+        assert.equal(marks[0].getAttribute('role'), 'img');
+        assert.match(marks[0].getAttribute('aria-label'), /^Estimated from the session open at /);
+      }
+    }
+    h.time(3603);
+    for (const desk of DESKS) {
+      const states = h.cells(h.model), view = { feeds: h.model.feeds(), states, now: at(3603) };
+      assert.equal(states[`desks.${desk}.dayPnl`].value, null, 'outage receipt cannot extend retention');
+      assert.equal(htmlDocument(compactDesk(view, desk)).querySelectorAll('.estimate-mark').length, 0);
+    }
+  });
+
   test('JOED-120 F1: frozen re-send then advancing outage never resurrects expired last-good, including restart', t => {
     const h = harness(t), candidate = ingress(fixture);
     assert.equal(h.model.accept(candidate).status, 200);

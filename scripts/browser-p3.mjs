@@ -770,7 +770,9 @@ try {
       if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
       const selectors = [...DESK_SHIFT, '.dnums .k', '.dnums .v', '.compact-label', '.compact-figure .bn'];
       const before = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
-      estimate.seq = ++seq; b.setNow(valid.data.receivedAt);
+      // A changed method is a new observation. Frozen generations deliberately
+      // preserve the earlier last-good source through a later outage (JOED-120).
+      estimate.seq = ++seq; estimate.generatedAt = at(valid.data.receivedAt, 1); b.setNow(estimate.generatedAt);
       check('fixtures', 'JOED-95 estimate accepted', (await b.push(estimate)).status === 200);
       b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
       const after = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
@@ -789,13 +791,13 @@ try {
       };
       await checkMarks('fresh');
       check('no-shift', `${tag}: exact → estimate has exactly 0 px layout shift`, JSON.stringify(before) === JSON.stringify(after), shifted(before, after));
-      recovery.seq = ++seq; b.setNow(valid.data.receivedAt); await b.push(recovery);
+      recovery.seq = ++seq; recovery.generatedAt = at(valid.data.receivedAt, 2); b.setNow(recovery.generatedAt); await b.push(recovery);
       b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
       check('no-shift', `${tag}: estimate → exact has exactly 0 px layout shift and removes all estimate marks`,
         JSON.stringify(before) === JSON.stringify(await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`)) &&
         await page.evaluate(`document.querySelectorAll('.estimate-mark').length === 0`));
       if (viewport.mobile) {
-        estimate.seq = ++seq; b.setNow(valid.data.receivedAt); await b.push(estimate);
+        estimate.seq = ++seq; estimate.generatedAt = at(valid.data.receivedAt, 3); b.setNow(estimate.generatedAt); await b.push(estimate);
         b.setNow(at(valid.data.receivedAt, 70)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
         check('fixtures', `${tag}: stale estimate really has a stale Today icon`,
           await page.evaluate(`document.querySelector('#desk-j .dnums > div').dataset.state === 'stale' && document.querySelector('#desk-j .compact-state[aria-label^="Stale"]') !== null`));
