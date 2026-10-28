@@ -186,7 +186,8 @@ export function indexResults(value) {
     const net = decimalUnits(t.netEur.amount);
     trades.desk[k] = desk; trades.date[k] = date; trades.closedAt[k] = closed[order[k]]; trades.openedAt[k] = Date.parse(t.openedAt);
     trades.net[k] = net; trades.gross[k] = decimalUnits(t.grossEur.amount); trades.fees[k] = decimalUnits(t.feesEur.amount);
-    const record = [t.id, t.symbol, t.company ?? '', t.side, t.quantity, t.entryPrice.amount, t.entryPrice.currency, t.exitPrice.amount, t.exitPrice.currency].join(FIELD);
+    // Company text may contain FIELD; JSON escapes it before offsets are measured.
+    const record = [t.id, t.symbol, JSON.stringify(t.company ?? ''), t.side, t.quantity, t.entryPrice.amount, t.entryPrice.currency, t.exitPrice.amount, t.exitPrice.currency].join(FIELD);
     text.push(record); trades.offsets[k] = length; length += record.length;
     symbols.set(t.symbol, (symbols.get(t.symbol) ?? 0) | (1 << desk));
     agg.count[cell]++; agg.net[cell] += net; agg.gross[cell] += trades.gross[k]; agg.fees[cell] += trades.fees[k];
@@ -495,7 +496,7 @@ export function rollup(ix, per, desks, ctx) {
 export function trade(ix, k) {
   const t = ix.trades;
   const [id, symbol, company, side, quantity, entry, entryCur, exit, exitCur] = t.blob.slice(t.offsets[k], t.offsets[k + 1]).split(FIELD);
-  return { k, id, desk: DESK_IDS[t.desk[k]], symbol, company: company || null, side, quantity,
+  return { k, id, desk: DESK_IDS[t.desk[k]], symbol, company: JSON.parse(company) || null, side, quantity,
     entry: { amount: entry, currency: entryCur }, exit: { amount: exit, currency: exitCur },
     date: ix.dates[t.date[k]], closedAt: t.closedAt[k], openedAt: t.openedAt[k],
     net: cents(t.net[k]), gross: cents(t.gross[k]), fees: cents(t.fees[k]), units: { net: t.net[k], gross: t.gross[k], fees: t.fees[k] } };
