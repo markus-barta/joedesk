@@ -40,7 +40,7 @@ if (nodeModule.registerHooks) {
 export async function resolve(specifier, context, next) { return next(mapped(specifier, context.parentURL), context); }`)}`, import.meta.url);
 }
 const hm = await import('../public/joe/history-model.js');
-const { boardStates } = await import('../public/joe/board-state.js');
+const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
 const { cellReason, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
 const fmt = await import('../public/joe/format.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
@@ -724,7 +724,13 @@ try {
       const caps = norm([ui.boardCaption, ui.say, ...Object.values(ui.cells).map(c => c.cap)].join(' | '));
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age and reason`, /[Aa]s of \d+\s(s|min) ago · updates are (late|stuck)/.test(caps), caps);
       if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.cells['hero.account'].cap === 'Not reported', caps);
-      if (kind === 'broken') check('fixtures', `${tag}: broken shows its reason locally or in the shared section line`, /Last good value, .* · |[Uu]navailable · /.test(caps), caps);
+      if (kind === 'broken') {
+        const notExactReasons = [...new Set(Object.values(CELL).map(panel => expectedCells[panel])
+          .filter(cell => cell.state === 'broken' && NOT_EXACT_REASONS.has(cell.reason)).map(cell => cell.reason))];
+        check('fixtures', `${tag}: broken shows its reason locally or in the shared section line`, notExactReasons.length
+          ? notExactReasons.every(reason => caps.includes(`Not exact yet · ${cellReason(reason)}`))
+          : /Last good value, .* · |[Uu]navailable · /.test(caps), caps);
+      }
       if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso', 'p3-single-missing-desk'].includes(id) && (viewport.name !== '390' || ['e-layout-storage-unavailable', 'a-gateway-up-but-dead'].includes(id))) {
         await shot(page, viewport, `${viewport.name}-${theme}-desk-state-${id}`, `Desk, P1 fixture ${id} (${kind})`);
       }

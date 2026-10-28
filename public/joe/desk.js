@@ -69,7 +69,7 @@ export function disclosureProblem(candidates) {
     // an old check-in must not obscure that the row's figures are unknown.
     const priority = cell?.state === 'broken' || state === 'unavailable' ? 3 : severity[p.tone];
     const why = reason ? cellReason(reason) : null;
-    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, reason: why === state ? null : why, label: `${label}: ${state}` }];
+    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, why, reason: why === state ? null : why, label: `${label}: ${state}` }];
   });
   problems.sort((a, b) => b.priority - a.priority || severity[b.tone] - severity[a.tone]);
   if (!problems.length) return null;
@@ -87,7 +87,7 @@ export function disclosureProblem(candidates) {
   const sharedReason = sharedSectionReason(candidates.map(([, cell]) => cell)) ??
     candidates.filter(([, cell]) => Array.isArray(cell?.value)).map(([, cell]) => positionSectionReason(cell)).find(Boolean) ?? null;
   return { ...summarize(problems), sharedReason,
-    expanded: sharedReason ? summarize(problems.filter(p => p.reason !== sharedReason)) : null };
+    expanded: sharedReason ? summarize(problems.filter(p => p.why !== sharedReason)) : null };
 }
 function problemHtml(problem) {
   const html = p => p ? `${icon(p.icon, `i tone-${p.tone}`)}<span class="summary-text" title="${esc(p.detail)}" aria-hidden="true">${esc(p.text)}</span><span class="vh">${esc(p.detail)}</span>` : '';

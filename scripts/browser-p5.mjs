@@ -425,12 +425,12 @@ try {
             nulls: [...document.querySelectorAll('.dnums .bn')].every(e => e.textContent === '—'),
             headerLayout: (${headerLayout.toString()})(), horizontal: __audit.horizontal(), clipping: __audit.clipping(), gui: __audit.gui27() };
         })()`);
-        const words = neutral ? 'not exact yet' : 'not reported by the broker';
+        const caption = neutral ? 'Numbers: not exact yet' : 'Numbers: unavailable · not reported by the broker';
         check('not-exact', `${tag} ${i}: header word, tone and icon reflect the actual null reason`,
           (neutral ? /^Live · updated/.test(seen.word) : seen.word === 'Board numbers are missing') && seen.headerIcon === (neutral ? '#i-check' : '#i-stop') && seen.headerColour === (neutral ? seen.ok : seen.bad), seen);
         checkHeaderLayout('not-exact', `${tag} ${i} ${seen.word}`, seen.headerLayout);
         check('not-exact', `${tag} ${i}: all three desk cards use the neutral info icon only for not-exact values`, seen.cards.length === 3 && seen.nulls && seen.cards.every(c =>
-          c.text === `Numbers: unavailable · ${words}` && c.tone === `st ${neutral ? 'none' : 'bad'}` && c.icon === (neutral ? '#i-info' : '#i-stop') && c.colour === (neutral ? seen.neutral : seen.bad) && c.style === 'normal'), seen.cards);
+          c.text === caption && c.tone === `st ${neutral ? 'none' : 'bad'}` && c.icon === (neutral ? '#i-info' : '#i-stop') && c.colour === (neutral ? seen.neutral : seen.bad) && c.style === 'normal'), seen.cards);
         check('not-exact', `${tag} ${i}: no overflow, clipping, italics or coloured edge accents`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length && !seen.gui.italics.length && !seen.gui.borders.length, seen);
         const after = await rects(boxes);
         check('not-exact', `${tag} ${i}: header, hero and desk boxes have exactly 0 px shift`, J(baseline) === J(after), { before: baseline, after });

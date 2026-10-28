@@ -31,6 +31,19 @@ test('summary selects the worst actual state and retains every independent reaso
   assert.equal(disclosureProblem([['Today', cell('broken', 'not_exact_yet')]]).icon, 'info');
 });
 
+test('opened not-exact desk summaries leave shared reasons in the body and keep independent problems', () => {
+  for (const reason of ['not_exact_yet', 'sod_missing']) {
+    const candidates = ['Today', 'Open positions', 'Since start'].map(label => [label, cell('broken', reason)]);
+    const p = disclosureProblem(candidates);
+    assert.equal(p.icon, 'info');
+    assert.equal(p.expanded, null, `${reason}: no repeated detail in the expanded header`);
+    assert.equal(p.sharedReason, reason === 'not_exact_yet' ? 'not exact yet' : 'start-of-day value missing');
+    assert.equal(p.text, reason === 'not_exact_yet' ? 'Today: not exact yet' : 'Today: not exact yet · start-of-day value missing');
+    const mixed = disclosureProblem([...candidates, ['History', cell('stale', 'snapshot_stale', {})]]);
+    assert.equal(mixed.expanded.detail, 'History: stale · updates are late');
+  }
+});
+
 test('one-line summaries expose every independent reason in the accessible button text', () => {
   const ctx = context();
   ctx.states['today.openPnl'] = cell('broken', 'not_exact_yet');
