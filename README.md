@@ -847,6 +847,20 @@ worker (shared `acceptRead`, then indexed once) and uses its existing
 live/stale/rejected/unavailable states. History stores only observations
 and null gaps, never the UI's assumed/interpolated continuity values.
 
+History's chart is one keyboard stop. Keyboard focus starts inspection;
+clicking or tapping leaves the pointer tooltip alone, and arrow keys can then
+start inspection. Left/Right inspect the original observations and gap samples;
+redundant window edges with the same minute and values are skipped. Home/End
+reach the first/last inspection point, and Page Up/Down move by at least ten
+points. Escape dismisses inspection, and Tab
+leaves the chart. Its polite screen-reader announcement and visible tooltip
+share the same Vienna timestamp and selected desk values, explicitly marked
+observed, estimated, or no value here. Inspection keeps focus across redraws
+and uses the existing fixed chart box and reduced-motion behavior. The chart's
+description includes its refresh status and inspection instructions. A data
+update or wheel zoom hides a hovering pointer tooltip until the pointer moves
+again, avoiding stale values after a redraw.
+
 P2 persists `data-state.json` (snapshot plus progress and retained-cell receipts),
 `history-state.json` and `results-state.json` as independent atomic/fsynced
 envelopes (mode 0600). Results snapshots, receipts, generation progress and
