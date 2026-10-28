@@ -779,6 +779,34 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
     }
   });
 
+  test('JOED-120 M1: restart repairs release-36 renewed receipts before an advancing outage', t => {
+    const h = harness(t), candidate = ingress(fixture);
+    assert.equal(h.model.accept(candidate).status, 200);
+    h.time(4000); candidate.seq++;
+    assert.equal(h.model.accept(candidate).status, 200);
+    const saved = JSON.parse(h.stored('data'));
+    for (const cell of Object.values(saved.cells)) if (cell.value != null) cell.valueReceivedAt = at(4000);
+    assert.equal(saved.feed.generatedAdvancedAt, at(0));
+    h.replaceState(saved);
+    const cold = h.restart();
+    assert.equal(cold.hasData(), true);
+    h.time(4030);
+    const dead = read('failures/a-gateway-up-but-dead.json').payload;
+    dead.seq = candidate.seq + 1; dead.generatedAt = dead.safety.gateway.checkedAt = at(4030);
+    assert.equal(cold.accept(dead).status, 200);
+    const repaired = JSON.parse(h.stored('data'));
+    for (const model of [cold, h.restart()]) for (const name of ['desks.j.equity', 'paperAccount']) {
+      assert.equal(repaired.cells[name].valueReceivedAt, at(0), name);
+      const cell = h.cells(model)[name];
+      assert.equal(cell.value, null, name);
+      assert.equal(cell.ageSeconds, 4030, name);
+    }
+    const cells = h.cells(cold);
+    t.diagnostic(`M1 probe: ${JSON.stringify(Object.fromEntries([['deskEquity', 'desks.j.equity'], ['account', 'paperAccount']]
+      .map(([label, name]) => [label, { shown: cells[name].value != null, retained: cells[name].retained,
+        ageSeconds: cells[name].ageSeconds, reason: cells[name].reason }])))}`);
+  });
+
   for (const seeded of [false, true]) test(`JOED-120 F2: non-null retained_values uses only verified last-good (seeded=${seeded})`, t => {
     const h = harness(t);
     if (seeded) assert.equal(h.model.accept(ingress(exact)).status, 200);
@@ -816,6 +844,40 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
     const cold = h.restart();
     assert.equal(cold.hasData(), true);
     for (const name of ['desks.j.equity', 'paperAccount', 'paperCash']) assert.equal(h.cells(cold)[name].value, null, name);
+  });
+
+  test('JOED-120 L1: retained day-P&L cleanup then frozen re-send keeps verified last-goods across restart', t => {
+    const h = harness(t);
+    assert.equal(h.model.accept(ingress(exact)).status, 200);
+    const saved = JSON.parse(h.stored('data'));
+    h.time(30);
+    const candidate = retained(exact, 30, exact.seq + 1);
+    saved.feed.value = { ...candidate, receivedAt: at(30) };
+    saved.feed.generatedAdvancedAt = at(30);
+    const dayPanels = Object.keys(saved.cells).filter(name => name.endsWith('.dayPnl'));
+    assert.equal(dayPanels.length, 4);
+    for (const name of dayPanels) {
+      assert.notEqual(saved.cells[name].value, null, name);
+      assert.ok(Object.hasOwn(saved.cells[name], 'valueSource'), name);
+      saved.cells[name].valueReceivedAt = at(30);
+    }
+    h.replaceState(saved);
+    const cold = h.restart();
+    const names = ['desks.j.equity', 'today.equity'];
+    const before = names.map(name => cold.panels()[name].value != null);
+    assert.deepEqual(before, [true, true]);
+    h.time(60); candidate.seq++;
+    assert.equal(cold.accept(candidate).status, 200);
+    const cleaned = JSON.parse(h.stored('data'));
+    for (const name of dayPanels) assert.deepEqual(cleaned.cells[name], {
+      value: null, valueReceivedAt: null, valueObservedAt: null, valueSource: null,
+    }, name);
+    const restarted = h.restart();
+    assert.equal(restarted.hasData(), true);
+    const after = names.map(name => restarted.panels()[name].value != null);
+    assert.deepEqual(after, [true, true]);
+    for (const name of names) assert.equal(restarted.panels()[name].valueReceivedAt, at(0), name);
+    t.diagnostic(`L1 probe: ${JSON.stringify({ before, after, dayPnlKeys: Object.keys(cleaned.cells[dayPanels[0]]) })}`);
   });
 
   function boundary(seq, limit) {

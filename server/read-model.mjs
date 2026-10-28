@@ -112,7 +112,14 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
           state.cells[name].valueReceivedAt === state.feed.value.receivedAt) ||
         (legacyLastGoods && /\.(?:dayPnl|equity)$/.test(name) && state.cells[name].value != null &&
           state.cells[name].valueReceivedAt !== state.feed.value.receivedAt)) {
-      state.cells[name] = { value: null, valueReceivedAt: null };
+      state.cells[name] = { value: null, valueReceivedAt: null,
+        ...(name.endsWith('.dayPnl') ? { valueObservedAt: null, valueSource: null } : {}) };
+    }
+    // Release 36 renewed receipts on frozen re-sends. No observation can be
+    // newer than the last generation advance; restore that original anchor.
+    for (const cell of Object.values(state.cells)) if (cell.value != null &&
+        Date.parse(cell.valueReceivedAt) > Date.parse(state.feed.generatedAdvancedAt)) {
+      cell.valueReceivedAt = state.feed.generatedAdvancedAt;
     }
     if (legacyLastGoods) {
       // Explicit provenance keys mark the upgraded shape, even when all
