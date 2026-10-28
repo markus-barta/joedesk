@@ -12,6 +12,7 @@ import { panelStates, MONEY_FIELDS } from '../contracts/panel-state.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
 import { validateContract, CONTRACTS } from '../contracts/index.mjs';
 import { decimalUnits, unitsDecimal } from '../contracts/decimal.mjs';
+const { sendOutcome } = await import('../public/joe/settings-model.js');
 const { boardStates, NOT_EXACT_REASONS, RETENTION_SECONDS } = await import('../public/joe/board-state.js');
 const { exactCell, rankDesks, todayPercent, sincePercent } = await import('../public/joe/performance.js');
 const { cellView, heroLeft, keptHtml, positionsHtml, compactDesk } = await import('../public/joe/desk.js');
@@ -1152,14 +1153,22 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
       time: value => { seconds = value; }, stored: name => JSON.parse(files.get(`${root}/${name}.json`)) };
   }
 
-  for (const mode of ['control', 'receipt', 'finalize']) test(`JOED-129 F1: ${mode} enforces committed KEEP before later inbox/history`, async t => {
-    const h = harness(t); h.faults[mode] = true;
+  for (const seconds of [0, -10]) for (const mode of ['control', 'receipt', 'finalize']) test(`JOED-129 F1: ${mode}${seconds < 0 ? ' after clock rollback' : ''} enforces committed KEEP before later inbox/history`, async t => {
+    const h = harness(t); h.time(seconds); h.faults[mode] = true;
     const sent = await h.propagate();
     assert.equal(h.stored('fleet-config').rev, 'fc-000020');
     assert.equal(h.model.feeds()['fleet-config'].value.rev, 'fc-000020', 'committed policy is effective despite ancillary failure');
-    assert.equal(sent.status, mode === 'control' ? 200 : mode === 'receipt' ? 503 : 500);
+    if (mode !== 'control') {
+      const outcome = sendOutcome(sent.status, sent.body, ['desks.keep']);
+      assert.equal(outcome.stored, true, 'Settings must report the committed KEEP change as saved');
+      assert.equal(outcome.rev, 'fc-000020');
+    }
+    assert.equal(sent.status, mode === 'control' ? 200 : 500);
     assert.equal(sent.body.ok, mode === 'control');
     assert.equal(h.stored('fleet-config-actions').entries.at(-1).outcome, mode === 'control' ? 'success' : 'pending');
+    const observedAt = new Date(Date.parse(fixture.data.receivedAt) + seconds * 1000).toISOString();
+    assert.equal(h.model.feeds()['fleet-config'].receivedAt, observedAt, 'receipt records the actual observation clock, including rollback');
+    h.time(0);
     const data = structuredClone(fixture.data); delete data.receivedAt;
     const pushed = await h.request('/joe/inbox', { method: 'POST',
       headers: { authorization: 'Bearer synthetic-fixture-only' }, body: JSON.stringify(data) });
@@ -1177,11 +1186,7 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
     h.faults.receipt = false;
     assert.equal((await h.request('/joe/fleet-config.json')).status, 200);
     assert.equal(h.stored('fleet-receipt').value.rev, 'fc-000020');
-    assert.equal(h.stored('fleet-receipt').receivedAt, fixture.data.receivedAt, 'retry preserves the policy observation age');
+    assert.equal(h.stored('fleet-receipt').receivedAt, observedAt, 'retry preserves the policy observation age');
     assert.equal(h.model.feeds().history.value.points.at(-1).desks.j.money.equity, null);
-    console.log('F1', JSON.stringify({ mode, status: sent.status, ok: sent.body.ok,
-      diskRev: h.stored('fleet-config').rev, modelRev: h.model.feeds()['fleet-config'].value.rev,
-      newKeepActive: true, pushAccepted: true, deskReason: h.model.panels()['desks.j.equity'].reason,
-      historyRecordedDeskValue: false, recoveryReceiptRev: h.stored('fleet-receipt').value.rev }));
   });
 }

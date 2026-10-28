@@ -1463,9 +1463,11 @@ snapshot keeps their values null with `not_exact_yet`; the row shows em
 dashes with each value's own reason, without partial totals.
 An accepted KEEP change applies as soon as the settings file is replaced,
 before receipt persistence or action-log finalization. A failure in either
-step returns an error and leaves the audit pending; later data pushes and
-history still use the new policy. Failed receipt writes retry without renewing
-the policy observation's age. After any position-list fallback, including
+step returns HTTP 500 with the saved revision and leaves the audit pending;
+Settings reports the change as saved. Later data pushes and history still use
+the new policy, even after a clock rollback. The receipt records the actual
+observation time; failed receipt writes retry without renewing its age.
+After any position-list fallback, including
 `retained_values`, the board filters both lists against the current KEEP
 partition and its mandatory SXR8/TSLA floor. Moved rows are withheld until
 matching producer evidence is available, preserving the lists' original age

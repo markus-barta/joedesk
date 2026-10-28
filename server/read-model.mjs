@@ -319,9 +319,10 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       if (!fleetReceiptPending) { delete rejections['fleet-config']; return { ok: true }; }
     } else {
       const now = clock();
-      if (fleet && Date.parse(now) < Date.parse(fleet.receivedAt)) return failed(503, 'clock_regressed');
       // The validated source policy governs immediately, even when its
       // ancillary receipt cannot be saved. Never fall back to the old KEEP.
+      // Record the actual observation time even if the clock moved backwards;
+      // the previous policy's receipt must not delay enforcing this one.
       fleet = { value, receivedAt: now };
       fleetReceiptPending = true;
     }
