@@ -1,5 +1,5 @@
 // Board display policy layered over the unchanged producer contract selector.
-import { panelStates, MONEY_FIELDS } from './contracts/panel-state.mjs';
+import { panelStates, panelState, MONEY_FIELDS } from './contracts/panel-state.mjs';
 import { nyDay } from './time.mjs';
 import { validInstant } from './contracts/schema-validator.mjs';
 
@@ -41,11 +41,19 @@ export function boardStates(feeds, now, previous = {}) {
   const numeric = ['paperAccount', 'paperCash', 'positions', 'kept',
     ...MONEY_FIELDS.flatMap(field => [`today.${field}`, ...DESKS.map(id => `desks.${id}.${field}`)])];
   for (const name of numeric) {
-    states[name] = withGenerationAge(states[name], feeds.data, now);
-    const cell = states[name], field = name.split('.').at(-1);
+    const field = name.split('.').at(-1);
     const sourceReasons = name === 'paperAccount' ? [data?.brokerAccount?.reason]
       : name === 'paperCash' ? [data?.brokerAccount?.reasons?.cash]
         : ['positions', 'kept'].includes(name) ? [data?.positions?.reason] : fieldReason(name, field);
+    // The sealed selector accepts legacy non-null retained_values. Discard
+    // that candidate amount and select only the trusted prior observation.
+    if (sourceReasons.includes('retained_values')) {
+      const prior = previous[name];
+      states[name] = panelState(feeds.data, null, states[name].reason ?? 'retained_values', now,
+        prior?.value, prior?.valueReceivedAt);
+    }
+    states[name] = withGenerationAge(states[name], feeds.data, now);
+    const cell = states[name];
     // Scoped exactness failures still apply when a feed/gateway failure masks
     // their reason in the shared selector. An outage cannot restore an amount.
     const inexact = [cell.reason, ...sourceReasons]
