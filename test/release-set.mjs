@@ -106,6 +106,7 @@ for (const [field, value, reason] of [
   ['validation_run.url', 'https://github.com/elsewhere/repo/actions/runs/123456', /url/],
   ['validation_run.url', 'https://github.com/markus-barta/joedesk/actions/runs/999', /url/],
   ['validation_run.url', 'http://github.com/markus-barta/joedesk/actions/runs/123456', /url/],
+  ['validation_run.url', 'https://unrelated.invalid/markus-barta/joedesk/actions/runs/123456', /url/],
   ['generated_at', '2026-10-18T12:00:00+02:00', /UTC instant/],
   ['generated_at', '2026-02-30T12:00:00.000Z', /UTC instant/],
 ]) test(`release-set rejects malformed ${field}: ${JSON.stringify(value)}`, () => {
