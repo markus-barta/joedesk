@@ -45,8 +45,8 @@ export const TERMS = Object.freeze({
   captured: ['Captured results', 'An early, partial record of J’s trades, kept in its own currency. It never adds into the euro totals.', 'Backfill, captured subtotal'],
   estimate: ['Estimated gap', 'Where no numbers arrived, the line is drawn dotted as an estimate. Estimates are never counted.', 'Gap fill, display estimate'],
   benchmark: ['Compared with an index', 'An index to hold the result against. Markus picks one at review; none is chosen yet.', 'Benchmark'],
-  session: ['Regular session', 'Regular trading in New York: 09:30 to 16:00 there. The Vienna times follow both clocks, including the weeks when they change on different dates.', 'NYSE regular trading hours'],
-  boardok: ['Board light', 'The board’s traffic light: green means every number is fresh and complete.', 'Board health (accounting light)'],
+  session: ['Regular session', 'Normal trading hours in New York are 09:30 to 16:00. Holidays and early closes follow the market calendar; use the session times shown on the board. The Vienna times follow both clocks, including the weeks when they change on different dates.', 'NYSE regular trading hours'],
+  boardok: ['Board light', 'The board’s traffic light checks data freshness, the broker connection and safety warnings. Green means those checks are OK; some values may still be not exact yet and shown as explained dashes. Open status details for the reason behind yellow or red.', 'Board health (accounting light)'],
 });
 
 export const termLabel = key => TERMS[key]?.[0] ?? key;

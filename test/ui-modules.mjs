@@ -14,6 +14,7 @@ import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 import './browser-settled.mjs';
 import './browser-group-timing.mjs';
 import './theme-geometry.mjs';
+import './theme-copy.mjs';
 import './board-sweep-plan.mjs';
 import './feed-robust.mjs';
 
