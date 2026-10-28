@@ -272,6 +272,242 @@ test('load states: loading and unavailable disable every button', () => {
   assert.equal(M.edit(none, 'desks.maxBusyDesks', '6'), none, 'nothing to edit before the settings arrive');
 });
 
+test('JOED-117 warm refresh failure: last-good settings keep the draft but cannot be reviewed or sent', () => {
+  const config = design();
+  for (const [reason, words] of [['refresh_failed', 'refresh failed'], ['auth_required', 'sign-in required'], ['contract_invalid', 'contract invalid']]) {
+    let s = M.adopt(M.editState(), config);
+    const clean = M.adopt(s, config, reason);
+    assert.equal(M.bar(clean).state, 'last-good');
+    assert.match(M.bar(clean).lead, /last good/i);
+    assert.doesNotMatch(M.bar(clean).rest, /is current/);
+    assert.ok(M.bar(clean).rest.includes(words));
+    s = M.confirm(M.review(M.edit(s, 'desks.maxBusyDesks', '6')).s, true);
+    assert.ok(M.canSend(s));
+    const failed = M.adopt(s, config, reason);
+    assert.equal(failed.readReason, reason);
+    assert.equal(failed.readAvailable, false);
+    assert.deepEqual(failed.draft, s.draft);
+    assert.equal(failed.config, config);
+    assert.equal(M.canSend(failed), false);
+    assert.deepEqual(M.bar(failed).buttons, { discard: true, save: true, review: false, send: false });
+    assert.equal(M.review(failed).rows.length, 0);
+    assert.equal(M.canSend(M.confirm(failed, true)), false);
+    const duringWrite = M.adopt(M.start(s), config, reason);
+    const finished = M.finish(duringWrite, { ok: true, config, keys: M.changes(s) });
+    assert.equal(finished.readAvailable, false, 'a completed write cannot erase a failed refresh');
+    assert.equal(M.bar(finished).state, 'last-good');
+    const discarded = M.discard(failed, config);
+    assert.equal(M.bar(discarded).state, 'last-good', 'discard cannot revalidate the read');
+    const recovered = M.adopt(failed, config);
+    assert.equal(recovered.readAvailable, true);
+    assert.deepEqual(recovered.draft, s.draft);
+    assert.equal(M.canSend(recovered), false, 'recovery requires a new review');
+    assert.ok(M.canSend(M.confirm(M.review(recovered).s, true)));
+  }
+});
+
+test('JOED-117 fleet transport: a validated same-revision 304 clears rejection without freshening the receipt', async () => {
+  const { createFeed } = await import('../public/joe/feed.js');
+  const realFetch = globalThis.fetch;
+  const config = design(), tag = `"${config.rev}"`, receipt = valid.data.receivedAt;
+  let answer, requestedTag;
+  const notifications = [];
+  globalThis.fetch = async (_url, init) => { requestedTag = init.headers?.['If-None-Match']; return answer(); };
+  try {
+    for (const status of [503, 401, 0]) {
+      const feed = createFeed(key => notifications.push(key));
+      answer = () => new Response(JSON.stringify(config), { headers: { ETag: tag, 'X-Joe-Server-Now': receipt, 'X-Joe-Received-At': receipt } });
+      await feed.refreshFleet();
+      const saved = feed.feeds['fleet-config'].value;
+      answer = () => { if (!status) throw new TypeError('offline'); return new Response('{}', { status }); };
+      await feed.refreshFleet();
+      assert.equal(feed.feeds['fleet-config'].reason, status === 401 ? 'auth_required' : 'refresh_failed');
+      const later = new Date(Date.parse(receipt) + 60000).toISOString();
+      answer = () => new Response(null, { status: 304, headers: { ETag: tag, 'X-Joe-Server-Now': later, 'X-Joe-Received-At': later } });
+      const before = notifications.length;
+      await feed.refreshFleet();
+      assert.equal(requestedTag, tag);
+      assert.equal(feed.feeds['fleet-config'].reason, null);
+      assert.equal(feed.feeds['fleet-config'].value, saved);
+      assert.equal(feed.feeds['fleet-config'].receivedAt, receipt);
+      assert.equal(feed.select().states['fleet-config'].state, 'stale', 'revalidation does not reset receipt age');
+      assert.ok(feed.select().states['fleet-config'].ageSeconds >= 60);
+      assert.deepEqual(notifications.slice(before), ['fleet'], 'recovery redraws Settings');
+      answer = () => new Response(null, { status: 304, headers: { ETag: '"unrelated"' } });
+      await feed.refreshFleet();
+      assert.equal(feed.feeds['fleet-config'].reason, 'refresh_failed', 'an unrelated 304 cannot validate the saved value');
+      answer = () => new Response(JSON.stringify({ ...config, mode: 'live' }), {
+        headers: { ETag: '"invalid"', 'X-Joe-Received-At': later },
+      });
+      await feed.refreshFleet();
+      assert.equal(feed.feeds['fleet-config'].reason, 'contract_invalid');
+      answer = () => new Response(null, { status: 304, headers: { ETag: tag } });
+      await feed.refreshFleet();
+      assert.equal(requestedTag, tag, 'a rejected 200 cannot replace the validated conditional tag');
+      assert.equal(feed.feeds['fleet-config'].reason, null);
+      assert.equal(feed.feeds['fleet-config'].value, saved);
+      assert.equal(feed.feeds['fleet-config'].receivedAt, receipt);
+    }
+    const cold = createFeed(() => {});
+    answer = () => new Response(null, { status: 304, headers: { ETag: tag } });
+    await cold.refreshFleet();
+    assert.equal(cold.feeds['fleet-config'].value, null);
+    assert.equal(cold.feeds['fleet-config'].reason, 'refresh_failed');
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('JOED-117 send outcomes precede the last-good note, with review and send blocked throughout the outage', () => {
+  const config = design();
+  const reviewed = M.confirm(M.review(M.edit(M.editState(config), 'desks.maxBusyDesks', '6')).s, true);
+  const written = withNextFleetRevision(M.buildCandidate(config, reviewed.base, reviewed.draft), config.rev);
+  for (const result of [
+    { ok: false, reason: 'fleet config unavailable', keys: M.changes(reviewed) },
+    { ok: true, config: written, keys: M.changes(reviewed) },
+    { ok: false, stored: true, rev: written.rev, reason: 'the change log could not record it', keys: M.changes(reviewed) },
+  ]) {
+    const expected = M.bar(M.finish(M.start(reviewed), result));
+    for (const reason of ['refresh_failed', 'auth_required', 'contract_invalid']) {
+      // A read can fail either during the write or after its answer arrives.
+      for (const duringWrite of [true, false]) {
+        const s = duringWrite
+          ? M.finish(M.adopt(M.start(reviewed), config, reason), result)
+          : M.adopt(M.finish(M.start(reviewed), result), config, reason);
+        const b = M.bar(s);
+        assert.equal(b.state, 'last-good');
+        assert.equal(b.lead, expected.lead);
+        assert.equal(b.rest, `${expected.rest} Fleet settings unavailable · showing last good.`);
+        assert.equal(b.tone, result.ok || result.stored ? 'warn' : 'bad');
+        assert.deepEqual(b.buttons, { discard: !result.ok && !result.stored, save: !result.ok && !result.stored, review: false, send: false });
+        assert.equal(M.canSend(s), false);
+        const recovered = M.bar(M.adopt(s, result.ok ? written : config));
+        assert.equal(recovered.state, expected.state);
+        assert.equal(recovered.rest, expected.rest);
+      }
+    }
+  }
+});
+
+test('JOED-117 fleet transport: healthy matching 304s preserve the feed object and emit no redraw', async () => {
+  const { createFeed } = await import('../public/joe/feed.js');
+  const realFetch = globalThis.fetch;
+  const config = design(), tag = `"${config.rev}"`, receipt = valid.data.receivedAt;
+  const notifications = [];
+  const feed = createFeed(key => notifications.push(key));
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify(config), { headers: { ETag: tag, 'X-Joe-Server-Now': receipt, 'X-Joe-Received-At': receipt } });
+    await feed.refreshFleet();
+    const saved = feed.feeds['fleet-config'];
+    assert.equal(saved.reason, null);
+    notifications.length = 0;
+    globalThis.fetch = async (_url, init) => {
+      assert.equal(init.headers['If-None-Match'], tag);
+      return new Response(null, { status: 304, headers: { ETag: tag } });
+    };
+    for (let poll = 0; poll < 3; poll++) {
+      await feed.refreshFleet();
+      assert.equal(feed.feeds['fleet-config'], saved);
+      assert.equal(feed.feeds['fleet-config'].receivedAt, receipt);
+    }
+    assert.deepEqual(notifications, []);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('JOED-117 rendered Settings: a failed warm read labels last-good values and disables send until revalidated', async () => {
+  const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
+  const realDocument = globalThis.document;
+  const doc = htmlDocument('<nav id="setNav"></nav><main id="setMain"></main><p id="setSub"></p><div id="editbar"><p id="editNote"></p><button id="discardBtn"></button><button id="savePreview"></button><button id="reviewBtn"></button><button id="sendBtn"></button></div><dialog id="diffDlg" open><input id="diffReviewed" type="checkbox"></dialog><div id="toast"></div>');
+  // Only the DOM operations used by the real render/update path; no browser.
+  const decorate = el => {
+    if (!el || el.classList) return el;
+    el.disabled = el.getAttribute('disabled') !== null;
+    el.removeAttribute = key => { delete el.attributes[key]; };
+    if (el.tagName === 'dialog') el.close = () => el.removeAttribute('open');
+    el.classList = {
+      contains: name => (el.getAttribute('class') ?? '').split(/\s+/).includes(name),
+      add(name) { this.toggle(name, true); },
+      remove(name) { this.toggle(name, false); },
+      toggle(name, on) {
+        const classes = new Set((el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean));
+        if (on) classes.add(name); else classes.delete(name);
+        el.setAttribute('class', [...classes].join(' '));
+      },
+    };
+    return el;
+  };
+  const selectAll = doc.querySelectorAll.bind(doc);
+  doc.querySelectorAll = selector => selectAll(selector).map(decorate);
+  doc.getElementById = id => doc.querySelector(`#${id}`);
+  doc.documentElement = { dataset: {} };
+  doc.body = { dataset: {} }; // Section scrolling is outside this render test.
+  globalThis.document = doc;
+  let page;
+  try {
+    page = await builders('settings.js', ['buildSkeleton', 'update', 'confirmReview']);
+    const { addTerms } = await import('../public/joe/ui.js');
+    addTerms(M.FIELD_TERMS);
+    page.buildSkeleton();
+    const config = design();
+    config.desks.stage0.capEur = 1.001;
+    const ctx = { feeds: { 'fleet-config': { value: config, reason: null } }, states: {}, now: valid.data.receivedAt };
+    page.renderSettings(ctx);
+    assert.match(doc.querySelector('#editNote').textContent, /version 12 is current/);
+    assert.equal(doc.querySelector('[data-row="desks.stage0.capEur"] .phone-only').textContent, `€${NB}1,001`);
+    let draft = M.edit(M.editState(config), 'desks.stage0.capEur', '1.002');
+    draft = M.confirm(M.review(draft).s, true);
+    page.update(draft);
+    assert.equal(doc.querySelector('#sendBtn').disabled, false);
+    ctx.feeds['fleet-config'].reason = 'refresh_failed';
+    page.renderSettings(ctx);
+    assert.equal(doc.querySelector('#editNote').dataset.state, 'last-good');
+    assert.match(doc.querySelector('#editNote').textContent, /showing last good.*refresh failed/);
+    assert.match(doc.querySelector('#setSub').textContent, /unavailable · last good version 12/);
+    assert.match(doc.querySelector('#srcFacts').textContent, /Last good version/);
+    assert.equal(doc.querySelector('[data-saved="desks.stage0.capEur"]').textContent, `Last good: €${NB}1,001`);
+    assert.equal(page.settingsState().draft['desks.stage0.capEur'], '1.002');
+    assert.equal(doc.querySelector('#sendBtn').disabled, true);
+    assert.equal(doc.querySelector('#reviewBtn').disabled, true);
+    doc.querySelector('#diffReviewed').checked = true;
+    const beforeConfirm = page.settingsState();
+    page.confirmReview();
+    assert.deepEqual(page.settingsState(), beforeConfirm, 'outage confirmation keeps the draft unconfirmed');
+    assert.equal(doc.querySelector('#diffDlg').getAttribute('open'), null, 'close the invalidated review so the toast is visible above its former backdrop');
+    assert.equal(doc.querySelector('#toast').textContent, 'The current fleet settings could not be checked. Reopen Settings to retry; your draft is kept.');
+    assert.ok(doc.querySelector('#toast').classList.contains('on'));
+    ctx.feeds['fleet-config'].reason = null;
+    page.renderSettings(ctx);
+    assert.equal(doc.querySelector('#editNote').dataset.state, 'dirty');
+    assert.equal(doc.querySelector('#reviewBtn').disabled, false);
+    assert.equal(doc.querySelector('#sendBtn').disabled, true, 'a new review is still required');
+    assert.equal(doc.querySelector('[data-saved="desks.stage0.capEur"]').textContent, `Saved: €${NB}1,001`);
+  } finally {
+    clearTimeout(page?.toast.timer);
+    if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
+  }
+});
+
+test('JOED-117 cap review and saved displays preserve every normalized accepted digit', () => {
+  const field = M.FIELD['desks.stage0.capEur'];
+  for (const [before, after, expectedBefore, expectedAfter] of [
+    [1.001, '1.0020', '1,001', '1,002'],
+    [1000.0000000000001, '1000.0000000000002', '1.000,0000000000001', '1.000,0000000000002'],
+    [0.0000001, '0.0000002', '0,0000001', '0,0000002'],
+    [0, '0.' + '0'.repeat(323) + '5', '0', '0,' + '0'.repeat(323) + '5'],
+  ]) {
+    const config = design();
+    config.desks.stage0.capEur = before;
+    const r = M.review(M.edit(M.editState(config), field.key, after));
+    assert.equal(r.error, null);
+    assert.equal(r.rows[0].before, `€${NB}${expectedBefore}`);
+    assert.equal(r.rows[0].after, `€${NB}${expectedAfter}`);
+    assert.notEqual(r.rows[0].before, r.rows[0].after);
+    assert.equal(M.savedText(field, String(before)), r.rows[0].before);
+    assert.equal(M.display(field, r.s.draft[field.key]), r.rows[0].after, 'phone and review use the same complete value');
+    const candidate = M.buildCandidate(config, r.s.base, r.s.draft);
+    assert.ok(validateContract('fleet-config', candidate).ok);
+    assert.equal(candidate.desks.stage0.capEur, Number(after));
+  }
+});
+
 test('browser draft: restored only for the same version, and only whole and well shaped; a malformed draft is dropped', () => {
   let s = M.editState(design());
   s = M.edit(s, 'desks.maxBusyDesks', '7');

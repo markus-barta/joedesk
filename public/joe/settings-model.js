@@ -121,10 +121,19 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 // ---------- Draft values: each editable field as the text its control holds ----------
 export const keepExtras = keep => (Array.isArray(keep) ? keep.filter(s => !KEEP_FLOOR.includes(s)) : []);
+// The complete normalized decimal for a cap, without exponent notation.
+function capDecimal(n) {
+  const [coefficient, exponent = '0'] = String(n).split('e');
+  const [integer, fraction = ''] = coefficient.split('.');
+  const all = integer + fraction, point = integer.length + Number(exponent);
+  return point <= 0 ? `0.${'0'.repeat(-point)}${all}`
+    : point >= all.length ? all.padEnd(point, '0') : `${all.slice(0, point)}.${all.slice(point)}`;
+}
 export function rawOf(field, config) {
   const v = get(config, field.key);
   if (field.type === 'symbols') return keepExtras(v).join(',');
   if (field.type === 'windows') return JSON.stringify(Array.isArray(v) ? v : []);
+  if (field.type === 'num' && Number.isFinite(v)) return capDecimal(v);
   return v == null ? '' : String(v);
 }
 export const valuesOf = config => Object.fromEntries(EDITABLE.map(key => [key, rawOf(FIELD[key], config)]));
@@ -182,6 +191,7 @@ export function parseField(field, raw) {
 export function rawFromParsed(field, parsed) {
   if (field.type === 'symbols') return parsed.join(',');
   if (field.type === 'windows') return JSON.stringify(parsed);
+  if (field.type === 'num') return capDecimal(parsed);
   return String(parsed);
 }
 
@@ -219,7 +229,14 @@ export function display(field, raw) {
       return ws.length ? ws.map(w => `${w.id}: ${w.days.map(d => DAY_NAME[d] ?? d).join(', ')}, ${w.from} to ${w.until}, desks ${w.desks.map(d => DESK_NAME[d] ?? d).join(', ')}`).join('; ') : 'No wake windows';
     } catch { return 'Unreadable wake windows'; }
   }
-  if (field.type === 'num') { const n = Number(value.replace(',', '.')); return Number.isFinite(n) ? `€${NB}${digits(n, Number.isInteger(n) ? 0 : 2)}` : value; }
+  if (field.type === 'num') {
+    const n = Number(value.replace(',', '.'));
+    if (!Number.isFinite(n)) return value;
+    // Localize the normalized Number's complete decimal, including small
+    // caps written in exponent form. toFixed would hide accepted differences.
+    const [whole, tail] = capDecimal(n).split('.');
+    return `€${NB}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}${tail ? `,${tail}` : ''}`;
+  }
   if (field.type === 'pct') return `${value}${NB}%`;
   if (field.type === 'int') return /^\d+$/.test(value) ? `${value}${NB}${Number(value) === 1 ? field.x.unit.replace(/s$/, '') : field.x.unit}` : value;
   if (field.type === 'time') return `${value} Vienna time`;
@@ -243,20 +260,26 @@ export const windowLines = w => ({ id: w.id, times: `${w.from} to ${w.until}`,
 
 // ---------- The edit flow ----------
 // state: { config: the saved settings the draft is based on, base, draft,
-// reviewed / confirmed: the fingerprint each step saw, busy, outcome }.
+// readAvailable / readReason describe the latest fleet read independently of
+// the saved version and local draft; reviewed / confirmed are fingerprints.
 export function editState(config = null) {
   const values = config ? valuesOf(config) : null;
-  return { config, base: values, draft: values ? { ...values } : null, reviewed: null, confirmed: null, busy: false, outcome: null };
+  return { config, base: values, draft: values ? { ...values } : null, readAvailable: Boolean(config), readReason: null,
+    reviewed: null, confirmed: null, busy: false, outcome: null };
 }
 export const changes = s => (s.base ? changedKeys(s.base, s.draft) : []);
 export const isDirty = s => changes(s).length > 0;
 const current = s => (s.base ? fingerprint(s.base, s.draft) : null);
 export const isConfirmed = s => isDirty(s) && s.confirmed !== null && s.confirmed === current(s);
-export const canSend = s => isConfirmed(s) && !s.busy;
+export const canSend = s => s.readAvailable && isConfirmed(s) && !s.busy;
 
 // A newer saved version replaces a clean draft; a draft in progress keeps the
 // version it was made against, so its send meets the server's revision check.
-export function adopt(s, config) {
+export function adopt(s, config, reason = null) {
+  const available = Boolean(config) && !reason;
+  if (s.readAvailable !== available || s.readReason !== reason) {
+    s = { ...s, readAvailable: available, readReason: reason, reviewed: null, confirmed: null };
+  }
   if (!config || s.busy || s.config === config) return s;
   if (s.config && isDirty(s)) return s;
   // Just written: an older read in flight never replaces the version written.
@@ -272,6 +295,7 @@ export function edit(s, key, raw) {
 // form, so the dialog shows exactly what would be sent.
 export function review(s) {
   if (!s.base || s.busy) return { s, error: null, rows: [] };
+  if (!s.readAvailable) return { s, error: 'The current fleet settings could not be checked. Reopen Settings to retry; your draft is kept.', rows: [] };
   const draft = { ...s.draft };
   for (const key of changedKeys(s.base, s.draft)) {
     try { draft[key] = rawFromParsed(FIELD[key], parseField(FIELD[key], draft[key])); }
@@ -284,7 +308,7 @@ export function review(s) {
     rows: keys.map(key => ({ key, label: FIELD[key].label, before: display(FIELD[key], next.base[key]), after: display(FIELD[key], draft[key]) })) };
 }
 export function confirm(s, ticked) {
-  if (!ticked || !s.reviewed || s.reviewed !== current(s) || !isDirty(s)) return s;
+  if (!s.readAvailable || !ticked || !s.reviewed || s.reviewed !== current(s) || !isDirty(s)) return s;
   return { ...s, confirmed: s.reviewed };
 }
 export const start = s => ({ ...s, busy: true, outcome: null });
@@ -295,7 +319,7 @@ export const start = s => ({ ...s, busy: true, outcome: null });
 export function finish(s, result) {
   if (result.ok) {
     const values = valuesOf(result.config);
-    return { config: result.config, base: values, draft: { ...values }, reviewed: null, confirmed: null, busy: false,
+    return { ...s, config: result.config, base: values, draft: { ...values }, reviewed: null, confirmed: null, busy: false,
       outcome: { ok: true, rev: result.config.rev, keys: result.keys } };
   }
   if (result.stored) {
@@ -306,7 +330,7 @@ export function finish(s, result) {
 }
 export function discard(s, config) {
   const fresh = editState(config ?? s.config);
-  return { ...fresh, outcome: null };
+  return { ...fresh, readAvailable: s.readAvailable, readReason: s.readReason, outcome: null };
 }
 
 // What the server's answer means (status and body as received).
@@ -328,15 +352,25 @@ export function sendOutcome(status, body, attemptedKeys) {
 }
 
 // The edit bar: the note and which buttons are enabled (spec §8.4, Part A words).
-export function bar(s, { loaded = Boolean(s.base), failed = false } = {}) {
+export function bar(s, { loaded = Boolean(s.base), failed = Boolean(s.readReason) } = {}) {
   const n = changes(s).length, v = vnum(s.config?.rev);
   const off = { discard: false, save: false, review: false, send: false };
   if (!loaded) return { tone: failed ? 'bad' : 'none', state: failed ? 'unavailable' : 'loading', lead: failed ? 'Fleet settings unavailable' : 'Loading the fleet settings', rest: failed ? 'values are hidden and editing is disabled. Reopen Settings to retry.' : 'editing starts once they arrive', buttons: off };
   if (s.busy) return { tone: 'none', state: 'writing', lead: `Writing version ${v + 1}…`, rest: '', buttons: off };
   const buttons = { discard: n > 0, save: n > 0, review: n > 0, send: canSend(s) };
-  if (s.outcome?.ok && !n) return { tone: 'ok', state: 'sent', lead: `Sent version ${vnum(s.outcome.rev)}`, rest: 'saved to the shared file. The desks’ reload is not confirmed.', buttons };
-  if (s.outcome?.stored && !n) return { tone: 'warn', state: 'stored', lead: `Sent version ${vnum(s.outcome.rev)}`, rest: `saved to the shared file, but ${s.outcome.reason}. The desks’ reload is not confirmed.`, buttons };
-  if (s.outcome && !s.outcome.ok && !s.outcome.stored) return { tone: 'bad', state: 'failed', lead: 'Not sent', rest: `version ${vnum(s.outcome.rev)} was not confirmed as written: ${s.outcome.reason}.`, buttons };
+  let outcome = null;
+  if (s.outcome?.ok && !n) outcome = { tone: 'ok', state: 'sent', lead: `Sent version ${vnum(s.outcome.rev)}`, rest: 'saved to the shared file. The desks’ reload is not confirmed.', buttons };
+  if (s.outcome?.stored && !n) outcome = { tone: 'warn', state: 'stored', lead: `Sent version ${vnum(s.outcome.rev)}`, rest: `saved to the shared file, but ${s.outcome.reason}. The desks’ reload is not confirmed.`, buttons };
+  if (s.outcome && !s.outcome.ok && !s.outcome.stored) outcome = { tone: 'bad', state: 'failed', lead: 'Not sent', rest: `version ${vnum(s.outcome.rev)} was not confirmed as written: ${s.outcome.reason}.`, buttons };
+  if (!s.readAvailable || failed) {
+    const lead = 'Fleet settings unavailable · showing last good';
+    const rest = `version ${v} could not be revalidated${s.readReason ? `: ${s.readReason === 'auth_required' ? 'sign-in required' : s.readReason.replaceAll('_', ' ')}` : ''}. Your local draft is kept; reopen Settings to retry before reviewing or sending.`;
+    // Keep the write's answer first, alongside the independent read failure.
+    return { tone: outcome?.tone === 'bad' ? 'bad' : 'warn', state: 'last-good', lead: outcome?.lead ?? lead,
+      rest: outcome ? `${outcome.rest} ${lead}.` : rest,
+      buttons: { ...off, discard: n > 0, save: n > 0 } };
+  }
+  if (outcome) return outcome;
   if (!n) return { tone: 'ok', state: 'clean', lead: 'No changes', rest: `version ${v} is current`, buttons };
   if (isConfirmed(s)) return { tone: 'ok', state: 'reviewed', lead: `${plural(n, 'change')} reviewed`, rest: `ready to send as version ${v + 1}`, buttons };
   return { tone: 'warn', state: 'dirty', lead: `${plural(n, 'change')} in your draft`, rest: 'review before you send', buttons };
