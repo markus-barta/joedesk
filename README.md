@@ -2003,3 +2003,9 @@ JOED-103: board health and cell captions use `NOT_EXACT_REASONS` from
 “not exact yet”; Details includes “Desk values are not exact yet”. Missing
 equity without a reason and real transport, feed or broker faults retain their
 existing health rules. No shared contract or retention policy changes.
+
+JOED-104: Today’s term explanation resolves New York midnight into Vienna
+time each time its tip opens, using the explicit zones through `Intl`. Its
+visible and accessible description share that text: normally 06:00, 05:00
+during the autumn and spring offset gaps. The fixed term dictionary is unchanged
+by rendering, and clock-change days use the offset at midnight itself.

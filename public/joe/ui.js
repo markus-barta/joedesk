@@ -4,6 +4,7 @@ import { TERMS } from './terms.js';
 import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol, cashAmount } from './format.js';
 import { cellReason, capital, CELL_REASON } from './health.js';
 import { NOT_EXACT_REASONS } from './board-state.js';
+import { nyDay, zonedInstant, wall, NY, VIENNA } from './time.mjs';
 
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -11,7 +12,15 @@ export const icon = (id, cls = 'i') => `<svg class="${cls}" aria-hidden="true"><
 // Entries added at run time (each fleet setting's Learn tip) beside the fixed dictionary.
 const added = new Map();
 export const addTerms = entries => { for (const [key, entry] of Object.entries(entries)) added.set(key, entry); };
-const entryOf = key => TERMS[key] ?? added.get(key);
+const entryOf = key => {
+  const entry = TERMS[key] ?? added.get(key);
+  if (key !== 'today') return entry;
+  // Resolve at each tip render, including after midnight. Intl supplies both
+  // zones' offsets at NY midnight itself, even on a clock-change Sunday.
+  const midnight = zonedInstant(nyDay(new Date().toISOString()), '00:00:00', NY);
+  const viennaTime = wall(midnight, VIENNA).slice(11, 16);
+  return [entry[0], entry[1].replace('{nyMidnightVienna}', viennaTime), entry[2]];
+};
 export const learnBtn = key => `<button type="button" class="learn" data-term="${esc(key)}" data-learn="1" aria-expanded="false" aria-label="Learn: ${esc(entryOf(key)[0])}">${icon('book')}Learn</button>`;
 export const term = (key, text) => `<button type="button" class="term" data-term="${key}">${esc(text ?? TERMS[key][0])}</button>`;
 
