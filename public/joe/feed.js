@@ -179,15 +179,22 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     const res = await read('./fleet-config.json', fleetTag ? { headers: { 'If-None-Match': fleetTag } } : {});
     busy.delete('fleet');
     anchorFrom(res.clock);
-    if (res.status === 304) return;
-    if (res.status === 200) {
+    // Only a conditional response for the validated saved document can clear
+    // a rejection. Its receipt still belongs to the original read.
+    if (res.status === 304 && fleetTag && feeds['fleet-config']?.value && res.headers?.get('ETag') === fleetTag) {
+      settle('fleet-config', { ...feeds['fleet-config'], reason: null });
+      onChange('fleet');
+      return;
+    }
+    const accepted = acceptRead('fleet-config', res.status === 200
+      ? { status: 200, payload: res.payload, receivedAt: res.headers.get('X-Joe-Received-At') ?? undefined }
+      : { status: res.status, redirected: res.redirected, payload: res.payload }, feeds['fleet-config']);
+    if (res.status === 200 && !accepted.reason) {
       fleetTag = res.headers.get('ETag');
       const path = res.headers.get('X-Joe-Fleet-Source-Path'), kind = res.headers.get('X-Joe-Fleet-Source-Kind');
       fleetSource = { path: path && /^\/[\x20-\x7e]{1,200}$/.test(path) ? path : null, kind: ['stored', 'example'].includes(kind) ? kind : null };
     }
-    settle('fleet-config', acceptRead('fleet-config', res.status === 200
-      ? { status: 200, payload: res.payload, receivedAt: res.headers.get('X-Joe-Received-At') ?? undefined }
-      : { status: res.status, redirected: res.redirected, payload: res.payload }, feeds['fleet-config']));
+    settle('fleet-config', accepted);
     onChange('fleet');
   }
 

@@ -277,7 +277,7 @@ function syncDraft() {
   const ch = new Set(M.changes(state));
   for (const el of $$('#setMain [data-saved]')) {
     const k = el.dataset.saved, on = ch.has(k);
-    const text = `Saved: ${M.savedText(M.FIELD[k], state.base[k])}`;
+    const text = `${state.readAvailable ? 'Saved' : 'Last good'}: ${M.savedText(M.FIELD[k], state.base[k])}`;
     if (el.textContent !== text) el.textContent = text;
     el.title = text;
     if (el.classList.contains('on') !== on) el.classList.toggle('on', on);
@@ -384,8 +384,8 @@ function sourceHtml(ctx) {
   return [
     ['Format', `${c ? `<span class="mono">${esc(c.$schema)}</span>` : na} ${keyCode('$schema')}`],
     ['Format name', `${c ? `<span class="mono">${esc(c.schema)}</span>` : na} ${keyCode('schema')}`],
-    [`Saved ${term('version', 'version')}`, `${c ? `Version ${M.vnum(c.rev)} · <span class="mono">${esc(c.rev)}</span>` : na} ${keyCode('rev')}`],
-    ['Saved at', `${c ? `${dateTimeFull(c.updatedAt)} Vienna` : na} ${keyCode('updatedAt')}`],
+    [`${c && !state.readAvailable ? 'Last good' : 'Saved'} ${term('version', 'version')}`, `${c ? `Version ${M.vnum(c.rev)} · <span class="mono">${esc(c.rev)}</span>` : na} ${keyCode('rev')}`],
+    [c && !state.readAvailable ? 'Last good saved at' : 'Saved at', `${c ? `${dateTimeFull(c.updatedAt)} Vienna` : na} ${keyCode('updatedAt')}`],
     ['File the board reads', file],
     ['Last sent', lastText],
   ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
@@ -409,8 +409,7 @@ function logHtml(ctx) {
 
 // ---------- The edit bar ----------
 function renderBar(ctx) {
-  const failed = !state.config && Boolean(ctx?.feeds['fleet-config']?.reason);
-  const b = M.bar(state, { failed });
+  const b = M.bar(state);
   const toneIcon = { ok: 'ok', warn: 'half', bad: 'stop', none: 'ring' }[b.tone];
   const lead = b.state === 'unavailable' ? `${term('fleet', 'Fleet settings')} unavailable` : esc(b.lead);
   const note = `<span class="note-i tone-${b.tone}">${icon(toneIcon)}</span><span class="note-t"><b>${lead}</b>${b.rest ? ` · ${esc(b.rest).replace(/revision changed to (fc-\d{6})/, 'revision changed to <span class="mono">$1</span>')}` : ''}</span>`;
@@ -426,7 +425,7 @@ export function renderSettings(ctx) {
   lastCtx = ctx;
   const config = loadedConfig(ctx);
   const before = state;
-  state = M.adopt(state, config);
+  state = M.adopt(state, config, ctx.feeds['fleet-config']?.reason ?? null);
   if (!restored && state.config) {
     restored = true;
     let text = null;
@@ -445,7 +444,7 @@ export function renderSettings(ctx) {
   patch($('#rtRows'), runtimeHtml(ctx));
   patch($('#srcFacts'), sourceHtml(ctx));
   patch($('#log'), logHtml(ctx));
-  const sub = state.config ? `${term('fleet', 'Fleet settings')} version ${M.vnum(state.config.rev)} · paper only` : `${term('fleet', 'Fleet settings')} ${ctx.feeds['fleet-config']?.reason ? 'unavailable' : 'loading'} · paper only`;
+  const sub = state.config ? `${term('fleet', 'Fleet settings')} ${state.readAvailable ? '' : 'unavailable · last good '}version ${M.vnum(state.config.rev)} · paper only` : `${term('fleet', 'Fleet settings')} ${ctx.feeds['fleet-config']?.reason ? 'unavailable' : 'loading'} · paper only`;
   patch($('#setSub'), sub);
   syncTheme();
   renderBar(ctx);
