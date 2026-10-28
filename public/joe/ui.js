@@ -3,6 +3,7 @@
 import { TERMS } from './terms.js';
 import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol, cashAmount } from './format.js';
 import { cellReason, capital, CELL_REASON } from './health.js';
+import { NOT_EXACT_REASONS } from './board-state.js';
 
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -247,9 +248,9 @@ export function statePhrase(cell, key, held = 'last good value', sharedReason = 
   const localWhy = why !== sharedReason ? why : null;
   const suffix = localWhy ? ` · ${esc(localWhy)}` : '';
   const ago = () => ageSpan(key, cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`);
+  if (cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason)) return { tone: 'none', icon: 'info',
+    text: `not exact yet${localWhy === 'not exact yet' ? '' : suffix}`, state };
   if (state === 'fresh') return { tone: 'ok', text: '', state };
-  if (cell?.value == null && cell?.reason === 'not_exact_yet') return { tone: 'none', icon: 'info',
-    text: `${state === 'not reported' ? 'not reported' : 'unavailable'}${suffix}`, state };
   if (state === 'not reported') return { tone: 'none', text: `not reported${suffix}`, state };
   if (cell.value == null) return { tone: 'bad', text: `unavailable${why ? suffix : ' · not available'}`, state };
   if (cell.retained) return { tone: 'warn', text: `${held}, ${ago()}${suffix}`, state };

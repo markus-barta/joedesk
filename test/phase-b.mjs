@@ -11,10 +11,10 @@ import { atomicWrite } from '../server/storage.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { scenario, NOW, at, advance } from '../scripts/browser/board.mjs';
-const { heroLeft, positionsHtml, keptHtml, positionSectionReason, cellView, compactDesk } = await import('../public/joe/desk.js');
+const { heroLeft, positionsHtml, keptHtml, positionSectionReason, cellView, compactDesk, headerHealth, healthPop } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { todayPercent, sincePercent } = await import('../public/joe/performance.js');
-const { cellReason } = await import('../public/joe/health.js');
+const { cellReason, boardHealthPresentation } = await import('../public/joe/health.js');
 const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
 
 const read = name => JSON.parse(readFileSync(new URL(`../fixtures/${name}.json`, import.meta.url)));
@@ -38,6 +38,34 @@ const rejects = (data, path, rule) => {
   assert.equal(result.ok, false);
   assert.ok(result.errors.some(e => e.path === path && e.rule === rule), JSON.stringify(result.errors));
 };
+
+for (const reason of NOT_EXACT_REASONS) test(`JOED-103: ${reason} equity keeps the rendered header green with a not-exact Details line`, () => {
+  const data = structuredClone(exact);
+  data.desks[0].money.equity = null;
+  data.desks[0].money.reasons = { equity: reason };
+  const ctx = context(data);
+  ctx.states = boardStates(ctx.feeds, ctx.now);
+  const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
+  assert.equal(health.tone, 'green');
+  assert.match(headerHealth(ctx, health).html, /tone-ok/);
+  assert.match(healthPop(ctx, health), /Desk values are not exact yet/);
+  assert.doesNotMatch(healthPop(ctx, health), /money is unavailable/);
+});
+
+test('JOED-103: the shipped mixed Phase B snapshot is not red; unexplained missing equity is still red', () => {
+  const ctx = context(mixed);
+  ctx.states = boardStates(ctx.feeds, ctx.now);
+  const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
+  assert.equal(health.tone, 'yellow', 'the existing regular-hours Today warning remains');
+  assert.equal(health.reason, 'day_pending');
+  assert.match(headerHealth(ctx, health).html, /tone-warn/);
+  assert.match(healthPop(ctx, health), /Desk values are not exact yet/);
+  const fault = context(exact);
+  fault.states['desks.j.equity'] = { state: 'broken', value: null, reason: null };
+  const red = boardHealthPresentation(fault.states, fault.feeds, fault.now);
+  assert.equal(red.tone, 'red');
+  assert.match(headerHealth(fault, red).html, /tone-bad/);
+});
 
 test('JOED-97 M1: replay the browser journey through the read model before asserting its Today wording', async t => {
   const dataDir = scratch('joed-97-journey-');
@@ -64,7 +92,7 @@ test('JOED-97 M1: replay the browser journey through the read model before asser
     const card = htmlDocument(deskCard(ctx, id, 50, true));
     const lines = card.querySelectorAll('.mini-label .st');
     const text = card.querySelector('.mini-label').textContent;
-    assert.ok(text.startsWith('Today: unavailable · waiting on the start-of-day value'), text);
+    assert.ok(text.startsWith('Today: not exact yet · waiting on the start-of-day value'), text);
     assert.equal(states[`desks.${id}.dayPnl`].value, null);
     assert.equal(states[`desks.${id}.openPnl`].retained, true);
     assert.ok(todayPattern.test(lines[0].textContent), text);

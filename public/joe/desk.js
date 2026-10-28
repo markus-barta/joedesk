@@ -12,7 +12,7 @@ import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
 import { STARTING_MONEY, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
-import { outageValue, withGenerationAge } from './board-state.js';
+import { NOT_EXACT_REASONS, outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -61,13 +61,15 @@ export function disclosureProblem(candidates) {
   const problems = candidates.flatMap(([label, cell]) => {
     const p = statePhrase(cell, '');
     if (p.state === 'fresh') return [];
-    const state = cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
+    const inexact = cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason);
+    const state = inexact ? 'not exact yet' : cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
       : p.state === 'not reported' ? 'not reported' : 'unavailable';
     const reason = cell?.reason ?? (p.state === 'not reported' ? 'feed_not_received' : null);
     // Unavailable money leads even when its honest not-exact icon is neutral;
     // an old check-in must not obscure that the row's figures are unknown.
     const priority = cell?.state === 'broken' || state === 'unavailable' ? 3 : severity[p.tone];
-    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, reason: reason ? cellReason(reason) : null, label: `${label}: ${state}` }];
+    const why = reason ? cellReason(reason) : null;
+    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, reason: why === state ? null : why, label: `${label}: ${state}` }];
   });
   problems.sort((a, b) => b.priority - a.priority || severity[b.tone] - severity[a.tone]);
   if (!problems.length) return null;

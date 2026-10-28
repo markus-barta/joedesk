@@ -28,7 +28,7 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 
 const { acceptSnapshot } = await import('../contracts/accept.mjs');
 const { panelStates } = await import('../contracts/panel-state.mjs');
-const { boardStates } = await import('../public/joe/board-state.js');
+const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
 const { isRTH } = await import('../time.mjs');
 const format = await import('../public/joe/format.js');
 const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await import('../public/joe/ui.js');
@@ -37,7 +37,7 @@ const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus, headerHealth, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
 const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { createFeed } = await import('../public/joe/feed.js');
@@ -153,10 +153,14 @@ test('hero captions: every reason reserves retained, stale, broken and null word
   assert.ok(phrases.includes('after fees'));
   assert.ok(phrases.includes('Not reported'));
   assert.ok(phrases.includes('Unavailable · not available'));
-  for (const why of new Set(Object.values(health.CELL_REASON))) {
+  for (const [reason, why] of Object.entries(health.CELL_REASON)) {
     const escaped = format.esc(why), capital = health.capital(escaped);
-    assert.ok(phrases.includes(`Unavailable · ${escaped}`), why);
-    assert.ok(phrases.includes(`Not reported · ${escaped}`), why);
+    if (NOT_EXACT_REASONS.has(reason)) {
+      assert.ok(phrases.includes(`Not exact yet${why === 'not exact yet' ? '' : ` · ${escaped}`}`), why);
+    } else {
+      assert.ok(phrases.includes(`Unavailable · ${escaped}`), why);
+      assert.ok(phrases.includes(`Not reported · ${escaped}`), why);
+    }
     for (const ago of ['999 days ago', '23 h 59 min ago', 'age unknown']) {
       assert.ok(phrases.includes(`Last good value, ${ago} · ${escaped}`), why);
       assert.ok(phrases.includes(`As of ${ago} · ${escaped}`), why);
@@ -809,7 +813,7 @@ test('health: not-exact switch values keep Board OK and one neutral Details fact
     const html = cardStatus(id, ['dayPnl', 'openPnl', 'totalPnl'].map(field => [field, b.states[`desks.${id}.${field}`]]));
     assert.match(html, /class="st none"/);
     assert.match(html, /href="#i-info"/);
-    assert.match(html, /Numbers: unavailable · not exact yet/);
+    assert.match(html, /Numbers: not exact yet/);
     assert.doesNotMatch(html, /st bad|#i-stop/);
   }
 });
@@ -823,6 +827,17 @@ test('health: any other missing equity reason stays red, including a missing cel
     }
     const b = notExactBoard(); delete b.states[name];
     assert.equal(health.localBoardHealth(b.states, b.feeds, b.now).reason, 'equity_unavailable');
+  }
+});
+
+test('JOED-103 health: every shared not-exact reason on every equity surface has a green header and Details fact', () => {
+  for (const reason of NOT_EXACT_REASONS) for (const name of ['today.equity', 'desks.j.equity', 'desks.joe.equity', 'desks.joel.equity']) {
+    const b = board(fixture('e-layout-storage-unavailable'));
+    b.states[name] = { state: 'broken', value: null, reason };
+    const p = health.boardHealthPresentation(b.states, b.feeds, b.now);
+    assert.equal(p.tone, 'green', `${name}: ${reason}`);
+    assert.match(headerHealth(b, p).html, /tone-ok/);
+    assert.match(healthPop(b, p), /Desk values are not exact yet/);
   }
 });
 
@@ -893,9 +908,11 @@ test('health: the single NOT_EXACT_TONE constant can opt into yellow, after othe
 });
 
 test('cell presentation: null not-exact values use neutral info; other failures and retained values keep their tone', () => {
-  for (const state of ['broken', 'stale', 'not reported']) {
-    const p = statePhrase({ state, value: null, reason: 'not_exact_yet' }, 'test');
+  for (const reason of NOT_EXACT_REASONS) for (const state of ['broken', 'stale', 'not reported', 'fresh']) {
+    const p = statePhrase({ state, value: null, reason }, 'test');
     assert.deepEqual([p.tone, p.icon], ['none', 'info']);
+    assert.match(p.text, /^not exact yet/);
+    assert.doesNotMatch(p.text, /unavailable/);
     assert.match(st(p.tone, p.text, p.icon), /class="st none".*href="#i-info"/);
   }
   for (const reason of ['source_unavailable', 'gateway_unconfirmed', null]) {
@@ -1027,7 +1044,7 @@ test('desk cards: every affected number keeps its own state, age and reason', ()
     ['Since 10 Sep', cell('broken', 'gateway_down', '4.5', '2026-10-14T17:40:00.000Z')],
   ]);
   const text = lines.replace(/<[^>]+>/g, '');
-  assert.match(text, /Today: unavailable · today’s result not available/);
+  assert.match(text, /Today: not exact yet · today’s result not available/);
   assert.match(text, /Open positions: last good, 2\smin ago · broker connection down/);
   assert.match(text, /Since 10 Sep: last good, 5\smin ago$/);
   assert.equal(text.match(/broker connection down/g).length, 1, 'the shared reason stays visible once while both ages remain');
@@ -1048,7 +1065,7 @@ test('section reasons: repeated readable reasons share once; single and fresh re
   assert.deepEqual(cells, before, 'presentation never changes selector states');
   const summary = disclosureProblem(cells.map((cell, i) => [`Field ${i}`, cell]));
   assert.equal(summary.detail.match(/broker connection down/g).length, 1);
-  assert.match(summary.detail, /Field 0: unavailable · not exact yet/);
+  assert.match(summary.detail, /Field 0: not exact yet/);
 });
 
 test('broker down: Positions and Kept show one section reason and accessible field-specific dashes', () => {
@@ -1145,7 +1162,7 @@ test('broker down: opened Account explains its figures once inside its own body'
     assert.equal(doc.querySelector('.collapsed-summary .summary-text').textContent.match(/broker connection down/g).length, 1);
     assert.doesNotMatch(doc.querySelector('.expanded-summary')?.textContent ?? '', /broker connection down/);
     ctx.states['today.openPnl'] = { state: 'broken', value: null, reason: 'not_exact_yet' };
-    assert.match(htmlDocument(heroLeft(ctx)).querySelector('#accountDetail').textContent, /Unavailable · not exact yet/);
+    assert.match(htmlDocument(heroLeft(ctx)).querySelector('#accountDetail').textContent, /Not exact yet/);
   }
   const ctx = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
   for (const seconds of [0, 90]) {
@@ -1190,7 +1207,7 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
   }
   ctx.states['today.openPnl'] = { state: 'broken', value: null, reason: 'not_exact_yet' };
   const different = htmlDocument(heroLeft(ctx));
-  assert.equal(different.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Unavailable · not exact yet');
+  assert.equal(different.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Not exact yet');
   assert.equal(different.querySelector('[data-cell="hero.open"] .bn').getAttribute('aria-label'), 'Open positions: not reported · not exact yet');
   const cold = board(fixture('a-gateway-up-but-dead'), { cold: true });
   const coldHero = htmlDocument(heroLeft(cold));

@@ -45,10 +45,14 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
         keeps: [...document.querySelectorAll('[data-keep]')].map(e => ({ symbol: e.dataset.keep, actions: e.querySelectorAll('button, a, input, [tabindex]').length })),
         overflow: document.documentElement.scrollWidth > innerWidth,
         mode: document.getElementById('modeLabel')?.innerText,
+        headerTone: document.getElementById('hdrHealth')?.dataset.tone,
+        details: document.getElementById('healthPop')?.textContent,
       };
     })()`);
     let result = await inspect();
     if (mixed) {
+      check('phase-b', `${tag}: withheld values keep the existing Today warning, never a red header, with the not-exact status fact`,
+        result.headerTone === 'warn' && /Desk values are not exact yet/.test(result.details), result);
       check('phase-b', `${tag}: incomplete totals stay dashes with no percentage`, result.day === '—' && result.since === '—' && result.percentages.length === 0, result);
       check('phase-b', `${tag}: independent exact desk survives ledger and SOD failures`, /desk ledger not reconciled/.test(result.j) && /start-of-day value missing/.test(result.joe) && result.joel.includes('+€5,00'), result);
       check('phase-b', `${tag}: stale conid has accessible nulls and one section reason; the fresh conid keeps its worth`,

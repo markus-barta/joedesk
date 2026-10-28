@@ -5,6 +5,7 @@ import { feedAge, panelState } from './contracts/panel-state.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { isRTH } from './time.mjs';
 import { age } from './format.js';
+import { NOT_EXACT_REASONS } from './board-state.js';
 
 // The contract's freshness bound: two 30-second producer cadences.
 export const STALE_AFTER_S = 60;
@@ -82,7 +83,7 @@ const DESKS = ['j', 'joe', 'joel'];
 const TRANSPORT = ['refresh_failed', 'auth_required', 'route_not_found'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
 const EQUITY_CELLS = ['today.equity', ...DESKS.map(id => `desks.${id}.equity`)];
-const notExact = cell => cell?.value == null && cell?.reason === 'not_exact_yet';
+const notExact = cell => cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason);
 export const deskValuesNotExact = states => EQUITY_CELLS.some(name => notExact(states[name]));
 // Today's carried valuation: equity and total result retained from a last good value.
 const CARRIED_CELLS = ['today.equity', 'today.totalPnl', ...DESKS.flatMap(id => [`desks.${id}.equity`, `desks.${id}.totalPnl`])];

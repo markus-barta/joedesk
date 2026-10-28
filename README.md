@@ -1997,3 +1997,9 @@ Reserve `261028081016.0.0` at `2026-10-28T08:10:16Z`, stable sequence 36, for JO
 Sequence 35 is deployed from main `2d36c7b439c679fc37b05940890652aa9414e200`.
 Keep revision-10 contracts, the shared presentation pin and historical artifacts.
 The coordinator owns browser validation, review, publication and deployment.
+
+JOED-103: board health and cell captions use `NOT_EXACT_REASONS` from
+`board-state.js`. Deliberately withheld values show a neutral info icon and
+“not exact yet”; Details includes “Desk values are not exact yet”. Missing
+equity without a reason and real transport, feed or broker faults retain their
+existing health rules. No shared contract or retention policy changes.
