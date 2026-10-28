@@ -77,6 +77,23 @@ export function boardStates(feeds, now, previous = {}) {
       ...(expired ? { outageExpired: true } : {}),
     };
   }
+  // Recheck policy after every prior-array fallback, including retained_values.
+  // Withhold moved rows rather than inventing new scope/desk evidence or age.
+  const keep = new Set(['SXR8', 'TSLA', ...(feeds['fleet-config']?.value?.desks.keep ?? [])]);
+  const affectedDesks = new Set();
+  for (const row of [...(data?.positions?.rows ?? []), ...(states.positions.value ?? []), ...(states.kept.value ?? [])]) {
+    if (keep.has(row.symbol) !== (row.scope === 'keep') || (keep.has(row.symbol) && row.desk !== null))
+      for (const id of row.desk ? [row.desk] : DESKS) affectedDesks.add(id);
+  }
+  for (const name of ['positions', 'kept']) {
+    const cell = states[name];
+    if (cell.value) states[name] = { ...cell, value: cell.value.filter(row => keep.has(row.symbol) === (name === 'kept')) };
+  }
+  // A changed partition invalidates affected prior desk amounts too.
+  for (const id of affectedDesks) for (const field of MONEY_FIELDS) {
+    const name = `desks.${id}.${field}`;
+    states[name] = withheld(states[name], states[name].reason ?? 'source_not_authoritative');
+  }
   // An outage can retain an older position list, but current per-field
   // exactness failures still invalidate those same older fields.
   const currentRows = new Map((data?.positions?.rows ?? []).map(row => [positionKey(row), row]));

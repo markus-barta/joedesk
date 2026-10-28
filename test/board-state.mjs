@@ -2,6 +2,9 @@
 import assert from 'node:assert/strict';
 import fs, { readFileSync } from 'node:fs';
 import { createReadModel } from '../server/read-model.mjs';
+import { createJoeServer } from '../server.mjs';
+import { EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
 import { test } from 'node:test';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { heroWordingFixtures } from '../scripts/browser/hero-wording-fixtures.mjs';
@@ -446,6 +449,63 @@ test('retained position rows cannot feed kept-worth sums or relative bars; per-f
   assert.equal(htmlDocument(positionsHtml(view).html).querySelectorAll('.vbar i').length, 0);
   const expired = ctx(data, RETENTION_SECONDS, 'refresh_failed');
   for (const name of ['positions', 'kept', 'paperAccount']) assert.equal(expired.states[name].value, null, name);
+});
+
+for (const fallback of ['gateway_expiry', 'retained_values', 'failed_read']) test(`JOED-129: current KEEP filters prior arrays after ${fallback}`, () => {
+  const data = structuredClone(exact);
+  data.safety.gateway.checkedAt = at(-50);
+  const policy = structuredClone(JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)))['fleet-config']);
+  const model = createReadModel({ dataDir: '/__joed129_board_memory_only__', clock: () => at(0), write: () => {} });
+  assert.equal(model.observeFleet(policy).ok, true);
+  const ingress = structuredClone(data); delete ingress.receivedAt;
+  assert.equal(model.accept(ingress).ok, true);
+  const before = boardStates(model.feeds(), at(0), model.panels());
+  const symbol = data.positions.rows.find(row => row.scope === 'stage0').symbol;
+  assert.ok(before.positions.value.some(row => row.symbol === symbol));
+  policy.desks.keep.push(symbol); policy.rev = 'fc-000013'; policy.updatedAt = at(10);
+  assert.equal(model.observeFleet(policy).ok, true);
+  const feeds = structuredClone(model.feeds());
+  if (fallback === 'retained_values') {
+    feeds.data.value.positions.reason = 'retained_values';
+    feeds.data.value.safety.gateway.checkedAt = at(0);
+    feeds.data.gatewayProgress = { checkedAt: at(0), advancedAt: at(0), initialAgeMs: 0 };
+  }
+  if (fallback === 'failed_read') feeds.data.reason = 'refresh_failed';
+  const states = boardStates(feeds, at(10), before);
+  const view = { feeds, states, now: at(10) };
+  assert.equal(states.positions.value.some(row => row.symbol === symbol), false, 'new KEEP symbol cannot retain desk attribution');
+  assert.equal(resultsView(view).positions.some(row => row.symbol === symbol), false, 'withheld row cannot supply a desk contribution note');
+  assert.equal(htmlDocument(positionsHtml(view).html).querySelectorAll('.prow:not(.hd) .name b')
+    .some(node => node.textContent === symbol), false);
+  // Withhold the moved row until producer scope agrees. Existing KEEP rows
+  // retain their own provenance and exactness rather than borrowing its age.
+  assert.deepEqual(states.kept.value.map(row => row.symbol), before.kept.value.map(row => row.symbol));
+  for (const name of ['positions', 'kept']) {
+    assert.equal(states[name].retained, true);
+    assert.equal(states[name].valueReceivedAt, before[name].valueReceivedAt);
+    assert.equal(states[name].ageSeconds, 10);
+    assert.equal(states[name].reason, fallback === 'gateway_expiry' ? 'gateway_unconfirmed'
+      : fallback === 'failed_read' ? 'refresh_failed' : 'retained_values');
+  }
+  for (const field of MONEY_FIELDS) {
+    assert.equal(states[`desks.j.${field}`].value, null, 'current KEEP invalidates older affected desk figures');
+    assert.equal(states[`today.${field}`].value, null);
+  }
+  assert.equal(states.paperAccount.value.amount, exact.brokerAccount.equity.amount);
+});
+
+test('JOED-129: retained KEEP arrays also obey removal and the mandatory SXR8/TSLA floor', () => {
+  const data = structuredClone(exact), moved = data.positions.rows.find(row => row.scope === 'stage0');
+  data.safety.gateway.checkedAt = at(-50);
+  moved.scope = 'keep'; moved.desk = null;
+  const policy = { desks: { keep: [moved.symbol] } };
+  const before = boardStates({ data: { value: data }, 'fleet-config': { value: policy } }, at(0));
+  const feeds = { data: { value: data, reason: 'refresh_failed' }, 'fleet-config': { value: { desks: { keep: [] } } } };
+  const states = boardStates(feeds, at(10), before);
+  assert.deepEqual(states.kept.value.map(row => row.symbol).sort(), ['SXR8', 'TSLA']);
+  assert.equal(states.positions.value.some(row => row.symbol === moved.symbol), false, 'no invented desk evidence for a formerly kept row');
+  assert.equal(states.kept.valueReceivedAt, before.kept.valueReceivedAt);
+  assert.equal(states.kept.ageSeconds, 10);
 });
 
 test('caption sizing markup remains unchanged across retention and expiry', () => {
@@ -1023,5 +1083,105 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
     assert.equal(cold.hasData(), true); assert.equal(cold.feeds().data.value.seq, fixture.seq);
     candidate.desks[0].action = candidate.desks[0].action.slice(0, -1);
     assert.equal(cold.accept(candidate).status, 200, 'rejected sequence is still available');
+  });
+}
+
+// JOED-129 request-listener regressions: memory-only, no sockets or host stores.
+{
+  const fixture = JSON.parse(fs.readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
+  const starter = JSON.parse(fs.readFileSync(new URL('../public/joe/fleet-config.example.json', import.meta.url)));
+
+  function harness(t) {
+    const root = '/__joed129_memory_only__';
+    const current = structuredClone(starter); current.rev = 'fc-000019';
+    const files = new Map([[`${root}/fleet-config.json`, JSON.stringify(current)]]);
+    const fds = new Map(); let fd = 1000000, actionWrites = 0, seconds = 0;
+    const faults = { receipt: false, finalize: false };
+    const virtual = p => typeof p === 'string' && p.startsWith(`${root}/`);
+    const missing = () => { throw Object.assign(new Error('synthetic missing'), { code: 'ENOENT' }); };
+    for (const name of ['existsSync', 'openSync', 'fstatSync', 'readFileSync', 'closeSync']) {
+      const original = fs[name];
+      t.mock.method(fs, name, (p, ...args) => {
+        const key = fds.get(p) ?? p;
+        if (!virtual(key)) return original(p, ...args);
+        if (name === 'existsSync') return files.has(key);
+        if (!files.has(key)) return missing();
+        if (name === 'openSync') { const n = fd++; fds.set(n, key); return n; }
+        if (name === 'fstatSync') return { size: Buffer.byteLength(files.get(key)) };
+        if (name === 'closeSync') return fds.delete(p);
+        return args[0] === 'utf8' ? files.get(key) : Buffer.from(files.get(key));
+      });
+    }
+    t.mock.method(fs, 'mkdirSync', p => assert.ok(p === root || virtual(p)));
+    t.mock.method(fs, 'chmodSync', p => assert.ok(virtual(p)));
+    t.mock.method(fs, 'writeFileSync', (p, value) => {
+      assert.ok(virtual(p));
+      if (p.endsWith('fleet-config-actions.json.next') && ++actionWrites === 2 && faults.finalize)
+        throw new Error('synthetic audit failure');
+      files.set(p, String(value));
+    });
+    t.mock.method(fs, 'renameSync', (a, b) => {
+      assert.ok(virtual(a) && virtual(b)); files.set(b, files.get(a)); files.delete(a);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+    const now = () => new Date(Date.parse(fixture.data.receivedAt) + seconds * 1000).toISOString();
+    const server = createJoeServer({ dataDir: root, clock: now, inboxToken: 'synthetic-fixture-only',
+      write: (p, value) => {
+        assert.ok(virtual(p));
+        if (faults.receipt && p.endsWith('fleet-receipt.json')) throw new Error('synthetic receipt failure');
+        files.set(p, JSON.stringify(value));
+      } });
+    async function request(url, { method = 'GET', headers = {}, body } = {}) {
+      const req = new EventEmitter();
+      Object.assign(req, { url, method, headers: { host: 'fixture.invalid', 'x-auth-request-user': 'fixture', ...headers } });
+      let status, payload;
+      const res = { writeHead(s) { status = s; }, end(b) { payload = String(b ?? ''); } };
+      const done = server.listeners('request')[0](req, res);
+      if (body !== undefined) queueMicrotask(() => { req.emit('data', Buffer.from(body)); req.emit('end'); });
+      await done;
+      return { status, body: JSON.parse(payload) };
+    }
+    const propagate = () => {
+      const candidate = structuredClone(current); candidate.desks.keep.push('DEMO');
+      return request('/joe/fleet-config/propagate', { method: 'POST',
+        headers: { origin: 'http://fixture.invalid', 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
+        body: JSON.stringify({ baseRev: current.rev, config: candidate }) });
+    };
+    return { model: server.readModel, faults, request, propagate, now,
+      time: value => { seconds = value; }, stored: name => JSON.parse(files.get(`${root}/${name}.json`)) };
+  }
+
+  for (const mode of ['control', 'receipt', 'finalize']) test(`JOED-129 F1: ${mode} enforces committed KEEP before later inbox/history`, async t => {
+    const h = harness(t); h.faults[mode] = true;
+    const sent = await h.propagate();
+    assert.equal(h.stored('fleet-config').rev, 'fc-000020');
+    assert.equal(h.model.feeds()['fleet-config'].value.rev, 'fc-000020', 'committed policy is effective despite ancillary failure');
+    assert.equal(sent.status, mode === 'control' ? 200 : mode === 'receipt' ? 503 : 500);
+    assert.equal(sent.body.ok, mode === 'control');
+    assert.equal(h.stored('fleet-config-actions').entries.at(-1).outcome, mode === 'control' ? 'success' : 'pending');
+    const data = structuredClone(fixture.data); delete data.receivedAt;
+    const pushed = await h.request('/joe/inbox', { method: 'POST',
+      headers: { authorization: 'Bearer synthetic-fixture-only' }, body: JSON.stringify(data) });
+    assert.equal(pushed.status, 200);
+    assert.equal(h.model.panels()['desks.j.equity'].reason, 'source_not_authoritative');
+    for (const field of MONEY_FIELDS) {
+      assert.equal(h.model.feeds().history.value.points.at(-1).desks.j.money[field], null);
+      assert.equal(h.model.feeds().history.value.points.at(-1).totals[field], null);
+    }
+    h.time(10);
+    if (mode === 'receipt') {
+      assert.equal((await h.request('/joe/fleet-config.json')).status, 503, 'failed receipt is retried, never silently acknowledged');
+      assert.equal(h.stored('fleet-receipt').value.rev, 'fc-000019');
+    }
+    h.faults.receipt = false;
+    assert.equal((await h.request('/joe/fleet-config.json')).status, 200);
+    assert.equal(h.stored('fleet-receipt').value.rev, 'fc-000020');
+    assert.equal(h.stored('fleet-receipt').receivedAt, fixture.data.receivedAt, 'retry preserves the policy observation age');
+    assert.equal(h.model.feeds().history.value.points.at(-1).desks.j.money.equity, null);
+    console.log('F1', JSON.stringify({ mode, status: sent.status, ok: sent.body.ok,
+      diskRev: h.stored('fleet-config').rev, modelRev: h.model.feeds()['fleet-config'].value.rev,
+      newKeepActive: true, pushAccepted: true, deskReason: h.model.panels()['desks.j.equity'].reason,
+      historyRecordedDeskValue: false, recoveryReceiptRev: h.stored('fleet-receipt').value.rev }));
   });
 }

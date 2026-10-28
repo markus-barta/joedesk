@@ -568,6 +568,14 @@ async function handleFleetPropagate(req, res) {
     return;
   }
 
+  // The source replacement has committed. Enforce it before receipt/audit
+  // failures can return, and leave the durable audit pending on failure.
+  const observed = model.observeFleet(next);
+  if (!observed.ok) {
+    sendJson(res, observed.status ?? 503, { ok: false, error: "fleet config stored but policy observation failed", currentRev: next.rev });
+    return;
+  }
+
   let action;
   try {
     action = fleetAction({
@@ -589,7 +597,6 @@ async function handleFleetPropagate(req, res) {
     return;
   }
 
-  model.observeFleet(next);
   sendJson(res, 200, {
     ok: true,
     rev: next.rev,

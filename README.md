@@ -1461,6 +1461,16 @@ An unknown worth has no visible bar track; the hidden track retains its space.
 KEEP rows have no worth track. Amy's switch
 snapshot keeps their values null with `not_exact_yet`; the row shows em
 dashes with each value's own reason, without partial totals.
+An accepted KEEP change applies as soon as the settings file is replaced,
+before receipt persistence or action-log finalization. A failure in either
+step returns an error and leaves the audit pending; later data pushes and
+history still use the new policy. Failed receipt writes retry without renewing
+the policy observation's age. After any position-list fallback, including
+`retained_values`, the board filters both lists against the current KEEP
+partition and its mandatory SXR8/TSLA floor. Moved rows are withheld until
+matching producer evidence is available, preserving the lists' original age
+and exactness. They cannot supply desk figures or Results position notes;
+affected prior desk amounts and household totals are withheld too.
 `fixtures/positions-unmapped.json` supplies this synthetic row. P5's existing
 `positions` scenario adds real-ingress, accessible-copy, neutral-identity,
 ordering, row-count, figure-exclusion and exact 0 px cash/KPI/card movement checks,
