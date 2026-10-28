@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { CONTRACTS, REASONS, validateContract } from '../contracts/index.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
 import { panelStates, panelState, DATA_PANELS, MONEY_FIELDS } from '../contracts/panel-state.mjs';
@@ -314,7 +315,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       rejections['fleet-config'] = 'refresh_failed'; return failed(503, 'refresh_failed');
     }
     if (fleet?.value.rev === value.rev) {
-      if (JSON.stringify(fleet.value) !== JSON.stringify(value)) { rejections['fleet-config'] = 'contract_invalid'; return failed(503, 'contract_invalid'); }
+      if (!isDeepStrictEqual(fleet.value, value)) { rejections['fleet-config'] = 'contract_invalid'; return failed(503, 'contract_invalid'); }
       delete rejections['fleet-config']; return { ok: true };
     }
     const now = clock();
