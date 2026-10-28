@@ -417,21 +417,13 @@ test('JOED-117 rendered Settings: a failed warm read labels last-good values and
   const realDocument = globalThis.document;
   const doc = htmlDocument('<nav id="setNav"></nav><main id="setMain"></main><p id="setSub"></p><div id="editbar"><p id="editNote"></p><button id="discardBtn"></button><button id="savePreview"></button><button id="reviewBtn"></button><button id="sendBtn"></button></div><dialog id="diffDlg" open><input id="diffReviewed" type="checkbox"></dialog><div id="toast"></div>');
   // Only the DOM operations used by the real render/update path; no browser.
+  const decorated = new WeakSet();
   const decorate = el => {
-    if (!el || el.classList) return el;
+    if (!el || decorated.has(el)) return el;
+    decorated.add(el);
     el.disabled = el.getAttribute('disabled') !== null;
     el.removeAttribute = key => { delete el.attributes[key]; };
     if (el.tagName === 'dialog') el.close = () => el.removeAttribute('open');
-    el.classList = {
-      contains: name => (el.getAttribute('class') ?? '').split(/\s+/).includes(name),
-      add(name) { this.toggle(name, true); },
-      remove(name) { this.toggle(name, false); },
-      toggle(name, on) {
-        const classes = new Set((el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean));
-        if (on) classes.add(name); else classes.delete(name);
-        el.setAttribute('class', [...classes].join(' '));
-      },
-    };
     return el;
   };
   const selectAll = doc.querySelectorAll.bind(doc);
