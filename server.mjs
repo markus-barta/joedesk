@@ -319,6 +319,8 @@ function send(res, status, body, headers = {}) {
   res.writeHead(status, {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "frame-ancestors 'none'",
+    "X-Frame-Options": "DENY",
     ...headers,
     // The deploy smoke distinguishes app responses from edge SSO denials.
     "X-JoeDesk-Origin": "app",
