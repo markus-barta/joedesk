@@ -1795,6 +1795,19 @@ nonempty text. Browser execution and the cross-family gate remain with the
 coordinator; the local fix uses only syntax, focused unit and release checks.
 Term underlines stay faint, dotted, 1 px thick and 3 px
 below the text, including on hover, focus and while their explanation is open.
+An unpinned term tip passes clicks through to other controls while its visible
+box remains part of the hover region. Crossing the trigger-to-tip gap allows
+150 ms; entering another term switches immediately, and moving elsewhere or
+pressing another control closes it. Tips leave the header Details control clear;
+opening Details closes the tip. Switching terms clears the old ARIA description.
+Escape leaves the explanation closed and keeps focus on its term. Explicitly
+focusing that same term again reopens its explanation, as focusing another term
+does; the browser emits no new focus event for an already-focused control.
+When native focus scrolls an offscreen term into view, its explanation follows
+the anchor through the first frame, including stationary-pointer boundary
+events caused by that scroll. Subsequent scrolling still closes a moved tip.
+The focused Node regression replays AC-39's hero click, Escape and desk focus
+with the pointer left at the click point, including the initial focus scroll.
 
 `node --test test/status-line.mjs` is the small local presentation suite, also
 included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,

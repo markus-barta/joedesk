@@ -188,7 +188,8 @@ test('term tips capture native focus, survive an unrelated Details close, and su
   const doc = { body, activeElement: null, querySelector: () => tip, addEventListener(type, fn, capture) {
     listeners.set(type, [...listeners.get(type) ?? [], fn]); captures.set(type, capture);
   } };
-  const globals = { document: doc, innerWidth: 1000, innerHeight: 800, addEventListener: (type, fn) => doc.addEventListener(type, fn) };
+  const globals = { document: doc, innerWidth: 1000, innerHeight: 800, requestAnimationFrame() {},
+    addEventListener: (type, fn) => doc.addEventListener(type, fn) };
   for (const [key, value] of Object.entries(globals)) {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
@@ -242,6 +243,12 @@ test('term tips capture native focus, survive an unrelated Details close, and su
     emit('focusout', button);
     assert.ok(!classes.has('on'));
   }
+  emit('click', outside);
+  emit('keydown', outside, { key: 'Escape' });
+  rebuilt.tip.focus(outside);
+  assert.ok(!classes.has('on'), 'a quiet rebuild handoff must preserve Escape dismissal');
+  outside.focus();
+  assert.ok(classes.has('on'), 'an explicit refocus after the handoff reopens the explanation');
   // Exercise the real tip render and its accessible description, not only
   // the time calculation. Rendering must never mutate the frozen dictionary.
   const { TERMS } = await import('../public/joe/terms.js');
@@ -267,6 +274,320 @@ test('term tips capture native focus, survive an unrelated Details close, and su
     emit('focusout', button);
   }
   assert.deepEqual(TERMS.today, original);
+});
+
+async function termTipFixture(t) {
+  const { initTips } = await import('../public/joe/ui.js');
+  const listeners = new Map(), classes = new Set(), frames = [];
+  const body = { append(el) { el.parentElement = this; } };
+  const tip = { style: {}, parentElement: body, offsetWidth: 200, offsetHeight: 80,
+    getBoundingClientRect() { const left = parseFloat(this.style.left), top = parseFloat(this.style.top);
+      return { left, top, right: left + this.offsetWidth, bottom: top + this.offsetHeight }; },
+    contains(el) { return el === this || el?.parentElement === this; },
+    closest(selector) { return selector === '#tip' ? this : null; },
+    classList: { add(...xs) { xs.forEach(x => classes.add(x)); }, remove(...xs) { xs.forEach(x => classes.delete(x)); },
+      toggle(x, yes) { yes ? classes.add(x) : classes.delete(x); } } };
+  const doc = { body, activeElement: null, querySelector: () => tip, getElementById: () => null,
+    addEventListener(type, fn) { listeners.set(type, [...listeners.get(type) ?? [], fn]); } };
+  const descriptors = new Map();
+  for (const [key, value] of Object.entries({ document: doc, innerWidth: 1000, innerHeight: 800,
+    requestAnimationFrame: fn => frames.push(fn),
+    addEventListener: (type, fn) => doc.addEventListener(type, fn) })) {
+    descriptors.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  }
+  const emit = (type, target, extra = {}) => {
+    let stopped = false;
+    const event = { type, target, pointerType: 'mouse', defaultPrevented: false,
+      preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() { stopped = true; }, ...extra };
+    for (const fn of listeners.get(type) ?? []) { fn(event); if (stopped) break; }
+    return event;
+  };
+  // Resolve the real stylesheet's tip hit-testing policy for an overlapping
+  // box; Node has no layout engine. Pointer coordinates are supplied by tests.
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  const hit = underneath => {
+    let events = 'auto';
+    for (const [, suffix, declarations] of css.matchAll(/\.tip(\.[\w-]+)?\s*\{([^}]+)\}/g)) {
+      if (suffix && !classes.has(suffix.slice(1))) continue;
+      const value = declarations.match(/pointer-events:\s*(\w+)\s*;/)?.[1];
+      if (value) events = value;
+    }
+    return classes.has('on') && events !== 'none' ? tip : underneath;
+  };
+  const anchor = term => ({ dataset: { term }, attrs: {},
+    closest(selector) { return selector.includes('[data-term]') ? this : null; },
+    contains(el) { return el === this || el?.parentElement === this; },
+    getBoundingClientRect: () => ({ left: 50, right: 100, top: 80, bottom: 100 }),
+    setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; },
+    focus() {
+      if (doc.activeElement === this) return;
+      const previous = doc.activeElement;
+      doc.activeElement = this;
+      if (previous) emit('focusout', previous, { relatedTarget: this });
+      emit('focus', this);
+    } });
+  const api = initTips();
+  t.after(() => {
+    api.hide();
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key];
+    }
+  });
+  return { emit, anchor, tip, classes, doc, api, hit, frame: () => frames.splice(0).forEach(fn => fn()) };
+}
+
+for (const width of [1024, 1440, 390]) test(`AC-39 at ${width}: focus survives its native scroll with the pointer at the hero click`, async t => {
+  const { emit, anchor, tip, classes, doc, frame } = await termTipFixture(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  globalThis.innerWidth = width;
+  globalThis.innerHeight = width === 1024 ? 768 : width === 1440 ? 1000 : 844;
+  const hero = anchor('today'), desk = anchor('today');
+  const pointer = { clientX: 75, clientY: 90 };
+  // The fresh design fixture omits heartbeat terms: both selectors find Today,
+  // but they are distinct controls. The 1024 hero has two supporting KPI rows;
+  // unlike __audit.visible, native focus must bring an offscreen desk into view.
+  let deskTop = width === 1024 ? 820 : 600;
+  desk.getBoundingClientRect = () => ({ left: 50, right: 100, top: deskTop, bottom: deskTop + 20 });
+  emit('pointerover', hero, pointer);
+  emit('pointerdown', hero, pointer);
+  hero.focus();
+  emit('click', hero, pointer);
+  frame();
+  emit('keydown', hero, { key: 'Escape' });
+  frame();
+  assert.ok(!classes.has('on'));
+  assert.equal(doc.activeElement, hero);
+
+  desk.focus(); // focus event runs before the native focus algorithm scrolls
+  assert.equal(doc.activeElement, desk);
+  assert.equal(desk.attrs['aria-expanded'], 'true', 'the new control is expanded synchronously');
+  if (width === 1024) {
+    deskTop = 374; // input geometry, not a browser pixel measurement
+    emit('scroll', doc);
+    assert.ok(classes.has('on'), 'the focus scroll itself must preserve the newly opened tip');
+    const background = { closest: () => null };
+    emit('pointerout', hero, { ...pointer, relatedTarget: background });
+    emit('pointerover', background, { ...pointer, relatedTarget: hero });
+  }
+  frame(); // settle() paints twice and then waits 30 ms
+  frame();
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'focus-induced scrolling must not dismiss its explanation');
+  assert.ok(!classes.has('pinned'));
+  assert.equal(desk.attrs['aria-expanded'], 'true');
+  assert.equal(desk.attrs['aria-describedby'], 'tip');
+  assert.equal(hero.attrs['aria-expanded'], 'false');
+  assert.equal(hero.attrs['aria-describedby'], undefined);
+  assert.ok(tip.innerHTML.startsWith('<b>Today</b>'));
+  const box = tip.getBoundingClientRect();
+  assert.equal(box.top, deskTop + 28, 'tip is placed against the anchor after native scrolling');
+  assert.ok(box.bottom <= innerHeight - 10 && box.top >= 10, 'tip follows the final visible anchor');
+  deskTop -= 20;
+  emit('scroll', doc);
+  assert.ok(!classes.has('on'), 'a later scroll still dismisses a moved anchor');
+});
+
+test('the initial focus frame yields to pointer movement, outside press and Escape', async t => {
+  const { emit, anchor, tip, classes, frame } = await termTipFixture(t);
+  const today = anchor('today'), broker = anchor('broker');
+  today.focus();
+  emit('pointermove', broker, { clientX: 75, clientY: 90 });
+  frame();
+  assert.ok(tip.innerHTML.startsWith('<b>Broker connection</b>'), 'a real move still switches terms immediately');
+  assert.equal(broker.attrs['aria-describedby'], 'tip');
+  assert.equal(today.attrs['aria-describedby'], undefined);
+  broker.focus();
+  today.focus();
+  emit('keydown', today, { key: 'Escape' });
+  frame();
+  assert.ok(!classes.has('on'), 'a queued focus placement never reopens an Escape-dismissed tip');
+  today.focus();
+  emit('pointerdown', { closest: () => null });
+  frame();
+  assert.ok(!classes.has('on'), 'an outside press cancels the focus handoff before the control action');
+});
+
+for (const same of [true, false]) test(`after pin and Escape, focusing ${same ? 'the same' : 'another'} term shows its explanation`, async t => {
+  const { emit, anchor, tip, classes, doc } = await termTipFixture(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const first = anchor('today'), next = same ? first : anchor('broker');
+  const originalFocus = first.focus;
+  first.focus(); // native pointer focus precedes the click
+  emit('click', first);
+  assert.ok(classes.has('on') && classes.has('pinned'));
+  emit('keydown', first, { key: 'Escape' });
+  assert.equal(doc.activeElement, first, 'Escape keeps focus on the term');
+  assert.ok(!classes.has('on'));
+  assert.equal(first.attrs['aria-expanded'], 'false');
+  assert.equal(first.attrs['aria-describedby'], undefined);
+  t.mock.timers.tick(1000);
+  assert.ok(!classes.has('on'), 'Escape stays closed until a new interaction');
+  next.focus(); // the browser emits no focus event for the already-focused term
+  assert.equal(doc.activeElement, next);
+  assert.ok(classes.has('on'));
+  assert.ok(!classes.has('pinned'), 'refocusing opens an unpinned explanation');
+  assert.equal(next.attrs['aria-expanded'], 'true');
+  assert.equal(next.attrs['aria-describedby'], 'tip');
+  assert.ok(tip.innerHTML.startsWith(`<b>${same ? 'Today' : 'Broker connection'}</b>`));
+  assert.equal(first.focus, originalFocus, 'reopening or leaving restores the original focus method');
+  if (!same) {
+    assert.equal(first.attrs['aria-expanded'], 'false');
+    assert.equal(first.attrs['aria-describedby'], undefined);
+  }
+});
+
+test('hovering the next term under an unpinned tip immediately shows its own heading', async t => {
+  const { emit, anchor, tip, classes, hit } = await termTipFixture(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const broker = anchor('broker'), halt = anchor('halt'), datafrom = anchor('datafrom');
+  halt.getBoundingClientRect = () => ({ left: 50, right: 100, top: 120, bottom: 140 });
+  datafrom.getBoundingClientRect = () => ({ left: 50, right: 100, top: 160, bottom: 180 });
+  emit('pointerover', broker);
+  for (const [previous, next, heading] of [[broker, halt, 'Emergency stop'], [halt, datafrom, 'Data from']]) {
+    const { top, bottom } = next.getBoundingClientRect(), clientY = (top + bottom) / 2;
+    const box = tip.getBoundingClientRect();
+    assert.ok(clientY > box.top && clientY < box.bottom, 'the next trigger really overlaps the preceding tip box');
+    const target = hit(next); // next term lies beneath the preceding tip
+    emit('pointerout', previous, { relatedTarget: target, clientX: 70, clientY });
+    emit('pointerover', target, { clientX: 70, clientY });
+    emit('pointermove', target, { clientX: 70, clientY });
+    assert.ok(tip.innerHTML.startsWith(`<b>${heading}</b>`), 'handover must not wait for a dismissal timer');
+    assert.equal(previous.attrs['aria-describedby'], undefined);
+    assert.equal(next.attrs['aria-describedby'], 'tip');
+    t.mock.timers.tick(1000);
+    assert.ok(classes.has('on'), 'the preceding term timer must not close the new tip');
+  }
+  emit('pointermove', { closest: () => null }, { clientX: 2, clientY: 2 });
+  assert.ok(!classes.has('on'), 'moving away from the tip and gap dismisses immediately before dialog Escape');
+});
+
+test('an unpinned tip lets another control receive its press and action, then closes', async t => {
+  const { emit, anchor, tip, classes, doc, hit } = await termTipFixture(t);
+  const broker = anchor('broker'), control = { closest: () => null };
+  let actions = 0;
+  doc.addEventListener('click', event => { if (event.target === control && !event.defaultPrevented) actions++; });
+  for (const open of [() => emit('pointerover', broker), () => broker.focus()]) {
+    open();
+    emit('pointermove', hit(control), { clientX: 70, clientY: 130 });
+    assert.ok(classes.has('on'), 'hovering the tip box preserves it despite click-through hit-testing');
+    const target = hit(control);
+    const press = emit('pointerdown', target, { clientX: 70, clientY: 130 });
+    assert.equal(press.defaultPrevented, false);
+    assert.ok(!classes.has('on'), 'outside press closes the unpinned tip before the control action');
+    emit('click', target);
+    assert.equal(broker.attrs['aria-describedby'], undefined);
+  }
+  assert.equal(actions, 2, 'hover- and focus-opened tips must let the control action run');
+  emit('pointerover', broker);
+  emit('click', control); // keyboard/programmatic activation has no pointerdown
+  assert.ok(!classes.has('on'), 'non-pointer control activation also closes the tip');
+  emit('click', broker);
+  assert.equal(hit(control), tip, 'a deliberately pinned tip retains its own hit-testing');
+});
+
+test('an unpinned tip flipped upward leaves the header Details control clear', async t => {
+  const { emit, anchor, tip, doc } = await termTipFixture(t);
+  globalThis.innerHeight = 190;
+  const header = { left: 40, right: 300, top: 0, bottom: 58 };
+  doc.getElementById = id => id === 'hdrHealth' ? { getBoundingClientRect: () => header } : null;
+  emit('pointerover', anchor('broker'));
+  assert.ok(tip.getBoundingClientRect().top >= header.bottom + 8);
+});
+
+test('switching a pinned term clears its old ARIA description through dismissal', async t => {
+  const { emit, anchor, tip, classes, api } = await termTipFixture(t);
+  const today = anchor('today'), broker = anchor('broker');
+  emit('click', today);
+  assert.equal(today.attrs['aria-describedby'], 'tip');
+  broker.focus();
+  assert.equal(today.attrs['aria-expanded'], 'false');
+  assert.equal(today.attrs['aria-describedby'], undefined, 'Today must not describe itself with Broker content');
+  assert.equal(broker.attrs['aria-describedby'], 'tip');
+  assert.ok(tip.innerHTML.startsWith('<b>Broker connection</b>'));
+  api.hide();
+  assert.ok(!classes.has('on'));
+  for (const button of [today, broker]) {
+    assert.equal(button.attrs['aria-expanded'], 'false');
+    assert.equal(button.attrs['aria-describedby'], undefined);
+  }
+});
+
+test('hover tips stay open across the gap and over their content, then dismiss outside the region', async t => {
+  const { emit, anchor, tip, classes, doc } = await termTipFixture(t);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const today = anchor('today'), broker = anchor('broker');
+  const text = { parentElement: tip, closest: selector => tip.closest(selector) };
+  const outside = { closest: () => null };
+  emit('pointerover', today);
+  emit('pointerout', today, { relatedTarget: outside, clientX: 70, clientY: 104 });
+  emit('pointermove', outside, { clientX: 70, clientY: 104 });
+  t.mock.timers.tick(50);
+  assert.ok(classes.has('on'), 'crossing the actual gap preserves the tip briefly');
+  emit('pointermove', outside, { clientX: 70, clientY: 130 });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'the tip box stays hovered when the event targets content beneath it');
+  emit('pointermove', outside, { clientX: 2, clientY: 2 });
+  assert.ok(!classes.has('on'), 'moving elsewhere dismisses without a delay');
+  emit('pointerover', today);
+  assert.ok(classes.has('on'));
+  assert.ok(!classes.has('pinned'));
+  emit('pointerout', today, { relatedTarget: outside }); // cross the 8px positioning gap
+  assert.ok(classes.has('on'), 'the gap must allow time to reach the tip');
+  t.mock.timers.tick(50);
+  emit('pointerover', text, { relatedTarget: outside });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'entering tip content cancels gap dismissal');
+  emit('pointerout', text, { relatedTarget: tip });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'moving within the tip stays in the region');
+  emit('pointerout', tip, { relatedTarget: today });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'returning directly to the trigger stays in the region');
+  emit('pointerout', today, { relatedTarget: text });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'moving directly onto the tip stays in the region');
+  emit('pointerout', text, { relatedTarget: outside });
+  t.mock.timers.tick(1000);
+  assert.ok(!classes.has('on'), 'leaving the whole region dismisses the unpinned tip');
+  assert.equal(today.attrs['aria-describedby'], undefined);
+
+  emit('pointerover', today);
+  emit('pointerout', today, { relatedTarget: outside });
+  t.mock.timers.tick(50);
+  emit('pointerover', today);
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'returning to the same trigger cancels dismissal');
+  emit('pointerout', today, { relatedTarget: outside });
+  emit('click', today);
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('pinned'), 'pinning cancels a pending hover dismissal');
+  emit('pointerout', today, { relatedTarget: outside });
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'a pinned tip survives leaving the region');
+  emit('click', outside);
+  assert.ok(!classes.has('on'), 'outside click still dismisses a pinned tip');
+
+  emit('pointerover', today);
+  emit('pointerout', today, { relatedTarget: outside });
+  broker.focus();
+  t.mock.timers.tick(1000);
+  assert.ok(classes.has('on'), 'an old hover timer must not dismiss a newly focused term');
+  emit('focusout', broker);
+  doc.activeElement = null;
+  assert.ok(!classes.has('on'), 'leaving keyboard focus still dismisses the tip');
+  emit('pointerover', today);
+  emit('keydown', today, { key: 'Escape' });
+  assert.ok(!classes.has('on'), 'Escape closes an unpinned tip');
+  assert.equal(doc.activeElement, today, 'Escape returns focus without reopening the tip');
+  emit('click', today);
+  emit('keydown', today, { key: 'Escape' });
+  assert.ok(!classes.has('on'), 'Escape also closes a pinned tip');
+
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.tip\s*\{[^}]*pointer-events:\s*none\s*;/, 'unpinned tips must let underlying controls receive clicks');
+  assert.doesNotMatch(css, /\.tip\.on\s*\{[^}]*pointer-events:\s*auto\s*;/);
+  assert.match(css, /\.tip\.pinned\s*\{[^}]*pointer-events:\s*auto\s*;/);
 });
 
 test('a compact non-green control puts the sentence on the reserved line; fitting warnings keep it in the control', () => {
