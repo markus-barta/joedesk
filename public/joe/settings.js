@@ -509,6 +509,20 @@ function review(event) {
   openDialog($('#diffDlg'), { pointer: fromPointer(event) });
 }
 
+function confirmReview() {
+  if (!state.readAvailable) {
+    $('#diffDlg').close();
+    toast('The current fleet settings could not be checked. Reopen Settings to retry; your draft is kept.');
+    return;
+  }
+  const next = M.confirm(state, $('#diffReviewed').checked);
+  if (next === state) return;
+  state = next;
+  $('#diffDlg').close();
+  renderBar(lastCtx);
+  toast(`Review confirmed for version ${M.vnum(state.config.rev)}.`);
+}
+
 async function send() {
   if (!M.canSend(state) || isPhone()) return;
   const keys = M.changes(state), baseRev = state.config.rev;
@@ -645,14 +659,7 @@ export function initSettings(options) {
   // Review dialog.
   $('#diffReviewed').addEventListener('change', e => { $('#diffConfirm').disabled = !e.target.checked; });
   $('#diffCancel').addEventListener('click', () => $('#diffDlg').close());
-  $('#diffConfirm').addEventListener('click', () => {
-    const next = M.confirm(state, $('#diffReviewed').checked);
-    if (next === state) return;
-    state = next;
-    $('#diffDlg').close();
-    renderBar(lastCtx);
-    toast(`Review confirmed for version ${M.vnum(state.config.rev)}.`);
-  });
+  $('#diffConfirm').addEventListener('click', confirmReview);
 
   // LIVE gate.
   $('#gatePhrase').addEventListener('input', gateMatch);

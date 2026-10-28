@@ -182,8 +182,10 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     // Only a conditional response for the validated saved document can clear
     // a rejection. Its receipt still belongs to the original read.
     if (res.status === 304 && fleetTag && feeds['fleet-config']?.value && res.headers?.get('ETag') === fleetTag) {
-      settle('fleet-config', { ...feeds['fleet-config'], reason: null });
-      onChange('fleet');
+      if (feeds['fleet-config'].reason != null) {
+        settle('fleet-config', { ...feeds['fleet-config'], reason: null });
+        onChange('fleet');
+      }
       return;
     }
     const accepted = acceptRead('fleet-config', res.status === 200

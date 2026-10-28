@@ -357,13 +357,20 @@ export function bar(s, { loaded = Boolean(s.base), failed = Boolean(s.readReason
   const off = { discard: false, save: false, review: false, send: false };
   if (!loaded) return { tone: failed ? 'bad' : 'none', state: failed ? 'unavailable' : 'loading', lead: failed ? 'Fleet settings unavailable' : 'Loading the fleet settings', rest: failed ? 'values are hidden and editing is disabled. Reopen Settings to retry.' : 'editing starts once they arrive', buttons: off };
   if (s.busy) return { tone: 'none', state: 'writing', lead: `Writing version ${v + 1}…`, rest: '', buttons: off };
-  if (!s.readAvailable || failed) return { tone: 'warn', state: 'last-good', lead: 'Fleet settings unavailable · showing last good',
-    rest: `version ${v} could not be revalidated${s.readReason ? `: ${s.readReason === 'auth_required' ? 'sign-in required' : s.readReason.replaceAll('_', ' ')}` : ''}. Your local draft is kept; reopen Settings to retry before reviewing or sending.`,
-    buttons: { ...off, discard: n > 0, save: n > 0 } };
   const buttons = { discard: n > 0, save: n > 0, review: n > 0, send: canSend(s) };
-  if (s.outcome?.ok && !n) return { tone: 'ok', state: 'sent', lead: `Sent version ${vnum(s.outcome.rev)}`, rest: 'saved to the shared file. The desks’ reload is not confirmed.', buttons };
-  if (s.outcome?.stored && !n) return { tone: 'warn', state: 'stored', lead: `Sent version ${vnum(s.outcome.rev)}`, rest: `saved to the shared file, but ${s.outcome.reason}. The desks’ reload is not confirmed.`, buttons };
-  if (s.outcome && !s.outcome.ok && !s.outcome.stored) return { tone: 'bad', state: 'failed', lead: 'Not sent', rest: `version ${vnum(s.outcome.rev)} was not confirmed as written: ${s.outcome.reason}.`, buttons };
+  let outcome = null;
+  if (s.outcome?.ok && !n) outcome = { tone: 'ok', state: 'sent', lead: `Sent version ${vnum(s.outcome.rev)}`, rest: 'saved to the shared file. The desks’ reload is not confirmed.', buttons };
+  if (s.outcome?.stored && !n) outcome = { tone: 'warn', state: 'stored', lead: `Sent version ${vnum(s.outcome.rev)}`, rest: `saved to the shared file, but ${s.outcome.reason}. The desks’ reload is not confirmed.`, buttons };
+  if (s.outcome && !s.outcome.ok && !s.outcome.stored) outcome = { tone: 'bad', state: 'failed', lead: 'Not sent', rest: `version ${vnum(s.outcome.rev)} was not confirmed as written: ${s.outcome.reason}.`, buttons };
+  if (!s.readAvailable || failed) {
+    const lead = 'Fleet settings unavailable · showing last good';
+    const rest = `version ${v} could not be revalidated${s.readReason ? `: ${s.readReason === 'auth_required' ? 'sign-in required' : s.readReason.replaceAll('_', ' ')}` : ''}. Your local draft is kept; reopen Settings to retry before reviewing or sending.`;
+    // Keep the write's answer first, alongside the independent read failure.
+    return { tone: outcome?.tone === 'bad' ? 'bad' : 'warn', state: 'last-good', lead: outcome?.lead ?? lead,
+      rest: outcome ? `${outcome.rest} ${lead}.` : rest,
+      buttons: { ...off, discard: n > 0, save: n > 0 } };
+  }
+  if (outcome) return outcome;
   if (!n) return { tone: 'ok', state: 'clean', lead: 'No changes', rest: `version ${v} is current`, buttons };
   if (isConfirmed(s)) return { tone: 'ok', state: 'reviewed', lead: `${plural(n, 'change')} reviewed`, rest: `ready to send as version ${v + 1}`, buttons };
   return { tone: 'warn', state: 'dirty', lead: `${plural(n, 'change')} in your draft`, rest: 'review before you send', buttons };

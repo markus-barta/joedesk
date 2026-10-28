@@ -356,17 +356,76 @@ test('JOED-117 fleet transport: a validated same-revision 304 clears rejection w
   } finally { globalThis.fetch = realFetch; }
 });
 
+test('JOED-117 send outcomes precede the last-good note, with review and send blocked throughout the outage', () => {
+  const config = design();
+  const reviewed = M.confirm(M.review(M.edit(M.editState(config), 'desks.maxBusyDesks', '6')).s, true);
+  const written = withNextFleetRevision(M.buildCandidate(config, reviewed.base, reviewed.draft), config.rev);
+  for (const result of [
+    { ok: false, reason: 'fleet config unavailable', keys: M.changes(reviewed) },
+    { ok: true, config: written, keys: M.changes(reviewed) },
+    { ok: false, stored: true, rev: written.rev, reason: 'the change log could not record it', keys: M.changes(reviewed) },
+  ]) {
+    const expected = M.bar(M.finish(M.start(reviewed), result));
+    for (const reason of ['refresh_failed', 'auth_required', 'contract_invalid']) {
+      // A read can fail either during the write or after its answer arrives.
+      for (const duringWrite of [true, false]) {
+        const s = duringWrite
+          ? M.finish(M.adopt(M.start(reviewed), config, reason), result)
+          : M.adopt(M.finish(M.start(reviewed), result), config, reason);
+        const b = M.bar(s);
+        assert.equal(b.state, 'last-good');
+        assert.equal(b.lead, expected.lead);
+        assert.equal(b.rest, `${expected.rest} Fleet settings unavailable · showing last good.`);
+        assert.equal(b.tone, result.ok || result.stored ? 'warn' : 'bad');
+        assert.deepEqual(b.buttons, { discard: !result.ok && !result.stored, save: !result.ok && !result.stored, review: false, send: false });
+        assert.equal(M.canSend(s), false);
+        const recovered = M.bar(M.adopt(s, result.ok ? written : config));
+        assert.equal(recovered.state, expected.state);
+        assert.equal(recovered.rest, expected.rest);
+      }
+    }
+  }
+});
+
+test('JOED-117 fleet transport: healthy matching 304s preserve the feed object and emit no redraw', async () => {
+  const { createFeed } = await import('../public/joe/feed.js');
+  const realFetch = globalThis.fetch;
+  const config = design(), tag = `"${config.rev}"`, receipt = valid.data.receivedAt;
+  const notifications = [];
+  const feed = createFeed(key => notifications.push(key));
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify(config), { headers: { ETag: tag, 'X-Joe-Server-Now': receipt, 'X-Joe-Received-At': receipt } });
+    await feed.refreshFleet();
+    const saved = feed.feeds['fleet-config'];
+    assert.equal(saved.reason, null);
+    notifications.length = 0;
+    globalThis.fetch = async (_url, init) => {
+      assert.equal(init.headers['If-None-Match'], tag);
+      return new Response(null, { status: 304, headers: { ETag: tag } });
+    };
+    for (let poll = 0; poll < 3; poll++) {
+      await feed.refreshFleet();
+      assert.equal(feed.feeds['fleet-config'], saved);
+      assert.equal(feed.feeds['fleet-config'].receivedAt, receipt);
+    }
+    assert.deepEqual(notifications, []);
+  } finally { globalThis.fetch = realFetch; }
+});
+
 test('JOED-117 rendered Settings: a failed warm read labels last-good values and disables send until revalidated', async () => {
   const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
   const realDocument = globalThis.document;
-  const doc = htmlDocument('<nav id="setNav"></nav><main id="setMain"></main><p id="setSub"></p><div id="editbar"><p id="editNote"></p><button id="discardBtn"></button><button id="savePreview"></button><button id="reviewBtn"></button><button id="sendBtn"></button></div>');
+  const doc = htmlDocument('<nav id="setNav"></nav><main id="setMain"></main><p id="setSub"></p><div id="editbar"><p id="editNote"></p><button id="discardBtn"></button><button id="savePreview"></button><button id="reviewBtn"></button><button id="sendBtn"></button></div><dialog id="diffDlg" open><input id="diffReviewed" type="checkbox"></dialog><div id="toast"></div>');
   // Only the DOM operations used by the real render/update path; no browser.
   const decorate = el => {
     if (!el || el.classList) return el;
     el.disabled = el.getAttribute('disabled') !== null;
     el.removeAttribute = key => { delete el.attributes[key]; };
+    if (el.tagName === 'dialog') el.close = () => el.removeAttribute('open');
     el.classList = {
       contains: name => (el.getAttribute('class') ?? '').split(/\s+/).includes(name),
+      add(name) { this.toggle(name, true); },
+      remove(name) { this.toggle(name, false); },
       toggle(name, on) {
         const classes = new Set((el.getAttribute('class') ?? '').split(/\s+/).filter(Boolean));
         if (on) classes.add(name); else classes.delete(name);
@@ -381,8 +440,9 @@ test('JOED-117 rendered Settings: a failed warm read labels last-good values and
   doc.documentElement = { dataset: {} };
   doc.body = { dataset: {} }; // Section scrolling is outside this render test.
   globalThis.document = doc;
+  let page;
   try {
-    const page = await builders('settings.js', ['buildSkeleton', 'update']);
+    page = await builders('settings.js', ['buildSkeleton', 'update', 'confirmReview']);
     const { addTerms } = await import('../public/joe/ui.js');
     addTerms(M.FIELD_TERMS);
     page.buildSkeleton();
@@ -406,6 +466,13 @@ test('JOED-117 rendered Settings: a failed warm read labels last-good values and
     assert.equal(page.settingsState().draft['desks.stage0.capEur'], '1.002');
     assert.equal(doc.querySelector('#sendBtn').disabled, true);
     assert.equal(doc.querySelector('#reviewBtn').disabled, true);
+    doc.querySelector('#diffReviewed').checked = true;
+    const beforeConfirm = page.settingsState();
+    page.confirmReview();
+    assert.deepEqual(page.settingsState(), beforeConfirm, 'outage confirmation keeps the draft unconfirmed');
+    assert.equal(doc.querySelector('#diffDlg').getAttribute('open'), null, 'close the invalidated review so the toast is visible above its former backdrop');
+    assert.equal(doc.querySelector('#toast').textContent, 'The current fleet settings could not be checked. Reopen Settings to retry; your draft is kept.');
+    assert.ok(doc.querySelector('#toast').classList.contains('on'));
     ctx.feeds['fleet-config'].reason = null;
     page.renderSettings(ctx);
     assert.equal(doc.querySelector('#editNote').dataset.state, 'dirty');
@@ -413,6 +480,7 @@ test('JOED-117 rendered Settings: a failed warm read labels last-good values and
     assert.equal(doc.querySelector('#sendBtn').disabled, true, 'a new review is still required');
     assert.equal(doc.querySelector('[data-saved="desks.stage0.capEur"]').textContent, `Saved: €${NB}1,001`);
   } finally {
+    clearTimeout(page?.toast.timer);
     if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
   }
 });

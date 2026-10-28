@@ -1001,11 +1001,16 @@ try {
           logged = await serverLog('fleet config read failed', error => error?.code === 'EACCES' && error.path === file, async () => {
             await mouse('#sendBtn'); sends++;
             await waitFor(page, `document.querySelector('#log li')?.innerText.includes('could not be read')`);
+            await waitFor(page, `document.getElementById('editNote').dataset.state === 'last-good' && document.getElementById('editNote').innerText.includes('fleet config unavailable')`);
           });
-          check('AC-24', `${tag}: the server's own failure is surfaced and audited ("the saved settings could not be read")`, N((await note()).text) === 'Not sent · version 12 was not confirmed as written: fleet config unavailable.' &&
+          check('AC-24', `${tag}: the server's own failure is surfaced and audited ("the saved settings could not be read")`, N((await note()).text) === 'Not sent · version 12 was not confirmed as written: fleet config unavailable. Fleet settings unavailable · showing last good.' &&
             new RegExp(`^Not sent .* ${ACTOR} · the saved settings could not be read`).test(N(await ev(`document.querySelector('#log li').innerText`))));
           check('AC-24', `${tag}: the board server logged this fixture's unreadable file once ("fleet config read failed", EACCES); nothing else`, logged.length === 1, logged.length);
-        } finally { chmodSync(file, mode); }
+        } finally {
+          chmodSync(file, mode);
+          await ev('window.__joedesk.refresh().then(() => true)');
+          await waitFor(page, `document.getElementById('editNote').dataset.state !== 'last-good' && !document.getElementById('reviewBtn').disabled`);
+        }
       }
       // Stored, change log unfinished: the board server writes version 13 but
       // cannot finish its change-log entry (it stays pending) and answers 500
@@ -1356,9 +1361,10 @@ try {
   if (run('sweep')) {
     const b = await designBoard();
     const widths = Array.from({ length: (1440 - 390) / 10 + 1 }, (_, i) => 390 + i * 10);
-    // The two longest notes: a stale version, and stored with the change log unfinished.
+    // Long outcomes, including a stored write alongside the last-good read note.
     const LONGEST = [['Not sent', 'version 12 was not confirmed as written: revision changed to fc-000013; reload before retrying.'],
-      ['Sent version 13', 'saved to the shared file, but the change log could not record it. The desks’ reload is not confirmed.']];
+      ['Sent version 13', 'saved to the shared file, but the change log could not record it. The desks’ reload is not confirmed.'],
+      ['Sent version 13', 'saved to the shared file, but the change log could not record it. The desks’ reload is not confirmed. Fleet settings unavailable · showing last good.']];
     for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
       const tag = `${theme}${font ? ' wide font' : ''} settings`;
       await openSettings(b, VIEWPORTS[0], theme, { font });
