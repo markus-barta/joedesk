@@ -276,7 +276,32 @@ test('term tips capture native focus, survive an unrelated Details close, and su
   assert.deepEqual(TERMS.today, original);
 });
 
-async function termTipFixture(t) {
+test('JOED-130 Today explanation follows the board clock across DST and midnight with a wrong browser date', async t => {
+  let now = null;
+  const { emit, anchor, tip } = await termTipFixture(t, { now: () => now });
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-24T12:00:00Z') });
+  for (const [serverNow, expected] of [
+    [null, '06:00'],
+    ['2026-10-28T12:00:00.000Z', '05:00'],
+    ['2026-11-02T04:59:59.000Z', '05:00'],
+    ['2026-11-02T05:00:00.000Z', '06:00'],
+    ['2026-03-09T12:00:00.000Z', '05:00'],
+  ]) {
+    now = serverNow;
+    const button = anchor('today');
+    emit('click', button);
+    assert.match(tip.innerHTML, new RegExp(`midnight in New York, ${expected} in Vienna`), String(serverNow));
+    assert.equal(button.attrs['aria-describedby'], 'tip');
+    emit('keydown', button, { key: 'Escape' });
+  }
+  t.mock.timers.setTime(NaN);
+  assert.ok(Number.isNaN(new Date().getTime()), 'invalid browser clock');
+  now = '2026-10-28T12:00:00.000Z';
+  emit('click', anchor('today'));
+  assert.match(tip.innerHTML, /midnight in New York, 05:00 in Vienna/);
+});
+
+async function termTipFixture(t, options) {
   const { initTips } = await import('../public/joe/ui.js');
   const listeners = new Map(), classes = new Set(), frames = [];
   const body = { append(el) { el.parentElement = this; } };
@@ -327,7 +352,7 @@ async function termTipFixture(t) {
       if (previous) emit('focusout', previous, { relatedTarget: this });
       emit('focus', this);
     } });
-  const api = initTips();
+  const api = initTips(options);
   t.after(() => {
     api.hide();
     for (const [key, descriptor] of descriptors) {

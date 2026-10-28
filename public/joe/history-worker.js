@@ -9,6 +9,7 @@ import { indexResults, transferables as resultsTransferables } from './results-m
 
 const previous = { history: null, results: null }, posted = { history: null, results: null };
 const AUTH = new Set([301, 302, 303, 307, 308, 401, 403]);
+const READ_TIMEOUT_MS = 15000;
 // The board server's clock from a response: its own stamp, else the HTTP date.
 function serverClock(headers) {
   const own = headers.get('X-Joe-Server-Now');
@@ -18,20 +19,28 @@ function serverClock(headers) {
 }
 
 async function read(url) {
+  const controller = new AbortController();
+  let timer, clock = null, at;
   try {
-    const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual' });
-    if (response.type === 'opaqueredirect') return { status: 302, redirected: true };
-    const clock = serverClock(response.headers), at = performance.now();
-    if (AUTH.has(response.status)) return { status: response.status, clock, at };
-    const reason = response.headers.get('X-Joe-Feed-Reason') ?? undefined;
-    let payload = null;
-    try { payload = await response.json(); } catch { if (response.ok) return { status: 0, clock, at }; }
-    return { ...(response.ok ? { status: 200, payload, reason,
-      generatedAdvancedAt: response.headers.get('X-Joe-Generated-Advanced-At') ?? undefined }
-      : { status: response.status, payload, reason: payload?.reason ?? undefined }), clock, at };
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => { controller.abort(); reject(new Error('Read timed out')); }, READ_TIMEOUT_MS);
+    });
+    return await Promise.race([deadline, (async () => {
+      const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', signal: controller.signal });
+      at = performance.now();
+      if (response.type === 'opaqueredirect') return { status: 302, redirected: true };
+      clock = serverClock(response.headers);
+      if (AUTH.has(response.status)) return { status: response.status, clock, at };
+      const reason = response.headers.get('X-Joe-Feed-Reason') ?? undefined;
+      let payload = null;
+      try { payload = await response.json(); } catch { if (response.ok) return { status: 0, clock, at }; }
+      return { ...(response.ok ? { status: 200, payload, reason,
+        generatedAdvancedAt: response.headers.get('X-Joe-Generated-Advanced-At') ?? undefined }
+        : { status: response.status, payload, reason: payload?.reason ?? undefined }), clock, at };
+    })()]);
   } catch {
-    return { status: 0 };
-  }
+    return { status: 0, clock, at };
+  } finally { clearTimeout(timer); }
 }
 
 // The server's time when this message leaves: its stamp plus the time spent here.

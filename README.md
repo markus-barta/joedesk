@@ -769,8 +769,11 @@ fixture includes both 02:30s and the exact fallback boundary on **25 Oct 2026**;
 Node tests also check both midnights of that 25-hour day. Full daily summaries
 reconcile the five closes on 25 Oct in every host zone.
 
-`createFeed().refresh()` waits for worker acceptance, including unchanged
-replies, and overlapping worker polls share that pending read. A fast state
+`createFeed().refresh()` waits for acceptance, including unchanged worker
+replies, and overlapping polls share their pending read on the page and in the
+worker. Each fetch and its response body share a 15-second deadline; expiry
+aborts the request, records the existing failed-read reason and releases the
+read so polling and manual refresh can retry. A fast state
 read can advance the clock and display Stale before a Results worker answers;
 dispatch alone must not count as a completed refresh. Otherwise the next
 refresh after a rejected push can be skipped while the previous read is busy.
@@ -828,7 +831,10 @@ Authoritative live adoption still requires the P6b and coordinator gates.
 
 `/joe/state.json` is the protected read model for P3: serverNow, four feeds with
 progress metadata, safe data projection and panel states. Anchor serverNow to
-the browser's monotonic timer; pass feed metadata and prior cells to the shared
+the browser's monotonic timer when headers arrive, before consuming the body;
+slow bodies cannot reset snapshot age or restore Live. The Today explanation
+uses this anchored clock's New York day (browser time only before an anchor is
+available). Pass feed metadata and prior cells to the shared
 selectors. `valueReceivedAt` is the original retained-cell receipt. Data/history
 responses also send `X-Joe-Server-Now`, data generation progress and any closed
 feed rejection reason as headers. A rejected push leaves the last good snapshot
