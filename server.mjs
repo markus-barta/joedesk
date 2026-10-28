@@ -139,9 +139,15 @@ function readFleetConfig(source = {}) {
     raw = fs.readFileSync(FLEET_CONFIG_FILE, "utf8");
   } catch (err) {
     if (!err || err.code !== "ENOENT") throw err;
+    const accepted = model.feeds()["fleet-config"].value;
+    const starter = parseFleetConfig(fs.readFileSync(FLEET_CONFIG_EXAMPLE, "utf8"));
+    if (accepted && !isDeepStrictEqual(accepted, starter)) {
+      model.fleetFailure();
+      throw err;
+    }
     source.path = FLEET_CONFIG_EXAMPLE;
     source.kind = "example";
-    return parseFleetConfig(fs.readFileSync(FLEET_CONFIG_EXAMPLE, "utf8"));
+    return starter;
   }
   const parsed = JSON.parse(raw);
   const normalized = normalizeFleetConfig(parsed, clock());
@@ -673,8 +679,9 @@ function handleStatic(req, res, urlPath) {
 }
 
 // An existing accepted policy must constrain the very first ingress after a
-// restart, even before any browser requests Fleet Config.
-if (fs.existsSync(FLEET_CONFIG_FILE)) {
+// restart, even before any browser requests Fleet Config. A durable receipt
+// also requires checking whether the established source has disappeared.
+if (fs.existsSync(FLEET_CONFIG_FILE) || model.feeds()["fleet-config"].value) {
   try {
     if (!model.observeFleet(readFleetConfig()).ok) model.fleetFailure();
   } catch { model.fleetFailure(); }
