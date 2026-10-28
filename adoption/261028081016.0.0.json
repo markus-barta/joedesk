@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261028081016.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 36,
+  "source": {
+    "commit": "b186308269ab9c05247c6b0f0e4b35fac4bc0ce7",
+    "tree": "c3b775f22ef1ad589b0563e7a0787975093c5dc3"
+  },
+  "release_set_sha256": "9c10f63c16cbf40aab693e5107863132660ef3af60a5c04e5d8675d97081ef57",
+  "image_digest": "sha256:bad2c211e12a23c89d7cdbca27b6289a0627e973c3984b902343305c60690d51",
+  "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+  "validation_run_id": "40668509647",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-10-28T20:23:05Z",
+    "operator_ticket": "JOED-106",
+    "rollback_reference": "JOED-106: revert the csb0 board re-pin (nixcfg #1178, merge 7311546898936c41c98d66969c66a040076fb35e) and switch csb0 with the retained sequence-35 image csb0-joe-board:source-2d36c7b439c679fc37b05940890652aa9414e200 (sha256:7486505b34d3d1a2e39e6829d7bcc003566d8c62539389b014adfaa9cbe577fa, pull_policy never); board-only switch, hsb0 untouched; pre-switch board backup board-pre-36-20261028T202206Z.tar"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-10-28T20:23:17Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-10-28T20:24:10Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-10-28T20:24:07Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-10-28T20:23:17Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-10-28T20:23:26Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; performed as a GET-only actor look of the served shell and app (served state from the hsb0 pusher; desks and all four feeds present; release 36 served: health uses the shared not-exact list (JOED-103), computed Today time (JOED-104), focus-safe reorder (JOED-105); all four feeds fresh, gateway confirmed, rev-10 exactness profile unchanged) plus the agm2 CI screenshots of the same build (main run 40668509647)"
+  },
+  "adopted_at": "2026-10-28T20:26:11Z"
+}
