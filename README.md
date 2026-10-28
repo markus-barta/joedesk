@@ -2059,9 +2059,12 @@ JOED-108 sweep fixes (JOED-107 and JOED-114–121). Sequence 36
 `2026-10-28T20:23:05Z` (JOED-106). About orders 37, 36 through 26, then legacy.
 
 The fixes preserve last-good observation ages across frozen re-sends and
-restarts, clarify header and settings states, retain settings drafts through
-recovery, enforce the kept-desk limit, improve history tooltips and keyboard
-inspection, and handle unusual Results date keys and large trade histories.
+restarts, warn in the header when a desk's own numbers are stale or frozen,
+and describe not-exact values consistently. Settings show outages honestly,
+retain drafts through recovery, show exact capital caps, and keep saved limits
+if the settings file goes missing. History tooltips and keyboard inspection
+improve, and focusing terms reopens their explanations. Results trade details
+open for every accepted company name, and very small prices show instead of zero.
 Reseal this candidate's runtime closure; keep revision-10 contracts, the shared
 presentation pin, legacy anchor and historical artifacts unchanged.
 The coordinator owns browser validation, review, publication and deployment.

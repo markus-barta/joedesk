@@ -13,10 +13,10 @@
         title: "Clearer states and easier history",
         changes: [
           "Keep last-good values tied to their original observations, even when the feed repeats old data.",
-          "Keep header status clear when desk values are not exact yet.",
-          "Show settings outages honestly, preserve drafts through recovery, and enforce the kept-desk limit.",
+          "Warn in the header when a desk's own numbers are stale or frozen, and describe not-exact values consistently.",
+          "Show settings outages honestly, preserve drafts, show exact capital caps, and keep saved limits if the settings file goes missing.",
           "Show complete history tooltips and let keyboard users inspect chart points and reopen explanations.",
-          "Keep Results reliable with unusual date keys and large trade histories.",
+          "Open trade details for every accepted company name and show very small prices instead of zero.",
         ],
       },
       {

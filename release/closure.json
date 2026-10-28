@@ -199,8 +199,8 @@
     },
     {
       "path": "public/joe/joe-version.js",
-      "size": 17895,
-      "sha256": "49fb05d447f0c5a41683e58179be6c47765c6bfa73f3494efdcc46ce34dfcebe"
+      "size": 17999,
+      "sha256": "277e20ccc1e2e3b4406a6a774fe16aaca7d724f2f58a4e4413aec224c9391bb3"
     },
     {
       "path": "public/joe/performance.js",
