@@ -12,12 +12,12 @@ export const icon = (id, cls = 'i') => `<svg class="${cls}" aria-hidden="true"><
 // Entries added at run time (each fleet setting's Learn tip) beside the fixed dictionary.
 const added = new Map();
 export const addTerms = entries => { for (const [key, entry] of Object.entries(entries)) added.set(key, entry); };
-const entryOf = key => {
+const entryOf = (key, now = null) => {
   const entry = TERMS[key] ?? added.get(key);
   if (key !== 'today') return entry;
   // Resolve at each tip render, including after midnight. Intl supplies both
   // zones' offsets at NY midnight itself, even on a clock-change Sunday.
-  const midnight = zonedInstant(nyDay(new Date().toISOString()), '00:00:00', NY);
+  const midnight = zonedInstant(nyDay(now ?? new Date().toISOString()), '00:00:00', NY);
   const viennaTime = wall(midnight, VIENNA).slice(11, 16);
   return [entry[0], entry[1].replace('{nyMidnightVienna}', viennaTime), entry[2]];
 };
@@ -64,7 +64,7 @@ export function fitStatusLine(control, line, narrow = matchMedia('(max-width: 11
 // A clamped sentence (data-say) shows itself whole there on a click, tap or
 // keyboard focus; hovering it shows nothing, as its words are already in view.
 const TRIGGER = '[data-term], [data-say]';
-export function initTips() {
+export function initTips({ now = () => null } = {}) {
   const tip = $('#tip');
   let anchor = null, pinned = false, quiet = null, at = null, dismissal = null;
   let restoreFocus = null;
@@ -98,7 +98,7 @@ export function initTips() {
       tip.innerHTML = `<b>${esc(TERMS[el.dataset.say][0])}</b>${el.querySelector('[data-clamp]')?.innerHTML ?? ''}`;
       return true;
     }
-    const entry = entryOf(el.dataset.term);
+    const entry = entryOf(el.dataset.term, now());
     if (!entry) return false;
     tip.innerHTML = `<b>${esc(entry[0])}</b>${esc(entry[1])}<span class="t2">${el.dataset.learn ? 'Term' : 'Also called'}: ${esc(entry[2])}</span>`;
     return true;
