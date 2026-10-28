@@ -281,6 +281,10 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   function observeFleet(value) {
     const checked = validateContract('fleet-config', value);
     if (!checked.ok) { rejections['fleet-config'] = checked.reason; return checked; }
+    // The starter is only a first-use policy, never recovery for a lost file.
+    if (value.rev === 'fc-000000' && fleet && fleet.value.rev !== value.rev) {
+      rejections['fleet-config'] = 'refresh_failed'; return failed(503, 'refresh_failed');
+    }
     if (fleet?.value.rev === value.rev) {
       if (JSON.stringify(fleet.value) !== JSON.stringify(value)) { rejections['fleet-config'] = 'contract_invalid'; return failed(503, 'contract_invalid'); }
       delete rejections['fleet-config']; return { ok: true };
