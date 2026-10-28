@@ -384,7 +384,7 @@ test('executor presentation: degraded without a reason is yellow; capture warns 
     [{ status: 'degraded' }, ['Degraded', 'warn', null]],
     [{ status: 'degraded', reason: 'results_capture_failed' }, ['Degraded', 'warn', 'results capture failing — trading continues']],
     [{ status: 'degraded', reason: 'ledger_size_limit' }, ['Degraded', 'bad', 'trade record is full — new orders refused']],
-    [{ status: 'down', reason: 'results_capture_failed' }, ['Down', 'bad', 'results capture failing — trading continues']],
+    [{ status: 'down', reason: 'results_capture_failed' }, ['Down', 'bad', 'results capture failing']],
     [{ halt: true, reason: 'executor_broker_disagreement' }, ['Running', 'bad', 'executor and broker disagree']]]) {
     const p = health.executorPresentation({ ...base, ...fields });
     assert.deepEqual([p.status, p.tone, p.reason], expected);
@@ -2174,4 +2174,57 @@ test('browser budget: observer snapshots drain undelivered entries once, with at
     observers[0].callback({ getEntries: () => [{ startTime: 450, duration: 125, name: 'self', attribution: [] }] });
     assert.equal(window.__budgetTasks.snapshot().tasks.length, 2, 'delivered entries are retained too');
   }
+});
+
+// Exercise the real state selection and both visible consumers of capture copy.
+let captureRuntimeHtml;
+async function captureRuntime(ctx) {
+  if (!captureRuntimeHtml) {
+    const saved = globalThis.document;
+    globalThis.document = { documentElement: { dataset: {} } };
+    try { ({ runtimeHtml: captureRuntimeHtml } = await builders('settings.js', ['runtimeHtml'])); }
+    finally { if (saved === undefined) delete globalThis.document; else globalThis.document = saved; }
+  }
+  return captureRuntimeHtml(ctx);
+}
+for (const [name, globalHalt, fields] of [
+  ['global halt', true, {}],
+  ['executor halt', false, { halt: true }],
+  ['brakes', false, { brakes: true }],
+  ['executor down', false, { status: 'down' }],
+  ['broker unreachable', false, { gatewayReachable: false }],
+  ['combined stop', true, { halt: true, brakes: true }],
+]) test(`JOED-142 F2: capture copy stays factual during ${name}`, async () => {
+  const data = structuredClone(read('phase-b.json').exact);
+  Object.assign(data.safety, { halt: globalHalt, haltReason: globalHalt ? 'halt_on' : null });
+  Object.assign(data.safety.executor, { status: 'degraded', halt: false, brakes: false, gatewayReachable: true,
+    reason: 'results_capture_failed', ...fields });
+  const { validateContract } = await import('../contracts/index.mjs');
+  assert.equal(validateContract('data', data).ok, true);
+  const feeds = { data: { value: data } }, now = data.receivedAt;
+  const states = boardStates(feeds, now), ctx = { feeds, now, states };
+  const presentation = health.executorPresentation(data.safety.executor, globalHalt);
+  assert.equal(presentation.reason, 'results capture failing');
+  const details = htmlDocument(healthPop(ctx, health.boardHealthPresentation(states, feeds, now)));
+  assert.doesNotMatch(details.textContent, /trading continues/);
+  if (globalHalt) assert.equal(details.querySelector('.status-sentence').textContent, 'Emergency stop is ON');
+  const runtime = htmlDocument(await captureRuntime(ctx));
+  for (const sizing of runtime.querySelectorAll('.rt-sizing')) sizing.remove();
+  assert.match(runtime.textContent, /results capture failing/);
+  assert.doesNotMatch(runtime.textContent, /trading continues/);
+});
+test('JOED-142 F2: shared wire reason never asserts continued trading without safety context', () => {
+  assert.equal(health.cellReason('results_capture_failed'), 'results capture failing');
+});
+
+test('JOED-142 F2: unpaused capture failure keeps continued-trading copy in Desk and Settings', async () => {
+  const data = structuredClone(read('phase-b.json').exact);
+  Object.assign(data.safety.executor, { status: 'degraded', halt: false, brakes: false, gatewayReachable: true, reason: 'results_capture_failed' });
+  const feeds = { data: { value: data } }, now = data.receivedAt;
+  const states = boardStates(feeds, now), ctx = { feeds, now, states };
+  assert.equal(health.executorPresentation(data.safety.executor, false).reason, 'results capture failing — trading continues');
+  assert.match(executorProblem(data), /results capture failing, trading continues/);
+  const runtime = htmlDocument(await captureRuntime(ctx));
+  for (const sizing of runtime.querySelectorAll('.rt-sizing')) sizing.remove();
+  assert.match(runtime.textContent, /results capture failing — trading continues/);
 });

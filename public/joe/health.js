@@ -68,7 +68,7 @@ export const CELL_REASON = Object.freeze({
   history_write_failed: 'history could not be saved',
   halt_on: 'emergency stop is on',
   executor_broker_disagreement: 'executor and broker disagree',
-  results_capture_failed: 'results capture failing — trading continues',
+  results_capture_failed: 'results capture failing',
   not_exact_yet: 'not exact yet',
   source_unavailable: 'not reported by the broker',
   desk_unmapped: 'not matched to a desk',
@@ -110,11 +110,15 @@ export function dataAge(feeds, now) {
   return { receipt: feedAge(feeds.data, now), frozen: cell.ageSeconds, state: cell.state, reason: cell.reason };
 }
 
-export function executorPresentation(executor) {
+export function executorPresentation(executor, globalHalt = false) {
   const status = { running: 'Running', degraded: 'Degraded', down: 'Down' }[executor.status] ?? 'Not reported';
   const tone = executor.reason === 'ledger_size_limit' || executor.status === 'down' || executor.halt ? 'bad'
     : executor.status === 'degraded' || executor.brakes || !executor.gatewayReachable ? 'warn' : 'ok';
-  return { status, tone, reason: executor.reason ? cellReason(executor.reason) : null };
+  const continues = ['running', 'degraded'].includes(executor.status) && !globalHalt &&
+    !executor.halt && !executor.brakes && executor.gatewayReachable !== false;
+  const reason = executor.reason ? cellReason(executor.reason) : null;
+  return { status, tone, reason: reason && executor.reason === 'results_capture_failed' && continues
+    ? `${reason} — trading continues` : reason };
 }
 
 export function localBoardHealth(states, feeds, now) {

@@ -57,7 +57,7 @@ export function boardStates(feeds, now, previous = {}) {
     // Scoped exactness failures still apply when a feed/gateway failure masks
     // their reason in the shared selector. An outage cannot restore an amount.
     const inexact = [cell.reason, ...sourceReasons]
-      .some(reason => NOT_EXACT_REASONS.has(reason));
+      .find(reason => NOT_EXACT_REASONS.has(reason));
     const expired = outageValue(cell) && (cell.ageSeconds == null || cell.ageSeconds >= RETENTION_SECONDS);
     // Today belongs to the observation's NY date, even if a real outage or
     // stopped feed spans midnight. Receipt time cannot freshen old evidence.
@@ -72,7 +72,9 @@ export function boardStates(feeds, now, previous = {}) {
       differentDay = !validInstant(observedAt) || nyDay(observedAt) !== nyDay(now);
     }
     if (inexact || expired || differentDay) states[name] = {
-      ...unavailable(cell, cell.reason ?? (differentDay ? 'baseline_pending' : null)),
+      // Preserve scoped exactness for every existing cell/health consumer.
+      // Feed rejection and transport evidence stays on the feed/header path.
+      ...unavailable(cell, inexact ?? cell.reason ?? (differentDay ? 'baseline_pending' : null)),
       // Value-free evidence for Results after unavailable() clears retained.
       ...(expired ? { outageExpired: true } : {}),
     };

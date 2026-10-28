@@ -10,17 +10,18 @@ import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { heroWordingFixtures } from '../scripts/browser/hero-wording-fixtures.mjs';
 import { panelStates, MONEY_FIELDS } from '../contracts/panel-state.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
-import { validateContract, CONTRACTS } from '../contracts/index.mjs';
+import { validateContract, CONTRACTS, REASONS } from '../contracts/index.mjs';
 import { decimalUnits, unitsDecimal } from '../contracts/decimal.mjs';
 const { sendOutcome } = await import('../public/joe/settings-model.js');
 const { boardStates, NOT_EXACT_REASONS, RETENTION_SECONDS } = await import('../public/joe/board-state.js');
 const { exactCell, rankDesks, todayPercent, sincePercent } = await import('../public/joe/performance.js');
-const { cellView, heroLeft, keptHtml, positionsHtml, compactDesk } = await import('../public/joe/desk.js');
+const { cellView, heroLeft, keptHtml, positionsHtml, compactDesk, healthPop } = await import('../public/joe/desk.js');
+const { statePhrase } = await import('../public/joe/ui.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { resultsView } = await import('../public/joe/results.js');
 const { age } = await import('../public/joe/format.js');
 const { createFeed } = await import('../public/joe/feed.js');
-const { localBoardHealth, boardHealthPresentation, statusPresentation, cellReason, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
+const { localBoardHealth, boardHealthPresentation, statusPresentation, cellReason, CELL_REASON, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
 const { bookkeepingHtml } = await builders('history.js', ['bookkeepingHtml']);
 const exact = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
 const DESKS = ['j', 'joe', 'joel'];
@@ -1264,3 +1265,128 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
     assert.equal(h.model.feeds().history.value.points.at(-1).desks.j.money.equity, null);
   });
 }
+
+// Scout3's complete wire matrix. F = generic fault, N = deliberate not-exact,
+// O = stopped/retained outage, T = transport on a feed, A = replay advisory,
+// M = successful history-compaction metadata. Every code also has field scope.
+const reasonMatrix = [
+  ['gateway_down', 'F', 'broker connection down'],
+  ['upstream_lost', 'F', 'broker connection down'],
+  ['gateway_degraded', 'F', 'broker connection unstable'],
+  ['gateway_unconfirmed', 'F', 'broker connection not confirmed'],
+  ['retained_values', 'O', 'carrying the last good value'],
+  ['family_projection_unavailable', 'F', 'desk total incomplete'],
+  ['day_pnl_unavailable', 'N', 'today’s result not available'],
+  ['all_desk_equity_unavailable', 'F', 'desks’ money not available'],
+  ['open_pnl_unavailable', 'F', 'open result not available'],
+  ['baseline_pending', 'N', 'waiting on the start-of-day value'],
+  ['snapshot_stale', 'O', 'updates are late'],
+  ['producer_frozen', 'O', 'updates are stuck'],
+  ['schema_unsupported', 'F', 'last update had an unknown format'],
+  ['contract_invalid', 'F', 'last update was rejected'],
+  ['sequence_replayed', 'A', 'last update repeated an old one'],
+  ['clock_regressed', 'F', 'last update had a clock behind'],
+  ['clock_ahead', 'F', 'last update had a clock ahead'],
+  ['feed_not_received', 'F', 'no data received yet'],
+  ['market_closed', 'F', 'market closed'],
+  ['calendar_unavailable', 'F', 'market calendar not available'],
+  ['refresh_failed', 'T', 'update failed'],
+  ['auth_required', 'T', 'sign-in expired — reload'],
+  ['route_not_found', 'T', 'not found on the board server'],
+  ['source_not_authoritative', 'F', 'held back: the kept-holdings list disagrees'],
+  ['history_size_limit', 'F', 'history is full'],
+  ['history_compacted', 'M', 'history was compacted'],
+  ['ledger_size_limit', 'F', 'trade record is full — new orders refused'],
+  ['history_write_failed', 'F', 'history could not be saved'],
+  ['halt_on', 'F', 'emergency stop is on'],
+  ['executor_broker_disagreement', 'F', 'executor and broker disagree'],
+  ['results_capture_failed', 'F', 'results capture failing'],
+  ['not_exact_yet', 'N', 'not exact yet'],
+  ['source_unavailable', 'F', 'not reported by the broker'],
+  ['desk_unmapped', 'F', 'not matched to a desk'],
+  ['sod_missing', 'N', 'start-of-day value missing'],
+  ['ledger_unreconciled', 'N', 'desk ledger not reconciled'],
+  ['position_stale', 'N', 'position update is old'],
+];
+function reasonedEquity(reason) {
+  const data = structuredClone(exact);
+  for (const bag of [data.totals, data.desks[0].money]) {
+    bag.equity = null;
+    (bag.reasons ??= {}).equity = reason;
+  }
+  assert.equal(validateContract('data', data).ok, true);
+  return data;
+}
+test('JOED-142 reason matrix covers the sealed wire enum and shared dictionary exactly', () => {
+  assert.deepEqual(reasonMatrix.map(([code]) => code).sort(), [...REASONS].sort());
+  assert.deepEqual(Object.keys(CELL_REASON).sort(), [...REASONS].sort());
+  assert.deepEqual(reasonMatrix.filter(([, kind]) => kind === 'N').map(([code]) => code).sort(), [...NOT_EXACT_REASONS].sort());
+});
+for (const [reason, kind, words] of reasonMatrix) test(`JOED-142 reason matrix: ${reason} in board-state, health and UI`, () => {
+  const data = reasonedEquity(reason), feeds = { data: { value: data } }, now = data.receivedAt;
+  const states = boardStates(feeds, now), cell = states['desks.j.equity'];
+  assert.deepEqual([cell.state, cell.value, cell.retained, cell.reason], ['broken', null, false, reason]);
+  assert.deepEqual(localBoardHealth(states, feeds, now), kind === 'N'
+    ? { tone: 'green', reason: 'board_ok' } : { tone: 'red', reason: 'equity_unavailable' });
+  assert.equal(cellReason(reason), words);
+  const phrase = statePhrase(cell, 'matrix');
+  assert.equal(phrase.tone, kind === 'N' ? 'none' : 'bad');
+  assert.equal(phrase.text, kind === 'N' ? `not exact yet${reason === 'not_exact_yet' ? '' : ` · ${words}`}` : `unavailable · ${words}`);
+  // Verified individual observations obey E/O; derived totals remain withheld.
+  const carried = boardStates(feeds, now, previous), retained = carried['desks.j.equity'];
+  assert.equal(retained.value == null, kind === 'N');
+  assert.equal(retained.retained, kind !== 'N');
+  assert.equal(carried['today.equity'].value, null);
+  assert.equal(statePhrase(retained, 'matrix').tone, kind === 'N' ? 'none' : 'warn');
+  assert.deepEqual(localBoardHealth(carried, feeds, now), kind === 'N'
+    ? { tone: 'green', reason: 'board_ok' } : { tone: 'yellow', reason: 'retained_values' });
+  assert.equal(boardStates(feeds, at(RETENTION_SECONDS), previous)['desks.j.equity'].value, null);
+  // Feed scope ranks T separately from rejection/advisory, without losing copy.
+  if (kind !== 'N' && reason !== 'feed_not_received') {
+    const failed = { data: { value: exact, reason } }, selected = boardStates(failed, now, previous);
+    assert.deepEqual(localBoardHealth(selected, failed, now), { tone: 'yellow', reason: kind === 'T' ? 'refresh_failed' : 'retained_values' });
+    assert.equal(selected['desks.j.equity'].state, kind === 'A' ? 'stale' : 'broken');
+  }
+});
+for (const reason of NOT_EXACT_REASONS) for (const failure of ['refresh_failed', 'auth_required', 'route_not_found', 'sequence_replayed', 'contract_invalid']) {
+  test(`JOED-142 F1: ${reason} stays neutral behind ${failure}`, () => {
+    const data = reasonedEquity(reason), now = data.receivedAt;
+    const initial = { data: { value: data } }, prior = boardStates(initial, now);
+    const feeds = { data: { value: data, reason: failure } }, states = boardStates(feeds, now, prior);
+    for (const name of ['today.equity', 'desks.j.equity']) {
+      assert.equal(states[name].value, null);
+      assert.equal(states[name].retained, false);
+      const phrase = statePhrase(states[name], name);
+      assert.equal(phrase.tone, 'none');
+      assert.equal(phrase.icon, 'info');
+      assert.match(phrase.text, /^not exact yet/);
+      assert.ok(phrase.text.includes(cellReason(reason)));
+    }
+    const health = boardHealthPresentation(states, feeds, now);
+    assert.deepEqual([health.tone, health.reason], ['yellow', ['refresh_failed', 'auth_required', 'route_not_found'].includes(failure) ? 'refresh_failed' : 'retained_values']);
+    const details = htmlDocument(healthPop({ states, feeds, now }, health)).textContent;
+    assert.match(details, /Desk values are not exact yet/);
+    assert.ok(details.includes(cellReason(failure)));
+    assert.doesNotMatch(details, /J’s money is unavailable/);
+    assert.equal(feeds.data.reason, failure);
+    // A later exact observation removes the scoped not-exact classification.
+    const recovered = boardStates({ data: { value: exact } }, now, states);
+    assert.equal(recovered['desks.j.equity'].reason, null);
+    assert.notEqual(recovered['desks.j.equity'].value, null);
+  });
+}
+test('JOED-142 F1: masked exactness preserves halt, ledger, broker, stopped-feed and frozen-producer precedence', () => {
+  for (const reason of NOT_EXACT_REASONS) for (const [change, expected] of [
+    [data => Object.assign(data.safety, { halt: true, haltReason: 'halt_on' }), 'halt_on'],
+    [data => { data.safety.executor.reason = 'ledger_size_limit'; }, 'ledger_size_limit'],
+    [data => Object.assign(data.safety.gateway, { apiSessionReady: false, reason: 'gateway_down' }), 'gateway_down'],
+    [() => {}, 'feed_disconnected'],
+    [() => {}, 'producer_stuck'],
+  ]) {
+    const data = reasonedEquity(reason); change(data);
+    const now = expected === 'feed_disconnected' ? at(FEED_STOPPED_S) : data.receivedAt;
+    const feeds = { data: { value: data, reason: 'refresh_failed',
+      ...(expected === 'producer_stuck' ? { generatedAdvancedAt: at(-FEED_STOPPED_S) } : {}) } };
+    assert.deepEqual(localBoardHealth(boardStates(feeds, now, previous), feeds, now), { tone: 'red', reason: expected });
+  }
+});

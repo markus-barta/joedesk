@@ -3,7 +3,7 @@
 // are shared once, while different ages and reasons stay beside their values.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
-import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation } from './health.js';
+import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation, executorPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { drawChart, eurAxis } from './chart.js';
@@ -142,7 +142,8 @@ export function executorProblem(data) {
   if (executorProblems.has(data)) return executorProblems.get(data);
   const executor = data.safety.executor;
   const problem = executor?.reason === 'ledger_size_limit' ? 'Trade record is full: new orders refused'
-    : executor?.status === 'degraded' && executor.reason === 'results_capture_failed' ? 'Paper executor degraded: results capture failing, trading continues' : null;
+    : executor?.status === 'degraded' && executor.reason === 'results_capture_failed'
+      ? `Paper executor degraded: ${executorPresentation(executor, data.safety.halt).reason.replace(' — ', ', ')}` : null;
   const ledger = problem ? ledgerSize(executor) : null;
   const sentence = problem ? `${problem}${ledger ? ` (${ledger.text})` : ''}.` : null;
   executorProblems.set(data, sentence);
