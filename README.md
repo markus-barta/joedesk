@@ -1268,7 +1268,11 @@ Amy's board display rule (JOED-91, 2026-10-26, release 33) is applied in
 `public/joe/board-state.js` after the unchanged contract selector.
 `not_exact_yet`, `sod_missing`, `ledger_unreconciled` and `position_stale`
 always show a dash, including when a feed or gateway failure masks the scoped
-reason. An outage may retain individual last-good observations with their own
+reason. The cell keeps its scoped not-exact explanation and neutral info tone;
+feed transport/rejection failures remain visible in the header and Details,
+without turning a deliberate dash into a red missing-money fault. Halt,
+broker-down, stopped-feed and frozen-producer checks retain their precedence.
+An outage may retain individual last-good observations with their own
 age and reason, for strictly less than 60 minutes from their original receipt;
 an unknown age or age ≥ 60 minutes shows a dash. Retained inputs never feed
 board totals, since-start figures, ranking, Results' current money, kept-worth
@@ -1538,8 +1542,10 @@ they check overflow/clipping and emit `<width>-<theme>-desk-kept-null` crops.
 
 Contract-set revision 7 keeps every revision-6 payload valid and the data ID
 `inspr.joe.household.v2`. The optional executor reason `results_capture_failed`
-means degraded health: results capture is failing and trading continues. Settings
-shows the reason in yellow. Desk’s health explanation adds “Paper executor
+means results capture is failing. Settings and Desk add “trading continues” only
+for a running/degraded executor with no global halt, executor halt or brakes,
+and no reported unreachable broker. Settings keeps the executor’s status tone.
+For an unpaused degraded executor, Desk’s health explanation adds “Paper executor
 degraded: results capture failing, trading continues (ledger 3,2 MB of 8,0 MB).”
 using the reported size; without ledger fields it omits the parentheses.
 

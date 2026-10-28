@@ -342,7 +342,7 @@ function runtimeHtml(ctx) {
   let executor;
   if (!ex) executor = notReported(exCell);
   else {
-    const { status, tone, reason } = executorPresentation(ex), ledger = ledgerSize(ex);
+    const { status, tone, reason } = executorPresentation(ex, data?.safety.halt), ledger = ledgerSize(ex);
     const healthReason = ['results_capture_failed', 'ledger_size_limit'].includes(ex.reason);
     const parts = [status, ...(reason && healthReason ? [esc(reason)] : []), ...(ledger ? [`<span role="group" title="${esc(ledger.title)}" aria-label="${esc(ledger.title)}">${esc(ledger.text)}</span>`] : []), ...(ex.halt ? ['emergency stop on'] : []), `broker ${ex.gatewayReachable ? 'reachable' : 'not reachable'}`, `${term('brakes', 'brakes')} ${ex.brakes ? 'on' : 'off'}`, `checked ${timeHMS(ex.checkedAt)}`];
     // Rank capture/ledger health here, with the feed still owning freshness.
