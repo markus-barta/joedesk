@@ -156,7 +156,7 @@ export function continuitySeries(cols, id, range, endAt) {
         if (r > left && Number.isNaN(eq[r])) markers.push(cols.t[r]);
       }
       const group = [gapPoint(a.x, a.y, 'interpolated', { observedBoundary: true })];
-      for (const x of markers.sort((m, n) => m - n)) if (!group.some(s => s.x === x)) group.push(gapPoint(x, a.y + (b.y - a.y) * ((x - a.x) / (b.x - a.x)), 'interpolated'));
+      for (const x of markers.sort((m, n) => m - n)) if (group[group.length - 1].x !== x) group.push(gapPoint(x, a.y + (b.y - a.y) * ((x - a.x) / (b.x - a.x)), 'interpolated'));
       group.push(gapPoint(b.x, b.y, 'interpolated', { observedBoundary: true }));
       groups.push(group);
     }
