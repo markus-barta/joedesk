@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { CONTRACTS, REASONS, validateContract } from '../contracts/index.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
-import { panelStates, DATA_PANELS, MONEY_FIELDS } from '../contracts/panel-state.mjs';
+import { panelStates, panelState, DATA_PANELS, MONEY_FIELDS } from '../contracts/panel-state.mjs';
 import { gatewayCheckAgeMs } from '../contracts/gateway.mjs';
 import { validInstant } from '../contracts/schema-validator.mjs';
 import { viennaDay } from '../contracts/vienna-date.mjs';
@@ -22,7 +22,7 @@ const failed = (status, reason) => ({ ok: false, status, reason });
 // Board retention policy, independent of the immutable rev-10 selector.
 // Keep aligned with public/joe/board-state.js, including rev-9 missing SOD.
 const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale', 'baseline_pending', 'day_pnl_unavailable']);
-function exactnessFailure(data, name) {
+function fieldReasons(data, name) {
   const field = name.split('.').at(-1);
   const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
   const bag = desk?.money ?? data?.totals;
@@ -31,7 +31,19 @@ function exactnessFailure(data, name) {
     : name === 'paperCash' ? [data?.brokerAccount?.reasons?.cash]
       : ['positions', 'kept'].includes(name) ? [data?.positions?.reason]
         : [bag?.reasons?.[field], period ? (desk?.pnlSources?.[period] ?? data?.pnlSources?.[period])?.reason : null];
-  return reasons.some(reason => NOT_EXACT_REASONS.has(reason));
+  return reasons;
+}
+const exactnessFailure = (data, name) => fieldReasons(data, name).some(reason => NOT_EXACT_REASONS.has(reason));
+// Legacy producers may attach retained_values to a non-null amount. Only a
+// previously verified observation can fill that unavailable current input.
+function policyPanels(feeds, now, previous = {}) {
+  const selected = panelStates(feeds, now, previous);
+  for (const name of DATA_PANELS) if (fieldReasons(feeds.data?.value, name).includes('retained_values')) {
+    const prior = previous[name];
+    selected[name] = panelState(feeds.data, null, selected[name].reason ?? 'retained_values', now,
+      prior?.value, prior?.valueReceivedAt);
+  }
+  return selected;
 }
 function daySource(data, name) {
   const desk = name.startsWith('desks.') ? data?.desks.find(d => d.id === name.split('.')[1]) : null;
@@ -96,9 +108,18 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     const dayPanels = DATA_PANELS.filter(name => name.endsWith('.dayPnl'));
     const legacyLastGoods = dayPanels.every(name => !Object.hasOwn(state.cells[name], 'valueSource'));
     for (const name of DATA_PANELS) if (exactnessFailure(state.feed.value, name) ||
+        (fieldReasons(state.feed.value, name).includes('retained_values') &&
+          state.cells[name].valueReceivedAt === state.feed.value.receivedAt) ||
         (legacyLastGoods && /\.(?:dayPnl|equity)$/.test(name) && state.cells[name].value != null &&
           state.cells[name].valueReceivedAt !== state.feed.value.receivedAt)) {
-      state.cells[name] = { value: null, valueReceivedAt: null };
+      state.cells[name] = { value: null, valueReceivedAt: null,
+        ...(name.endsWith('.dayPnl') ? { valueObservedAt: null, valueSource: null } : {}) };
+    }
+    // Release 36 renewed receipts on frozen re-sends. No observation can be
+    // newer than the last generation advance; restore that original anchor.
+    for (const cell of Object.values(state.cells)) if (cell.value != null &&
+        Date.parse(cell.valueReceivedAt) > Date.parse(state.feed.generatedAdvancedAt)) {
+      cell.valueReceivedAt = state.feed.generatedAdvancedAt;
     }
     if (legacyLastGoods) {
       // Explicit provenance keys mark the upgraded shape, even when all
@@ -148,7 +169,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     results: { ...results?.feed, reason: rejections.results ?? (results ? null : 'feed_not_received') },
     'fleet-config': { value: fleet?.value, receivedAt: fleet?.receivedAt, reason: rejections['fleet-config'] ?? (fleet ? null : 'feed_not_received') } });
   const panels = (now = clock()) => {
-    const selected = panelStates(feeds(), now, state?.cells ?? {});
+    const selected = policyPanels(feeds(), now, state?.cells ?? {});
     for (const name of DATA_PANELS.filter(n => n.endsWith('.dayPnl'))) {
       const cell = selected[name];
       cell.valueObservedAt = cell.retained ? state?.cells[name]?.valueObservedAt ?? cell.valueReceivedAt
@@ -220,6 +241,10 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       }
       return { ...reject(accepted.reason), errors };
     }
+    // Validate the receipt-stamped form before any snapshot/history write.
+    const served = validateContract('data', accepted.value);
+    if (!served.ok) return { ...reject(served.reason),
+      errors: served.errors.slice(0, 20).map(({ path, rule }) => ({ path, rule })) };
     const check = candidate.safety.gateway;
     let gatewayProgress = state?.gatewayProgress ?? null;
     const checkAge = gatewayCheckAgeMs(check, candidate.generatedAt);
@@ -233,7 +258,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
         initialAgeMs: checkAge };
     }
     const nextFeeds = { ...feeds(), data: { ...accepted, gatewayProgress } };
-    const selected = panelStates(nextFeeds, now, state?.cells ?? {});
+    const selected = policyPanels(nextFeeds, now, state?.cells ?? {});
     // Only current observations advance receipt metadata. Retained cells keep
     // their original receipt, including false HALT and known-empty row sets.
     const cells = Object.fromEntries(DATA_PANELS.map(name => {
@@ -242,7 +267,10 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       // last-good, and must invalidate an older exact observation too.
       if (exactnessFailure(accepted.value, name)) return [name, { value: null, valueReceivedAt: null,
         ...(name.endsWith('.dayPnl') ? { valueObservedAt: null, valueSource: null } : {}) }];
-      return [name, { value: cell.value ?? null, valueReceivedAt: cell.valueReceivedAt ?? null,
+      // A new transport receipt for the same generation is not an observation.
+      // Keep exactness invalidation above, but never renew last-good provenance.
+      if (state && accepted.value.generatedAt === state.feed.value.generatedAt) return [name, state.cells[name]];
+      return [name, { value: cell.value ?? null, valueReceivedAt: cell.value == null ? null : cell.valueReceivedAt ?? null,
         ...(name.endsWith('.dayPnl') ? { valueObservedAt: cell.retained ? state?.cells[name]?.valueObservedAt ?? cell.valueReceivedAt
           : dayObservedAt(accepted.value, name),
           valueSource: cell.retained ? state?.cells[name]?.valueSource ?? null : daySource(accepted.value, name) } : {}) }];
@@ -281,6 +309,10 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   function observeFleet(value) {
     const checked = validateContract('fleet-config', value);
     if (!checked.ok) { rejections['fleet-config'] = checked.reason; return checked; }
+    // The starter is only a first-use policy, never recovery for a lost file.
+    if (value.rev === 'fc-000000' && fleet && fleet.value.rev !== value.rev) {
+      rejections['fleet-config'] = 'refresh_failed'; return failed(503, 'refresh_failed');
+    }
     if (fleet?.value.rev === value.rev) {
       if (JSON.stringify(fleet.value) !== JSON.stringify(value)) { rejections['fleet-config'] = 'contract_invalid'; return failed(503, 'contract_invalid'); }
       delete rejections['fleet-config']; return { ok: true };
@@ -297,7 +329,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     const source = feeds();
     // Feed rejection is a separate header/state diagnostic. Only actual
     // session or KEEP-policy constraints may withhold snapshot values.
-    const projection = panelStates({ ...source, data: { ...source.data, reason: null } }, now, state?.cells ?? {});
+    const projection = policyPanels({ ...source, data: { ...source.data, reason: null } }, now, state?.cells ?? {});
     let value = state?.feed.value ? structuredClone(state.feed.value) : null;
     if (value) {
       const setBag = (bag, prefix) => {

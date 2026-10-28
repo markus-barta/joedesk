@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261028081016.0.0` (`inspr-calver-3`, stable sequence 36), reserved once at `2026-10-28T08:10:16Z` for honest dashes, correct Today time and preserved focus (JOED-103/104/105, release [JOED-106](https://aeon.barta.cm/p/JOED/JOED-106)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261028202622.0.0` (`inspr-calver-3`, stable sequence 37), reserved once at `2026-10-28T20:26:22Z` for the JOED-108 sweep fixes (JOED-107, JOED-114–121, release [JOED-122](https://aeon.barta.cm/p/JOED/JOED-122)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261027124551.0.0` / sequence 35,
-published on `main` at `2d36c7b439c679fc37b05940890652aa9414e200` under JOED-99,
-live on csb0 since `2026-10-27T20:18:18Z` (JOED-99). `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261028081016.0.0` / sequence 36,
+published on `main` at `b186308269ab9c05247c6b0f0e4b35fac4bc0ce7` under JOED-106,
+live on csb0 since `2026-10-28T20:23:05Z` (JOED-106). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 36. Sequence 34 (`261026232616.0.0`) was previously deployed
+adoption for sequence 37. Sequence 35 (`261027124551.0.0`) was previously deployed
+at `2026-10-27T20:18:18Z` (JOED-99). Sequence 34 (`261026232616.0.0`) was previously deployed
 at `2026-10-27T03:30:43Z` (JOED-97). Sequence 33 (`261026070713.0.0`) was previously deployed
 at `2026-10-26T20:06:06Z` (JOED-90). Sequence 32 (`261025221940.0.0`) was previously deployed
 at `2026-10-26T01:13:15Z` (JOED-87). Sequence 31 (`261025144826.0.0`) was previously deployed
@@ -32,13 +33,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-36 candidate has not been published. The candidate
+cutover**. The sequence-37 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -88,7 +89,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261028081016.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261028202622.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -847,6 +848,20 @@ worker (shared `acceptRead`, then indexed once) and uses its existing
 live/stale/rejected/unavailable states. History stores only observations
 and null gaps, never the UI's assumed/interpolated continuity values.
 
+History's chart is one keyboard stop. Keyboard focus starts inspection;
+clicking or tapping leaves the pointer tooltip alone, and arrow keys can then
+start inspection. Left/Right inspect the original observations and gap samples;
+redundant window edges with the same minute and values are skipped. Home/End
+reach the first/last inspection point, and Page Up/Down move by at least ten
+points. Escape dismisses inspection, and Tab
+leaves the chart. Its polite screen-reader announcement and visible tooltip
+share the same Vienna timestamp and selected desk values, explicitly marked
+observed, estimated, or no value here. Inspection keeps focus across redraws
+and uses the existing fixed chart box and reduced-motion behavior. The chart's
+description includes its refresh status and inspection instructions. A data
+update or wheel zoom hides a hovering pointer tooltip until the pointer moves
+again, avoiding stale values after a redraw.
+
 P2 persists `data-state.json` (snapshot plus progress and retained-cell receipts),
 `history-state.json` and `results-state.json` as independent atomic/fsynced
 envelopes (mode 0600). Results snapshots, receipts, generation progress and
@@ -1597,6 +1612,10 @@ for the standard fixture's All desks and individual-desk selections; its
 existing tick/filter geometry checks include the figure and percentage slot.
 
 A snapshot state shared by money cells appears once in the hero's board caption.
+Shared not-exact reasons use “Numbers: not exact yet” in both the hero and
+Account section, appending the reason when it adds information. Real faults
+keep `Numbers unavailable · <reason>`. P3 checks each broken hero cell and
+includes synthetic generic, shared and mixed not-exact/fault cases (JOED-107).
 The cells keep subtle state icons. Different states, reasons, ages, missing
 values or retained observations keep their own explanations; positions and kept
 holdings retain their section state lines. Caption and percentage space stays
@@ -1777,6 +1796,19 @@ nonempty text. Browser execution and the cross-family gate remain with the
 coordinator; the local fix uses only syntax, focused unit and release checks.
 Term underlines stay faint, dotted, 1 px thick and 3 px
 below the text, including on hover, focus and while their explanation is open.
+An unpinned term tip passes clicks through to other controls while its visible
+box remains part of the hover region. Crossing the trigger-to-tip gap allows
+150 ms; entering another term switches immediately, and moving elsewhere or
+pressing another control closes it. Tips leave the header Details control clear;
+opening Details closes the tip. Switching terms clears the old ARIA description.
+Escape leaves the explanation closed and keeps focus on its term. Explicitly
+focusing that same term again reopens its explanation, as focusing another term
+does; the browser emits no new focus event for an already-focused control.
+When native focus scrolls an offscreen term into view, its explanation follows
+the anchor through the first frame, including stationary-pointer boundary
+events caused by that scroll. Subsequent scrolling still closes a moved tip.
+The focused Node regression replays AC-39's hero click, Escape and desk focus
+with the pointer left at the click point, including the initial focus scroll.
 
 `node --test test/status-line.mjs` is the small local presentation suite, also
 included in `npm run test:ui` on CI. P3 moves strip/age checks into Details,
@@ -1967,6 +1999,8 @@ The original flip exposed 20 fields, omitted editable AMBER and wake windows, di
 
 **Where is this defined?** remains above the section navigation and shows the schema ID, saved revision, actual file used by the board, and latest propagation attempt/outcome. `GET /joe/fleet-config.json` reports `X-Joe-Fleet-Source-Path` and `X-Joe-Fleet-Source-Kind` (`example` or `stored`) from the successful file read, including on 304 responses. Thus the untouched starter example is distinguishable from `/var/lib/joe-board/fleet-config.json`. Missing provenance or failed reads are shown as unknown/unavailable, never inferred from the declared Mac path. The action log supplies propagation evidence; `updatedAt` is not treated as a successful propagation. Writing the shared file does not confirm that Amy, Mac or desk consumers reloaded it.
 
+A failed settings refresh keeps the last-good values and local draft visible, with review and send disabled until a validated read recovers. Send outcomes remain first in the edit bar alongside the last-good note. Confirming an open review during an outage shows a retry toast. Saved-value captions reserve the full control width and one non-wrapping line for both “Saved” and “Last good”; long text ellipsises with its complete title and accessible description. A matching conditional 304 clears an existing read failure without changing the original receipt or redrawing an already healthy feed. Proxies must preserve the server's `ETag` on 304 responses: a missing or mismatched tag fails closed as `refresh_failed`, retaining last-good settings and blocking review/send until a validated response recovers.
+
 ### Release 34 preparation (JOED-97)
 
 JOED-97 reserves `261026232616.0.0` once at `2026-10-26T23:26:16Z`, stable sequence 34,
@@ -2015,3 +2049,22 @@ whenever keyboard focus or an open tip is inside the desk grid. Desktop terms,
 phone rows and tips stay in place without a scroll jump; the next render after
 focus and the tip leave applies the latest ranking. Browser checks cover focused
 terms, a pinned tip with focus elsewhere, and collapsed phone rows.
+
+### Release 37 preparation (JOED-122)
+
+Reserve `261028202622.0.0` at `2026-10-28T20:26:22Z`, stable sequence 37, for the
+JOED-108 sweep fixes (JOED-107 and JOED-114–121). Sequence 36
+(`261028081016.0.0`) is deployed from main
+`b186308269ab9c05247c6b0f0e4b35fac4bc0ce7`, live on csb0 since
+`2026-10-28T20:23:05Z` (JOED-106). About orders 37, 36 through 26, then legacy.
+
+The fixes preserve last-good observation ages across frozen re-sends and
+restarts, warn in the header when a desk's own numbers are stale or frozen,
+and describe not-exact values consistently. Settings show outages honestly,
+retain drafts through recovery, show exact capital caps, and keep saved limits
+if the settings file goes missing. History tooltips and keyboard inspection
+improve, and focusing terms reopens their explanations. Results trade details
+open for every accepted company name, and very small prices show instead of zero.
+Reseal this candidate's runtime closure; keep revision-10 contracts, the shared
+presentation pin, legacy anchor and historical artifacts unchanged.
+The coordinator owns browser validation, review, publication and deployment.

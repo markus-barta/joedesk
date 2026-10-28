@@ -10,6 +10,7 @@ import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, go as goPage, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
 import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
+import { heroWordingFixtures } from './browser/hero-wording-fixtures.mjs';
 import { focusTermTips } from './browser/term-focus.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
@@ -41,10 +42,11 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 }
 const hm = await import('../public/joe/history-model.js');
 const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
-const { cellReason, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
+const { cellReason, capital, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
+const { statePhrase } = await import('../public/joe/ui.js');
 const fmt = await import('../public/joe/format.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
-const { boardCaptionCell, sharesBoardCaption, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
+const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
 const HEALTH_LINES = Object.keys(REASON_COPY).map(reason => statusSentence({ reason, tone: reason === 'board_ok' ? 'green' : 'red' }, { receipt: 9, gatewayAge: 179 }));
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
@@ -285,7 +287,7 @@ async function leaveSay(page) {
 const sayWhole = t => t.on && t.pinned && t.head === 'Today' && t.expanded === 'true' && t.say.length > 10 && t.tip === `Today ${t.say}`;
 
 async function key(page, name, modifiers = 0) {
-  const code = { Enter: 13, Tab: 9, Escape: 27 }[name];
+  const code = { Enter: 13, Tab: 9, Escape: 27, ArrowRight: 39 }[name];
   await page.s('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode: code, modifiers, ...(name === 'Enter' ? { text: '\r' } : {}) });
   await page.s('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code: name, windowsVirtualKeyCode: code, modifiers });
 }
@@ -344,6 +346,28 @@ async function historyChecks(page, viewport, theme) {
   await settle(page);
   const parts = await page.evaluate(`({ compare: document.getElementById('histCompare').innerText, j: document.getElementById('jAcct').innerText, capt: Boolean(document.querySelector('#jAcct svg.capt')), events: document.querySelectorAll('#events li').length, legend: document.getElementById('histLegend').innerText })`);
   check('AC-21', `${tag}: compare, J's bookkeeping, captured results and desk changes`, /^From .* J [+−]?\d/.test(parts.compare) && /Counted from/.test(parts.j) && parts.capt && parts.events >= 1 && /Estimated gap/.test(parts.legend), parts);
+  await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
+  // The legend's last term is the final tab stop before the chart.
+  await page.evaluate(`Array.from(document.querySelectorAll('#histLegend [data-term]')).at(-1).focus()`);
+  await key(page, 'Tab');
+  const firstAnnouncement = await page.evaluate(`document.getElementById('histLive').textContent`);
+  await key(page, 'ArrowRight');
+  await settle(page);
+  const inspection = await page.evaluate(`(() => {
+    const chart = document.getElementById('histChart'), tip = document.getElementById('histTip'), live = document.getElementById('histLive');
+    return { focused: document.activeElement === chart, stops: chart.querySelectorAll('[tabindex="0"]').length,
+      name: chart.getAttribute('aria-label'), description: chart.getAttribute('aria-describedby').split(/\\s+/).map(id => document.getElementById(id)?.textContent).join(' '),
+      polite: live.getAttribute('aria-live'), atomic: live.getAttribute('aria-atomic'), on: tip.classList.contains('on'),
+      visible: tip.innerText, announced: live.textContent };
+  })()`);
+  const normalizeInspection = text => text.replace(/\s+/g, ' ').trim();
+  check('JOED-121', `${tag}: Tab reaches the chart and Right exposes identical visible and politely announced history values`,
+    inspection.focused && inspection.stops === 0 && /Each desk’s money/.test(inspection.name) && /Left and Right/.test(inspection.description) &&
+    inspection.polite === 'polite' && inspection.atomic === 'true' && inspection.on && inspection.announced !== firstAnnouncement && /Vienna time/.test(inspection.announced) &&
+    ['J', 'Joe', 'Joel'].every(desk => new RegExp(desk + ' .*?(observed|estimated|no value here)').test(inspection.announced)) &&
+    normalizeInspection(inspection.visible) === normalizeInspection(inspection.announced), inspection);
+  await key(page, 'Escape');
+  await page.evaluate('document.activeElement?.blur()');
   if (!viewport.mobile) {
     const box = await page.evaluate(`(() => { const r = document.querySelector('#histChart').getBoundingClientRect(); return { x: r.left + r.width * 0.6, y: r.top + r.height / 2 }; })()`);
     await page.s('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240 });
@@ -581,11 +605,13 @@ try {
     ['a-dead-session-current-money', 'broken', 'Needs fix'], ['h-secondary-position-source', 'broken', 'Needs fix'], ['i-oversize-data', 'broken', 'Needs fix'],
     ['g-expired-sso', 'broken', 'Data delayed'], ['d-routing-stub', 'broken', 'Data delayed'],
     ['p3-single-missing-desk', 'broken', 'Data delayed'], ['p3-coupled-unavailable', 'broken', 'Data delayed'],
+    ['p3-not-exact-yet', 'broken', 'Data delayed'], ['p3-shared-not-exact', 'broken', 'Data delayed'],
+    ['p3-mixed-not-exact-fault', 'broken', 'Data delayed'],
   ];
   // ADR deferred P3 rows, derived from valid.json; expected states come from
   // the shared selector followed by the board display policy.
-  const DERIVED = { 'p3-single-missing-desk': singleMissingDesk, 'p3-coupled-unavailable': coupledUnavailable };
-  const RETAINED_GRACE_CASES = new Set(['b-incomplete-family', 'b-equity-null-gateway-ready', ...Object.keys(DERIVED)]);
+  const DERIVED = { 'p3-single-missing-desk': singleMissingDesk, 'p3-coupled-unavailable': coupledUnavailable, ...heroWordingFixtures(valid.data) };
+  const RETAINED_GRACE_CASES = new Set(['b-incomplete-family', 'b-equity-null-gateway-ready', 'p3-single-missing-desk', 'p3-coupled-unavailable']);
   const derive = id => {
     const f = DERIVED[id]();
     const feeds = { 'fleet-config': { value: valid['fleet-config'], receivedAt: valid.data.receivedAt }, data: acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt) };
@@ -725,11 +751,24 @@ try {
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age and reason`, /[Aa]s of \d+\s(s|min) ago · updates are (late|stuck)/.test(caps), caps);
       if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.cells['hero.account'].cap === 'Not reported', caps);
       if (kind === 'broken') {
-        const notExactReasons = [...new Set(Object.values(CELL).map(panel => expectedCells[panel])
-          .filter(cell => cell.state === 'broken' && NOT_EXACT_REASONS.has(cell.reason)).map(cell => cell.reason))];
-        check('fixtures', `${tag}: broken shows its reason locally or in the shared section line`, notExactReasons.length
-          ? notExactReasons.every(reason => caps.includes(`Not exact yet · ${cellReason(reason)}`))
-          : /Last good value, .* · |[Uu]navailable · /.test(caps), caps);
+        const shared = sharedSectionReason([...Object.values(CELL).map(panel => expectedCells[panel]), expectedCells.paperCash]);
+        // Check every affected cell, including retained values after rejection.
+        // A not-exact cell must never hide a different cell's real fault.
+        const plain = html => norm(html.replace(/<[^>]*>/g, ''));
+        for (const [key, panel] of Object.entries(CELL)) {
+          const cell = expectedCells[panel];
+          if (cell.state === 'fresh') continue;
+          const onBoard = sharesBoardCaption(cell, boardCaption);
+          const inSection = cell.reason && cellReason(cell.reason) === shared;
+          const sectionOnBoard = inSection && boardCaption?.reason && cellReason(boardCaption.reason) === shared;
+          const phrase = statePhrase(cell, '', 'last good value', shared);
+          const want = onBoard || sectionOnBoard ? capital(statePhrase(boardCaption, '').text)
+            : inSection ? sharedSectionPhrase(cell) : capital(phrase.text);
+          const inSentence = key === 'hero.day' && cell.value != null;
+          const actual = onBoard || inSection ? ui.boardCaption : inSentence ? ui.say : ui.cells[key].cap;
+          check('fixtures', `${tag}: ${key} ${NOT_EXACT_REASONS.has(cell.reason) ? 'not-exact' : 'fault'} keeps its own reason locally or in the shared section line`,
+            (onBoard || inSection || inSentence ? norm(actual).includes(plain(want)) : norm(actual) === plain(want)), { key, actual, want: plain(want) });
+        }
       }
       if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso', 'p3-single-missing-desk'].includes(id) && (viewport.name !== '390' || ['e-layout-storage-unavailable', 'a-gateway-up-but-dead'].includes(id))) {
         await shot(page, viewport, `${viewport.name}-${theme}-desk-state-${id}`, `Desk, P1 fixture ${id} (${kind})`);
@@ -770,7 +809,9 @@ try {
       if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
       const selectors = [...DESK_SHIFT, '.dnums .k', '.dnums .v', '.compact-label', '.compact-figure .bn'];
       const before = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
-      estimate.seq = ++seq; b.setNow(valid.data.receivedAt);
+      // A changed method is a new observation. Frozen generations deliberately
+      // preserve the earlier last-good source through a later outage (JOED-120).
+      estimate.seq = ++seq; estimate.generatedAt = at(valid.data.receivedAt, 1); b.setNow(estimate.generatedAt);
       check('fixtures', 'JOED-95 estimate accepted', (await b.push(estimate)).status === 200);
       b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
       const after = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
@@ -789,13 +830,13 @@ try {
       };
       await checkMarks('fresh');
       check('no-shift', `${tag}: exact → estimate has exactly 0 px layout shift`, JSON.stringify(before) === JSON.stringify(after), shifted(before, after));
-      recovery.seq = ++seq; b.setNow(valid.data.receivedAt); await b.push(recovery);
+      recovery.seq = ++seq; recovery.generatedAt = at(valid.data.receivedAt, 2); b.setNow(recovery.generatedAt); await b.push(recovery);
       b.setNow(at(valid.data.receivedAt, 9)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
       check('no-shift', `${tag}: estimate → exact has exactly 0 px layout shift and removes all estimate marks`,
         JSON.stringify(before) === JSON.stringify(await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`)) &&
         await page.evaluate(`document.querySelectorAll('.estimate-mark').length === 0`));
       if (viewport.mobile) {
-        estimate.seq = ++seq; b.setNow(valid.data.receivedAt); await b.push(estimate);
+        estimate.seq = ++seq; estimate.generatedAt = at(valid.data.receivedAt, 3); b.setNow(estimate.generatedAt); await b.push(estimate);
         b.setNow(at(valid.data.receivedAt, 70)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
         check('fixtures', `${tag}: stale estimate really has a stale Today icon`,
           await page.evaluate(`document.querySelector('#desk-j .dnums > div').dataset.state === 'stale' && document.querySelector('#desk-j .compact-state[aria-label^="Stale"]') !== null`));

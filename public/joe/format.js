@@ -64,7 +64,8 @@ export const arrowOf = n => (isZero(n) ? 'flat' : n > 0 ? 'up' : 'down');
 
 export function money(n, currency = 'EUR', signed = false, d = 2) {
   if (n == null || !known(n)) return '—';
-  if (isZero(n)) n = typeof n === 'bigint' ? 0n : 0;
+  // Suppress signs only when zero at the requested display precision.
+  if (typeof n === 'bigint' ? roundUnits(n, d) === 0n : Math.abs(n) < 0.5 * 10 ** -d) n = typeof n === 'bigint' ? 0n : 0;
   const sign = n < 0 ? MINUS : signed && n > 0 ? '+' : '';
   return `${sign}${currencySymbol(currency)}${NB}${digits(n, d)}`;
 }

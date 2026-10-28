@@ -5,7 +5,7 @@ import { esc, amountOf, eur, pct, age, dayDDM, dayDM, timeHM, money, NB } from '
 import { cellReason } from './health.js';
 import { exactCell } from './performance.js';
 import { drawChart, eurAxis } from './chart.js';
-import { DESK_IDS, ASSUMED_BASELINE, continuitySeries, sharedWindowCompare, basisNotice, toColumns, rangeWindow } from './history-model.js';
+import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, sharedWindowCompare, basisNotice, toColumns, rangeWindow } from './history-model.js';
 import { viennaDay, zonedInstant, VIENNA, NY } from './time.mjs';
 
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -86,17 +86,51 @@ function midnightLines(from, to) {
   return lines;
 }
 
+// First point at or after x; both observations and gap samples are ordered.
+function pointAt(points, x) {
+  let lo = 0, hi = points.length;
+  while (lo < hi) { const mid = (lo + hi) >>> 1; if (points[mid].x < x) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+
+// Display-only hits use original observations, never the thinned SVG points.
+// An actual observation wins at its timestamp; inside a gap show its estimate.
+function historyHit(observed, gaps, x) {
+  const i = pointAt(observed, x), a = observed[i - 1], b = observed[i];
+  const p = !a ? b : !b || x - a.x <= b.x - x ? a : b;
+  if (p?.x === x) return { x: p.x, v: p.y };
+  const gap = gaps.find(g => g[0].x <= x && g[g.length - 1].x >= x);
+  if (gap) {
+    const k = pointAt(gap, x), right = gap[k], left = gap[Math.max(0, k - 1)];
+    const v = right.x === left.x ? right.y : left.y + (right.y - left.y) * ((x - left.x) / (right.x - left.x));
+    return { x, v, estimated: true };
+  }
+  return p && Math.abs(p.x - x) <= OBSERVATION_INTERVAL_MS ? { x: p.x, v: p.y } : null;
+}
+
+// One wording for the visible tooltip and the polite keyboard announcement.
+export function historyPointDetails(near, x, desks) {
+  const at = new Date(Math.round(x)).toISOString();
+  const lines = [`${dayDDM(at)}, ${timeHM(at)} Vienna time`, ...desks.map((id, i) => {
+    const p = near[i];
+    return `${LABEL[id]} ${p ? `${eur(p.v)} ${p.estimated ? 'estimated' : 'observed'}` : 'no value here'}`;
+  })];
+  return { text: lines.join('\n'), html: `<b>${esc(lines[0])}</b>${lines.slice(1).map(line => `<br>${esc(line)}`).join('')}` };
+}
+
 export function historyChart(ctx) {
   const el = $('#histChart');
   const top = Math.ceil($('#histStatus')?.offsetHeight ?? 0);
+  const inspection = { description: 'histStatus histInspectHelp', live: $('#histLive'), points: [] };
   if (!ctx.now) {
     HS.full = null;
-    return drawChart(el, { series: [], xDomain: [0, 1], empty: true, pad: { t: 12 + top }, emptyText: 'Waiting for the board server’s clock', label: 'Each desk’s money: the board server’s time is not known yet' });
+    return drawChart(el, { series: [], xDomain: [0, 1], empty: true, inspect: inspection, pad: { t: 12 + top }, emptyText: 'Waiting for the board server’s clock', label: 'Each desk’s money: the board server’s time is not known yet' });
   }
   const cell = ctx.states.history;
   const cols = cell?.value?.columns ?? EMPTY;
   const endAt = Date.parse(ctx.now);
   const model = HS.desks.map(id => ({ id, ...continuitySeries(cols, id, HS.range, endAt) }));
+  const hitPoints = model.map(m => m.observed.filter(p => p.y !== null));
   HS.full = rangeWindow(cols, HS.range, endAt);
   const [x0, x1] = historyWindow(cols, endAt);
   const inView = p => p.x >= x0 && p.x <= x1;
@@ -132,28 +166,25 @@ export function historyChart(ctx) {
     const step = span > 864e5 * 1.2 ? 6 * 3600e3 : span > 6 * 3600e3 ? (phone ? 6 : 4) * 3600e3 : 3600e3;
     for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) if (x < x1 - span * 0.06) xLabels.push({ x, text: timeHM(new Date(x).toISOString()), anchor: 'start' });
   }
-  const lineIdx = visible.map((s, i) => (s.dotted ? null : i)).filter(i => i !== null);
+  const hitTest = xv => model.map((m, i) => historyHit(hitPoints[i], m.gaps, xv));
+  const tipFmt = (near, xv) => historyPointDetails(near, xv, HS.desks);
+  const points = [...new Set([x0, x1, ...model.flatMap(m => [...m.observed.map(p => p.x), ...m.gaps.flatMap(g => g.map(p => p.x))])])]
+    .filter(x => x >= x0 && x <= x1).sort((a, b) => a - b);
+  // Synthetic window edges can snap to an observation in the same minute.
+  // Keep every original observation, but skip an edge that repeats its neighbour.
+  for (const edge of [x0, x1]) {
+    const i = points.indexOf(edge), adjacent = points[i === 0 ? 1 : i - 1];
+    if (i < 0 || adjacent === undefined || hitPoints.some(pts => pts.some(p => p.x === edge))) continue;
+    if (tipFmt(hitTest(edge), edge).text === tipFmt(hitTest(adjacent), adjacent).text) points.splice(i, 1);
+  }
   const scale = drawChart(el, {
     series: visible, xDomain: [x0, x1], base, yValues, yFmt: eurAxis, ticks: 5, pad: { t: 12 + top },
     vlines: midnightLines(x0, x1).map(x => ({ x })), xLabels,
     empty: !HS.desks.length, emptyText: 'Choose a desk to draw its line',
     label: `Each desk’s money, ${RANGE_WORD[HS.range]}${HS.zoom ? ', zoomed' : ''}`,
     isPanning: () => Boolean(ctx.panning?.()),
-    tipFmt: (near, xv) => {
-      const at = new Date(Math.round(xv)).toISOString();
-      return `<b>${dayDDM(at)}, ${timeHM(at)}</b>${lineIdx.map((si, i) => {
-        const p = near[i];
-        if (!p) return '';
-        const id = visible[si].desk;
-        const far = Math.abs(p.x - xv) > 5 * 60e3;
-        if (!far) return `<br>${LABEL[id]} ${eur(p.v)}`;
-        const gap = model.find(m => m.id === id)?.gaps.find(g => g[0].x <= xv && g[g.length - 1].x >= xv);
-        if (!gap) return `<br>${LABEL[id]} <span class="t2">no value here</span>`;
-        let v = gap[0].y;
-        for (let k = 1; k < gap.length; k++) if (gap[k].x >= xv) { const a = gap[k - 1], b = gap[k]; v = b.x === a.x ? b.y : a.y + (b.y - a.y) * ((xv - a.x) / (b.x - a.x)); break; }
-        return `<br>${LABEL[id]} ${eur(v)} <span class="t2">estimate</span>`;
-      }).join('')}`;
-    },
+    inspect: { ...inspection, points },
+    hitTest, tipFmt,
   });
   // The drawn window, for the zoom and pan checks.
   const svg = el.querySelector(':scope > svg');

@@ -259,6 +259,7 @@ test('real patches retain disclosure visibility and pin/focus on a rebuilt visib
     set(value) { html.set.call(root, value); decorate(root); },
   });
   for (const [key, value] of Object.entries({ document: doc, CSS: { escape: value => value }, innerWidth: 390, innerHeight: 844,
+    requestAnimationFrame() {},
     addEventListener: (type, fn) => doc.addEventListener(type, fn) })) {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });

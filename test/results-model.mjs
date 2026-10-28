@@ -1166,6 +1166,67 @@ test('JOED-31 rendering: short words, symbols, numbers and meta units never gain
   }
 });
 
+test('JOED-119 rendering: accepted company separators round-trip and render in panel and sheet', t => {
+  const companies = ['Acme\u001fHoldings', '"Acme" \\ \u0000\n& <name> 𐐀', undefined];
+  const trades = companies.map((company, i) => {
+    const trade = tradeOf(`rt-company-${i}`, 'j', '2026-10-13T15:00:00.000Z', '0');
+    if (company === undefined) delete trade.company;
+    else trade.company = company;
+    return trade;
+  });
+  const value = record([closeDay('2026-10-13', '5000')], trades);
+  const rendered = calendarCapture(t)(value, '2026-10-14T12:00:00.000Z', '2026-10-13');
+  const ix = M.indexResults(value);
+  const copy = structuredClone(ix, { transfer: M.transferables(ix) });
+  for (const [i, source] of trades.entries()) {
+    const decoded = M.trade(copy, i);
+    assert.equal(decoded.id, source.id);
+    assert.equal(decoded.company, source.company ?? null);
+    assert.equal(decoded.side, source.side);
+    assert.equal(decoded.quantity, source.quantity);
+    assert.deepEqual(decoded.entry, source.entryPrice);
+    assert.deepEqual(decoded.exit, source.exitPrice);
+  }
+  for (const html of [rendered.panel, rendered.sheet]) {
+    assert.equal((html.match(/class="trow"/g) ?? []).length, trades.length);
+    assert.ok(textOf(html).includes(companies[0]));
+    assert.ok(html.includes('&lt;name&gt;'));
+    assert.ok(!html.includes('<name>'));
+    assert.ok(textOf(html).includes('$ 70,00'));
+  }
+});
+
+test('JOED-119 rendering: sub-cent execution prices retain their recorded precision', t => {
+  const trade = tradeOf('rt-sub-cent', 'j', '2026-10-13T15:00:00.000Z', '1');
+  trade.quantity = '1000';
+  trade.entryPrice.amount = '0.003';
+  trade.exitPrice.amount = '0.004';
+  trade.fx.rate = '1';
+  const value = record([closeDay('2026-10-13', '5001')], [trade]);
+  assert.equal(M.grossFromFx(trade), E('1'));
+  const rendered = calendarCapture(t)(value, '2026-10-14T12:00:00.000Z', '2026-10-13');
+  for (const html of [rendered.panel, rendered.sheet]) {
+    const prices = html.match(/<div class="px">[\s\S]*?<\/div>/)[0];
+    assert.ok(textOf(prices).includes('$ 0,003'), prices);
+    assert.ok(textOf(prices).includes('$ 0,004'), prices);
+    assert.ok(textOf(html).includes('+€ 1,00'));
+  }
+});
+
+test('JOED-119 money: zero suppression follows requested precision with exact half-away rounding', () => {
+  for (const [amount, d, expected] of [
+    ['0.003', 3, '+$ 0,003'], ['-0.004', 3, '−$ 0,004'],
+    ['0.00000001', 8, '+$ 0,00000001'], ['-0.00000001', 8, '−$ 0,00000001'],
+    ['0.00049999', 3, '$ 0,000'], ['-0.00049999', 3, '$ 0,000'],
+    ['0.0005', 3, '+$ 0,001'], ['-0.0005', 3, '−$ 0,001'],
+    ['0.49', 0, '$ 0'], ['-0.49', 0, '$ 0'], ['0.5', 0, '+$ 1'], ['-0.5', 0, '−$ 1'],
+  ]) assert.equal(fmt.money(E(amount), 'USD', true, d), expected, `${amount} at ${d} decimals`);
+  for (const n of [E('0.004'), E('-0.004'), 0.004, -0.004]) {
+    assert.equal(fmt.money(n, 'USD', true), '$ 0,00', 'default two-decimal behavior');
+    assert.equal(fmt.money(n, 'USD', true, 3), n < 0 ? '−$ 0,004' : '+$ 0,004');
+  }
+});
+
 test('JOED-31 rendering: company tokens preserve spacing and escape markup in panel and sheet', t => {
   const { date, record: value } = tradeAmountResults();
   value.trades[2].company = 'First  <script> & "company"';
