@@ -10,6 +10,7 @@
 // JOED-31 adds trade-amount: full amounts beside long prices in panel/sheet.
 // One headless browser, one page, run sequentially; screenshots go to the QA folder.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import assert from 'node:assert/strict';
 import { homedir, cpus } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
@@ -365,10 +366,72 @@ const viewShot = async (page, name, what) => {
   shots.push({ file: `${name}.png`, what });
 };
 const key = async (page, name) => {
-  await page.s('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode: name === 'Escape' ? 27 : 13, ...(name === 'Enter' ? { text: '\r' } : {}) });
-  await page.s('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code: name, windowsVirtualKeyCode: name === 'Escape' ? 27 : 13 });
+  const windowsVirtualKeyCode = { Escape: 27, Enter: 13, Tab: 9, PageDown: 34, End: 35 }[name];
+  assert.ok(windowsVirtualKeyCode, `unsupported test key: ${name}`);
+  await page.s('Input.dispatchKeyEvent', { type: 'keyDown', key: name, code: name, windowsVirtualKeyCode, ...(name === 'Enter' ? { text: '\r' } : {}) });
+  await page.s('Input.dispatchKeyEvent', { type: 'keyUp', key: name, code: name, windowsVirtualKeyCode });
   await settle(page);
 };
+
+// Hard assertions extend the existing view without changing its inventory of
+// reported checks. Failures stop CI; no existing assertion is replaced.
+async function assertNarrowResults(page, viewport, theme) {
+  try {
+    for (const [width, mobile, scale] of [[320, true, 1], [360, true, 1], [390, true, 1], [320, false, 2]]) {
+      // The final case is the CSS reflow equivalent of a 640 px desktop
+      // window at 200% zoom, rather than a claim of OS/browser zoom emulation.
+      await configure(page, { name: String(width), width, height: 844, mobile }, theme, { scale });
+      for (const period of ['day', 'week', 'month', 'ytd', 'all']) {
+        await click(page, `#periodSeg [data-period="${period}"]`);
+        const geometry = await page.evaluate(`(() => {
+          const step = document.querySelector('.res-tools .step'), label = document.getElementById('perLabel');
+          const controls = [...step.querySelectorAll('button')].map(el => el.getBoundingClientRect().toJSON());
+          const days = [...document.querySelectorAll('#cal [data-day]')].map(el => el.getBoundingClientRect().toJSON());
+          return { width: innerWidth, step: step.getBoundingClientRect().toJSON(), controls, days,
+            labelFits: label.scrollWidth <= label.clientWidth,
+            calRole: document.getElementById('cal').getAttribute('role'),
+            orphanHeaders: document.querySelectorAll('#cal [role="columnheader"]').length,
+            targetFailures: __audit.targets().filter(t => t.el.includes('cell')) };
+        })()`);
+        assert.equal(geometry.width, width);
+        assert.ok(geometry.step.left >= 0 && geometry.step.right <= width, `${width} ${period}: stepper fits`);
+        assert.ok(geometry.labelFits, `${width} ${period}: full label wraps without clipping`);
+        assert.ok(geometry.controls.every(r => r.width >= 44 && r.height >= 44 && r.left >= 0 && r.right <= width), 'period arrow targets');
+        assert.ok(geometry.days.length >= 28 && geometry.days.every(r => r.width >= 44 && r.height >= 44 && r.left >= 0 && r.right <= width), `${width}: calendar targets fit`);
+        assert.deepEqual(geometry.targetFailures, [], `${width}: existing calendar target audit`);
+        assert.equal(geometry.calRole, 'group');
+        assert.equal(geometry.orphanHeaders, 0);
+      }
+    }
+  } finally {
+    await configure(page, viewport, theme);
+    await reset();
+    await page.evaluate('window.scrollTo(0, 0)');
+    await settle(page);
+  }
+}
+
+async function assertLongSheetKeyboard(page, day) {
+  await page.evaluate(`document.querySelector('#cal [data-day="${day}"]').focus()`);
+  await key(page, 'Enter');
+  assert.equal(await page.evaluate('document.activeElement?.hasAttribute("data-close")'), true, 'keyboard opening focuses Close');
+  assert.equal(await page.evaluate('document.querySelectorAll("#sheetBody .trow").length'), 99);
+  await key(page, 'Tab');
+  assert.equal(await page.evaluate('document.activeElement?.id'), 'sheetBody', 'Tab enters scroll body');
+  await key(page, 'PageDown');
+  await waitFor(page, 'document.getElementById("sheetBody").scrollTop > 0');
+  await key(page, 'End');
+  await waitFor(page, `(() => {
+    const body = document.getElementById('sheetBody'), last = body.querySelector('.trow:last-child');
+    const b = body.getBoundingClientRect(), r = last.getBoundingClientRect();
+    return body.scrollTop > 0 && r.top >= b.top && r.bottom <= b.bottom + 1;
+  })()`);
+  await key(page, 'Tab');
+  assert.equal(await page.evaluate('document.activeElement?.hasAttribute("data-close")'), true, 'Tab wraps back to Close');
+  await key(page, 'Escape');
+  assert.equal(await page.evaluate('document.getElementById("daySheet").open'), false);
+  assert.equal(await page.evaluate('document.activeElement?.dataset.day'), day, 'Escape returns focus to selected day');
+}
 
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
 const engine = await browser.send('Browser.getVersion');
@@ -442,6 +505,7 @@ try {
       await load(page, board.url, 'results');
       await waitFor(page, `document.querySelector('#tiles .tile .tval .num')`);
       await auditScreen(page, viewport, theme, 'results');
+      if (viewport.mobile) await assertNarrowResults(page, viewport, theme);
       await checkMetricGeometry(page, tag);
       const help = await page.evaluate(`[...document.querySelectorAll('#tiles .metric-info')].map(b => ({ key: b.dataset.term, name: b.getAttribute('aria-label'), text: b.textContent, icon: b.querySelector('use')?.getAttribute('href'), title: b.closest('.tile').querySelector('h3').textContent }))`);
       check('AC-39', `${tag}: all eight metric help controls are labeled info icons`, help.length === 8 && help.every(b => b.name === 'Learn about ' + b.title && !b.text.trim() && b.icon === '#i-info'), help);
@@ -2023,6 +2087,7 @@ try {
       // change the fixed 36 px header or the settled phone sheet's geometry.
       if (view('partial-days', 'large-summary', viewport, theme)) {
         await replace(largeFull, `${tag} full large summary`);
+        if (viewport.mobile) await assertLongSheetKeyboard(page, partialTrade);
         if (viewport.mobile) await click(page, `#cal [data-day="${partialTrade}"]`);
         const headerSelectors = viewport.mobile ? ['.dlg-h', '#sheetBody .dp-sum'] : ['.dp-head'];
         const headerBefore = await rects(page, headerSelectors);

@@ -657,6 +657,124 @@ function calendarCapture(t) {
   };
 }
 const partialReason = "Part of this day's activity couldn't be confirmed, so its result may be incomplete.";
+test('JOED-140: a complete 99-trade sheet body participates in the production focus trap', async t => {
+  const render = calendarCapture(t), value = fixture('scratches');
+  value.trades = Array.from({ length: 99 }, (_, i) => ({ ...value.trades[0], id: `rt-scroll-${i}` }));
+  withTradeSummaries(value);
+  assert.equal(validateContract('results', value).ok, true);
+  const selected = M.viennaDate(Date.parse(value.trades[0].closedAt));
+  const rendered = render(value, value.receivedAt, selected);
+  assert.equal(htmlDocument(rendered.sheet).querySelectorAll('.trow').length, 99);
+  const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  const sheet = doc.querySelector('#daySheet'), body = doc.querySelector('#sheetBody');
+  const close = sheet.querySelector('[data-close]');
+  body.innerHTML = rendered.sheet;
+  // Supply visibility/focus only; the production selector decides which
+  // elements participate. Native interior Tab/scroll is verified in CI.
+  const all = sheet.querySelectorAll('[tabindex]').concat(sheet.querySelectorAll('button'));
+  for (const el of all) {
+    el.getClientRects = () => [{}];
+    el.focus = () => { doc.activeElement = el; };
+  }
+  sheet.contains = el => el === close || el === body;
+  const select = sheet.querySelectorAll.bind(sheet);
+  sheet.querySelectorAll = selector => selector.split(', ').flatMap(s => select(s));
+  const handlers = new Map();
+  doc.querySelectorAll = () => [sheet];
+  doc.addEventListener = (type, fn) => handlers.set(type, fn);
+  const beforeStyle = globalThis.getComputedStyle;
+  t.after(() => { globalThis.getComputedStyle = beforeStyle; });
+  globalThis.getComputedStyle = () => ({ visibility: 'visible' });
+  globalThis.document = doc;
+  const ui = await import(`../public/joe/ui.js?joed140-focus`);
+  ui.trapDialogs();
+  const tab = shiftKey => {
+    let prevented = false;
+    handlers.get('keydown')({ key: 'Tab', shiftKey, preventDefault() { prevented = true; } });
+    return prevented;
+  };
+  close.focus();
+  assert.equal(tab(false), false, 'Tab from Close must reach the native scroll-body stop');
+  assert.equal(body.getAttribute('tabindex'), '0');
+  assert.equal(tab(true), true);
+  assert.equal(doc.activeElement, body, 'Shift+Tab wraps Close to the scroll body');
+  assert.equal(tab(false), true);
+  assert.equal(doc.activeElement, close, 'Tab wraps the body back to Close');
+});
+
+test('JOED-140: trade fields have accessible names and list ownership in panel and sheet', t => {
+  const value = fixture('scratches'), selected = M.viennaDate(Date.parse(value.trades[0].closedAt));
+  const r = calendarCapture(t)(value, value.receivedAt, selected);
+  for (const html of [r.panel, r.sheet]) {
+    const doc = htmlDocument(html), rows = doc.querySelectorAll('.trow');
+    assert.ok(rows.length > 0);
+    for (const row of rows) {
+      assert.equal(row.getAttribute('role'), 'listitem');
+      assert.equal(row.parentElement.getAttribute('role'), 'list');
+      for (const name of ['Entry price', 'Exit price', 'Net after fees']) {
+        const field = row.querySelectorAll('[aria-label]').find(el => el.getAttribute('aria-label') === name);
+        assert.ok(field, name);
+        assert.equal(field.getAttribute('role'), 'group');
+        assert.ok(field.textContent.trim(), 'the named field retains its amount');
+      }
+    }
+  }
+});
+
+// Source constraint probes, not pixel measurements: CI exercises the same
+// layouts in Chrome, including a 640 px window's 200% zoom equivalent.
+const resultsCss = () => readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+function maxWidthRules(css, width) {
+  const blocks = [];
+  for (const match of css.matchAll(new RegExp(`@media \\(max-width: ${width}px\\) \\{`, 'g'))) {
+    let depth = 1, end = match.index + match[0].length;
+    for (; depth && end < css.length; end++) {
+      if (css[end] === '{') depth++;
+      if (css[end] === '}') depth--;
+    }
+    blocks.push(css.slice(match.index, end));
+  }
+  return blocks.join('\n');
+}
+test('JOED-140: the narrow period stepper releases its 210 px minimum and wraps text', () => {
+  const css = resultsCss();
+  const narrow = maxWidthRules(css, 700);
+  assert.match(narrow, /\.res-tools \.step-label\s*\{[^}]*min-width:\s*0\s*;/);
+  assert.match(narrow, /\.res-tools \.step-label\s*\{[^}]*white-space:\s*normal\s*;/);
+  assert.match(narrow, /\.res-tools \.step-label\s*\{[^}]*minmax\(0,\s*1fr\)/);
+  assert.ok(320 - 32 - 2 * 44 - 2 * 4 > 0, 'the remaining label track is positive at 320 CSS px');
+});
+
+test('JOED-140: calendar exposes a named button group without orphan grid roles', t => {
+  const value = fixture('scratches'), selected = M.viennaDate(Date.parse(value.trades[0].closedAt));
+  const r = calendarCapture(t)(value, value.receivedAt, selected);
+  const shell = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  const cal = shell.querySelector('#cal');
+  cal.innerHTML = r.html;
+  assert.equal(cal.getAttribute('role'), 'group');
+  assert.equal(cal.getAttribute('aria-label'), 'Result calendar');
+  assert.equal(cal.querySelectorAll('[role="columnheader"]').length, 0);
+  const buttons = cal.querySelectorAll('[data-day]');
+  assert.equal(buttons.length, 31);
+  for (const button of buttons) {
+    assert.ok(button.getAttribute('aria-label').startsWith(M.fmtDay(button.dataset.day)));
+    assert.equal(button.getAttribute('aria-pressed'), String(button.dataset.day === selected));
+  }
+});
+
+test('JOED-140: narrow calendar dates become an agenda with at least 44 px targets', () => {
+  const css = resultsCss(), narrow = maxWidthRules(css, 400);
+  const columns = narrow.match(/\.cal\s*\{[^}]*grid-template-columns:\s*repeat\((\d+),\s*minmax\(0,\s*1fr\)\)/);
+  assert.ok(columns, 'narrow agenda declares its column count');
+  assert.match(narrow, /\.cal \.cell\s*\{[^}]*min-height:\s*44px/);
+  assert.match(narrow, /\.cal \.dow\s*\{\s*display:\s*none/);
+  assert.match(narrow, /\.cal \.agenda-date\s*\{\s*display:\s*inline/);
+  for (const viewport of [320, 360, 390]) {
+    const count = Number(columns[1]), width = (viewport - 32 - 8 - 16 - (count - 1) * 3) / count;
+    assert.ok(width >= 44, `${viewport}: agenda targets fit, including a reserved 16 px scrollbar`);
+  }
+});
+
 const textOf = html => html.replace(/<[^>]+>/g, '').replaceAll('&#39;', "'").replaceAll('\u00ad', '');
 
 function heroCapture() {

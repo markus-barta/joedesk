@@ -303,7 +303,7 @@ export function renderCalendar(view, per, desks) {
   fitMonthSummary($('#calSum'));
   const start = M.monday(first);
   const inPer = k => (RS.period === 'day' || RS.period === 'week') && k >= per.start && k <= per.end;
-  let html = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow" role="columnheader">${d}</div>`).join('') + '<div class="dow wkh" role="columnheader">Week</div>';
+  let html = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow" aria-hidden="true">${d}</div>`).join('') + '<div class="dow wkh" aria-hidden="true">Week</div>';
   for (let r = 0; r < 6; r++) {
     const wk = M.addDays(start, r * 7);
     let inMonth = false, wkCount = 0, wkUnits = 0n, wkDays = 0;
@@ -318,7 +318,7 @@ export function renderCalendar(view, per, desks) {
       // warning on a neutral no-trade cell uses the warning token.
       const cls = ['cell', s.cls, warning ? 'day-incomplete' : '', k === today ? 'today' : '', k === RS.sel ? 'sel' : '', inPer(k) ? 'inper' : ''].filter(Boolean).join(' ');
       const value = s.r ? `<span class="vl">${plain(s.r.units)}</span><span class="vs">${compact(s.r.units)}</span>` : s.dash ? '<span class="muted">—</span>' : '';
-      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${warning ? `; ${esc(warning.text)}` : ''}"><span class="d">${Number(k.slice(8))}</span>${warning ? `<span class="day-warning st${warning.label === 'Partial' && s.cls === 'none' ? ' warn' : ''}" title="${esc(warning.text)}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${warning ? warning.label : s.note}</span></button>`;
+      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${warning ? `; ${esc(warning.text)}` : ''}"><span class="d"><span class="agenda-date">${M.fmtDDM(k)}</span><span class="grid-date">${Number(k.slice(8))}</span></span>${warning ? `<span class="day-warning st${warning.label === 'Partial' && s.cls === 'none' ? ' warn' : ''}" title="${esc(warning.text)}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${warning ? warning.label : s.note}</span></button>`;
     }
     // A week still ahead has nothing to sum yet.
     const ahead = wk > today;
@@ -385,12 +385,12 @@ const softHyphens = word => word.replace(/\p{L}{8,}/gu, letters => letters.repla
 const tradeWords = text => text.split(/(\s+)/u).map(word => /^\s+$/u.test(word) ? esc(word) : `<span class="word">${esc(softHyphens(word))}</span>`).join('');
 const metaSuffix = '<span class="meta-sep" aria-hidden="true"> ·</span>';
 function tradeRows(ts) {
-  return ts.map(t => `<div class="trow" data-trade="${esc(t.id)}">
+  return `<div role="list" aria-label="Closed trades">${ts.map(t => `<div class="trow" data-trade="${esc(t.id)}" role="listitem">
     ${symBadge(t.symbol, t.desk)}
     <div class="name" lang="en"><b class="word">${esc(t.symbol)}</b>${t.company ? ` · ${tradeWords(t.company)}` : ''}<span class="meta"><span class="meta-unit">${inlineMark(t.desk)} ${LABEL[t.desk]}${metaSuffix}</span> <span class="meta-unit">${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(t.quantity.replace('.', ','))}${metaSuffix}</span> <span class="meta-unit">closed ${timeHM(new Date(t.closedAt).toISOString())}${metaSuffix}</span> <span class="meta-unit">${held(t)}</span></span></div>
-    <div class="px"><span class="ln"><span>${price(t.entry)}</span><span>${icon('arrow')}${price(t.exit)}</span></span><span class="fee">fees ${eur(t.units.fees)}</span></div>
-    <div class="net">${pl(t.units.net)}</div>
-  </div>`).join('');
+    <div class="px"><span class="ln"><span role="group" aria-label="Entry price">${price(t.entry)}</span><span role="group" aria-label="Exit price">${icon('arrow')}${price(t.exit)}</span></span><span class="fee">fees ${eur(t.units.fees)}</span></div>
+    <div class="net" role="group" aria-label="Net after fees">${pl(t.units.net)}</div>
+  </div>`).join('')}</div>`;
 }
 
 // Use the rendered font and column, rather than viewport thresholds: a pair

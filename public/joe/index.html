@@ -239,7 +239,7 @@
           </div>
           <span class="sub" id="calSum"></span>
         </div>
-        <div class="cal" id="cal" role="grid" aria-label="Result calendar"></div>
+        <div class="cal" id="cal" role="group" aria-label="Result calendar"></div>
         <div class="cal-legend" id="calLegend"></div>
       </div>
       <div class="daypanel" id="daypanel" aria-live="polite"></div>
@@ -373,7 +373,7 @@
 <dialog class="dlg sheet" id="daySheet" aria-labelledby="sheetTitle">
   <div class="dlg-in">
     <div class="dlg-h"><h2 id="sheetTitle" tabindex="-1"></h2><button type="button" class="icon-btn" data-close aria-label="Close"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
-    <div class="dlg-b" id="sheetBody"></div>
+    <div class="dlg-b" id="sheetBody" tabindex="0" role="region" aria-labelledby="sheetTitle"></div>
   </div>
 </dialog>
 </div>
