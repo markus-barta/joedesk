@@ -1597,6 +1597,10 @@ for the standard fixture's All desks and individual-desk selections; its
 existing tick/filter geometry checks include the figure and percentage slot.
 
 A snapshot state shared by money cells appears once in the hero's board caption.
+Shared not-exact reasons use “Numbers: not exact yet” in both the hero and
+Account section, appending the reason when it adds information. Real faults
+keep `Numbers unavailable · <reason>`. P3 checks each broken hero cell and
+includes synthetic generic, shared and mixed not-exact/fault cases (JOED-107).
 The cells keep subtle state icons. Different states, reasons, ages, missing
 values or retained observations keep their own explanations; positions and kept
 holdings retain their section state lines. Caption and percentage space stays

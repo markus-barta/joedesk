@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
+import { heroWordingFixtures } from '../scripts/browser/hero-wording-fixtures.mjs';
 import { panelStates, MONEY_FIELDS } from '../contracts/panel-state.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
 import { validateContract } from '../contracts/index.mjs';
@@ -197,7 +198,9 @@ for (const reason of NOT_EXACT_REASONS) test(`${reason}: dashed hero reasons sta
     if (data === dayOnly || data === mixed) assert.equal(dayCaption, `Not exact yet${reason === 'not_exact_yet' ? '' : ` · ${cellReason(reason)}`}`);
     else {
       assert.equal(dayCaption, '', 'a shared reason is not repeated on Today');
-      assert.equal(section, `Numbers unavailable · ${cellReason(reason)}`);
+      const wording = `Numbers: not exact yet${reason === 'not_exact_yet' ? '' : ` · ${cellReason(reason)}`}`;
+      assert.equal(section, wording);
+      assert.equal(hero.querySelector('.account-state').textContent, wording);
     }
     for (const node of hero.querySelectorAll('[data-cell]')) {
       if (node.dataset.state !== 'broken') continue;
@@ -206,6 +209,44 @@ for (const reason of NOT_EXACT_REASONS) test(`${reason}: dashed hero reasons sta
       const why = cellReason(view.states[`today.${name}`].reason);
       assert.ok(node.querySelector('.c').textContent.toLowerCase().includes(why) || section.includes(why), `${node.dataset.cell}: ${why}`);
     }
+  }
+});
+
+test('JOED-107: a shared real fault keeps the unavailable wording in both hero sections', () => {
+  const hero = htmlDocument(heroLeft(ctx(missing('source_unavailable'))));
+  for (const selector of ['.board-caption', '.account-state']) {
+    assert.equal(hero.querySelector(selector).textContent, 'Numbers unavailable · not reported by the broker');
+  }
+});
+
+const browserSnapshot = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url))).data;
+for (const [id, fixture] of Object.entries(heroWordingFixtures(browserSnapshot))) test(`JOED-107 ${id}: accepted fixture exercises its intended hero wording shape`, () => {
+  const f = fixture(), first = { value: browserSnapshot };
+  const feed = acceptSnapshot('data', f.payload, first, f.receivedAt);
+  assert.equal(feed.status, 200, JSON.stringify(feed.errors));
+  const feeds = { data: feed }, states = boardStates(feeds, f.now, panelStates({ data: first }, browserSnapshot.receivedAt));
+  const status = statusPresentation({ states, feeds, now: f.now });
+  assert.equal(status.tone, 'yellow');
+  assert.equal(status.label, 'Data delayed');
+  const brokenHero = ['today.dayPnl', 'today.openPnl', 'today.totalPnl', 'today.equity', 'paperAccount']
+    .filter(name => states[name].state === 'broken');
+  assert.deepEqual(brokenHero, id === 'p3-not-exact-yet' ? ['today.dayPnl'] : ['today.dayPnl', 'today.openPnl']);
+  const hero = htmlDocument(heroLeft({ states, feeds, now: f.now }));
+  for (const node of hero.querySelectorAll('.cash-sizing')) node.remove();
+  assert.equal(states['today.dayPnl'].state, 'broken');
+  assert.equal(states['today.dayPnl'].value, null);
+  if (id === 'p3-shared-not-exact') {
+    assert.equal(states['today.openPnl'].state, 'broken');
+    assert.equal(states['today.openPnl'].value, null);
+    assert.equal(hero.querySelector('.board-caption').textContent, 'Numbers: not exact yet · waiting on the start-of-day value');
+    assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, '');
+  } else {
+    assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Not exact yet');
+    if (id === 'p3-mixed-not-exact-fault') {
+      assert.equal(states['today.openPnl'].state, 'broken');
+      assert.equal(states['today.openPnl'].value, null);
+      assert.equal(hero.querySelector('[data-cell="hero.open"] .c').textContent, 'Unavailable · not reported by the broker');
+    } else assert.equal(states['today.openPnl'].state, 'fresh');
   }
 });
 
