@@ -35,6 +35,7 @@ const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await im
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
+const { HS, historyChart, downsample } = await import('../public/joe/history.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
 const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
@@ -1390,6 +1391,96 @@ test('history: empty, leading, internal and trailing gaps are dotted; solid is o
   const outage = hm.continuitySeries(hm.toColumns([pt(iso(0), { j: 5000 }), pt(iso(10), { j: 5001 })]), 'j', '1d', T0 + 3 * 864e5);
   assert.deepEqual(outage.observed, []);
   assert.ok(outage.gaps.length && outage.gaps.every(g => g.every(p => p.y === 5001)), 'a range wholly inside an outage holds the last value dotted');
+});
+
+test('history: long null gaps keep every marker without quadratic deduplication', () => {
+  const n = 9000;
+  const cols = hm.toColumns(Array.from({ length: n }, (_, i) => pt(iso(i / 2), { j: i === 0 ? 10 : i === n - 1 ? 20 : null })));
+  const originalSome = Array.prototype.some;
+  let visits = 0, result;
+  try {
+    Array.prototype.some = function (predicate, thisArg) {
+      return originalSome.call(this, (value, i, array) => { visits++; return predicate.call(thisArg, value, i, array); });
+    };
+    result = hm.continuitySeries(cols, 'j', 'all', cols.t.at(-1));
+  } finally { Array.prototype.some = originalSome; }
+  const gap = result.gaps[0];
+  assert.equal(gap.length, n);
+  assert.equal(new Set(gap.map(p => p.x)).size, n);
+  assert.deepEqual(gap.map(p => p.x), [...cols.t]);
+  assert.deepEqual([gap[0].y, gap.at(-1).y], [10, 20]);
+  assert.ok(gap[0].observedBoundary && gap.at(-1).observedBoundary);
+  assert.ok(gap.slice(1, -1).every(p => p.estimated && p.assumption === 'interpolated' && p.y > 10 && p.y < 20));
+  assert.ok(visits <= n * 4, `marker deduplication visited ${visits} elements for ${n} rows`);
+});
+
+// Exercise the real SVG renderer and pointer handler without launching a browser.
+function historyPointer(t, points, { width = 300, range = '1d', zoom = null, end = Date.parse(points.at(-1)?.t ?? iso(10)) } = {}) {
+  const saved = { document: globalThis.document, matchMedia: globalThis.matchMedia, state: { ...HS } };
+  t.after(() => { globalThis.document = saved.document; globalThis.matchMedia = saved.matchMedia; Object.assign(HS, saved.state); });
+  globalThis.document = htmlDocument('<div id="histChart"><div id="histStatus"></div><div class="ctip"></div></div>');
+  globalThis.matchMedia = () => ({ matches: true });
+  Object.assign(HS, { desks: hm.DESK_IDS.slice(), range, zoom });
+  const el = document.querySelector('#histChart'), tip = el.querySelector('.ctip');
+  Object.assign(el, { clientWidth: width, clientHeight: 250, getBoundingClientRect: () => ({ left: 0 }) });
+  Object.assign(tip, { offsetWidth: 80, offsetHeight: 40, classList: { add() { tip.on = true; }, remove() { tip.on = false; } } });
+  const columns = hm.toColumns(points);
+  const scale = historyChart({ now: new Date(end).toISOString(), states: { history: { value: { columns } } } });
+  return { el, tip, columns, scale, hover(x) {
+    el.onpointermove({ clientX: scale.X(x), target: { closest: () => null } });
+    return tip.innerHTML;
+  } };
+}
+
+test('history: dense tooltip hits original observations omitted by drawing thinning', t => {
+  const points = Array.from({ length: 9000 }, (_, i) => pt(iso(i / 2), Object.fromEntries(hm.DESK_IDS.map(id => [id, (10 + i / 1000).toFixed(3)]))));
+  const { columns, scale, tip, hover } = historyPointer(t, points, { range: '1w' });
+  const original = hm.continuitySeries(columns, 'j', '1w', columns.t.at(-1)).observed.map(p => ({ x: p.x, v: p.y }));
+  const thinned = downsample(original, scale.x0, scale.x1, 300);
+  assert.ok(thinned.length < original.length);
+  const p = original.find(p => thinned.every(q => Math.abs(q.x - p.x) > hm.OBSERVATION_INTERVAL_MS));
+  assert.ok(p, 'fixture has an observation over five minutes from any drawing point');
+  const html = hover(p.x);
+  assert.equal(tip.on, true);
+  assert.doesNotMatch(html, /no value here|estimate/);
+  for (const label of ['J', 'Joe', 'Joel']) assert.ok(html.includes(`${label} ${format.eur(p.v)}`), `${label} shows the original observed value`);
+});
+
+test('history: gap interiors interpolate and mark estimates even near observed endpoints', t => {
+  const points = [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(10), { j: 20, joe: 20, joel: 20 })];
+  const { hover } = historyPointer(t, points, { width: 1000, zoom: [T0, T0 + 10 * 60000] });
+  for (const minute of [1, 5, 9]) {
+    const html = hover(T0 + minute * 60000);
+    assert.equal((html.match(/estimate/g) ?? []).length, 3);
+    for (const label of ['J', 'Joe', 'Joel']) assert.ok(html.includes(`${label} ${format.eur(10 + minute)}`));
+  }
+  for (const [minute, value] of [[0, 10], [10, 20]]) {
+    const html = hover(T0 + minute * 60000);
+    assert.doesNotMatch(html, /estimate/);
+    assert.ok(html.includes(`J ${format.eur(value)}`), 'an actual endpoint remains observed');
+  }
+});
+
+test('history: entirely estimated windows expose carry and baseline tooltips', t => {
+  const points = [pt(iso(0), { j: 10, joe: 20 }), pt(iso(1), { j: 11, joe: 21 })];
+  const { el, tip, hover, scale } = historyPointer(t, points, { end: T0 + 3 * 864e5 });
+  assert.equal(el.querySelectorAll('[data-estimate]').length, 3);
+  const html = hover((scale.x0 + scale.x1) / 2);
+  assert.equal(tip.on, true);
+  assert.equal((html.match(/estimate/g) ?? []).length, 3);
+  for (const [label, value] of [['J', 11], ['Joe', 21], ['Joel', 5000]]) assert.ok(html.includes(`${label} ${format.eur(value)}`));
+  el.onpointerleave();
+  assert.equal(tip.on, false);
+});
+
+test('history: an unobserved desk estimate stays visible beside observed siblings', t => {
+  const { hover, tip } = historyPointer(t, [pt(iso(0), { j: 10, joe: 20 }), pt(iso(1), { j: 11, joe: 21 })], { zoom: [T0, T0 + 60000] });
+  const html = hover(T0 + 60000);
+  assert.equal(tip.on, true);
+  assert.ok(html.includes(`J ${format.eur(11)}`));
+  assert.ok(html.includes(`Joe ${format.eur(21)}`));
+  assert.ok(html.includes(`Joel ${format.eur(5000)} <span class="t2">estimate</span>`));
+  assert.equal((html.match(/estimate/g) ?? []).length, 1);
 });
 
 test('history: basis breaks exclude older records and compare stays on observed, compatible points', () => {

@@ -23,7 +23,9 @@ const drawn = new Set();
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // series: [{ pts:[{x,v}], color, w, live, area, endDot, dotted }]; gaps are
-// drawn by the caller as dotted series. Returns the scale for hit-testing.
+// drawn by the caller as dotted series. Optional hitTest(x) supplies one hit
+// per non-dotted, hittable series independently of the drawing points.
+// Returns the scale for hit-testing.
 export function drawChart(el, o) {
   const W = el.clientWidth, H = el.clientHeight;
   if (!W || !H) return null;
@@ -92,7 +94,7 @@ export function drawChart(el, o) {
     if (e.target.closest?.('.hist-status, .mini-label')) { el.onpointerleave(); return; }
     const r = el.getBoundingClientRect(), mx = e.clientX - r.left, xv = x0 + (mx - pad.l) / pw * (x1 - x0);
     if (mx < pad.l - 4 || mx > pad.l + pw + 4) { el.onpointerleave(); return; }
-    const near = hits.map(i => {
+    const near = o.hitTest ? o.hitTest(xv) : hits.map(i => {
       let best = null;
       for (const p of o.series[i].pts) if (p.v !== null && p.v !== undefined && (!best || Math.abs(p.x - xv) < Math.abs(best.x - xv))) best = p;
       return best;
@@ -101,7 +103,7 @@ export function drawChart(el, o) {
     if (!anchor) return;
     const cx = X(anchor.x);
     xh.setAttribute('x1', cx); xh.setAttribute('x2', cx); xh.setAttribute('visibility', 'visible');
-    xds.forEach((d, i) => { if (!near[i]) { d.setAttribute('visibility', 'hidden'); return; } d.setAttribute('cx', X(near[i].x)); d.setAttribute('cy', Y(near[i].v)); d.setAttribute('visibility', 'visible'); });
+    xds.forEach((d, i) => { if (!near[i] || near[i].estimated) { d.setAttribute('visibility', 'hidden'); return; } d.setAttribute('cx', X(near[i].x)); d.setAttribute('cy', Y(near[i].v)); d.setAttribute('visibility', 'visible'); });
     tip.innerHTML = o.tipFmt(near, xv);
     tip.classList.add('on');
     const tw = tip.offsetWidth, th = tip.offsetHeight;
