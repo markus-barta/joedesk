@@ -2,6 +2,7 @@
 // bookkeeping with its captured results, and the desk changes this browser saw.
 import { $, $$, icon, term, st, pl, inlineMark, swatch, ageSpan, patch, isPhone, statePhrase, stateCaption } from './ui.js';
 import { esc, amountOf, eur, pct, age, dayDDM, dayDM, timeHM, money, NB } from './format.js';
+import { decimalUnits } from './contracts/decimal.mjs';
 import { cellReason } from './health.js';
 import { exactCell } from './performance.js';
 import { drawChart, eurAxis } from './chart.js';
@@ -205,7 +206,8 @@ function capturedHtml(desk) {
     const cx = x => 10 + (t1 === t0 ? (W - 20) / 2 : (x - t0) / (t1 - t0) * (W - 20)), cy = v => 8 + (hi - v) / span * (H - 16);
     const last = pts[pts.length - 1].v, color = last < 0 ? 'var(--loss)' : last > 0 ? 'var(--gain)' : 'var(--ink-3)';
     const tint = last < 0 ? 'loss' : 'gain';
-    chart = `<svg class="capt" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" data-zero="1" data-ylo="${lo}" data-yhi="${hi}" role="img" aria-label="Captured J results in ${cur === 'USD' ? 'dollars' : esc(cur)}: from ${money(pts[0].v, cur, true)} to ${money(last, cur, true)}"><defs><linearGradient id="ga-capt" x1="0" y1="${last < 0 ? 1 : 0}" x2="0" y2="${last < 0 ? 0 : 1}"><stop offset="0" style="stop-color:var(--${tint});stop-opacity:.22"/><stop offset="1" style="stop-color:var(--${tint});stop-opacity:0"/></linearGradient></defs><line x1="0" x2="${W}" y1="${cy(0).toFixed(1)}" y2="${cy(0).toFixed(1)}" stroke="var(--line-2)" vector-effect="non-scaling-stroke"/>${pts.length > 1 ? `<path d="M${pts.map(p => `${cx(p.x).toFixed(1)} ${cy(p.v).toFixed(1)}`).join(' L')} L${cx(pts[pts.length - 1].x).toFixed(1)} ${cy(0).toFixed(1)} L${cx(pts[0].x).toFixed(1)} ${cy(0).toFixed(1)} Z" fill="url(#ga-capt)"/><polyline points="${pts.map(p => `${cx(p.x).toFixed(1)},${cy(p.v).toFixed(1)}`).join(' ')}" fill="none" stroke="${color}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>` : `<circle cx="${cx(pts[0].x)}" cy="${cy(pts[0].v)}" r="3" fill="${color}"/>`}</svg>`;
+    const firstMoney = decimalUnits(captured.points[0].realizedPnl.amount), lastMoney = decimalUnits(captured.points.at(-1).realizedPnl.amount);
+    chart = `<svg class="capt" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" data-zero="1" data-ylo="${lo}" data-yhi="${hi}" role="img" aria-label="Captured J results in ${cur === 'USD' ? 'dollars' : esc(cur)}: from ${money(firstMoney, cur, true)} to ${money(lastMoney, cur, true)}"><defs><linearGradient id="ga-capt" x1="0" y1="${last < 0 ? 1 : 0}" x2="0" y2="${last < 0 ? 0 : 1}"><stop offset="0" style="stop-color:var(--${tint});stop-opacity:.22"/><stop offset="1" style="stop-color:var(--${tint});stop-opacity:0"/></linearGradient></defs><line x1="0" x2="${W}" y1="${cy(0).toFixed(1)}" y2="${cy(0).toFixed(1)}" stroke="var(--line-2)" vector-effect="non-scaling-stroke"/>${pts.length > 1 ? `<path d="M${pts.map(p => `${cx(p.x).toFixed(1)} ${cy(p.v).toFixed(1)}`).join(' L')} L${cx(pts[pts.length - 1].x).toFixed(1)} ${cy(0).toFixed(1)} L${cx(pts[0].x).toFixed(1)} ${cy(0).toFixed(1)} Z" fill="url(#ga-capt)"/><polyline points="${pts.map(p => `${cx(p.x).toFixed(1)},${cy(p.v).toFixed(1)}`).join(' ')}" fill="none" stroke="${color}" stroke-width="1.8" vector-effect="non-scaling-stroke"/>` : `<circle cx="${cx(pts[0].x)}" cy="${cy(pts[0].v)}" r="3" fill="${color}"/>`}</svg>`;
   }
   const curWord = cur === 'USD' ? 'dollars' : cur === 'EUR' ? 'euros' : cur;
   const span = (from, to) => (viennaDay(from) === viennaDay(to) ? `${dayDM(from)}, ${timeHM(from)} to ${timeHM(to)}` : `${dayDM(from)}, ${timeHM(from)} to ${dayDM(to)}, ${timeHM(to)}`);
@@ -213,7 +215,7 @@ function capturedHtml(desk) {
   return `<div class="sec-h small"><h2>${term('captured')}, ${partial}</h2><span class="sub">In ${curWord}, on their own scale; never added to the euro totals</span></div>
     ${chart}
     <dl class="facts-dl">
-      <dt>Captured result</dt><dd>${pl(amountOf(captured.realizedPnl), cur)} from ${captured.executionCount}${NB}fills and ${captured.commissionCount}${NB}commissions</dd>
+      <dt>Captured result</dt><dd>${pl(captured.realizedPnl ? decimalUnits(captured.realizedPnl.amount) : null, cur)} from ${captured.executionCount}${NB}fills and ${captured.commissionCount}${NB}commissions</dd>
       <dt>How it is counted</dt><dd>${captured.method === 'captured-fifo-matched-roundtrips' ? 'Buys and sells matched, oldest first' : 'Not reported'}</dd>
       <dt>Covers</dt><dd>${span(captured.fromInclusive, captured.throughInclusive)}${captured.pointsTruncated ? ' · only part of the curve is kept' : ''}</dd>
       <dt>Record checked</dt><dd>${span(backfill.coverage.fromInclusive, backfill.coverage.toExclusive)} · ${backfill.coverage.gapCount} gap${backfill.coverage.gapCount === 1 ? '' : 's'}</dd>

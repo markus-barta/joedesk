@@ -70,8 +70,12 @@ export function money(n, currency = 'EUR', signed = false, d = 2) {
   return `${sign}${currencySymbol(currency)}${NB}${digits(n, d)}`;
 }
 export const eur = (n, signed = false, d = 2) => money(n, 'EUR', signed, d);
-export const pct = (n, d = 0, signed = false) => (n == null || !Number.isFinite(n) ? '—'
-  : `${n < 0 ? MINUS : signed && n > 0 ? '+' : ''}${digits(n, d)}${NB}%`);
+export function pct(n, d = 0, signed = false) {
+  if (n == null || !Number.isFinite(n)) return '—';
+  const magnitude = digits(n, d);
+  const sign = /^0(?:,0+)?$/.test(magnitude) ? '' : n < 0 ? MINUS : signed && n > 0 ? '+' : '';
+  return `${sign}${magnitude}${NB}%`;
+}
 
 // Exact per-currency sums for native values (Kept holdings never convert).
 export function sumByCurrency(values) {

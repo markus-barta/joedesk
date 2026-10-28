@@ -576,6 +576,12 @@ reconciliation verifies checks, captures and each theme/font/screen/width.
 colour/shadow tokens may only feed painting, with two named exceptions for
 the root `color-scheme` palette hint and the equal-size sun/moon swap.
 It and `test/board-sweep-plan.mjs` join the existing UI unit suite.
+JOED-133 adds `test/theme-copy.mjs` to that suite: editable Settings boundaries
+use a dedicated token with at least 3:1 contrast against the composited field
+and surrounding backgrounds in both themes, plus a system-color border in
+forced colors. Captured-result text rounds exact decimal money through BigInt;
+percentages rounded to zero have no sign. Board-light help allows explained
+not-exact dashes, and session help qualifies normal hours for holidays and early closes.
 
 The budget trace keeps timestamped long-task attribution, overlapping render
 and worker-reply events, and long-animation-frame script/layout attribution
