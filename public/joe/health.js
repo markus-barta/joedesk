@@ -5,7 +5,7 @@ import { feedAge, panelState } from './contracts/panel-state.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { isRTH } from './time.mjs';
 import { age } from './format.js';
-import { NOT_EXACT_REASONS } from './board-state.js';
+import { NOT_EXACT_REASONS, stoppedData } from './board-state.js';
 
 // The contract's freshness bound: two 30-second producer cadences.
 export const STALE_AFTER_S = 60;
@@ -149,7 +149,8 @@ export function localBoardHealth(states, feeds, now) {
   if (rejected) return { tone: 'yellow', reason: 'retained_values' };
   if (receipt >= STALE_AFTER_S || frozen >= STALE_AFTER_S) return { tone: 'yellow', reason: 'snapshot_stale' };
   if (broker.word !== 'OK') return { tone: 'yellow', reason: 'gateway_unconfirmed' };
-  if (CARRIED_CELLS.some(name => observation(states[name]).retained)) return { tone: 'yellow', reason: 'retained_values' };
+  // Scoped stalls have no independent age; a fresh envelope cannot date them.
+  if (CARRIED_CELLS.some(name => observation(states[name]).retained || stoppedData(states[name]))) return { tone: 'yellow', reason: 'retained_values' };
   if (data.desks.some(desk => desk.state === 'stuck')) return { tone: 'yellow', reason: 'retained_values' };
   if (isRTH(now) && !current(states['today.dayPnl'])) return { tone: 'yellow', reason: 'day_pending' };
   if (isRTH(now) && !current(states['today.openPnl'])) return { tone: 'yellow', reason: 'open_unavailable_rth' };

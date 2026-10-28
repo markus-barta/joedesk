@@ -15,7 +15,7 @@ const { deskCard } = await builders('desk.js', ['deskCard']);
 const { resultsView } = await import('../public/joe/results.js');
 const { age } = await import('../public/joe/format.js');
 const { createFeed } = await import('../public/joe/feed.js');
-const { localBoardHealth, statusPresentation, cellReason, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
+const { localBoardHealth, boardHealthPresentation, statusPresentation, cellReason, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
 const { bookkeepingHtml } = await builders('history.js', ['bookkeepingHtml']);
 const exact = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
 const DESKS = ['j', 'joe', 'joel'];
@@ -551,14 +551,27 @@ for (const frozen of [false, true]) test(`JOED-96 ${frozen ? 'producer_frozen' :
   assert.ok(htmlDocument(positionsHtml(recovered).html).querySelectorAll('.vbar i').length > 0);
 });
 
-test('JOED-96: a stale sibling withholds a current total with its health evidence', () => {
+for (const reason of ['snapshot_stale', 'producer_frozen']) for (const field of ['equity', 'totalPnl'])
+for (const scope of ['desk', 'household']) test(`JOED-114 ${scope} ${field} ${reason}: withheld totals keep health evidence and warn without a fresh-envelope age`, () => {
   const data = structuredClone(exact);
-  data.desks[0].money.reasons = { equity: 'snapshot_stale' };
+  const bag = scope === 'desk' ? data.desks[0].money : data.totals;
+  bag.reasons = { [field]: reason };
+  assert.equal(validateContract('data', data).ok, true);
   const view = ctx(data, 0);
   assert.notEqual(view.states['desks.j.equity'].value, null);
-  assert.equal(view.states['today.equity'].value, null);
-  assert.equal(view.states['today.equity'].reason, 'snapshot_stale');
-  assert.deepEqual(view.states['today.equity'].health, { available: true, retained: false, ageSeconds: 0 });
+  assert.equal(view.states[`today.${field}`].value, null);
+  assert.equal(view.states[`today.${field}`].reason, reason);
+  assert.deepEqual(view.states[`today.${field}`].health, { available: true, retained: false, ageSeconds: 0 });
+  if (scope === 'desk' && field === 'totalPnl') assert.equal(view.states['desks.j.totalPnl'].value, null);
+  const health = boardHealthPresentation(view.states, view.feeds, view.now);
+  assert.equal(health.tone, 'yellow');
+  assert.equal(health.statusTone, 'warn');
+  assert.equal(health.reason, 'retained_values');
+  assert.equal(health.label, 'Data delayed');
+  const status = statusPresentation(view);
+  assert.equal(status.sentence, 'Numbers a bit old');
+  assert.equal(status.compact, 'Older numbers');
+  assert.equal(status.announcement, 'Numbers a bit old. Carrying the last good values');
 });
 
 test('JOED-96: sequence_replayed retains the existing advisory and retention policy', () => {
