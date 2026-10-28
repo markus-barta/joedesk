@@ -10,6 +10,7 @@ import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, scenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, go as goPage, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
 import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
+import { heroWordingFixtures } from './browser/hero-wording-fixtures.mjs';
 import { focusTermTips } from './browser/term-focus.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
@@ -41,10 +42,11 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 }
 const hm = await import('../public/joe/history-model.js');
 const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
-const { cellReason, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
+const { cellReason, capital, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
+const { statePhrase } = await import('../public/joe/ui.js');
 const fmt = await import('../public/joe/format.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
-const { boardCaptionCell, sharesBoardCaption, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
+const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
 const HEALTH_LINES = Object.keys(REASON_COPY).map(reason => statusSentence({ reason, tone: reason === 'board_ok' ? 'green' : 'red' }, { receipt: 9, gatewayAge: 179 }));
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
@@ -581,11 +583,13 @@ try {
     ['a-dead-session-current-money', 'broken', 'Needs fix'], ['h-secondary-position-source', 'broken', 'Needs fix'], ['i-oversize-data', 'broken', 'Needs fix'],
     ['g-expired-sso', 'broken', 'Data delayed'], ['d-routing-stub', 'broken', 'Data delayed'],
     ['p3-single-missing-desk', 'broken', 'Data delayed'], ['p3-coupled-unavailable', 'broken', 'Data delayed'],
+    ['p3-not-exact-yet', 'broken', 'Data delayed'], ['p3-shared-not-exact', 'broken', 'Data delayed'],
+    ['p3-mixed-not-exact-fault', 'broken', 'Data delayed'],
   ];
   // ADR deferred P3 rows, derived from valid.json; expected states come from
   // the shared selector followed by the board display policy.
-  const DERIVED = { 'p3-single-missing-desk': singleMissingDesk, 'p3-coupled-unavailable': coupledUnavailable };
-  const RETAINED_GRACE_CASES = new Set(['b-incomplete-family', 'b-equity-null-gateway-ready', ...Object.keys(DERIVED)]);
+  const DERIVED = { 'p3-single-missing-desk': singleMissingDesk, 'p3-coupled-unavailable': coupledUnavailable, ...heroWordingFixtures(valid.data) };
+  const RETAINED_GRACE_CASES = new Set(['b-incomplete-family', 'b-equity-null-gateway-ready', 'p3-single-missing-desk', 'p3-coupled-unavailable']);
   const derive = id => {
     const f = DERIVED[id]();
     const feeds = { 'fleet-config': { value: valid['fleet-config'], receivedAt: valid.data.receivedAt }, data: acceptSnapshot('data', ingress(valid.data), null, valid.data.receivedAt) };
@@ -725,11 +729,24 @@ try {
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age and reason`, /[Aa]s of \d+\s(s|min) ago · updates are (late|stuck)/.test(caps), caps);
       if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.cells['hero.account'].cap === 'Not reported', caps);
       if (kind === 'broken') {
-        const notExactReasons = [...new Set(Object.values(CELL).map(panel => expectedCells[panel])
-          .filter(cell => cell.state === 'broken' && NOT_EXACT_REASONS.has(cell.reason)).map(cell => cell.reason))];
-        check('fixtures', `${tag}: broken shows its reason locally or in the shared section line`, notExactReasons.length
-          ? notExactReasons.every(reason => caps.includes(`Not exact yet · ${cellReason(reason)}`))
-          : /Last good value, .* · |[Uu]navailable · /.test(caps), caps);
+        const shared = sharedSectionReason([...Object.values(CELL).map(panel => expectedCells[panel]), expectedCells.paperCash]);
+        // Check every affected cell, including retained values after rejection.
+        // A not-exact cell must never hide a different cell's real fault.
+        const plain = html => norm(html.replace(/<[^>]*>/g, ''));
+        for (const [key, panel] of Object.entries(CELL)) {
+          const cell = expectedCells[panel];
+          if (cell.state === 'fresh') continue;
+          const onBoard = sharesBoardCaption(cell, boardCaption);
+          const inSection = cell.reason && cellReason(cell.reason) === shared;
+          const sectionOnBoard = inSection && boardCaption?.reason && cellReason(boardCaption.reason) === shared;
+          const phrase = statePhrase(cell, '', 'last good value', shared);
+          const want = onBoard || sectionOnBoard ? capital(statePhrase(boardCaption, '').text)
+            : inSection ? sharedSectionPhrase(cell) : capital(phrase.text);
+          const inSentence = key === 'hero.day' && cell.value != null;
+          const actual = onBoard || inSection ? ui.boardCaption : inSentence ? ui.say : ui.cells[key].cap;
+          check('fixtures', `${tag}: ${key} ${NOT_EXACT_REASONS.has(cell.reason) ? 'not-exact' : 'fault'} keeps its own reason locally or in the shared section line`,
+            (onBoard || inSection || inSentence ? norm(actual).includes(plain(want)) : norm(actual) === plain(want)), { key, actual, want: plain(want) });
+        }
       }
       if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso', 'p3-single-missing-desk'].includes(id) && (viewport.name !== '390' || ['e-layout-storage-unavailable', 'a-gateway-up-but-dead'].includes(id))) {
         await shot(page, viewport, `${viewport.name}-${theme}-desk-state-${id}`, `Desk, P1 fixture ${id} (${kind})`);
