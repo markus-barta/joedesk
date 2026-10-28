@@ -2,10 +2,17 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261027124551.0.0",
+    APP_VERSION: "261028081016.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 35,
+    RELEASE_SEQUENCE: 36,
     VERSION_HISTORY: [
+      {
+        version: "261028081016.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-28",
+        title: "Honest dashes and steadier desk cards",
+        changes: ["Keep deliberately withheld desk values informational and show the correct Vienna time for Today.", "Keep keyboard focus and open tips when desk rankings change."],
+      },
       {
         version: "261027124551.0.0",
         versionScheme: "inspr-calver-3",
