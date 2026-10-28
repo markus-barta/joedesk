@@ -628,9 +628,9 @@ test('JOED-29 calendar rendering: phone cells keep signs and tints without arrow
     assert.match(cell(day), new RegExp(`class="vl">[\\s\\S]*href="#i-${direction}"`), day);
     assert.match(cell(day), new RegExp(`class="cell ${direction === 'up' ? 'g' : 'l'}[1-4]\\b`), day);
   }
-  const weeks = html.match(/<div class="wk">[\s\S]*?<\/div>/g) ?? [];
-  assert.ok(weeks.some(week => week.includes('href="#i-up"')), 'a positive week keeps its arrow');
-  assert.ok(weeks.some(week => week.includes('href="#i-down"')), 'a negative week keeps its arrow');
+  const weeks = htmlDocument(html).querySelectorAll('.wk');
+  assert.ok(weeks.some(week => week.querySelector('use[href="#i-up"]')), 'a positive week keeps its arrow');
+  assert.ok(weeks.some(week => week.querySelector('use[href="#i-down"]')), 'a negative week keeps its arrow');
   assert.doesNotMatch(html, /title=/);
 });
 
@@ -760,18 +760,31 @@ test('JOED-140: calendar exposes a named button group without orphan grid roles'
     assert.ok(button.getAttribute('aria-label').startsWith(M.fmtDay(button.dataset.day)));
     assert.equal(button.getAttribute('aria-pressed'), String(button.dataset.day === selected));
   }
+  const weeks = cal.querySelectorAll('.wk').filter(el => el.getAttribute('aria-hidden') !== 'true');
+  assert.ok(weeks.length >= 4);
+  const start = M.monday(`${selected.slice(0, 7)}-01`);
+  for (const [i, week] of weeks.entries()) {
+    assert.equal(week.getAttribute('role'), 'group');
+    assert.equal(week.getAttribute('aria-label'), `Week of ${M.fmtDay(M.addDays(start, i * 7))}`);
+    assert.ok(week.querySelector('.v'), 'the named group owns its week result');
+  }
 });
 
-test('JOED-140: narrow calendar dates become an agenda with at least 44 px targets', () => {
-  const css = resultsCss(), narrow = maxWidthRules(css, 400);
+test('JOED-140: agenda ends at 382 px and seven-column targets fit from 383 px', () => {
+  const css = resultsCss(), narrow = maxWidthRules(css, 382);
   const columns = narrow.match(/\.cal\s*\{[^}]*grid-template-columns:\s*repeat\((\d+),\s*minmax\(0,\s*1fr\)\)/);
   assert.ok(columns, 'narrow agenda declares its column count');
   assert.match(narrow, /\.cal \.cell\s*\{[^}]*min-height:\s*44px/);
   assert.match(narrow, /\.cal \.dow\s*\{\s*display:\s*none/);
   assert.match(narrow, /\.cal \.agenda-date\s*\{\s*display:\s*inline/);
-  for (const viewport of [320, 360, 390]) {
+  for (const viewport of [320, 360, 382]) {
     const count = Number(columns[1]), width = (viewport - 32 - 8 - 16 - (count - 1) * 3) / count;
     assert.ok(width >= 44, `${viewport}: agenda targets fit, including a reserved 16 px scrollbar`);
+  }
+  assert.match(maxWidthRules(css, 700), /\.cal\s*\{[^}]*grid-template-columns:\s*repeat\(7,\s*minmax\(0,\s*1fr\)\)/);
+  for (const viewport of [383, 390, 393]) {
+    const width = (viewport - 32 - 8 - 16 - 6 * 3) / 7;
+    assert.ok(width >= 44, `${viewport}: seven-column targets fit, including a reserved 16 px scrollbar`);
   }
 });
 

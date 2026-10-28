@@ -323,7 +323,7 @@ export function renderCalendar(view, per, desks) {
     // A week still ahead has nothing to sum yet.
     const ahead = wk > today;
     const wkValue = ahead ? '<span class="v"></span>' : !ix ? '<span class="v muted">—</span>' : `<span class="v">${wkCount ? plain(wkUnits) : '—'}</span>`;
-    html += inMonth ? `<div class="wk"><span>${!ix || ahead ? '' : wkDays ? plural(wkDays, 'day') : 'no trades'}</span>${wkValue}</div>` : '<div class="wk" style="visibility:hidden" aria-hidden="true"></div>';
+    html += inMonth ? `<div class="wk" role="group" aria-label="Week of ${M.fmtDay(wk)}"><span>${!ix || ahead ? '' : wkDays ? plural(wkDays, 'day') : 'no trades'}</span>${wkValue}</div>` : '<div class="wk" style="visibility:hidden" aria-hidden="true"></div>';
   }
   patch($('#cal'), html);
   patch($('#calLegend'), `<span class="nowrap">Loss <span class="ramp"><i style="background:var(--l4)"></i><i style="background:var(--l3)"></i><i style="background:var(--l2)"></i><i style="background:var(--l1)"></i></span></span>
