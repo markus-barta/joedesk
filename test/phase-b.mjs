@@ -11,9 +11,10 @@ import { atomicWrite } from '../server/storage.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { scenario, NOW, at, advance } from '../scripts/browser/board.mjs';
+import { deskRankingSnapshot } from '../scripts/browser/phase-b.mjs';
 const { heroLeft, positionsHtml, keptHtml, positionSectionReason, cellView, compactDesk, headerHealth, healthPop } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
-const { todayPercent, sincePercent } = await import('../public/joe/performance.js');
+const { todayPercent, sincePercent, rankDesks } = await import('../public/joe/performance.js');
 const { cellReason, boardHealthPresentation } = await import('../public/joe/health.js');
 const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
 
@@ -65,6 +66,29 @@ test('JOED-103: the shipped mixed Phase B snapshot is not red; unexplained missi
   const red = boardHealthPresentation(fault.states, fault.feeds, fault.now);
   assert.equal(red.tone, 'red');
   assert.match(headerHealth(fault, red).html, /tone-bad/);
+});
+
+test('JOED-105: the browser refresh changes the real ranking while J’s term and phone row markup stay stable', async t => {
+  const dataDir = scratch('joed-105-ranking-');
+  t.after(() => discard(dataDir, 'JOED-105 ranking fixture'));
+  let now = exact.generatedAt;
+  const model = createReadModel({ dataDir, clock: () => now, write: () => {} });
+  const data = ingress(exact);
+  assert.equal(model.accept(data).status, 200);
+  const view = () => {
+    const v = model.view();
+    return { feeds: v.feeds, now, states: boardStates(v.feeds, now, v.panels) };
+  };
+  const before = view();
+  const order = ['j', 'joel', 'joe'];
+  assert.deepEqual(rankDesks(before.states, order), order);
+  const next = deskRankingSnapshot(data);
+  now = next.generatedAt;
+  assert.equal(model.accept(next).status, 200);
+  const after = view();
+  assert.deepEqual(rankDesks(after.states, order), ['joe', 'j', 'joel']);
+  assert.equal(deskCard(after, 'j', 50, true), deskCard(before, 'j', 50, true));
+  assert.equal(compactDesk(after, 'j'), compactDesk(before, 'j'));
 });
 
 test('JOED-97 M1: replay the browser journey through the read model before asserting its Today wording', async t => {

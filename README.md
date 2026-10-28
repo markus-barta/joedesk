@@ -2009,3 +2009,9 @@ time each time its tip opens, using the explicit zones through `Intl`. Its
 visible and accessible description share that text: normally 06:00, 05:00
 during the autumn and spring offset gaps. The fixed term dictionary is unchanged
 by rendering, and clock-change days use the offset at midnight itself.
+
+JOED-105: refreshes update card values while deferring Since-start reordering
+whenever keyboard focus or an open tip is inside the desk grid. Desktop terms,
+phone rows and tips stay in place without a scroll jump; the next render after
+focus and the tip leave applies the latest ranking. Browser checks cover focused
+terms, a pinned tip with focus elsewhere, and collapsed phone rows.

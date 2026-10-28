@@ -1,7 +1,7 @@
 // Desk: health line and details, Today, the three desks, positions and the
 // kept holdings. Every number keeps its panel state; matching snapshot captions
 // are shared once, while different ages and reasons stay beside their values.
-import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption } from './ui.js';
+import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
@@ -623,9 +623,13 @@ export function renderDesk(ctx) {
   syncDeskDisclosures();
   const grid = $('.desk-grid');
   const currentOrder = [...grid.children].map(card => card.id.slice(5));
-  for (const [index, id] of rankDesks(ctx.states, currentOrder).entries()) {
-    const card = $(`#desk-${id}`);
-    if (grid.children[index] !== card) grid.insertBefore(card, grid.children[index]);
+  // Re-ranking must not detach a focused phone row or a term's open tip.
+  // Values still refresh; apply the latest ranking once the user leaves.
+  if (!interactionWithin(grid)) {
+    for (const [index, id] of rankDesks(ctx.states, currentOrder).entries()) {
+      const card = $(`#desk-${id}`);
+      if (grid.children[index] !== card) grid.insertBefore(card, grid.children[index]);
+    }
   }
   // Charts measure their boxes before the long sections below change, so an
   // update never forces a layout of the whole position list mid-render.

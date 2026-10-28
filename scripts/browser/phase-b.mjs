@@ -3,9 +3,82 @@ import { readFileSync } from 'node:fs';
 import { configure, load, settle, waitFor, VIEWPORTS, THEMES } from './shots.mjs';
 import { WIDE_FONT } from './gate.mjs';
 import { setDeskDisclosures } from './desk-disclosures.mjs';
-import { ingress, at } from './board.mjs';
+import { ingress, at, advance } from './board.mjs';
 
 const fixtures = JSON.parse(readFileSync(new URL('../../fixtures/phase-b.json', import.meta.url)));
+
+export function deskRankingSnapshot(data) {
+  const next = advance(data, at(data.generatedAt, 10), data.seq + 1, { cents: [0, 0, 0] });
+  const joe = next.desks.find(d => d.id === 'joe');
+  joe.money.totalPnl.amount = '300'; joe.money.equity.amount = '5300';
+  next.totals.totalPnl.amount = '475'; next.totals.equity.amount = '15475';
+  return next;
+}
+
+// A ranking refresh changes Joe only, so J's existing button identity is a
+// strict check of reordering, independent of the content-rebuild handoff.
+export async function deskRankingFocusChecks({ page, newBoard, check }) {
+  for (const viewport of VIEWPORTS.filter(v => v.name !== '1024')) for (const theme of THEMES) {
+    for (const mode of ['focused-term', 'pinned-tip', ...(viewport.mobile ? ['phone-row'] : [])]) {
+      const tag = `${viewport.name} ${theme} ${mode} ranking refresh`;
+      const b = await newBoard(), data = ingress(fixtures.exact);
+      b.setNow(data.generatedAt);
+      check('AC-33', `${tag}: initial snapshot accepted`, (await b.push(data)).status === 200);
+      await configure(page, viewport, theme);
+      await load(page, b.url);
+      await setDeskDisclosures(page, mode !== 'phone-row');
+      // Clicking disclosures can leave focus in the grid; settle the initial
+      // ranking before deliberately taking ownership of the moving J card.
+      await page.evaluate(`document.activeElement.blur(); document.body.click(); window.__joedesk.refresh()`);
+      await waitFor(page, `[...document.querySelector('.desk-grid').children].map(e => e.id).join() === 'desk-j,desk-joel,desk-joe'`);
+      const selector = mode === 'phone-row' ? '#desk-j .desk-row' : '#desk-j [data-term="today"]';
+      await page.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({block:'center'})`);
+      await settle(page);
+      await page.evaluate(`(() => {
+        window.__rankAnchor = document.querySelector(${JSON.stringify(selector)});
+        if (${JSON.stringify(mode)} === 'pinned-tip') {
+          document.activeElement.blur(); __rankAnchor.click();
+        } else __rankAnchor.focus({preventScroll:true});
+      })()`);
+      await settle(page);
+      const inspect = () => page.evaluate(`(() => {
+        const a = window.__rankAnchor, tip = document.getElementById('tip');
+        const rect = e => { const r = e.getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; };
+        return { connected: a.isConnected, focused: document.activeElement === a,
+          tip: tip.classList.contains('on'), pinned: tip.classList.contains('pinned'),
+          described: a.getAttribute('aria-describedby'), expanded: a.getAttribute('aria-expanded'),
+          tipRect: rect(tip), anchorRect: rect(a), scroll: [scrollX, scrollY],
+          cards: [...document.querySelector('.desk-grid').children].map(e => [e.id, ...rect(e)]),
+          joe: document.querySelector('#desk-joe .dnums').textContent.replace(/\\s/g, '') };
+      })()`);
+      const before = await inspect();
+      check('AC-33', `${tag}: interaction is active before refresh`, before.connected &&
+        (mode === 'pinned-tip' ? !before.focused && before.tip && before.pinned : before.focused) &&
+        (mode === 'phone-row' || before.tip && before.described === 'tip' && before.expanded === 'true'), before);
+      const next = deskRankingSnapshot(data);
+      b.setNow(next.generatedAt);
+      const accepted = await b.push(next);
+      check('AC-33', `${tag}: changed ranking accepted`, accepted.status === 200, accepted.body);
+      await page.evaluate('window.__joedesk.refresh()');
+      await waitFor(page, `document.querySelector('#desk-joe .dnums').textContent.replace(/\\s/g, '').includes('+€300,00')`);
+      await settle(page);
+      const after = await inspect();
+      check('AC-33', `${tag}: refreshed values keep the identical focused button and open tip anchor`, after.connected &&
+        (mode === 'pinned-tip' ? !after.focused && after.pinned : after.focused) &&
+        (mode === 'phone-row' || after.tip && after.described === 'tip' && after.expanded === 'true' &&
+          JSON.stringify(after.tipRect) === JSON.stringify(before.tipRect)) && after.joe.includes('+€300,00'), { before, after });
+      check('no-shift', `${tag}: deferred ranking causes zero card movement or scroll jump`,
+        JSON.stringify(after.cards) === JSON.stringify(before.cards) &&
+        JSON.stringify(after.anchorRect) === JSON.stringify(before.anchorRect) &&
+        JSON.stringify(after.scroll) === JSON.stringify(before.scroll), { before, after });
+      await page.evaluate(`document.activeElement.blur(); document.body.click(); window.__joedesk.refresh()`);
+      await waitFor(page, `[...document.querySelector('.desk-grid').children].map(e => e.id).join() === 'desk-joe,desk-j,desk-joel'`);
+      check('AC-33', `${tag}: latest ranking applies after focus and tip leave`, await page.evaluate(`
+        !document.querySelector('.desk-grid').contains(document.activeElement) && !document.getElementById('tip').classList.contains('on')`));
+    }
+  }
+}
+
 export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, mixed = false }) {
   for (const viewport of [...VIEWPORTS, { ...VIEWPORTS[2], name: '360', width: 360 }]) for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
     const data = fixtures[mixed ? 'mixed' : 'exact'];

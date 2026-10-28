@@ -175,7 +175,7 @@ test('missing or invalid check-ins fall back to snapshot age only once it is sta
 });
 
 test('term tips capture native focus, survive an unrelated Details close, and suppress only synchronous handoff focus', async t => {
-  const { initTips, rebuilt } = await builders('ui.js', ['rebuilt']);
+  const { initTips, rebuilt, interactionWithin } = await builders('ui.js', ['rebuilt']);
   const listeners = new Map(), captures = new Map();
   const emit = (type, target, extra = {}) => {
     for (const fn of listeners.get(type) ?? []) fn({ target, pointerType: 'mouse', preventDefault() {}, stopImmediatePropagation() {}, ...extra });
@@ -206,18 +206,26 @@ test('term tips capture native focus, survive an unrelated Details close, and su
   inside.focus();
   assert.ok(classes.has('on'));
   assert.match(tip.innerHTML, /Broker connection/);
+  const grid = { contains: el => el === outside };
+  assert.equal(interactionWithin(grid), false, 'unrelated focus and tip do not hold desk order');
   emit('click', outside); // capture-phase tip opens before the Details bubble handler
+  assert.equal(interactionWithin(grid), true, 'a pinned grid tip holds order even with focus elsewhere');
   tips.hide(pop);
   assert.ok(classes.has('on'));
   assert.equal(outside.attributes['aria-expanded'], 'true');
   assert.match(tip.innerHTML, /Today/);
   tips.hide();
+  assert.equal(interactionWithin(grid), false, 'dismissing the tip releases the deferred order');
   emit('pointermove', outside);
   assert.ok(classes.has('on'), 'pointer movement restores a tip dismissed by scroll');
+  assert.equal(interactionWithin(grid), true, 'an unpinned hover tip also holds order');
   tips.hide();
   rebuilt.tip.focus(inside);
   rebuilt.tip.focus(inside); // no focus event: must not suppress the next user's focus
   outside.focus();
+  tips.hide();
+  assert.equal(interactionWithin(grid), true, 'focused grid controls hold order even with the tip dismissed');
+  emit('focus', outside);
   assert.ok(classes.has('on'));
   assert.equal(outside.attributes['aria-expanded'], 'true');
   inside.focus();

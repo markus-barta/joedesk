@@ -129,8 +129,8 @@
     },
     {
       "path": "public/joe/desk.js",
-      "size": 48493,
-      "sha256": "b01566f991564c67bc40168fd4b40ab7ef200c03c32d26b4f11636000167842c"
+      "size": 48706,
+      "sha256": "b50af2ffa15e3e3678b23df17c96d5423380592d460c8e01469d4fdab3cf6ded"
     },
     {
       "path": "public/joe/events.js",
@@ -239,8 +239,8 @@
     },
     {
       "path": "public/joe/ui.js",
-      "size": 19086,
-      "sha256": "a046d04b7a8c1200694ea3ecc3944da948d6f5becae19161d360bd8fb18badf9"
+      "size": 19416,
+      "sha256": "e9fa0ccd34e1c65b6c4bbd86ff89e38266c556ea038082304379bd11e1c3923c"
     },
     {
       "path": "public/joe/vendor/calver/display.json",

@@ -205,6 +205,12 @@ export const ageSpan = (key, text) => `<span class="age" data-age="${key}">${esc
 const AGE_RE = /<span class="age" data-age="([^"]+)">([^<]*)<\/span>/g;
 const structure = new WeakMap();
 const rebuilt = { tip: null, busy: false };
+// Keep an interacting region stationary, even when a pointer-pinned tip has
+// no keyboard focus. The next render after leaving may apply its new order.
+export function interactionWithin(root) {
+  const anchor = rebuilt.tip?.anchor();
+  return root.contains(document.activeElement) || Boolean(anchor && root.contains(anchor));
+}
 const KEYS = ['data-term', 'data-say', 'data-desk-disclosure', 'data-go', 'data-hdesk', 'data-range', 'data-desk', 'data-day', 'data-period', 'data-field', 'data-themeopt', 'data-sec'];
 function identity(node, root) {
   if (node.id) return { sel: `#${CSS.escape(node.id)}`, index: 0 };

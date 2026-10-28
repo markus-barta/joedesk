@@ -14,7 +14,7 @@ import { focusTermTips } from './browser/term-focus.mjs';
 import { runBudget, budgetTable, CI_GUARD, REFERENCE_BUDGET } from './browser/budget.mjs';
 import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
-import { phaseBChecks } from './browser/phase-b.mjs';
+import { phaseBChecks, deskRankingFocusChecks } from './browser/phase-b.mjs';
 import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
 import { parseBoardSweepArgs, createBoardSweepPlan, boardSweepErrors, boardSweepTable } from './board-sweep-plan.mjs';
 
@@ -456,7 +456,10 @@ const unavailable = (r, words) => r.on && r.hero.includes(`Results are unavailab
 const norm = text => text?.replace(/\s+/g, ' ').trim();
 const moves = (a, b) => shifted(a, b, ['top', 'left', 'height']);
 try {
-  if (run('phase-b')) await phaseBChecks({ page, newBoard, check, shot, auditScreen });
+  if (run('phase-b')) {
+    await phaseBChecks({ page, newBoard, check, shot, auditScreen });
+    await deskRankingFocusChecks({ page, newBoard, check });
+  }
   if (run('design')) {
   // 1 · The full design scenario at every viewport and theme.
   const { snapshot, history } = scenario(NOW);
