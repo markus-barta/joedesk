@@ -848,6 +848,7 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
     for (const name of ['openSync', 'fstatSync', 'readFileSync', 'closeSync']) {
       const original = fs[name];
       t.mock.method(fs, name, (key, ...args) => {
+        if (name === 'readFileSync' && files.has(String(key))) return files.get(String(key));
         if (name === 'openSync' && files.has(String(key))) { const fd = nextFd++; fds.set(fd, String(key)); return fd; }
         if (fds.has(key)) {
           const body = files.get(fds.get(key));
@@ -862,10 +863,83 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
       write: (file, value) => files.set(file, JSON.stringify(value)) };
     const stored = name => files.get(`${options.dataDir}/${name}-state.json`);
     return { model: createReadModel(options), restart: () => createReadModel(options),
+      server: () => createJoeServer(options),
+      replaceFleet: value => files.set(`${options.dataDir}/fleet-config.json`, JSON.stringify(value)),
+      fleetReceipt: () => files.get(`${options.dataDir}/fleet-receipt.json`),
       time: value => { seconds = value; }, stored,
       replaceState: value => files.set(`${options.dataDir}/data-state.json`, JSON.stringify(value)),
       cells: model => boardStates(model.feeds(), at(seconds), model.panels()) };
   }
+  async function fleetRead(server, headers = {}) {
+    let status, responseHeaders, text;
+    await server.listeners('request')[0]({ url: '/joe/fleet-config.json', method: 'GET',
+      headers: { host: 'fixture.invalid', 'x-auth-request-user': 'fixture', ...headers } }, {
+      writeHead(code, value) { status = code; responseHeaders = new Headers(value); },
+      end(value) { text = String(value ?? ''); },
+    });
+    return { status, headers: responseHeaders, text, value: text ? JSON.parse(text) : null };
+  }
+  function reverseKeys(value) {
+    if (Array.isArray(value)) return value.map(reverseKeys);
+    if (value && typeof value === 'object') return Object.fromEntries(
+      Object.entries(value).reverse().map(([key, child]) => [key, reverseKeys(child)]));
+    return value;
+  }
+  for (const nested of [false, true]) test(`JOED-131 F2: reordered ${nested ? 'nested' : 'top-level'} keys preserve settings reads, ETag and receipt across restart`, async t => {
+    const h = harness(t), config = JSON.parse(fs.readFileSync(new URL('../public/joe/fleet-config.example.json', import.meta.url)));
+    config.rev = 'fc-000019'; h.replaceFleet(config);
+    const server = h.server();
+    const first = await fleetRead(server);
+    assert.equal(first.status, 200);
+    const receipt = h.fleetReceipt(), etag = first.headers.get('etag');
+    assert.equal(etag, '"fc-000019"');
+    const reordered = nested ? reverseKeys(config) : Object.fromEntries(Object.entries(config).reverse());
+    assert.deepEqual(reordered, config);
+    assert.notEqual(JSON.stringify(reordered), JSON.stringify(config));
+    assert.equal(validateContract('fleet-config', reordered).ok, true);
+    h.replaceFleet(reordered); h.time(45);
+    // Construct the restart before either read, so it must load the original receipt.
+    for (const current of [server, h.server()]) {
+      const response = await fleetRead(current);
+      assert.equal(response.status, 200);
+      assert.deepEqual(response.value, config);
+      assert.equal(response.headers.get('etag'), etag);
+      assert.equal(response.headers.get('x-joe-received-at'), at(0));
+      assert.equal(response.headers.get('x-joe-feed-reason'), null);
+      const cached = await fleetRead(current, { 'if-none-match': etag });
+      assert.equal(cached.status, 304); assert.equal(cached.text, '');
+      assert.equal(cached.headers.get('x-joe-received-at'), at(0));
+      assert.equal(current.readModel.panels()['fleet-config'].ageSeconds, 45);
+      assert.equal(current.readModel.feeds()['fleet-config'].reason, null);
+      assert.equal(h.fleetReceipt(), receipt, 'unchanged content must not rewrite the receipt');
+    }
+  });
+  for (const [field, change] of [
+    ['nested value', config => { config.desks.maxBusyDesks--; }],
+    ['timestamp', config => { config.updatedAt = at(1); }],
+    ['array order', config => { config.desks.keep.reverse(); }],
+  ]) test(`JOED-131: same-revision ${field} changes still fail closed across restart`, async t => {
+    const h = harness(t), config = JSON.parse(fs.readFileSync(new URL('../public/joe/fleet-config.example.json', import.meta.url)));
+    config.rev = 'fc-000019'; h.replaceFleet(config);
+    const server = h.server();
+    assert.equal((await fleetRead(server)).status, 200);
+    const receipt = h.fleetReceipt(), changed = reverseKeys(config);
+    change(changed); assert.equal(validateContract('fleet-config', changed).ok, true);
+    h.replaceFleet(changed); h.time(45);
+    for (const current of [server, h.server()]) {
+      assert.deepEqual(current.readModel.observeFleet(changed), { ok: false, status: 503, reason: 'contract_invalid' });
+      for (const headers of [{}, { 'if-none-match': '"fc-000019"' }]) {
+        const response = await fleetRead(current, headers);
+        assert.equal(response.status, 503); assert.equal(response.value.reason, 'refresh_failed');
+      }
+      assert.deepEqual(current.readModel.feeds()['fleet-config'].value, config);
+      assert.equal(h.fleetReceipt(), receipt);
+    }
+    h.replaceFleet(config);
+    assert.equal((await fleetRead(server)).status, 200);
+    assert.equal(server.readModel.feeds()['fleet-config'].reason, null);
+    assert.equal(h.fleetReceipt(), receipt);
+  });
   function retained(value, seconds, seq) {
     const copy = ingress(value);
     copy.seq = seq; copy.generatedAt = copy.safety.gateway.checkedAt = at(seconds);
