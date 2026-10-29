@@ -266,7 +266,7 @@ function renderedBoard(t) {
     events: { recent: () => [], baseline: () => true }, actions: { entries: designActions() } };
   const set = (selector, html) => { const node = document.querySelector(selector); assert.ok(node, selector); node.innerHTML = html; };
   set('#heroL', deskUI.heroLeft(ctx));
-  for (const id of ['j', 'joe', 'joel']) set(`#desk-${id}`, deskUI.deskCard(ctx, id, 100, true));
+  for (const id of ['j', 'joe', 'joel']) set(`#desk-${id}`, deskUI.deskCard(ctx, id));
   set('#positions', deskUI.positionsHtml(ctx).html);
   set('#kept', deskUI.keptHtml(ctx));
   set('#jAcct', historyUI.bookkeepingHtml(ctx));

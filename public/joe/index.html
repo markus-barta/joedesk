@@ -171,13 +171,19 @@
 <main class="page" id="main">
   <section class="screen" id="scr-desk" aria-labelledby="deskTitle">
     <h1 class="vh" id="deskTitle">Desk</h1>
+    <!-- JOED-156 slot: the whole-account block (IB paper account incl. kept holdings, with its chart) renders here, above the desk hero. Until then desk.js accountSlot() shows the account's two snapshot figures. -->
+    <div class="account-slot" id="accountSlot"></div>
+    <p class="desks-eyebrow" id="desksEyebrow"></p>
     <section class="card hero" id="deskHero" aria-label="Desk performance">
       <div class="hero-l" id="heroL"></div>
       <div class="hero-r">
-        <button type="button" class="desk-disclosure" data-desk-disclosure="chart" aria-expanded="false" aria-controls="chartDetail"><span id="chartTitle">Market hours</span><span id="chartSummary" class="disclosure-warning"></span><svg class="i disclosure-chevron" aria-hidden="true"><use href="#i-chev-d"/></svg></button>
+        <button type="button" class="desk-disclosure" data-desk-disclosure="chart" aria-expanded="false" aria-controls="chartDetail"><span id="chartTitle">New York market</span><span id="chartSummary" class="disclosure-warning"></span><svg class="i disclosure-chevron" aria-hidden="true"><use href="#i-chev-d"/></svg></button>
         <div class="disclosure-body" id="chartDetail">
-          <div class="session" id="heroSession"></div>
-          <div class="chart hero-chart" id="heroChart" hidden><div class="ctip" role="tooltip"></div></div>
+          <div class="session mkt" id="heroSession"></div>
+          <div class="sess-slot" id="sessSlot">
+            <div class="chart hero-chart" id="heroChart" hidden><div class="ctip" role="tooltip"></div></div>
+            <div class="sess-ax" id="sessAxis" aria-hidden="true"></div>
+          </div>
         </div>
       </div>
     </section>

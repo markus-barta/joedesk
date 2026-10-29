@@ -42,7 +42,7 @@ const hm = await import('../public/joe/history-model.js');
 const { HS, historyChart, downsample, historyPointDetails, initHistoryInput, historyPreset } = await import('../public/joe/history.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, accountSlot, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
 const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { createFeed } = await import('../public/joe/feed.js');
@@ -203,12 +203,14 @@ test('hero captions: every reason reserves retained, stale, broken and null word
   assert.deepEqual(sizing(reservedCaption(visible, ['after fees'])), phrases, 'reserve stays identical across states');
 });
 
+// JOED-153: Open result and Desks' money stay in the desk hero; the paper account
+// moved to the whole-account slot above it with the same reserved caption.
 test('hero captions: three supporting KPIs keep the same reserve through session loss and incomplete bookkeeping', () => {
   const fresh = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
   const session = board(fixture('a-gateway-up-but-dead'));
   const incomplete = structuredClone(fresh);
   incomplete.states['desks.j.equity'].value = null;
-  const kpis = ctx => [...heroLeft(ctx).matchAll(/<div class="kpi"[\s\S]*?<\/div>/g)].map(m => m[0]);
+  const kpis = ctx => [...`${heroLeft(ctx)}${accountSlot(ctx)}`.matchAll(/<div class="kpi"[\s\S]*?<\/div>/g)].map(m => m[0]);
   const reserve = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
   const baseline = kpis(fresh);
   assert.equal(baseline.length, 3);
@@ -1223,20 +1225,25 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
   assert.doesNotMatch(doc.querySelector('.say').textContent, /broker connection down/);
   assert.match(doc.querySelector('[data-cell="hero.since"] .account-caption').children[0].textContent, /Last good value, 2\smin ago$/);
   assert.match(doc.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, /Last good value, 1\smin ago$/);
-  assert.equal(doc.querySelector('.cash-reason').textContent, 'not reported');
-  assert.match(doc.querySelector('[data-cash="hero.cash"]').getAttribute('aria-label'), /Cash not reported · broker connection down/);
   for (const caption of doc.querySelectorAll('.account-caption')) assert.doesNotMatch(caption.children[0].textContent, /broker connection down/);
-  assert.equal(doc.querySelector('.disclosure-warning .vh').textContent.match(/broker connection down/g).length, 1, 'collapsed Account retains one reason');
+  assert.equal(doc.querySelector('.disclosure-warning .vh').textContent.match(/broker connection down/g).length, 1, 'collapsed Desks’ money retains one reason');
+  // JOED-153: Cash sits in the whole-account slot above the hero and still says the outage once.
+  const slot = htmlDocument(accountSlot(ctx));
+  for (const sizing of slot.querySelectorAll('.cash-sizing')) sizing.remove();
+  assert.equal(slot.querySelector('.cash-reason').textContent, 'not reported');
+  assert.match(slot.querySelector('[data-cash="hero.cash"]').getAttribute('aria-label'), /Cash not reported · broker connection down/);
+  assert.equal(slot.querySelector('.account-slot-state').textContent, 'Numbers unavailable · broker connection down');
   for (const id of ['j', 'joe', 'joel']) {
     ctx.states[`desks.${id}.totalPnl`].ageSeconds = 150;
-    const card = htmlDocument(deskCard(ctx, id, 10, false));
-    const status = card.querySelector('.mini-label').textContent;
+    const card = htmlDocument(deskCard(ctx, id));
+    const status = card.querySelector('.card-status').textContent;
     assert.equal(status.match(/broker connection down/g).length, 1, id);
     assert.match(status, /Since 10\sSep: last good, 2\smin ago$/);
     const compact = htmlDocument(compactDesk(ctx, id));
     assert.equal(compact.querySelector('.summary-text').textContent.match(/broker connection down/g).length, 1);
     assert.equal(compact.querySelector('.vh').textContent.match(/broker connection down/g).length, 1);
-    assert.match(compact.querySelector('.expanded-summary .vh').textContent, /History: stale · updates are late/);
+    // History no longer feeds a desk card, so its state is not a desk's warning.
+    assert.doesNotMatch(compact.querySelector('.vh').textContent, /History/);
     assert.match(compact.querySelector('.expanded-summary .vh').textContent, /Check-in: stale/);
     assert.doesNotMatch(compact.querySelector('.expanded-summary .vh').textContent, /broker connection down/, 'independent warnings survive expansion without repeating the shared outage');
     assert.equal(compact.querySelectorAll('.compact-state').length, 2);
@@ -1244,14 +1251,14 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
   ctx.states['today.openPnl'] = { state: 'broken', value: null, reason: 'not_exact_yet' };
   const different = htmlDocument(heroLeft(ctx));
   assert.equal(different.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Not exact');
-  assert.equal(different.querySelector('[data-cell="hero.open"] .bn').getAttribute('aria-label'), 'Open positions: not exact');
+  assert.equal(different.querySelector('[data-cell="hero.open"] .bn').getAttribute('aria-label'), 'Open result: not exact');
   const cold = board(fixture('a-gateway-up-but-dead'), { cold: true });
   const coldHero = htmlDocument(heroLeft(cold));
   assert.equal(coldHero.querySelector('.board-caption').textContent, 'Numbers unavailable · broker connection down');
   for (const dash of coldHero.querySelectorAll('[data-cell] .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
   for (const id of ['j', 'joe', 'joel']) {
-    const card = htmlDocument(deskCard(cold, id, 10, false));
-    assert.equal(card.querySelector('.mini-label').textContent, 'Numbers: unavailable · broker connection down');
+    const card = htmlDocument(deskCard(cold, id));
+    assert.equal(card.querySelector('.card-status').textContent, 'Numbers: unavailable · broker connection down');
     for (const dash of card.querySelectorAll('.dnums .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
   }
 });

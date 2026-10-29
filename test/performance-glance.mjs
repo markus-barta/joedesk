@@ -9,7 +9,7 @@ const { boardStates } = await import('../public/joe/board-state.js');
 import { copyText } from '../scripts/browser/shots.mjs';
 const { joinUnits, eur } = await import('../public/joe/format.js');
 const { STARTING_MONEY, SINCE_START, sinceStarts, exactMoney, exactCell, percentOf, todayPercent, sincePercent, rankDesks } = await import('../public/joe/performance.js');
-const { boardCaptionCell, sharesBoardCaption, heroLeft, cardStatus, percentHtml, positionsHtml, compactDesk, healthPop } = await import('../public/joe/desk.js');
+const { boardCaptionCell, sharesBoardCaption, heroLeft, accountSlot, cardStatus, percentHtml, positionsHtml, compactDesk, healthPop } = await import('../public/joe/desk.js');
 const { boardHealthPresentation } = await import('../public/joe/health.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { tile, two } = await builders('results.js', ['tile', 'two']);
@@ -100,16 +100,21 @@ test('ranking is exact, descending, stable in current order, with unknown result
   assert.deepEqual(rankDesks({}, ['joel', 'joe', 'j']), ['joel', 'joe', 'j']);
 });
 
-test('hero preserves all five figures and promotes Since start beside Today', () => {
+test('hero keeps the desks’ four figures and promotes Since start beside Today; the whole account sits in the slot above', () => {
   const ctx = context(), doc = htmlDocument(heroLeft(ctx));
-  assert.equal(doc.querySelectorAll('[data-cell]').length, 5);
+  assert.equal(doc.querySelectorAll('[data-cell]').length, 4);
   assert.deepEqual(doc.querySelectorAll('.performance .primary').map(el => el.dataset.cell), ['hero.day', 'hero.since']);
   assert.equal(doc.querySelectorAll('.performance-pct').length, 2);
   // Amy's A4: every desk counts from 10 Sep 2026 (New York), so the label names the day.
   assert.equal(doc.querySelector('[data-cell="hero.since"] .term').textContent, 'Since 10\u00a0Sep');
-  assert.equal(doc.querySelectorAll('.kpi').length, 4);
-  assert.deepEqual(doc.querySelectorAll('.kpi dt').map(el => el.textContent), ['Open positions', 'Desks’ money', 'Paper account', 'Cash']);
+  // JOED-153: the summary row is Open result and Desks' money; the kept holdings never enter a desk figure.
+  assert.deepEqual(doc.querySelectorAll('.kpi dt').map(el => el.textContent), ['Open result', 'Desks’ money']);
+  assert.equal(doc.querySelector('.desk-scope').textContent, 'Desk figures never include the kept holdings. The whole account, with them, is at the top.');
   assert.equal(doc.querySelector('[data-cell="hero.day"] .bn').textContent, '−€1,00');
+  const slot = htmlDocument(accountSlot(ctx));
+  assert.deepEqual(slot.querySelectorAll('.kpi dt').map(el => el.textContent), ['IB paper account · whole account', 'Cash']);
+  assert.equal(slot.querySelectorAll('[data-cell]').length, 1);
+  assert.equal(slot.querySelector('[data-cell="hero.account"] .account-caption').children[0].textContent, 'includes the kept holdings');
 });
 
 test('separate Cash figure preserves exact values and keeps unavailable wording inside its caption', () => {
@@ -123,7 +128,7 @@ test('separate Cash figure preserves exact values and keeps unavailable wording 
     cell('12345.67890123', { state: 'broken', retained: true, reason: 'gateway_unconfirmed' }),
   ]) {
     ctx.states.paperCash = cash;
-    const html = heroLeft(ctx), doc = htmlDocument(html), figure = doc.querySelector('.cash-kpi');
+    const html = accountSlot(ctx), doc = htmlDocument(html), figure = doc.querySelector('.cash-kpi');
     const actual = figure.querySelector('[data-cash="hero.cash"]');
     assert.equal(figure.querySelector('.cash-caption .cash-description').textContent, 'cash · as the broker reports it');
     assert.equal(actual.getAttribute('aria-label'), actual.getAttribute('title'));
@@ -151,24 +156,26 @@ test('separate Cash figure preserves exact values and keeps unavailable wording 
 test('omitted Cash is a muted dash with the missing-data explanation in the caption', () => {
   const ctx = context();
   delete ctx.states.paperCash;
-  const figure = htmlDocument(heroLeft(ctx)).querySelector('.cash-kpi');
+  const figure = htmlDocument(accountSlot(ctx)).querySelector('.cash-kpi');
   assert.equal(figure.querySelector('.cash-amount.muted').textContent, '—');
   assert.equal(figure.querySelector('.cash-caption .cash-reason').textContent, 'not reported · no data received yet');
   assert.equal(figure.querySelector('[data-cash]').getAttribute('aria-label'), 'Cash not reported · no data received yet');
 });
 
+// The fixture's open desk positions, as the fresh positions panel lists them.
+const positionCount = ctx => ctx.states.positions.value.filter(row => row.quantity == null || decimalUnits(row.quantity) !== 0n).length;
 test('AC-19 supporting captions and Cash explanation survive phone separator typography', () => {
   const ctx = context();
   delete ctx.states.paperCash;
   for (const joinDot of [false, true]) {
-    const doc = htmlDocument(heroLeft(ctx));
-    const captions = doc.querySelectorAll('.kpi').map(figure => {
+    const hero = htmlDocument(heroLeft(ctx)), doc = htmlDocument(accountSlot(ctx));
+    const captions = [...hero.querySelectorAll('.kpi'), ...doc.querySelectorAll('.kpi')].map(figure => {
       const cash = figure.querySelector('.cash-caption');
       const caption = cash?.querySelector('.cash-description') ?? figure.querySelector('.account-caption').children[0];
       return joinUnits(caption.textContent, { joinDot });
     });
     const reason = joinUnits(doc.querySelector('.cash-caption .cash-reason').textContent, { joinDot });
-    assert.deepEqual(copyText(captions), ['still moving until closed', `started with ${eur(STARTING_MONEY, false, 0)} on 10\u00a0Sep`, 'includes the kept holdings', 'cash · as the broker reports it']);
+    assert.deepEqual(copyText(captions), [`${positionCount(ctx)}\u00a0position · changes until they close`, `started with ${eur(STARTING_MONEY, false, 0)} on 10\u00a0Sep`, 'includes the kept holdings', 'cash · as the broker reports it']);
     assert.equal(copyText(reason), 'not reported · no data received yet');
     if (joinDot) {
       assert.match(captions[3], /cash\u00a0·/);
@@ -182,11 +189,12 @@ test('shared stale captions appear once, with local subtle state icons intact', 
   assert.match(doc.querySelector('.board-caption').textContent, /As of 1 min ago · updates are late/);
   assert.doesNotMatch(doc.querySelector('.say').textContent, /updates are late/);
   assert.equal(doc.querySelector('[data-cell="hero.since"] .account-caption').children[0].textContent, '');
-  assert.equal(doc.querySelectorAll('.cell-state').length, 5);
+  assert.equal(doc.querySelectorAll('.cell-state').length, 4);
+  assert.equal(htmlDocument(accountSlot(ctx)).querySelectorAll('.cell-state').length, 1, 'the account figure keeps its own subtle icon in the slot');
   for (const id of ['j', 'joe', 'joel']) {
-    const c = htmlDocument(deskCard(ctx, id, 10, true));
+    const c = htmlDocument(deskCard(ctx, id));
     assert.equal(c.querySelectorAll('.cell-state').length, 3);
-    assert.doesNotMatch(c.querySelector('.mini-label').textContent, /updates are late/);
+    assert.doesNotMatch(c.querySelector('.spark-h').textContent, /updates are late/);
     assert.equal(cardStatus(id, [['Today', ctx.states[`desks.${id}.dayPnl`]]], board), '');
   }
 });
@@ -221,7 +229,7 @@ test('no snapshot keeps every original missing explanation and omits both percen
 test('per-desk base omission is explained and position open results retain native currency', () => {
   const ctx = context();
   assert.match(TERMS.since[1], /do not provide a starting base per desk/);
-  for (const id of ['j', 'joe', 'joel']) assert.doesNotMatch(deskCard(ctx, id, 10, true), /performance-pct/);
+  for (const id of ['j', 'joe', 'joel']) assert.doesNotMatch(deskCard(ctx, id), /performance-pct/);
   ctx.states.positions.value = [{ desk: 'j', symbol: 'ABC', side: 'long', quantity: '1', scope: 'stage0',
     mark: { amount: '10', currency: 'USD' }, marketValue: { amount: '10', currency: 'USD' }, openPnl: { amount: '2', currency: 'USD' } }];
   assert.match(positionsHtml(ctx).sub, /each in its own currency/);
@@ -251,11 +259,13 @@ test('JOED-148 A4: Since start names its day and its basis from the configured s
   for (const node of doc.querySelectorAll('.cash-sizing')) node.remove();
   const since = doc.querySelector('[data-cell="hero.since"]');
   assert.equal(since.querySelector('.term').textContent, 'Since 10 Sep');
-  assert.equal(since.querySelector('.account-caption').children[0].textContent, `of ${eur(STARTING_MONEY, false, 0)} · after fees, incl. open positions`);
-  assert.equal(since.querySelector('.phone-primary-note').textContent, `of ${eur(STARTING_MONEY, false, 0)} · after fees, incl. open positions`);
+  // JOED-153: the basis sits beside the percentage it defines; the caption says what is counted.
+  assert.equal(since.querySelector('.pct-slot').textContent, `−0,01\u00a0% of ${eur(STARTING_MONEY, false, 0)}`);
+  assert.equal(since.querySelector('.account-caption').children[0].textContent, 'after fees, incl. open positions');
+  assert.equal(since.querySelector('.phone-primary-note').textContent, 'after fees, incl. open positions');
   assert.equal(doc.querySelector('[data-cell="hero.equity"] .account-caption').children[0].textContent, `started with ${eur(STARTING_MONEY, false, 0)} on 10 Sep`);
   for (const id of ['j', 'joe', 'joel']) {
-    const card = htmlDocument(deskCard(ctx, id, 10, true));
+    const card = htmlDocument(deskCard(ctx, id));
     assert.equal(card.querySelectorAll('.dnums .term')[2].textContent, 'Since 10 Sep', id);
     // The phone row says "Since"; the Desks heading carries the one start day.
     assert.equal(htmlDocument(compactDesk(ctx, id)).querySelectorAll('.compact-label')[1].textContent, 'Since');
@@ -271,8 +281,8 @@ test('JOED-148 A4: a desk’s own accounting start wins; another Results start l
   assert.equal(doc.querySelector('[data-cell="hero.since"] .term').textContent, 'Since start', 'no single day for the household');
   for (const node of doc.querySelectorAll('.cash-sizing')) node.remove();
   assert.equal(doc.querySelector('[data-cell="hero.equity"] .account-caption').children[0].textContent, `started with ${eur(STARTING_MONEY, false, 0)}`);
-  assert.equal(htmlDocument(deskCard(ctx, 'j', 10, true)).querySelectorAll('.dnums .term')[2].textContent, 'Since 12 Sep');
-  assert.equal(htmlDocument(deskCard(ctx, 'joe', 10, true)).querySelectorAll('.dnums .term')[2].textContent, 'Since 10 Sep');
+  assert.equal(htmlDocument(deskCard(ctx, 'j')).querySelectorAll('.dnums .term')[2].textContent, 'Since 12 Sep');
+  assert.equal(htmlDocument(deskCard(ctx, 'joe')).querySelectorAll('.dnums .term')[2].textContent, 'Since 10 Sep');
   assert.equal(htmlDocument(compactDesk(ctx, 'j')).querySelectorAll('.compact-label')[1].textContent, 'Since 12 Sep');
   // Results agreeing changes nothing; Results starting elsewhere drops the board's date.
   delete ctx.feeds.data.value.desks[0].accounting;
@@ -283,7 +293,7 @@ test('JOED-148 A4: a desk’s own accounting start wins; another Results start l
   assert.deepEqual(sinceStarts(ctx.feeds).days, { j: null, joe: null, joel: null });
   doc = htmlDocument(heroLeft(ctx));
   assert.equal(doc.querySelector('[data-cell="hero.since"] .term').textContent, 'Since start');
-  for (const id of ['j', 'joe', 'joel']) assert.equal(htmlDocument(deskCard(ctx, id, 10, true)).querySelectorAll('.dnums .term')[2].textContent, 'Since start');
+  for (const id of ['j', 'joe', 'joel']) assert.equal(htmlDocument(deskCard(ctx, id)).querySelectorAll('.dnums .term')[2].textContent, 'Since start');
   const details = htmlDocument(healthPop(ctx, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now)));
   const flag = details.querySelectorAll('.st.warn').map(e => e.textContent);
   assert.ok(flag.includes('Since start dates differ: Results start on 12 Sep; J, Joe and Joel count from 10 Sep. Desk shows no date until they agree.'), flag.join(' | '));
@@ -303,7 +313,7 @@ const sinceView = ctx => {
   return {
     hero: hero.querySelector('[data-cell="hero.since"] .term').textContent,
     money: hero.querySelector('[data-cell="hero.equity"] .account-caption').children[0].textContent,
-    cards: ['j', 'joe', 'joel'].map(id => htmlDocument(deskCard(ctx, id, 10, true)).querySelectorAll('.dnums .term')[2].textContent),
+    cards: ['j', 'joe', 'joel'].map(id => htmlDocument(deskCard(ctx, id)).querySelectorAll('.dnums .term')[2].textContent),
     warning: details.querySelectorAll('.st.warn').map(e => e.textContent).find(text => text.startsWith('Since start dates differ')) ?? null,
   };
 };

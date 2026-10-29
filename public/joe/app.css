@@ -11,7 +11,7 @@
   --gain-fill: rgba(34, 103, 58, .14); --loss-fill: rgba(163, 56, 47, .13);
   --paper-bg: #dce8f2; --paper-ink: #1b4566; --paper-line: rgba(27, 69, 102, .25);
   --live-bg: #b3261e; --live-ink: #ffffff;
-  --desk-j: #3d8a37; --desk-joe: #2f6fae; --desk-joel: #8a6240; --est: #8f8c83;
+  --desk-j: #7b51a8; --desk-joe: #2f6fae; --desk-joel: #8a6240; --est: #8f8c83;
   --seg-bg: rgba(31, 33, 30, .055); --seg-on: #fffefb; --seg-shadow: 0 1px 2px rgba(31, 33, 30, .12), inset 0 0 0 1px rgba(255, 255, 255, .9);
   --row-hover: rgba(43, 95, 134, .06); --field-bg: #fffefb; --field-line: #7b8075;
   --tip-bg: #1f2124; --tip-ink: #f4f1ea; --tip-ink-2: #c9c5ba;
@@ -37,7 +37,7 @@
     --gain-fill: rgba(147, 207, 133, .16); --loss-fill: rgba(240, 153, 141, .14);
     --paper-bg: #213547; --paper-ink: #cfe3f2; --paper-line: rgba(207, 227, 242, .24);
     --live-bg: #c0392b; --live-ink: #ffffff;
-    --desk-j: #8ecf78; --desk-joe: #6aaee8; --desk-joel: #c49a6c; --est: #7d7a70;
+    --desk-j: #c0a2e8; --desk-joe: #6aaee8; --desk-joel: #c49a6c; --est: #7d7a70;
     --seg-bg: rgba(238, 232, 216, .06); --seg-on: rgba(238, 232, 216, .12); --seg-shadow: 0 1px 2px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 255, 255, .06);
     --row-hover: rgba(156, 194, 221, .07); --field-bg: rgba(0, 0, 0, .2); --field-line: #858b7f;
     --tip-bg: #f1ede3; --tip-ink: #1b1c19; --tip-ink-2: #4a4a43;
@@ -59,7 +59,7 @@
   --gain-fill: rgba(147, 207, 133, .16); --loss-fill: rgba(240, 153, 141, .14);
   --paper-bg: #213547; --paper-ink: #cfe3f2; --paper-line: rgba(207, 227, 242, .24);
   --live-bg: #c0392b; --live-ink: #ffffff;
-  --desk-j: #8ecf78; --desk-joe: #6aaee8; --desk-joel: #c49a6c; --est: #7d7a70;
+  --desk-j: #c0a2e8; --desk-joe: #6aaee8; --desk-joel: #c49a6c; --est: #7d7a70;
   --seg-bg: rgba(238, 232, 216, .06); --seg-on: rgba(238, 232, 216, .12); --seg-shadow: 0 1px 2px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 255, 255, .06);
   --row-hover: rgba(156, 194, 221, .07); --field-bg: rgba(0, 0, 0, .2); --field-line: #858b7f;
   --tip-bg: #f1ede3; --tip-ink: #1b1c19; --tip-ink-2: #4a4a43;
@@ -207,7 +207,7 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 /* ---------- Charts ---------- */
 .chart { position: relative; }
 .chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.chart text, svg.mini text { font: 500 10.5px var(--mono); fill: var(--ink-3); }
+.chart text { font: 500 10.5px var(--mono); fill: var(--ink-3); }
 .ctip { position: absolute; top: 0; left: 0; pointer-events: none; padding: 7px 10px 8px; border-radius: 9px; background: var(--tip-bg); color: var(--tip-ink); font-size: 12px; line-height: 1.45; white-space: nowrap; box-shadow: var(--shadow-pop); opacity: 0; visibility: hidden; }
 .ctip.on { opacity: 1; visibility: visible; }
 .ctip b { font-weight: 650; }
@@ -239,11 +239,6 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .kpi dd { margin: 2px 0 0; font-size: 21px; line-height: 28px; font-weight: 650; }
 .kpi .c { display: block; font-size: 12px; font-weight: 400; color: var(--ink-3); line-height: 16px; letter-spacing: 0; }
 .hero-r { display: flex; flex-direction: column; min-width: 0; }
-.session { display: flex; align-items: center; gap: 14px; }
-.session svg { width: 64px; height: 64px; flex: none; }
-.session b { display: block; font-weight: 650; }
-.session span { display: block; color: var(--ink-3); font-size: 12.5px; }
-.hero-chart { height: 196px; margin-top: 12px; }
 .desk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .dcard { padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .dcard header { display: flex; align-items: center; gap: 11px; }
@@ -261,15 +256,11 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 /* At 390 px the padded detail has 102 px columns. Anonymous flex text
    cannot shrink to fit those columns. Size from the full formatted amount,
    reserving room for the arrow, unit and trailing glyph/letter spacing. */
-.dnums .v > .bn { display: flex; height: 26px; font-size: min(19px, calc((100cqw - 2px) / var(--digits) * 1.5)); }
+.dnums .v > .bn, .dnums .v > .fig-link > .bn { display: flex; height: 26px; font-size: min(19px, calc((100cqw - 2px) / var(--digits) * 1.5)); }
 /* Estimate copy uses the existing label line, outside number/control flow. */
 .dnums .k { position: relative; }
 .dnums > div:first-child .k { padding-right: 48px; }
 .estimate-mark { position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: 10px; line-height: 1; font-weight: 400; letter-spacing: -.02em; color: var(--ink-3); white-space: nowrap; pointer-events: none; }
-.dbar { position: relative; height: 4px; border-radius: 2px; background: var(--sunken); margin-top: 4px; width: 100%; }
-.dbar i { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
-.dbar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--line-2); }
-svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .dcard footer { display: flex; align-items: flex-start; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 12.5px; }
 .dcard footer .i { width: 15px; height: 15px; margin-top: 1px; color: var(--ink-3); }
 .sym { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none; font: 700 10.5px/1 var(--font); letter-spacing: .02em; color: var(--ink); background: color-mix(in srgb, var(--c, var(--accent)) 16%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c, var(--accent)) 30%, transparent); }
@@ -607,10 +598,9 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .hero-l { display: contents; }
 .hero-primary { min-width: 0; container-type: inline-size; grid-column: 1; grid-row: 1; }
 .hero-r { grid-column: 2; grid-row: 1; }
-.hero-r .hero-chart { flex: 1; min-height: 196px; }
 .hero .kpis { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 0; }
 .hero .kpi dt { height: 20px; line-height: 20px; }
-.hero .kpi dd > .bn { display: flex; height: 28px; }
+.hero .kpi dd > .bn, .hero .kpi dd > .fig-link > .bn { display: flex; height: 28px; }
 /* Five caption lines inside every secondary cell, independent of state.
    The hero itself has no reserved height. */
 .hero .kpi .c { height: 80px; min-height: 0; }
@@ -628,13 +618,11 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .hero { grid-template-columns: 1fr; }
   .hero-l { display: block; min-width: 0; }
   .hero-r { grid-column: 1; grid-row: 2; }
-  .hero-r .hero-chart { flex: none; }
   .hero .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 20px; }
   .hero .kpi .c { height: 128px; }
   /* Keep the phone's account, then Cash, then chart order for UX 3. */
   .cash-kpi { grid-column: 1; margin-top: -12px; }
 }
-.performance-date { height: 20px; font-size: 12px; color: var(--ink-3); }
 .performance { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 .performance .primary { min-width: 0; }
 .performance .hero-k { height: 32px; gap: 5px; white-space: nowrap; }
@@ -660,9 +648,6 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .tile .tval .pair-value { display: block; font-size: min(22px, calc((100cqw - 18px) / var(--characters) * 1.45)); line-height: 26px; }
 .tile .tval .sl { font-size: 14px; margin: 0 5px 0 0; }
 .kpi .c { min-height: 16px; }
-.session > div { min-width: 0; }
-.ring-t { font: 650 11px var(--font); fill: var(--ink); }
-.ring-s { font: 500 8.5px var(--font); fill: var(--ink-3); }
 /* A desk card's status yields to a single-line check-in, with its full title.
    A card narrower than 340 px (phones too) keeps "Checked in … ago"
    right-aligned on the name row and gives the state the row below. */
@@ -684,19 +669,8 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 }
 .dcard .state .i { width: 15px; height: 15px; }
 .dnums > div { min-width: 0; }
-span.dbar, span.vbar { display: block; }
-.dnums .dbar { width: 72px; max-width: 100%; }
-.chart.mini { position: relative; }
-.mini-label { position: absolute; left: 2px; right: 6px; top: -2px; display: flex; align-items: center; gap: 6px; font: 500 10.5px/14px var(--mono); color: var(--ink-3); white-space: nowrap; pointer-events: none; }
-.mini-label .st { font: 500 11.5px/14px var(--font); color: var(--ink-2); gap: 5px; }
-.mini-label .st .i { width: 13px; height: 13px; }
-/* Each number that is not fresh gets its own line, inside the chart's box. */
-.mini-label.off { flex-direction: column; align-items: flex-start; gap: 1px; white-space: normal; }
-.mini-label.off .st { white-space: normal; align-items: flex-start; line-height: 13px; }
-.mini-label.off .st .i { margin-top: 1px; }
+span.vbar { display: block; }
 .dnums .k .term { white-space: nowrap; }
-/* Room for one line per not-fresh number (up to three, wrapped) above the sparkline. */
-.chart.mini { height: 84px; }
 .positions .pnote, .kept .pnote, .empty-line { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); font-size: 13px; padding: 10px 0; margin: 0; }
 .pnote .i, .empty-line .i { color: var(--ink-3); margin-top: 2px; }
 /* A section's own state line is always there, sized for its longest state. */
@@ -1144,6 +1118,207 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .dlg-f { padding: 12px 16px 16px; }
   .check { min-height: 44px; align-items: center; }
 }
+
+/* ---------- Desk hero and cards (JOED-153, approved design v3) ----------
+   The session-dated hero (M1, A2), the market-day bar (M3), the summary row
+   and the desk cards with their last-ten-sessions bars (M4, M5). Nothing here
+   clips or ends in an ellipsis; boxes that carry a state keep their room.
+   Phone overrides of the shared sections sit in the JOED-79 block below. */
+/* The whole-account block's slot; until that block lands, the account's two
+   snapshot figures, without a card of their own. */
+.account-slot:empty { display: none; }
+.account-slot { margin-bottom: 14px; }
+.account-slot-section { display: contents; }
+.account-interim { padding: 0 2px; }
+.account-interim .kpis { margin: 0; padding: 0; border-top: 0; }
+/* The shared-reason line keeps its room in every state, so nothing moves. */
+.account-interim .account-slot-state { min-height: 24px; padding: 2px 0 4px; }
+.desks-eyebrow { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; font-size: 12.5px; line-height: 20px; font-weight: 600; color: var(--ink-2); }
+.desks-eyebrow .i { width: 15px; height: 15px; margin-top: 2px; color: var(--ink-3); }
+/* The hero: the two figures with the sentence, the market block beside them;
+   the summary row and the kept-holdings line across the bottom. */
+.hero { grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr); gap: 0 32px; padding: 22px 26px 0; }
+.hero-r { padding-left: 28px; border-left: 1px solid var(--line); }
+.performance { gap: 16px 32px; }
+.performance .hero-k { height: 22px; gap: 8px; }
+.performance .hero-k > .i { width: 15px; height: 15px; color: var(--ink-3); }
+.live-dot { flex: none; width: 8px; height: 8px; margin: 0 2px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+.pct-slot { white-space: nowrap; }
+.pct-slot .basis { margin-left: 2px; font-size: 13px; font-weight: 500; color: var(--ink-3); }
+.pct-slot .term.basis { text-decoration-color: color-mix(in srgb, var(--ink-3) 45%, transparent); }
+.performance .primary-caption { min-height: 32px; }
+.primary-caption .cap-short { display: none; }
+.primary-caption .st, .dnums .c .st { display: inline-flex; gap: 4px; vertical-align: top; white-space: nowrap; }
+.primary-caption .st .i, .dnums .c .st .i { width: 12px; height: 12px; margin-top: 2px; }
+/* M6: figures are links. The amount stays the link's text; hover and focus underline it. */
+.fig-link { position: relative; display: inline-flex; max-width: 100%; color: inherit; text-decoration: none; border-radius: 8px; }
+@media (hover: hover) { .fig-link:hover .bn { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: .18em; } }
+.fig-link:focus-visible .bn { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: .18em; }
+.hero-l .say .num { font-weight: 600; }
+.hero .kpis { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 32px; margin: 10px 0 0; padding: 13px 0 12px; }
+.hero .kpi { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: baseline; column-gap: 10px; }
+.hero .kpi dt { height: auto; }
+.hero .kpi dd { display: contents; }
+.hero .kpi dd > .bn, .hero .kpi dd > .fig-link > .bn { display: inline-flex; height: auto; }
+.hero .kpi .c { height: auto; min-height: 0; }
+.desk-scope { grid-column: 1 / -1; grid-row: 3; min-height: 40px; margin: 0; padding: 11px 0; border-top: 1px dashed var(--line); font-size: 12px; line-height: 18px; color: var(--ink-3); }
+/* M3: the market block, a linear Vienna day 00–24. */
+.session.mkt { display: block; min-width: 0; }
+.mkt-t { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-height: 22px; font-weight: 650; }
+.mkt-t .st { font-size: 12.5px; font-weight: 650; }
+.mkt-t .st.ok { color: var(--ok); }
+.mkt-t .rest { font-weight: 500; color: var(--ink-2); }
+.mkt-s { min-height: 20px; margin-top: 2px; font-size: 13px; line-height: 20px; color: var(--ink-2); }
+.mkt-s b { font-weight: 650; color: var(--ink); }
+.mkt-ny { min-height: 18px; margin-top: 2px; font-size: 12px; line-height: 18px; color: var(--ink-3); }
+.daybar { position: relative; display: block; height: 50px; margin-top: 8px; container-type: inline-size; }
+.db-now-l { position: absolute; top: 0; transform: translateX(-50%); font: 650 10.5px/14px var(--mono); color: var(--ink); white-space: nowrap; }
+.db-now-l.r { transform: translateX(-100%); } .db-now-l.l { transform: none; }
+.db-track { position: absolute; left: 0; right: 0; top: 17px; height: 12px; overflow: hidden; border-radius: 6px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--line); }
+.db-ny { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 13%, transparent); }
+.db-sess { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.db-sess.done { background: color-mix(in srgb, var(--accent) 42%, transparent); box-shadow: none; }
+.db-sess.none { background: transparent; box-shadow: none; border: 1px dashed var(--line-2); }
+.db-fill { position: absolute; top: 0; bottom: 0; border-radius: 3px 0 0 3px; background: var(--accent); }
+.db-now { position: absolute; top: 13px; width: 2px; height: 20px; margin-left: -1px; border-radius: 1px; background: var(--ink); box-shadow: 0 0 0 2px var(--surface); }
+.db-ticks { position: absolute; left: 0; right: 0; top: 34px; height: 14px; font: 500 10.5px/14px var(--mono); color: var(--ink-3); }
+.db-ticks > span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.db-ticks > .s { transform: none; } .db-ticks > .e { transform: translateX(-100%); }
+.db-ticks > .nyl { font: 500 11px/14px var(--font); color: var(--ink-2); }
+@container (max-width: 359.98px) { .db-ticks > .e { display: none; } }
+/* The session line: only in the session and after the close, and only there
+   is its room kept, so it never moves the page within a phase. */
+.sess-slot { display: none; }
+#deskHero[data-phase="live"] .sess-slot, #deskHero[data-phase="closed"] .sess-slot { display: block; height: 46px; margin: 6px 0 14px; }
+.sess-slot .hero-chart { height: 28px; margin: 0; }
+.sess-ax { position: relative; height: 14px; margin-top: 2px; font: 500 10px/14px var(--mono); color: var(--ink-3); }
+.sess-ax > span { position: absolute; top: 0; left: 0; white-space: nowrap; }
+.sess-ax > .e { left: auto; right: 0; }
+.sess-ax > .sl-v { left: clamp(44px, calc(var(--at) * 100%), calc(100% - 44px)); transform: translateX(-50%); font: 650 11px/14px var(--font); }
+/* M5: desk cards. Two columns when a desk is one row; that row spans both. */
+.desk-grid[data-rows="1"], .desk-grid[data-rows="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.desk-grid .dcard[data-layout="row"] { grid-column: 1 / -1; }
+.dcard header { grid-template-columns: 34px minmax(0, 1fr) auto auto; }
+.dcard .who { display: flex; align-items: baseline; gap: 7px; }
+.dcard .who h3 { flex: none; }
+.dcard .who .state .detail { color: var(--ink-2); }
+.card-go { position: relative; display: inline-flex; align-items: center; gap: 3px; min-height: 28px; padding: 0 6px; border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--ink-3); text-decoration: none; white-space: nowrap; }
+.card-go .i { width: 12px; height: 12px; }
+.card-go::after { content: ""; position: absolute; inset: -8px -4px; }
+@media (hover: hover) { .card-go:hover { color: var(--accent-ink); background: var(--row-hover); } }
+.card-go:focus-visible { color: var(--accent-ink); background: var(--row-hover); }
+.dnums { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); }
+.dnums .c { display: block; min-height: 32px; font-size: 11.5px; line-height: 16px; color: var(--ink-3); }
+/* M4: the last ten sessions in a box of their own. When a number is not fresh
+   its line, age and reason take that same box (the bars stay laid out beneath,
+   hidden), so a change of state moves nothing. */
+.spark { position: relative; padding-top: 9px; border-top: 1px solid var(--line); container: spark / inline-size; }
+.spark-h { min-height: 32px; font-size: 11.5px; line-height: 16px; color: var(--ink-3); }
+.spark-h b { font-weight: 600; color: var(--ink-2); }
+.spark.off > :not(.card-status) { visibility: hidden; }
+.card-status { position: absolute; inset: 9px 0 0; display: flex; flex-direction: column; gap: 2px; }
+.card-status .st { align-items: flex-start; gap: 5px; white-space: normal; font-size: 11.5px; line-height: 16px; color: var(--ink-2); }
+.card-status .st .i { width: 13px; height: 13px; margin-top: 1px; }
+.bars { position: relative; display: flex; gap: 4px; height: 76px; margin-top: 2px; }
+.bars .bz { position: absolute; left: 0; right: 0; height: 1px; background: var(--line-2); pointer-events: none; }
+.bars .b { position: relative; flex: 1 1 0; min-width: 0; height: 100%; border-radius: 5px; color: inherit; text-decoration: none; }
+@media (hover: hover) { .bars .b:hover { background: var(--row-hover); } }
+.bars .b:focus-visible { background: var(--row-hover); outline-offset: 1px; }
+.bars .b i { position: absolute; left: 16%; right: 16%; border-radius: 3px; }
+.bars .b i.gain { background: var(--gain); } .bars .b i.loss { background: var(--loss); } .bars .b i.flat { background: var(--ink-3); }
+/* Today's bar still moves: filled at 60 % with its outline. */
+.bars .b i.live.gain { background: color-mix(in srgb, var(--gain) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--gain); }
+.bars .b i.live.loss { background: color-mix(in srgb, var(--loss) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--loss); }
+.bars .b i.live.flat { background: color-mix(in srgb, var(--ink-3) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.bars .b i.est { background-image: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in srgb, var(--surface) 55%, transparent) 3px 5px); }
+.bars .b i.nx { border: 1.5px dashed var(--ink-3); border-radius: 4px; background: transparent; }
+/* Every bar's value: inside the bar when it has room, else beside zero. */
+.bars .bl { position: absolute; left: 50%; transform: translateX(-50%); width: max-content; font: 600 9.5px/11px var(--mono); letter-spacing: -.02em; white-space: nowrap; pointer-events: none; }
+.bars .bl.out.gain { color: color-mix(in srgb, var(--gain) 62%, var(--ink-3)); }
+.bars .bl.out.loss { color: color-mix(in srgb, var(--loss) 62%, var(--ink-3)); }
+.bars .bl.out.flat { color: var(--ink-3); }
+.bars .bl.in { display: none; color: var(--surface); }
+@container spark (min-width: 268px) { .bars .b[data-c="2"] .bl.in { display: block; } .bars .b.has-in[data-c="2"] .bl.out { display: none; } }
+@container spark (min-width: 355px) { .bars .b[data-c="3"] .bl.in { display: block; } .bars .b.has-in[data-c="3"] .bl.out { display: none; } }
+@container spark (min-width: 442px) { .bars .b[data-c="4"] .bl.in { display: block; } .bars .b.has-in[data-c="4"] .bl.out { display: none; } }
+@container spark (min-width: 529px) { .bars .b[data-c="5"] .bl.in { display: block; } .bars .b.has-in[data-c="5"] .bl.out { display: none; } }
+@container spark (min-width: 615px) { .bars .b[data-c="6"] .bl.in { display: block; } .bars .b.has-in[data-c="6"] .bl.out { display: none; } }
+@container spark (min-width: 702px) { .bars .b[data-c="7"] .bl.in { display: block; } .bars .b.has-in[data-c="7"] .bl.out { display: none; } }
+/* Outside labels collide below the width they need (data-need, desk.js):
+   then the extremes and today keep theirs; the rest show on hover or focus. */
+@container spark (max-width: 99.98px) { .bars[data-need="100"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 119.98px) { .bars[data-need="120"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 139.98px) { .bars[data-need="140"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 159.98px) { .bars[data-need="160"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 179.98px) { .bars[data-need="180"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 199.98px) { .bars[data-need="200"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 219.98px) { .bars[data-need="220"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 239.98px) { .bars[data-need="240"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 259.98px) { .bars[data-need="260"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 279.98px) { .bars[data-need="280"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 299.98px) { .bars[data-need="300"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 319.98px) { .bars[data-need="320"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 339.98px) { .bars[data-need="340"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 359.98px) { .bars[data-need="360"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 379.98px) { .bars[data-need="380"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 399.98px) { .bars[data-need="400"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+/* Hover or focus: the bar's date and exact amount, on an opaque tip. */
+.bars .bt { position: absolute; z-index: 6; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: max-content; max-width: 220px; padding: 6px 9px 7px; border-radius: 9px; background: var(--tip-bg); color: var(--tip-ink); box-shadow: var(--shadow-pop); font-size: 12px; line-height: 1.4; white-space: normal; visibility: hidden; pointer-events: none; }
+.bars .bt b { font-weight: 650; }
+.bars .bt > span { display: block; font-size: 11px; color: var(--tip-ink-2); }
+.bars a.b:nth-of-type(-n+3) .bt { left: 0; transform: none; }
+.bars a.b:nth-last-of-type(-n+3) .bt { left: auto; right: 0; transform: none; }
+@media (hover: hover) { .bars .b:hover .bt { visibility: visible; } }
+.bars .b:focus-visible .bt { visibility: visible; }
+.bars-ax { display: flex; justify-content: space-between; height: 14px; margin-top: 4px; font: 500 10px/14px var(--mono); color: var(--ink-3); }
+.bars.bars-why { display: grid; place-items: center; padding: 0 12px; font-size: 12px; line-height: 16px; color: var(--ink-2); text-align: center; }
+/* M5: a desk with no trades since the start is one row. */
+.dcard[data-layout="row"] { padding: 10px 18px; gap: 0; }
+.drow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto auto; align-items: center; gap: 0 14px; min-height: 36px; }
+.drow .dmark { width: 28px; height: 28px; border-radius: 8px; }
+.drow .dmark svg { width: 18px; height: 18px; }
+.drow .who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; min-width: 0; }
+.drow .who h3 { flex: none; font-size: 15px; }
+/* The row's state words wrap; they are never cut (AC-36). */
+.drow .state > span { overflow: visible; white-space: normal; text-overflow: clip; }
+.drow .dnums { display: flex; flex-wrap: wrap; gap: 4px 22px; }
+.drow .dnums > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; }
+.drow .dnums .k { padding-right: 0; }
+.drow .dnums .v { font-size: 15px; line-height: 22px; container-type: normal; }
+.drow .dnums .v > .bn, .drow .dnums .v > .fig-link > .bn { display: inline-flex; height: auto; font-size: inherit; }
+.drow .dnums .c { min-height: 0; }
+.drow .dnums > div[data-state="fresh"] .c { display: none; }
+/* Middle widths: the market block goes under the figures. */
+@media (max-width: 1180px) {
+  .hero { grid-template-columns: minmax(0, 1fr); }
+  .hero-r { grid-column: 1; grid-row: 2; margin-top: 12px; padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
+  .hero .kpis { grid-row: 3; }
+  .desk-scope { grid-row: 4; }
+}
+@container (max-width: 339.98px) {
+  .dcard .who { display: contents; }
+  .dcard header .card-go { grid-column: 4; grid-row: 1; }
+}
+@media (max-width: 480px) {
+  /* Phones: the slot is a collapsed section at the top; the desk rows keep the first screen. */
+  .account-slot { margin-bottom: 12px; }
+  .account-slot-section { display: block; min-width: 0; border-radius: 14px; background: var(--card); box-shadow: var(--shadow-card); }
+  .account-slot .account-interim { padding: 0 12px 12px; }
+  .desks-eyebrow { display: none; }
+  .pct-slot .basis { display: none; }
+  .primary-caption .cap-long { display: none; }
+  .primary-caption .cap-short { display: inline; }
+}
+@media (max-width: 700px) {
+  .hero .kpis { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .drow { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .drow .dnums { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; margin-top: 6px; }
+  .drow .hb { grid-column: 3; grid-row: 1; }
+  /* 44 px hit areas around the figures and the bars (the bars' overlap their gaps). */
+  .fig-link::after { content: ""; position: absolute; inset: -9px -6px; }
+  .bars .b::after { content: ""; position: absolute; inset: 0 -8px; }
+}
+/* ---------- end Desk hero and cards (JOED-153) ---------- */
 
 /* JOED-79: wrappers keep the existing grid/flex items above 480 px. */
 .account-section, .desk-section, .disclosure-body { display: contents; }
