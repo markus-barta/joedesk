@@ -12,6 +12,7 @@ import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { scenario, NOW, at, advance } from '../scripts/browser/board.mjs';
 import { deskRankingSnapshot, mixedHeaderOk, mixedDesksOk } from '../scripts/browser/phase-b.mjs';
+const { brokenJourneyTotalsOk } = await import('../scripts/browser/desk-checks.mjs');
 const { heroLeft, positionsHtml, keptHtml, positionSectionReason, cellView, compactDesk, headerHealth, healthPop } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { todayPercent, sincePercent, rankDesks } = await import('../public/joe/performance.js');
@@ -34,6 +35,7 @@ const context = data => {
   const feeds = { data: { value: data } }, now = data.receivedAt;
   return { feeds, now, states: panelStates(feeds, now) };
 };
+
 const rejects = (data, path, rule) => {
   const result = validateContract('data', data);
   assert.equal(result.ok, false);
@@ -128,6 +130,15 @@ test('JOED-97 M1: replay the browser journey through the read model before asser
     assert.equal(states[`desks.${id}.openPnl`].retained, true);
     assert.ok(todayPattern.test(lines[0].textContent), text);
   }
+  const hero = htmlDocument(heroLeft(ctx));
+  const cells = Object.fromEntries(hero.querySelectorAll('[data-cell]').map(c => [c.dataset.cell, { state: c.dataset.state, cap: (c.querySelector('.account-caption')?.children[0] ?? c.querySelector('.c')).textContent }]));
+  const ui = { cells, say: hero.querySelector('.say').textContent, account: { state: states.paperAccount.state, line: null } };
+  assert.equal(brokenJourneyTotalsOk(ui), true, JSON.stringify(ui));
+  for (const [key, value] of [['hero.open', 'Unavailable · open result not available'], ['hero.since', 'Unavailable'], ['hero.day', 'Not exact']]) {
+    const wrong = structuredClone(ui); wrong.cells[key].cap = value;
+    assert.equal(brokenJourneyTotalsOk(wrong), false, `${key}: preserve the exact local state and reason`);
+  }
+  assert.equal(brokenJourneyTotalsOk({ ...ui, say: 'No desk has an exact result for today: waiting on the start-of-day value.' }), false, 'Today must not repeat its caption’s reason');
 });
 
 test('JOED-97 L2: first load of a release-33 store drops kept day/equity once, including behind a later outage', async t => {

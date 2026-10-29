@@ -51,11 +51,11 @@ const { statePhrase } = await import('../public/joe/ui.js');
 const fmt = await import('../public/joe/format.js');
 const { STARTING_MONEY } = await import('../public/joe/performance.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
-const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, disclosureProblem, rowProblems, householdDayReason, dashWords } = await import('../public/joe/desk.js');
+const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, disclosureProblem, rowProblems, dashWords } = await import('../public/joe/desk.js');
 // JOED-153: Desk beside a Results record, and the pure parts of the Desk
 // checks (both read the page's model, so after the hooks).
 const { deskSessionChecks } = await import('./browser/desk-sessions.mjs');
-const { percentText, keptOnlyInAccount } = await import('./browser/desk-checks.mjs');
+const { percentText, keptOnlyInAccount, brokenJourneyTotalsOk, heroProblemCaption } = await import('./browser/desk-checks.mjs');
 // JOED-156: the whole-account block fills JOED-153's slot above the hero; its
 // value states its own panel state in its change line (account.js stateLine).
 const { stateLine } = await import('../public/joe/account.js');
@@ -823,26 +823,17 @@ try {
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age and reason`, /[Aa]s of \d+\s(s|min) ago · updates are (late|stuck)/.test(caps), caps);
       if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.account.line === 'Not reported', { caps, account: ui.account });
       if (kind === 'broken') {
-        // The hero's section reason, as heroLeft computes it: its four money cells.
-        const shared = sharedSectionReason(Object.values(CELL).map(panel => expectedCells[panel]));
         // Check every affected cell, including retained values after rejection.
         // A not-exact cell must never hide a different cell's real fault.
         const plain = html => norm(html.replace(/<[^>]*>/g, ''));
         for (const [key, panel] of Object.entries(CELL)) {
           const cell = expectedCells[panel];
           if (cell.state === 'fresh') continue;
-          const onBoard = sharesBoardCaption(cell, boardCaption);
-          const inSection = cell.reason && cellReason(cell.reason) === shared;
-          const sectionOnBoard = inSection && boardCaption?.reason && cellReason(boardCaption.reason) === shared;
-          const phrase = statePhrase(cell, '', 'last good value', shared);
-          // A not-exact household Today names the desks that keep it from being exact.
-          const household = key === 'hero.day' && !onBoard ? householdDayReason(expectedCells, shared) : null;
-          const want = onBoard || sectionOnBoard ? capital(statePhrase(boardCaption, '').text)
-            : inSection ? sharedSectionPhrase(cell) : household || capital(phrase.text);
+          const { section, text: want } = heroProblemCaption(expectedContext, key);
           // JOED-153: a shown household Today states its own state in its caption.
-          const actual = onBoard || inSection ? ui.boardCaption : ui.cells[key].cap;
+          const actual = section ? ui.boardCaption : ui.cells[key].cap;
           check('fixtures', `${tag}: ${key} ${NOT_EXACT_REASONS.has(cell.reason) ? 'not-exact' : 'fault'} keeps its own reason locally or in the shared section line`,
-            (onBoard || inSection ? norm(actual).includes(plain(want)) : norm(actual) === plain(want)), { key, actual, want: plain(want) });
+            (section ? norm(actual).includes(plain(want)) : norm(actual) === plain(want)), { key, actual, want: plain(want) });
         }
       }
       if (['e-layout-storage-unavailable', 'stale-receive-age', 'a-gateway-up-but-dead', 'b-incomplete-family', 'missing-runtime-and-results', 'c-old-producer-image', 'g-expired-sso', 'p3-single-missing-desk'].includes(id) && (viewport.name !== '390' || ['e-layout-storage-unavailable', 'a-gateway-up-but-dead'].includes(id))) {
@@ -1257,9 +1248,7 @@ try {
     check('journey', `${tag} broken: each affected desk number has its own line, age and reason`, j.lines.length === 3 && today.test(j.lines[0]) && open.test(j.lines[1]) &&
       /^Since 10\sSep: unavailable · carrying the last good value$/.test(j.lines[2]) && [joe, joel].every(c => c.lines.length === 2 && today.test(c.lines[0]) && open.test(c.lines[1])) &&
       JSON.stringify(j.nums) === '["broken","broken","broken"]' && [joe, joel].every(c => JSON.stringify(c.nums) === '["broken","broken","fresh"]'), ui.cards);
-    check('journey', `${tag} broken: unavailable totals keep their own reasons; Today states its reason once`, ui.cells['hero.day'].state === 'broken' && ui.cells['hero.day'].cap === 'Not exact · waiting on the start-of-day value' && ui.say === 'No desk has an exact result for today.' &&
-      /^Unavailable · open result not available$/.test(ui.cells['hero.open'].cap) && /^Unavailable · desk total incomplete$/.test(ui.cells['hero.since'].cap) &&
-      ui.cells['hero.equity'].state === 'fresh' && ui.account.state === 'fresh' && ui.account.line === null, { cells: ui.cells, account: ui.account, say: ui.say });
+    check('journey', `${tag} broken: unavailable totals keep their own reasons; Today states its reason once`, brokenJourneyTotalsOk(ui), { cells: ui.cells, account: ui.account, say: ui.say });
     check('no-shift', `${tag}: stale → broken moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
     boxes.push(['broken', await rects(STATE_BOXES)]);
     const rebuiltSay = await page.evaluate(SAY_TIP);
