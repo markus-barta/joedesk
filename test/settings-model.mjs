@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
+import { runInNewContext } from 'node:vm';
+import { SETTINGS_SECTION_IDS, PHONE_SETTINGS_NOTE, fleetSettingsControls } from '../scripts/browser/settings-checks.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -22,6 +24,64 @@ const { withNextFleetRevision } = await import('../fleet-config.mjs');
 const schema = JSON.parse(readFileSync(new URL('../contracts/fleet-config.schema.json', import.meta.url)));
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const NB = '\u00a0'; // numbers never part from their units
+
+test('Settings browser expectations include Account start in both rendered sections and canonical sub-nav links', async () => {
+  const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
+  const previous = globalThis.document;
+  const doc = htmlDocument('<nav id="setNav"></nav><main id="setMain"></main>');
+  doc.documentElement = { dataset: {} };
+  globalThis.document = doc;
+  try {
+    const page = await builders('settings.js', ['buildSkeleton', 'renderFields']);
+    const { addTerms } = await import('../public/joe/ui.js');
+    addTerms(M.FIELD_TERMS);
+    page.buildSkeleton();
+    const main = doc.querySelector('#setMain');
+    const sections = main.children.filter(node => typeof node !== 'string' && node.matches('.set-sec'));
+    assert.deepEqual(sections.map(node => node.id), SETTINGS_SECTION_IDS);
+    const links = doc.querySelectorAll('#setNav a');
+    assert.deepEqual(links.map(node => node.dataset.sec), SETTINGS_SECTION_IDS);
+    assert.deepEqual(links.map(node => node.getAttribute('href')), SETTINGS_SECTION_IDS.map(id => `#settings/${id}`));
+    assert.equal(links[1].textContent, 'Account start');
+
+    // Render the real cold/unavailable fleet fields alongside the independent
+    // account form. The old page-wide selector counted its four hidden inputs.
+    page.renderFields(true);
+    assert.deepEqual(main.querySelectorAll('input').map(node => node.id), [
+      'accountStartAmount', 'accountStartDate', 'accountStartClear', 'accountStartConfirmed',
+    ]);
+    // The small Node DOM handles individual selectors; supply native union
+    // semantics while running the exact function serialized by the browser gate.
+    const root = { querySelectorAll: selector => [...new Set(selector.split(',').flatMap(part => main.querySelectorAll(part.trim())))] };
+    const controls = () => Array.from(runInNewContext(`(${fleetSettingsControls.toString()})(root)`, { root }));
+    assert.equal(controls().length, 0);
+    assert.equal(main.querySelectorAll('[data-value]').some(node => node.textContent === 'Not available'), true);
+
+    // Hidden or disabled fleet controls still fail, across every control type.
+    // Excluding only visible inputs would conceal a real outage regression.
+    const group = doc.querySelector('#grp-desks');
+    for (const html of [
+      '<input id="unexpected" hidden disabled>', '<select id="unexpected" hidden disabled></select>',
+      '<textarea id="unexpected" hidden disabled></textarea>', '<button id="unexpected" role="switch" hidden disabled></button>',
+      '<button id="unexpected" data-bump="1" hidden disabled></button>', '<button id="unexpected" class="tog" hidden disabled></button>',
+      '<button id="unexpected" data-wwdel="0" hidden disabled></button>', '<button id="wwAdd" hidden disabled></button>',
+    ]) {
+      group.insertAdjacentHTML('afterbegin', html);
+      assert.equal(controls().length, 1, html);
+      group.children[0].remove();
+    }
+    // A control outside the account section cannot evade the assertion by
+    // reusing an account input id, or by being outside the usual fleet rows.
+    doc.querySelector('#set-how').insertAdjacentHTML('afterbegin', '<input id="accountStartAmount">');
+    assert.equal(controls().length, 1);
+  } finally { globalThis.document = previous; }
+});
+
+test('phone Settings note exactly describes the independent account and appearance settings', async () => {
+  const { htmlDocument } = await import('./fixtures/preview-dom.mjs');
+  const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  assert.equal(doc.querySelector('.set-phone-note').textContent.trim(), PHONE_SETTINGS_NOTE);
+});
 
 test('account start row shows the saved EUR amount/date or exact honest unset text with a reason', () => {
   const unset = "Not set: the whole account's 'Since start' stays hidden until you set it.";

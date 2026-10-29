@@ -15,6 +15,7 @@ import { VIEWPORTS, THEMES, configure, load as loadPage, settle, waitFor, pointe
 import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { designFleet, designActions, designSnapshot, cashSessionSnapshot, switchSetSnapshot, longFleet } from './browser/settings-fixtures.mjs';
+import { SETTINGS_SECTION_IDS as SECTION_IDS, PHONE_SETTINGS_NOTE, fleetSettingsControls } from './browser/settings-checks.mjs';
 import { designResults } from './browser/results.mjs';
 import { pngColours } from './browser/pixels.mjs';
 import { captureHeaderCrop } from './browser/header-crop.mjs';
@@ -57,7 +58,6 @@ const N = text => String(text ?? '').replace(/[\s ]+/g, ' ').trim();
 const schema = JSON.parse(readFileSync(new URL('../contracts/fleet-config.schema.json', import.meta.url)));
 const LEAVES = M.schemaLeafKeys(schema);
 const HISTORY = (() => { const w = {}; new Function('window', readFileSync(new URL('../public/joe/joe-version.js', import.meta.url), 'utf8'))(w); return w.JoeVersion.VERSION_HISTORY; })();
-const SECTION_IDS = ['set-mode', 'set-runtime', ...M.GROUPS.map(g => `set-${g.id}`), 'set-how', 'set-source', 'set-log', 'set-appearance', 'set-about'];
 const DESKTOP = VIEWPORTS.filter(v => !v.mobile);
 const PHONE = VIEWPORTS.find(v => v.mobile);
 const READS = ['/joe/state.json', '/joe/history.json', '/joe/account-history.json', '/joe/results.json', '/joe/fleet-config.json', '/joe/fleet-config/actions.json'];
@@ -150,7 +150,7 @@ const viewShot = async (name, what) => {
 // Absolute boxes of the page (scroll-independent) and viewport boxes of the fixed bar.
 // The sticky header is left out: the page scrolls between steps; boxes are absolute.
 const SHIFT = ['.set-sec', '.set-sec .sec-head', '.mode-panel', '.rt-row', '.field', '.field .f-k', '.field .f-in', '.wrow', '.tbl', 'footer.foot'];
-const ABOVE_LOG = ['#set-mode', '#set-runtime', '.rt-row', ...M.GROUPS.map(g => `#set-${g.id}`), '#setMain [data-row]', '#setMain [data-row] .f-in', '#set-how', '#set-source .sec-head'];
+const ABOVE_LOG = ['#set-mode', '#set-account', '#set-runtime', '.rt-row', ...M.GROUPS.map(g => `#set-${g.id}`), '#setMain [data-row]', '#setMain [data-row] .f-in', '#set-how', '#set-source .sec-head'];
 const rects = list => ev(`__audit.rects(${J(list)})`);
 // Serialized into the page for both real-ingress and synchronous label checks.
 function headerLayout() {
@@ -196,7 +196,7 @@ async function keyChecks(tag) {
   // An array's item keys read as their own names ("id"); data-key holds the full key.
   const missing = LEAVES.filter(k => !seen.out[k].some(e => (e.text === k || (k.includes('[].') && e.text === M.itemName(k))) && e.mono));
   check('AC-22', `${tag}: all ${LEAVES.length} leaf keys of fleet-config.schema.json appear as data-key with visible mono text`, !missing.length, missing);
-  check('AC-22', `${tag}: Settings starts with Mode, then Runtime state, in the spec's section order`, J(seen.order) === J(SECTION_IDS), seen.order);
+  check('AC-22', `${tag}: Settings starts with Mode, Account start, then Runtime state, in the approved section order`, J(seen.order) === J(SECTION_IDS), seen.order);
 }
 
 async function editabilityChecks(tag, viewport, fleet) {
@@ -204,7 +204,7 @@ async function editabilityChecks(tag, viewport, fleet) {
     const ph = await ev(`({ inputs: [...document.querySelectorAll('#scr-settings input, #scr-settings select, #scr-settings textarea, #scr-settings [role=switch], #scr-settings [data-bump], #scr-settings .tog, #scr-settings [data-wwdel], #wwAdd')].filter(__audit.visible).length,
       note: __audit.visible(document.querySelector('.set-phone-note')) ? document.querySelector('.set-phone-note').innerText.trim() : null, bar: __audit.visible(document.getElementById('editbar')),
       values: Object.fromEntries([...document.querySelectorAll('#setMain [data-row]')].map(r => [r.dataset.row, [...r.querySelectorAll('.phone-only [data-value], .ro:not(.phone-only) [data-value]')].filter(__audit.visible).map(e => e.innerText.trim()).join(' | ')])) })`);
-    check('AC-23', `${tag}: phones show the phone note, no inputs and no edit bar`, ph.inputs === 0 && ph.note === 'Read-only on a phone. Change fleet settings on a larger screen.' && !ph.bar, ph);
+    check('AC-23', `${tag}: phones name the separate Account start and appearance settings; the closed page has no visible inputs or fleet edit bar`, ph.inputs === 0 && ph.note === PHONE_SETTINGS_NOTE && !ph.bar, ph);
     const base = M.valuesOf(fleet), wrong = [];
     for (const k of M.EDITABLE) {
       const f = M.FIELD[k];
@@ -1162,9 +1162,9 @@ try {
       await load(page, broken.url, 'settings');
       await waitFor(page, `document.getElementById('setSub').innerText.includes('unavailable')`);
       const s = await ev(`({ sub: document.getElementById('setSub').innerText.trim(), note: document.getElementById('editNote').innerText.trim(), buttons: ['discardBtn', 'savePreview', 'reviewBtn', 'sendBtn'].map(id => document.getElementById(id).disabled),
-        inputs: [...document.querySelectorAll('#setMain input, #setMain [role=switch], #setMain [data-bump], #setMain .tog')].length, floor: document.querySelector('#set-desks .kfloor').innerText.trim(),
+        inputs: (${fleetSettingsControls.toString()})(document.getElementById('setMain')).length, floor: document.querySelector('#set-desks .kfloor').innerText.trim(),
         values: [...document.querySelectorAll('#setMain .field .ro [data-value]')].filter(__audit.visible).map(e => e.innerText.trim()), mode: document.getElementById('modeLabel').innerText.trim() })`);
-      check('AC-24', `${tag}: the settings are unavailable: values hidden, editing disabled, every button off`, N(s.sub) === 'Fleet settings unavailable · paper only' && s.inputs === 0 && s.buttons.every(Boolean) &&
+      check('AC-24', `${tag}: fleet settings are unavailable: fleet values hidden, no fleet controls, every fleet edit-bar button off`, N(s.sub) === 'Fleet settings unavailable · paper only' && s.inputs === 0 && s.buttons.every(Boolean) &&
         (viewport.mobile || N(s.note) === 'Fleet settings unavailable · values are hidden and editing is disabled. Reopen Settings to retry.') && s.values.every(v => /^(Not available|Other kept symbols are hidden|Not reported yet)$/.test(v)), s);
       check('KEEP', `${tag}: SXR8 and TSLA are named as always kept`, s.floor === 'SXR8 and TSLA are always kept' && s.mode === 'PAPER', s.floor);
       await keyChecks(tag);
@@ -1655,11 +1655,11 @@ Every screenshot was taken again. What changed, per fix:
 
 | AC | Browser (this gate) | Node |
 | --- | --- | --- |
-| AC-22 Mode then Runtime state; all leaf keys as data-key with visible mono text, against the schema file | \`AC-22\` (clean, starter file, unavailable; six combos) | \`schema keys\` (\`test/settings-model.mjs\`) |
-| AC-23 today's editable/read-only split; phones read-only with the note, no inputs | \`AC-23\` | \`editability\` |
+| AC-22 Mode, Account start, then Runtime state; all leaf keys as data-key with visible mono text, against the schema file | \`AC-22\` (clean, starter file, unavailable; six combos) | \`schema keys\`, \`Settings browser expectations\` (\`test/settings-model.mjs\`) |
+| AC-23 today's editable/read-only split; phone fleet settings read-only with the note, no visible inputs before opening Account start | \`AC-23\` | \`editability\`, \`phone Settings note\` |
 | AC-24 Edit → Review changes (dialog + tick) → Confirm → Send; edit-bar states and toasts; stale version "revision changed to …; reload before retrying"; audited | \`AC-24\` (edited, draft, stale = 409, failure = plain 500 / no answer / unreadable, stored = 500 naming the version, malformed draft, long values, unavailable) | \`edit flow\`, \`stale version\`, \`stored, change log unfinished\`, \`review\`, \`load states\`, \`browser draft\`, \`candidate\`, \`validation\`, \`diff model\`; server: \`Fleet Config propagates one atomic paper revision…\` |
 | AC-25 seven rows; "Not reported"; no secrets, tokens, full account numbers or env content | \`AC-25\` (frozen clocks: the same on any runner) | — |
-| AC-26 sub-nav reaches every section and marks the one in view | \`AC-26\` (clicks and scrolling; nothing moves) | — |
+| AC-26 sub-nav reaches every section, including Account start, and marks the one in view | \`AC-26\` (clicks and scrolling; nothing moves) | \`Settings browser expectations\` |
 | AC-27 How it works, Where this is defined with Sources, Change log, Appearance, About | \`AC-27\` | \`change log\` |
 | AC-28 no horizontal scroll 390–1440 | \`AC-28\` (audit at six combos; sweep in 10 px steps, both fonts and themes) | — |
 | AC-29 contrast ≥ 4.5:1 | \`AC-29\` (every audited state, both themes) | — |
