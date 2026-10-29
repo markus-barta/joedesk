@@ -57,7 +57,7 @@ export function boardStates(feeds, now, previous = {}) {
     // Scoped exactness failures still apply when a feed/gateway failure masks
     // their reason in the shared selector. An outage cannot restore an amount.
     const inexact = [cell.reason, ...sourceReasons]
-      .some(reason => NOT_EXACT_REASONS.has(reason));
+      .find(reason => NOT_EXACT_REASONS.has(reason));
     const expired = outageValue(cell) && (cell.ageSeconds == null || cell.ageSeconds >= RETENTION_SECONDS);
     // Today belongs to the observation's NY date, even if a real outage or
     // stopped feed spans midnight. Receipt time cannot freshen old evidence.
@@ -72,10 +72,29 @@ export function boardStates(feeds, now, previous = {}) {
       differentDay = !validInstant(observedAt) || nyDay(observedAt) !== nyDay(now);
     }
     if (inexact || expired || differentDay) states[name] = {
-      ...unavailable(cell, cell.reason ?? (differentDay ? 'baseline_pending' : null)),
+      // Preserve scoped exactness for every existing cell/health consumer.
+      // Feed rejection and transport evidence stays on the feed/header path.
+      ...unavailable(cell, inexact ?? cell.reason ?? (differentDay ? 'baseline_pending' : null)),
       // Value-free evidence for Results after unavailable() clears retained.
       ...(expired ? { outageExpired: true } : {}),
     };
+  }
+  // Recheck policy after every prior-array fallback, including retained_values.
+  // Withhold moved rows rather than inventing new scope/desk evidence or age.
+  const keep = new Set(['SXR8', 'TSLA', ...(feeds['fleet-config']?.value?.desks.keep ?? [])]);
+  const affectedDesks = new Set();
+  for (const row of [...(data?.positions?.rows ?? []), ...(states.positions.value ?? []), ...(states.kept.value ?? [])]) {
+    if (keep.has(row.symbol) !== (row.scope === 'keep') || (keep.has(row.symbol) && row.desk !== null))
+      for (const id of row.desk ? [row.desk] : DESKS) affectedDesks.add(id);
+  }
+  for (const name of ['positions', 'kept']) {
+    const cell = states[name];
+    if (cell.value) states[name] = { ...cell, value: cell.value.filter(row => keep.has(row.symbol) === (name === 'kept')) };
+  }
+  // A changed partition invalidates affected prior desk amounts too.
+  for (const id of affectedDesks) for (const field of MONEY_FIELDS) {
+    const name = `desks.${id}.${field}`;
+    states[name] = withheld(states[name], states[name].reason ?? 'source_not_authoritative');
   }
   // An outage can retain an older position list, but current per-field
   // exactness failures still invalidate those same older fields.

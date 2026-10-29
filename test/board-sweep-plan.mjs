@@ -24,14 +24,14 @@ test('Board sweep: CLI defaults to full and rejects ambiguous or unknown plans b
 
 test('Board sweep: full adds code-derived boundaries in both themes/fonts; every PR round is covered on main', () => {
   const full = plan('full'), subset = plan('subset');
-  assert.deepEqual(subset.breakpoints, [480, 700, 701, 900, 960, 1100, 1180, 1181]);
-  assert.deepEqual(subset.boundaryWidths, [360, 470, 480, 490, 690, 691, 700, 701, 710, 711,
+  assert.deepEqual(subset.breakpoints, [382, 480, 700, 701, 900, 960, 1100, 1180, 1181]);
+  assert.deepEqual(subset.boundaryWidths, [360, 372, 382, 392, 470, 480, 490, 690, 691, 700, 701, 710, 711,
     890, 900, 910, 950, 960, 970, 1024, 1090, 1100, 1110, 1170, 1171, 1180, 1181, 1190, 1191, 1440]);
   assert.equal(subset.variants.length, 16);
   assert.equal(full.gridWidths.length, 109);
   assert.ok(full.gridWidths.every((w, i) => w === 360 + i * 10));
   assert.deepEqual(full.fullWidths, [...new Set([...full.gridWidths, ...full.boundaryWidths])].sort((a, b) => a - b));
-  assert.equal(full.fullWidths.length, 116);
+  assert.equal(full.fullWidths.length, 119);
   assert.ok(full.variants.every(v => v.widths === full.fullWidths));
   assert.ok(subset.variants.filter(v => v.theme === 'light').every(v => v.widths === subset.gridWidths));
   assert.ok(subset.variants.filter(v => v.theme === 'dark').every(v => v.widths === subset.boundaryWidths));
@@ -42,8 +42,8 @@ test('Board sweep: full adds code-derived boundaries in both themes/fonts; every
     assert.equal(p.screenshots, 6);
     assert.ok(p.boundaryWidths.every(w => w >= 360 && w <= 1440));
   }
-  assert.equal(full.rounds, 1856);
-  assert.equal(subset.rounds, 1088);
+  assert.equal(full.rounds, 1904);
+  assert.equal(subset.rounds, 1112);
   const future = createBoardSweepPlan({ mode: 'subset', compact, css: `${css}\n@media (max-width: 1230px) { .x { color: red; } }`,
     javascript: [...javascript, "matchMedia('(max-width: 810px)')"] });
   for (const w of [800, 810, 820, 1220, 1230, 1240]) {
@@ -72,8 +72,8 @@ test('Board sweep: actual-count reconciliation rejects missing/extra checks, cap
     assert.match(boardSweepTable(p, true), new RegExp(`Plan: \\*\\*${mode}\\*\\*; executed`));
     assert.match(boardSweepTable(p, false), /not selected/);
     assert.match(boardSweepTable(p, true), new RegExp(`Expected sweep: 137 checks, 6 screenshots, ${p.rounds} resize/measure rounds`));
-    assert.match(boardSweepTable(p, true), /Boundary widths \(27\): 360, 470/);
-    assert.match(boardSweepTable(p, true), mode === 'full' ? /Light: 116 widths: the 109-width .* ∪ the boundary widths below/ : /Light: 109 widths, 360–1440 px in 10 px steps/);
+    assert.match(boardSweepTable(p, true), /Boundary widths \(30\): 360, 372, 382, 392, 470/);
+    assert.match(boardSweepTable(p, true), mode === 'full' ? /Light: 119 widths: the 109-width .* ∪ the boundary widths below/ : /Light: 109 widths, 360–1440 px in 10 px steps/);
   }
 });
 

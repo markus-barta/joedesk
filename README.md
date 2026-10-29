@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261028202622.0.0` (`inspr-calver-3`, stable sequence 37), reserved once at `2026-10-28T20:26:22Z` for the JOED-108 sweep fixes (JOED-107, JOED-114–121, release [JOED-122](https://aeon.barta.cm/p/JOED/JOED-122)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261029075623.0.0` (`inspr-calver-3`, stable sequence 38), reserved once at `2026-10-29T07:56:23Z` for the sweeps 2 and 3 fixes (JOED-129–134, JOED-140–142, release [JOED-143](https://aeon.barta.cm/p/JOED/JOED-143)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261028081016.0.0` / sequence 36,
-published on `main` at `b186308269ab9c05247c6b0f0e4b35fac4bc0ce7` under JOED-106,
-live on csb0 since `2026-10-28T20:23:05Z` (JOED-106). `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261028202622.0.0` / sequence 37,
+published on `main` at `aedc666492a6379bf946900ce8521d105a70ede5` under JOED-122,
+live on csb0 since `2026-10-29T07:51:18Z` (JOED-122). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 37. Sequence 35 (`261027124551.0.0`) was previously deployed
+adoption for sequence 38. Sequence 36 (`261028081016.0.0`) was previously deployed
+at `2026-10-28T20:23:05Z` (JOED-106). Sequence 35 (`261027124551.0.0`) was previously deployed
 at `2026-10-27T20:18:18Z` (JOED-99). Sequence 34 (`261026232616.0.0`) was previously deployed
 at `2026-10-27T03:30:43Z` (JOED-97). Sequence 33 (`261026070713.0.0`) was previously deployed
 at `2026-10-26T20:06:06Z` (JOED-90). Sequence 32 (`261025221940.0.0`) was previously deployed
@@ -33,13 +34,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-37 candidate has not been published. The candidate
+cutover**. The sequence-38 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -89,7 +90,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261028202622.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261029075623.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -561,11 +562,12 @@ plus `groupTimingTable(report)`. Its fake-clock tests run directly with
 `node --test test/browser-group-timing.mjs` and through `test/ui-modules.mjs`.
 
 The Board width sweep defaults to `--full`: both themes, both fonts and all
-four screens at every 10 px from 360 to 1440 plus the code-derived boundary widths (116 widths total). CI PRs pass `--subset`: light
+four screens at every 10 px from 360 to 1440 plus the code-derived boundary widths (119 widths total). CI PRs pass `--subset`: light
 keeps the full grid and dark uses the code-derived viewport breakpoints and
 their ±10 px neighbors, plus 360/1024/1440. Pushes to main and manual dispatch
 keep `--full`. Both plans retain 137 sweep checks and six screenshots; the
-resize/measure rounds are 1,856 full and 1,088 subset with the current code.
+resize/measure rounds are 1,904 full and 1,112 subset with the current code,
+including JOED-140's 382 px calendar breakpoint and its 372/392 px neighbors.
 `scripts/board-sweep-plan.mjs` derives boundaries from `app.css` viewport
 `@media` queries, `public/joe/*.js` `matchMedia` queries and P3's `COMPACT`.
 The 339.98 px card container query and history.js clientWidth thresholds describe elements rather than viewports;
@@ -577,6 +579,12 @@ reconciliation verifies checks, captures and each theme/font/screen/width.
 colour/shadow tokens may only feed painting, with two named exceptions for
 the root `color-scheme` palette hint and the equal-size sun/moon swap.
 It and `test/board-sweep-plan.mjs` join the existing UI unit suite.
+JOED-133 adds `test/theme-copy.mjs` to that suite: editable Settings boundaries
+use a dedicated token with at least 3:1 contrast against the composited field
+and surrounding backgrounds in both themes, plus a system-color border in
+forced colors. Captured-result text rounds exact decimal money through BigInt;
+percentages rounded to zero have no sign. Board-light help allows explained
+not-exact dashes, and session help qualifies normal hours for holidays and early closes.
 
 The budget trace keeps timestamped long-task attribution, overlapping render
 and worker-reply events, and long-animation-frame script/layout attribution
@@ -770,8 +778,11 @@ fixture includes both 02:30s and the exact fallback boundary on **25 Oct 2026**;
 Node tests also check both midnights of that 25-hour day. Full daily summaries
 reconcile the five closes on 25 Oct in every host zone.
 
-`createFeed().refresh()` waits for worker acceptance, including unchanged
-replies, and overlapping worker polls share that pending read. A fast state
+`createFeed().refresh()` waits for acceptance, including unchanged worker
+replies, and overlapping polls share their pending read on the page and in the
+worker. Each fetch and its response body share a 15-second deadline; expiry
+aborts the request, records the existing failed-read reason and releases the
+read so polling and manual refresh can retry. A fast state
 read can advance the clock and display Stale before a Results worker answers;
 dispatch alone must not count as a completed refresh. Otherwise the next
 refresh after a rejected push can be skipped while the previous read is busy.
@@ -829,7 +840,10 @@ Authoritative live adoption still requires the P6b and coordinator gates.
 
 `/joe/state.json` is the protected read model for P3: serverNow, four feeds with
 progress metadata, safe data projection and panel states. Anchor serverNow to
-the browser's monotonic timer; pass feed metadata and prior cells to the shared
+the browser's monotonic timer when headers arrive, before consuming the body;
+slow bodies cannot reset snapshot age or restore Live. The Today explanation
+uses this anchored clock's New York day (browser time only before an anchor is
+available). Pass feed metadata and prior cells to the shared
 selectors. `valueReceivedAt` is the original retained-cell receipt. Data/history
 responses also send `X-Joe-Server-Now`, data generation progress and any closed
 feed rejection reason as headers. A rejected push leaves the last good snapshot
@@ -1044,7 +1058,22 @@ padding, with the missing-day warning aligned at the same right offset.
 An amount that rounds to zero shows an unsigned `0` and keeps its day tint;
 an exactly zero day stays flat.
 The cell's accessible label and the day sheet retain the exact amount.
-Desktop calendar amounts and the week column keep their existing formatting.
+The Results calendar is a named group of date buttons, each with its full
+date, result/state and selected state. At 382 CSS px and below it becomes a
+three-column agenda with full dates so every day retains a 44 px target. The
+383 px boundary and the 390/393 px reference phones keep seven columns. The
+42 slots preserve the calendar's height across month changes. Period labels
+wrap between the 44 px arrows at 320 CSS px, including the reflow equivalent
+of a 640 px desktop window at 200% zoom. Day trades form a list with named
+Entry price, Exit price and Net after fees groups in both panel and sheet.
+The sheet's labelled, focusable scroll region follows Close in the tab order
+with an inset focus ring in both themes.
+Page Down/End can reach long trade lists, and Escape restores the selected day.
+JOED-140 unit regressions cover markup, the production focus trap and CSS
+constraints. P4 adds browser assertions for the 320/360/382/383/390/393 px
+layouts, overflow and stable period-control geometry, and keyboard scrolling
+with an unclipped focus ring through 99 complete trades; CI runs those assertions.
+Desktop week summaries are named groups identifying the week's start date.
 The focused `phone-calendar` browser scenario measures the full signed form
 set at 360/390 in light/dark against fractional amount-box widths, also
 requiring `scrollWidth ≤ clientWidth`. Signed `999k` probes are INFO only;
@@ -1269,7 +1298,11 @@ Amy's board display rule (JOED-91, 2026-10-26, release 33) is applied in
 `public/joe/board-state.js` after the unchanged contract selector.
 `not_exact_yet`, `sod_missing`, `ledger_unreconciled` and `position_stale`
 always show a dash, including when a feed or gateway failure masks the scoped
-reason. An outage may retain individual last-good observations with their own
+reason. The cell keeps its scoped not-exact explanation and neutral info tone;
+feed transport/rejection failures remain visible in the header and Details,
+without turning a deliberate dash into a red missing-money fault. Halt,
+broker-down, stopped-feed and frozen-producer checks retain their precedence.
+An outage may retain individual last-good observations with their own
 age and reason, for strictly less than 60 minutes from their original receipt;
 an unknown age or age ≥ 60 minutes shows a dash. Retained inputs never feed
 board totals, since-start figures, ranking, Results' current money, kept-worth
@@ -1462,6 +1495,18 @@ An unknown worth has no visible bar track; the hidden track retains its space.
 KEEP rows have no worth track. Amy's switch
 snapshot keeps their values null with `not_exact_yet`; the row shows em
 dashes with each value's own reason, without partial totals.
+An accepted KEEP change applies as soon as the settings file is replaced,
+before receipt persistence or action-log finalization. A failure in either
+step returns HTTP 500 with the saved revision and leaves the audit pending;
+Settings reports the change as saved. Later data pushes and history still use
+the new policy, even after a clock rollback. The receipt records the actual
+observation time; failed receipt writes retry without renewing its age.
+After any position-list fallback, including
+`retained_values`, the board filters both lists against the current KEEP
+partition and its mandatory SXR8/TSLA floor. Moved rows are withheld until
+matching producer evidence is available, preserving the lists' original age
+and exactness. They cannot supply desk figures or Results position notes;
+affected prior desk amounts and household totals are withheld too.
 `fixtures/positions-unmapped.json` supplies this synthetic row. P5's existing
 `positions` scenario adds real-ingress, accessible-copy, neutral-identity,
 ordering, row-count, figure-exclusion and exact 0 px cash/KPI/card movement checks,
@@ -1539,8 +1584,10 @@ they check overflow/clipping and emit `<width>-<theme>-desk-kept-null` crops.
 
 Contract-set revision 7 keeps every revision-6 payload valid and the data ID
 `inspr.joe.household.v2`. The optional executor reason `results_capture_failed`
-means degraded health: results capture is failing and trading continues. Settings
-shows the reason in yellow. Desk’s health explanation adds “Paper executor
+means results capture is failing. Settings and Desk add “trading continues” only
+for a running/degraded executor with no global halt, executor halt or brakes,
+and no reported unreachable broker. Settings keeps the executor’s status tone.
+For an unpaused degraded executor, Desk’s health explanation adds “Paper executor
 degraded: results capture failing, trading continues (ledger 3,2 MB of 8,0 MB).”
 using the reported size; without ledger fields it omits the parentheses.
 
@@ -1936,6 +1983,13 @@ metadata only; the full record stays on its worker read path.
 
 ### Fleet Config propagation
 
+Every app response sends `Content-Security-Policy: frame-ancestors 'none'`
+and `X-Frame-Options: DENY` to prevent framing of the board and its settings
+(JOED-141). Open the board directly; HostDash links to its protected address.
+This framing-only CSP leaves script, style and worker loading unrestricted.
+
+Reordering JSON object keys in the saved config preserves settings reads, the original receipt and matching-ETag 304 responses, including after restart (JOED-131). Actual value changes under the same revision still fail closed; arrays retain their ordering semantics.
+
 `POST /joe/fleet-config/propagate` accepts the flip plane's JSON `{baseRev, config}` envelope. It requires same-origin browser headers plus the proxy-supplied `X-Auth-Request-User` identity and **must remain behind the same trusted Zitadel SSO reverse proxy as `/joe/`**. The proxy must strip any client-supplied copy of that header before oauth2-proxy supplies the authenticated Zitadel identity; never expose this route directly. The server validates the strict paper-only v1 schema, rejects stale revisions, assigns the next `fc-NNNNNN` revision, and atomically renames it into `/var/lib/joe-board/fleet-config.json` with mode `0644`.
 
 Amy and desk processes consume that JSON file directly and reload only when its top-level `rev` changes; they never scrape JoeDesk HTML. `GET /joe/fleet-config.json` exposes the same current document to the authenticated board. The checked-in `public/joe/fleet-config.example.json` is revision `fc-000000` until the first write. Secret slots contain agenix/Janus reference names only.
@@ -2068,3 +2122,25 @@ open for every accepted company name, and very small prices show instead of zero
 Reseal this candidate's runtime closure; keep revision-10 contracts, the shared
 presentation pin, legacy anchor and historical artifacts unchanged.
 The coordinator owns browser validation, review, publication and deployment.
+
+### Release 38 preparation (JOED-143)
+
+Reserve `261029075623.0.0` at `2026-10-29T07:56:23Z`, stable sequence 38, for the
+sweeps 2 and 3 fixes (JOED-129–134, JOED-140–142). Sequence 37
+(`261028202622.0.0`) is deployed from main
+`aedc666492a6379bf946900ce8521d105a70ede5`, live on csb0 since
+`2026-10-29T07:51:18Z` (JOED-122). About orders 38, 37 through 26, then legacy.
+
+Saved KEEP changes take effect at once, including after save failures and on
+retained data. Feeds recover from stalled downloads and use an accurate board
+clock. Settings stay readable across saved-file key order changes; fields stay
+visible, money and percentages stay exact, and help matches the board. Position
+lists and Results accurately describe holdings. Release verification accepts CI
+evidence only from GitHub itself. Results support keyboard and screen-reader
+use, including at 320 px. Other sites cannot frame the board. Masked not-exact
+values stay informational, and capture copy describes a halt honestly.
+
+Reseal only this candidate's runtime closure. Keep revision-10 contracts, the
+approved shared presentation pin, legacy anchor and historical artifacts
+unchanged. Review, publication, deployment and live verification remain with
+the coordinator; this reservation grants none of those approvals.

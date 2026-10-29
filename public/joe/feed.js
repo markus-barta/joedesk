@@ -12,6 +12,7 @@ import { acceptActions } from './settings-model.js';
 export const POLL_DATA_MS = 15000;
 export const POLL_HISTORY_MS = 30000;
 export const TICK_MS = 1000;
+const READ_TIMEOUT_MS = 15000;
 // Before any server clock is known no feed holds a value (every read that
 // brings one also brings the clock), so no state can depend on the instant;
 // this fixed one only satisfies the selector's input.
@@ -27,17 +28,26 @@ export function serverClock(headers) {
 
 const AUTH = new Set([301, 302, 303, 307, 308, 401, 403]);
 async function read(url, init = {}) {
+  const controller = new AbortController();
+  let timer, clock = null, at;
   try {
-    const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', ...init });
-    if (response.type === 'opaqueredirect') return { status: 302, redirected: true };
-    const clock = serverClock(response.headers);
-    if (AUTH.has(response.status) || response.status === 304) return { status: response.status, headers: response.headers, clock };
-    let payload = null;
-    try { payload = await response.json(); } catch { if (response.ok) return { status: 0, clock }; }
-    return { status: response.status, payload, headers: response.headers, clock };
+    // One deadline bounds both the response headers and consumption of its body.
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => { controller.abort(); reject(new Error('Read timed out')); }, READ_TIMEOUT_MS);
+    });
+    return await Promise.race([deadline, (async () => {
+      const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', ...init, signal: controller.signal });
+      at = performance.now();
+      if (response.type === 'opaqueredirect') return { status: 302, redirected: true };
+      clock = serverClock(response.headers);
+      if (AUTH.has(response.status) || response.status === 304) return { status: response.status, headers: response.headers, clock, at };
+      let payload = null;
+      try { payload = await response.json(); } catch { if (response.ok) return { status: 0, clock, at }; }
+      return { status: response.status, payload, headers: response.headers, clock, at };
+    })()]);
   } catch {
-    return { status: 0 };
-  }
+    return { status: 0, clock, at };
+  } finally { clearTimeout(timer); }
 }
 
 export function createFeed(onChange, measure = () => {}, version = '', { actionsWanted = () => false } = {}) {
@@ -45,7 +55,14 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   // Where the server read the fleet settings from, and its change log.
   let fleetSource = null, actions = null;
   const feeds = { data: null, history: null, results: null, 'fleet-config': null };
-  const busy = new Set();
+  const reads = new Map();
+  // Overlapping refreshes await the same bounded attempt, including acceptance.
+  const poll = (kind, run) => {
+    if (reads.has(kind)) return reads.get(kind);
+    const promise = run().finally(() => { if (reads.get(kind) === promise) reads.delete(kind); });
+    reads.set(kind, promise);
+    return promise;
+  };
   const now = () => (anchor ? new Date(Math.round(anchor.serverMs + performance.now() - anchor.perf)).toISOString() : null);
   const settle = (key, value) => { feeds[key] = value; };
 
@@ -58,20 +75,17 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       anchor = { serverMs: ms, perf, source };
     }
   }
-  const anchorFrom = clock => { if (clock) anchorTo(clock.at, clock.precise ? 'stamp' : 'date'); };
+  const anchorFrom = res => { if (res.clock) anchorTo(res.clock.at, res.clock.precise ? 'stamp' : 'date', res.at); };
 
-  async function pollState() {
-    if (busy.has('state')) return;
-    busy.add('state');
+  function pollState() { return poll('state', async () => {
     const res = await read('./state.json');
-    busy.delete('state');
     if (res.status !== 200 || !res.payload?.feeds) {
       // Keep the last good snapshot and its original receipts; only the reason changes.
-      anchorFrom(res.clock);
+      anchorFrom(res);
       settle('data', acceptRead('data', { status: res.status === 200 ? 0 : res.status, redirected: res.redirected }, feeds.data));
       onChange('data'); return;
     }
-    anchorTo(res.payload.serverNow, 'state');
+    anchorTo(res.payload.serverNow, 'state', res.at);
     const started = performance.now();
     const d = res.payload.feeds.data ?? {};
     settle('data', acceptRead('data', d.value
@@ -82,7 +96,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     serverPanels = panels;
     measure('data-accept', performance.now() - started);
     onChange('data');
-  }
+  }); }
 
   // History and the closed-trade record are read, parsed and validated in a
   // worker; the page only receives typed columns. Workers ignore the page's
@@ -91,7 +105,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   // workers the same steps run here.
   let worker = null;
   // A refresh completes when its worker reply has been accepted, including an
-  // unchanged reply. Dispatch alone leaves busy set: the next refresh would
+  // unchanged reply. Dispatch alone keeps the read pending: the next refresh would
   // otherwise silently skip the read (for example after a rejected push).
   const workerReads = new Map();
   const readInWorker = (kind, message) => {
@@ -105,7 +119,6 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     worker = new Worker(new URL(`./v/${encodeURIComponent(version)}/history-worker.js`, import.meta.url), { type: 'module' });
     worker.onmessage = ({ data }) => {
       const kind = data.kind === 'unchanged' ? data.feed : data.kind;
-      busy.delete(kind);
       const pending = workerReads.get(kind);
       workerReads.delete(kind);
       try {
@@ -119,20 +132,17 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     };
     worker.onerror = () => {
       const pending = [...workerReads.values()]; workerReads.clear();
-      worker = null; busy.delete('history'); busy.delete('results');
+      worker = null; reads.delete('history'); reads.delete('results');
       const complete = () => pending.forEach(read => read.resolve());
       Promise.all([pollHistory(), pollResults()]).then(complete, complete);
     };
   } catch { worker = null; }
 
   let fallback = null;
-  async function pollHistory() {
-    if (busy.has('history')) return workerReads.get('history')?.promise;
-    busy.add('history');
+  function pollHistory() { return poll('history', async () => {
     if (worker) return readInWorker('history', 'poll');
     const res = await read('./history.json');
-    busy.delete('history');
-    anchorFrom(res.clock);
+    anchorFrom(res);
     const reason = res.headers?.get('X-Joe-Feed-Reason') ?? undefined;
     const started = performance.now();
     const accepted = acceptRead('history', res.status === 200 ? { status: 200, payload: res.payload, reason }
@@ -144,20 +154,17 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       points: v.points.length, columns, closes: Object.fromEntries(DESK_IDS.map(id => [id, sessionCloses(columns, id, 'totalPnl', 9)])) } : null, reason: accepted.reason ?? null });
     measure('history-accept', performance.now() - started);
     onChange('history');
-  }
+  }); }
 
   // The accepted closed-trade record from the machine inbox. Keep its index,
   // original receipt and generation progress through refreshes and rejections.
   const resultsFeed = (index, reason, generatedAdvancedAt) => ({ value: index ? { ...index.meta, index } : null, reason: reason ?? null,
     ...(generatedAdvancedAt ? { generatedAdvancedAt } : {}) });
   let resultsFallback = null;
-  async function pollResults() {
-    if (busy.has('results')) return workerReads.get('results')?.promise;
-    busy.add('results');
+  function pollResults() { return poll('results', async () => {
     if (worker) return readInWorker('results', 'results');
     const res = await read('./results.json');
-    busy.delete('results');
-    anchorFrom(res.clock);
+    anchorFrom(res);
     const reason = res.headers?.get('X-Joe-Feed-Reason') ?? undefined;
     const started = performance.now();
     const previous = resultsFallback;
@@ -171,14 +178,11 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       : resultsFeed(v ? indexResults(v) : null, accepted.reason, accepted.generatedAdvancedAt));
     measure('results-accept', performance.now() - started);
     onChange('results');
-  }
+  }); }
 
-  async function pollFleet() {
-    if (busy.has('fleet')) return;
-    busy.add('fleet');
+  function pollFleet() { return poll('fleet', async () => {
     const res = await read('./fleet-config.json', fleetTag ? { headers: { 'If-None-Match': fleetTag } } : {});
-    busy.delete('fleet');
-    anchorFrom(res.clock);
+    anchorFrom(res);
     // Only a conditional response for the validated saved document can clear
     // a rejection. Its receipt still belongs to the original read.
     if (res.status === 304 && fleetTag && feeds['fleet-config']?.value && res.headers?.get('ETag') === fleetTag) {
@@ -198,20 +202,17 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     }
     settle('fleet-config', accepted);
     onChange('fleet');
-  }
+  }); }
 
   // The fleet settings' change log: every send to the desks, newest first.
   // A failed read keeps the last good log and says why.
-  async function pollActions() {
-    if (busy.has('actions')) return;
-    busy.add('actions');
+  function pollActions() { return poll('actions', async () => {
     const res = await read('./fleet-config/actions.json');
-    busy.delete('actions');
-    anchorFrom(res.clock);
+    anchorFrom(res);
     const entries = res.status === 200 ? acceptActions(res.payload) : null;
     actions = entries ? { entries, reason: null } : { entries: actions?.entries ?? null, reason: AUTH.has(res.status) ? 'auth_required' : res.status === 200 ? 'contract_invalid' : 'refresh_failed' };
     onChange('actions');
-  }
+  }); }
 
   // Every panel through the shared selector at the anchored server time. The
   // server's own panels carry retained last-good values and their receipts.

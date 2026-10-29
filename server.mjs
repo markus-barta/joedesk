@@ -319,6 +319,8 @@ function send(res, status, body, headers = {}) {
   res.writeHead(status, {
     "Cache-Control": "no-store",
     "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "frame-ancestors 'none'",
+    "X-Frame-Options": "DENY",
     ...headers,
     // The deploy smoke distinguishes app responses from edge SSO denials.
     "X-JoeDesk-Origin": "app",
@@ -568,6 +570,14 @@ async function handleFleetPropagate(req, res) {
     return;
   }
 
+  // The source replacement has committed. Enforce it before receipt/audit
+  // failures can return, and leave the durable audit pending on failure.
+  const observed = model.observeFleet(next);
+  if (!observed.ok) {
+    sendJson(res, 500, { ok: false, error: "fleet config stored and policy in effect but receipt save failed", currentRev: next.rev });
+    return;
+  }
+
   let action;
   try {
     action = fleetAction({
@@ -589,7 +599,6 @@ async function handleFleetPropagate(req, res) {
     return;
   }
 
-  model.observeFleet(next);
   sendJson(res, 200, {
     ok: true,
     rev: next.rev,
