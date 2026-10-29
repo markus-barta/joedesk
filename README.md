@@ -930,11 +930,13 @@ history in both measures. The comparison line and the tooltip follow the
 measure: "Change from … to …: J −€ 1,20 · …" (exact, from the stored
 decimals) and, in Money, each desk's money at both ends with an arrow
 between them. The address names the view,
-`#history?range=fit|day|week|month&desk=all|none|j,joe,joel&mode=change|money`
-(`readHistoryRoute(params)` reads it, also as JOED-152's
-`onRoute('history', readHistoryRoute)`; `historyQuery()` writes it in place
-on every change); an unreadable part keeps the current choice. A manual pan
-or zoom is not part of the address.
+`#history?range=fit|day|week|month&desk=all|none|j,joe,joel&mode=change|money`:
+`onRoute('history', readHistoryRoute)` reads it on every arrival (route.js),
+and after each History render `writeRoute('history', historyQuery())`
+corrects the address in place, without a history entry; an unreadable part
+keeps the current choice, so a link like `#history?range=week&mode=money`
+reads as `#history?range=week&desk=all&mode=money`. A manual pan or zoom is
+not part of the address.
 
 The vertical axis is a choice of the shared chart component (`chart.js`):
 **Auto** re-fits to the shown window on every pan and zoom, gliding over

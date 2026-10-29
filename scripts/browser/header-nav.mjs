@@ -80,18 +80,21 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
   await click('#routeProbe');
   const linked = await state();
   await page.evaluate(`document.getElementById('routeProbe').remove()`);
-  check('routes', 'a plain same-page link shows History, keeps its query and pushes one entry', linked.screen === 'history' && linked.hash === '#history?range=week&mode=money' &&
-    linked.query === 'range=week&mode=money' && linked.length === start.length + 3 && J(linked.current) === J(['history', 'history']), linked);
+  // History names its whole view in its address (JOED-154): the link's range and
+  // measure, and the desks it keeps (all), corrected in place.
+  const historyLink = 'range=week&desk=all&mode=money';
+  check('routes', 'a plain same-page link shows History, keeps its query in History’s own form and pushes one entry', linked.screen === 'history' && linked.hash === `#history?${historyLink}` &&
+    linked.query === historyLink && linked.length === start.length + 3 && J(linked.current) === J(['history', 'history']), linked);
   const deep = await step(`location.hash = '#results?period=day&date=2026-10-28&desk=j'`, `window.__joedesk.route().query === 'period=day&date=2026-10-28&desk=j'`);
   check('routes', 'a typed #results?… shows Results and keeps its query in the address', deep.screen === 'results' && deep.hash === '#results?period=day&date=2026-10-28&desk=j' && deep.length === start.length + 4, deep);
   const walk = [];
-  walk.push(await step('history.back()', `window.__joedesk.route().query === 'range=week&mode=money'`));
+  walk.push(await step('history.back()', `window.__joedesk.route().query === ${J(historyLink)}`));
   walk.push(await step('history.back()', `document.body.dataset.screen === 'settings'`));
   walk.push(await step('history.back()', `document.body.dataset.screen === 'results' && window.__joedesk.route().query === ${J(home.slice('#results?'.length))}`));
   walk.push(await step('history.back()', `document.body.dataset.screen === 'desk'`));
   walk.push(await step('history.forward()', `document.body.dataset.screen === 'results'`));
   check('routes', 'Back walks History (with its query), Settings, Results and Desk; Forward returns to Results; the current marks follow',
-    J(walk.map(w => [w.screen, w.hash, w.current.join()])) === J([['history', '#history?range=week&mode=money', 'history,history'], ['settings', '#settings', 'settings'],
+    J(walk.map(w => [w.screen, w.hash, w.current.join()])) === J([['history', `#history?${historyLink}`, 'history,history'], ['settings', '#settings', 'settings'],
       ['results', home, 'results,results'], ['desk', '#desk', 'desk,desk'], ['results', home, 'results,results']]), walk);
 
   // 2 · Back returns to the place left on the page; a new screen opens at its top.
@@ -132,9 +135,11 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
   // 3 · An unknown route is Desk; an anchor scrolls and leaves the address.
   const unknown = await step(`location.hash = '#nowhere?period=day'`, `location.hash === '#desk'`);
   check('routes', 'an unknown route shows Desk and the address is corrected to #desk', unknown.screen === 'desk' && unknown.query === '', unknown);
-  const anchored = await step(`location.hash = '#history/j-accounting'`, `document.body.dataset.screen === 'history' && location.hash === '#history'`);
+  // The anchor only scrolls; the address then names History's own view (its defaults after the reload above).
+  const historyView = 'range=week&desk=all&mode=change';
+  const anchored = await step(`location.hash = '#history/j-accounting'`, `document.body.dataset.screen === 'history' && location.hash === ${J(`#history?${historyView}`)}`);
   const inView = await page.evaluate(`(() => { const r = document.getElementById('j-accounting').getBoundingClientRect(); return r.top >= -1 && r.top < innerHeight; })()`);
-  check('routes', '#history/j-accounting shows History with J’s bookkeeping in view; the address keeps #history', anchored.query === '' && inView, anchored);
+  check('routes', '#history/j-accounting shows History with J’s bookkeeping in view; the address keeps History’s view, not the anchor', anchored.query === historyView && inView, anchored);
 
   // 4 · Phones, 320–390 px: the bottom bar and the header, on every screen.
   for (const width of [320, 360, 390]) for (const theme of THEMES) {
