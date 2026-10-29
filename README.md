@@ -1351,22 +1351,32 @@ height. The phone section is then titled “Market hours” instead of
 point of a session.
 
 Amy's A3 (2026-10-29, JOED-148) changes one light rule. During New York
-regular hours a household Today that the feed explains as not exact, with
-every desk's own Today either trustworthy and current or withheld as not
-exact, no longer turns the header yellow: the board stays green, and Details
-says why once, in its “Today’s result” row (“Exact for Joel; not exact for J
-and Joe · ‹reason›”); no separate note repeats it. Real gaps keep yellow
+regular hours a Today that the feed explains as not exact no longer turns the
+header yellow: the board stays green, and Details says why once, in its
+“Today’s result” row (“Exact for Joel; not exact for J and Joe · ‹reason›”); no
+separate note repeats it. One classifier,
+`classifyDay` / `classifyDays` in `board-state.js`, decides every Today, the
+household's and each desk's, over all of its channels: the board's cell (value,
+state, freshness, last good), the money reason, and the source's status and
+reason. A fault on any channel wins over “not exact”; “exact” needs a
+trustworthy current value (`trustedCurrent`: shown, fresh, no reason, not an
+outage's last good value, its source available) and no reason on any channel;
+“not exact” is a dash whose every reason is a not-exact one. The light stays
+green only when the household Today and every desk's Today are each exact or
+not exact: a current household total never excuses a desk whose Today is a
+fault. The board gives such a desk's cell the fault as its own reason, so its
+card, the hero and Details name the same thing, and it withholds the household
+Today rather than show a total across that desk. Real gaps keep yellow
 `day_pending`, now worded “Today’s result is late — reload; if it stays, tell
-Amy” (compact “Result late”): a Today without
-a reason, with a fault reason, or with any desk whose Today is unavailable,
-only a last good value, or shown with a fault reason or a non-fresh state.
-`trustedCurrent` in `board-state.js` is the one test for a current, true value
-(shown, fresh, no reason, not an outage's last good value, its source
-available); the light, the hero's desk names and Details all use it, while
-`exactCell` keeps its separate money rule (JOED-96 replays). Transport failures and stale or missing feeds keep their
-earlier, higher-ranked warnings. Not-exact values still never turn the board
-red (JOED-103), the open-result rule in regular hours is unchanged, and no copy
-promises when a value becomes exact (A5).
+Amy” (compact “Result late”), and Details names each one: “Today’s result is
+unavailable during New York regular hours: ‹reason›.” for the household,
+“Joe’s Today is unavailable: ‹reason›.” or “Joe’s Today is only a last good
+value: ‹reason›.” for a desk. The light, the hero's desk names and sentence,
+the cards and Details all use the classifier, while `exactCell` keeps its
+separate money rule (JOED-96 replays). Transport failures and stale or missing
+feeds keep their earlier, higher-ranked warnings. Not-exact values still never
+turn the board red (JOED-103), the open-result rule in regular hours is
+unchanged, and no copy promises when a value becomes exact (A5).
 
 Amy's A4 (2026-10-29, JOED-148): Since start counts from 10 Sep 2026, 00:00 New
 York, for all three desks. `SINCE_START` in `public/joe/performance.js` holds

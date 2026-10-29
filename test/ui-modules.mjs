@@ -911,8 +911,12 @@ test('health: not-exact values still run gateway, stuck-desk, transport, feed an
   const rth = board({ feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) }, { cold: true });
   // Amy's A3: the not-exact Today is explained; the not-exact open result still warns in regular hours.
   assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
-  rth.states['today.dayPnl'] = { value: null, reason: null, state: 'broken', retained: false };
-  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'day_pending', 'a Today without a reason is a real gap');
+  // A household Today with no reason on any channel (cell, money, source) is a real gap.
+  const gap = { ...rth, states: { ...rth.states }, feeds: { ...rth.feeds, data: { ...rth.feeds.data, value: structuredClone(rth.feeds.data.value) } } };
+  delete gap.feeds.data.value.totals.reasons.dayPnl;
+  delete gap.feeds.data.value.pnlSources.day.reason;
+  gap.states['today.dayPnl'] = { value: null, reason: null, state: 'broken', retained: false };
+  assert.equal(health.localBoardHealth(gap.states, gap.feeds, gap.now).reason, 'day_pending', 'a Today without a reason is a real gap');
   rth.states['today.dayPnl'] = { state: 'fresh', value: { amount: '0', currency: 'EUR' }, reason: null, retained: false };
   assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
 });

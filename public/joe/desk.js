@@ -12,7 +12,7 @@ import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
 import { STARTING_MONEY, sinceStarts, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
-import { NOT_EXACT_REASONS, notExactDash, trustedCurrent, outageValue, withGenerationAge } from './board-state.js';
+import { NOT_EXACT_REASONS, notExactDash, classifyDay, classifyDays, dayChannels, outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -269,7 +269,7 @@ export function healthPop(ctx, health) {
       const ms = gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed);
       return `${esc(desk.label)}: ${ms == null ? 'not reported' : `${ageSpan(`pop.hb.${desk.id}`, `${age(ms / 1000)} ago`)}`}`;
     }).join(' · ')]);
-    rows.push(['Today’s result', esc(notExactDash(states['today.dayPnl']) ? dayBreakdown(states)
+    rows.push(['Today’s result', esc(classifyDays(states, data).today.kind === 'notExact' ? dayBreakdown(states, data)
       : dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Open positions', esc(openMethodLabel(data.pnlSources?.open) ?? `Not available · ${cellReason(data.pnlSources?.open?.reason ?? states['today.openPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Source', `${esc(data.source.label)} · paper only`]);
@@ -332,34 +332,31 @@ function sessionRing(now) {
 const byDesk = (a, b) => DESKS.indexOf(a) - DESKS.indexOf(b);
 export const deskNames = ids => ids.length > 1 ? `${ids.slice(0, -1).map(id => LABEL[id]).join(', ')} and ${LABEL[ids.at(-1)]}` : LABEL[ids[0]];
 // Each desk's own Today in plain words, grouped by word and reason in desk
-// order: trustworthy current figures (exact or estimated), not-exact dashes
-// and other states, on the same test the light uses (trustedCurrent).
-// Only the board's per-desk cells are read; nothing is computed from money.
-export function deskDays(states) {
-  const groups = [];
+// order, from the one classifier the light uses (classifyDays, every channel):
+// exact or estimated figures, not-exact dashes, and faults named by their
+// cell's state. Nothing is computed from money.
+export function deskDays(states, data) {
+  const days = classifyDays(states, data), groups = [];
   for (const id of DESKS) {
-    const cell = states[`desks.${id}.dayPnl`];
-    let word, reason = null;
-    if (trustedCurrent(cell) && exactCell(cell) !== null) word = cell.valueSource?.method === 'session-open-estimate' ? 'estimated' : 'exact';
-    else {
-      word = notExactDash(cell) ? NOT_EXACT : cell?.retained ? 'last good' : cell?.state === 'stale' ? 'stale'
-        : (cell?.state ?? 'not reported') === 'not reported' ? 'not reported' : 'unavailable';
-      const why = cell?.reason ? cellReason(cell.reason) : null;
-      reason = why !== word ? why : null;
-    }
+    const cell = states[`desks.${id}.dayPnl`], day = days[id];
+    const word = day.kind === 'exact' ? day.estimated ? 'estimated' : 'exact' : day.kind === 'notExact' ? NOT_EXACT
+      : cell?.retained ? 'last good' : cell?.state === 'stale' ? 'stale'
+        : cell?.value == null && (cell?.state ?? 'not reported') === 'not reported' ? 'not reported' : 'unavailable';
+    const why = day.reason ? cellReason(day.reason) : null;
+    const reason = why !== word ? why : null;
     const group = groups.find(g => g.word === word && g.reason === reason);
     if (group) group.ids.push(id); else groups.push({ word, reason, ids: [id] });
   }
   return groups;
 }
-const blockingDays = states => deskDays(states).filter(g => !['exact', 'estimated'].includes(g.word));
+const blockingDays = (states, data) => deskDays(states, data).filter(g => !['exact', 'estimated'].includes(g.word));
 // Details: every desk's Today, exact ones first, e.g. "Exact for Joel; not
 // exact for J and Joe · start-of-day value missing". This one row is also
 // how Details explains a green light beside a not-exact Today (Amy's A3).
 const DAY_ORDER = ['exact', 'estimated', NOT_EXACT];
 const dayRank = g => DAY_ORDER.includes(g.word) ? DAY_ORDER.indexOf(g.word) : DAY_ORDER.length;
-export function dayBreakdown(states) {
-  const groups = deskDays(states).sort((a, b) => dayRank(a) - dayRank(b) || byDesk(a.ids[0], b.ids[0]));
+export function dayBreakdown(states, data) {
+  const groups = deskDays(states, data).sort((a, b) => dayRank(a) - dayRank(b) || byDesk(a.ids[0], b.ids[0]));
   return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` · ${g.reason}` : ''}`).join('; '));
 }
 
@@ -384,9 +381,9 @@ export function startsDiffer(feeds) {
 // as not exact, say once which desks keep it from being exact and why: their
 // shared reason, unless the section line already gives it. A reason common to
 // every desk needs no names. Null when the cell's own caption applies.
-export function householdDayReason(states, sharedReason = null) {
-  if (!notExactDash(states['today.dayPnl'])) return null;
-  const blocking = blockingDays(states);
+export function householdDayReason(states, data, sharedReason = null) {
+  if (classifyDays(states, data).today.kind !== 'notExact') return null;
+  const blocking = blockingDays(states, data);
   if (!blocking.length) return null;
   if (blocking.length === 1) {
     const [{ word, reason, ids }] = blocking, all = ids.length === DESKS.length;
@@ -404,10 +401,11 @@ export function householdDayReason(states, sharedReason = null) {
 
 // A dashed household Today still knows each exact desk's own Today: "Joel is
 // flat today." Estimates keep their own mark on their cards and are left out.
-function exactDeskSentence(states) {
+function exactDeskSentence(states, data) {
+  const days = classifyDays(states, data);
   const parts = DESKS.flatMap(id => {
-    const cell = states[`desks.${id}.dayPnl`], units = trustedCurrent(cell) ? exactCell(cell) : null;
-    if (units === null || cell.valueSource?.method === 'session-open-estimate') return [];
+    const units = days[id].kind === 'exact' && !days[id].estimated ? exactCell(states[`desks.${id}.dayPnl`]) : null;
+    if (units === null) return [];
     return [`${LABEL[id]} is ${isZero(units) ? 'flat' : `${units > 0n ? 'up' : 'down'} ${eur(units < 0n ? -units : units)}`}`];
   });
   return parts.length ? `${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]} today.` : null;
@@ -435,7 +433,7 @@ export function heroLeft(ctx) {
   const onBoard = sharesBoardCaption(dayCell, board);
   // A dashed Today states its reason once, here, unless the section says it.
   // A not-exact household Today names the desks that keep it from being exact.
-  const household = onBoard ? null : householdDayReason(states, shared);
+  const household = onBoard ? null : householdDayReason(states, data, shared);
   const dayCaption = household ?? (day.state === 'broken' && day.units === null && !onBoard && (!shared || why !== shared) ? day.caption : '');
   const dayAmount = day.units === null ? null : eur(day.units < 0n ? -day.units : day.units);
   let say;
@@ -443,7 +441,7 @@ export function heroLeft(ctx) {
     // The sentence never repeats the reason shown in the caption or section
     // line: it gives what is known instead, each exact desk's own Today.
     say = !data ? day.state === 'not reported' ? 'No numbers yet: no board data has arrived.' : `No numbers: ${esc(why ?? 'not available')}.`
-      : exactDeskSentence(states) ?? (notExactDash(dayCell) ? 'No desk has an exact result for today.'
+      : exactDeskSentence(states, data) ?? (classifyDays(states, data).today.kind === 'notExact' ? 'No desk has an exact result for today.'
         : `Today’s result is not available${why !== shared && !dayCaption && !onBoard ? `: ${esc(why ?? 'not reported')}` : ''}.`);
   } else if (day.state === 'fresh') {
     const who = 'J, Joe and Joel';
@@ -507,7 +505,7 @@ function deskCard(ctx, id, maxDay, showBars) {
   const cells = [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]];
   // A not-exact Today that is the card's only problem needs no line of its own:
   // its info icon and its dash's name and title already give the reason.
-  const loneNotExactDay = notExactDash(cells[0][1]) && cells.slice(1).every(([, cell]) => cell?.state === 'fresh' || sharesBoardCaption(cell, board));
+  const loneNotExactDay = classifyDay(cells[0][1], dayChannels(data, id)).kind === 'notExact' && cells.slice(1).every(([, cell]) => cell?.state === 'fresh' || sharesBoardCaption(cell, board));
   const status = loneNotExactDay ? '' : cardStatus(id, cells, board);
   const learning = learningLine(desk?.learning);
   return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(info.word + since)}">${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>

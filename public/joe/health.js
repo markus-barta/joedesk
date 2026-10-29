@@ -5,7 +5,7 @@ import { feedAge, panelState } from './contracts/panel-state.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { isRTH } from './time.mjs';
 import { age } from './format.js';
-import { NOT_EXACT_REASONS, stoppedData, trustedCurrent } from './board-state.js';
+import { NOT_EXACT_REASONS, stoppedData, trustedCurrent, classifyDays } from './board-state.js';
 
 // The contract's freshness bound: two 30-second producer cadences.
 export const STALE_AFTER_S = 60;
@@ -88,13 +88,11 @@ const notExact = cell => cell?.value == null && NOT_EXACT_REASONS.has(cell?.reas
 export const deskValuesNotExact = states => EQUITY_CELLS.some(name => notExact(states[name]));
 // Today's carried valuation: equity and total result retained from a last good value.
 const CARRIED_CELLS = ['today.equity', 'today.totalPnl', ...DESKS.flatMap(id => [`desks.${id}.equity`, `desks.${id}.totalPnl`])];
-// Amy's A3 (2026-10-29): a household Today the feed explains as not exact is
-// not late when every desk's own Today is either trustworthy and current or
-// withheld as not exact. It keeps the light green in regular hours; Details
-// says why. Anything else (a fault reason or state, a source that says it is
-// unavailable, a last good value) is a real gap.
-export const dayNotExact = states => notExact(states['today.dayPnl']) &&
-  DESKS.every(id => trustedCurrent(states[`desks.${id}.dayPnl`]) || notExact(states[`desks.${id}.dayPnl`]));
+// Amy's A3 (2026-10-29) with the JOED-148 gates: in regular hours Today holds
+// only when the household Today and every desk's Today are each exact or
+// withheld as not exact (classifyDays, every channel). A fault anywhere is a
+// real gap, also beside a current household Today; Details says why.
+const todayHolds = (states, data) => Object.values(classifyDays(states, data)).every(day => day.kind !== 'fault');
 // Board totals may be hidden while their observations remain usable for health.
 const observation = cell => cell?.health ?? { available: cell?.value != null, retained: cell?.retained, ageSeconds: cell?.ageSeconds };
 
@@ -163,7 +161,7 @@ export function localBoardHealth(states, feeds, now) {
   // Scoped stalls have no independent age; a fresh envelope cannot date them.
   if (CARRIED_CELLS.some(name => observation(states[name]).retained || stoppedData(states[name]))) return { tone: 'yellow', reason: 'retained_values' };
   if (data.desks.some(desk => desk.state === 'stuck')) return { tone: 'yellow', reason: 'retained_values' };
-  if (isRTH(now) && !trustedCurrent(states['today.dayPnl']) && !dayNotExact(states)) return { tone: 'yellow', reason: 'day_pending' };
+  if (isRTH(now) && !todayHolds(states, data)) return { tone: 'yellow', reason: 'day_pending' };
   if (isRTH(now) && !trustedCurrent(states['today.openPnl'])) return { tone: 'yellow', reason: 'open_unavailable_rth' };
   if (NOT_EXACT_TONE === 'yellow' && deskValuesNotExact(states)) return { tone: 'yellow', reason: 'values_not_exact' };
   return { tone: 'green', reason: 'board_ok' };
@@ -246,9 +244,17 @@ export function boardDiagnostics(states, feeds, now) {
     else if (cell?.value == null && cell?.reason && !notExact(cell)) problems.push(`${LABEL[id]}’s money is unavailable: ${cellReason(cell.reason)}.`);
   }
   for (const desk of data.desks) if (desk.state === 'stuck') problems.push(`${desk.label} is stuck: ${STUCK_REASON}.`);
-  if (isRTH(now)) for (const [kind, field] of [['day', 'dayPnl'], ['open', 'openPnl']]) {
-    const cell = states[`today.${field}`];
-    if (!trustedCurrent(cell) && !(kind === 'day' && dayNotExact(states))) problems.push(`${PNL_COPY[kind]} is unavailable during New York regular hours: ${cellReason(cell?.reason ?? data.pnlSources?.[kind]?.reason ?? 'feed_not_received')}.`);
+  if (isRTH(now)) {
+    // The same classifier as the light: each Today fault, household or desk, once.
+    const days = classifyDays(states, data);
+    if (days.today.kind === 'fault') problems.push(`${PNL_COPY.day} is unavailable during New York regular hours: ${cellReason(days.today.reason ?? data.pnlSources?.day?.reason ?? 'feed_not_received')}.`);
+    for (const id of DESKS) if (days[id].kind === 'fault') {
+      const lastGood = states[`desks.${id}.dayPnl`]?.retained, reason = days[id].reason;
+      const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason)}` : '';
+      problems.push(`${LABEL[id]}’s Today is ${lastGood ? 'only a last good value' : 'unavailable'}${why}.`);
+    }
+    const open = states['today.openPnl'];
+    if (!trustedCurrent(open)) problems.push(`${PNL_COPY.open} is unavailable during New York regular hours: ${cellReason(open?.reason ?? data.pnlSources?.open?.reason ?? 'feed_not_received')}.`);
   }
   return problems;
 }

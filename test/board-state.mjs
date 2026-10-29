@@ -13,7 +13,7 @@ import { acceptSnapshot } from '../contracts/accept.mjs';
 import { validateContract, CONTRACTS, REASONS } from '../contracts/index.mjs';
 import { decimalUnits, unitsDecimal } from '../contracts/decimal.mjs';
 const { sendOutcome } = await import('../public/joe/settings-model.js');
-const { boardStates, NOT_EXACT_REASONS, RETENTION_SECONDS, trustedCurrent } = await import('../public/joe/board-state.js');
+const { boardStates, NOT_EXACT_REASONS, RETENTION_SECONDS, trustedCurrent, classifyDay, classifyDays, dayChannels } = await import('../public/joe/board-state.js');
 const { exactCell, rankDesks, todayPercent, sincePercent } = await import('../public/joe/performance.js');
 const { cellView, heroLeft, keptHtml, positionsHtml, compactDesk, healthPop } = await import('../public/joe/desk.js');
 const { statePhrase } = await import('../public/joe/ui.js');
@@ -1590,18 +1590,20 @@ test('JOED-148 A3: a not-exact Today keeps the regular-hours light green and say
 });
 
 test('JOED-148 A3: real gaps keep the yellow Today warning: no reason, a fault reason, or a desk without an explained Today', () => {
-  const yellow = (view, why) => {
+  // Details names each real gap once: the household's, and each desk's own.
+  const yellow = (view, why, problem) => {
     const health = boardHealthPresentation(view.states, view.feeds, view.now), status = statusPresentation(view, health);
     assert.deepEqual([health.tone, health.reason, health.label], ['yellow', 'day_pending', 'Data delayed'], why);
     assert.deepEqual([status.sentence, status.alert, status.compact], ['Today’s result is late', 'Today’s result is late · Reload; if it stays, tell Amy', 'Result late'], why);
-    assert.match(pop(view).textContent, /Today’s result is unavailable during New York regular hours/, why);
+    assert.match(pop(view).textContent, problem, why);
   };
+  const household = /Today’s result is unavailable during New York regular hours/;
   const none = ctx(exact); none.states['today.dayPnl'] = { state: 'broken', value: null, reason: null, retained: false };
-  yellow(none, 'no reason');
+  yellow(none, 'no reason', household);
   const cold = data => { const view = ctx(data); return { ...view, states: boardStates(view.feeds, view.now) }; };
-  yellow(cold(dayNotExact({ j: 'source_unavailable', joe: 'source_unavailable', joel: 'source_unavailable' })), 'a fault reason');
-  yellow(cold(dayNotExact({ j: 'not_exact_yet', joe: 'source_unavailable' })), 'one desk has a real gap');
-  yellow(ctx(dayNotExact({ j: 'not_exact_yet', joe: 'source_unavailable' })), 'one desk only has a last good value');
+  yellow(cold(dayNotExact({ j: 'source_unavailable', joe: 'source_unavailable', joel: 'source_unavailable' })), 'a fault reason', household);
+  yellow(cold(dayNotExact({ j: 'not_exact_yet', joe: 'source_unavailable' })), 'one desk has a real gap', /Joe’s Today is unavailable: not reported by the broker\./);
+  yellow(ctx(dayNotExact({ j: 'not_exact_yet', joe: 'source_unavailable' })), 'one desk only has a last good value', /Joe’s Today is only a last good value: not reported by the broker\./);
   // JOED-103 stays: not-exact values never turn the board red.
   for (const reason of NOT_EXACT_REASONS) assert.notEqual(boardHealthPresentation(ctx(missing(reason)).states, ctx(missing(reason)).feeds, ctx(missing(reason)).now).tone, 'red', reason);
 });
@@ -1644,7 +1646,8 @@ for (const [what, gap] of joeTodayGaps) test(`JOED-148 A3: J not exact beside Jo
   assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'green', reason: 'board_ok' }, 'control: Joe exact');
   if (gap === undefined) delete view.states['desks.joe.dayPnl']; else view.states['desks.joe.dayPnl'] = gap;
   assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'yellow', reason: 'day_pending' }, what);
-  assert.match(boardDiagnostics(view.states, view.feeds, view.now).join(' '), /Today’s result is unavailable during New York regular hours/);
+  // Details names Joe's own gap; the household (J not exact) is not the fault.
+  assert.match(boardDiagnostics(view.states, view.feeds, view.now).join(' '), what === 'last good' ? /Joe’s Today is only a last good value/ : /Joe’s Today is unavailable/);
   assert.equal(trustedCurrent(view.states['desks.joe.dayPnl']), false);
 });
 
@@ -1666,3 +1669,155 @@ test('JOED-148: Details carries one line for a not-exact Today', () => {
     assert.doesNotMatch(text, /Today: not exact/);
   }
 });
+
+// JOED-148 fix round 2: one classifier for a Today figure over every channel
+// the contract allows (the board's cell, the money reason, the source's status
+// and reason). A fault on any channel wins.
+test('JOED-148: classifyDay truth table over every channel', () => {
+  const fresh = { state: 'fresh', value: { amount: '1', currency: 'EUR' }, retained: false, reason: null };
+  const dash = reason => ({ state: 'broken', value: null, retained: false, reason });
+  const available = { status: 'available', method: 'sod-virtual-equity' };
+  const unavailable = reason => ({ status: 'unavailable', method: null, ...(reason ? { reason } : {}) });
+  for (const [what, cell, moneyReason, source, kind, reason] of [
+    ['a current value from an available source', fresh, null, available, 'exact', null],
+    ['a current session-open estimate', fresh, null, { status: 'available', method: 'session-open-estimate' }, 'exact', null],
+    ['a current value without source evidence', fresh, null, null, 'exact', null],
+    ['not exact on the money channel', dash('not_exact_yet'), 'not_exact_yet', unavailable(), 'notExact', 'not_exact_yet'],
+    ['not exact on the source channel', dash('not_exact_yet'), null, unavailable('not_exact_yet'), 'notExact', 'not_exact_yet'],
+    ['the board’s New York-day guard', dash('baseline_pending'), null, available, 'notExact', 'baseline_pending'],
+    ['a fault on the money channel', dash('source_unavailable'), 'source_unavailable', unavailable(), 'fault', 'source_unavailable'],
+    ['a fault on the source channel', dash('source_unavailable'), null, unavailable('source_unavailable'), 'fault', 'source_unavailable'],
+    ['not exact money beside a faulty source', dash('not_exact_yet'), 'not_exact_yet', unavailable('source_unavailable'), 'fault', 'source_unavailable'],
+    ['a money fault beside a not-exact source', dash('not_exact_yet'), 'source_unavailable', unavailable('not_exact_yet'), 'fault', 'source_unavailable'],
+    ['a value kept beside a money fault', { ...fresh, state: 'broken', reason: 'source_unavailable' }, 'source_unavailable', available, 'fault', 'source_unavailable'],
+    ['a value from a source that says it is unavailable', fresh, null, unavailable(), 'fault', null],
+    ['a last good value', { ...fresh, state: 'broken', retained: true, reason: 'gateway_down' }, 'source_unavailable', unavailable('source_unavailable'), 'fault', 'gateway_down'],
+    ['a last good value with a not-exact reason', { ...fresh, state: 'broken', retained: true, reason: 'not_exact_yet' }, null, null, 'fault', null],
+    ['stopped data', { ...fresh, state: 'stale', reason: 'snapshot_stale' }, null, available, 'fault', 'snapshot_stale'],
+    ['not reported, no reason anywhere', { state: 'not reported', value: null, retained: false, reason: null }, null, unavailable(), 'fault', null],
+    ['a missing cell', undefined, null, null, 'fault', null],
+  ]) {
+    const day = classifyDay(cell, { moneyReason, source });
+    assert.deepEqual([day.kind, day.reason], [kind, reason], what);
+    assert.equal(Boolean(day.estimated), what === 'a current session-open estimate', what);
+  }
+  // Channels come from the snapshot: the desk's own source, else the snapshot's.
+  const data = structuredClone(exact);
+  delete data.desks[1].pnlSources;
+  data.desks[1].money.reasons = { dayPnl: 'not_exact_yet' };
+  assert.deepEqual(dayChannels(data, 'joe'), { moneyReason: 'not_exact_yet', source: data.pnlSources.day });
+  assert.deepEqual(dayChannels(data, 'j'), { moneyReason: null, source: data.desks[0].pnlSources.day });
+  assert.deepEqual(dayChannels(data, 'today'), { moneyReason: null, source: data.pnlSources.day });
+  assert.deepEqual(Object.keys(classifyDays({}, data)), ['today', 'j', 'joe', 'joel']);
+});
+
+// The re-gate's two concrete reproductions, contract-valid, by name.
+test('JOED-148 re-gate High 1: a current household Today never exempts a desk whose Today is a fault', () => {
+  const data = structuredClone(exact);
+  data.desks.find(d => d.id === 'joe').money.reasons = { dayPnl: 'source_unavailable' };
+  assert.equal(validateContract('data', data).ok, true);
+  const view = ctx(data), joe = view.states['desks.joe.dayPnl'];
+  // Joe keeps a value beside a fault reason; the pusher's household total is current on its own channels.
+  assert.deepEqual([joe.state, joe.value != null, joe.retained, joe.reason], ['broken', true, false, 'source_unavailable']);
+  assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'yellow', reason: 'day_pending' });
+  assert.ok(boardDiagnostics(view.states, view.feeds, view.now).includes('Joe’s Today is unavailable: not reported by the broker.'));
+  assert.deepEqual(classifyDay(joe, dayChannels(data, 'joe')), { kind: 'fault', reason: 'source_unavailable' });
+  // A total across a faulty desk is no clean household result: the hero
+  // withholds it and keeps the exact desks' own results.
+  assert.deepEqual([view.states['today.dayPnl'].value, view.states['today.dayPnl'].reason], [null, 'source_unavailable']);
+  const hero = htmlDocument(heroLeft(view));
+  assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable · not reported by the broker');
+  assert.equal(hero.querySelector('.say').textContent, `J is up ${eur(decimalUnits('50'))} and Joel is up ${eur(decimalUnits('5'))} today.`);
+  assert.equal(todayPercent(view.states, data.pnlSources.day), null);
+});
+
+test('JOED-148 re-gate High 2: a not-exact money reason never masks a faulty source', () => {
+  const data = dayNotExact({ joe: 'not_exact_yet' });
+  Object.assign(data.desks.find(d => d.id === 'joe').pnlSources.day, { reason: 'source_unavailable' });
+  assert.equal(validateContract('data', data).ok, true);
+  const view = ctx(data);
+  assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'yellow', reason: 'day_pending' });
+  assert.deepEqual(classifyDays(view.states, data).joe, { kind: 'fault', reason: 'source_unavailable' });
+  // The cell itself carries the fault, so the card, the hero and Details agree.
+  assert.deepEqual([view.states['desks.joe.dayPnl'].value, view.states['desks.joe.dayPnl'].reason], [null, 'source_unavailable']);
+  assert.equal(htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker');
+  assert.equal(detailsRow(view, 'Today’s result'), 'Exact for J and Joel; unavailable for Joe · not reported by the broker');
+  assert.equal(htmlDocument(deskCard(view, 'joe', 50, true)).querySelector('.mini-label').textContent, 'Today: unavailable · not reported by the broker');
+});
+
+// Every combination of the desks' and the household's Today channels during
+// regular hours, judged by an oracle written in plain words, apart from the
+// board's code. Many of these snapshots are ones the contract would reject at
+// ingress; the board must still never call a fault green.
+//
+// The oracle. Each desk's Today, and whether it is fine during regular hours:
+const DESK_TODAY = {
+  exact: ['an exact, current value', true],
+  notExactMoney: ['withheld as not exact on the money channel', true],
+  notExactSource: ['withheld as not exact on the source channel', true],
+  faultMoney: ['withheld for a fault on the money channel', false],
+  faultSource: ['withheld for a fault on the source channel', false],
+  notExactMoneyFaultSource: ['not exact on the money channel but a fault on the source channel', false],
+  faultMoneyNotExactSource: ['a fault on the money channel but not exact on the source channel', false],
+  unavailable: ['unavailable, with no reason on any channel', false],
+  lastGood: ['only a last good value from before an outage', false],
+  valueKeptFaultMoney: ['a value kept beside a fault on the money channel', false],
+};
+// The household's Today, and whether it is fine:
+const HOUSEHOLD_TODAY = {
+  current: ['a current total', true],
+  notExact: ['withheld as not exact', true],
+  fault: ['withheld for a fault', false],
+  nullNoReason: ['missing, with no reason', false],
+};
+// The light is green only when no Today is a fault: the household's Today is
+// fine and so is every desk's. Anything else is yellow, "Today's result is
+// late". Details names each desk whose Today is not fine, and the household
+// Today is shown only as a current total of three exact desks.
+const NAMES = { j: 'J', joe: 'Joe', joel: 'Joel' };
+function dayCombination(desks, household) {
+  const data = structuredClone(exact), prior = {};
+  const withhold = (bag, source, moneyReason, sourceReason) => {
+    bag.dayPnl = null;
+    if (moneyReason) (bag.reasons ??= {}).dayPnl = moneyReason; else if (bag.reasons) delete bag.reasons.dayPnl;
+    Object.assign(source, { status: 'unavailable', method: null, observedAt: null });
+    if (sourceReason) source.reason = sourceReason; else delete source.reason;
+  };
+  desks.forEach((option, i) => {
+    const desk = data.desks[i], source = desk.pnlSources.day, money = desk.money;
+    if (option === 'notExactMoney') withhold(money, source, 'not_exact_yet', null);
+    if (option === 'notExactSource') withhold(money, source, null, 'not_exact_yet');
+    if (option === 'faultMoney') withhold(money, source, 'source_unavailable', null);
+    if (option === 'faultSource') withhold(money, source, null, 'source_unavailable');
+    if (option === 'notExactMoneyFaultSource') withhold(money, source, 'not_exact_yet', 'source_unavailable');
+    if (option === 'faultMoneyNotExactSource') withhold(money, source, 'source_unavailable', 'not_exact_yet');
+    if (option === 'unavailable') withhold(money, source, null, null);
+    if (option === 'lastGood') {
+      withhold(money, source, 'source_unavailable', 'source_unavailable');
+      prior[`desks.${desk.id}.dayPnl`] = previous[`desks.${desk.id}.dayPnl`];
+    }
+    if (option === 'valueKeptFaultMoney') (money.reasons ??= {}).dayPnl = 'source_unavailable';
+  });
+  const householdReason = { notExact: 'not_exact_yet', fault: 'source_unavailable', nullNoReason: null }[household];
+  if (household !== 'current') withhold(data.totals, data.pnlSources.day, householdReason, householdReason);
+  const feeds = { data: { value: data } }, now = at(30);  // 13:42 New York on a Wednesday: regular hours
+  return { feeds, now, states: boardStates(feeds, now, prior) };
+}
+test('JOED-148: every desk and household Today combination matches the plain-words oracle (4000 cases)', () => {
+  let count = 0, green = 0;
+  for (const j of Object.keys(DESK_TODAY)) for (const joe of Object.keys(DESK_TODAY)) for (const joel of Object.keys(DESK_TODAY)) {
+    for (const household of Object.keys(HOUSEHOLD_TODAY)) {
+      const desks = [j, joe, joel], view = dayCombination(desks, household);
+      const label = `household ${HOUSEHOLD_TODAY[household][0]}; ${desks.map((option, i) => `${NAMES[DESKS[i]]} ${DESK_TODAY[option][0]}`).join('; ')}`;
+      const fine = HOUSEHOLD_TODAY[household][1] && desks.every(option => DESK_TODAY[option][1]);
+      assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), fine ? { tone: 'green', reason: 'board_ok' } : { tone: 'yellow', reason: 'day_pending' }, label);
+      const named = boardDiagnostics(view.states, view.feeds, view.now).join(' ');
+      DESKS.forEach((id, i) => assert.equal(named.includes(`${NAMES[id]}’s Today is`), !DESK_TODAY[desks[i]][1], `${label}: Details on ${NAMES[id]}`));
+      assert.equal(view.states['today.dayPnl'].value != null, household === 'current' && desks.every(option => option === 'exact'), `${label}: household shown`);
+      count++; if (fine) green++;
+    }
+  }
+  assert.equal(count, 10 ** 3 * 4);
+  assert.equal(green, 3 ** 3 * 2, 'green only for fine desks beside a current or not-exact household');
+});
+
