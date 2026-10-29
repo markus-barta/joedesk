@@ -1830,7 +1830,89 @@ test('JOED-30 rev 5 phone disclosure: removes its control and focuses the first 
   assert.deepEqual(events, [['remove'], ['focus', { preventScroll: true }]]);
 });
 
-// ---------- JOED-151: the approved Results design ----------
+// ---------- JOED-151: the approved Results design and its deep links ----------
+
+test('JOED-151 deep links: parsing keeps only valid parts; the canonical form names all three', () => {
+  assert.deepEqual(M.parseResultsRoute('period=day&date=2026-10-28&desk=j'), { period: 'day', date: '2026-10-28', desk: 'j' });
+  assert.deepEqual(M.parseResultsRoute('?period=year'), { period: 'ytd', date: null, desk: null }, 'a leading ? is accepted; year is This year');
+  assert.deepEqual(M.parseResultsRoute('period=Week&desk=ALL'), { period: 'week', date: null, desk: 'all' }, 'letter case is ignored');
+  assert.deepEqual(M.parseResultsRoute('desk=joel&date=2026-09-10&period=all&extra=1'), { period: 'all', date: '2026-09-10', desk: 'joel' });
+  for (const query of ['', '?', 'period=ytd', 'period=quarter', 'period=__proto__', 'period=constructor', 'desk=toString', 'desk=hasOwnProperty',
+    'desk=bob', 'desk=', 'date=2026-02-30', 'date=2026-13-01', 'date=26-10-28', 'date=0099-01-01', 'date=2026-10-28T00:00', 'date=2026-1-5']) {
+    assert.deepEqual(M.parseResultsRoute(query), { period: null, date: null, desk: null }, query);
+  }
+  assert.deepEqual(M.parseResultsRoute(null), { period: null, date: null, desk: null });
+  const names = { day: 'day', week: 'week', month: 'month', ytd: 'year', all: 'all' };
+  for (const period of ['day', 'week', 'month', 'ytd', 'all']) for (const desk of ['all', 'j', 'joe', 'joel']) {
+    const query = M.resultsRoute({ period, date: '2026-10-28', desk });
+    assert.equal(query, `period=${names[period]}&date=2026-10-28&desk=${desk}`);
+    assert.deepEqual(M.parseResultsRoute(query), { period, date: '2026-10-28', desk }, 'serialising then parsing is the identity');
+  }
+});
+
+test('JOED-151 deep links: a link sets what it names; missing or invalid parts keep the current view', () => {
+  const saved = { ...page.RS }, view = { today: '2026-10-29', trackingStart: '2026-09-10' };
+  const state = () => ({ period: page.RS.period, anchor: page.RS.anchor, sel: page.RS.sel, desk: page.RS.desk, cal: page.RS.cal, moved: page.RS.moved });
+  try {
+    Object.assign(page.RS, { period: 'week', anchor: null, sel: null, desk: 'all', cal: null, moved: false });
+    // Nothing set: This week, today and All desks.
+    assert.equal(page.applyResultsRoute('', view), false);
+    assert.equal(page.resultsUrl(view), '#results?period=week&date=2026-10-29&desk=all');
+    assert.equal(page.applyResultsRoute('period=day&date=2026-10-28&desk=j', view), true);
+    assert.deepEqual(state(), { period: 'day', anchor: '2026-10-28', sel: '2026-10-28', desk: 'j', cal: [2026, 9], moved: true });
+    assert.equal(page.resultsUrl(view), '#results?period=day&date=2026-10-28&desk=j');
+    // Missing parts keep the view.
+    page.applyResultsRoute('period=month', view);
+    assert.deepEqual(state(), { period: 'month', anchor: '2026-10-28', sel: '2026-10-28', desk: 'j', cal: [2026, 9], moved: true });
+    page.applyResultsRoute('desk=joel', view);
+    assert.equal(page.resultsUrl(view), '#results?period=month&date=2026-10-28&desk=joel');
+    // Invalid values fall back silently: unknown words, impossible or future
+    // dates and dates before the first step change nothing.
+    const before = state();
+    for (const query of ['period=quarter', 'date=2026-02-30', 'desk=bob', 'date=2026-10-30', 'date=2026-07-31', 'period=__proto__&desk=constructor']) {
+      assert.equal(page.applyResultsRoute(query, view), false, query);
+      assert.deepEqual(state(), before, query);
+    }
+    // Valid parts apply even beside invalid ones.
+    page.applyResultsRoute('period=week&desk=bob&date=2026-13-40', view);
+    assert.deepEqual(state(), { ...before, period: 'week' });
+    // The date picks the period that contains it: Day the date, Week its
+    // Monday-to-Sunday week, Month its month, year its calendar year, All
+    // the whole record (the date is the selected day).
+    for (const [query, start, end, lab] of [
+      ['period=day&date=2026-10-12', '2026-10-12', '2026-10-12', 'Mon 12 Oct 2026'],
+      ['period=week&date=2026-10-28', '2026-10-26', '2026-11-01', 'This week · 26 Oct – 1 Nov'],
+      ['period=week&date=2026-10-25', '2026-10-19', '2026-10-25', 'Last week · 19–25 Oct'],
+      ['period=month&date=2026-09-30', '2026-09-01', '2026-09-30', 'Last month · September'],
+      ['period=year&date=2026-09-30', '2026-01-01', '2026-10-29', 'This year · since 1 Jan'],
+      ['period=all&date=2026-09-30', '2026-09-10', '2026-10-29', 'All time · since 10 Sep'],
+    ]) {
+      page.applyResultsRoute(query, view);
+      const per = M.periodOf(page.RS.period, page.RS.anchor, view.today, view.trackingStart);
+      assert.deepEqual([per.start, per.end, per.lab], [start, end, lab], query);
+      assert.equal(page.RS.sel, new URLSearchParams(query).get('date'), `${query}: the date is the selected day`);
+      assert.equal(page.resultsUrl(view), `#results?${query}&desk=joel`, `${query}: the address names the same view`);
+    }
+    // A link to today keeps following the board's today.
+    page.applyResultsRoute('period=day&date=2026-10-29', view);
+    assert.equal(page.RS.moved, false);
+  } finally { Object.assign(page.RS, saved); }
+});
+
+test('JOED-151 year: the period is the calendar year that contains its date', () => {
+  const today = '2027-02-01', ts = '2026-09-10';
+  assert.deepEqual(M.periodOf('ytd', today, today, ts), { p: 'ytd', start: '2027-01-01', end: today, lab: 'This year · since 1 Jan', head: 'this year', phrase: 'this year' });
+  assert.deepEqual(M.periodOf('ytd', '2026-03-01', today, ts), { p: 'ytd', start: '2026-01-01', end: '2026-12-31', lab: 'Last year · 2026', head: 'last year', phrase: 'last year' });
+  assert.deepEqual(M.periodOf('ytd', '2025-06-01', today, ts), { p: 'ytd', start: '2025-01-01', end: '2025-12-31', lab: '2025', head: '2025', phrase: 'in 2025' });
+  const saved = { ...page.RS };
+  try {
+    Object.assign(page.RS, { period: 'week', anchor: today, sel: today, desk: 'all', cal: [2027, 1], moved: false });
+    assert.equal(page.applyResultsRoute('period=year&date=2026-11-02', { today, trackingStart: ts }), true);
+    const per = M.periodOf(page.RS.period, page.RS.anchor, today, ts);
+    assert.deepEqual([per.start, per.end], ['2026-01-01', '2026-12-31']);
+    assert.equal(page.resultsUrl({ today, trackingStart: ts }), '#results?period=year&date=2026-11-02&desk=all');
+  } finally { Object.assign(page.RS, saved); }
+});
 
 test('JOED-151 hero: it names result, desks and period, shows the base beside the percentage and a signed split', () => {
   const render = heroCapture(), now = '2026-10-14T17:42:22.000Z';

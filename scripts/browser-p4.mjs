@@ -505,6 +505,52 @@ async function assertDesignLayout(page, viewport, tag) {
   assert.ok(g.fx?.startsWith('Prices in USD, as traded. Fees and results in EUR at each trade’s IB rate (€ per $).'), `${tag}: the day explains its currencies`);
 }
 
+// JOED-151 (hard assertions): the Results deep link
+// #results?period=…&date=…&desk=… opens its view; each change of the view is
+// a history entry that Back and Forward restore; missing parts keep the view
+// and invalid ones fall back silently.
+async function assertResultsLinks(page, ix, inputs) {
+  const today = inputs.today, ts = ix.meta.trackingStart;
+  const day = [...ix.dates].reverse().find(k => k < today && M.dayResult(ix, k, ['j']).count);
+  const state = () => page.evaluate(`({ hash: location.hash,
+    period: document.querySelector('#periodSeg [aria-pressed="true"]')?.dataset.period,
+    desk: document.querySelector('#deskSeg [aria-pressed="true"]')?.dataset.desk,
+    label: document.querySelector('#perLabel .cur')?.innerText, sel: document.querySelector('#cal .sel')?.dataset.day,
+    display: document.querySelector('#rheroL .display')?.innerText })`);
+  const expect = async (want, why) => {
+    const hash = `#results?period=${want.period === 'ytd' ? 'year' : want.period}&date=${want.date}&desk=${want.desk}`;
+    await waitFor(page, `location.hash === ${JSON.stringify(hash)}`);
+    await settle(page);
+    const got = await state(), e = expected(ix, inputs, want.period, want.date, want.desk);
+    assert.equal(got.period, want.period, `${why}: period`);
+    assert.equal(got.desk, want.desk, `${why}: desk`);
+    assert.equal(N(got.label), N(e.per.lab), `${why}: stepper`);
+    assert.equal(got.sel, want.date, `${why}: selected day`);
+    assert.equal(N(got.display), N(e.R.empty || e.R.net === null ? '—' : money(e.R.net)), `${why}: the period's result`);
+  };
+  const go = hash => page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
+  await go(`#results?period=day&date=${day}&desk=j`);
+  await expect({ period: 'day', date: day, desk: 'j' }, 'link');
+  await click(page, '#periodSeg [data-period="month"]');
+  await expect({ period: 'month', date: day, desk: 'j' }, 'month');
+  await click(page, '#deskSeg [data-desk="all"]');
+  await expect({ period: 'month', date: day, desk: 'all' }, 'all desks');
+  await page.evaluate('history.back()');
+  await expect({ period: 'month', date: day, desk: 'j' }, 'back');
+  await page.evaluate('history.back()');
+  await expect({ period: 'day', date: day, desk: 'j' }, 'back again');
+  await page.evaluate('history.forward()');
+  await expect({ period: 'month', date: day, desk: 'j' }, 'forward');
+  await go('#results?desk=joel');
+  await expect({ period: 'month', date: day, desk: 'joel' }, 'missing parts keep the view');
+  await go('#results?period=quarter&date=2026-02-30&desk=bob');
+  await expect({ period: 'month', date: day, desk: 'joel' }, 'invalid parts fall back');
+  await go(`#results?period=year&date=${day}`);
+  await expect({ period: 'ytd', date: day, desk: 'joel' }, 'year');
+  assert.equal(M.periodOf('ytd', day, today, ts).lab, `This year · since 1${NB}Jan`);
+  await go(`#results?period=week&date=${today}&desk=all`);
+  await expect({ period: 'week', date: today, desk: 'all' }, 'back to today');
+}
 
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
 const engine = await browser.send('Browser.getVersion');
@@ -707,6 +753,7 @@ try {
       // Kept holdings never appear on Results.
       const kept = await page.evaluate(`/\\b(SXR8|TSLA)\\b/.test(document.getElementById('scr-results').innerText)`);
       check('AC-9', `${tag}: no kept holding appears on Results`, !kept);
+      if (viewport.name === '1440' && theme === 'light') await assertResultsLinks(page, ix, inputs);
     }
     // More views for the visual check.
     for (const [viewport, theme, period, desk, name, what] of [[VIEWPORTS[0], 'light', 'day', 'all', 'day', 'Day: today, all desks (intraday points from History)'],

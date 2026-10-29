@@ -8,7 +8,7 @@ import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure } from './desk.js';
 import { renderHistory, historyChart, HS } from './history.js';
-import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
+import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, applyResultsRoute, resultsUrl } from './results.js';
 import { boardHealthPresentation } from './health.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { initSettings, renderSettings, showSection, SECTIONS as SETTINGS_SECTIONS } from './settings.js';
@@ -114,7 +114,7 @@ function start() {
       const moved = guard('history', () => renderHistory(ctx))?.redraw;
       if (moved || dirtyHistory || !['tick', 'results'].includes(reason)) { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }
     }
-    if (screen === 'results') guard('results', () => renderResults(ctx));
+    if (screen === 'results') { const url = guard('results', () => renderResults(ctx)); if (url) setHash(url, false, true); }
     if (screen === 'settings') guard('settings', () => renderSettings(ctx));
     window.__joedesk.renders++;
     if (reason !== 'tick') {
@@ -124,12 +124,31 @@ function start() {
     if (feed.settled()) root.dataset.ready = '1';
   }
 
+  // The address: "#screen", "#screen/element", or a Results view as
+  // "#results?period=…&date=…&desk=…" (README: Results deep links). A user's
+  // change of the Results view adds a history entry; Back and Forward
+  // restore each view, and a link from elsewhere opens its view.
+  const routeOf = hash => {
+    const [path, query = ''] = hash.replace(/^#/, '').split('?');
+    const [name, anchor] = path.split('/');
+    return { name, anchor, query };
+  };
+  let routed = '';
+  // A passive write (a render keeping the address in step) never replaces an
+  // address that changed outside the page and is still waiting for followHash.
+  function setHash(hash, push = false, passive = false) {
+    if (passive && location.hash !== routed) return;
+    if (location.hash !== hash) {
+      try { history[push ? 'pushState' : 'replaceState'](null, '', hash); } catch { /* file or sandboxed context */ }
+    }
+    routed = location.hash;
+  }
   function schedule(reason = 'tick') {
     if (frame) { if (reason !== 'tick') pending = reason; return; }
     const why = reason;
     frame = requestAnimationFrame(() => { const r = pending ?? why; pending = null; render(r); });
   }
-  function go(next, anchor) {
+  function go(next, anchor, query = '') {
     if (!SCREENS.includes(next)) next = 'desk';
     screen = next;
     tips.hide();
@@ -138,7 +157,9 @@ function start() {
     $$('.nav button, .bottom-nav button').forEach(b => { if (b.dataset.go === next) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     closePop();
     for (const dialog of $$('dialog[open]')) dialog.close();
-    try { history.replaceState(null, '', `#${next}`); } catch { /* file or sandboxed context */ }
+    // Results reads its own query; another screen's query stays for that screen.
+    if (next === 'results') applyResultsRoute(query, view());
+    setHash(next === 'results' ? resultsUrl(view()) : `#${next}${query ? `?${query}` : ''}`);
     dirtyHistory = true; forgetCharts(); forgetResults();
     if (next === 'settings') feed.refreshActions();
     render('screen');
@@ -291,16 +312,18 @@ function start() {
   // a day drive every number; on a phone a day opens its trades in a sheet.
   for (const root of [$('#daypanel'), $('#daySheet')]) root.addEventListener('copy', copyDayText);
   const view = () => resultsView(context());
+  const commit = () => setHash(resultsUrl(view()), true);
   $('#periodSeg').addEventListener('click', e => {
     const b = e.target.closest('[data-period]');
     if (!b) return;
     RS.period = b.dataset.period;
     if (RS.period === 'ytd' || RS.period === 'all') RS.anchor = view().today;
+    commit();
     render('results-period');
   });
-  $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { RS.desk = b.dataset.desk; render('results-desk'); } });
-  $('#prevPer').addEventListener('click', () => { stepPeriod(-1, view()); render('results-step'); });
-  $('#nextPer').addEventListener('click', () => { stepPeriod(1, view()); render('results-step'); });
+  $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { RS.desk = b.dataset.desk; commit(); render('results-desk'); } });
+  $('#prevPer').addEventListener('click', () => { stepPeriod(-1, view()); commit(); render('results-step'); });
+  $('#nextPer').addEventListener('click', () => { stepPeriod(1, view()); commit(); render('results-step'); });
   $('#prevMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m ? [y, m - 1] : [y - 1, 11]; RS.moved = true; render('results-month'); });
   $('#nextMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m === 11 ? [y + 1, 0] : [y, m + 1]; RS.moved = true; render('results-month'); });
   let sheetFrom = null;
@@ -310,6 +333,7 @@ function start() {
     const v = view();
     RS.sel = c.dataset.day; RS.moved = true;
     if (['day', 'week', 'month'].includes(RS.period) && RS.sel <= v.today) RS.anchor = RS.sel;
+    commit();
     render('results-day');
     if (isPhone()) { sheetFrom = RS.sel; openDaySheet(v, RS.sel, { pointer: fromPointer(e) }); }
   });
@@ -322,7 +346,23 @@ function start() {
   });
   sheet.addEventListener('close', () => { if (sheetFrom) document.querySelector(`#cal [data-day="${sheetFrom}"]`)?.focus({ preventScroll: true }); sheetFrom = null; });
 
-  addEventListener('hashchange', () => { const [next, anchor] = location.hash.slice(1).split('/'); if (next !== screen) go(next, anchor); });
+  // A link from elsewhere, or Back and Forward. Our own writes are not news.
+  const followHash = () => {
+    if (location.hash === routed) return;
+    routed = location.hash;
+    const r = routeOf(location.hash);
+    if (r.name === 'results' && screen === 'results') {
+      tips.hide();
+      for (const dialog of $$('dialog[open]')) dialog.close();
+      applyResultsRoute(r.query, view());
+      setHash(resultsUrl(view()));
+      render('results-link');
+      return;
+    }
+    if (r.name !== screen) go(r.name, r.anchor, r.query);
+  };
+  addEventListener('hashchange', followHash);
+  addEventListener('popstate', followHash);
   let resize = 0;
   addEventListener('resize', () => { cancelAnimationFrame(resize); resize = requestAnimationFrame(() => { forgetCharts(); forgetResults(); dirtyHistory = true; render('resize'); }); });
   // With System chosen the page follows the OS live (CSS); the header button's words follow too.
@@ -349,7 +389,7 @@ function start() {
   initSettings({ feed, tips, schedule });
   initVersionDisplay();
   $('#footShield').innerHTML = `${icon('shield')}Read-only paper board · nothing here can place a trade`;
-  const [first, anchor] = (location.hash || '#desk').slice(1).split('/');
-  go(first, anchor);
+  const first = routeOf(location.hash || '#desk');
+  go(first.name, first.anchor, first.query);
   feed.start();
 }

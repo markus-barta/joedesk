@@ -140,7 +140,14 @@ export function periodOf(p, a, today, trackingStart = null) {
     return { p, start: dateKey(y, m, 1), end: dateKey(y, m, daysIn(y, m)), lab: cur ? `This month · ${MONTH[m]}` : prev ? `Last month · ${MONTH[m]}` : `${MONTH[m]} ${y}`,
       head: cur ? 'this month' : prev ? 'last month' : name, phrase: cur ? 'this month' : prev ? 'last month' : `in ${name}` };
   }
-  if (p === 'ytd') return { p, start: `${today.slice(0, 4)}-01-01`, end: today, lab: `This year · since 1${NB}Jan`, head: 'this year', phrase: 'this year' };
+  if (p === 'ytd') {
+    // The anchor's calendar year: this year runs to today. An earlier year,
+    // reached through a deep link, is that whole calendar year.
+    const ty = Number(today.slice(0, 4));
+    if (y >= ty) return { p, start: `${today.slice(0, 4)}-01-01`, end: today, lab: `This year · since 1${NB}Jan`, head: 'this year', phrase: 'this year' };
+    const prev = y === ty - 1;
+    return { p, start: `${y}-01-01`, end: `${y}-12-31`, lab: prev ? `Last year · ${y}` : `${y}`, head: prev ? 'last year' : `${y}`, phrase: prev ? 'last year' : `in ${y}` };
+  }
   const start = trackingStart ?? firstStep(null);
   return { p: 'all', start, end: today, lab: trackingStart ? `All time · since ${fmtDM(trackingStart)}` : 'All time', head: 'all time',
     phrase: trackingStart ? `since ${fmtDM(trackingStart)}` : 'so far' };
@@ -155,6 +162,26 @@ export function stepAnchor(period, anchor, dir, today, trackingStart = null) {
   const k = kOf(a), first = firstStep(trackingStart);
   return k > today ? today : k < first ? first : k;
 }
+
+// ---------- Deep links ----------
+// #results?period=day|week|month|year|all&date=YYYY-MM-DD&desk=all|j|joe|joel
+// (README: Results deep links). Parsing keeps only valid values: the page
+// takes every missing or invalid one from its current view. The date is any
+// Vienna date inside the period: Day is that date, Week its Monday-to-Sunday
+// week, Month its calendar month and year its calendar year.
+const ROUTE_PERIOD = new Map([['day', 'day'], ['week', 'week'], ['month', 'month'], ['year', 'ytd'], ['all', 'all']]);
+const ROUTE_NAME = new Map([...ROUTE_PERIOD].map(([name, period]) => [period, name]));
+const ROUTE_DESKS = new Set(['all', ...DESK_IDS]);
+const validDate = k => /^\d{4}-\d{2}-\d{2}$/.test(k) && kOf(parse(k)) === k;
+export function parseResultsRoute(query) {
+  const params = new URLSearchParams(String(query ?? '').replace(/^\?/, ''));
+  const value = key => params.get(key)?.trim().toLowerCase() ?? '';
+  const date = value('date');
+  return { period: ROUTE_PERIOD.get(value('period')) ?? null, date: validDate(date) ? date : null,
+    desk: ROUTE_DESKS.has(value('desk')) ? value('desk') : null };
+}
+// The canonical form names all three, so each history entry is a whole view.
+export const resultsRoute = ({ period, date, desk }) => `period=${ROUTE_NAME.get(period) ?? 'week'}&date=${date}&desk=${ROUTE_DESKS.has(desk) ? desk : 'all'}`;
 
 // ---------- Index ----------
 const FIELD = '\u001f';

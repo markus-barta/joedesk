@@ -61,6 +61,34 @@ export function stepPeriod(dir, view) {
   RS.moved = true;
 }
 
+// ---------- Deep links (README: Results deep links) ----------
+// A link sets what it names. Each missing or invalid part keeps the current
+// view, which on a fresh page is This week, today and All desks; a date after
+// today or before the first step is invalid too. Returns whether it applied.
+export function applyResultsRoute(query, view) {
+  const route = M.parseResultsRoute(query), today = view.today;
+  const date = route.date && route.date <= today && route.date >= M.firstStep(view.trackingStart) ? route.date : null;
+  if (!route.period && !route.desk && !date) return false;
+  if (route.period) RS.period = route.period;
+  if (route.desk) RS.desk = route.desk;
+  if (date) {
+    // The period is the one that contains the date, which also becomes the
+    // selected day; a link to today keeps following the board's today.
+    RS.anchor = RS.sel = date;
+    RS.cal = M.ymOf(date);
+    RS.moved = date !== today;
+  }
+  return true;
+}
+
+// The view as its canonical link: the period, a day inside it and the desk.
+export function resultsUrl(view) {
+  const today = view.today, anchor = RS.anchor ?? today, sel = RS.sel ?? anchor;
+  const per = M.periodOf(RS.period, anchor, today, view.trackingStart);
+  const date = sel >= per.start && sel <= (per.end < today ? per.end : today) ? sel : anchor;
+  return `#results?${M.resultsRoute({ period: RS.period, date, desk: RS.desk })}`;
+}
+
 const D = '<span class="bn muted">—</span>';
 const deskSet = () => (RS.desk === 'all' ? DESKS.slice() : [RS.desk]);
 const whoOf = desks => (desks.length === 3 ? 'All desks' : LABEL[desks[0]]);
@@ -139,7 +167,7 @@ export function renderResults(ctx) {
   if (!RS.moved || !RS.anchor) { RS.anchor = RS.sel = today; RS.cal = M.ymOf(today); }
   const sig = [ix, view.cols, view.reason, view.cell?.state, today, view.todayUnits.join(), view.moneyCells.map(c => c?.reason).join(), view.basis, view.positions.map(p => `${p.desk}|${p.symbol}|${p.company}|${p.openedAt}`).join(),
     JSON.stringify(RS), $('#curve').clientWidth, $('#daySheet')?.open];
-  if (last && sig.every((v, i) => v === last[i])) { renderStatus(view); return; }
+  if (last && sig.every((v, i) => v === last[i])) { renderStatus(view); return resultsUrl(view); }
   last = sig;
   const per = M.periodOf(RS.period, RS.anchor, today, view.trackingStart);
   const desks = deskSet();
@@ -159,6 +187,7 @@ export function renderResults(ctx) {
   renderCalendar(view, per, desks);
   renderStatus(view);
   renderCurve(view, per, desks, R, mctx);
+  return resultsUrl(view);
 }
 
 function heroSentence(view, per, R, partialDays) {

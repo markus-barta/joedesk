@@ -1282,7 +1282,7 @@ and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.
 
-### Results screen layout (JOED-151)
+### Results screen: layout and deep links (JOED-151)
 
 Results follows the approved board design (JOED-147). Under the period tabs
 (Day · Week · Month · This year · All), the stepper and the desk filter, one
@@ -1310,6 +1310,32 @@ domain, colour, the period-start money for the minimum span, axis labels,
 tracking marker, words) and `drawResultChart` draws that description, today
 with `chart.js`. The shared time-chart component replaces only
 `drawResultChart`.
+
+**Deep links.** A Results view has one address:
+
+```
+#results?period=day|week|month|year|all&date=YYYY-MM-DD&desk=all|j|joe|joel
+```
+
+- `period`: `day`, `week`, `month`, `year` (This year) or `all` (All time).
+- `date`: a Vienna date inside the period, which is also the calendar's
+  selected day. Day is that date; Week is the Monday-to-Sunday Vienna week
+  that contains it; Month its calendar month; `year` its calendar year (this
+  year runs to today, an earlier year is the whole calendar year); All the
+  whole record.
+- `desk`: `all`, `j`, `joe` or `joel`.
+
+Every parameter is optional: a missing one keeps the current view, which on a
+fresh page is This week, today and All desks. Invalid values (unknown words,
+impossible dates, dates after today or before the stepper's first month) fall
+back silently. A link whose date is today keeps following the board's today.
+Examples: `/joe/#results?period=day&date=2026-10-28&desk=j` (one session for
+J), `#results?period=all` (All time), `#results?desk=joe`. The address always
+shows the current view in this canonical form with all three parameters. Each
+change of period, desk, step or selected day adds a history entry, so Back and
+Forward restore every view; a link from another screen opens its view, and
+`#results/<element-id>` still scrolls to an element. Desk's links use this
+format; History has its own `#history?…`.
 
 ### Phase B exact money (JOED-85, contract-set revision 10)
 
