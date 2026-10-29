@@ -925,7 +925,8 @@ so all lines start at 0 on a zero line; **Money** shows each desk's money as
 observed. Only the numbers move: the interval classifier, the hatched bands,
 the dashed estimates and "coverage unknown" are exactly those of Money, and
 the scale's ±0,5 % floor is always taken of the money, so a change of a few
-cents never fills the chart. The comparison line and the tooltip follow the
+cents never fills the chart. The overview strip keeps the money of all kept
+history in both measures. The comparison line and the tooltip follow the
 measure: "Change from … to …: J −€ 1,20 · …" (exact, from the stored
 decimals) and, in Money, each desk's money at both ends with an arrow
 between them. The address names the view,

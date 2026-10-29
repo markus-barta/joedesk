@@ -111,9 +111,10 @@ function compareWords(result, measure) {
   return { text: `${lead}: ${figures.map(f => f.text).join(' · ')}`, html: `${esc(lead)}: ${figures.map(f => f.html).join(' · ')}` };
 }
 // The longest line each measure can write (three desks, the longest stretch
-// wording and wide amounts), laid out invisibly under the real one: the line
-// keeps one height per measure while presets, desks and the window change.
-const SIZING_AT = Date.parse('2026-10-28T22:59:00.000Z');
+// wording, wide amounts and a wide date, Wed 28 May), laid out invisibly
+// under the real one: the line keeps one height per measure while presets,
+// desks and the window change.
+const SIZING_AT = Date.parse('2025-05-28T21:59:00.000Z');
 const sizing = {};
 function compareSizing(measure) {
   return (sizing[measure] ??= compareWords({ after: 'incompatible-basis', startAt: new Date(SIZING_AT - 86340e3).toISOString(), endAt: new Date(SIZING_AT).toISOString(),
