@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import * as nodeModule from 'node:module';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
+import { probeHeaderFits } from '../scripts/browser/header-nav.mjs';
 
 // results.js as the board serves it: time.mjs and contracts/ come from the
 // repo root (test/results-model.mjs maps them the same way).
@@ -121,10 +122,15 @@ test('route readers: each screen gets its own parameters before it renders, poss
 // or rendered before its data is in, is short, so the scroll position clamps
 // as in a real layout); a reload (the same entry, a new page at its top, its
 // data still coming); ResizeObserver, timers and events.
-function browser() {
-  const entries = [{ hash: '#desk', state: null }], timers = new Map(), rendered = new Set(), observers = new Set(), calls = [];
+function browser({ historyLimit = Infinity, previousEntries = 0 } = {}) {
+  const entries = [...Array.from({ length: previousEntries }, (_, i) => ({ hash: `#desk?old=${i}`, state: null })), { hash: '#desk', state: null }];
+  const timers = new Map(), rendered = new Set(), observers = new Set(), calls = [];
   const tall = { desk: 3000, results: 2400, history: 2400, settings: 2400 };
-  let listeners = new Map(), index = 0, clock = 0, timerId = 0, visible = 'desk', y = 0, data = true;
+  let listeners = new Map(), index = previousEntries, clock = 0, timerId = 0, visible = 'desk', y = 0, data = true;
+  const push = entry => {
+    entries.splice(index + 1, Infinity, entry); index++;
+    if (entries.length > historyLimit) { entries.shift(); index--; }
+  };
   const max = () => Math.max(0, 110 + (rendered.has(visible) ? tall[visible] : 600) - 800);
   const hashOf = url => new URL(url, 'http://board.test/joe/').hash;
   const fire = type => { for (const fn of listeners.get(type) ?? []) fn({ type }); };
@@ -135,9 +141,10 @@ function browser() {
   class ResizeObserver { constructor(callback) { this.callback = callback; } observe() { observers.add(this); } disconnect() { observers.delete(this); } }
   const win = {
     history: {
+      get length() { return entries.length; },
       get state() { return structuredClone(entries[index].state); },
       replaceState(state, _title, url) { spend(); entries[index] = { hash: url === undefined ? entries[index].hash : hashOf(url), state: structuredClone(state) }; },
-      pushState(state, _title, url) { spend(); entries.splice(index + 1, Infinity, { hash: hashOf(url), state: structuredClone(state) }); index++; },
+      pushState(state, _title, url) { spend(); push({ hash: hashOf(url), state: structuredClone(state) }); },
     },
     location: { get hash() { return entries[index].hash; }, pathname: '/joe/', search: '' },
     get scrollY() { y = Math.min(y, max()); return y; },
@@ -164,7 +171,7 @@ function browser() {
       clock = end;
     },
     traverse(delta) { const from = entries[index].hash; index += delta; fire('popstate'); if (entries[index].hash !== from) fire('hashchange'); },
-    typed(hash, before = () => {}) { entries.splice(index + 1, Infinity, { hash, state: null }); index++; before(); fire('popstate'); fire('hashchange'); },
+    typed(hash, before = () => {}) { push({ hash, state: null }); before(); fire('popstate'); fire('hashchange'); },
     reload() { listeners = new Map(); timers.clear(); observers.clear(); rendered.clear(); y = 0; data = false; },
   };
 }
@@ -186,6 +193,85 @@ function boot(source, b, extra = {}) {
   runInContext(code, ctx);
   return runInContext('go', ctx);
 }
+
+test('routes: a full 50-entry browser history still pushes one place per arrival, canonical corrections replace it, and the active gear adds none', () => {
+  const b = browser({ historyLimit: 50, previousEntries: 49 }), go = boot(app, b);
+  const home = '#results?period=week&date=2026-10-14&desk=all';
+  const linked = '#history?range=week&desk=all&mode=money';
+  const deep = '#results?period=day&date=2026-10-28&desk=j';
+  go('results', { push: true });
+  assert.equal(writeRoute('results', home.split('?')[1]), true);
+  go('settings', { push: true });
+  const before = structuredClone(b.entries);
+  go('settings', { push: true });
+  assert.deepEqual(b.entries, before, 'the active gear repeats neither the entry nor its state');
+  const link = linkRoute({ button: 0 }, { getAttribute: name => name === 'href' ? '#history?range=week&mode=money' : null });
+  go(link.screen, { ...link, push: true });
+  assert.equal(writeRoute('history', linked.split('?')[1]), true);
+  b.typed(deep);
+  assert.equal(b.win.history.length, 50, 'a push evicts an old entry: length cannot count new arrivals here');
+  assert.deepEqual(b.entries.slice(-5).map(e => e.hash), ['#desk', home, '#settings', linked, deep]);
+  assert.equal(new Set(b.entries.slice(-5).map(e => e.state.joeEntry)).size, 5, 'five distinct places, including the typed arrival');
+  const walk = [];
+  for (const delta of [-1, -1, -1, -1, 1]) { b.traverse(delta); walk.push(b.win.location.hash); }
+  assert.deepEqual(walk, [linked, '#settings', home, '#desk', home], 'exact Back/Forward sequence, without duplicate canonical entries');
+});
+
+// A content-box observer ignores padding-only growth. Resize delivery and
+// fitting take successive frames; real pixels and elementFromPoint stay in CI.
+function headerProbePage({ failAudit = false } = {}) {
+  const fits = ['', 'word', 'word labels', 'word labels tight', 'word labels tight icons', 'word labels tight icons squeeze'];
+  const header = { dataset: { fit: '' } }, buttons = [{ id: 'gear', visible: true }, { id: 'hidden-nav', visible: false }];
+  let cssText = '', attached = false, contentWidth = 62, pending = null;
+  const audited = [];
+  const style = { get textContent() { return cssText; }, set textContent(value) { cssText = value; }, remove() { attached = false; cssText = ''; } };
+  const context = {
+    document: {
+      createElement: tag => { assert.equal(tag, 'style'); return style; },
+      getElementById: id => { assert.equal(id, 'modeLabel'); return { getBoundingClientRect: () => ({ width: 80 }) }; },
+      head: { append: node => { assert.equal(node, style); attached = true; } },
+      querySelector: selector => { assert.equal(selector, '.top-in'); return header; },
+      querySelectorAll: selector => { assert.equal(selector, '.top-in button'); return buttons; },
+    },
+    requestAnimationFrame: done => queueMicrotask(() => {
+      if (pending !== null) { header.dataset.fit = pending; pending = null; }
+      // 18 px padding, unchanged by width-based growth. Padding-only growth
+      // leaves this observed box at 62 px and never queues a fitted step.
+      const width = Number(/\bwidth:\s*([\d.]+)px/.exec(cssText)?.[1] ?? 80) - 18;
+      if (width !== contentWidth) {
+        contentWidth = width;
+        pending = fits[Math.min(fits.length - 1, Math.floor((width - 62) / 8))];
+      }
+      done();
+    }),
+    __audit: {
+      visible: button => button.visible,
+      hits: controls => {
+        assert.deepEqual(Array.from(controls), [buttons[0]], 'audit every visible control, excluding hidden nav');
+        if (failAudit) throw new Error('hit audit failed');
+        audited.push(header.dataset.fit);
+        return header.dataset.fit === 'word labels' ? [{ id: 'gear', reason: 'shared hit region' }] : [];
+      },
+    },
+  };
+  return { fits, audited, get clean() { return !attached && cssText === '' && header.dataset.fit === ''; },
+    run: () => runInContext(`(${probeHeaderFits.toString()})()`, createContext(context)).then(structuredClone) };
+}
+
+test('header probe: content-box growth reaches every fitted step after resize delivery, retains hit faults and restores the header', async () => {
+  const page = headerProbePage();
+  const steps = await page.run();
+  assert.deepEqual(steps.map(s => s.fit), page.fits);
+  assert.deepEqual(page.audited, page.fits);
+  assert.deepEqual(steps.find(s => s.fit === 'word labels').faults, [{ id: 'gear', reason: 'shared hit region' }], 'a geometry fault cannot disappear in the probe');
+  assert.ok(page.clean, 'temporary growth is removed and the resize has settled');
+});
+
+test('header probe: an audit failure still removes temporary growth', async () => {
+  const page = headerProbePage({ failAudit: true });
+  await assert.rejects(page.run(), /hit audit failed/);
+  assert.ok(page.clean);
+});
 
 test('places: the place is read before the page changes, so a screen taller than the next one comes back where it was left', () => {
   const b = browser(), go = boot(app, b);
