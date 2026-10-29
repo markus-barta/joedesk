@@ -114,6 +114,15 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
   const backToDesk = await step('history.back()', `document.body.dataset.screen === 'desk'`);
   const forwardAgain = await step('history.forward()', `document.body.dataset.screen === 'results'`);
   check('routes', 'Desk, Results, scroll Results, Back, Forward: Results comes back where Back left it, and Desk at its top', onResults.scroll > 100 && backToDesk.scroll === 0 && Math.abs(forwardAgain.scroll - onResults.scroll) <= 1, { onResults, backToDesk, forwardAgain });
+  // A reload returns to the place once the page has grown to it (its data comes in after the load).
+  await page.evaluate('new Promise(r => setTimeout(r, 700))');
+  const reloading = await state();
+  await page.s('Page.reload', {});
+  await waitFor(page, `document.documentElement.dataset.ready === '1' && document.readyState === 'complete'`);
+  await waitFor(page, `Math.abs(scrollY - ${J(reloading.scroll)}) <= 1`, 5000).catch(() => {});
+  const reloaded = await state();
+  check('routes', 'a reload of Results returns to the place it was left at, once the page has grown to it', reloading.scroll > 100 && reloaded.screen === 'results' &&
+    reloaded.hash === '#results' && Math.abs(reloaded.scroll - reloading.scroll) <= 1, { reloading, reloaded });
 
   // 3 · An unknown route is Desk; an anchor scrolls and leaves the address.
   const unknown = await step(`location.hash = '#nowhere?period=day'`, `location.hash === '#desk'`);

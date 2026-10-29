@@ -102,36 +102,56 @@ test('route readers: each screen gets its own parameters before it renders, poss
 
 // A browser for the navigation code: session history with states (Back and
 // Forward fire popstate, then hashchange when the fragment differs; a typed
-// address adds a browser-made entry), a page as tall as the shown screen (one
-// not yet rendered is short, so the scroll position clamps as in a real
-// layout), timers and events.
+// address adds a browser-made entry) that, like WebKit, refuses a history call
+// beyond 100 in 30 s; a page as tall as the shown screen (one not yet rendered,
+// or rendered before its data is in, is short, so the scroll position clamps
+// as in a real layout); a reload (the same entry, a new page at its top, its
+// data still coming); ResizeObserver, timers and events.
 function browser() {
-  const entries = [{ hash: '#desk', state: null }], listeners = new Map(), timers = new Map(), rendered = new Set();
+  const entries = [{ hash: '#desk', state: null }], timers = new Map(), rendered = new Set(), observers = new Set(), calls = [];
   const tall = { desk: 3000, results: 2400, history: 2400, settings: 2400 };
-  let index = 0, clock = 0, timerId = 0, visible = 'desk', y = 0, writes = 0;
+  let listeners = new Map(), index = 0, clock = 0, timerId = 0, visible = 'desk', y = 0, data = true;
   const max = () => Math.max(0, 110 + (rendered.has(visible) ? tall[visible] : 600) - 800);
   const hashOf = url => new URL(url, 'http://board.test/joe/').hash;
   const fire = type => { for (const fn of listeners.get(type) ?? []) fn({ type }); };
+  const spend = () => {
+    calls.push(clock);
+    if (calls.filter(t => clock - t < 30000).length > 100) throw Object.assign(new Error('history used more than 100 times in 30 seconds'), { name: 'SecurityError' });
+  };
+  class ResizeObserver { constructor(callback) { this.callback = callback; } observe() { observers.add(this); } disconnect() { observers.delete(this); } }
   const win = {
     history: {
       get state() { return structuredClone(entries[index].state); },
-      replaceState(state, _title, url) { writes++; entries[index] = { hash: url === undefined ? entries[index].hash : hashOf(url), state: structuredClone(state) }; },
-      pushState(state, _title, url) { writes++; entries.splice(index + 1, Infinity, { hash: hashOf(url), state: structuredClone(state) }); index++; },
+      replaceState(state, _title, url) { spend(); entries[index] = { hash: url === undefined ? entries[index].hash : hashOf(url), state: structuredClone(state) }; },
+      pushState(state, _title, url) { spend(); entries.splice(index + 1, Infinity, { hash: hashOf(url), state: structuredClone(state) }); index++; },
     },
     location: { get hash() { return entries[index].hash; }, pathname: '/joe/', search: '' },
     get scrollY() { y = Math.min(y, max()); return y; },
     scrollTo(_x, to) { y = Math.max(0, Math.min(to, max())); },
     setTimeout(fn, ms) { timers.set(++timerId, { at: clock + ms, fn }); return timerId; },
     clearTimeout(id) { timers.delete(id); },
-    performance: { now: () => clock, timeOrigin: 1761700000000 },
+    performance: { now: () => clock },
     addEventListener(type, fn) { listeners.set(type, [...(listeners.get(type) ?? []), fn]); },
+    ResizeObserver,
   };
-  return { win, entries, get index() { return index; }, get writes() { return writes; },
-    show: screen => { visible = screen; }, render: () => { rendered.add(visible); },
+  return { win, entries, calls, get index() { return index; },
+    // The most history calls the page made in any 30 s.
+    peak: () => Math.max(0, ...calls.map(t => calls.filter(u => u >= t && u - t < 30000).length)),
+    show: screen => { visible = screen; }, render: () => { if (data) rendered.add(visible); },
+    // The shown screen's data arrives: it renders at its full height.
+    load() { data = true; rendered.add(visible); for (const o of [...observers]) o.callback([]); },
     scroll(to) { y = Math.max(0, Math.min(to, max())); fire('scroll'); },
-    tick(ms) { clock += ms; for (const [id, t] of [...timers].sort((a, b) => a[1].at - b[1].at)) if (t.at <= clock && timers.delete(id)) t.fn(); },
+    fire,
+    tick(ms) {
+      const end = clock + ms;
+      for (let next; (next = [...timers].filter(([, t]) => t.at <= end).sort((a, b) => a[1].at - b[1].at)[0]);) {
+        timers.delete(next[0]); clock = Math.max(clock, next[1].at); next[1].fn();
+      }
+      clock = end;
+    },
     traverse(delta) { const from = entries[index].hash; index += delta; fire('popstate'); if (entries[index].hash !== from) fire('hashchange'); },
     typed(hash, before = () => {}) { entries.splice(index + 1, Infinity, { hash, state: null }); index++; before(); fire('popstate'); fire('hashchange'); },
+    reload() { listeners = new Map(); timers.clear(); observers.clear(); rendered.clear(); y = 0; data = false; },
   };
 }
 // app.js's own navigation (go, follow and the first load), run against that
@@ -144,7 +164,7 @@ function boot(source, b) {
     screen: 'desk', dirtyHistory: false, __joedesk: {}, tips: { hide() {} }, closePop() {}, forgetCharts() {}, forgetResults() {},
     feed: { refreshActions() {} }, guard: (_name, fn) => fn(), render: () => b.render(), SETTINGS_SECTIONS: [], showSection() {},
     $: selector => ({ classList: { toggle: (_name, on) => { if (on) b.show(selector.slice('#scr-'.length)); } } }), $$: () => [],
-    document: { body: { dataset: {} }, getElementById: () => null } };
+    document: { body: { dataset: {} }, getElementById: () => null, documentElement: {} } };
   Object.defineProperties(ctx, Object.getOwnPropertyDescriptors(b.win));
   ctx.window = ctx;
   createContext(ctx);
@@ -191,29 +211,87 @@ test('places: a browser-made entry gets no save from the screen before it, opens
   assert.equal(b.win.scrollY, 1500, 'Back returns to Results where it was left');
 });
 
-test('places: saved while reading at most every 500 ms and at once on scrollend or leaving; a reload finds them', () => {
+test('places: one saver writes at most every 500 ms; a flush skips the spacing, never the 60-call budget; navigation always goes through', () => {
   const b = browser(), places = createPlaces(b.win);
   b.render();
   assert.equal(places.step(), true, 'the first entry is taken up');
   assert.equal(places.step(), false, 'the same entry again is no step');
   const id = b.entries[0].state.joeEntry;
   assert.ok(id);
-  const before = b.writes;
+  let start = b.calls.length;
   for (let t = 0; t < 2000; t += 16) { b.scroll(t); places.scrolled(); b.tick(16); }
-  assert.ok(b.writes - before <= 5, `${b.writes - before} saves for 2 s of scrolling`);
-  b.scroll(2100); places.save();
-  assert.equal(b.entries[0].state.joeScrollY, 2100, 'scrollend saves at once');
-  b.scroll(1200); places.leave();
-  assert.equal(b.entries[0].state.joeScrollY, 1200, 'leaving saves the place read now');
-  assert.equal(b.entries[0].state.joeEntry, id, 'the entry keeps its id');
-  // A reload: a new page on the same entry restores from its state.
+  b.tick(600);
+  assert.ok(b.calls.length - start <= 5, `${b.calls.length - start} writes for 2 s of scrolling`);
+  assert.equal(b.entries[0].state.joeScrollY, b.win.scrollY, 'the last place is saved');
+  b.scroll(1200); places.flush();
+  assert.equal(b.entries[0].state.joeScrollY, 1200, 'a flush writes at once');
+  // Flushes as fast as they come: the saves stop at 60 calls in 30 s.
+  start = b.calls.length;
+  for (let i = 0; i < 100; i++) { b.scroll(100 + i * 10); places.flush(); b.tick(10); }
+  assert.ok(b.peak() <= 60, `${b.peak()} history calls in 30 s`);
+  assert.notEqual(b.entries[0].state.joeScrollY, b.win.scrollY, 'the budget held the last save back');
+  // The board's navigation still goes through, with WebKit's room to spare.
+  assert.equal(places.push('/joe/#results'), true);
+  assert.equal(b.win.location.hash, '#results');
+  assert.equal(b.entries[1].state.joeEntry === id, false, 'the new entry has its own id');
+  // A reload of the first entry: a new page restores from its state.
+  b.traverse(-1);
   const again = createPlaces(b.win);
   again.step();
-  assert.equal(again.saved(), 1200);
   assert.equal(b.entries[0].state.joeEntry, id);
-  // A next entry gets its own id.
-  const next = again.next();
-  assert.notEqual(next.joeEntry, id);
+  assert.equal(again.saved(), b.entries[0].state.joeScrollY);
+});
+
+test('places: a reload returns to the entry’s place once the page has grown to it (through app.js’s own start)', () => {
+  const b = browser(), go = boot(app, b);
+  go('results', { push: true });
+  b.scroll(1500);
+  b.tick(1000);
+  assert.equal(b.entries[b.index].state.joeScrollY, 1500, 'the place is in the entry for a reload');
+  b.reload();
+  boot(app, b);
+  assert.equal(b.win.location.hash, '#results');
+  assert.ok(b.win.scrollY < 1500, 'the page is still short: its data is not in yet');
+  b.load();
+  assert.equal(b.win.scrollY, 1500, 'the reload returns to Results 1500 px down');
+  // The reader's own scroll ends the wait; so does the 15 s limit.
+  b.scroll(1200); b.tick(1000);
+  b.reload(); boot(app, b);
+  b.fire('wheel'); b.scroll(0);
+  b.load();
+  assert.equal(b.win.scrollY, 0, 'the reader scrolled before the data came: the page stays where they are');
+  b.reload(); boot(app, b);
+  b.tick(16000);
+  b.load();
+  assert.equal(b.win.scrollY, 0, 'after 15 s the page no longer jumps');
+});
+
+test('places: many short scrolls stay within the history budget, navigation goes through in the middle of them, and the last place is saved (through app.js)', () => {
+  const b = browser(), go = boot(app, b);
+  go('results', { push: true });
+  let y = 0;
+  // Four short scrolls a second, each ending in scrollend.
+  const scrolls = seconds => {
+    for (let i = 0; i < seconds * 4; i++) {
+      for (let k = 0; k < 3; k++) { y = 40 + (y + 20) % 1600; b.scroll(y); b.tick(16); }
+      b.fire('scrollend');
+      b.tick(250 - 48);
+    }
+  };
+  scrolls(60);
+  assert.ok(b.peak() <= 60, `${b.peak()} history calls in some 30 s: WebKit allows about 100, and navigation needs room`);
+  // Straight from a minute of scrolling: the nav, then Back.
+  const left = y;
+  go('history', { push: true });
+  assert.equal(b.win.location.hash, '#history', 'navigation goes through');
+  b.traverse(-1);
+  assert.equal(b.win.location.hash, '#results');
+  assert.equal(b.win.scrollY, left, 'Back returns to the place left on Results');
+  // Another burst, then quiet: the saver catches up within its budget.
+  scrolls(10);
+  b.tick(31000);
+  assert.equal(b.entries[b.index].state.joeScrollY, y, 'the last place is in the entry, for a reload');
+  assert.ok(b.peak() <= 62, `${b.peak()} history calls in some 30 s, the two navigations included`);
 });
 
 test('header markup: brand, PAPER, Desk · Results · History, the light, the Settings gear and the theme button, in that order', () => {

@@ -1752,10 +1752,15 @@ unknown route is Desk. The nav, the gear, `data-go` controls (with an optional
 `data-query`) and plain clicks on same-page links add a history entry, so Back
 and Forward walk the screens; the first load, Back, Forward and a typed address
 only correct the address. Each entry keeps the reader's place
-(`createPlaces`): read before the page changes, kept for the entry being left
-(by the board's navigation or the browser's), and saved into its state while
-reading (at most every 500 ms, on `scrollend` and `pagehide`), so Back and
-Forward return to it, also after a reload. A
+(`createPlaces`, which makes every history call the board makes): read before
+the page changes and kept for the entry being left (by the board's navigation
+or the browser's), so Back and Forward return to it. One saver also writes it
+into the entry's state: a scroll or its end asks, a write lands at most once
+per 500 ms, and hiding the page or leaving by the nav flushes it. Saves stop
+at 60 history calls in any 30 s, navigation counted, so WebKit's limit of
+about 100 keeps room for navigation, which always goes through. A reload
+returns to the entry's place once the page has grown to it (its data comes in
+after the load), unless the reader scrolls first or 15 s pass. A
 screen reads its own parameters by registering one reader,
 `onRoute(screen, read)`: `go()` calls it with the route's `URLSearchParams`
 before the screen renders, on every arrival; an absent parameter keeps that

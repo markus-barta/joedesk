@@ -135,16 +135,19 @@ function start() {
   }
   // Every way onto a screen ends here (route.js). The reader's own navigation
   // (push) adds a history entry; the first load, Back and Forward only
-  // correct the address. Each entry keeps the reader's place (createPlaces):
-  // saved while scrolling and on every departure, restored on return. The
+  // correct the address. Each entry keeps the reader's place (createPlaces,
+  // which makes every history call within one budget): saved while reading
+  // and on every departure, restored on return and after a reload. The
   // address keeps the screen and its query, which the screen's route reader
   // gets before it renders; an anchor only scrolls.
   let shown = { screen, query: '' };
   window.__joedesk.route = () => ({ ...shown });
   const places = createPlaces(window);
   addEventListener('scroll', places.scrolled, { passive: true });
-  addEventListener('scrollend', places.save);
-  addEventListener('pagehide', places.save);
+  addEventListener('scrollend', places.scrolled);
+  addEventListener('pagehide', places.flush);
+  // The reader's own scrolling ends a return still waiting for the page to grow.
+  for (const type of ['wheel', 'touchstart', 'keydown', 'mousedown']) addEventListener(type, places.abandon, { passive: true });
   function go(next, { anchor = null, query = '', push = false, scroll = 0 } = {}) {
     if (!SCREENS.includes(next)) { next = 'desk'; anchor = null; query = ''; }
     const target = { screen: next, query };
@@ -152,8 +155,7 @@ function start() {
     // hiding a screen, closing a dialog or rendering may move it.
     try {
       const step = historyStep(location.hash, target, push), address = `${location.pathname}${location.search}${routeHash(target)}`;
-      if (step === 'push') { places.leave(); history.pushState(places.next(), '', address); }
-      else if (step === 'replace') history.replaceState(history.state, '', address);
+      if (step === 'push') { if (!places.push(address)) places.step(); } else if (step === 'replace') places.replace(address);
     } catch { places.step(); /* file or sandboxed context: keep the entry it is on */ }
     shown = target;
     screen = next;
@@ -168,8 +170,8 @@ function start() {
     if (next === 'settings') feed.refreshActions();
     guard('route', () => applyRoute(target));
     render('screen');
-    if (next === 'settings' && SETTINGS_SECTIONS.some(s => s.id === anchor)) showSection(anchor);
-    else if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); else window.scrollTo(0, scroll);
+    if (next === 'settings' && SETTINGS_SECTIONS.some(s => s.id === anchor)) { places.abandon(); showSection(anchor); }
+    else if (anchor) { places.abandon(); document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); } else places.arrive(scroll);
   }
 
   // The board details are a dialog: opening moves focus into it, Tab stays
@@ -331,8 +333,9 @@ function start() {
   $('#footShield').innerHTML = `${icon('shield')}Read-only paper board · nothing here can place a trade`;
   // go() puts each screen back where the reader left it; the browser need not.
   try { history.scrollRestoration = 'manual'; } catch { /* go() still scrolls */ }
+  // A reload returns to the entry's place once the page has grown to it.
   places.step();
   const first = parseRoute(location.hash || '#desk');
-  go(first.screen, { anchor: first.anchor, query: first.query });
+  go(first.screen, { anchor: first.anchor, query: first.query, scroll: places.saved() });
   feed.start();
 }

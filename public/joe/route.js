@@ -40,32 +40,51 @@ export function linkRoute(event, link) {
   return route.known ? route : null;
 }
 
-// Where the reader was, per history entry. Every entry the board shows gets
-// an id in its state. The place is read before anything on the page changes
-// and kept for the entry being left, whether by the board's own navigation
-// (leave) or by Back, Forward or a typed address (step), so Back and Forward
-// both return to it. It is also written into the entry's state while reading
-// (at most every `every` ms, so WebKit's budget of 100 history calls per
-// 30 s stays free for navigation; at once when a scroll ends and when the
-// page is hidden), so it survives a reload. A save never writes into an
-// entry the board has not taken up yet (one the browser just made).
-export function createPlaces(win, { every = 500 } = {}) {
+// Where the reader was, per history entry, and every history call the board
+// makes. Each entry the board shows gets an id in its state.
+// - The place is read before anything on the page changes and kept for the
+//   entry being left, by the board's own navigation (push) or by Back,
+//   Forward or a typed address (step), so Back and Forward return to it.
+// - One saver also writes the place into the entry's state, for a reload:
+//   a scroll or the end of one asks for a save, which lands at most once per
+//   `every` ms; hiding the page (pagehide) or leaving by the nav flushes it.
+//   Saves stop at `budget` calls in any 30 s, the board's navigation counted
+//   too, so WebKit's limit of about 100 history calls per 30 s always keeps
+//   room for navigation (push, replace), which is never held back.
+// - A save never writes into an entry the board has not taken up yet (one
+//   the browser just made).
+// - Arriving (arrive) goes to the entry's place. While the page is too short
+//   for it (its data still coming in, as after a reload), the place waits for
+//   the page to grow, until the reader scrolls (abandon), the next arrival or
+//   `wait` ms.
+export function createPlaces(win, { every = 500, budget = 60, wait = 15000 } = {}) {
   // Ids are unique per page, so entries from before a reload never collide.
-  const kept = new Map(), doc = Math.random().toString(36).slice(2, 10);
-  let entry = null, count = 0, last = -Infinity, timer = 0;
+  const kept = new Map(), doc = Math.random().toString(36).slice(2, 10), calls = [];
+  let entry = null, count = 0, timer = 0, last = -Infinity, pending = null, watch = null, expiry = 0;
+  const now = () => win.performance.now();
+  const recent = () => { while (calls.length && now() - calls[0] >= 30000) calls.shift(); return calls.length; };
+  const call = (method, ...args) => { recent(); calls.push(now()); try { win.history[method](...args); return true; } catch { return false; } };
   const current = () => win.history.state?.joeEntry ?? null;
-  const write = state => { try { win.history.replaceState({ ...win.history.state, ...state }, ''); } catch { /* the history budget or a sandbox */ } };
+  const place = () => pending ?? win.scrollY;
   const cancel = () => { win.clearTimeout(timer); timer = 0; };
-  const keep = () => { const y = win.scrollY; kept.set(entry, y); write({ joeScrollY: y }); };
-  const save = () => {
+  const request = (delay = Math.max(0, every - (now() - last))) => { if (!timer) timer = win.setTimeout(() => { timer = 0; save(false); }, delay); };
+  // The one saver; `flush` skips the spacing, never the budget.
+  function save(flush) {
     cancel();
     if (entry === null || current() !== entry) return;
-    last = win.performance.now();
-    keep();
-  };
+    const y = place();
+    kept.set(entry, y);
+    if (win.history.state?.joeScrollY === y) return;
+    if (recent() >= budget) { if (!flush) request(30000 - (now() - calls[0])); return; }
+    if (!flush && now() - last < every) { request(); return; }
+    last = now();
+    call('replaceState', { ...win.history.state, joeScrollY: y }, '');
+  }
+  const finish = () => { pending = null; watch?.disconnect(); watch = null; win.clearTimeout(expiry); expiry = 0; };
+  const settle = () => { if (pending === null) return; win.scrollTo(0, pending); if (win.scrollY >= pending - 1) finish(); };
   return {
-    save,
-    scrolled() { if (!timer) timer = win.setTimeout(save, Math.max(0, every - (win.performance.now() - last))); },
+    scrolled: () => request(),
+    flush: () => save(true),
     // The entry is new (Back, Forward, a typed address, the first load): the
     // entry left keeps the place the page still shows; take this one up.
     // False when it is the entry already taken up (the step's second event).
@@ -73,15 +92,33 @@ export function createPlaces(win, { every = 500 } = {}) {
       const id = current();
       if (entry !== null && id === entry) return false;
       cancel();
-      if (entry !== null) kept.set(entry, win.scrollY);
+      if (entry !== null) kept.set(entry, place());
+      finish();
       entry = id ?? `${doc}.${++count}`;
-      if (id === null) write({ joeEntry: entry });
+      if (id === null) call('replaceState', { ...win.history.state, joeEntry: entry }, '');
       return true;
     },
-    // Leaving by the board's own navigation, before anything changes.
-    leave() { cancel(); if (entry !== null && current() === entry) keep(); },
-    // The state for the entry the board pushes next.
-    next() { entry = `${doc}.${++count}`; return { joeEntry: entry }; },
+    // The board's own navigation: flush the place being left, then the new entry.
+    push(address) {
+      save(true);
+      finish();
+      const left = entry;
+      entry = `${doc}.${++count}`;
+      if (call('pushState', { joeEntry: entry }, '', address)) return true;
+      entry = left;
+      return false;
+    },
+    replace: address => call('replaceState', win.history.state, '', address),
+    arrive(y) {
+      finish();
+      win.scrollTo(0, y);
+      if (y <= 0 || win.scrollY >= y - 1 || !win.ResizeObserver) return;
+      pending = y;
+      watch = new win.ResizeObserver(settle);
+      watch.observe(win.document.documentElement);
+      expiry = win.setTimeout(finish, wait);
+    },
+    abandon: finish,
     saved: () => kept.get(entry) ?? win.history.state?.joeScrollY ?? 0,
   };
 }
