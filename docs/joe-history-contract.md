@@ -204,8 +204,11 @@ and says so). A module worker (`account-worker.js`, started under the
 release's own path like the History worker) fetches, parses and checks it
 and transfers compact columns to the page; it answers "unchanged" only when
 the response is byte for byte the one it last sent the page (its key is the
-response's length and 64-bit FNV-1a hash). Without module workers the page
-reads it itself. 1D and 5D draw `points`, the longer ranges `dailyCloses`
+response's length and 64-bit FNV-1a hash). A worker that fails or does not
+answer within 20 s is terminated and that read runs on the page at once; the
+next read tries one new worker, and after its failure, or without module
+workers, the page reads it itself for the rest of the session. 1D and 5D
+draw `points`, the longer ranges `dailyCloses`
 (`equityAt` and `equity`; a cash-only day draws nothing). Only exact values
 are drawn: an unavailable value, more than 20 minutes between snapshots or a
 missing Vienna day breaks the line with a hatched band, and nothing is drawn

@@ -147,7 +147,8 @@ export function subParts(ctx, start = accountStart(), settings = boardSettingsSt
 // ---------- The account history ----------
 // Read by a worker (account-worker.js) that parses and checks it off the
 // main thread and hands over compact columns; without module workers, or
-// when the worker fails, the same read and checks run here. A failed read
+// when the worker fails or does not answer, the same read and checks run
+// here (the worker's life is below, at `reader`). A failed read
 // keeps the last good series and says why. The worker is started on the
 // first read, under this release's own path, as feed.js starts History's.
 const timing = (reason, ms) => {
@@ -190,20 +191,32 @@ function useReply(reply) {
   store.reason = reply?.reason ?? 'refresh_failed';
   return false;
 }
-let worker, waiting = null;
+// The read worker's life. It starts on the first read. One that times out or
+// fails is terminated, never posted to again, and that read goes to the page
+// at once. The next read tries one new worker; after a second failure (or
+// without module workers) the page reads for the rest of the session.
+const reader = { worker: null, failures: 0, waiting: null, reading: null };
+const WORKER_TRIES = 2;
+// Each worker fails once, however many errors it reports.
+function dropWorker(w) {
+  if (reader.worker !== w) return;
+  reader.worker = null;
+  reader.failures++;
+  try { w.terminate(); } catch { /* already gone */ }
+}
 function startWorker() {
-  if (worker !== undefined) return worker;
-  worker = null;
+  if (reader.worker || reader.failures >= WORKER_TRIES) return reader.worker;
   const version = globalThis.JoeVersion?.APP_VERSION;
-  if (!version || typeof Worker !== 'function') return worker;
+  if (!version || typeof Worker !== 'function') { reader.failures = WORKER_TRIES; return null; }
   try {
     const w = new Worker(new URL(`./v/${encodeURIComponent(version)}/account-worker.js`, import.meta.url), { type: 'module' });
-    w.onmessage = ({ data }) => { const done = waiting; waiting = null; done?.(data); };
-    // A failed worker hands its read in flight to the page, and reads stay here.
-    w.onerror = () => { worker = null; const done = waiting; waiting = null; done?.(null); };
-    worker = w;
-  } catch { worker = null; }
-  return worker;
+    w.onmessage = ({ data }) => { if (reader.worker !== w) return; const done = reader.waiting; reader.waiting = null; done?.(data); };
+    // A failure during a read ends that read (refresh drops the worker);
+    // one between reads drops it now.
+    w.onerror = () => { if (reader.worker !== w) return; const done = reader.waiting; reader.waiting = null; if (done) done(null); else dropWorker(w); };
+    reader.worker = w;
+  } catch { reader.failures = WORKER_TRIES; reader.worker = null; }
+  return reader.worker;
 }
 async function readOnPage() {
   const started = performance.now(), res = await read('./account-history.json');
@@ -214,19 +227,35 @@ async function readOnPage() {
     return { kind: 'account', status: 200, reason: null, value };
   } catch { return { kind: 'account', status: 200, reason: 'contract_invalid', value: null }; }
 }
-async function refresh() {
+// One read at a time: a read asked for while one runs is that read, so no
+// reply can go to the wrong caller (and leave a healthy worker timed out).
+function refresh() {
+  if (!reader.reading) {
+    const now = readHistory().finally(() => { if (reader.reading === now) reader.reading = null; });
+    reader.reading = now;
+  }
+  return reader.reading;
+}
+async function readHistory() {
   store.busy = true;
   const w = startWorker();
   let reply = null;
   if (w) {
     let guard;
+    // The worker's own read gives up after TIMEOUT_MS; this guard catches a
+    // worker that never answers at all. A refused post fails it at once.
     reply = await Promise.race([
-      new Promise(resolve => { waiting = resolve; w.postMessage({ read: 'account', have: store.value ? store.key : null }); }),
-      new Promise(resolve => { guard = setTimeout(() => resolve({ kind: 'account', status: 0, reason: 'refresh_failed', value: null }), TIMEOUT_MS + 5000); }),
+      new Promise(resolve => {
+        reader.waiting = resolve;
+        try { w.postMessage({ read: 'account', have: store.value ? store.key : null }); } catch { resolve(null); }
+      }),
+      new Promise(resolve => { guard = setTimeout(() => resolve(null), TIMEOUT_MS + 5000); }),
     ]);
-    clearTimeout(guard); waiting = null;
+    clearTimeout(guard); reader.waiting = null;
     if (reply) timing('account-worker', reply.ms);
+    else dropWorker(w);
   }
+  // No worker, or it timed out or failed: this same read runs on the page.
   const ok = useReply(reply ?? await readOnPage());
   store.busy = false;
   store.next = performance.now() + (ok ? READ_MS : RETRY_MS);
@@ -235,8 +264,11 @@ async function refresh() {
 export const forgetAccountHistory = () => Object.assign(store, { value: null, reason: 'loading', loadedAt: null, key: null, version: store.version + 1, busy: false, next: 0 });
 // Read now (a retry, the budget run, a test), whatever the schedule says.
 export const refreshAccountHistory = () => refresh();
-// Forget the worker (tests): the next read starts a new one.
-export const forgetAccountWorker = () => { worker = undefined; waiting = null; };
+// Forget the worker and its failures (tests): the next read starts a new one.
+export const forgetAccountWorker = () => {
+  try { reader.worker?.terminate?.(); } catch { /* already gone */ }
+  Object.assign(reader, { worker: null, failures: 0, waiting: null, reading: null });
+};
 // The live value at the end of the chosen source, kept per series and value.
 const merged = { key: null, series: null };
 function seriesFor(source, live) {
@@ -748,7 +780,7 @@ export function initAccount() {
   // The board's own read-only hooks: read the account history now, and
   // whether a worker reads it (the browser budget checks both).
   const hooks = globalThis.__joedesk;
-  if (hooks && typeof hooks === 'object') Object.assign(hooks, { refreshAccount: () => refresh(), accountWorker: () => Boolean(worker) });
+  if (hooks && typeof hooks === 'object') Object.assign(hooks, { refreshAccount: () => refresh(), accountWorker: () => Boolean(reader.worker) });
   $('#acctRanges').addEventListener('click', e => {
     const b = e.target.closest('[data-acct-range]');
     if (b) chooseRange(b.dataset.acctRange);

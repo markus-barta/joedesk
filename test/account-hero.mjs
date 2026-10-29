@@ -363,8 +363,10 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
   const made = [], sent = [];
   let reply = () => ({ kind: 'account', status: 200, reason: null, value: M.acceptAccountHistory(history()), key: 'k1', ms: 4 });
   globalThis.Worker = class {
-    constructor(url, options) { made.push({ url: String(url), options }); }
-    postMessage(data) { sent.push(data); const out = reply(data); queueMicrotask(() => (out === 'fail' ? this.onerror(new Error('worker failed')) : this.onmessage({ data: out }))); }
+    constructor(url, options) { made.push({ url: String(url), options, worker: this }); }
+    // A failing worker reports two errors at once: it still fails only once.
+    postMessage(data) { sent.push(data); const out = reply(data); queueMicrotask(() => (out === 'fail' ? (this.onerror(new Error('worker failed')), this.onerror(new Error('and again'))) : this.onmessage({ data: out }))); }
+    terminate() { this.terminated = true; }
   };
   globalThis.JoeVersion = { APP_VERSION: '261029075623.0.0' };
   globalThis.__joedesk = { timings: [] };
@@ -388,15 +390,106 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
   reply = () => ({ kind: 'account', status: 401, reason: 'auth_required', value: null, key: null, ms: 1 });
   await A.refreshAccountHistory();
   assert.match(p.text('#acctNote'), /^Update failed · showing what loaded \d+ s ago$/);
-  // A failed worker hands its read to the page, and reads stay there.
+  // A failed worker is terminated and hands its read to the page at once.
   reply = () => 'fail';
   await A.refreshAccountHistory();
   assert.deepEqual(p.reads, ['./account-history.json'], 'the page reads instead');
+  assert.equal(made[0].worker.terminated, true);
   assert.equal(globalThis.__joedesk.accountWorker(), false);
   assert.equal(globalThis.__joedesk.timings.at(-1).reason, 'account-accept');
+  // The next read tries one new worker; a second failure leaves the page reading for good.
   await A.refreshAccountHistory();
-  assert.equal(made.length, 1, 'no new worker after a failure');
-  assert.equal(p.reads.length, 2);
+  assert.equal(made.length, 2, 'one new worker on the next read');
+  assert.deepEqual([made[1].worker.terminated, p.reads.length], [true, 2]);
+  const posts = sent.length;
+  await A.refreshAccountHistory();
+  assert.deepEqual([made.length, sent.length, p.reads.length], [2, posts, 3], 'no third worker and no post to a dead one');
+});
+
+// Mocked timers never fire on their own: a test that waits on one stops at its timeout.
+test('JOED-156 fix round 2: a worker that never answers is terminated after the timeout and the page reads at once; one new worker next time, then the page for good', { timeout: 10_000 }, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const saved = { Worker: globalThis.Worker, JoeVersion: globalThis.JoeVersion, hooks: globalThis.__joedesk };
+  t.after(() => { for (const [k, v] of Object.entries({ Worker: saved.Worker, JoeVersion: saved.JoeVersion, __joedesk: saved.hooks })) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } });
+  const workers = [];
+  globalThis.Worker = class {
+    constructor() { this.posts = 0; this.terminated = false; workers.push(this); }
+    postMessage() { this.posts++; if (this.terminated) throw new Error('posted to a terminated worker'); }
+    terminate() { this.terminated = true; }
+  };
+  globalThis.JoeVersion = { APP_VERSION: '261029075623.0.0' };
+  globalThis.__joedesk = { timings: [] };
+  const p = page(t);
+  await p.render();
+  assert.deepEqual([workers.length, workers[0].posts, p.reads.length], [1, 1, 0], 'the worker has the read');
+  assert.equal(p.svg().getAttribute('aria-label'), 'Loading the account history', 'nothing shown yet');
+  // 15 s for the worker's own read, 5 s more: it never answered.
+  t.mock.timers.tick(19999);
+  await p.settle();
+  assert.equal(workers[0].terminated, false, 'not before the timeout');
+  t.mock.timers.tick(1);
+  await p.settle(); await p.settle(); await p.settle();
+  assert.equal(workers[0].terminated, true, 'terminated after it');
+  assert.deepEqual(p.reads, ['./account-history.json'], 'that same read on the page, at once');
+  assert.equal(p.svg().dataset.source, 'daily', 'and its data shown');
+  assert.equal(globalThis.__joedesk.accountWorker(), false);
+  // The next read: one new worker, which times out too.
+  const next = A.refreshAccountHistory();
+  await p.settle();
+  assert.deepEqual([workers.length, workers[1].posts], [2, 1]);
+  t.mock.timers.tick(20000);
+  await next;
+  assert.deepEqual([workers[1].terminated, p.reads.length], [true, 2]);
+  // From now on the page reads, and nothing is posted to either dead worker.
+  await A.refreshAccountHistory();
+  await A.refreshAccountHistory();
+  assert.deepEqual([workers.length, workers[0].posts, workers[1].posts, p.reads.length], [2, 1, 1, 4]);
+  assert.equal(p.svg().dataset.source, 'daily');
+});
+
+test('JOED-156 fix round 2: two reads asked at once are one read, so a healthy worker’s reply ends it and the worker stays', { timeout: 10_000 }, async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const saved = { Worker: globalThis.Worker, JoeVersion: globalThis.JoeVersion, hooks: globalThis.__joedesk };
+  t.after(() => { for (const [k, v] of Object.entries({ Worker: saved.Worker, JoeVersion: saved.JoeVersion, __joedesk: saved.hooks })) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } });
+  const workers = [];
+  globalThis.Worker = class {
+    constructor() { this.posts = 0; this.terminated = false; workers.push(this); }
+    postMessage() { const n = ++this.posts; queueMicrotask(() => this.onmessage({ data: { kind: 'account', status: 200, reason: null, value: M.acceptAccountHistory(history()), key: `k${n}`, ms: 2 } })); }
+    terminate() { this.terminated = true; }
+  };
+  globalThis.JoeVersion = { APP_VERSION: '261029075623.0.0' };
+  globalThis.__joedesk = { timings: [] };
+  const p = page(t);
+  await p.render();
+  assert.deepEqual([workers.length, workers[0].posts], [1, 1]);
+  // A forced read while the scheduled one runs (the budget run does this).
+  const both = Promise.all([A.refreshAccountHistory(), A.refreshAccountHistory()]);
+  await p.settle();
+  assert.equal(workers[0].posts, 2, 'one post for both');
+  t.mock.timers.tick(20000);
+  await both;
+  await p.settle();
+  assert.deepEqual([workers.length, workers[0].terminated, globalThis.__joedesk.accountWorker()], [1, false, true], 'no timeout, and the worker stays');
+  assert.equal(document.querySelector('#acctHero').dataset.history, 'ok');
+  assert.deepEqual(p.reads, [], 'nothing read on the page');
+});
+
+test('JOED-156 fix round 2: a worker that refuses the post fails like one that never answers: terminated, and the page reads at once', { timeout: 10_000 }, async t => {
+  const saved = { Worker: globalThis.Worker, JoeVersion: globalThis.JoeVersion, hooks: globalThis.__joedesk };
+  t.after(() => { for (const [k, v] of Object.entries({ Worker: saved.Worker, JoeVersion: saved.JoeVersion, __joedesk: saved.hooks })) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } });
+  const workers = [];
+  globalThis.Worker = class {
+    constructor() { this.terminated = false; workers.push(this); }
+    postMessage() { throw new Error('the post was refused'); }
+    terminate() { this.terminated = true; }
+  };
+  globalThis.JoeVersion = { APP_VERSION: '261029075623.0.0' };
+  globalThis.__joedesk = { timings: [] };
+  const p = page(t);
+  await p.render();
+  assert.deepEqual([workers.length, workers[0].terminated, p.reads], [1, true, ['./account-history.json']]);
+  assert.equal(p.svg().dataset.source, 'daily', 'the page’s read is shown');
+  assert.equal(document.querySelector('#acctHero').dataset.history, 'ok');
 });
 
 test('JOED-156 fix 5: each pointer sees its own Controls list; only the pointer rules set the lists’ display', () => {
