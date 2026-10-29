@@ -1,7 +1,7 @@
 // Desk: health line and details, Today, the three desks, positions and the
 // kept holdings. Every number keeps its panel state; matching snapshot captions
 // are shared once, while different ages and reasons stay beside their values.
-import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin, NOT_EXACT, dashWords } from './ui.js';
+import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, interactionWithin, NOT_EXACT, dashWords } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, STUCK_REASON, statusPresentation, executorPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, viennaDay, wall, NY, VIENNA, sessionLabel, sessionDayName, zoneGap, USUAL_GAP_HOURS } from './time.mjs';
@@ -873,28 +873,6 @@ export function heroLeft(ctx, facts = deskFacts(ctx)) {
     </dl><p class="desk-scope">Desk figures never include the kept holdings. The whole account, with them, is at the top.</p></div></div>`;
 }
 
-// The slot above the desk hero belongs to the whole-account block. Until that
-// block takes it, the slot carries the two whole-account figures the snapshot
-// has, with the same honest captions they had in the hero: the paper account
-// (incl. the kept holdings) and Cash with Amy's caption. On a phone it is one
-// collapsed section like the others, its summary naming any problem, so the
-// desk rows keep their first screen.
-export function accountSlot(ctx) {
-  const { states } = ctx;
-  const board = boardCaptionCell(ctx);
-  const shared = sharedSectionReason([states.paperAccount, states.paperCash]);
-  const v = cellView(states.paperAccount, 'hero.account', { signed: false, caption: 'includes the kept holdings', sharedReason: shared, label: 'Paper account' });
-  const sharedCell = shared ? [states.paperAccount, states.paperCash].find(cell => cell?.reason && cellReason(cell.reason) === shared) : null;
-  const problem = disclosureProblem([['Paper account', states.paperAccount], ['Cash', states.paperCash], ['Broker', states.gateway]]);
-  // A reason the whole snapshot shares is the board caption's, said once in the hero.
-  const line = shared && (!board?.reason || cellReason(board.reason) !== shared) ? st(statePhrase(sharedCell, '').tone, sharedSectionPhrase(sharedCell), statePhrase(sharedCell, '').icon) : '';
-  return `<div class="account-slot-section">${disclosureButton('whole', 'Whole account', 'wholeDetail', problem)}<div class="disclosure-body" id="wholeDetail">
-    <div class="account-interim" role="group" aria-label="IB paper account, whole account"><dl class="kpis">
-      <div class="kpi" data-cell="hero.account" data-state="${v.state}"><dt>${term('paperacct', 'IB paper account · whole account')}${cellIcon(states.paperAccount, shared)}</dt><dd>${v.html}<span class="c">${reservedCaption(sharesBoardCaption(states.paperAccount, board) ? '' : v.caption, ['includes the kept holdings'])}</span></dd></div>
-      ${cashCaption(states.paperCash, 'hero.cash', { figure: true, sharedReason: shared })}
-    </dl><p class="pstate account-slot-state"${line ? '' : ' aria-hidden="true"'}>${line}</p></div></div></div>`;
-}
-
 // The line above the hero: whose money the figures below are.
 export const desksEyebrow = () => `${icon('desk')}<span>Desks J, Joe and Joel · their ${eur(STARTING_MONEY, false, 0)} practice capital · kept holdings left out · EUR</span>`;
 
@@ -1359,9 +1337,8 @@ function drawHeroChart(ctx, history, label = ctx.now ? sessionLabel(ctx.now) : n
 export function renderDesk(ctx) {
   const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
   const facts = deskFacts(ctx), phase = facts.label?.phase ?? 'none';
-  // The whole-account block's slot, above the desk hero.
-  const slot = $('#accountSlot');
-  if (slot) patch(slot, accountSlot(ctx));
+  // The slot above the desk hero is the whole-account block's (account.js,
+  // JOED-156): the paper account with the kept holdings, and Cash.
   const eyebrow = $('#desksEyebrow');
   if (eyebrow) patch(eyebrow, desksEyebrow());
   const hero = $('#deskHero');

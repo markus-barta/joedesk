@@ -21,6 +21,9 @@ import './position-claims.mjs';
 import './history-view.mjs';
 import './header-nav.mjs';
 import './chart-axis.mjs';
+import './account-model.mjs';
+import './account-hero.mjs';
+import './account-worker.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -44,7 +47,9 @@ const hm = await import('../public/joe/history-model.js');
 const { HS, historyChart, downsample, historyPointDetails, initHistoryInput, initHistoryControls, historyPreset, historyAxis, historyQuery, readHistoryRoute } = await import('../public/joe/history.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
-const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, accountSlot, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
+const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
+// JOED-156: the whole-account block (the paper account and Cash) above the hero.
+const A = await import('../public/joe/account.js');
 const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { createFeed } = await import('../public/joe/feed.js');
@@ -207,18 +212,19 @@ test('hero captions: every reason reserves retained, stale, broken and null word
 
 // JOED-153: Open result and Desks' money stay in the desk hero; the paper account
 // moved to the whole-account slot above it with the same reserved caption.
-test('hero captions: three supporting KPIs keep the same reserve through session loss and incomplete bookkeeping', () => {
+test('hero captions: the two supporting KPIs keep the same reserve through session loss and incomplete bookkeeping', () => {
   const fresh = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
   const session = board(fixture('a-gateway-up-but-dead'));
   const incomplete = structuredClone(fresh);
   incomplete.states['desks.j.equity'].value = null;
-  const kpis = ctx => [...`${heroLeft(ctx)}${accountSlot(ctx)}`.matchAll(/<div class="kpi"[\s\S]*?<\/div>/g)].map(m => m[0]);
+  // The whole account's value has its own state line above the hero (JOED-156): no caption reserve.
+  const kpis = ctx => [...heroLeft(ctx).matchAll(/<div class="kpi"[\s\S]*?<\/div>/g)].map(m => m[0]);
   const reserve = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
   const baseline = kpis(fresh);
-  assert.equal(baseline.length, 3);
+  assert.equal(baseline.length, 2);
   for (const ctx of [fresh, session, incomplete]) {
     const actual = kpis(ctx);
-    assert.equal(actual.length, 3);
+    assert.equal(actual.length, 2);
     actual.forEach((html, i) => {
       assert.match(html, /<span class="c"><span class="account-caption">/);
       assert.deepEqual(reserve(html), reserve(baseline[i]));
@@ -1229,12 +1235,15 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
   assert.match(doc.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, /Last good value, 1\smin ago$/);
   for (const caption of doc.querySelectorAll('.account-caption')) assert.doesNotMatch(caption.children[0].textContent, /broker connection down/);
   assert.equal(doc.querySelector('.disclosure-warning .vh').textContent.match(/broker connection down/g).length, 1, 'collapsed Desks’ money retains one reason');
-  // JOED-153: Cash sits in the whole-account slot above the hero and still says the outage once.
-  const slot = htmlDocument(accountSlot(ctx));
-  for (const sizing of slot.querySelectorAll('.cash-sizing')) sizing.remove();
-  assert.equal(slot.querySelector('.cash-reason').textContent, 'not reported');
-  assert.match(slot.querySelector('[data-cash="hero.cash"]').getAttribute('aria-label'), /Cash not reported · broker connection down/);
-  assert.equal(slot.querySelector('.account-slot-state').textContent, 'Numbers unavailable · broker connection down');
+  // JOED-156: Cash sits in the whole account above the hero and still says the outage once:
+  // the value's state line says it, Cash's dash only "not reported", its name all of it.
+  const state = A.stateLine(ctx.states.paperAccount);
+  assert.equal(state.text.match(/broker connection down/g)?.length, 1, state.text);
+  for (const html of Object.values(A.subParts(ctx, null, { reason: 'missing' })).slice(0, 2)) {
+    const cash = htmlDocument(html).querySelector('[data-cash="acct.cash"]');
+    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported');
+    assert.equal(cash.getAttribute('aria-label'), 'Cash not reported · broker connection down');
+  }
   for (const id of ['j', 'joe', 'joel']) {
     ctx.states[`desks.${id}.totalPnl`].ageSeconds = 150;
     const card = htmlDocument(deskCard(ctx, id));
@@ -2241,7 +2250,7 @@ test('browser budget: every timing-only combination gets one final re-measure, w
 
 test('browser budget: any non-timing or unknown failure prevents a re-measure even with timing breaches', () => {
   for (const key of ['measured', 'worker', 'historyRead', 'noMainThreadHistory', 'drawn', 'deskPushes', 'historyPushes',
-    'finite', 'redraws', 'historyReads', 'nearMaximum', 'notCompacted', 'unknownBudget']) {
+    'finite', 'redraws', 'historyReads', 'nearMaximum', 'notCompacted', 'accountWorker', 'accountReads', 'noMainThreadAccount', 'unknownBudget']) {
     for (const timingOK of [true, false]) {
       const first = { [key]: false, patchBudget: timingOK, historyBudget: timingOK, renderBudget: timingOK, taskBudget: timingOK };
       for (const second of [null, Object.fromEntries(Object.keys(first).map(key => [key, true]))]) {
@@ -2276,20 +2285,25 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
       if (source.includes('tasks: window.__budgetTasks.snapshot()')) {
         const task = { startTime: phase === 'cold' ? 210 : 150, duration: sample.taskMs ?? 60, attribution: [] };
         return { timings: [...timings('history-worker', 3, 10), ...timings('history', 3, sample.historyMs ?? 10)],
-          tasks: { tasks: sample.taskMs === null ? [] : [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400 };
+          tasks: { tasks: sample.taskMs === null ? [] : [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400,
+          accountWorker: sample.accountWorker ?? true };
       }
       if (source.includes('timings.splice(0)')) {
         reads++;
-        return { timings: reads === 2 ? timings('data', sample.pushes ?? 5, sample.patchMs ?? 10) : [], end: reads * 100 };
+        // The Desk updates: their renders, and (JOED-156) one account worker read each.
+        return { timings: reads === 2 ? [...timings('data', sample.pushes ?? 5, sample.patchMs ?? 10),
+          ...timings('account-worker', sample.accountReads ?? sample.pushes ?? 5, 7), ...timings('account-accept', sample.mainThreadAccount ?? 0, 30)] : [], end: reads * 100 };
       }
       if (source.includes("filter(t => t.reason === 'history').length")) return 0;
-      assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()', source);
+      if (source.includes("filter(t => t.reason === 'account-worker').length")) return 0;
+      assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()' || source === 'window.__joedesk.refresh(); window.__joedesk.refreshAccount?.()', source);
     },
   };
   const context = { decideTaskGuard, TIMING_GUARDS, observeBudgetTasks, attributeBudgetTasks,
     max: list => list.length ? Math.max(...list) : NaN,
     VIEWPORTS: [{ name: '390' }], NOW: '2026-10-14T17:42:22.000Z', ACTOR: 'fixture',
     largeScenario: (now, points = 9000) => ({ snapshot: { seq: 1001 }, history: { receivedAt: now, points: Array(points) } }),
+    accountScenario: (now, { largest } = {}) => ({ largest, short: { points: Array(largest ? 9057 : 841) }, daily: { days: Array(largest ? 2196 : 38) } }),
     wideSnapshot: (snapshot, when, seq, shift) => ({ when, seq, shift }), at: (base, seconds) => `${base}/${seconds}`,
     configure: async () => {}, go: async () => {}, settle: async () => {}, waitFor: async () => {},
     load: async (page, url, panel) => {
@@ -2303,8 +2317,8 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
   };
   const execute = runInNewContext(`(${runBudget.toString()})`, context);
   const traces = await execute({ page, limits,
-    newBoard: async ({ history }) => {
-      const board = { history, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
+    newBoard: async ({ history, accountHistory }) => {
+      const board = { history, accountHistory, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
         async push(payload) { this.pushes.push(payload); return { status: 200 }; } };
       boards.push(board);
       return board;
@@ -2338,6 +2352,21 @@ test('browser budget: cold and live re-measure on fresh boards, retaining both a
   assert.match(table, /Attempt/);
   assert.equal(table.match(/1\/2 \(re-measured\)/g).length, 2);
   assert.equal(table.match(/2\/2 \(re-measured\)/g).length, 2);
+});
+
+test('JOED-156 browser budget: the live boards carry the largest account history, read by its worker on every Desk update', async () => {
+  const { checks, boards, loads } = await simulatedBudget();
+  const liveBoards = boards.filter(b => b.history.points.length === 7200);
+  assert.ok(liveBoards.length >= 1 && liveBoards.every(b => b.accountHistory?.largest === true && b.accountHistory.short.points.length === 9057));
+  assert.ok(boards.filter(b => b.history.points.length === 9000).every(b => b.accountHistory === undefined), 'the cold History read stays as it was');
+  const account = checks.find(c => c.name.includes('whole account'));
+  assert.ok(account?.ok && /9057 snapshots, 2196 closes/.test(account.name), account?.name);
+  for (const sample of [{ accountWorker: false }, { accountReads: 4 }, { mainThreadAccount: 1 }]) {
+    const failed = await simulatedBudget({ live: [sample, sample] });
+    assert.ok(failed.checks.some(c => !c.ok && c.name.includes('whole account')), JSON.stringify(sample));
+    assert.equal(failed.loads.live, 1, 'not a timing breach: no re-measure');
+  }
+  assert.deepEqual(loads, { cold: 1, live: 1 });
 });
 
 test('browser budget: runBudget stops after reproduced breaches and does not retry other failed checks', async () => {

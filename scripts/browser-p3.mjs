@@ -7,7 +7,7 @@ import { homedir, cpus } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
-import { startBoard, scenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
+import { startBoard, scenario, accountScenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, go as goPage, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
 import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
 import { heroWordingFixtures } from './browser/hero-wording-fixtures.mjs';
@@ -19,6 +19,7 @@ import { phaseBChecks, deskRankingFocusChecks } from './browser/phase-b.mjs';
 import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
 import { historyControlChecks, historyFollowGrowthChecks, historyDesignChecks } from './browser/history-controls.mjs';
 import { headerNavChecks } from './browser/header-nav.mjs';
+import { accountHeroChecks } from './browser/account-hero.mjs';
 import { parseBoardSweepArgs, createBoardSweepPlan, boardSweepErrors, boardSweepTable } from './board-sweep-plan.mjs';
 
 // The widest window with the phone's bottom bar (app.css); above it the nav
@@ -55,6 +56,9 @@ const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSection
 // checks (both read the page's model, so after the hooks).
 const { deskSessionChecks } = await import('./browser/desk-sessions.mjs');
 const { percentText, keptOnlyInAccount } = await import('./browser/desk-checks.mjs');
+// JOED-156: the whole-account block fills JOED-153's slot above the hero; its
+// value states its own panel state in its change line (account.js stateLine).
+const { stateLine } = await import('../public/joe/account.js');
 const HEALTH_LINES = Object.keys(REASON_COPY).map(reason => statusSentence({ reason, tone: reason === 'board_ok' ? 'green' : 'red' }, { receipt: 9, gatewayAge: 179 }));
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
@@ -62,7 +66,7 @@ mkdirSync(QA_DIR, { recursive: true });
 const AUDIT = readFileSync(new URL('./browser/audit.js', import.meta.url), 'utf8');
 const { results, shots, check, shot, auditScreen } = createGate(QA_DIR);
 const timing = createGroupTiming({ results, shots });
-const SHIFT_SELECTORS = ['header.top', '#statusAlert', '#accountSlot', '#deskHero', '.hero-primary', '#accountSection', '.hero-r', '.desk-row', '#heroL .primary', '#heroL .pct-slot', '#heroL .board-caption', '#heroL .kpi', '#heroL .display', '.dcard', '.dcard .dnums > div', '.dcard .spark', '#positions', '.prow', '#kept', 'footer.foot'];
+const SHIFT_SELECTORS = ['header.top', '#statusAlert', '#acctHero', '#deskHero', '.hero-primary', '#accountSection', '.hero-r', '.desk-row', '#heroL .primary', '#heroL .pct-slot', '#heroL .board-caption', '#heroL .kpi', '#heroL .display', '.dcard', '.dcard .dnums > div', '.dcard .spark', '#positions', '.prow', '#kept', 'footer.foot'];
 
 // Original checks read complete cards, charts and rows. Open their actual
 // phone controls first; initial/collapsed checks opt out explicitly below.
@@ -78,9 +82,13 @@ async function go(page, screen) {
 async function phoneFirstScreenChecks(page, viewport, theme, snapshot) {
   const tag = `${viewport.name} ${theme} phone first screen`;
   const d = await phoneDeskSnapshot(page).then(copyText);
-  check('phone-first', `${tag}: primary euros/percent, one-line sentence and all ranked desk rows fit above the bottom navigation without scrolling`,
-    d.primary.length === 2 && d.primary.every(p => /€/.test(p.euros) && /%/.test(p.pct)) && d.rows.length === 3 &&
-    d.rows.every(r => r.icon && r.state && r.top >= 0 && r.bottom <= Math.min(844, d.bottomBar.top) - 8) &&
+  // JOED-156: the whole account comes first and fills the first screen (value,
+  // change, Since start · Cash, ranges and chart, above the bottom navigation);
+  // the desk figures, the one-line sentence and the ranked rows follow it.
+  check('phone-first', `${tag}: the whole account fits above the bottom navigation first; primary euros/percent, the one-line sentence and all ranked desk rows follow it`,
+    d.account && /€/.test(d.account.value) && d.account.top >= d.header.bottom - 0.5 && d.account.bottom <= Math.min(844, d.bottomBar.top) - 8 &&
+    d.account.chart.bottom <= d.account.bottom && d.primary.length === 2 && d.primary.every(p => /€/.test(p.euros) && /%/.test(p.pct) && p.top >= d.account.bottom) && d.rows.length === 3 &&
+    d.rows.every(r => r.icon && r.state && r.top >= d.account.bottom) &&
     d.sentence.bottom <= d.rows[0].top && await page.evaluate(`document.querySelector('#heroL .say > span').dataset.clamp === '1' && scrollY === 0`), d);
   const ranked = snapshot.desks.slice().sort((a, b) => {
     const x = decimalUnits(a.money.totalPnl.amount), y = decimalUnits(b.money.totalPnl.amount);
@@ -92,11 +100,15 @@ async function phoneFirstScreenChecks(page, viewport, theme, snapshot) {
   check('phone-first', `${tag}: compact rows and their section end within 12 px of the reserved warning line, without a trailing detail gap`,
     d.rows.length === 3 && d.rows.every(r => r.card.bottom - r.warningLineBottom >= 0 && r.card.bottom - r.warningLineBottom <= 12 && r.card.bottom === r.bottom) &&
     d.desks.bottom - d.rows.at(-1).warningLineBottom <= 12 && d.desks.bottom === d.rows.at(-1).bottom, { desks: d.desks, rows: d.rows });
-  check('phone-first', `${tag}: all eight disclosures start collapsed with 44 px targets, no horizontal scroll and a collapsed page ≤1600 px`,
-    d.controls.length === 8 && d.controls.every(c => c.expanded === 'false' && c.hidden && !c.visible && c.height >= 44) && d.horizontal.scroll <= d.horizontal.inner && d.pageHeight <= 1600, d);
-  // JOED-153: the whole account is the phone's first section until its own block takes the slot.
-  check('phone-first', `${tag}: missing Cash is visible in the collapsed Whole account summary with an icon and its reason`,
-    d.controls[0]?.key === 'whole' && d.controls.find(c => c.key === 'whole')?.warning.includes('Cash: not reported · no data received yet') && Boolean(d.controls.find(c => c.key === 'whole')?.icon), d.controls);
+  // JOED-156 fills JOED-153's slot: the whole account is the phone's first
+  // block, open (no collapsed Whole account section); the 1600 px budget stays
+  // for everything below it, which adds its own block and gap.
+  check('phone-first', `${tag}: all seven disclosures start collapsed with 44 px targets, no horizontal scroll and a collapsed page ≤1600 px plus the whole account`,
+    d.controls.length === 7 && !d.controls.some(c => c.key === 'whole') && d.controls.every(c => c.expanded === 'false' && c.hidden && !c.visible && c.height >= 44) && d.horizontal.scroll <= d.horizontal.inner &&
+    d.account && d.account.height <= 440 && d.pageHeight <= 1600 + d.account.height + d.account.gap, d);
+  check('phone-first', `${tag}: missing Cash is visible on the first screen, in the whole account's Since start · Cash line, with its reason and accessible name`,
+    d.account?.cash?.text === 'Cash — · not reported · no data received yet' && d.account.cash.name === 'Cash not reported · no data received yet' &&
+    d.account.cash.top >= d.account.top && d.account.cash.bottom <= Math.min(844, d.bottomBar.top) - 8, d.account);
   await shot(page, viewport, `${viewport.name}-${theme}-desk-first-screen`, 'Phone Desk, default collapsed: status, Today, Since start and three ranked desk rows');
   // Enter and Space use the native button, retain focus, and expose the body.
   await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
@@ -130,7 +142,10 @@ async function deskChecks(page, viewport, theme, snapshot) {
     const say = document.querySelector('#heroL .say > span');
     return {
       header, boardOkElsewhere: /Board OK/.test(rest), strip: t('#healthPop .health-facts'), freshCheckins: [...document.querySelectorAll('.dcard .hb')].some(e => e.textContent.trim()),
-      display: t('#heroL .display'), kpis: [...document.querySelectorAll('#heroL .kpi')].map(kpi), slot: [...document.querySelectorAll('#accountSlot .kpi')].map(kpi),
+      display: t('#heroL .display'), kpis: [...document.querySelectorAll('#heroL .kpi')].map(kpi),
+      account: (() => { const cash = [...document.querySelectorAll('#acctHero [data-cash]')].find(__audit.visible);
+        return { title: t('#acctTitle'), keep: t('#acctHero .acct-chip.keep'), value: t('#acctValue'), state: document.getElementById('acctValue').dataset.state,
+          cash: cash ? { text: cash.innerText.replace(/\\s+/g, ' ').trim(), name: cash.getAttribute('aria-label'), state: cash.dataset.state, muted: Boolean(cash.querySelector('b.muted')) } : null }; })(),
       eyebrow: t('#desksEyebrow'), scope: t('#heroL .desk-scope'),
       say: { text: say.innerText, lines: Math.round(say.scrollHeight / parseFloat(getComputedStyle(say).lineHeight)) },
       market: { title: t('#heroSession .mkt-t'), sub: t('#heroSession .mkt-s'), ny: t('#heroSession .mkt-ny'), bar: document.querySelector('#heroSession .daybar')?.getAttribute('aria-label'),
@@ -138,7 +153,7 @@ async function deskChecks(page, viewport, theme, snapshot) {
       heroLayout: (() => {
         const rect = e => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height }; };
         return { hero: rect(document.getElementById('deskHero')), primary: rect(document.querySelector('.hero-primary')), right: rect(document.querySelector('.hero-r')), row: rect(document.querySelector('#heroL .kpis')),
-          scope: rect(document.querySelector('#heroL .desk-scope')), slot: rect(document.getElementById('accountSlot')), eyebrow: rect(document.getElementById('desksEyebrow')),
+          scope: rect(document.querySelector('#heroL .desk-scope')), slot: rect(document.getElementById('acctHero')), eyebrow: rect(document.getElementById('desksEyebrow')),
           figures: [...document.querySelectorAll('#heroL .kpi')].map(rect) };
       })(),
       primary: [...document.querySelectorAll('#heroL .primary')].map(k => ({ cell: k.dataset.cell, phase: k.dataset.phase, label: k.querySelector('.term').textContent, value: k.querySelector('.bn').innerText, pct: k.querySelector('.performance-pct')?.textContent,
@@ -156,16 +171,18 @@ async function deskChecks(page, viewport, theme, snapshot) {
     }; })()`).then(copyText);
   check('AC-18', `${tag}: one live header control and no fresh card check-ins or visible status strip`, /Live/.test(d.header) && !d.boardOkElsewhere && !d.freshCheckins && !await page.evaluate(`Boolean(document.querySelector('#health, .hstrip, #footData'))`), d);
   // JOED-153: the desks' summary row is Open result and Desks' money; the
-  // whole account (incl. kept holdings) and Cash sit in the slot above the hero.
+  // whole account (incl. kept holdings) and Cash are the whole-account block's,
+  // which fills the slot above the hero (JOED-156).
   const held = snapshot.positions.rows.filter(r => r.scope === 'stage0' && r.desk && decimalUnits(r.quantity) !== 0n).length;
   const sinceCaption = copyText(await page.evaluate(`__audit.deskCaption(document.querySelector('[data-cell="hero.since"]'))`));
-  check('AC-19', `${tag}: Today and Since start remain primary and name their session; the summary row and the whole-account slot keep their captions`, Boolean(d.display) && d.primary.length === 2 &&
+  check('AC-19', `${tag}: Today and Since start remain primary and name their session; the summary row and the whole-account block keep their captions`, Boolean(d.display) && d.primary.length === 2 &&
     d.primary.map(p => p.label).join() === 'Today · Wed 14 Oct · live,Since 10 Sep' && d.primary[0].phase === 'live' && d.primary[0].dot && !d.primary[1].dot &&
     d.kpis.map(k => k.dt).join() === 'Open result,Desks’ money' && d.kpis[0].cap === `${held} position${held === 1 ? '' : 's'} · changes until they close` && /^started with €\s15\.000 on 10\sSep$/.test(d.kpis[1].cap) &&
-    d.slot.map(k => k.dt).join() === 'IB paper account · whole account,Cash' && d.slot[0].cap === 'includes the kept holdings' && d.slot[1].cap === 'cash · as the broker reports it' &&
+    d.account.title === (viewport.mobile ? 'Whole account' : 'IB paper account · whole account') && d.account.keep === 'incl. kept holdings' && Boolean(d.account.cash) &&
     sinceCaption === 'after fees, incl. open positions' && d.primary[1].basis === `of ${fmt.eur(STARTING_MONEY, false, 0)}` &&
-    d.scope === 'Desk figures never include the kept holdings. The whole account, with them, is at the top.' && /^Desks J, Joe and Joel · their €\s15\.000 practice capital|^Desks · €\s15\.000 practice capital/.test(d.eyebrow), { primary: d.primary, kpis: d.kpis, slot: d.slot, sinceCaption, scope: d.scope, eyebrow: d.eyebrow });
-  check('AC-19', `${tag}: unreported Cash is a muted dash with its reason in the caption`, d.slot[1].value === '—' && d.slot[1].muted && d.slot[1].cashReason === 'not reported · no data received yet', d.slot[1]);
+    d.scope === 'Desk figures never include the kept holdings. The whole account, with them, is at the top.' && /^Desks J, Joe and Joel · their €\s15\.000 practice capital|^Desks · €\s15\.000 practice capital/.test(d.eyebrow), { primary: d.primary, kpis: d.kpis, account: d.account, sinceCaption, scope: d.scope, eyebrow: d.eyebrow });
+  check('AC-19', `${tag}: unreported Cash is a muted dash with its reason beside it, in the whole account`, d.account.cash?.muted && d.account.cash.state === 'not reported' &&
+    d.account.cash.text === 'Cash — · not reported · no data received yet' && d.account.cash.name === 'Cash not reported · no data received yet', d.account);
   const day = decimalUnits(snapshot.totals.dayPnl.amount), equity = decimalUnits(snapshot.totals.equity.amount), since = decimalUnits(snapshot.totals.totalPnl.amount);
   const percent = percentText;
   check('AC-19', `${tag}: primary euros and percentages use the exact start-of-day and since-start bases, and Today names its base`, d.primary[0].value.replace(/\s/g, '') === fmt.eur(day, true).replace(/\s/g, '') && d.primary[1].value.replace(/\s/g, '') === fmt.eur(since, true).replace(/\s/g, '') &&
@@ -180,7 +197,7 @@ async function deskChecks(page, viewport, theme, snapshot) {
       close(layout.figures[0].top, layout.figures[1].top) && (viewport.name === '1440'
         ? close(layout.primary.top, layout.right.top) && layout.primary.right < layout.right.left && layout.row.top >= Math.max(layout.primary.bottom, layout.right.bottom) - 0.5 && close(layout.row.right, layout.right.right)
         : layout.right.top >= layout.primary.bottom - 0.5 && layout.row.top >= layout.right.bottom - 0.5 && close(layout.row.right, layout.primary.right));
-  check('AC-19', `${tag}: the slot, the eyebrow, then the hero; Today larger beside Since; the market block beside the figures at 1440 and under them at 1024; Open result and Desks’ money in one row across the hero, then the kept-holdings line (stacked on phones, below Desks)`,
+  check('AC-19', `${tag}: the whole account (the slot), the eyebrow, then the hero; Today larger beside Since; the market block beside the figures at 1440 and under them at 1024; Open result and Desks’ money in one row across the hero, then the kept-holdings line (stacked on phones, below Desks)`,
     d.primary[0].top === d.primary[1].top && d.primary[0].left + d.primary[0].width <= d.primary[1].left && d.primary[0].size > d.primary[1].size && supportingLayout, { primary: d.primary, layout });
   check('P1-2', `${tag}: the sentence is the per-desk breakdown in sign colours, one line${viewport.mobile ? ' with its ellipsis on phones' : ' at ≥ 820 px'}`,
     /^J ([+−]€\s[\d.]+,\d\d|flat) · Joe ([+−]€\s[\d.]+,\d\d|flat) · Joel ([+−]€\s[\d.]+,\d\d|flat)$/.test(copyText(d.say.text)) && d.say.lines === 1 &&
@@ -200,8 +217,8 @@ async function deskChecks(page, viewport, theme, snapshot) {
   check('AC-42', `${tag}: worth bars proportional within each currency`, viewport.mobile || (worth.length >= 2 && !proportional(worth, 'worth')), worth);
   check('AC-7', `${tag}: kept symbols only under Kept holdings`, !d.positions.some(s => ['SXR8', 'TSLA'].includes(s)) && d.kept.map(k => k.sym).join() === 'SXR8,TSLA' && d.kept.every(k => k.label) && !d.notJoe, { positions: d.positions, kept: d.kept });
   check('AC-8', `${tag}: kept rows are inert`, d.kept.every(k => k.interactive === 0 && !k.pointer), d.kept);
-  // JOED-153: the paper account (with the kept holdings) is the whole-account slot's first figure.
-  check('AC-9', `${tag}: kept values counted only in the paper account`, keptOnlyInAccount(d), { cap: d.keptCap, state: d.keptState, equity: d.kpis[1]?.value, account: d.slot[0]?.value });
+  // JOED-153: the paper account (with the kept holdings) is the whole-account block's value (JOED-156).
+  check('AC-9', `${tag}: kept values counted only in the paper account`, keptOnlyInAccount(d), { cap: d.keptCap, state: d.keptState, equity: d.kpis[1]?.value, account: d.account?.value });
 
   // Details popover: opaque, anchored, closes on Escape, moves nothing.
   const before = await page.evaluate(`__audit.rects(${JSON.stringify(SHIFT_SELECTORS)})`);
@@ -490,7 +507,8 @@ const HIST_SHIFT = ['.hist-tools', '.hcard', '#histChart', '#histCompare', '#his
 const copyExpression = expression => `(${copyText.toString()})(${expression})`;
 const DESK_TEXT = copyExpression(`(() => ({
   label: document.querySelector('#hdrHealth .status-full').textContent, market: document.querySelector('#heroSession .mkt-t')?.innerText, marketSub: document.querySelector('#heroSession .mkt-s')?.innerText ?? '',
-  cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell], #accountSlot [data-cell]')].map(c => [c.dataset.cell, { state: c.dataset.state, cap: __audit.deskCaption(c) }])),
+  cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(c => [c.dataset.cell, { state: c.dataset.state, cap: __audit.deskCaption(c) }])),
+  account: { state: document.getElementById('acctValue')?.dataset.state ?? null, value: document.getElementById('acctValue')?.innerText.trim() ?? '', line: document.querySelector('#acctChange [data-clamp]')?.innerText ?? null },
   cards: [...document.querySelectorAll('.dcard')].map(c => ({ id: c.id.slice(5), lines: [...c.querySelectorAll('.card-status .st')].map(n => n.innerText), label: c.querySelector('.spark-h')?.innerText ?? '', status: c.querySelector('.card-status')?.innerText ?? '', nums: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), icons: c.querySelectorAll('.cell-state').length })),
   boardCaption: document.querySelector('#heroL .board-caption').innerText,
   positions: document.querySelector('#positions .pstate')?.innerText, posState: document.querySelector('#positions .pstate')?.dataset.state,
@@ -516,7 +534,7 @@ try {
   if (run('design')) {
   // 1 · The full design scenario at every viewport and theme.
   const { snapshot, history } = scenario(NOW);
-  board = await newBoard({ history });
+  board = await newBoard({ history, accountHistory: accountScenario(NOW) });
   board.setNow(NOW);
   const pushed = await board.push(snapshot);
   if (pushed.status !== 200) throw new Error(`scenario push failed: ${JSON.stringify(pushed.body)}`);
@@ -526,7 +544,7 @@ try {
     await load(page, board.url, 'desk', { details: false });
     await phoneFirstScreenChecks(page, viewport, theme, snapshot);
     await setDeskDisclosures(page, false);
-    const selectors = ['header.top', '#statusAlert', '#accountSlot', '.hero-primary', '.desk-row', '#accountSection', '.hero-r', '.desk-section', 'footer.foot'];
+    const selectors = ['header.top', '#statusAlert', '#acctHero', '.hero-primary', '.desk-row', '#accountSection', '.hero-r', '.desk-section', 'footer.foot'];
     const before = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
     await page.evaluate('window.__joedesk.refresh()'); await settle(page);
     const after = await page.evaluate(`__audit.rects(${JSON.stringify(selectors)})`);
@@ -543,6 +561,7 @@ try {
       await auditScreen(page, viewport, theme, screen);
       await shot(page, viewport, `${viewport.name}-${theme}-${screen}`, `${screen[0].toUpperCase()}${screen.slice(1)}, design scenario`);
       if (screen === 'desk') await deskChecks(page, viewport, theme, snapshot);
+      if (screen === 'desk') await accountHeroChecks({ page, viewport, theme, check, settle, rects, moves, snapshot, load, url: board.url });
     }
     if (viewport.name === '1440') { await go(page, 'desk'); await focusChecks(page, `${viewport.name} ${theme} desk`); }
     if (viewport.mobile) {
@@ -626,7 +645,9 @@ try {
   if (run('fixtures')) {
   // 3 · P1 fixtures through the real server: fresh, stale with age, not
   // reported and broken with a reason, each panel on its own; no blank page.
-  const CELL = { 'hero.day': 'today.dayPnl', 'hero.open': 'today.openPnl', 'hero.since': 'today.totalPnl', 'hero.equity': 'today.equity', 'hero.account': 'paperAccount' };
+  // The desk hero's money cells. The paper account is the whole-account block's
+  // (JOED-156): its own state and change line are checked apart, below.
+  const CELL = { 'hero.day': 'today.dayPnl', 'hero.open': 'today.openPnl', 'hero.since': 'today.totalPnl', 'hero.equity': 'today.equity' };
   const CASES = [
     ['e-layout-storage-unavailable', 'fresh', 'Board OK'], ['b-session-open-estimate', 'fresh', 'Board OK'], ['stale-receive-age', 'stale', 'Stale 1 min'],
     ['c-frozen-producer', 'stale', 'Stale 2 min'], ['missing-runtime-and-results', 'not reported', 'Board OK'], ['a-gateway-up-but-dead', 'broken', 'Needs fix'],
@@ -696,7 +717,6 @@ try {
         await setDeskDisclosures(page, false);
         const collapsed = await phoneDeskSnapshot(page).then(copyText);
         const summaryCells = {
-          whole: [['Paper account', expectedCells.paperAccount], ['Cash', expectedCells.paperCash], ['Broker', expectedCells.gateway]],
           account: [['Open result', expectedCells['today.openPnl']], ['Desks’ money', expectedCells['today.equity']]],
           positions: [['Positions', expectedCells.positions], ...rowProblems(expectedCells.positions)],
           kept: [['Kept holdings', expectedCells.kept], ...rowProblems(expectedCells.kept)],
@@ -707,9 +727,13 @@ try {
             (expected ? actual.warning === expected.text && actual.icon === `#i-${expected.icon}` : !actual.warning && !actual.icon), { actual, expected });
         }
         if (id === 'a-gateway-up-but-dead') {
-          const warnings = collapsed.controls.filter(c => ['whole', 'account', 'positions', 'kept', 'j', 'joe', 'joel'].includes(c.key));
-          check('fixtures', `${viewport.name} ${theme}: every collapsed outage section retains its icon and one broker-down reason in both short and accessible copy`, warnings.length === 7 &&
+          const warnings = collapsed.controls.filter(c => ['account', 'positions', 'kept', 'j', 'joe', 'joel'].includes(c.key));
+          check('fixtures', `${viewport.name} ${theme}: every collapsed outage section retains its icon and one broker-down reason in both short and accessible copy`, warnings.length === 6 &&
             warnings.every(c => c.icon && (c.warning.match(/broker connection down/g) ?? []).length === 1 && (c.detail.match(/broker connection down/g) ?? []).length === 1), warnings);
+          // The whole account above stays open on a phone and says the outage once, in its change line; Cash only "not reported".
+          check('fixtures', `${viewport.name} ${theme}: the open whole account states the broker-down reason once, Cash without repeating it`,
+            (collapsed.account?.line?.match(/broker connection down/g) ?? []).length === 1 && collapsed.account.cash?.text === 'Cash — · not reported' &&
+            collapsed.account.cash.name === 'Cash not reported · broker connection down', collapsed.account);
         }
         check('phone-first', `${viewport.name} ${theme} ${id}: collapsed panels do not scroll horizontally`, collapsed.horizontal.scroll <= collapsed.horizontal.inner, collapsed.horizontal);
         await setDeskDisclosures(page, true);
@@ -719,7 +743,8 @@ try {
         compact: (() => { const e = document.querySelector('#hdrHealth .status-compact'); return __audit.visible(e) ? e.textContent : null; })(),
         visibleSentence: (() => { const full = document.querySelector('#hdrHealth .status-full'), line = document.getElementById('statusAlertText');
           return [full, line].filter(__audit.visible).map(e => e.textContent); })(),
-        cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell], #accountSlot [data-cell]')].map(k => [k.dataset.cell, { state: k.dataset.state, cap: __audit.deskCaption(k) }])),
+        cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(k => [k.dataset.cell, { state: k.dataset.state, cap: __audit.deskCaption(k) }])),
+        account: { state: document.getElementById('acctValue')?.dataset.state ?? null, value: document.getElementById('acctValue')?.innerText.trim() ?? '', line: document.querySelector('#acctChange [data-clamp]')?.innerText ?? null },
         desks: [...document.querySelectorAll('.dcard')].map(c => ({ id: c.id.slice(5), name: c.querySelector('h3')?.innerText, nums: c.querySelectorAll('.dnums > div').length, states: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), status: c.querySelector('.card-status')?.innerText ?? '', icons: c.querySelectorAll('.cell-state').length,
           dayName: c.querySelector('.dnums .bn')?.getAttribute('aria-label') ?? null, dayTitle: c.querySelector('.dnums .bn')?.getAttribute('title') ?? null })),
         boardCaption: document.querySelector('#heroL .board-caption').innerText,
@@ -743,12 +768,17 @@ try {
         { ui, expected: expectedStatus });
       if (ui.alertGeometry.visible) check('fixtures', `${tag}: the one-line problem has body-size text, a status icon, a 44 px target and clear space above the hero`,
         ui.alertGeometry.size === ui.alertGeometry.bodySize && ui.alertGeometry.icon === (expectedStatus.statusTone === 'warn' ? '#i-half' : '#i-stop') && ui.alertGeometry.target >= 44 && ui.alertGeometry.gap >= 12, ui.alertGeometry);
-      check('fixtures', `${tag}: no panel or page blanks`, Object.keys(ui.cells).length === 5 && ui.desks.length === 3 && ui.desks.every(d => d.name && d.nums === 3) && ui.positions && ui.kept && ui.strip && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
+      check('fixtures', `${tag}: no panel or page blanks`, Object.keys(ui.cells).length === 4 && Boolean(ui.account.value) && ui.desks.length === 3 && ui.desks.every(d => d.name && d.nums === 3) && ui.positions && ui.kept && ui.strip && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
       const expected = expectedCells;
       const mismatch = Object.entries(CELL).filter(([key, panel]) => ui.cells[key].state !== expected[panel].state).map(([key, panel]) => ({ key, ui: ui.cells[key].state, want: expected[panel].state }));
       const deskMismatch = ui.desks.flatMap(d => ['dayPnl', 'openPnl', 'totalPnl'].map((f2, k) => [d.id, f2, d.states[k]]))
         .filter(([desk, field, state]) => state !== expected[`desks.${desk}.${field}`].state);
       check('fixtures', `${tag}: every money cell shows its own panel state`, !mismatch.length && !deskMismatch.length, { mismatch, deskMismatch });
+      // JOED-156: the whole account's value keeps its own panel state and says it
+      // in its change line, in the words of its state (none while current).
+      const accountLine = stateLine(expected.paperAccount);
+      check('fixtures', `${tag}: the whole account's value shows its own panel state and states it in its change line`,
+        ui.account.state === (expected.paperAccount?.state ?? 'not reported') && norm(ui.account.line ?? '') === norm(accountLine?.text ?? ''), { account: ui.account, want: accountLine?.text ?? null });
       check('fixtures', `${tag}: positions and kept holdings show their own panel states`, ui.sections.positions === expected.positions.state && ui.sections.kept === expected.kept.state, { ui: ui.sections, want: [expected.positions.state, expected.kept.state] });
       if (expectedStatus.tone !== 'green') {
         const openers = ['#hdrHealth', ...await page.evaluate(`document.getElementById('statusAlert').hasAttribute('data-visible') ? ['#statusAlertControl'] : []`)];
@@ -791,9 +821,10 @@ try {
       check('fixtures', `${tag}: matching money captions appear once on the board`, !repeated.length && (!boardCaption || ui.boardCaption.includes(cellReason(boardCaption.reason))), { repeated, caption: ui.boardCaption });
       const caps = norm([ui.boardCaption, ui.say, ...Object.values(ui.cells).map(c => c.cap)].join(' | '));
       if (kind === 'stale') check('fixtures', `${tag}: stale shows its age and reason`, /[Aa]s of \d+\s(s|min) ago · updates are (late|stuck)/.test(caps), caps);
-      if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.cells['hero.account'].cap === 'Not reported', caps);
+      if (kind === 'not reported') check('fixtures', `${tag}: not reported reads plainly`, ui.account.line === 'Not reported', { caps, account: ui.account });
       if (kind === 'broken') {
-        const shared = sharedSectionReason([...Object.values(CELL).map(panel => expectedCells[panel]), expectedCells.paperCash]);
+        // The hero's section reason, as heroLeft computes it: its four money cells.
+        const shared = sharedSectionReason(Object.values(CELL).map(panel => expectedCells[panel]));
         // Check every affected cell, including retained values after rejection.
         // A not-exact cell must never hide a different cell's real fault.
         const plain = html => norm(html.replace(/<[^>]*>/g, ''));
@@ -938,15 +969,15 @@ try {
       const collapsed = await page.evaluate(`(() => {
         const count = text => (text.match(/broker connection down/g) ?? []).length;
         return { controls: [...document.querySelectorAll('[data-desk-disclosure]')]
-          .filter(b => ['whole', 'account', 'j', 'joe', 'joel', 'positions', 'kept'].includes(b.dataset.deskDisclosure)).map(b => {
+          .filter(b => ['account', 'j', 'joe', 'joel', 'positions', 'kept'].includes(b.dataset.deskDisclosure)).map(b => {
             const body = document.getElementById(b.getAttribute('aria-controls')), summary = b.querySelector('.collapsed-summary .summary-text');
             return { key: b.dataset.deskDisclosure, expanded: b.getAttribute('aria-expanded'), hidden: body.hidden,
               visible: __audit.visible(b) && __audit.visible(summary), bodyVisible: __audit.visible(body),
               icon: __audit.visible(b.querySelector('.collapsed-summary .i')), reason: count(summary?.innerText ?? ''), detail: count(summary?.title ?? '') };
           }), horizontal: __audit.horizontal() };
       })()`);
-      check('fixtures', `${tag}: each collapsed Whole account, Desks’ money, desk, Positions and Kept summary visibly retains its icon and one shared reason`,
-        collapsed.controls.length === 7 && collapsed.controls.every(c => c.expanded === 'false' && c.hidden && !c.bodyVisible && c.visible && c.icon && c.reason === 1 && c.detail === 1), collapsed);
+      check('fixtures', `${tag}: each collapsed Desks’ money, desk, Positions and Kept summary visibly retains its icon and one shared reason`,
+        collapsed.controls.length === 6 && collapsed.controls.every(c => c.expanded === 'false' && c.hidden && !c.bodyVisible && c.visible && c.icon && c.reason === 1 && c.detail === 1), collapsed);
       const changed = moves(collapsedBefore, await rects(DESK_SHIFT));
       check('no-shift', `${tag}: collapsed fresh → broker down shifts 0 px and does not scroll horizontally`,
         !changed.length && collapsed.horizontal.scroll <= collapsed.horizontal.inner, { changed, horizontal: collapsed.horizontal });
@@ -958,11 +989,11 @@ try {
       return {
         hero: count(text('#heroL .board-caption')),
         cells: [...document.querySelectorAll('#heroL [data-cell]')].map(c => count(__audit.deskCaption(c))),
-        cash: count(text('#accountSlot .cash-reason')), slot: count(text('#accountSlot')), say: count(text('#heroL .say')),
+        cash: count([...document.querySelectorAll('#acctHero [data-cash]')].filter(__audit.visible).map(e => e.innerText).join(' ')), whole: count(text('#acctHero')), say: count(text('#heroL .say')),
         account: count(text('#accountDetail .account-state')),
         cards: [...document.querySelectorAll('.dcard .card-status')].map(c => __audit.visible(c) ? count(c.innerText) : 0),
         opened: [...document.querySelectorAll('[data-desk-disclosure]')]
-          .filter(b => ['whole', 'account', 'j', 'joe', 'joel', 'positions', 'kept'].includes(b.dataset.deskDisclosure)).map(b => {
+          .filter(b => ['account', 'j', 'joe', 'joel', 'positions', 'kept'].includes(b.dataset.deskDisclosure)).map(b => {
             const body = document.getElementById(b.getAttribute('aria-controls'));
             return { key: b.dataset.deskDisclosure, expanded: b.getAttribute('aria-expanded'), visible: __audit.visible(body),
               reason: count(body.innerText), summary: [...b.querySelectorAll('.summary-text')].filter(__audit.visible).reduce((n, s) => n + count(s.innerText), 0) };
@@ -973,12 +1004,12 @@ try {
         horizontal: __audit.horizontal(),
       };
     })()`);
-    check('fixtures', `${tag}: hero/account, each card, Positions and Kept have one shared reason with no per-cell or per-row repetition`,
-      d.hero === 1 && d.cells.every(n => n === 0) && d.cash === 0 && d.slot === 1 && d.say === 0 && d.cards.length === 3 && d.cards.every(n => n === 1) &&
+    check('fixtures', `${tag}: the whole account, the hero, each card, Positions and Kept have one shared reason with no per-cell or per-row repetition`,
+      d.hero === 1 && d.cells.every(n => n === 0) && d.cash === 0 && d.whole === 1 && d.say === 0 && d.cards.length === 3 && d.cards.every(n => n === 1) &&
       d.sections.every(s => s.reason === 1 && s.rows.length > 0 && s.rows.every(row => row.reason === 0 && row.dashes.length > 0 && row.dashes.every(dash =>
         /^(Last price|Worth|Today’s result|Open result): not reported · broker connection down$/.test(dash.label) && dash.title === dash.label))), d);
-    if (phone) check('fixtures', `${tag}: opened Whole account, Desks’ money, each desk, Positions and Kept visibly state the shared reason once in the body without repeating it in their summaries`,
-      d.account === 1 && d.opened.length === 7 && d.opened.every(c => c.expanded === 'true' && c.visible && c.reason === 1 && c.summary === 0), d.opened);
+    if (phone) check('fixtures', `${tag}: opened Desks’ money, each desk, Positions and Kept visibly state the shared reason once in the body without repeating it in their summaries`,
+      d.account === 1 && d.opened.length === 6 && d.opened.every(c => c.expanded === 'true' && c.visible && c.reason === 1 && c.summary === 0), d.opened);
     const changed = moves(before, await rects(DESK_SHIFT));
     check('no-shift', `${tag}: fresh → broker down shifts 0 px and does not scroll horizontally`, !changed.length && d.horizontal.scroll <= d.horizontal.inner, { changed, horizontal: d.horizontal });
   }
@@ -1041,7 +1072,8 @@ try {
         await settle(page);
         const words = cellReason(reason);
         const ui = await page.evaluate(DESK_TEXT);
-        const cellsOk = Object.values(ui.cells).every(c => c.state === 'broken') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => c.cap === `Unavailable · ${words}`);
+        const cellsOk = Object.values(ui.cells).every(c => c.state === 'broken') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => c.cap === `Unavailable · ${words}`) &&
+          ui.account.state === 'broken' && ui.account.line === `Unavailable · ${words}`;
         check('cold', `${tag}: no clock, yet every panel shows broken with its reason`, ui.label === 'No board data' && /^Time not known/.test(ui.marketSub) && cellsOk && ui.say === `No numbers: ${words}.` &&
           ui.cards.every(c => c.status === `Numbers: unavailable · ${words}` && c.nums.every(x => x === 'broken')) && ui.positions === `Position detail is unavailable: ${words}.` &&
           ui.kept === `Kept holdings are unavailable: ${words}.` && ui.strip.includes(`No data · ${words}`) && !/Data from|refreshes every/.test(ui.foot) && ui.alert.startsWith('No board data') && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
@@ -1091,7 +1123,7 @@ try {
       check('cold', `${tag}: History draws its own observed lines and stays fresh`, h.state === 'fresh' && !h.status && h.lines >= 3 && worker, { h, worker });
       await go(page, 'desk');
       const ui = await page.evaluate(DESK_TEXT);
-      check('cold', `${tag}: Desk shows not found per panel, with the market clock from History's read`, !/^Time not known/.test(ui.marketSub) && Object.values(ui.cells).every(c => c.state === 'broken') &&
+      check('cold', `${tag}: Desk shows not found per panel, with the market clock from History's read`, !/^Time not known/.test(ui.marketSub) && Object.values(ui.cells).every(c => c.state === 'broken') && ui.account.state === 'broken' &&
         ui.cards.every(c => c.status === 'Numbers: unavailable · not found on the board server'), ui);
       await unroute();
       page.errors.length = 0;
@@ -1119,15 +1151,16 @@ try {
       await configure(page, viewport, theme);
       await load(page, b.url, 'desk');
       const ui = await page.evaluate(DESK_TEXT);
-      const CELL = { 'hero.day': 'today.dayPnl', 'hero.open': 'today.openPnl', 'hero.since': 'today.totalPnl', 'hero.equity': 'today.equity', 'hero.account': 'paperAccount' };
+      const CELL = { 'hero.day': 'today.dayPnl', 'hero.open': 'today.openPnl', 'hero.since': 'today.totalPnl', 'hero.equity': 'today.equity' };
       const wrong = Object.entries(CELL).filter(([k, panel]) => ui.cells[k].state !== server.panels[panel].state || server.panels[panel].state !== 'stale').map(([k, panel]) => ({ k, ui: ui.cells[k].state, p1: server.panels[panel].state }));
+      if (ui.account.state !== server.panels.paperAccount.state || server.panels.paperAccount.state !== 'stale') wrong.push({ k: 'whole account', ui: ui.account.state, p1: server.panels.paperAccount.state });
       check('passthrough', `${tag}: every cell keeps the selector's stale state`, !wrong.length && ui.cards.every(c => c.nums.every(x => x === 'stale')) && ui.posState === 'stale' && ui.keptState === 'stale', { wrong, cards: ui.cards });
       const caps = Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').map(([, c]) => c.cap);
       check('passthrough', `${tag}: retained observations keep their age; totals, since-start and the kept sum show dashes`, /^Last good value, 3\d\ss ago · last update repeated an old one$/.test(ui.boardCaption) &&
-        caps.filter(c => c === 'Unavailable').length === 3 && caps.filter(c => c === '').length === 1 &&
+        caps.length === 3 && caps.every(c => c === 'Unavailable') && /^Last good value, 3\d\ss ago · last update repeated an old one$/.test(norm(ui.account.line ?? '')) &&
         ui.cards.every(c => /^Since .+: unavailable · last update repeated an old one$/.test(c.status) && c.icons === 3) &&
         /^Last good positions, 3\d\ss ago · last update repeated an old one$/.test(ui.positions) &&
-        /^Last good values, 3\d\ss ago · last update repeated an old one · worth —$/.test(ui.kept), { caps, cards: ui.cards.map(c => c.status), positions: ui.positions, kept: ui.kept });
+        /^Last good values, 3\d\ss ago · last update repeated an old one · worth —$/.test(ui.kept), { caps, account: ui.account, cards: ui.cards.map(c => c.status), positions: ui.positions, kept: ui.kept });
       if (viewport.name === '1024') await shot(page, viewport, `${viewport.name}-${theme}-desk-state-replayed`, 'Desk, replayed push: last good values stay stale with their age');
     }
   }
@@ -1172,7 +1205,9 @@ try {
     await refresh(`document.querySelector('#hdrHealth').dataset.reason === 'snapshot_stale'`);
     ui = await page.evaluate(DESK_TEXT);
     const late = /^As of 1\smin ago · updates are late\.?$/;
+    // The whole account, its own block above the hero, says its value's state in its own change line.
     check('journey', `${tag} stale: one board caption gives the matching age/reason; every number retains its state and icon`, Object.values(ui.cells).every(c => c.state === 'stale') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => c.cap === '') && late.test(ui.boardCaption) &&
+      ui.account.state === 'stale' && late.test(norm(ui.account.line ?? '')) &&
       ui.say === 'Today’s result is not available.' && ui.cards.every(c => c.label === 'Last sessions · each session’s result in €, after fees' && !c.status && c.icons === 3) && /^As of 1\smin ago · updates are late$/.test(ui.positions) &&
       /^As of 1\smin ago · updates are late · worth —$/.test(ui.kept), ui);
     const staleDerived = await page.evaluate(`(() => ({
@@ -1224,7 +1259,7 @@ try {
       JSON.stringify(j.nums) === '["broken","broken","broken"]' && [joe, joel].every(c => JSON.stringify(c.nums) === '["broken","broken","fresh"]'), ui.cards);
     check('journey', `${tag} broken: unavailable totals keep their own reasons; Today states its reason once`, ui.cells['hero.day'].state === 'broken' && ui.cells['hero.day'].cap === 'Not exact · waiting on the start-of-day value' && ui.say === 'No desk has an exact result for today.' &&
       /^Unavailable · open result not available$/.test(ui.cells['hero.open'].cap) && /^Unavailable · desk total incomplete$/.test(ui.cells['hero.since'].cap) &&
-      ui.cells['hero.equity'].state === 'fresh' && ui.cells['hero.account'].state === 'fresh', { cells: ui.cells, say: ui.say });
+      ui.cells['hero.equity'].state === 'fresh' && ui.account.state === 'fresh' && ui.account.line === null, { cells: ui.cells, account: ui.account, say: ui.say });
     check('no-shift', `${tag}: stale → broken moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
     boxes.push(['broken', await rects(STATE_BOXES)]);
     const rebuiltSay = await page.evaluate(SAY_TIP);

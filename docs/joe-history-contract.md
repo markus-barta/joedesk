@@ -197,6 +197,26 @@ exists. No client may treat missing observations as zero. The route remains
 useful when any independent store is unavailable. Existing History feed headers
 remain desk diagnostics; consumers use body reasons for account-store status.
 
+Desk's whole-account block (JOED-156, `public/joe/account.js` and
+`account-model.js`) is the consumer. It reads this route when Desk is shown,
+then every 60 s (15 s after a failed read, which keeps the last good series
+and says so). A module worker (`account-worker.js`, started under the
+release's own path like the History worker) fetches, parses and checks it
+and transfers compact columns to the page; it answers "unchanged" only when
+the response is byte for byte the one it last sent the page (its key is the
+response's length and 64-bit FNV-1a hash). A worker that fails or does not
+answer within 20 s is terminated and that read runs on the page at once; the
+next read tries one new worker, and after its failure, or without module
+workers, the page reads it itself for the rest of the session. 1D and 5D
+draw `points`, the longer ranges `dailyCloses`
+(`equityAt` and `equity`; a cash-only day draws nothing). Only exact values
+are drawn: an unavailable value, more than 20 minutes between snapshots or a
+missing Vienna day breaks the line with a hatched band, and nothing is drawn
+before the first or after the last value. The value the board shows now joins
+the line only when it is current and exact. A range longer than the record
+says since when it records; the change says what it covers. The store's own
+reason and `discontinuity` appear as one line under the chart.
+
 ## Display-only continuity
 
 History draws a second, gray dashed dataset for each desk. These lines are

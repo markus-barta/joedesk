@@ -9,7 +9,10 @@ const { boardStates } = await import('../public/joe/board-state.js');
 import { copyText } from '../scripts/browser/shots.mjs';
 const { joinUnits, eur } = await import('../public/joe/format.js');
 const { STARTING_MONEY, SINCE_START, sinceStarts, exactMoney, exactCell, percentOf, todayPercent, sincePercent, rankDesks } = await import('../public/joe/performance.js');
-const { boardCaptionCell, sharesBoardCaption, heroLeft, accountSlot, cardStatus, percentHtml, positionsHtml, compactDesk, healthPop } = await import('../public/joe/desk.js');
+const { boardCaptionCell, sharesBoardCaption, heroLeft, cardStatus, percentHtml, positionsHtml, compactDesk, healthPop } = await import('../public/joe/desk.js');
+// JOED-156: the whole account (with Cash) fills the slot above the hero.
+const { accountSkeleton, cashPart } = await import('../public/joe/account.js');
+const { cellReason } = await import('../public/joe/health.js');
 const { boardHealthPresentation } = await import('../public/joe/health.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { tile, two } = await builders('results.js', ['tile', 'two']);
@@ -100,7 +103,7 @@ test('ranking is exact, descending, stable in current order, with unknown result
   assert.deepEqual(rankDesks({}, ['joel', 'joe', 'j']), ['joel', 'joe', 'j']);
 });
 
-test('hero keeps the desks’ four figures and promotes Since start beside Today; the whole account sits in the slot above', () => {
+test('hero keeps the desks’ four figures and promotes Since start beside Today; the whole account sits in its block above', () => {
   const ctx = context(), doc = htmlDocument(heroLeft(ctx));
   assert.equal(doc.querySelectorAll('[data-cell]').length, 4);
   assert.deepEqual(doc.querySelectorAll('.performance .primary').map(el => el.dataset.cell), ['hero.day', 'hero.since']);
@@ -111,14 +114,17 @@ test('hero keeps the desks’ four figures and promotes Since start beside Today
   assert.deepEqual(doc.querySelectorAll('.kpi dt').map(el => el.textContent), ['Open result', 'Desks’ money']);
   assert.equal(doc.querySelector('.desk-scope').textContent, 'Desk figures never include the kept holdings. The whole account, with them, is at the top.');
   assert.equal(doc.querySelector('[data-cell="hero.day"] .bn').textContent, '−€1,00');
-  const slot = htmlDocument(accountSlot(ctx));
-  assert.deepEqual(slot.querySelectorAll('.kpi dt').map(el => el.textContent), ['IB paper account · whole account', 'Cash']);
-  assert.equal(slot.querySelectorAll('[data-cell]').length, 1);
-  assert.equal(slot.querySelector('[data-cell="hero.account"] .account-caption').children[0].textContent, 'includes the kept holdings');
+  // JOED-156: the paper account, kept holdings included, and Cash are the whole-account block's, once.
+  const whole = htmlDocument(accountSkeleton());
+  assert.equal(whole.querySelector('#acctTitle .acct-wide').textContent, 'IB paper account · whole account');
+  assert.equal(whole.querySelector('.acct-chip.keep').textContent, 'incl. kept holdings');
+  assert.equal(htmlDocument(cashPart(ctx.states.paperCash)).querySelectorAll('[data-cash="acct.cash"]').length, 1);
+  assert.doesNotMatch(heroLeft(ctx), /data-cash=|hero\.account/, 'neither is a desk figure');
 });
 
-test('separate Cash figure preserves exact values and keeps unavailable wording inside its caption', () => {
-  const ctx = context();
+// JOED-49's Cash on Desk is the whole account's (JOED-156): two decimals, the
+// broker's exact lexeme in the name, and Desk's dash rules for every state.
+test('Desk’s Cash, in the whole account, preserves exact values and keeps unavailable wording beside its dash', () => {
   for (const cash of [
     cell('12345.67890123'), cell('12345.67890123', { state: 'stale', reason: 'snapshot_stale' }),
     cell(null, { state: 'not reported', reason: 'feed_not_received' }),
@@ -127,39 +133,37 @@ test('separate Cash figure preserves exact values and keeps unavailable wording 
     cell(null, { state: 'broken', reason: 'not_exact_yet' }),
     cell('12345.67890123', { state: 'broken', retained: true, reason: 'gateway_unconfirmed' }),
   ]) {
-    ctx.states.paperCash = cash;
-    const html = accountSlot(ctx), doc = htmlDocument(html), figure = doc.querySelector('.cash-kpi');
-    const actual = figure.querySelector('[data-cash="hero.cash"]');
-    assert.equal(figure.querySelector('.cash-caption .cash-description').textContent, 'cash · as the broker reports it');
-    assert.equal(actual.getAttribute('aria-label'), actual.getAttribute('title'));
-    const hasValue = Boolean(cash.value && !cash.retained), caption = figure.querySelector('.cash-caption .cash-reason');
-    assert.equal(figure.querySelector('.cash-amount').textContent, hasValue ? '€ 12.345,68' : '—');
-    assert.equal(Boolean(figure.querySelector('.cash-amount.muted')), !hasValue);
-    const plain = actual.textContent.replace(/\s+/g, ' ').trim();
-    const captionText = figure.querySelector('.cash-caption').textContent.replace(/\s+/g, ' ').trim();
-    assert.equal(plain, `${hasValue ? '€ 12.345,68' : '—'} ${captionText}`, 'value and caption stay separate even while the Account body is collapsed');
-    const reasonText = caption.textContent.trim();
-    assert.equal(captionText, `cash · as the broker reports it${reasonText ? ` ${reasonText}` : ''}`);
-    assert.equal(figure.querySelector('.cash-caption.c'), figure.querySelector('.cash-reserve'), 'the description and reason share the reserved caption block');
-    assert.equal(figure.querySelector('.cash-caption').children.filter(n => typeof n !== 'string').length, 2, 'the fixed caption block needs no hidden sizing paragraphs');
-    assert.equal(figure.querySelectorAll('.cash-sizing').length, 0);
-    // JOED-148: a not-exact Cash is named like every other not-exact dash.
-    if (!hasValue && cash.reason === 'not_exact_yet') {
-      assert.equal(caption.textContent, 'not exact');
-      assert.equal(actual.getAttribute('aria-label'), 'Cash: not exact');
-    } else if (!hasValue) assert.match(caption.textContent, /^not reported · .+/);
-    if (cash.reason === 'gateway_unconfirmed') assert.match(caption.textContent, /broker connection not confirmed/);
-    if (cash.reason === 'snapshot_stale') assert.match(caption.textContent, /updates are late/);
+    const doc = htmlDocument(cashPart(cash)), actual = doc.querySelector('[data-cash="acct.cash"]');
+    const hasValue = Boolean(cash.value && !cash.retained), why = cash.reason ? cellReason(cash.reason) : null;
+    const plain = actual.textContent.replace(/\s+/g, ' ').trim(), name = actual.getAttribute('aria-label');
+    assert.equal(name, actual.getAttribute('title'));
+    assert.equal(actual.dataset.state, cash.state);
+    assert.equal(actual.querySelector('b').textContent, hasValue ? '€\u00a012.345,68' : '—', 'two decimals, one unit, or a dash (an outage’s kept Cash is withheld)');
+    assert.equal(Boolean(actual.querySelector('b.muted')), !hasValue);
+    if (hasValue) {
+      assert.equal(plain, `Cash € 12.345,68${why ? ` · ${why}` : ''}`);
+      assert.equal(name, `Cash: EUR 12345.67890123${why ? ` · ${why}` : ''}`, 'the broker’s exact lexeme');
+    } else if (cash.reason === 'not_exact_yet') {
+      // JOED-148: a not-exact Cash is named like every other not-exact dash.
+      assert.equal(plain, 'Cash — · not exact');
+      assert.equal(name, 'Cash: not exact');
+    } else {
+      assert.equal(plain, `Cash — · not reported · ${why}`);
+      assert.equal(name, `Cash not reported · ${why}`);
+    }
+    if (cash.reason === 'gateway_unconfirmed') assert.match(plain, /broker connection not confirmed/);
+    if (cash.reason === 'snapshot_stale') assert.match(plain, /updates are late/);
   }
 });
 
-test('omitted Cash is a muted dash with the missing-data explanation in the caption', () => {
+test('omitted Cash is a muted dash with the missing-data explanation beside it', () => {
   const ctx = context();
   delete ctx.states.paperCash;
-  const figure = htmlDocument(accountSlot(ctx)).querySelector('.cash-kpi');
-  assert.equal(figure.querySelector('.cash-amount.muted').textContent, '—');
-  assert.equal(figure.querySelector('.cash-caption .cash-reason').textContent, 'not reported · no data received yet');
-  assert.equal(figure.querySelector('[data-cash]').getAttribute('aria-label'), 'Cash not reported · no data received yet');
+  const figure = htmlDocument(cashPart(ctx.states.paperCash)).querySelector('[data-cash="acct.cash"]');
+  assert.equal(figure.querySelector('b.muted').textContent, '—');
+  assert.equal(figure.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported · no data received yet');
+  assert.equal(figure.getAttribute('aria-label'), 'Cash not reported · no data received yet');
+  assert.equal(figure.dataset.state, 'not reported');
 });
 
 // The fixture's open desk positions, as the fresh positions panel lists them.
@@ -168,19 +172,13 @@ test('AC-19 supporting captions and Cash explanation survive phone separator typ
   const ctx = context();
   delete ctx.states.paperCash;
   for (const joinDot of [false, true]) {
-    const hero = htmlDocument(heroLeft(ctx)), doc = htmlDocument(accountSlot(ctx));
-    const captions = [...hero.querySelectorAll('.kpi'), ...doc.querySelectorAll('.kpi')].map(figure => {
-      const cash = figure.querySelector('.cash-caption');
-      const caption = cash?.querySelector('.cash-description') ?? figure.querySelector('.account-caption').children[0];
-      return joinUnits(caption.textContent, { joinDot });
-    });
-    const reason = joinUnits(doc.querySelector('.cash-caption .cash-reason').textContent, { joinDot });
-    assert.deepEqual(copyText(captions), [`${positionCount(ctx)}\u00a0position · changes until they close`, `started with ${eur(STARTING_MONEY, false, 0)} on 10\u00a0Sep`, 'includes the kept holdings', 'cash · as the broker reports it']);
+    const hero = htmlDocument(heroLeft(ctx)), cash = htmlDocument(cashPart(ctx.states.paperCash));
+    const captions = [...hero.querySelectorAll('.kpi')].map(figure => joinUnits(figure.querySelector('.account-caption').children[0].textContent, { joinDot }));
+    // Cash's explanation, in the whole account's line above the hero (JOED-156).
+    const reason = joinUnits(cash.querySelector('[data-cash]').textContent.replace(/\s+/g, ' ').trim().replace(/^Cash — · /, ''), { joinDot });
+    assert.deepEqual(copyText(captions), [`${positionCount(ctx)}\u00a0position · changes until they close`, `started with ${eur(STARTING_MONEY, false, 0)} on 10\u00a0Sep`]);
     assert.equal(copyText(reason), 'not reported · no data received yet');
-    if (joinDot) {
-      assert.match(captions[3], /cash\u00a0·/);
-      assert.match(reason, /reported\u00a0·/);
-    }
+    if (joinDot) assert.match(reason, /reported\u00a0·/);
   }
 });
 
@@ -190,7 +188,6 @@ test('shared stale captions appear once, with local subtle state icons intact', 
   assert.doesNotMatch(doc.querySelector('.say').textContent, /updates are late/);
   assert.equal(doc.querySelector('[data-cell="hero.since"] .account-caption').children[0].textContent, '');
   assert.equal(doc.querySelectorAll('.cell-state').length, 4);
-  assert.equal(htmlDocument(accountSlot(ctx)).querySelectorAll('.cell-state').length, 1, 'the account figure keeps its own subtle icon in the slot');
   for (const id of ['j', 'joe', 'joel']) {
     const c = htmlDocument(deskCard(ctx, id));
     assert.equal(c.querySelectorAll('.cell-state').length, 3);

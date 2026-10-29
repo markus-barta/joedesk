@@ -2099,20 +2099,16 @@ visible collapsed summaries first, then opens the disclosures and checks each
 body and its rows; expanded and collapsed geometry checks remain. Execution
 belongs to agm2 CI.
 The hero keeps its primary results, sentence and board caption on the left,
-with the clock and chart on the right. Open positions, Desks’ money, Paper
-account and Cash share one row below both columns above 1180 px; at 701–1180 px
-they form a 2×2 grid. The chart fills the primary area's height, removing the
+with the clock and chart on the right. Its supporting figures (Open result and
+Desks’ money since JOED-153; the paper account and Cash are the whole-account
+block's above the hero since JOED-156, below) share one row below both columns
+above 1180 px. The chart fills the primary area's height, removing the
 empty right column. At 481–700 px the order stays primary results, secondary
-figures (Cash below Paper account), then clock and chart. Cash keeps its exact
-broker lexeme in its title/accessibility name, its independent missing/stale
-reason and a state-independent reserve; Settings keeps its existing cash layout.
+figures, then clock and chart. Settings keeps its existing cash layout.
 Each secondary cell reserves five 16 px caption lines (eight on phones) inside
-the cell, with a 20 px label and a 28 px value row. Cash's broker caption uses
-the first two reserved lines; the same `.cash-caption` contains
-“not reported · no data received yet” (or its own reason) below the broker
-description when Cash is a muted em dash. AC-19 compares the four supporting
-captions through the shared copy normalizer, preserving the phone's nonbreaking
-space before middle dots; its Cash reason selector stays inside the caption.
+the cell, with a 20 px label and a 28 px value row. AC-19 compares the
+supporting captions through the shared copy normalizer, preserving the phone's
+nonbreaking space before middle dots.
 The fixed 80 px caption block (128 px on phones) remains state-independent. The hero
 has no reserved card height. Fix 4 removes Cash's hidden sizing paragraphs:
 the more-specific `.kpi .c` block display had defeated their grid overlap and
@@ -2124,10 +2120,37 @@ These are CSS estimates; browser height and zero-shift verification stay in CI.
 Desk check-ins stay on one line. A long status yields with an ellipsis and a
 complete native title; cards below 340 px retain the check-in on the name row.
 
+Desk's whole account (JOED-156: `account.js`, `account-model.js`,
+`account-worker.js`) fills JOED-153's slot above the desk hero, its own card:
+the IB paper account incl. kept holdings (`brokerAccount.equity`, EUR) as
+Desk's largest number, its change for the chosen range, Since start from the
+Settings account start, Cash, and the kept holdings each in its own currency
+(display only, never actionable). A value that is not current and exact
+states its own state in the block's change line; the desk hero's board
+caption covers the desk figures. Cash is Desk's Cash figure (JOED-49) in the
+block's “Since start · Cash” line, as designed (“Cash € 4.212,77”; Settings
+keeps the caption “cash · as the broker reports it”): two decimals, the
+broker's exact lexeme in its title and accessible name, a missing Cash a
+muted dash with “not reported · ‹reason›” (“no data received yet” when none
+came), a not-exact one “not exact” (JOED-148) and an outage's kept Cash
+withheld (JOED-91); a reason the account value shares is said once, in the
+change line. On a phone the block stays open, first on the screen (no
+collapsed section): the value, the change, one Since start · Cash line,
+Account details (the kept holdings, the start), the ranges and a 120 px
+chart. Its link to the account start is a plain route link
+(`#settings/set-account`); its chart reads the account history in a module
+worker; its first-visit hint is every chart's (`chartHintSeen`,
+`dismissChartHint`). P3 reads the block where it read the slot: AC-9's paper
+account, AC-19's title, chip and unreported Cash, the fixtures' and journeys'
+account state and change line, the phone first screen and the outage counts;
+P5's Cash phases read its line.
+
 JOED-79 changes only Desk at widths up to 480 px. The first screen contains
 the existing header status control and reserved red/yellow problem line,
-Today and Since start with euros and percentages, the one-line Today summary,
-and three ranked desk rows. Each row retains its desk mark, name, state word,
+then (since JOED-156) the whole account, open, above the bottom navigation;
+Today and Since start with euros and percentages, the one-line Today summary
+and three ranked desk rows follow it (P3 keeps the 1600 px collapsed page
+budget for everything below the whole account). Each row retains its desk mark, name, state word,
 Today and Since start euros, tones and state markers. Tapping it exposes the
 original complete card, including action, all three figures, chart and learning.
 The Account figures, today's clock/chart, Positions and Kept holdings have
@@ -2403,7 +2426,7 @@ until you set it.” Missing/corrupt/unreadable storage has an additional explan
 The form preserves a failed save's draft and asks for a refresh before retrying.
 Fleet policy keeps its existing separate review and propagation flow.
 
-The forthcoming Desk hero can import `accountStart()` from
+Desk's whole-account block (JOED-156) imports `accountStart()` from
 `public/joe/board-settings.js` to get a defensive `{amountEur,date}` copy or null.
 `onBoardSettingsChange(callback)` adds an independent listener and returns its
 unsubscribe function, so Settings and the hero can both subscribe. This page

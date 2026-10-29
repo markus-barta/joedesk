@@ -60,7 +60,7 @@ const HISTORY = (() => { const w = {}; new Function('window', readFileSync(new U
 const SECTION_IDS = ['set-mode', 'set-runtime', ...M.GROUPS.map(g => `set-${g.id}`), 'set-how', 'set-source', 'set-log', 'set-appearance', 'set-about'];
 const DESKTOP = VIEWPORTS.filter(v => !v.mobile);
 const PHONE = VIEWPORTS.find(v => v.mobile);
-const READS = ['/joe/state.json', '/joe/history.json', '/joe/results.json', '/joe/fleet-config.json', '/joe/fleet-config/actions.json'];
+const READS = ['/joe/state.json', '/joe/history.json', '/joe/account-history.json', '/joe/results.json', '/joe/fleet-config.json', '/joe/fleet-config/actions.json'];
 const PROPAGATE = '/joe/fleet-config/propagate';
 
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
@@ -379,7 +379,7 @@ try {
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
       shots.push({ file: `${name}.png`, what: `Rev-9 desk values not exact: ${name}` });
     };
-    const boxes = ['header.top', '.top-in > :not(nav)', '#hdrHealth .lbl', '#hdrHealth b', '#statusAlert', '#accountSlot', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .spark'];
+    const boxes = ['header.top', '.top-in > :not(nav)', '#hdrHealth .lbl', '#hdrHealth b', '#statusAlert', '#acctHero', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .spark'];
     for (const viewport of [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }]) for (const theme of THEMES) {
       const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b);
       b.setNow(base.generatedAt);
@@ -488,16 +488,20 @@ try {
         await configure(page, viewport, theme);
         await load(page, b.url, screen);
         if (screen === 'settings') await waitFor(page, `document.querySelector('#rtRows [data-cash="rt.cash"]')`);
-        // JOED-153: on Desk, Cash sits with the paper account in the whole-account slot above the hero.
-        const selector = screen === 'desk' ? '#accountSlot .cash-kpi' : '#rtRows .rt-row:last-child';
-        const cashKey = screen === 'desk' ? 'hero.cash' : 'rt.cash';
-        const surface = screen === 'desk' ? 'desk-hero-cash' : 'settings-account-cash';
-        // Cash now has its own Desk figure; track all four secondary cells too.
-        // Earlier Settings rows have independent state copy.
+        // JOED-156: on Desk, Cash is the whole account's (the block in JOED-153's
+        // slot above the hero), in its Since start · Cash line; a phone shows
+        // the short line, wider screens the long one.
+        const selector = screen === 'desk' ? '#acctHero' : '#rtRows .rt-row:last-child';
+        const cashKey = screen === 'desk' ? 'acct.cash' : 'rt.cash';
+        const surface = screen === 'desk' ? 'desk-account-cash' : 'settings-account-cash';
+        // The boxes around Cash: on Desk the whole account's rows (the line's
+        // text changes width inside its fixed box) and the desk hero below;
+        // in Settings the row, its reserve and the value.
         const measure = () => ev(`(() => {
           const parent = document.querySelector(${J(selector)}), p = parent.getBoundingClientRect();
-          const nodes = [parent, parent.querySelector('.cash-reserve'), parent.querySelector('[data-cash]')];
-          if (${J(screen)} === 'desk') nodes.push(...document.querySelectorAll('#accountSlot .kpi'), document.getElementById('accountSlot'), document.getElementById('deskHero'));
+          const nodes = ${J(screen)} === 'desk'
+            ? [parent, [...parent.querySelectorAll('.acct-sub')].find(__audit.visible), document.getElementById('acctValue'), document.getElementById('acctChange'), document.getElementById('acctChart'), document.getElementById('deskHero')]
+            : [parent, parent.querySelector('.cash-reserve'), parent.querySelector('[data-cash]')];
           return nodes.map((e, i) => { const r = e.getBoundingClientRect(); return { key: i, top: r.top - p.top, left: r.left - p.left, width: r.width, height: r.height }; });
         })()`);
         const baseline = await measure();
@@ -507,12 +511,13 @@ try {
           await ev('window.__joedesk.refresh().then(() => true)');
           await settle(page);
           const seen = await ev(`(() => {
-            const e = document.querySelector('[data-cash="${cashKey}"]'), parent = document.querySelector(${J(selector)});
+            const e = [...document.querySelectorAll('[data-cash="${cashKey}"]')].find(__audit.visible), parent = document.querySelector(${J(selector)});
             const r = e.getBoundingClientRect(), p = parent.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(e);
             const glyphs = [...range.getClientRects()].map(g => ({ left: g.left, right: g.right, top: g.top, bottom: g.bottom }));
             const cs = getComputedStyle(e);
-            return { text: e.innerText.trim(), label: e.closest('.cash-block').querySelector('.cash-label').innerText, caption: e.closest('.cash-block').querySelector('.cash-caption').innerText, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'),
-              section: [document.querySelector('#heroL .board-caption')?.innerText ?? '', document.querySelector('#accountSlot .account-slot-state')?.innerText ?? ''].join(' '),
+            const block = e.closest('.cash-block');
+            return { text: e.innerText.trim(), label: block?.querySelector('.cash-label').innerText ?? null, caption: block?.querySelector('.cash-caption').innerText ?? null, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'),
+              section: [document.querySelector('#heroL .board-caption')?.innerText ?? '', document.querySelector('#acctChange [data-clamp]')?.innerText ?? ''].join(' '),
               fits: glyphs.every(g => g.left >= p.left - 0.5 && g.right <= p.right + 0.5 && g.top >= p.top - 0.5 && g.bottom <= p.bottom + 0.5),
               clipped: e.scrollWidth > e.clientWidth || e.scrollHeight > e.clientHeight, style: cs.fontStyle,
               horizontal: __audit.horizontal(), clipping: __audit.clipping() };
@@ -522,28 +527,34 @@ try {
           const why = phase === 'stale' ? 'updates are late' : phase === 'session' ? 'broker connection not confirmed'
             : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact' : 'not reported by the broker';
           const brokerCaption = 'cash · as the broker reports it';
+          // On Desk a reason the account value shares (a stale snapshot, a lost
+          // session) is said once, in the whole account's change line.
           const shared = screen === 'desk' && ['stale', 'session'].includes(phase);
           // JOED-148: a not-exact Cash is named "not exact" like every other dash, on Desk and in Settings.
           const missing = phase === 'not-exact' ? 'not exact' : `not reported${shared ? '' : ` · ${why}`}`;
-          const cashState = hasValue ? phase === 'stale' && !shared ? `· ${why}` : '' : missing;
-          const caption = screen === 'desk' ? `${brokerCaption}${cashState ? ` ${cashState}` : ''}` : brokerCaption;
-          const expected = screen === 'desk' ? `${hasValue ? '€ 12.345,68' : '—'} ${caption}`
+          const cashState = hasValue ? phase === 'stale' && !shared ? ` · ${why}` : '' : ` · ${missing}`;
+          // Desk (the whole account's line, as designed): "Cash", the amount or a dash, its state. Settings: the account row's figure.
+          const expected = screen === 'desk' ? `Cash ${hasValue ? '€ 12.345,68' : '—'}${cashState}`
             : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'not exact' : `not reported · ${why}`;
           const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'Cash: not exact' : `Cash not reported · ${why}`;
-          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme and reason locally or once in the section`, N(seen.text) === expected && seen.label === 'Cash' && N(seen.caption) === caption && seen.title === exact && seen.name === exact && (!shared || seen.section.includes(why)) && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
+          const labelled = screen === 'desk' ? seen.label === null : seen.label === 'Cash' && N(seen.caption) === brokerCaption;
+          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme and reason locally or once in the section`, N(seen.text) === expected && labelled && seen.title === exact && seen.name === exact && (!shared || seen.section.includes(why)) && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
           check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
           const after = await measure();
           const moved = baseline.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== after[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: after[i]?.[k] })));
           check('paper-cash', `${tag}: cash and account boxes have exactly 0 px shift`, !moved.length, moved);
           if (screen === 'desk' && viewport.width <= 480) {
+            // The whole account is open on a phone, never a collapsed section:
+            // every non-green cash reason is in view, beside Cash or once in the change line.
             await setDeskDisclosures(page, false);
             const collapsed = await phoneDeskSnapshot(page).then(copyText);
-            const account = collapsed.controls.find(c => c.key === 'whole');
-            check('phone-first', `${tag}: collapsed Whole account carries every non-green cash reason`,
-              account.hidden && account.expanded === 'false' && (phase === 'value' || phase === 'recovered' || (Boolean(account.icon) && account.detail.includes(why))) && collapsed.horizontal.scroll <= collapsed.horizontal.inner, account);
+            const account = collapsed.account;
+            check('phone-first', `${tag}: the open whole account carries every non-green cash reason in view`,
+              !collapsed.controls.some(c => c.key === 'whole') && N(account?.cash?.text) === expected && account.cash.bottom <= collapsed.bottomBar.top &&
+              (phase === 'value' || phase === 'recovered' || N(`${account.cash.text} ${account.line ?? ''}`).includes(why)) && collapsed.horizontal.scroll <= collapsed.horizontal.inner, account);
             await setDeskDisclosures(page, true);
           }
-          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? '#accountSlot' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
+          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? '#acctHero' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
         }
       }
     }
@@ -572,9 +583,9 @@ try {
         check('phone-first', `${tag}: fresh panels with partial rows retain warnings and row reasons when collapsed`, sections.length === 2 && sections.every(c => c.hidden && Boolean(c.icon) && /not exact|not reported by the broker/.test(c.warning)), sections);
         await setDeskDisclosures(page, true);
       }
-      const figureSelectors = ['#accountSlot', '#deskHero', '#heroL .kpi', '#accountSlot .cash-reserve', '#desks', '.dcard'];
+      const figureSelectors = ['#acctHero', '#acctValue', '#acctChange', '#deskHero', '#heroL .kpi', '#desks', '.dcard'];
       const figureBoxes = await rects(figureSelectors);
-      const figures = () => ev(`({ values: [...document.querySelectorAll('#heroL .display, #heroL .kpi dd .bn, #heroL .kpi .c, #accountSlot .kpi dd .bn, #accountSlot [data-cash], .dcard .dnums .v')].map(e => e.innerText), count: document.getElementById('posSub').innerText })`);
+      const figures = () => ev(`({ values: [...document.querySelectorAll('#heroL .display, #heroL .kpi dd .bn, #heroL .kpi .c, #acctValue, #acctHero [data-cash], .dcard .dnums .v')].map(e => e.innerText), count: document.getElementById('posSub').innerText })`);
       const before = await figures();
       snapshot.seq++;
       snapshot.positions.rows.unshift({ ...structuredClone(unmapped), updatedAt: NOW });

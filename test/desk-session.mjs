@@ -16,6 +16,8 @@ const { TERMS } = await import('../public/joe/terms.js');
 const { eur } = await import('../public/joe/format.js');
 const { STARTING_MONEY, percentOf, todayBase, todayPercent, exactCell } = await import('../public/joe/performance.js');
 const desk = await import('../public/joe/desk.js');
+// JOED-156: the whole-account block that fills the slot above the hero.
+const account = await import('../public/joe/account.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { dayWarning } = await builders('results.js', ['dayWarning']);
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url))).data;
@@ -380,15 +382,17 @@ test('JOED-153 M3: the day bar places New York’s day, the session (early close
   assert.ok(weekend.textContent.includes('no session today'));
 });
 
-test('JOED-153 slot: the whole-account block’s place above the hero, marked for it, with the account’s own figures until then', () => {
+test('JOED-153 slot, filled by JOED-156: the whole-account block above the hero, with the paper account and Cash once', () => {
   const html = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8');
-  const desk0 = html.indexOf('id="scr-desk"'), slot = html.indexOf('id="accountSlot"'), hero = html.indexOf('id="deskHero"');
-  assert.ok(desk0 < slot && slot < hero, 'the slot sits above the desk hero');
-  assert.match(html.slice(desk0, slot), /<!-- JOED-156 slot: the whole-account block/);
-  const doc = htmlDocument(desk.accountSlot(context()));
-  assert.equal(doc.querySelector('[data-cell="hero.account"] .bn').textContent, '€28.000,00');
-  assert.equal(doc.querySelectorAll('[data-cash="hero.cash"]').length, 1);
-  assert.equal(doc.querySelectorAll('.card').length, 0, 'the interim figures are no card of their own (AC-44)');
+  const desk0 = html.indexOf('id="scr-desk"'), slot = html.indexOf('id="acctHero"'), eyebrow = html.indexOf('id="desksEyebrow"'), hero = html.indexOf('id="deskHero"');
+  assert.ok(desk0 < slot && slot < eyebrow && eyebrow < hero, 'the whole account, the desks’ eyebrow, then the desk hero');
+  assert.match(html.slice(desk0, slot), /<!-- JOED-156 fills JOED-153's slot: the whole-account block/);
+  assert.ok(!html.includes('id="accountSlot"'), 'the interim figures are retired');
+  assert.equal(desk.accountSlot, undefined, 'desk.js renders no second copy');
+  const ctx = context();
+  assert.equal(htmlDocument(account.valueHtml(ctx.states.paperAccount)).querySelector('.bn').textContent, '€28.000,00');
+  assert.equal(htmlDocument(account.subParts(ctx, null, { reason: 'missing' }).wide).querySelectorAll('[data-cash="acct.cash"]').length, 1);
+  assert.doesNotMatch(desk.heroLeft(ctx), /data-cash=|hero\.account/, 'neither is a desk figure');
   assert.equal(desk.desksEyebrow().includes('kept holdings left out'), true);
 });
 
@@ -569,7 +573,7 @@ test('JOED-153 M4 touch: first tap shows the tip, a second tap or its link opens
 
 // Gate finding 7: P3's Desk checks must read the page as it now is. On the
 // design scenario the page's own render passes AC-9 (the paper account is the
-// whole-account slot's first figure, no longer a hero figure) and writes its
+// whole-account block's value above the hero, JOED-156) and writes its
 // percentages exactly as the check expects them (with the no-break space).
 test('JOED-153 browser checks: AC-9 and the percent text hold on the page’s own render of the P3 design scenario', async () => {
   const { keptOnlyInAccount, percentText } = await import('../scripts/browser/desk-checks.mjs');
@@ -577,9 +581,9 @@ test('JOED-153 browser checks: AC-9 and the percent text hold on the page’s ow
   const { snapshot } = scenario(P3_NOW);
   const now = at(P3_NOW, 9), feeds = { data: { value: preflightSnapshot('data', snapshot, null, P3_NOW).value }, results: { value: null, reason: 'feed_not_received' } };
   const ctx = { feeds, now, states: boardStates(feeds, now) };
-  const hero = htmlDocument(desk.heroLeft(ctx)), slot = htmlDocument(desk.accountSlot(ctx)), kept = htmlDocument(desk.keptHtml(ctx));
+  const hero = htmlDocument(desk.heroLeft(ctx)), whole = htmlDocument(account.valueHtml(ctx.states.paperAccount)), kept = htmlDocument(desk.keptHtml(ctx));
   const value = k => (k.querySelector('dd .bn') ?? k.querySelector('.cash-amount'))?.textContent;
-  const d = { kpis: hero.querySelectorAll('.kpi').map(k => ({ value: value(k) })), slot: slot.querySelectorAll('.kpi').map(k => ({ value: value(k) })),
+  const d = { kpis: hero.querySelectorAll('.kpi').map(k => ({ value: value(k) })), account: { value: whole.querySelector('.bn').textContent },
     keptCap: text(kept.querySelector('.keep-cap')), keptState: text(kept.querySelector('.pstate')) };
   assert.equal(d.kpis.length, 2, 'the hero keeps Open result and Desks’ money only');
   assert.equal(keptOnlyInAccount(d), true, JSON.stringify(d));

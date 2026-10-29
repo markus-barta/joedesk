@@ -7,7 +7,9 @@ import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
 import { cashSessionSnapshot, designSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { preflightSnapshot } from '../scripts/browser/board.mjs';
-const { compactDesk, disclosureProblem, rowProblems, syncDeskDisclosures, toggleDeskDisclosure, heroLeft, accountSlot } = await import('../public/joe/desk.js');
+const { compactDesk, disclosureProblem, rowProblems, syncDeskDisclosures, toggleDeskDisclosure, heroLeft } = await import('../public/joe/desk.js');
+// JOED-156: the whole-account block fills the slot above the hero.
+const A = await import('../public/joe/account.js');
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const cell = (state, reason = null, value = null, retained = false) => ({ state, reason, value, retained });
 function context() {
@@ -59,19 +61,27 @@ test('one-line summaries expose every independent reason in the accessible butto
   assert.doesNotMatch(accessible.textContent, /Paper account|Cash/);
 });
 
-test('the slot above the hero states the whole account’s own figures in place, with their reasons', () => {
+test('the whole account above the hero states its own figures in place, with their reasons, open on a phone', () => {
   const ctx = context();
   ctx.states.paperAccount = cell('stale', 'snapshot_stale', { amount: '12.34', currency: 'EUR' });
   ctx.states.paperCash = cell('broken', 'gateway_unconfirmed');
-  const slot = htmlDocument(accountSlot(ctx));
-  assert.equal(slot.querySelector('[data-cell="hero.account"]').dataset.state, 'stale');
-  assert.match(slot.querySelector('[data-cell="hero.account"] .cell-state').getAttribute('aria-label'), /^Stale · updates are late/);
-  assert.match(slot.querySelector('.cash-reason').textContent, /not reported · broker connection not confirmed/);
-  // On a phone the slot is one collapsed section; its one-line summary keeps every reason.
-  const control = slot.querySelector('[data-desk-disclosure="whole"]');
-  assert.equal(control.getAttribute('aria-controls'), 'wholeDetail');
-  const accessible = control.querySelector('.vh').textContent;
-  for (const label of ['Paper account: stale', 'Cash: unavailable']) assert.ok(accessible.includes(label), label);
+  // The value keeps its own state words: never shown as current.
+  const value = htmlDocument(A.valueHtml(ctx.states.paperAccount)).querySelector('.bn');
+  assert.equal(value.textContent, '€12,34');
+  const state = A.stateLine(ctx.states.paperAccount);
+  assert.equal(state.tone, 'warn');
+  assert.match(state.text, /updates are late/);
+  // Cash keeps its own reason beside its dash, in the phone's Since start · Cash line too.
+  const parts = A.subParts(ctx, null, { reason: 'missing' });
+  for (const html of [parts.wide, parts.narrow]) {
+    const cash = htmlDocument(html).querySelector('[data-cash="acct.cash"]');
+    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported · broker connection not confirmed');
+    assert.equal(cash.getAttribute('aria-label'), 'Cash not reported · broker connection not confirmed');
+    assert.equal(cash.dataset.state, 'broken');
+  }
+  // On a phone the block is open, no collapsed section of its own: the
+  // problems sit in place, on the first screen (the P3 phone-first checks).
+  assert.equal(htmlDocument(A.accountSkeleton()).querySelectorAll('[data-desk-disclosure]').length, 0);
 });
 
 test('cash session fixture passes real ingress while preserving desk content and withholding current money', () => {
@@ -111,14 +121,14 @@ test('fresh position panels expose null-field and unmatched-desk problems in the
   assert.deepEqual(rowProblems(cell('broken')), []);
 });
 
-test('missing Cash keeps the figure’s default reason in the slot above the hero', () => {
+test('missing Cash keeps the figure’s default reason in the whole account above the hero', () => {
   const ctx = context();
   for (const absent of [undefined, cell('not reported')]) {
     ctx.states.paperCash = absent;
-    const doc = htmlDocument(accountSlot(ctx));
-    assert.equal(doc.querySelector('.cash-amount').textContent, '—');
-    assert.match(doc.querySelector('.cash-reason').textContent, /^not reported · no data received yet$/);
-    assert.equal(doc.querySelector('[data-cash="hero.cash"]').getAttribute('aria-label'), 'Cash not reported · no data received yet');
+    const cash = htmlDocument(A.subParts(ctx, null, { reason: 'missing' }).narrow).querySelector('[data-cash="acct.cash"]');
+    assert.equal(cash.querySelector('b.muted').textContent, '—');
+    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported · no data received yet');
+    assert.equal(cash.getAttribute('aria-label'), 'Cash not reported · no data received yet');
     assert.doesNotMatch(heroLeft(ctx), /data-cash=/, 'Cash is not a desk figure');
   }
 });

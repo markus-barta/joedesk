@@ -7,6 +7,7 @@ import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitSta
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure, initBarTaps } from './desk.js';
+import { initAccount, renderAccount } from './account.js';
 import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput, initHistoryControls, historyQuery, readHistoryRoute } from './history.js';
 import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsUrl } from './results.js';
 import { boardHealthPresentation } from './health.js';
@@ -55,6 +56,7 @@ function start() {
   document.fonts.addEventListener('loadingdone', queueHeaderFit);
   fitHeader();
   trapDialogs();
+  initAccount();
   const events = createObservedEvents();
   let lastData = null, frame = 0, pending = null, dirtyHistory = true;
   const feed = createFeed(kind => {
@@ -114,7 +116,8 @@ function start() {
     const data = ctx.feeds.data?.value ?? null;
     if (data && data !== lastData) { guard('events', () => events.observe(data)); lastData = data; }
     guard('header', () => renderHeader(ctx));
-    if (screen === 'desk') guard('desk', () => renderDesk(ctx));
+    // Desk's whole account (JOED-156) renders first, in the slot above the desk hero.
+    if (screen === 'desk') { guard('account', () => renderAccount(ctx)); guard('desk', () => renderDesk(ctx)); }
     // History's address names its preset, desks and measure: a correction in
     // place (no history entry), never over an address still waiting for follow().
     if (screen === 'history') {
