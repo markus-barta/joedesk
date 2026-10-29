@@ -40,7 +40,7 @@ jobs:
         run: |
           docker run --rm --network none --tmpfs /var/lib/joe-board \
             -v "$PWD:/repo:ro" -w /repo node:22@sha256:0e5f906573693feaa1e21057ebdcfdb5bd5021f050b2dc7c9deceb629c7da2a8 \
-            node --test --test-concurrency=2 test/server-contract.mjs
+            node --test --test-concurrency=2 test/server-contract.mjs test/account-history.mjs test/account-history-endpoint.mjs
       - name: Release preparation, staged migration, smoke and SSO negatives (UTC)
         env:
           TZ: UTC

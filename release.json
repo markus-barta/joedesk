@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261029075623.0.0",
+  "version": "261029192345.0.0",
   "release_channel": "stable",
-  "release_sequence": 38,
+  "release_sequence": 39,
   "status": "candidate",
-  "note": "Sweeps 2 and 3: KEEP changes enforced at once, robust feeds and settings, truthful positions, accessible Results, clickjacking protection (JOED-123, JOED-135)"
+  "note": "Board redesign: whole-account chart, History minimap and natural zoom, session-dated Desk, Results redesign, honest reasons and quieter board (JOED-144)"
 }

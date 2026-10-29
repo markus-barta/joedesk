@@ -76,7 +76,7 @@ for (const phase of ['fetch', 'body']) test(`JOED-130 page ${phase} deadlines re
   await turn();
   assert.equal(refreshed, false, 'overlapping refresh waits for the active attempts');
   assert.equal(actionsFinished, false);
-  assert.equal(calls.length, 5, 'one attempt per feed, including state from manual refresh');
+  assert.equal(calls.length, 6, 'one attempt per feed and the continuity sidecar, including state from manual refresh');
   assert.ok(calls.every(call => call.signal instanceof AbortSignal), 'every read supplies an abort signal');
   clock.expire();
   await turn();
@@ -122,7 +122,7 @@ for (const phase of ['fetch', 'body']) test(`JOED-130 actual worker ${phase} dea
   const overlap = feed.refresh();
   await turn();
   assert.equal(finished, false);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.ok(calls.every(call => call.signal instanceof AbortSignal));
   clock.expire();
   await Promise.all([pending, overlap]);
@@ -185,7 +185,7 @@ test('JOED-130 timeouts retain warm values and ignore late bodies before a clean
   hanging = true;
   const pending = feed.refresh();
   await turn();
-  assert.equal(clock.deadlines.size, 4, 'all warm reads have a deadline');
+  assert.equal(clock.deadlines.size, 5, 'all warm reads and provenance have a deadline');
   clock.advance(15000);
   clock.expire();
   await pending;

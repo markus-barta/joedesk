@@ -1,21 +1,22 @@
 // JoeDesk shell: navigation, theme, the header light, the footer and one
-// render per animation frame. A read-only paper board: the one request that
-// changes anything is a reviewed paper draft of the fleet settings, sent only
-// from Settings (fleet-write.js).
+// render per animation frame. Settings saves reviewed paper fleet drafts and
+// board display values through separate authenticated routes.
 import { isCanonicalJoeHost } from './host.js';
+import { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute, onAddress, writeRoute, createPlaces } from './route.js';
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
-import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure } from './desk.js';
-import { renderHistory, historyChart, HS } from './history.js';
-import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
+import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure, initBarTaps } from './desk.js';
+import { initAccount, renderAccount } from './account.js';
+import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput, initHistoryControls, historyQuery, readHistoryRoute } from './history.js';
+import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsUrl } from './results.js';
 import { boardHealthPresentation } from './health.js';
+import { sinceStarts } from './performance.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { initSettings, renderSettings, showSection, SECTIONS as SETTINGS_SECTIONS } from './settings.js';
 import { NB, joinUnits } from './format.js';
 import { initVersionDisplay } from './version-display.js';
 
-const SCREENS = ['desk', 'results', 'history', 'settings'];
 const root = document.documentElement;
 let screen = 'desk';
 const timings = [];
@@ -30,15 +31,19 @@ if (!isCanonicalJoeHost(location.hostname)) {
 }
 
 function start() {
-  // CSS shrinks only the brand before any essential item. Hide an incomplete
-  // wordmark, then tighten gaps if even the icon-only row needs more room.
-  // Visibility never changes sizes, so observing the result cannot oscillate.
-  const header = $('.top-in'), word = header.querySelector('.brand .word'), wordText = word.firstElementChild;
+  // The header keeps one row. While its last control, the theme button, does
+  // not fit, add the next step (app.css: the wordmark goes, the nav drops its
+  // icons, gaps tighten, the nav keeps only its icons, then the light may
+  // narrow), keeping the earlier ones. Each pass starts from none, and only
+  // the viewport and the fonts decide the steps, never the light's words, so
+  // no tick or state change moves the header and refitting cannot oscillate.
+  const header = $('.top-in'), themeBtn = $('#themeBtn');
+  const FIT = ['word', 'labels', 'tight', 'icons', 'squeeze'];
+  const overflows = () => themeBtn.getBoundingClientRect().right > header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight) + 0.02;
   const fitHeader = () => {
-    header.removeAttribute('data-tight');
-    const row = header.getBoundingClientRect(), css = getComputedStyle(header);
-    if ($('#themeBtn').getBoundingClientRect().right > row.right - parseFloat(css.paddingRight) + 0.02) header.setAttribute('data-tight', '');
-    word.style.visibility = wordText.getBoundingClientRect().width > word.getBoundingClientRect().width + 0.02 ? 'hidden' : '';
+    let steps = 0;
+    header.dataset.fit = '';
+    while (steps < FIT.length && overflows()) header.dataset.fit = FIT.slice(0, ++steps).join(' ');
     fitStatusLine($('#hdrHealth'), $('#statusAlert'));
   };
   // Apply size changes in the next frame, outside ResizeObserver delivery.
@@ -47,25 +52,27 @@ function start() {
     if (!headerFrame) headerFrame = requestAnimationFrame(() => { headerFrame = 0; fitHeader(); });
   };
   const headerFit = new ResizeObserver(queueHeaderFit);
-  for (const el of [header, word, wordText, $('#hdrHealth'), header.querySelector('.nav')]) headerFit.observe(el);
+  for (const el of [header, $('#modeLabel'), header.querySelector('.brand .word > span'), header.querySelector('.nav'), $('#hdrHealth')]) headerFit.observe(el);
   document.fonts.addEventListener('loadingdone', queueHeaderFit);
   fitHeader();
   trapDialogs();
+  initAccount();
   const events = createObservedEvents();
-  let lastData = null, frame = 0, pending = null, dirtyHistory = true, panning = false;
+  let lastData = null, frame = 0, pending = null, dirtyHistory = true;
   const feed = createFeed(kind => {
     if (kind === 'history') dirtyHistory = true;
     schedule(kind);
   }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, globalThis.JoeVersion.APP_VERSION,
   { actionsWanted: () => screen === 'settings' });
-  const tips = initTips({ now: () => feed.now() });
+  const tips = initTips({ now: () => feed.now(), since: () => sinceStarts(feed.feeds) });
+  initBarTaps();
   // Read-only: fetches the same three reads now instead of at the next poll.
   window.__joedesk.refresh = () => feed.refresh();
   window.__joedesk.worker = () => feed.usesWorker();
 
   // Every render has a selection: before the server's clock is known, each
   // panel still shows its own state and reason, and nothing needs an age.
-  const context = () => ({ ...feed.select(), events, panning: () => panning });
+  const context = () => ({ ...feed.select(), events });
 
   function guard(name, fn) {
     try { return fn(); } catch (error) {
@@ -109,12 +116,17 @@ function start() {
     const data = ctx.feeds.data?.value ?? null;
     if (data && data !== lastData) { guard('events', () => events.observe(data)); lastData = data; }
     guard('header', () => renderHeader(ctx));
-    if (screen === 'desk') guard('desk', () => renderDesk(ctx));
+    // Desk's whole account (JOED-156) renders first, in the slot above the desk hero.
+    if (screen === 'desk') { guard('account', () => renderAccount(ctx)); guard('desk', () => renderDesk(ctx)); }
+    // History's address names its preset, desks and measure: a correction in
+    // place (no history entry), never over an address still waiting for follow().
     if (screen === 'history') {
       const moved = guard('history', () => renderHistory(ctx))?.redraw;
       if (moved || dirtyHistory || !['tick', 'results'].includes(reason)) { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }
+      writeRoute('history', historyQuery());
     }
-    if (screen === 'results') guard('results', () => renderResults(ctx));
+    // Results' address follows its view once a link is applied (a correction; README: Results deep links).
+    if (screen === 'results') { const url = guard('results', () => renderResults(ctx)); if (url) writeRoute('results', parseRoute(url).query); }
     if (screen === 'settings') guard('settings', () => renderSettings(ctx));
     window.__joedesk.renders++;
     if (reason !== 'tick') {
@@ -129,21 +141,67 @@ function start() {
     const why = reason;
     frame = requestAnimationFrame(() => { const r = pending ?? why; pending = null; render(r); });
   }
-  function go(next, anchor) {
-    if (!SCREENS.includes(next)) next = 'desk';
+  // Every way onto a screen ends here (route.js). The reader's own navigation
+  // (push) adds a history entry; the first load, Back and Forward only
+  // correct the address. Each entry keeps the reader's place (createPlaces,
+  // which makes every history call within one budget): saved while reading
+  // and on every departure, restored on return and after a reload. The
+  // address keeps the screen and its query, which the screen's route reader
+  // gets before it renders; an anchor only scrolls.
+  let shown = { screen, query: '' };
+  window.__joedesk.route = () => ({ ...shown });
+  const places = createPlaces(window);
+  addEventListener('scroll', places.scrolled, { passive: true });
+  addEventListener('scrollend', places.scrolled);
+  addEventListener('pagehide', places.flush);
+  // The reader's own scrolling ends a return still waiting for the page to grow.
+  for (const type of ['wheel', 'touchstart', 'keydown', 'mousedown']) addEventListener(type, places.abandon, { passive: true });
+  // The one address path: go() and a shown screen writing its own query
+  // (route.js writeRoute) take the same history step through the same places,
+  // so every write counts against the one budget.
+  function address(target, push) {
+    try {
+      const step = historyStep(location.hash, target, push), url = `${location.pathname}${location.search}${routeHash(target)}`;
+      if (step === 'push') { if (!places.push(url)) places.step(); } else if (step === 'replace') places.replace(url);
+    } catch { places.step(); /* file or sandboxed context: keep the entry it is on */ }
+    shown = target;
+  }
+  // A shown screen's own query: the reader's change pushes, a correction
+  // replaces, and a correction never overwrites an address that changed
+  // outside the page and still waits for follow().
+  onAddress((target, push) => {
+    if (target.screen !== screen || (!push && location.hash !== routeHash(shown))) return false;
+    address(target, push);
+    return true;
+  });
+  function go(next, { anchor = null, query = '', push = false, scroll = 0 } = {}) {
+    if (!SCREENS.includes(next)) { next = 'desk'; anchor = null; query = ''; }
+    // The reader's own way onto the screen already shown (its nav button, the
+    // gear, a bare link or anchor) asks for that screen as it is: it keeps the
+    // query the screen gave its address, so no entry repeats the shown view.
+    // Nothing in the address changed, so the screen's reader does not run
+    // again and its state stays (Results' browsed month); only the scroll or
+    // the anchor applies.
+    const asIs = push && !query && next === shown.screen;
+    if (asIs) query = shown.query;
+    const target = { screen: next, query };
+    // The address first, while the page still shows the place being left:
+    // hiding a screen, closing a dialog or rendering may move it.
+    address(target, push);
     screen = next;
     tips.hide();
     for (const s of SCREENS) $(`#scr-${s}`).classList.toggle('on', s === next);
     document.body.dataset.screen = next;
-    $$('.nav button, .bottom-nav button').forEach(b => { if (b.dataset.go === next) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+    // The nav (both copies) and the gear: exactly the shown screen is current.
+    $$('.top-in [data-go], .bottom-nav [data-go]').forEach(b => { if (b.dataset.go === next) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     closePop();
     for (const dialog of $$('dialog[open]')) dialog.close();
-    try { history.replaceState(null, '', `#${next}`); } catch { /* file or sandboxed context */ }
     dirtyHistory = true; forgetCharts(); forgetResults();
     if (next === 'settings') feed.refreshActions();
+    if (!asIs) guard('route', () => applyRoute(target));
     render('screen');
-    if (next === 'settings' && SETTINGS_SECTIONS.some(s => s.id === anchor)) showSection(anchor);
-    else if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0);
+    if (next === 'settings' && SETTINGS_SECTIONS.some(s => s.id === anchor)) { places.abandon(); showSection(anchor); }
+    else if (anchor) { places.abandon(); document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); } else places.arrive(scroll);
   }
 
   // The board details are a dialog: opening moves focus into it, Tab stays
@@ -184,7 +242,9 @@ function start() {
       return;
     }
     const goEl = e.target.closest('[data-go]');
-    if (goEl) { go(goEl.dataset.go, goEl.dataset.anchor); return; }
+    if (goEl) { go(goEl.dataset.go, { anchor: goEl.dataset.anchor, query: goEl.dataset.query, push: true }); return; }
+    const route = linkRoute(e, e.target.closest('a[href]'));
+    if (route) { e.preventDefault(); go(route.screen, { anchor: route.anchor, query: route.query, push: true }); return; }
     const pop = $('#healthPop');
     const statusControl = e.target.closest('#hdrHealth, #statusAlertControl');
     if (statusControl) {
@@ -211,7 +271,10 @@ function start() {
   $('#themeBtn').addEventListener('click', () => { toggleTheme(); schedule('theme'); });
   window.__joedesk.setTheme = setTheme;
 
-  // History controls: desk toggles, range, zoom and pan (desktop), retry.
+  // History controls: desk toggles, Change | Money, the window presets and
+  // Follow; the chart and its overview strip take their own pointer, wheel
+  // and keys. History reads its link (range, desk, mode) before it renders.
+  onRoute('history', readHistoryRoute);
   $('#histDesks').addEventListener('click', e => {
     const b = e.target.closest('[data-hdesk]');
     if (!b) return;
@@ -223,93 +286,48 @@ function start() {
   $('#histRange').addEventListener('click', e => {
     const b = e.target.closest('[data-range]');
     if (!b) return;
-    HS.range = b.dataset.range; HS.zoom = null; dirtyHistory = true; render('history-range');
+    historyPreset(b.dataset.range); dirtyHistory = true; render('history-range');
   });
-  $('#resetZoom').addEventListener('click', () => { HS.zoom = null; dirtyHistory = true; render('history-zoom'); });
-  const chartEl = $('#histChart');
-  const domain = () => (HS.full ? { full: HS.full, current: HS.zoom ?? HS.full } : null);
-  chartEl.addEventListener('wheel', e => {
-    if (isPhone()) return;
-    const d = domain();
-    if (!d?.current) return;
-    e.preventDefault();
-    const r = chartEl.getBoundingClientRect(), padL = 64, pw = r.width - padL - 14;
-    const [x0, x1] = d.current, at = x0 + Math.min(1, Math.max(0, (e.clientX - r.left - padL) / pw)) * (x1 - x0);
-    const factor = e.deltaY < 0 ? 0.8 : 1.25;
-    let a = at - (at - x0) * factor, b = at + (x1 - at) * factor;
-    const [f0, f1] = d.full;
-    if (b - a >= f1 - f0) { HS.zoom = null; } else { if (a < f0) { b += f0 - a; a = f0; } if (b > f1) { a -= b - f1; b = f1; } HS.zoom = [Math.max(f0, a), Math.min(f1, b)]; }
-    if (HS.zoom && HS.zoom[1] - HS.zoom[0] < 30 * 60e3) HS.zoom = [at - 15 * 60e3, at + 15 * 60e3];
-    dirtyHistory = true; schedule('history-zoom');
-  }, { passive: false });
-  let drag = null;
-  chartEl.addEventListener('pointerdown', e => {
-    if (!e.shiftKey || !HS.zoom || isPhone()) return;
-    drag = { x: e.clientX, zoom: HS.zoom.slice() }; panning = true;
-    chartEl.setPointerCapture(e.pointerId);
+  // Change | Money: what the lines measure (the window and the desks stay).
+  $('#histMeasure').addEventListener('click', e => {
+    const b = e.target.closest('[data-measure]');
+    if (!b || b.dataset.measure === HS.measure) return;
+    HS.measure = b.dataset.measure; dirtyHistory = true; render('history-measure');
   });
-  chartEl.addEventListener('pointermove', e => {
-    if (!drag) return;
-    const d = domain();
-    const r = chartEl.getBoundingClientRect(), pw = r.width - 78;
-    const shift = -(e.clientX - drag.x) / pw * (drag.zoom[1] - drag.zoom[0]);
-    let a = drag.zoom[0] + shift, b = drag.zoom[1] + shift;
-    if (a < d.full[0]) { b += d.full[0] - a; a = d.full[0]; }
-    if (b > d.full[1]) { a -= b - d.full[1]; b = d.full[1]; }
-    HS.zoom = [a, b]; dirtyHistory = true; schedule('history-pan');
-  });
-  const endDrag = () => { drag = null; panning = false; };
-  chartEl.addEventListener('pointerup', endDrag);
-  chartEl.addEventListener('pointercancel', endDrag);
-  // Pinch to zoom on touch: two fingers scale the time window around their middle.
-  const touches = new Map();
-  let pinch = null;
-  const spread = () => { const [a, b] = [...touches.values()]; return Math.abs(a - b); };
-  chartEl.addEventListener('pointerdown', e => {
-    if (e.pointerType !== 'touch' || !HS.full) return;
-    touches.set(e.pointerId, e.clientX);
-    if (touches.size === 2) {
-      const r = chartEl.getBoundingClientRect(), [x0, x1] = HS.zoom ?? HS.full, mid = ([...touches.values()].reduce((a, b) => a + b) / 2 - r.left - 64) / (r.width - 78);
-      pinch = { spread: Math.max(20, spread()), zoom: [x0, x1], at: x0 + Math.min(1, Math.max(0, mid)) * (x1 - x0) };
-    }
-  });
-  chartEl.addEventListener('pointermove', e => {
-    if (!touches.has(e.pointerId)) return;
-    touches.set(e.pointerId, e.clientX);
-    if (!pinch || touches.size !== 2) return;
-    const [f0, f1] = HS.full, ratio = pinch.spread / Math.max(20, spread());
-    let a = pinch.at - (pinch.at - pinch.zoom[0]) * ratio, b = pinch.at + (pinch.zoom[1] - pinch.at) * ratio;
-    if (b - a >= f1 - f0) HS.zoom = null;
-    else { if (a < f0) { b += f0 - a; a = f0; } if (b > f1) { a -= b - f1; b = f1; } HS.zoom = [a, b]; }
-    dirtyHistory = true; schedule('history-zoom');
-  });
-  const endTouch = e => { touches.delete(e.pointerId); if (touches.size < 2) pinch = null; };
-  chartEl.addEventListener('pointerup', endTouch);
-  chartEl.addEventListener('pointercancel', endTouch);
+  // Follow and its phone copy (index.html) are one toggle.
+  for (const b of $$('[data-follow]')) b.addEventListener('click', () => { toggleFollow(); dirtyHistory = true; render('history-follow'); });
+  initHistoryInput({ schedule });
+  initHistoryControls({ schedule });
 
   // Results: the period and desk switches, the stepper, the month arrows and
   // a day drive every number; on a phone a day opens its trades in a sheet.
   for (const root of [$('#daypanel'), $('#daySheet')]) root.addEventListener('copy', copyDayText);
   const view = () => resultsView(context());
+  // Results reads its link before it renders (route.js onRoute); a link that
+  // waits for the record keeps its address until Results applies it once
+  // (results.js). Each change of the view pushes its address (writeRoute).
+  onRoute('results', (_params, route) => requestResultsRoute(route.query));
+  const commit = () => writeRoute('results', parseRoute(resultsUrl(view())).query, { push: true });
   $('#periodSeg').addEventListener('click', e => {
     const b = e.target.closest('[data-period]');
     if (!b) return;
-    RS.period = b.dataset.period;
-    if (RS.period === 'ytd' || RS.period === 'all') RS.anchor = view().today;
+    choosePeriod(b.dataset.period, view());
+    commit();
     render('results-period');
   });
-  $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { RS.desk = b.dataset.desk; render('results-desk'); } });
-  $('#prevPer').addEventListener('click', () => { stepPeriod(-1, view()); render('results-step'); });
-  $('#nextPer').addEventListener('click', () => { stepPeriod(1, view()); render('results-step'); });
-  $('#prevMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m ? [y, m - 1] : [y - 1, 11]; RS.moved = true; render('results-month'); });
-  $('#nextMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m === 11 ? [y + 1, 0] : [y, m + 1]; RS.moved = true; render('results-month'); });
+  $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { chooseDesk(b.dataset.desk); commit(); render('results-desk'); } });
+  $('#prevPer').addEventListener('click', () => { stepPeriod(-1, view()); commit(); render('results-step'); });
+  $('#nextPer').addEventListener('click', () => { stepPeriod(1, view()); commit(); render('results-step'); });
+  // The month on show is not part of the link: a day selects, a month only browses.
+  $('#prevMonth').addEventListener('click', () => { showMonth(-1); render('results-month'); });
+  $('#nextMonth').addEventListener('click', () => { showMonth(1); render('results-month'); });
   let sheetFrom = null;
   $('#cal').addEventListener('click', e => {
     const c = e.target.closest('[data-day]');
-    if (!c) return;
+    if (!c || c.disabled) return;
     const v = view();
-    RS.sel = c.dataset.day; RS.moved = true;
-    if (['day', 'week', 'month'].includes(RS.period) && RS.sel <= v.today) RS.anchor = RS.sel;
+    if (!selectDay(c.dataset.day, v)) return;
+    commit();
     render('results-day');
     if (isPhone()) { sheetFrom = RS.sel; openDaySheet(v, RS.sel, { pointer: fromPointer(e) }); }
   });
@@ -322,7 +340,17 @@ function start() {
   });
   sheet.addEventListener('close', () => { if (sheetFrom) document.querySelector(`#cal [data-day="${sheetFrom}"]`)?.focus({ preventScroll: true }); sheetFrom = null; });
 
-  addEventListener('hashchange', () => { const [next, anchor] = location.hash.slice(1).split('/'); if (next !== screen) go(next, anchor); });
+  // Back, Forward, a typed address or a link the browser followed itself:
+  // the entry left keeps the place the page still shows; show what the
+  // address says, where the reader last was on it (a new entry: its top).
+  // Back and Forward fire both events; the second finds the entry taken up.
+  const follow = () => {
+    const moved = places.step(), next = parseRoute(location.hash);
+    if (!moved && next.known && !next.anchor && sameRoute(next, shown)) return;
+    go(next.screen, { anchor: next.anchor, query: next.query, scroll: places.saved() });
+  };
+  addEventListener('popstate', follow);
+  addEventListener('hashchange', follow);
   let resize = 0;
   addEventListener('resize', () => { cancelAnimationFrame(resize); resize = requestAnimationFrame(() => { forgetCharts(); forgetResults(); dirtyHistory = true; render('resize'); }); });
   // With System chosen the page follows the OS live (CSS); the header button's words follow too.
@@ -349,7 +377,11 @@ function start() {
   initSettings({ feed, tips, schedule });
   initVersionDisplay();
   $('#footShield').innerHTML = `${icon('shield')}Read-only paper board · nothing here can place a trade`;
-  const [first, anchor] = (location.hash || '#desk').slice(1).split('/');
-  go(first, anchor);
+  // go() puts each screen back where the reader left it; the browser need not.
+  try { history.scrollRestoration = 'manual'; } catch { /* go() still scrolls */ }
+  // A reload returns to the entry's place once the page has grown to it.
+  places.step();
+  const first = parseRoute(location.hash || '#desk');
+  go(first.screen, { anchor: first.anchor, query: first.query, scroll: places.saved() });
   feed.start();
 }

@@ -5,6 +5,21 @@ import { test } from 'node:test';
 const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8');
 
+test('JOED-163: linked detail money fills the same column as the direct dash', () => {
+  // The generic figure link is inline-flex: its contents otherwise shrink
+  // to the amount and add an inline baseline when a dash becomes a link.
+  const rules = parseCSS(css), values = selector => Object.fromEntries(rules.filter(r => r.selector === selector)
+    .flatMap(r => r.declarations).map(d => [d.property, d.value]));
+  assert.equal(values('.fig-link').display, 'inline-flex');
+  // One block-level rule (JOED-153's flex fill wins the merge with JOED-163's block): the link
+  // fills the value column like the direct dash, and its amount grows to the column.
+  assert.equal(values('.dnums .v > .fig-link').display, 'flex');
+  assert.equal(values('.dnums .v > .fig-link > .bn').flex, '1 1 auto');
+  const money = rules.find(r => r.selector === '.dnums .v > .bn, .dnums .v > .fig-link > .bn');
+  assert.equal(money.declarations.find(d => d.property === 'display').value, 'flex');
+  assert.equal(money.declarations.find(d => d.property === 'height').value, '26px');
+});
+
 // A small, fail-closed CSS parser for this stylesheet. Braces/semicolons in
 // strings, brackets and functions are not delimiters; nested rules retain all
 // ancestors, so @media/@supports/@layer cannot hide a theme declaration.
