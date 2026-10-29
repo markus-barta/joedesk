@@ -1903,8 +1903,10 @@ and an optional `?query` that belongs to the screen
 The address keeps the screen and its query; an anchor only scrolls, and an
 unknown route is Desk. The nav, the gear, `data-go` controls (with an optional
 `data-query`) and plain clicks on same-page links add a history entry, so Back
-and Forward walk the screens; the first load, Back, Forward and a typed address
-only correct the address. Each entry keeps the reader's place
+and Forward walk the screens; on the screen already shown, a bare one (its own
+nav button, the gear, an anchor) keeps the query that screen gave its address
+and adds none. The first load, Back, Forward and a typed address only correct
+the address. Each entry keeps the reader's place
 (`createPlaces`, which makes every history call the board makes): read before
 the page changes and kept for the entry being left (by the board's navigation
 or the browser's), so Back and Forward return to it. One saver also writes it

@@ -363,6 +363,40 @@ test('screen writer: fifty changes of the view in 30 s between scrolls stay with
   assert.equal(b.entries[b.index].state.joeScrollY, 1234, 'the last place is in the entry, for a reload');
 });
 
+test('active nav: the screen already shown adds no entry, whatever query it gave its address, and Back leaves it (Results, History, Settings)', () => {
+  // History's own query stands in for JOED-154's (#history?range=…&desk=…&mode=…).
+  for (const [name, own] of [['results', 'period=week&date=2026-10-14&desk=all'], ['history', 'range=fit&desk=all&mode=change'], ['settings', null]]) {
+    const b = browser(), go = boot(app, b), reads = [];
+    onRoute(name, (_params, route) => reads.push(route.query));
+    try {
+      go(name, { push: true });
+      // The screen names its view in its address, a correction of that entry
+      // (Results' render; History's own query once JOED-154 is in).
+      if (own) assert.equal(writeRoute(name, own), true);
+      const hash = own ? `#${name}?${own}` : `#${name}`, entries = b.entries.length;
+      assert.deepEqual([b.win.location.hash, entries], [hash, 2], `${name}: Desk, then one entry for ${name}`);
+      reads.length = 0;
+      // Its nav button (or the gear) again, and a bare anchor on it: the screen as it is.
+      go(name, { push: true });
+      go(name, { anchor: 'nowhere', push: true });
+      assert.deepEqual([b.win.location.hash, b.entries.length], [hash, entries], `${name}: the shown screen adds no entry`);
+      assert.deepEqual(reads, [own ?? '', own ?? ''], `${name}: the screen reads its own query, its view unchanged`);
+      b.traverse(-1);
+      assert.equal(b.win.location.hash, '#desk', `${name}: Back leaves it for Desk`);
+      // Another query for the shown screen is another place: one entry, and Back returns.
+      if (own) {
+        b.traverse(1);
+        go(name, { query: 'other=1', push: true });
+        assert.deepEqual([b.win.location.hash, b.entries.length], [`#${name}?other=1`, entries + 1]);
+        b.traverse(-1);
+        assert.equal(b.win.location.hash, hash);
+      }
+    } finally {
+      onRoute(name, undefined);
+    }
+  }
+});
+
 test('Results links through follow(): a link that arrives while Results is shown closes what is open, reaches Results before it renders, keeps its address while it waits, then applies once', () => {
   const b = browser(), seen = [], spies = { tips: 0, pop: 0, dialogs: 0 };
   const go = boot(app, b, {

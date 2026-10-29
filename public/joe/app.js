@@ -169,6 +169,10 @@ function start() {
   });
   function go(next, { anchor = null, query = '', push = false, scroll = 0 } = {}) {
     if (!SCREENS.includes(next)) { next = 'desk'; anchor = null; query = ''; }
+    // The reader's own way onto the screen already shown (its nav button, the
+    // gear, a bare link or anchor) asks for that screen as it is: it keeps the
+    // query the screen gave its address, so no entry repeats the shown view.
+    if (push && !query && next === shown.screen) query = shown.query;
     const target = { screen: next, query };
     // The address first, while the page still shows the place being left:
     // hiding a screen, closing a dialog or rendering may move it.
