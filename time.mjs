@@ -4,6 +4,13 @@ import { viennaDay } from './contracts/vienna-date.mjs';
 
 export const NY = 'America/New_York';
 export const VIENNA = 'Europe/Vienna';
+// History: the longest time between two received rows that still counts as
+// continuous reporting. The producer's slowest normal cadence is its
+// overnight regime, one snapshot every 900 s; 20 minutes leaves 5 minutes
+// for a late push or a restart, while a missed snapshot (30 minutes) is a
+// gap. The server's compaction (server/history.mjs) and the page
+// (history-model.js) share this one value; the History copy names it.
+export const GAP_MS = 20 * 60 * 1000;
 Object.freeze(calendar.years); Object.freeze(calendar.holidays); Object.freeze(calendar.earlyCloses);
 export const MARKET_CALENDAR = Object.freeze(calendar);
 const formatters = new Map([NY, VIENNA].map(timeZone => [timeZone,

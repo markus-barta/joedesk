@@ -1439,7 +1439,7 @@ try {
       const point = (id, iso) => drawn[id].find(p => p.x === Date.parse(iso))?.y;
       const when = iso => `${fmt.dayDDM(iso)}, ${fmt.timeHM(iso)}`, figures = r.desks.map(d => `${LABEL[d.id]} ${fmt.pct(d.pct, 2, true)}`).join(' · ');
       // Over part of the window the line names the stretch it compares (history.js, compareLine).
-      const text = r.after ? `Last ${fmt.age((Date.parse(r.endAt) - Date.parse(r.startAt)) / 1000)} ${r.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'without gaps'}, from ${when(r.startAt)}: ${figures}`
+      const text = r.after ? `Last ${fmt.age((Date.parse(r.endAt) - Date.parse(r.startAt)) / 1000)} ${r.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'with continuous data'}, from ${when(r.startAt)}: ${figures}`
         : `From ${when(r.startAt)} to ${when(r.endAt)}: ${figures}`;
       return { r, onChart: r.desks.every(d => d.start === point(d.id, r.startAt) && d.end === point(d.id, r.endAt)), text };
     };

@@ -1466,14 +1466,15 @@ test('history: dense tooltip hits original observations omitted by drawing thinn
 });
 
 test('history: gap interiors interpolate and mark estimates even near observed endpoints', t => {
-  const points = [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(10), { j: 20, joe: 20, joel: 20 })];
-  const { hover } = historyPointer(t, points, { width: 1000, zoom: [T0, T0 + 10 * 60000] });
-  for (const minute of [1, 5, 9]) {
+  // Rows 30 minutes apart: longer than GAP_MS, a stretch without data.
+  const points = [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(30), { j: 40, joe: 40, joel: 40 })];
+  const { hover } = historyPointer(t, points, { width: 1000, zoom: [T0, T0 + 30 * 60000] });
+  for (const minute of [1, 15, 29]) {
     const html = hover(T0 + minute * 60000);
     assert.equal((html.match(/estimate/g) ?? []).length, 3);
     for (const label of ['J', 'Joe', 'Joel']) assert.ok(html.includes(`${label} ${format.eur(10 + minute)}`));
   }
-  for (const [minute, value] of [[0, 10], [10, 20]]) {
+  for (const [minute, value] of [[0, 10], [30, 40]]) {
     const html = hover(T0 + minute * 60000);
     assert.doesNotMatch(html, /estimate/);
     assert.ok(html.includes(`J ${format.eur(value)}`), 'an actual endpoint remains observed');
@@ -1580,13 +1581,13 @@ test('history: synthetic edges that repeat the same minute and snapped values ar
 });
 
 test('history: estimated edges with different values remain inspection points', t => {
-  const h = historyPointer(t, [pt(iso(0), { j: 10 }), pt(iso(10), { j: 20 })], { zoom: [T0 + 6000, T0 + 10 * 60000 - 6000] });
+  const h = historyPointer(t, [pt(iso(0), { j: 10 }), pt(iso(30), { j: 40 })], { zoom: [T0 + 6000, T0 + 30 * 60000 - 6000] });
   h.focus();
   assert.match(h.live.textContent, /J €\s10,10 estimated/);
   h.key('ArrowRight');
-  assert.match(h.live.textContent, /J €\s15,00 estimated/);
+  assert.match(h.live.textContent, /J €\s25,00 estimated/);
   h.key('End');
-  assert.match(h.live.textContent, /J €\s19,90 estimated/);
+  assert.match(h.live.textContent, /J €\s39,90 estimated/);
 });
 
 test('history: shared point wording names observed, estimated and absent values without inventing money', () => {
@@ -1598,16 +1599,16 @@ test('history: shared point wording names observed, estimated and absent values 
 });
 
 test('history: keyboard crosses a gap through the same estimated point as the pointer', t => {
-  const h = historyPointer(t, [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(10), { j: 20, joe: 20, joel: 20 })], { zoom: [T0, T0 + 10 * 60000] });
+  const h = historyPointer(t, [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(30), { j: 40, joe: 40, joel: 40 })], { zoom: [T0, T0 + 30 * 60000] });
   h.focus();
   assert.match(h.live.textContent, /observed/);
   h.key('ArrowRight');
-  assert.match(h.live.textContent, /J €\s15,00 estimated/);
+  assert.match(h.live.textContent, /J €\s25,00 estimated/);
   assert.equal((h.live.textContent.match(/estimated/g) ?? []).length, 3);
   const keyboard = h.tip.innerHTML;
-  assert.equal(h.hover(T0 + 5 * 60000), keyboard);
+  assert.equal(h.hover(T0 + 15 * 60000), keyboard);
   h.key('End');
-  assert.match(h.live.textContent, /J €\s20,00 observed/);
+  assert.match(h.live.textContent, /J €\s40,00 observed/);
 });
 
 test('history: Escape and blur dismiss inspection; focused redraw retains its point and focus', t => {
@@ -1687,19 +1688,27 @@ test('JOED-145 history: the chart says what it shows: all kept history, the last
   assert.match(label({ zoom: [T0 + 864e5, T0 + 864e5 + 3600e3] }), /^Each desk’s money, zoomed: .+ to .+ Vienna time$/);
 });
 
-test('JOED-145 history: in the server-thinned part a hover names the nearest kept observation; without the mark it is an estimate', t => {
-  const points = [...[0, 40, 80, 120].map(m => pt(iso(m), { j: 10 + m, joe: 20 + m, joel: 30 + m })),
-    ...Array.from({ length: 11 }, (_, i) => pt(iso(120.5 + i / 2), { j: 200, joe: 200, joel: 200 }))];
-  const zoom = [T0, T0 + 125 * 60000];
-  const thinned = historyPointer(t, points, { zoom, thinned: T0 + 120 * 60000 });
-  const html = thinned.hover(T0 + 50 * 60000);
-  assert.doesNotMatch(html, /estimate/);
+test('JOED-145 history: thinned rows at most GAP_MS apart are observed and the nearest kept row answers; rows an older version left further apart are estimates with coverage unknown', t => {
+  const raw = Array.from({ length: 11 }, (_, i) => pt(iso(120.5 + i / 2), { j: 200, joe: 200, joel: 200 }));
+  const zoom = [T0, T0 + 125 * 60000], mark = T0 + 120 * 60000;
+  // Kept every 20 minutes up to the mark, as the server thins now.
+  const kept = historyPointer(t, [...[0, 20, 40, 60, 80, 100, 120].map(m => pt(iso(m), { j: 10 + m, joe: 20 + m, joel: 30 + m })), ...raw], { zoom, thinned: mark });
+  const html = kept.hover(T0 + 47 * 60000);
+  assert.doesNotMatch(html, /estimate|coverage/);
   for (const [label, value] of [['J', 50], ['Joe', 60], ['Joel', 70]]) assert.ok(html.includes(`${label} ${format.eur(value)} observed`), `${label} names the kept row at 40 minutes`);
-  assert.equal(thinned.el.querySelectorAll('[data-estimate]').length, 0, 'the kept rows draw as one connected line');
-  assert.equal(thinned.el.querySelectorAll('[data-gap]').length, 0);
-  const raw = historyPointer(t, points, { zoom });
-  assert.match(raw.hover(T0 + 50 * 60000), /J €\s\d+,\d\d estimated/);
-  assert.equal(raw.el.querySelectorAll('[data-gap]').length, 3, 'unmarked, 40-minute steps read as outages');
+  assert.equal(kept.el.querySelectorAll('[data-estimate]').length, 0, 'the kept rows draw as one connected line');
+  assert.equal(kept.el.querySelectorAll('[data-gap]').length, 0);
+  // Kept 40 minutes apart, as versions before this rule thinned: never joined.
+  const legacy = [...[0, 40, 80, 120].map(m => pt(iso(m), { j: 10 + m, joe: 20 + m, joel: 30 + m })), ...raw];
+  const older = historyPointer(t, legacy, { zoom, thinned: mark });
+  const tip = older.hover(T0 + 50 * 60000);
+  for (const [label, value] of [['J', 60], ['Joe', 70], ['Joel', 80]]) assert.ok(tip.includes(`${label} ${format.eur(value)} estimated`), `${label} is an estimate`);
+  assert.match(tip, /Thinned or not reported: coverage unknown/);
+  assert.equal(older.el.querySelectorAll('[data-gap]').length, 3, 'each 40-minute step is a stretch without data');
+  // Without the mark nothing was thinned: a stretch without rows, nothing more to say.
+  const unmarked = historyPointer(t, legacy, { zoom }).hover(T0 + 50 * 60000);
+  assert.match(unmarked, /J €\s60,00 estimated/);
+  assert.doesNotMatch(unmarked, /coverage/);
 });
 
 test('JOED-145 history: Shift with arrows, Home and End is left to the window keys; plain arrows still inspect', t => {
@@ -1906,7 +1915,7 @@ test('history: a zoom compares exactly the points the chart draws, never a recor
 test('history: compare uses exactly the chart window, anchored to the board time, not the last observation', () => {
   // Observations end on 14 Oct; the board's time is 17 Oct.
   const points = [];
-  for (let m = 0; m < 3 * 24 * 60; m += 30) points.push(pt(new Date(Date.parse('2026-10-12T00:00:00.000Z') + m * 60000).toISOString(), { j: 5000 + m / 30, joe: 5000 - m / 60, joel: 5000 }));
+  for (let m = 0; m < 3 * 24 * 60; m += 15) points.push(pt(new Date(Date.parse('2026-10-12T00:00:00.000Z') + m * 60000).toISOString(), { j: 5000 + m / 30, joe: 5000 - m / 60, joel: 5000 }));
   const cols = hm.toColumns(points);
   const now = Date.parse('2026-10-17T12:00:00.000Z');
   const day = hm.rangeWindow(cols, '1d', now);

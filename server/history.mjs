@@ -1,7 +1,7 @@
 import { CONTRACTS, validateContract } from '../contracts/index.mjs';
 import { MONEY_FIELDS } from '../contracts/panel-state.mjs';
 import { decimalUnits } from '../contracts/decimal.mjs';
-import { viennaDay } from '../time.mjs';
+import { viennaDay, GAP_MS } from '../time.mjs';
 
 export const HISTORY_CAP = 8 * 1024 * 1024;
 export const HISTORY_WARNING = Math.floor(HISTORY_CAP * 0.8);
@@ -35,8 +35,17 @@ export function historyPoint(snapshot, states) {
 
 // One bounded pass: bucket endpoints, every series' extrema, both sides of each
 // null gap and every desk's composite accounting/historyBasis transition.
+// It is gap-preserving, so every interval between kept rows says what it is.
+// Rows more than GAP_MS apart (time.mjs) are a gap in reporting: both rows
+// around it are kept, so a pass never merges across one and every run of
+// continuous reporting keeps its first and last row. Inside a run no pass
+// leaves more than GAP_MS between kept rows. A kept interval of at most
+// GAP_MS is therefore continuous reporting, thinned or not, and a longer one
+// is exactly a gap the input had. No row needs a mark for that: the history
+// contract stays as it is, and every older page and server reads it.
 export function compactPoints(points, bucketSize = 64) {
   const keep = new Set([0, points.length - 1]);
+  const at = points.map(p => Date.parse(p.t));
   const series = p => [...DESKS.map(id => p.desks[id]?.money), p.totals];
   const basis = p => JSON.stringify(DESKS.map(id => [p.desks[id]?.accounting ?? null, p.desks[id]?.historyBasis ?? null]));
   let previousBasis, previousPresence, previousDay;
@@ -44,6 +53,7 @@ export function compactPoints(points, bucketSize = 64) {
   let extrema = new Map();
   for (let i = 0; i < points.length; i++) {
     if (i % bucketSize === 0) { extrema = new Map(); keep.add(i); if (i) keep.add(i - 1); }
+    if (i && at[i] - at[i - 1] > GAP_MS) { keep.add(i - 1); keep.add(i); }
     const p = points[i], identity = basis(p);
     const day = viennaDay(p.t);
     if (previousDay && day !== previousDay) {
@@ -69,6 +79,17 @@ export function compactPoints(points, bucketSize = 64) {
     previousBasis = identity; previousPresence = presence; previousDay = day;
   }
   for (const index of dailyLast) if (index !== undefined) keep.add(index);
+  // Between two kept rows of one run, keep the furthest row within GAP_MS of
+  // the last kept one until the next is in reach. Gap ends are kept, so every
+  // row between two kept ones is at most GAP_MS from the row before it.
+  const kept = [...keep].sort((a, b) => a - b);
+  for (let k = 1; k < kept.length; k++) {
+    for (let last = kept[k - 1]; kept[k] > last + 1 && at[kept[k]] - at[last] > GAP_MS;) {
+      let next = last + 1;
+      while (next + 1 < kept[k] && at[next + 1] - at[last] <= GAP_MS) next++;
+      keep.add(next); last = next;
+    }
+  }
   return points.filter((_, i) => keep.has(i));
 }
 
