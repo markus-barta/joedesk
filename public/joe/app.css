@@ -1219,59 +1219,69 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 .card-status { position: absolute; inset: 9px 0 0; display: flex; flex-direction: column; gap: 2px; }
 .card-status .st { align-items: flex-start; gap: 5px; white-space: normal; font-size: 11.5px; line-height: 16px; color: var(--ink-2); }
 .card-status .st .i { width: 13px; height: 13px; margin-top: 1px; }
-.bars { position: relative; display: flex; gap: 4px; height: 76px; margin-top: 2px; }
-.bars .bz { position: absolute; left: 0; right: 0; height: 1px; background: var(--line-2); pointer-events: none; }
-.bars .b { position: relative; flex: 1 1 0; min-width: 0; height: 100%; border-radius: 5px; color: inherit; text-decoration: none; }
-@media (hover: hover) { .bars .b:hover { background: var(--row-hover); } }
-.bars .b:focus-visible { background: var(--row-hover); outline-offset: 1px; }
-.bars .b i { position: absolute; left: 16%; right: 16%; border-radius: 3px; }
-.bars .b i.gain { background: var(--gain); } .bars .b i.loss { background: var(--loss); } .bars .b i.flat { background: var(--ink-3); }
+.desk-sessions .bars { position: relative; display: flex; gap: 4px; height: 76px; margin-top: 2px; }
+.desk-sessions .bars .bz { position: absolute; left: 0; right: 0; height: 1px; background: var(--line-2); pointer-events: none; }
+.desk-sessions .bars .b { position: relative; flex: 1 1 0; min-width: 0; height: 100%; border-radius: 5px; color: inherit; text-decoration: none; }
+@media (hover: hover) { .desk-sessions .bars .b:hover { background: var(--row-hover); } }
+.desk-sessions .bars .b:focus-visible { background: var(--row-hover); outline-offset: 1px; }
+.desk-sessions .bars .b i { position: absolute; left: 16%; right: 16%; border-radius: 3px; }
+.desk-sessions .bars .b i.gain { background: var(--gain); } .desk-sessions .bars .b i.loss { background: var(--loss); } .desk-sessions .bars .b i.flat { background: var(--ink-3); }
 /* Today's bar still moves: filled at 60 % with its outline. */
-.bars .b i.live.gain { background: color-mix(in srgb, var(--gain) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--gain); }
-.bars .b i.live.loss { background: color-mix(in srgb, var(--loss) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--loss); }
-.bars .b i.live.flat { background: color-mix(in srgb, var(--ink-3) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--ink-3); }
-.bars .b i.est { background-image: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in srgb, var(--surface) 55%, transparent) 3px 5px); }
-.bars .b i.nx { border: 1.5px dashed var(--ink-3); border-radius: 4px; background: transparent; }
+.desk-sessions .bars .b i.live.gain { background: color-mix(in srgb, var(--gain) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--gain); }
+.desk-sessions .bars .b i.live.loss { background: color-mix(in srgb, var(--loss) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--loss); }
+.desk-sessions .bars .b i.live.flat { background: color-mix(in srgb, var(--ink-3) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.desk-sessions .bars .b i.est { background-image: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in srgb, var(--surface) 55%, transparent) 3px 5px); }
+.desk-sessions .bars .b i.nx { border: 1.5px dashed var(--ink-3); border-radius: 4px; background: transparent; }
 /* Every bar's value: inside the bar when it has room, else beside zero. */
-.bars .bl { position: absolute; left: 50%; transform: translateX(-50%); width: max-content; font: 600 9.5px/11px var(--mono); letter-spacing: -.02em; white-space: nowrap; pointer-events: none; }
-.bars .bl.out.gain { color: color-mix(in srgb, var(--gain) 62%, var(--ink-3)); }
-.bars .bl.out.loss { color: color-mix(in srgb, var(--loss) 62%, var(--ink-3)); }
-.bars .bl.out.flat { color: var(--ink-3); }
-.bars .bl.in { display: none; color: var(--surface); }
-@container spark (min-width: 268px) { .bars .b[data-c="2"] .bl.in { display: block; } .bars .b.has-in[data-c="2"] .bl.out { display: none; } }
-@container spark (min-width: 355px) { .bars .b[data-c="3"] .bl.in { display: block; } .bars .b.has-in[data-c="3"] .bl.out { display: none; } }
-@container spark (min-width: 442px) { .bars .b[data-c="4"] .bl.in { display: block; } .bars .b.has-in[data-c="4"] .bl.out { display: none; } }
-@container spark (min-width: 529px) { .bars .b[data-c="5"] .bl.in { display: block; } .bars .b.has-in[data-c="5"] .bl.out { display: none; } }
-@container spark (min-width: 615px) { .bars .b[data-c="6"] .bl.in { display: block; } .bars .b.has-in[data-c="6"] .bl.out { display: none; } }
-@container spark (min-width: 702px) { .bars .b[data-c="7"] .bl.in { display: block; } .bars .b.has-in[data-c="7"] .bl.out { display: none; } }
+.desk-sessions .bars .bl { position: absolute; left: 50%; transform: translateX(-50%); width: max-content; font: 600 9.5px/11px var(--mono); letter-spacing: -.02em; white-space: nowrap; pointer-events: none; }
+.desk-sessions .bars .bl.out.gain { color: color-mix(in srgb, var(--gain) 62%, var(--ink-3)); }
+.desk-sessions .bars .bl.out.loss { color: color-mix(in srgb, var(--loss) 62%, var(--ink-3)); }
+.desk-sessions .bars .bl.out.flat { color: var(--ink-3); }
+.desk-sessions .bars .bl.in { display: none; color: var(--surface); }
+@container spark (min-width: 268px) { .desk-sessions .bars .b[data-c="2"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="2"] .bl.out { display: none; } }
+@container spark (min-width: 355px) { .desk-sessions .bars .b[data-c="3"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="3"] .bl.out { display: none; } }
+@container spark (min-width: 442px) { .desk-sessions .bars .b[data-c="4"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="4"] .bl.out { display: none; } }
+@container spark (min-width: 529px) { .desk-sessions .bars .b[data-c="5"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="5"] .bl.out { display: none; } }
+@container spark (min-width: 615px) { .desk-sessions .bars .b[data-c="6"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="6"] .bl.out { display: none; } }
+@container spark (min-width: 702px) { .desk-sessions .bars .b[data-c="7"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="7"] .bl.out { display: none; } }
 /* Outside labels collide below the width they need (data-need, desk.js):
    then the extremes and today keep theirs; the rest show on hover or focus. */
-@container spark (max-width: 99.98px) { .bars[data-need="100"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 119.98px) { .bars[data-need="120"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 139.98px) { .bars[data-need="140"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 159.98px) { .bars[data-need="160"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 179.98px) { .bars[data-need="180"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 199.98px) { .bars[data-need="200"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 219.98px) { .bars[data-need="220"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 239.98px) { .bars[data-need="240"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 259.98px) { .bars[data-need="260"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 279.98px) { .bars[data-need="280"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 299.98px) { .bars[data-need="300"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 319.98px) { .bars[data-need="320"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 339.98px) { .bars[data-need="340"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 359.98px) { .bars[data-need="360"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 379.98px) { .bars[data-need="380"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 399.98px) { .bars[data-need="400"] .b:not(:hover):not(:focus-visible) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 99.98px) { .desk-sessions .bars[data-need="100"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 119.98px) { .desk-sessions .bars[data-need="120"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 139.98px) { .desk-sessions .bars[data-need="140"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 159.98px) { .desk-sessions .bars[data-need="160"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 179.98px) { .desk-sessions .bars[data-need="180"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 199.98px) { .desk-sessions .bars[data-need="200"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 219.98px) { .desk-sessions .bars[data-need="220"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 239.98px) { .desk-sessions .bars[data-need="240"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 259.98px) { .desk-sessions .bars[data-need="260"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 279.98px) { .desk-sessions .bars[data-need="280"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 299.98px) { .desk-sessions .bars[data-need="300"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 319.98px) { .desk-sessions .bars[data-need="320"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 339.98px) { .desk-sessions .bars[data-need="340"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 359.98px) { .desk-sessions .bars[data-need="360"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 379.98px) { .desk-sessions .bars[data-need="380"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
+@container spark (max-width: 399.98px) { .desk-sessions .bars[data-need="400"] .b:not(:hover):not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
 /* Hover or focus: the bar's date and exact amount, on an opaque tip. */
-.bars .bt { position: absolute; z-index: 6; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: max-content; max-width: 220px; padding: 6px 9px 7px; border-radius: 9px; background: var(--tip-bg); color: var(--tip-ink); box-shadow: var(--shadow-pop); font-size: 12px; line-height: 1.4; white-space: normal; visibility: hidden; pointer-events: none; }
-.bars .bt b { font-weight: 650; }
-.bars .bt > span { display: block; font-size: 11px; color: var(--tip-ink-2); }
-.bars a.b:nth-of-type(-n+3) .bt { left: 0; transform: none; }
-.bars a.b:nth-last-of-type(-n+3) .bt { left: auto; right: 0; transform: none; }
-@media (hover: hover) { .bars .b:hover .bt { visibility: visible; } }
-.bars .b:focus-visible .bt { visibility: visible; }
-.bars-ax { display: flex; justify-content: space-between; height: 14px; margin-top: 4px; font: 500 10px/14px var(--mono); color: var(--ink-3); }
-.bars.bars-why { display: grid; place-items: center; padding: 0 12px; font-size: 12px; line-height: 16px; color: var(--ink-2); text-align: center; }
+.desk-sessions .bars .bt { position: absolute; z-index: 6; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: max-content; max-width: 220px; padding: 6px 9px 7px; border-radius: 9px; background: var(--tip-bg); color: var(--tip-ink); box-shadow: var(--shadow-pop); font-size: 12px; line-height: 1.4; white-space: normal; visibility: hidden; pointer-events: none; }
+.desk-sessions .bars .bt b { font-weight: 650; }
+.desk-sessions .bars .bt > span { display: block; font-size: 11px; color: var(--tip-ink-2); }
+.desk-sessions .bars a.b:nth-of-type(-n+3) .bt { left: 0; transform: none; }
+.desk-sessions .bars a.b:nth-last-of-type(-n+3) .bt { left: auto; right: 0; transform: none; }
+@media (hover: hover) { .desk-sessions .bars .b:hover .bt { visibility: visible; } }
+.desk-sessions .bars .b:focus-visible .bt { visibility: visible; }
+/* Touch: a first tap on a bar opens this tip, with the way to Results; a
+   second tap on the bar or the link opens Results (desk.js initBarTaps). */
+.desk-sessions .bars-tap { position: absolute; z-index: 7; left: 0; top: 0; width: max-content; max-width: 240px; padding: 7px 10px 8px; border-radius: 10px; background: var(--tip-bg); color: var(--tip-ink); box-shadow: var(--shadow-pop); font-size: 12px; line-height: 1.4; transform: translateY(calc(-100% - 6px)); }
+.desk-sessions .bars-tap[hidden] { display: none; }
+.desk-sessions .bars-tap b { font-weight: 650; }
+.desk-sessions .bars-tap > span { display: block; font-size: 11px; color: var(--tip-ink-2); }
+.desk-sessions .bars-tap .bars-go { position: relative; display: inline-flex; align-items: center; gap: 3px; margin-top: 4px; font-weight: 650; color: var(--tip-ink); text-decoration: underline; text-underline-offset: 2px; }
+.desk-sessions .bars-tap .bars-go .i { width: 12px; height: 12px; }
+.desk-sessions .bars-tap .bars-go::after { content: ""; position: absolute; inset: -14px -8px; }
+.desk-sessions .bars .b.tapped { background: var(--row-hover); }
+.desk-sessions .bars-ax { display: flex; justify-content: space-between; height: 14px; margin-top: 4px; font: 500 10px/14px var(--mono); color: var(--ink-3); }
+.desk-sessions .bars.bars-why { display: grid; place-items: center; padding: 0 12px; font-size: 12px; line-height: 16px; color: var(--ink-2); text-align: center; }
 /* M5: a desk with no trades since the start is one row. */
 .dcard[data-layout="row"] { padding: 10px 18px; gap: 0; }
 .drow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto auto; align-items: center; gap: 0 14px; min-height: 36px; }
@@ -1316,7 +1326,7 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .drow .hb { grid-column: 3; grid-row: 1; }
   /* 44 px hit areas around the figures and the bars (the bars' overlap their gaps). */
   .fig-link::after { content: ""; position: absolute; inset: -9px -6px; }
-  .bars .b::after { content: ""; position: absolute; inset: 0 -8px; }
+  .desk-sessions .bars .b::after { content: ""; position: absolute; inset: 0 -8px; }
 }
 /* ---------- end Desk hero and cards (JOED-153) ---------- */
 

@@ -35,19 +35,26 @@ const TRADES = [
 ];
 // 9 Oct is still incomplete (Stale from 14 Oct on), 14 Oct is the open or last day (Partial on 15 Oct).
 const PARTIAL = { '2026-10-09': ['fx_missing'], '2026-10-14': ['fx_missing'] };
-function record(receivedAt = '2026-10-15T11:00:00.000Z') {
+// The sessions from the desks' start (10 Sep) before the ten above: flat, no
+// trades. With them the record covers every closed session (M5's proof).
+const EARLY = ['2026-09-10', '2026-09-11', '2026-09-14', '2026-09-15', '2026-09-16', '2026-09-17', '2026-09-18',
+  '2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24', '2026-09-25', '2026-09-28', '2026-09-29', '2026-09-30'];
+function record(receivedAt = '2026-10-15T11:00:00.000Z', partial = PARTIAL, { early = false } = {}) {
   const trades = TRADES.map((t, i) => ({ id: `rt-desk-session-${i}`, desk: t.desk, symbol: 'DEMO', company: 'Demo', side: 'long', quantity: '1',
     openedAt: '2026-10-01T14:00:00.000Z', closedAt: t.at, entryPrice: { amount: '10', currency: 'USD' }, exitPrice: { amount: '11', currency: 'USD' },
     grossEur: money(t.gross), feesEur: money(t.fees), netEur: money(t.net),
     fx: { base: 'USD', quote: 'EUR', rate: '0.9', source: 'fixture-close-rate', observedAt: t.at }, method: 'execution-fifo-net-current-fx' }));
-  const days = SESSIONS.map((date, i) => ({ date, ...(PARTIAL[date] ? { coverage: 'partial', partialReasons: PARTIAL[date] } : {}),
+  // An empty reason list is an open day still in progress: partial, no cause.
+  const cover = date => (partial[date] ? { coverage: 'partial', ...(partial[date].length ? { partialReasons: partial[date] } : {}) } : {});
+  const days = SESSIONS.map((date, i) => ({ date, ...cover(date),
     desks: Object.fromEntries(DESK_IDS.map(id => {
       const own = TRADES.filter(t => t.desk === id && t.day === date);
       return [id, { equityClose: money(CLOSE[id][i]), realisedNet: money(own.reduce((s, t) => s + Number(t.net), 0)),
         fees: money(own.reduce((s, t) => s + Number(t.fees), 0).toFixed(1)), trades: own.length }];
     })) }));
+  const flat = date => ({ date, ...cover(date), desks: Object.fromEntries(DESK_IDS.map(id => [id, { equityClose: money(5000), realisedNet: money(0), fees: money(0), trades: 0 }])) });
   const value = { schema: 'inspr.joe.household.results.v2', seq: 7, generatedAt: receivedAt, receivedAt, currency: 'EUR', timeZone: 'Europe/Vienna',
-    trackingStart: '2026-09-10', days, trades, benchmark: null };
+    trackingStart: '2026-09-10', days: [...(early ? EARLY.map(flat) : []), ...days], trades, benchmark: null };
   const check = validateContract('results', value);
   assert.ok(check.ok, JSON.stringify(check.errors));
   return value;
@@ -64,11 +71,11 @@ function snapshotAt(at) {
   data.pnlSources.day.periodStart = zonedInstant(nyDay(at), '00:00:00', NY);
   return data;
 }
-function context(now = NOW, { results = true, data = null } = {}) {
+function context(now = NOW, { results = true, data = null, partial = PARTIAL, early = false, edit = null, receivedAt = undefined } = {}) {
   const snapshot = data ?? snapshotAt(new Date(Date.parse(now) - 9000).toISOString());
   const feeds = { data: { value: snapshot } }, states = boardStates(feeds, now);
   if (results) {
-    const value = record(), index = indexResults(value);
+    const value = record(receivedAt, partial, { early }), index = indexResults(edit ? edit(value) : value);
     feeds.results = { value: { ...index.meta, index } };
     states.results = { state: 'fresh', value: { ...index.meta, index }, reason: null, ageSeconds: 9 };
   }
@@ -112,7 +119,8 @@ test('JOED-153 A2: before the open the hero shows the last session’s Results �
   assert.equal(first.querySelector('.primary-caption .st').getAttribute('title'), `Partial: this day's record is incomplete. FX missing`);
   assert.equal(first.dataset.state, 'stale');
   // The sentence: each desk's figure for that session, then the positions held.
-  assert.equal(hero.querySelector('.say').textContent, `Wednesday: J +€${NB}10,00 · Joe +€${NB}2,00 · Joel flat · 1${NB}position held overnight`);
+  // Joel neither traded nor moved: the record says no trades, never € 0 (gate finding 2).
+  assert.equal(hero.querySelector('.say').textContent, `Wednesday: J +€${NB}10,00 · Joe +€${NB}2,00 · Joel no trades · 1${NB}position held overnight`);
   assert.deepEqual(hero.querySelectorAll('.say .num').map(n => n.getAttribute('class')), ['num gain', 'num gain'], 'sign colours');
 });
 
@@ -252,20 +260,52 @@ test('JOED-153 M5: card header says what the desk does; one Results link; first 
   assert.equal(text(htmlDocument(deskCard(context('2026-10-17T10:00:00.000Z'), 'j')).querySelector('header .state')), `Working${NB}· 1${NB}position held over the weekend`);
 });
 
-test('JOED-153 M5: a desk with no trades since the start is one row, its figures still honest', () => {
-  const ctx = context(), facts = desk.deskFacts(ctx);
-  assert.deepEqual(DESK_IDS.map(id => desk.noTradesSinceStart(ctx, facts, id)), [false, false, true]);
+// Gate findings 4 and 6: the one-row card is the record's claim. It needs a
+// record that covers the desk's whole period, and only the record decides it,
+// so a positions panel going stale changes words inside, never the layout.
+test('JOED-153 M5: one row only when the record proves no trades for the whole period; positions never decide', () => {
+  const full = { partial: {}, early: true };
+  const ctx = context(NOW, full), facts = desk.deskFacts(ctx);
+  assert.deepEqual(DESK_IDS.map(id => desk.noTradesSinceStart(ctx, facts, id)), [null, null, '2026-09-10']);
   const row = htmlDocument(deskCard(ctx, 'joel'));
   assert.ok(row.querySelector('.drow'));
-  assert.equal(text(row.querySelector('.who')), `Joel · sitting out · no trades since 10${NB}Sep`);
+  assert.equal(text(row.querySelector('.who')), `Joel · sitting out · no trades since 10${NB}Sep · no positions`);
   assert.deepEqual(row.querySelectorAll('.dnums .term').map(t => t.textContent), ['Today', `Since 10${NB}Sep`]);
   assert.deepEqual(row.querySelectorAll('.dnums .v').map(v => v.textContent), ['€0,00', '€0,00']);
   assert.equal(row.querySelectorAll('.bars').length, 0);
-  // Unknown is never "none": without the record, or with an old positions panel, Joel keeps the full card.
-  const noRecord = context(NOW, { results: false });
-  assert.equal(desk.noTradesSinceStart(noRecord, desk.deskFacts(noRecord), 'joel'), false);
-  const stale = context(); stale.states.positions = { ...stale.states.positions, state: 'stale', reason: 'snapshot_stale' };
-  assert.equal(desk.noTradesSinceStart(stale, desk.deskFacts(stale), 'joel'), false);
+  // 75 s later the positions panel is stale: the same layouts (so the same
+  // grid columns), and the row says the positions are not current.
+  const data = snapshotAt(new Date(Date.parse(NOW) - 9000).toISOString());
+  const later = context(new Date(Date.parse(NOW) + 75000).toISOString(), { ...full, data });
+  assert.equal(later.states.positions.state, 'stale');
+  const laterFacts = desk.deskFacts(later);
+  assert.deepEqual(DESK_IDS.map(id => desk.noTradesSinceStart(later, laterFacts, id)), [null, null, '2026-09-10']);
+  assert.equal(text(htmlDocument(deskCard(later, 'joel')).querySelector('.who')), `Joel · sitting out · no trades since 10${NB}Sep · positions not current`);
+  // A full card says the same about its positions, in its header.
+  assert.match(htmlDocument(deskCard(later, 'j')).querySelector('header .state span').textContent, /· positions not current$/);
+  // Unknown is never "none": the normal card whenever the record cannot prove it.
+  const cases = {
+    'no record': context(NOW, { results: false }),
+    'a partial closed day (FX)': context(NOW, { early: true }),
+    'a capture gap': context(NOW, { early: true, partial: { '2026-09-21': ['capture_gap'] } }),
+    'unattributed activity': context(NOW, { early: true, partial: { '2026-10-06': ['unattributed_activity'] } }),
+    'an open day with a real cause': context(NOW, { early: true, partial: { '2026-10-14': ['fx_missing'] } }),
+    'a missing daily summary': context(NOW, { early: true, partial: {}, edit: v => ({ ...v, missingDays: ['2026-10-07'] }) }),
+    'sessions without a summary': context(NOW, { partial: {} }),
+    'tracking that started after the desk': context(NOW, { early: true, partial: {}, edit: v => ({ ...v, trackingStart: '2026-09-21', days: v.days.filter(d => d.date >= '2026-09-21') }) }),
+  };
+  for (const [name, c] of Object.entries(cases)) assert.equal(desk.noTradesSinceStart(c, desk.deskFacts(c), 'joel'), null, name);
+  // An open day still in progress (partial, no cause) is no gap.
+  const open = context(NOW, { early: true, partial: { '2026-10-14': [] }, receivedAt: '2026-10-14T17:40:00.000Z' });
+  assert.equal(desk.noTradesSinceStart(open, desk.deskFacts(open), 'joel'), '2026-09-10');
+  // A retained (last good) record proves nothing new.
+  const retained = context(NOW, full);
+  retained.states.results = { ...retained.states.results, state: 'broken', retained: true, reason: 'contract_invalid' };
+  assert.equal(desk.noTradesSinceStart(retained, desk.deskFacts(retained), 'joel'), null);
+  // An old but accepted record still holds: its age alone flips nothing.
+  const old = context(NOW, full);
+  old.states.results = { ...old.states.results, state: 'stale', reason: 'snapshot_stale', ageSeconds: 75 };
+  assert.equal(desk.noTradesSinceStart(old, desk.deskFacts(old), 'joel'), '2026-09-10');
 });
 
 test('JOED-153: the phone row labels its first figure per phase and counts what is held', () => {
@@ -353,14 +393,174 @@ test('JOED-153 slot: the whole-account block’s place above the hero, marked fo
 // width it names, and every inside label its threshold.
 test('JOED-153 M4: every label width the cards can write has its collision rule in app.css', () => {
   const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
-  const rules = [...css.matchAll(/@container spark \(max-width: ([\d.]+)px\) \{ \.bars\[data-need="(\d+)"\] \.b:not\(:hover\):not\(:focus-visible\) \.bl\.out:not\(\.keep\) \{ visibility: hidden; \} \}/g)];
+  // A tapped bar (touch) keeps its label, as a hovered or focused one does.
+  const rules = [...css.matchAll(/@container spark \(max-width: ([\d.]+)px\) \{ \.desk-sessions \.bars\[data-need="(\d+)"\] \.b:not\(:hover\):not\(:focus-visible\):not\(\.tapped\) \.bl\.out:not\(\.keep\) \{ visibility: hidden; \} \}/g)];
   assert.deepEqual(rules.map(m => Number(m[2])), Array.from({ length: 16 }, (_, i) => 100 + 20 * i));
   assert.ok(rules.every(m => Number(m[1]) === Number(m[2]) - 0.02));
   const ctx = context(), needs = new Set();
-  // Joel's one-row card (no trades) draws no bars.
-  for (const id of DESK_IDS) { const bars = htmlDocument(deskCard(ctx, id)).querySelector('.bars'); if (bars) needs.add(bars.dataset.need); }
+  for (const id of DESK_IDS) { const bars = htmlDocument(deskCard(ctx, id)).querySelector('.bars'); if (bars?.dataset.need) needs.add(bars.dataset.need); }
   assert.ok(needs.size >= 1 && [...needs].every(n => rules.some(m => m[2] === n)), [...needs].join());
-  for (const c of [2, 3, 4, 5, 6, 7]) assert.match(css, new RegExp(`@container spark \\(min-width: \\d+px\\) \\{ \\.bars \\.b\\[data-c="${c}"\\] \\.bl\\.in \\{ display: block; \\}`));
+  for (const c of [2, 3, 4, 5, 6, 7]) assert.match(css, new RegExp(`@container spark \\(min-width: \\d+px\\) \\{ \\.desk-sessions \\.bars \\.b\\[data-c="${c}"\\] \\.bl\\.in \\{ display: block; \\}`));
+});
+
+// Every selector of a CSS text, outside at-rule preludes and comments.
+const cssSelectors = css => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{/g)]
+  .map(m => m[1].trim()).filter(pre => pre && !pre.startsWith('@')).flatMap(pre => pre.split(',').map(sel => sel.trim().replace(/\s+/g, ' ')));
+// A selector widened to what the test DOM reads: no pseudo-classes or
+// -elements and descendants for every combinator, so it matches a superset.
+const widened = sel => sel.replace(/::?[\w-]+(\((?:[^()]|\([^()]*\))*\))?/g, '').replace(/\s*[>+~]\s*/g, ' ').trim();
+const DESK_BLOCK = (() => {
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  return css.slice(css.indexOf('/* ---------- Desk hero and cards (JOED-153'), css.indexOf('/* ---------- end Desk hero and cards (JOED-153)'));
+})();
+
+// Gate finding 1: the Desk block's rules reach Desk only. Results' breakdown
+// is also a `.bars` of `.b` bars; it keeps exactly its own styles.
+test('JOED-153 CSS: no Desk hero or card rule reaches Results; Results’ breakdown keeps its own styles', async () => {
+  const page = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  const { renderBreakdown, RS } = await builders('results.js', ['renderBreakdown']);
+  const ctx = context('2026-10-15T12:00:00.000Z'), view = resultsView(ctx), saved = globalThis.document, savedDesk = RS.desk;
+  const per = periodOf('week', '2026-10-14', view.today, view.trackingStart);
+  const rows = [...DESK_IDS.map(id => rollup(view.ix, per, [id], moneyContext(view.ix, view, per, [id]))), rollup(view.ix, per, DESK_IDS, moneyContext(view.ix, view, per, DESK_IDS))];
+  globalThis.document = page;
+  try { RS.desk = 'all'; renderBreakdown(view, per, DESK_IDS, rows); } finally {
+    RS.desk = savedDesk; if (saved === undefined) delete globalThis.document; else globalThis.document = saved;
+  }
+  const results = page.querySelector('#scr-results');
+  assert.ok(results.querySelectorAll('#breakdown .brow .track .b').length >= 2, 'the breakdown draws its result bars');
+  const selectors = cssSelectors(DESK_BLOCK).map(widened).filter(Boolean);
+  assert.deepEqual(selectors.filter(sel => results.querySelectorAll(sel).length), [], 'Desk rules that reach the Results screen');
+  // Not vacuous: the same rules do reach a Desk card's session bars.
+  const card = htmlDocument(`<article class="card dcard" id="desk-j"><div class="desk-detail">${deskCard(context(), 'j')}</div></article>`);
+  assert.equal(card.querySelectorAll(widened('.desk-sessions .bars .b')).length, 10);
+  assert.ok(selectors.includes('.desk-sessions .bars .b'));
+  // Every bars rule of the block is scoped to Desk's session charts.
+  assert.deepEqual(cssSelectors(DESK_BLOCK).filter(sel => /(^|\s)\.(bars|bl|bt|bz|bars-ax|bars-tap)\b/.test(sel) && !sel.startsWith('.desk-sessions ')), []);
+});
+
+// Gate finding 2: an accepted record without days or trades is no evidence
+// of a result. Last session is A2's dash with one plain reason, as Results'
+// Day hero shows a dash for it: never € 0 or 0 %.
+test('JOED-153 A2: an accepted empty record gives the last session a dash and “No trades recorded”, never € 0', () => {
+  const empty = v => ({ ...v, days: [], trades: [] });
+  assert.ok(validateContract('results', empty(record())).ok, 'an accepted envelope');
+  const ctx = context('2026-10-15T12:00:00.000Z', { edit: empty }), view = resultsView(ctx);
+  const per = periodOf('day', '2026-10-14', view.today, view.trackingStart);
+  assert.equal(rollup(view.ix, per, DESK_IDS, moneyContext(view.ix, view, per, DESK_IDS)).empty, true, 'Results’ Day hero: a dash, “No trades …”');
+  const hero = htmlDocument(desk.heroLeft(ctx)), first = hero.querySelector('[data-cell="hero.day"]');
+  assert.equal(first.querySelector('.display').textContent, '—');
+  assert.equal(first.querySelector('.bn').getAttribute('aria-label'), `Last session · Wed 14${NB}Oct: no trades recorded`);
+  assert.equal(first.querySelector('.primary-caption').textContent, 'No trades recorded');
+  assert.equal(first.querySelector('.pct-slot').textContent, '');
+  assert.equal(hero.querySelector('.say').textContent, `No trades recorded on Wednesday · 1${NB}position held overnight`);
+  assert.doesNotMatch(first.textContent + hero.querySelector('.say').textContent, /€\s?0,00|0,00\s?%/);
+  // The record covers no session, so no desk is one row; every bar is a dashed
+  // outline that says so, none a zero.
+  for (const id of DESK_IDS) {
+    const card = htmlDocument(deskCard(ctx, id)), bars = card.querySelectorAll('.bars .b');
+    assert.equal(card.querySelectorAll('.drow').length, 0, id);
+    assert.equal(card.querySelector('.dnums .v .bn').getAttribute('aria-label'), `${{ j: 'J', joe: 'Joe', joel: 'Joel' }[id]} · Wed 14${NB}Oct: no trades recorded`);
+    assert.equal(bars.length, 10);
+    assert.ok(bars.every(b => b.querySelector('i.nx') && !b.querySelector('.bl') && b.getAttribute('aria-label').endsWith(': no trades recorded')), id);
+  }
+  // Within a record, a desk-day without a trade or a change is the same: a dash.
+  const quiet = desk.resultsDay(resultsView(context('2026-10-15T12:00:00.000Z')), '2026-10-13', ['joel']);
+  assert.deepEqual([quiet.units, quiet.kind, quiet.reason], [null, 'empty', 'no trades recorded']);
+});
+
+// Gate finding 3: before the open, a phone row's first figure is Results'
+// last session. Its Partial/Stale marker and the record's state stay with it:
+// in the row's visible warning line and its accessible name.
+test('JOED-153: a phone row keeps the last session’s marker and the record’s state, in its text and its name', () => {
+  const at = '2026-10-15T08:00:00.000Z';
+  const summary = row => [row.querySelector('.disclosure-warning .summary-text')?.textContent ?? '', row.querySelector('.disclosure-warning .vh')?.textContent ?? ''];
+  // Wed 14 Oct is Partial in the record (FX missing).
+  const partial = htmlDocument(desk.compactDesk(context(at), 'j'));
+  assert.equal(partial.querySelector('[data-compact-value="dayPnl"] .compact-state').getAttribute('aria-label'), 'Partial');
+  assert.deepEqual(summary(partial), Array(2).fill('Last session: partial · this day\'s record is incomplete. FX missing'));
+  // Without a day marker, an old record says how old it is.
+  const old = context(at, { partial: {} });
+  old.states.results = { ...old.states.results, state: 'stale', reason: 'snapshot_stale', ageSeconds: 300 };
+  const stale = htmlDocument(desk.compactDesk(old, 'j'));
+  assert.equal(stale.querySelector('[data-compact-value="dayPnl"] .compact-state').getAttribute('aria-label'), 'Stale');
+  assert.equal(summary(stale)[0], `Last session: stale · Results as of 5${NB}min ago · updates are late`);
+  // Results unavailable: the row says so; a fact (no trades recorded) is no problem.
+  assert.equal(summary(htmlDocument(desk.compactDesk(context(at, { results: false }), 'j')))[0], 'Last session: not reported · no data received yet');
+  assert.equal(summary(htmlDocument(desk.compactDesk(context(at, { edit: v => ({ ...v, days: [], trades: [] }) }), 'j')))[0], '');
+  // In the session the Today cell is the row's figure, as before.
+  assert.equal(htmlDocument(desk.compactDesk(context(), 'j')).querySelectorAll('[data-compact-value="dayPnl"] .compact-state').length, 0);
+});
+
+// Gate finding 5: on a touch screen a first tap shows the bar's tip with the
+// way to Results; that link or a second tap opens Results; Escape or a tap
+// elsewhere closes it. A mouse and the keyboard keep hover and focus.
+test('JOED-153 M4 touch: first tap shows the tip, a second tap or its link opens Results, Escape or elsewhere closes', async () => {
+  const A = 'desk-j|2026-10-13', B = 'desk-j|2026-10-12';
+  for (const [open, event, want] of [
+    [null, { bar: A, touch: true }, 'open'], [A, { bar: A, touch: true }, 'follow'], [A, { bar: B, touch: true }, 'open'],
+    [A, { inTip: true, onTip: true }, 'follow'], [A, { onTip: true }, null], [A, {}, 'close'], [A, { bar: A, touch: false }, 'close'], [null, { bar: A, touch: false }, null], [null, {}, null],
+  ]) assert.equal(desk.barTapAction(open, event), want, JSON.stringify([open, event]));
+  const href = '#results?period=day&date=2026-10-13&desk=j';
+  const tipHtml = desk.barTipHtml(`<b>Tue 13${NB}Oct</b> · +€${NB}18,00<span>after fees · from Results</span>`, href);
+  const tip = htmlDocument(tipHtml);
+  assert.equal(tip.querySelector('a.bars-go').getAttribute('href'), href);
+  assert.equal(tip.querySelector('a.bars-go').textContent, 'Open in Results');
+  assert.equal(tip.querySelector('a.bars-go use').getAttribute('href'), '#i-chev-r', 'the chevron icon, never a glyph');
+  assert.doesNotMatch(tipHtml, /›/);
+  // The events, through the real handlers, on the test DOM with a card in it.
+  const cardHtml = deskCard(context(), 'j');
+  const doc = htmlDocument(`<article class="card dcard" id="desk-j"><div class="desk-detail">${cardHtml}</div></article>`);
+  // The test DOM keeps no markup of parsed nodes: give each hover tip its own.
+  const words = [...cardHtml.matchAll(/<span class="bt" aria-hidden="true">(.*?<\/span>)<\/span><\/a>/g)].map(m => m[1]);
+  doc.querySelectorAll('.bars a.b .bt').forEach((bt, i) => { bt.html = words[i]; });
+  const listeners = {};
+  Object.assign(doc, { addEventListener: (type, fn) => { (listeners[type] ??= []).push(fn); } });
+  const proto = Object.getPrototypeOf(doc);
+  const savedRect = proto.getBoundingClientRect, saved = globalThis.document;
+  proto.getBoundingClientRect = () => ({ left: 0, width: 30 });
+  const tipEl = doc.querySelector('.bars-tap');
+  Object.defineProperty(tipEl, 'hidden', { get() { return this.getAttribute('hidden') !== null; }, set(v) { if (v) this.setAttribute('hidden', ''); else delete this.attributes.hidden; }, configurable: true });
+  const bars = doc.querySelectorAll('.bars a.b'), barAt = i => bars[i];
+  const fire = (type, init) => { const e = { defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...init }; for (const fn of listeners[type] ?? []) fn(e); return e; };
+  const tap = target => { fire('pointerdown', { pointerType: 'touch', target }); return fire('click', { pointerType: 'touch', detail: 1, target }); };
+  globalThis.document = doc;
+  try {
+    desk.initBarTaps();
+    const first = tap(barAt(8));
+    assert.equal(first.defaultPrevented, true, 'a first tap does not navigate');
+    assert.equal(tipEl.hidden, false);
+    assert.match(tipEl.innerHTML, /Tue 13.*Oct.*Open in Results/s);
+    assert.ok(barAt(8).classList.contains('tapped'), 'the tapped bar shows its label');
+    const second = tap(barAt(8));
+    assert.equal(second.defaultPrevented, false, 'a second tap on the same bar opens Results');
+    await new Promise(r => setTimeout(r, 0));
+    assert.equal(tipEl.hidden, true);
+    tap(barAt(8));
+    tap(tipEl.querySelector('b'));
+    assert.equal(tipEl.hidden, false, 'a tap inside the tip keeps it');
+    const link = tap(tipEl.querySelector('a.bars-go'));
+    assert.equal(link.defaultPrevented, false, 'its link opens Results');
+    await new Promise(r => setTimeout(r, 0));
+    assert.equal(tipEl.hidden, true);
+    tap(barAt(8));
+    fire('keydown', { key: 'Escape', target: doc });
+    assert.equal(tipEl.hidden, true, 'Escape closes it');
+    tap(barAt(8));
+    const elsewhere = fire('click', { pointerType: 'touch', detail: 1, target: doc.querySelector('.spark-h') });
+    assert.equal(elsewhere.defaultPrevented, false);
+    assert.equal(tipEl.hidden, true, 'a tap elsewhere closes it');
+    // A mouse click and the keyboard's Enter open Results straight away.
+    fire('pointerdown', { pointerType: 'mouse', target: barAt(3) });
+    assert.equal(fire('click', { pointerType: 'mouse', detail: 1, target: barAt(3) }).defaultPrevented, false);
+    assert.equal(fire('click', { pointerType: '', detail: 0, target: barAt(3) }).defaultPrevented, false);
+    assert.equal(tipEl.hidden, true);
+  } finally {
+    proto.getBoundingClientRect = savedRect;
+    if (saved === undefined) delete globalThis.document; else globalThis.document = saved;
+  }
+  // Wired once by the app; styled on Desk only.
+  assert.match(readFileSync(new URL('../public/joe/app.js', import.meta.url), 'utf8'), /\n  initBarTaps\(\);\n/);
+  assert.match(DESK_BLOCK, /\.desk-sessions \.bars-tap \{[^}]*background: var\(--tip-bg\)/);
 });
 
 // The browser check (scripts/browser/desk-sessions.mjs) expects what Desk

@@ -5,7 +5,7 @@ import { isCanonicalJoeHost } from './host.js';
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
-import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure } from './desk.js';
+import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure, initBarTaps } from './desk.js';
 import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput } from './history.js';
 import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
 import { boardHealthPresentation } from './health.js';
@@ -59,6 +59,7 @@ function start() {
   }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, globalThis.JoeVersion.APP_VERSION,
   { actionsWanted: () => screen === 'settings' });
   const tips = initTips({ now: () => feed.now(), since: () => sinceStarts(feed.feeds) });
+  initBarTaps();
   // Read-only: fetches the same three reads now instead of at the next poll.
   window.__joedesk.refresh = () => feed.refresh();
   window.__joedesk.worker = () => feed.usesWorker();
