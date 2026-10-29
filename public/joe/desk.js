@@ -353,10 +353,18 @@ const blockingDays = (states, data) => deskDays(states, data).filter(g => !['exa
 // Details: every desk's Today, exact ones first, e.g. "Exact for Joel; not
 // exact for J and Joe · start-of-day value missing". This one row is also
 // how Details explains a green light beside a not-exact Today (Amy's A3).
+// A household withheld as not exact while every desk is exact says so itself:
+// "Household not exact · ‹reason›; each desk exact".
 const DAY_ORDER = ['exact', 'estimated', NOT_EXACT];
 const dayRank = g => DAY_ORDER.includes(g.word) ? DAY_ORDER.indexOf(g.word) : DAY_ORDER.length;
 export function dayBreakdown(states, data) {
   const groups = deskDays(states, data).sort((a, b) => dayRank(a) - dayRank(b) || byDesk(a.ids[0], b.ids[0]));
+  const today = classifyDays(states, data).today;
+  if (today.kind === 'notExact' && groups.every(g => ['exact', 'estimated'].includes(g.word))) {
+    const why = cellReason(today.reason);
+    const desks = groups.length === 1 && groups[0].word === 'exact' ? 'each desk exact' : groups.map(g => `${g.word} for ${deskNames(g.ids)}`).join('; ');
+    return `Household not exact${why !== NOT_EXACT ? ` · ${why}` : ''}; ${desks}`;
+  }
   return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` · ${g.reason}` : ''}`).join('; '));
 }
 

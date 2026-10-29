@@ -1398,8 +1398,9 @@ point of a session.
 Amy's A3 (2026-10-29, JOED-148) changes one light rule. During New York
 regular hours a Today that the feed explains as not exact no longer turns the
 header yellow: the board stays green, and Details says why once, in its
-“Today’s result” row (“Exact for Joel; not exact for J and Joe · ‹reason›”); no
-separate note repeats it. One classifier,
+“Today’s result” row (“Exact for Joel; not exact for J and Joe · ‹reason›”, or
+“Household not exact · ‹reason›; each desk exact” when only the household
+total is withheld); no separate note repeats it. One classifier,
 `classifyDay` / `classifyDays` in `board-state.js`, decides every Today, the
 household's and each desk's, over all of its channels: the board's cell (value,
 state, freshness, last good), the money reason, and the source's status and
