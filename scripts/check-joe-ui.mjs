@@ -76,7 +76,7 @@ for (const [name, text] of modules) {
   required(!/\bmode\s*[:=]\s*['"`](live|LIVE)['"`]/.test(text) && !/\.mode\s*=\s*(?!['"`]paper['"`])['"`]/.test(text), `${name}: no code path sets a live mode`);
   required(!/serviceWorker/.test(text), `${name}: no service worker`);
   for (const [, key] of text.matchAll(/localStorage\.(?:getItem|setItem|removeItem)\(([^)]+)\)/g)) {
-    required(/THEME_KEY|OBSERVED_EVENTS_KEY|PREVIEW_KEY|joe-board-theme-v1/.test(key), `${name}: only theme, observed events and the fleet settings draft use browser storage (${key})`);
+    required(/THEME_KEY|OBSERVED_EVENTS_KEY|PREVIEW_KEY|joe-board-theme-v1/.test(key) || name === 'chart.js' && /^(CHART_AXES_KEY|CHART_HINT_KEY)\b/.test(key), `${name}: only theme, observed events, the fleet settings draft and the charts' vertical axis and first-visit hint use browser storage (${key})`);
   }
   const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
   for (const [, quote, body] of code.matchAll(/(['"`])((?:(?!\1)[^\\]|\\.)*)\1/g)) {

@@ -1,7 +1,8 @@
 // One SVG chart renderer in the Paimos language: faint grid, mono axes, soft
 // area, emphasised end, crosshair with an opaque tip. Honest scales: result
 // charts include zero; money charts span at least ±0,5 % of their base.
-// Below it, the pure input rules History's time chart and overview share.
+// Below it, the pure input rules History's time chart and overview share,
+// and the vertical-axis choice every time chart offers (Auto, Max, Custom).
 import { esc, digits, MINUS, NB } from './format.js';
 
 // ---------- Input on a time chart ----------
@@ -61,20 +62,161 @@ function niceStep(raw) {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
 }
 const r2 = n => Math.round(n * 100) / 100;
+// The smallest nice step whose labels stay `gap` px apart on `px` of axis,
+// counted after the range is rounded out to whole steps.
+function pixelStep(lo, hi, { px, gap }) {
+  const most = Math.max(1, Math.floor(px / gap));
+  let step = niceStep((hi - lo) / most);
+  for (let i = 0; i < 12 && Math.ceil(hi / step - 1e-9) - Math.floor(lo / step + 1e-9) > most; i++) step = niceStep(step * 1.000001);
+  return step;
+}
 
-export function axis(lo, hi, n = 4, base = 0, zero = false) {
+// `room` ({ px, gap }) picks the step from the axis's length in pixels, so
+// labels keep at least `gap` px apart at every size; without it, about `n`
+// steps as before.
+export function axis(lo, hi, n = 4, base = 0, zero = false, room = null) {
   if (zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
   if (base) { const c = (lo + hi) / 2, h = Math.max(Math.abs(base) * 0.005, (hi - lo) / 2); lo = c - h; hi = c + h; }
   if (hi - lo < 1) { if (zero) hi = Math.max(hi, lo + 1); else { lo -= 0.5; hi += 0.5; } }
-  const step = niceStep((hi - lo) / n), a = Math.floor(lo / step + 1e-9) * step, b = Math.ceil(hi / step - 1e-9) * step, ticks = [];
+  const step = room?.px > 0 && room.gap > 0 ? pixelStep(lo, hi, room) : niceStep((hi - lo) / n);
+  const a = Math.floor(lo / step + 1e-9) * step, b = Math.ceil(hi / step - 1e-9) * step, ticks = [];
   for (let v = a; v <= b + step / 2; v += step) ticks.push(r2(v));
   return { lo: a, hi: b, ticks, step };
 }
-export const eurAxis = (t, step) => `${t < 0 ? MINUS : ''}€${NB}${digits(t, step < 1 ? 2 : 0)}`;
+// An axis over exactly [lo, hi] (a custom axis, or one frame of an eased
+// change): ticks on the nice step that keeps labels `gap` px apart.
+export function fixedAxis(lo, hi, room = null, n = 4) {
+  const span = Math.max(hi - lo, 1e-6);
+  const step = niceStep(room?.px > 0 && room.gap > 0 ? span * room.gap / room.px : span / n), ticks = [];
+  for (let k = Math.ceil(lo / step - 1e-9); k * step <= hi + step * 1e-9 && ticks.length < 200; k++) ticks.push(r2(k * step));
+  return { lo, hi, ticks, step };
+}
+// Whole euros for whole steps; a 2,5 step keeps its decimal.
+const stepDigits = step => (step < 1 ? 2 : Number.isInteger(step) ? 0 : 1);
+export const eurAxis = (t, step) => `${t < 0 ? MINUS : ''}€${NB}${digits(t, stepDigits(step))}`;
+// A change: signed, so +€ 20 and −€ 20 read apart from € 0.
+export const changeAxis = (t, step) => `${t > 0 ? '+' : t < 0 ? MINUS : ''}€${NB}${digits(t, stepDigits(step))}`;
+
+// ---------- The vertical axis: Auto, Max or Custom ----------
+// Every time chart offers the same choice, remembered per chart and viewer
+// in this browser:
+//   auto    fits the values in the shown window (the default);
+//   max     fits every value the chart has loaded, so moving the window
+//           never rescales it;
+//   custom  keeps the reader's own bottom and top, in euros of what the
+//           chart shows.
+// A chart adopts it with its own id:
+//   const yAxis = createAxisMode('account');
+//   yAxis.setAxisMode({ mode: 'custom', min: 4900, max: 5100 });
+//     // { ok: true, choice } once saved, or { ok: false, field, error }
+//   drawChart(el, { ...o, axis: yAxis.get(), yValues: shownValues, maxValues: [lowest, highest], tickGap: 56, ease: 180, again: redraw });
+// drawChart without `axis` draws exactly as before.
+export const AXIS_MODES = Object.freeze(['auto', 'max', 'custom']);
+export const AXIS_LIMIT = 1e7;
+export const CHART_AXES_KEY = 'joe-board-chart-axes-v1';
+const AUTO = Object.freeze({ mode: 'auto' });
+const withinLimit = n => Number.isFinite(n) && Math.abs(n) <= AXIS_LIMIT;
+
+// A saved or requested choice, checked; anything else is Auto.
+export function axisChoice(value) {
+  if (!value || typeof value !== 'object' || !AXIS_MODES.includes(value.mode) || value.mode === 'auto') return AUTO;
+  if (value.mode === 'max') return Object.freeze({ mode: 'max' });
+  const { min, max } = value;
+  return withinLimit(min) && withinLimit(max) && min < max ? Object.freeze({ mode: 'custom', min, max }) : AUTO;
+}
+// One custom bound as typed: an optional sign, digits and at most two
+// decimals after a point or a comma, without grouping, as Settings reads
+// euros. A Number passes as it is. Null: not a bound.
+export function axisBound(raw) {
+  if (typeof raw === 'number') return withinLimit(raw) ? raw : null;
+  const text = String(raw ?? '').trim().replace(/^[−–]/, '-');
+  if (!/^[+-]?\d+(?:[.,]\d{1,2})?$/.test(text)) return null;
+  const n = Number(text.replace(',', '.'));
+  return withinLimit(n) ? n : null;
+}
+// Both bounds of a custom axis, or which one is wrong and why.
+export function customAxis(min, max) {
+  const blank = v => typeof v !== 'number' && !String(v ?? '').trim();
+  if (blank(min) || blank(max)) return { ok: false, field: blank(min) ? 'min' : 'max', error: 'Enter both a bottom and a top.' };
+  const lo = axisBound(min), hi = axisBound(max);
+  if (lo === null || hi === null) return { ok: false, field: lo === null ? 'min' : 'max', error: `Enter euros as a number, for example ${MINUS}25 or 4950,50, without grouping and within ${digits(AXIS_LIMIT, 0)}.` };
+  if (!(hi > lo)) return { ok: false, field: 'max', error: 'The top must be above the bottom.' };
+  return { ok: true, min: lo, max: hi };
+}
+
+// The saved choices, one entry per chart id, read once. Unreadable storage
+// keeps Auto everywhere; a full or blocked one keeps a choice for this page.
+// (Storage is the window's: outside a page, as under Node, there is none.)
+let savedAxes = null;
+function axesSaved() {
+  if (savedAxes) return savedAxes;
+  savedAxes = {};
+  try {
+    const all = JSON.parse(globalThis.window?.localStorage.getItem(CHART_AXES_KEY) ?? '{}');
+    if (all && typeof all === 'object' && !Array.isArray(all)) {
+      for (const [id, value] of Object.entries(all)) { const choice = axisChoice(value); if (choice !== AUTO) savedAxes[id] = choice; }
+    }
+  } catch { /* nothing saved, or no storage */ }
+  return savedAxes;
+}
+export function createAxisMode(id) {
+  return {
+    id,
+    get: () => axesSaved()[id] ?? AUTO,
+    setAxisMode(next = {}) {
+      let choice = AUTO;
+      if (next.mode === 'custom') {
+        const bounds = customAxis(next.min, next.max);
+        if (!bounds.ok) return bounds;
+        choice = axisChoice({ mode: 'custom', min: bounds.min, max: bounds.max });
+      } else choice = axisChoice(next);
+      const all = axesSaved();
+      if (choice === AUTO) delete all[id]; else all[id] = choice;
+      try { globalThis.window?.localStorage.setItem(CHART_AXES_KEY, JSON.stringify(all)); } catch { /* this page only */ }
+      return { ok: true, choice };
+    },
+  };
+}
+
+// The first-visit hint under a chart: shown until the first drag, swipe,
+// zoom or key on any chart, then never again in this browser.
+export const CHART_HINT_KEY = 'joe-board-chart-hint-v1';
+let hintSeen = null;
+export function chartHintSeen() {
+  if (hintSeen === null) { try { hintSeen = globalThis.window?.localStorage.getItem(CHART_HINT_KEY) === '1'; } catch { hintSeen = false; } }
+  return hintSeen;
+}
+// True only the first time.
+export function dismissChartHint() {
+  if (chartHintSeen()) return false;
+  hintSeen = true;
+  try { globalThis.window?.localStorage.setItem(CHART_HINT_KEY, '1'); } catch { /* this page only */ }
+  return true;
+}
+// Read the saved choices and the hint again (a test, or another tab's change).
+export function forgetChartMemory() { savedAxes = null; hintSeen = null; }
 
 const drawn = new Set();
 const cursors = new WeakMap();
+const eases = new WeakMap();
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const easeOut = t => 1 - (1 - t) ** 3;
+// The y-range drawn this frame. A new target glides from the range on screen
+// over `o.ease` ms (redrawing through `o.again`); with reduced motion, on
+// the first drawing and when `o.easeKey` changes (another quantity, say) it
+// lands at once.
+function easedAxis(el, target, o, room) {
+  const now = performance.now(), last = eases.get(el), key = o.easeKey ?? '', to = [target.lo, target.hi];
+  let e = last;
+  if (!last || last.key !== key || reduced()) e = { key, from: to, to, start: -Infinity, shown: to };
+  else if (last.to[0] !== to[0] || last.to[1] !== to[1]) e = { key, from: last.shown, to, start: now, shown: last.shown };
+  const k = Math.min(1, (now - e.start) / o.ease), t = easeOut(k);
+  e.shown = k >= 1 ? e.to : [e.from[0] + (e.to[0] - e.from[0]) * t, e.from[1] + (e.to[1] - e.from[1]) * t];
+  eases.set(el, e);
+  if (k >= 1) return target;
+  o.again?.();
+  return fixedAxis(e.shown[0], e.shown[1], room, o.ticks || 4);
+}
 
 // series: [{ pts:[{x,v}], color, w, live, area, endDot, estimate }]; gaps are
 // drawn by the caller as estimate series (one subtle dashed style). Optional
@@ -85,6 +227,12 @@ const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 // timestamps, an instruction id and a live region; its tipFmt returns
 // { html, text } with shared visible/spoken words. Returns the scale for
 // hit-testing, with inspectAt/release for a touch caller.
+// The vertical axis (all optional): axis is a choice from createAxisMode
+// (Auto fits yValues; Max fits maxValues, every value the chart has loaded;
+// Custom is exactly its bounds, marked on the chart, with a note where
+// values lie beyond it); tickGap keeps its labels that many px apart; ease
+// glides a new range over that many ms, calling again() for each next frame
+// (easeKey: a new key lands at once).
 export function drawChart(el, o) {
   const W = el.clientWidth, H = el.clientHeight;
   if (!W || !H) return null;
@@ -112,9 +260,18 @@ export function drawChart(el, o) {
     el.onpointermove = null; el.onpointerleave = null;
     return null;
   }
-  let lo = Math.min(...values), hi = Math.max(...values);
-  if (o.margin) { const m = (hi - lo) * o.margin; lo -= m; hi += m; }
-  const ax = axis(lo, hi, o.ticks || 4, o.base || 0, Boolean(o.zero));
+  const choice = o.axis ? axisChoice(o.axis) : AUTO, custom = choice.mode === 'custom';
+  const room = o.tickGap ? { px: ph, gap: o.tickGap } : null;
+  let target;
+  if (custom) target = fixedAxis(choice.min, choice.max, room, o.ticks || 4);
+  else {
+    const fit = choice.mode === 'max' ? (o.maxValues ?? []).filter(Number.isFinite) : [];
+    const from = fit.length ? fit : values;
+    let lo = Math.min(...from), hi = Math.max(...from);
+    if (o.margin) { const m = (hi - lo) * o.margin; lo -= m; hi += m; }
+    target = axis(lo, hi, o.ticks || 4, o.base || 0, Boolean(o.zero), room);
+  }
+  const ax = o.ease > 0 ? easedAxis(el, target, o, room) : target;
   const [x0, x1] = o.xDomain;
   const X = x => pad.l + (x1 === x0 ? pw / 2 : (x - x0) / (x1 - x0) * pw);
   const Y = v => pad.t + (ax.hi - v) / (ax.hi - ax.lo) * ph;
@@ -134,6 +291,12 @@ export function drawChart(el, o) {
   for (const l of o.xLabels || []) g += `<text x="${X(l.x).toFixed(1)}" y="${H - 6}" text-anchor="${l.anchor || 'middle'}">${esc(l.text)}</text>`;
   if (o.startLine != null) g += `<line x1="${pad.l}" x2="${pad.l + pw}" y1="${Y(o.startLine).toFixed(1)}" y2="${Y(o.startLine).toFixed(1)}" stroke="var(--ink-3)" stroke-dasharray="3 3"/>`;
   if (o.now != null && o.now >= x0 && o.now <= x1) g += `<line x1="${X(o.now).toFixed(1)}" x2="${X(o.now).toFixed(1)}" y1="${pad.t}" y2="${pad.t + ph}" stroke="var(--ink-3)" stroke-opacity=".45" data-now="1"/><text x="${(X(o.now) - 5).toFixed(1)}" y="${pad.t + 10}" text-anchor="end">now</text>`;
+  // A custom axis says so, and where values lie beyond it (their lines are cut there).
+  if (custom) {
+    const above = values.some(v => v > ax.hi), below = values.some(v => v < ax.lo);
+    g += `<text class="axis-note" x="${pad.l + 6}" y="${pad.t + 11}" data-axis-note="top">${above ? 'Custom axis · some values lie above it' : 'Custom axis'}</text>`;
+    if (below) g += `<text class="axis-note" x="${pad.l + 6}" y="${(pad.t + ph - 5).toFixed(1)}" data-axis-note="bottom">Some values lie below it</text>`;
+  }
   const base = o.zero ? 0 : ax.lo;
   g += `<g clip-path="url(#${clip})">`;
   o.series.forEach((s, si) => {
@@ -160,11 +323,15 @@ export function drawChart(el, o) {
   if (o.marker) g += `<line x1="${X(o.marker.x).toFixed(1)}" x2="${X(o.marker.x).toFixed(1)}" y1="${pad.t}" y2="${pad.t + ph}" stroke="var(--line-2)"/><text x="${(X(o.marker.x) + 6).toFixed(1)}" y="${pad.t + 11}" text-anchor="start">${esc(o.marker.text)}</text>`;
   const hits = o.series.map((s, i) => (s.estimate || s.noHit ? null : i)).filter(i => i !== null);
   g += `<line class="xh" x1="0" x2="0" y1="${pad.t}" y2="${pad.t + ph}" stroke="var(--ink-3)" stroke-dasharray="2 3" visibility="hidden"/>${hits.map(i => `<circle class="xd" r="4" fill="var(--surface)" stroke="${o.series[i].color}" stroke-width="2" visibility="hidden"/>`).join('')}`;
-  // A result chart is zero-based; given a base it also keeps the money chart's minimum span.
-  const attrs = o.zero ? `data-zero="1" data-ylo="${ax.lo}" data-yhi="${ax.hi}"${o.base ? ` data-base="${o.base}"` : ''}` : `data-ylo="${ax.lo}" data-yhi="${ax.hi}" data-base="${o.base}"`;
+  // A result chart is zero-based; given a base it also keeps the money
+  // chart's minimum span. Both are promises of the automatic fits: a custom
+  // axis is the reader's own, makes neither and says so on the chart.
+  const fitted = o.zero ? `data-zero="1" data-ylo="${ax.lo}" data-yhi="${ax.hi}"${o.base ? ` data-base="${o.base}"` : ''}` : `data-ylo="${ax.lo}" data-yhi="${ax.hi}" data-base="${o.base}"`;
+  const attrs = `${custom ? `data-ylo="${ax.lo}" data-yhi="${ax.hi}"` : fitted}${o.axis ? ` data-axis="${choice.mode}"` : ''}`;
   el.insertAdjacentHTML('afterbegin', `<svg viewBox="0 0 ${W} ${H}" ${attrs} role="img" aria-label="${esc(o.label)}"${o.inspect ? ' aria-hidden="true"' : ''}>${g}</svg>`);
   if (first) for (const p of el.querySelectorAll('[data-draw]')) { const len = Math.ceil(p.getTotalLength()); p.style.setProperty('--len', len); p.setAttribute('stroke-dasharray', `${len} ${len}`); }
-  const scale = { X, Y, pad, pw, ph, W, H, x0, x1, ax };
+  // ax is the range drawn this frame; target the one an eased change settles on.
+  const scale = { X, Y, pad, pw, ph, W, H, x0, x1, ax, target, axis: choice };
   if (!tip || !o.tipFmt) { el.onpointermove = null; el.onpointerleave = null; return scale; }
   const xh = el.querySelector('.xh'), xds = [...el.querySelectorAll('.xd')];
   const show = (xv, announce = false) => {
