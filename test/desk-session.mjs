@@ -20,6 +20,7 @@ const desk = await import('../public/joe/desk.js');
 // JOED-156: the whole-account block that fills the slot above the hero.
 const account = await import('../public/joe/account.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
+const { positionsFor } = await builders('desk.js', ['positionsFor']);
 const { dayWarning } = await builders('results.js', ['dayWarning']);
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url))).data;
 
@@ -88,6 +89,27 @@ function context(now = NOW, { results = true, data = null, partial = PARTIAL, ea
 }
 const text = doc => doc.textContent.replace(/[ \t\n]+/g, ' ').trim();
 const visible = doc => { for (const selector of ['.cash-sizing', '.vh']) for (const node of doc.querySelectorAll(selector)) node.remove(); return doc; };
+
+test('JOED-167 fresh position sections reuse unchanged rows; changed rows, state, snapshot and NY day are rendered', () => {
+  const ctx = context(), first = positionsFor(ctx);
+  assert.equal(positionsFor(ctx), first, 'an unrelated refresh reuses the formatted section');
+  ctx.states.positions = { ...ctx.states.positions, value: ctx.states.positions.value.slice() };
+  assert.equal(positionsFor(ctx), first, 'a selector array holding the same rows reuses the section');
+  ctx.states.positions.value[0] = { ...ctx.states.positions.value[0], mark: { amount: '123.45', currency: 'USD' } };
+  const moved = positionsFor(ctx);
+  assert.notEqual(moved, first);
+  assert.equal(moved.html, desk.positionsHtml(ctx).html, 'changed values reach the original renderer');
+  ctx.now = '2026-10-15T04:00:00.000Z';
+  const midnight = positionsFor(ctx);
+  assert.notEqual(midnight, moved, 'opened-today labels follow the new NY day');
+  ctx.feeds.data.value = structuredClone(ctx.feeds.data.value);
+  assert.notEqual(positionsFor(ctx), midnight, 'new snapshot metadata invalidates the section');
+  ctx.states.positions = { ...ctx.states.positions, state: 'stale', reason: 'snapshot_stale', ageSeconds: 61 };
+  const stale = positionsFor(ctx);
+  ctx.states.positions.ageSeconds = 62;
+  assert.notEqual(positionsFor(ctx), stale, 'non-fresh captions stay live');
+  assert.equal(positionsFor(ctx).html, desk.positionsHtml(ctx).html);
+});
 
 test('JOED-153 M1: the first figure names its session in every phase, with its own link and term', () => {
   for (const [now, phase, label, term, href] of [
