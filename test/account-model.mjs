@@ -3,10 +3,27 @@
 // tooltip's nearest value and the time axis on Vienna wall-clock ticks.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { MIN, HOUR, DAY, iso, valid, words, point, body, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
+import { MIN, HOUR, DAY, iso, valid, words, point, close, body, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
 
 const M = await import('../public/joe/account-model.js');
 const { decimalUnits } = await import('../contracts/decimal.mjs');
+
+test('JOED-167 account calendar: repeated draws preserve consecutive closes across leap days, years and DST', () => {
+  for (const days of [
+    ['2024-02-28', '2024-02-29', '2024-03-01'], ['2026-02-28', '2026-03-01', '2026-03-02'],
+    ['2026-12-31', '2027-01-01', '2027-01-02'], ['2026-03-28', '2026-03-29', '2026-03-30'],
+    ['2026-10-24', '2026-10-25', '2026-10-26'],
+  ]) {
+    const closes = days.map(day => close(day, `${day}T19:30:00.000Z`, '100.00'));
+    for (const gap of [false, true]) {
+      const series = M.acceptAccountHistory(body([], gap ? [closes[0], closes[2]] : closes)).daily;
+      const window = [series.t[0], series.t.at(-1)];
+      const first = M.chartPoints(series, window, window[1]);
+      assert.equal(first.bands.length, gap ? 1 : 0, `${days}: ${gap ? 'missing day stays a gap' : 'consecutive days join'}`);
+      assert.deepEqual(M.chartPoints(series, window, window[1]), first, 'a cached successor preserves the drawing');
+    }
+  }
+});
 
 test('JOED-156 model: the endpoint becomes two typed series; anything off the documented shape is refused', () => {
   const h = M.acceptAccountHistory(history());

@@ -171,6 +171,22 @@ function canvas(t, { reduce = true, height = 300 } = {}) {
 }
 const line = (values, x0 = 0) => [{ pts: values.map((v, i) => ({ x: x0 + i, v })), color: 'var(--desk-j)', area: false }];
 
+test('JOED-167 drawChart: a measured box draws the same SVG without another layout read', t => {
+  const c = canvas(t), options = { series: line([0, 12, -5, 8]), xDomain: [0, 3], zero: true, yFmt: changeAxis };
+  drawChart(c.el, options);
+  const expected = c.el.innerHTML;
+  for (const name of ['clientWidth', 'clientHeight']) Object.defineProperty(c.el, name, {
+    get() { throw new Error(`unexpected layout read: ${name}`); },
+  });
+  drawChart(c.el, { ...options, size: { w: 600, h: 300 } });
+  assert.equal(c.el.innerHTML, expected);
+  drawChart(c.el, { ...options, size: { w: 420, h: 180 } });
+  assert.equal(c.svg().getAttribute('viewBox'), '0 0 420 180');
+  const svg = c.svg();
+  assert.equal(drawChart(c.el, { ...options, size: { w: 0, h: 0 } }), null);
+  assert.equal(c.svg(), svg, 'a hidden chart is left alone');
+});
+
 test('JOED-154 drawChart: without an axis choice it draws as before; Auto fits the shown values, Max every loaded value', t => {
   const c = canvas(t);
   const shown = [5000, 5010, 4995, 5020];
