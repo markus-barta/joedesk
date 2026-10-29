@@ -97,14 +97,20 @@ export function axis(lo, hi, n = 4, base = 0, zero = false, room = null) {
 // An axis over exactly [lo, hi] (a custom axis, or one frame of an eased
 // change): ticks on the cent step that keeps labels `gap` px apart. A range
 // too small for two of them is labelled at its bounds, in whole cents, when
-// those are far enough apart; never two labels for the same cent.
+// those are far enough apart, and at zero between them when it fits too;
+// never two labels for the same cent. (drawChart draws a zero line whether
+// or not a label sits there.)
 export function fixedAxis(lo, hi, room = null, n = 4) {
   const span = Math.max(hi - lo, 1e-6), pixels = room?.px > 0 && room.gap > 0;
   const step = centStep(pixels ? span * room.gap / room.px : span / n), ticks = [];
   for (let k = Math.ceil(lo / step - 1e-9); k * step <= hi + step * 1e-9 && ticks.length < 200; k++) ticks.push(r2(k * step) || 0);
   if (ticks.length < 2) {
     const a = Math.ceil(lo * 100 - 1e-6) / 100, b = Math.floor(hi * 100 + 1e-6) / 100;
-    if (a < b && (!pixels || (b - a) / span * room.px >= room.gap)) return { lo, hi, ticks: [a, b], step: Number.isInteger(a) && Number.isInteger(b) ? 1 : 0.01 };
+    const apart = (u, v) => !pixels || (v - u) / span * room.px >= room.gap;
+    if (a < b && apart(a, b)) {
+      const zero = a < 0 && b > 0 && apart(a, 0) && apart(0, b) ? [0] : [];
+      return { lo, hi, ticks: [a, ...zero, b], step: Number.isInteger(a) && Number.isInteger(b) ? 1 : 0.01 };
+    }
   }
   return { lo, hi, ticks, step };
 }
@@ -321,14 +327,21 @@ export function drawChart(el, o) {
   drawn.add(el.id);
   const clip = `cl-${el.id}`, hatch = `ht-${el.id}`;
   const bands = (o.bands || []).map(([a, b]) => [Math.max(a, x0), Math.min(b, x1)]).filter(([a, b]) => b > a);
-  let g = `<defs><clipPath id="${clip}"><rect x="${pad.l}" y="${pad.t - 6}" width="${pw}" height="${ph + 12}"/></clipPath>${bands.length ? `<pattern id="${hatch}" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="var(--line-2)" stroke-width="1.5"/></pattern>` : ''}${o.series.map((s, i) => `<linearGradient id="ga-${el.id}-${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${s.color};stop-opacity:${o.series.length > 1 ? 0.1 : 0.24}"/><stop offset="1" style="stop-color:${s.color};stop-opacity:0"/></linearGradient>`).join('')}</defs>`;
+  // The lines' clip is the plot box plus half a line's width: a line on the
+  // axis's edge keeps its whole width, and nothing beyond the axis shows past it.
+  const edge = Math.max(0.5, ...o.series.map(s => (s.estimate ? 1.4 : s.w || 2) / 2));
+  let g = `<defs><clipPath id="${clip}"><rect x="${pad.l}" y="${(pad.t - edge).toFixed(1)}" width="${pw}" height="${(ph + 2 * edge).toFixed(1)}"/></clipPath>${bands.length ? `<pattern id="${hatch}" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="7" stroke="var(--line-2)" stroke-width="1.5"/></pattern>` : ''}${o.series.map((s, i) => `<linearGradient id="ga-${el.id}-${i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${s.color};stop-opacity:${o.series.length > 1 ? 0.1 : 0.24}"/><stop offset="1" style="stop-color:${s.color};stop-opacity:0"/></linearGradient>`).join('')}</defs>`;
   if (o.future && o.future[1] > o.future[0]) g += `<rect x="${X(o.future[0]).toFixed(1)}" y="${pad.t}" width="${Math.max(0, X(o.future[1]) - X(o.future[0])).toFixed(1)}" height="${ph}" fill="var(--sunken)" rx="6"/>`;
   for (const [a, b] of bands) g += `<rect x="${X(a).toFixed(1)}" y="${pad.t}" width="${Math.max(1, X(b) - X(a)).toFixed(1)}" height="${ph}" fill="url(#${hatch})" data-gap="1"/>`;
+  const zeroStyle = o.strongZero ? ' stroke-width="1.4" style="stroke:var(--ink-3)"' : ' stroke-width="1.2" style="stroke:var(--line-2)"';
   for (const t of ax.ticks) {
     const y = Y(t).toFixed(1), zeroLine = Math.abs(t) < 1e-9 && o.zero;
-    g += `<line x1="${pad.l}" x2="${pad.l + pw}" y1="${y}" y2="${y}" stroke="var(--line)"${zeroLine ? (o.strongZero ? ' stroke-width="1.4" style="stroke:var(--ink-3)"' : ' stroke-width="1.2" style="stroke:var(--line-2)"') : ''}/>`;
+    g += `<line x1="${pad.l}" x2="${pad.l + pw}" y1="${y}" y2="${y}" stroke="var(--line)"${zeroLine ? `${zeroStyle} data-zero-line="1"` : ''}/>`;
     if (!o.noY) g += `<text x="${pad.l - 8}" y="${(Y(t) + 3.5).toFixed(1)}" text-anchor="end">${esc(o.yFmt ? o.yFmt(t, ax.step) : t)}</text>`;
   }
+  // The zero line belongs to the chart, not to its labels: it is drawn when
+  // zero is in view, also where no label sits at zero.
+  if (o.zero && ax.lo <= 0 && ax.hi >= 0 && !ax.ticks.some(t => Math.abs(t) < 1e-9)) g += `<line x1="${pad.l}" x2="${pad.l + pw}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" stroke="var(--line)"${zeroStyle} data-zero-line="1"/>`;
   for (const v of o.vlines || []) if (v.x >= x0 && v.x <= x1) g += `<line x1="${X(v.x).toFixed(1)}" x2="${X(v.x).toFixed(1)}" y1="${pad.t}" y2="${pad.t + ph}" ${v.dashed ? 'stroke="var(--line-2)" stroke-dasharray="3 4"' : 'stroke="var(--line)"'}/>`;
   for (const l of o.xLabels || []) g += `<text x="${X(l.x).toFixed(1)}" y="${H - 6}" text-anchor="${l.anchor || 'middle'}">${esc(l.text)}</text>`;
   if (o.startLine != null) g += `<line x1="${pad.l}" x2="${pad.l + pw}" y1="${Y(o.startLine).toFixed(1)}" y2="${Y(o.startLine).toFixed(1)}" stroke="var(--ink-3)" stroke-dasharray="3 3"/>`;
@@ -346,7 +359,14 @@ export function drawChart(el, o) {
     for (const p of s.pts) { if (p.v === null || p.v === undefined) { segs.push([]); continue; } segs[segs.length - 1].push(p); }
     for (const seg of segs) {
       if (!seg.length) continue;
-      if (seg.length === 1 && !s.estimate) { g += `<circle cx="${X(seg[0].x).toFixed(1)}" cy="${Y(seg[0].v).toFixed(1)}" r="2" fill="${s.color}"/>`; continue; }
+      // An isolated value is a dot inside the plot; beyond a custom axis, a
+      // chevron at the edge it lies past (as the newest value is).
+      if (seg.length === 1 && !s.estimate) {
+        const cx = X(seg[0].x), cy = Y(seg[0].v);
+        if (inPlot(cy)) g += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2" fill="${s.color}"/>`;
+        else if (custom) g += beyond(cx, cy < pad.t, s.color);
+        continue;
+      }
       const line = seg.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(1)} ${Y(p.v).toFixed(1)}`).join(' ');
       if (s.area !== false && !s.estimate) g += `<path d="${line} L${X(seg[seg.length - 1].x).toFixed(1)} ${Y(base).toFixed(1)} L${X(seg[0].x).toFixed(1)} ${Y(base).toFixed(1)} Z" fill="url(#ga-${el.id}-${si})"${first ? ' class="fade-in"' : ''}/>`;
       g += s.estimate
@@ -360,9 +380,9 @@ export function drawChart(el, o) {
   for (const s of o.series) {
     const last = [...s.pts].reverse().find(p => p.v !== null && p.v !== undefined);
     if (s.endDot !== false && !s.estimate && last && last.x >= x0 && last.x <= x1) {
-      const cx = X(last.x), cy = Y(last.v);
+      const cx = X(last.x), cy = Y(last.v), i = s.pts.lastIndexOf(last), isolated = !(i > 0 && s.pts[i - 1]?.v != null);
       if (inPlot(cy)) g += `${s.live && !reduced() ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="${s.color}" class="dot-live" opacity=".35"/>` : ''}<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="var(--surface)" stroke="${s.color}" stroke-width="2"/>`;
-      else if (custom) g += beyond(cx, cy < pad.t, s.color);
+      else if (custom && !isolated) g += beyond(cx, cy < pad.t, s.color);
     }
   }
   if (o.marker) g += `<line x1="${X(o.marker.x).toFixed(1)}" x2="${X(o.marker.x).toFixed(1)}" y1="${pad.t}" y2="${pad.t + ph}" stroke="var(--line-2)"/><text x="${(X(o.marker.x) + 6).toFixed(1)}" y="${pad.t + 11}" text-anchor="start">${esc(o.marker.text)}</text>`;

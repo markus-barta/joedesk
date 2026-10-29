@@ -943,8 +943,10 @@ loaded, so moving never rescales it (in Change: the largest fall and rise
 from any kept value to a later one); **Custom** takes a bottom and a top in
 euros of the current measure (a point or a comma, no grouping), says
 "Custom axis" on the chart and names values beyond it; no dot is ever drawn
-off the plot, and a newest value beyond the axis is a small chevron at the
-edge it lies past. The choice is kept per
+off the plot (the lines are clipped to the plot box plus half a line's
+width), and a newest or isolated value beyond the axis is a small chevron at
+the edge it lies past. A zero line is drawn whenever zero is in view, whether
+or not a label sits there. The choice is kept per
 chart and viewer in this browser (`createAxisMode(id)`: `get()` and
 `setAxisMode({ mode, min, max })`, which returns `{ ok, choice }` or
 `{ ok: false, field, error }`; `drawChart` takes it as `axis`, with

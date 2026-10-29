@@ -256,6 +256,10 @@ function drawnLabels(el, scale) {
   }).sort((a, b) => a.y - b.y);
 }
 
+// The zero grid lines drawn: full-width horizontal lines at zero, in the zero style.
+const zeroLines = (el, scale) => el.querySelectorAll('line').filter(l => l.getAttribute('x1') === String(scale.pad.l) && l.getAttribute('y1') === l.getAttribute('y2') &&
+  Math.abs(Number(l.getAttribute('y1')) - scale.Y(0)) <= 0.06 && ['1.2', '1.4'].includes(l.getAttribute('stroke-width')));
+
 test('JOED-154 fix 1: a value beyond a custom axis never puts a dot outside the plot; the newest is a chevron at the edge it lies past', t => {
   const c = canvas(t);
   const series = [{ pts: [{ x: 0, v: 0 }, { x: 1, v: 3 }, { x: 2, v: -100 }], color: 'var(--desk-j)', area: false, live: true }];
@@ -293,6 +297,7 @@ test('JOED-154 fix 2: custom ranges draw neighbouring labels at least 56 px apar
       });
       assert.equal(new Set(labels.map(l => l.text)).size, labels.length, `${at}: no label twice`);
       assert.ok(labels.length >= (max - min >= 0.01 && scale.ph >= 56 ? 2 : 1), `${at}: ${labels.map(l => l.text)}`);
+      assert.equal(zeroLines(c.el, scale).length, min <= 0 && max >= 0 ? 1 : 0, `${at}: the zero line when zero is in view`);
     }
   }
   // The same holds while a range glides, and in Auto and Max.
@@ -329,4 +334,55 @@ test('JOED-154 fix 5: every chart’s money labels state the value of their own 
   const c = canvas(t, { height: 160 });
   drawChart(c.el, { series: line([0, 7.4]), xDomain: [0, 1], ...shapes.desk });
   assert.deepEqual(c.el.querySelectorAll('text').filter(n => n.getAttribute('text-anchor') === 'end').map(n => n.textContent), [`€${NB}0,0`, `€${NB}2,5`, `€${NB}5,0`, `€${NB}7,5`]);
+});
+
+// ---------- Fix round 2 (the Codex re-gate on cccf6de) ----------
+test('JOED-154 fix 6: an isolated value beyond a custom axis is no dot off the plot but a chevron at its edge, and the lines are clipped to the plot', t => {
+  const c = canvas(t);
+  // The re-gate's case: a 300 px chart, Custom −5 to 5, an observation at 5,1 alone between two gaps; another alone at 4,9.
+  const pts = [{ x: 0, v: 0 }, { x: 1, v: 1 }, { x: 2, v: null }, { x: 3, v: 5.1 }, { x: 4, v: null }, { x: 5, v: 4.9 }, { x: 6, v: null }, { x: 7, v: 2 }, { x: 8, v: 3 }];
+  const scale = drawChart(c.el, { series: [{ pts, color: 'var(--desk-j)', area: false }], xDomain: [0, 8], zero: true, yFmt: changeAxis, tickGap: 56, axis: { mode: 'custom', min: -5, max: 5 } });
+  const inside = y => y >= scale.pad.t - 0.5 && y <= scale.pad.t + scale.ph + 0.5;
+  const dots = c.el.querySelectorAll('circle').filter(d => d.getAttribute('cy') !== null);
+  assert.deepEqual(dots.filter(d => !inside(Number(d.getAttribute('cy')))).map(d => d.getAttribute('cy')), [], 'no dot off the plot (cccf6de drew the 5,1 at cy 9,4, above the plot at 12)');
+  assert.ok(dots.some(d => d.getAttribute('r') === '2' && Math.abs(Number(d.getAttribute('cx')) - scale.X(5)) < 0.11 && inside(Number(d.getAttribute('cy')))), 'the isolated 4,9 keeps its dot');
+  const marks = c.el.querySelectorAll('[data-beyond]');
+  assert.deepEqual(marks.map(m => [m.getAttribute('data-beyond'), Math.round(pathPoints(m.getAttribute('d'))[1][0])]), [['above', Math.round(scale.X(3))]], 'the isolated 5,1 is a chevron above the axis, at its time');
+  assert.ok(pathPoints(marks[0].getAttribute('d')).every(([, y]) => inside(y)));
+  const clip = c.el.querySelector('clippath rect'), top = Number(clip.getAttribute('y')), bottom = top + Number(clip.getAttribute('height'));
+  assert.ok(top >= scale.pad.t - 1 && bottom <= scale.pad.t + scale.ph + 1, `the lines' clip is the plot box plus half a line: ${top}…${bottom} for ${scale.pad.t}…${scale.pad.t + scale.ph}`);
+  // An isolated newest value beyond the axis is one chevron, not two.
+  drawChart(c.el, { series: [{ pts: [{ x: 0, v: 0 }, { x: 1, v: null }, { x: 2, v: -9 }], color: 'var(--desk-j)', area: false }], xDomain: [0, 2], zero: true, yFmt: changeAxis, tickGap: 56, axis: { mode: 'custom', min: -5, max: 5 } });
+  assert.deepEqual(c.el.querySelectorAll('[data-beyond]').map(m => m.getAttribute('data-beyond')), ['below']);
+  assert.deepEqual(c.el.querySelectorAll('circle').filter(d => d.getAttribute('cy') !== null).map(d => [d.getAttribute('r'), d.getAttribute('cx')]), [['2', scale.X(0).toFixed(1)]],
+    'only the isolated 0 at the start is a dot');
+  // An automatic fit holds every value: isolated dots are drawn as before.
+  drawChart(c.el, { series: [{ pts, color: 'var(--desk-j)', area: false }], xDomain: [0, 8], zero: true, yFmt: changeAxis, tickGap: 56, axis: { mode: 'auto' } });
+  assert.equal(c.el.querySelectorAll('circle').filter(d => d.getAttribute('r') === '2').length, 2);
+  assert.equal(c.el.querySelectorAll('[data-beyond]').length, 0);
+});
+
+test('JOED-154 fix 7: the zero line is drawn whenever zero is in view, whichever labels are kept (Custom −0,99 to 0,99 on 200 px)', t => {
+  assert.deepEqual(fixedAxis(-0.99, 0.99, { px: 200, gap: 56 + DRAWN_SLACK }).ticks, [-0.99, 0, 0.99], 'the bounds and zero, 100 px apart (cccf6de kept only the bounds)');
+  assert.deepEqual(fixedAxis(-0.99, 0.99, { px: 100, gap: 56 + DRAWN_SLACK }).ticks, [-0.99, 0.99], 'on 100 px zero has no room for a label');
+  const draw = (height, min, max, more = {}) => {
+    const c = canvas(t, { height });
+    const scale = drawChart(c.el, { series: line([min, max]), xDomain: [0, 1], zero: true, yFmt: changeAxis, tickGap: 56, axis: { mode: 'custom', min, max }, ...more });
+    return { c, scale, zero: zeroLines(c.el, scale), labels: drawnLabels(c.el, scale) };
+  };
+  for (const [height, labelled] of [[236, true], [136, false]]) {
+    const { scale, zero, labels } = draw(height, -0.99, 0.99);
+    assert.equal(zero.length, 1, `${scale.ph} px: one zero line`);
+    assert.ok(Math.abs(Number(zero[0].getAttribute('y1')) - scale.Y(0)) <= 0.06 && zero[0].getAttribute('stroke-width') === '1.2', `${scale.ph} px: at zero, in the zero style`);
+    assert.equal(labels.some(l => l.value === 0), labelled, `${scale.ph} px: ${labels.map(l => l.text)}`);
+  }
+  assert.equal(draw(236, -0.99, 0.99, { zero: false }).zero.length, 0, 'no zero line unless the chart asks for one');
+  assert.equal(draw(236, 0.5, 0.99).zero.length, 0, 'none when zero is not in view');
+  assert.equal(draw(236, -12, 30.5).zero.length, 1, 'one, not two, when a label sits at zero');
+  // Auto in Change and the zero-based Desk and Results shapes keep theirs.
+  for (const o of [{ axis: { mode: 'auto' }, base: 5000, margin: 0.08, tickGap: 56 }, { ticks: 3, pad: { l: 52 } }, { strongZero: true, ticks: 4 }]) {
+    const c = canvas(t, { height: 236 });
+    const scale = drawChart(c.el, { series: line([-3, 7.4]), xDomain: [0, 1], zero: true, yFmt: changeAxis, ...o });
+    assert.equal(zeroLines(c.el, scale).length, 1, JSON.stringify(o));
+  }
 });
