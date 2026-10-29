@@ -12,7 +12,7 @@ import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, ACTOR, TOKEN, NOW, at } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
-import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
+import { setDeskDisclosures, phoneDeskSnapshot, collapsedMoneySummariesOk } from './browser/desk-disclosures.mjs';
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { designFleet, designActions, designSnapshot, cashSessionSnapshot, switchSetSnapshot, longFleet } from './browser/settings-fixtures.mjs';
 import { designResults } from './browser/results.mjs';
@@ -408,11 +408,9 @@ try {
         if (viewport.width <= 480) {
           await setDeskDisclosures(page, false);
           const collapsed = await phoneDeskSnapshot(page).then(copyText);
-          const words = neutral ? 'not exact' : 'not reported by the broker';
           const moneySections = collapsed.controls.filter(c => ['j', 'joe', 'joel', 'account'].includes(c.key));
           check('phone-first', `${tag} ${i}: collapsed desk/account summaries expose unavailable money with the true icon and reason`,
-            moneySections.length === 4 && moneySections.every(c => c.hidden && c.expanded === 'false' && c.warning.includes(words) && c.icon === (neutral ? '#i-info' : '#i-stop')) &&
-            collapsed.horizontal.scroll <= collapsed.horizontal.inner, moneySections);
+            collapsedMoneySummariesOk(collapsed, neutral), moneySections);
           await setDeskDisclosures(page, true);
         }
         const seen = await ev(`(() => {

@@ -5,9 +5,12 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
-import { cashSessionSnapshot, designSnapshot } from '../scripts/browser/settings-fixtures.mjs';
+import { cashSessionSnapshot, designSnapshot, switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { preflightSnapshot } from '../scripts/browser/board.mjs';
+import { collapsedMoneySummariesOk } from '../scripts/browser/desk-disclosures.mjs';
+import { copyText } from '../scripts/browser/shots.mjs';
 const { compactDesk, disclosureProblem, rowProblems, syncDeskDisclosures, toggleDeskDisclosure, heroLeft } = await import('../public/joe/desk.js');
+const { boardStates } = await import('../public/joe/board-state.js');
 // JOED-156: the whole-account block fills the slot above the hero.
 const A = await import('../public/joe/account.js');
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
@@ -16,6 +19,34 @@ function context() {
   const feeds = { data: { value: structuredClone(valid.data) } }, now = valid.data.receivedAt;
   return { feeds, now, states: panelStates(feeds, now) };
 }
+
+test('JOED-163: switch-set collapsed summaries keep attributed faults and one complete accessible reason', () => {
+  for (const reason of ['not_exact_yet', 'source_unavailable', 'not_exact_yet']) {
+    const data = switchSetSnapshot(); data.receivedAt = data.generatedAt;
+    for (const bag of [data.totals, ...data.desks.map(d => d.money)]) for (const field of Object.keys(bag.reasons)) bag.reasons[field] = reason;
+    for (const source of Object.values(data.pnlSources)) source.reason = reason;
+    const feeds = { data: { value: data } }, now = data.generatedAt, ctx = { feeds, now, states: boardStates(feeds, now) };
+    const controls = ['account', 'j', 'joe', 'joel'].map(key => {
+      const doc = htmlDocument(key === 'account' ? heroLeft(ctx) : compactDesk(ctx, key));
+      const summary = doc.querySelector('.disclosure-warning .summary-text');
+      return { key, hidden: true, visible: false, expanded: 'false', warning: summary.textContent, detail: summary.getAttribute('title'),
+        accessible: doc.querySelector('.disclosure-warning .vh').textContent, icon: doc.querySelector('.disclosure-warning use').getAttribute('href') };
+    });
+    const snapshot = copyText({ controls, horizontal: { scroll: 390, inner: 390 } }), neutral = reason === 'not_exact_yet';
+    assert.equal(collapsedMoneySummariesOk(snapshot, neutral), true, JSON.stringify(snapshot.controls));
+    const reject = mutate => { const bad = structuredClone(snapshot); mutate(bad); assert.equal(collapsedMoneySummariesOk(bad, neutral), false); };
+    reject(s => { s.controls[0].detail = s.controls[0].warning; s.controls[0].accessible = ''; });
+    reject(s => { s.controls[0].warning = 'Open result: unavailable'; });
+    reject(s => { s.controls[0].icon = '#i-check'; });
+    reject(s => { s.controls[1].visible = true; });
+    reject(s => { s.controls[1].key = 'account'; });
+    reject(s => { s.horizontal.scroll++; });
+    if (!neutral) {
+      reject(s => { s.controls[0].detail = s.controls[0].warning; s.controls[0].accessible = s.controls[0].detail; });
+      reject(s => { s.controls[0].detail += ' · not reported by the broker'; s.controls[0].accessible = s.controls[0].detail; });
+    }
+  }
+});
 
 test('summary selects the worst actual state and retains every independent reason', () => {
   assert.equal(disclosureProblem([['Cash', cell('fresh', null, {})]]), null);
