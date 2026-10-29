@@ -269,7 +269,7 @@ for (const [id, fixture] of Object.entries(heroWordingFixtures(browserSnapshot))
     if (id === 'p3-mixed-not-exact-fault') {
       assert.equal(states['today.openPnl'].state, 'broken');
       assert.equal(states['today.openPnl'].value, null);
-      assert.equal(hero.querySelector('[data-cell="hero.open"] .c').textContent, 'Unavailable for J, Joe and Joel · not reported by the broker');
+      assert.equal(hero.querySelector('[data-cell="hero.open"] .c').textContent, 'Last good for J, Joe and Joel · not reported by the broker');
     } else assert.equal(states['today.openPnl'].state, 'fresh');
   }
 });
@@ -1492,9 +1492,9 @@ test('JOED-148: different desk reasons name their desks; the section line keeps 
   const fault = dayNotExact({ j: 'not_exact_yet', joe: 'source_unavailable' });
   // An outage keeps Joe's last good value (never in the household total); a
   // cold page has none. Either way the household caption leads with the
-  // fault; Details still names Joe's own state beside J's.
+  // fault using Joe's own state word, as do Details and the cards.
   const carried = ctx(fault), cold = { ...carried, states: boardStates(carried.feeds, carried.now) };
-  assert.equal(htmlDocument(heroLeft(carried)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker; not exact for J');
+  assert.equal(htmlDocument(heroLeft(carried)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Last good for Joe · not reported by the broker; not exact for J');
   assert.equal(detailsRow(carried, 'Today’s result'), 'Exact for Joel; not exact for J; last good for Joe · not reported by the broker');
   assert.equal(htmlDocument(heroLeft(cold)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker; not exact for J');
   assert.equal(detailsRow(cold, 'Today’s result'), 'Exact for Joel; not exact for J; unavailable for Joe · not reported by the broker');
@@ -1815,18 +1815,20 @@ test('JOED-148: every desk and household Today combination matches the plain-wor
       DESKS.forEach((id, i) => assert.equal(named.includes(`${NAMES[id]}’s Today is`), !DESK_TODAY[desks[i]][1], `${label}: Details on ${NAMES[id]}`));
       assert.equal(view.states['today.dayPnl'].value != null, household === 'current' && desks.every(option => option === 'exact'), `${label}: household shown`);
       // Judge the caption independently of blocker selection: a faulty desk
-      // must make the household unavailable, even after a not-exact desk or
-      // beside a household that already carried its own not-exact dash.
+      // leads the household caption with its own state word, even after a
+      // not-exact desk or beside an already not-exact household dash.
       if (desks.some(option => !DESK_TODAY[option][1])) {
         assert.equal(view.states['today.dayPnl'].reason, 'source_unavailable', `${label}: fault wins household reason`);
         const caption = htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent;
         const groups = caption.split('; ');
-        assert.match(groups[0], /^Unavailable for /, `${label}: household caption leads with faults`);
+        assert.match(groups[0], /^(Unavailable|Last good|Not reported) for /, `${label}: household caption leads with faults`);
         DESKS.forEach((id, i) => {
-          if (DESK_TODAY[desks[i]][1]) return;
+          if (desks[i] === 'exact') return;
           const group = groups.find(text => new RegExp(`\\b${NAMES[id]}\\b`).test(text));
-          assert.ok(group, `${label}: caption names faulty ${NAMES[id]}`);
-          assert.doesNotMatch(group, /not exact/i, `${label}: faulty ${NAMES[id]} is never not exact`);
+          const word = desks[i] === 'lastGood' ? 'last good' : desks[i] === 'unavailable' ? 'not reported'
+            : DESK_TODAY[desks[i]][1] ? 'not exact' : 'unavailable';
+          assert.ok(group, `${label}: caption names ${NAMES[id]}`);
+          assert.match(group, new RegExp(`^${word} for `, 'i'), `${label}: caption agrees with ${NAMES[id]}’s own state`);
         });
       }
       count++; if (fine) green++;

@@ -1438,9 +1438,16 @@ known not-exact set remain faults; Today keeps its original reason set. A fault
 on any channel wins, with yellow `open_fault_rth` and “Open result is unavailable”.
 A desk fault also withholds the household Open amount, including when the
 producer supplied a current total. Household Today and Open captions name the
-faulty desks and their reasons first, followed by any not-exact desks (for
-example, “Unavailable for Joe · not reported by the broker; not exact for J”).
-Cards and phone summaries retain the desk's own warning; Details names each
+faulty desks and their reasons first, using each desk's own state word, followed
+by not-exact desks or desks waiting on prices (for example, “Last good for Joe ·
+not reported by the broker; not exact for J”, or “Unavailable for Joe · not
+reported by the broker; waiting on prices for J and Joel”). Headlines, Details,
+cards and phone summaries agree on those words. Retained observations keep
+their last-good ages. Before any snapshot, or when the household and all faulty
+desks are simply not reported with no reason or unavailable source, the board
+keeps the absent state rather than inventing a fault or blaming desks. The
+cold page still says “No numbers yet: no board data has arrived.”
+Details names each
 faulty desk and its reason and keeps the household problem line for a not-exact
 Open. Its “Open positions” row explains non-exact results
 (“Joe and Joel: exact; J: not exact · ‹reason›”)
@@ -1450,9 +1457,10 @@ and Open, a faulty blocking desk supplies the withheld household's fault
 caption before any not-exact blocker, regardless of desk order or a preexisting
 not-exact household dash. Open source status alone can invalidate an otherwise
 current amount. Higher-ranked feed and broker warnings retain their priority.
-`test/open-result.mjs` checks all 5,000 combinations of ten desk conditions
-across three desks and five household conditions (including an amount beside
-its own fault) against an independent
+`test/open-result.mjs` checks all 10,368 combinations of twelve desk conditions
+across three desks and six household conditions (including money-channel and
+source-channel price waits, a household price wait, and an amount beside its
+own fault) against an independent
 plain-words oracle, through the light, hero/summary, Details, cards and phone
 rows. It also covers source fallback, unavailable source status and every
 known not-exact reason; the Today regression suite remains separate.

@@ -13,6 +13,8 @@ export const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledge
 // price wait. Only Open gets this explicit exception; every other reason
 // outside NOT_EXACT_REASONS remains a fault, and Today's rule stays unchanged.
 const OPEN_WAITING_REASONS = new Set(['open_pnl_unavailable']);
+// Display the explicit Open wait without relabelling a retained observation.
+export const waitingOnPrices = cell => OPEN_WAITING_REASONS.has(cell?.reason) && !outageValue(cell);
 const notExactReason = (reason, field) => NOT_EXACT_REASONS.has(reason) || (field === 'openPnl' && OPEN_WAITING_REASONS.has(reason));
 // A dash the feed explains as not exact (never a fault, never a last value).
 export const notExactDash = cell => cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason);

@@ -80,6 +80,8 @@ const DESK_OPEN = {
   exact: { fine: true, word: 'exact', amount: true },
   notExactMoney: { fine: true, word: 'not exact', amount: false, reason: 'not exact' },
   notExactSource: { fine: true, word: 'not exact', amount: false, reason: 'not exact' },
+  waitMoney: { fine: true, word: 'waiting on prices', amount: false },
+  waitSource: { fine: true, word: 'waiting on prices', amount: false },
   faultMoney: { fine: false, word: 'unavailable', amount: false, reason: 'not reported by the broker' },
   faultSource: { fine: false, word: 'unavailable', amount: false, reason: 'not reported by the broker' },
   notExactMoneyFaultSource: { fine: false, word: 'unavailable', amount: false, reason: 'not reported by the broker' },
@@ -91,6 +93,7 @@ const DESK_OPEN = {
 const HOUSEHOLD_OPEN = {
   current: { fine: true, word: 'exact', amount: true },
   notExact: { fine: true, word: 'not exact', reason: 'not exact' },
+  wait: { fine: true, word: 'waiting on prices' },
   fault: { fine: false, word: 'unavailable', reason: 'not reported by the broker' },
   nullNoReason: { fine: false, word: 'not reported' },
   valueKeptFaultMoney: { fine: false, word: 'unavailable', amount: true, reason: 'not reported by the broker' },
@@ -104,8 +107,7 @@ function oracle(desks, household) {
   const deskFault = inputs.some(input => !input.fine), allExact = inputs.every(input => input.word === 'exact');
   const green = own.word === 'exact' && allExact, fault = !own.fine || deskFault;
   return { inputs, green, fault, shown: Boolean(own.amount) && allExact,
-    word: deskFault ? 'unavailable' : own.word === 'exact' && !allExact ? 'not exact' : own.word,
-    reason: deskFault ? 'not reported by the broker' : own.word === 'exact' && !allExact ? 'not exact' : own.reason };
+    word: deskFault ? inputs.find(input => !input.fine).word : own.fine && own.word !== 'waiting on prices' && !allExact ? inputs.find(input => input.word !== 'exact').word : own.word };
 }
 
 function combination(desks, household) {
@@ -120,6 +122,8 @@ function combination(desks, household) {
     const desk = data.desks[i], source = desk.pnlSources.open, money = desk.money;
     if (option === 'notExactMoney') withhold(money, source, 'not_exact_yet', null);
     if (option === 'notExactSource') withhold(money, source, null, 'not_exact_yet');
+    if (option === 'waitMoney') withhold(money, source, 'open_pnl_unavailable', null);
+    if (option === 'waitSource') withhold(money, source, null, 'open_pnl_unavailable');
     if (option === 'faultMoney') withhold(money, source, 'source_unavailable', null);
     if (option === 'faultSource') withhold(money, source, null, 'source_unavailable');
     if (option === 'notExactMoneyFaultSource') withhold(money, source, 'not_exact_yet', 'source_unavailable');
@@ -131,7 +135,7 @@ function combination(desks, household) {
     }
     if (option === 'valueKeptFaultMoney') (money.reasons ??= {}).openPnl = 'source_unavailable';
   });
-  const reason = { notExact: 'not_exact_yet', fault: 'source_unavailable', nullNoReason: null }[household];
+  const reason = { notExact: 'not_exact_yet', wait: 'open_pnl_unavailable', fault: 'source_unavailable', nullNoReason: null }[household];
   if (household === 'valueKeptFaultMoney') (data.totals.reasons ??= {}).openPnl = 'source_unavailable';
   else if (household !== 'current') withhold(data.totals, data.pnlSources.open, reason, reason);
   return viewOf(data, prior);
@@ -153,6 +157,28 @@ test('JOED-157 fix2: household Open captions name faulty desks before not-exact 
     'Unavailable for Joe · not reported by the broker; not exact for J');
   assert.equal(hero.querySelector('.account-section .summary-text').textContent,
     'Open positions: unavailable for Joe · not reported by the broker; not exact for J');
+});
+
+test('JOED-157 fix3: price waits and last-good desks keep their own words in fault-first headlines', () => {
+  for (const [desks, caption] of [
+    [['waitMoney', 'faultSource', 'waitSource'], 'Unavailable for Joe · not reported by the broker; waiting on prices for J and Joel'],
+    [['notExactMoney', 'lastGood', 'exact'], 'Last good for Joe · not reported by the broker; not exact for J'],
+    [['waitSource', 'lastGood', 'exact'], 'Last good for Joe · not reported by the broker; waiting on prices for J'],
+  ]) {
+    const view = combination(desks, 'notExact'), hero = htmlDocument(heroLeft(view));
+    assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, caption);
+    assert.equal(hero.querySelector('.account-section .summary-text').textContent, `Open positions: ${caption[0].toLowerCase()}${caption.slice(1)}`);
+    const row = detailsRow(htmlDocument(healthPop(view, boardHealthPresentation(view.states, view.feeds, now))), 'Open positions');
+    desks.forEach((option, i) => {
+      const word = DESK_OPEN[option].word;
+      if (word === 'exact') return;
+      const group = row.split('; ').find(text => new RegExp(`\\b${NAMES[i]}\\b`).test(text));
+      assert.ok(group?.includes(`: ${word}`), `${NAMES[i]} in ${row}`);
+      const card = htmlDocument(deskCard(view, DESKS[i], 50, true));
+      assert.match(card.querySelector('.mini-label').textContent, new RegExp(`Open positions: ${word}`));
+      assert.match(htmlDocument(compactDesk(view, DESKS[i])).querySelector('.summary-text').textContent, new RegExp(`Open positions: ${word}`));
+    });
+  }
 });
 
 test('JOED-157 fix2: a shared fault reason keeps the faulty desk named in Today and Open', () => {
@@ -226,7 +252,7 @@ test('JOED-157 fix2: not-exact household Open retains its Details problem line',
   assert.equal(detailsRow(pop, 'Open positions'), 'Household not exact; each desk exact');
 });
 
-test('JOED-157: every desk and household Open combination matches the plain-words oracle through light and renderers (5000 cases)', t => {
+test('JOED-157: every desk and household Open combination matches the plain-words oracle through light and renderers (10368 cases)', t => {
   const mismatches = {}, examples = [];
   let count = 0, greens = 0, wrongGreens = 0, wrongGreensCurrent = 0;
   const check = (ok, category, label) => {
@@ -250,18 +276,24 @@ test('JOED-157: every desk and household Open combination matches the plain-word
       check((hero.querySelector('[data-cell="hero.open"] .bn').textContent !== '—') === expected.shown, 'hero amount', label);
       const summary = hero.querySelector('.account-section .summary-text')?.textContent ?? '';
       check(expected.word === 'exact' ? !summary.includes('Open positions:') : summary.includes(`Open positions: ${expected.word}`), 'hero summary', label);
-      if (expected.reason) check(summary.includes(expected.reason), 'hero reason', label);
+      const deskFault = expected.inputs.some(input => !input.fine);
+      if (!deskFault && HOUSEHOLD_OPEN[household].reason && !HOUSEHOLD_OPEN[household].fine)
+        check(summary.includes(HOUSEHOLD_OPEN[household].reason), 'own household fault reason', label);
       if (expected.fault) check(!summary.includes('Open positions: not exact'), 'fault wins household caption', label);
-      if (expected.inputs.some(input => !input.fine)) {
+      if (deskFault) {
         const caption = hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent;
         for (const text of [caption, summary]) {
           const groups = text.split('; ');
-          check(/unavailable for/i.test(groups[0]), 'fault caption first', label);
+          check(new RegExp(`^(${expected.inputs.filter(input => !input.fine).map(input => input.word).join('|')}) for `, 'i').test(groups[0].replace('Open positions: ', '')), 'fault caption first', label);
+          const faultPositions = [], waitPositions = [];
           expected.inputs.forEach((input, i) => {
-            if (input.fine) return;
+            if (input.word === 'exact') return;
             const group = groups.find(group => new RegExp(`\\b${NAMES[i]}\\b`).test(group));
-            check(Boolean(group) && !/not exact/i.test(group), 'fault caption names desk', `${label}: ${NAMES[i]}`);
+            check(Boolean(group) && new RegExp(`^(?:Open positions: )?${input.word} for `, 'i').test(group), 'caption agrees with desk word', `${label}: ${NAMES[i]}`);
+            (input.fine ? waitPositions : faultPositions).push(groups.indexOf(group));
+            if (input.reason && input.reason !== input.word && !input.fine) check(group?.includes(input.reason), 'fault caption desk reason', `${label}: ${NAMES[i]}`);
           });
+          check(!waitPositions.length || Math.max(...faultPositions) < Math.min(...waitPositions), 'all fault groups precede waits', label);
         }
       }
 
@@ -270,10 +302,11 @@ test('JOED-157: every desk and household Open combination matches the plain-word
       check(Boolean(row), 'Details row exists', label);
       if (expected.fault) check(row.includes('Household unavailable'), 'household fault Details', label);
       if (expected.inputs.every(input => input.word === 'exact') && expected.word !== 'exact') {
-        check(row.includes(`Household ${expected.word === 'not exact' ? 'not exact' : 'unavailable'}`) && row.includes('each desk exact'), 'household-only Details', label);
-        if (expected.reason) check(row.includes(expected.reason), 'household-only reason', label);
+        check(row.includes(`Household ${expected.word === 'not reported' ? 'unavailable' : expected.word}`) && row.includes('each desk exact'), 'household-only Details', label);
+        const reason = HOUSEHOLD_OPEN[household].reason;
+        if (reason) check(row.includes(reason), 'household-only reason', label);
       }
-      const groups = (row ?? '').split('; ').map(text => text.match(/^(.*?): (exact|not exact|unavailable|last good|not reported)(?: · (.*))?$/i)).filter(Boolean);
+      const groups = (row ?? '').split('; ').map(text => text.match(/^(.*?): (exact|not exact|waiting on prices|unavailable|last good|not reported)(?: · (.*))?$/i)).filter(Boolean);
       DESKS.forEach((id, i) => {
         const input = expected.inputs[i], name = NAMES[i];
         check(pop.textContent.includes(`${name}’s Open result is`) === !input.fine, 'Details diagnostic', `${label}: ${name}`);
@@ -287,6 +320,7 @@ test('JOED-157: every desk and household Open combination matches the plain-word
         check((card.querySelectorAll('.dnums .bn')[1].textContent !== '—') === input.amount, 'card amount', `${label}: ${name}`);
         const cardLine = card.querySelector('.mini-label').textContent;
         check(cardLine.includes('Open positions:') === (input.word !== 'exact'), 'card status', `${label}: ${name}`);
+        if (input.word !== 'exact') check(cardLine.includes(`Open positions: ${input.word}`), 'card agrees with desk word', `${label}: ${name}`);
         if (input.reason) check(cardLine.includes(input.reason), 'card reason', `${label}: ${name}`);
 
         const phone = htmlDocument(compactDesk(view, id));
@@ -300,7 +334,7 @@ test('JOED-157: every desk and household Open combination matches the plain-word
     }
   }
   t.diagnostic(JSON.stringify({ count, greens, wrongGreens, wrongGreensCurrent, mismatches, examples }));
-  assert.equal(count, 5000);
+  assert.equal(count, 12 ** 3 * 6);
   assert.equal(greens, 1);
   assert.deepEqual(mismatches, {});
 });
