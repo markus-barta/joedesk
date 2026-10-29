@@ -72,11 +72,19 @@ number for more than five minutes, the chart also hatches that stretch (one
 legend entry, "No data"); a desk missing alone is shown by its dashed line.
 
 Rows at or before `compactedThrough` were thinned by the server to stay inside
-its size limit, so their wide spacing is the thinning, not missing data: the
-display connects them as observed and its tooltip names the nearest kept
-observation. Explicit null values survive thinning and stay estimates. A short
-outage inside the thinned part cannot be told apart from thinning; History
-says so under the chart.
+its size limit (`compactPoints`: per 64 rows the bucket ends, each series'
+extrema, both sides of every presence or basis change, and each Vienna day's
+last valued row; later passes thin the kept rows again, so spacing grows with
+age). The server records nothing where no row arrived, so an outage and a
+thinned stretch can look alike. The display connects a thinned interval as
+observed, with the tooltip naming the nearest kept observation, only where
+thinning explains it: it does not cross a Vienna midnight except from that
+day's last row (at most five minutes before midnight) into the next day, and
+it is no longer than three times the longest of the 16 kept intervals on
+either side. Longer intervals stay estimates and, where no chosen desk has a
+number, hatched no-data bands. Explicit null values survive thinning and stay
+estimates. An outage shorter than the thinning step at its age cannot be told
+apart from thinning; History says so under the chart.
 
 The renderer builds continuity over the whole kept history before clipping to
 the shown window, so a window inside an outage still contains a line. Solid
@@ -84,7 +92,10 @@ observations keep the desk color; gray segments and their tooltips identify the
 assumption. The window is a preset (Fit all, Day, Week, Month; a preset longer
 than the kept history shows all of it) or a manual view chosen on the chart or
 its overview strip; it never leaves the kept history, never shows less than
-five minutes, and ends at the current chart time while it follows the newest.
+five minutes (a narrower manual view is widened around its middle each time the
+window is resolved, also once newer history allows it), and ends at the current
+chart time while it follows the newest. A move by pan, zoom, drag or keys keeps
+following only if the window still ends exactly at the newest time.
 The comparison always uses the window the chart settles on. This policy applies
 to each newly encountered gap. Estimates are never written to `history.json`,
 counted as broker observations, or used by P&L, comparison or sparkline
