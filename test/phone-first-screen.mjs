@@ -307,12 +307,18 @@ test('expanding measured chart boxes plots observed closes and current values on
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     t.after(() => { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; });
   }
-  const history = { closes: Object.fromEntries(['j', 'joe', 'joel'].map(id => [id, [{ v: -1.25 }, { v: 2.5 }]])) };
-  drawHeroChart(ctx, null); drawMiniCharts(ctx, history);
+  // Today's chart has two observed points inside the open session (synthetic values).
+  const { toColumns } = await import('../public/joe/history-model.js');
+  const point = (t, amount) => ({ t, totals: { dayPnl: { amount, currency: 'EUR' } } });
+  const history = { closes: Object.fromEntries(['j', 'joe', 'joel'].map(id => [id, [{ v: -1.25 }, { v: 2.5 }]])),
+    columns: toColumns([point('2026-10-14T14:00:00.000Z', '-1'), point('2026-10-14T17:30:00.000Z', '2')]), seq: 2 };
+  assert.equal(drawHeroChart(ctx, history), true, 'a line exists');
+  drawMiniCharts(ctx, history);
   assert.equal(doc.querySelectorAll('svg').length, 0, 'collapsed boxes cannot be measured or cached as drawn');
   for (const chart of charts) { chart.clientWidth = 322; chart.clientHeight = 84; }
-  drawHeroChart(ctx, null); drawMiniCharts(ctx, history);
+  drawHeroChart(ctx, history); drawMiniCharts(ctx, history);
   assert.equal(doc.querySelectorAll('svg').length, 4);
+  assert.equal(charts[0].hidden, false);
   for (const id of ['j', 'joe', 'joel']) {
     const svg = doc.querySelector(`#mini-${id} svg`);
     const current = Number(ctx.states[`desks.${id}.totalPnl`].value.amount);
@@ -320,4 +326,46 @@ test('expanding measured chart boxes plots observed closes and current values on
     assert.equal(svg.getAttribute('data-zero'), '1');
     assert.equal(svg.querySelectorAll('[data-estimate]').length, 0);
   }
+});
+
+// JOED-148 P0-6: no empty chart box. Without a line the box is hidden and
+// holds nothing; the market block already says when the session runs.
+test('Today’s chart renders only with a line: no clock, a day without a session, before the open and no points leave no box', async t => {
+  const { drawHeroChart } = await builders('desk.js', ['drawHeroChart']);
+  const { toColumns } = await import('../public/joe/history-model.js');
+  const doc = htmlDocument('<div id="heroChart"><div class="ctip"></div></div>'), chart = doc.querySelector('#heroChart');
+  for (const [key, value] of Object.entries({ document: doc, matchMedia: () => ({ matches: false }) })) {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    t.after(() => { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; });
+  }
+  chart.clientWidth = 600; chart.clientHeight = 196;
+  const point = (t, amount) => ({ t, totals: { dayPnl: { amount, currency: 'EUR' } } });
+  // Tuesday's whole session and Wednesday's first hours, as History holds them at 17:42 New York time.
+  const session = { columns: toColumns([point('2026-10-13T15:00:00.000Z', '3'), point('2026-10-13T19:00:00.000Z', '4'),
+    point('2026-10-14T14:00:00.000Z', '-1'), point('2026-10-14T17:30:00.000Z', '2')]), seq: 4 };
+  const tuesday = { columns: toColumns([point('2026-10-13T15:00:00.000Z', '3'), point('2026-10-13T19:00:00.000Z', '4')]), seq: 2 };
+  const ctx = now => ({ ...context(), now });
+  // Wed 14 Oct: during the session the line draws; a later redraw after the line vanishes removes the box.
+  assert.equal(drawHeroChart(ctx('2026-10-14T17:42:22.000Z'), session), true);
+  assert.equal(chart.hidden, false);
+  assert.equal(chart.querySelectorAll(':scope > svg').length, 1);
+  assert.equal(drawHeroChart(ctx('2026-10-14T22:00:00.000Z'), session), true, 'after the close the session keeps its line');
+  for (const [why, view, history] of [
+    ['no clock', { ...context(), now: null }, session],
+    ['before the open', ctx('2026-10-14T12:00:00.000Z'), tuesday],
+    ['a weekend day', ctx('2026-10-17T15:00:00.000Z'), session],
+    ['no result points', ctx('2026-10-14T17:42:22.000Z'), { columns: toColumns([]), seq: 0 }],
+    ['no history', ctx('2026-10-14T17:42:22.000Z'), null],
+  ]) {
+    assert.equal(drawHeroChart(view, history), false, why);
+    assert.equal(chart.hidden, true, `${why}: the box takes no space`);
+    assert.equal(chart.querySelectorAll(':scope > svg').length, 0, `${why}: no empty chart text`);
+    assert.equal(drawHeroChart(ctx('2026-10-14T17:42:22.000Z'), session), true, `${why}: the line returns`);
+    assert.equal(chart.hidden, false);
+  }
+  // The static page starts without the box, so a phase without a line never shows one.
+  const page = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  assert.notEqual(page.querySelector('#heroChart').getAttribute('hidden'), null);
+  assert.equal(page.querySelector('#chartTitle').textContent, 'Market hours');
 });

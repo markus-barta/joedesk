@@ -21,7 +21,7 @@ const { deskCard } = await builders('desk.js', ['deskCard']);
 const { resultsView } = await import('../public/joe/results.js');
 const { age, eur } = await import('../public/joe/format.js');
 const { createFeed } = await import('../public/joe/feed.js');
-const { localBoardHealth, boardHealthPresentation, statusPresentation, cellReason, CELL_REASON, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
+const { localBoardHealth, boardHealthPresentation, statusPresentation, boardDiagnostics, cellReason, CELL_REASON, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
 const { bookkeepingHtml } = await builders('history.js', ['bookkeepingHtml']);
 const exact = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
 const DESKS = ['j', 'joe', 'joel'];
@@ -1508,4 +1508,62 @@ test('JOED-148: a card line stays when the not-exact Today is not the card’s o
   assert.equal(validateContract('data', data).ok, true);
   const lines = htmlDocument(deskCard(ctx(data), 'j', 50, true)).querySelectorAll('.mini-label .st').map(line => line.textContent);
   assert.deepEqual(lines, ['Today: not exact', `Open positions: last good, ${age(30)} ago · not reported by the broker`]);
+});
+
+// JOED-148 P0-5: the v2 feed sends no learning and no check-ins, and its desk
+// actions are the pusher's valuation sentences. None of that is shown as news.
+function quietV2() {
+  const data = structuredClone(exact);
+  const sentences = { j: 'Some paper desk values are unavailable.', joe: 'Paper desk values are available.', joel: 'Valuation is not exact yet.' };
+  for (const desk of data.desks) { delete desk.heartbeatAt; delete desk.learning; desk.action = sentences[desk.id]; }
+  assert.equal(validateContract('data', data).ok, true);
+  return data;
+}
+const pop = view => htmlDocument(healthPop(view, boardHealthPresentation(view.states, view.feeds, view.now)));
+
+test('JOED-148: no Learning line without learning; the line returns when the feed reports learning', () => {
+  const data = quietV2(), view = ctx(data);
+  for (const id of DESKS) {
+    const card = htmlDocument(deskCard(view, id, 50, true));
+    assert.equal(card.querySelector('footer'), null, `${id}: no permanent "Learning: not reported"`);
+    assert.doesNotMatch(card.textContent, /Learning|not reported/);
+  }
+  data.desks[0].learning = { status: 'blocked', headline: 'Synthetic headline', detail: 'Synthetic detail', iteration: 2 };
+  assert.equal(validateContract('data', data).ok, true);
+  const footer = htmlDocument(deskCard(ctx(data), 'j', 50, true)).querySelector('footer');
+  assert.equal(footer.textContent, 'Learning: Synthetic headline · Synthetic detail · round 2 · blocked');
+});
+
+test('JOED-148: check-in warnings and the Checked in row appear only when the feed carries check-ins', () => {
+  const view = ctx(quietV2());
+  view.states.history = { state: 'fresh', value: {}, reason: null };
+  for (const id of DESKS) {
+    const row = htmlDocument(compactDesk(view, id));
+    assert.doesNotMatch(row.textContent, /Check-in/, `${id}: no false phone warning`);
+    assert.equal(row.querySelector('.summary-text'), null, `${id}: a quiet row has no warning at all`);
+  }
+  const details = pop(view);
+  assert.equal(details.querySelectorAll('dt').some(dt => dt.textContent === 'Checked in'), false);
+  assert.doesNotMatch(healthPop(view, boardHealthPresentation(view.states, view.feeds, view.now)), /data-term="heartbeat"/);
+  // A feed with check-ins still names the desk whose check-in is missing.
+  const data = structuredClone(exact); delete data.desks[2].heartbeatAt;
+  const carried = ctx(data);
+  assert.match(htmlDocument(compactDesk(carried, 'joel')).querySelector('.summary-text').textContent, /^Check-in: not reported/);
+  assert.doesNotMatch(htmlDocument(compactDesk(carried, 'j')).textContent, /Check-in/);
+  const row = pop(carried).querySelectorAll('dt').findIndex(dt => dt.textContent === 'Checked in');
+  assert.match(pop(carried).querySelectorAll('dd')[row].textContent, /Joel: not reported$/);
+});
+
+test('JOED-148: the pusher’s valuation sentences give way to the desk’s state; real activity stays', () => {
+  const data = quietV2(), view = ctx(data);
+  const line = id => htmlDocument(deskCard(view, id, 50, true)).querySelector('.now').textContent;
+  assert.deepEqual(DESKS.map(line), ['J is working.', 'Joe is sitting out.', 'Joel is sitting out.']);
+  data.desks[0].state = 'stuck';
+  assert.equal(htmlDocument(deskCard(ctx(data), 'j', 50, true)).querySelector('.now').textContent, 'J is stuck: its trading activity can’t be confirmed.');
+  assert.ok(boardDiagnostics(ctx(data).states, ctx(data).feeds, ctx(data).now).includes('J is stuck: its trading activity can’t be confirmed.'));
+  assert.doesNotMatch(boardDiagnostics(ctx(data).states, ctx(data).feeds, ctx(data).now).join(' '), /values are|Valuation/);
+  // A desk's own activity sentence is news and stays verbatim (escaped).
+  data.desks[0].action = 'Synthetic <b>activity</b> sentence.';
+  assert.equal(htmlDocument(deskCard(ctx(data), 'j', 50, true)).querySelector('.now').textContent, 'Synthetic <b>activity</b> sentence.');
+  assert.ok(deskCard(ctx(data), 'j', 50, true).includes('Synthetic &lt;b&gt;activity&lt;/b&gt; sentence.'));
 });

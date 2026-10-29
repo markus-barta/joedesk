@@ -208,6 +208,9 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
 }
 
 const PNL_COPY = { day: 'Today’s result', open: 'The open result' };
+// A stuck desk is one whose positions, orders or executions the pusher cannot
+// currently confirm; its own status text names no cause, so the board says this.
+export const STUCK_REASON = 'its trading activity can’t be confirmed';
 export function boardDiagnostics(states, feeds, now) {
   const data = feeds.data?.value;
   const problems = [];
@@ -236,7 +239,7 @@ export function boardDiagnostics(states, feeds, now) {
     if (cell?.retained && cell.value) problems.push(`${LABEL[id]}’s money is carried from ${age(cell.ageSeconds)} ago (${cellReason(cell.reason)}).`);
     else if (cell?.value == null && cell?.reason && !notExact(cell)) problems.push(`${LABEL[id]}’s money is unavailable: ${cellReason(cell.reason)}.`);
   }
-  for (const desk of data.desks) if (desk.state === 'stuck') problems.push(`${desk.label} is stuck: ${desk.action}`);
+  for (const desk of data.desks) if (desk.state === 'stuck') problems.push(`${desk.label} is stuck: ${STUCK_REASON}.`);
   if (isRTH(now)) for (const [kind, field] of [['day', 'dayPnl'], ['open', 'openPnl']]) {
     const cell = states[`today.${field}`];
     if (!current(cell)) problems.push(`${PNL_COPY[kind]} is unavailable during New York regular hours: ${cellReason(cell?.reason ?? data.pnlSources?.[kind]?.reason ?? 'feed_not_received')}.`);

@@ -3,7 +3,7 @@
 // are shared once, while different ages and reasons stay beside their values.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin, NOT_EXACT } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
-import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation, executorPresentation } from './health.js';
+import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, STUCK_REASON, statusPresentation, executorPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { drawChart, eurAxis } from './chart.js';
@@ -107,6 +107,20 @@ export function rowProblems(cell) {
     [`${row.symbol} ${POSITION_FIELDS[field] ?? field}`, { state: 'broken', value: null, reason }]));
 }
 
+// Only a feed that sends check-ins can show one as missing; the v2 feed sends
+// none, so its desks never warn about a check-in that does not exist.
+export const carriesCheckIns = data => Boolean(data?.desks?.some(desk => desk.heartbeatAt != null));
+// The paper pusher's own valuation sentences say nothing about what a desk is
+// doing; the card shows a short line from the desk's state instead.
+const PUSHER_STATUS = new Set(['Paper desk values are available.', 'Some paper desk values are unavailable.',
+  'Valuation is not exact yet.', 'Valuation unavailable pending exact source validation.']);
+export function activityLine(desk) {
+  if (!desk) return 'Waiting for the first valid snapshot.';
+  const info = STATE[desk.state];
+  if (!PUSHER_STATUS.has(desk.action) || !info) return esc(desk.action);
+  return `${esc(desk.label)} is ${info.word.toLowerCase()}${desk.state === 'stuck' ? `: ${STUCK_REASON}` : ''}.`;
+}
+
 function deskProblem(ctx, id) {
   const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
   const cells = [['Today', ctx.states[`desks.${id}.dayPnl`]], ['Open positions', ctx.states[`desks.${id}.openPnl`]], ['Since start', ctx.states[`desks.${id}.totalPnl`]], ['History', ctx.states.history]];
@@ -114,7 +128,7 @@ function deskProblem(ctx, id) {
   if (desk?.learning?.status === 'blocked') cells.push(['Learning blocked', { state: 'broken', value: null }]);
   const elapsed = ctx.feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(ctx.now) - Date.parse(ctx.feeds.data.generatedAdvancedAt)) : 0;
   const heartbeat = desk?.heartbeatAt ? gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, ctx.feeds.data.value.generatedAt, elapsed) : null;
-  if (desk && (heartbeat == null || heartbeat / 1000 >= STALE_AFTER_S)) cells.unshift(['Check-in', { state: heartbeat == null ? 'not reported' : 'stale', value: heartbeat }]);
+  if (desk && carriesCheckIns(ctx.feeds.data.value) && (heartbeat == null || heartbeat / 1000 >= STALE_AFTER_S)) cells.unshift(['Check-in', { state: heartbeat == null ? 'not reported' : 'stale', value: heartbeat }]);
   return disclosureProblem(cells);
 }
 export function compactDesk(ctx, id) {
@@ -249,7 +263,7 @@ export function healthPop(ctx, health) {
     rows.push(['Data', `${dateTimeFull(data.generatedAt)} · ${ageSpan('pop.data', `${age(receipt)} old`)} · refreshes every 15${NB}s`]);
     rows.push(['Broker connection', `${broker.word === 'OK' ? 'Answering' : broker.word === 'down' ? 'Down' : broker.word === 'degraded' ? 'Unstable' : 'Not confirmed'}${gateway?.reason ? ` · ${esc(cellReason(gateway.reason))}` : ''}${gateway?.checkedAt ? ` · checked ${timeHMS(gateway.checkedAt)}` : ' · no check reported'}`]);
     rows.push(['Emergency stop', data.safety.halt ? `On: ${esc(cellReason(data.safety.haltReason))}` : 'Off']);
-    rows.push([term('heartbeat'), data.desks.map(desk => {
+    if (carriesCheckIns(data)) rows.push([term('heartbeat'), data.desks.map(desk => {
       const elapsed = feeds.data.generatedAdvancedAt ? Math.max(0, Date.parse(now) - Date.parse(feeds.data.generatedAdvancedAt)) : 0;
       const ms = gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed);
       return `${esc(desk.label)}: ${ms == null ? 'not reported' : `${ageSpan(`pop.hb.${desk.id}`, `${age(ms / 1000)} ago`)}`}`;
@@ -470,14 +484,14 @@ function deskCard(ctx, id, maxDay, showBars) {
   const status = loneNotExactDay ? '' : cardStatus(id, cells, board);
   const learning = learningLine(desk?.learning);
   return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(info.word + since)}">${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
-      <p class="now">${desk ? esc(desk.action) : 'Waiting for the first valid snapshot.'}</p>
+      <p class="now">${activityLine(desk)}</p>
       <div class="dnums">
         ${num(term('today') + dayEstimateMark(ctx, id), dayV, states[`desks.${id}.dayPnl`], `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
         ${num(term('open'), openV, states[`desks.${id}.openPnl`])}
         ${num(term('since', sinceText), sinceV, states[`desks.${id}.totalPnl`])}
       </div>
       <div class="chart mini" id="mini-${id}"><div class="mini-label${status ? ' off' : ''}">${status || 'since start · last sessions'}</div></div>
-      <footer>${icon('learning')}<span>${term('learning')}: ${learning ? esc(learning) : 'not reported'}${desk?.learning?.status === 'blocked' ? ' · blocked' : ''}</span></footer>`;
+      ${learning ? `<footer>${icon('learning')}<span>${term('learning')}: ${esc(learning)}${desk.learning.status === 'blocked' ? ' · blocked' : ''}</span></footer>` : ''}`;
 }
 
 // The card's numbers that are not fresh, each with its own state, age and
@@ -637,30 +651,37 @@ function chartOnce(el, key, draw) {
 }
 export const forgetCharts = () => chartKeys.clear();
 
+// Today's chart exists only with a line to draw. Without a clock, on a day
+// without a session, before the open or before the first result point there
+// is no box at all: the market block above already says when the session runs.
+// Returns whether the line is shown.
 function drawHeroChart(ctx, history) {
   const el = $('#heroChart');
-  if (!ctx.now) {
-    chartOnce(el, JSON.stringify(['no-clock', el?.clientWidth, el?.clientHeight]), () => drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: 'Waiting for the board server’s clock', label: 'Today’s result: the board server’s time is not known yet' }));
-    return;
+  if (!el) return false;
+  const b = ctx.now ? sessionBounds(ctx.now) : null;
+  const series = b?.openAt && history ? intraday(history.columns, 'dayPnl', b.openAt, b.closeAt) : [];
+  if (!series.length) {
+    el.hidden = true;
+    el.querySelector(':scope > svg')?.remove();
+    chartKeys.delete(el.id);
+    return false;
   }
-  const b = sessionBounds(ctx.now);
+  el.hidden = false;
   const nowMs = Date.parse(ctx.now);
   const minuteKey = Math.floor(nowMs / 60000);
-  const key = JSON.stringify([b.openAt, minuteKey, history?.seq, history?.receivedAt, el?.clientWidth, el?.clientHeight]);
-  if (chartKeys.get(el?.id) === key && el?.querySelector(':scope > svg')) return;
-  const series = b.openAt && history ? intraday(history.columns, 'dayPnl', b.openAt, b.closeAt) : [];
+  const key = JSON.stringify([b.openAt, minuteKey, history?.seq, history?.receivedAt, el.clientWidth, el.clientHeight]);
+  if (chartKeys.get(el.id) === key && el.querySelector(':scope > svg')) return true;
   chartOnce(el, key, () => {
-    if (!b.openAt) { drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: 'Market closed today', label: 'Market closed today' }); return; }
     const open = Date.parse(b.openAt), close = Date.parse(b.closeAt);
-    const empty = !series.length;
     drawChart(el, {
       series: [{ pts: series, color: 'var(--accent)', live: b.rth }], xDomain: [open, close], zero: true, ticks: 3, yFmt: eurAxis, pad: { l: 52 },
-      future: b.rth ? [nowMs, close] : null, empty, emptyText: nowMs < open ? `The session opens at ${timeHM(b.openAt)}` : 'No result points for this session yet',
+      future: b.rth ? [nowMs, close] : null,
       xLabels: [{ x: open, text: timeHM(b.openAt), anchor: 'start' }, ...(b.rth && nowMs - open > (close - open) * 0.18 && close - nowMs > (close - open) * 0.18 ? [{ x: nowMs, text: `now ${timeHM(ctx.now)}` }] : []), { x: close, text: timeHM(b.closeAt), anchor: 'end' }],
-      label: `Today’s result through the regular session${series.length ? `: ${eur(series.at(-1).v, true)}` : ''}`,
+      label: `Today’s result through the regular session: ${eur(series.at(-1).v, true)}`,
       tipFmt: near => `<b>${timeHM(new Date(near[0].x).toISOString())}</b> · ${eur(near[0].v, true)}`,
     });
   });
+  return true;
 }
 
 function drawMiniCharts(ctx, history) {
@@ -731,7 +752,9 @@ export function renderDesk(ctx) {
   // Charts measure their boxes before the long sections below change, so an
   // update never forces a layout of the whole position list mid-render.
   const history = ctx.states.history?.value?.columns ? ctx.states.history.value : null;
-  drawHeroChart(ctx, history);
+  // The phone section names what it holds: the market hours, with the chart only when it has a line.
+  const chartTitle = $('#chartTitle'), title = drawHeroChart(ctx, history) ? 'Today’s chart' : 'Market hours';
+  if (chartTitle && chartTitle.textContent !== title) chartTitle.textContent = title;
   drawMiniCharts(ctx, history);
   const pos = positionsHtml(ctx);
   $('#posSub').textContent = pos.sub;

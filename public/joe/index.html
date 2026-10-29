@@ -171,10 +171,10 @@
     <section class="card hero" id="deskHero" aria-label="Desk performance">
       <div class="hero-l" id="heroL"></div>
       <div class="hero-r">
-        <button type="button" class="desk-disclosure" data-desk-disclosure="chart" aria-expanded="false" aria-controls="chartDetail"><span>Today's chart</span><span id="chartSummary" class="disclosure-warning"></span><svg class="i disclosure-chevron" aria-hidden="true"><use href="#i-chev-d"/></svg></button>
+        <button type="button" class="desk-disclosure" data-desk-disclosure="chart" aria-expanded="false" aria-controls="chartDetail"><span id="chartTitle">Market hours</span><span id="chartSummary" class="disclosure-warning"></span><svg class="i disclosure-chevron" aria-hidden="true"><use href="#i-chev-d"/></svg></button>
         <div class="disclosure-body" id="chartDetail">
           <div class="session" id="heroSession"></div>
-          <div class="chart hero-chart" id="heroChart"><div class="ctip" role="tooltip"></div></div>
+          <div class="chart hero-chart" id="heroChart" hidden><div class="ctip" role="tooltip"></div></div>
         </div>
       </div>
     </section>

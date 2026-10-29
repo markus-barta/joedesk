@@ -1330,6 +1330,24 @@ card adds no line for a not-exact Today that is its only problem: the icon and
 the dash's name and title carry it. Details' “Today’s result” row lists every
 desk, exact ones first (“Exact for Joel; not exact for J and Joe”).
 
+JOED-148 also removes permanent noise. A desk card shows its Learning line
+only when the feed reports learning. The pusher's own valuation sentences
+(“Paper desk values are available.”, “Some paper desk values are
+unavailable.”, “Valuation is not exact yet.”, “Valuation unavailable pending
+exact source validation.”) are not desk activity: the card says “Joe is
+working.” or “Joel is sitting out.” instead, while any other action sentence
+stays verbatim. Check-in warnings on phone rows and Details' “Checked in” row
+appear only when the feed carries check-ins at all (the v2 feed sends none); a
+desk missing from a feed that does still says “Check-in: not reported”. A stuck
+desk reads “‹desk› is stuck: its trading activity can’t be confirmed.” Today's
+chart renders only with a line to draw: without a clock, on a day without a
+session, before the open or before the first result point the box is hidden
+and takes no space (the market block above already gives the session and the
+next opening), so the hero shrinks wherever the chart's 196 px minimum set its
+height. The phone section is then titled “Market hours” instead of
+“Today’s chart”. Within a phase nothing moves; the box appears with the first
+point of a session.
+
 Release 35 (JOED-96, Markus Desk f3b46a8d) extends this outage policy to a
 stopped DATA feed (`snapshot_stale`) or frozen producer (`producer_frozen`).
 Individual observations keep their stale value, caption, age and reason below
