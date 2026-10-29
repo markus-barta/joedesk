@@ -249,8 +249,10 @@ for (const [id, fixture] of Object.entries(heroWordingFixtures(browserSnapshot))
   assert.equal(feed.status, 200, JSON.stringify(feed.errors));
   const feeds = { data: feed }, states = boardStates(feeds, f.now, panelStates({ data: first }, browserSnapshot.receivedAt));
   const status = statusPresentation({ states, feeds, now: f.now });
-  assert.equal(status.tone, 'yellow');
-  assert.equal(status.label, 'Data delayed');
+  // Amy's A3: a not-exact Today alone keeps the light green in regular hours;
+  // a not-exact or missing open result still warns as before.
+  assert.deepEqual([status.tone, status.label, status.reason], id === 'p3-not-exact-yet'
+    ? ['green', 'Board OK', 'board_ok'] : ['yellow', 'Data delayed', 'open_unavailable_rth']);
   const brokenHero = ['today.dayPnl', 'today.openPnl', 'today.totalPnl', 'today.equity', 'paperAccount']
     .filter(name => states[name].state === 'broken');
   assert.deepEqual(brokenHero, id === 'p3-not-exact-yet' ? ['today.dayPnl'] : ['today.dayPnl', 'today.openPnl']);
@@ -1566,4 +1568,38 @@ test('JOED-148: the pusher’s valuation sentences give way to the desk’s stat
   data.desks[0].action = 'Synthetic <b>activity</b> sentence.';
   assert.equal(htmlDocument(deskCard(ctx(data), 'j', 50, true)).querySelector('.now').textContent, 'Synthetic <b>activity</b> sentence.');
   assert.ok(deskCard(ctx(data), 'j', 50, true).includes('Synthetic &lt;b&gt;activity&lt;/b&gt; sentence.'));
+});
+
+// JOED-148 A3 (Amy 2026-10-29): during regular hours a Today the feed explains
+// as not exact keeps the light green with one Details line; real gaps stay yellow.
+test('JOED-148 A3: a not-exact Today keeps the regular-hours light green and says why in Details', () => {
+  for (const reasons of [{ j: 'not_exact_yet', joe: 'not_exact_yet' }, ...[...NOT_EXACT_REASONS].map(r => ({ j: r, joe: r, joel: r }))]) {
+    const view = ctx(dayNotExact(reasons));  // 13:42 New York time on a Wednesday: regular hours
+    const health = boardHealthPresentation(view.states, view.feeds, view.now);
+    assert.deepEqual([health.tone, health.reason, health.label], ['green', 'board_ok', 'Board OK'], JSON.stringify(reasons));
+    assert.match(statusPresentation(view, health).sentence, /^Live · updated /);
+    const details = pop(view), notes = details.querySelectorAll('.st.none').map(note => note.textContent);
+    const reason = reasons.joel ? cellReason(reasons.joel) : null;
+    const expected = reasons.joel ? `Today: not exact for J, Joe and Joel${reason === 'not exact' ? '' : ` (${reason})`}` : 'Today: not exact for J and Joe';
+    assert.ok(notes.includes(expected), `${JSON.stringify(reasons)}: ${notes}`);
+    assert.equal(details.querySelectorAll('p').find(p => p.textContent === 'No current problems.')?.textContent, 'No current problems.', 'a not-exact Today is not a problem');
+    assert.doesNotMatch(details.textContent, /during New York regular hours|money is unavailable/);
+  }
+});
+
+test('JOED-148 A3: real gaps keep the yellow Today warning: no reason, a fault reason, or a desk without an explained Today', () => {
+  const yellow = (view, why) => {
+    const health = boardHealthPresentation(view.states, view.feeds, view.now), status = statusPresentation(view, health);
+    assert.deepEqual([health.tone, health.reason, health.label], ['yellow', 'day_pending', 'Data delayed'], why);
+    assert.deepEqual([status.sentence, status.alert, status.compact], ['Today’s result is late', 'Today’s result is late · Reload; if it stays, tell Amy', 'Result late'], why);
+    assert.match(pop(view).textContent, /Today’s result is unavailable during New York regular hours/, why);
+  };
+  const none = ctx(exact); none.states['today.dayPnl'] = { state: 'broken', value: null, reason: null, retained: false };
+  yellow(none, 'no reason');
+  const cold = data => { const view = ctx(data); return { ...view, states: boardStates(view.feeds, view.now) }; };
+  yellow(cold(dayNotExact({ j: 'source_unavailable', joe: 'source_unavailable', joel: 'source_unavailable' })), 'a fault reason');
+  yellow(cold(dayNotExact({ j: 'not_exact_yet', joe: 'source_unavailable' })), 'one desk has a real gap');
+  yellow(ctx(dayNotExact({ j: 'not_exact_yet', joe: 'source_unavailable' })), 'one desk only has a last good value');
+  // JOED-103 stays: not-exact values never turn the board red.
+  for (const reason of NOT_EXACT_REASONS) assert.notEqual(boardHealthPresentation(ctx(missing(reason)).states, ctx(missing(reason)).feeds, ctx(missing(reason)).now).tone, 'red', reason);
 });

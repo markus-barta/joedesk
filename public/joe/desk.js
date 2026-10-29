@@ -278,6 +278,7 @@ export function healthPop(ctx, health) {
     ${healthFacts(ctx, health)}
     <p>${problems.length ? esc(problems.join(' ')) : 'No current problems.'}</p>
     ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact', 'info')}</p>` : ''}
+    ${dayNote(states) ? `<p>${st('none', esc(dayNote(states)), 'info')}</p>` : ''}
     ${rows.length ? `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
     <p>If a light turns yellow or red: reload once. If it stays, tell Amy what the light says and how old the data is.</p>
     <p><button type="button" class="btn quiet link" data-go="history" data-anchor="j-accounting">${icon('book')}J’s bookkeeping${icon('chev-r')}</button></p>`;
@@ -356,6 +357,15 @@ const dayRank = g => DAY_ORDER.includes(g.word) ? DAY_ORDER.indexOf(g.word) : DA
 export function dayBreakdown(states) {
   const groups = deskDays(states).sort((a, b) => dayRank(a) - dayRank(b) || byDesk(a.ids[0], b.ids[0]));
   return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` · ${g.reason}` : ''}`).join('; '));
+}
+
+// Details, beside a green light (Amy's A3): which desks keep the household
+// Today from being exact, and why, e.g. "Today: not exact for J and Joe".
+export function dayNote(states) {
+  if (!notExactDash(states['today.dayPnl'])) return null;
+  const blocking = blockingDays(states);
+  if (!blocking.length) return `Today: ${statePhrase(states['today.dayPnl'], '').text}`;
+  return `Today: ${blocking.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` (${g.reason})` : ''}`).join('; ')}`;
 }
 
 // The household Today needs all three desks. When the feed explains its dash

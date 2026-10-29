@@ -613,8 +613,9 @@ test('health: every P1 fixture lands on today’s light, label and plain reason'
     'b-incomplete-family': ['yellow', 'retained_values', 'Data delayed'],
     'b-equity-null-gateway-ready': ['yellow', 'retained_values', 'Data delayed'],
     'h-keep-policy-mismatch': ['yellow', 'retained_values', 'Data delayed'],
-    'b-weekend-no-sod': ['yellow', 'day_pending', 'Data delayed'],
-    'j-ny-midnight-gap': ['yellow', 'day_pending', 'Data delayed'],
+    // Amy's A3: a Today the feed explains as not exact is not late in regular hours.
+    'b-weekend-no-sod': ['green', 'board_ok', 'Board OK'],
+    'j-ny-midnight-gap': ['green', 'board_ok', 'Board OK'],
     'a-gateway-up-but-dead': ['red', 'gateway_down', 'Needs fix'],
     'c-old-producer-image': ['red', 'feed_disconnected', 'Needs fix'],
     'unknown-schema': ['red', 'feed_disconnected', 'Needs fix'],
@@ -888,7 +889,10 @@ test('health: not-exact values still run gateway, stuck-desk, transport, feed an
   }
   const payload = switchSetSnapshot(valid.data.generatedAt);
   const rth = board({ feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) }, { cold: true });
-  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'day_pending');
+  // Amy's A3: the not-exact Today is explained; the not-exact open result still warns in regular hours.
+  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
+  rth.states['today.dayPnl'] = { value: null, reason: null, state: 'broken', retained: false };
+  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'day_pending', 'a Today without a reason is a real gap');
   rth.states['today.dayPnl'] = { value: { amount: '0', currency: 'EUR' }, retained: false };
   assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
 });

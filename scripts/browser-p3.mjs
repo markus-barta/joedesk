@@ -600,12 +600,13 @@ try {
     ['e-layout-storage-unavailable', 'fresh', 'Board OK'], ['b-session-open-estimate', 'fresh', 'Board OK'], ['stale-receive-age', 'stale', 'Stale 1 min'],
     ['c-frozen-producer', 'stale', 'Stale 2 min'], ['missing-runtime-and-results', 'not reported', 'Board OK'], ['a-gateway-up-but-dead', 'broken', 'Needs fix'],
     ['a-missing-gateway', 'broken', 'Needs fix'], ['a-frozen-ready-gateway', 'broken', 'Needs fix'], ['b-incomplete-family', 'broken', 'Data delayed'],
-    ['b-equity-null-gateway-ready', 'broken', 'Data delayed'], ['b-weekend-no-sod', 'broken', 'Data delayed'], ['j-ny-midnight-gap', 'broken', 'Data delayed'],
+    // Amy's A3: a Today the feed explains as not exact is not late in regular hours.
+    ['b-equity-null-gateway-ready', 'broken', 'Data delayed'], ['b-weekend-no-sod', 'broken', 'Board OK'], ['j-ny-midnight-gap', 'broken', 'Board OK'],
     ['h-keep-policy-mismatch', 'broken', 'Needs fix'], ['c-old-producer-image', 'broken', 'Needs fix'], ['unknown-schema', 'broken', 'Needs fix'],
     ['a-dead-session-current-money', 'broken', 'Needs fix'], ['h-secondary-position-source', 'broken', 'Needs fix'], ['i-oversize-data', 'broken', 'Needs fix'],
     ['g-expired-sso', 'broken', 'Data delayed'], ['d-routing-stub', 'broken', 'Data delayed'],
     ['p3-single-missing-desk', 'broken', 'Data delayed'], ['p3-coupled-unavailable', 'broken', 'Data delayed'],
-    ['p3-not-exact-yet', 'broken', 'Data delayed'], ['p3-shared-not-exact', 'broken', 'Data delayed'],
+    ['p3-not-exact-yet', 'broken', 'Board OK'], ['p3-shared-not-exact', 'broken', 'Data delayed'],
     ['p3-mixed-not-exact-fault', 'broken', 'Data delayed'],
   ];
   // ADR deferred P3 rows, derived from valid.json; expected states come from

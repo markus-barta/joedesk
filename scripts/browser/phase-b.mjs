@@ -121,13 +121,16 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
         overflow: document.documentElement.scrollWidth > innerWidth,
         mode: document.getElementById('modeLabel')?.innerText,
         headerTone: document.getElementById('hdrHealth')?.dataset.tone,
+        headerReason: document.getElementById('hdrHealth')?.dataset.reason,
         details: document.getElementById('healthPop')?.textContent,
       };
     })()`);
     let result = await inspect();
     if (mixed) {
-      check('phase-b', `${tag}: withheld values keep the existing Today warning, never a red header, with the not-exact status fact`,
-        result.headerTone === 'warn' && /Desk values are not exact(?! yet)/.test(result.details), result);
+      // Amy's A3: the not-exact Today no longer warns; J's not-exact open result keeps the regular-hours warning.
+      check('phase-b', `${tag}: withheld values keep the open-result warning, never a red header, with the not-exact status facts`,
+        result.headerTone === 'warn' && result.headerReason === 'open_unavailable_rth' && /Desk values are not exact(?! yet)/.test(result.details) &&
+        result.details.includes('Today: not exact for J (desk ledger not reconciled); not exact for Joe (start-of-day value missing)'), result);
       check('phase-b', `${tag}: incomplete totals stay dashes with no percentage`, result.day === '—' && result.since === '—' && result.percentages.length === 0, result);
       // JOED-148: Joe's lone not-exact Today keeps its reason on its own dash; the card adds no line.
       check('phase-b', `${tag}: independent exact desk survives ledger and SOD failures`, /desk ledger not reconciled/.test(result.j) &&

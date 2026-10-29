@@ -1348,6 +1348,19 @@ height. The phone section is then titled “Market hours” instead of
 “Today’s chart”. Within a phase nothing moves; the box appears with the first
 point of a session.
 
+Amy's A3 (2026-10-29, JOED-148) changes one light rule. During New York
+regular hours a household Today that the feed explains as not exact, with
+every desk's own Today current or not exact too, no longer turns the header
+yellow: the board stays green and Details adds one neutral line, e.g.
+“Today: not exact for J and Joe” (with the reason in parentheses when it adds
+words). Real gaps keep yellow `day_pending`, now worded “Today’s result is
+late — reload; if it stays, tell Amy” (compact “Result late”): a Today without
+a reason, with a fault reason, or with any desk whose Today is unavailable or
+only a last good value. Transport failures and stale or missing feeds keep their
+earlier, higher-ranked warnings. Not-exact values still never turn the board
+red (JOED-103), the open-result rule in regular hours is unchanged, and no copy
+promises when a value becomes exact (A5).
+
 Release 35 (JOED-96, Markus Desk f3b46a8d) extends this outage policy to a
 stopped DATA feed (`snapshot_stale`) or frozen producer (`producer_frozen`).
 Individual observations keep their stale value, caption, age and reason below

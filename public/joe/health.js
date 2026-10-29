@@ -24,7 +24,7 @@ export const REASON_COPY = Object.freeze({
   gateway_degraded: 'the broker connection is unstable — reload; if it persists, tell Amy',
   gateway_unconfirmed: 'the broker connection has not checked in — reload; if still old, tell Amy',
   open_unavailable_rth: 'waiting on broker prices — the desks’ money is still available',
-  day_pending: 'today’s result is waiting on data — the desks’ money is still available',
+  day_pending: 'today’s result is late — reload; if it stays, tell Amy',
   halt_on: 'paper trading is paused — the operator must check',
   gateway_down: 'the broker is offline — tell Amy to check the paper broker connection',
   feed_disconnected: 'board updates stopped — tell Amy to check the feed',
@@ -89,6 +89,11 @@ export const deskValuesNotExact = states => EQUITY_CELLS.some(name => notExact(s
 // Today's carried valuation: equity and total result retained from a last good value.
 const CARRIED_CELLS = ['today.equity', 'today.totalPnl', ...DESKS.flatMap(id => [`desks.${id}.equity`, `desks.${id}.totalPnl`])];
 const current = cell => cell?.value != null && !cell.retained;
+// Amy's A3 (2026-10-29): a household Today the feed explains as not exact, with
+// every desk's own Today current or not exact too, is not late. It keeps the light
+// green in regular hours; Details says why. Any other missing Today is a real gap.
+export const dayNotExact = states => notExact(states['today.dayPnl']) &&
+  DESKS.every(id => current(states[`desks.${id}.dayPnl`]) || notExact(states[`desks.${id}.dayPnl`]));
 // Board totals may be hidden while their observations remain usable for health.
 const observation = cell => cell?.health ?? { available: cell?.value != null, retained: cell?.retained, ageSeconds: cell?.ageSeconds };
 
@@ -157,7 +162,7 @@ export function localBoardHealth(states, feeds, now) {
   // Scoped stalls have no independent age; a fresh envelope cannot date them.
   if (CARRIED_CELLS.some(name => observation(states[name]).retained || stoppedData(states[name]))) return { tone: 'yellow', reason: 'retained_values' };
   if (data.desks.some(desk => desk.state === 'stuck')) return { tone: 'yellow', reason: 'retained_values' };
-  if (isRTH(now) && !current(states['today.dayPnl'])) return { tone: 'yellow', reason: 'day_pending' };
+  if (isRTH(now) && !current(states['today.dayPnl']) && !dayNotExact(states)) return { tone: 'yellow', reason: 'day_pending' };
   if (isRTH(now) && !current(states['today.openPnl'])) return { tone: 'yellow', reason: 'open_unavailable_rth' };
   if (NOT_EXACT_TONE === 'yellow' && deskValuesNotExact(states)) return { tone: 'yellow', reason: 'values_not_exact' };
   return { tone: 'green', reason: 'board_ok' };
@@ -196,7 +201,7 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
   const short = {
     values_not_exact: 'Not exact', snapshot_stale: 'Updates late', retained_values: 'Older numbers',
     gateway_degraded: 'Broker unstable', gateway_unconfirmed: 'Broker unsure', open_unavailable_rth: 'Prices pending',
-    day_pending: 'Result pending', refresh_failed: 'Data delayed',
+    day_pending: 'Result late', refresh_failed: 'Data delayed',
   };
   const control = health.tone === 'red' ? health.reason === 'halt_on' ? 'Emergency stop' : 'Problem' : sentence;
   return { ...health, sentence, control,
@@ -242,7 +247,7 @@ export function boardDiagnostics(states, feeds, now) {
   for (const desk of data.desks) if (desk.state === 'stuck') problems.push(`${desk.label} is stuck: ${STUCK_REASON}.`);
   if (isRTH(now)) for (const [kind, field] of [['day', 'dayPnl'], ['open', 'openPnl']]) {
     const cell = states[`today.${field}`];
-    if (!current(cell)) problems.push(`${PNL_COPY[kind]} is unavailable during New York regular hours: ${cellReason(cell?.reason ?? data.pnlSources?.[kind]?.reason ?? 'feed_not_received')}.`);
+    if (!current(cell) && !(kind === 'day' && dayNotExact(states))) problems.push(`${PNL_COPY[kind]} is unavailable during New York regular hours: ${cellReason(cell?.reason ?? data.pnlSources?.[kind]?.reason ?? 'feed_not_received')}.`);
   }
   return problems;
 }

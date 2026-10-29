@@ -57,8 +57,11 @@ test('JOED-103: the shipped mixed Phase B snapshot is not red; unexplained missi
   const ctx = context(mixed);
   ctx.states = boardStates(ctx.feeds, ctx.now);
   const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
-  assert.equal(health.tone, 'yellow', 'the existing regular-hours Today warning remains');
-  assert.equal(health.reason, 'day_pending');
+  // Amy's A3: the not-exact Today no longer warns; J's not-exact open result
+  // keeps the existing regular-hours open-result warning.
+  assert.equal(health.tone, 'yellow', 'the regular-hours open-result warning remains');
+  assert.equal(health.reason, 'open_unavailable_rth');
+  assert.match(healthPop(ctx, health), /Today: not exact for J \(desk ledger not reconciled\); not exact for Joe \(start-of-day value missing\)/);
   assert.match(headerHealth(ctx, health).html, /tone-warn/);
   assert.match(healthPop(ctx, health), /Desk values are not exact(?! yet)/);
   const fault = context(exact);
