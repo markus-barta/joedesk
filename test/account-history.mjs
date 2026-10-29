@@ -8,6 +8,7 @@ import { createReadModel } from '../server/read-model.mjs';
 import { atomicWrite } from '../server/storage.mjs';
 import { CONTRACTS, validateContract } from '../contracts/index.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
+import { acceptSnapshot, MAX_CLOCK_AHEAD_MS } from '../contracts/accept.mjs';
 import './fixtures/preview-dom.mjs';
 import { historyPoint, compactPoints, boundHistory, historyEnvelope, measureHistory, HISTORY_CAP, HISTORY_WARNING } from '../server/history.mjs';
 import { accountObservation, validAccountObservation, appendAccountHistory, emptyAccountHistory, compactAccountPoints,
@@ -83,6 +84,57 @@ test('older feed without cash is not recorded as zero; a stale/session-blocked s
 test('future account timestamps are unavailable rather than poisoning daily close ordering', () => {
   const value = snapshot(); value.brokerAccount.observedAt = at(1);
   assert.deepEqual(point(value).account.reasons, { equity: 'clock_ahead', cash: 'clock_ahead' });
+});
+
+test('account recording accepts a producer 4.9 seconds ahead without a write alarm', t => {
+  const { model } = setup(t);
+  const value = snapshot(101, at(4.9));
+  assert.equal(acceptSnapshot('data', value, null, T0).status, 200);
+  assert.equal(model.accept(value).status, 200);
+  const history = model.accountHistory();
+  assert.equal(history.reason, null);
+  assert.deepEqual(history.points.map(p => p.t), [value.generatedAt]);
+  assert.equal(history.dailyCloses.reason, null);
+  assert.equal(history.dailyCloses.days[0].t, value.brokerAccount.observedAt);
+  assert.equal(history.dailyCloses.days[0].day, viennaDay(value.brokerAccount.observedAt));
+});
+
+test('account validation and ingress share the inclusive clock-skew boundary', t => {
+  const { model } = setup(t);
+  const history = { ...emptyAccountHistory(), generatedAt: T0, receivedAt: T0,
+    points: [{ t: at(4.9), account: accountAt(at(4.9)) }] };
+  assert.equal(validateAccountHistory(history), history);
+  history.points[0] = { t: at(MAX_CLOCK_AHEAD_MS / 1000), account: accountAt(at(MAX_CLOCK_AHEAD_MS / 1000)) };
+  assert.equal(validateAccountHistory(history), history);
+  assert.equal(acceptSnapshot('data', snapshot(101, history.points[0].t), null, T0).status, 200);
+  history.points[0] = { t: at(5.1), account: accountAt(at(5.1)) };
+  assert.throws(() => validateAccountHistory(history), /contract_invalid/);
+  const ahead = snapshot(101, at(5.1));
+  assert.equal(acceptSnapshot('data', ahead, null, T0).reason, 'clock_ahead');
+  assert.equal(model.accept(ahead).reason, 'clock_ahead');
+  assert.equal(model.feeds().history.value, null);
+  assert.deepEqual(model.accountHistory().points, []);
+  assert.deepEqual(model.accountHistory().dailyCloses.days, []);
+});
+
+test('skewed desk and account timestamps stay aligned on disk and after restart', t => {
+  let now = T0;
+  const { dataDir, model } = setup(t, { clock: () => now });
+  for (const [seq, received, generated] of [[101, T0, at(4.9)], [102, at(10), at(12)]]) {
+    now = received;
+    assert.equal(model.accept(snapshot(seq, generated)).status, 200);
+  }
+  const desk = JSON.parse(readFileSync(join(dataDir, 'history-state.json'))).value;
+  const account = JSON.parse(readFileSync(join(dataDir, 'account-history-state.json'))).value;
+  assert.deepEqual(account.points.map(p => p.t), desk.points.map(p => p.t));
+  assert.deepEqual(account.points.map(p => p.t), [at(4.9), at(12)]);
+  assert.equal(account.generatedAt, desk.generatedAt);
+  assert.equal(account.receivedAt, desk.receivedAt);
+  assert.equal(account.generatedAt, now);
+  const restarted = createReadModel({ dataDir, clock: () => now });
+  assert.deepEqual(restarted.accountHistory(), model.accountHistory());
+  assert.equal(restarted.accountHistory().reason, null);
+  assert.deepEqual(restarted.feeds().history.value, desk);
 });
 
 test('desk fields match the pre-account golden including null reasons and composite basis identity', () => {
