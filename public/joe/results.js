@@ -652,7 +652,7 @@ function renderCurve(view, per, desks, R, mctx) {
   const marks = [first, ...(middle.x - first.x > span / 5 && last.x - middle.x > span / 5 ? [middle] : []), last];
   const trackAt = c.day ? (view.trackingStart && per.start <= view.trackingStart ? x0 : null) : c.tracking;
   drawResultChart(el, {
-    pts, domain: [x0, x1], color, live: per.end >= view.today, top,
+    pts, domain: [x0, x1], color, live: per.end >= view.today, top, grid: c.day ? [] : timeMarks(per.start, x0, x1),
     // Honest scale: zero is always in view, and the span is at least ±0,5 % of the
     // desks' money at the period start, so a few euros never look like a crash.
     base: M.unitsCents(c.startE),
@@ -663,11 +663,22 @@ function renderCurve(view, per, desks, R, mctx) {
   });
 }
 
+// The design's quiet time marks, at Vienna midnights inside the domain: every
+// day up to 16 days, every Monday up to 120 days, else every first of a month.
+export function timeMarks(start, x0, x1) {
+  const days = (x1 - x0) / 864e5, out = [];
+  for (let k = M.addDays(start, 1), x = M.viennaMidnight(k); x < x1; k = M.addDays(k, 1), x = M.viennaMidnight(k)) {
+    if (days <= 16 || (days <= 120 ? M.dowOf(k) === 1 : k.endsWith('-01'))) out.push(x);
+  }
+  return out;
+}
+
 // The seam. A description is either { empty, label, top } or the line: its
 // points ({ x, v, u, lab }, v null for a break), x domain, colour, whether it
-// runs to now, the period-start money for the minimum span, axis labels, the
-// tracking marker, the accessible label and the crosshair text. The design's
-// line: one thin stroke without an area, its end marked, zero dashed (CSS).
+// runs to now, the period-start money for the minimum span, the time marks,
+// axis labels, the tracking marker, the accessible label and the crosshair
+// text. The design's line: one thin stroke without an area, its end marked,
+// zero dashed (CSS).
 function drawResultChart(el, spec) {
   if (spec.empty) {
     drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: spec.empty, label: spec.label, pad: { t: spec.top } });
@@ -675,6 +686,6 @@ function drawResultChart(el, spec) {
   }
   drawChart(el, {
     series: [{ pts: spec.pts, color: spec.color, live: spec.live, w: 1.8, area: false }], xDomain: spec.domain, zero: true, strongZero: true, yFmt: eurAxis, ticks: 4,
-    base: spec.base, pad: { t: spec.top }, xLabels: spec.xLabels, marker: spec.marker, label: spec.label, tipFmt: spec.tipFmt,
+    base: spec.base, pad: { t: spec.top }, vlines: (spec.grid ?? []).map(x => ({ x })), xLabels: spec.xLabels, marker: spec.marker, label: spec.label, tipFmt: spec.tipFmt,
   });
 }

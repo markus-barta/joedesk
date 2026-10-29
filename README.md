@@ -1306,10 +1306,12 @@ All Results-only CSS is one block in `public/joe/app.css`, between
 `Results (one block)` and `end of Results`; a unit test fails if a
 Results-only rule appears outside it. The hero chart has one seam:
 `renderCurve` (`public/joe/results.js`) describes the line (points, time
-domain, colour, the period-start money for the minimum span, axis labels,
-tracking marker, words) and `drawResultChart` draws that description, today
-with `chart.js`. The shared time-chart component replaces only
-`drawResultChart`.
+domain, colour, the period-start money for the minimum span, the design's
+quiet time marks, axis labels, tracking marker, words) and `drawResultChart`
+draws that description, today with `chart.js`: one thin line without an
+area, a dashed zero, and a mark at each Vienna midnight in a week, each
+Monday up to 120 days, otherwise each first of a month. The shared
+time-chart component replaces only `drawResultChart`.
 
 **Deep links.** A Results view has one address:
 

@@ -2007,6 +2007,21 @@ test('JOED-151 trades: each row shows the trade’s own rate as recorded; a list
   assert.equal(htmlDocument(none.panel).querySelectorAll('.dp-fx').length, 0, 'a day without listed trades has no prices to explain');
 });
 
+test('JOED-151 chart: quiet time marks at Vienna midnights, by the length of the period', () => {
+  const at = k => M.viennaMidnight(k), day = k => new Date(at(k)).toISOString();
+  // A week: every midnight inside it, also across the October clock change.
+  assert.deepEqual(page.timeMarks('2026-10-19', at('2026-10-19'), at('2026-10-26')).map(x => new Date(x).toISOString()),
+    ['2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25'].map(day));
+  // This week so far: only the midnights before now.
+  assert.deepEqual(page.timeMarks('2026-10-12', at('2026-10-12'), Date.parse('2026-10-14T17:42:31.000Z')), [at('2026-10-13'), at('2026-10-14')]);
+  // A month: its Mondays after the first; longer periods: each first of a month.
+  assert.deepEqual(page.timeMarks('2026-10-01', at('2026-10-01'), at('2026-11-01')), ['2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26'].map(at));
+  const year = page.timeMarks('2025-10-01', at('2025-10-01'), at('2026-10-15'));
+  assert.deepEqual(year, ['2025-11-01', '2025-12-01', '2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01',
+    '2026-07-01', '2026-08-01', '2026-09-01', '2026-10-01'].map(at));
+  assert.deepEqual(page.timeMarks('2026-10-14', at('2026-10-14'), at('2026-10-14') + 3600000), [], 'nothing inside a single hour');
+});
+
 test('JOED-151 CSS: every Results-only rule lives in one delimited block', () => {
   const css = resultsCss();
   const open = '/* ==================== Results (one block) ====================', close = '/* ==================== end of Results ==================== */';
