@@ -456,7 +456,8 @@ try {
   // JOED-49: one real account observation through ingress, shared selectors
   // and both surfaces. Browser execution/crops belong to PR CI.
   if (run('cash')) {
-    const viewports = [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }];
+    // Desk's Cash also at 320 px, the narrowest phone its line is held for (JOED-156).
+    const viewports = [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }, { ...PHONE, name: '320', width: 320 }];
     const amount = '12345.67890123';
     const crop = async (selector, name) => {
       const clip = await ev(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
@@ -479,7 +480,7 @@ try {
         const accepted = await b.push(next);
         check('paper-cash', `${viewport.name} ${theme} ${phase}: real ingress accepts the snapshot`, accepted.status === 200, accepted);
       };
-      for (const screen of ['desk', 'settings']) {
+      for (const screen of viewport.width === 320 ? ['desk'] : ['desk', 'settings']) {
         offset = screen === 'desk' ? 0 : 300;
         await push('value', 0);
         b.setNow(at(NOW, offset + 9));
@@ -498,9 +499,10 @@ try {
         const measure = () => ev(`(() => {
           const parent = document.querySelector(${J(selector)}), p = parent.getBoundingClientRect();
           const nodes = ${J(screen)} === 'desk'
-            ? [parent, [...parent.querySelectorAll('.acct-sub')].find(__audit.visible), document.getElementById('acctValue'), document.getElementById('acctChange'), document.getElementById('acctChart'), document.getElementById('deskHero')]
-            : [parent, parent.querySelector('.cash-reserve'), parent.querySelector('[data-cash]')];
-          return nodes.map((e, i) => { const r = e.getBoundingClientRect(); return { key: i, top: r.top - p.top, left: r.left - p.left, width: r.width, height: r.height }; });
+            ? [['whole account', parent], ['Since start · Cash line', [...parent.querySelectorAll('.acct-sub')].find(__audit.visible)], ['value', document.getElementById('acctValue')],
+              ['change line', document.getElementById('acctChange')], ['chart', document.getElementById('acctChart')], ['desk hero', document.getElementById('deskHero')]]
+            : [['row', parent], ['reserve', parent.querySelector('.cash-reserve')], ['cash', parent.querySelector('[data-cash]')]];
+          return nodes.map(([key, e]) => { const r = e.getBoundingClientRect(); return { key, top: r.top - p.top, left: r.left - p.left, width: r.width, height: r.height }; });
         })()`);
         const baseline = await measure();
         for (const phase of ['value', 'stale', 'null', 'not-exact', 'session', 'rev7', 'recovered']) {
@@ -537,10 +539,17 @@ try {
           const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'Cash: not exact' : `Cash not reported · ${why}`;
           const labelled = screen === 'desk' ? seen.label === null : seen.label === 'Cash' && N(seen.caption) === brokerCaption;
           check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme and reason locally or once in the section`, N(seen.text) === expected && labelled && seen.title === exact && seen.name === exact && (!shared || seen.section.includes(why)) && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
-          check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
+          // Cash's own text, and then the screen around it: each fault is named
+          // where it is (the page-wide audit lists another block's clipping too).
+          check('paper-cash', `${tag}: Cash's text is whole: no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal', seen);
+          check('paper-cash', `${tag}: nothing on the screen scrolls sideways or clips`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, { horizontal: seen.horizontal, clipping: seen.clipping });
           const after = await measure();
           const moved = baseline.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== after[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: after[i]?.[k] })));
-          check('paper-cash', `${tag}: cash and account boxes have exactly 0 px shift`, !moved.length, moved);
+          // On Desk the desk hero below is measured too: a Cash phase moves or
+          // resizes nothing there either (its own reserves are JOED-153's).
+          const own = moved.filter(m => m.key !== 'desk hero'), below = moved.filter(m => m.key === 'desk hero');
+          check('paper-cash', `${tag}: Cash and the boxes around it have exactly 0 px shift`, !own.length, own);
+          if (screen === 'desk') check('paper-cash', `${tag}: the desk hero below keeps its box through the Cash phases`, !below.length, below);
           if (screen === 'desk' && viewport.width <= 480) {
             // The whole account is open on a phone, never a collapsed section:
             // every non-green cash reason is in view, beside Cash or once in the change line.

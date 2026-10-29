@@ -2148,7 +2148,10 @@ worker; its first-visit hint is every chart's (`chartHintSeen`,
 Custom, `createAxisMode('account')`). P3 reads the block where it read the slot: AC-9's paper
 account, AC-19's title, chip and unreported Cash, the fixtures' and journeys'
 account state and change line, the phone first screen and the outage counts;
-P5's Cash phases read its line.
+P5's Cash phases read its line. The Since start · Cash line reserves, by the
+block's width, the lines its longest form needs (amounts up to €1e9,
+±99.999,99 %, every Cash reason, in SF Pro and DejaVu Sans;
+test/account-hero.mjs); longer content wraps on, visibly.
 
 JOED-79 changes only Desk at widths up to 480 px. The first screen contains
 the existing header status control and reserved red/yellow problem line,

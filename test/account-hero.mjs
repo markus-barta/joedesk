@@ -586,3 +586,158 @@ test('JOED-156 fix 5: each pointer sees its own Controls list; only the pointer 
   assert.match(css, /@media \(pointer: coarse\) \{ \.acct-keys\.hint-fine \{ display: none; \} \.acct-keys\.hint-touch \{ display: grid; \} \}/);
   assert.equal([...css.matchAll(/\.acct-keys[^{]*\{[^}]*display:/g)].length, 4, 'no other rule sets their display');
 });
+
+// ---------- r39: the Since start · Cash line's lines, a cheap and honest bound ----------
+// The line reserves, by the block's own width (container queries), the lines
+// its longest form needs within the documented bound: amounts up to €1e9
+// (Since start, Cash, each kept holding), ±99.999,99 %, a start up to €1e9.
+// Beyond the bound the line wraps on, visibly; no money figure is clipped.
+//
+// Widths: the board's fonts as read from their files, with the page's
+// tabular figures (fixtures/account-line-metrics.json): SF Pro at 12 px
+// (opsz 17, weights 400 and 600) and DejaVu Sans Book and Bold, the Linux
+// fallback the CI renders with. Every figure is drawn at its font's widest
+// tabular digit, and every space at the advance of its own run's weight.
+// Lines break only at ordinary spaces outside a no-wrap amount or holding,
+// never at a hyphen or beside a separator: never fewer lines than the browser.
+//
+// Coverage: greedy line breaking never needs fewer lines when a word or a
+// space widens or the line narrows (each line then starts no later), so a
+// field at its maximal digit count (each digit at the widest) bounds every
+// shorter value of it, and the narrowest width of each step bounds the step.
+// Everything else is enumerated: every Since start wording and both signs,
+// both start forms (whole euros, cents) on the widest date, Cash as a value
+// (both signs) or a dash beside every reason, and the kept holdings as two or
+// either one (both signs), none, or a dash beside every reason; every
+// combination of them.
+const LINE_FONTS = Object.fromEntries(Object.entries(JSON.parse(readFileSync(new URL('./fixtures/account-line-metrics.json', import.meta.url), 'utf8')))
+  .filter(([, f]) => f.regular));
+const { CELL_REASON } = await import('../public/joe/health.js');
+const ENTITY = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
+const DIGITS = '0123456789';
+// A line's words as { w, gap }: its width, and the advance of the space before it.
+function lineWords(html, font, px) {
+  const words = [{ w: 0, gap: 0 }], open = [];
+  const widest = Object.fromEntries(['regular', 'bold'].map(weight => [weight, Math.max(...[...DIGITS].map(d => font[weight][d]))]));
+  let bold = 0, nowrap = 0;
+  for (const m of html.matchAll(/<(\/?)(b|span|a)([^>]*)>|([^<]+)/g)) {
+    if (m[4] !== undefined) {
+      const weight = bold ? 'bold' : 'regular', text = m[4].replace(/&(amp|lt|gt|quot|#39);/g, e => ENTITY[e]);
+      const advance = ch => {
+        if (DIGITS.includes(ch)) return widest[weight];
+        assert.ok(font[weight][ch] !== undefined, `no width for ${JSON.stringify(ch)}`);
+        return font[weight][ch];
+      };
+      (nowrap ? [text] : text.split(' ')).forEach((part, k) => {
+        if (k) words.push({ w: 0, gap: font[weight][' '] * px });
+        for (const ch of part) words[words.length - 1].w += advance(ch) * px;
+      });
+    } else if (m[1]) ({ bold, nowrap } = open.pop());
+    else {
+      open.push({ bold, nowrap });
+      if (m[2] === 'b' || m[2] === 'a' || /set-link/.test(m[3])) bold = 1;
+      if (/nowrap/.test(m[3])) nowrap = 1;
+      // A separator: 1 px and 9 px each side, joined to its neighbours.
+      if (/acct-sep/.test(m[3])) words[words.length - 1].w += 19;
+    }
+  }
+  return words.filter(({ w }) => w > 0);
+}
+function lineCount(words, width) {
+  let lines = 1, used = 0;
+  for (const { w, gap } of words) {
+    if (!used) used = w;
+    else if (used + gap + w <= width) used += gap + w;
+    else { lines++; used = w; }
+  }
+  return lines;
+}
+
+test('JOED-156 r39: the Since start · Cash line reserves the lines its longest form needs at every width, in the board’s fonts', () => {
+  // The rule: by the block's width, lines × line height; above the last width, two lines.
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  const RESERVE = {
+    narrow: { px: 12, lineHeight: 17, from: 260, steps: [[291, 4], [408, 3], [Infinity, 2]] },
+    wide: { px: 12.5, lineHeight: 18, from: 397, steps: [[489, 5], [612, 4], [864, 3], [Infinity, 2]] },
+  };
+  assert.match(css, /\n\.acct-hero \{ container: acct \/ inline-size; \}/);
+  assert.match(css, /\n\.acct-sub \{ min-height: 36px; margin-top: 6px; font-size: 12\.5px; line-height: 18px;/, 'two lines of 18 px at 12,5 px');
+  assert.match(css, /\n {2}\.acct-sub \{ min-height: 34px; margin-top: 4px; font-size: 12px; line-height: 17px; \}/, 'on a phone two lines of 17 px at 12 px');
+  assert.match(css, /\n {2}font: 14px\/1\.5 var\(--font\); font-variant-numeric: tabular-nums;/, 'the page’s tabular figures');
+  for (const [kind, { lineHeight, steps }] of Object.entries(RESERVE)) {
+    for (const [below, lines] of steps.filter(([below]) => below !== Infinity)) {
+      assert.ok(css.includes(`@container acct (max-width: ${below - 1}.98px) { .acct-sub.acct-${kind} { min-height: ${lines * lineHeight}px; } }`), `${kind}: ${lines} lines below ${below} px`);
+    }
+  }
+  // The block's width at the narrowest widths the board serves: the phone's
+  // (320 px) and the first width with the wide line (481 px).
+  assert.match(css, /\n\.acct-hero \{ position: relative; padding: 20px 26px 14px;/);
+  assert.match(css, /\n {2}\.acct-hero \{ padding: 14px; margin-bottom: 12px; \}/);
+  assert.match(css, /--gutter: 28px;/);
+  assert.match(css, /@media \(max-width: 700px\) \{\n {2}:root \{ --gutter: 16px; \}/);
+  assert.deepEqual([320 - 2 * 16 - 2 * 14, 481 - 2 * 16 - 2 * 26], [RESERVE.narrow.from, RESERVE.wide.from]);
+
+  // Every form within the bound, as the page writes it (subParts), its
+  // fields at their maximal digit counts.
+  const money = (amount, currency = 'EUR') => ({ amount, currency });
+  const reasons = Object.keys(CELL_REASON);
+  const longest = reasons.reduce((a, b) => (CELL_REASON[b].length > CELL_REASON[a].length ? b : a));
+  const cashes = [money('1000000000.00'), money('-1000000000.00')].flatMap(value => [{ state: 'fresh', value, reason: null },
+    ...reasons.map(reason => ({ state: 'broken', value, reason, retained: false }))]);
+  cashes.push({ state: 'not reported', value: null, reason: null }, ...reasons.map(reason => ({ state: 'broken', value: null, reason })));
+  const holding = (symbol, currency, sign) => ({ symbol, marketValue: money(`${sign}1000000000.00`, currency) });
+  const kepts = ['', '-'].flatMap(sign => [[holding('SXR8', 'EUR', sign), holding('TSLA', 'USD', sign)], [holding('SXR8', 'EUR', sign)], [holding('TSLA', 'USD', sign)]]).concat([[]])
+    .map(value => ({ state: 'fresh', reason: null, value }));
+  kepts.push({ state: 'broken', reason: null, value: null }, ...reasons.map(reason => ({ state: 'broken', reason, value: null })));
+  // Since start: ±€ 1.000.000.000,00 at ±99.999,99 % against a start of
+  // € 1.000.000,10, then written with the widest start (€ 999.999.999,99 or
+  // € 1.000.000.000) on the widest date of either font; the start set but the
+  // value not current; and every wording while it is not set.
+  const fresh = units => ({ state: 'fresh', value: money(units), reason: null, retained: false, ageSeconds: 9 });
+  const dated = date => A.subParts({ states: { paperAccount: fresh('-998999999.9'), paperCash: cashes[0], kept: kepts[6] } }, { amountEur: 1000000.1, date }, { reason: null }).wide;
+  const months = Array.from({ length: 12 }, (_, i) => `2025-${String(i + 1).padStart(2, '0')}-28`);
+  const span = (html, font) => lineWords(html, font, 12.5).reduce((sum, { w, gap }) => sum + w + gap, 0);
+  const dates = [...new Set(Object.values(LINE_FONTS).map(font => months.reduce((a, b) => (span(dated(b), font) > span(dated(a), font) ? b : a))))];
+  const starts = [...dates.flatMap(date => [[fresh('-998999999.9'), { amountEur: 1000000.1, date }], [fresh('1001000000.1'), { amountEur: 1000000.1, date }],
+    [{ state: 'stale', value: money('1.00'), reason: 'snapshot_stale', ageSeconds: 75 }, { amountEur: 1000000.1, date }]]),
+  ...['missing', 'refresh_failed', 'invalid', 'loading'].map(reason => [fresh('1.00'), null, { reason }])];
+  // The wide line is Since start, Cash, then the kept holdings, a separator
+  // joining each to the next: its forms are every head (Since start and
+  // Cash) followed by every tail (the kept holdings).
+  const SEP = '<span class="acct-sep" aria-hidden="true"></span>';
+  const split = html => { const at = html.indexOf(SEP, html.indexOf(SEP) + 1); return [html.slice(0, at), html.slice(at)]; };
+  const narrow = [], heads = [];
+  for (const [paperAccount, start, settings = { reason: null }] of starts) for (const paperCash of cashes) {
+    const parts = A.subParts({ states: { paperAccount, paperCash, kept: kepts[6] } }, start, settings);
+    narrow.push(parts.narrow);
+    const [head] = split(parts.wide);
+    heads.push(...(start ? ['€ 999.999.999,99', '€ 1.000.000.000'].map(basis => head.replace('€ 1.000.000,10', basis)) : [head]));
+  }
+  const tails = kepts.map(kept => split(A.subParts({ states: { paperAccount: fresh('1.00'), paperCash: cashes[0], kept } }, null, { reason: 'missing' }).wide)[1]);
+  const text = html => words(html.replace(/<[^>]+>/g, ''));
+  assert.ok(narrow.some(h => text(h) === 'Since start −€ 1.000.000.000,00 (−99.999,99 %) · Cash −€ 1.000.000.000,00'), 'the widest figures, minus');
+  assert.ok(narrow.some(h => text(h) === 'Since start +€ 1.000.000.000,00 (+99.999,99 %) · Cash € 1.000.000.000,00'), 'and plus');
+  assert.ok(narrow.some(h => text(h).endsWith(`Cash −€ 1.000.000.000,00 · ${CELL_REASON[longest]}`)), `the longest Cash reason (${longest}) beside the widest value`);
+  assert.ok(heads.some(h => /\(€ 999\.999\.999,99 on 28 \w+ 2025\): [+−]€ 1\.000\.000\.000,00 · [+−]99\.999,99 %/.test(text(h))), 'the widest start with cents');
+  assert.ok(heads.some(h => /\(€ 1\.000\.000\.000 on 28 \w+ 2025\): —/.test(text(h))), 'the whole-euro start, the value not current');
+  assert.ok(tails.some(h => text(h).endsWith('incl. kept holdings SXR8 −€ 1.000.000.000,00 · TSLA −$ 1.000.000.000,00, each in its own currency')));
+  assert.ok(tails.some(h => text(h).endsWith(`incl. kept holdings — · ${CELL_REASON[longest]}`)));
+  assert.ok(heads.length >= 1140 && tails.length === 7 + 1 + Object.keys(CELL_REASON).length, `${heads.length} heads × ${tails.length} tails`);
+
+  // At the narrowest width of each step, every form fits the lines reserved there.
+  const joined = (head, tail) => head.slice(0, -1).concat([{ w: head.at(-1).w + tail[0].w, gap: head.at(-1).gap }], tail.slice(1));
+  for (const [fontName, font] of Object.entries(LINE_FONTS)) {
+    const lines = { narrow: narrow.map(h => [lineWords(h, font, 12)]),
+      wide: (() => { const t = tails.map(h => lineWords(h, font, 12.5)); return heads.map(h => { const w = lineWords(h, font, 12.5); return t.map(tail => joined(w, tail)); }); })() };
+    for (const [kind, { from, steps }] of Object.entries(RESERVE)) {
+      let at = from;
+      for (const [below, reserved] of steps) {
+        let need = 0;
+        for (const group of lines[kind]) for (const w of group) need = Math.max(need, lineCount(w, at));
+        assert.ok(need <= reserved, `${fontName} ${kind} at ${at} px of line: ${need} lines needed, ${reserved} reserved`);
+        if (below === Infinity) break;
+        at = below;
+      }
+    }
+  }
+});
