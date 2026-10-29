@@ -1747,34 +1747,104 @@ test('JOED-148 re-gate High 2: a not-exact money reason never masks a faulty sou
 
 // Every combination of the desks' and the household's Today channels during
 // regular hours, judged by an oracle written in plain words, apart from the
-// board's code. Many of these snapshots are ones the contract would reject at
-// ingress; the board must still never call a fault green.
+// board's code, on every surface that shows Today: the light, Details, the
+// hero, each desk card and each phone row. Many of these snapshots are ones
+// the contract would reject at ingress; the board must still never call a
+// fault green or show it as anything but a fault.
 //
-// The oracle. Each desk's Today, and whether it is fine during regular hours:
+// The oracle. The test's fault reason (source_unavailable) in the board's words:
+const BROKER = 'not reported by the broker';
+// Each desk's Today: what it is; whether it is fine during regular hours; the
+// one word the board uses for it, with its reason; whether the desk still
+// shows a value; and the one line its card and its phone row carry (none when
+// it is exact, or when a not-exact dash's own name says it).
+const AS_FAULT = { fine: false, word: 'unavailable', reason: BROKER, value: false, card: `Today: unavailable · ${BROKER}`, phone: `Today: unavailable · ${BROKER}` };
 const DESK_TODAY = {
-  exact: ['an exact, current value', true],
-  notExactMoney: ['withheld as not exact on the money channel', true],
-  notExactSource: ['withheld as not exact on the source channel', true],
-  faultMoney: ['withheld for a fault on the money channel', false],
-  faultSource: ['withheld for a fault on the source channel', false],
-  notExactMoneyFaultSource: ['not exact on the money channel but a fault on the source channel', false],
-  faultMoneyNotExactSource: ['a fault on the money channel but not exact on the source channel', false],
-  unavailable: ['unavailable, with no reason on any channel', false],
-  lastGood: ['only a last good value from before an outage', false],
-  valueKeptFaultMoney: ['a value kept beside a fault on the money channel', false],
+  exact: { says: 'an exact, current value', fine: true, word: 'exact', value: true, card: null, phone: null },
+  notExactMoney: { says: 'withheld as not exact on the money channel', fine: true, word: 'not exact', value: false, card: null, phone: 'Today: not exact' },
+  notExactSource: { says: 'withheld as not exact on the source channel', fine: true, word: 'not exact', value: false, card: null, phone: 'Today: not exact' },
+  faultMoney: { says: 'withheld for a fault on the money channel', ...AS_FAULT },
+  faultSource: { says: 'withheld for a fault on the source channel', ...AS_FAULT },
+  notExactMoneyFaultSource: { says: 'not exact on the money channel but a fault on the source channel', ...AS_FAULT },
+  faultMoneyNotExactSource: { says: 'a fault on the money channel but not exact on the source channel', ...AS_FAULT },
+  // The phone row adds its own fallback reason to a reason-less dash (since 811f9b2).
+  unavailable: { says: 'unavailable, with no reason on any channel', fine: false, word: 'not reported', value: false, card: 'Today: not reported',
+    phone: /^Today: not reported(?: · no data received yet)?$/ },
+  lastGood: { says: 'only a last good value from before an outage', fine: false, word: 'last good', reason: BROKER, value: true,
+    card: `Today: last good, ${age(30)} ago · ${BROKER}`, phone: `Today: last good · ${BROKER}` },
+  valueKeptFaultMoney: { says: 'a value kept beside a fault on the money channel', fine: false, word: 'unavailable', reason: BROKER, value: true,
+    card: `Today: ${BROKER} · as of ${age(30)} ago`, phone: `Today: unavailable · ${BROKER}` },
 };
 // The household's Today, and whether it is fine:
 const HOUSEHOLD_TODAY = {
-  current: ['a current total', true],
-  notExact: ['withheld as not exact', true],
-  fault: ['withheld for a fault', false],
-  nullNoReason: ['missing, with no reason', false],
+  current: { says: 'a current total', fine: true },
+  notExact: { says: 'withheld as not exact', fine: true },
+  fault: { says: 'withheld for a fault', fine: false },
+  nullNoReason: { says: 'missing, with no reason', fine: false },
 };
-// The light is green only when no Today is a fault: the household's Today is
-// fine and so is every desk's. Anything else is yellow, "Today's result is
-// late". Details names each desk whose Today is not fine, and the household
-// Today is shown only as a current total of three exact desks.
+// What the board must show, surface by surface:
+// - The light is green only when no Today is a fault: the household's Today
+//   is fine and so is every desk's. Anything else is yellow, "Today’s result
+//   is late".
+// - The household Today is shown only as a current total of three exact
+//   desks: the hero gives the fixture's total with no caption and says "Up …
+//   today across J, Joe and Joel". Otherwise the hero shows a dash. When the
+//   dash has a caption, the sentence gives each exact desk's own result and
+//   no other desk's, or says that no desk is exact (Today withheld as not
+//   exact) or that Today's result is not available (a fault); without a
+//   caption, the sentence itself says that Today's result is not available.
+// - The hero's dash has a caption unless the household Today came with no
+//   reason at all. The caption names a desk only in that desk's own word,
+//   never an exact desk, and when it names any desk it names every desk that
+//   is not exact. When everything is fine it says "Not exact" and nothing
+//   worse; when anything is not fine, the caption or the sentence says so.
+// - Details states each desk whose Today is not fine once, in its own words,
+//   and no other desk. A household Today that is not fine gets its own line;
+//   one withheld as not exact, or current beside fine desks, gets none. The
+//   "Today’s result" row lists every desk exactly once in
+//   its own word and reason whenever it lists desks, and it must whenever the
+//   household Today is withheld as not exact; otherwise it gives the
+//   household's own source ("Counted from …", or "Not available · …").
+// - Each card and each phone row shows the desk's own value or a dash. A dash
+//   is named with its reason; the desk's problem, if any, is its one line.
 const NAMES = { j: 'J', joe: 'Joe', joel: 'Joel' };
+const FIGURE = { j: '+€50,00', joe: '−€5,00', joel: '+€5,00' };  // the fixture's desk results
+const OWN_DAY = { j: `J is up ${eur(decimalUnits('50'))}`, joe: `Joe is down ${eur(decimalUnits('5'))}`, joel: `Joel is up ${eur(decimalUnits('5'))}` };
+const FAULT_WORDS = /unavailable|not available|not reported|last good/i;
+const PROBLEM = { unavailable: `is unavailable: ${BROKER}.`, 'not reported': 'is unavailable.', 'last good': `is only a last good value: ${BROKER}.` };
+const SOURCE_ROW = /^(?:Counted from 06:00 \(midnight in New York\)|Not available · .+)$/;
+const inWords = ids => ids.length > 1 ? `${ids.slice(0, -1).join(', ')} and ${ids.at(-1)}` : ids[0];
+// "Exact for Joel; not exact for J and Joe · reason" as [name, word, reason] per named desk.
+const namedIn = text => text.split('; ').flatMap(group => {
+  const m = group.match(/^(exact|estimated|not exact|unavailable|not reported|last good|stale) for (.+?)(?: · (.+))?$/i);
+  return m ? m[2].split(/, | and /).map(name => [name, m[1].toLowerCase(), m[3] ?? null]) : [];
+});
+const sameNames = (named, desks) => JSON.stringify(named.map(([name]) => name).sort()) === JSON.stringify(desks.map(d => d.name).sort());
+// A dash names its reason: "Today: not exact", "Today: not reported", or a
+// fault's own words; a fault is never named "not exact".
+const dashNamed = (name, desk) => desk.word === 'not exact' ? name === 'Today: not exact'
+  : desk.word === 'not reported' ? name === 'Today: not reported'
+    : name?.startsWith('Today: ') && name.endsWith(` · ${desk.reason}`) && !name.includes('not exact');
+// The hero also renders Since start and the account panel; only its Today
+// cell and its sentence are parsed, to keep 4000 renders fast.
+function heroToday(html) {
+  const since = html.indexOf('<div class="primary since-primary"'), say = html.indexOf('<button type="button" class="say"');
+  const account = html.indexOf('<div class="account-section"');
+  assert.ok(since > 0 && say > since && account > say, 'the hero markup changed; update heroToday');
+  return htmlDocument(html.slice(0, since) + html.slice(say, account));
+}
+// A card's and a phone row's Today, read from their parsed markup. Cards and
+// rows repeat across cases, so each distinct markup is parsed and read once.
+const cardToday = doc => {
+  const cell = doc.querySelector('.dnums .bn');
+  return { figure: cell.textContent, name: cell.getAttribute('aria-label'), lines: doc.querySelectorAll('.mini-label .st').map(line => line.textContent) };
+};
+const phoneToday = doc => {
+  const cell = doc.querySelector('[data-compact-value="dayPnl"] .bn');
+  return { figure: cell.textContent, name: cell.getAttribute('aria-label'), line: doc.querySelector('.summary-text')?.textContent ?? null };
+};
+const readCards = new Map(), readRows = new Map();
+const readOnce = (seen, html, read) => seen.get(html) ?? seen.set(html, read(htmlDocument(html))).get(html);
 function dayCombination(desks, household) {
   const data = structuredClone(exact), prior = {};
   const withhold = (bag, source, moneyReason, sourceReason) => {
@@ -1801,20 +1871,87 @@ function dayCombination(desks, household) {
   const householdReason = { notExact: 'not_exact_yet', fault: 'source_unavailable', nullNoReason: null }[household];
   if (household !== 'current') withhold(data.totals, data.pnlSources.day, householdReason, householdReason);
   const feeds = { data: { value: data } }, now = at(30);  // 13:42 New York on a Wednesday: regular hours
-  return { feeds, now, states: boardStates(feeds, now, prior) };
+  const states = boardStates(feeds, now, prior);
+  states.history = { state: 'fresh', value: {}, reason: null };  // no History feed here; its line stays quiet
+  return { feeds, now, states };
 }
-test('JOED-148: every desk and household Today combination matches the plain-words oracle (4000 cases)', () => {
+// Every surface against the oracle; returns what is wrong, in words.
+function daySurfaces(view, desks, household) {
+  const wrong = [], expect = (ok, what) => { if (!ok) wrong.push(what); };
+  const own = desks.map((option, i) => ({ id: DESKS[i], name: NAMES[DESKS[i]], reason: null, ...DESK_TODAY[option] }));
+  const fine = HOUSEHOLD_TODAY[household].fine && own.every(d => d.fine);
+  const shown = household === 'current' && own.every(d => d.word === 'exact');
+  const exactDesks = own.filter(d => d.word === 'exact'), notExactDesks = own.filter(d => d.word === 'not exact');
+  // The light.
+  const health = boardHealthPresentation(view.states, view.feeds, view.now);
+  expect(health.tone === (fine ? 'green' : 'yellow') && health.reason === (fine ? 'board_ok' : 'day_pending'), `light: ${health.tone} ${health.reason}`);
+  // Details: one line per desk that is not fine, the household's own line, and the Today row.
+  // Details joins its problems into one paragraph, a sentence each.
+  const details = htmlDocument(healthPop(view, health)), lines = details.querySelectorAll('p').flatMap(p => p.textContent.split(/(?<=\.) (?=[A-Z])/));
+  const deskLines = lines.filter(line => /^(?:J|Joe|Joel)’s Today is /.test(line));
+  expect(JSON.stringify(deskLines) === JSON.stringify(own.filter(d => !d.fine).map(d => `${d.name}’s Today ${PROBLEM[d.word]}`)), `Details lines: ${deskLines.join(' ')}`);
+  const householdLine = lines.some(line => line.startsWith('Today’s result is unavailable during New York regular hours: '));
+  if (!HOUSEHOLD_TODAY[household].fine) expect(householdLine, 'Details: no line for the household Today');
+  else if (household === 'notExact' || own.every(d => d.fine)) expect(!householdLine, 'Details: a household line beside a fine household Today');
+  const row = details.querySelectorAll('dd')[details.querySelectorAll('dt').findIndex(dt => dt.textContent === 'Today’s result')].textContent;
+  const rowNamed = namedIn(row);
+  if (shown) expect(row === 'Counted from 06:00 (midnight in New York)', `Today row: ${row}`);
+  else if (household === 'notExact' && exactDesks.length === 3) expect(row === 'Household not exact; each desk exact', `Today row: ${row}`);
+  else if (household === 'notExact' || (household === 'current' && own.every(d => d.fine))) expect(rowNamed.length > 0, `Today row lists no desk: ${row}`);
+  if (rowNamed.length) {
+    expect(sameNames(rowNamed, own), `Today row names: ${row}`);
+    for (const d of own) {
+      const [, word, reason] = rowNamed.find(([name]) => name === d.name) ?? [];
+      expect(word === d.word && reason === d.reason, `Today row on ${d.name}: ${row}`);
+    }
+  } else if (!shown && row !== 'Household not exact; each desk exact') expect(SOURCE_ROW.test(row), `Today row: ${row}`);
+  // The hero: figure, caption and sentence.
+  const hero = heroToday(heroLeft(view)), day = hero.querySelector('[data-cell="hero.day"]'), figure = day.querySelector('.bn');
+  const caption = day.querySelector('.primary-caption').textContent, sentence = hero.querySelector('.say').textContent;
+  expect(figure.textContent === (shown ? '+€50,00' : '—'), `hero figure: ${figure.textContent}`);
+  if (shown) {
+    expect(caption === '', `hero caption: ${caption}`);
+    expect(sentence === `Up ${eur(decimalUnits('50'))} today across J, Joe and Joel.`, `hero sentence: ${sentence}`);
+  } else {
+    const sentences = !caption ? ['Today’s result is not available.']
+      : exactDesks.length ? [`${inWords(exactDesks.map(d => OWN_DAY[d.id]))} today.`]
+      : household === 'notExact' ? ['No desk has an exact result for today.']
+        : household !== 'current' ? ['Today’s result is not available.']
+          : [...(notExactDesks.length ? ['No desk has an exact result for today.'] : []), ...(own.some(d => !d.fine) ? ['Today’s result is not available.'] : [])];
+    expect(sentences.includes(sentence), `hero sentence: ${sentence}`);
+    expect(!caption === (household === 'nullNoReason'), `hero caption: ${caption}`);
+    const named = namedIn(caption);
+    for (const [name, word] of named) expect(word !== 'exact' && own.find(d => d.name === name)?.word === word, `hero caption on ${name}: ${caption}`);
+    if (named.length) expect(sameNames(named, own.filter(d => d.word !== 'exact')), `hero caption names: ${caption}`);
+    if (fine) {
+      expect(/^Not exact/.test(caption) && !FAULT_WORDS.test(caption), `hero caption: ${caption}`);
+      expect(named.length === (notExactDesks.length < 3 ? notExactDesks.length : 0), `hero caption names: ${caption}`);
+      expect(figure.getAttribute('aria-label') === 'Today: not exact', `hero dash: ${figure.getAttribute('aria-label')}`);
+    } else expect(FAULT_WORDS.test(caption) || FAULT_WORDS.test(sentence), `hero hides the fault: ${caption} / ${sentence}`);
+  }
+  // Each card's Today cell and line, and each phone row.
+  for (const d of own) {
+    const card = readOnce(readCards, deskCard(view, d.id, 50, true), cardToday);
+    expect(card.figure === (d.value ? FIGURE[d.id] : '—'), `${d.name}'s card: ${card.figure}`);
+    if (!d.value) expect(dashNamed(card.name, d), `${d.name}'s card dash: ${card.name}`);
+    expect(JSON.stringify(card.lines) === JSON.stringify(d.card ? [d.card] : []), `${d.name}'s card lines: ${card.lines.join(' / ')}`);
+    const phone = readOnce(readRows, compactDesk(view, d.id), phoneToday);
+    expect(phone.figure === (d.value ? FIGURE[d.id] : '—'), `${d.name}'s phone row: ${phone.figure}`);
+    if (!d.value) expect(dashNamed(phone.name, d), `${d.name}'s phone dash: ${phone.name}`);
+    expect(d.phone instanceof RegExp ? d.phone.test(phone.line ?? '') : phone.line === d.phone, `${d.name}'s phone line: ${phone.line}`);
+  }
+  return wrong;
+}
+test('JOED-148: every desk and household Today combination matches the plain-words oracle on every surface (4000 cases)', () => {
   let count = 0, green = 0;
   for (const j of Object.keys(DESK_TODAY)) for (const joe of Object.keys(DESK_TODAY)) for (const joel of Object.keys(DESK_TODAY)) {
     for (const household of Object.keys(HOUSEHOLD_TODAY)) {
       const desks = [j, joe, joel], view = dayCombination(desks, household);
-      const label = `household ${HOUSEHOLD_TODAY[household][0]}; ${desks.map((option, i) => `${NAMES[DESKS[i]]} ${DESK_TODAY[option][0]}`).join('; ')}`;
-      const fine = HOUSEHOLD_TODAY[household][1] && desks.every(option => DESK_TODAY[option][1]);
-      assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), fine ? { tone: 'green', reason: 'board_ok' } : { tone: 'yellow', reason: 'day_pending' }, label);
-      const named = boardDiagnostics(view.states, view.feeds, view.now).join(' ');
-      DESKS.forEach((id, i) => assert.equal(named.includes(`${NAMES[id]}’s Today is`), !DESK_TODAY[desks[i]][1], `${label}: Details on ${NAMES[id]}`));
+      const label = `household ${HOUSEHOLD_TODAY[household].says}; ${desks.map((option, i) => `${NAMES[DESKS[i]]} ${DESK_TODAY[option].says}`).join('; ')}`;
+      assert.deepEqual(daySurfaces(view, desks, household), [], label);
       assert.equal(view.states['today.dayPnl'].value != null, household === 'current' && desks.every(option => option === 'exact'), `${label}: household shown`);
-      count++; if (fine) green++;
+      count++;
+      if (HOUSEHOLD_TODAY[household].fine && desks.every(option => DESK_TODAY[option].fine)) green++;
     }
   }
   assert.equal(count, 10 ** 3 * 4);
@@ -1841,4 +1978,20 @@ test('JOED-148 re-gate Medium: a household Today withheld as not exact beside th
   assert.equal(detailsRow(ctx(householdNotExact('sod_missing')), 'Today’s result'), 'Household not exact · start-of-day value missing; each desk exact');
   // A desk's own not-exact Today keeps the per-desk row (no household prefix).
   assert.equal(detailsRow(ctx(dayNotExact({ j: 'not_exact_yet' })), 'Today’s result'), 'Exact for Joe and Joel; not exact for J');
+});
+
+// Found by the every-surface oracle: a household Today missing without any
+// reason has no caption, so the hero's sentence keeps its one statement
+// instead of giving the exact desks' results beside a bare dash.
+test('JOED-148: a hero dash without a caption keeps its statement in the sentence', () => {
+  const data = structuredClone(exact);
+  data.totals.dayPnl = null;
+  Object.assign(data.pnlSources.day, { status: 'unavailable', method: null, observedAt: null });
+  assert.equal(validateContract('data', data).ok, true);
+  const hero = htmlDocument(heroLeft(ctx(data)));
+  assert.deepEqual([hero.querySelector('[data-cell="hero.day"] .bn').textContent, hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent], ['—', '']);
+  assert.equal(hero.querySelector('.say').textContent, 'Today’s result is not available.');
+  // With a caption, the sentence gives what is known instead.
+  assert.equal(htmlDocument(heroLeft(ctx(householdNotExact('not_exact_yet')))).querySelector('.say').textContent,
+    `J is up ${eur(decimalUnits('50'))}, Joe is down ${eur(decimalUnits('5'))} and Joel is up ${eur(decimalUnits('5'))} today.`);
 });
