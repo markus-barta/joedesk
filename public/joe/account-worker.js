@@ -10,6 +10,10 @@
 //   { kind: 'account', status, reason, value, key, ms }: value holds the two
 //     series (null when the read failed, with its reason);
 //   { kind: 'unchanged', feed: 'account', key, ms }: the page's copy is current.
+// The key fingerprints the complete response (its length in bytes and a
+// 64-bit FNV-1a hash of them): every time, amount, reason and day of both
+// stores. "unchanged" needs more than a matching key: the response must be
+// exactly the one this worker last sent the page.
 import { acceptAccountHistory, accountTransferables } from './account-model.js';
 
 const AUTH = new Set([301, 302, 303, 307, 308, 401, 403]);
@@ -25,29 +29,41 @@ async function read(url) {
         const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', signal: controller.signal });
         if (response.type === 'opaqueredirect') return { status: 302 };
         if (response.status !== 200) return { status: response.status };
-        return { status: 200, body: await response.json() };
+        return { status: 200, text: await response.text() };
       })(),
     ]);
   } catch { return { status: 0 }; } finally { clearTimeout(timer); }
 }
 const readReason = status => (AUTH.has(status) ? 'auth_required' : status === 404 ? 'route_not_found' : 'refresh_failed');
 
-// What the page needs to know whether its copy is current: the shape, the
-// newest times, the store reasons and sums over every time and amount (a
-// late close for an older day changes them).
-export function historyKey(value) {
-  const part = s => { let t = 0, u = 0n; for (let i = 0; i < s.t.length; i++) { t += s.t[i]; u += s.u[i]; } return [s.t.length, s.t.at(-1) ?? null, t, String(u), s.reason, s.loss?.at ?? null]; };
-  return JSON.stringify([part(value.short), part(value.daily)]);
+// 64-bit FNV-1a over bytes, in four 16-bit limbs (exact without BigInt):
+// hash ^= byte, then hash *= 2^40 + 0x1b3, modulo 2^64.
+export function fnv1a64(bytes) {
+  let h0 = 0x2325, h1 = 0x8422, h2 = 0x9ce4, h3 = 0xcbf2;
+  for (let i = 0; i < bytes.length; i++) {
+    h0 ^= bytes[i];
+    const r0 = h0 * 0x1b3, r1 = h1 * 0x1b3 + (r0 >>> 16), r2 = h2 * 0x1b3 + h0 * 0x100 + (r1 >>> 16), r3 = h3 * 0x1b3 + h1 * 0x100 + (r2 >>> 16);
+    h0 = r0 & 0xffff; h1 = r1 & 0xffff; h2 = r2 & 0xffff; h3 = r3 & 0xffff;
+  }
+  return [h3, h2, h1, h0].map(h => h.toString(16).padStart(4, '0')).join('');
 }
+// The response's fingerprint: its length in bytes and their hash.
+export function fingerprint(text) {
+  const bytes = new TextEncoder().encode(text);
+  return `${bytes.length}:${fnv1a64(bytes)}`;
+}
+// The response last sent to the page with its data, to confirm "unchanged".
+let sent = null;
 
 export async function readAccount(have = null) {
   const started = performance.now(), ms = () => performance.now() - started;
   const res = await read('/joe/account-history.json');
   if (res.status !== 200) return { message: { kind: 'account', status: res.status, reason: readReason(res.status), value: null, key: null, ms: ms() }, transfer: [] };
+  const key = fingerprint(res.text);
+  if (have !== null && have === key && sent?.key === key && sent.text === res.text) return { message: { kind: 'unchanged', feed: 'account', key, ms: ms() }, transfer: [] };
   let value;
-  try { value = acceptAccountHistory(res.body); } catch { return { message: { kind: 'account', status: 200, reason: 'contract_invalid', value: null, key: null, ms: ms() }, transfer: [] }; }
-  const key = historyKey(value);
-  if (key === have) return { message: { kind: 'unchanged', feed: 'account', key, ms: ms() }, transfer: [] };
+  try { value = acceptAccountHistory(JSON.parse(res.text)); } catch { return { message: { kind: 'account', status: 200, reason: 'contract_invalid', value: null, key: null, ms: ms() }, transfer: [] }; }
+  sent = { key, text: res.text };
   return { message: { kind: 'account', status: 200, reason: null, value, key, ms: ms() }, transfer: accountTransferables(value) };
 }
 

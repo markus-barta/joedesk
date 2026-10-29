@@ -25,7 +25,7 @@ const worker = t => {
 const answer = (t, reply) => {
   const urls = [];
   t.mock.method(globalThis, 'fetch', async url => { urls.push(String(url)); const r = typeof reply === 'function' ? reply() : reply;
-    return { type: 'basic', status: r.status ?? 200, json: async () => (r.status ? {} : r) }; });
+    return { type: 'basic', status: r.status ?? 200, text: async () => (r.status ? '{}' : JSON.stringify(r)), json: async () => (r.status ? {} : r) }; });
   return urls;
 };
 
@@ -53,23 +53,63 @@ test('JOED-156 worker: a read posts the two series as compact columns, by transf
   assert.equal(cloned.value.short.u[0], M.acceptAccountHistory(history()).short.u[0]);
 });
 
-test('JOED-156 worker: the page’s current copy gets "unchanged"; any change to its times or amounts gets the data', async t => {
-  const send = worker(t);
+// A fresh worker module (its own global for the import): it has sent the page nothing yet.
+async function freshWorker(tag) {
+  const before = Object.getOwnPropertyDescriptor(globalThis, 'self');
+  Object.defineProperty(globalThis, 'self', { configurable: true, writable: true, value: { postMessage() {} } });
+  try { return await import(`../public/joe/account-worker.js?${tag}`); }
+  finally { if (before) Object.defineProperty(globalThis, 'self', before); else delete globalThis.self; }
+}
+
+test('JOED-156 worker: "unchanged" only for exactly the response it last sent; the key fingerprints all of it', async t => {
+  const fresh = await freshWorker('exact-same');
   let body = history();
   answer(t, () => body);
-  await send({ read: 'account', have: null });
-  const key = posted[0].message.key;
-  await send({ read: 'account', have: key });
-  assert.deepEqual(posted[1].message.kind, 'unchanged');
-  assert.deepEqual(Object.keys(posted[1].message).sort(), ['feed', 'key', 'kind', 'ms']);
-  assert.deepEqual([posted[1].message.feed, posted[1].message.key, posted[1].transfer], ['account', key, []]);
-  // A late close for an older day: same length and newest time, a new key.
-  body = history();
-  body.dailyCloses.days[5].equity = { amount: '1.23', currency: 'EUR' };
-  await send({ read: 'account', have: key });
-  assert.equal(posted[2].message.kind, 'account');
-  assert.notEqual(posted[2].message.key, key);
-  assert.equal(W.historyKey(M.acceptAccountHistory(history())), key, 'the key is the history’s, not the read’s');
+  const first = (await fresh.readAccount(null)).message;
+  assert.equal(first.kind, 'account');
+  assert.equal(first.key, fresh.fingerprint(JSON.stringify(body)), 'the response’s length and hash');
+  assert.match(first.key, /^\d+:[0-9a-f]{16}$/);
+  const same = await fresh.readAccount(first.key);
+  assert.deepEqual([same.message.kind, same.message.key, same.transfer], ['unchanged', first.key, []]);
+  assert.equal((await fresh.readAccount(null)).message.kind, 'account', 'a page that holds nothing gets the data');
+  // Another worker (one started after a failure) has sent nothing: data, whatever the page holds.
+  const other = await freshWorker('exact-other');
+  assert.equal((await other.readAccount(first.key)).message.kind, 'account');
+});
+
+test('JOED-156 fix round 2: offsetting corrections, a zero becoming unavailable and a changed reason all send the data', async t => {
+  const fresh = await freshWorker('exact-changes');
+  const base = history();
+  base.points[5].account.equity = { amount: '0', currency: 'EUR' };
+  base.points[6].account = { observedAt: base.points[6].t, equity: null, cash: null, reasons: { equity: 'gateway_down', cash: 'gateway_down' } };
+  let body = base;
+  answer(t, () => body);
+  const held = (await fresh.readAccount(null)).message;
+  const cases = {
+    // The same sums of times and amounts: one value up, another down by as much.
+    'offsetting corrections': b => { b.points[10].account.equity.amount = '27006.00'; b.points[11].account.equity.amount = '27004.50'; },
+    'zero becomes unavailable': b => { b.points[5].account = { observedAt: b.points[5].t, equity: null, cash: b.points[5].account.cash, reasons: { equity: 'source_unavailable' } }; },
+    'a changed reason': b => { b.points[6].account.reasons = { equity: 'contract_invalid', cash: 'gateway_down' }; },
+  };
+  // What the page holding the original is sent: 'data' is the history with a new key.
+  const seen = {}, sentAs = (m, key) => (m.kind === 'account' && m.value && (key ? m.key === key : m.key !== held.key) ? 'data' : m.kind);
+  for (const [name, change] of Object.entries(cases)) {
+    body = structuredClone(base); change(body);
+    seen[name] = sentAs((await fresh.readAccount(held.key)).message);
+    // Back to the page's copy: the worker last sent the changed history, so
+    // the original comes as data again, with its own key.
+    body = base;
+    seen[`${name}, then back`] = sentAs((await fresh.readAccount(held.key)).message, held.key);
+  }
+  assert.deepEqual(seen, Object.fromEntries(Object.keys(cases).flatMap(name => [[name, 'data'], [`${name}, then back`, 'data']])));
+});
+
+test('JOED-156 worker: the fingerprint is 64-bit FNV-1a over the bytes, with their length', () => {
+  const enc = text => new TextEncoder().encode(text);
+  for (const [text, hash] of [['', 'cbf29ce484222325'], ['a', 'af63dc4c8601ec8c'], ['foobar', '85944171f73967e8']]) assert.equal(W.fnv1a64(enc(text)), hash, JSON.stringify(text));
+  const reference = bytes => { let h = 0xcbf29ce484222325n; for (const b of bytes) { h ^= BigInt(b); h = (h * 0x100000001b3n) & 0xffffffffffffffffn; } return h.toString(16).padStart(16, '0'); };
+  for (const text of ['€ 985.100,10', 'ünchanged · “quoted”', JSON.stringify(history()).slice(0, 5000)]) assert.equal(W.fnv1a64(enc(text)), reference(enc(text)), text.slice(0, 20));
+  assert.equal(W.fingerprint('€'), `3:${reference(enc('€'))}`, 'the length is in bytes');
 });
 
 test('JOED-156 worker: a failed read or a body off the contract posts its reason and no columns', async t => {
