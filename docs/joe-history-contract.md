@@ -53,8 +53,12 @@ Account samples live in **`account-history-state.json`**, envelope format
 ```
 
 The timestamp `t` is the accepted snapshot generation; `account.observedAt` is
-the broker observation time, or null when absent. Each field is independently
-exact or null; `reasons` contains only null fields. Reason-bearing values are
+the broker observation time, or null when absent. As in desk History, envelope
+`generatedAt` and `receivedAt` are the server receipt time, while point `t`
+preserves producer time. Validation uses the acceptance contract's shared
+`MAX_CLOCK_AHEAD_MS` tolerance, including its boundary, relative to `receivedAt`;
+it never clamps accepted producer timestamps to receipt time. Each field is
+independently exact or null; `reasons` contains only null fields. Reason-bearing values are
 unavailable even when they contain an amount. No account identifiers are copied.
 Older desk-only files do not create account points: absent means not recorded,
 never zero.
@@ -113,6 +117,9 @@ Both account stores use the following independent recovery policy:
 
 - A missing file starts empty with `feed_not_received`, clearing after its
   first successful recording. No older account observations are invented.
+- A file or journal I/O error reports `history_write_failed` without moving or
+  replacing the file. A later recording retries the load before appending, so
+  temporary read failures cannot restart a healthy series from empty memory.
 - A corrupt, oversized or unknown-format file starts empty with
   `contract_invalid`. Before the first replacement write, the server atomically
   renames its bytes to `<filename>.damaged-<UTC instant>` (adding a numeric
@@ -122,7 +129,9 @@ Both account stores use the following independent recovery policy:
   Its reason stays visible after successful writes and restarts. A bounded,
   atomic mode-0600 `<filename>.discontinuity.json` journal records the same
   marker before the rename, so an interruption before replacement cannot hide
-  the loss. Keep that journal and preserved file with backups.
+  the loss. Keep that journal and preserved file with backups. Each later
+  corruption gets a new timestamp and preserved name, even if an earlier
+  preserved copy has been retired.
 - Recognized future versions (`v2` and higher) stay untouched and read-only,
   returning `store_version_unsupported`. New observations continue to the
   other stores. This release never overwrites or quarantines a future format.
@@ -130,6 +139,17 @@ Both account stores use the following independent recovery policy:
   Successful writes clear a transient write reason; a durable discontinuity
   remains `contract_invalid`. A rename followed by directory-sync failure
   honors the committed data while reporting the failed durability check.
+
+An invalid journal keeps that store read-only with `contract_invalid`; an
+unreadable journal is retried as an I/O failure. For recovery, stop the server
+and back up the store, journal and preserved copies together. Restore a valid,
+matching journal/store pair from backup, then restart and verify the series.
+Loss markers deliberately never expire, including after the short retention
+window. To acknowledge a loss and clear its alarm, with the server stopped and
+the backup retained, remove the `discontinuity` property from the valid store
+envelope and retire its journal together; restart and verify both history and
+the cleared reason. Clearing only one leaves the other marker active. This
+operator action acknowledges the gap; it does not reconstruct missing values.
 
 ### Release 39 rollback
 

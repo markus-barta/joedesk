@@ -12,61 +12,75 @@ export function openAccountStore({ file, format, cap, empty, validate, clock, wr
     marker.preservedAs.startsWith(`${path.basename(file)}.damaged-`) &&
     path.basename(marker.preservedAs) === marker.preservedAs;
   let value = empty(), reason = null, discontinuity = null, damaged = false, readOnly = false;
-  try {
-    discontinuity = readJson(markerFile, 4096);
-    if (!validMarker(discontinuity)) throw new Error('contract_invalid');
-  } catch (error) {
-    discontinuity = null;
-    if (error.code !== 'ENOENT') { reason = 'contract_invalid'; readOnly = true; }
-  }
-  try {
-    let stored;
-    try { stored = readJson(file, cap); }
-    catch (error) {
-      if (error.message !== 'storage_size_limit') throw error;
-      // Future envelopes may outgrow today's cap. Inspect only the bounded
-      // format header (the first field of our envelopes), never their payload.
-      const fd = fs.openSync(file, 'r'), header = Buffer.alloc(4096);
-      try {
-        const bytes = fs.readSync(fd, header, 0, header.length, 0);
-        const match = /^\s*\{\s*"format"\s*:\s*("[^"\\]*")/.exec(header.toString('utf8', 0, bytes));
-        stored = { format: match ? JSON.parse(match[1]) : null };
-      } finally { fs.closeSync(fd); }
+  let retryRead = false, preservationMarker = null;
+  function load() {
+    value = empty(); reason = null; discontinuity = null; damaged = false; readOnly = false; retryRead = false;
+    try {
+      discontinuity = readJson(markerFile, 4096);
+      if (!validMarker(discontinuity)) throw new Error('contract_invalid');
+    } catch (error) {
+      discontinuity = null;
+      if (error.code !== 'ENOENT') {
+        retryRead = Boolean(error.code);
+        reason = retryRead ? 'history_write_failed' : 'contract_invalid'; readOnly = true;
+      }
     }
-    // Recognized future formats are never quarantined or replaced by v1.
-    const prefix = format.slice(0, format.lastIndexOf('v') + 1);
-    if (typeof stored?.format === 'string' && stored.format.startsWith(prefix) &&
-        /^[2-9][0-9]*$|^1[0-9]+$/.test(stored.format.slice(prefix.length))) {
-      reason = 'store_version_unsupported'; readOnly = true;
-    } else {
-      if (stored?.format !== format || (stored.discontinuity !== undefined && !validMarker(stored.discontinuity))) throw new Error('contract_invalid');
-      value = validate(stored.value);
-      discontinuity ??= stored.discontinuity ?? null;
+    try {
+      let stored;
+      try { stored = readJson(file, cap); }
+      catch (error) {
+        if (error.message !== 'storage_size_limit') throw error;
+        // Future envelopes may outgrow today's cap. Inspect only the bounded
+        // format header (the first field of our envelopes), never their payload.
+        const fd = fs.openSync(file, 'r'), header = Buffer.alloc(4096);
+        try {
+          const bytes = fs.readSync(fd, header, 0, header.length, 0);
+          const match = /^\s*\{\s*"format"\s*:\s*("[^"\\]*")/.exec(header.toString('utf8', 0, bytes));
+          stored = { format: match ? JSON.parse(match[1]) : null };
+        } finally { fs.closeSync(fd); }
+      }
+      // Recognized future formats are never quarantined or replaced by v1.
+      const prefix = format.slice(0, format.lastIndexOf('v') + 1);
+      if (typeof stored?.format === 'string' && stored.format.startsWith(prefix) &&
+          /^[2-9][0-9]*$|^1[0-9]+$/.test(stored.format.slice(prefix.length))) {
+        reason = 'store_version_unsupported'; readOnly = true;
+      } else {
+        if (stored?.format !== format || (stored.discontinuity !== undefined && !validMarker(stored.discontinuity))) throw new Error('contract_invalid');
+        value = validate(stored.value);
+        discontinuity ??= stored.discontinuity ?? null;
+      }
+    } catch (error) {
+      const ioError = error.code && error.code !== 'ENOENT';
+      reason ??= ioError ? 'history_write_failed' : error.code === 'ENOENT' ? 'feed_not_received' : 'contract_invalid';
+      retryRead ||= Boolean(ioError);
+      damaged = !error.code;
     }
-  } catch (error) {
-    reason ??= error.code === 'ENOENT' ? 'feed_not_received' : 'contract_invalid';
-    damaged = error.code !== 'ENOENT';
   }
+  load();
   const view = () => {
     const currentReason = reason === 'feed_not_received' && discontinuity ? discontinuity.reason : reason;
     return { ...value, reason: currentReason ?? discontinuity?.reason ?? null,
       ...(discontinuity ? { discontinuity } : {}) };
   };
   function append(update) {
+    // An unreadable file is not evidence of corruption. Reload before using
+    // empty memory so a temporary I/O failure cannot replace healthy history.
+    if (retryRead) { load(); if (retryRead) return; }
     if (readOnly) return;
     try {
       const next = update(value);
       if (next === value) return;
       validate(next);
       if (damaged) {
-        // Persist the marker before moving the only damaged copy. Retry uses
-        // the same destination after a failed write, including after restart.
-        if (!discontinuity || fs.existsSync(path.join(path.dirname(file), discontinuity.preservedAs))) {
+        // Persist the marker before moving the only damaged copy. In-process
+        // retries reuse it; a later corruption always gets a new loss instant.
+        if (!preservationMarker) {
           const at = clock();
           let preservedAs = `${path.basename(file)}.damaged-${at}`, suffix = 0;
           while (fs.existsSync(path.join(path.dirname(file), preservedAs))) preservedAs = `${path.basename(file)}.damaged-${at}-${++suffix}`;
-          discontinuity = { at, reason: 'contract_invalid', preservedAs };
+          preservationMarker = { at, reason: 'contract_invalid', preservedAs };
         }
+        discontinuity = preservationMarker;
         write(markerFile, discontinuity, 4096);
         fs.renameSync(file, path.join(path.dirname(file), discontinuity.preservedAs));
         damaged = false;

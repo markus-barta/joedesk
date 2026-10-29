@@ -1,4 +1,5 @@
 import { REASONS } from '../contracts/index.mjs';
+import { MAX_CLOCK_AHEAD_MS } from '../contracts/accept.mjs';
 import { validInstant } from '../contracts/schema-validator.mjs';
 import { viennaDay } from '../time.mjs';
 import { decimalUnits } from '../contracts/decimal.mjs';
@@ -51,9 +52,10 @@ export function validateAccountHistory(value) {
       !validInstant(value.generatedAt) || !validInstant(value.receivedAt) ||
       Buffer.byteLength(JSON.stringify({ format: ACCOUNT_HISTORY_FORMAT, value })) > ACCOUNT_HISTORY_CAP - 4096) throw new Error('contract_invalid');
   let previous;
+  const latestAcceptedTime = Date.parse(value.receivedAt) + MAX_CLOCK_AHEAD_MS;
   for (const p of value.points) {
     if (!keysOnly(p, ['t', 'account']) || !validInstant(p.t) || !validAccountObservation(p.account) ||
-        (previous && p.t <= previous) || p.t > value.generatedAt ||
+        (previous && p.t <= previous) || Date.parse(p.t) > latestAcceptedTime ||
         (ACCOUNT_FIELDS.some(f => p.account[f] !== null) && p.account.observedAt > p.t)) throw new Error('contract_invalid');
     previous = p.t;
   }
