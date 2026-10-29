@@ -150,7 +150,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     fallback = accepted;
     const v = accepted.value;
     const columns = v ? toColumns(v.points) : null;
-    settle('history', { value: v ? { schema: v.schema, seq: v.seq, generatedAt: v.generatedAt, receivedAt: v.receivedAt, reason: v.reason ?? null,
+    settle('history', { value: v ? { schema: v.schema, seq: v.seq, generatedAt: v.generatedAt, receivedAt: v.receivedAt, compactedThrough: v.compactedThrough ?? null, reason: v.reason ?? null,
       points: v.points.length, columns, closes: Object.fromEntries(DESK_IDS.map(id => [id, sessionCloses(columns, id, 'totalPnl', 9)])) } : null, reason: accepted.reason ?? null });
     measure('history-accept', performance.now() - started);
     onChange('history');

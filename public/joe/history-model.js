@@ -1,5 +1,5 @@
 // History display model (pure, display only). Solid means observed; the grey
-// dotted line holds or interpolates across missing spans, from an explicitly
+// dashed line holds or interpolates across missing spans, from an explicitly
 // assumed € 5.000 per desk before the first observation. Estimates never enter
 // comparisons, sparklines, totals or storage. The validated history arrives as
 // typed columns (one row per point, NaN for a missing value) so a 10,000-point
@@ -90,6 +90,86 @@ export function rangeWindow(cols, range, endAt) {
 }
 const windowRows = (cols, [from, to]) => [rowAt(cols, from), rowAt(cols, to + 1)];
 
+// ---------- The shown window (History's overview strip and chart) ----------
+// Windows are [from, to] in milliseconds inside the kept range [first kept
+// observation, board's current time]. A preset is a span ending at the
+// newest time (Fit all is the whole range); a manual view stays where it was
+// put unless it follows the newest time. Zooming never goes below five
+// minutes of data or beyond the range, and every result is clamped exactly,
+// so a window resting on an edge never jitters.
+export const VIEW_PRESETS = Object.freeze(['all', '1d', '1w', '1m']);
+export const MIN_VIEW_MS = 5 * 60 * 1000;
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+export const keptRange = (cols, endAt) => rangeWindow(cols, 'all', endAt);
+export const minSpan = ([k0, k1]) => Math.min(MIN_VIEW_MS, k1 - k0);
+
+// A window `span` wide with `at` at fraction `frac` of it, inside the range.
+export function placeWindow(range, span, at, frac = 0.5) {
+  const [k0, k1] = range, full = k1 - k0;
+  const w = clamp(span, minSpan(range), full);
+  if (!(w < full)) return [k0, k1];
+  const from = clamp(at - w * frac, k0, k1 - w);
+  return from >= k1 - w ? [k1 - w, k1] : [from, from + w];
+}
+export const panWindow = (range, [a, b], by) => placeWindow(range, b - a, a + by, 0);
+// Zoom by a factor (below 1 narrows), keeping `at` where it is on screen.
+export function zoomWindow(range, [a, b], factor, at = (a + b) / 2) {
+  const w = b - a;
+  return placeWindow(range, w * factor, at, w ? clamp((at - a) / w, 0, 1) : 0.5);
+}
+// Move one edge; the other stays and the window keeps the minimum span.
+export function resizeWindow(range, [a, b], edge, to) {
+  const [k0, k1] = range, min = minSpan(range);
+  return edge === 'from' ? [clamp(to, k0, b - min), b] : [a, clamp(to, a + min, k1)];
+}
+// The newest time is in view (within about two pixels of the window's end).
+export const atLiveEdge = (range, [a, b]) => range[1] - b <= Math.max(1000, (b - a) * 0.002);
+export const followWindow = (range, [a, b]) => placeWindow(range, b - a, range[1], 1);
+export const presetSpan = (range, preset) => Math.min(rangeSpanMs(preset) ?? Infinity, range[1] - range[0]);
+export const presetWindow = (range, preset) => placeWindow(range, presetSpan(range, preset), range[1], 1);
+// The preset a window's width matches: the chosen one if it does (a Month
+// longer than the kept history shows all of it), otherwise the first.
+export function windowPreset(range, [a, b], chosen = null) {
+  const near = span => Math.abs(span - (b - a)) <= Math.max(1000, span * 0.002);
+  const matches = VIEW_PRESETS.filter(p => near(presetSpan(range, p)));
+  return matches.includes(chosen) ? chosen : matches[0] ?? null;
+}
+// A window moved inside the range with its width kept (unless wider).
+export function keepInside([k0, k1], [a, b]) {
+  const w = Math.min(Math.max(0, b - a), k1 - k0), from = clamp(a, k0, k1 - w);
+  return from >= k1 - w ? [k1 - w, k1] : [from, from + w];
+}
+// The window shown: a preset ending at the newest time, or a manual view kept
+// inside the range that follows the newest time while Follow is on.
+export function resolveView(range, { preset = 'all', view = null, follow = true } = {}) {
+  if (!view) return presetWindow(range, preset);
+  const [a, b] = keepInside(range, view);
+  return follow ? [range[1] - (b - a), range[1]] : [a, b];
+}
+export const easeOut = t => 1 - (1 - clamp(t, 0, 1)) ** 3;
+export const lerpWindow = ([a0, b0], [a1, b1], t) => (t >= 1 ? [a1, b1] : [a0 + (a1 - a0) * t, b0 + (b1 - b0) * t]);
+// The overview strip maps the whole range onto its width, and back.
+export const toStrip = ([k0, k1], width, x) => (k1 > k0 ? clamp((x - k0) / (k1 - k0), 0, 1) * width : 0);
+export const fromStrip = ([k0, k1], width, px) => k0 + (width > 0 ? clamp(px / width, 0, 1) : 0) * (k1 - k0);
+
+// Where no chosen desk has a number for longer than the observation interval:
+// the intersection of every desk's estimated stretches. gapsByDesk holds each
+// desk's ordered gap groups; one band per remaining stretch, in time order.
+export function missingBands(gapsByDesk, minMs = OBSERVATION_INTERVAL_MS) {
+  if (!gapsByDesk.length) return [];
+  let bands = gapsByDesk[0].map(g => [g[0].x, g[g.length - 1].x]);
+  for (const gaps of gapsByDesk.slice(1)) {
+    const other = gaps.map(g => [g[0].x, g[g.length - 1].x]), next = [];
+    for (let i = 0, j = 0; i < bands.length && j < other.length;) {
+      const from = Math.max(bands[i][0], other[j][0]), to = Math.min(bands[i][1], other[j][1]);
+      if (to > from) next.push([from, to]);
+      if (bands[i][1] < other[j][1]) i++; else j++;
+    }
+    bands = next;
+  }
+  return bands.filter(([from, to]) => to - from > minMs);
+}
+
 // The rows the chart keeps for one desk, [start, last): every row up to the
 // board's current time on the desk's latest comparable bookkeeping basis. The
 // chart, the comparison and the basis notice all read exactly these rows, so
@@ -120,19 +200,25 @@ function clipGap(samples, startAt, endAt) {
   return out;
 }
 
-// Observed samples (null y marks a gap) plus the dotted continuity groups for
+// Observed samples (null y marks a gap) plus the dashed continuity groups for
 // one desk, clipped to the visible range ending at the board's current time.
-export function continuitySeries(cols, id, range, endAt) {
+// Rows at or before thinnedThrough were thinned by the server to stay inside
+// its size limit (history contract, compaction): wide spacing there is the
+// thinning, not missing data, so those rows stay connected. Explicit missing
+// values survive thinning and stay estimates.
+export function continuitySeries(cols, id, range, endAt, { thinnedThrough = null } = {}) {
   const { start, last } = chartRows(cols, id, endAt);
   const earliest = last ? cols.t[0] : null;
   const [startAt] = rangeWindow(cols, range, endAt);
   const eq = cols.desks[id].equity;
+  const thin = Number.isFinite(thinnedThrough) ? thinnedThrough : -Infinity;
+  const apart = (a, b) => cols.t[b] - cols.t[a] > OBSERVATION_INTERVAL_MS && cols.t[b] > thin;
   const inside = rowAt(cols, startAt);
   const from = Math.max(start, inside - 1), seenRows = [];
   const observed = [];
   for (let i = inside < last ? from : last; i < last; i++) {
     const y = Number.isNaN(eq[i]) ? null : eq[i];
-    if (i > from && cols.t[i] - cols.t[i - 1] > OBSERVATION_INTERVAL_MS) observed.push({ x: cols.t[i - 1] + (cols.t[i] - cols.t[i - 1]) / 2, y: null });
+    if (i > from && apart(i - 1, i)) observed.push({ x: cols.t[i - 1] + (cols.t[i] - cols.t[i - 1]) / 2, y: null });
     observed.push({ x: cols.t[i], y });
   }
   // Continuity needs the observed rows across the whole retained basis, so a
@@ -147,12 +233,12 @@ export function continuitySeries(cols, id, range, endAt) {
     if (baselineAt < cols.t[first]) groups.push([gapPoint(baselineAt, ASSUMED_BASELINE, 'assumed-baseline'), gapPoint(cols.t[first], eq[first], 'assumed-baseline', { observedBoundary: true })]);
     for (let k = 0; k + 1 < seenRows.length; k++) {
       const left = seenRows[k], right = seenRows[k + 1];
-      if (right === left + 1 && cols.t[right] - cols.t[left] <= OBSERVATION_INTERVAL_MS) continue;
+      if (right === left + 1 && !apart(left, right)) continue;
       if (cols.t[right] < startAt - OBSERVATION_INTERVAL_MS) continue;
       const a = { x: cols.t[left], y: eq[left] }, b = { x: cols.t[right], y: eq[right] };
       const markers = [];
       for (let r = left; r < right; r++) {
-        if (cols.t[r + 1] - cols.t[r] > OBSERVATION_INTERVAL_MS) markers.push(cols.t[r] + (cols.t[r + 1] - cols.t[r]) / 2);
+        if (apart(r, r + 1)) markers.push(cols.t[r] + (cols.t[r + 1] - cols.t[r]) / 2);
         if (r > left && Number.isNaN(eq[r])) markers.push(cols.t[r]);
       }
       const group = [gapPoint(a.x, a.y, 'interpolated', { observedBoundary: true })];
