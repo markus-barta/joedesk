@@ -1545,3 +1545,19 @@ aborted publications remain excluded. Reseal only this candidate's runtime
 closure. Contracts revision 10, the approved presentation bundle, legacy anchor
 and historical artifacts remain unchanged. This local preparation grants no
 publication or deployment approval.
+
+## Release 38 candidate (JOED-143)
+
+Reserve `261029075623.0.0` at `2026-10-29T07:56:23Z` as `inspr-calver-3`, stable sequence 38,
+for the sweeps 2 and 3 fixes (JOED-129–134, JOED-140–142): immediate KEEP
+enforcement, bounded feed recovery and an accurate board clock, readable and
+exact settings, truthful position lists and Results, GitHub-only CI evidence,
+accessible Results at 320 px, clickjacking protection, and informational masked
+not-exact values with honest capture copy during a halt. Prior deployed sequence
+37 is `261028202622.0.0`, main
+`aedc666492a6379bf946900ce8521d105a70ede5`, live since
+`2026-10-29T07:51:18Z` (JOED-122). About orders 38, 37 through 26, then legacy;
+aborted publications remain excluded. Reseal only this candidate's runtime
+closure. Contracts revision 10, the approved presentation bundle, legacy anchor
+and historical artifacts remain unchanged. This local preparation grants no
+publication or deployment approval.

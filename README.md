@@ -2,13 +2,14 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261028202622.0.0` (`inspr-calver-3`, stable sequence 37), reserved once at `2026-10-28T20:26:22Z` for the JOED-108 sweep fixes (JOED-107, JOED-114–121, release [JOED-122](https://aeon.barta.cm/p/JOED/JOED-122)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261029075623.0.0` (`inspr-calver-3`, stable sequence 38), reserved once at `2026-10-29T07:56:23Z` for the sweeps 2 and 3 fixes (JOED-129–134, JOED-140–142, release [JOED-143](https://aeon.barta.cm/p/JOED/JOED-143)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261028081016.0.0` / sequence 36,
-published on `main` at `b186308269ab9c05247c6b0f0e4b35fac4bc0ce7` under JOED-106,
-live on csb0 since `2026-10-28T20:23:05Z` (JOED-106). `previous_release` and
+**Last deployed release:** `inspr-calver-3` / `261028202622.0.0` / sequence 37,
+published on `main` at `aedc666492a6379bf946900ce8521d105a70ede5` under JOED-122,
+live on csb0 since `2026-10-29T07:51:18Z` (JOED-122). `previous_release` and
 `last_deployed_release` both record that release. This history does not claim
-adoption for sequence 37. Sequence 35 (`261027124551.0.0`) was previously deployed
+adoption for sequence 38. Sequence 36 (`261028081016.0.0`) was previously deployed
+at `2026-10-28T20:23:05Z` (JOED-106). Sequence 35 (`261027124551.0.0`) was previously deployed
 at `2026-10-27T20:18:18Z` (JOED-99). Sequence 34 (`261026232616.0.0`) was previously deployed
 at `2026-10-27T03:30:43Z` (JOED-97). Sequence 33 (`261026070713.0.0`) was previously deployed
 at `2026-10-26T20:06:06Z` (JOED-90). Sequence 32 (`261025221940.0.0`) was previously deployed
@@ -33,13 +34,13 @@ records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
 `previous_release` from `last_deployed_release`. About lists the current build,
-deployed sequences 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
+deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-37 candidate has not been published. The candidate
+cutover**. The sequence-38 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -89,7 +90,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261028202622.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261029075623.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -2121,3 +2122,25 @@ open for every accepted company name, and very small prices show instead of zero
 Reseal this candidate's runtime closure; keep revision-10 contracts, the shared
 presentation pin, legacy anchor and historical artifacts unchanged.
 The coordinator owns browser validation, review, publication and deployment.
+
+### Release 38 preparation (JOED-143)
+
+Reserve `261029075623.0.0` at `2026-10-29T07:56:23Z`, stable sequence 38, for the
+sweeps 2 and 3 fixes (JOED-129–134, JOED-140–142). Sequence 37
+(`261028202622.0.0`) is deployed from main
+`aedc666492a6379bf946900ce8521d105a70ede5`, live on csb0 since
+`2026-10-29T07:51:18Z` (JOED-122). About orders 38, 37 through 26, then legacy.
+
+Saved KEEP changes take effect at once, including after save failures and on
+retained data. Feeds recover from stalled downloads and use an accurate board
+clock. Settings stay readable across saved-file key order changes; fields stay
+visible, money and percentages stay exact, and help matches the board. Position
+lists and Results accurately describe holdings. Release verification accepts CI
+evidence only from GitHub itself. Results support keyboard and screen-reader
+use, including at 320 px. Other sites cannot frame the board. Masked not-exact
+values stay informational, and capture copy describes a halt honestly.
+
+Reseal only this candidate's runtime closure. Keep revision-10 contracts, the
+approved shared presentation pin, legacy anchor and historical artifacts
+unchanged. Review, publication, deployment and live verification remain with
+the coordinator; this reservation grants none of those approvals.
