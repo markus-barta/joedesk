@@ -136,11 +136,18 @@ export async function historyControlChecks({ page, viewport, theme, check, settl
     const centred = Math.min(s.k1 - width / 2, Math.max(s.k0 + width / 2, centre));
     check('JOED-145', `${tag}: a click beside the window centres it there`, near((t.x0 + t.x1) / 2, centred, 2 * perPx) && near(t.x1 - t.x0, width, 1000), { s, t, centred });
 
+    // Centring near the right edge clamps onto the newest time and already
+    // turns Follow on. Park the window first: otherwise a click toggles it off.
+    s = t;
+    await drag(page, { x: s.win.left + s.win.width / 2, y: s.track.top + s.track.height / 2 }, { x: s.win.left + s.win.width / 2 - 60, y: s.track.top + s.track.height / 2 });
+    await settle(page);
+    s = await state();
+    check('JOED-145', `${tag}: before resuming Follow, the window is parked earlier at the same width`, s.follow === 'false' && s.x1 < s.k1 && near(s.x1 - s.x0, width, 1000), s);
     // Follow: one click returns to the newest time with the same width.
     await page.evaluate(`document.getElementById('histFollow').click()`);
     await settle(page);
     t = await state();
-    check('JOED-145', `${tag}: Follow returns the window to the newest time, same width, pressed`, t.follow === 'true' && near(t.x1, t.k1, 1000) && near(t.x1 - t.x0, width, 1000), t);
+    check('JOED-145', `${tag}: Follow returns the window to the newest time, same width, pressed`, t.follow === 'true' && near(t.x1, t.k1, 1000) && near(t.x1 - t.x0, width, 1000), { s, t });
 
     // The chart: ⌘-wheel and Ctrl-wheel zoom around the pointer; a plain
     // vertical wheel scrolls the page; a sideways wheel and a drag pan.
