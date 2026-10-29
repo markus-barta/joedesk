@@ -113,7 +113,7 @@ test('JOED-133 percentages: zero at display precision has no sign', () => {
   for (const n of [null, undefined, NaN, Infinity, -Infinity]) assert.equal(pct(n, 2, true), '—');
 });
 
-test('JOED-133 percentages: History comparison suppresses signed zero without changing model values', () => {
+test('JOED-133 History comparison suppresses signed zero without changing model values', () => {
   const start = Date.parse(exact().generatedAt), end = start + 300000;
   const row = (ms, values) => ({ t: new Date(ms).toISOString(),
     desks: Object.fromEntries(['j', 'joe', 'joel'].map((id, i) => [id, { money: { equity: { amount: values[i], currency: 'EUR' } } }])), totals: {} });
@@ -121,7 +121,9 @@ test('JOED-133 percentages: History comparison suppresses signed zero without ch
   const model = sharedWindowCompare(cols, ['j', 'joe', 'joel'], [start, end], end);
   assert.equal(model.ok, true);
   assert.ok(model.desks[0].pct < 0 && model.desks[1].pct > 0, 'actual changes remain nonzero');
-  assert.match(compareLine(cols, [start, end], end), /J 0,00 % · Joe 0,00 % · Joel 0,00 %$/);
+  // Both measures (JOED-154): a change below half a cent reads € 0,00, unsigned.
+  assert.match(compareLine(cols, [start, end], end, 'change').text, /J €\s0,00 · Joe €\s0,00 · Joel €\s0,00$/);
+  assert.match(compareLine(cols, [start, end], end, 'money').text, /J €\s1\.000,00 to €\s1\.000,00 · Joe €\s1\.000,00 to €\s1\.000,00 · Joel €\s1\.000,00 to €\s1\.000,00$/);
 });
 
 test('JOED-133 Board light help: green allows explained not-exact dashes', () => {

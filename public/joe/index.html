@@ -113,6 +113,7 @@
   <symbol id="i-feed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1.4" fill="currentColor"/></symbol>
   <symbol id="i-gauge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 17a8.5 8.5 0 1 1 15 0"/><path d="m12 13 4-5"/><circle cx="12" cy="13.5" r="1.2" fill="currentColor"/></symbol>
   <symbol id="i-wallet" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5.5A1.5 1.5 0 0 0 17.5 4H5a2 2 0 0 0 0 4h14a1 1 0 0 1 1 1v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6"/><path d="M16.5 14h.1"/></symbol>
+  <symbol id="i-kbd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="12" rx="2.2"/><path d="M6 10h.01M9.5 10h.01M13 10h.01M16.5 10h.01M6 14h.01M18 14h.01M9 14h6"/></symbol>
   <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M5 21v-7M5 10V3M12 21v-9M12 8V3M19 21v-5M19 12V3M2.5 14h5M9.5 8h5M16.5 16h5"/></symbol>
   <symbol id="i-alarm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="7.5"/><path d="M12 9.5V13l2.5 1.5M4.5 4.5 2.5 6.5M19.5 4.5l2 2"/></symbol>
   <symbol id="i-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M20.5 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 20.5 12z"/></symbol>
@@ -252,21 +253,33 @@
   </section>
 
   <section class="screen" id="scr-history" aria-labelledby="histTitle">
-    <div class="scr-h"><h1 id="histTitle">History</h1><span class="sub">Each desk’s money as observed · paper · euro</span></div>
+    <div class="scr-h"><h1 id="histTitle">History</h1><span class="sub" id="histSub">Each desk’s change in € since the start of the view · paper · EUR · kept holdings left out</span></div>
+    <!-- Tab order is the visual order at every width: on a phone the first
+         row is the desks and Follow (its phone copy), then Change | Money and
+         the presets; wider, Follow (the other copy) ends the one row. -->
     <div class="hist-tools">
       <div class="seg" role="group" aria-label="Desks" id="histDesks"></div>
-      <div class="seg" role="group" aria-label="Range" id="histRange">
-        <button type="button" data-range="all" aria-pressed="false">Fit all</button>
-        <button type="button" data-range="1d" aria-pressed="false">Day</button>
-        <button type="button" data-range="1w" aria-pressed="true">Week</button>
-        <button type="button" data-range="1m" aria-pressed="false">Month</button>
+      <button type="button" class="btn quiet hist-follow hist-follow-phone" id="histFollowPhone" data-follow aria-pressed="true" aria-describedby="histFollowHelp"><svg class="i" aria-hidden="true"><use href="#i-dot"/></svg>Follow</button>
+      <div class="hist-view">
+        <div class="seg" role="group" aria-label="Show" aria-describedby="histMeasureHelp" id="histMeasure">
+          <button type="button" data-measure="change" aria-pressed="true">Change</button>
+          <button type="button" data-measure="money" aria-pressed="false">Money</button>
+        </div>
+        <p class="vh" id="histMeasureHelp">Change starts every desk at zero at the left edge of the shown window; Money shows each desk’s money as observed.</p>
+        <span class="grow" aria-hidden="true"></span>
+        <div class="seg" role="group" aria-label="Range" id="histRange">
+          <button type="button" data-range="all" aria-pressed="false">Fit all</button>
+          <button type="button" data-range="1d" aria-pressed="false">Day</button>
+          <button type="button" data-range="1w" aria-pressed="true">Week</button>
+          <button type="button" data-range="1m" aria-pressed="false">Month</button>
+        </div>
+        <button type="button" class="btn quiet hist-follow" id="histFollow" data-follow aria-pressed="true" aria-describedby="histFollowHelp"><svg class="i" aria-hidden="true"><use href="#i-dot"/></svg>Follow</button>
       </div>
-      <button type="button" class="btn quiet hist-follow" id="histFollow" aria-pressed="true" aria-describedby="histFollowHelp"><svg class="i" aria-hidden="true"><use href="#i-dot"/></svg>Follow</button>
       <p class="vh" id="histFollowHelp">Keeps the newest history in view. Moving the window back in time turns it off.</p>
     </div>
     <section class="card hcard" aria-label="Desk money over time">
       <div class="legend" id="histLegend"></div>
-      <div class="hist-compare"><p id="histCompare"></p></div>
+      <div class="hist-compare"><p id="histCompare"></p><p class="cmp-size" id="histCompareSize" aria-hidden="true"></p></div>
       <div class="chart hist-chart" id="histChart"><div class="hist-status" id="histStatus"></div><div class="ctip" id="histTip" aria-hidden="true"></div></div>
       <p class="vh" id="histInspectHelp">Use Left and Right to inspect history points, Home and End for the ends, and Page Up and Page Down for larger steps. Shift with Left and Right moves the shown window, plus and minus zoom, and 0 shows all kept history. Escape leaves inspection; Tab moves to the next control.</p>
       <div class="vh" id="histLive" aria-live="polite" aria-atomic="true"></div>
@@ -280,7 +293,43 @@
         </div>
       </div>
       <p class="vh" id="histMiniHelp">Left and Right move the shown window by a tenth, Page Up and Page Down by its width, Home and End to the oldest and newest history; Shift with Left and Right makes it narrower or wider. On an edge, Left and Right move that edge.</p>
-      <p class="hist-help"><span id="histBasis"></span> <span id="histThin"></span> Vienna time · dashed lines mark midnight · <span class="hint-fine">drag to move, <span class="mod-key">Ctrl</span> + scroll or pinch to zoom, double-click to see all</span><span class="hint-touch">swipe sideways to move, pinch to zoom, double-tap to see all</span> · JoeDesk keeps the last 14 days</p>
+      <div class="hist-foot">
+        <p class="hist-hint" id="histHint"><span class="hint-fine">Drag or swipe to move · ⌘/Ctrl-scroll or pinch to zoom</span><span class="hint-touch">Swipe · pinch · double-tap</span></p>
+        <button type="button" class="btn quiet hist-ctl" id="histCtl" aria-expanded="false" aria-controls="histControls"><svg class="i" aria-hidden="true"><use href="#i-kbd"/></svg>Controls</button>
+        <div class="hist-pop" id="histControls" role="group" aria-label="Chart controls" hidden>
+          <dl class="ctl-list">
+            <dt class="ctl-fine">Drag, or scroll sideways</dt><dd class="ctl-fine">move in time</dd>
+            <dt class="ctl-fine"><kbd class="mod-key">Ctrl</kbd> + scroll, or pinch</dt><dd class="ctl-fine">zoom at the pointer</dd>
+            <dt class="ctl-fine">Scroll up or down</dt><dd class="ctl-fine">scrolls the page, never the chart</dd>
+            <dt class="ctl-fine">Double-click</dt><dd class="ctl-fine">fit all kept history</dd>
+            <dt class="ctl-touch">Swipe sideways</dt><dd class="ctl-touch">move in time; up or down scrolls the page</dd>
+            <dt class="ctl-touch">Pinch</dt><dd class="ctl-touch">zoom</dd>
+            <dt class="ctl-touch">Double-tap</dt><dd class="ctl-touch">fit all kept history</dd>
+            <dt class="ctl-touch">Tap, or press and hold</dt><dd class="ctl-touch">read a moment</dd>
+            <dt><kbd><svg class="i k-l" aria-hidden="true"><use href="#i-arrow"/></svg><span class="vh">Left</span></kbd> <kbd><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg><span class="vh">Right</span></kbd> · <kbd>Home</kbd> <kbd>End</kbd></dt><dd>inspect point by point · the first and last point</dd>
+            <dt><kbd>Shift</kbd> + <kbd><svg class="i k-l" aria-hidden="true"><use href="#i-arrow"/></svg><span class="vh">Left</span></kbd> <kbd><svg class="i" aria-hidden="true"><use href="#i-arrow"/></svg><span class="vh">Right</span></kbd></dt><dd>move the window</dd>
+            <dt><kbd>+</kbd> <kbd>−</kbd> · <kbd>0</kbd></dt><dd>zoom · fit all kept history</dd>
+            <dt>Overview strip</dt><dd>drag the window or an edge, or click beside it to jump there</dd>
+          </dl>
+          <div class="ctl-axis">
+            <p class="ctl-h" id="histAxisName">Vertical axis</p>
+            <div class="seg" role="group" aria-labelledby="histAxisName" aria-describedby="histAxisNote" id="histAxis">
+              <button type="button" data-axis="auto" aria-pressed="true">Auto</button>
+              <button type="button" data-axis="max" aria-pressed="false">Max</button>
+              <button type="button" data-axis="custom" aria-pressed="false">Custom</button>
+            </div>
+            <p class="ctl-note" id="histAxisNote">Fits the shown window and glides with every move.</p>
+            <form class="ctl-custom" id="histAxisForm" novalidate hidden>
+              <label for="histAxisMin">Bottom</label><input class="inp" id="histAxisMin" inputmode="decimal" autocomplete="off" aria-invalid="false" aria-describedby="histAxisUnit">
+              <label for="histAxisMax">Top</label><input class="inp" id="histAxisMax" inputmode="decimal" autocomplete="off" aria-invalid="false" aria-describedby="histAxisUnit">
+              <button type="submit" class="btn">Apply</button>
+              <p class="ctl-note" id="histAxisUnit">In euros of change, for example −25 or 40,50.</p>
+              <p class="ctl-err" id="histAxisError" aria-live="polite"></p>
+            </form>
+          </div>
+        </div>
+      </div>
+      <p class="hist-help"><span id="histBasis"></span> <span id="histThin"></span> Vienna time · dashed lines mark midnight · JoeDesk keeps the last 14 days</p>
     </section>
     <div class="hist-cols">
       <div>

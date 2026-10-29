@@ -269,7 +269,74 @@ test('JOED-145 axis: a Day view names both dates, the day it starts in at its le
   assert.equal(atMidnight.filter(l => l.text === 'Thu 29').length, 1);
 });
 
-test('JOED-145 compare: over part of the window the line names the stretch it uses; over all of it, both ends', () => {
+test('JOED-154 address: #history?range=…&desk=…&mode=… names the preset, desks and measure; what is missing or unreadable is left out', () => {
+  assert.deepEqual(hm.parseHistoryRoute('range=day&desk=j,joel&mode=money'), { preset: '1d', desks: ['j', 'joel'], measure: 'money' });
+  assert.deepEqual(hm.parseHistoryRoute(new URLSearchParams('?range=fit&desk=all&mode=change')), { preset: 'all', desks: ['j', 'joe', 'joel'], measure: 'change' });
+  assert.deepEqual(hm.parseHistoryRoute('?desk=joel%2Cj'), { desks: ['j', 'joel'] }, 'desks come back in board order, an escaped comma too');
+  assert.deepEqual(hm.parseHistoryRoute('desk=none'), { desks: [] });
+  assert.deepEqual(hm.parseHistoryRoute('range=year&desk=j,bob&mode=live&x=1'), {}, 'unknown values are ignored, never guessed');
+  assert.deepEqual(hm.parseHistoryRoute('desk=j,,joe'), {});
+  assert.deepEqual(hm.parseHistoryRoute(''), {});
+  assert.deepEqual(hm.parseHistoryRoute(null), {});
+  for (const [state, query] of [
+    [{ preset: '1w', desks: hm.DESK_IDS, measure: 'change' }, 'range=week&desk=all&mode=change'],
+    [{ preset: '1m', desks: ['joel', 'j'], measure: 'money' }, 'range=month&desk=j,joel&mode=money'],
+    [{ preset: 'all', desks: [], measure: 'change' }, 'range=fit&desk=none&mode=change'],
+    [{ preset: '1d', desks: ['joe'], measure: 'money' }, 'range=day&desk=joe&mode=money'],
+  ]) {
+    assert.equal(hm.historyRouteQuery(state), query);
+    const back = hm.parseHistoryRoute(query);
+    assert.deepEqual([back.preset, back.desks, back.measure], [state.preset, hm.DESK_IDS.filter(id => state.desks.includes(id)), state.measure], `${query} reads back`);
+  }
+  assert.equal(hm.historyRouteQuery(), 'range=week&desk=all&mode=change', 'the defaults: Week, every desk, Change');
+});
+
+test('JOED-154 Max in Change: the largest fall and rise from a value to a later one bound every window’s changes', () => {
+  assert.deepEqual(hm.changeExtremes([]), [0, 0]);
+  assert.deepEqual(hm.changeExtremes([5000]), [0, 0]);
+  assert.deepEqual(hm.changeExtremes([4900, 5100, 4950]), [-150, 200]);
+  assert.deepEqual(hm.changeExtremes([5100, 5000, 4900]), [-200, 0], 'only falling: no rise');
+  assert.deepEqual(hm.changeExtremes([1, NaN, 3, null, 0]), [-3, 2], 'gaps are skipped');
+  // Against every window of a random walk: each change from the window's first value lies inside.
+  let seed = 7;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const walk = [5000];
+  for (let i = 1; i < 300; i++) walk.push(walk[i - 1] + (rand() - 0.5) * 20);
+  const [lo, hi] = hm.changeExtremes(walk);
+  let seenLo = 0, seenHi = 0;
+  for (let a = 0; a < walk.length; a += 7) for (let b = a; b < walk.length; b++) { const d = walk[b] - walk[a]; seenLo = Math.min(seenLo, d); seenHi = Math.max(seenHi, d); }
+  assert.ok(seenLo >= lo - 1e-9 && seenHi <= hi + 1e-9, `${seenLo}…${seenHi} inside ${lo}…${hi}`);
+  for (let a = 0; a < walk.length; a++) for (let b = a; b < walk.length; b++) assert.ok(walk[b] - walk[a] >= lo - 1e-9 && walk[b] - walk[a] <= hi + 1e-9);
+});
+
+test('JOED-154 axis: time labels keep 56 px apart and inside the plot at every width, also across both clock changes', () => {
+  const spans = [5 * MIN, 30 * MIN, 3 * HOUR, DAY, 36 * HOUR, 3 * DAY, 7 * DAY, 14 * DAY];
+  const starts = ['2026-10-28T07:54:00.000Z', '2026-10-24T21:13:00.000Z', '2027-03-27T20:41:00.000Z', '2027-03-21T23:00:00.000Z'].map(Date.parse);
+  for (const pw of [190, 242, 260, 280, 312, 520, 760, 1100, 1300]) for (const x0 of starts) for (const length of spans) {
+    const labels = axisLabels(x0, x0 + length, pw), px = l => (l.x - x0) / length * pw, at = `${new Date(x0).toISOString()} + ${length / MIN} min on ${pw} px`;
+    assert.ok(labels.length >= 1, `${at}: at least one label`);
+    labels.forEach((l, i) => {
+      assert.ok(px(l) >= 0 && px(l) < pw - 40, `${at}: ${l.text} inside the plot`);
+      if (i) assert.ok(px(l) - px(labels[i - 1]) >= 56 - 1e-9, `${at}: ${labels[i - 1].text} and ${l.text} are ${(px(l) - px(labels[i - 1])).toFixed(1)} px apart`);
+    });
+  }
+});
+
+test('JOED-154 tooltip: in Change each value is the signed change since the window’s start, which a second line names; Money keeps its words', () => {
+  const since = Date.parse('2026-10-29T07:00:00.000Z'), x = since + HOUR, NB = '\u00a0';
+  const change = historyPointDetails([{ v: 12.5 }, { v: -3, estimated: true }, null], x, hm.DESK_IDS, false, since);
+  assert.equal(change.text, `Thu 29${NB}Oct, 09:00 Vienna time\nChange since Thu 29${NB}Oct, 08:00\nJ +€${NB}12,50 observed\nJoe −€${NB}3,00 estimated\nJoel no value here`);
+  assert.equal(change.html.split('<br>').length, 5, 'the same lines on screen');
+  const money = historyPointDetails([{ v: 5012.5 }, { v: 4997, estimated: true }, null], x, hm.DESK_IDS, true);
+  assert.equal(money.text, `Thu 29${NB}Oct, 09:00 Vienna time\nJ €${NB}5.012,50 observed\nJoe €${NB}4.997,00 estimated\nJoel no value here\nThinned or not reported: coverage unknown`);
+  assert.doesNotMatch(historyPointDetails([{ v: 0.001 }], x, ['j'], false, since).text, /[+−]€/, 'a change under half a cent has no sign');
+  // A start inside a gap is an estimate: the change from it is said to be.
+  const fromGap = historyPointDetails([{ v: 4 }, { v: 1 }, { v: 2, estimated: true }], x, hm.DESK_IDS, false, since, [true, false, true]).text.split('\n');
+  assert.deepEqual(fromGap.slice(2), [`J +€${NB}4,00 observed, from an estimated start`, `Joe +€${NB}1,00 observed`, `Joel +€${NB}2,00 estimated, from an estimated start`]);
+  assert.doesNotMatch(historyPointDetails([{ v: 4 }], x, ['j'], false, null, [true]).text, /estimated start/, 'Money has no start to name');
+});
+
+test('JOED-145 compare: over part of the window the line names the stretch it uses; over all of it, both ends (JOED-154: in euros, per measure)', () => {
   const at = (ms, j, joe, joel, basis = 'j.v2') => ({ t: new Date(ms).toISOString(), totals: {}, desks: {
     j: { money: { equity: j === null ? null : { amount: String(j), currency: 'EUR' } }, historyBasis: basis },
     joe: { money: { equity: { amount: String(joe), currency: 'EUR' } }, historyBasis: 'joe.v2' },
@@ -279,12 +346,27 @@ test('JOED-145 compare: over part of the window the line names the stretch it us
   for (let m = 0; m < 20 * 60; m += 30) rows.push(at(K0 + m * MIN, 4900, 5100, 5000));
   rows.push(at(K0 + 20.5 * HOUR, null, 5100, 5000));
   for (let ms = cut; ms <= end; ms += 2 * MIN) rows.push(at(ms, ms === end ? 5010 : 5000, ms === end ? 4995 : 5000, 5000));
-  const gap = compareLine(hm.toColumns(rows), window, end);
-  assert.match(gap, /^Last 3.h.22.min with continuous data, from Wed 7.Oct, 22:38: J \+0,20.% · Joe −0,10.% · Joel 0,00.%$/, gap);
-  const basis = compareLine(hm.toColumns(rows.map(r => (Date.parse(r.t) < cut ? { ...r, desks: { ...r.desks, j: { ...r.desks.j, historyBasis: 'j.v1' } } } : r)).filter(r => r.desks.j.money.equity)), window, end);
-  assert.match(basis, /^Last 3.h.22.min on the current bookkeeping, from Wed 7.Oct, 22:38: J \+0,20.%/, basis);
-  const whole = compareLine(hm.toColumns(rows.filter(r => Date.parse(r.t) >= cut)), window, end);
-  assert.match(whole, /^From Wed 7.Oct, 22:38 to Thu 8.Oct, 02:00: J \+0,20.%/, whole);
+  const cols = hm.toColumns(rows);
+  const gap = compareLine(cols, window, end, 'change');
+  assert.match(gap.text, /^Change in the last 3.h.22.min with continuous data, from Wed 7.Oct, 22:38: J \+€.10,00 · Joe −€.5,00 · Joel €.0,00$/, gap.text);
+  const money = compareLine(cols, window, end, 'money');
+  assert.match(money.text, /^Last 3.h.22.min with continuous data, from Wed 7.Oct, 22:38: J €.5\.000,00 to €.5\.010,00 · Joe €.5\.000,00 to €.4\.995,00 · Joel €.5\.000,00 to €.5\.000,00$/, money.text);
+  assert.ok(money.html.includes('<use href="#i-arrow"/>') && !money.html.includes('\u2192'), 'the markup draws an arrow icon between the ends, never a text glyph');
+  assert.equal((money.html.match(/<span class="vh"> to <\/span>/g) ?? []).length, 3, 'and says "to" to a screen reader');
+  const basis = compareLine(hm.toColumns(rows.map(r => (Date.parse(r.t) < cut ? { ...r, desks: { ...r.desks, j: { ...r.desks.j, historyBasis: 'j.v1' } } } : r)).filter(r => r.desks.j.money.equity)), window, end, 'change');
+  assert.match(basis.text, /^Change in the last 3.h.22.min on the current bookkeeping, from Wed 7.Oct, 22:38: J \+€.10,00/, basis.text);
+  const after = hm.toColumns(rows.filter(r => Date.parse(r.t) >= cut));
+  assert.match(compareLine(after, window, end, 'change').text, /^Change from Wed 7.Oct, 22:38 to Thu 8.Oct, 02:00: J \+€.10,00 · Joe −€.5,00 · Joel €.0,00$/);
+  assert.match(compareLine(after, window, end, 'money').text, /^From Wed 7.Oct, 22:38 to Thu 8.Oct, 02:00: J €.5\.000,00 to €.5\.010,00/);
+});
+
+test('JOED-154 compare: a change is exact from the stored decimals, not a difference of floats', () => {
+  const at = (ms, j) => ({ t: new Date(ms).toISOString(), totals: {}, desks: Object.fromEntries(hm.DESK_IDS.map(id => [id, { money: { equity: { amount: id === 'j' ? j : '1000', currency: 'EUR' } } }])) });
+  // 1000.115 − 1000.11 is 0.00499… in floating point; exactly it is half a cent, which rounds up.
+  const cols = hm.toColumns([at(K0, '1000.11'), at(K0 + MIN, '1000.115')]);
+  assert.ok(1000.115 - 1000.11 < 0.005, 'the float difference would read € 0,00');
+  assert.match(compareLine(cols, [K0, K0 + MIN], K0 + MIN, 'change').text, /: J \+€.0,01 · Joe €.0,00 · Joel €.0,00$/);
+  assert.match(compareLine(cols, [K0, K0 + MIN], K0 + MIN, 'money').text, /: J €.1\.000,11 to €.1\.000,12 · /, 'Money rounds each exact end half away from zero');
 });
 
 test('JOED-145 bands: hatched only where every chosen desk lacks numbers for more than five minutes', () => {
@@ -391,13 +473,14 @@ test('JOED-145 compare: never claims continuous data across a stretch without ro
   const cols = hm.toColumns(rows), end = K0 + 4 * HOUR + MIN, window = [K0, end];
   const result = hm.sharedWindowCompare(cols, hm.DESK_IDS, window, end);
   assert.deepEqual([result.startAt, result.endAt, result.after], [rows[3].t, rows[4].t, 'gap'], 'the stretch after the gap');
-  const line = compareLine(cols, window, end);
-  assert.match(line, /^Last 1.min with continuous data, from Wed 7.Oct, 06:00: J \+0,20.% · Joe 0,00.% · Joel 0,00.%$/, line);
+  const line = compareLine(cols, window, end, 'change').text;
+  assert.match(line, /^Change in the last 1.min with continuous data, from Wed 7.Oct, 06:00: J \+€.10,00 · Joe €.0,00 · Joel €.0,00$/, line);
+  assert.match(compareLine(cols, window, end, 'money').text, /^Last 1.min with continuous data, from Wed 7.Oct, 06:00: J €.5\.020,00 to €.5\.030,00/);
   assert.deepEqual(bandsOf(cols, end), [[K0 + 3 * MIN, K0 + 4 * HOUR]], 'the chart hatches the same stretch');
   // The comparison is always the last stretch: one row after a gap is not one yet.
   const short = hm.toColumns(rows.slice(1, 4)), until = [K0, K0 + 4 * HOUR];
   assert.deepEqual(hm.sharedWindowCompare(short, hm.DESK_IDS, until, until[1]), { ok: false, reason: 'gap' });
-  assert.equal(compareLine(short, until, until[1]), 'Comparing needs two moments with continuous data in this window.');
+  for (const measure of ['change', 'money']) assert.equal(compareLine(short, until, until[1], measure).text, 'Comparing needs two moments with continuous data in this window.');
 });
 
 test('JOED-145 compaction: never across a gap, both ends of every run kept, every kept interval says what it is, pass after pass', () => {

@@ -335,6 +335,63 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .hist-mini[data-off] .mini-win, .hist-mini[data-off] .mini-h { visibility: hidden; }
 .hint-touch { display: none; }
 @media (pointer: coarse) { .hint-fine { display: none; } .hint-touch { display: inline; } }
+/* Desks and Change | Money on the left, the presets and Follow on the right.
+   The view group is part of the one row (display: contents) until a phone
+   gives it a row of its own; Follow has a phone copy after the desks, so the
+   Tab order is the visual order at every width, with no CSS order. */
+.hist-view { display: contents; }
+.hist-view > .grow { flex: 1; }
+.hist-follow-phone { display: none; }
+/* The comparison keeps the height of the longest line its measure can write
+   (an invisible copy under it), so presets, desks and the window move nothing. */
+.hist-compare { display: grid; }
+.hist-compare > p { grid-area: 1 / 1; min-width: 0; }
+.hist-compare > .cmp-size { visibility: hidden; }
+.cmp-to { width: 14px; height: 14px; margin: 0 4px; vertical-align: -2px; color: var(--ink-3); }
+/* Under the strip: the first-visit hint (its room stays once it goes) and Controls. */
+.hist-foot { position: relative; display: flex; align-items: center; gap: 6px 12px; min-height: 34px; margin-top: 6px; }
+.hist-hint { flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: var(--ink-3); }
+.hist-hint[data-seen] { visibility: hidden; }
+.btn.hist-ctl { flex: none; margin-left: auto; height: 30px; padding: 0 11px; font-size: 12.5px; box-shadow: inset 0 0 0 1px var(--line); }
+.hist-ctl .i { width: 16px; height: 16px; }
+.btn.hist-ctl[aria-expanded="true"] { background: var(--row-hover); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.hist-pop { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; width: min(380px, 100%); max-height: min(72vh, 600px); overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px 14px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); }
+.ctl-list { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 12.5px; line-height: 18px; }
+.ctl-list dt { color: var(--ink); font-weight: 600; }
+.ctl-list dd { margin: 0; color: var(--ink-2); }
+.ctl-list .ctl-touch { display: none; }
+@media (pointer: coarse) { .ctl-list .ctl-fine { display: none; } .ctl-list .ctl-touch { display: block; } }
+.hist-pop kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; padding: 0 5px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--line-2); font: 600 10.5px/1 var(--mono); color: var(--ink-2); vertical-align: 1px; }
+.hist-pop kbd .i { width: 12px; height: 12px; }
+.hist-pop kbd .k-l { transform: scaleX(-1); }
+.ctl-axis { display: grid; justify-items: start; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ctl-h { font-size: 13px; font-weight: 650; color: var(--ink); }
+.ctl-note { font-size: 12px; color: var(--ink-3); }
+.ctl-err { font-size: 12px; color: var(--bad); }
+.ctl-err:empty { display: none; }
+.ctl-custom { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; gap: 6px 8px; width: 100%; }
+.ctl-custom label { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.ctl-custom input { min-width: 0; height: 34px; font-variant-numeric: tabular-nums; }
+.ctl-custom .ctl-note, .ctl-custom .ctl-err { grid-column: 1 / -1; }
+.chart text.axis-note { font: 600 10.5px var(--font); fill: var(--ink-2); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
+@media (max-width: 700px) { .btn.hist-ctl { height: 44px; } .hist-foot { min-height: 44px; } }
+/* Phones: the desks and Follow, then Change | Money and the presets in one
+   row, so the chart starts higher (the narrowest screens wrap instead). */
+@media (max-width: 480px) {
+  .hist-tools { gap: 8px; }
+  .hist-view { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  .hist-view > .grow, #histFollow { display: none; }
+  .hist-follow-phone { display: inline-flex; margin-left: auto; padding: 0 10px; }
+  #histRange { flex: 1 1 0; }
+  #histMeasure button { padding: 0 8px; }
+  #histRange button { flex: 1 1 auto; padding: 0 6px; }
+  .ctl-list { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .ctl-list dd { margin-bottom: 6px; }
+  .ctl-custom { grid-template-columns: auto minmax(0, 1fr); }
+  .ctl-custom input { height: 44px; }
+  .ctl-custom .btn { grid-column: 1 / -1; justify-self: start; }
+  #histAxis button { min-width: 64px; }
+}
 
 .bottom-nav { display: none; }
 .phone-only, .t-short { display: none; }

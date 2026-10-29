@@ -278,6 +278,14 @@ counted as broker observations, or used by P&L, comparison or sparkline
 calculations. Historical accounting boundaries remain intact; the display layer
 does not recover missing records.
 
+History draws in Change by default: each desk's line is shifted by its own
+drawn value at the window's left edge, so every line starts at 0. The shift
+moves numbers only. The interval classifier, the no-data bands, the dashed
+estimates and "coverage unknown" are the ones above, the honest-scale floor
+stays ±0,5 % of the money, and the comparison's change is the exact
+difference of the two observed decimals it names. Money draws the money as
+observed. Neither ever writes to `history.json`.
+
 When selected J has a validated captured backfill curve in the current
 snapshot, the History tile also shows it in a distinct native-currency panel.
 The desk and range controls apply to that panel, but its USD or EUR realized

@@ -162,6 +162,46 @@ export function resolveView(range, { preset = 'all', view = null, follow = true 
   if (follow) return placeWindow(range, span, range[1], 1);
   return span >= min ? keepInside(range, view) : placeWindow(range, min, (a + b) / 2, 0.5);
 }
+// ---------- What History shows, and its address ----------
+// Change draws each desk as its distance in euros from its own value at the
+// window's left edge, so every line starts at 0; Money draws the money as
+// observed. The address #history?range=fit|day|week|month&desk=all|none|
+// j,joe,joel&mode=change|money names the chosen preset, desks and measure;
+// a part that is missing or unreadable keeps the current choice.
+export const HISTORY_MEASURES = Object.freeze(['change', 'money']);
+const RANGE_NAMES = Object.freeze({ all: 'fit', '1d': 'day', '1w': 'week', '1m': 'month' });
+export function parseHistoryRoute(params) {
+  const p = params instanceof URLSearchParams ? params : new URLSearchParams(String(params ?? '').replace(/^\?/, ''));
+  const out = {}, range = p.get('range'), desk = p.get('desk'), measure = p.get('mode');
+  const preset = Object.keys(RANGE_NAMES).find(key => RANGE_NAMES[key] === range);
+  if (preset) out.preset = preset;
+  if (desk === 'all') out.desks = DESK_IDS.slice();
+  else if (desk === 'none') out.desks = [];
+  else if (desk) {
+    const ids = desk.split(',');
+    if (ids.every(id => DESK_IDS.includes(id))) out.desks = DESK_IDS.filter(id => ids.includes(id));
+  }
+  if (HISTORY_MEASURES.includes(measure)) out.measure = measure;
+  return out;
+}
+export function historyRouteQuery({ preset = '1w', desks = DESK_IDS, measure = 'change' } = {}) {
+  const desk = desks.length === DESK_IDS.length ? 'all' : desks.length ? DESK_IDS.filter(id => desks.includes(id)).join(',') : 'none';
+  return `range=${RANGE_NAMES[preset] ?? 'week'}&desk=${desk}&mode=${HISTORY_MEASURES.includes(measure) ? measure : 'change'}`;
+}
+// Max in Change mode: over one desk's drawn values in time order (observed
+// values and the corners of its estimates; the lines between are straight),
+// the largest fall and rise from any value to a later one. Whatever window
+// the reader chooses, its Change values lie in between.
+export function changeExtremes(values) {
+  let lo = 0, hi = 0, min = Infinity, max = -Infinity;
+  for (const v of values) {
+    if (!Number.isFinite(v)) continue;
+    if (min <= max) { hi = Math.max(hi, v - min); lo = Math.min(lo, v - max); }
+    min = Math.min(min, v); max = Math.max(max, v);
+  }
+  return [lo, hi];
+}
+
 export const easeOut = t => 1 - (1 - clamp(t, 0, 1)) ** 3;
 export const lerpWindow = ([a0, b0], [a1, b1], t) => (t >= 1 ? [a1, b1] : [a0 + (a1 - a0) * t, b0 + (b1 - b0) * t]);
 // The overview strip maps the whole range onto its width, and back.
@@ -304,9 +344,10 @@ export function sharedWindowCompare(cols, ids, bounds, endAt) {
     runEnd = i;
   }
   if (runStart < 0 || runEnd <= runStart) return { ok: false, reason: lastBreak };
+  // Both ends also exactly (BigInt units), for figures in euros.
   return { ok: true, startAt: new Date(cols.t[runStart]).toISOString(), endAt: new Date(cols.t[runEnd]).toISOString(), after: runStart > from ? lastBreak : null, desks: ids.map(id => {
-    const start = cols.desks[id].equity[runStart], end = cols.desks[id].equity[runEnd];
-    return { id, start, end, pct: start === 0 ? null : (end - start) / start * 100 };
+    const start = cols.desks[id].equity[runStart], end = cols.desks[id].equity[runEnd], units = cols.desks[id].equityUnits;
+    return { id, start, end, startUnits: units?.[runStart] ?? null, endUnits: units?.[runEnd] ?? null, pct: start === 0 ? null : (end - start) / start * 100 };
   }) };
 }
 

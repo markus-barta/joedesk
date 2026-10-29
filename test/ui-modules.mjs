@@ -20,6 +20,7 @@ import './feed-robust.mjs';
 import './position-claims.mjs';
 import './history-view.mjs';
 import './header-nav.mjs';
+import './chart-axis.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -40,7 +41,7 @@ const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await im
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
-const { HS, historyChart, downsample, historyPointDetails, initHistoryInput, historyPreset } = await import('../public/joe/history.js');
+const { HS, historyChart, downsample, historyPointDetails, initHistoryInput, initHistoryControls, historyPreset, historyAxis, historyQuery, readHistoryRoute } = await import('../public/joe/history.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
 const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
@@ -1451,12 +1452,13 @@ test('history: long null gaps keep every marker without quadratic deduplication'
 });
 
 // Exercise the real SVG renderer and pointer handler without launching a browser.
-function historyPointer(t, points, { width = 300, range = '1d', zoom = null, end = Date.parse(points.at(-1)?.t ?? iso(10)), panning = () => false, thinned = null } = {}) {
+// The tests below read money values, so they draw Money (Change is History's default; its own tests follow).
+function historyPointer(t, points, { width = 300, range = '1d', zoom = null, end = Date.parse(points.at(-1)?.t ?? iso(10)), panning = () => false, thinned = null, measure = 'money' } = {}) {
   const saved = { document: globalThis.document, matchMedia: globalThis.matchMedia, state: { ...HS } };
   t.after(() => { globalThis.document = saved.document; globalThis.matchMedia = saved.matchMedia; Object.assign(HS, saved.state); });
   globalThis.document = htmlDocument('<div id="histChart"><div id="histStatus"></div><div class="ctip"></div></div><div id="histLive" aria-live="polite" aria-atomic="true"></div>');
   globalThis.matchMedia = () => ({ matches: true });
-  Object.assign(HS, { desks: hm.DESK_IDS.slice(), preset: range, view: zoom, follow: !zoom });
+  Object.assign(HS, { desks: hm.DESK_IDS.slice(), preset: range, view: zoom, follow: !zoom, measure });
   const el = document.querySelector('#histChart'), tip = el.querySelector('.ctip');
   Object.assign(el, { clientWidth: width, clientHeight: 250, getBoundingClientRect: () => ({ left: 0 }) });
   const matches = el.matches.bind(el);
@@ -1827,7 +1829,7 @@ function historyInput(t, points, { end = Date.parse(points.at(-1).t), ...state }
   const ctx = { now: new Date(end).toISOString(), states: { history: { value: { columns: hm.toColumns(points) } } } };
   let pending = 0;
   initHistoryInput({ schedule: () => { pending++; } });
-  Object.assign(HS, { desks: hm.DESK_IDS.slice(), preset: '1d', view: null, follow: true, ...state });
+  Object.assign(HS, { desks: hm.DESK_IDS.slice(), preset: '1d', view: null, follow: true, measure: 'money', ...state });
   const frame = () => { pending = 0; historyChart(ctx); return [...HS.shown]; };
   const target = { closest: () => null };
   return { chart, tip, frame, pending: () => pending,
@@ -1884,6 +1886,167 @@ test('JOED-145 input: when the last finger of a pinch lifts no gesture is left, 
     assert.match(h.hover(464), /Vienna time/, 'after a swipe as well');
     h.tip.innerHTML = '';
   }
+});
+
+// The y of a drawn path where it crosses x (its segments are straight).
+function pathY(d, x) {
+  const pts = [...d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])]);
+  for (let i = 1; i < pts.length; i++) {
+    const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
+    if (ax <= x && bx >= x) return bx === ax ? ay : ay + (by - ay) * (x - ax) / (bx - ax);
+  }
+  return null;
+}
+const pathPoints = d => [...d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])]);
+const svgRange = h => { const svg = h.el.querySelector(':scope > svg'); return [Number(svg.getAttribute('data-ylo')), Number(svg.getAttribute('data-yhi'))]; };
+
+test('JOED-154 history: Change starts every desk at 0 at the left edge, on a zero line, and its tooltip names since when; Money draws the money', t => {
+  const points = Array.from({ length: 121 }, (_, i) => pt(iso(i), { j: 5000 + i / 2, joe: 5100 - i / 4, joel: 4900 + (i % 10) }));
+  // The left edge falls between two observations, 15 s after minute 30.
+  const zoom = [T0 + 30 * 60000 + 15000, T0 + 90 * 60000];
+  const h = historyPointer(t, points, { zoom, measure: 'change', width: 600 });
+  const svg = h.el.querySelector(':scope > svg'), [lo, hi] = svgRange(h), zeroY = h.scale.Y(0);
+  assert.deepEqual([svg.dataset.measure, svg.getAttribute('data-zero')], ['change', '1']);
+  assert.ok(lo < 0 && hi > 0, `zero inside ${lo}…${hi}`);
+  assert.ok(hi - lo >= Number(svg.getAttribute('data-base')) * 0.01 - 1e-9 && Number(svg.getAttribute('data-base')) > 4900, 'the ±0,5 % floor is of the money');
+  for (const id of hm.DESK_IDS) {
+    const y = pathY(h.el.querySelector(`path[stroke="var(--desk-${id})"]`).getAttribute('d'), h.scale.pad.l);
+    assert.ok(Math.abs(y - zeroY) <= 0.1, `${id} starts at 0: ${y} vs ${zeroY}`);
+  }
+  assert.ok(h.el.querySelectorAll('line').some(l => l.getAttribute('stroke-width') === '1.2' && Math.abs(Number(l.getAttribute('y1')) - zeroY) <= 0.1), 'the zero line');
+  assert.ok(h.el.querySelectorAll('text').some(n => n.textContent === '€\u00a00') && h.el.querySelectorAll('text').some(n => /^\+€/.test(n.textContent)), 'signed axis labels with € 0');
+  assert.match(h.el.getAttribute('aria-label'), /^Each desk’s change since the start of the window, zoomed: /);
+  // At minute 60: J 5030 − 5015,125, Joe 5085 − 5092,4375, Joel 4900 − 4900,25.
+  const tip = h.hover(T0 + 60 * 60000);
+  assert.match(tip, /Change since Wed 14.Oct, 12:30/);
+  assert.match(tip, /J \+€.14,88 observed<br>Joe −€.7,44 observed<br>Joel −€.0,25 observed/);
+  const money = historyPointer(t, points, { zoom, measure: 'money', width: 600 });
+  assert.equal(money.el.querySelector(':scope > svg').getAttribute('data-zero'), null);
+  assert.ok(svgRange(money)[0] >= 4800 && svgRange(money)[1] <= 5200, `Money draws euros as observed: ${svgRange(money)}`);
+  assert.match(money.hover(T0 + 60 * 60000), /J €.5\.030,00 observed<br>Joe €.5\.085,00 observed<br>Joel €.4\.900,00 observed/);
+  assert.doesNotMatch(money.hover(T0 + 60 * 60000), /Change since/);
+});
+
+test('JOED-154 history: in Change the classifier, bands, estimates and coverage notes stay exactly those of Money; only the numbers move', t => {
+  const all = m => ({ j: 10 + m, joe: 20 + m, joel: 30 + m });
+  const points = [0, 0.5, 1, 1.5, 2, 30, 30.5, 31].map(m => pt(iso(m), all(m)));
+  const drawn = {};
+  for (const measure of ['money', 'change']) {
+    const h = historyPointer(t, points, { zoom: [T0, T0 + 31 * 60000], measure });
+    drawn[measure] = { bands: h.el.querySelectorAll('[data-gap]').map(b => [b.getAttribute('x'), b.getAttribute('width')]), estimates: h.el.querySelectorAll('[data-estimate]').length, tip: h.hover(T0 + 16 * 60000), h };
+  }
+  assert.deepEqual(drawn.change.bands, drawn.money.bands, 'the same hatched stretch');
+  assert.equal(drawn.change.estimates, drawn.money.estimates);
+  assert.equal(drawn.change.estimates, 3);
+  // Inside the outage J is estimated: 26 in money, 16 above its 10 at the left edge.
+  assert.match(drawn.money.tip, /J €.26,00 estimated/);
+  assert.match(drawn.change.tip, /J \+€.16,00 estimated/);
+  // A window that starts inside the outage starts from an estimate, and says so.
+  const inside = historyPointer(t, points, { zoom: [T0 + 10 * 60000, T0 + 31 * 60000], measure: 'change' }).hover(T0 + 31 * 60000);
+  assert.match(inside, /J \+€.21,00 observed, from an estimated start<br>Joe \+€.21,00 observed, from an estimated start<br>Joel \+€.21,00 observed, from an estimated start/);
+  assert.doesNotMatch(drawn.change.tip.replace(/estimated<br>/g, ''), /from an estimated start/, 'a start on observed data says nothing more');
+  // Each dashed estimate is shifted with its desk: J's starts at the same height as J's line there.
+  const h = drawn.change.h, j = pathPoints(h.el.querySelector('path[stroke="var(--desk-j)"]').getAttribute('d'));
+  const firstEstimate = pathPoints(h.el.querySelectorAll('[data-estimate]')[0].getAttribute('d'))[0];
+  assert.ok(j.some(([x, y]) => Math.abs(x - firstEstimate[0]) < 0.11 && Math.abs(y - firstEstimate[1]) < 0.11), 'the estimate leaves the line where it ends');
+});
+
+test('JOED-154 history: Auto re-fits as the window moves; Max holds everything kept, in both measures; Custom is exactly the reader’s', t => {
+  t.after(() => { for (const measure of ['change', 'money']) historyAxis(measure).setAxisMode({ mode: 'auto' }); });
+  const points = Array.from({ length: 241 }, (_, i) => pt(iso(i), { j: (5000 + 60 * Math.sin(i / 25)).toFixed(2), joe: (5000 + i / 3).toFixed(2), joel: (5000 - i / 6).toFixed(2) }));
+  const windows = [[T0, T0 + 60 * 60000], [T0 + 70 * 60000, T0 + 100 * 60000], [T0 + 150 * 60000, T0 + 240 * 60000], [T0 + 200 * 60000, T0 + 215 * 60000]];
+  const draw = (zoom, measure) => historyPointer(t, points, { zoom, measure, width: 600 });
+  for (const measure of ['money', 'change']) {
+    historyAxis(measure).setAxisMode({ mode: 'auto' });
+    const auto = windows.map(w => svgRange(draw(w, measure)));
+    assert.ok(new Set(auto.map(String)).size > 1, `${measure}: Auto re-fits to each window: ${JSON.stringify(auto)}`);
+    assert.equal(draw(windows[0], measure).el.querySelector(':scope > svg').getAttribute('data-axis'), 'auto');
+    historyAxis(measure).setAxisMode({ mode: 'max' });
+    const max = windows.map(w => draw(w, measure)), first = svgRange(max[0]);
+    for (const h of max) {
+      assert.deepEqual(svgRange(h), first, `${measure}: Max never rescales`);
+      assert.equal(h.el.querySelector(':scope > svg').getAttribute('data-axis'), 'max');
+      assert.match(h.el.getAttribute('aria-label'), /; vertical axis fixed to all kept history$/);
+      // Nothing is cut: every drawn point inside the plot lies inside the axis.
+      for (const id of hm.DESK_IDS) for (const [x, y] of pathPoints(h.el.querySelector(`path[stroke="var(--desk-${id})"]`).getAttribute('d'))) {
+        if (x >= h.scale.pad.l && x <= h.scale.pad.l + h.scale.pw) assert.ok(y >= h.scale.pad.t - 0.1 && y <= h.scale.pad.t + h.scale.ph + 0.1, `${measure} ${id}: ${y} inside the plot`);
+      }
+    }
+    if (measure === 'change') assert.ok(first[0] < 0 && first[1] > 0, 'Change Max holds the largest fall and rise, around zero');
+    else assert.ok(first[0] <= 4960 && first[1] >= 5080, `Money Max holds every kept value: ${first}`);
+  }
+  const custom = historyAxis('change').setAxisMode({ mode: 'custom', min: '-5', max: '5' });
+  assert.equal(custom.ok, true);
+  const h = draw(windows[2], 'change');
+  assert.deepEqual(svgRange(h), [-5, 5]);
+  assert.deepEqual([h.el.querySelector(':scope > svg').getAttribute('data-axis'), h.el.querySelector(':scope > svg').getAttribute('data-zero')], ['custom', null]);
+  assert.match(h.el.getAttribute('aria-label'), /; custom vertical axis from −€.5,00 to \+€.5,00$/);
+  assert.ok(h.el.querySelectorAll('[data-axis-note]').some(n => /some values lie above it/.test(n.textContent)), 'the cut lines are named');
+  assert.equal(svgRange(draw(windows[2], 'money'))[0] > 4000, true, 'Money keeps its own choice (Max here), Change its custom one');
+});
+
+test('JOED-154 history: the address names the preset, desks and measure; reading one shows its preset from the newest time', t => {
+  const saved = { ...HS, desks: HS.desks.slice() };
+  t.after(() => Object.assign(HS, saved));
+  Object.assign(HS, { desks: hm.DESK_IDS.slice(), preset: '1w', view: [T0, T0 + 60000], follow: false, measure: 'change' });
+  assert.equal(historyQuery(), 'range=week&desk=all&mode=change', 'a manual window keeps the preset it came from');
+  readHistoryRoute(new URLSearchParams('range=day&desk=j,joel&mode=money'));
+  assert.deepEqual([HS.preset, HS.view, HS.follow, HS.desks, HS.measure], ['1d', null, true, ['j', 'joel'], 'money']);
+  assert.equal(historyQuery(), 'range=day&desk=j,joel&mode=money');
+  readHistoryRoute('range=year&desk=j,bob&mode=live');
+  assert.deepEqual([HS.preset, HS.desks, HS.measure], ['1d', ['j', 'joel'], 'money'], 'unreadable parts keep the choice');
+  readHistoryRoute('desk=none');
+  assert.equal(historyQuery(), 'range=day&desk=none&mode=money');
+  readHistoryRoute('range=fit&desk=all&mode=change');
+  assert.equal(historyQuery(), 'range=fit&desk=all&mode=change');
+});
+
+test('JOED-154 fix 3: a corrected bound is valid again: invalid, corrected, then Enter leaves both fields valid, the focused one included', t => {
+  const saved = { document: globalThis.document, state: { ...HS, desks: HS.desks.slice() } };
+  t.after(() => { globalThis.document = saved.document; Object.assign(HS, saved.state); historyAxis('change').setAxisMode({ mode: 'auto' }); });
+  globalThis.document = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  const on = new Map(), listen = (node, name) => { node.addEventListener = (type, fn) => on.set(`${name}:${type}`, fn); };
+  const [ctl, axisSeg, form, min, max] = ['#histCtl', '#histAxis', '#histAxisForm', '#histAxisMin', '#histAxisMax'].map(id => document.querySelector(id));
+  listen(ctl, 'ctl'); listen(axisSeg, 'axis'); listen(form, 'form'); listen(document, 'document');
+  for (const field of [ctl, min, max]) field.focus = () => { document.activeElement = field; };
+  Object.assign(HS, { measure: 'change' });
+  initHistoryControls({ schedule: () => {} });
+  historyAxis('change').setAxisMode({ mode: 'custom', min: -10, max: 10 });
+  const submit = () => on.get('form:submit')({ preventDefault() {} });
+  const state = () => [min, max].map(f => [f.getAttribute('aria-invalid'), f.getAttribute('aria-describedby')]);
+  min.value = '4.950'; max.value = '30'; min.focus();
+  submit();
+  assert.deepEqual(state(), [['true', 'histAxisUnit histAxisError'], ['false', 'histAxisUnit']], 'the unreadable bottom is invalid and names the error');
+  assert.match(document.querySelector('#histAxisError').textContent, /without grouping/);
+  assert.equal(document.activeElement, min);
+  min.value = '-12';
+  submit();
+  assert.deepEqual(state(), [['false', 'histAxisUnit'], ['false', 'histAxisUnit']], 'both valid again, the focused one included');
+  assert.equal(document.querySelector('#histAxisError').textContent, '');
+  assert.deepEqual(historyAxis('change').get(), { mode: 'custom', min: -12, max: 30 });
+  assert.deepEqual([min.value, max.value], ['−12', '30'], 'the fields show the bounds as read');
+  // A top that is not above the bottom marks the top only, and a new choice clears it.
+  max.value = '-20'; max.focus();
+  submit();
+  assert.deepEqual(state(), [['false', 'histAxisUnit'], ['true', 'histAxisUnit histAxisError']]);
+  on.get('axis:click')({ target: { closest: () => document.querySelector('#histAxis [data-axis="auto"]') } });
+  assert.deepEqual(state(), [['false', 'histAxisUnit'], ['false', 'histAxisUnit']]);
+});
+
+test('JOED-154 fix 4: the History tools take no CSS order, so Tab follows what the eye sees; a phone shows Follow between the desks and Change | Money, as in the page', () => {
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /hist-tools|hist-view|hist-follow|histDesks|histFollow|histMeasure|histRange/.test(selector));
+  assert.ok(rules.length > 4);
+  assert.deepEqual(rules.filter(([, , body]) => /(^|[\s;])order\s*:/.test(body)).map(([selector]) => selector.trim()), [], 'no rule reorders them');
+  const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  const ids = [], walk = node => { for (const child of node.children) if (typeof child !== 'string') { if (['histDesks', 'histFollowPhone', 'histMeasure', 'histRange', 'histFollow'].includes(child.id)) ids.push(child.id); walk(child); } };
+  walk(doc.querySelector('.hist-tools'));
+  assert.deepEqual(ids, ['histDesks', 'histFollowPhone', 'histMeasure', 'histRange', 'histFollow'], 'page order: desks, Follow (phone), Change | Money, presets, Follow (wider)');
+  assert.ok(['#histFollowPhone', '#histFollow'].every(id => doc.querySelector(id).getAttribute('data-follow') !== null), 'both are the one Follow toggle');
+  // Which copy shows: the phone one only at 480 px or less, the other above.
+  assert.match(css, /\.hist-follow-phone \{ display: none; \}/);
+  const phone = css.slice(css.indexOf('@media (max-width: 480px) {\n  .hist-tools { gap: 8px; }'));
+  assert.match(phone.slice(0, phone.indexOf('\n}')), /\.hist-view > \.grow, #histFollow \{ display: none; \}[\s\S]*\.hist-follow-phone \{ display: inline-flex;/);
 });
 
 test('history: basis breaks exclude older records and compare stays on observed, compatible points', () => {

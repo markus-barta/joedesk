@@ -1,30 +1,54 @@
-// History: each desk's money as observed, dashed where a desk's numbers are
-// estimated and hatched where no numbers arrived, an overview strip of all
-// kept history with the shown window, J's bookkeeping with its captured
+// History: each desk's change since the start of the shown window (or its
+// money as observed), dashed where a desk's numbers are estimated and
+// hatched where no numbers arrived, an overview strip of all kept history
+// with the shown window, its Controls, J's bookkeeping with its captured
 // results, and the desk changes this browser saw.
 import { $, $$, icon, term, st, pl, inlineMark, swatch, ageSpan, patch, statePhrase, stateCaption } from './ui.js';
-import { esc, amountOf, eur, pct, age, dayDDM, dayDM, timeHM, money, digits, NB } from './format.js';
+import { esc, amountOf, eur, age, dayDDM, dayDM, timeHM, money, digits, MINUS, NB } from './format.js';
 import { decimalUnits } from './contracts/decimal.mjs';
 import { cellReason } from './health.js';
 import { exactCell } from './performance.js';
-import { drawChart, eurAxis, axis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor } from './chart.js';
+import { drawChart, eurAxis, changeAxis, axis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor, createAxisMode, chartHintSeen, dismissChartHint, DRAWN_SLACK } from './chart.js';
 import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, coverageUnknownAt, sharedWindowCompare, basisNotice, toColumns, rowAt, rangeSpanMs,
   keptRange, placeWindow, panWindow, zoomWindow, resizeWindow, atLiveEdge, endsAtNewest, followWindow, presetSpan, windowPreset, resolveView,
-  missingBands, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
+  missingBands, easeOut, lerpWindow, toStrip, fromStrip, parseHistoryRoute, historyRouteQuery, changeExtremes } from './history-model.js';
 import { viennaDay, zonedInstant, VIENNA, NY } from './time.mjs';
 
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
 const EMPTY = toColumns([]);
 // The chosen desks, the last chosen preset, a manual window (null while a
-// preset shows) and whether the window follows the newest time. full and
+// preset shows), whether the window follows the newest time and what the
+// lines measure ('change' since the window's start, or 'money'). full and
 // shown are the kept range and the window drawn last, for the input below.
-export const HS = { desks: DESK_IDS.slice(), preset: '1w', view: null, follow: true, full: null, shown: null };
+export const HS = { desks: DESK_IDS.slice(), preset: '1w', view: null, follow: true, measure: 'change', full: null, shown: null };
 const RANGE_WORD = { '1d': 'last day', '1w': 'last week', '1m': 'last month', all: 'all kept history' };
 const DAY = 864e5, HOUR = 3600e3;
+const SUBTITLE = {
+  change: 'Each desk’s change in € since the start of the view · paper · EUR · kept holdings left out',
+  money: 'Each desk’s money as observed · paper · EUR · kept holdings left out',
+};
+
+// The vertical axis, one choice per measure (their euros differ), each
+// remembered in this browser (chart.js: createAxisMode).
+const AXES = { change: createAxisMode('history.change'), money: createAxisMode('history.money') };
+export const historyAxis = (measure = HS.measure) => AXES[measure] ?? AXES.change;
+
+// The address of what History shows (history-model.js: the route format).
+export const historyQuery = () => historyRouteQuery(HS);
+// A route's parameters (URLSearchParams or a query string), before History
+// renders; a missing or unreadable one keeps the current choice. A preset
+// shows from the newest time, as its button does.
+export function readHistoryRoute(params) {
+  const route = parseHistoryRoute(params);
+  if (route.preset) { HS.preset = route.preset; HS.view = null; HS.follow = true; }
+  if (route.desks) HS.desks = route.desks;
+  if (route.measure) HS.measure = route.measure;
+  return route;
+}
 
 function toolsHtml() {
   return {
-    desks: `<button type="button" data-hdesk="all" aria-pressed="${HS.desks.length === 3}">All desks</button>${DESK_IDS.map(id => `<button type="button" data-hdesk="${id}" aria-pressed="${HS.desks.includes(id)}">${inlineMark(id)}${LABEL[id]}</button>`).join('')}`,
+    desks: `${DESK_IDS.map(id => `<button type="button" data-hdesk="${id}" aria-pressed="${HS.desks.includes(id)}">${inlineMark(id)}${LABEL[id]}</button>`).join('')}<button type="button" data-hdesk="all" aria-pressed="${HS.desks.length === 3}" aria-label="All desks"><span class="t-long">All desks</span><span class="t-short">All</span></button>`,
   };
 }
 
@@ -50,24 +74,51 @@ export function historyWindow(cols, endAt) {
 }
 const thinnedOf = cell => { const at = Date.parse(cell?.value?.compactedThrough ?? ''); return Number.isFinite(at) ? at : null; };
 
-function compareLine(cols, bounds, endAt) {
-  if (HS.desks.length < 2) return 'Choose two or more desks to compare them over the same window.';
+// The comparison follows the measure: in Change, each desk's change in
+// euros over the stretch it compares ("Change from … to …: J −€ 1,20 · …");
+// in Money, its money at both ends ("J € 4.976,58", an arrow, "€ 5.000,00"), exact
+// from the stored decimals. { text, html }: the words, and the markup with
+// an arrow icon between the two ends (the words say "to").
+const plainLine = text => ({ text, html: esc(text) });
+function compareLine(cols, bounds, endAt, measure = HS.measure) {
+  if (HS.desks.length < 2) return plainLine('Choose two or more desks to compare them over the same window.');
   const result = sharedWindowCompare(cols, HS.desks, bounds, endAt);
   if (!result.ok) {
-    return result.reason === 'incomplete-coverage' ? 'Comparing needs the same moments for every chosen desk in this window.'
+    return plainLine(result.reason === 'incomplete-coverage' ? 'Comparing needs the same moments for every chosen desk in this window.'
       : result.reason === 'gap' ? 'Comparing needs two moments with continuous data in this window.'
         : result.reason === 'incompatible-basis' ? 'Comparing needs two moments on every chosen desk’s current bookkeeping basis.'
-          : result.reason === 'insufficient-points' ? 'Not enough history in this window to compare.' : 'Choose two or more desks to compare them over the same window.';
+          : result.reason === 'insufficient-points' ? 'Not enough history in this window to compare.' : 'Choose two or more desks to compare them over the same window.');
   }
-  const when = iso => `${dayDDM(iso)}, ${timeHM(iso)}`, figures = result.desks.map(d => `${LABEL[d.id]} ${pct(d.pct, 2, true)}`).join(' · ');
+  return compareWords(result, measure);
+}
+function compareWords(result, measure) {
+  const when = iso => `${dayDDM(iso)}, ${timeHM(iso)}`, change = measure === 'change';
+  const figures = result.desks.map(d => {
+    const exact = typeof d.startUnits === 'bigint' && typeof d.endUnits === 'bigint';
+    const start = exact ? d.startUnits : d.start, end = exact ? d.endUnits : d.end, name = LABEL[d.id];
+    if (change) return plainLine(`${name} ${eur(end - start, true)}`);
+    return { text: `${name} ${eur(start)} to ${eur(end)}`, html: `${esc(name)} ${esc(eur(start))}${icon('arrow', 'i cmp-to')}<span class="vh"> to </span>${esc(eur(end))}` };
+  });
   // A comparison that cannot use the whole window names the stretch it uses:
   // continuous data (every interval observed, every number there) after a gap
   // or a missing number, or the current bookkeeping after a basis change.
+  let lead;
   if (result.after) {
     const run = age((Date.parse(result.endAt) - Date.parse(result.startAt)) / 1000);
-    return `Last ${run} ${result.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'with continuous data'}, from ${when(result.startAt)}: ${figures}`;
-  }
-  return `From ${when(result.startAt)} to ${when(result.endAt)}: ${figures}`;
+    const stretch = `${run} ${result.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'with continuous data'}, from ${when(result.startAt)}`;
+    lead = change ? `Change in the last ${stretch}` : `Last ${stretch}`;
+  } else lead = `${change ? 'Change from' : 'From'} ${when(result.startAt)} to ${when(result.endAt)}`;
+  return { text: `${lead}: ${figures.map(f => f.text).join(' · ')}`, html: `${esc(lead)}: ${figures.map(f => f.html).join(' · ')}` };
+}
+// The longest line each measure can write (three desks, the longest stretch
+// wording, wide amounts and a wide date, Wed 28 May), laid out invisibly
+// under the real one: the line keeps one height per measure while presets,
+// desks and the window change.
+const SIZING_AT = Date.parse('2025-05-28T21:59:00.000Z');
+const sizing = {};
+function compareSizing(measure) {
+  return (sizing[measure] ??= compareWords({ after: 'incompatible-basis', startAt: new Date(SIZING_AT - 86340e3).toISOString(), endAt: new Date(SIZING_AT).toISOString(),
+    desks: DESK_IDS.map(id => (measure === 'change' ? { id, start: 0, end: -8888.88 } : { id, start: 88888.88, end: 88888.88 })) }, measure).html);
 }
 
 // Display-only thinning: per pixel bucket keep the first, lowest, highest and
@@ -131,11 +182,15 @@ export function wallTicks(from, to, stepMin) {
 }
 const midnightLines = (from, to) => wallTicks(from, to, 1440).map(t => t.at);
 const dayWord = at => dayDDM(new Date(at).toISOString()).split(NB)[0];
-// Axis labels at least `gap` pixels apart: clock times for a day or two,
-// dates beyond; a label at midnight is always the date, and a window that
-// starts during a day names that day at its left edge ("Wed 28" before the
-// midnight line marked "Thu 29").
-function axisLabels(x0, x1, pw, gap = 56) {
+// Axis labels at least `gap` pixels apart at every width: clock times for a
+// day or two, dates beyond; a label at midnight is always the date, and a
+// window that starts during a day names that day at its left edge ("Wed 28"
+// before the midnight line marked "Thu 29"). Steps are planned from the
+// average pixels per minute; a last pass drops any label a short day (the
+// spring clock change) or the left-edge date brings closer than `gap`. The
+// gap includes chart.js's DRAWN_SLACK, so labels drawn to a tenth of a pixel
+// stay 56 px apart.
+function axisLabels(x0, x1, pw, gap = 56 + DRAWN_SLACK) {
   const span = x1 - x0, perMin = pw / (span / 60e3) || 0;
   const stepMin = [5, 10, 15, 30, 60, 120, 180, 360, 720].find(s => s * perMin >= gap);
   const labels = [];
@@ -150,8 +205,10 @@ function axisLabels(x0, x1, pw, gap = 56) {
     const every = [1, 2, 4, 7, 14].find(n => n * 1440 * perMin >= gap) ?? 14;
     wallTicks(x0, x1, 1440).forEach((t, i) => { if (i % every === 0) labels.push({ x: t.at, text: dayWord(t.at), anchor: 'start' }); });
   }
+  const px = l => (l.x - x0) / span * pw, kept = [];
+  for (const l of labels) if (!kept.length || px(l) - px(kept[kept.length - 1]) >= gap) kept.push(l);
   // A label never runs past the plot's right edge.
-  return labels.filter(l => (l.x - x0) / span * pw < pw - 40);
+  return kept.filter(l => px(l) < pw - 40);
 }
 
 // First point at or after x; both observations and gap samples are ordered.
@@ -186,12 +243,15 @@ function historyHit(observed, gaps, x) {
 
 // One wording for the visible tooltip and the polite keyboard announcement.
 // Inside a stretch without rows that an older version may have thinned
-// (coverageUnknownAt), a last line says its coverage is unknown.
-export function historyPointDetails(near, x, desks, unknown = false) {
-  const at = new Date(Math.round(x)).toISOString();
-  const lines = [`${dayDDM(at)}, ${timeHM(at)} Vienna time`, ...desks.map((id, i) => {
+// (coverageUnknownAt), a last line says its coverage is unknown. In Change
+// (since: the window's start, in ms) each value is that desk's signed change
+// since then, and a second line says since when; a desk whose value at that
+// start is itself an estimate (estimatedStart[i]) says so.
+export function historyPointDetails(near, x, desks, unknown = false, since = null, estimatedStart = []) {
+  const at = new Date(Math.round(x)).toISOString(), change = Number.isFinite(since);
+  const lines = [`${dayDDM(at)}, ${timeHM(at)} Vienna time`, ...(change ? [`Change since ${when(since)}`] : []), ...desks.map((id, i) => {
     const p = near[i];
-    return `${LABEL[id]} ${p ? `${eur(p.v)} ${p.estimated ? 'estimated' : 'observed'}` : 'no value here'}`;
+    return `${LABEL[id]} ${p ? `${eur(p.v, change)} ${p.estimated ? 'estimated' : 'observed'}${change && estimatedStart[i] ? ', from an estimated start' : ''}` : 'no value here'}`;
   }), ...(unknown ? ['Thinned or not reported: coverage unknown'] : [])];
   return { text: lines.join('\n'), html: `<b>${esc(lines[0])}</b>${lines.slice(1).map(line => `<br>${esc(line)}`).join('')}` };
 }
@@ -259,11 +319,47 @@ function spanText(ms) {
   if (ms >= 2 * HOUR) return `${Math.round(ms / HOUR)}${NB}h`;
   return `${Math.max(1, Math.round(ms / 60e3))}${NB}min`;
 }
-function chartLabel(range, shown) {
+function chartLabel(range, shown, yAxis = { mode: 'auto' }) {
+  const what = HS.measure === 'change' ? 'Each desk’s change since the start of the window' : 'Each desk’s money';
+  const axisWords = yAxis.mode === 'max' ? '; vertical axis fixed to all kept history'
+    : yAxis.mode === 'custom' ? `; custom vertical axis from ${eur(yAxis.min, HS.measure === 'change')} to ${eur(yAxis.max, HS.measure === 'change')}` : '';
   const pressed = windowPreset(range, shown, HS.preset);
-  if (pressed === 'all' || (pressed && presetSpan(range, pressed) < rangeSpanMs(pressed))) return `Each desk’s money, ${RANGE_WORD.all}`;
-  if (pressed && HS.follow && atLiveEdge(range, shown)) return `Each desk’s money, ${RANGE_WORD[pressed]}`;
-  return `Each desk’s money, zoomed: ${when(shown[0])} to ${when(shown[1])} Vienna time`;
+  if (pressed === 'all' || (pressed && presetSpan(range, pressed) < rangeSpanMs(pressed))) return `${what}, ${RANGE_WORD.all}${axisWords}`;
+  if (pressed && HS.follow && atLiveEdge(range, shown)) return `${what}, ${RANGE_WORD[pressed]}${axisWords}`;
+  return `${what}, zoomed: ${when(shown[0])} to ${when(shown[1])} Vienna time${axisWords}`;
+}
+// Change: a desk's value at the window's left edge, where its line starts
+// at 0. That is the drawn line there: the observed line where it is solid,
+// otherwise the estimate that crosses the edge (and then the start is an
+// estimate, which the tooltip says).
+function edgeValue(d, gaps, x) {
+  const v = lineAt(d.lines, x);
+  if (v !== null) return { v, estimated: false };
+  const g = gaps.find(s => s[0].x <= x && s[s.length - 1].x >= x);
+  if (g) return { v: segmentAt(g, x), estimated: true };
+  const next = d.lines.find(p => p.v !== null && p.x >= x);
+  return next ? { v: next.v, estimated: false } : { v: ASSUMED_BASELINE, estimated: true };
+}
+// Max: every drawn value of the chosen desks over all kept history (the
+// observed lines and the corners of their estimates), as Money's lowest and
+// highest value, Change's largest fall and rise (changeExtremes) and the
+// money the scale's ±0,5 % floor is taken of. Kept until the model changes.
+function historyExtremes(m, gaps) {
+  if (m.extremes) return m.extremes;
+  let lo = Infinity, hi = -Infinity, fall = 0, rise = 0;
+  const firsts = [];
+  m.models.forEach((d, i) => {
+    const pts = d.lines.filter(p => p.v !== null).map(p => [p.x, p.v]);
+    for (const g of gaps[i]) pts.push([g[0].x, g[0].y], [g[g.length - 1].x, g[g.length - 1].y]);
+    pts.sort((p, q) => p[0] - q[0]);
+    const values = pts.map(p => p[1]);
+    for (const v of values) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    const [down, up] = changeExtremes(values);
+    fall = Math.min(fall, down); rise = Math.max(rise, up);
+    firsts.push(values[0] ?? ASSUMED_BASELINE);
+  });
+  m.extremes = { money: lo <= hi ? [lo, hi] : null, change: [fall, rise], base: firsts.length ? firsts.reduce((a, b) => a + b, 0) / firsts.length : ASSUMED_BASELINE };
+  return m.extremes;
 }
 let lastScale = null;
 export function historyChart(ctx) {
@@ -285,28 +381,38 @@ export function historyChart(ctx) {
   const [x0, x1] = frameWindow(target);
   HS.full = range; HS.shown = [x0, x1];
   const pw = Math.max(1, el.clientWidth - 78);
+  const change = HS.measure === 'change', yAxis = historyAxis().get();
+  // Change shifts each desk by its value at the left edge, so every line
+  // starts at 0; Money draws the money itself. The classifier, the bands and
+  // the estimates are the same in both; only the numbers move.
+  const starts = m.models.map((d, i) => (change ? edgeValue(d, gaps[i], x0) : { v: 0, estimated: false }));
+  const shifts = starts.map(start => start.v), estimatedStart = starts.map(start => start.estimated);
   const series = [], firsts = [], yValues = [];
   m.models.forEach((d, i) => {
+    const shift = shifts[i];
     const from = Math.max(0, pointAt(d.lines, x0) - 1), to = Math.min(d.lines.length, pointAt(d.lines, x1) + 1);
     const visible = downsample(d.lines.slice(from, to), x0, x1, Math.max(200, el.clientWidth));
     let first = null;
-    for (const p of visible) if (p.v !== null && p.x >= x0 && p.x <= x1) { yValues.push(p.v); first ??= p.v; }
-    for (const x of [x0, x1]) { const v = lineAt(d.lines, x); if (v !== null) yValues.push(v); }
+    for (const p of visible) if (p.v !== null && p.x >= x0 && p.x <= x1) { yValues.push(p.v - shift); first ??= p.v; }
+    for (const x of [x0, x1]) { const v = lineAt(d.lines, x); if (v !== null) yValues.push(v - shift); }
     let firstGap = null;
     // Each estimate is one straight segment (its markers lie on it).
     for (const g of gaps[i]) {
       if (g[g.length - 1].x < x0 || g[0].x > x1) continue;
       const a = Math.max(x0, g[0].x), b = Math.min(x1, g[g.length - 1].x);
-      yValues.push(segmentAt(g, a), segmentAt(g, b));
+      yValues.push(segmentAt(g, a) - shift, segmentAt(g, b) - shift);
       firstGap ??= segmentAt(g, a);
-      series.push({ pts: [{ x: g[0].x, v: g[0].y }, { x: g[g.length - 1].x, v: g[g.length - 1].y }], color: 'var(--est)', estimate: true, desk: d.id });
+      series.push({ pts: [{ x: g[0].x, v: g[0].y - shift }, { x: g[g.length - 1].x, v: g[g.length - 1].y - shift }], color: 'var(--est)', estimate: true, desk: d.id });
     }
     firsts.push(first ?? firstGap ?? ASSUMED_BASELINE);
-    series.push({ pts: visible, color: `var(--desk-${d.id})`, w: 1.8, live: true, area: false, desk: d.id });
+    series.push({ pts: shift ? visible.map(p => (p.v === null ? p : { x: p.x, v: p.v - shift })) : visible, color: `var(--desk-${d.id})`, w: 1.8, live: true, area: false, desk: d.id });
   });
+  // The ±0,5 % floor is always taken of the money, also in Change: a change
+  // of a few cents never fills the chart.
   const base = firsts.length ? firsts.reduce((a, b) => a + b, 0) / firsts.length : ASSUMED_BASELINE;
-  const hitTest = xv => m.models.map((d, i) => historyHit(d.hits, gaps[i], xv));
-  const tipFmt = (near, xv) => historyPointDetails(near, xv, HS.desks, coverageUnknownAt(cols, xv, thin));
+  const most = yAxis.mode === 'max' && HS.desks.length ? historyExtremes(m, gaps) : null;
+  const hitTest = xv => m.models.map((d, i) => { const hit = historyHit(d.hits, gaps[i], xv); return hit && shifts[i] ? { ...hit, v: hit.v - shifts[i] } : hit; });
+  const tipFmt = (near, xv) => historyPointDetails(near, xv, HS.desks, coverageUnknownAt(cols, xv, thin), change ? x0 : null, estimatedStart);
   const points = [x0, ...m.xs.slice(firstAt(m.xs, x0), firstAt(m.xs, x1, true)), x1].filter((x, i, list) => x !== list[i - 1]);
   // Synthetic window edges can snap to an observation in the same minute.
   // Keep every original observation, but skip an edge that repeats its neighbour.
@@ -315,20 +421,24 @@ export function historyChart(ctx) {
     if (i < 0 || adjacent === undefined || m.models.some(d => d.hits[pointAt(d.hits, edge)]?.x === edge)) continue;
     if (tipFmt(hitTest(edge), edge).text === tipFmt(hitTest(adjacent), adjacent).text) points.splice(i, 1);
   }
+  // The vertical axis: Auto re-fits to the window on every pan and zoom,
+  // gliding over 180 ms; Max holds every value kept; Custom is the reader's.
+  // Labels keep 56 px apart on both axes.
   const scale = drawChart(el, {
-    series, xDomain: [x0, x1], base, yValues, margin: 0.08, yFmt: eurAxis, ticks: 5, pad: { t: 12 + top },
+    series, xDomain: [x0, x1], base: most ? most.base : base, yValues, margin: 0.08, yFmt: change ? changeAxis : eurAxis, ticks: 5, tickGap: 56, pad: { t: 12 + top },
+    zero: change, axis: yAxis, maxValues: most?.[HS.measure] ?? null, ease: 180, easeKey: HS.measure, again: () => input.schedule?.('history-anim'),
     vlines: midnightLines(x0, x1).map(x => ({ x, dashed: true })), xLabels: axisLabels(x0, x1, pw), bands, now: endAt,
     empty: !HS.desks.length, emptyText: 'Choose a desk to draw its line',
-    label: chartLabel(range, [x0, x1]),
+    label: chartLabel(range, [x0, x1], yAxis),
     isPanning: () => Boolean(ctx.panning?.() || input.blocksTip()), isPinned: () => input.pinned,
     inspect: { ...inspection, points },
     hitTest, tipFmt,
   });
   lastScale = scale;
   el.classList.toggle('pannable', canPan());
-  // The drawn window, for the zoom and pan checks.
+  // The drawn window and what it measures, for the zoom, pan and mode checks.
   const svg = el.querySelector(':scope > svg');
-  if (svg) { svg.dataset.x0 = String(Math.round(x0)); svg.dataset.x1 = String(Math.round(x1)); }
+  if (svg) { svg.dataset.x0 = String(Math.round(x0)); svg.dataset.x1 = String(Math.round(x1)); svg.dataset.measure = HS.measure; }
   if (input.announce && inspection.live) { inspection.live.textContent = input.announce; input.announce = null; }
   if (HS.desks.length && range[1] > range[0]) drawOverview(m, range, gaps, bands, [x0, x1]);
   else overviewOff();
@@ -353,10 +463,13 @@ function overviewSvg(m, range, gaps, bands, width, height) {
   const Y = v => (top + (ax.hi - v) / (ax.hi - ax.lo) * (bottom - top)).toFixed(1);
   let g = bands.length ? '<defs><pattern id="ht-mini" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="var(--line-2)" stroke-width="1.2"/></pattern></defs>' : '';
   for (const [a, b] of bands) g += `<rect x="${X(a)}" y="0" width="${Math.max(1, toStrip(range, width, b) - toStrip(range, width, a)).toFixed(1)}" height="${bottom + 3}" fill="url(#ht-mini)"/>`;
-  const days = wallTicks(k0, k1, 1440), every = [1, 2, 4, 7, 14].find(n => n * DAY / (k1 - k0) * width >= 46) ?? 14;
+  const days = wallTicks(k0, k1, 1440), every = [1, 2, 4, 7, 14].find(n => n * DAY / (k1 - k0) * width >= 56) ?? 14;
+  // Day labels keep 56 px apart as drawn, also across a 23-hour day.
+  let labelled = -Infinity;
   days.forEach((t, i) => {
     g += `<line x1="${X(t.at)}" x2="${X(t.at)}" y1="0" y2="${bottom + 3}" stroke="var(--line)"/>`;
-    if (i % every === 0 && toStrip(range, width, t.at) < width - 34) g += `<text x="${(toStrip(range, width, t.at) + 3).toFixed(1)}" y="${height - 4}">${esc(dayWord(t.at))}</text>`;
+    const at = toStrip(range, width, t.at);
+    if (i % every === 0 && at < width - 34 && at - labelled >= 56 + DRAWN_SLACK) { g += `<text x="${(at + 3).toFixed(1)}" y="${height - 4}">${esc(dayWord(t.at))}</text>`; labelled = at; }
   });
   gaps.forEach(list => { for (const s of list) g += `<path d="M${X(s[0].x)} ${Y(s[0].y)} L${X(s[s.length - 1].x)} ${Y(s[s.length - 1].y)}" fill="none" stroke="var(--est)" stroke-width="1" stroke-dasharray="3 3"/>`; });
   m.models.forEach((d, i) => {
@@ -418,12 +531,16 @@ function drawOverview(m, range, gaps, bands, [a, b]) {
 // sideways; a plain vertical wheel always scrolls the page.
 const input = { schedule: null, drag: null, touch: null, pinned: false, announce: null, blocksTip: () => false };
 const canPan = () => Boolean(HS.full && HS.shown && HS.shown[1] - HS.shown[0] < (HS.full[1] - HS.full[0]) * 0.999);
+// The first gesture or key on the chart or its strip retires the first-visit
+// hint for good (its room stays, so nothing moves).
+function gestured() { if (dismissChartHint()) $('#histHint')?.setAttribute('data-seen', ''); }
 // A person's change of the window. Its width may match a preset again; it
 // follows the newest time only while it ends exactly there, so a pan of a
 // single pixel into the past turns Follow off.
 function setView(next) {
   if (!HS.full) return;
   HS.view = next; HS.follow = endsAtNewest(HS.full, next);
+  gestured();
   input.schedule?.('history-pan');
 }
 // The window a move starts from: the frame on screen while a glide runs,
@@ -449,7 +566,7 @@ export function toggleFollow() {
   glide();
   HS.view = followWindow(HS.full, HS.shown); HS.follow = true;
 }
-const fitAll = () => { historyPreset('all'); input.schedule?.('history-range'); };
+const fitAll = () => { gestured(); historyPreset('all'); input.schedule?.('history-range'); };
 
 export function initHistoryInput({ schedule }) {
   input.schedule = schedule;
@@ -572,6 +689,7 @@ export function initHistoryInput({ schedule }) {
   // Keys on the focused chart; the arrows alone stay with point inspection.
   chart.addEventListener('keydown', e => {
     if (e.target !== chart || e.altKey || e.ctrlKey || e.metaKey || !HS.shown) return;
+    if (!['Tab', 'Shift'].includes(e.key)) gestured();
     const shown = current(), [a, b] = shown, w = b - a, anchor = HS.follow ? b : (a + b) / 2;
     const next = e.shiftKey && e.key === 'ArrowLeft' ? panWindow(HS.full, shown, -w * 0.1)
       : e.shiftKey && e.key === 'ArrowRight' ? panWindow(HS.full, shown, w * 0.1)
@@ -632,6 +750,99 @@ export function initHistoryInput({ schedule }) {
     e.preventDefault(); stop();
     if (!step) glide();
     setView(next);
+  });
+}
+
+// ---------- Controls ----------
+// One small button under the chart opens the gestures and keys and the
+// vertical axis (Auto, Max, Custom). The button again, Escape or a click
+// outside closes it; Escape returns focus to the button. Auto and Max apply
+// at once; Custom starts from the range on screen, and its bottom and top
+// apply with Enter or Apply, in euros of the current measure.
+const AXIS_NOTE = {
+  auto: () => 'Fits the shown window and glides with every move.',
+  max: () => (HS.measure === 'change' ? 'Holds every change all kept history can show, so moving never rescales.' : 'Holds all kept history, so moving never rescales.'),
+  custom: () => `Your own bottom and top, in euros${HS.measure === 'change' ? ' of change' : ''}.`,
+};
+const typedBound = n => `${n < 0 ? MINUS : ''}${String(Math.abs(n)).replace('.', ',')}`;
+const axisShown = { key: null };
+// A field's validation state: invalid fields name the error, valid ones only
+// the unit. Set on every check, whatever has focus.
+function markBound(field, invalid) {
+  if (!field) return;
+  field.setAttribute('aria-invalid', String(invalid));
+  field.setAttribute('aria-describedby', invalid ? 'histAxisUnit histAxisError' : 'histAxisUnit');
+}
+function syncAxisControls(force = false) {
+  const choice = historyAxis().get(), pop = $('#histControls');
+  if (!pop) return;
+  for (const b of $$('#histAxis [data-axis]')) setAttrs(b, { 'aria-pressed': b.dataset.axis === choice.mode });
+  setText($('#histAxisNote'), AXIS_NOTE[choice.mode]());
+  setText($('#histAxisUnit'), HS.measure === 'change' ? `In euros of change, for example ${MINUS}25 or 40,50.` : 'In euros, for example 4950 or 5050,50.');
+  const form = $('#histAxisForm');
+  if (form) form.hidden = choice.mode !== 'custom';
+  // The fields follow the saved bounds when the measure or the choice
+  // changes, never while the reader is typing.
+  const key = `${HS.measure}|${choice.mode}|${choice.min}|${choice.max}`;
+  if (!force && axisShown.key === key) return;
+  axisShown.key = key;
+  for (const [id, value] of [['#histAxisMin', choice.min], ['#histAxisMax', choice.max]]) {
+    const field = $(id);
+    markBound(field, false);
+    if (field && document.activeElement !== field) field.value = choice.mode === 'custom' ? typedBound(value) : '';
+  }
+  setText($('#histAxisError'), '');
+}
+export function initHistoryControls({ schedule }) {
+  const button = $('#histCtl'), pop = $('#histControls'), form = $('#histAxisForm');
+  if (!button || !pop) return;
+  const isOpen = () => !pop.hidden;
+  const close = (focus = false) => {
+    if (!isOpen()) return;
+    pop.hidden = true; button.setAttribute('aria-expanded', 'false');
+    if (focus) button.focus({ preventScroll: true });
+  };
+  button.addEventListener('click', () => {
+    if (isOpen()) { close(); return; }
+    syncAxisControls(true);
+    pop.hidden = false; button.setAttribute('aria-expanded', 'true');
+  });
+  document.addEventListener('pointerdown', e => { if (isOpen() && !pop.contains(e.target) && !button.contains(e.target)) close(); }, true);
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !isOpen()) return;
+    const inside = pop.contains(document.activeElement) || document.activeElement === button;
+    if (inside) e.preventDefault();
+    close(inside);
+  });
+  const applied = () => { syncAxisControls(true); schedule('history-axis'); };
+  $('#histAxis')?.addEventListener('click', e => {
+    const b = e.target.closest('[data-axis]');
+    if (!b) return;
+    const yAxis = historyAxis();
+    if (b.dataset.axis !== 'custom') { yAxis.setAxisMode({ mode: b.dataset.axis }); applied(); return; }
+    if (yAxis.get().mode !== 'custom') {
+      // Custom starts from the range on screen, in whole euros.
+      const shown = lastScale?.target ?? { lo: 0, hi: 1 }, lo = Math.floor(shown.lo), hi = Math.ceil(shown.hi);
+      yAxis.setAxisMode({ mode: 'custom', min: lo, max: hi > lo ? hi : lo + 1 });
+    }
+    applied();
+    $('#histAxisMin')?.focus();
+  });
+  form?.addEventListener('submit', e => {
+    e.preventDefault();
+    const min = $('#histAxisMin'), max = $('#histAxisMax');
+    const result = historyAxis().setAxisMode({ mode: 'custom', min: min.value, max: max.value });
+    if (!result.ok) {
+      markBound(min, result.field === 'min');
+      markBound(max, result.field === 'max');
+      setText($('#histAxisError'), result.error);
+      (result.field === 'min' ? min : max).focus();
+      return;
+    }
+    // Both fields are valid again and show the bounds as read, the focused one included.
+    for (const field of [min, max]) markBound(field, false);
+    min.value = typedBound(result.choice.min); max.value = typedBound(result.choice.max);
+    applied();
   });
 }
 
@@ -696,7 +907,13 @@ const hatch = '<svg viewBox="0 0 22 10" aria-hidden="true"><defs><pattern id="ht
 export function renderHistory(ctx) {
   const tools = toolsHtml();
   patch($('#histDesks'), tools.desks);
+  for (const b of $$('#histMeasure [data-measure]')) setAttrs(b, { 'aria-pressed': b.dataset.measure === HS.measure });
+  setText($('#histSub'), SUBTITLE[HS.measure]);
   patch($('#histLegend'), `${DESK_IDS.map(id => `<span class="lg">${swatch(`var(--desk-${id})`, '', 2.4)}${LABEL[id]}</span>`).join('')}<span class="lg">${swatch('var(--est)', '5 4', 1.6)}${term('estimate')} (drawn, not measured)</span><span class="lg">${hatch}${term('nodata')}</span>`);
+  patch($('#histCompareSize'), compareSizing(HS.measure));
+  const hint = $('#histHint');
+  if (hint && chartHintSeen() && hint.getAttribute('data-seen') === null) hint.setAttribute('data-seen', '');
+  syncAxisControls();
   const cell = ctx.states.history;
   const cols = cell?.value?.columns ?? EMPTY;
   const moved = patch($('#histStatus'), statusLine(cell));
@@ -704,7 +921,7 @@ export function renderHistory(ctx) {
   if (ctx.now) {
     const endAt = Date.parse(ctx.now), range = keptRange(cols, endAt), bounds = resolveView(range, HS);
     pressed = windowPreset(range, bounds, HS.preset);
-    setText($('#histCompare'), compareLine(cols, bounds, endAt));
+    patch($('#histCompare'), compareLine(cols, bounds, endAt).html);
     // Named over everything kept and every desk, so switching desks or the
     // window never moves the lines below.
     const excluded = basisNotice(cols, DESK_IDS, range, endAt);
@@ -712,13 +929,12 @@ export function renderHistory(ctx) {
     const thin = thinnedOf(cell);
     setText($('#histThin'), thin !== null && thin > range[0] ? `Before ${when(Math.min(thin, endAt))} the history is thinned to fit its size limit: the line joins kept observations where continuous reporting is recorded. Other stretches are hatched; where coverage cannot be proved, the tooltip says coverage unknown.` : '');
   } else {
-    setText($('#histCompare'), 'Comparing waits for the board server’s clock.');
+    patch($('#histCompare'), esc('Comparing waits for the board server’s clock.'));
     setText($('#histBasis'), '');
     setText($('#histThin'), '');
   }
   for (const b of $$('#histRange button')) setAttrs(b, { 'aria-pressed': b.dataset.range === pressed });
-  const follow = $('#histFollow');
-  if (follow) setAttrs(follow, { 'aria-pressed': HS.follow });
+  for (const follow of $$('[data-follow]')) setAttrs(follow, { 'aria-pressed': HS.follow });
   patch($('#jAcct'), bookkeepingHtml(ctx));
   patch($('#events'), eventsHtml(ctx));
   return { redraw: moved };

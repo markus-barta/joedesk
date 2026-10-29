@@ -17,7 +17,7 @@ import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { phaseBChecks, deskRankingFocusChecks } from './browser/phase-b.mjs';
 import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
-import { historyControlChecks, historyFollowGrowthChecks } from './browser/history-controls.mjs';
+import { historyControlChecks, historyFollowGrowthChecks, historyDesignChecks } from './browser/history-controls.mjs';
 import { headerNavChecks } from './browser/header-nav.mjs';
 import { parseBoardSweepArgs, createBoardSweepPlan, boardSweepErrors, boardSweepTable } from './board-sweep-plan.mjs';
 
@@ -350,7 +350,8 @@ async function historyChecks(page, viewport, theme) {
   await page.evaluate(`document.querySelector('#histRange [data-range="1w"]').click()`);
   await settle(page);
   const parts = await page.evaluate(`({ compare: document.getElementById('histCompare').innerText, j: document.getElementById('jAcct').innerText, capt: Boolean(document.querySelector('#jAcct svg.capt')), events: document.querySelectorAll('#events li').length, legend: document.getElementById('histLegend').innerText })`);
-  check('AC-21', `${tag}: compare, J's bookkeeping, captured results and desk changes`, /^From .* J [+−]?\d/.test(parts.compare) && /Counted from/.test(parts.j) && parts.capt && parts.events >= 1 && /Estimated gap/.test(parts.legend), parts);
+  // History opens in Change (JOED-154): the comparison is each desk's change in euros.
+  check('AC-21', `${tag}: compare, J's bookkeeping, captured results and desk changes`, /^Change (from|in the last) .*: J [+−]?€\s?\d/.test(parts.compare) && /Counted from/.test(parts.j) && parts.capt && parts.events >= 1 && /Estimated gap/.test(parts.legend), parts);
   await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
   // The legend's last term is the final tab stop before the chart.
   await page.evaluate(`Array.from(document.querySelectorAll('#histLegend [data-term]')).at(-1).focus()`);
@@ -367,13 +368,14 @@ async function historyChecks(page, viewport, theme) {
   })()`);
   const normalizeInspection = text => text.replace(/\s+/g, ' ').trim();
   check('JOED-121', `${tag}: Tab reaches the chart and Right exposes identical visible and politely announced history values`,
-    inspection.focused && inspection.stops === 0 && /Each desk’s money/.test(inspection.name) && /Left and Right/.test(inspection.description) &&
+    inspection.focused && inspection.stops === 0 && /^Each desk’s change since the start of the window/.test(inspection.name) && /Left and Right/.test(inspection.description) &&
     inspection.polite === 'polite' && inspection.atomic === 'true' && inspection.on && inspection.announced !== firstAnnouncement && /Vienna time/.test(inspection.announced) &&
     ['J', 'Joe', 'Joel'].every(desk => new RegExp(desk + ' .*?(observed|estimated|no value here)').test(inspection.announced)) &&
     normalizeInspection(inspection.visible) === normalizeInspection(inspection.announced), inspection);
   await key(page, 'Escape');
   await page.evaluate('document.activeElement?.blur()');
   await historyControlChecks({ page, viewport, theme, check, settle, configure, rects, moves });
+  await historyDesignChecks({ page, viewport, theme, check, settle, rects, moves });
   if (!viewport.mobile) {
     const box = await page.evaluate(`(() => { const r = document.querySelector('#histChart').getBoundingClientRect(); return { x: r.left + r.width * 0.6, y: r.top + r.height / 2 }; })()`);
     await page.s('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240, modifiers: 2 });

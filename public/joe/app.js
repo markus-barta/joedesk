@@ -7,7 +7,7 @@ import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitSta
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure } from './desk.js';
-import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput } from './history.js';
+import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput, initHistoryControls, historyQuery, readHistoryRoute } from './history.js';
 import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsUrl } from './results.js';
 import { boardHealthPresentation } from './health.js';
 import { sinceStarts } from './performance.js';
@@ -114,9 +114,12 @@ function start() {
     if (data && data !== lastData) { guard('events', () => events.observe(data)); lastData = data; }
     guard('header', () => renderHeader(ctx));
     if (screen === 'desk') guard('desk', () => renderDesk(ctx));
+    // History's address names its preset, desks and measure: a correction in
+    // place (no history entry), never over an address still waiting for follow().
     if (screen === 'history') {
       const moved = guard('history', () => renderHistory(ctx))?.redraw;
       if (moved || dirtyHistory || !['tick', 'results'].includes(reason)) { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }
+      writeRoute('history', historyQuery());
     }
     // Results' address follows its view once a link is applied (a correction; README: Results deep links).
     if (screen === 'results') { const url = guard('results', () => renderResults(ctx)); if (url) writeRoute('results', parseRoute(url).query); }
@@ -264,8 +267,10 @@ function start() {
   $('#themeBtn').addEventListener('click', () => { toggleTheme(); schedule('theme'); });
   window.__joedesk.setTheme = setTheme;
 
-  // History controls: desk toggles, the window presets and Follow; the chart
-  // and its overview strip take their own pointer, wheel and keys.
+  // History controls: desk toggles, Change | Money, the window presets and
+  // Follow; the chart and its overview strip take their own pointer, wheel
+  // and keys. History reads its link (range, desk, mode) before it renders.
+  onRoute('history', readHistoryRoute);
   $('#histDesks').addEventListener('click', e => {
     const b = e.target.closest('[data-hdesk]');
     if (!b) return;
@@ -279,8 +284,16 @@ function start() {
     if (!b) return;
     historyPreset(b.dataset.range); dirtyHistory = true; render('history-range');
   });
-  $('#histFollow').addEventListener('click', () => { toggleFollow(); dirtyHistory = true; render('history-follow'); });
+  // Change | Money: what the lines measure (the window and the desks stay).
+  $('#histMeasure').addEventListener('click', e => {
+    const b = e.target.closest('[data-measure]');
+    if (!b || b.dataset.measure === HS.measure) return;
+    HS.measure = b.dataset.measure; dirtyHistory = true; render('history-measure');
+  });
+  // Follow and its phone copy (index.html) are one toggle.
+  for (const b of $$('[data-follow]')) b.addEventListener('click', () => { toggleFollow(); dirtyHistory = true; render('history-follow'); });
   initHistoryInput({ schedule });
+  initHistoryControls({ schedule });
 
   // Results: the period and desk switches, the stepper, the month arrows and
   // a day drive every number; on a phone a day opens its trades in a sheet.
