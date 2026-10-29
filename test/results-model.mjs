@@ -90,6 +90,48 @@ test('JOED-166 close coordinates: worker transfer preserves the next Vienna midn
   assert.deepEqual(curve.pts.filter(p => dates.includes(p.k) && !p.now && !p.edge).map(p => p.x), expected.slice(0, 3));
 });
 
+test('JOED-166 close coordinates: contract-valid extreme dates preserve indexing, worker replies and fallback results', { timeout: 5000 }, async () => {
+  const { createFeed } = await import('../public/joe/feed.js');
+  const realWorker = globalThis.Worker, realFetch = globalThis.fetch, realSelf = globalThis.self;
+  const ctx = ctxOf([E('5000'), E('5000'), E('5000')]);
+  try {
+    for (const name of ['empty', 'scratches']) for (const date of ['9999-12-31', '0100-01-01', '0999-12-31', '0000-01-01']) {
+      const value = fixture(name), before = M.indexResults(value);
+      value.days.push({ date, desks: {} });
+      assert.ok(validateContract('results', value).ok, `${name}: ${date} is contract-valid`);
+      const indexed = M.indexResults(value);
+      const transferred = structuredClone(indexed, { transfer: M.transferables(indexed) });
+      globalThis.fetch = async () => new Response(JSON.stringify(value), { headers: { 'X-Joe-Server-Now': value.receivedAt } });
+      const message = new Promise(resolve => {
+        globalThis.self = { postMessage: (data, transfer) => resolve(structuredClone(data, { transfer })) };
+      });
+      await import(`../public/joe/history-worker.js?joed166-extreme-${name}-${date}`);
+      self.onmessage({ data: 'results' });
+      const reply = await message;
+      assert.equal(reply.kind, 'results');
+      globalThis.Worker = undefined;
+      const feed = createFeed(() => {});
+      await feed.refreshResults();
+      assert.equal(feed.usesWorker(), false);
+      const cell = feed.select().states.results;
+      assert.equal(cell.state, 'fresh');
+      for (const ix of [transferred, reply.index, cell.value.index]) {
+        const at = ix.dates.indexOf(date);
+        assert.ok(at >= 0, 'the unused row is retained');
+        assert.deepEqual([...ix.close.state.slice(at * 3, at * 3 + 3)], [0, 0, 0], 'its desks remain empty');
+        assert.deepEqual(M.dayResult(ix, '2026-10-13', ALL), M.dayResult(before, '2026-10-13', ALL));
+        assert.deepEqual(roll(ix, 'week', today, ALL, ctx), roll(before, 'week', today, ALL, ctx));
+        const per = M.periodOf('week', today, today, ix.meta.trackingStart);
+        assert.deepEqual(M.curve(ix, per, ALL, ctx), M.curve(before, per, ALL, ctx));
+      }
+    }
+  } finally {
+    globalThis.Worker = realWorker; globalThis.fetch = realFetch;
+    if (realSelf === undefined) delete globalThis.self;
+    else globalThis.self = realSelf;
+  }
+});
+
 test('JOED-30 results: partial dates, empty desks and nullable summaries validate and survive worker transfer', () => {
   const value = fixture('partial-day');
   value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial', partialReasons: ['history_gap'] });
@@ -2035,6 +2077,14 @@ test('JOED-151 chart: quiet time marks at Vienna midnights, by the length of the
   assert.deepEqual(year, ['2025-11-01', '2025-12-01', '2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01',
     '2026-07-01', '2026-08-01', '2026-09-01', '2026-10-01'].map(at));
   assert.deepEqual(page.timeMarks('2026-10-14', at('2026-10-14'), at('2026-10-14') + 3600000), [], 'nothing inside a single hour');
+});
+
+test('JOED-166 time marks: historical Vienna offsets keep every interior midnight', () => {
+  const start = '1890-01-01', x0 = M.viennaMidnight(start), mark = M.viennaMidnight('1890-01-02');
+  assert.equal(new Date(mark).toISOString(), '1890-01-01T22:54:39.000Z', 'Vienna LMT is UTC+01:05:21');
+  assert.deepEqual(page.timeMarks(start, x0, mark - 1), []);
+  assert.deepEqual(page.timeMarks(start, x0, mark), [], 'the endpoint is excluded');
+  assert.deepEqual(page.timeMarks(start, x0, mark + 1), [mark], 'one millisecond inside the domain');
 });
 
 test('JOED-166 time marks: sparse traversal matches the daily reference across DST and interval boundaries', () => {

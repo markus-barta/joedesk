@@ -760,7 +760,7 @@ function renderCurve(view, per, desks, R, mctx) {
 // The design's quiet time marks, at Vienna midnights inside the domain: every
 // day up to 16 days, every Monday up to 120 days, else every first of a month.
 export function timeMarks(start, x0, x1) {
-  const days = (x1 - x0) / 864e5, out = [], end = M.viennaDate(x1);
+  const days = (x1 - x0) / 864e5, out = [], end = viennaDay(new Date(x1).toISOString());
   const nextMonth = k => M.addDays(M.dateKey(...M.ymOf(k), 1), M.daysIn(...M.ymOf(k)));
   // Only resolve midnights that will be drawn. Walking every calendar day
   // made the first All-time switch resolve a year's unmarked weekends too.

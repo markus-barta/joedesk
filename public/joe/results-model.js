@@ -232,8 +232,10 @@ export function indexResults(value) {
   trades.blob = text.join('');
   // The chart places a close at the following Vienna midnight. Resolve it
   // once with the index in the worker, instead of during a period switch.
+  // Outside this range the next midnight can need an unpadded or five-digit
+  // year. Keep those rows; resolve their coordinates only if a chart uses them.
   const close = { amount: exact(cells), state: new Uint8Array(cells), entry: new Int32Array(cells).fill(-1),
-    at: Float64Array.from(dates, k => viennaMidnight(addDays(k, 1))) };
+    at: Float64Array.from(dates, k => k >= '1000-01-01' && k < '9999-12-31' ? viennaMidnight(addDays(k, 1)) : NaN) };
   for (const day of value.days) {
     const i = di.get(day.date);
     for (const [id, d] of Object.entries(day.desks)) {
@@ -614,7 +616,7 @@ export function curve(ix, per, desks, ctx) {
   for (let i = i0; i < i1; i++) {
     const k = ix.dates[i];
     if (k === ctx.today || !sel.some(desk => ix.close.state[i * 3 + desk])) continue;
-    point(k, ix.close.at[i], equityAt(ix, desks, k, ctx));
+    point(k, Number.isNaN(ix.close.at[i]) ? viennaMidnight(addDays(k, 1)) : ix.close.at[i], equityAt(ix, desks, k, ctx));
   }
   if (live) point(end, x1, equityAt(ix, desks, end, ctx), { now: true });
   return { pts, startE, day: false, domain: [x0, x1], tracking };

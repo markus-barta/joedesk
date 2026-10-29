@@ -1,4 +1,235 @@
 {
+  "fix1": {
+    "session": "c8706ae3-95d7-4cd7-a0a6-a742aa8a42db",
+    "recorded_at": "2026-10-29T22:58:36.874Z",
+    "scope": "Correct only the two confirmed date regressions while retaining cached modern close coordinates and sparse time-mark traversal. No new browser/performance measurement; the original CI limitation still applies.",
+    "parent": "24d1e466fcf35f4742aa385b8e2939bc4b230feb",
+    "changes": {
+      "close_coordinates": "Dates outside 1000-01-01 through 9999-12-30 retain their indexed rows and carry a transferable NaN coordinate. Curve conversion falls back to the previous per-date computation only when the close is used.",
+      "time_marks": "Use the exact Vienna endpoint date from viennaDay rather than the hour-rounded viennaDate cache."
+    },
+    "fail_on_parent": {
+      "method": "Run the final regression tests unchanged; a Node load hook supplies the two production modules verbatim from git show of the parent. No worktree mutation.",
+      "zone": "UTC",
+      "exit": 1,
+      "tests": 2,
+      "passed": 0,
+      "failed": 2,
+      "tests_and_failures": [
+        {
+          "name": "JOED-166 close coordinates: contract-valid extreme dates preserve indexing, worker replies and fallback results",
+          "failure": "TypeError: Explicit zone, date and time required at parent results-model.js:236"
+        },
+        {
+          "name": "JOED-166 time marks: historical Vienna offsets keep every interior midnight",
+          "failure": "At mark + 1 ms, expected [-2524439121000], actual []"
+        }
+      ],
+      "name_pattern": "JOED-166 close coordinates: contract-valid extreme dates|JOED-166 time marks: historical Vienna offsets"
+    },
+    "regression_coverage": {
+      "extreme_dates": [
+        "9999-12-31",
+        "0100-01-01",
+        "0999-12-31",
+        "0000-01-01"
+      ],
+      "fixtures": [
+        "empty",
+        "scratches"
+      ],
+      "paths": [
+        "direct index and transfer",
+        "actual history-worker.js poll and transfer",
+        "createFeed main-thread fallback"
+      ],
+      "preserved": [
+        "extreme row and empty desks",
+        "fixture-day trade result",
+        "current-week rollup",
+        "current-week curve"
+      ],
+      "historical_marks": "1890 Vienna UTC+01:05:21; endpoint - 1 ms, exact endpoint, endpoint + 1 ms"
+    },
+    "validation": {
+      "node": "v24.20.0",
+      "started_at": "2026-10-29T22:53:21.018Z",
+      "finished_at": "2026-10-29T22:58:21.158Z",
+      "invocation": "Each package.json test:ui and test:contracts file run alone with node --test --test-reporter=tap under each TZ, serially.",
+      "zones": [
+        "UTC",
+        "Europe/Vienna",
+        "America/New_York"
+      ],
+      "runs": 45,
+      "passed": 3117,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "files": [
+        {
+          "file": "test/ui-modules.mjs",
+          "passed_by_zone": [
+            314,
+            314,
+            314
+          ]
+        },
+        {
+          "file": "test/status-line.mjs",
+          "passed_by_zone": [
+            44,
+            44,
+            44
+          ]
+        },
+        {
+          "file": "test/performance-glance.mjs",
+          "passed_by_zone": [
+            28,
+            28,
+            28
+          ]
+        },
+        {
+          "file": "test/board-state.mjs",
+          "passed_by_zone": [
+            212,
+            212,
+            212
+          ]
+        },
+        {
+          "file": "test/open-result.mjs",
+          "passed_by_zone": [
+            11,
+            11,
+            11
+          ]
+        },
+        {
+          "file": "test/phone-first-screen.mjs",
+          "passed_by_zone": [
+            17,
+            17,
+            17
+          ]
+        },
+        {
+          "file": "test/desk-session.mjs",
+          "passed_by_zone": [
+            32,
+            32,
+            32
+          ]
+        },
+        {
+          "file": "test/results-model.mjs",
+          "passed_by_zone": [
+            112,
+            112,
+            112
+          ]
+        },
+        {
+          "file": "test/settings-model.mjs",
+          "passed_by_zone": [
+            27,
+            27,
+            27
+          ]
+        },
+        {
+          "file": "test/contracts.mjs",
+          "passed_by_zone": [
+            96,
+            96,
+            96
+          ]
+        },
+        {
+          "file": "test/phase-b.mjs",
+          "passed_by_zone": [
+            45,
+            45,
+            45
+          ]
+        },
+        {
+          "file": "test/failure-fixtures.mjs",
+          "passed_by_zone": [
+            26,
+            26,
+            26
+          ]
+        },
+        {
+          "file": "test/time-vectors.mjs",
+          "passed_by_zone": [
+            34,
+            34,
+            34
+          ]
+        },
+        {
+          "file": "test/account-history.mjs",
+          "passed_by_zone": [
+            40,
+            40,
+            40
+          ]
+        },
+        {
+          "file": "test/account-history-endpoint.mjs",
+          "passed_by_zone": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "syntax": {
+        "invocation": "node --check",
+        "passed": 18,
+        "files": [
+          "public/joe/results-model.js",
+          "public/joe/results.js",
+          "scripts/check-release.mjs",
+          "test/ui-modules.mjs",
+          "test/status-line.mjs",
+          "test/performance-glance.mjs",
+          "test/board-state.mjs",
+          "test/open-result.mjs",
+          "test/phone-first-screen.mjs",
+          "test/desk-session.mjs",
+          "test/results-model.mjs",
+          "test/settings-model.mjs",
+          "test/contracts.mjs",
+          "test/phase-b.mjs",
+          "test/failure-fixtures.mjs",
+          "test/time-vectors.mjs",
+          "test/account-history.mjs",
+          "test/account-history-endpoint.mjs"
+        ]
+      },
+      "setup": {
+        "initial_failure": "test/contracts.mjs could not load the checkout-only yaml dependency (ERR_MODULE_NOT_FOUND)",
+        "correction": "npm ci --prefix test --ignore-scripts --no-audit --no-fund",
+        "exit": 0
+      }
+    },
+    "fixed_payload_sha256": {
+      "public/joe/results-model.js": "a46ef26ccefd81d696a93f2c805ccb49b864e0f388206ef9585c5a3220bcb7f1",
+      "public/joe/results.js": "46a66506c5d01a699a69dcb4d911dc6408a1e2af134816b7452ad0554faaa27e"
+    },
+    "candidate": {
+      "version": "261029192345.0.0",
+      "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+      "presentation_source_commit": "01b3080948c21899cbbacbfa3447da6799af1b56",
+      "reseal": "Separate following commit; brief confirms unpublished/no release set."
+    },
+    "boundaries": "No push, deployment, browser, review gate, subagent or other model CLI. Coordinator owns the cross-family gate after this worker exits; JOED-166 remains open."
+  },
   "ticket": "JOED-166",
   "session": "bd1cb3ab-6692-4f33-9bad-134e71b931f4",
   "recorded_at": "2026-10-29T22:23:02.196375+00:00",
