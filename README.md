@@ -860,6 +860,24 @@ worker (shared `acceptRead`, then indexed once) and uses its existing
 live/stale/rejected/unavailable states. History stores only observations
 and null gaps, never the UI's assumed/interpolated continuity values.
 
+JOED-150 also records exact whole-account EUR equity/cash (including kept
+holdings) in each new stored History point. The existing desk response and UI
+stay unchanged; authenticated `GET /joe/account-history.json` exposes the
+retained account points and independent daily closes. The server-owned
+`history-state.json` v3 envelope accepts older v2 files without inventing
+account values. `account-closes-state.json` stores the last exact value of
+each field per **Vienna calendar day**, using the broker's observation time
+and separate equity/cash timestamps. Missing fields/days remain missing;
+no value is carried into another day. These are last-observed daily values,
+not NY market closing valuations. The latest 2,196 observed dates (at least
+six years of daily data) fit a bounded 2 MiB atomic/fsynced mode-0600 store
+that survives restarts and the short History's 14-day cut. Missing/corrupt
+daily storage starts empty with a reported reason and recovers on the next
+exact observation. Short History and daily-store failures remain independent.
+See [the History contract](docs/joe-history-contract.md) for stored shapes,
+reasons, retention and the GET-only endpoint. No pusher contract or chart UI
+changes are part of this recording work.
+
 History's chart is one keyboard stop. Keyboard focus starts inspection;
 clicking or tapping leaves the pointer tooltip alone, and arrow keys can then
 start inspection. Left/Right inspect the original observations and gap samples;
