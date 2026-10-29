@@ -60,7 +60,7 @@ const HISTORY = (() => { const w = {}; new Function('window', readFileSync(new U
 const SECTION_IDS = ['set-mode', 'set-runtime', ...M.GROUPS.map(g => `set-${g.id}`), 'set-how', 'set-source', 'set-log', 'set-appearance', 'set-about'];
 const DESKTOP = VIEWPORTS.filter(v => !v.mobile);
 const PHONE = VIEWPORTS.find(v => v.mobile);
-const READS = ['/joe/state.json', '/joe/history.json', '/joe/results.json', '/joe/fleet-config.json', '/joe/fleet-config/actions.json'];
+const READS = ['/joe/state.json', '/joe/history.json', '/joe/account-history.json', '/joe/results.json', '/joe/fleet-config.json', '/joe/fleet-config/actions.json'];
 const PROPAGATE = '/joe/fleet-config/propagate';
 
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });

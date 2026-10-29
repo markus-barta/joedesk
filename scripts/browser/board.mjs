@@ -9,8 +9,9 @@ import { panelStates } from '../../contracts/panel-state.mjs';
 import { validateContract } from '../../contracts/index.mjs';
 import { acceptSnapshot } from '../../contracts/accept.mjs';
 import { historyEnvelope, historyPoint, measureHistory, HISTORY_CAP } from '../../server/history.mjs';
+import { ACCOUNT_HISTORY_FORMAT, ACCOUNT_HISTORY_CAP, ACCOUNT_CLOSES_CAP, accountClosesEnvelope, validateAccountHistory, validateAccountCloses } from '../../server/account-history.mjs';
 import { atomicWrite } from '../../server/storage.mjs';
-import { nyDay, isRTH } from '../../time.mjs';
+import { nyDay, isRTH, viennaDay, zonedInstant, VIENNA } from '../../time.mjs';
 
 const root = new URL('../../', import.meta.url);
 export const read = file => JSON.parse(readFileSync(new URL(file, root)));
@@ -32,13 +33,18 @@ export function preflightSnapshot(kind, payload, previous, receivedAt, { status 
   return checked;
 }
 
-export async function startBoard({ fleetConfig = null, history = null, fleetConfigRaw = null, fleetActions = null } = {}) {
+export async function startBoard({ fleetConfig = null, history = null, fleetConfigRaw = null, fleetActions = null, accountHistory = null } = {}) {
   const dataDir = scratch('joed-p3-board-');
   if (fleetConfig) writeFileSync(join(dataDir, 'fleet-config.json'), JSON.stringify(fleetConfig));
   // P5: a stored file the server cannot read, and a seeded change log.
   if (fleetConfigRaw !== null) writeFileSync(join(dataDir, 'fleet-config.json'), fleetConfigRaw);
   if (fleetActions) writeFileSync(join(dataDir, 'fleet-config-actions.json'), JSON.stringify({ schema: 'inspr.joe.fleet-config.actions.v1', entries: fleetActions }));
   if (history) atomicWrite(join(dataDir, 'history-state.json'), historyEnvelope(history), HISTORY_CAP);
+  // JOED-156: the whole account's two stores, as the server writes them.
+  if (accountHistory) {
+    atomicWrite(join(dataDir, 'account-history-state.json'), { format: ACCOUNT_HISTORY_FORMAT, value: validateAccountHistory(accountHistory.short) }, ACCOUNT_HISTORY_CAP);
+    atomicWrite(join(dataDir, 'account-closes-state.json'), accountClosesEnvelope(validateAccountCloses(accountHistory.daily)), ACCOUNT_CLOSES_CAP);
+  }
   let base = Date.parse(NOW), real = performance.now(), frozen = false;
   const clock = () => new Date(Math.round(base + (frozen ? 0 : performance.now() - real))).toISOString();
   const server = createJoeServer({ dataDir, clock, inboxToken: TOKEN });
@@ -150,6 +156,37 @@ export function scenario(now = NOW, { historyFrom = '2026-10-07T00:00:00.000Z', 
   const checks = [validateContract('data', snapshot, { stage: 'ingress' }), validateContract('history', history)];
   for (const check of checks) if (!check.ok) throw new Error(`scenario invalid: ${JSON.stringify(check.errors.slice(0, 5))}`);
   return { snapshot, history };
+}
+
+// The whole account's recorded history for the design scenario (JOED-156):
+// three days of five-minute snapshots up to a minute before now, with a
+// two-hour outage, ending on the snapshot's € 31.482,75; and 40 Vienna days
+// of last values with one day missing. Cash rides along; kept holdings are
+// inside the value, as on the feed.
+const euros = cents => ({ amount: (cents / 100).toFixed(2), currency: 'EUR' });
+export function accountScenario(now = NOW, { closeDays = 40, missingDay = 10, outage = ['2026-10-13T09:00:00.000Z', '2026-10-13T11:00:00.000Z'] } = {}) {
+  const R = random(20261029), end = Date.parse(now) - 60000, raw = [];
+  let cents = 3110000;
+  for (let t = end - 3 * 864e5; t <= end; t += 5 * 60000) {
+    const iso = new Date(t).toISOString();
+    if (t >= Date.parse(outage[0]) && t < Date.parse(outage[1])) continue;
+    if (isRTH(iso)) cents += Math.round((R() - 0.47) * 900);
+    raw.push({ iso, cents });
+  }
+  const shift = 3148275 - raw.at(-1).cents;
+  const points = raw.map(r => ({ t: r.iso, account: { observedAt: r.iso, equity: euros(r.cents + shift), cash: euros(421277) } }));
+  const days = [];
+  let close = 2980000;
+  for (let k = closeDays - 1; k >= 1; k--) {
+    const day = viennaDay(new Date(Date.parse(now) - k * 864e5).toISOString());
+    close += Math.round((R() - 0.45) * 30000);
+    if (k === missingDay) continue;
+    const t = zonedInstant(day, '22:00:00', VIENNA);
+    days.push({ day, t, equity: euros(close), cash: euros(421277), equityAt: t, cashAt: t });
+  }
+  const at = new Date(end).toISOString();
+  return { short: { schema: 'inspr.joe.account-series.v1', generatedAt: at, receivedAt: at, points },
+    daily: { schema: 'inspr.joe.account-closes.v1', timeZone: 'Europe/Vienna', days } };
 }
 
 // The largest history the 8 MiB contract allows for this point shape (about

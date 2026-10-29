@@ -7,7 +7,7 @@ import { homedir, cpus } from 'node:os';
 import { join } from 'node:path';
 import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
-import { startBoard, scenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
+import { startBoard, scenario, accountScenario, NOW, at, ACTOR, valid, fixture, ingress, singleMissingDesk, coupledUnavailable, acceptSnapshot, panelStates, advance, measureHistory } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, go as goPage, screenshot, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
 import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
 import { heroWordingFixtures } from './browser/hero-wording-fixtures.mjs';
@@ -18,6 +18,7 @@ import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs
 import { phaseBChecks, deskRankingFocusChecks } from './browser/phase-b.mjs';
 import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
 import { historyControlChecks, historyFollowGrowthChecks } from './browser/history-controls.mjs';
+import { accountHeroChecks } from './browser/account-hero.mjs';
 import { parseBoardSweepArgs, createBoardSweepPlan, boardSweepErrors, boardSweepTable } from './board-sweep-plan.mjs';
 
 // The widest window with the compact header (app.css). Plan before any side
@@ -72,9 +73,13 @@ async function go(page, screen) {
 async function phoneFirstScreenChecks(page, viewport, theme, snapshot) {
   const tag = `${viewport.name} ${theme} phone first screen`;
   const d = await phoneDeskSnapshot(page).then(copyText);
-  check('phone-first', `${tag}: primary euros/percent, one-line sentence and all ranked desk rows fit above the bottom navigation without scrolling`,
-    d.primary.length === 2 && d.primary.every(p => /€/.test(p.euros) && /%/.test(p.pct)) && d.rows.length === 3 &&
-    d.rows.every(r => r.icon && r.state && r.top >= 0 && r.bottom <= Math.min(844, d.bottomBar.top) - 8) &&
+  // JOED-156: the whole account comes first and fills the first screen (value,
+  // change, Since start · Cash, ranges and chart, above the bottom navigation);
+  // the desk figures, the one-line sentence and the ranked rows follow it.
+  check('phone-first', `${tag}: the whole account fits above the bottom navigation first; primary euros/percent, the one-line sentence and all ranked desk rows follow it`,
+    d.account && /€/.test(d.account.value) && d.account.top >= d.header.bottom - 0.5 && d.account.bottom <= Math.min(844, d.bottomBar.top) - 8 &&
+    d.account.chart.bottom <= d.account.bottom && d.primary.length === 2 && d.primary.every(p => /€/.test(p.euros) && /%/.test(p.pct) && p.top >= d.account.bottom) && d.rows.length === 3 &&
+    d.rows.every(r => r.icon && r.state && r.top >= d.account.bottom) &&
     d.sentence.bottom <= d.rows[0].top && await page.evaluate(`document.querySelector('#heroL .say > span').dataset.clamp === '1' && scrollY === 0`), d);
   const ranked = snapshot.desks.slice().sort((a, b) => {
     const x = decimalUnits(a.money.totalPnl.amount), y = decimalUnits(b.money.totalPnl.amount);
@@ -86,8 +91,10 @@ async function phoneFirstScreenChecks(page, viewport, theme, snapshot) {
   check('phone-first', `${tag}: compact rows and their section end within 12 px of the reserved warning line, without a trailing detail gap`,
     d.rows.length === 3 && d.rows.every(r => r.card.bottom - r.warningLineBottom >= 0 && r.card.bottom - r.warningLineBottom <= 12 && r.card.bottom === r.bottom) &&
     d.desks.bottom - d.rows.at(-1).warningLineBottom <= 12 && d.desks.bottom === d.rows.at(-1).bottom, { desks: d.desks, rows: d.rows });
-  check('phone-first', `${tag}: all seven disclosures start collapsed with 44 px targets, no horizontal scroll and a collapsed page ≤1600 px`,
-    d.controls.length === 7 && d.controls.every(c => c.expanded === 'false' && c.hidden && !c.visible && c.height >= 44) && d.horizontal.scroll <= d.horizontal.inner && d.pageHeight <= 1600, d);
+  // The 1600 px budget stays for everything below the whole account, which adds its own block and gap.
+  check('phone-first', `${tag}: all seven disclosures start collapsed with 44 px targets, no horizontal scroll and a collapsed page ≤1600 px plus the whole account`,
+    d.controls.length === 7 && d.controls.every(c => c.expanded === 'false' && c.hidden && !c.visible && c.height >= 44) && d.horizontal.scroll <= d.horizontal.inner &&
+    d.account && d.account.height <= 440 && d.pageHeight <= 1600 + d.account.height + d.account.gap, d);
   check('phone-first', `${tag}: missing Cash is visible in the collapsed Account summary with an icon and its reason`,
     d.controls.find(c => c.key === 'account')?.warning.includes('Cash: not reported · no data received yet') && Boolean(d.controls.find(c => c.key === 'account')?.icon), d.controls);
   await shot(page, viewport, `${viewport.name}-${theme}-desk-first-screen`, 'Phone Desk, default collapsed: status, Today, Since start and three ranked desk rows');
@@ -482,7 +489,7 @@ try {
   if (run('design')) {
   // 1 · The full design scenario at every viewport and theme.
   const { snapshot, history } = scenario(NOW);
-  board = await newBoard({ history });
+  board = await newBoard({ history, accountHistory: accountScenario(NOW) });
   board.setNow(NOW);
   const pushed = await board.push(snapshot);
   if (pushed.status !== 200) throw new Error(`scenario push failed: ${JSON.stringify(pushed.body)}`);
@@ -512,6 +519,7 @@ try {
       await auditScreen(page, viewport, theme, screen);
       await shot(page, viewport, `${viewport.name}-${theme}-${screen}`, `${screen[0].toUpperCase()}${screen.slice(1)}, design scenario`);
       if (screen === 'desk') await deskChecks(page, viewport, theme, expectedMini, snapshot);
+      if (screen === 'desk') await accountHeroChecks({ page, viewport, theme, check, settle, rects, moves, snapshot, load, url: board.url });
     }
     if (viewport.name === '1440') { await go(page, 'desk'); await focusChecks(page, `${viewport.name} ${theme} desk`); }
     if (viewport.mobile) {

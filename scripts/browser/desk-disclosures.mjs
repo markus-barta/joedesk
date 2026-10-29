@@ -25,6 +25,9 @@ export async function phoneDeskSnapshot(page) {
       primary: [...document.querySelectorAll('#heroL .primary')].map(e => ({ ...rect(e), euros: e.querySelector('.display').innerText, pct: e.querySelector('.pct-slot').innerText })),
       sentence: rect(document.querySelector('#heroL .say')),
       desks: rect(document.querySelector('#desks')),
+      // JOED-156: the whole account, first on Desk, with the gap below it.
+      account: (() => { const e = document.getElementById('acctHero'); return e ? { ...rect(e), gap: parseFloat(getComputedStyle(e).marginBottom) || 0,
+        value: e.querySelector('#acctValue').innerText, chart: rect(e.querySelector('#acctChart')) } : null; })(),
       rows: rows.map(e => ({ ...rect(e), key: e.dataset.deskDisclosure, text: e.innerText, icon: Boolean(e.querySelector('.dmark svg')), state: e.querySelector('.compact-word').innerText,
         card: rect(e.closest('.dcard')),
         warningLineBottom: (() => { const w = e.querySelector('.disclosure-warning'); return rect(w).top + parseFloat(getComputedStyle(w).lineHeight); })(),

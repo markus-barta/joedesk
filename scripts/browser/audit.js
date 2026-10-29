@@ -202,7 +202,7 @@
     },
     gui27() {
       const out = { italics: [], borders: [], pills: [], uppercase: [], cards: [], boxes: [] };
-      const primary = ['hero', 'dcard', 'rhero', 'tile', 'calcard', 'hcard', 'mode-panel'];
+      const primary = ['hero', 'dcard', 'rhero', 'tile', 'calcard', 'hcard', 'mode-panel', 'acct-hero'];
       for (const el of document.querySelectorAll('body *')) {
         if (!visible(el) || el.closest('svg')) continue;
         const cs = getComputedStyle(el), r = el.getBoundingClientRect();
