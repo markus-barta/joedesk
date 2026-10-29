@@ -894,7 +894,7 @@ test('health: not-exact values still run gateway, stuck-desk, transport, feed an
   assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
   rth.states['today.dayPnl'] = { value: null, reason: null, state: 'broken', retained: false };
   assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'day_pending', 'a Today without a reason is a real gap');
-  rth.states['today.dayPnl'] = { value: { amount: '0', currency: 'EUR' }, retained: false };
+  rth.states['today.dayPnl'] = { state: 'fresh', value: { amount: '0', currency: 'EUR' }, reason: null, retained: false };
   assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
 });
 

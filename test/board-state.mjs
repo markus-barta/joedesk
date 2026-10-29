@@ -13,7 +13,7 @@ import { acceptSnapshot } from '../contracts/accept.mjs';
 import { validateContract, CONTRACTS, REASONS } from '../contracts/index.mjs';
 import { decimalUnits, unitsDecimal } from '../contracts/decimal.mjs';
 const { sendOutcome } = await import('../public/joe/settings-model.js');
-const { boardStates, NOT_EXACT_REASONS, RETENTION_SECONDS } = await import('../public/joe/board-state.js');
+const { boardStates, NOT_EXACT_REASONS, RETENTION_SECONDS, trustedCurrent } = await import('../public/joe/board-state.js');
 const { exactCell, rankDesks, todayPercent, sincePercent } = await import('../public/joe/performance.js');
 const { cellView, heroLeft, keptHtml, positionsHtml, compactDesk, healthPop } = await import('../public/joe/desk.js');
 const { statePhrase } = await import('../public/joe/ui.js');
@@ -1602,4 +1602,55 @@ test('JOED-148 A3: real gaps keep the yellow Today warning: no reason, a fault r
   yellow(ctx(dayNotExact({ j: 'not_exact_yet', joe: 'source_unavailable' })), 'one desk only has a last good value');
   // JOED-103 stays: not-exact values never turn the board red.
   for (const reason of NOT_EXACT_REASONS) assert.notEqual(boardHealthPresentation(ctx(missing(reason)).states, ctx(missing(reason)).feeds, ctx(missing(reason)).now).tone, 'red', reason);
+});
+
+// JOED-148 fix round 1 (gate finding 1): A3 may excuse only desks whose Today
+// is trustworthy and current or withheld as not exact. A shown value that
+// carries a fault reason, a non-current state, a last good value or an
+// unavailable source is a real gap.
+test('JOED-148 A3: a desk Today shown with a fault reason keeps the light yellow (contract-valid wire case)', () => {
+  const data = dayNotExact({ j: 'not_exact_yet' });
+  const joe = data.desks.find(d => d.id === 'joe');
+  assert.notEqual(joe.money.dayPnl, null);
+  joe.money.reasons = { ...joe.money.reasons, dayPnl: 'source_unavailable' };
+  assert.equal(validateContract('data', data).ok, true);
+  const view = ctx(data), cell = view.states['desks.joe.dayPnl'];
+  assert.deepEqual([cell.state, cell.value != null, cell.retained, cell.reason], ['broken', true, false, 'source_unavailable']);
+  const health = boardHealthPresentation(view.states, view.feeds, view.now);
+  assert.deepEqual([health.tone, health.reason], ['yellow', 'day_pending']);
+  // The hero and Details name Joe's real gap with the same test the light uses.
+  assert.equal(htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Not exact for J; unavailable for Joe');
+  assert.equal(detailsRow(view, 'Today’s result'), 'Exact for Joel; not exact for J; unavailable for Joe · not reported by the broker');
+});
+
+const FAULT_REASONS = REASONS.filter(reason => !NOT_EXACT_REASONS.has(reason));
+const shown = { amount: '-5', currency: 'EUR' };
+const joeTodayGaps = [
+  ...FAULT_REASONS.map(reason => [`shown with ${reason}`, { state: 'broken', value: shown, retained: false, reason }]),
+  ['stale', { state: 'stale', value: shown, retained: false, reason: 'snapshot_stale' }],
+  ['frozen', { state: 'stale', value: shown, retained: false, reason: 'producer_frozen' }],
+  ['replay advisory', { state: 'stale', value: shown, retained: false, reason: 'sequence_replayed' }],
+  ['last good', { state: 'broken', value: shown, retained: true, reason: 'gateway_down', ageSeconds: 30 }],
+  ['fresh, from an unavailable source', { state: 'fresh', value: shown, retained: false, reason: null, valueSource: { status: 'unavailable', reason: 'source_unavailable' } }],
+  ['fresh with a fault reason', { state: 'fresh', value: shown, retained: false, reason: 'source_unavailable' }],
+  ['not reported', { state: 'not reported', value: null, retained: false, reason: null }],
+  ['unavailable', { state: 'broken', value: null, retained: false, reason: 'source_unavailable' }],
+  ['missing', undefined],
+];
+for (const [what, gap] of joeTodayGaps) test(`JOED-148 A3: J not exact beside Joe's Today ${what} is a real gap: yellow`, () => {
+  const view = ctx(dayNotExact({ j: 'not_exact_yet' }));
+  assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'green', reason: 'board_ok' }, 'control: Joe exact');
+  if (gap === undefined) delete view.states['desks.joe.dayPnl']; else view.states['desks.joe.dayPnl'] = gap;
+  assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'yellow', reason: 'day_pending' }, what);
+  assert.match(boardDiagnostics(view.states, view.feeds, view.now).join(' '), /Today’s result is unavailable during New York regular hours/);
+  assert.equal(trustedCurrent(view.states['desks.joe.dayPnl']), false);
+});
+
+test('JOED-148: trustedCurrent is the one test for a current, true value', () => {
+  const fresh = { state: 'fresh', value: shown, retained: false, reason: null };
+  assert.equal(trustedCurrent(fresh), true);
+  assert.equal(trustedCurrent({ ...fresh, valueSource: { status: 'available', method: 'sod-virtual-equity' } }), true);
+  assert.equal(trustedCurrent({ ...fresh, valueSource: { status: 'available', method: 'session-open-estimate' } }), true, 'an estimate is current; its cards mark it');
+  for (const [, gap] of joeTodayGaps) assert.equal(trustedCurrent(gap), false);
+  for (const reason of NOT_EXACT_REASONS) assert.equal(trustedCurrent({ ...fresh, value: null, state: 'broken', reason }), false);
 });

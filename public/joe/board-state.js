@@ -11,6 +11,11 @@ export const outageValue = cell => Boolean(cell?.retained || stoppedData(cell));
 export const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale', 'baseline_pending', 'day_pnl_unavailable']);
 // A dash the feed explains as not exact (never a fault, never a last value).
 export const notExactDash = cell => cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason);
+// The board's one test for a value it may treat as current and true: shown,
+// fresh, with no reason at all (no fault and not "not exact"), not an outage's
+// last good value, and not from a source that calls itself unavailable.
+export const trustedCurrent = cell => cell?.value != null && cell.state === 'fresh' && !cell.reason && !outageValue(cell) &&
+  (cell.valueSource == null || cell.valueSource.status === 'available');
 const DESKS = ['j', 'joe', 'joel'];
 const positionKey = row => JSON.stringify([row.scope, row.desk, row.symbol]);
 const unavailable = (cell, reason = cell.reason) => ({ ...cell, state: cell.state === 'fresh' ? 'broken' : cell.state, value: null, retained: false, reason });

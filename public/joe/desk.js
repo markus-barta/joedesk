@@ -12,7 +12,7 @@ import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
 import { STARTING_MONEY, SINCE_START, sinceStarts, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
-import { NOT_EXACT_REASONS, notExactDash, outageValue, withGenerationAge } from './board-state.js';
+import { NOT_EXACT_REASONS, notExactDash, trustedCurrent, outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -338,14 +338,15 @@ function sessionRing(now) {
 const byDesk = (a, b) => DESKS.indexOf(a) - DESKS.indexOf(b);
 export const deskNames = ids => ids.length > 1 ? `${ids.slice(0, -1).map(id => LABEL[id]).join(', ')} and ${LABEL[ids.at(-1)]}` : LABEL[ids[0]];
 // Each desk's own Today in plain words, grouped by word and reason in desk
-// order: exact (or estimated) figures, not-exact dashes and other states.
+// order: trustworthy current figures (exact or estimated), not-exact dashes
+// and other states, on the same test the light uses (trustedCurrent).
 // Only the board's per-desk cells are read; nothing is computed from money.
 export function deskDays(states) {
   const groups = [];
   for (const id of DESKS) {
     const cell = states[`desks.${id}.dayPnl`];
     let word, reason = null;
-    if (exactCell(cell) !== null) word = cell.valueSource?.method === 'session-open-estimate' ? 'estimated' : 'exact';
+    if (trustedCurrent(cell) && exactCell(cell) !== null) word = cell.valueSource?.method === 'session-open-estimate' ? 'estimated' : 'exact';
     else {
       word = notExactDash(cell) ? NOT_EXACT : cell?.retained ? 'last good' : cell?.state === 'stale' ? 'stale'
         : (cell?.state ?? 'not reported') === 'not reported' ? 'not reported' : 'unavailable';
@@ -409,7 +410,7 @@ export function householdDayReason(states, sharedReason = null) {
 // flat today." Estimates keep their own mark on their cards and are left out.
 function exactDeskSentence(states) {
   const parts = DESKS.flatMap(id => {
-    const cell = states[`desks.${id}.dayPnl`], units = exactCell(cell);
+    const cell = states[`desks.${id}.dayPnl`], units = trustedCurrent(cell) ? exactCell(cell) : null;
     if (units === null || cell.valueSource?.method === 'session-open-estimate') return [];
     return [`${LABEL[id]} is ${isZero(units) ? 'flat' : `${units > 0n ? 'up' : 'down'} ${eur(units < 0n ? -units : units)}`}`];
   });
