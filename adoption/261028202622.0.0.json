@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261028202622.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 37,
+  "source": {
+    "commit": "aedc666492a6379bf946900ce8521d105a70ede5",
+    "tree": "31046c5f7d52234335f35eff76617d5460b81f2b"
+  },
+  "release_set_sha256": "b16ce7d5430d295a644a945e8921b94cd3ebd63a9ce26c7d649a35400cfa45f9",
+  "image_digest": "sha256:20b1113495a46eb35546b29db58d077ffd06125475b2afe6433a073f3344a9bf",
+  "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+  "validation_run_id": "40775229493",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-10-29T07:51:18Z",
+    "operator_ticket": "JOED-122",
+    "rollback_reference": "JOED-122: revert the csb0 board re-pin (nixcfg #1182, merge de267b5f1c5580ed5784ea206590c1edd0a59771) and switch csb0 to the previous generation nbj86py0s921sy0rs48x8753z78pqiyy-nixos-system-csb0 with the retained sequence-36 image csb0-joe-board:source-b186308269ab9c05247c6b0f0e4b35fac4bc0ce7 (sha256:722b603f59cc013311fc9c0f2eece0d762d4d28ee7624a7e40ae9fba46e315ff, pull_policy never); board-only switch, hsb0 untouched; pre-switch board backup board-pre-37-20261029T075024Z.tar"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-10-29T07:51:32Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-10-29T07:52:23Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-10-29T07:52:19Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-10-29T07:51:32Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-10-29T07:54:05Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; GET-only served shell/app look: hsb0 pusher state, desks/all four feeds present; release 37 JOED-108 fixes (JOED-114 stale/frozen desk header warning, JOED-121 keyboard history, About 37); all feeds fresh, gateway confirmed (15 s gateway_unconfirmed restart transient cleared 07:51:42Z), rev-10 exactness profile unchanged; same-build agm2 CI screenshots (main run 40775229493)"
+  },
+  "adopted_at": "2026-10-29T07:56:28Z"
+}
