@@ -4,12 +4,18 @@
 // comparisons, sparklines, totals or storage. The validated history arrives as
 // typed columns (one row per point, NaN for a missing value) so a 10,000-point
 // file never costs the page more than a few milliseconds.
-import { nyDay, viennaDay, marketSession, zonedInstant, NY, VIENNA } from './time.mjs';
+import { nyDay, marketSession, zonedInstant, NY, GAP_MS } from './time.mjs';
 import { decimalUnits } from './contracts/decimal.mjs';
+import { continuityClaims } from './history-continuity.js';
 
 export const DESK_IDS = Object.freeze(['j', 'joe', 'joel']);
 export const FIELDS = Object.freeze(['equity', 'dayPnl', 'openPnl', 'totalPnl']);
 export const ASSUMED_BASELINE = 5000;
+// Rows further apart than GAP_MS (time.mjs, shared with the server) are a gap
+// in reporting; see "Rows the server thinned" below. A stretch of rows that
+// arrived without numbers is hatched once it lasts longer than
+// OBSERVATION_INTERVAL_MS.
+export { GAP_MS };
 export const OBSERVATION_INTERVAL_MS = 5 * 60 * 1000;
 const RANGE_MS = { '1d': 864e5, '1w': 7 * 864e5, '1m': 30 * 864e5 };
 export const rangeSpanMs = range => RANGE_MS[range] ?? null;
@@ -25,15 +31,17 @@ export const basisKey = d => JSON.stringify([d?.historyBasis ?? null, d?.account
 // for the family, and each desk's bookkeeping basis as an index into a table.
 // Each desk's equity also rides along exactly (BigInt units, null when not
 // observed) for Results, which never takes money from a Number.
-export function toColumns(points) {
+export function toColumns(points, continuity = null, historySeq = continuity?.historySeq) {
   const n = points.length, basisKeys = [], basisIndex = new Map();
-  const t = new Float64Array(n);
+  const t = new Float64Array(n), continuous = new Uint8Array(n);
+  const claims = continuityClaims(continuity, historySeq);
   const col = () => Object.fromEntries(FIELDS.map(f => [f, new Float64Array(n)]));
   const desks = Object.fromEntries(DESK_IDS.map(id => [id, { ...col(), equityUnits: new Array(n).fill(null), basis: new Int32Array(n), identified: new Uint8Array(n) }]));
   const totals = col();
   for (let i = 0; i < n; i++) {
     const p = points[i];
     t[i] = Date.parse(p.t);
+    if (i && claims.has(`${points[i - 1].t}/${p.t}`)) continuous[i] = 1;
     for (const f of FIELDS) totals[f][i] = number(p.totals?.[f]);
     for (const id of DESK_IDS) {
       const d = p.desks?.[id], c = desks[id];
@@ -45,10 +53,10 @@ export function toColumns(points) {
       c.identified[i] = d?.historyBasis || d?.accounting ? 1 : 0;
     }
   }
-  return { n, t, desks, totals, basisKeys };
+  return { n, t, continuous, desks, totals, basisKeys };
 }
 
-export const transferables = cols => [cols.t.buffer, ...Object.values(cols.totals).map(a => a.buffer),
+export const transferables = cols => [cols.t.buffer, cols.continuous.buffer, ...Object.values(cols.totals).map(a => a.buffer),
   ...DESK_IDS.flatMap(id => [...FIELDS.map(f => cols.desks[id][f].buffer), cols.desks[id].basis.buffer, cols.desks[id].identified.buffer])];
 
 // A row that says something about a desk: an identified basis or a value.
@@ -163,6 +171,7 @@ export const fromStrip = ([k0, k1], width, px) => k0 + (width > 0 ? clamp(px / w
 // Where no chosen desk has a number for longer than the observation interval:
 // the intersection of every desk's estimated stretches. gapsByDesk holds each
 // desk's ordered gap groups; one band per remaining stretch, in time order.
+// A gap in reporting lasts more than GAP_MS, so it is always hatched.
 export function missingBands(gapsByDesk, minMs = OBSERVATION_INTERVAL_MS) {
   if (!gapsByDesk.length) return [];
   let bands = gapsByDesk[0].map(g => [g[0].x, g[g.length - 1].x]);
@@ -188,55 +197,17 @@ export function chartRows(cols, id, endAt) {
 }
 
 // ---------- Rows the server thinned ----------
-// To stay inside its size limit the server thins its stored history
-// (server/history.mjs, compactPoints) and marks the newest row it thinned
-// (compactedThrough). Each pass keeps, from every 64 rows, the first and the
-// last, each series' lowest and highest, both sides of every change in which
-// values are present or in the bookkeeping basis, and each Vienna day's last
-// row with a value. Later passes thin the kept rows again, so the spacing
-// grows with age: minutes a day back, about one row a day after a week. The
-// server records nothing where no row ever arrived, so a producer outage and
-// a thinned stretch can look alike. A thinned interval is drawn as observed
-// only where thinning explains it:
-// - it crosses a Vienna midnight only from that day's last row (at most the
-//   observation interval before midnight) into the next day: every day's
-//   last row survives every pass, so any other crossing lost real time;
-// - it is no longer than THIN_TOLERANCE times the longest of the
-//   THIN_NEIGHBOURS kept intervals on either side, the thinning step at that
-//   age.
-// Anything longer stays an estimate (hatched where no chosen desk has a
-// number). The client cannot tell an outage shorter than the thinning step
-// there from thinning: it stays joined, and History says so under the chart.
-// Only the server could keep them apart, by marking the rows around each
-// outage before it thins them.
-export const THIN_NEIGHBOURS = 16, THIN_TOLERANCE = 3;
-const nextDayOf = day => new Date(Date.parse(`${day}T12:00:00Z`) + 864e5).toISOString().slice(0, 10);
-const valued = (cols, i) => FIELDS.some(f => !Number.isNaN(cols.totals[f][i]) || DESK_IDS.some(id => !Number.isNaN(cols.desks[id][f][i])));
-const thinned = new WeakMap();
-// 1 where the interval ending at row i is longer than thinning explains;
-// null without a thinning mark. Cached per history and mark.
-export function unexplainedThinning(cols, thinnedThrough) {
-  if (!Number.isFinite(thinnedThrough) || !cols.n) return null;
-  const hit = thinned.get(cols);
-  if (hit?.through === thinnedThrough) return hit.gaps;
-  const t = cols.t, last = rowAt(cols, thinnedThrough + 1), gaps = new Uint8Array(cols.n);
-  // Vienna midnights from the first kept row to past the last thinned one.
-  const midnights = [];
-  for (let day = viennaDay(new Date(t[0]).toISOString()), m = -Infinity; last && m <= t[last - 1];) {
-    day = nextDayOf(day);
-    midnights.push(m = Date.parse(zonedInstant(day, '00:00:00', VIENNA)));
-  }
-  for (let i = 1, k = 0; i < last; i++) {
-    const a = t[i - 1], b = t[i];
-    while (midnights[k] <= a) k++;
-    if (b - a <= OBSERVATION_INTERVAL_MS) continue;
-    const crossed = midnights[k] <= b && valued(cols, i - 1) && (midnights[k] - a > OBSERVATION_INTERVAL_MS || midnights[k + 1] <= b);
-    let step = 0;
-    for (let j = Math.max(1, i - THIN_NEIGHBOURS); j <= Math.min(last - 1, i + THIN_NEIGHBOURS); j++) if (j !== i) step = Math.max(step, t[j] - t[j - 1]);
-    if (crossed || b - a > THIN_TOLERANCE * step) gaps[i] = 1;
-  }
-  thinned.set(cols, { through: thinnedThrough, gaps });
-  return gaps;
+// Only an exact sidecar claim can prove a long interval continuous. Missing,
+// damaged, future or sequence-mismatched provenance contributes no claims.
+// Legacy compacted intervals remain coverage unknown, never inferred from
+// adjacent cadence or the mere presence of compactedThrough.
+export const observedInterval = (cols, i) => i > 0 && i < cols.n &&
+  (cols.t[i] - cols.t[i - 1] <= GAP_MS || cols.continuous?.[i] === 1);
+// Inside a stretch without rows, ending at or before compactedThrough.
+export function coverageUnknownAt(cols, x, thinnedThrough) {
+  if (!Number.isFinite(thinnedThrough)) return false;
+  const i = rowAt(cols, x);
+  return i > 0 && i < cols.n && cols.t[i] > x && cols.t[i] <= thinnedThrough && !observedInterval(cols, i);
 }
 
 const gapPoint = (x, y, assumption, extra = {}) => ({ x, y, estimated: true, assumption, ...extra });
@@ -262,22 +233,19 @@ function clipGap(samples, startAt, endAt) {
 
 // Observed samples (null y marks a gap) plus the dashed continuity groups for
 // one desk, clipped to the visible range ending at the board's current time.
-// Rows at or before thinnedThrough were thinned by the server (see above):
-// spacing there that thinning explains stays connected; longer intervals and
-// explicit missing values stay estimates.
-export function continuitySeries(cols, id, range, endAt, { thinnedThrough = null } = {}) {
+// Explicit missing values and unproven intervals above GAP_MS are estimates;
+// the sidecar proves which long intervals came from continuous reporting.
+export function continuitySeries(cols, id, range, endAt) {
   const { start, last } = chartRows(cols, id, endAt);
   const earliest = last ? cols.t[0] : null;
   const [startAt] = rangeWindow(cols, range, endAt);
   const eq = cols.desks[id].equity;
-  const thin = Number.isFinite(thinnedThrough) ? thinnedThrough : -Infinity, unexplained = unexplainedThinning(cols, thinnedThrough);
-  const apart = (a, b) => cols.t[b] - cols.t[a] > OBSERVATION_INTERVAL_MS && (cols.t[b] > thin || unexplained[b] === 1);
   const inside = rowAt(cols, startAt);
   const from = Math.max(start, inside - 1), seenRows = [];
   const observed = [];
   for (let i = inside < last ? from : last; i < last; i++) {
     const y = Number.isNaN(eq[i]) ? null : eq[i];
-    if (i > from && apart(i - 1, i)) observed.push({ x: cols.t[i - 1] + (cols.t[i] - cols.t[i - 1]) / 2, y: null });
+    if (i > from && !observedInterval(cols, i)) observed.push({ x: cols.t[i - 1] + (cols.t[i] - cols.t[i - 1]) / 2, y: null });
     observed.push({ x: cols.t[i], y });
   }
   // Continuity needs the observed rows across the whole retained basis, so a
@@ -292,12 +260,12 @@ export function continuitySeries(cols, id, range, endAt, { thinnedThrough = null
     if (baselineAt < cols.t[first]) groups.push([gapPoint(baselineAt, ASSUMED_BASELINE, 'assumed-baseline'), gapPoint(cols.t[first], eq[first], 'assumed-baseline', { observedBoundary: true })]);
     for (let k = 0; k + 1 < seenRows.length; k++) {
       const left = seenRows[k], right = seenRows[k + 1];
-      if (right === left + 1 && !apart(left, right)) continue;
+      if (right === left + 1 && observedInterval(cols, right)) continue;
       if (cols.t[right] < startAt - OBSERVATION_INTERVAL_MS) continue;
       const a = { x: cols.t[left], y: eq[left] }, b = { x: cols.t[right], y: eq[right] };
       const markers = [];
       for (let r = left; r < right; r++) {
-        if (apart(r, r + 1)) markers.push(cols.t[r] + (cols.t[r + 1] - cols.t[r]) / 2);
+        if (!observedInterval(cols, r + 1)) markers.push(cols.t[r] + (cols.t[r + 1] - cols.t[r]) / 2);
         if (r > left && Number.isNaN(eq[r])) markers.push(cols.t[r]);
       }
       const group = [gapPoint(a.x, a.y, 'interpolated', { observedBoundary: true })];
@@ -315,8 +283,12 @@ export function continuitySeries(cols, id, range, endAt, { thinnedThrough = null
 // (observed, latest comparable basis), inside its window [from, to] in
 // milliseconds; endAt is the board's current time, as for the chart. It runs
 // over the last stretch in which every chosen desk has a number on its
-// current basis; `after` names what ended the stretch before it inside the
-// window (null when the stretch starts with the window's first row).
+// current basis and every interval is observed (the chart's own rule: at
+// most GAP_MS between rows or an exact continuity claim), so a stretch it
+// compares is continuous data;
+// `after` names what ended the stretch before it inside the window (null
+// when the stretch starts with the window's first row): 'gap' for a stretch
+// without rows, 'incomplete-coverage' for missing numbers.
 export function sharedWindowCompare(cols, ids, bounds, endAt) {
   if (ids.length < 2) return { ok: false, reason: 'insufficient-selection' };
   if (!cols.n) return { ok: false, reason: 'insufficient-points' };
@@ -327,6 +299,7 @@ export function sharedWindowCompare(cols, ids, bounds, endAt) {
   for (let i = from; i < to; i++) {
     if (!ids.every(id => !Number.isNaN(cols.desks[id].equity[i]))) { runStart = -1; lastBreak = 'incomplete-coverage'; continue; }
     if (kept.some(k => i < k.start || i >= k.last)) { runStart = -1; lastBreak = 'incompatible-basis'; continue; }
+    if (runStart >= 0 && !observedInterval(cols, i)) { runStart = -1; lastBreak = 'gap'; }
     if (runStart < 0) runStart = i;
     runEnd = i;
   }

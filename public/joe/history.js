@@ -8,7 +8,7 @@ import { decimalUnits } from './contracts/decimal.mjs';
 import { cellReason } from './health.js';
 import { exactCell } from './performance.js';
 import { drawChart, eurAxis, axis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor } from './chart.js';
-import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, sharedWindowCompare, basisNotice, toColumns, rowAt, rangeSpanMs,
+import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, coverageUnknownAt, sharedWindowCompare, basisNotice, toColumns, rowAt, rangeSpanMs,
   keptRange, placeWindow, panWindow, zoomWindow, resizeWindow, atLiveEdge, endsAtNewest, followWindow, presetSpan, windowPreset, resolveView,
   missingBands, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
 import { viennaDay, zonedInstant, VIENNA, NY } from './time.mjs';
@@ -55,14 +55,17 @@ function compareLine(cols, bounds, endAt) {
   const result = sharedWindowCompare(cols, HS.desks, bounds, endAt);
   if (!result.ok) {
     return result.reason === 'incomplete-coverage' ? 'Comparing needs the same moments for every chosen desk in this window.'
-      : result.reason === 'incompatible-basis' ? 'Comparing needs two moments on every chosen desk’s current bookkeeping basis.'
-        : result.reason === 'insufficient-points' ? 'Not enough history in this window to compare.' : 'Choose two or more desks to compare them over the same window.';
+      : result.reason === 'gap' ? 'Comparing needs two moments with continuous data in this window.'
+        : result.reason === 'incompatible-basis' ? 'Comparing needs two moments on every chosen desk’s current bookkeeping basis.'
+          : result.reason === 'insufficient-points' ? 'Not enough history in this window to compare.' : 'Choose two or more desks to compare them over the same window.';
   }
   const when = iso => `${dayDDM(iso)}, ${timeHM(iso)}`, figures = result.desks.map(d => `${LABEL[d.id]} ${pct(d.pct, 2, true)}`).join(' · ');
-  // A comparison that cannot use the whole window names the stretch it uses.
+  // A comparison that cannot use the whole window names the stretch it uses:
+  // continuous data (every interval observed, every number there) after a gap
+  // or a missing number, or the current bookkeeping after a basis change.
   if (result.after) {
     const run = age((Date.parse(result.endAt) - Date.parse(result.startAt)) / 1000);
-    return `Last ${run} ${result.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'without gaps'}, from ${when(result.startAt)}: ${figures}`;
+    return `Last ${run} ${result.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'with continuous data'}, from ${when(result.startAt)}: ${figures}`;
   }
   return `From ${when(result.startAt)} to ${when(result.endAt)}: ${figures}`;
 }
@@ -166,8 +169,9 @@ function firstAt(xs, x, after = false) {
 
 // Display-only hits use original observations, never the thinned SVG points.
 // An actual observation wins at its timestamp; inside a gap show its estimate.
-// Where the server thinned old rows, the nearest kept observation answers.
-function historyHit(observed, gaps, x, thin = null) {
+// Between observations joined by proven continuous reporting, the nearest
+// actual observation answers.
+function historyHit(observed, gaps, x) {
   const i = pointAt(observed, x), a = observed[i - 1], b = observed[i];
   const p = !a ? b : !b || x - a.x <= b.x - x ? a : b;
   if (p?.x === x) return { x: p.x, v: p.y };
@@ -177,41 +181,42 @@ function historyHit(observed, gaps, x, thin = null) {
     const v = right.x === left.x ? right.y : left.y + (right.y - left.y) * ((x - left.x) / (right.x - left.x));
     return { x, v, estimated: true };
   }
-  const thinned = thin !== null && a && b && b.x <= thin;
-  return p && (thinned || Math.abs(p.x - x) <= OBSERVATION_INTERVAL_MS) ? { x: p.x, v: p.y } : null;
+  return p && ((a && b) || Math.abs(p.x - x) <= OBSERVATION_INTERVAL_MS) ? { x: p.x, v: p.y } : null;
 }
 
 // One wording for the visible tooltip and the polite keyboard announcement.
-export function historyPointDetails(near, x, desks) {
+// Inside a stretch without rows that an older version may have thinned
+// (coverageUnknownAt), a last line says its coverage is unknown.
+export function historyPointDetails(near, x, desks, unknown = false) {
   const at = new Date(Math.round(x)).toISOString();
   const lines = [`${dayDDM(at)}, ${timeHM(at)} Vienna time`, ...desks.map((id, i) => {
     const p = near[i];
     return `${LABEL[id]} ${p ? `${eur(p.v)} ${p.estimated ? 'estimated' : 'observed'}` : 'no value here'}`;
-  })];
+  }), ...(unknown ? ['Thinned or not reported: coverage unknown'] : [])];
   return { text: lines.join('\n'), html: `<b>${esc(lines[0])}</b>${lines.slice(1).map(line => `<br>${esc(line)}`).join('')}` };
 }
 
 // ---------- The drawn model ----------
-// Rebuilt only when the history, the desk choice, the thinning mark or the
-// rows up to the board's time change. Between updates only each desk's
-// trailing estimate (its held last value, or the assumed start of a desk
-// never observed) reaches the board's current time, so a frame of panning or
-// zooming never walks the whole history.
+// Rebuilt only when the history, the desk choice or the rows up to the
+// board's time change. Between updates only each desk's trailing estimate
+// (its held last value, or the assumed start of a desk never observed)
+// reaches the board's current time, so a frame of panning or zooming never
+// walks the whole history.
 let model = null;
-function deskModel(cols, id, endAt, thin) {
-  const s = continuitySeries(cols, id, 'all', endAt, { thinnedThrough: thin });
+function deskModel(cols, id, endAt) {
+  const s = continuitySeries(cols, id, 'all', endAt);
   const end = s.gaps.at(-1);
   const tail = end && end.at(-1).x === endAt && ['last-value-carry', 'no-history-baseline'].includes(end[0].assumption) ? end : null;
   const hits = s.observed.filter(p => p.y !== null);
   return { id, lines: s.observed.map(p => ({ x: p.x, v: p.y })), hits, body: tail ? s.gaps.slice(0, -1) : s.gaps, tail };
 }
-function historyModel(cols, endAt, thin) {
+function historyModel(cols, endAt) {
   const last = rowAt(cols, endAt + 1), desks = HS.desks.join();
-  if (!model || !last || model.cols !== cols || model.desks !== desks || model.last !== last || model.thin !== thin) {
-    const models = HS.desks.map(id => deskModel(cols, id, endAt, thin));
+  if (!model || !last || model.cols !== cols || model.desks !== desks || model.last !== last) {
+    const models = HS.desks.map(id => deskModel(cols, id, endAt));
     // Every original moment keyboard inspection can stop at, in order.
     const xs = [...new Set(models.flatMap(m => [...m.lines.map(p => p.x), ...m.body.flatMap(g => g.map(p => p.x)), ...(m.tail ? [m.tail[0].x] : [])]))].sort((a, b) => a - b);
-    model = { cols, desks, last, thin, models, xs, overview: null };
+    model = { cols, desks, last, models, xs, overview: null };
   }
   return model;
 }
@@ -272,7 +277,7 @@ export function historyChart(ctx) {
   const cell = ctx.states.history;
   const cols = cell?.value?.columns ?? EMPTY;
   const endAt = Date.parse(ctx.now), thin = thinnedOf(cell);
-  const m = historyModel(cols, endAt, thin);
+  const m = historyModel(cols, endAt);
   const range = keptRange(cols, endAt);
   const gaps = m.models.map(d => gapsAt(d, endAt));
   const bands = missingBands(gaps);
@@ -300,8 +305,8 @@ export function historyChart(ctx) {
     series.push({ pts: visible, color: `var(--desk-${d.id})`, w: 1.8, live: true, area: false, desk: d.id });
   });
   const base = firsts.length ? firsts.reduce((a, b) => a + b, 0) / firsts.length : ASSUMED_BASELINE;
-  const hitTest = xv => m.models.map((d, i) => historyHit(d.hits, gaps[i], xv, thin));
-  const tipFmt = (near, xv) => historyPointDetails(near, xv, HS.desks);
+  const hitTest = xv => m.models.map((d, i) => historyHit(d.hits, gaps[i], xv));
+  const tipFmt = (near, xv) => historyPointDetails(near, xv, HS.desks, coverageUnknownAt(cols, xv, thin));
   const points = [x0, ...m.xs.slice(firstAt(m.xs, x0), firstAt(m.xs, x1, true)), x1].filter((x, i, list) => x !== list[i - 1]);
   // Synthetic window edges can snap to an observation in the same minute.
   // Keep every original observation, but skip an edge that repeats its neighbour.
@@ -486,7 +491,7 @@ export function initHistoryInput({ schedule }) {
   // Mouse and pen: drag pans after 3 px, double-click shows everything kept.
   // Touch: a clear sideways swipe pans (a vertical one scrolls the page), two
   // fingers pinch and pan, a tap or a long press inspects, a double tap fits.
-  input.blocksTip = () => Boolean(input.drag?.moved || (input.touch && input.touch.mode !== 'scrub'));
+  input.blocksTip = () => Boolean(input.drag?.moved || (input.touch && input.touch.phase !== 'scrub'));
   chart.addEventListener('pointerdown', e => {
     if (!HS.shown || e.target.closest('.hist-status')) return;
     const start = current();
@@ -499,13 +504,13 @@ export function initHistoryInput({ schedule }) {
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     clearTimeout(input.touch?.timer);
     if (touches.size === 1) {
-      const t = { mode: 'pending', id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, down: e.timeStamp, start, perPx: perPx() };
-      t.timer = setTimeout(() => { if (input.touch === t && t.mode === 'pending') { t.mode = 'scrub'; input.pinned = true; lastScale?.inspectAt(t.lastX); } }, 350);
+      const t = { phase: 'pending', id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, down: e.timeStamp, start, perPx: perPx() };
+      t.timer = setTimeout(() => { if (input.touch === t && t.phase === 'pending') { t.phase = 'scrub'; input.pinned = true; lastScale?.inspectAt(t.lastX); } }, 350);
       input.touch = t;
     } else if (touches.size === 2) {
       const [p, q] = [...touches.values()], mid = (p.x + q.x) / 2;
       unpin();
-      input.touch = { mode: 'pinch', start, spread: Math.max(24, Math.abs(p.x - q.x)), mid, at: chartTime(mid, start), perPx: perPx() };
+      input.touch = { phase: 'pinch', start, spread: Math.max(24, Math.abs(p.x - q.x)), mid, at: chartTime(mid, start), perPx: perPx() };
     }
   });
   chart.addEventListener('pointermove', e => {
@@ -520,7 +525,7 @@ export function initHistoryInput({ schedule }) {
     if (!touches.has(e.pointerId) || !input.touch) return;
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const t = input.touch;
-    if (t.mode === 'pinch') {
+    if (t.phase === 'pinch') {
       if (touches.size !== 2) return;
       const [p, q] = [...touches.values()], spread = Math.max(24, Math.abs(p.x - q.x)), mid = (p.x + q.x) / 2;
       const zoomed = zoomWindow(HS.full, t.start, t.spread / spread, t.at);
@@ -530,15 +535,15 @@ export function initHistoryInput({ schedule }) {
     if (t.id !== e.pointerId) return;
     t.lastX = e.clientX;
     const dx = e.clientX - t.x, dy = e.clientY - t.y;
-    if (t.mode === 'pending') {
+    if (t.phase === 'pending') {
       if (Math.hypot(dx, dy) < 8) return;
       clearTimeout(t.timer);
-      if (Math.abs(dx) <= Math.abs(dy)) { t.mode = 'page'; return; }
+      if (Math.abs(dx) <= Math.abs(dy)) { t.phase = 'page'; return; }
       unpin();
-      t.mode = canPan() ? 'pan' : 'scrub';
-      if (t.mode === 'scrub') input.pinned = true;
+      t.phase = canPan() ? 'pan' : 'scrub';
+      if (t.phase === 'scrub') input.pinned = true;
     }
-    if (t.mode === 'pan') setView(panWindow(HS.full, t.start, -dx * t.perPx));
+    if (t.phase === 'pan') setView(panWindow(HS.full, t.start, -dx * t.perPx));
   });
   // Fingers are tracked by id. Whichever lifts last ends the gesture, pinch or
   // swipe, so none of its state outlives it and a mouse or pen inspects again.
@@ -549,11 +554,11 @@ export function initHistoryInput({ schedule }) {
     if (!touches.size) input.touch = null;
     if (!t) return;
     clearTimeout(t.timer);
-    if (t.mode === 'pinch' || t.mode === 'done') { if (touches.size) t.mode = 'done'; return; }
+    if (t.phase === 'pinch' || t.phase === 'done') { if (touches.size) t.phase = 'done'; return; }
     if (t.id !== e.pointerId) return;
     input.touch = null;
     if (e.type === 'pointercancel') { unpin(); return; }
-    if (t.mode !== 'pending' || e.timeStamp - t.down > 300) return;
+    if (t.phase !== 'pending' || e.timeStamp - t.down > 300) return;
     const tap = input.lastTap;
     if (tap && e.timeStamp - tap.at < 300 && Math.abs(e.clientX - tap.x) < 24) { input.lastTap = null; unpin(); fitAll(); return; }
     input.lastTap = { at: e.timeStamp, x: e.clientX };
@@ -705,7 +710,7 @@ export function renderHistory(ctx) {
     const excluded = basisNotice(cols, DESK_IDS, range, endAt);
     setText($('#histBasis'), excluded.length ? `This chart shows comparable records for ${excluded.map(id => LABEL[id]).join(' and ')}. Older records on another bookkeeping basis stay in the history file.` : '');
     const thin = thinnedOf(cell);
-    setText($('#histThin'), thin !== null && thin > range[0] ? `Before ${when(Math.min(thin, endAt))} the history is thinned to fit its size limit. The line joins the points kept; a gap there shows only where it is longer than the thinning.` : '');
+    setText($('#histThin'), thin !== null && thin > range[0] ? `Before ${when(Math.min(thin, endAt))} the history is thinned to fit its size limit: the line joins kept observations where continuous reporting is recorded. Other stretches are hatched; where coverage cannot be proved, the tooltip says coverage unknown.` : '');
   } else {
     setText($('#histCompare'), 'Comparing waits for the board server’s clock.');
     setText($('#histBasis'), '');

@@ -1,6 +1,7 @@
 // JOED-145: History's shown window (presets, pan, zoom, resize, follow), the
 // overview strip's mapping and targets, the wheel/pinch/scroll rules, the
-// time axis, the comparison line, the no-data bands and the thinned record.
+// time axis, the comparison line, the no-data bands, and the server's
+// gap-preserving compaction with what the page reads from it.
 // Pure functions, no browser.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -8,12 +9,14 @@ import { builders } from './fixtures/preview-dom.mjs';
 
 const hm = await import('../public/joe/history-model.js');
 const { wheelIntent, createWheelLatch, wheelPixels, wheelZoomFactor, overviewTargets } = await import('../public/joe/chart.js');
-const { wallTicks } = await import('../public/joe/history.js');
+const { wallTicks, historyPointDetails } = await import('../public/joe/history.js');
 const { axisLabels, compareLine } = await builders('history.js', ['axisLabels', 'compareLine']);
-const { compactPoints } = await import('../server/history.mjs');
+const { compactPoints, compactHistory, boundHistory, measureHistory, HISTORY_WARNING } = await import('../server/history.mjs');
+const { emptyContinuity, continuityClaims } = await import('../public/joe/history-continuity.js');
+const { CONTRACTS, validateContract } = await import('../contracts/index.mjs');
 const { timeHM } = await import('../public/joe/format.js');
 
-const MIN = 60e3, HOUR = 3600e3, DAY = 864e5;
+const MIN = 60e3, HOUR = 3600e3, DAY = 864e5, GAP = 20 * MIN;
 const K0 = Date.parse('2026-10-07T00:00:00.000Z'), K1 = K0 + 7.75 * DAY, RANGE = [K0, K1];
 const span = ([a, b]) => b - a;
 const inside = ([a, b], [k0, k1] = RANGE) => a >= k0 && b <= k1 && a <= b;
@@ -277,7 +280,7 @@ test('JOED-145 compare: over part of the window the line names the stretch it us
   rows.push(at(K0 + 20.5 * HOUR, null, 5100, 5000));
   for (let ms = cut; ms <= end; ms += 2 * MIN) rows.push(at(ms, ms === end ? 5010 : 5000, ms === end ? 4995 : 5000, 5000));
   const gap = compareLine(hm.toColumns(rows), window, end);
-  assert.match(gap, /^Last 3.h.22.min without gaps, from Wed 7.Oct, 22:38: J \+0,20.% · Joe −0,10.% · Joel 0,00.%$/, gap);
+  assert.match(gap, /^Last 3.h.22.min with continuous data, from Wed 7.Oct, 22:38: J \+0,20.% · Joe −0,10.% · Joel 0,00.%$/, gap);
   const basis = compareLine(hm.toColumns(rows.map(r => (Date.parse(r.t) < cut ? { ...r, desks: { ...r.desks, j: { ...r.desks.j, historyBasis: 'j.v1' } } } : r)).filter(r => r.desks.j.money.equity)), window, end);
   assert.match(basis, /^Last 3.h.22.min on the current bookkeeping, from Wed 7.Oct, 22:38: J \+0,20.%/, basis);
   const whole = compareLine(hm.toColumns(rows.filter(r => Date.parse(r.t) >= cut)), window, end);
@@ -299,62 +302,157 @@ test('JOED-145 bands: hatched only where every chosen desk lacks numbers for mor
 const row = (ms, values) => ({ t: new Date(ms).toISOString(), totals: {},
   desks: Object.fromEntries(hm.DESK_IDS.map(id => [id, { money: values[id] === undefined ? {} : { equity: values[id] === null ? null : { amount: String(values[id]), currency: 'EUR' } } }])) });
 
-test('JOED-145 thinning: rows the server thinned stay connected; explicit nulls and later gaps stay estimates', () => {
-  // Thinned: rows 40 minutes apart until 06:00, one explicit null; raw rows every
-  // 30 s after it, then a real 20-minute outage.
-  const points = [];
-  for (let m = 0; m <= 360; m += 40) points.push(row(K0 + m * MIN, { j: m === 160 ? null : 5000 + m }));
-  for (let s = 361 * 60; s <= 420 * 60; s += 30) points.push(row(K0 + s * 1000, { j: 6000 }));
-  for (let s = 440 * 60; s <= 450 * 60; s += 30) points.push(row(K0 + s * 1000, { j: 6001 }));
-  const cols = hm.toColumns(points), end = K0 + 450 * MIN, thin = K0 + 360 * MIN;
-  const raw = hm.continuitySeries(cols, 'j', 'all', end);
-  const kept = hm.continuitySeries(cols, 'j', 'all', end, { thinnedThrough: thin });
-  assert.ok(raw.gaps.length > kept.gaps.length, 'without the mark, thinning reads as outages');
-  const inThinned = g => g[g.length - 1].x <= thin;
-  assert.deepEqual(kept.gaps.filter(inThinned).map(g => [g[0].x, g[g.length - 1].x]), [[K0 + 120 * MIN, K0 + 200 * MIN]], 'only the explicit null is estimated in the thinned part');
-  assert.equal(kept.observed.filter(p => p.y === null && p.x < K0 + 120 * MIN).length, 0, 'no breaks between thinned rows');
-  assert.ok(kept.gaps.some(g => g[0].x === K0 + 420 * MIN && g[g.length - 1].x === K0 + 440 * MIN), 'a real outage after the mark is still an estimate');
-  assert.ok(kept.gaps.some(g => g[0].x === K0 + 360 * MIN && g[g.length - 1].x === K0 + 361 * MIN) === false, 'the step from thinned to raw rows within five minutes is observed');
-  assert.deepEqual(hm.continuitySeries(cols, 'j', 'all', end, { thinnedThrough: null }), raw, 'no mark, no change');
-});
-
-// The producer's 30-second stream through the server's own compaction
-// (server/history.mjs): a pass runs whenever the store holds more than `cap`
-// rows, as boundHistory does at its size warning, and marks the newest row it
-// thinned. Money moves a few cents every row, as on a trading day.
-function compacted({ hours = 48, cap = 2400, outage = null } = {}) {
-  let seed = 7, points = [], thinnedThrough = null;
+// The producer's stream: rows every 30 s, every 900 s overnight (22:00 to
+// 06:00 UTC, the scheduler's slowest regime) unless `night` is off, none
+// inside an outage. Through the server's own compaction (server/history.mjs)
+// a pass runs whenever the store holds more than `cap` rows, as boundHistory
+// does at its size warning, and marks the newest row it thinned. Money moves
+// a few cents every row, as on a trading day.
+function stream({ days = 2, cap = Infinity, outages = [], night = true } = {}) {
+  let seed = 7, points = [], thinnedThrough = null, passes = 0;
+  const continuity = emptyContinuity(1);
   const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
   const cents = { j: 500000, joe: 500000, joel: 500000 };
-  for (let t = K0; t < K0 + hours * HOUR; t += 30e3) {
-    if (outage && t >= outage[0] && t < outage[1]) continue;
-    for (const id of hm.DESK_IDS) cents[id] += Math.round((rand() - 0.5) * 40);
-    points.push(row(t, Object.fromEntries(hm.DESK_IDS.map(id => [id, cents[id] / 100]))));
-    if (points.length > cap) { points = compactPoints(points); thinnedThrough = Date.parse(points.at(-1).t); }
+  for (let t = K0; t < K0 + days * DAY;) {
+    if (!outages.some(([a, b]) => t >= a && t < b)) {
+      for (const id of hm.DESK_IDS) cents[id] += Math.round((rand() - 0.5) * 40);
+      points.push(row(t, Object.fromEntries(hm.DESK_IDS.map(id => [id, cents[id] / 100]))));
+      if (points.length > cap) { const compacted = compactHistory(points, { continuity }); points = compacted.points; continuity.intervals = compacted.intervals; thinnedThrough = Date.parse(points.at(-1).t); passes++; }
+    }
+    const hour = new Date(t).getUTCHours();
+    t += night && (hour >= 22 || hour < 6) ? 900e3 : 30e3;
   }
-  return { cols: hm.toColumns(points), thinnedThrough, end: Date.parse(points.at(-1).t) };
+  return { points, continuity, cols: hm.toColumns(points, continuity), thinnedThrough, passes, end: Date.parse(points.at(-1).t) };
 }
-const bandsOf = ({ cols, thinnedThrough, end }) => hm.missingBands(hm.DESK_IDS.map(id => hm.continuitySeries(cols, id, 'all', end, { thinnedThrough }).gaps));
+const bandsOf = (cols, end) => hm.missingBands(hm.DESK_IDS.map(id => hm.continuitySeries(cols, id, 'all', end).gaps));
+// Every interval longer than GAP_MS, as [from, to] times.
+const gapsIn = (points, continuity = null) => points.flatMap((p, i) => (i && Date.parse(p.t) - Date.parse(points[i - 1].t) > GAP && !continuityClaims(continuity).has(`${points[i - 1].t}/${p.t}`) ? [[points[i - 1].t, p.t]] : []));
+const steps = points => points.slice(1).map((p, i) => Date.parse(p.t) - Date.parse(points[i].t));
 
-test('JOED-145 thinning: through the server’s compaction a normal stretch stays joined; an outage longer than the thinning keeps its band', () => {
-  const clean = compacted();
-  const spacing = [...clean.cols.t].slice(1).map((x, i) => x - clean.cols.t[i]).filter((_, i) => clean.cols.t[i + 1] <= clean.thinnedThrough);
-  assert.ok(clean.thinnedThrough > K0 + DAY && Math.max(...spacing) > 10 * MIN, 'the fixture was thinned, to more than ten minutes between kept rows');
-  assert.deepEqual(bandsOf(clean), [], 'thinning alone draws no band');
-  for (const id of hm.DESK_IDS) assert.deepEqual(hm.continuitySeries(clean.cols, id, 'all', clean.end, { thinnedThrough: clean.thinnedThrough }).gaps, [], `${id}: no estimate either`);
-  // Three hours where the rows were thinned once (minutes apart), eight where
-  // they were thinned twice (up to about two hours apart), and 45 minutes
-  // across a Vienna midnight, whose last row before it every pass keeps. An
-  // outage shorter than the thinning step at its age cannot be told apart.
-  for (const [from, to] of [[28, 31], [6, 14], [21.5, 22.25]]) {
-    const outage = [K0 + from * HOUR, K0 + to * HOUR], out = compacted({ outage }), name = new Date(outage[0]).toISOString();
-    assert.ok(out.thinnedThrough > outage[1], `${name}: the outage lies in the thinned part`);
-    const bands = bandsOf(out);
-    assert.equal(bands.length, 1, `${name}: one band`);
-    assert.ok(bands[0][0] <= outage[0] && bands[0][1] >= outage[1] && bands[0][0] >= outage[0] - 3 * HOUR && bands[0][1] <= outage[1] + 3 * HOUR, `${name}: over the outage`);
-    const j = hm.continuitySeries(out.cols, 'j', 'all', out.end, { thinnedThrough: out.thinnedThrough });
-    assert.ok(j.gaps.some(g => g[0].x <= outage[0] && g.at(-1).x >= outage[1]), 'with its dashed estimate');
+test('JOED-145 thinning: the server and the page share one GAP_MS, longer than the slowest normal cadence', () => {
+  assert.equal(hm.GAP_MS, GAP);
+  assert.ok(hm.GAP_MS > 900e3, 'the overnight 900-second regime is continuous reporting');
+});
+
+test('JOED-145 thinning: two nearby outages keep both bands through one compaction and every later one (the Codex gate’s case)', () => {
+  // Flat 30-second rows on Wed 7 Oct; none from 06:00 to 09:00 and from 10:00 to 13:00 UTC.
+  const outages = [[K0 + 6 * HOUR, K0 + 9 * HOUR], [K0 + 10 * HOUR, K0 + 13 * HOUR]];
+  const raw = [];
+  for (let t = K0; t < K0 + DAY; t += 30e3) if (!outages.some(([a, b]) => t >= a && t < b)) raw.push(row(t, { j: 5000, joe: 5000, joel: 5000 }));
+  let points = raw;
+  const continuity = emptyContinuity(1);
+  for (const pass of [1, 2, 3]) {
+    const compacted = compactHistory(points, { continuity });
+    points = compacted.points; continuity.intervals = compacted.intervals;
+    assert.ok(points.length < raw.length / 10, `pass ${pass}: thinned to ${points.length} rows`);
+    assert.deepEqual(bandsOf(hm.toColumns(points, continuity), Date.parse(points.at(-1).t)), outages.map(([a, b]) => [a - 30e3, b]),
+      `pass ${pass}: each outage keeps its band, from the last row before it to the first after it`);
   }
-  // Without the mark nothing is thinned, so every wide step reads as missing.
-  assert.ok(bandsOf({ ...clean, thinnedThrough: null }).length > 10);
+});
+
+test('JOED-145 thinning: a normally thinned 14-day store draws no band and no estimate, its 900-second nights included', () => {
+  const store = stream({ days: 14, cap: 10000 });
+  const thinned = steps(store.points).filter((_, i) => Date.parse(store.points[i + 1].t) <= store.thinnedThrough);
+  assert.ok(store.passes >= 2 && Math.max(...thinned) > 10 * MIN, `thinned by ${store.passes} passes, up to ${Math.max(...thinned) / MIN} min between kept rows`);
+  assert.ok(Math.max(...steps(store.points)) > GAP, 'thinning is no longer blocked by GAP_MS');
+  assert.deepEqual(gapsIn(store.points, store.continuity), [], 'every long kept interval has explicit continuity');
+  assert.deepEqual(bandsOf(store.cols, store.end), [], 'thinning and the night cadence draw no band');
+  for (const id of hm.DESK_IDS) assert.deepEqual(hm.continuitySeries(store.cols, id, 'all', store.end).gaps, [], `${id}: no estimate either`);
+  const all = hm.keptRange(store.cols, store.end), result = hm.sharedWindowCompare(store.cols, hm.DESK_IDS, all, store.end);
+  assert.deepEqual([result.ok, result.after, result.startAt], [true, null, store.points[0].t], 'the comparison runs over all 14 days');
+});
+
+test('JOED-145 thinning: rows an older version thinned further apart than GAP_MS are no data, and their coverage is unknown', () => {
+  // As versions before this rule left a store: rows 40 minutes apart up to the
+  // mark at 06:00 UTC, raw 30-second rows after it with a 30-minute outage.
+  const points = [];
+  for (let m = 0; m <= 360; m += 40) points.push(row(K0 + m * MIN, { j: 5000 + m, joe: 5000, joel: 5000 }));
+  for (let s = 361 * 60; s <= 420 * 60; s += 30) points.push(row(K0 + s * 1000, { j: 6000, joe: 5000, joel: 5000 }));
+  for (let s = 450 * 60; s <= 460 * 60; s += 30) points.push(row(K0 + s * 1000, { j: 6001, joe: 5000, joel: 5000 }));
+  const cols = hm.toColumns(points), end = K0 + 460 * MIN, thin = K0 + 360 * MIN;
+  const legacy = Array.from({ length: 9 }, (_, k) => [K0 + 40 * k * MIN, K0 + 40 * (k + 1) * MIN]);
+  assert.deepEqual(bandsOf(cols, end), [...legacy, [K0 + 420 * MIN, K0 + 450 * MIN]], 'every interval longer than GAP_MS is a no-data band, thinned or not');
+  for (const [a, b] of legacy) assert.equal(hm.coverageUnknownAt(cols, (a + b) / 2, thin), true, `${new Date(a).toISOString()}: thinned or not reported`);
+  for (const x of [K0, K0 + 40 * MIN, K0 + 360 * MIN, K0 + 390 * MIN, K0 + 435 * MIN]) {
+    assert.equal(hm.coverageUnknownAt(cols, x, thin), false, `${new Date(x).toISOString()}: a kept row, raw rows or an outage after the mark`);
+  }
+  assert.equal(hm.coverageUnknownAt(cols, K0 + 20 * MIN, null), false, 'without the mark nothing was thinned');
+  const near = hm.DESK_IDS.map(() => ({ v: 5010, estimated: true }));
+  assert.match(historyPointDetails(near, K0 + 20 * MIN, hm.DESK_IDS, true).text, /estimated\nThinned or not reported: coverage unknown$/);
+  assert.doesNotMatch(historyPointDetails(near, K0 + 435 * MIN, hm.DESK_IDS, false).text, /coverage/);
+});
+
+test('JOED-145 compare: never claims continuous data across a stretch without rows (the Codex gate’s case)', () => {
+  const at = (ms, j) => ({ t: new Date(ms).toISOString(), totals: {}, desks: {
+    j: { money: { equity: j === null ? null : { amount: String(j), currency: 'EUR' } } },
+    joe: { money: { equity: { amount: '5000', currency: 'EUR' } } }, joel: { money: { equity: { amount: '5000', currency: 'EUR' } } } } });
+  // An explicit null at 00:01, complete rows at 00:02 and 00:03, then none until 04:00 and 04:01 UTC.
+  const rows = [at(K0 + MIN, null), at(K0 + 2 * MIN, 5000), at(K0 + 3 * MIN, 5010), at(K0 + 4 * HOUR, 5020), at(K0 + 4 * HOUR + MIN, 5030)];
+  const cols = hm.toColumns(rows), end = K0 + 4 * HOUR + MIN, window = [K0, end];
+  const result = hm.sharedWindowCompare(cols, hm.DESK_IDS, window, end);
+  assert.deepEqual([result.startAt, result.endAt, result.after], [rows[3].t, rows[4].t, 'gap'], 'the stretch after the gap');
+  const line = compareLine(cols, window, end);
+  assert.match(line, /^Last 1.min with continuous data, from Wed 7.Oct, 06:00: J \+0,20.% · Joe 0,00.% · Joel 0,00.%$/, line);
+  assert.deepEqual(bandsOf(cols, end), [[K0 + 3 * MIN, K0 + 4 * HOUR]], 'the chart hatches the same stretch');
+  // The comparison is always the last stretch: one row after a gap is not one yet.
+  const short = hm.toColumns(rows.slice(1, 4)), until = [K0, K0 + 4 * HOUR];
+  assert.deepEqual(hm.sharedWindowCompare(short, hm.DESK_IDS, until, until[1]), { ok: false, reason: 'gap' });
+  assert.equal(compareLine(short, until, until[1]), 'Comparing needs two moments with continuous data in this window.');
+});
+
+test('JOED-145 compaction: never across a gap, both ends of every run kept, every kept interval says what it is, pass after pass', () => {
+  // A stretch of exactly GAP_MS between rows is continuous; 30 s more is a gap.
+  const outages = [[2 * HOUR, 2 * HOUR + 19.5 * MIN], [3 * HOUR, 3 * HOUR + 20 * MIN], [9 * HOUR, 10 * HOUR], [DAY + 12 * HOUR, DAY + 17 * HOUR],
+    [DAY + 21.5 * HOUR, DAY + 22.5 * HOUR]].map(([a, b]) => [K0 + a, K0 + b]);
+  const raw = stream({ days: 3, outages, night: false }).points, gaps = gapsIn(raw);
+  assert.deepEqual(gaps.map(([a, b]) => Date.parse(b) - Date.parse(a)), [20.5 * MIN, 60.5 * MIN, 300.5 * MIN, 60.5 * MIN], 'four gaps; the 20-minute stretch is not one');
+  const ends = [raw[0], ...raw.filter((p, i) => gaps.some(([a, b]) => p.t === a || p.t === b)), raw.at(-1)];
+  let points = raw;
+  const continuity = emptyContinuity(1);
+  for (const pass of [1, 2, 3]) {
+    const before = points;
+    const compacted = compactHistory(points, { continuity });
+    points = compacted.points; continuity.intervals = compacted.intervals;
+    assert.ok(points.length < raw.length / 4 && points.every(p => before.includes(p)), `pass ${pass}: ${points.length} of the rows before it, unchanged`);
+    assert.deepEqual(gapsIn(points, continuity), gaps, `pass ${pass}: exactly the gaps the stream had, none merged across, none made by thinning`);
+    for (const p of ends) assert.ok(points.includes(p), `pass ${pass}: ${p.t} ends a run and is kept`);
+    assert.ok(continuity.intervals.length > 0, `pass ${pass}: explicit continuous thinned intervals`);
+    assert.equal(JSON.stringify(compactHistory(points, { continuity })), JSON.stringify({ points, intervals: continuity.intervals }), 'identical rows AND claims on the next pass');
+    assert.deepEqual(bandsOf(hm.toColumns(points, continuity), Date.parse(points.at(-1).t)), gaps.map(([a, b]) => [Date.parse(a), Date.parse(b)]), `pass ${pass}: the page hatches exactly the gaps`);
+  }
+});
+
+test('JOED-145 compaction: the size cap still holds, every gap kept', () => {
+  // Rows with the longest bookkeeping note each desk may carry, 30 s apart
+  // with two outages, until the store passes its size warning.
+  const accounting = { periodStart: '2026-10-01T04:00:00.000Z', method: 'execution-fifo-net-current-fx', detail: 'é'.repeat(240) };
+  const outages = [[K0 + 5 * HOUR, K0 + 6 * HOUR], [K0 + 20 * HOUR, K0 + 20 * HOUR + 25 * MIN]];
+  const points = stream({ days: 2, outages, night: false }).points.slice(0, 4000);
+  for (const p of points) for (const id of hm.DESK_IDS) p.desks[id] = { ...p.desks[id], accounting, historyBasis: `${id}.paper.v2` };
+  const value = { schema: CONTRACTS.contracts.history, seq: 1, generatedAt: points.at(-1).t, receivedAt: points.at(-1).t, points, sizeBytes: 0 };
+  const original = points.slice(), gaps = gapsIn(original);
+  assert.ok(measureHistory(value) >= HISTORY_WARNING && gaps.length === 2, 'the store starts over its size warning, with both outages');
+  const continuity = emptyContinuity(1);
+  boundHistory(value, continuity);
+  assert.ok(value.sizeBytes < HISTORY_WARNING && value.points.length < original.length, `compacted to ${value.sizeBytes} bytes`);
+  assert.equal(value.compactedThrough, original.at(-1).t);
+  assert.equal(validateContract('history', value).ok, true, 'the contract is unchanged and still holds');
+  assert.deepEqual(gapsIn(value.points, continuity), gaps, 'both gaps kept');
+  assert.ok(value.points.every(p => original.includes(p)), 'kept rows are unchanged');
+});
+
+
+test('JOED-145 absolute-grid compaction is byte-idempotent, including the 2,880-row reproduction', () => {
+  for (const days of [1, 3, 14]) {
+    const points = Array.from({ length: days * 2880 }, (_, i) => row(K0 + i * 30e3, { j: 5000, joe: 5000, joel: 5000 }));
+    const before = JSON.stringify(points), first = compactPoints(points);
+    assert.equal(JSON.stringify(compactPoints(first)), JSON.stringify(first), `${days} days: no sidecar needed for row idempotence`);
+    const full = compactHistory(points), continuity = { ...emptyContinuity(1), intervals: full.intervals };
+    assert.equal(JSON.stringify(compactHistory(full.points, { continuity })), JSON.stringify(full), `${days} days: claims stable too`);
+    assert.equal(JSON.stringify(points), before, 'pure function: inputs unchanged');
+    // Bucket representatives stay on the same UTC grid if retention moves the
+    // first point inside a bucket; the run's new endpoint is the only addition.
+    const trimmed = compactHistory(points.slice(1));
+    assert.deepEqual(trimmed.points.slice(1), full.points.slice(1));
+  }
 });

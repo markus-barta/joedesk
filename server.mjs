@@ -36,7 +36,7 @@ const FLEET_ACTOR = /^[A-Za-z0-9][A-Za-z0-9@._+-]{0,159}$/;
 const TOKEN_FILE = "/run/secrets/joe-board-push-token";
 const MAX_BODY = 262144;
 
-const PROTECTED_READS = new Set(["/joe/data.json", "/joe/history.json", "/joe/account-history.json", "/joe/results.json", "/joe/state.json", "/joe/fleet-config.json", "/joe/fleet-config/actions.json", "/joe/board-settings.json"]);
+const PROTECTED_READS = new Set(["/joe/data.json", "/joe/history.json", "/joe/account-history.json", "/joe/history-continuity.json", "/joe/results.json", "/joe/state.json", "/joe/fleet-config.json", "/joe/fleet-config/actions.json", "/joe/board-settings.json"]);
 // Offline native imports share this exact package with server acceptance.
 const CONTRACT_FILES = Object.freeze(Object.fromEntries([
   "index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "vienna-date.mjs", "accept.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
@@ -54,7 +54,7 @@ function feedHeaders(kind) {
 
 // The UI is plain ES modules; every served asset is listed here explicitly.
 const UI_MODULES = ["app.js", "host.js", "ui.js", "terms.js", "format.js", "health.js", "feed.js", "board-state.js", "events.js",
-  "desk.js", "performance.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js",
+  "desk.js", "performance.js", "history.js", "history-model.js", "history-worker.js", "history-continuity.js", "chart.js", "results.js", "results-model.js", "theme.js",
   "settings.js", "settings-model.js", "board-settings.js", "board-settings-validation.js", "board-settings-write.js", "fleet-write.js", "version-display.js"];
 const VENDOR_FILES = Object.freeze(Object.fromEntries(['display.json', 'version.js', 'presentation.js', 'version-interaction.js', 'schemes.json', 'package.json', 'manifest.json']
   .map(name => [`/joe/vendor/calver/${name}`, `vendor/calver/${name}`])));
@@ -681,6 +681,10 @@ function handleStatic(req, res, urlPath) {
   }
   if (urlPath === "/joe/account-history.json") {
     sendJson(res, 200, model.accountHistory(), feedHeaders("history"));
+    return;
+  }
+  if (urlPath === "/joe/history-continuity.json") {
+    sendJson(res, 200, model.historyContinuity(), feedHeaders("history"));
     return;
   }
   if (urlPath === "/joe/results.json") {

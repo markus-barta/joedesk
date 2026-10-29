@@ -9,11 +9,13 @@ import { gatewayCheckAgeMs } from '../contracts/gateway.mjs';
 import { validInstant } from '../contracts/schema-validator.mjs';
 import { viennaDay } from '../contracts/vienna-date.mjs';
 import { atomicWrite, readJson } from './storage.mjs';
-import { appendHistory, historyEnvelope, HISTORY_CAP, measureHistory } from './history.mjs';
+import { appendHistory, historyEnvelope, HISTORY_CAP, measureHistory, retainedContinuity } from './history.mjs';
 import { accountObservation, emptyAccountCloses, appendAccountClose, validateAccountCloses,
   ACCOUNT_CLOSES_FORMAT, ACCOUNT_CLOSES_CAP, emptyAccountHistory, appendAccountHistory,
   validateAccountHistory, ACCOUNT_HISTORY_FORMAT, ACCOUNT_HISTORY_CAP } from './account-history.mjs';
 import { openAccountStore } from './account-store.mjs';
+import { openHistoryContinuity } from './history-continuity.mjs';
+import { CONTINUITY_CAP } from '../public/joe/history-continuity.js';
 
 const STATE_CAP = 2 * 1024 * 1024;
 const FORMAT = 'joedesk.data-store.v2';
@@ -82,6 +84,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   if (['data.json', 'history.json'].some(name => existsSync(path.join(dataDir, name)))) throw new Error('data_migration_required');
   const stateFile = path.join(dataDir, 'data-state.json');
   const historyFile = path.join(dataDir, 'history-state.json');
+  const continuityFile = path.join(dataDir, 'history-continuity.json');
   const resultsFile = path.join(dataDir, 'results-state.json');
   const rejectionFile = path.join(dataDir, 'feed-rejections.json');
   const fleetFile = path.join(dataDir, 'fleet-receipt.json');
@@ -155,6 +158,9 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   const accountDaily = openAccountStore({ file: path.join(dataDir, 'account-closes-state.json'),
     format: ACCOUNT_CLOSES_FORMAT, cap: ACCOUNT_CLOSES_CAP, empty: emptyAccountCloses,
     validate: validateAccountCloses, clock, write });
+  const openedContinuity = openHistoryContinuity(continuityFile);
+  let continuity = retainedContinuity(history?.points ?? [],
+    openedContinuity.value.historySeq === history?.seq ? openedContinuity.value : null, history?.seq ?? null);
   try {
     results = readJson(resultsFile, RESULTS_CAP);
     if (results.format !== RESULTS_FORMAT || !validateContract('results', results.feed?.value).ok ||
@@ -313,10 +319,21 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     // An unreadable history store stays untouched until operator recovery.
     // Its independent alarm must not prevent the money board from advancing.
     if (!historyStorageInvalid) try {
-      const nextHistory = appendHistory(history, accepted.value, selected, now);
+      const nextContinuity = structuredClone(continuity);
+      const nextHistory = appendHistory(history, accepted.value, selected, now, nextContinuity);
       if (nextHistory !== history) {
+        // Each file is atomically replaced. Publish provenance first, then its
+        // history sequence: a crash between renames leaves a mismatched sidecar
+        // which startup/clients ignore. No partial write can assert continuity
+        // for another version of the points. Existing history bytes stay v2.
+        if (!openedContinuity.writable) throw new Error('continuity_write_failed');
+        write(continuityFile, nextContinuity, CONTINUITY_CAP);
         try { write(historyFile, historyEnvelope(nextHistory), HISTORY_CAP); }
-        catch (error) { if (error.committed) history = nextHistory; throw error; }
+        catch (error) {
+          if (error.committed) { history = nextHistory; continuity = nextContinuity; }
+          throw error;
+        }
+        continuity = nextContinuity;
         delete rejections.history;
       }
       history = nextHistory;
@@ -403,6 +420,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   const accountHistory = () => ({ ...accountShort.view(), schema: 'inspr.joe.account-history.v1',
     dailyCloses: accountDaily.view() });
   return { accept, acceptResults, reject, feeds, panels, view, observeFleet, accountHistory,
+    historyContinuity: () => structuredClone(continuity),
     fleetFailure: () => { rejections['fleet-config'] = 'refresh_failed'; },
     hasData: () => Boolean(state) };
 }
