@@ -11,7 +11,10 @@ test('JOED-163: linked detail money fills the same column as the direct dash', (
   const rules = parseCSS(css), values = selector => Object.fromEntries(rules.filter(r => r.selector === selector)
     .flatMap(r => r.declarations).map(d => [d.property, d.value]));
   assert.equal(values('.fig-link').display, 'inline-flex');
-  assert.equal(values('.dnums .v > .fig-link').display, 'block');
+  // One block-level rule (JOED-153's flex fill wins the merge with JOED-163's block): the link
+  // fills the value column like the direct dash, and its amount grows to the column.
+  assert.equal(values('.dnums .v > .fig-link').display, 'flex');
+  assert.equal(values('.dnums .v > .fig-link > .bn').flex, '1 1 auto');
   const money = rules.find(r => r.selector === '.dnums .v > .bn, .dnums .v > .fig-link > .bn');
   assert.equal(money.declarations.find(d => d.property === 'display').value, 'flex');
   assert.equal(money.declarations.find(d => d.property === 'height').value, '26px');
