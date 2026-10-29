@@ -334,8 +334,8 @@
     },
     {
       "path": "release/data-migration.mjs",
-      "size": 10667,
-      "sha256": "f31a4941411420f8bdc17e16c2462ce68ffe68fdc6069dba4a14a6dea7ba5fc9"
+      "size": 13925,
+      "sha256": "41d7855b5ff27e4d592e6e1079c01fa188a747787ecd92fd92419c77083e111f"
     },
     {
       "path": "release/preparation.json",
