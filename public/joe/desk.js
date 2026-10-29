@@ -1,7 +1,7 @@
 // Desk: health line and details, Today, the three desks, positions and the
 // kept holdings. Every number keeps its panel state; matching snapshot captions
 // are shared once, while different ages and reasons stay beside their values.
-import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin, NOT_EXACT } from './ui.js';
+import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin, NOT_EXACT, dashWords } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, STUCK_REASON, statusPresentation, executorPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
@@ -169,13 +169,8 @@ export function executorProblem(data) {
   return sentence;
 }
 
-// A dash's accessible name and title after its label: a value the feed sent as
-// not exact says "not exact" (with a reason only when it adds words), never
-// "not reported"; every other missing value keeps its existing words.
-export function dashWords(reason) {
-  const why = reason ? cellReason(reason) : null;
-  return NOT_EXACT_REASONS.has(reason) ? `${NOT_EXACT}${why !== NOT_EXACT ? ` · ${why}` : ''}` : `not reported${why ? ` · ${why}` : ''}`;
-}
+// Dashes are named by dashWords (ui.js), shared with Cash.
+export { dashWords };
 
 // One money cell: the value (or a dash) and a caption for exactly the state
 // the shared selector gave it, with this cell's own age and reason. A fresh

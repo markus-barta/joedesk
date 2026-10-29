@@ -1324,7 +1324,9 @@ every desk shares needs no names, and other desk states keep their own word
 (“Not exact for J; last good for Joe”). Today's sentence never repeats a reason
 that the caption or section line shows. It gives each exact desk's own Today
 (“Joel is flat today.”), or “No desk has an exact result for today.” Dashes are
-named “‹label›: not exact · ‹reason›”, never “not reported”; their info icon is
+named “‹label›: not exact · ‹reason›”, never “not reported”, and so is a
+not-exact Cash on Desk and in Settings (caption “not exact”, name “Cash: not
+exact”), through one shared `dashWords` in `ui.js`; their info icon is
 a pointer tip hidden from screen readers, so the reason is spoken once. A desk
 card adds no line for a not-exact Today that is its only problem: the icon and
 the dash's name and title carry it. Details' “Today’s result” row lists every
@@ -1634,7 +1636,8 @@ row. Both use the label “Cash” and caption “cash · as the broker reports 
 They show two decimals using exact integer units for display only, with
 the untouched broker lexeme in title and accessible name. Null Cash shows a
 muted dash in the Desk figure with “not reported · [reason]” in its caption;
-Settings retains that wording inline. Rev-7 omission reads “no data received yet”.
+Settings retains that wording inline. A not-exact Cash says “not exact”
+instead (JOED-148). Rev-7 omission reads “no data received yet”.
 Desk reserves fixed caption lines inside each cell; Settings reserves the actual
 wrapped value/stale/null reason forms, including the session reason at 360 px. They wrap
 text and keep the existing header. P5's `cash` cases cover real ingress, stale, null, API-session loss,

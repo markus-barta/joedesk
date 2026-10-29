@@ -138,7 +138,11 @@ test('separate Cash figure preserves exact values and keeps unavailable wording 
     assert.equal(figure.querySelector('.cash-caption.c'), figure.querySelector('.cash-reserve'), 'the description and reason share the reserved caption block');
     assert.equal(figure.querySelector('.cash-caption').children.filter(n => typeof n !== 'string').length, 2, 'the fixed caption block needs no hidden sizing paragraphs');
     assert.equal(figure.querySelectorAll('.cash-sizing').length, 0);
-    if (!hasValue) assert.match(caption.textContent, /^not reported · .+/);
+    // JOED-148: a not-exact Cash is named like every other not-exact dash.
+    if (!hasValue && cash.reason === 'not_exact_yet') {
+      assert.equal(caption.textContent, 'not exact');
+      assert.equal(actual.getAttribute('aria-label'), 'Cash: not exact');
+    } else if (!hasValue) assert.match(caption.textContent, /^not reported · .+/);
     if (cash.reason === 'gateway_unconfirmed') assert.match(caption.textContent, /broker connection not confirmed/);
     if (cash.reason === 'snapshot_stale') assert.match(caption.textContent, /updates are late/);
   }

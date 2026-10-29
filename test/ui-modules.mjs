@@ -127,6 +127,23 @@ test('cash captions: null, omitted and broken retained values always explain why
   }
 });
 
+test('JOED-148 cash captions: a not-exact Cash says "not exact" in its caption and name on Desk and in Settings', () => {
+  for (const reason of NOT_EXACT_REASONS) {
+    const why = health.cellReason(reason), words = `not exact${reason === 'not_exact_yet' ? '' : ` · ${why}`}`;
+    const cell = { state: 'broken', value: null, reason };
+    const settings = cashCaption(cell, 'rt.cash'), desk = htmlDocument(cashCaption(cell, 'hero.cash', { figure: true }));
+    assert.ok(settings.includes(`title="Cash: ${format.esc(words)}" aria-label="Cash: ${format.esc(words)}">${format.esc(words)}</span>`), reason);
+    assert.equal(desk.querySelector('.cash-reason').textContent, words, reason);
+    assert.equal(desk.querySelector('[data-cash]').getAttribute('aria-label'), `Cash: ${words}`, reason);
+    assert.equal(desk.querySelector('.cash-amount').textContent, '—');
+    for (const html of [settings, desk.textContent]) assert.doesNotMatch(html.replace(/<span class="cash-sizing"[^]*?<\/span>/g, ''), /not reported/, reason);
+    // A shared section reason is not repeated on the figure.
+    assert.equal(htmlDocument(cashCaption(cell, 'hero.cash', { figure: true, sharedReason: why })).querySelector('.cash-reason').textContent, 'not exact');
+  }
+  // Faults keep their existing "not reported" naming in both surfaces.
+  assert.ok(cashCaption({ state: 'broken', value: null, reason: 'source_unavailable' }, 'rt.cash').includes('aria-label="Cash not reported · not reported by the broker">not reported · not reported by the broker</span>'));
+});
+
 test('cash captions: stale values keep exact accessibility and their own reason with the same reserve', () => {
   const value = { amount: '12345.67890123', currency: 'EUR' };
   const reserve = html => html.slice(html.indexOf('<span class="cash-sizing"'));
@@ -144,7 +161,9 @@ test('cash captions: Amy’s label and caption stay fixed; every null and stale 
     for (const key of ['hero.cash', 'rt.cash']) {
       const html = cashCaption({ state: 'broken', value: null, reason }, key);
       assert.ok(html.includes('<span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span>'));
-      assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`not reported · ${why}`)}</span>`), reason);
+      // A not-exact Cash reserves its own not-exact words (JOED-148), the rest "not reported".
+      const missing = NOT_EXACT_REASONS.has(reason) ? `not exact${why === 'not exact' ? '' : ` · ${why}`}` : `not reported · ${why}`;
+      assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(missing)}</span>`), reason);
       assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`−€ 999.999,99 · ${why}`)}</span>`), reason);
     }
   }

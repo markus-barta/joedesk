@@ -521,11 +521,13 @@ try {
             : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact' : 'not reported by the broker';
           const brokerCaption = 'cash · as the broker reports it';
           const shared = screen === 'desk' && ['stale', 'session'].includes(phase);
-          const cashState = hasValue ? phase === 'stale' && !shared ? `· ${why}` : '' : `not reported${shared ? '' : ` · ${why}`}`;
+          // JOED-148: a not-exact Cash is named "not exact" like every other dash, on Desk and in Settings.
+          const missing = phase === 'not-exact' ? 'not exact' : `not reported${shared ? '' : ` · ${why}`}`;
+          const cashState = hasValue ? phase === 'stale' && !shared ? `· ${why}` : '' : missing;
           const caption = screen === 'desk' ? `${brokerCaption}${cashState ? ` ${cashState}` : ''}` : brokerCaption;
           const expected = screen === 'desk' ? `${hasValue ? '€ 12.345,68' : '—'} ${caption}`
-            : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `not reported · ${why}`;
-          const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : `Cash not reported · ${why}`;
+            : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'not exact' : `not reported · ${why}`;
+          const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'Cash: not exact' : `Cash not reported · ${why}`;
           check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme and reason locally or once in the section`, N(seen.text) === expected && seen.label === 'Cash' && N(seen.caption) === caption && seen.title === exact && seen.name === exact && (!shared || seen.section.includes(why)) && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
           check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
           const after = await measure();
