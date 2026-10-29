@@ -888,13 +888,21 @@ more than 5 seconds ahead of server receipt is rejected with `clock_ahead`
 before snapshot/history writes, so a higher valid sequence can recover normally.
 Legacy data/history files are neither migrated nor overwritten automatically;
 P6 owns the compatible backup and cutover. History's `sizeBytes` measures its
-complete UTF-8 storage envelope; compaction begins at 80% of 8 MiB, preserves
-endpoints/extrema/gap edges/per-desk basis transitions and both rows around
-every reporting gap (rows more than `GAP_MS`, 20 minutes, apart), leaves at
-most `GAP_MS` between kept rows otherwise, and prunes its 14-day window by
-server time. Successful compaction reports the advisory
-`history_compacted` state until the compacted range (`compactedThrough`) leaves
-retention; it does not mark history broken. Actual `history_size_limit` and
+complete UTF-8 storage envelope; compaction begins at 80% of 8 MiB. Absolute UTC
+buckets are 4 hours on the newest UTC day, 12 hours on the preceding six days,
+and 24 hours earlier. It preserves representatives/extrema/value-presence and
+bookkeeping edges, daily closes and both ends of every reporting run. The
+optional `history-continuity.json` sidecar (`joedesk.history-continuity.v1`)
+records exact kept-point pairs known to contain no reporting gap over `GAP_MS`
+(20 minutes). Both stores are atomically replaced in the same history-write
+step; a matching `historySeq` binds their versions, so interrupted writes or
+racing reads fail closed to unknown coverage. Both prune by server-time 14-day
+retention. The protected read-only `/joe/history-continuity.json` route serves
+these claims to the worker and fallback. Missing/damaged/future sidecars give
+no continuity claims; damaged bytes are moved aside before recovery. History
+v2 rows and contracts stay unchanged. Compaction keeps history fresh and
+retains `compactedThrough` until that range leaves retention. Actual
+`history_size_limit` and
 `history_write_failed` alarms remain broken until a successful history write
 resolves them; deduplication alone cannot clear one. A snapshot rename followed
 by a directory-sync failure still records its history point before replying.

@@ -62,8 +62,8 @@ break in the measured data.
 ## Display-only continuity
 
 History draws a second, gray dashed dataset for each desk. These lines are
-explicitly estimated: linear interpolation across null values and across rows
-more than 20 minutes apart, plus a last-value carry to the current chart time.
+explicitly estimated: linear interpolation across null values and across
+unproven intervals more than 20 minutes apart, plus a last-value carry to the current chart time.
 The 20 minutes are `GAP_MS` in `time.mjs`, one value shared by the server and
 the page: the longest time between two rows that still counts as continuous
 reporting, above the producer's slowest normal cadence (one snapshot every
@@ -76,24 +76,48 @@ legend entry, "No data"); a stretch without rows lasts more than 20 minutes,
 so it is always hatched, and a desk missing alone is shown by its dashed line.
 
 Rows at or before `compactedThrough` were thinned by the server to stay inside
-its size limit (`compactPoints`: per 64 rows the bucket ends, each series'
-extrema, both sides of every presence or basis change, and each Vienna day's
-last valued row; later passes thin the kept rows again). Compaction is
-gap-preserving and so says where it thinned. Rows more than `GAP_MS` apart are
-a gap in reporting, and both rows around a gap are always kept: a pass never
-merges across one, and every run of continuous reporting keeps its first and
-last row. Inside a run no pass leaves more than `GAP_MS` between kept rows.
-Every interval therefore says what it is without a mark on any row, so this
-contract and the history store stay as they are and older pages and servers
-read them unchanged: an interval of at most `GAP_MS` is continuous reporting,
-thinned or not, drawn as observed with the tooltip naming the nearest kept
-row; a longer one is exactly a gap in the rows that arrived, drawn as an
-estimate and hatched. The page infers nothing from neighbouring rows.
-Versions before this rule thinned old rows to hours apart. Where such rows
-are still kept, a longer interval at or before `compactedThrough` may be that
-thinning as well as an outage: it stays no data, and its tooltip adds
-"Thinned or not reported: coverage unknown". Explicit null values survive
-thinning and stay estimates.
+its size limit. `compactHistory` uses an absolute UTC time grid: 4-hour buckets
+on the newest UTC day, 12-hour buckets on the preceding six UTC days, and
+24-hour buckets before that. The reference day comes from server time (or the
+newest observation for standalone compaction), never the first retained row.
+It keeps the last observation of each bucket, every money series' extrema,
+value-presence and bookkeeping-transition edges, each Vienna day's final
+valued row, and both endpoints of every gap-free run. A raw interval longer
+than `GAP_MS` ends a run. Compaction never merges across it. Repeating a pass
+with the same reference and provenance returns byte-identical rows and claims.
+
+Continuity provenance lives beside `history-state.json` in a separate bounded
+1 MiB file, `history-continuity.json`, served read-only at the protected
+`GET /joe/history-continuity.json` route with the same no-store, CSP and server
+clock headers as History. Its format is:
+
+```json
+{
+  "schema": "joedesk.history-continuity.v1",
+  "historySeq": 42,
+  "intervals": [["2026-10-07T00:00:00.000Z", "2026-10-07T04:00:00.000Z"]]
+}
+```
+
+Each pair names adjacent kept observations with known continuous reporting
+between them before thinning. Claims can be composed only across raw intervals
+at most `GAP_MS` long or previously proven pairs. They never bridge a raw gap.
+Claims are pruned with the same 14-day retention and never add fields to the
+unchanged History v2 envelope or point schema. Both files use atomic rename
+and fsync in the history-write step: sidecar first, History second. The
+sequence binds the pair; a crash between renames, or racing HTTP reads, gives
+no claims for a different History sequence. This is conservative crash
+recovery, not a two-file filesystem transaction.
+
+The worker and page fallback fetch both reads together. An interval is observed
+only if it is at most `GAP_MS` long or its exact pair is listed by a valid,
+matching-sequence sidecar. Comparisons use that same classifier. Missing,
+corrupt, oversized, future-version or mismatched sidecars provide no claims;
+compacted intervals without a claim remain no data, and their tooltip says
+"Thinned or not reported: coverage unknown". On startup, a damaged or
+unsupported file is preserved as `history-continuity.json.damaged-<UUID>`
+before recovery writes; opening it never rewrites the desk History store.
+Explicit null values survive thinning and stay estimates.
 
 The renderer builds continuity over the whole kept history before clipping to
 the shown window, so a window inside an outage still contains a line. Solid
