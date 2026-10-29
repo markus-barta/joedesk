@@ -2040,6 +2040,7 @@ test('JOED-151 CSS: every Results-only rule lives in one delimited block', () =>
 // ---------- JOED-151 fix round 1 (Codex gate): a link keeps the selected day
 // and waits for the record; the hero's sentence never runs into the split ----------
 
+const NB = '\u00a0';
 const routeState = () => ({ period: page.RS.period, anchor: page.RS.anchor, sel: page.RS.sel, desk: page.RS.desk, cal: page.RS.cal, moved: page.RS.moved });
 const freshRoute = day => ({ period: 'week', anchor: day, sel: day, desk: 'all', cal: M.ymOf(day), moved: false });
 const queryOf = url => url.slice('#results?'.length);
@@ -2164,4 +2165,48 @@ test('JOED-151 r1 deep links: a cold link waits for the record and the server’
     assert.equal(page.resultsRoutePending(), false, change.toString());
     assert.equal(page.settleResultsRoute(warm), false);
   }
+});
+
+test('JOED-151 r1 hero: a change of basis or an unknown result reserves its longest copy, so the split starts below it', t => {
+  const render = heroCapture(t), now = '2026-10-14T17:42:22.000Z';
+  const anchors = ['2026-10-14', '2026-10-13', '2026-10-07', '2026-09-30', '2026-09-16', '2026-09-10'];
+  const sessions = [];
+  for (let k = '2026-09-10'; k < today; k = M.addDays(k, 1)) if (!M.isWeekend(k)) sessions.push(k);
+  // Closes every session and a cut every day for every desk: each period and
+  // desk set crosses one. Without J's money (no closes, none now) every period
+  // with a trade has an unknown result.
+  const value = record(sessions.map(k => closeDay(k, '5000')), [tradeOf('rt-r1-win', 'j', '2026-10-12T15:00:00.000Z', '2', '0.5')]);
+  const blind = record(sessions.map(k => closeDay(k, null)), anchors.map(k => tradeOf(`rt-r1-${k}`, 'j', `${k}T15:00:00.000Z`, '1')));
+  const cuts = [];
+  for (let k = '2026-09-10'; k <= today; k = M.addDays(k, 1)) for (const desk of ALL) cuts.push({ desk, at: M.viennaMidnight(k) + 36e6 });
+  const reserveOf = html => htmlDocument(html).querySelectorAll('.say-size span').map(s => s.textContent);
+  const sizer = html => htmlDocument(html).querySelector('.say-size');
+  const wide = `J, Joe and Joel’s bookkeeping basis changed on Wed 27${NB}May, and a change of basis is not a gain or a loss.`;
+  const reserved = {
+    cut: [`No result in the week of 25${NB}May: ${wide}`, `No result in September 2025: ${wide}`, `No result on Wed 27${NB}May: ${wide}`],
+    unknown: [`in the week of 25${NB}May`, 'in September 2025', `on Wed 27${NB}May`].map(p => `The result ${p} is not known yet: the desks’ money on Wed 27${NB}May is not available.`),
+  };
+  const noJ = [null, E('5000'), E('5000')];
+  for (const [state, source, desks, units, inputs] of [['cut', value, ALL, undefined, { cuts }], ['cut', value, ['joel'], undefined, { cuts }],
+    ['unknown', blind, ALL, noJ, {}], ['unknown', blind, ['j'], noJ, {}]]) {
+    for (const period of ['day', 'week', 'month', 'ytd', 'all']) for (const anchor of anchors) {
+      const shown = render(source, now, period, anchor, desks, units, inputs), why = `${state} ${desks.join()} ${period} ${anchor}`;
+      const sentence = textOf(shown.sentence);
+      assert.match(sentence, state === 'cut' ? /^No result .+ bookkeeping basis changed on / : /^The result .+ is not known yet: /, why);
+      assert.deepEqual(reserveOf(shown.html), reserved[state], `${why}: the same reserve for the whole state`);
+      assert.equal(sizer(shown.html).getAttribute('aria-hidden'), 'true', why);
+      assert.ok(sentence.length <= Math.max(...reserved[state].map(c => c.length)), `${why}: no real copy is longer than the reserve`);
+    }
+  }
+  // Every other state keeps the three-line row and no reserve.
+  for (const [why, shown] of [['a result', render(value, now, 'week', today)], ['no trades', render(record([]), now, 'week', today)],
+    ['unavailable', render(null, now, 'week', today)]]) assert.equal(sizer(shown.html), null, why);
+  // The reserve shares the sentence's cell: the row grows to the taller of
+  // the two, and the split follows in its own row.
+  const css = resultsCss();
+  assert.match(css, /\.rhero-l\s*\{\s*display:\s*grid;\s*grid-template-rows:\s*20px 78px minmax\(67px, auto\) auto;/);
+  assert.match(css, /\.rhero-l > \.say, \.rhero-l > \.say-size\s*\{\s*grid-row:\s*3;\s*grid-column:\s*1;\s*\}/);
+  assert.match(css, /\.rhero-l > \.split\s*\{\s*grid-row:\s*4;\s*\}/);
+  assert.match(css, /\.rhero \.say-size\s*\{[^}]*margin-top:\s*4px;\s*font-size:\s*14px;\s*line-height:\s*21px;\s*visibility:\s*hidden;/, 'the reserve sets text as the sentence does');
+  assert.match(css, /\.rhero \.say-size > span\s*\{\s*grid-area:\s*1 \/ 1;\s*\}/);
 });

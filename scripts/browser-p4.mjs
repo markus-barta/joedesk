@@ -605,6 +605,65 @@ async function assertResultsLinks(page, ix, inputs, board, record) {
   }
 }
 
+// JOED-151 fix round 1 (hard assertions, no change to the check inventory):
+// at 320 and 390 px the hero's sentence never runs into the split, whatever
+// it explains. A change of basis or an unknown result keeps the room of its
+// longest copy, so the split's divider and rows start below the last line;
+// within each state (want(period, desk): 'cut', 'unknown' or 'plain') the
+// split stays put across every period and desk, even for the longest copy.
+async function assertNarrowSentence(page, viewport, theme, tag, want) {
+  const probe = () => page.evaluate(`(() => {
+    const say = document.querySelector('#rheroL .say'), split = document.querySelector('#rheroL .split');
+    const range = document.createRange(); range.selectNodeContents(say);
+    const lines = [...range.getClientRects()].filter(r => r.width > 0.5 && r.height > 0.5), divider = split.getBoundingClientRect();
+    const sizer = document.querySelector('#rheroL .say-size'), root = document.documentElement;
+    return { text: say.textContent, last: Math.max(...lines.map(r => r.bottom)), box: say.getBoundingClientRect().bottom, divider: divider.top,
+      splitTop: divider.top + scrollY, reserve: sizer ? [...sizer.children].map(c => c.textContent) : [], hidden: !sizer || getComputedStyle(sizer).visibility === 'hidden',
+      scroll: root.scrollWidth, client: root.clientWidth };
+  })()`);
+  const stateOf = text => (/^No result /.test(text) ? 'cut' : /^The result .+ is not known yet: /.test(text) ? 'unknown' : 'plain');
+  const said = [];
+  try {
+    for (const width of [320, 390]) {
+      await configure(page, { name: String(width), width, height: 844, mobile: true }, theme);
+      const tops = new Map();
+      const fits = (g, why) => {
+        assert.ok(g.last <= g.divider - 0.5 && g.box <= g.divider + 0.5, `${why}: the sentence ends above the split's divider (${N(g.text)})`);
+        assert.ok(g.scroll <= g.client, `${why}: no document overflow`);
+      };
+      for (const period of PERIODS) for (const desk of DESK_CHOICES) {
+        await click(page, `#periodSeg [data-period="${period}"]`);
+        await click(page, `#deskSeg [data-desk="${desk}"]`);
+        const g = await probe(), why = `${tag} @${width} ${period} ${desk}`, state = stateOf(g.text);
+        said.push(g.text);
+        assert.equal(state, want(period, desk), `${why}: the state shown (${N(g.text)})`);
+        assert.equal(g.reserve.length > 0, state !== 'plain', `${why}: only an explanation reserves its longest copy`);
+        assert.ok(g.hidden, `${why}: the reserve stays invisible`);
+        fits(g, why);
+        if (!tops.has(state)) tops.set(state, g.splitTop);
+        assert.ok(Math.abs(g.splitTop - tops.get(state)) <= 0.5, `${why}: within the ${state} state the split stays put`);
+        // The longest copy itself, set as the sentence, fits the same room.
+        if (state !== 'plain' && period === 'week' && desk === 'all') {
+          for (const copy of g.reserve) {
+            await page.evaluate(`document.querySelector('#rheroL .say').textContent = ${JSON.stringify(copy)}`);
+            const longest = await probe();
+            fits(longest, `${why} (longest copy)`);
+            assert.ok(Math.abs(longest.splitTop - g.splitTop) <= 0.5, `${why}: the longest copy moves the split exactly 0 px`);
+          }
+          // Restore the renderer's own sentence before the next switch.
+          await click(page, '#periodSeg [data-period="day"]');
+          await click(page, '#periodSeg [data-period="week"]');
+        }
+      }
+    }
+  } finally {
+    await configure(page, viewport, theme);
+    await click(page, '#periodSeg [data-period="week"]');
+    await click(page, '#deskSeg [data-desk="all"]');
+  }
+  return said;
+}
+
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
 const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, ${cpus().length} cores, Node ${process.version}`;
@@ -1124,8 +1183,23 @@ try {
           { display: r.display, say: r.say, dip: tileOf(r, 'dip'), curve: r.curve?.aria, rows: r.rows.map(x => x.val) });
         }
         await auditScreen(page, viewport, theme, 'results (basis change)');
+        if (viewport.mobile) await assertNarrowSentence(page, viewport, theme, tag, (period, desk) => (desk === 'all' || desk === 'j' ? 'cut' : 'plain'));
         await click(page, '#periodSeg [data-period="week"]'); await click(page, '#deskSeg [data-desk="all"]');
         await shot(page, viewport, `${viewport.name}-${theme}-results-basis-change`, 'Results across J’s change of bookkeeping basis: no result, dip or line; the change said as such; Joe and Joel stand');
+        if (viewport.mobile) {
+          // Fix round 1: the longest real wording, all three desks changing their basis at 13:00 today.
+          const every = await designBoard(NOW, null, ({ history }) => { for (const p of history.points) if (Date.parse(p.t) < CHANGE) for (const d of DESKS) p.desks[d].historyBasis = `${d}.paper.v1`; });
+          assert.deepEqual(every.inputs.cuts.map(c => c.desk).sort(), [...DESKS].sort(), 'all three desks change their basis');
+          try {
+            await serve(served(record, every.board));
+            await load(page, every.board.url, 'results');
+            await waitFor(page, `document.querySelector('#rheroL .say')?.textContent.startsWith('No result this week: J, Joe and Joel’s')`);
+            const said = await assertNarrowSentence(page, viewport, theme, `${tag} all three desks`, () => 'cut');
+            assert.ok(said.some(text => text.includes('J, Joe and Joel’s bookkeeping basis changed on Wed 14')), 'all desks name all three');
+          } finally {
+            await serve(served(record, board));
+          }
+        }
       }
       await serve(null);
     }
@@ -1158,6 +1232,7 @@ try {
             : e.R.net !== null && r.display !== '—', { display: r.display, say: r.say, split: r.split });
         }
         await auditScreen(page, viewport, theme, 'results (no money now)');
+        if (viewport.mobile) await assertNarrowSentence(page, viewport, theme, tag, (period, desk) => (desk === 'all' || desk === 'j' ? 'unknown' : 'plain'));
       }
       await serve(null);
     }
@@ -2865,9 +2940,11 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 - **Hero layout (JOED-151, the approved design).** The hero names result,
   desks and period; the percentage and its base sit under the number, the
   sentence in a fixed three-line row, then the split; a sentence of one, two
-  or three lines never moves a number (wide font included). The benchmark
-  ("No index chosen") is in the chart legend. The chart sits beside the
-  300/280 px figure column and under it at ≤ 900 px.
+  or three lines never moves a number (wide font included). A change of basis
+  or an unknown result keeps the room of its longest copy, so at 320 and
+  390 px the split starts below the sentence and stays put within that state
+  (fix round 1). The benchmark ("No index chosen") is in the chart legend.
+  The chart sits beside the 300/280 px figure column and under it at ≤ 900 px.
 - **Best and worst trade** name each trade by symbol and desk ("UBER (Joel)")
   rather than the company, so a long company name can never clip the tile.
 - **Calendar.** US market holidays read "closed", like weekends. Weeks still

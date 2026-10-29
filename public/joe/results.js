@@ -263,13 +263,32 @@ export function renderResults(ctx) {
   return address();
 }
 
+const cutSentence = (phrase, cut) => `No result ${phrase}: ${cutText(cut)}, and a change of basis is not a gain or a loss.`;
+const unknownSentence = (phrase, when) => `The result ${phrase} is not known yet: the desks’ money ${when} is not available.`;
 function heroSentence(view, per, R, partialDays) {
   if (!view.ix) return `Results are unavailable: ${cellReason(view.reason)}.`;
-  if (R.cut) return `No result ${per.phrase}: ${cutText(R.cut)}, and a change of basis is not a gain or a loss.`;
+  if (R.cut) return cutSentence(per.phrase, R.cut);
   if (R.empty) return `No trades${partialDays ? ' recorded' : ''} ${per.phrase}. Paper results start on ${startText(view.trackingStart)}.`;
-  if (R.net === null) return `The result ${per.phrase} is not known yet: the desks’ money ${R.end === view.today ? 'now' : `on ${M.fmtDDM(R.end)}`} is not available.`;
+  if (R.net === null) return unknownSentence(per.phrase, R.end === view.today ? 'now' : `on ${M.fmtDDM(R.end)}`);
   return `${signedWord(R.units.net)} ${per.phrase}.`;
 }
+
+// The two explanations can outgrow the three-line sentence row (a change of
+// basis across all three desks, an unknown result on a past date). Their
+// widest forms sit invisibly in the same cell, so the split starts below the
+// longest copy of that state wherever it shows: nothing overlaps, and
+// switching period or desk within the state moves nothing. Widest forms:
+// all three desks, a Wednesday in May (the widest weekday and month), and
+// each of the widest period phrases (an older week, a month of another year,
+// a past day), whose line breaks differ.
+const WIDE_DATE = `Wed 27${NB}May`;
+const WIDE_PHRASES = [`in the week of 25${NB}May`, 'in September 2025', `on ${WIDE_DATE}`];
+const WIDE_CUT = { desks: DESKS, at: Date.parse('2026-05-27T12:00:00.000Z') };
+const SENTENCE_RESERVE = {
+  cut: WIDE_PHRASES.map(phrase => cutSentence(phrase, WIDE_CUT)),
+  unknown: WIDE_PHRASES.map(phrase => unknownSentence(phrase, `on ${WIDE_DATE}`)),
+};
+export const sentenceReserve = (view, R) => (!view.ix || !R ? [] : R.cut ? SENTENCE_RESERVE.cut : !R.empty && R.net === null ? SENTENCE_RESERVE.unknown : []);
 
 // The hero names what it shows (result, desks, period) above the figure, its
 // percentage with the base it divides by, the sentence and the split. Each row
@@ -285,14 +304,15 @@ export function renderHero(view, per, desks, R) {
   const resultDigits = none || R.net === null ? 1 : eur(R.units.net, true).length;
   // Coverage qualifies a stated result, not an explanation of a missing one.
   const partialDays = view.ix && !R.cut && (R.empty || R.net !== null) ? M.countPartialDays(view.ix, per, view.today) : 0;
-  const sentence = heroSentence(view, per, R, partialDays);
+  const sentence = heroSentence(view, per, R, partialDays), reserve = sentenceReserve(view, R);
   patch($('#rheroL'), `
     <div class="hero-k">${icon('results')}<span>${term('result')} · ${esc(whoOf(desks))} · ${esc(per.head)}</span></div>
     <div class="result-figure" role="group" aria-label="Period result" style="--result-digits:${resultDigits};--percent-digits:${percentDigits}">
       <div class="display">${none || R.net === null ? D : bn(R.units.net)}</div>
       <div class="period-percent-slot">${percentMarkup}${percent === null ? '' : ` <button type="button" class="term of" data-term="result">of <span class="nw">${esc(baseText)}</span></button><span class="vh">, the money at the period start</span>`}</div>
     </div>
-    <p class="say">${esc(partialDays ? sentence.replace(/\.$/, '') : sentence)}${partialHint(partialDays)}</p>
+    <p class="say">${esc(partialDays ? sentence.replace(/\.$/, '') : sentence)}${partialHint(partialDays)}</p>${reserve.length
+      ? `<p class="say-size" aria-hidden="true">${reserve.map(copy => `<span>${esc(copy)}</span>`).join('')}</p>` : ''}
     <dl class="split">
       <dt>${term('closed')}</dt><dd>${none ? '—' : signed(R.units.realised)}</dd>
       <dt>${term('stillopen')}</dt><dd>${none || R.unreal === null ? '—' : signed(R.units.unreal)}</dd>

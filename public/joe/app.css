@@ -603,10 +603,20 @@ dialog.dlg::backdrop { background: var(--scrim); }
 .step-label { min-width: 210px; font-weight: 600; }
 
 /* The hero: what it shows (result, desks, period), the figure, its percentage
-   with the money it divides by, one sentence, then the split. Fixed rows: a
-   sentence of one, two or three lines never moves a number. */
+   with the money it divides by, one sentence, then the split. The sentence
+   row keeps three lines, so a result of one to three lines never moves a
+   number. An explanation that can be longer (a change of basis, an unknown
+   result) carries its longest copy invisibly in the same cell (.say-size):
+   the split starts below it, never under the text, and stays put within
+   that state. */
 .rhero { padding: 20px 22px 16px; display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0 28px; }
-.rhero-l { display: grid; grid-template-rows: 20px 78px 67px auto; min-width: 0; }
+.rhero-l { display: grid; grid-template-rows: 20px 78px minmax(67px, auto) auto; min-width: 0; }
+.rhero-l > .hero-k { grid-row: 1; }
+.rhero-l > .result-figure { grid-row: 2; }
+.rhero-l > .say, .rhero-l > .say-size { grid-row: 3; grid-column: 1; }
+.rhero-l > .split { grid-row: 4; }
+.rhero .say-size { display: grid; align-self: start; margin-top: 4px; font-size: 14px; line-height: 21px; visibility: hidden; pointer-events: none; }
+.rhero .say-size > span { grid-area: 1 / 1; }
 .rhero .hero-k { display: flex; align-items: center; gap: 8px; height: 20px; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
 .rhero .hero-k .i { width: 15px; height: 15px; color: var(--ink-3); }
 .result-figure { display: grid; grid-template-rows: 56px 22px; min-width: 0; }

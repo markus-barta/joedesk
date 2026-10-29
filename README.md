@@ -1029,6 +1029,13 @@ own coverage hint even when the hero cannot state a result.
 The hero's figure column has fixed rows (JOED-151): its heading, the figure
 with its percentage line, a three-line sentence row and the split, so a
 sentence of one to three lines never moves the split, chart, legend or tiles.
+The two explanations that can run longer, a change of basis and an unknown
+result, carry their longest copy invisibly in the same row (all three desks,
+a Wednesday in May, and each of the widest period phrases), so the split
+starts below the sentence's last line and stays put while the view switches
+within that state; the row grows only for them. Browser assertions at
+320 and 390 px require that for a basis change of one desk and of all
+three, and for an unknown result.
 Phones at ≤ 700 px keep at least a two-line sentence box in that row. The
 browser assertions require the longest eligible empty wording, with **Paper
 results start on 30 Sep 2026** and the older **week of 21 Sep**, to fit three
