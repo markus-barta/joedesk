@@ -1884,7 +1884,7 @@ function historyInput(t, points, { end = Date.parse(points.at(-1).t), ...state }
   const target = { closest: () => null };
   return { chart, tip, frame, pending: () => pending,
     wheel(e, at) { const event = { deltaX: 0, deltaY: 0, deltaMode: 0, clientX: 464, timeStamp: at, target, prevented: false, preventDefault() { event.prevented = true; }, ...e }; on.chart.wheel(event); return event; },
-    touch(type, id, x, at = 0, y = 120) { on.chart[type]({ type, pointerId: id, pointerType: 'touch', clientX: x, clientY: y, button: 0, timeStamp: at, target }); },
+    touch(type, id, x, at = 0, y = 120, hit = target) { on.chart[type]({ type, pointerId: id, pointerType: 'touch', clientX: x, clientY: y, button: 0, timeStamp: at, target: hit }); },
     hover(x) { chart.onpointermove({ clientX: x, target }); return tip.innerHTML; } };
 }
 const threeDays = () => Array.from({ length: 145 }, (_, i) => pt(iso(i * 30), { j: 10 + i, joe: 20, joel: 30 }));
@@ -1961,6 +1961,35 @@ test('JOED-145 input: when the last finger of a pinch lifts no gesture is left, 
     assert.match(h.hover(464), /Vienna time/, 'after a swipe as well');
     h.tip.innerHTML = '';
   }
+});
+
+// Every frame replaces the drawing under a finger, which ends the browser's
+// own hold on it: a finger then lifted beyond the chart (a pinch spreads past
+// its top and bottom) ended nowhere the chart could hear, and every later
+// touch was ignored. The chart now holds each finger itself until it lifts.
+test('JOED-154 input: the chart holds each finger until it lifts, so a gesture ending beyond the chart still ends', t => {
+  const h = historyInput(t, threeDays()), held = [];
+  h.chart.setPointerCapture = id => { held.push(id); };
+  const day = h.frame();
+  h.touch('pointerdown', 1, 300, 0, 60); h.touch('pointerdown', 2, 500, 0, 180);
+  assert.deepEqual(held, [1, 2], 'both fingers of a pinch are held by the chart, not by the drawing under them');
+  h.touch('pointermove', 1, 260, 10, 20); h.touch('pointermove', 2, 540, 10, 220);
+  const zoomed = h.frame();
+  assert.ok(zoomed[1] - zoomed[0] < day[1] - day[0], 'the pinch zoomed');
+  // Held, both ends arrive at the chart wherever the fingers are.
+  h.touch('pointerup', 1, 250, 20, -40); h.touch('pointerup', 2, 560, 20, 300);
+  historyPreset('1d');
+  const before = h.frame();
+  h.touch('pointerdown', 3, 400, 1000);
+  for (const [x, at] of [[430, 1010], [460, 1020], [470, 1030]]) h.touch('pointermove', 3, x, at);
+  const after = h.frame();
+  h.touch('pointerup', 3, 470, 1040);
+  assert.deepEqual(held, [1, 2, 3], 'a later swipe is held as well');
+  assert.ok(after[0] < before[0] && Math.abs(after[1] - after[0] - (before[1] - before[0])) < 1e-3, 'and pans, same width');
+  // A touch on the status line (its Retry button) stays a plain tap.
+  h.touch('pointerdown', 4, 400, 2000, 10, { closest: selector => (selector === '.hist-status' ? {} : null) });
+  h.touch('pointerup', 4, 400, 2010, 10);
+  assert.deepEqual(held, [1, 2, 3], 'the status line is never held');
 });
 
 // The y of a drawn path where it crosses x (its segments are straight).

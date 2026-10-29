@@ -618,6 +618,11 @@ export function initHistoryInput({ schedule }) {
       if (e.button === 0 && canPan()) input.drag = { kind: 'chart', id: e.pointerId, x: e.clientX, start, perPx: perPx(), moved: false };
       return;
     }
+    // The chart holds every finger until it lifts. Each frame replaces the
+    // drawing under the finger, which ends the browser's own hold on it, so
+    // a finger lifted beyond the chart (a pinch spreads past its edges)
+    // would never end its gesture and every later touch would be ignored.
+    chart.setPointerCapture?.(e.pointerId);
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     clearTimeout(input.touch?.timer);
     if (touches.size === 1) {
