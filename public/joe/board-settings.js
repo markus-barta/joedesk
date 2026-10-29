@@ -16,7 +16,7 @@ export function validateBoardSettings(value) {
 
 // Each failed read hides the base rather than retaining an unverified amount.
 // A late read may never replace the result of a more recent save.
-export function createBoardSettings({ fetcher = (...args) => fetch(...args), changed = () => {} } = {}) {
+export function createBoardSettings({ fetcher = (...args) => fetch(...args), changed = () => {}, timeoutMs = 15000 } = {}) {
   let state = { accountStart: null, reason: 'loading' }, generation = 0, saving = false;
   const snapshot = () => structuredClone(state);
   const publish = next => { state = next; changed(); };
@@ -24,21 +24,31 @@ export function createBoardSettings({ fetcher = (...args) => fetch(...args), cha
     if (saving) return { ok: false, error: 'Account start is being saved.' };
     const current = ++generation;
     saving = method === 'POST';
+    const controller = new AbortController();
+    let timer;
     try {
-      const response = await fetcher('./board-settings.json', { method, credentials: 'same-origin', cache: 'no-store', redirect: 'manual',
-        ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) } : {}) });
-      const body = await response.json();
+      // Bound headers and body together, as the existing feed reader does.
+      const { response, body } = await Promise.race([
+        new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('Account start request timed out. Refresh before retrying.')); }, timeoutMs); }),
+        (async () => {
+          const response = await fetcher('./board-settings.json', { method, credentials: 'same-origin', cache: 'no-store', redirect: 'manual', signal: controller.signal,
+            ...(method === 'POST' ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) } : {}) });
+          return { response, body: await response.json() };
+        })(),
+      ]);
       const settings = { accountStart: body?.accountStart };
       if (response.status !== 200 || validateBoardSettings(settings) || !['missing', 'invalid', 'unreadable', 'unset', null].includes(body.reason)) {
         throw new Error(response.status !== 200 && typeof body?.error === 'string' ? body.error : 'Account start could not be checked.');
       }
-      if (body.reason !== null && settings.accountStart !== null) throw new Error('Account start could not be checked.');
+      if ((body.reason === null) !== (settings.accountStart !== null)) throw new Error('Account start could not be checked.');
+      if (method === 'POST' && (body.ok !== true || (value.accountStart === null ? settings.accountStart !== null :
+        settings.accountStart?.amountEur !== value.accountStart.amountEur || settings.accountStart?.date !== value.accountStart.date))) throw new Error('The saved account start could not be confirmed. Refresh before retrying.');
       if (current === generation) publish({ ...settings, reason: body.reason });
       return { ok: true };
     } catch (error) {
       if (current === generation) publish({ accountStart: null, reason: 'refresh_failed' });
       return { ok: false, error: error.message || 'Account start could not be saved.' };
-    } finally { if (current === generation) saving = false; }
+    } finally { clearTimeout(timer); if (current === generation) saving = false; }
   }
   return { snapshot, accountStart: () => snapshot().accountStart,
     refresh: () => request('GET'),

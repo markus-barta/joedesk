@@ -1,7 +1,6 @@
 // JoeDesk shell: navigation, theme, the header light, the footer and one
-// render per animation frame. A read-only paper board: the one request that
-// changes anything is a reviewed paper draft of the fleet settings, sent only
-// from Settings (fleet-write.js).
+// render per animation frame. Settings saves reviewed paper fleet drafts and
+// board display values through separate authenticated routes.
 import { isCanonicalJoeHost } from './host.js';
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';

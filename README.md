@@ -1981,6 +1981,47 @@ metadata only; the full record stays on its worker read path.
 
 ### Fleet Config propagation
 
+Account start is a separate board display setting (JOED-155), saved in
+`/var/lib/joe-board/board-settings.json` as
+`{ "accountStart": { "amountEur": <positive EUR number>, "date": "YYYY-MM-DD" } }`
+or `{ "accountStart": null }`. It never changes `fleet-config.json`, executor
+policy, contracts, or broker data. Amounts have at most two decimal places and
+must retain safe integer cents; dates must be real calendar dates in years
+0001–9999. No amount or date is supplied by default.
+
+`GET /joe/board-settings.json` uses the existing authenticated read path and
+returns `{accountStart, reason}` with no-store and the common CSP/frame headers.
+The reason is `null` when set, `unset` when deliberately cleared, `missing`
+before any save, `invalid` for corrupt/invalid/oversize storage, or `unreadable`
+for other read failures. Failures return a null account start without crashing.
+`POST` on the same route accepts only `{accountStart}` and mirrors Fleet Config's
+trusted proxy identity, same-origin checks, JSON content-type check and 262144-byte
+request limit. Validation failures return 422 with a plain error; auth/origin
+failures return 403, wrong content type 415, malformed JSON 400, oversize bodies
+413 and store failures 500. Successful responses include `{ok:true,accountStart,reason}`.
+The bounded 4096-byte file uses `server/storage.mjs` atomic replacement, fsync
+and mode 0600. Log lines record actor, time, changed key and pending/success/failure,
+never the amount or date. Concurrent saves use the last completed replacement.
+
+Settings → **Account start** works on desktop and phone: Edit, enter amount and
+date, Review changes, tick the review box, then Save account start. Point and
+comma decimal input are accepted without grouping. Clearing also requires review.
+An unset value reads “Not set: the whole account's 'Since start' stays hidden
+until you set it.” Missing/corrupt/unreadable storage has an additional explanation.
+The form preserves a failed save's draft and asks for a refresh before retrying.
+Fleet policy keeps its existing separate review and propagation flow.
+
+The forthcoming Desk hero can import `accountStart()` from
+`public/joe/board-settings.js` to get a defensive `{amountEur,date}` copy or null.
+Settings initialization loads it for every screen; visible pages refresh it every
+30 seconds and on focus/visibility return. Failed reads hide the accessor's value
+until a valid response recovers. A 15-second deadline bounds response headers
+and body, including saves whose outcome must be checked by refreshing after a timeout.
+A late GET never overwrites a newer save, and
+editing or a changed server value invalidates the form's prior review. This
+ticket adds no Desk UI. Focused tests are `test/board-settings.mjs`,
+`test/board-settings-route.mjs` and `test/settings-model.mjs`.
+
 Every app response sends `Content-Security-Policy: frame-ancestors 'none'`
 and `X-Frame-Options: DENY` to prevent framing of the board and its settings
 (JOED-141). Open the board directly; HostDash links to its protected address.

@@ -60,7 +60,7 @@ const response = (body, status = 200) => ({ status, json: async () => body });
 test('page accessor starts unset; private reads and saves expose only validated server values', async () => {
   assert.equal(accountStart(), null);
   const calls = [];
-  const client = createBoardSettings({ fetcher: async (...args) => { calls.push(args); return response({ ...value, reason: null }); } });
+  const client = createBoardSettings({ fetcher: async (...args) => { calls.push(args); return response({ ok: true, ...value, reason: null }); } });
   assert.equal(client.accountStart(), null);
   assert.deepEqual(await client.refresh(), { ok: true });
   assert.deepEqual(client.accountStart(), value.accountStart);
@@ -79,7 +79,7 @@ test('client hides account start on failed or invalid reads and accepts missing/
   let body = { ...value, reason: null }, status = 200;
   const client = createBoardSettings({ fetcher: async () => response(body, status) });
   await client.refresh();
-  for (const invalid of [{ ...value, reason: 'invalid' }, { ...value, reason: 'unknown' }, { accountStart: {} }, {}]) {
+  for (const invalid of [{ ...value, reason: 'invalid' }, { ...value, reason: 'unknown' }, { accountStart: null, reason: null }, { accountStart: {} }, {}]) {
     body = invalid; assert.equal((await client.refresh()).ok, false); assert.equal(client.accountStart(), null);
   }
   body = { ...value, reason: null }; status = 401;
@@ -96,7 +96,40 @@ test('late GET cannot overwrite a newer save; background refresh does not race a
   const client = createBoardSettings({ fetcher: (_, options) => new Promise(resolve => { if (options.method === 'GET') resolveRead = resolve; else resolveSave = resolve; }) });
   const read = client.refresh(), save = client.save(value);
   assert.equal((await client.refresh()).ok, false);
-  resolveSave(response({ ...value, reason: null })); await save;
+  resolveSave(response({ ok: true, ...value, reason: null })); await save;
   resolveRead(response({ accountStart: null, reason: 'missing' })); await read;
   assert.deepEqual(client.accountStart(), value.accountStart);
+});
+
+test('a save needs a success receipt for the exact reviewed amount/date', async () => {
+  let body;
+  const client = createBoardSettings({ fetcher: async () => response(body) });
+  for (body of [{ ...value, reason: null }, { ok: false, ...value, reason: null },
+    { ok: true, accountStart: { ...value.accountStart, amountEur: 99 }, reason: null },
+    { ok: true, accountStart: null, reason: 'unset' }]) {
+    assert.equal((await client.save(value)).ok, false);
+    assert.equal(client.accountStart(), null);
+  }
+});
+
+test('fetch/body timeouts abort, hide the base, release the save lock and ignore late answers', async () => {
+  for (const stage of ['fetch', 'body']) {
+    let release, signal;
+    const late = new Promise(resolve => { release = resolve; });
+    const client = createBoardSettings({ timeoutMs: 5, fetcher: async (_, options) => {
+      signal = options.signal;
+      if (stage === 'fetch') return late;
+      return { status: 200, json: () => late };
+    } });
+    const answer = await client.save(value);
+    assert.equal(answer.ok, false); assert.match(answer.error, /timed out/);
+    assert.equal(signal.aborted, true);
+    assert.deepEqual(client.snapshot(), { accountStart: null, reason: 'refresh_failed' });
+    const body = { ok: true, ...value, reason: null };
+    release(stage === 'fetch' ? response(body) : body);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(client.accountStart(), null);
+    const retry = await client.save(value);
+    assert.equal(retry.ok, true, 'timed-out save releases its lock for a later request');
+  }
 });

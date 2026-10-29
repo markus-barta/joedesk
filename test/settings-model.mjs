@@ -23,6 +23,122 @@ const schema = JSON.parse(readFileSync(new URL('../contracts/fleet-config.schema
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const NB = '\u00a0'; // numbers never part from their units
 
+test('account start row shows the saved EUR amount/date or exact honest unset text with a reason', () => {
+  const unset = "Not set: the whole account's 'Since start' stays hidden until you set it.";
+  const accountStart = { amountEur: 12.34, date: '2024-02-29' };
+  assert.deepEqual(M.accountStartRow({ accountStart, reason: null }), { text: `Account start: €${NB}12,34 on 2024-02-29`, note: '', editable: true });
+  for (const reason of ['missing', 'invalid', 'unreadable', 'unset', 'loading', 'refresh_failed']) {
+    const row = M.accountStartRow({ accountStart: null, reason });
+    assert.equal(row.text, unset);
+    assert.equal(row.editable, !['loading', 'refresh_failed'].includes(reason));
+    if (reason !== 'unset') assert.ok(row.note);
+  }
+  assert.match(M.accountStartRow({ accountStart, reason: 'refresh_failed' }).text, /Not set/);
+  assert.equal(M.accountStartRow({ accountStart: {}, reason: null }).editable, false);
+  assert.deepEqual(M.accountStartDraft(null), { amount: '', date: '', clear: false }, 'no sample defaults');
+  assert.deepEqual(M.accountStartDraft(accountStart), { amount: '12.34', date: '2024-02-29', clear: false });
+});
+
+test('account start review validates text without rounding, keeps calendar dates and permits a reviewed clear', () => {
+  const snapshot = { accountStart: null, reason: 'missing' };
+  const draft = { amount: '12,34', date: '2024-02-29', clear: false };
+  const review = M.reviewAccountStart(draft, snapshot);
+  assert.deepEqual(review.value, { accountStart: { amountEur: 12.34, date: '2024-02-29' } });
+  assert.equal(review.base, 'null'); assert.match(review.before, /Not set/);
+  assert.equal(review.after, `Account start: €${NB}12,34 on 2024-02-29`);
+  for (const amount of ['', '0', '-1', '1.001', '1,001', '1.234,56', '1,234.56', '1e2', 'Infinity', '0x10']) assert.ok(M.reviewAccountStart({ ...draft, amount }, snapshot).error, amount);
+  assert.ok(M.reviewAccountStart({ ...draft, date: '2023-02-29' }, snapshot).error);
+  const saved = { ...review.value, reason: null };
+  assert.match(M.reviewAccountStart(draft, saved).error, /matches the saved/);
+  const clear = M.reviewAccountStart({ amount: '', date: '', clear: true }, saved);
+  assert.deepEqual(clear.value, { accountStart: null }); assert.match(clear.after, /Not set/);
+  for (const reason of ['loading', 'refresh_failed']) assert.match(M.reviewAccountStart(draft, { accountStart: null, reason }).error, /Refresh/);
+  assert.equal(M.reviewAccountStart(draft, { accountStart: null, reason: 'invalid' }).error, undefined, 'a corrupt setting can be replaced');
+});
+
+test('account start rendered form requires confirmation, invalidates edited/stale reviews and keeps failed drafts', async () => {
+  const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
+  const board = await import('../public/joe/board-settings.js');
+  const realDocument = globalThis.document, realFetch = globalThis.fetch;
+  const doc = htmlDocument('<nav id="setNav"></nav><main id="setMain"></main>');
+  let focused = null, calls = [], stored = { accountStart: null, reason: 'missing' }, fail = false;
+  const selectAll = doc.querySelectorAll.bind(doc);
+  doc.querySelectorAll = selector => selectAll(selector).map(el => { el.focus = () => { focused = el.id; }; return el; });
+  globalThis.document = doc;
+  globalThis.fetch = async (_, init) => {
+    calls.push(init);
+    if (init.method === 'POST') {
+      if (fail) return { status: 500, json: async () => ({ ok: false, error: 'fixture store failure' }) };
+      stored = { ...JSON.parse(init.body), reason: JSON.parse(init.body).accountStart ? null : 'unset' };
+      return { status: 200, json: async () => ({ ok: true, ...stored }) };
+    }
+    return { status: 200, json: async () => stored };
+  };
+  const $ = selector => doc.querySelector(selector);
+  const event = { preventDefault() {} };
+  try {
+    await board.refreshBoardSettings();
+    const page = await builders('settings.js', ['buildSkeleton', 'renderAccountStart', 'reviewAccountStart', 'saveAccountStart', 'resetAccountReview']);
+    page.buildSkeleton(); page.renderAccountStart();
+    assert.match($('#accountStartSummary').textContent, /Not set/);
+    assert.equal($('#accountStartAmount').getAttribute('placeholder'), null);
+    for (const [input, label] of [['accountStartAmount', 'Amount in EUR'], ['accountStartDate', 'Start date']]) {
+      assert.match($(`label[for="${input}"]`).textContent, new RegExp(label));
+    }
+    assert.equal($('#accountStartSummary').getAttribute('aria-live'), 'polite');
+    $('#accountStartForm').hidden = false;
+    $('#accountStartAmount').value = '12,34'; $('#accountStartDate').value = '2024-02-29';
+    page.reviewAccountStart();
+    assert.equal(focused, 'accountStartConfirmed');
+    assert.equal($('#accountStartSave').disabled, true);
+    const count = calls.length;
+    await page.saveAccountStart(event);
+    assert.equal(calls.length, count, 'unchecked review never writes');
+    $('#accountStartConfirmed').checked = true;
+    $('#accountStartAmount').value = '13.34';
+    await page.saveAccountStart(event);
+    assert.equal(calls.length, count, 'unannounced control changes never send the prior review');
+    assert.match($('#accountStartMessage').textContent, /Review the current/);
+    page.reviewAccountStart(); $('#accountStartConfirmed').checked = true;
+    await page.saveAccountStart(event);
+    assert.equal(calls.at(-1).method, 'POST');
+    assert.deepEqual(JSON.parse(calls.at(-1).body), { accountStart: { amountEur: 13.34, date: '2024-02-29' } });
+    assert.equal($('#accountStartForm').hidden, true);
+    assert.equal(focused, 'accountStartEdit');
+    assert.equal($('#accountStartSummary').textContent, `Account start: €${NB}13,34 on 2024-02-29`);
+    assert.equal($('#accountStartMessage').textContent, 'Account start saved for this board.');
+
+    $('#accountStartForm').hidden = false;
+    $('#accountStartAmount').value = '14.34'; page.reviewAccountStart();
+    $('#accountStartConfirmed').checked = true;
+    stored = { accountStart: { amountEur: 15.34, date: '2024-02-29' }, reason: null };
+    await board.refreshBoardSettings(); page.renderAccountStart();
+    assert.equal($('#accountStartSave').disabled, true);
+    assert.equal($('#accountStartReviewBox').hidden, true);
+    assert.match($('#accountStartMessage').textContent, /saved account start changed/);
+
+    page.reviewAccountStart(); $('#accountStartConfirmed').checked = true; fail = true;
+    await page.saveAccountStart(event);
+    assert.equal($('#accountStartForm').hidden, false);
+    assert.equal($('#accountStartAmount').value, '14.34');
+    assert.equal($('#accountStartSave').disabled, true);
+    assert.equal(focused, 'accountStartRetry');
+    assert.match($('#accountStartMessage').textContent, /fixture store failure.*Refresh before retrying/);
+    assert.equal(board.accountStart(), null);
+    assert.match($('#accountStartReason').textContent, /could not be refreshed/);
+    fail = false; await board.refreshBoardSettings();
+    $('#accountStartClear').checked = true; page.resetAccountReview();
+    assert.equal($('#accountStartAmount').disabled, true);
+    page.reviewAccountStart(); $('#accountStartConfirmed').checked = true;
+    await page.saveAccountStart(event);
+    assert.deepEqual(JSON.parse(calls.at(-1).body), { accountStart: null });
+    assert.equal(board.accountStart(), null);
+  } finally {
+    globalThis.fetch = realFetch;
+    if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
+  }
+});
+
 test('P6 Saved captions: window and long symbol counts, complete strings for accessible ellipsis', () => {
   assert.equal(M.savedText(M.FIELD['cadence.wakeWindows'], '[]'), '0 wake windows');
   assert.equal(M.savedText(M.FIELD['desks.keep'], 'AAA,BBB,CCC,DDD,EEE'), '7 kept symbols');
