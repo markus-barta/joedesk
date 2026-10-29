@@ -284,3 +284,28 @@ test('JOED-156 fix 3: one resize rule keeps the source’s floor, inside the ran
   const short = [NOW - DAY, NOW];
   assert.deepEqual(M.resizeWithin(short, short, 'from', NOW, 10 * DAY), short, 'a range shorter than the floor is the narrowest window');
 });
+
+test('JOED-156 r39: liveTail is the end of chartPoints’ drawing, thinned or not; the points before it never depend on the live value', () => {
+  const h = M.acceptAccountHistory(history()), last = h.short.t.at(-1);
+  const live = (after, amount) => M.withLive(h.short, { t: last + after, observedAt: iso(last + after), amount });
+  // Three days of five-minute values in 200 buckets are thinned; Infinity keeps every one.
+  const window = [last - 3 * DAY, last + 15 * MIN], now = last + 15 * MIN;
+  for (const buckets of [Infinity, 200]) {
+    let before = null;
+    // The lowest, the highest and a middle value of its bucket, and one in the next bucket.
+    for (const [after, amount] of [[MIN, '26000.00'], [3 * MIN, '30000.00'], [4 * MIN, '27420.00'], [14 * MIN, '27421.00']]) {
+      const series = live(after, amount), { pts, thinned } = M.chartPoints(series, window, now, buckets);
+      const tail = M.liveTail(series, window, buckets, thinned), head = pts.slice(0, pts.length - tail.pts.length);
+      assert.equal(thinned, buckets === 200);
+      assert.deepEqual(pts.slice(head.length), tail.pts, `${buckets} buckets, ${amount}: the drawing ends on the tail`);
+      assert.deepEqual(head, before ?? head, `${buckets} buckets, ${amount}: the drawing before it is the same`);
+      before = head;
+      assert.equal(tail.from < series.t.length - 1, thinned, 'thinned, with the bucket of the value before it');
+    }
+  }
+  // No tail without a live value joined to the value before it.
+  assert.equal(M.liveTail(h.short, window, 200, true), null);
+  assert.equal(M.liveTail(live(30 * MIN, '27000.00'), [last - DAY, last + 31 * MIN], Infinity, false), null, 'after a gap');
+  // The time to now is a gap past the snapshot cadence, or a day without a close.
+  assert.deepEqual([M.gapToNow(h.short, h.short.t.length - 1, last + 20 * MIN), M.gapToNow(h.short, h.short.t.length - 1, last + 20 * MIN + 1)], [false, true]);
+});

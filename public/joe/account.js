@@ -294,8 +294,33 @@ function emptyText(series) {
 }
 
 // ---------- The chart ----------
-const last = { ctx: null, key: null, scale: null, series: null, live: null, frame: 0 };
+// The chart's and the strip's sizes come from a ResizeObserver, so a Desk
+// update never asks the browser for layout. Without one (or before its first
+// report) an element's own size is read, as a draw does anyway. A size the
+// chart was not drawn at draws it again.
+const sizes = new WeakMap();
+let watched = null;
+function watchSizes() {
+  watched?.disconnect();
+  watched = typeof ResizeObserver === 'function' ? new ResizeObserver(entries => {
+    for (const { target, contentRect } of entries) sizes.set(target, { w: Math.round(contentRect.width), h: Math.round(contentRect.height) });
+    if (last.ctx && drawKey(last.ctx) !== last.key) requestDraw();
+  }) : null;
+  for (const el of [$('#acctChart'), $('#acctTrack')]) if (el) watched?.observe(el);
+}
+const sizeOf = el => sizes.get(el) ?? { w: el.clientWidth, h: el.clientHeight };
+// Every drawing of the chart and of the strip, counted (tests).
+const counts = { chart: 0, strip: 0 };
+export const accountDraws = () => ({ ...counts });
+const chartDraw = (el, o) => { counts.chart++; return drawChart(el, o); };
+// key: what the chart was drawn for (drawKey); moved: the live value it
+// shows; drawn: what moveLive needs to move a new one in place; fine: the
+// window ends at "now" itself (zoomed in, a minute is more than a pixel).
+const last = { ctx: null, key: null, scale: null, series: null, live: null, frame: 0, moved: null, drawn: null, fine: false };
+const liveKey = live => (live ? `${live.t}|${live.amount}` : '');
 const motion = { from: null, start: 0 };
+// The automatic fits' margin: a share of the values' range on each side.
+const AXIS_MARGIN = 0.08;
 const eurK = (v, step) => (step >= 1000 ? `${v < 0 ? MINUS : ''}€${NB}${digits(Math.abs(v) / 1000, step >= 10000 ? 0 : 1)}k` : eurAxis(v, step));
 const padFor = () => (phone() ? { l: 50, r: 8, t: 12, b: 22 } : { l: 58, r: 14, t: 14, b: 24 });
 function glide() { if (AS.shown && !reducedMotion()) { motion.from = AS.shown.slice(); motion.start = performance.now(); } }
@@ -345,6 +370,15 @@ const spanLabel = ([a, b], source, toNow) => {
   return `${dayDM(at(a))}, ${timeHM(at(a))} – ${toNow ? 'now' : sameDay ? timeHM(at(b)) : `${dayDM(at(b))}, ${timeHM(at(b))}`}`;
 };
 
+// What the chart and the strip are drawn for. Anything else (a new live
+// value inside the minute) moves in place (moveLive); zoomed in, the live
+// value is part of it.
+function drawKey(ctx, live = ctx ? M.liveObservation(ctx.states.paperAccount, ctx.feeds.data?.value) : null) {
+  const size = el => (el ? sizeOf(el) : { w: 0, h: 0 }), chart = size($('#acctChart')), track = size($('#acctTrack'));
+  const now = ctx?.now ? Date.parse(ctx.now) : null;
+  return JSON.stringify([store.version, store.reason, Boolean(live), AS.range, AS.view, AS.follow, chart.w, chart.h, track.w, track.h, yAxis.get(),
+    now === null ? null : Math.floor(now / MIN), phone(), last.fine ? liveKey(live) : '']);
+}
 function chartLabel(source, range, choice = { mode: 'auto' }) {
   const axisWords = choice.mode === 'max' ? '; vertical axis fixed to everything loaded'
     : choice.mode === 'custom' ? `; custom vertical axis from ${money(choice.min, 'EUR')} to ${money(choice.max, 'EUR')}` : '';
@@ -352,47 +386,64 @@ function chartLabel(source, range, choice = { mode: 'auto' }) {
     : `The whole paper account, kept holdings included, zoomed: ${spanLabel(AS.shown, source, false)} Vienna time, in euros${axisWords}`;
 }
 function draw() {
-  const el = $('#acctChart');
-  if (!el || !el.clientWidth) { syncWindowParts(); return; }
+  const el = $('#acctChart'), size = el ? sizeOf(el) : null;
+  if (!el || !size.w) { syncWindowParts(); return; }
   const ctx = last.ctx, inspect = { description: 'acctInspectHelp', live: $('#acctLive'), points: [] }, pad = padFor();
-  const empty = text => { AS.full = null; AS.shown = null; last.scale = drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: text, inspect, pad, label: `The whole paper account over time: ${text.toLowerCase()}` }); stripOff(); syncWindowParts(); };
+  // What this drawing is for (again below, once the window's kind is known).
+  last.drawn = null; last.key = drawKey(ctx);
+  const empty = text => { AS.full = null; AS.shown = null; last.scale = chartDraw(el, { series: [], xDomain: [0, 1], empty: true, emptyText: text, inspect, pad, label: `The whole paper account over time: ${text.toLowerCase()}` }); stripOff(); syncWindowParts(); };
   if (!ctx?.now) { empty('Waiting for the board server’s clock'); return; }
   const source = M.sourceOf(AS.range), live = M.liveObservation(ctx.states.paperAccount, ctx.feeds.data?.value);
   const series = seriesFor(source, live), now = Date.parse(ctx.now);
-  const endAt = Math.max(Math.floor(now / MIN) * MIN, series.t.at(-1) ?? -Infinity);
-  const full = M.keptRange(series, endAt);
-  last.series = series; last.live = live;
+  last.series = series; last.live = live; last.moved = liveKey(live);
+  // "Now" to the minute, or a later value: the now marker, and the end of a
+  // gap since the last value. The window ends there too where a minute is
+  // more than a pixel (zoomed in); otherwise at the end of the minute, at
+  // most a pixel on, so a new live value inside the minute moves in place.
+  const settled = Math.max(Math.floor(now / MIN) * MIN, series.t.at(-1) ?? -Infinity);
+  const pw = Math.max(1, size.w - pad.l - pad.r);
+  let full = M.keptRange(series, Math.max(settled, Math.floor(now / MIN) * MIN + MIN)), target = full && M.accountWindow(full, AS);
+  last.fine = Boolean(target) && pw * MIN > target[1] - target[0];
+  if (last.fine) { full = M.keptRange(series, settled); target = M.accountWindow(full, AS); }
+  last.key = drawKey(ctx);
   if (!full) { empty(emptyText(series)); return; }
   AS.full = full;
-  const [x0, x1] = frameWindow(M.accountWindow(full, AS));
+  const [x0, x1] = frameWindow(target);
   AS.shown = [x0, x1];
-  const { pts, bands } = M.chartPoints(series, [x0, x1], endAt, Math.max(200, el.clientWidth));
+  const buckets = Math.max(200, size.w);
+  const { pts, bands, thinned } = M.chartPoints(series, [x0, x1], settled, buckets);
   const ext = M.extents(series, [x0, x1]);
-  const base = pts.find(p => p.v !== null && p.x >= x0)?.v ?? ext.visible?.[0] ?? 0;
+  const first = pts.find(p => p.v !== null && p.x >= x0);
+  const base = first?.v ?? ext.visible?.[0] ?? 0;
   const ticks = phone() ? 3 : 4;
-  const pw = Math.max(1, el.clientWidth - pad.l - pad.r), time = M.timeLabels(x0, x1, pw, phone() ? 50 : 56);
+  const time = M.timeLabels(x0, x1, pw, phone() ? 50 : 56);
   const following = AS.follow && atLiveEdge(full, [x0, x1]);
   const range = M.windowRange(full, [x0, x1], source, AS.range);
-  const hitTest = x => { const p = M.pointNear(series, x); return [!p ? null : p.stands ? { ...p, gap: false } : { x, v: p.v, gap: true, why: p.why, estimated: true }]; };
+  // The tip and the reading follow the live value as it moves (last.series).
+  const hitTest = x => { const p = M.pointNear(last.series ?? series, x); return [!p ? null : p.stands ? { ...p, gap: false } : { x, v: p.v, gap: true, why: p.why, estimated: true }]; };
   // Auto: the values in the window, with the money charts' honest minimum span
   // (base); Max: every value loaded; Custom: the viewer's own bounds.
   const choice = yAxis.get();
-  last.scale = drawChart(el, {
+  last.scale = chartDraw(el, {
     // Max keeps one base too (the lowest value loaded), so no window rescales it.
     axis: choice, maxValues: ext.loaded ?? null, ease: 180, easeKey: source, again: requestDraw,
     series: [{ pts, color: 'var(--accent)', w: 1.9, live: following && Boolean(series.live), area: false }],
-    xDomain: [x0, x1], base: choice.mode === 'max' && ext.loaded ? ext.loaded[0] : base, yValues: ext.visible ?? [], margin: 0.08, yFmt: eurK, ticks, pad, bands,
-    vlines: time.lines, xLabels: time.labels, now: following ? endAt : null,
+    xDomain: [x0, x1], base: choice.mode === 'max' && ext.loaded ? ext.loaded[0] : base, yValues: ext.visible ?? [], margin: AXIS_MARGIN, yFmt: eurK, ticks, pad, bands,
+    vlines: time.lines, xLabels: time.labels, now: following ? settled : null,
     emptyText: 'No value recorded in this window', label: chartLabel(source, range, choice),
     isPanning: () => Boolean(input.drag?.moved || (input.touch && input.touch.phase !== 'scrub')), isPinned: () => input.pinned,
     inspect: { ...inspect, points: M.observedTimes(series, [x0, x1]) },
-    hitTest, tipFmt: (near, x) => pointDetails(near[0], x, series),
+    hitTest, tipFmt: (near, x) => pointDetails(near[0], x, last.series ?? series),
   });
-  const svg = el.querySelector(':scope > svg');
-  if (svg) Object.assign(svg.dataset, { x0: String(Math.round(x0)), x1: String(Math.round(x1)), source, range: range ?? '', points: String(pts.filter(p => p.v !== null).length) });
+  const svg = el.querySelector(':scope > svg'), points = pts.filter(p => p.v !== null).length;
+  if (svg) Object.assign(svg.dataset, { x0: String(Math.round(x0)), x1: String(Math.round(x1)), source, range: range ?? '', points: String(points) });
+  if (!last.fine) {
+    const notes = ext.visible && { above: ext.visible[1] > last.scale?.ax.hi, below: ext.visible[0] < last.scale?.ax.lo };
+    last.drawn = drawnLive(el, series, { source, x0, x1, buckets, thinned, following, choice, base, baseIsLive: Boolean(series.live) && first?.x === series.t.at(-1), ticks, points, notes });
+  }
   el.classList.toggle('pannable', canPan());
   if (input.announce && inspect.live) { inspect.live.textContent = input.announce; input.announce = null; }
-  drawStrip(series, full, [x0, x1], endAt);
+  drawStrip(series, full, [x0, x1], settled);
   syncWindowParts();
 }
 
@@ -405,31 +456,70 @@ function stripOff() {
   for (const n of [$('#acctWin'), ...$$('#acctStrip [data-edge]')]) if (n) setAttrs(n, { tabindex: '-1', 'aria-hidden': 'true' });
   const plot = $('#acctMiniPlot');
   if (plot?.innerHTML) plot.innerHTML = '';
-  stripKey = null;
+  Object.assign(strips, { key: null, series: null, live: null });
 }
-let stripKey = null;
-function stripSvg(series, full, width, height) {
-  const { pts, bands } = M.chartPoints(series, full, full[1], Math.max(50, Math.round(width)));
+// The strip as drawn: what for (key), from which series, and what moving a
+// new live value in place needs (stripSvg).
+const strips = { key: null, series: null, live: null };
+function stripSvg(series, full, width, height, settled) {
+  const buckets = Math.max(50, Math.round(width));
+  const { pts, bands, thinned } = M.chartPoints(series, full, settled, buckets);
   const values = pts.filter(p => p.v !== null).map(p => p.v);
-  if (!values.length) return '';
+  if (!values.length) return { html: '', live: null };
   const ax = axis(Math.min(...values), Math.max(...values), 2, values[0]);
   const X = x => toStrip(full, width, x).toFixed(1), Y = v => (4 + (ax.hi - v) / (ax.hi - ax.lo) * (height - 8)).toFixed(1);
   let g = bands.length ? '<defs><pattern id="ht-acctmini" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="var(--line-2)" stroke-width="1.2"/></pattern></defs>' : '';
   for (const [a, b] of bands) g += `<rect x="${X(a)}" y="0" width="${Math.max(1, toStrip(full, width, b) - toStrip(full, width, a)).toFixed(1)}" height="${height}" fill="url(#ht-acctmini)"/>`;
-  let path = '', pen = false;
-  for (const p of pts) { if (p.v === null) { pen = false; continue; } path += `${pen ? 'L' : 'M'}${X(p.x)} ${Y(p.v)}`; pen = true; }
+  // The line; the points a new live value changes are its last (M.liveTail),
+  // while no gap runs from it to now.
+  const n = series.t.length - 1, tail = n >= 0 && !M.gapToNow(series, n, settled) ? M.liveTail(series, full, buckets, thinned) : null;
+  const cut = tail ? pts.length - tail.pts.length : -1;
+  let path = '', pen = false, before = null;
+  pts.forEach((p, i) => {
+    if (i === cut) before = { d: path, pen };
+    if (p.v === null) { pen = false; return; }
+    path += `${pen ? 'L' : 'M'}${X(p.x)} ${Y(p.v)}`; pen = true;
+  });
   if (path) g += `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-linejoin="round" stroke-opacity=".85"/>`;
-  return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true" focusable="false">${g}</svg>`;
+  const html = `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true" focusable="false">${g}</svg>`;
+  if (!before || !tail.pts.every((q, i) => pts[cut + i].x === q.x && pts[cut + i].v === q.v)) return { html, live: null };
+  const rest = values.slice(0, values.length - tail.pts.length);
+  return { html, live: { full, buckets, thinned, ax, X, Y, before, from: tail.from, length: series.t.length,
+    lo: Math.min(...rest), hi: Math.max(...rest), first: rest.length ? rest[0] : null } };
 }
-function drawStrip(series, full, [a, b], endAt) {
+// Moves a new live value on the drawn strip; false when the strip must be
+// drawn again (its scale would change, or the line before it).
+function moveStripLive(series, settled) {
+  const s = strips.live, path = $('#acctMiniPlot')?.querySelector('path');
+  if (!s || !path || series.t.length !== s.length || M.gapToNow(series, s.length - 1, settled)) return false;
+  const tail = M.liveTail(series, s.full, s.buckets, s.thinned);
+  if (!tail || tail.from !== s.from) return false;
+  const vs = tail.pts.map(p => p.v), ax = axis(Math.min(s.lo, ...vs), Math.max(s.hi, ...vs), 2, s.first ?? vs[0]);
+  if (ax.lo !== s.ax.lo || ax.hi !== s.ax.hi) return false;
+  path.setAttribute('d', tail.pts.reduce((d, p, i) => `${d}${i || s.before.pen ? 'L' : 'M'}${s.X(p.x)} ${s.Y(p.v)}`, s.before.d));
+  strips.series = series;
+  return true;
+}
+// The strip for this series, drawn again only when it must.
+function stripFor(series, full, width, height, settled) {
+  const plot = $('#acctMiniPlot');
+  const key = `${width}|${height}|${store.version}|${series.source}|${Boolean(series.live)}|${Math.round(full[0])}|${Math.round(full[1])}`;
+  if (strips.key === key && (strips.series === series || moveStripLive(series, settled))) return;
+  counts.strip++;
+  const drawn = stripSvg(series, full, width, height, settled);
+  plot.innerHTML = drawn.html;
+  Object.assign(strips, { key, series, live: drawn.live });
+}
+function drawStrip(series, full, [a, b], settled) {
   const strip = $('#acctStrip'), track = $('#acctTrack'), plot = $('#acctMiniPlot');
   if (!strip || !track || !plot) return;
-  const width = track.clientWidth, height = track.clientHeight;
+  const { w: width, h: height } = sizeOf(track);
   if (!width || !height || full[1] <= full[0]) { stripOff(); return; }
   strip.removeAttribute('data-off');
   setAttrs(strip, { 'data-k0': Math.round(full[0]), 'data-k1': Math.round(full[1]) });
-  const key = `${width}|${height}|${merged.key}|${Math.round(full[0])}|${Math.round(endAt / MIN)}`;
-  if (stripKey !== key) { plot.innerHTML = stripSvg(series, full, width, height); stripKey = key; }
+  // Drawn again for a new history, range, size or end (each minute, or each
+  // value zoomed in); a new live value inside the minute moves in place.
+  stripFor(series, full, width, height, settled);
   const off = track.offsetLeft || 0;
   const t = overviewTargets({ width, left: toStrip(full, width, a), right: toStrip(full, width, b), hit: coarse() ? 44 : 16, lo: -off, hi: Math.max(width, (strip.clientWidth || 0) - off) });
   const win = $('#acctWin'), from = $('#acctStrip [data-edge="from"]'), to = $('#acctStrip [data-edge="to"]');
@@ -445,7 +535,8 @@ function drawStrip(series, full, [a, b], endAt) {
   setAttrs(win, { tabindex: '0', 'aria-hidden': 'false', 'aria-valuemin': min(full[0]), 'aria-valuemax': min(full[1] - (b - a)), 'aria-valuenow': min(a),
     'aria-valuetext': `${spanLabel([a, b], source, live)} Vienna time, of ${span} loaded${live ? ', following the newest' : ''}` });
   setAttrs(from, { tabindex: '0', 'aria-hidden': 'false', 'aria-valuemin': min(full[0]), 'aria-valuemax': min(b), 'aria-valuenow': min(a), 'aria-valuetext': `From ${whenText(a)} Vienna time` });
-  setAttrs(to, { tabindex: '0', 'aria-hidden': 'false', 'aria-valuemin': min(a), 'aria-valuemax': min(full[1]), 'aria-valuenow': min(b), 'aria-valuetext': `To ${whenText(b)} Vienna time${live ? ', the newest' : ''}` });
+  // Following, the window may end with the minute: its end is "now" to the minute.
+  setAttrs(to, { tabindex: '0', 'aria-hidden': 'false', 'aria-valuemin': min(a), 'aria-valuemax': min(full[1]), 'aria-valuenow': min(b), 'aria-valuetext': `To ${whenText(live ? Math.min(b, settled) : b)} Vienna time${live ? ', the newest' : ''}` });
 }
 
 // ---------- Parts that follow the window ----------
@@ -505,10 +596,83 @@ export function renderAccount(ctx) {
   patch($('#acctSubN'), parts.narrow);
   patch($('#acctDetails'), parts.details);
   root.dataset.history = store.value ? 'ok' : store.reason ?? 'ok';
-  const el = $('#acctChart'), now = ctx.now ? Date.parse(ctx.now) : null;
+  // The chart and the strip are drawn again only for what drawKey names; a
+  // new live value inside the minute moves in place (moveLive).
   const live = M.liveObservation(ctx.states.paperAccount, ctx.feeds.data?.value);
-  const key = JSON.stringify([store.version, store.reason, live?.t, live?.amount, AS.range, AS.view, AS.follow, el?.clientWidth, el?.clientHeight, yAxis.get(), now === null ? null : Math.floor(now / MIN), phone()]);
-  if (key !== last.key || motion.from) { last.key = key; draw(); } else syncWindowParts();
+  if (drawKey(ctx, live) !== last.key || motion.from) { draw(); return; }
+  if (liveKey(live) !== last.moved && !moveLive()) { draw(); return; }
+  syncWindowParts();
+}
+
+// ---------- The live value, in place ----------
+// A new live value inside the minute changes only the line's last points
+// (M.liveTail), its end dot and halo, and "now" where it stands on the live
+// value. moveLive moves them on the drawn chart where a new drawing would
+// put them, while a new drawing would draw nothing else differently: the
+// same window, the same vertical axis (Auto and Max follow the values; a
+// custom axis keeps its notes), no gap to now, no tip open. Anything else is
+// drawn again. drawnLive keeps what that needs, or null when the drawing has
+// no live value, its axis is still gliding or its line draws in.
+const vertex = (scale, p) => `${scale.X(p.x).toFixed(1)} ${scale.Y(p.v).toFixed(1)}`;
+function drawnLive(el, series, o) {
+  const svg = el.querySelector(':scope > svg'), scale = last.scale, n = series.t.length - 1;
+  if (!svg || !scale || !series.live || n < 1 || scale.ax.lo !== scale.target.lo || scale.ax.hi !== scale.target.hi) return null;
+  const drawing = { ...o, el, svg, scale, length: series.t.length, tail: null };
+  // The window ends before the value before the live one: neither is drawn.
+  if (series.t[n - 1] > o.x1) return drawing;
+  const tail = M.liveTail(series, [o.x0, o.x1], o.buckets, o.thinned);
+  const path = [...svg.querySelectorAll('path')].filter(p => p.getAttribute('stroke') === 'var(--accent)').at(-1);
+  if (!tail || !path || path.getAttribute('data-draw') !== null) return null;
+  const drawn = (path.getAttribute('d') ?? '').slice(1).split(' L'), at = drawn.length - tail.pts.length;
+  if (at < 0 || tail.pts.some((p, i) => vertex(scale, p) !== drawn[at + i])) return null;
+  const circles = [...svg.querySelectorAll('circle')];
+  return { ...drawing, tail, path, before: drawn.slice(0, at),
+    ring: circles.find(c => c.getAttribute('r') === '4' && c.getAttribute('class') === null) ?? null,
+    halo: circles.find(c => c.getAttribute('class') === 'dot-live') ?? null,
+    now: svg.querySelector('[data-now]'), nowText: [...svg.querySelectorAll('text')].find(t => t.textContent === 'now') ?? null };
+}
+// Moves a new live value on the drawn chart and strip; false when the chart
+// must be drawn again.
+function moveLive() {
+  const d = last.drawn, ctx = last.ctx;
+  if (!d || !ctx?.now || d.el.querySelector(':scope > svg') !== d.svg || d.el.querySelector('.ctip.on')) return false;
+  const live = M.liveObservation(ctx.states.paperAccount, ctx.feeds.data?.value);
+  const series = seriesFor(d.source, live), n = series.t.length - 1, now = Date.parse(ctx.now);
+  if (!series.live || series.t.length !== d.length) return false;
+  const settled = Math.max(Math.floor(now / MIN) * MIN, series.t[n]);
+  // The vertical axis a new drawing would settle on (drawChart's Auto and
+  // Max fits), or a custom axis's notes on values beyond it.
+  const ext = M.extents(series, [d.x0, d.x1]), { ax, target } = d.scale;
+  if (!ext.visible) return false;
+  if (d.choice.mode === 'custom') {
+    if (!d.notes || (ext.visible[1] > ax.hi) !== d.notes.above || (ext.visible[0] < ax.lo) !== d.notes.below) return false;
+  } else {
+    const max = d.choice.mode === 'max' && ext.loaded, [lo, hi] = max ? ext.loaded : ext.visible, m = (hi - lo) * AXIS_MARGIN;
+    const next = axis(lo - m, hi + m, d.ticks, (max ? ext.loaded[0] : d.baseIsLive ? series.v[n] : d.base) || 0);
+    if (next.lo !== target.lo || next.hi !== target.hi || next.step !== target.step) return false;
+  }
+  if (d.tail) {
+    const tail = M.gapToNow(series, n, settled) ? null : M.liveTail(series, [d.x0, d.x1], d.buckets, d.thinned);
+    if (!tail || tail.from !== d.tail.from) return false;
+    // The end dot and its halo where a drawing draws them (drawChart's fits).
+    const { X, Y, pad, ph } = d.scale, x = series.t[n], cy = Y(series.v[n]), custom = d.choice.mode === 'custom', inX = x >= d.x0 && x <= d.x1;
+    const fits = r => (custom ? cy - r >= pad.t - 1e-6 && cy + r <= pad.t + ph + 1e-6 : cy >= pad.t - 0.5 && cy <= pad.t + ph + 0.5);
+    const ring = inX && fits(4 + 2 / 2), halo = ring && d.following && !reducedMotion() && fits(5 * 2.2);
+    const nowAt = d.following && settled >= d.x0 && settled <= d.x1;
+    if (ring !== Boolean(d.ring) || halo !== Boolean(d.halo) || (custom && inX && !ring) || nowAt !== Boolean(d.now)) return false;
+    d.path.setAttribute('d', `M${[...d.before, ...tail.pts.map(p => vertex(d.scale, p))].join(' L')}`);
+    for (const dot of [d.ring, d.halo]) if (dot) { dot.setAttribute('cx', X(x).toFixed(1)); dot.setAttribute('cy', cy.toFixed(1)); }
+    if (d.now) {
+      for (const k of ['x1', 'x2']) d.now.setAttribute(k, X(settled).toFixed(1));
+      d.nowText?.setAttribute('x', (X(settled) - 5).toFixed(1));
+    }
+    d.points += tail.pts.length - d.tail.pts.length;
+    d.svg.dataset.points = String(d.points);
+    d.tail = tail;
+  }
+  last.series = series; last.live = live; last.moved = liveKey(live);
+  if (strips.key) { const { w, h } = sizeOf($('#acctTrack')); stripFor(series, AS.full, w, h, settled); }
+  return true;
 }
 
 // ---------- Input ----------
@@ -868,6 +1032,7 @@ export function initAccount() {
   const root = $('#acctHero');
   if (!root) return;
   root.innerHTML = accountSkeleton();
+  watchSizes();
   // The board's own read-only hooks: read the account history now, and
   // whether a worker reads it (the browser budget checks both).
   const hooks = globalThis.__joedesk;

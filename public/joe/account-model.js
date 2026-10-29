@@ -223,10 +223,19 @@ const nextDay = day => new Date(Date.parse(`${day}T12:00:00Z`) + DAY).toISOStrin
 function apart(series, a, b) {
   return series.day ? series.day[b] !== nextDay(series.day[a]) : series.t[b] - series.t[a] > SHORT_GAP_MS;
 }
-// Display thinning per pixel bucket: first, lowest, highest and last, and
-// every break, so extremes and gaps survive.
-export function downsample(pts, x0, x1, buckets) {
-  if (pts.length <= buckets * 4) return pts;
+// The time from the value at i to now is a gap: longer than the snapshot
+// cadence, or a calendar day after the close's without one.
+export const gapToNow = (series, i, now) => (series.day ? viennaDay(new Date(now).toISOString()) > nextDay(series.day[i]) : now - series.t[i] > SHORT_GAP_MS);
+// The series ends on the live value, joined to the value before it (no gap).
+export const liveJoined = series => {
+  const n = series.t.length - 1;
+  return Boolean(series.live) && n >= 1 && Number.isFinite(series.v[n - 1]) && Number.isFinite(series.v[n]) && !apart(series, n - 1, n);
+};
+// Display thinning per pixel bucket, past four points a bucket (thin):
+// first, lowest, highest and last, and every break, so extremes and gaps
+// survive.
+export const downsample = (pts, x0, x1, buckets) => (pts.length <= buckets * 4 ? pts : thin(pts, x0, x1, buckets));
+export function thin(pts, x0, x1, buckets) {
   const out = [], width = (x1 - x0) / buckets;
   let bucket = null, group = [];
   const flush = () => {
@@ -266,8 +275,29 @@ export function chartPoints(series, [x0, x1], now, buckets = Infinity) {
     prev = i; missing = false;
   }
   const lastSeen = prev >= 0 && i1 === t.length ? t[prev] : null;
-  if (lastSeen !== null && (missing || (series.day ? viennaDay(new Date(now).toISOString()) > nextDay(series.day[prev]) : now - lastSeen > SHORT_GAP_MS))) bands.push([lastSeen, now]);
-  return { pts: downsample(pts, x0, x1, buckets), bands };
+  if (lastSeen !== null && (missing || gapToNow(series, prev, now))) bands.push([lastSeen, now]);
+  const drawn = downsample(pts, x0, x1, buckets);
+  // thinned: the points are thinned per bucket (thin).
+  return { pts: drawn, bands, thinned: drawn !== pts };
+}
+// The points a new live value changes in a drawing of chartPoints: the live
+// value and, thinned, the bucket group of the value before it (a group ends
+// at a break or a new bucket, so every point before `from` is drawn as it
+// was). Null unless the series ends on the live value joined to the value
+// before it, and that value is inside the window (the live value may be the
+// one after it).
+export function liveTail(series, [x0, x1], buckets, thinned) {
+  if (!liveJoined(series)) return null;
+  const { t, v } = series, n = t.length - 1, p = n - 1;
+  if (t[p] < x0 || t[p] > x1) return null;
+  let from = n;
+  if (thinned) {
+    const width = (x1 - x0) / buckets, bucket = i => Math.floor((t[i] - x0) / width);
+    for (from = p; from > 0 && bucket(from - 1) === bucket(p) && Number.isFinite(v[from - 1]) && !apart(series, from - 1, from); from--);
+  }
+  const pts = [];
+  for (let i = from; i <= n; i++) pts.push({ x: t[i], v: v[i] });
+  return { from, pts: thinned ? thin(pts, x0, x1, buckets) : pts };
 }
 // The observation nearest to x and whether it stands for x (it is within
 // the gap rule of it); inside a gap the tooltip says no value was recorded.

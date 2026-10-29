@@ -588,10 +588,14 @@ test('JOED-156 fix 5: each pointer sees its own Controls list; only the pointer 
 });
 
 // ---------- r39: the Since start · Cash line's lines, a cheap and honest bound ----------
-// The line reserves, by the block's own width (container queries), the lines
-// its longest form needs within the documented bound: amounts up to €1e9
-// (Since start, Cash, each kept holding), ±99.999,99 %, a start up to €1e9.
-// Beyond the bound the line wraps on, visibly; no money figure is clipped.
+// The line reserves, by the block's content width (container queries), the
+// lines its longest form needs within the documented bound: amounts up to
+// €1e9 (Since start, Cash, each kept holding), ±99.999,99 %, a start up to
+// €1e9, at any width from LINE_FLOOR up, in either form (the phone's and the
+// wide one). No layout's narrowest width is assumed: a container query reads
+// the real content width, so a scrollbar, page zoom or a side panel lands in
+// the band for the width it leaves. Beyond the bound, or below the floor, the
+// line wraps on, visibly; no money figure is clipped.
 //
 // Widths: the board's fonts as read from their files, with the page's
 // tabular figures (fixtures/account-line-metrics.json): SF Pro at 12 px
@@ -604,7 +608,7 @@ test('JOED-156 fix 5: each pointer sees its own Controls list; only the pointer 
 // Coverage: greedy line breaking never needs fewer lines when a word or a
 // space widens or the line narrows (each line then starts no later), so a
 // field at its maximal digit count (each digit at the widest) bounds every
-// shorter value of it, and the narrowest width of each step bounds the step.
+// shorter value of it, and the narrowest width of each band bounds the band.
 // Everything else is enumerated: every Since start wording and both signs,
 // both start forms (whole euros, cents) on the widest date, Cash as a value
 // (both signs) or a dash beside every reason, and the kept holdings as two or
@@ -652,30 +656,51 @@ function lineCount(words, width) {
   }
   return lines;
 }
+// The bands, from the floor up: below `below` px of content width (the
+// rule's max-width is `below` − 0.02 px), `lines` lines; from the last width
+// on, the base rule's two. app.css and the browser check
+// (scripts/browser/account-hero.mjs) follow this table.
+const LINE_FLOOR = 240;
+const RESERVE = {
+  narrow: { px: 12, lineHeight: 17, steps: [[291, 4], [408, 3], [Infinity, 2]] },
+  wide: { px: 12.5, lineHeight: 18, steps: [[242, 10], [251, 9], [307, 8], [348, 7], [389, 6], [489, 5], [612, 4], [864, 3], [Infinity, 2]] },
+};
 
-test('JOED-156 r39: the Since start · Cash line reserves the lines its longest form needs at every width, in the board’s fonts', () => {
-  // The rule: by the block's width, lines × line height; above the last width, two lines.
+test('JOED-156 r39: the Since start · Cash line’s bands run contiguous from the 240 px floor to infinity, in app.css and in the browser check', () => {
   const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
-  const RESERVE = {
-    narrow: { px: 12, lineHeight: 17, from: 260, steps: [[291, 4], [408, 3], [Infinity, 2]] },
-    wide: { px: 12.5, lineHeight: 18, from: 397, steps: [[489, 5], [612, 4], [864, 3], [Infinity, 2]] },
-  };
-  assert.match(css, /\n\.acct-hero \{ container: acct \/ inline-size; \}/);
+  assert.match(css, /\n\.acct-hero \{ container: acct \/ inline-size; \}/, 'the block is the container: its content width decides');
+  // Every rule on the container; widths in hundredths of a px, a rule on N.98 px applying up to N·100 + 98.
+  const rules = [...css.matchAll(/@container acct \(max-width: (\d+)\.98px\) \{ \.acct-sub\.acct-(narrow|wide) \{ min-height: (\d+)px; \} \}/g)]
+    .map(([, n, kind, minHeight]) => ({ upTo: +n * 100 + 98, kind, minHeight: +minHeight }));
+  assert.equal(rules.length, css.match(/@container acct\b/g).length, 'no other rule on the container');
+  const base = { wide: +css.match(/\n\.acct-sub \{ min-height: (\d+)px;/)[1], narrow: +css.match(/\n {2}\.acct-sub \{ min-height: (\d+)px;/)[1] };
+  for (const [kind, { lineHeight, steps }] of Object.entries(RESERVE)) {
+    // The table rises from above the floor to infinity, its lines falling to two.
+    assert.ok(steps[0][0] > LINE_FLOOR && steps.at(-1)[0] === Infinity && steps.at(-1)[1] === 2, `${kind}: the table spans the floor to infinity`);
+    steps.slice(1).forEach(([below, lines], i) => assert.ok(below > steps[i][0] && lines < steps[i][1], `${kind}: ${below} px after ${steps[i][0]} px`));
+    // The cascade at a width: the last rule that applies wins (one selector),
+    // else the base two lines; both sides change only at an edge, so the
+    // floor, every edge and a hundredth past each cover every width up from it.
+    const own = rules.filter(r => r.kind === kind);
+    const cascade = w => (own.filter(r => w <= r.upTo).at(-1)?.minHeight ?? base[kind]) / lineHeight;
+    const proved = w => steps.find(([below]) => below === Infinity || w <= below * 100 - 2)[1];
+    const edges = [...own.map(r => r.upTo), ...steps.slice(0, -1).map(([below]) => below * 100 - 2)];
+    const probes = [LINE_FLOOR * 100, ...edges.flatMap(e => [e, e + 1]), 1e8].filter(w => w >= LINE_FLOOR * 100);
+    for (const w of probes) assert.equal(cascade(w), proved(w), `${kind} at ${w / 100} px: app.css reserves the lines proved`);
+  }
+  // The browser check holds the line to the same table.
+  const p3 = readFileSync(new URL('../scripts/browser/account-hero.mjs', import.meta.url), 'utf8');
+  const [, narrow, wide] = p3.match(/\(line\.narrow \? (\[\[[^:]*\]\]) : (\[\[[^)]*\]\])\)/) ?? [];
+  const table = s => JSON.parse(s.replaceAll('Infinity', '"∞"')).map(([below, lines]) => [below === '∞' ? Infinity : below, lines]);
+  assert.deepEqual({ narrow: table(narrow), wide: table(wide) }, { narrow: RESERVE.narrow.steps, wide: RESERVE.wide.steps });
+});
+
+test('JOED-156 r39: the Since start · Cash line reserves the lines its longest form needs at every width from the floor, in the board’s fonts', () => {
+  // The premises: the line's size and figures, in either form.
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
   assert.match(css, /\n\.acct-sub \{ min-height: 36px; margin-top: 6px; font-size: 12\.5px; line-height: 18px;/, 'two lines of 18 px at 12,5 px');
   assert.match(css, /\n {2}\.acct-sub \{ min-height: 34px; margin-top: 4px; font-size: 12px; line-height: 17px; \}/, 'on a phone two lines of 17 px at 12 px');
   assert.match(css, /\n {2}font: 14px\/1\.5 var\(--font\); font-variant-numeric: tabular-nums;/, 'the page’s tabular figures');
-  for (const [kind, { lineHeight, steps }] of Object.entries(RESERVE)) {
-    for (const [below, lines] of steps.filter(([below]) => below !== Infinity)) {
-      assert.ok(css.includes(`@container acct (max-width: ${below - 1}.98px) { .acct-sub.acct-${kind} { min-height: ${lines * lineHeight}px; } }`), `${kind}: ${lines} lines below ${below} px`);
-    }
-  }
-  // The block's width at the narrowest widths the board serves: the phone's
-  // (320 px) and the first width with the wide line (481 px).
-  assert.match(css, /\n\.acct-hero \{ position: relative; padding: 20px 26px 14px;/);
-  assert.match(css, /\n {2}\.acct-hero \{ padding: 14px; margin-bottom: 12px; \}/);
-  assert.match(css, /--gutter: 28px;/);
-  assert.match(css, /@media \(max-width: 700px\) \{\n {2}:root \{ --gutter: 16px; \}/);
-  assert.deepEqual([320 - 2 * 16 - 2 * 14, 481 - 2 * 16 - 2 * 26], [RESERVE.narrow.from, RESERVE.wide.from]);
 
   // Every form within the bound, as the page writes it (subParts), its
   // fields at their maximal digit counts.
@@ -724,20 +749,157 @@ test('JOED-156 r39: the Since start · Cash line reserves the lines its longest 
   assert.ok(tails.some(h => text(h).endsWith(`incl. kept holdings — · ${CELL_REASON[longest]}`)));
   assert.ok(heads.length >= 1140 && tails.length === 7 + 1 + Object.keys(CELL_REASON).length, `${heads.length} heads × ${tails.length} tails`);
 
-  // At the narrowest width of each step, every form fits the lines reserved there.
+  // At the narrowest width of each band, every form fits the lines reserved
+  // there: the floor, then just past the band before (its rule's max-width,
+  // below − 0.02 px).
   const joined = (head, tail) => head.slice(0, -1).concat([{ w: head.at(-1).w + tail[0].w, gap: head.at(-1).gap }], tail.slice(1));
   for (const [fontName, font] of Object.entries(LINE_FONTS)) {
-    const lines = { narrow: narrow.map(h => [lineWords(h, font, 12)]),
-      wide: (() => { const t = tails.map(h => lineWords(h, font, 12.5)); return heads.map(h => { const w = lineWords(h, font, 12.5); return t.map(tail => joined(w, tail)); }); })() };
-    for (const [kind, { from, steps }] of Object.entries(RESERVE)) {
-      let at = from;
+    const { narrow: { px: phone }, wide: { px: wider } } = RESERVE;
+    const lines = { narrow: narrow.map(h => [lineWords(h, font, phone)]),
+      wide: (() => { const t = tails.map(h => lineWords(h, font, wider)); return heads.map(h => { const w = lineWords(h, font, wider); return t.map(tail => joined(w, tail)); }); })() };
+    for (const [kind, { steps }] of Object.entries(RESERVE)) {
+      let at = LINE_FLOOR;
       for (const [below, reserved] of steps) {
         let need = 0;
         for (const group of lines[kind]) for (const w of group) need = Math.max(need, lineCount(w, at));
         assert.ok(need <= reserved, `${fontName} ${kind} at ${at} px of line: ${need} lines needed, ${reserved} reserved`);
         if (below === Infinity) break;
-        at = below;
+        at = below - 0.02;
       }
     }
   }
+});
+
+// ---------- r39: a new live value moves in place ----------
+// Snapshots come every few seconds. The chart and the strip are drawn again
+// for a new history, window, axis, size or minute; inside the minute a new
+// live value moves the line's end, its dot and "now" in place, where a new
+// drawing puts them (every drawing is counted: accountDraws).
+const SEC = 1000;
+const snapshotAt = (ms, amount) => ctxFor({ now: ms + 5 * SEC, mutate: d => {
+  d.generatedAt = d.receivedAt = d.brokerAccount.observedAt = d.safety.gateway.checkedAt = iso(ms);
+  d.brokerAccount.equity = { amount, currency: 'EUR' };
+} });
+// What the chart shows: its lines, dots, "now", vertical axis and points.
+const shown = svg => ({
+  lines: [...svg.querySelectorAll('path')].filter(x => x.getAttribute('stroke') === 'var(--accent)').map(x => x.getAttribute('d')),
+  dots: [...svg.querySelectorAll('circle')].filter(c => c.getAttribute('class') !== 'xd').map(c => `${c.getAttribute('r')}@${c.getAttribute('cx')},${c.getAttribute('cy')}`),
+  now: svg.querySelector('[data-now]')?.getAttribute('x1') ?? null, axis: [svg.dataset.ylo, svg.dataset.yhi], points: svg.dataset.points,
+});
+// A new drawing of the same moment: to another range and back.
+async function redrawn(p, ctx, range) {
+  A.chooseRange(range === '1M' ? '5D' : '1M'); await p.render(ctx);
+  A.chooseRange(range); await p.render(ctx);
+  return shown(p.svg());
+}
+function withStrip(p) {
+  const strip = p.$('#acctStrip');
+  strip.removeAttribute = key => { delete strip.attributes[key]; };
+  Object.assign(p.$('#acctTrack'), { clientWidth: 828, clientHeight: 40 });
+  for (const edge of document.querySelectorAll('#acctStrip [data-edge]')) edge.firstElementChild = edge.querySelector('.grip');
+  return () => p.$('#acctMiniPlot').querySelector('path')?.getAttribute('d') ?? null;
+}
+
+test('JOED-156 r39 perf: a new live value inside the minute moves the line’s end, its dot and now in place; nothing is drawn again', async t => {
+  const p = page(t), stripLine = withStrip(p);
+  await p.render(snapshotAt(SNAP, '28000.00'));
+  const svg = p.svg(), drawn = A.accountDraws(), before = shown(svg), strip = stripLine();
+  assert.ok(before.now && before.dots.length === 1 && strip, 'the live value with its dot, now and the strip');
+  assert.equal(Number(svg.dataset.x1), Math.floor(NOW / MIN) * MIN + MIN, 'the month ends with the minute, under a pixel on');
+  const ctx = await p.render(snapshotAt(SNAP + 10 * SEC, '27950.55'));
+  assert.deepEqual(A.accountDraws(), drawn, 'neither the chart nor the strip is drawn again');
+  assert.equal(p.svg(), svg, 'the same chart');
+  assert.equal(p.text('#acctValue'), '€27.950,55');
+  const moved = shown(svg), stripMoved = stripLine();
+  assert.notDeepEqual(moved.lines, before.lines, 'the line ends on the new value');
+  assert.notEqual(moved.dots[0], before.dots[0], 'and so does its dot');
+  assert.notEqual(stripMoved, strip, 'and the strip’s line');
+  assert.deepEqual(await redrawn(p, ctx, '1M'), moved, 'where a new drawing puts them');
+  assert.equal(stripLine(), stripMoved, 'the strip’s too');
+  // A value inside the plot that the vertical axis would fit closer: drawn
+  // again, so the axis still fits the values.
+  let count = A.accountDraws().chart;
+  const yhi = Number(p.svg().dataset.yhi);
+  await p.render(snapshotAt(SNAP + 20 * SEC, '27000.00'));
+  assert.equal(A.accountDraws().chart, count + 1, 'a closer axis: drawn again');
+  assert.ok(Number(p.svg().dataset.yhi) < yhi, `the axis fits closer: ${p.svg().dataset.yhi} from ${yhi}`);
+  // A new minute, the same value: drawn again.
+  count = A.accountDraws().chart;
+  await p.render(snapshotAt(SNAP + 40 * SEC, '27000.00'));
+  assert.equal(A.accountDraws().chart, count + 1, 'a new minute: drawn again');
+});
+
+test('JOED-156 r39 perf: on Max and on a custom axis too, a new live value moves in place where a new drawing puts it', async t => {
+  const p = page(t);
+  for (const choice of [{ mode: 'max' }, { mode: 'custom', min: 25000, max: 30000.5 }]) {
+    A.accountAxis().setAxisMode(choice);
+    await p.render(snapshotAt(SNAP, '28000.00'));
+    const count = A.accountDraws().chart;
+    const ctx = await p.render(snapshotAt(SNAP + 10 * SEC, '27950.55'));
+    assert.equal(A.accountDraws().chart, count, `${choice.mode}: moved in place`);
+    const moved = shown(p.svg());
+    assert.deepEqual(await redrawn(p, ctx, '1M'), moved, `${choice.mode}: where a new drawing puts it`);
+  }
+});
+
+test('JOED-156 r39 perf: thinned to the pixel, the live value’s bucket is thinned again in place as a new drawing thins it', async t => {
+  const p = page(t);
+  // 200 buckets: three days of five-minute snapshots are thinned.
+  Object.assign(p.chart, { clientWidth: 200 });
+  A.chooseRange('5D');
+  await p.render(snapshotAt(SNAP, '27400.00'));
+  assert.ok(Number(p.svg().dataset.points) < 600, `thinned: ${p.svg().dataset.points} points drawn`);
+  // The lowest of its bucket, then the highest: its bucket is drawn with other points each time.
+  for (const [at, amount] of [[10, '27050.00'], [20, '27431.60']]) {
+    const count = A.accountDraws().chart;
+    const ctx = await p.render(snapshotAt(SNAP + at * SEC, amount));
+    assert.equal(A.accountDraws().chart, count, `${amount}: moved in place`);
+    const moved = shown(p.svg());
+    assert.deepEqual(await redrawn(p, ctx, '5D'), moved, `${amount}: as a new drawing draws it`);
+  }
+});
+
+test('JOED-156 r39 perf: zoomed in to more than a pixel a minute, the window ends at the newest value and follows each one', async t => {
+  const p = page(t);
+  // A day on 1528 px: more than a pixel a minute.
+  Object.assign(p.chart, { clientWidth: 1600 });
+  A.chooseRange('1D');
+  await p.render(snapshotAt(SNAP, '28000.00'));
+  assert.equal(Number(p.svg().dataset.x1), SNAP, 'the window ends at the newest value');
+  const count = A.accountDraws().chart;
+  await p.render(snapshotAt(SNAP + 10 * SEC, '28010.00'));
+  assert.deepEqual([A.accountDraws().chart, Number(p.svg().dataset.x1)], [count + 1, SNAP + 10 * SEC], 'and follows the next, drawn again');
+});
+
+test('JOED-156 r39 perf: sizes come from a ResizeObserver; a new live value reads no layout, a new size draws once', async t => {
+  const saved = { ResizeObserver: globalThis.ResizeObserver, requestAnimationFrame: globalThis.requestAnimationFrame };
+  t.after(() => { for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } });
+  const observers = [], frames = [];
+  globalThis.ResizeObserver = class { constructor(report) { this.report = report; this.watched = []; observers.push(this); } observe(el) { this.watched.push(el); } disconnect() { this.watched = []; } };
+  globalThis.requestAnimationFrame = fn => frames.push(fn);
+  const p = page(t), track = p.$('#acctTrack');
+  const observer = observers.at(-1);
+  assert.deepEqual(observer.watched, [p.chart, track], 'the chart and the strip are watched');
+  await p.render(snapshotAt(SNAP, '28000.00'));
+  // The first report, at the size drawn: nothing to draw again.
+  const first = A.accountDraws().chart;
+  observer.report([{ target: p.chart, contentRect: { width: 900, height: 230 } }, { target: track, contentRect: { width: 0, height: 0 } }]);
+  assert.deepEqual([frames.length, A.accountDraws().chart], [0, first]);
+  // Every size read from here on is counted.
+  let reads = 0;
+  for (const el of [p.chart, track]) for (const k of ['clientWidth', 'clientHeight', 'offsetLeft']) {
+    let value = el[k];
+    Object.defineProperty(el, k, { configurable: true, get: () => { reads++; return value; }, set: v => { value = v; } });
+  }
+  const count = A.accountDraws().chart;
+  const ctx = await p.render(snapshotAt(SNAP + 10 * SEC, '28050.00'));
+  assert.deepEqual([reads, A.accountDraws().chart], [0, count], 'a new live value: no size read, nothing drawn');
+  // The window gets narrower: reported, drawn once at the new size.
+  p.chart.clientWidth = 700;
+  observer.report([{ target: p.chart, contentRect: { width: 700, height: 230 } }]);
+  frames.splice(0).forEach(f => f());
+  assert.equal(A.accountDraws().chart, count + 1);
+  assert.match(p.svg().getAttribute('viewBox'), /^0 0 700 /);
+  await p.render(ctx);
+  assert.equal(A.accountDraws().chart, count + 1, 'and not again at the next update');
 });
