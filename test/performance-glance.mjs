@@ -7,9 +7,10 @@ import { decimalUnits } from '../contracts/decimal.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
 const { boardStates } = await import('../public/joe/board-state.js');
 import { copyText } from '../scripts/browser/shots.mjs';
-const { joinUnits } = await import('../public/joe/format.js');
-const { STARTING_MONEY, exactMoney, exactCell, percentOf, todayPercent, sincePercent, rankDesks } = await import('../public/joe/performance.js');
-const { boardCaptionCell, sharesBoardCaption, heroLeft, cardStatus, percentHtml, positionsHtml } = await import('../public/joe/desk.js');
+const { joinUnits, eur } = await import('../public/joe/format.js');
+const { STARTING_MONEY, SINCE_START, sinceStarts, exactMoney, exactCell, percentOf, todayPercent, sincePercent, rankDesks } = await import('../public/joe/performance.js');
+const { boardCaptionCell, sharesBoardCaption, heroLeft, cardStatus, percentHtml, positionsHtml, compactDesk, healthPop } = await import('../public/joe/desk.js');
+const { boardHealthPresentation } = await import('../public/joe/health.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { tile, two } = await builders('results.js', ['tile', 'two']);
 const { TERMS } = await import('../public/joe/terms.js');
@@ -104,7 +105,8 @@ test('hero preserves all five figures and promotes Since start beside Today', ()
   assert.equal(doc.querySelectorAll('[data-cell]').length, 5);
   assert.deepEqual(doc.querySelectorAll('.performance .primary').map(el => el.dataset.cell), ['hero.day', 'hero.since']);
   assert.equal(doc.querySelectorAll('.performance-pct').length, 2);
-  assert.equal(doc.querySelector('[data-cell="hero.since"] .term').textContent, 'Since start');
+  // Amy's A4: every desk counts from 10 Sep 2026 (New York), so the label names the day.
+  assert.equal(doc.querySelector('[data-cell="hero.since"] .term').textContent, 'Since 10\u00a0Sep');
   assert.equal(doc.querySelectorAll('.kpi').length, 4);
   assert.deepEqual(doc.querySelectorAll('.kpi dt').map(el => el.textContent), ['Open positions', 'Desks’ money', 'Paper account', 'Cash']);
   assert.equal(doc.querySelector('[data-cell="hero.day"] .bn').textContent, '−€1,00');
@@ -136,7 +138,11 @@ test('separate Cash figure preserves exact values and keeps unavailable wording 
     assert.equal(figure.querySelector('.cash-caption.c'), figure.querySelector('.cash-reserve'), 'the description and reason share the reserved caption block');
     assert.equal(figure.querySelector('.cash-caption').children.filter(n => typeof n !== 'string').length, 2, 'the fixed caption block needs no hidden sizing paragraphs');
     assert.equal(figure.querySelectorAll('.cash-sizing').length, 0);
-    if (!hasValue) assert.match(caption.textContent, /^not reported · .+/);
+    // JOED-148: a not-exact Cash is named like every other not-exact dash.
+    if (!hasValue && cash.reason === 'not_exact_yet') {
+      assert.equal(caption.textContent, 'not exact');
+      assert.equal(actual.getAttribute('aria-label'), 'Cash: not exact');
+    } else if (!hasValue) assert.match(caption.textContent, /^not reported · .+/);
     if (cash.reason === 'gateway_unconfirmed') assert.match(caption.textContent, /broker connection not confirmed/);
     if (cash.reason === 'snapshot_stale') assert.match(caption.textContent, /updates are late/);
   }
@@ -162,7 +168,7 @@ test('AC-19 supporting captions and Cash explanation survive phone separator typ
       return joinUnits(caption.textContent, { joinDot });
     });
     const reason = joinUnits(doc.querySelector('.cash-caption .cash-reason').textContent, { joinDot });
-    assert.deepEqual(copyText(captions), ['still moving until closed', 'started with € 15.000', 'includes the kept holdings', 'cash · as the broker reports it']);
+    assert.deepEqual(copyText(captions), ['still moving until closed', `started with ${eur(STARTING_MONEY, false, 0)} on 10\u00a0Sep`, 'includes the kept holdings', 'cash · as the broker reports it']);
     assert.equal(copyText(reason), 'not reported · no data received yet');
     if (joinDot) {
       assert.match(captions[3], /cash\u00a0·/);
@@ -235,4 +241,103 @@ test('all eight metric info buttons preserve their original term and explanation
   const pair = htmlDocument(two('+€100.000,12', '−€99.999,99'));
   assert.equal(pair.querySelectorAll('.pair-value').length, 2);
   assert.equal(pair.textContent, '+€100.000,12/−€99.999,99');
+});
+
+// JOED-148 A4 (Amy 2026-10-29): Since start counts from 10 Sep 2026, New York,
+// for all three desks; a desk's own accounting date wins for that desk.
+test('JOED-148 A4: Since start names its day and its basis from the configured starting money', () => {
+  assert.equal(SINCE_START, '2026-09-10');
+  const ctx = context(), doc = htmlDocument(heroLeft(ctx));
+  for (const node of doc.querySelectorAll('.cash-sizing')) node.remove();
+  const since = doc.querySelector('[data-cell="hero.since"]');
+  assert.equal(since.querySelector('.term').textContent, 'Since 10 Sep');
+  assert.equal(since.querySelector('.account-caption').children[0].textContent, `of ${eur(STARTING_MONEY, false, 0)} · after fees, incl. open positions`);
+  assert.equal(since.querySelector('.phone-primary-note').textContent, `of ${eur(STARTING_MONEY, false, 0)} · after fees, incl. open positions`);
+  assert.equal(doc.querySelector('[data-cell="hero.equity"] .account-caption').children[0].textContent, `started with ${eur(STARTING_MONEY, false, 0)} on 10 Sep`);
+  for (const id of ['j', 'joe', 'joel']) {
+    const card = htmlDocument(deskCard(ctx, id, 10, true));
+    assert.equal(card.querySelectorAll('.dnums .term')[2].textContent, 'Since 10 Sep', id);
+    // The phone row says "Since"; the Desks heading carries the one start day.
+    assert.equal(htmlDocument(compactDesk(ctx, id)).querySelectorAll('.compact-label')[1].textContent, 'Since');
+  }
+  assert.equal(sinceStarts(ctx.feeds).common, SINCE_START);
+});
+
+test('JOED-148 A4: a desk’s own accounting start wins; another Results start leaves the date off and Details flags it', () => {
+  const ctx = context();
+  ctx.feeds.data.value.desks[0].accounting = { periodStart: '2026-09-12T04:00:00.000Z', method: 'execution-fifo-net-current-fx' };
+  assert.deepEqual(sinceStarts(ctx.feeds).days, { j: '2026-09-12', joe: SINCE_START, joel: SINCE_START });
+  let doc = htmlDocument(heroLeft(ctx));
+  assert.equal(doc.querySelector('[data-cell="hero.since"] .term').textContent, 'Since start', 'no single day for the household');
+  for (const node of doc.querySelectorAll('.cash-sizing')) node.remove();
+  assert.equal(doc.querySelector('[data-cell="hero.equity"] .account-caption').children[0].textContent, `started with ${eur(STARTING_MONEY, false, 0)}`);
+  assert.equal(htmlDocument(deskCard(ctx, 'j', 10, true)).querySelectorAll('.dnums .term')[2].textContent, 'Since 12 Sep');
+  assert.equal(htmlDocument(deskCard(ctx, 'joe', 10, true)).querySelectorAll('.dnums .term')[2].textContent, 'Since 10 Sep');
+  assert.equal(htmlDocument(compactDesk(ctx, 'j')).querySelectorAll('.compact-label')[1].textContent, 'Since 12 Sep');
+  // Results agreeing changes nothing; Results starting elsewhere drops the board's date.
+  delete ctx.feeds.data.value.desks[0].accounting;
+  ctx.feeds.results = { value: { trackingStart: SINCE_START } };
+  assert.equal(sinceStarts(ctx.feeds).conflict, false);
+  assert.equal(htmlDocument(heroLeft(ctx)).querySelector('[data-cell="hero.since"] .term').textContent, 'Since 10 Sep');
+  ctx.feeds.results = { value: { trackingStart: '2026-09-12' } };
+  assert.deepEqual(sinceStarts(ctx.feeds).days, { j: null, joe: null, joel: null });
+  doc = htmlDocument(heroLeft(ctx));
+  assert.equal(doc.querySelector('[data-cell="hero.since"] .term').textContent, 'Since start');
+  for (const id of ['j', 'joe', 'joel']) assert.equal(htmlDocument(deskCard(ctx, id, 10, true)).querySelectorAll('.dnums .term')[2].textContent, 'Since start');
+  const details = htmlDocument(healthPop(ctx, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now)));
+  const flag = details.querySelectorAll('.st.warn').map(e => e.textContent);
+  assert.ok(flag.includes('Since start dates differ: Results start on 12 Sep; J, Joe and Joel count from 10 Sep. Desk shows no date until they agree.'), flag.join(' | '));
+  assert.equal(boardHealthPresentation(ctx.states, ctx.feeds, ctx.now).tone, 'green', 'a date question never changes the light');
+});
+
+// JOED-148 fix round 1 (gate finding 2): Results is checked against each desk's
+// effective start (its own accounting date, else SINCE_START), never against the
+// fallback alone, and the warning names the days the desks actually count from.
+const accountingStart = (ctx, ids, periodStart) => {
+  for (const desk of ctx.feeds.data.value.desks) if (ids.includes(desk.id)) desk.accounting = { periodStart, method: 'execution-fifo-net-current-fx' };
+};
+const sinceView = ctx => {
+  const hero = htmlDocument(heroLeft(ctx));
+  for (const node of hero.querySelectorAll('.cash-sizing')) node.remove();
+  const details = htmlDocument(healthPop(ctx, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now)));
+  return {
+    hero: hero.querySelector('[data-cell="hero.since"] .term').textContent,
+    money: hero.querySelector('[data-cell="hero.equity"] .account-caption').children[0].textContent,
+    cards: ['j', 'joe', 'joel'].map(id => htmlDocument(deskCard(ctx, id, 10, true)).querySelectorAll('.dnums .term')[2].textContent),
+    warning: details.querySelectorAll('.st.warn').map(e => e.textContent).find(text => text.startsWith('Since start dates differ')) ?? null,
+  };
+};
+test('JOED-148 A4: desks that all send 12 Sep beside Results on 12 Sep read "Since 12 Sep" with no warning', () => {
+  const ctx = context();
+  accountingStart(ctx, ['j', 'joe', 'joel'], '2026-09-12T04:00:00.000Z');
+  ctx.feeds.results = { value: { trackingStart: '2026-09-12' } };
+  const starts = sinceStarts(ctx.feeds);
+  assert.deepEqual([starts.common, starts.conflict, starts.differ], ['2026-09-12', false, []]);
+  assert.deepEqual(sinceView(ctx), { hero: 'Since 12 Sep', money: `started with ${eur(STARTING_MONEY, false, 0)} on 12 Sep`,
+    cards: ['Since 12 Sep', 'Since 12 Sep', 'Since 12 Sep'], warning: null });
+});
+
+test('JOED-148 A4: mixed and contradicting starts name each desk’s effective day in the warning', () => {
+  const nb = ' ';
+  for (const [what, own, results, expected] of [
+    ['every desk’s own date against another Results day', ['j', 'joe', 'joel'], '2026-09-10',
+      { hero: `Since 12${nb}Sep`, cards: [`Since 12${nb}Sep`, `Since 12${nb}Sep`, `Since 12${nb}Sep`],
+        warning: `Since start dates differ: Results start on 10${nb}Sep; J, Joe and Joel count from 12${nb}Sep.` }],
+    ['J’s own date agrees, the fallback does not', ['j'], '2026-09-12',
+      { hero: 'Since start', cards: [`Since 12${nb}Sep`, 'Since start', 'Since start'],
+        warning: `Since start dates differ: Results start on 12${nb}Sep; J counts from 12${nb}Sep, Joe and Joel from 10${nb}Sep. Desk shows no date for Joe and Joel until they agree.` }],
+    ['J’s own date disagrees, the fallback agrees', ['j'], '2026-09-10',
+      { hero: 'Since start', cards: [`Since 12${nb}Sep`, `Since 10${nb}Sep`, `Since 10${nb}Sep`],
+        warning: `Since start dates differ: Results start on 10${nb}Sep; J counts from 12${nb}Sep, Joe and Joel from 10${nb}Sep.` }],
+    ['no own dates against another Results day', [], '2026-09-12',
+      { hero: 'Since start', cards: ['Since start', 'Since start', 'Since start'],
+        warning: `Since start dates differ: Results start on 12${nb}Sep; J, Joe and Joel count from 10${nb}Sep. Desk shows no date until they agree.` }],
+  ]) {
+    const ctx = context();
+    accountingStart(ctx, own, '2026-09-12T04:00:00.000Z');
+    ctx.feeds.results = { value: { trackingStart: results } };
+    const view = sinceView(ctx);
+    assert.deepEqual({ hero: view.hero, cards: view.cards, warning: view.warning }, expected, what);
+    assert.doesNotMatch(view.warning, /bookkeeping on/, `${what}: never the fallback alone`);
+  }
 });

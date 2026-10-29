@@ -171,14 +171,14 @@
     <section class="card hero" id="deskHero" aria-label="Desk performance">
       <div class="hero-l" id="heroL"></div>
       <div class="hero-r">
-        <button type="button" class="desk-disclosure" data-desk-disclosure="chart" aria-expanded="false" aria-controls="chartDetail"><span>Today's chart</span><span id="chartSummary" class="disclosure-warning"></span><svg class="i disclosure-chevron" aria-hidden="true"><use href="#i-chev-d"/></svg></button>
+        <button type="button" class="desk-disclosure" data-desk-disclosure="chart" aria-expanded="false" aria-controls="chartDetail"><span id="chartTitle">Market hours</span><span id="chartSummary" class="disclosure-warning"></span><svg class="i disclosure-chevron" aria-hidden="true"><use href="#i-chev-d"/></svg></button>
         <div class="disclosure-body" id="chartDetail">
           <div class="session" id="heroSession"></div>
-          <div class="chart hero-chart" id="heroChart"><div class="ctip" role="tooltip"></div></div>
+          <div class="chart hero-chart" id="heroChart" hidden><div class="ctip" role="tooltip"></div></div>
         </div>
       </div>
     </section>
-    <div class="sec-h desks-heading"><h2>Desks</h2><span class="sub" id="desksSub"></span></div>
+    <div class="sec-h desks-heading"><h2>Desks</h2><span class="desks-since" id="desksSince"></span><span class="sub" id="desksSub"></span></div>
     <div class="desk-grid" id="desks">
       <article class="card dcard" id="desk-j" aria-label="Desk J"></article>
       <article class="card dcard" id="desk-joe" aria-label="Desk Joe"></article>

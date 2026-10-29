@@ -377,7 +377,7 @@ try {
       const clip = await ev(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
       const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
-      shots.push({ file: `${name}.png`, what: `Rev-9 desk values not exact yet: ${name}` });
+      shots.push({ file: `${name}.png`, what: `Rev-9 desk values not exact: ${name}` });
     };
     const boxes = ['header.top', '.top-in > :not(nav)', '#hdrHealth .lbl', '#hdrHealth b', '#statusAlert', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .mini'];
     for (const viewport of [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }]) for (const theme of THEMES) {
@@ -408,7 +408,7 @@ try {
         if (viewport.width <= 480) {
           await setDeskDisclosures(page, false);
           const collapsed = await phoneDeskSnapshot(page).then(copyText);
-          const words = neutral ? 'not exact yet' : 'not reported by the broker';
+          const words = neutral ? 'not exact' : 'not reported by the broker';
           const moneySections = collapsed.controls.filter(c => ['j', 'joe', 'joel', 'account'].includes(c.key));
           check('phone-first', `${tag} ${i}: collapsed desk/account summaries expose unavailable money with the true icon and reason`,
             moneySections.length === 4 && moneySections.every(c => c.hidden && c.expanded === 'false' && c.warning.includes(words) && c.icon === (neutral ? '#i-info' : '#i-stop')) &&
@@ -425,7 +425,7 @@ try {
             nulls: [...document.querySelectorAll('.dnums .bn')].every(e => e.textContent === '—'),
             headerLayout: (${headerLayout.toString()})(), horizontal: __audit.horizontal(), clipping: __audit.clipping(), gui: __audit.gui27() };
         })()`);
-        const caption = neutral ? 'Numbers: not exact yet' : 'Numbers: unavailable · not reported by the broker';
+        const caption = neutral ? 'Numbers: not exact' : 'Numbers: unavailable · not reported by the broker';
         check('not-exact', `${tag} ${i}: header word, tone and icon reflect the actual null reason`,
           (neutral ? /^Live · updated/.test(seen.word) : seen.word === 'Board numbers are missing') && seen.headerIcon === (neutral ? '#i-check' : '#i-stop') && seen.headerColour === (neutral ? seen.ok : seen.bad), seen);
         checkHeaderLayout('not-exact', `${tag} ${i} ${seen.word}`, seen.headerLayout);
@@ -437,11 +437,14 @@ try {
         await click('#hdrHealth');
         const details = await ev(`(() => {
           const pop = document.getElementById('healthPop');
-          const notes = [...pop.querySelectorAll('.st')].filter(e => e.textContent.trim() === 'Desk values are not exact yet');
-          return { open: pop.classList.contains('on'), text: pop.innerText, notes: notes.map(e => ({ tone: e.className, icon: e.querySelector('use').getAttribute('href'), style: getComputedStyle(e).fontStyle })) };
+          const notes = [...pop.querySelectorAll('.st')].filter(e => /^(Desk values are not exact|Today: not exact)/.test(e.textContent.trim()));
+          const today = [...pop.querySelectorAll('dt')].find(dt => dt.textContent === 'Today’s result')?.nextElementSibling?.textContent ?? null;
+          return { open: pop.classList.contains('on'), text: pop.innerText, today, notes: notes.map(e => ({ text: e.textContent.trim(), tone: e.className, icon: e.querySelector('use').getAttribute('href'), style: getComputedStyle(e).fontStyle })) };
         })()`);
-        check('not-exact', `${tag} ${i}: Details has one neutral sentence and no false missing-money alarms`, details.open && (neutral
-          ? details.notes.length === 1 && details.notes[0].tone === 'st none' && details.notes[0].icon === '#i-info' && details.notes[0].style === 'normal' && !details.text.includes('money is unavailable')
+        // One neutral line for the desk values; the "Today’s result" row states the not-exact Today once (Amy's A3).
+        check('not-exact', `${tag} ${i}: Details has one neutral sentence, one Today row and no false missing-money alarms`, details.open && (neutral
+          ? J(details.notes.map(n => n.text)) === J(['Desk values are not exact']) && details.today === 'Not exact for J, Joe and Joel' &&
+            details.notes.every(n => n.tone === 'st none' && n.icon === '#i-info' && n.style === 'normal') && !details.text.includes('money is unavailable')
           : details.notes.length === 0 && details.text.includes('money is unavailable')), details);
         await key('Escape');
         if (i === 0) {
@@ -515,14 +518,16 @@ try {
           const tag = `${viewport.name} ${theme} ${screen} cash ${phase}`;
           const hasValue = ['value', 'stale', 'recovered'].includes(phase);
           const why = phase === 'stale' ? 'updates are late' : phase === 'session' ? 'broker connection not confirmed'
-            : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact yet' : 'not reported by the broker';
+            : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact' : 'not reported by the broker';
           const brokerCaption = 'cash · as the broker reports it';
           const shared = screen === 'desk' && ['stale', 'session'].includes(phase);
-          const cashState = hasValue ? phase === 'stale' && !shared ? `· ${why}` : '' : `not reported${shared ? '' : ` · ${why}`}`;
+          // JOED-148: a not-exact Cash is named "not exact" like every other dash, on Desk and in Settings.
+          const missing = phase === 'not-exact' ? 'not exact' : `not reported${shared ? '' : ` · ${why}`}`;
+          const cashState = hasValue ? phase === 'stale' && !shared ? `· ${why}` : '' : missing;
           const caption = screen === 'desk' ? `${brokerCaption}${cashState ? ` ${cashState}` : ''}` : brokerCaption;
           const expected = screen === 'desk' ? `${hasValue ? '€ 12.345,68' : '—'} ${caption}`
-            : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `not reported · ${why}`;
-          const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : `Cash not reported · ${why}`;
+            : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'not exact' : `not reported · ${why}`;
+          const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'Cash: not exact' : `Cash not reported · ${why}`;
           check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme and reason locally or once in the section`, N(seen.text) === expected && seen.label === 'Cash' && N(seen.caption) === caption && seen.title === exact && seen.name === exact && (!shared || seen.section.includes(why)) && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
           check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
           const after = await measure();
@@ -562,7 +567,7 @@ try {
         await setDeskDisclosures(page, false);
         const collapsed = await phoneDeskSnapshot(page).then(copyText);
         const sections = collapsed.controls.filter(c => ['positions', 'kept'].includes(c.key));
-        check('phone-first', `${tag}: fresh panels with partial rows retain warnings and row reasons when collapsed`, sections.length === 2 && sections.every(c => c.hidden && Boolean(c.icon) && /not exact yet|not reported by the broker/.test(c.warning)), sections);
+        check('phone-first', `${tag}: fresh panels with partial rows retain warnings and row reasons when collapsed`, sections.length === 2 && sections.every(c => c.hidden && Boolean(c.icon) && /not exact|not reported by the broker/.test(c.warning)), sections);
         await setDeskDisclosures(page, true);
       }
       const figureSelectors = ['#deskHero', '#heroL .kpi', '#heroL .cash-reserve', '#desks', '.dcard'];
@@ -605,10 +610,11 @@ try {
         horizontal: __audit.horizontal(), clipping: __audit.clipping()
       }))()`);
       for (const row of seen.kept) {
-        const why = row.symbol === 'SXR8' ? 'not exact yet' : 'not reported by the broker';
+        // JOED-148: a not-exact dash is named "not exact", never "not reported".
+        const why = row.symbol === 'SXR8' ? 'not exact' : 'not reported by the broker', dashName = why === 'not exact' ? why : `not reported · ${why}`;
         check('positions', `${tag} ${row.symbol}: quantity and values visibly explain their nulls`,
           ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => row.reasons?.includes(`${label}: ${why}`) || seen.worth.includes(why)) &&
-          ['Quantity', 'Last price', 'Worth'].every(label => row.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · ${why}` && d.name === d.title)), row);
+          ['Quantity', 'Last price', 'Worth'].every(label => row.dashes.some(d => d.text === '—' && d.title === `${label}: ${dashName}` && d.name === d.title)), row);
         check('KEEP', `${tag} ${row.symbol}: no interactive element inside the kept row`, row.interactive === 0, row);
         check('positions', `${tag} ${row.symbol}: unknown KEEP worth has no bar track`, row.tracks === 0, row);
       }
@@ -619,10 +625,10 @@ try {
       check('desk-unmapped', `${tag}: visible name line, title and accessible name carry the desk reason without a desk colour or mark`,
         u.label === deskLabel && u.title === deskLabel && u.name === deskLabel && !u.colour && u.marks === 0 && J(seen.order) === J(['DEMO', 'AAA']), seen);
       check('desk-unmapped', `${tag}: all null values stay dashes with their own reasons`,
-        ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => u.reason?.includes(`${label}: not exact yet`) || seen.positionState.includes('not exact yet')) &&
-        ['Quantity', 'Last price', 'Worth', 'Open result'].every(label => u.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · not exact yet` && d.name === d.title)), u);
+        ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => u.reason?.includes(`${label}: not exact`) || seen.positionState.includes('not exact')) &&
+        ['Quantity', 'Last price', 'Worth', 'Open result'].every(label => u.dashes.some(d => d.text === '—' && d.title === `${label}: not exact` && d.name === d.title)), u);
       check('positions', `${tag}: no partial kept worth is presented as complete and both reasons stay visible`, /worth not available/i.test(N(seen.worth)) &&
-        ['not exact yet', 'not reported by the broker'].every(why => seen.worth.includes(why) || seen.kept.some(row => row.reasons?.includes(why))) &&
+        ['not exact', 'not reported by the broker'].every(why => seen.worth.includes(why) || seen.kept.some(row => row.reasons?.includes(why))) &&
         !/worth [€$]/i.test(N(seen.worth)), seen.worth);
       check('positions', `${tag}: no overflow or clipping`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
       const clip = await ev(`(() => { const r = document.getElementById('kept').getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);

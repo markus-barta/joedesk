@@ -1,9 +1,9 @@
 // Desk: health line and details, Today, the three desks, positions and the
 // kept holdings. Every number keeps its panel state; matching snapshot captions
 // are shared once, while different ages and reasons stay beside their values.
-import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin } from './ui.js';
+import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin, NOT_EXACT, dashWords } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
-import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation, executorPresentation } from './health.js';
+import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, STUCK_REASON, statusPresentation, executorPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { drawChart, eurAxis } from './chart.js';
@@ -11,12 +11,15 @@ import { intraday } from './history-model.js';
 import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
-import { STARTING_MONEY, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
-import { NOT_EXACT_REASONS, outageValue, withGenerationAge } from './board-state.js';
+import { STARTING_MONEY, sinceStarts, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
+import { NOT_EXACT_REASONS, notExactDash, classifyDay, classifyDays, dayChannels, outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
 const TONE_ICON = { ok: 'ok', warn: 'half', bad: 'stop', none: 'ring' };
+// "10 Sep" for a New York day; "Since 10 Sep", or "Since start" when the day is unknown.
+const dayText = day => dayDM(zonedInstant(day, '12:00:00', NY), NY);
+export const sinceLabel = day => day ? `Since ${dayText(day)}` : 'Since start';
 const STATE = {
   working: { tone: 'ok', icon: 'work', word: 'Working' },
   'sit-out': { tone: 'none', icon: 'pause', word: 'Sitting out' },
@@ -68,8 +71,7 @@ export function disclosureProblem(candidates) {
   const problems = candidates.flatMap(([label, cell]) => {
     const p = statePhrase(cell, '');
     if (p.state === 'fresh') return [];
-    const inexact = cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason);
-    const state = inexact ? 'not exact yet' : cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
+    const state = notExactDash(cell) ? NOT_EXACT : cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
       : p.state === 'not reported' ? 'not reported' : 'unavailable';
     const reason = cell?.reason ?? (p.state === 'not reported' ? 'feed_not_received' : null);
     // Unavailable money leads even when its honest not-exact icon is neutral;
@@ -108,29 +110,46 @@ export function rowProblems(cell) {
     [`${row.symbol} ${POSITION_FIELDS[field] ?? field}`, { state: 'broken', value: null, reason }]));
 }
 
+// Only a feed that sends check-ins can show one as missing; the v2 feed sends
+// none, so its desks never warn about a check-in that does not exist.
+export const carriesCheckIns = data => Boolean(data?.desks?.some(desk => desk.heartbeatAt != null));
+// The paper pusher's own valuation sentences say nothing about what a desk is
+// doing; the card shows a short line from the desk's state instead.
+const PUSHER_STATUS = new Set(['Paper desk values are available.', 'Some paper desk values are unavailable.',
+  'Valuation is not exact yet.', 'Valuation unavailable pending exact source validation.']);
+export function activityLine(desk) {
+  if (!desk) return 'Waiting for the first valid snapshot.';
+  const info = STATE[desk.state];
+  if (!PUSHER_STATUS.has(desk.action) || !info) return esc(desk.action);
+  return `${esc(desk.label)} is ${info.word.toLowerCase()}${desk.state === 'stuck' ? `: ${STUCK_REASON}` : ''}.`;
+}
+
 function deskProblem(ctx, id) {
   const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
-  const cells = [['Today', ctx.states[`desks.${id}.dayPnl`]], ['Open positions', ctx.states[`desks.${id}.openPnl`]], ['Since start', ctx.states[`desks.${id}.totalPnl`]], ['History', ctx.states.history]];
+  const cells = [['Today', ctx.states[`desks.${id}.dayPnl`]], ['Open positions', ctx.states[`desks.${id}.openPnl`]], [sinceLabel(sinceStarts(ctx.feeds).days[id]), ctx.states[`desks.${id}.totalPnl`]], ['History', ctx.states.history]];
   if (desk?.state === 'stuck') cells.unshift(['Desk stuck', { state: 'broken', value: null }]);
   if (desk?.learning?.status === 'blocked') cells.push(['Learning blocked', { state: 'broken', value: null }]);
   const elapsed = ctx.feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(ctx.now) - Date.parse(ctx.feeds.data.generatedAdvancedAt)) : 0;
   const heartbeat = desk?.heartbeatAt ? gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, ctx.feeds.data.value.generatedAt, elapsed) : null;
-  if (desk && (heartbeat == null || heartbeat / 1000 >= STALE_AFTER_S)) cells.unshift(['Check-in', { state: heartbeat == null ? 'not reported' : 'stale', value: heartbeat }]);
+  if (desk && carriesCheckIns(ctx.feeds.data.value) && (heartbeat == null || heartbeat / 1000 >= STALE_AFTER_S)) cells.unshift(['Check-in', { state: heartbeat == null ? 'not reported' : 'stale', value: heartbeat }]);
   return disclosureProblem(cells);
 }
 export function compactDesk(ctx, id) {
   const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
   const info = STATE[desk?.state] ?? { tone: 'none', icon: 'ring', word: 'Not reported' };
   const shared = sharedSectionReason(['dayPnl', 'openPnl', 'totalPnl'].map(name => ctx.states[`desks.${id}.${name}`]));
-  const figure = (name, label) => {
+  // One start day for all desks sits once in the phone's Desks heading, read
+  // before the rows; each row then says "Since" (a dash keeps the whole label).
+  const starts = sinceStarts(ctx.feeds), since = sinceLabel(starts.days[id]);
+  const figure = (name, label, shown = label) => {
     const cell = ctx.states[`desks.${id}.${name}`], value = cellView(cell, `compact.${id}.${name}`, { label });
     const marker = cellIcon(cell, shared).replace('cell-state', 'compact-state');
     const characters = value.units === null ? 1 : eur(value.units, true).length;
-    return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${label}${marker}${name === 'dayPnl' ? dayEstimateMark(ctx, id) : ''}</span>${value.html}</span>`;
+    return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${shown}${marker}${name === 'dayPnl' ? dayEstimateMark(ctx, id) : ''}</span>${value.html}</span>`;
   };
   return `<button type="button" class="desk-disclosure desk-row" data-desk-disclosure="${id}" aria-expanded="${expanded.has(id)}" aria-controls="detail-${id}">
     ${deskMark(id)}<span class="compact-identity"><strong>${esc(desk?.label ?? LABEL[id])}</strong><span class="compact-word tone-${info.tone}">${icon(info.icon)}${info.word}</span></span>
-    ${figure('dayPnl', 'Today')}${figure('totalPnl', 'Since start')}${icon('chev-d', 'i disclosure-chevron')}
+    ${figure('dayPnl', 'Today')}${figure('totalPnl', since, starts.common ? 'Since' : since)}${icon('chev-d', 'i disclosure-chevron')}
     <span class="disclosure-warning">${problemHtml(deskProblem(ctx, id))}</span></button>`;
 }
 
@@ -150,6 +169,9 @@ export function executorProblem(data) {
   return sentence;
 }
 
+// Dashes are named by dashWords (ui.js), shared with Cash.
+export { dashWords };
+
 // One money cell: the value (or a dash) and a caption for exactly the state
 // the shared selector gave it, with this cell's own age and reason. A fresh
 // value keeps the designed caption.
@@ -157,7 +179,7 @@ export function cellView(cell, key, { signed = true, caption = '', sharedReason 
   const value = cell?.value ?? null;
   const n = amountOf(value);
   const units = value ? decimalUnits(value.amount) : null;
-  const missingLabel = `${label}: not reported${cell?.reason ? ` · ${cellReason(cell.reason)}` : ''}`;
+  const missingLabel = `${label}: ${dashWords(cell?.reason)}`;
   const html = value == null && label ? `<span class="bn muted" role="img" title="${esc(missingLabel)}" aria-label="${esc(missingLabel)}">—</span>` : bn(units, value?.currency ?? 'EUR', signed);
   return { html, caption: stateCaption(cell, key, caption, undefined, sharedReason), state: cell?.state ?? 'not reported', n, units };
 }
@@ -177,6 +199,9 @@ export function sharesBoardCaption(cell, board) {
 function cellIcon(cell, sharedReason = null) {
   if (!cell || cell.state === 'fresh') return '';
   const p = statePhrase(cell, '');
+  // A not-exact dash names itself (dashWords); its info icon only marks it, with
+  // the same words as a pointer tip, so a screen reader hears the reason once.
+  if (notExactDash(cell)) return `<span class="cell-state tone-${p.tone}" aria-hidden="true" title="${esc(capital(statePhrase(cell, '', undefined, sharedReason).text))}">${icon(p.icon)}</span>`;
   const label = `${capital(p.state)}${cell.reason && cellReason(cell.reason) !== sharedReason ? ` · ${cellReason(cell.reason)}` : ''}`;
   return `<span class="cell-state tone-${p.tone}" role="img" aria-label="${esc(label)}">${icon(p.icon ?? TONE_ICON[p.tone])}</span>`;
 }
@@ -239,20 +264,23 @@ export function healthPop(ctx, health) {
     rows.push(['Data', `${dateTimeFull(data.generatedAt)} · ${ageSpan('pop.data', `${age(receipt)} old`)} · refreshes every 15${NB}s`]);
     rows.push(['Broker connection', `${broker.word === 'OK' ? 'Answering' : broker.word === 'down' ? 'Down' : broker.word === 'degraded' ? 'Unstable' : 'Not confirmed'}${gateway?.reason ? ` · ${esc(cellReason(gateway.reason))}` : ''}${gateway?.checkedAt ? ` · checked ${timeHMS(gateway.checkedAt)}` : ' · no check reported'}`]);
     rows.push(['Emergency stop', data.safety.halt ? `On: ${esc(cellReason(data.safety.haltReason))}` : 'Off']);
-    rows.push([term('heartbeat'), data.desks.map(desk => {
+    if (carriesCheckIns(data)) rows.push([term('heartbeat'), data.desks.map(desk => {
       const elapsed = feeds.data.generatedAdvancedAt ? Math.max(0, Date.parse(now) - Date.parse(feeds.data.generatedAdvancedAt)) : 0;
       const ms = gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed);
       return `${esc(desk.label)}: ${ms == null ? 'not reported' : `${ageSpan(`pop.hb.${desk.id}`, `${age(ms / 1000)} ago`)}`}`;
     }).join(' · ')]);
-    rows.push(['Today’s result', esc(dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
+    rows.push(['Today’s result', esc(classifyDays(states, data).today.kind === 'notExact' ? dayBreakdown(states, data)
+      : dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Open positions', esc(openMethodLabel(data.pnlSources?.open) ?? `Not available · ${cellReason(data.pnlSources?.open?.reason ?? states['today.openPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Source', `${esc(data.source.label)} · paper only`]);
   }
+  const notes = { since: startsDiffer(feeds) };
   return `<h3>${icon(TONE_ICON[health.statusTone])}Board status details</h3>
     <p class="status-sentence">${esc(statusPresentation(ctx, health).sentence)}</p>
     ${healthFacts(ctx, health)}
     <p>${problems.length ? esc(problems.join(' ')) : 'No current problems.'}</p>
-    ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact yet', 'info')}</p>` : ''}
+    ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact', 'info')}</p>` : ''}
+    ${notes.since ? `<p>${st('warn', esc(notes.since))}</p>` : ''}
     ${rows.length ? `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
     <p>If a light turns yellow or red: reload once. If it stays, tell Amy what the light says and how old the data is.</p>
     <p><button type="button" class="btn quiet link" data-go="history" data-anchor="j-accounting">${icon('book')}J’s bookkeeping${icon('chev-r')}</button></p>`;
@@ -301,6 +329,88 @@ function sessionRing(now) {
   return `${svg}<div><b>${title}</b><span>${line}</span><span>${session}</span></div>`;
 }
 
+const byDesk = (a, b) => DESKS.indexOf(a) - DESKS.indexOf(b);
+export const deskNames = ids => ids.length > 1 ? `${ids.slice(0, -1).map(id => LABEL[id]).join(', ')} and ${LABEL[ids.at(-1)]}` : LABEL[ids[0]];
+// Each desk's own Today in plain words, grouped by word and reason in desk
+// order, from the one classifier the light uses (classifyDays, every channel):
+// exact or estimated figures, not-exact dashes, and faults named by their
+// cell's state. Nothing is computed from money.
+export function deskDays(states, data) {
+  const days = classifyDays(states, data), groups = [];
+  for (const id of DESKS) {
+    const cell = states[`desks.${id}.dayPnl`], day = days[id];
+    const word = day.kind === 'exact' ? day.estimated ? 'estimated' : 'exact' : day.kind === 'notExact' ? NOT_EXACT
+      : cell?.retained ? 'last good' : cell?.state === 'stale' ? 'stale'
+        : cell?.value == null && (cell?.state ?? 'not reported') === 'not reported' ? 'not reported' : 'unavailable';
+    const why = day.reason ? cellReason(day.reason) : null;
+    const reason = why !== word ? why : null;
+    const group = groups.find(g => g.word === word && g.reason === reason);
+    if (group) group.ids.push(id); else groups.push({ word, reason, ids: [id] });
+  }
+  return groups;
+}
+const blockingDays = (states, data) => deskDays(states, data).filter(g => !['exact', 'estimated'].includes(g.word));
+// Details: every desk's Today, exact ones first, e.g. "Exact for Joel; not
+// exact for J and Joe · start-of-day value missing". This one row is also
+// how Details explains a green light beside a not-exact Today (Amy's A3).
+const DAY_ORDER = ['exact', 'estimated', NOT_EXACT];
+const dayRank = g => DAY_ORDER.includes(g.word) ? DAY_ORDER.indexOf(g.word) : DAY_ORDER.length;
+export function dayBreakdown(states, data) {
+  const groups = deskDays(states, data).sort((a, b) => dayRank(a) - dayRank(b) || byDesk(a.ids[0], b.ids[0]));
+  return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` · ${g.reason}` : ''}`).join('; '));
+}
+
+// Details flags a closed-trade record that starts on another day than a
+// desk's effective Since start, naming the days each desk actually counts
+// from, and which desks Desk then shows without a date until they agree.
+export function startsDiffer(feeds) {
+  const starts = sinceStarts(feeds);
+  if (!starts.conflict) return null;
+  const groups = [];
+  for (const id of DESKS) {
+    const group = groups.find(g => g.day === starts.effective[id]);
+    if (group) group.ids.push(id); else groups.push({ day: starts.effective[id], ids: [id] });
+  }
+  const counts = groups.map((g, i) => `${deskNames(g.ids)}${i ? '' : g.ids.length > 1 ? ' count' : ' counts'} from ${dayText(g.day)}`).join(', ');
+  const undated = DESKS.filter(id => starts.days[id] === null);
+  const shown = undated.length ? ` Desk shows no date${undated.length === DESKS.length ? '' : ` for ${deskNames(undated)}`} until they agree.` : '';
+  return `Since start dates differ: Results start on ${dayText(starts.trackingStart)}; ${counts}.${shown}`;
+}
+
+// The household Today needs all three desks. When the feed explains its dash
+// as not exact, say once which desks keep it from being exact and why: their
+// shared reason, unless the section line already gives it. A reason common to
+// every desk needs no names. Null when the cell's own caption applies.
+export function householdDayReason(states, data, sharedReason = null) {
+  if (classifyDays(states, data).today.kind !== 'notExact') return null;
+  const blocking = blockingDays(states, data);
+  if (!blocking.length) return null;
+  if (blocking.length === 1) {
+    const [{ word, reason, ids }] = blocking, all = ids.length === DESKS.length;
+    if (all && (reason ?? word) === sharedReason) return '';
+    return capital(`${word}${all ? '' : ` for ${deskNames(ids)}`}${reason && reason !== sharedReason ? ` · ${reason}` : ''}`);
+  }
+  // Several states: name the desks per state; each card keeps its own reason.
+  const words = [];
+  for (const g of blocking) {
+    const same = words.find(w => w.word === g.word);
+    if (same) same.ids.push(...g.ids); else words.push({ word: g.word, ids: [...g.ids] });
+  }
+  return capital(words.map(w => `${w.word} for ${deskNames(w.ids.sort(byDesk))}`).join('; '));
+}
+
+// A dashed household Today still knows each exact desk's own Today: "Joel is
+// flat today." Estimates keep their own mark on their cards and are left out.
+function exactDeskSentence(states, data) {
+  const days = classifyDays(states, data);
+  const parts = DESKS.flatMap(id => {
+    const units = days[id].kind === 'exact' && !days[id].estimated ? exactCell(states[`desks.${id}.dayPnl`]) : null;
+    if (units === null) return [];
+    return [`${LABEL[id]} is ${isZero(units) ? 'flat' : `${units > 0n ? 'up' : 'down'} ${eur(units < 0n ? -units : units)}`}`];
+  });
+  return parts.length ? `${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]} today.` : null;
+}
+
 export function heroLeft(ctx) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
@@ -314,15 +424,25 @@ export function heroLeft(ctx) {
     return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}${cellIcon(states[name], shared)}</dt><dd>${v.html}<span class="c">${caption}</span></dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
-  const moneyCaptions = [`started with ${eur(STARTING_MONEY, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
+  // Since start counts from one known day for all desks, or the hero names none.
+  const starts = sinceStarts(feeds), sinceText = sinceLabel(starts.common);
+  const started = `started with ${eur(STARTING_MONEY, false, 0)}`;
+  const moneyCaptions = [starts.common ? `${started} on ${dayText(starts.common)}` : started, 'J’s bookkeeping incomplete · desk total unavailable', started];
+  const sinceCaption = `of ${eur(STARTING_MONEY, false, 0)} · after fees, incl. open positions`;
   const why = dayCell?.reason ? cellReason(dayCell.reason) : null;
-  // A dashed Today needs its own state/reason unless the section says it.
-  const dayCaption = day.state === 'broken' && day.units === null && !sharesBoardCaption(dayCell, board) && (!shared || why !== shared) ? day.caption : '';
+  const onBoard = sharesBoardCaption(dayCell, board);
+  // A dashed Today states its reason once, here, unless the section says it.
+  // A not-exact household Today names the desks that keep it from being exact.
+  const household = onBoard ? null : householdDayReason(states, data, shared);
+  const dayCaption = household ?? (day.state === 'broken' && day.units === null && !onBoard && (!shared || why !== shared) ? day.caption : '');
   const dayAmount = day.units === null ? null : eur(day.units < 0n ? -day.units : day.units);
   let say;
   if (day.n == null) {
-    say = data ? `Today’s result is not available${why === shared ? '' : `: ${esc(why ?? 'not reported')}`}.`
-      : day.state === 'not reported' ? 'No numbers yet: no board data has arrived.' : `No numbers: ${esc(why ?? 'not available')}.`;
+    // The sentence never repeats the reason shown in the caption or section
+    // line: it gives what is known instead, each exact desk's own Today.
+    say = !data ? day.state === 'not reported' ? 'No numbers yet: no board data has arrived.' : `No numbers: ${esc(why ?? 'not available')}.`
+      : exactDeskSentence(states, data) ?? (classifyDays(states, data).today.kind === 'notExact' ? 'No desk has an exact result for today.'
+        : `Today’s result is not available${why !== shared && !dayCaption && !onBoard ? `: ${esc(why ?? 'not reported')}` : ''}.`);
   } else if (day.state === 'fresh') {
     const who = 'J, Joe and Joel';
     say = isZero(day.units) ? `Flat today for ${who}.` : `${day.units > 0n ? 'Up' : 'Down'} ${dayAmount} today across ${who}.`;
@@ -332,7 +452,7 @@ export function heroLeft(ctx) {
     // Not fresh: the amount, then this value's own state, age and reason.
     say = `${isZero(day.units) ? 'Flat' : `${day.units > 0n ? 'Up' : 'Down'} ${dayAmount}`} today.${sharesBoardCaption(dayCell, board) ? '' : ` ${day.caption}.`}`;
   }
-  const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: 'after fees', sharedReason: shared, label: 'Since start' });
+  const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: sinceCaption, sharedReason: shared, label: sinceText });
   const sharedCell = shared ? Object.values(states).find(cell => cell?.reason && cellReason(cell.reason) === shared && cell.state !== 'fresh') : null;
   const boardText = [board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : '',
     shared && (!board?.reason || cellReason(board.reason) !== shared) ? st(statePhrase(sharedCell, '').tone, sharedSectionPhrase(sharedCell), statePhrase(sharedCell, '').icon) : ''].filter(Boolean).join(' ');
@@ -340,10 +460,10 @@ export function heroLeft(ctx) {
       <div class="primary" data-cell="hero.day" data-state="${day.state}"><div class="hero-k">${icon('clock')}${term('today')}${cellIcon(dayCell, shared)}</div>
         <div class="display">${day.html}</div><div class="pct-slot">${percentHtml(todayPercent(states, data?.pnlSources?.day))}</div>
         <span class="c primary-caption">${dayCaption}</span></div>
-      <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since')}${cellIcon(sinceCell, shared)}</div>
+      <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since', sinceText)}${cellIcon(sinceCell, shared)}</div>
         <div class="display">${since.html}</div><div class="pct-slot">${percentHtml(sincePercent(states))}</div>
-        <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, ['after fees'])}</span>
-        <button type="button" class="phone-primary-note" data-say="since" aria-label="About Since start" aria-expanded="false"${sharesBoardCaption(sinceCell, board) ? ' disabled' : ''}><span data-clamp="3">${sharesBoardCaption(sinceCell, board) ? '&#160;' : stateCaption(sinceCell, 'hero.phone.since', 'after fees', undefined, shared)}</span></button></div>
+        <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, [sinceCaption])}</span>
+        <button type="button" class="phone-primary-note" data-say="since" aria-label="About Since start" aria-expanded="false"${sharesBoardCaption(sinceCell, board) ? ' disabled' : ''}><span data-clamp="3">${sharesBoardCaption(sinceCell, board) ? '&#160;' : stateCaption(sinceCell, 'hero.phone.since', sinceCaption, undefined, shared)}</span></button></div>
     </div>
     <button type="button" class="say" data-say="today" aria-expanded="false"><span data-clamp="2">${say}</span></button>
     <p class="board-caption">${boardText}</p></div>
@@ -372,8 +492,9 @@ function deskCard(ctx, id, maxDay, showBars) {
   const shared = sharedSectionReason(['dayPnl', 'openPnl', 'totalPnl'].map(name => states[`desks.${id}.${name}`]));
   const dayV = cellView(states[`desks.${id}.dayPnl`], `d.${id}.day`, { label: 'Today' });
   const openV = cellView(states[`desks.${id}.openPnl`], `d.${id}.open`, { label: 'Open positions' });
-  const sinceV = cellView(states[`desks.${id}.totalPnl`], `d.${id}.since`, { label: 'Since start' });
-  const sinceText = desk?.accounting?.periodStart ? `Since ${dayDM(desk.accounting.periodStart, NY)}` : 'Since start';
+  // The desk's own accounting start wins; else the board's verified start (A4).
+  const sinceText = sinceLabel(sinceStarts(feeds).days[id]);
+  const sinceV = cellView(states[`desks.${id}.totalPnl`], `d.${id}.since`, { label: sinceText });
   const bar = showBars && exactCell(states[`desks.${id}.dayPnl`]) !== null && dayV.n != null && !isZero(dayV.n)
     ? `<i data-v="${dayV.n}" style="${dayV.n > 0 ? 'left' : 'right'}:50%;width:${(Math.abs(dayV.n) / maxDay * 50).toFixed(3)}%;background:var(--${dayV.n > 0 ? 'gain' : 'loss'})"></i>` : '';
   const board = boardCaptionCell(ctx);
@@ -381,17 +502,21 @@ function deskCard(ctx, id, maxDay, showBars) {
     const characters = v.units === null ? 1 : eur(v.units, true).length;
     return `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell, shared)}</span><span class="v" style="--digits:${characters}">${v.html}</span>${extra}</div>`;
   };
-  const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]], board);
+  const cells = [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]];
+  // A not-exact Today that is the card's only problem needs no line of its own:
+  // its info icon and its dash's name and title already give the reason.
+  const loneNotExactDay = classifyDay(cells[0][1], dayChannels(data, id)).kind === 'notExact' && cells.slice(1).every(([, cell]) => cell?.state === 'fresh' || sharesBoardCaption(cell, board));
+  const status = loneNotExactDay ? '' : cardStatus(id, cells, board);
   const learning = learningLine(desk?.learning);
   return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(info.word + since)}">${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
-      <p class="now">${desk ? esc(desk.action) : 'Waiting for the first valid snapshot.'}</p>
+      <p class="now">${activityLine(desk)}</p>
       <div class="dnums">
         ${num(term('today') + dayEstimateMark(ctx, id), dayV, states[`desks.${id}.dayPnl`], `<span class="dbar" role="img" aria-label="Today’s result on a shared scale">${bar}</span>`)}
         ${num(term('open'), openV, states[`desks.${id}.openPnl`])}
         ${num(term('since', sinceText), sinceV, states[`desks.${id}.totalPnl`])}
       </div>
       <div class="chart mini" id="mini-${id}"><div class="mini-label${status ? ' off' : ''}">${status || 'since start · last sessions'}</div></div>
-      <footer>${icon('learning')}<span>${term('learning')}: ${learning ? esc(learning) : 'not reported'}${desk?.learning?.status === 'blocked' ? ' · blocked' : ''}</span></footer>`;
+      ${learning ? `<footer>${icon('learning')}<span>${term('learning')}: ${esc(learning)}${desk.learning.status === 'blocked' ? ' · blocked' : ''}</span></footer>` : ''}`;
 }
 
 // The card's numbers that are not fresh, each with its own state, age and
@@ -444,7 +569,7 @@ export function positionSectionReason(cell) {
 function positionValue(row, field, cell) {
   const value = row[field];
   if (value != null) return field === 'quantity' ? quantity(value) : money(decimalUnits(value.amount), value.currency);
-  const label = `${POSITION_FIELDS[field]}: not reported · ${rowReason(row, field, cell)}`;
+  const label = `${POSITION_FIELDS[field]}: ${dashWords(row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received')}`;
   return `<span class="position-value" role="img" title="${esc(label)}" aria-label="${esc(label)}">—</span>`;
 }
 function positionReasons(row, cell, sharedReason = null) {
@@ -551,30 +676,37 @@ function chartOnce(el, key, draw) {
 }
 export const forgetCharts = () => chartKeys.clear();
 
+// Today's chart exists only with a line to draw. Without a clock, on a day
+// without a session, before the open or before the first result point there
+// is no box at all: the market block above already says when the session runs.
+// Returns whether the line is shown.
 function drawHeroChart(ctx, history) {
   const el = $('#heroChart');
-  if (!ctx.now) {
-    chartOnce(el, JSON.stringify(['no-clock', el?.clientWidth, el?.clientHeight]), () => drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: 'Waiting for the board server’s clock', label: 'Today’s result: the board server’s time is not known yet' }));
-    return;
+  if (!el) return false;
+  const b = ctx.now ? sessionBounds(ctx.now) : null;
+  const series = b?.openAt && history ? intraday(history.columns, 'dayPnl', b.openAt, b.closeAt) : [];
+  if (!series.length) {
+    el.hidden = true;
+    el.querySelector(':scope > svg')?.remove();
+    chartKeys.delete(el.id);
+    return false;
   }
-  const b = sessionBounds(ctx.now);
+  el.hidden = false;
   const nowMs = Date.parse(ctx.now);
   const minuteKey = Math.floor(nowMs / 60000);
-  const key = JSON.stringify([b.openAt, minuteKey, history?.seq, history?.receivedAt, el?.clientWidth, el?.clientHeight]);
-  if (chartKeys.get(el?.id) === key && el?.querySelector(':scope > svg')) return;
-  const series = b.openAt && history ? intraday(history.columns, 'dayPnl', b.openAt, b.closeAt) : [];
+  const key = JSON.stringify([b.openAt, minuteKey, history?.seq, history?.receivedAt, el.clientWidth, el.clientHeight]);
+  if (chartKeys.get(el.id) === key && el.querySelector(':scope > svg')) return true;
   chartOnce(el, key, () => {
-    if (!b.openAt) { drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: 'Market closed today', label: 'Market closed today' }); return; }
     const open = Date.parse(b.openAt), close = Date.parse(b.closeAt);
-    const empty = !series.length;
     drawChart(el, {
       series: [{ pts: series, color: 'var(--accent)', live: b.rth }], xDomain: [open, close], zero: true, ticks: 3, yFmt: eurAxis, pad: { l: 52 },
-      future: b.rth ? [nowMs, close] : null, empty, emptyText: nowMs < open ? `The session opens at ${timeHM(b.openAt)}` : 'No result points for this session yet',
+      future: b.rth ? [nowMs, close] : null,
       xLabels: [{ x: open, text: timeHM(b.openAt), anchor: 'start' }, ...(b.rth && nowMs - open > (close - open) * 0.18 && close - nowMs > (close - open) * 0.18 ? [{ x: nowMs, text: `now ${timeHM(ctx.now)}` }] : []), { x: close, text: timeHM(b.closeAt), anchor: 'end' }],
-      label: `Today’s result through the regular session${series.length ? `: ${eur(series.at(-1).v, true)}` : ''}`,
+      label: `Today’s result through the regular session: ${eur(series.at(-1).v, true)}`,
       tipFmt: near => `<b>${timeHM(new Date(near[0].x).toISOString())}</b> · ${eur(near[0].v, true)}`,
     });
   });
+  return true;
 }
 
 function drawMiniCharts(ctx, history) {
@@ -612,6 +744,8 @@ export function renderDesk(ctx) {
   const data = ctx.feeds.data?.value;
   const working = data ? data.desks.filter(d => d.state === 'working').length : 0;
   $('#desksSub').textContent = data ? `${working} of 3 working · kept holdings left out` : 'Waiting for the first valid snapshot';
+  const desksSince = $('#desksSince'), common = sinceStarts(ctx.feeds).common, sinceHeading = common ? sinceLabel(common) : '';
+  if (desksSince && desksSince.textContent !== sinceHeading) desksSince.textContent = sinceHeading;
   const days = DESKS.map(id => exactCell(ctx.states[`desks.${id}.dayPnl`]) === null ? null : amountOf(ctx.states[`desks.${id}.dayPnl`].value));
   const showBars = days.every(v => v != null);
   const maxDay = Math.max(...days.filter(v => v != null).map(Math.abs), 0.01);
@@ -645,7 +779,9 @@ export function renderDesk(ctx) {
   // Charts measure their boxes before the long sections below change, so an
   // update never forces a layout of the whole position list mid-render.
   const history = ctx.states.history?.value?.columns ? ctx.states.history.value : null;
-  drawHeroChart(ctx, history);
+  // The phone section names what it holds: the market hours, with the chart only when it has a line.
+  const chartTitle = $('#chartTitle'), title = drawHeroChart(ctx, history) ? 'Today’s chart' : 'Market hours';
+  if (chartTitle && chartTitle.textContent !== title) chartTitle.textContent = title;
   drawMiniCharts(ctx, history);
   const pos = positionsHtml(ctx);
   $('#posSub').textContent = pos.sub;

@@ -23,13 +23,13 @@ function context(seconds = 9) {
 }
 const cases = [
   ['green', 'board_ok', 'Live · updated 9 s ago'],
-  ['yellow', 'values_not_exact', 'Desk values are not exact yet'],
+  ['yellow', 'values_not_exact', 'Desk values are not exact'],
   ['yellow', 'snapshot_stale', 'Updates are late'],
   ['yellow', 'retained_values', 'Numbers a bit old'],
   ['yellow', 'gateway_degraded', 'The broker connection is unstable'],
   ['yellow', 'gateway_unconfirmed', 'Broker unsure: last check 1 min ago'],
   ['yellow', 'open_unavailable_rth', 'Waiting on broker prices'],
-  ['yellow', 'day_pending', 'Today’s result is waiting on data'],
+  ['yellow', 'day_pending', 'Today’s result is late'],
   ['red', 'halt_on', 'Emergency stop is ON'],
   ['red', 'gateway_down', 'The broker is offline'],
   ['red', 'feed_disconnected', 'Board updates stopped'],
@@ -299,6 +299,37 @@ test('JOED-130 Today explanation follows the board clock across DST and midnight
   now = '2026-10-28T12:00:00.000Z';
   emit('click', anchor('today'));
   assert.match(tip.innerHTML, /midnight in New York, 05:00 in Vienna/);
+});
+
+test('JOED-148 A4: Since start’s explanation states the configured basis and day, never a placeholder or the retired J sentence', async t => {
+  let since = null;
+  const { emit, anchor, tip } = await termTipFixture(t, { since: () => since });
+  const { TERMS } = await import('../public/joe/terms.js');
+  const { STARTING_MONEY, SINCE_START } = await import('../public/joe/performance.js');
+  const { eur } = await import('../public/joe/format.js');
+  const original = [...TERMS.since];
+  const show = () => {
+    const button = anchor('since');
+    emit('click', button);
+    const html = tip.innerHTML;
+    emit('keydown', button, { key: 'Escape' });
+    return html;
+  };
+  // Before any feed answers, the board's own basis applies.
+  let html = show();
+  assert.ok(html.startsWith('<b>Since start</b>'));
+  assert.match(html, /since paper results were verified on Thu 10\sSep 2026 \(New York trading day\), after fees/);
+  assert.ok(html.includes(`against the ${eur(STARTING_MONEY, false, 0)} they started with (${eur(STARTING_MONEY / 3n, false, 0)} each)`));
+  assert.ok(html.includes(`The percentage divides by that ${eur(STARTING_MONEY, false, 0)}.`));
+  assert.doesNotMatch(html, /[{}]|J’s bookkeeping starts on its own date|Same start as Results/);
+  since = { common: SINCE_START, trackingStart: SINCE_START, conflict: false };
+  assert.match(show(), /open positions at the last price\. Same start as Results · All time\./);
+  // Results starting on another day: no date is claimed.
+  since = { common: null, trackingStart: '2026-09-12', conflict: true };
+  html = show();
+  assert.match(html, /since paper results were verified, after fees/);
+  assert.doesNotMatch(html, /10\sSep|Same start/);
+  assert.deepEqual(TERMS.since, original, 'rendering never changes the frozen dictionary');
 });
 
 async function termTipFixture(t, options) {

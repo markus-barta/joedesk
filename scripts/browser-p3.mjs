@@ -41,12 +41,13 @@ if (nodeModule.registerHooks) {
 export async function resolve(specifier, context, next) { return next(mapped(specifier, context.parentURL), context); }`)}`, import.meta.url);
 }
 const hm = await import('../public/joe/history-model.js');
-const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
+const { boardStates, NOT_EXACT_REASONS, notExactDash } = await import('../public/joe/board-state.js');
 const { cellReason, capital, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
 const { statePhrase } = await import('../public/joe/ui.js');
 const fmt = await import('../public/joe/format.js');
+const { STARTING_MONEY } = await import('../public/joe/performance.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
-const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
+const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, disclosureProblem, rowProblems, householdDayReason, dashWords } = await import('../public/joe/desk.js');
 const HEALTH_LINES = Object.keys(REASON_COPY).map(reason => statusSentence({ reason, tone: reason === 'board_ok' ? 'green' : 'red' }, { receipt: 9, gatewayAge: 179 }));
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
@@ -137,9 +138,11 @@ async function deskChecks(page, viewport, theme, expectedMini, snapshot) {
     }; })()`).then(copyText);
   check('AC-18', `${tag}: one live header control and no fresh card check-ins or visible status strip`, /Live/.test(d.header) && !d.boardOkElsewhere && !d.freshCheckins && !await page.evaluate(`Boolean(document.querySelector('#health, .hstrip, #footData'))`), d);
   const kpiNames = d.kpis.map(k => k.dt);
-  check('AC-19', `${tag}: Today and Since start remain primary, with four supporting figures and their captions intact`, Boolean(d.display) && d.primary.length === 2 && d.primary.map(p => p.label).join() === 'Today,Since start' && d.kpis.length === 4 && kpiNames.join() === 'Open positions,Desks’ money,Paper account,Cash' &&
-    d.kpis[0].cap === 'still moving until closed' && /started with €\s15\.000/.test(d.kpis[1].cap) && d.kpis[2].cap === 'includes the kept holdings' && d.kpis[3].cap === 'cash · as the broker reports it' &&
-    await page.evaluate(`__audit.deskCaption(document.querySelector('[data-cell="hero.since"]')) === 'after fees'`), { primary: d.primary, kpis: d.kpis });
+  // Amy's A4: Since start names its day (10 Sep 2026, New York) and its basis, the configured starting money.
+  const sinceCaption = copyText(await page.evaluate(`__audit.deskCaption(document.querySelector('[data-cell="hero.since"]'))`));
+  check('AC-19', `${tag}: Today and Since start remain primary, with four supporting figures and their captions intact`, Boolean(d.display) && d.primary.length === 2 && d.primary.map(p => p.label).join() === 'Today,Since 10\u00a0Sep' && d.kpis.length === 4 && kpiNames.join() === 'Open positions,Desks’ money,Paper account,Cash' &&
+    d.kpis[0].cap === 'still moving until closed' && /^started with €\s15\.000 on 10\sSep$/.test(d.kpis[1].cap) && d.kpis[2].cap === 'includes the kept holdings' && d.kpis[3].cap === 'cash · as the broker reports it' &&
+    sinceCaption === `of ${fmt.eur(STARTING_MONEY, false, 0)} · after fees, incl. open positions`, { primary: d.primary, kpis: d.kpis, sinceCaption });
   check('AC-19', `${tag}: unreported Cash is a muted dash with its reason in the caption`, d.kpis[3].value === '—' && d.kpis[3].muted && d.kpis[3].cashReason === 'not reported · no data received yet', d.kpis[3]);
   const day = decimalUnits(snapshot.totals.dayPnl.amount), equity = decimalUnits(snapshot.totals.equity.amount), since = decimalUnits(snapshot.totals.totalPnl.amount);
   const percent = (result, base) => { const n = divRound(result * 10000n, base); return `${n < 0n ? '−' : n > 0n ? '+' : ''}${fmt.digits(n * UNIT / 100n)} %`; };
@@ -600,12 +603,13 @@ try {
     ['e-layout-storage-unavailable', 'fresh', 'Board OK'], ['b-session-open-estimate', 'fresh', 'Board OK'], ['stale-receive-age', 'stale', 'Stale 1 min'],
     ['c-frozen-producer', 'stale', 'Stale 2 min'], ['missing-runtime-and-results', 'not reported', 'Board OK'], ['a-gateway-up-but-dead', 'broken', 'Needs fix'],
     ['a-missing-gateway', 'broken', 'Needs fix'], ['a-frozen-ready-gateway', 'broken', 'Needs fix'], ['b-incomplete-family', 'broken', 'Data delayed'],
-    ['b-equity-null-gateway-ready', 'broken', 'Data delayed'], ['b-weekend-no-sod', 'broken', 'Data delayed'], ['j-ny-midnight-gap', 'broken', 'Data delayed'],
+    // Amy's A3: a Today the feed explains as not exact is not late in regular hours.
+    ['b-equity-null-gateway-ready', 'broken', 'Data delayed'], ['b-weekend-no-sod', 'broken', 'Board OK'], ['j-ny-midnight-gap', 'broken', 'Board OK'],
     ['h-keep-policy-mismatch', 'broken', 'Needs fix'], ['c-old-producer-image', 'broken', 'Needs fix'], ['unknown-schema', 'broken', 'Needs fix'],
     ['a-dead-session-current-money', 'broken', 'Needs fix'], ['h-secondary-position-source', 'broken', 'Needs fix'], ['i-oversize-data', 'broken', 'Needs fix'],
     ['g-expired-sso', 'broken', 'Data delayed'], ['d-routing-stub', 'broken', 'Data delayed'],
     ['p3-single-missing-desk', 'broken', 'Data delayed'], ['p3-coupled-unavailable', 'broken', 'Data delayed'],
-    ['p3-not-exact-yet', 'broken', 'Data delayed'], ['p3-shared-not-exact', 'broken', 'Data delayed'],
+    ['p3-not-exact-yet', 'broken', 'Board OK'], ['p3-shared-not-exact', 'broken', 'Data delayed'],
     ['p3-mixed-not-exact-fault', 'broken', 'Data delayed'],
   ];
   // ADR deferred P3 rows, derived from valid.json; expected states come from
@@ -687,7 +691,8 @@ try {
         visibleSentence: (() => { const full = document.querySelector('#hdrHealth .status-full'), line = document.getElementById('statusAlertText');
           return [full, line].filter(__audit.visible).map(e => e.textContent); })(),
         cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(k => [k.dataset.cell, { state: k.dataset.state, cap: __audit.deskCaption(k) }])),
-        desks: [...document.querySelectorAll('.dcard')].map(c => ({ id: c.id.slice(5), name: c.querySelector('h3')?.innerText, nums: c.querySelectorAll('.dnums > div').length, states: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), status: c.querySelector('.mini-label').innerText, icons: c.querySelectorAll('.cell-state').length })),
+        desks: [...document.querySelectorAll('.dcard')].map(c => ({ id: c.id.slice(5), name: c.querySelector('h3')?.innerText, nums: c.querySelectorAll('.dnums > div').length, states: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), status: c.querySelector('.mini-label').innerText, icons: c.querySelectorAll('.cell-state').length,
+          dayName: c.querySelector('.dnums .bn')?.getAttribute('aria-label') ?? null, dayTitle: c.querySelector('.dnums .bn')?.getAttribute('title') ?? null })),
         boardCaption: document.querySelector('#heroL .board-caption').innerText,
         alertGeometry: (() => { const line = document.getElementById('statusAlert'), button = document.getElementById('statusAlertControl'), text = document.getElementById('statusAlertText');
           const r = text.getBoundingClientRect(), hero = document.querySelector('.hero-primary').getBoundingClientRect();
@@ -742,9 +747,17 @@ try {
       }
       // Shared snapshot captions move to the board once. Different reasons,
       // ages and retained values still belong to the affected number/card.
-      const missingReasons = ui.desks.flatMap(d => ['dayPnl', 'openPnl', 'totalPnl'].map(field => expectedCells[`desks.${d.id}.${field}`])
-        .filter(cell => cell.state !== 'fresh' && !sharesBoardCaption(cell, boardCaption)).map(cell => (cell.reason ? cellReason(cell.reason) : 'not reported')).filter(words => !d.status.includes(words)).map(words => ({ desk: d.name, words, status: d.status })));
-      check('fixtures', `${tag}: every differing desk number keeps its own reason and every affected number keeps a state icon`, !missingReasons.length && ui.desks.every(d => d.icons === d.states.filter(state => state !== 'fresh').length), missingReasons.slice(0, 3));
+      // JOED-148: a not-exact Today that is the card's only problem has no card
+      // line; its reason is on its own dash (name and title), never repeated.
+      const quiet = (d, field) => expectedCells[`desks.${d.id}.${field}`].state === 'fresh' || sharesBoardCaption(expectedCells[`desks.${d.id}.${field}`], boardCaption);
+      const missingReasons = ui.desks.flatMap(d => ['dayPnl', 'openPnl', 'totalPnl'].map(field => [field, expectedCells[`desks.${d.id}.${field}`]])
+        .filter(([, cell]) => cell.state !== 'fresh' && !sharesBoardCaption(cell, boardCaption)).flatMap(([field, cell]) => {
+          const words = cell.reason ? cellReason(cell.reason) : 'not reported';
+          const loneDay = field === 'dayPnl' && notExactDash(cell) && quiet(d, 'openPnl') && quiet(d, 'totalPnl');
+          const ok = loneDay ? d.dayName === `Today: ${dashWords(cell.reason)}` && d.dayTitle === d.dayName && !d.status.includes(words) : d.status.includes(words);
+          return ok ? [] : [{ desk: d.name, field, loneDay, words, status: d.status, dayName: d.dayName }];
+        }));
+      check('fixtures', `${tag}: every differing desk number keeps its own reason (a lone not-exact Today on its dash) and every affected number keeps a state icon`, !missingReasons.length && ui.desks.every(d => d.icons === d.states.filter(state => state !== 'fresh').length), missingReasons.slice(0, 3));
       const repeated = Object.entries(CELL).filter(([key, panel]) => key !== 'hero.day' && sharesBoardCaption(expectedCells[panel], boardCaption) && ui.cells[key].cap);
       check('fixtures', `${tag}: matching money captions appear once on the board`, !repeated.length && (!boardCaption || ui.boardCaption.includes(cellReason(boardCaption.reason))), { repeated, caption: ui.boardCaption });
       const caps = norm([ui.boardCaption, ui.say, ...Object.values(ui.cells).map(c => c.cap)].join(' | '));
@@ -762,8 +775,10 @@ try {
           const inSection = cell.reason && cellReason(cell.reason) === shared;
           const sectionOnBoard = inSection && boardCaption?.reason && cellReason(boardCaption.reason) === shared;
           const phrase = statePhrase(cell, '', 'last good value', shared);
+          // A not-exact household Today names the desks that keep it from being exact.
+          const household = key === 'hero.day' && !onBoard ? householdDayReason(expectedCells, shared) : null;
           const want = onBoard || sectionOnBoard ? capital(statePhrase(boardCaption, '').text)
-            : inSection ? sharedSectionPhrase(cell) : capital(phrase.text);
+            : inSection ? sharedSectionPhrase(cell) : household || capital(phrase.text);
           const inSentence = key === 'hero.day' && cell.value != null;
           const actual = onBoard || inSection ? ui.boardCaption : inSentence ? ui.say : ui.cells[key].cap;
           check('fixtures', `${tag}: ${key} ${NOT_EXACT_REASONS.has(cell.reason) ? 'not-exact' : 'fault'} keeps its own reason locally or in the shared section line`,
@@ -1174,17 +1189,17 @@ try {
     await refresh(`document.getElementById('desk-joe').innerText.includes('open result not available')`);
     ui = await page.evaluate(DESK_TEXT);
     const [j, joe, joel] = ['j', 'joe', 'joel'].map(id => ui.cards.find(c => c.id === id));
-    const today = /^Today: not exact yet · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
+    const today = /^Today: not exact · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
     check('journey', `${tag} broken: each affected desk number has its own line, age and reason`, j.lines.length === 3 && today.test(j.lines[0]) && open.test(j.lines[1]) &&
       /^Since 10\sSep: unavailable · carrying the last good value$/.test(j.lines[2]) && [joe, joel].every(c => c.lines.length === 2 && today.test(c.lines[0]) && open.test(c.lines[1])) &&
       JSON.stringify(j.nums) === '["broken","broken","broken"]' && [joe, joel].every(c => JSON.stringify(c.nums) === '["broken","broken","fresh"]'), ui.cards);
-    check('journey', `${tag} broken: unavailable totals keep their own reasons`, ui.cells['hero.day'].state === 'broken' && /Today’s result is not available: waiting on the start-of-day value\./.test(ui.say) &&
+    check('journey', `${tag} broken: unavailable totals keep their own reasons; Today states its reason once`, ui.cells['hero.day'].state === 'broken' && ui.cells['hero.day'].cap === 'Not exact · waiting on the start-of-day value' && ui.say === 'No desk has an exact result for today.' &&
       /^Unavailable · open result not available$/.test(ui.cells['hero.open'].cap) && /^Unavailable · desk total incomplete$/.test(ui.cells['hero.since'].cap) &&
       ui.cells['hero.equity'].state === 'fresh' && ui.cells['hero.account'].state === 'fresh', { cells: ui.cells, say: ui.say });
     check('no-shift', `${tag}: stale → broken moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
     boxes.push(['broken', await rects(STATE_BOXES)]);
     const rebuiltSay = await page.evaluate(SAY_TIP);
-    check('clamp', `${tag} broken: the pinned tip follows Today's rebuilt sentence`, sayWhole(rebuiltSay) && /waiting on the start-of-day value\.$/.test(rebuiltSay.say), { pinnedSay, rebuiltSay });
+    check('clamp', `${tag} broken: the pinned tip follows Today's rebuilt sentence`, sayWhole(rebuiltSay) && rebuiltSay.say === 'No desk has an exact result for today.' && pinnedSay.say !== rebuiltSay.say, { pinnedSay, rebuiltSay });
     if (!font && viewport.name === '390' && theme === 'light') await shot(page, viewport, '390-light-desk-say-tip', `Desk, broken: Today's one-line phone sentence${rebuiltSay.clamped ? ' with its ellipsis' : ''}, a tap shows it whole in the explanation tip`);
     await key(page, 'Escape');
     await leaveSay(page);

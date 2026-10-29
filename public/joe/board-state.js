@@ -9,7 +9,46 @@ export const RETENTION_SECONDS = 60 * 60;
 export const stoppedData = cell => ['snapshot_stale', 'producer_frozen'].includes(cell?.reason);
 export const outageValue = cell => Boolean(cell?.retained || stoppedData(cell));
 export const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale', 'baseline_pending', 'day_pnl_unavailable']);
+// A dash the feed explains as not exact (never a fault, never a last value).
+export const notExactDash = cell => cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason);
+// The board's one test for a value it may treat as current and true: shown,
+// fresh, with no reason at all (no fault and not "not exact"), not an outage's
+// last good value, and not from a source that calls itself unavailable.
+export const trustedCurrent = cell => cell?.value != null && cell.state === 'fresh' && !cell.reason && !outageValue(cell) &&
+  (cell.valueSource == null || cell.valueSource.status === 'available');
 const DESKS = ['j', 'joe', 'joel'];
+
+// Every channel a Today figure has on the wire besides the board's own cell:
+// its money reason and its source (pnlSources.day status and reason). A desk
+// without its own source uses the snapshot's, as the selector does.
+export function dayChannels(data, scope) {
+  const desk = scope === 'today' ? null : data?.desks?.find(d => d.id === scope);
+  const bag = scope === 'today' ? data?.totals : desk?.money;
+  return { moneyReason: bag?.reasons?.dayPnl ?? null, source: (desk?.pnlSources?.day ?? data?.pnlSources?.day) ?? null };
+}
+// The one classifier for a Today figure, over every channel: the board's cell
+// (value, state, freshness, retention and the reason the selector or the
+// board chose), the money reason and the source's status and reason.
+// - 'fault' wins: any fault reason on any channel, a missing cell, a last good
+//   value or stopped data, or anything that is neither of the two below.
+// - 'notExact': withheld, and every reason on every channel is a not-exact one.
+// - 'exact': a trustworthy current value (trustedCurrent) from an available
+//   source, with no reason on any channel; `estimated` marks a session-open estimate.
+export function classifyDay(cell, { moneyReason = null, source = null } = {}) {
+  const reasons = [cell?.reason, moneyReason, source?.reason].filter(Boolean);
+  const fault = reasons.find(reason => !NOT_EXACT_REASONS.has(reason));
+  if (fault) return { kind: 'fault', reason: fault };
+  if (!cell || outageValue(cell)) return { kind: 'fault', reason: null };
+  const notExact = reasons.find(reason => NOT_EXACT_REASONS.has(reason));
+  if (notExact) return { kind: 'notExact', reason: notExact };
+  if (trustedCurrent(cell) && (source == null || source.status === 'available')) {
+    return { kind: 'exact', reason: null, estimated: source?.method === 'session-open-estimate' };
+  }
+  return { kind: 'fault', reason: null };
+}
+// The household Today and each desk's, classified the same way.
+export const classifyDays = (states, data) => Object.fromEntries(['today', ...DESKS].map(scope =>
+  [scope, classifyDay(states[scope === 'today' ? 'today.dayPnl' : `desks.${scope}.dayPnl`], dayChannels(data, scope))]));
 const positionKey = row => JSON.stringify([row.scope, row.desk, row.symbol]);
 const unavailable = (cell, reason = cell.reason) => ({ ...cell, state: cell.state === 'fresh' ? 'broken' : cell.state, value: null, retained: false, reason });
 // Hiding a derived amount does not erase the observation's health/grace.
@@ -58,6 +97,11 @@ export function boardStates(feeds, now, previous = {}) {
     // their reason in the shared selector. An outage cannot restore an amount.
     const inexact = [cell.reason, ...sourceReasons]
       .find(reason => NOT_EXACT_REASONS.has(reason));
+    // Beside a not-exact channel, a fault on another of the figure's own
+    // channels (money or source) is the cell's reason: it never hides behind
+    // "not exact". A feed or gateway failure still does not replace the scoped
+    // not-exact reason (it stays on the header path, JOED-98).
+    const scopedFault = sourceReasons.find(reason => reason && !NOT_EXACT_REASONS.has(reason));
     const expired = outageValue(cell) && (cell.ageSeconds == null || cell.ageSeconds >= RETENTION_SECONDS);
     // Today belongs to the observation's NY date, even if a real outage or
     // stopped feed spans midnight. Receipt time cannot freshen old evidence.
@@ -74,7 +118,7 @@ export function boardStates(feeds, now, previous = {}) {
     if (inexact || expired || differentDay) states[name] = {
       // Preserve scoped exactness for every existing cell/health consumer.
       // Feed rejection and transport evidence stays on the feed/header path.
-      ...unavailable(cell, inexact ?? cell.reason ?? (differentDay ? 'baseline_pending' : null)),
+      ...unavailable(cell, inexact ? scopedFault ?? inexact : cell.reason ?? (differentDay ? 'baseline_pending' : null)),
       // Value-free evidence for Results after unavailable() clears retained.
       ...(expired ? { outageExpired: true } : {}),
     };
@@ -111,10 +155,13 @@ export function boardStates(feeds, now, previous = {}) {
     }) };
   }
   // Totals and since-start are derived figures. Never display a carried
-  // result or combine exact siblings with an outage/missing input.
+  // result or combine exact siblings with an outage/missing input. A desk
+  // Today the classifier calls a fault (a value kept beside a fault reason)
+  // is no input for the household Today either (JOED-148).
   for (const field of MONEY_FIELDS) {
     const name = `today.${field}`, cell = states[name];
-    const blocked = DESKS.map(id => states[`desks.${id}.${field}`]).find(c => outageValue(c) || c.value == null);
+    const blocked = DESKS.map(id => states[`desks.${id}.${field}`]).find((c, i) => outageValue(c) || c.value == null ||
+      (field === 'dayPnl' && classifyDay(c, dayChannels(data, DESKS[i])).kind === 'fault'));
     if (outageValue(cell) || (cell.value != null && blocked)) states[name] = withheld(cell, cell.reason ?? blocked?.reason);
   }
   for (const id of DESKS) {

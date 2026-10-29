@@ -1317,6 +1317,89 @@ When Today is a broken dash, its local caption states the reason unless the
 board's state line already explains it. This includes pending start-of-day
 results and every revision-10 exactness reason; repeated section reasons stay shared.
 
+JOED-148 (board only, no figure changes meaning) states each dash's reason once
+and promises no time. `not_exact_yet` reads “not exact”; the other not-exact
+reasons add their own words (“Not exact · start-of-day value missing”). A
+not-exact household Today names the desks that keep it from being exact,
+from the board's own per-desk cells (“Not exact for J and Joe”); a reason that
+every desk shares needs no names, and other desk states keep their own word
+(“Not exact for J; last good for Joe”). Today's sentence never repeats a reason
+that the caption or section line shows. It gives each exact desk's own Today
+(“Joel is flat today.”), or “No desk has an exact result for today.” Dashes are
+named “‹label›: not exact · ‹reason›”, never “not reported”, and so is a
+not-exact Cash on Desk and in Settings (caption “not exact”, name “Cash: not
+exact”), through one shared `dashWords` in `ui.js`; their info icon is
+a pointer tip hidden from screen readers, so the reason is spoken once. A desk
+card adds no line for a not-exact Today that is its only problem: the icon and
+the dash's name and title carry it. Details' “Today’s result” row lists every
+desk, exact ones first (“Exact for Joel; not exact for J and Joe”).
+
+JOED-148 also removes permanent noise. A desk card shows its Learning line
+only when the feed reports learning. The pusher's own valuation sentences
+(“Paper desk values are available.”, “Some paper desk values are
+unavailable.”, “Valuation is not exact yet.”, “Valuation unavailable pending
+exact source validation.”) are not desk activity: the card says “Joe is
+working.” or “Joel is sitting out.” instead, while any other action sentence
+stays verbatim. Check-in warnings on phone rows and Details' “Checked in” row
+appear only when the feed carries check-ins at all (the v2 feed sends none); a
+desk missing from a feed that does still says “Check-in: not reported”. A stuck
+desk reads “‹desk› is stuck: its trading activity can’t be confirmed.” Today's
+chart renders only with a line to draw: without a clock, on a day without a
+session, before the open or before the first result point the box is hidden
+and takes no space (the market block above already gives the session and the
+next opening), so the hero shrinks wherever the chart's 196 px minimum set its
+height. The phone section is then titled “Market hours” instead of
+“Today’s chart”. Within a phase nothing moves; the box appears with the first
+point of a session.
+
+Amy's A3 (2026-10-29, JOED-148) changes one light rule. During New York
+regular hours a Today that the feed explains as not exact no longer turns the
+header yellow: the board stays green, and Details says why once, in its
+“Today’s result” row (“Exact for Joel; not exact for J and Joe · ‹reason›”); no
+separate note repeats it. One classifier,
+`classifyDay` / `classifyDays` in `board-state.js`, decides every Today, the
+household's and each desk's, over all of its channels: the board's cell (value,
+state, freshness, last good), the money reason, and the source's status and
+reason. A fault on any channel wins over “not exact”; “exact” needs a
+trustworthy current value (`trustedCurrent`: shown, fresh, no reason, not an
+outage's last good value, its source available) and no reason on any channel;
+“not exact” is a dash whose every reason is a not-exact one. The light stays
+green only when the household Today and every desk's Today are each exact or
+not exact: a current household total never excuses a desk whose Today is a
+fault. The board gives such a desk's cell the fault as its own reason, so its
+card, the hero and Details name the same thing, and it withholds the household
+Today rather than show a total across that desk. Real gaps keep yellow
+`day_pending`, now worded “Today’s result is late — reload; if it stays, tell
+Amy” (compact “Result late”), and Details names each one: “Today’s result is
+unavailable during New York regular hours: ‹reason›.” for the household,
+“Joe’s Today is unavailable: ‹reason›.” or “Joe’s Today is only a last good
+value: ‹reason›.” for a desk. The light, the hero's desk names and sentence,
+the cards and Details all use the classifier, while `exactCell` keeps its
+separate money rule (JOED-96 replays). Transport failures and stale or missing
+feeds keep their earlier, higher-ranked warnings. Not-exact values still never
+turn the board red (JOED-103), the open-result rule in regular hours is
+unchanged, and no copy promises when a value becomes exact (A5).
+
+Amy's A4 (2026-10-29, JOED-148): Since start counts from 10 Sep 2026, 00:00 New
+York, for all three desks. `SINCE_START` in `public/joe/performance.js` holds
+that New York day beside `STARTING_MONEY`, citing the pusher's `PERIOD_START`
+(J's `FIXED_PERIOD_START` is the same instant). A desk's own
+`accounting.periodStart`, when the feed sends one, wins for that desk. The hero
+and the cards read “Since 10 Sep”; the hero caption gives the percentage's
+basis from the configured money (“of € 15.000 · after fees, incl. open
+positions”), Desks' money reads “started with € 15.000 on 10 Sep”, and phone
+rows say “Since” under a phone-only “Since 10 Sep” in the Desks heading. When
+desks start on different days the hero says “Since start” and each card keeps
+its own date. Results' `trackingStart` is checked against each desk's
+effective day (its own accounting date, else 10 Sep), never against the
+fallback alone. A desk's own date stays shown; a fallback day that Results
+contradicts becomes “Since start”. Details then names the actual days, e.g.
+“Since start dates differ: Results start on 12 Sep; J counts from 12 Sep, Joe
+and Joel from 10 Sep. Desk shows no date for Joe and Joel until they agree.”
+The light is unaffected. Since start's explanation retires “J’s bookkeeping starts on its own
+date” and resolves its day, starting money, each desk's share and “Same start as
+Results · All time” (only once Results agrees) from those values at display time.
+
 Release 35 (JOED-96, Markus Desk f3b46a8d) extends this outage policy to a
 stopped DATA feed (`snapshot_stale`) or frozen producer (`producer_frozen`).
 Individual observations keep their stale value, caption, age and reason below
@@ -1530,7 +1613,7 @@ keep their precedence.
 
 JOED-57 treats null desk equity with `not_exact_yet` as deliberately uncaptured,
 so an otherwise healthy board stays **Board OK** and Details adds one neutral
-“Desk values are not exact yet” line. Other missing reasons stay red except for
+“Desk values are not exact” line. Other missing reasons stay red except for
 the bounded broker-check gap above; retained values, stuck desks and regular-session result warnings keep
 their existing rules. `NOT_EXACT_TONE` in `health.js` defaults to `green`;
 `yellow` opts into `values_not_exact` after those checks. Null not-exact cells
@@ -1549,8 +1632,9 @@ the status and its label. These browser assertions run in PR CI.
 
 The reason enum appends `not_exact_yet` (the broker reports it, but it is not
 yet captured exactly) and `source_unavailable` (the broker did not report it,
-or did not report it in the required currency). Board copy is “not exact yet”
-and “not reported by the broker”. `source_not_authoritative` still means the
+or did not report it in the required currency). Board copy is “not exact”
+(JOED-148: the board cannot say when a value becomes exact) and “not reported
+by the broker”. `source_not_authoritative` still means the
 kept-holdings list disagrees. Desk and KEEP null values show an accessible
 em dash plus visible per-row reasons; KEEP remains read-only. A missing
 market-value summand makes the entire kept worth unavailable with its reason,
@@ -1564,7 +1648,8 @@ row. Both use the label “Cash” and caption “cash · as the broker reports 
 They show two decimals using exact integer units for display only, with
 the untouched broker lexeme in title and accessible name. Null Cash shows a
 muted dash in the Desk figure with “not reported · [reason]” in its caption;
-Settings retains that wording inline. Rev-7 omission reads “no data received yet”.
+Settings retains that wording inline. A not-exact Cash says “not exact”
+instead (JOED-148). Rev-7 omission reads “no data received yet”.
 Desk reserves fixed caption lines inside each cell; Settings reserves the actual
 wrapped value/stale/null reason forms, including the session reason at 360 px. They wrap
 text and keep the existing header. P5's `cash` cases cover real ingress, stale, null, API-session loss,
@@ -1659,7 +1744,7 @@ for the standard fixture's All desks and individual-desk selections; its
 existing tick/filter geometry checks include the figure and percentage slot.
 
 A snapshot state shared by money cells appears once in the hero's board caption.
-Shared not-exact reasons use “Numbers: not exact yet” in both the hero and
+Shared not-exact reasons use “Numbers: not exact” in both the hero and
 Account section, appending the reason when it adds information. Real faults
 keep `Numbers unavailable · <reason>`. P3 checks each broken hero cell and
 includes synthetic generic, shared and mixed not-exact/fault cases (JOED-107).

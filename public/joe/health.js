@@ -5,7 +5,7 @@ import { feedAge, panelState } from './contracts/panel-state.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { isRTH } from './time.mjs';
 import { age } from './format.js';
-import { NOT_EXACT_REASONS, stoppedData } from './board-state.js';
+import { NOT_EXACT_REASONS, stoppedData, trustedCurrent, classifyDays } from './board-state.js';
 
 // The contract's freshness bound: two 30-second producer cadences.
 export const STALE_AFTER_S = 60;
@@ -18,13 +18,13 @@ export const NOT_EXACT_TONE = 'green';
 
 export const REASON_COPY = Object.freeze({
   board_ok: 'numbers are up to date',
-  values_not_exact: 'desk values are not exact yet',
+  values_not_exact: 'desk values are not exact',
   snapshot_stale: 'updates are late — reload; if still late, tell Amy',
   retained_values: 'numbers a bit old — carrying the last good values',
   gateway_degraded: 'the broker connection is unstable — reload; if it persists, tell Amy',
   gateway_unconfirmed: 'the broker connection has not checked in — reload; if still old, tell Amy',
   open_unavailable_rth: 'waiting on broker prices — the desks’ money is still available',
-  day_pending: 'today’s result is waiting on data — the desks’ money is still available',
+  day_pending: 'today’s result is late — reload; if it stays, tell Amy',
   halt_on: 'paper trading is paused — the operator must check',
   gateway_down: 'the broker is offline — tell Amy to check the paper broker connection',
   feed_disconnected: 'board updates stopped — tell Amy to check the feed',
@@ -69,7 +69,8 @@ export const CELL_REASON = Object.freeze({
   halt_on: 'emergency stop is on',
   executor_broker_disagreement: 'executor and broker disagree',
   results_capture_failed: 'results capture failing',
-  not_exact_yet: 'not exact yet',
+  // The board cannot say when a value becomes exact, so its words promise no time.
+  not_exact_yet: 'not exact',
   source_unavailable: 'not reported by the broker',
   desk_unmapped: 'not matched to a desk',
   sod_missing: 'start-of-day value missing',
@@ -87,7 +88,11 @@ const notExact = cell => cell?.value == null && NOT_EXACT_REASONS.has(cell?.reas
 export const deskValuesNotExact = states => EQUITY_CELLS.some(name => notExact(states[name]));
 // Today's carried valuation: equity and total result retained from a last good value.
 const CARRIED_CELLS = ['today.equity', 'today.totalPnl', ...DESKS.flatMap(id => [`desks.${id}.equity`, `desks.${id}.totalPnl`])];
-const current = cell => cell?.value != null && !cell.retained;
+// Amy's A3 (2026-10-29) with the JOED-148 gates: in regular hours Today holds
+// only when the household Today and every desk's Today are each exact or
+// withheld as not exact (classifyDays, every channel). A fault anywhere is a
+// real gap, also beside a current household Today; Details says why.
+const todayHolds = (states, data) => Object.values(classifyDays(states, data)).every(day => day.kind !== 'fault');
 // Board totals may be hidden while their observations remain usable for health.
 const observation = cell => cell?.health ?? { available: cell?.value != null, retained: cell?.retained, ageSeconds: cell?.ageSeconds };
 
@@ -156,8 +161,8 @@ export function localBoardHealth(states, feeds, now) {
   // Scoped stalls have no independent age; a fresh envelope cannot date them.
   if (CARRIED_CELLS.some(name => observation(states[name]).retained || stoppedData(states[name]))) return { tone: 'yellow', reason: 'retained_values' };
   if (data.desks.some(desk => desk.state === 'stuck')) return { tone: 'yellow', reason: 'retained_values' };
-  if (isRTH(now) && !current(states['today.dayPnl'])) return { tone: 'yellow', reason: 'day_pending' };
-  if (isRTH(now) && !current(states['today.openPnl'])) return { tone: 'yellow', reason: 'open_unavailable_rth' };
+  if (isRTH(now) && !todayHolds(states, data)) return { tone: 'yellow', reason: 'day_pending' };
+  if (isRTH(now) && !trustedCurrent(states['today.openPnl'])) return { tone: 'yellow', reason: 'open_unavailable_rth' };
   if (NOT_EXACT_TONE === 'yellow' && deskValuesNotExact(states)) return { tone: 'yellow', reason: 'values_not_exact' };
   return { tone: 'green', reason: 'board_ok' };
 }
@@ -193,9 +198,9 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
   const explanation = REASON_COPY[health.reason] ?? FALLBACK_COPY;
   const action = explanation.includes(' — ') ? capital(explanation.split(' — ')[1]) : '';
   const short = {
-    values_not_exact: 'Not exact yet', snapshot_stale: 'Updates late', retained_values: 'Older numbers',
+    values_not_exact: 'Not exact', snapshot_stale: 'Updates late', retained_values: 'Older numbers',
     gateway_degraded: 'Broker unstable', gateway_unconfirmed: 'Broker unsure', open_unavailable_rth: 'Prices pending',
-    day_pending: 'Result pending', refresh_failed: 'Data delayed',
+    day_pending: 'Result late', refresh_failed: 'Data delayed',
   };
   const control = health.tone === 'red' ? health.reason === 'halt_on' ? 'Emergency stop' : 'Problem' : sentence;
   return { ...health, sentence, control,
@@ -207,6 +212,9 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
 }
 
 const PNL_COPY = { day: 'Today’s result', open: 'The open result' };
+// A stuck desk is one whose positions, orders or executions the pusher cannot
+// currently confirm; its own status text names no cause, so the board says this.
+export const STUCK_REASON = 'its trading activity can’t be confirmed';
 export function boardDiagnostics(states, feeds, now) {
   const data = feeds.data?.value;
   const problems = [];
@@ -235,10 +243,18 @@ export function boardDiagnostics(states, feeds, now) {
     if (cell?.retained && cell.value) problems.push(`${LABEL[id]}’s money is carried from ${age(cell.ageSeconds)} ago (${cellReason(cell.reason)}).`);
     else if (cell?.value == null && cell?.reason && !notExact(cell)) problems.push(`${LABEL[id]}’s money is unavailable: ${cellReason(cell.reason)}.`);
   }
-  for (const desk of data.desks) if (desk.state === 'stuck') problems.push(`${desk.label} is stuck: ${desk.action}`);
-  if (isRTH(now)) for (const [kind, field] of [['day', 'dayPnl'], ['open', 'openPnl']]) {
-    const cell = states[`today.${field}`];
-    if (!current(cell)) problems.push(`${PNL_COPY[kind]} is unavailable during New York regular hours: ${cellReason(cell?.reason ?? data.pnlSources?.[kind]?.reason ?? 'feed_not_received')}.`);
+  for (const desk of data.desks) if (desk.state === 'stuck') problems.push(`${desk.label} is stuck: ${STUCK_REASON}.`);
+  if (isRTH(now)) {
+    // The same classifier as the light: each Today fault, household or desk, once.
+    const days = classifyDays(states, data);
+    if (days.today.kind === 'fault') problems.push(`${PNL_COPY.day} is unavailable during New York regular hours: ${cellReason(days.today.reason ?? data.pnlSources?.day?.reason ?? 'feed_not_received')}.`);
+    for (const id of DESKS) if (days[id].kind === 'fault') {
+      const lastGood = states[`desks.${id}.dayPnl`]?.retained, reason = days[id].reason;
+      const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason)}` : '';
+      problems.push(`${LABEL[id]}’s Today is ${lastGood ? 'only a last good value' : 'unavailable'}${why}.`);
+    }
+    const open = states['today.openPnl'];
+    if (!trustedCurrent(open)) problems.push(`${PNL_COPY.open} is unavailable during New York regular hours: ${cellReason(open?.reason ?? data.pnlSources?.open?.reason ?? 'feed_not_received')}.`);
   }
   return problems;
 }

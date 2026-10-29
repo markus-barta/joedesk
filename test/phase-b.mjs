@@ -11,7 +11,7 @@ import { atomicWrite } from '../server/storage.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { scenario, NOW, at, advance } from '../scripts/browser/board.mjs';
-import { deskRankingSnapshot } from '../scripts/browser/phase-b.mjs';
+import { deskRankingSnapshot, mixedHeaderOk, mixedDesksOk } from '../scripts/browser/phase-b.mjs';
 const { heroLeft, positionsHtml, keptHtml, positionSectionReason, cellView, compactDesk, headerHealth, healthPop } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { todayPercent, sincePercent, rankDesks } = await import('../public/joe/performance.js');
@@ -49,7 +49,7 @@ for (const reason of NOT_EXACT_REASONS) test(`JOED-103: ${reason} equity keeps t
   const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
   assert.equal(health.tone, 'green');
   assert.match(headerHealth(ctx, health).html, /tone-ok/);
-  assert.match(healthPop(ctx, health), /Desk values are not exact yet/);
+  assert.match(healthPop(ctx, health), /Desk values are not exact(?! yet)/);
   assert.doesNotMatch(healthPop(ctx, health), /money is unavailable/);
 });
 
@@ -57,10 +57,17 @@ test('JOED-103: the shipped mixed Phase B snapshot is not red; unexplained missi
   const ctx = context(mixed);
   ctx.states = boardStates(ctx.feeds, ctx.now);
   const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
-  assert.equal(health.tone, 'yellow', 'the existing regular-hours Today warning remains');
-  assert.equal(health.reason, 'day_pending');
+  // Amy's A3: the not-exact Today no longer warns; J's not-exact open result
+  // keeps the existing regular-hours open-result warning.
+  assert.equal(health.tone, 'yellow', 'the regular-hours open-result warning remains');
+  assert.equal(health.reason, 'open_unavailable_rth');
+  // Details states the not-exact Today once, in its "Today’s result" row.
+  const details = htmlDocument(healthPop(ctx, health)), rows = details.querySelectorAll('dt').map(dt => dt.textContent);
+  assert.equal(details.querySelectorAll('dd')[rows.indexOf('Today’s result')].textContent,
+    'Exact for Joel; not exact for J · desk ledger not reconciled; not exact for Joe · start-of-day value missing');
+  assert.doesNotMatch(details.textContent, /Today: not exact/);
   assert.match(headerHealth(ctx, health).html, /tone-warn/);
-  assert.match(healthPop(ctx, health), /Desk values are not exact yet/);
+  assert.match(healthPop(ctx, health), /Desk values are not exact(?! yet)/);
   const fault = context(exact);
   fault.states['desks.j.equity'] = { state: 'broken', value: null, reason: null };
   const red = boardHealthPresentation(fault.states, fault.feeds, fault.now);
@@ -116,7 +123,7 @@ test('JOED-97 M1: replay the browser journey through the read model before asser
     const card = htmlDocument(deskCard(ctx, id, 50, true));
     const lines = card.querySelectorAll('.mini-label .st');
     const text = card.querySelector('.mini-label').textContent;
-    assert.ok(text.startsWith('Today: not exact yet · waiting on the start-of-day value'), text);
+    assert.ok(text.startsWith('Today: not exact · waiting on the start-of-day value'), text);
     assert.equal(states[`desks.${id}.dayPnl`].value, null);
     assert.equal(states[`desks.${id}.openPnl`].retained, true);
     assert.ok(todayPattern.test(lines[0].textContent), text);
@@ -658,7 +665,14 @@ test('mixed rendering keeps exact desks visible, explains each failure and share
   assert.equal(hero.querySelectorAll('.performance-pct').length, 0);
   const j = htmlDocument(deskCard(ctx, 'j', 50, false));
   assert.equal(j.textContent.match(/desk ledger not reconciled/g)?.length, 1);
-  assert.match(htmlDocument(deskCard(ctx, 'joe', 50, false)).textContent, /start-of-day value missing/);
+  // JOED-148: Joe's lone not-exact Today keeps its reason on its own dash and
+  // info icon; the card adds no line that would repeat it.
+  const joe = htmlDocument(deskCard(ctx, 'joe', 50, false)), joeDay = joe.querySelector('.dnums .bn');
+  assert.equal(joe.querySelector('.mini-label').textContent, 'since start · last sessions');
+  assert.doesNotMatch(joe.textContent, /start-of-day value missing/);
+  assert.equal(joeDay.getAttribute('aria-label'), 'Today: not exact · start-of-day value missing');
+  assert.equal(joeDay.getAttribute('title'), joeDay.getAttribute('aria-label'));
+  assert.equal(joe.querySelector('.dnums .cell-state').getAttribute('title'), 'Not exact · start-of-day value missing');
   assert.equal(htmlDocument(deskCard(ctx, 'joel', 50, false)).querySelectorAll('.dnums .v .bn').length, 3);
   const positions = htmlDocument(positionsHtml(ctx).html);
   assert.equal(positionSectionReason(ctx.states.positions), cellReason('position_stale'));
@@ -669,4 +683,27 @@ test('mixed rendering keeps exact desks visible, explains each failure and share
     assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
   }
   assert.match(positions.textContent, /\$\s*40,01/, 'fresh callbacks remain exact beside the stale row');
+});
+
+// JOED-148 fix round 1 (gate finding 3): the Phase B browser evidence must hold
+// at 390/360 px, where the page joins "·" to the word before it with a
+// no-break space, and at desktop widths, where it does not.
+test('JOED-148: Phase B mixed browser evidence accepts the phone’s no-break space before “·”', () => {
+  const phone = text => text.replace(/ ·/g, ' ·');
+  const desktop = {
+    headerTone: 'warn', headerReason: 'open_unavailable_rth',
+    details: 'Desk values are not exact Today’s resultExact for Joel; not exact for J · desk ledger not reconciled; not exact for Joe · start-of-day value missing',
+    j: 'Numbers: not exact · desk ledger not reconciled', joe: 'Joe is sitting out. Today — since start · last sessions', joel: '+€5,00€5.025,00',
+    joeDay: { name: 'Today: not exact · start-of-day value missing', title: 'Today: not exact · start-of-day value missing' },
+    joeStatus: 'since start · last sessions',
+  };
+  const onPhone = { ...desktop, details: phone(desktop.details), j: phone(desktop.j), joe: phone(desktop.joe), joeStatus: phone(desktop.joeStatus) };
+  for (const result of [desktop, onPhone]) {
+    assert.equal(mixedHeaderOk(result), true);
+    assert.equal(mixedDesksOk(result), true);
+  }
+  // The checks still reject the old copy and a repeated Today line.
+  assert.equal(mixedDesksOk({ ...onPhone, joeStatus: 'Today: not exact · start-of-day value missing' }), false);
+  assert.equal(mixedHeaderOk({ ...onPhone, details: `${onPhone.details} Today: not exact for J and Joe` }), false);
+  assert.equal(mixedDesksOk({ ...desktop, joeDay: { ...desktop.joeDay, title: 'Today: not reported · start-of-day value missing' } }), false);
 });
