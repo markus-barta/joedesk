@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import * as nodeModule from 'node:module';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
+import { probeHeaderFits } from '../scripts/browser/header-nav.mjs';
 
 // results.js as the board serves it: time.mjs and contracts/ come from the
 // repo root (test/results-model.mjs maps them the same way).
@@ -214,6 +215,62 @@ test('routes: a full 50-entry browser history still pushes one place per arrival
   const walk = [];
   for (const delta of [-1, -1, -1, -1, 1]) { b.traverse(delta); walk.push(b.win.location.hash); }
   assert.deepEqual(walk, [linked, '#settings', home, '#desk', home], 'exact Back/Forward sequence, without duplicate canonical entries');
+});
+
+// A content-box observer ignores padding-only growth. Resize delivery and
+// fitting take successive frames; real pixels and elementFromPoint stay in CI.
+function headerProbePage({ failAudit = false } = {}) {
+  const fits = ['', 'word', 'word labels', 'word labels tight', 'word labels tight icons', 'word labels tight icons squeeze'];
+  const header = { dataset: { fit: '' } }, buttons = [{ id: 'gear', visible: true }, { id: 'hidden-nav', visible: false }];
+  let cssText = '', attached = false, contentWidth = 62, pending = null;
+  const audited = [];
+  const style = { get textContent() { return cssText; }, set textContent(value) { cssText = value; }, remove() { attached = false; cssText = ''; } };
+  const context = {
+    document: {
+      createElement: tag => { assert.equal(tag, 'style'); return style; },
+      getElementById: id => { assert.equal(id, 'modeLabel'); return { getBoundingClientRect: () => ({ width: 80 }) }; },
+      head: { append: node => { assert.equal(node, style); attached = true; } },
+      querySelector: selector => { assert.equal(selector, '.top-in'); return header; },
+      querySelectorAll: selector => { assert.equal(selector, '.top-in button'); return buttons; },
+    },
+    requestAnimationFrame: done => queueMicrotask(() => {
+      if (pending !== null) { header.dataset.fit = pending; pending = null; }
+      // 18 px padding, unchanged by width-based growth. Padding-only growth
+      // leaves this observed box at 62 px and never queues a fitted step.
+      const width = Number(/\bwidth:\s*([\d.]+)px/.exec(cssText)?.[1] ?? 80) - 18;
+      if (width !== contentWidth) {
+        contentWidth = width;
+        pending = fits[Math.min(fits.length - 1, Math.floor((width - 62) / 8))];
+      }
+      done();
+    }),
+    __audit: {
+      visible: button => button.visible,
+      hits: controls => {
+        assert.deepEqual(Array.from(controls), [buttons[0]], 'audit every visible control, excluding hidden nav');
+        if (failAudit) throw new Error('hit audit failed');
+        audited.push(header.dataset.fit);
+        return header.dataset.fit === 'word labels' ? [{ id: 'gear', reason: 'shared hit region' }] : [];
+      },
+    },
+  };
+  return { fits, audited, get clean() { return !attached && cssText === '' && header.dataset.fit === ''; },
+    run: () => runInContext(`(${probeHeaderFits.toString()})()`, createContext(context)).then(structuredClone) };
+}
+
+test('header probe: content-box growth reaches every fitted step after resize delivery, retains hit faults and restores the header', async () => {
+  const page = headerProbePage();
+  const steps = await page.run();
+  assert.deepEqual(steps.map(s => s.fit), page.fits);
+  assert.deepEqual(page.audited, page.fits);
+  assert.deepEqual(steps.find(s => s.fit === 'word labels').faults, [{ id: 'gear', reason: 'shared hit region' }], 'a geometry fault cannot disappear in the probe');
+  assert.ok(page.clean, 'temporary growth is removed and the resize has settled');
+});
+
+test('header probe: an audit failure still removes temporary growth', async () => {
+  const page = headerProbePage({ failAudit: true });
+  await assert.rejects(page.run(), /hit audit failed/);
+  assert.ok(page.clean);
 });
 
 test('places: the place is read before the page changes, so a screen taller than the next one comes back where it was left', () => {

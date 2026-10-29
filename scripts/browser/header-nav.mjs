@@ -46,6 +46,28 @@ const LAYOUT = `(() => {
 })()`;
 const rowOk = l => l.paper === 'PAPER' && l.inRow && !l.overlaps.length && !l.wordmarkClipped && l.status.lines === 1;
 
+// Serialized into the page; Node exercises the same probe without a browser.
+export async function probeHeaderFits() {
+  const style = document.createElement('style'), seen = new Map();
+  const width = document.getElementById('modeLabel').getBoundingClientRect().width;
+  const frames = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))));
+  document.head.append(style);
+  try {
+    for (let grow = 0; grow <= 1600; grow += 8) {
+      // fitHeader observes the content box. Padding alone grows the border
+      // box without notifying it (the 1024 px CI case stayed at no steps).
+      style.textContent = '#modeLabel { width: ' + (width + grow) + 'px; }';
+      await frames();
+      const fit = document.querySelector('.top-in').dataset.fit;
+      if (!seen.has(fit)) seen.set(fit, __audit.hits([...document.querySelectorAll('.top-in button')].filter(__audit.visible)));
+      if (fit.split(' ').includes('squeeze')) break;
+    }
+    return [...seen].map(([fit, faults]) => ({ fit, faults }));
+  } finally {
+    style.remove(); await frames();
+  }
+}
+
 export async function headerNavChecks({ page, newBoard, check, shot }) {
   const { snapshot, history } = scenario(NOW);
   const b = await newBoard({ history });
@@ -229,20 +251,7 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
   for (const [width, mobile] of [[1024, false], [820, false], [390, true]]) {
     await configure(page, { name: String(width), width, height: 900, mobile }, 'light');
     await load(page, b.url, 'desk');
-    const steps = await page.evaluate(`(async () => {
-      const style = document.createElement('style'), seen = new Map();
-      const frames = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))));
-      document.head.append(style);
-      for (let grow = 0; grow <= 1600; grow += 8) {
-        style.textContent = '#modeLabel { padding-right: ' + (10 + grow) + 'px; }';
-        await frames();
-        const fit = document.querySelector('.top-in').dataset.fit;
-        if (!seen.has(fit)) seen.set(fit, __audit.hits([...document.querySelectorAll('.top-in button')].filter(__audit.visible)));
-        if (fit.split(' ').includes('squeeze')) break;
-      }
-      style.remove(); await frames();
-      return [...seen].map(([fit, faults]) => ({ fit, faults }));
-    })()`);
+    const steps = await page.evaluate(`(${probeHeaderFits.toString()})()`);
     check('header', `${width}: growing PAPER walks the header through its fitted steps (${steps.map(s => s.fit || 'none').join(' · ')}); at every step each control's real hit region is whole, 44 px each way and shared with no neighbour`,
       ['word', 'labels', 'tight', 'icons', 'squeeze'].every(step => steps.some(s => s.fit.split(' ').includes(step))) && steps.every(s => !s.faults.length), steps);
   }
