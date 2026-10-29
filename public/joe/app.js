@@ -2,6 +2,7 @@
 // render per animation frame. Settings saves reviewed paper fleet drafts and
 // board display values through separate authenticated routes.
 import { isCanonicalJoeHost } from './host.js';
+import { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, applyRoute, createPlaces } from './route.js';
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
@@ -15,7 +16,6 @@ import { initSettings, renderSettings, showSection, SECTIONS as SETTINGS_SECTION
 import { NB, joinUnits } from './format.js';
 import { initVersionDisplay } from './version-display.js';
 
-const SCREENS = ['desk', 'results', 'history', 'settings'];
 const root = document.documentElement;
 let screen = 'desk';
 const timings = [];
@@ -30,15 +30,19 @@ if (!isCanonicalJoeHost(location.hostname)) {
 }
 
 function start() {
-  // CSS shrinks only the brand before any essential item. Hide an incomplete
-  // wordmark, then tighten gaps if even the icon-only row needs more room.
-  // Visibility never changes sizes, so observing the result cannot oscillate.
-  const header = $('.top-in'), word = header.querySelector('.brand .word'), wordText = word.firstElementChild;
+  // The header keeps one row. While its last control, the theme button, does
+  // not fit, add the next step (app.css: the wordmark goes, the nav drops its
+  // icons, gaps tighten, the nav keeps only its icons, then the light may
+  // narrow), keeping the earlier ones. Each pass starts from none, and only
+  // the viewport and the fonts decide the steps, never the light's words, so
+  // no tick or state change moves the header and refitting cannot oscillate.
+  const header = $('.top-in'), themeBtn = $('#themeBtn');
+  const FIT = ['word', 'labels', 'tight', 'icons', 'squeeze'];
+  const overflows = () => themeBtn.getBoundingClientRect().right > header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight) + 0.02;
   const fitHeader = () => {
-    header.removeAttribute('data-tight');
-    const row = header.getBoundingClientRect(), css = getComputedStyle(header);
-    if ($('#themeBtn').getBoundingClientRect().right > row.right - parseFloat(css.paddingRight) + 0.02) header.setAttribute('data-tight', '');
-    word.style.visibility = wordText.getBoundingClientRect().width > word.getBoundingClientRect().width + 0.02 ? 'hidden' : '';
+    let steps = 0;
+    header.dataset.fit = '';
+    while (steps < FIT.length && overflows()) header.dataset.fit = FIT.slice(0, ++steps).join(' ');
     fitStatusLine($('#hdrHealth'), $('#statusAlert'));
   };
   // Apply size changes in the next frame, outside ResizeObserver delivery.
@@ -47,7 +51,7 @@ function start() {
     if (!headerFrame) headerFrame = requestAnimationFrame(() => { headerFrame = 0; fitHeader(); });
   };
   const headerFit = new ResizeObserver(queueHeaderFit);
-  for (const el of [header, word, wordText, $('#hdrHealth'), header.querySelector('.nav')]) headerFit.observe(el);
+  for (const el of [header, $('#modeLabel'), header.querySelector('.brand .word > span'), header.querySelector('.nav'), $('#hdrHealth')]) headerFit.observe(el);
   document.fonts.addEventListener('loadingdone', queueHeaderFit);
   fitHeader();
   trapDialogs();
@@ -129,21 +133,45 @@ function start() {
     const why = reason;
     frame = requestAnimationFrame(() => { const r = pending ?? why; pending = null; render(r); });
   }
-  function go(next, anchor) {
-    if (!SCREENS.includes(next)) next = 'desk';
+  // Every way onto a screen ends here (route.js). The reader's own navigation
+  // (push) adds a history entry; the first load, Back and Forward only
+  // correct the address. Each entry keeps the reader's place (createPlaces,
+  // which makes every history call within one budget): saved while reading
+  // and on every departure, restored on return and after a reload. The
+  // address keeps the screen and its query, which the screen's route reader
+  // gets before it renders; an anchor only scrolls.
+  let shown = { screen, query: '' };
+  window.__joedesk.route = () => ({ ...shown });
+  const places = createPlaces(window);
+  addEventListener('scroll', places.scrolled, { passive: true });
+  addEventListener('scrollend', places.scrolled);
+  addEventListener('pagehide', places.flush);
+  // The reader's own scrolling ends a return still waiting for the page to grow.
+  for (const type of ['wheel', 'touchstart', 'keydown', 'mousedown']) addEventListener(type, places.abandon, { passive: true });
+  function go(next, { anchor = null, query = '', push = false, scroll = 0 } = {}) {
+    if (!SCREENS.includes(next)) { next = 'desk'; anchor = null; query = ''; }
+    const target = { screen: next, query };
+    // The address first, while the page still shows the place being left:
+    // hiding a screen, closing a dialog or rendering may move it.
+    try {
+      const step = historyStep(location.hash, target, push), address = `${location.pathname}${location.search}${routeHash(target)}`;
+      if (step === 'push') { if (!places.push(address)) places.step(); } else if (step === 'replace') places.replace(address);
+    } catch { places.step(); /* file or sandboxed context: keep the entry it is on */ }
+    shown = target;
     screen = next;
     tips.hide();
     for (const s of SCREENS) $(`#scr-${s}`).classList.toggle('on', s === next);
     document.body.dataset.screen = next;
-    $$('.nav button, .bottom-nav button').forEach(b => { if (b.dataset.go === next) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+    // The nav (both copies) and the gear: exactly the shown screen is current.
+    $$('.top-in [data-go], .bottom-nav [data-go]').forEach(b => { if (b.dataset.go === next) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     closePop();
     for (const dialog of $$('dialog[open]')) dialog.close();
-    try { history.replaceState(null, '', `#${next}`); } catch { /* file or sandboxed context */ }
     dirtyHistory = true; forgetCharts(); forgetResults();
     if (next === 'settings') feed.refreshActions();
+    guard('route', () => applyRoute(target));
     render('screen');
-    if (next === 'settings' && SETTINGS_SECTIONS.some(s => s.id === anchor)) showSection(anchor);
-    else if (anchor) document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0);
+    if (next === 'settings' && SETTINGS_SECTIONS.some(s => s.id === anchor)) { places.abandon(); showSection(anchor); }
+    else if (anchor) { places.abandon(); document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); } else places.arrive(scroll);
   }
 
   // The board details are a dialog: opening moves focus into it, Tab stays
@@ -184,7 +212,9 @@ function start() {
       return;
     }
     const goEl = e.target.closest('[data-go]');
-    if (goEl) { go(goEl.dataset.go, goEl.dataset.anchor); return; }
+    if (goEl) { go(goEl.dataset.go, { anchor: goEl.dataset.anchor, query: goEl.dataset.query, push: true }); return; }
+    const route = linkRoute(e, e.target.closest('a[href]'));
+    if (route) { e.preventDefault(); go(route.screen, { anchor: route.anchor, query: route.query, push: true }); return; }
     const pop = $('#healthPop');
     const statusControl = e.target.closest('#hdrHealth, #statusAlertControl');
     if (statusControl) {
@@ -264,7 +294,17 @@ function start() {
   });
   sheet.addEventListener('close', () => { if (sheetFrom) document.querySelector(`#cal [data-day="${sheetFrom}"]`)?.focus({ preventScroll: true }); sheetFrom = null; });
 
-  addEventListener('hashchange', () => { const [next, anchor] = location.hash.slice(1).split('/'); if (next !== screen) go(next, anchor); });
+  // Back, Forward, a typed address or a link the browser followed itself:
+  // the entry left keeps the place the page still shows; show what the
+  // address says, where the reader last was on it (a new entry: its top).
+  // Back and Forward fire both events; the second finds the entry taken up.
+  const follow = () => {
+    const moved = places.step(), next = parseRoute(location.hash);
+    if (!moved && next.known && !next.anchor && sameRoute(next, shown)) return;
+    go(next.screen, { anchor: next.anchor, query: next.query, scroll: places.saved() });
+  };
+  addEventListener('popstate', follow);
+  addEventListener('hashchange', follow);
   let resize = 0;
   addEventListener('resize', () => { cancelAnimationFrame(resize); resize = requestAnimationFrame(() => { forgetCharts(); forgetResults(); dirtyHistory = true; render('resize'); }); });
   // With System chosen the page follows the OS live (CSS); the header button's words follow too.
@@ -291,7 +331,11 @@ function start() {
   initSettings({ feed, tips, schedule });
   initVersionDisplay();
   $('#footShield').innerHTML = `${icon('shield')}Read-only paper board · nothing here can place a trade`;
-  const [first, anchor] = (location.hash || '#desk').slice(1).split('/');
-  go(first, anchor);
+  // go() puts each screen back where the reader left it; the browser need not.
+  try { history.scrollRestoration = 'manual'; } catch { /* go() still scrolls */ }
+  // A reload returns to the entry's place once the page has grown to it.
+  places.step();
+  const first = parseRoute(location.hash || '#desk');
+  go(first.screen, { anchor: first.anchor, query: first.query, scroll: places.saved() });
   feed.start();
 }

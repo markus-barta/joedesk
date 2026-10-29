@@ -78,8 +78,10 @@ export async function load(page, url, screen = 'desk') {
   await settle(page);
 }
 
+// The reading screens are in the header's nav (the bottom bar's on a phone);
+// Settings is the header's gear.
 export async function go(page, screen) {
-  await page.evaluate(`document.querySelector('.nav [data-go="${screen}"]')?.click() ?? document.querySelector('.bottom-nav [data-go="${screen}"]').click()`);
+  await page.evaluate(`(document.querySelector('.top-in [data-go="${screen}"]') ?? document.querySelector('.bottom-nav [data-go="${screen}"]')).click()`);
   await settle(page);
 }
 

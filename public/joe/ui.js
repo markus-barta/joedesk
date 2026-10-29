@@ -56,6 +56,10 @@ export function bn(n, currency = 'EUR', signed = true, d = 2) {
   const sign = n < 0 ? MINUS : signed && n > 0 ? '+' : '';
   return `<span class="bn ${signed ? tone(n) : ''}">${signed && n ? icon(arrowOf(n), 'i ar') : ''}${sign}<span class="u">${esc(currencySymbol(currency))}</span>${digits(n, d)}</span>`;
 }
+// Money inside running text (captions, sentences, the header): one unit that
+// never wraps, so a line cannot end in its sign with the amount on the next.
+// bn() and pl() already keep their figures whole.
+export const moneyNoWrap = (n, currency = 'EUR', signed = false, d = 2) => `<span class="nowrap">${esc(money(n, currency, signed, d))}</span>`;
 export const pl = (n, currency = 'EUR') => (n == null || !known(n) ? '<span class="muted">—</span>'
   : isZero(n) ? `<span class="pl">${money(0, currency)}</span>`
     : `<span class="pl ${tone(n)}">${icon(arrowOf(n))}${money(n, currency, true)}</span>`);

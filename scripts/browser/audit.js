@@ -58,7 +58,7 @@
     // Shared by P3's full width/font sweep and P5's real-ingress checks.
     headerLayout() {
       const row = document.querySelector('.top-in'), r = row.getBoundingClientRect(), css = getComputedStyle(row);
-      const selectors = ['.brand', '#modeLabel', '#hdrHealth', '#themeBtn'];
+      const selectors = ['.brand', '#modeLabel', '#hdrHealth', '#settingsBtn', '#themeBtn'];
       if (visible(row.querySelector('.nav'))) selectors.push('.nav');
       const items = selectors.map(selector => {
         const e = row.querySelector(selector), box = e.getBoundingClientRect();
@@ -244,10 +244,44 @@
       const cs = getComputedStyle(el);
       return { bgAlpha: parseColor(cs.backgroundColor)?.a, opacity: Number(cs.opacity), visible: cs.visibility };
     },
+    // A control's target: its box, or its absolute ::after where that reaches
+    // further (the header draws 30 and 36 px controls with 44 px targets).
+    target(el) {
+      const r = el.getBoundingClientRect(), after = getComputedStyle(el, '::after');
+      const reach = after.content && after.content !== 'none' && after.position === 'absolute';
+      const inset = k => (reach ? Math.min(0, parseFloat(after[k]) || 0) : 0);
+      const box = { left: r.left + inset('left'), right: r.right - inset('right'), top: r.top + inset('top'), bottom: r.bottom - inset('bottom') };
+      return { ...box, width: box.right - box.left, height: box.bottom - box.top };
+    },
+    // Real hit regions (elementFromPoint, so a neighbour's ::after on top
+    // counts against a control): along each control's centre lines, every
+    // point of its target (box and absolute ::after) within 12 px of an edge,
+    // and its centre, must hit the control itself, and the target must span
+    // 44 px each way. Neighbours reach at most 7 px into a control, so the
+    // edge bands see every overlap. Returns one line per failing control.
+    hits(controls) {
+      const faults = [], label = el => el.id || el.dataset.go || String(el.className).split(' ')[0] || el.tagName.toLowerCase();
+      for (const el of controls) {
+        const box = this.target(el), cx = (box.left + box.right) / 2, cy = (box.top + box.bottom) / 2, others = new Set();
+        let misses = 0;
+        const probe = (x, y) => {
+          if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return;
+          const hit = document.elementFromPoint(x, y)?.closest('button, a[href], input, select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])');
+          if (hit !== el) { misses++; others.add(hit ? label(hit) : 'nothing'); }
+        };
+        const band = (a, b, fn) => { for (let v = Math.floor(a) + 0.5; v < b; v += 1) if (v - a <= 12 || b - v <= 12) fn(v); };
+        band(box.left, box.right, x => probe(x, cy));
+        band(box.top, box.bottom, y => probe(cx, y));
+        probe(cx, cy);
+        if (misses || box.width < 43.5 || box.height < 43.5) faults.push(`${label(el)} ${Math.round(box.width)}×${Math.round(box.height)}${misses ? `, ${misses} points hit ${[...others].join('/')}` : ''}`);
+      }
+      return faults;
+    },
     // One width of the width sweep: the page's right edge, the header's row,
-    // the one nav, 44 px targets and aligned icons in the compact header, and
-    // (light given) every light label put through the header.
-    sweep(compactMax, light) {
+    // the one nav (in the header above barMax px, the bottom bar up to it)
+    // with Settings as the header's gear, 44 px targets and aligned icons,
+    // and (light given) every light label put through the header.
+    sweep(barMax, light) {
       const box = el => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height }; };
       const name = el => el.id || String(el.className?.baseVal ?? el.className).split(' ')[0] || el.tagName.toLowerCase();
       const inFixed = el => { for (let n = el; n; n = n.parentElement) if (getComputedStyle(n).position === 'fixed') return true; return false; };
@@ -271,23 +305,34 @@
         if (!status.iconInside || status.iconOverlap || !status.tabular) faults.push('status icon or numerals');
         return faults;
       };
-      const compact = innerWidth <= compactMax;
+      const compact = innerWidth <= barMax;
       const nav = document.querySelector('.top .nav'), bar = document.querySelector('.bottom-nav');
       const shown = compact ? bar : nav, hidden = compact ? nav : bar;
       const buttons = [...shown.querySelectorAll('button')];
-      const navOk = visible(shown) && !visible(hidden) && buttons.length === 4 && buttons.every(b => { const r = box(b); return visible(b) && r.left >= -0.5 && r.right <= innerWidth + 0.5 && r.top >= -0.5 && r.bottom <= innerHeight + 0.5; });
+      const gear = document.getElementById('settingsBtn'), here = document.body.dataset.screen;
+      // Exactly the shown screen is current: both copies of the nav on a
+      // reading screen, the gear alone on Settings.
+      const current = [...document.querySelectorAll('.top-in [data-go], .bottom-nav [data-go]')].filter(b => b.getAttribute('aria-current') === 'page');
+      const navOk = visible(shown) && !visible(hidden) && buttons.map(b => b.dataset.go).join() === 'desk,results,history' &&
+        buttons.every(b => { const r = box(b); return visible(b) && r.left >= -0.5 && r.right <= innerWidth + 0.5 && r.top >= -0.5 && r.bottom <= innerHeight + 0.5; }) &&
+        visible(gear) && top.contains(gear) && gear.dataset.go === 'settings' && gear.getAttribute('aria-label') === 'Settings' &&
+        !document.querySelector('.top .nav [data-go="settings"], .bottom-nav [data-go="settings"]') &&
+        current.length === (here === 'settings' ? 1 : 2) && current.every(b => b.dataset.go === here);
       const health = document.getElementById('hdrHealth'), theme = document.getElementById('themeBtn');
-      const targets = compact ? [health, theme, ...bar.querySelectorAll('button')].filter(visible).map(b => ({ id: name(b), ...box(b) })).filter(b => b.width < 43.5 || b.height < 43.5)
-        .map(b => `${b.id} ${Math.round(b.width)}×${Math.round(b.height)}`) : [];
+      // Every header control at every width, and the bottom bar where it shows:
+      // each real hit region is whole, 44 px each way and shared with no neighbour.
+      const targets = this.hits([...top.querySelectorAll('button'), ...(compact ? bar.querySelectorAll('button') : [])].filter(visible));
       const icons = [];
       const centred = (el, axes, what) => {
-        const icon = [...el.querySelectorAll(':scope > svg')].find(visible);
+        // A nav button that the fitted header shows as its label alone centres the label.
+        const icon = [...el.querySelectorAll(':scope > svg, :scope > span')].find(visible);
         if (!icon) { icons.push(`${what}: no icon`); return; }
         const a = box(el), i = box(icon);
         const dx = (i.left + i.right) / 2 - (a.left + a.right) / 2, dy = (i.top + i.bottom) / 2 - (a.top + a.bottom) / 2;
         if ((axes.includes('x') && Math.abs(dx) > 0.5) || (axes.includes('y') && Math.abs(dy) > 0.5)) icons.push(`${what} off by ${dx.toFixed(2)}, ${dy.toFixed(2)}`);
       };
       centred(theme, 'xy', 'theme');
+      centred(gear, 'xy', 'gear');
       if (innerWidth <= 700) {
         // The phone light's icon shares its first line so the next line can
         // use the full button width. It aligns with that line, not the two-line block.
