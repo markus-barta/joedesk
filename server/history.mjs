@@ -2,12 +2,28 @@ import { CONTRACTS, validateContract } from '../contracts/index.mjs';
 import { MONEY_FIELDS } from '../contracts/panel-state.mjs';
 import { decimalUnits } from '../contracts/decimal.mjs';
 import { viennaDay } from '../time.mjs';
+import { accountObservation, validAccountObservation } from './account-history.mjs';
 
 export const HISTORY_CAP = 8 * 1024 * 1024;
 export const HISTORY_WARNING = Math.floor(HISTORY_CAP * 0.8);
 const DESKS = ['j', 'joe', 'joel'];
 const MAX_AGE = 14 * 86400000;
-export const historyEnvelope = value => ({ format: 'joedesk.history-store.v2', value });
+export const historyEnvelope = value => ({ format: value.points.some(p => Object.hasOwn(p, 'account'))
+  ? 'joedesk.history-store.v3' : 'joedesk.history-store.v2', value });
+
+// The immutable desk wire contract has no extension fields. The server's v3
+// envelope records account observations; the sibling account endpoint exposes
+// them without changing the existing page's validation or desk calculations.
+export function deskHistory(value) {
+  if (!value || !value.points.some(p => Object.hasOwn(p, 'account'))) return value;
+  return { ...value, points: value.points.map(({ account, ...point }) => point) };
+}
+
+export function validHistory(value) {
+  return Array.isArray(value?.points) && value.points.every(p => !Object.hasOwn(p, 'account') ||
+    (validAccountObservation(p.account) && (!(p.account.equity || p.account.cash) || Date.parse(p.account.observedAt) <= Date.parse(p.t)))) &&
+    validateContract('history', deskHistory(value)).ok;
+}
 
 export function historyPoint(snapshot, states) {
   const desks = {};
@@ -30,7 +46,7 @@ export function historyPoint(snapshot, states) {
     if (!totals[field]) reasons[field] = cell.reason ?? 'family_projection_unavailable';
   }
   if (Object.keys(reasons).length) totals.reasons = reasons;
-  return { t: snapshot.generatedAt, desks, totals };
+  return { t: snapshot.generatedAt, desks, totals, account: accountObservation(snapshot, states) };
 }
 
 // One bounded pass: bucket endpoints, every series' extrema, both sides of each
@@ -89,8 +105,7 @@ export function boundHistory(value) {
     measureHistory(value);
   }
   if (value.sizeBytes > HISTORY_CAP || value.points.length > 10000) throw new Error('history_size_limit');
-  const check = validateContract('history', value);
-  if (!check.ok) throw new Error('history_write_failed');
+  if (!validHistory(value)) throw new Error('history_write_failed');
   return value;
 }
 

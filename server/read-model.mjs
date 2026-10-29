@@ -9,7 +9,9 @@ import { gatewayCheckAgeMs } from '../contracts/gateway.mjs';
 import { validInstant } from '../contracts/schema-validator.mjs';
 import { viennaDay } from '../contracts/vienna-date.mjs';
 import { atomicWrite, readJson } from './storage.mjs';
-import { appendHistory, historyEnvelope, HISTORY_CAP, measureHistory } from './history.mjs';
+import { appendHistory, deskHistory, validHistory, historyEnvelope, HISTORY_CAP, measureHistory } from './history.mjs';
+import { accountObservation, emptyAccountCloses, appendAccountClose, validateAccountCloses,
+  accountClosesEnvelope, ACCOUNT_CLOSES_FORMAT, ACCOUNT_CLOSES_CAP } from './account-history.mjs';
 
 const STATE_CAP = 2 * 1024 * 1024;
 const FORMAT = 'joedesk.data-store.v2';
@@ -78,12 +80,14 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   if (['data.json', 'history.json'].some(name => existsSync(path.join(dataDir, name)))) throw new Error('data_migration_required');
   const stateFile = path.join(dataDir, 'data-state.json');
   const historyFile = path.join(dataDir, 'history-state.json');
+  const accountClosesFile = path.join(dataDir, 'account-closes-state.json');
   const resultsFile = path.join(dataDir, 'results-state.json');
   const rejectionFile = path.join(dataDir, 'feed-rejections.json');
   const fleetFile = path.join(dataDir, 'fleet-receipt.json');
   let state = null, history = null, rejections = {}, fleet = null, storageInvalid = false, historyStorageInvalid = false;
   let fleetReceiptPending = false;
   let results = null, resultsStorageInvalid = false;
+  let publicHistory = null, accountCloses = emptyAccountCloses(), accountClosesReason = null;
   // One exemption until a successful results acceptance; restart re-arms it.
   let rolloverResendPending = false;
   try {
@@ -139,11 +143,20 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   try {
     const stored = readJson(historyFile, HISTORY_CAP);
     history = stored.value;
-    if (stored.format !== 'joedesk.history-store.v2' || !validateContract('history', history).ok ||
+    if (!['joedesk.history-store.v2', 'joedesk.history-store.v3'].includes(stored.format) ||
+        (stored.format === 'joedesk.history-store.v2' && history?.points?.some(p => Object.hasOwn(p, 'account'))) || !validHistory(history) ||
         measureHistory(structuredClone(history)) !== history.sizeBytes) throw new Error('contract_invalid');
+    publicHistory = deskHistory(history);
   } catch (error) {
     history = null;
     if (!isMissing(error)) { historyStorageInvalid = true; rejections.history = 'history_write_failed'; }
+  }
+  try {
+    const stored = readJson(accountClosesFile, ACCOUNT_CLOSES_CAP);
+    if (stored.format !== ACCOUNT_CLOSES_FORMAT) throw new Error('contract_invalid');
+    accountCloses = validateAccountCloses(stored.value);
+  } catch (error) {
+    accountClosesReason = isMissing(error) ? 'feed_not_received' : 'contract_invalid';
   }
   try {
     results = readJson(resultsFile, RESULTS_CAP);
@@ -167,7 +180,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   let savedReasons = JSON.stringify(durableReasons());
 
   const feeds = () => ({ data: { ...state?.feed, gatewayProgress: state?.gatewayProgress, reason: rejections.data ?? (state ? null : 'feed_not_received') },
-    history: { value: history, reason: rejections.history ?? (history ? null : 'feed_not_received') },
+    history: { value: publicHistory, reason: rejections.history ?? (history ? null : 'feed_not_received') },
     results: { ...results?.feed, reason: rejections.results ?? (results ? null : 'feed_not_received') },
     'fleet-config': { value: fleet?.value, receivedAt: fleet?.receivedAt, reason: rejections['fleet-config'] ?? (fleet ? null : 'feed_not_received') } });
   const panels = (now = clock()) => {
@@ -286,7 +299,20 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       // before replying, since the producer's retry will be a replay.
       stateSyncFailed = true;
     }
+    const generationAdvanced = !state || Date.parse(accepted.value.generatedAt) > Date.parse(state.feed.value.generatedAt);
     state = next; delete rejections.data;
+    // Independent of the short desk store: its corruption or hard cap cannot
+    // prevent recording a new exact daily account observation.
+    if (generationAdvanced) try {
+      const observation = accountObservation(accepted.value, selected);
+      const nextCloses = observation.observedAt === null ? accountCloses
+        : appendAccountClose(accountCloses, observation.observedAt, observation);
+      if (nextCloses !== accountCloses) {
+        try { write(accountClosesFile, accountClosesEnvelope(nextCloses), ACCOUNT_CLOSES_CAP); }
+        catch (error) { if (error.committed) accountCloses = nextCloses; throw error; }
+        accountCloses = nextCloses; accountClosesReason = null;
+      }
+    } catch { accountClosesReason = 'history_write_failed'; }
     // Snapshot is durable even if the independent history store fails.
     let historyReason = rejections.history ?? null;
     // An unreadable history store stays untouched until operator recovery.
@@ -295,10 +321,11 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       const nextHistory = appendHistory(history, accepted.value, selected, now);
       if (nextHistory !== history) {
         try { write(historyFile, historyEnvelope(nextHistory), HISTORY_CAP); }
-        catch (error) { if (error.committed) history = nextHistory; throw error; }
+        catch (error) { if (error.committed) { history = nextHistory; publicHistory = deskHistory(history); } throw error; }
         delete rejections.history;
       }
       history = nextHistory;
+      publicHistory = deskHistory(history);
       historyReason = rejections.history ?? history.reason ?? null;
     } catch (error) {
       historyReason = error.message === 'history_size_limit' ? error.message : 'history_write_failed';
@@ -306,7 +333,8 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     }
     if (stateSyncFailed) return reject('refresh_failed', 500);
     try { persistReasons(); } catch { rejections.data = 'refresh_failed'; return failed(500, 'refresh_failed'); }
-    return { ok: true, status: 200, reason: null, receivedAt: now, historyPoints: history?.points.length ?? 0, historyReason };
+    return { ok: true, status: 200, reason: null, receivedAt: now, historyPoints: history?.points.length ?? 0, historyReason,
+      accountClosesReason };
   }
   function observeFleet(value) {
     const checked = validateContract('fleet-config', value);
@@ -378,7 +406,12 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     }
     return { serverNow: now, feeds: feeds(), panels: selected, data: value };
   }
-  return { accept, acceptResults, reject, feeds, panels, view, observeFleet,
+  const accountHistory = () => ({ schema: 'inspr.joe.account-history.v1',
+    generatedAt: history?.generatedAt ?? null, receivedAt: history?.receivedAt ?? null,
+    reason: feeds().history.reason,
+    points: (history?.points ?? []).map(p => ({ t: p.t, ...(Object.hasOwn(p, 'account') ? { account: p.account } : {}) })),
+    dailyCloses: { ...accountCloses, reason: accountClosesReason } });
+  return { accept, acceptResults, reject, feeds, panels, view, observeFleet, accountHistory,
     fleetFailure: () => { rejections['fleet-config'] = 'refresh_failed'; },
     hasData: () => Boolean(state) };
 }
