@@ -8,7 +8,7 @@
 import { $, $$, icon, term, bn, statePhrase, patch, dashWords, moneyNoWrap, NOT_EXACT } from './ui.js';
 import { esc, money, digits, dayDM, dayDDM, timeHM, age, MINUS, NB, cashAmount } from './format.js';
 import { decimalUnits } from './contracts/decimal.mjs';
-import { cellReason, capital, CELL_REASON } from './health.js';
+import { cellReason, capital } from './health.js';
 import { outageValue, trustedCurrent, NOT_EXACT_REASONS } from './board-state.js';
 import { accountStart, boardSettingsState } from './board-settings.js';
 import { drawChart, axis, eurAxis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor, chartHintSeen, dismissChartHint, createAxisMode } from './chart.js';
@@ -37,8 +37,7 @@ const plain = html => html.replace(/<[^>]+>/g, '').replace(/&(amp|lt|gt|quot|#39
 const startDate = date => `${dayDM(zonedInstant(date, '12:00:00', VIENNA))} ${date.slice(0, 4)}`;
 const startMoney = start => { const cents = Math.round(start.amountEur * 100); return moneyNoWrap(BigInt(cents) * 1000000n, 'EUR', false, cents % 100 ? 2 : 0); };
 // A plain link: the router (route.js) opens Settings at the account start.
-// The line's reserved forms (below) carry it as inert text.
-const settingsLink = (words, inert = false) => (inert ? `<span class="set-link">${words}</span>` : `<a class="set-link" href="#settings/set-account">${words}</a>`);
+const settingsLink = words => `<a class="set-link" href="#settings/set-account">${words}</a>`;
 
 // The vertical axis, every time chart's (JOED-154, chart.js): Auto fits the
 // shown window and glides with every move, Max holds everything loaded (the
@@ -80,17 +79,16 @@ export function changeHtml(change, chip, chipTitle) {
 }
 // Since start, against the account start in Settings. Until it is set the
 // board shows no figure and says where to set it.
-// `widest`: the same words with the widest figures, for the line's reserved box.
-function sinceParts(cell, start, settings, widest = false) {
+function sinceParts(cell, start, settings) {
   const n = trustedCurrent(cell) ? units(cell.value) : null;
   if (!start) {
     const reason = settings?.reason;
     const words = reason === 'loading' ? 'Account start loading' : reason === 'refresh_failed' ? 'Account start could not be checked'
       : ['invalid', 'unreadable'].includes(reason) ? 'Account start unreadable' : 'Account start not set';
-    const link = reason === 'loading' ? '' : ` · ${settingsLink(reason === 'refresh_failed' ? 'open Settings' : 'set in Settings', widest)}`;
+    const link = reason === 'loading' ? '' : ` · ${settingsLink(reason === 'refresh_failed' ? 'open Settings' : 'set in Settings')}`;
     return { wide: `${words}${link}`, narrow: `${words}${link}`, detail: '' };
   }
-  const since = widest ? { change: -WIDEST, pct: -99999n } : M.sinceStart(n, start);
+  const since = M.sinceStart(n, start);
   const tone = since ? since.change > 0n ? ' gain' : since.change < 0n ? ' loss' : '' : '';
   const amount = since ? moneyNoWrap(since.change, 'EUR', true) : '—', pct = since ? nw(M.pctText(since.pct)) : '';
   const basis = `${startMoney(start)} on ${esc(startDate(start.date))}`;
@@ -128,71 +126,23 @@ export function keptWorth(kept, shared) {
   const rows = kept?.value;
   const own = kept?.reason && kept.reason !== shared ? ` · ${esc(cellReason(kept.reason))}` : '';
   if (!rows || outageValue(kept)) return { html: `<b>—</b>${own}`, rows: null };
-  const sorted = [...rows].sort((a, b) => a.symbol.localeCompare(b.symbol));
-  keptSeen.rows = sorted.map(r => [r.symbol, r.marketValue?.currency ?? 'EUR']);
-  const list = sorted.map(r => {
+  const list = [...rows].sort((a, b) => a.symbol.localeCompare(b.symbol)).map(r => {
     const n = units(r.marketValue);
     return `<b class="nowrap">${esc(r.symbol)} ${n === null ? '—' : esc(money(n, r.marketValue.currency))}</b>`;
   });
   return { html: list.join(' · '), rows: rows.length };
 }
-const SEP = '<span class="acct-sep" aria-hidden="true"></span>';
-const wideLine = (since, cash, kept) => `<span class="acct-item">${since}</span>${SEP}<span class="acct-item">${cash}</span>${SEP}<span class="acct-item">${kept}</span>`;
-const narrowLine = (since, cash) => `<span class="acct-item">${since}</span> · <span class="acct-item">${cash}</span>`;
 export function subParts(ctx, start = accountStart(), settings = boardSettingsState()) {
   const cell = ctx.states.paperAccount, shared = cell?.reason ?? null;
   const since = sinceParts(cell, start, settings), cash = cashPart(ctx.states.paperCash, shared), kept = keptWorth(ctx.states.kept, shared);
+  const sep = '<span class="acct-sep" aria-hidden="true"></span>';
   const keptWide = kept.rows === 0 ? 'no kept holdings in this snapshot' : `incl. kept holdings ${kept.html}${kept.rows ? ', each in its own currency' : ''}`;
   const keptDetail = kept.rows === 0 ? 'No kept holdings in this snapshot.' : `Kept holdings, each in its own currency: ${kept.html}. They count only in this whole-account figure.`;
   return {
-    wide: wideLine(since.wide, cash, keptWide),
-    narrow: narrowLine(since.narrow, cash),
+    wide: `<span class="acct-item">${since.wide}</span>${sep}<span class="acct-item">${cash}</span>${sep}<span class="acct-item">${keptWide}</span>`,
+    narrow: `<span class="acct-item">${since.narrow}</span> · <span class="acct-item">${cash}</span>`,
     details: `<p>${keptDetail}</p>${since.detail ? `<p>${since.detail}</p>` : ''}`,
   };
-}
-
-// ---------- The line's box ----------
-// The Since start · Cash line (and, on wider screens, the kept holdings) keeps
-// one box in every state, at every width: hidden behind it, in the same grid
-// cell, lie the line's tallest forms (every form Cash can take, JOED-49/148,
-// and every form of the kept holdings, each beside the widest of the other
-// parts), so the box is as tall as the tallest of them and no state change
-// moves anything (JOED-79's zero shift). The forms are plain text: no link,
-// no name, unread (aria-hidden) and unseen (visibility: hidden).
-const WIDEST = 999999999000000n;  // € 9.999.999,99 in exact units
-const plainLength = html => plain(html).length;
-const longest = forms => forms.reduce((a, b) => (plainLength(b) > plainLength(a) ? b : a));
-const CASH_FORMS = [...new Set([
-  `Cash <b>${moneyNoWrap(-WIDEST, 'EUR')}</b>`, 'Cash <b class="muted">—</b> · not reported',
-  ...Object.keys(CELL_REASON).flatMap(reason => [`Cash <b class="muted">—</b> · ${esc(dashWords(reason))}`,
-    `Cash <b>${moneyNoWrap(-WIDEST, 'EUR')}</b> · ${esc(cellReason(reason))}`]),
-])];
-// The kept symbols last listed, with their currencies: their widest amounts
-// still size the line while the list itself is unavailable.
-const keptSeen = { rows: [] };
-function keptForms() {
-  const list = keptSeen.rows.length ? [`incl. kept holdings ${keptSeen.rows.map(([symbol, currency]) =>
-    `<b class="nowrap">${esc(symbol)} ${esc(money(-WIDEST, currency))}</b>`).join(' · ')}, each in its own currency`] : [];
-  return [...new Set([...list, 'no kept holdings in this snapshot', 'incl. kept holdings <b>—</b>',
-    ...Object.keys(CELL_REASON).map(reason => `incl. kept holdings <b>—</b> · ${esc(cellReason(reason))}`)])];
-}
-// The reserved forms of both lines, with the key they change by. Only what
-// sets a line's metrics stays: the words, the bold figures, the unbreakable
-// amounts and the separators (no colours, names or wrappers).
-const metricsOnly = html => html.replace(/ class="(acct-fig[^"]*|muted)"| aria-hidden="true"/g, '')
-  .replace(/<b><span class="nowrap">([^<]*)<\/span><\/b>/g, '<b class="nowrap">$1</b>');
-// What the forms depend on: the start (its words, or the widest figures) and
-// the kept symbols. Cheap, so a render builds the forms only when it changes.
-export const lineFormsKey = (start = accountStart(), settings = boardSettingsState()) => {
-  const since = sinceParts(null, start, settings, true);
-  return JSON.stringify([since.wide, since.narrow, keptSeen.rows]);
-};
-export function lineForms(start = accountStart(), settings = boardSettingsState()) {
-  const since = sinceParts(null, start, settings, true), kept = keptForms(), cash = longest(CASH_FORMS), keep = longest(kept);
-  const form = html => `<span>${metricsOnly(html)}</span>`;
-  const wideForm = (c, k) => form(`${since.wide}${SEP}${c}${SEP}${k}`);
-  const wide = [...new Set([...CASH_FORMS.map(c => wideForm(c, keep)), ...kept.map(k => wideForm(cash, k))])];
-  return { key: lineFormsKey(start, settings), wide: wide.join(''), narrow: CASH_FORMS.map(c => form(`${since.narrow} · ${c}`)).join('') };
 }
 
 // ---------- The account history ----------
@@ -344,7 +294,7 @@ function emptyText(series) {
 }
 
 // ---------- The chart ----------
-const last = { ctx: null, key: null, scale: null, series: null, live: null, frame: 0, forms: null };
+const last = { ctx: null, key: null, scale: null, series: null, live: null, frame: 0 };
 const motion = { from: null, start: 0 };
 const eurK = (v, step) => (step >= 1000 ? `${v < 0 ? MINUS : ''}€${NB}${digits(Math.abs(v) / 1000, step >= 10000 ? 0 : 1)}k` : eurAxis(v, step));
 const padFor = () => (phone() ? { l: 50, r: 8, t: 12, b: 22 } : { l: 58, r: 14, t: 14, b: 24 });
@@ -550,17 +500,9 @@ export function renderAccount(ctx) {
   const value = $('#acctValue'), state = ctx.states.paperAccount?.state ?? 'not reported';
   patch(value, valueHtml(ctx.states.paperAccount));
   if (value.dataset.state !== state) value.dataset.state = state;
-  const start = accountStart(), settings = boardSettingsState(), parts = subParts(ctx, start, settings);
+  const parts = subParts(ctx);
   patch($('#acctSub'), parts.wide);
   patch($('#acctSubN'), parts.narrow);
-  // The lines' reserved forms, built again only when what sizes them changes.
-  const formsKey = lineFormsKey(start, settings);
-  if (formsKey !== last.forms) {
-    const forms = lineForms(start, settings);
-    last.forms = formsKey;
-    $('#acctSubSizes').innerHTML = forms.wide;
-    $('#acctSubNSizes').innerHTML = forms.narrow;
-  }
   patch($('#acctDetails'), parts.details);
   root.dataset.history = store.value ? 'ok' : store.reason ?? 'ok';
   const el = $('#acctChart'), now = ctx.now ? Date.parse(ctx.now) : null;
@@ -904,8 +846,8 @@ export function accountSkeleton() {
   return `<div class="acct-eyebrow">${icon('keep')}<h2 class="acct-title" id="acctTitle"><span class="acct-wide">${term('paperacct', 'IB paper account')} · whole account</span><span class="acct-narrow">Whole account</span></h2><span class="acct-chip keep">incl. kept holdings</span><span class="acct-chip mono">EUR · <span class="acct-wide">account </span>base currency</span><button type="button" class="acct-dbtn" id="acctDetailsBtn" aria-expanded="false" aria-controls="acctDetails">Account details${icon('chev-d')}</button></div>
     <div class="acct-value" id="acctValue"></div>
     <div class="acct-change" id="acctChange"></div>
-    <p class="acct-sub acct-wide" id="acctSubBox"><span class="acct-fit"><span class="acct-line" id="acctSub"></span><span class="acct-sizes" id="acctSubSizes" aria-hidden="true"></span></span></p>
-    <p class="acct-sub acct-narrow" id="acctSubNBox"><span class="acct-fit"><span class="acct-line" id="acctSubN"></span><span class="acct-sizes" id="acctSubNSizes" aria-hidden="true"></span></span></p>
+    <p class="acct-sub acct-wide" id="acctSub"></p>
+    <p class="acct-sub acct-narrow" id="acctSubN"></p>
     <div class="acct-details" id="acctDetails" hidden></div>
     <div class="seg acct-ranges" role="group" aria-label="Chart range" id="acctRanges">${ranges}</div>
     <div class="chart acct-chart" id="acctChart"><div class="ctip" id="acctTip" aria-hidden="true"></div></div>
@@ -926,7 +868,6 @@ export function initAccount() {
   const root = $('#acctHero');
   if (!root) return;
   root.innerHTML = accountSkeleton();
-  last.forms = null;
   // The board's own read-only hooks: read the account history now, and
   // whether a worker reads it (the browser budget checks both).
   const hooks = globalThis.__joedesk;
