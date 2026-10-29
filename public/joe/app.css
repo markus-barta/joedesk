@@ -371,12 +371,15 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
    row, so the chart starts higher (the narrowest screens wrap instead). */
 @media (max-width: 480px) {
   .hist-tools { gap: 8px; }
-  .hist-view { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  /* At 390 px the row has 358 px: Change | Money (127 px), the gap and the
+     presets (208 px) fit in bold DejaVu Sans, wider than a phone's own face,
+     with 4 px label padding; targets keep 44 px (the .seg phone rule). */
+  .hist-view { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
   .hist-view > .grow, #histFollow { display: none; }
   .hist-follow-phone { display: inline-flex; margin-left: auto; padding: 0 10px; }
   #histRange { flex: 1 1 0; }
-  #histMeasure button { padding: 0 8px; }
-  #histRange button { flex: 1 1 auto; padding: 0 6px; }
+  #histMeasure button { padding: 0 4px; }
+  #histRange button { flex: 1 1 auto; padding: 0 4px; }
   .ctl-list { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .ctl-list dd { margin-bottom: 6px; }
   .ctl-custom { grid-template-columns: auto minmax(0, 1fr); }
