@@ -68,7 +68,7 @@ export function sharedSectionPhrase(cell) {
 // may still contain partial rows; those reasons join the same summary ranking.
 export function disclosureProblem(candidates) {
   const severity = { bad: 3, warn: 2, none: 1 };
-  const problems = candidates.flatMap(([label, cell]) => {
+  const problems = candidates.flatMap(([label, cell, caption]) => {
     const p = statePhrase(cell, '');
     if (p.state === 'fresh') return [];
     const state = notExactDash(cell) ? NOT_EXACT : cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
@@ -78,7 +78,7 @@ export function disclosureProblem(candidates) {
     // an old check-in must not obscure that the row's figures are unknown.
     const priority = cell?.state === 'broken' || state === 'unavailable' ? 3 : severity[p.tone];
     const why = reason ? cellReason(reason) : null;
-    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, why, reason: why === state ? null : why, label: `${label}: ${state}` }];
+    return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, why, reason: caption || why === state ? null : why, label: `${label}: ${caption ? caption[0].toLowerCase() + caption.slice(1) : state}` }];
   });
   problems.sort((a, b) => b.priority - a.priority || severity[b.tone] - severity[a.tone]);
   if (!problems.length) return null;
@@ -355,7 +355,6 @@ export function deskDays(states, data, field = 'dayPnl') {
   }
   return groups;
 }
-const blockingDays = (states, data) => deskDays(states, data).filter(g => !['exact', 'estimated'].includes(g.word));
 // Details: every desk's Today, exact ones first, e.g. "Exact for Joel; not
 // exact for J and Joe · start-of-day value missing". This one row is also
 // how Details explains a green light beside a not-exact Today (Amy's A3).
@@ -407,13 +406,33 @@ export function startsDiffer(feeds) {
   return `Since start dates differ: Results start on ${dayText(starts.trackingStart)}; ${counts}.${shown}`;
 }
 
-// The household Today needs all three desks. When the feed explains its dash
-// as not exact, say once which desks keep it from being exact and why: their
-// shared reason, unless the section line already gives it. A reason common to
-// every desk needs no names. Null when the cell's own caption applies.
-export function householdDayReason(states, data, sharedReason = null) {
-  if (classifyDays(states, data).today.kind !== 'notExact') return null;
-  const blocking = blockingDays(states, data);
+// Household results need all three desks. Inherited faults name the faulty
+// desks first, with their reasons, then any not-exact desks. The household is
+// unavailable even if a faulty desk still shows its last good observation.
+// For a not-exact Today, preserve the existing shared-reason presentation.
+function householdPnlReason(states, data, field, sharedReason = null) {
+  const results = classifyCells(states, data, field);
+  const faulty = DESKS.filter(id => results[id].kind === 'fault');
+  if (results.today.kind === 'fault' && faulty.length) {
+    const cell = states[`today.${field}`], reason = results.today.reason;
+    // Keep a figure's own fault, shared outage wording and retained ages.
+    // Desk attribution explains only a household dash inherited from desks.
+    if (cell?.value != null || outageValue(cell) || (reason && cellReason(reason) === sharedReason)
+      || (reason !== 'source_unavailable' && !faulty.some(id => results[id].reason === reason))) return null;
+    const groups = [];
+    for (const id of faulty) {
+      const rawReason = results[id].reason ?? results.today.reason;
+      const reason = rawReason ? cellReason(rawReason) : null;
+      const group = groups.find(g => g.reason === reason);
+      if (group) group.ids.push(id); else groups.push({ ids: [id], reason });
+    }
+    const parts = groups.map(g => `unavailable for ${deskNames(g.ids)}${g.reason ? ` · ${g.reason}` : ''}`);
+    const notExact = DESKS.filter(id => results[id].kind === 'notExact');
+    if (notExact.length) parts.push(`not exact for ${deskNames(notExact)}`);
+    return capital(parts.join('; '));
+  }
+  if (results.today.kind !== 'notExact') return null;
+  const blocking = deskDays(states, data, field).filter(g => !['exact', 'estimated'].includes(g.word));
   if (!blocking.length) return null;
   if (blocking.length === 1) {
     const [{ word, reason, ids }] = blocking, all = ids.length === DESKS.length;
@@ -428,6 +447,7 @@ export function householdDayReason(states, data, sharedReason = null) {
   }
   return capital(words.map(w => `${w.word} for ${deskNames(w.ids.sort(byDesk))}`).join('; '));
 }
+export const householdDayReason = (states, data, sharedReason = null) => householdPnlReason(states, data, 'dayPnl', sharedReason);
 
 // A dashed household Today still knows each exact desk's own Today: "Joel is
 // flat today." Estimates keep their own mark on their cards and are left out.
@@ -448,9 +468,10 @@ export function heroLeft(ctx) {
   const board = boardCaptionCell(ctx);
   const shared = data ? sharedSectionReason(['today.dayPnl', 'today.totalPnl', 'today.openPnl', 'today.equity', 'paperAccount', 'paperCash'].map(name => states[name])) : null;
   const day = cellView(dayCell, 'hero.day', { sharedReason: shared, label: 'Today' });
+  const openCaption = householdPnlReason(states, data, 'openPnl', shared);
   const kpi = (termKey, label, name, key, opts) => {
     const v = cellView(states[name], key, { ...opts, sharedReason: shared, label: label ?? { open: 'Open positions', desksmoney: 'Desks’ money', paperacct: 'Paper account' }[termKey] });
-    const caption = reservedCaption(sharesBoardCaption(states[name], board) ? '' : v.caption, opts.captions ?? [opts.caption]);
+    const caption = reservedCaption(sharesBoardCaption(states[name], board) ? '' : name === 'today.openPnl' && openCaption != null ? esc(openCaption) : v.caption, opts.captions ?? [opts.caption]);
     return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}${cellIcon(states[name], shared)}</dt><dd>${v.html}<span class="c">${caption}</span></dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
@@ -498,7 +519,7 @@ export function heroLeft(ctx) {
     <button type="button" class="say" data-say="today" aria-expanded="false"><span data-clamp="2">${say}</span></button>
     <p class="board-caption">${boardText}</p></div>
     <div class="account-section" id="accountSection">${disclosureButton('account', 'Account', 'accountDetail', disclosureProblem([
-      ['Open positions', states['today.openPnl']], ['Desks’ money', states['today.equity']], ['Paper account', states.paperAccount], ['Cash', states.paperCash], ['Broker', states.gateway],
+      ['Open positions', states['today.openPnl'], openCaption], ['Desks’ money', states['today.equity']], ['Paper account', states.paperAccount], ['Cash', states.paperCash], ['Broker', states.gateway],
     ]))}<div class="disclosure-body" id="accountDetail"><p class="pstate account-state"${shared ? '' : ' aria-hidden="true"'}>${shared ? st(statePhrase(sharedCell, '').tone, sharedSectionPhrase(sharedCell), statePhrase(sharedCell, '').icon) : ''}</p><dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: 'still moving until closed' })}
       ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions })}

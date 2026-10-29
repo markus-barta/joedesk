@@ -269,7 +269,7 @@ for (const [id, fixture] of Object.entries(heroWordingFixtures(browserSnapshot))
     if (id === 'p3-mixed-not-exact-fault') {
       assert.equal(states['today.openPnl'].state, 'broken');
       assert.equal(states['today.openPnl'].value, null);
-      assert.equal(hero.querySelector('[data-cell="hero.open"] .c').textContent, 'Unavailable · not reported by the broker');
+      assert.equal(hero.querySelector('[data-cell="hero.open"] .c').textContent, 'Unavailable for J, Joe and Joel · not reported by the broker');
     } else assert.equal(states['today.openPnl'].state, 'fresh');
   }
 });
@@ -1494,9 +1494,9 @@ test('JOED-148: different desk reasons name their desks; the section line keeps 
   // cold page has none. Either way the household caption leads with the
   // fault; Details still names Joe's own state beside J's.
   const carried = ctx(fault), cold = { ...carried, states: boardStates(carried.feeds, carried.now) };
-  assert.equal(htmlDocument(heroLeft(carried)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable · not reported by the broker');
+  assert.equal(htmlDocument(heroLeft(carried)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker; not exact for J');
   assert.equal(detailsRow(carried, 'Today’s result'), 'Exact for Joel; not exact for J; last good for Joe · not reported by the broker');
-  assert.equal(htmlDocument(heroLeft(cold)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable · not reported by the broker');
+  assert.equal(htmlDocument(heroLeft(cold)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker; not exact for J');
   assert.equal(detailsRow(cold, 'Today’s result'), 'Exact for Joel; not exact for J; unavailable for Joe · not reported by the broker');
 });
 
@@ -1623,7 +1623,7 @@ test('JOED-148 A3: a desk Today shown with a fault reason keeps the light yellow
   const health = boardHealthPresentation(view.states, view.feeds, view.now);
   assert.deepEqual([health.tone, health.reason], ['yellow', 'day_pending']);
   // The hero and Details name Joe's real gap with the same test the light uses.
-  assert.equal(htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable · not reported by the broker');
+  assert.equal(htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker; not exact for J');
   assert.equal(detailsRow(view, 'Today’s result'), 'Exact for Joel; not exact for J; unavailable for Joe · not reported by the broker');
 });
 
@@ -1726,7 +1726,7 @@ test('JOED-148 re-gate High 1: a current household Today never exempts a desk wh
   // withholds it and keeps the exact desks' own results.
   assert.deepEqual([view.states['today.dayPnl'].value, view.states['today.dayPnl'].reason], [null, 'source_unavailable']);
   const hero = htmlDocument(heroLeft(view));
-  assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable · not reported by the broker');
+  assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker');
   assert.equal(hero.querySelector('.say').textContent, `J is up ${eur(decimalUnits('50'))} and Joel is up ${eur(decimalUnits('5'))} today.`);
   assert.equal(todayPercent(view.states, data.pnlSources.day), null);
 });
@@ -1740,7 +1740,7 @@ test('JOED-148 re-gate High 2: a not-exact money reason never masks a faulty sou
   assert.deepEqual(classifyDays(view.states, data).joe, { kind: 'fault', reason: 'source_unavailable' });
   // The cell itself carries the fault, so the card, the hero and Details agree.
   assert.deepEqual([view.states['desks.joe.dayPnl'].value, view.states['desks.joe.dayPnl'].reason], [null, 'source_unavailable']);
-  assert.equal(htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable · not reported by the broker');
+  assert.equal(htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker');
   assert.equal(detailsRow(view, 'Today’s result'), 'Exact for J and Joel; unavailable for Joe · not reported by the broker');
   assert.equal(htmlDocument(deskCard(view, 'joe', 50, true)).querySelector('.mini-label').textContent, 'Today: unavailable · not reported by the broker');
 });
@@ -1820,8 +1820,14 @@ test('JOED-148: every desk and household Today combination matches the plain-wor
       if (desks.some(option => !DESK_TODAY[option][1])) {
         assert.equal(view.states['today.dayPnl'].reason, 'source_unavailable', `${label}: fault wins household reason`);
         const caption = htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent;
-        assert.match(caption, /Unavailable · not reported by the broker/, `${label}: household caption`);
-        assert.doesNotMatch(caption, /not exact/i, `${label}: never a not-exact caption for a fault`);
+        const groups = caption.split('; ');
+        assert.match(groups[0], /^Unavailable for /, `${label}: household caption leads with faults`);
+        DESKS.forEach((id, i) => {
+          if (DESK_TODAY[desks[i]][1]) return;
+          const group = groups.find(text => new RegExp(`\\b${NAMES[id]}\\b`).test(text));
+          assert.ok(group, `${label}: caption names faulty ${NAMES[id]}`);
+          assert.doesNotMatch(group, /not exact/i, `${label}: faulty ${NAMES[id]} is never not exact`);
+        });
       }
       count++; if (fine) green++;
     }

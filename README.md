@@ -1434,7 +1434,10 @@ Open stays green only when the household and every desk are exact. A not-exact
 Open keeps the existing yellow `open_unavailable_rth` price warning. A fault
 on any channel wins, with yellow `open_fault_rth` and “Open result is unavailable”.
 A desk fault also withholds the household Open amount, including when the
-producer supplied a current total. Cards and phone summaries retain the desk's
+producer supplied a current total. Household Today and Open captions name the
+faulty desks and their reasons first, followed by any not-exact desks (for
+example, “Unavailable for Joe · not reported by the broker; not exact for J”).
+Cards and phone summaries retain the desk's
 own warning; Details names each faulty desk and its reason. Its “Open positions”
 row explains non-exact results (“Joe and Joel: exact; J: not exact · ‹reason›”)
 and household-only gaps, rather than showing an available valuation method

@@ -97,6 +97,15 @@ test('JOED-157: household-current shape never exempts a desk open fault (contrac
   assert.match(boardDiagnostics(view.states, view.feeds, now).join(' '), /Joe’s Open result is unavailable: not reported by the broker/);
 });
 
+test('JOED-157 fix2: household Open captions name faulty desks before not-exact desks', () => {
+  const view = combination(['notExactMoney', 'faultSource', 'exact'], 'notExact');
+  const hero = htmlDocument(heroLeft(view));
+  assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent,
+    'Unavailable for Joe · not reported by the broker; not exact for J');
+  assert.equal(hero.querySelector('.account-section .summary-text').textContent,
+    'Open positions: unavailable for Joe · not reported by the broker; not exact for J');
+});
+
 test('JOED-157: Details keeps the household own fault beside desk gaps', () => {
   const data = combination(['notExactMoney', 'exact', 'exact'], 'valueKeptFaultMoney').feeds.data.value;
   data.totals.reasons.openPnl = 'open_pnl_unavailable';
@@ -131,6 +140,18 @@ test('JOED-157: every desk and household Open combination matches the plain-word
       check(expected.word === 'exact' ? !summary.includes('Open positions:') : summary.includes(`Open positions: ${expected.word}`), 'hero summary', label);
       if (expected.reason) check(summary.includes(expected.reason), 'hero reason', label);
       if (expected.fault) check(!summary.includes('Open positions: not exact'), 'fault wins household caption', label);
+      if (expected.inputs.some(input => !input.fine)) {
+        const caption = hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent;
+        for (const text of [caption, summary]) {
+          const groups = text.split('; ');
+          check(/unavailable for/i.test(groups[0]), 'fault caption first', label);
+          expected.inputs.forEach((input, i) => {
+            if (input.fine) return;
+            const group = groups.find(group => new RegExp(`\\b${NAMES[i]}\\b`).test(group));
+            check(Boolean(group) && !/not exact/i.test(group), 'fault caption names desk', `${label}: ${NAMES[i]}`);
+          });
+        }
+      }
 
       const pop = htmlDocument(healthPop(view, boardHealthPresentation(view.states, view.feeds, now)));
       const row = detailsRow(pop, 'Open positions');
