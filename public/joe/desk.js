@@ -12,7 +12,7 @@ import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
 import { STARTING_MONEY, sinceStarts, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
-import { NOT_EXACT_REASONS, notExactDash, classifyDay, classifyDays, classifyCells, dayChannels, outageValue, withGenerationAge } from './board-state.js';
+import { NOT_EXACT_REASONS, notExactDash, classifyDay, classifyDays, classifyCells, dayChannels, absentPnl, outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -411,6 +411,7 @@ export function startsDiffer(feeds) {
 // unavailable even if a faulty desk still shows its last good observation.
 // For a not-exact Today, preserve the existing shared-reason presentation.
 function householdPnlReason(states, data, field, sharedReason = null) {
+  if (absentPnl(states, data, field)) return null;
   const results = classifyCells(states, data, field);
   const faulty = DESKS.filter(id => results[id].kind === 'fault');
   if (results.today.kind === 'fault' && faulty.length) {

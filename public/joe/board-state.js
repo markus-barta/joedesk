@@ -62,6 +62,20 @@ export const classifyDay = (cell, channels) => classifyCell(cell, channels);
 export const classifyCells = (states, data, field) => Object.fromEntries(['today', ...DESKS].map(scope =>
   [scope, classifyCell(states[scope === 'today' ? `today.${field}` : `desks.${scope}.${field}`], pnlChannels(data, scope, field), field)]));
 export const classifyDays = (states, data) => classifyCells(states, data, 'dayPnl');
+// Before a snapshot, or while amounts are simply absent, missing cells are
+// not evidence of a broker fault. Explicit reasons, unavailable sources and
+// retained observations still take the normal fault path (JOED-157 fix3).
+export function absentPnl(states, data, field) {
+  if (!data) return true;
+  const plainMissing = scope => {
+    const cell = states[scope === 'today' ? `today.${field}` : `desks.${scope}.${field}`];
+    const { moneyReason, source } = pnlChannels(data, scope, field);
+    return cell?.state === 'not reported' && cell.value == null && !outageValue(cell)
+      && !cell.reason && !moneyReason && !source?.reason && source?.status !== 'unavailable';
+  };
+  const results = classifyCells(states, data, field);
+  return plainMissing('today') && DESKS.filter(id => results[id].kind === 'fault').every(plainMissing);
+}
 const positionKey = row => JSON.stringify([row.scope, row.desk, row.symbol]);
 const unavailable = (cell, reason = cell.reason) => ({ ...cell, state: cell.state === 'fresh' ? 'broken' : cell.state, value: null, retained: false, reason });
 // Hiding a derived amount does not erase the observation's health/grace.
@@ -184,7 +198,8 @@ export function boardStates(feeds, now, previous = {}) {
     const name = `today.${field}`, cell = states[name];
     const inputs = DESKS.map(id => ({ id, cell: states[`desks.${id}.${field}`],
       result: ['dayPnl', 'openPnl'].includes(field) ? classifyCell(states[`desks.${id}.${field}`], pnlChannels(data, id, field), field) : null }));
-    const faulty = inputs.find(input => input.result?.kind === 'fault');
+    const faulty = ['dayPnl', 'openPnl'].includes(field) && absentPnl(states, data, field)
+      ? undefined : inputs.find(input => input.result?.kind === 'fault');
     const blocked = faulty ?? inputs.find(({ cell: c }) => outageValue(c) || c.value == null);
     const own = faulty ? classifyCell(cell, pnlChannels(data, 'today', field), field) : null;
     // A stale envelope cannot replace the producer's scoped price-wait copy.

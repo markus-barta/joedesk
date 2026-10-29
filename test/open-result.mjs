@@ -23,6 +23,55 @@ const detailsRow = (pop, name) => {
   return pop.querySelectorAll('dd')[keys.findIndex(node => node.textContent === name)]?.textContent;
 };
 
+test('JOED-157 fix3: cold boardStates preserves the browser first-load state and captions', () => {
+  for (const feeds of [{}, { data: { value: null } }, { data: { value: null, reason: 'route_not_found' } }]) {
+    const states = board.boardStates(feeds, now), hero = htmlDocument(heroLeft({ feeds, now, states }));
+    const rejected = feeds.data?.reason === 'route_not_found';
+    for (const scope of ['today', ...DESKS.map(id => `desks.${id}`)]) for (const field of ['dayPnl', 'openPnl']) {
+      assert.equal(states[`${scope}.${field}`].state, rejected ? 'broken' : 'not reported');
+      assert.equal(states[`${scope}.${field}`].reason, rejected ? 'route_not_found' : null);
+    }
+    // browser-p3:1119-1121 reads data-state, not just the visible dash.
+    assert.equal(hero.querySelector('[data-cell="hero.day"]').dataset.state, rejected ? 'broken' : 'not reported');
+    assert.equal(hero.querySelector('.say').textContent, rejected
+      ? 'No numbers: not found on the board server.' : 'No numbers yet: no board data has arrived.');
+    assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent,
+      rejected ? 'Unavailable · not found on the board server' : '');
+    assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent,
+      rejected ? 'Unavailable · not found on the board server' : 'Not reported');
+    const summary = hero.querySelector('.account-section .summary-text').textContent;
+    assert.equal(summary, rejected ? 'Open positions: unavailable · not found on the board server' : 'Open positions: not reported · no data received yet');
+    assert.doesNotMatch(hero.textContent, /Unavailable for|unavailable for/);
+  }
+});
+
+test('JOED-157 fix3: absent P&L is not a synthesized fault, but real fault evidence still escalates', () => {
+  for (const field of ['dayPnl', 'openPnl']) {
+    const data = structuredClone(exact), period = field === 'dayPnl' ? 'day' : 'open';
+    data.totals[field] = null;
+    for (const desk of data.desks) desk.money[field] = null;
+    // The source has no fault evidence; null amounts alone mean absent.
+    let view = viewOf(data), hero = htmlDocument(heroLeft(view));
+    assert.equal(view.states[`today.${field}`].state, 'not reported');
+    assert.equal(view.states[`today.${field}`].reason, null);
+    assert.doesNotMatch(hero.textContent, /Unavailable for|unavailable for/);
+    for (const channel of ['money', 'source', 'status', 'lastGood']) {
+      const faulty = structuredClone(data), desk = faulty.desks[1];
+      if (channel === 'money') (desk.money.reasons ??= {})[field] = 'source_unavailable';
+      if (channel === 'source') desk.pnlSources[period].reason = 'source_unavailable';
+      if (channel === 'status') desk.pnlSources[period].status = 'unavailable';
+      if (channel === 'lastGood') {
+        desk.pnlSources[period].reason = 'source_unavailable';
+        desk.pnlSources[period].status = 'unavailable';
+      }
+      const prior = channel === 'lastGood' ? { [`desks.joe.${field}`]: previous[`desks.joe.${field}`] } : {};
+      view = viewOf(faulty, prior);
+      assert.equal(view.states[`today.${field}`].state, 'broken', `${field} ${channel}`);
+      assert.equal(view.states[`today.${field}`].value, null);
+    }
+  }
+});
+
 // Open is green only when every result is exact. Explained not-exact gaps
 // keep the existing price warning; faults get unavailable wording. `fine`
 // below means no fault, so diagnostics distinguish faults from not-exact gaps.
