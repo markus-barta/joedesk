@@ -2,6 +2,7 @@ import { CONTRACTS, validateContract } from '../contracts/index.mjs';
 import { MONEY_FIELDS } from '../contracts/panel-state.mjs';
 import { decimalUnits } from '../contracts/decimal.mjs';
 import { viennaDay, GAP_MS } from '../time.mjs';
+import { emptyContinuity, continuityClaims } from '../public/joe/history-continuity.js';
 
 export const HISTORY_CAP = 8 * 1024 * 1024;
 export const HISTORY_WARNING = Math.floor(HISTORY_CAP * 0.8);
@@ -33,29 +34,43 @@ export function historyPoint(snapshot, states) {
   return { t: snapshot.generatedAt, desks, totals };
 }
 
-// One bounded pass: bucket endpoints, every series' extrema, both sides of each
-// null gap and every desk's composite accounting/historyBasis transition.
-// It is gap-preserving, so every interval between kept rows says what it is.
-// Rows more than GAP_MS apart (time.mjs) are a gap in reporting: both rows
-// around it are kept, so a pass never merges across one and every run of
-// continuous reporting keeps its first and last row. Inside a run no pass
-// leaves more than GAP_MS between kept rows. A kept interval of at most
-// GAP_MS is therefore continuous reporting, thinned or not, and a longer one
-// is exactly a gap the input had. No row needs a mark for that: the history
-// contract stays as it is, and every older page and server reads it.
-export function compactPoints(points, bucketSize = 64) {
+// Absolute UTC buckets, coarsening with age: 4 h in the newest UTC day,
+// 12 h on the preceding six UTC days, 24 h before that. Widths divide the next width, so
+// advancing age only merges buckets. The reference is explicit and fixed for
+// a pass (default: newest observation); never align to the first kept row.
+const DAY = 86400000;
+export const HISTORY_BUCKET_MS = Object.freeze([4 * 3600000, 12 * 3600000, DAY]);
+export function compactHistory(points, { now = points.at(-1)?.t, continuity = null } = {}) {
+  if (!points.length) return { points: [], intervals: [] };
   const keep = new Set([0, points.length - 1]);
+  const claims = continuityClaims(continuity);
   const at = points.map(p => Date.parse(p.t));
+  const today = Math.floor(Date.parse(now) / DAY) * DAY;
+  const bucket = t => {
+    const age = today - Math.floor(t / DAY) * DAY;
+    const band = age < DAY ? 0 : age < 7 * DAY ? 1 : 2;
+    return `${band}/${Math.floor(t / HISTORY_BUCKET_MS[band])}`;
+  };
   const series = p => [...DESKS.map(id => p.desks[id]?.money), p.totals];
   const basis = p => JSON.stringify(DESKS.map(id => [p.desks[id]?.accounting ?? null, p.desks[id]?.historyBasis ?? null]));
-  let previousBasis, previousPresence, previousDay;
-  let dailyLast = [];
-  let extrema = new Map();
+  let previousBasis, previousPresence, previousDay, previousBucket;
+  let dailyLast = [], extrema = new Map();
+  // A prefix count lets us prove a kept interval contains no unknown/raw gap.
+  const breaks = new Uint32Array(points.length);
+  const finishBucket = last => {
+    if (last < 0) return;
+    keep.add(last); // last actual observation, not a synthetic average
+    for (const e of extrema.values()) { keep.add(e.minAt); keep.add(e.maxAt); }
+  };
   for (let i = 0; i < points.length; i++) {
-    if (i % bucketSize === 0) { extrema = new Map(); keep.add(i); if (i) keep.add(i - 1); }
-    if (i && at[i] - at[i - 1] > GAP_MS) { keep.add(i - 1); keep.add(i); }
-    const p = points[i], identity = basis(p);
-    const day = viennaDay(p.t);
+    const connected = i && (at[i] - at[i - 1] <= GAP_MS || claims.has(`${points[i - 1].t}/${points[i].t}`));
+    breaks[i] = (breaks[i - 1] ?? 0) + (i && !connected ? 1 : 0);
+    const key = bucket(at[i]);
+    if (i && (!connected || key !== previousBucket)) {
+      finishBucket(i - 1); extrema = new Map();
+    }
+    if (i && !connected) { keep.add(i - 1); keep.add(i); }
+    const p = points[i], identity = basis(p), day = viennaDay(p.t);
     if (previousDay && day !== previousDay) {
       for (const index of dailyLast) if (index !== undefined) keep.add(index);
       dailyLast = [];
@@ -73,24 +88,29 @@ export function compactPoints(points, bucketSize = 64) {
         if (units > old.max) { old.max = units; old.maxAt = i; }
       }
     });
-    if ((i + 1) % bucketSize === 0 || i === points.length - 1) {
-      for (const e of extrema.values()) { keep.add(e.minAt); keep.add(e.maxAt); }
-    }
-    previousBasis = identity; previousPresence = presence; previousDay = day;
+    previousBasis = identity; previousPresence = presence; previousDay = day; previousBucket = key;
   }
+  finishBucket(points.length - 1);
   for (const index of dailyLast) if (index !== undefined) keep.add(index);
-  // Between two kept rows of one run, keep the furthest row within GAP_MS of
-  // the last kept one until the next is in reach. Gap ends are kept, so every
-  // row between two kept ones is at most GAP_MS from the row before it.
-  const kept = [...keep].sort((a, b) => a - b);
-  for (let k = 1; k < kept.length; k++) {
-    for (let last = kept[k - 1]; kept[k] > last + 1 && at[kept[k]] - at[last] > GAP_MS;) {
-      let next = last + 1;
-      while (next + 1 < kept[k] && at[next + 1] - at[last] <= GAP_MS) next++;
-      keep.add(next); last = next;
+  const indices = [...keep].sort((a, b) => a - b), intervals = [];
+  for (let k = 1; k < indices.length; k++) {
+    const a = indices[k - 1], b = indices[k];
+    if (breaks[a] === breaks[b] && (b > a + 1 || claims.has(`${points[a].t}/${points[b].t}`))) {
+      intervals.push([points[a].t, points[b].t]);
     }
   }
-  return points.filter((_, i) => keep.has(i));
+  return { points: indices.map(i => points[i]), intervals };
+}
+
+// Compatibility for callers needing only the unchanged rows. Without a
+// sidecar, previously thinned long intervals are conservatively run edges.
+export const compactPoints = points => compactHistory(points).points;
+
+// Retain claims only for exact adjacent pairs still in the retained store.
+export function retainedContinuity(points, continuity, historySeq) {
+  const claims = continuityClaims(continuity), intervals = [];
+  for (let i = 1; i < points.length; i++) if (claims.has(`${points[i - 1].t}/${points[i].t}`)) intervals.push([points[i - 1].t, points[i].t]);
+  return { ...emptyContinuity(historySeq), intervals };
 }
 
 export function measureHistory(value) {
@@ -101,21 +121,24 @@ export function measureHistory(value) {
   return bytes;
 }
 
-export function boundHistory(value) {
+export function boundHistory(value, continuity = emptyContinuity()) {
   if (value.reason === 'history_compacted') delete value.reason;
   const bytes = measureHistory(value);
   if (bytes >= HISTORY_WARNING || value.points.length > 10000) {
-    value.points = compactPoints(value.points);
+    const compacted = compactHistory(value.points, { now: value.generatedAt, continuity });
+    value.points = compacted.points;
+    continuity.intervals = compacted.intervals;
     value.compactedThrough = value.points.at(-1)?.t ?? value.generatedAt;
     measureHistory(value);
   }
+  Object.assign(continuity, retainedContinuity(value.points, continuity, value.seq));
   if (value.sizeBytes > HISTORY_CAP || value.points.length > 10000) throw new Error('history_size_limit');
   const check = validateContract('history', value);
   if (!check.ok) throw new Error('history_write_failed');
   return value;
 }
 
-export function appendHistory(previous, snapshot, states, now) {
+export function appendHistory(previous, snapshot, states, now, continuity = emptyContinuity()) {
   if (previous && Date.parse(snapshot.generatedAt) <= Date.parse(previous.points.at(-1)?.t)) return previous;
   const cutoff = Date.parse(now) - MAX_AGE;
   const points = (previous?.points ?? []).filter(p => Date.parse(p.t) >= cutoff);
@@ -125,5 +148,5 @@ export function appendHistory(previous, snapshot, states, now) {
   points.push(historyPoint(snapshot, states));
   return boundHistory({ schema: CONTRACTS.contracts.history, seq: (previous?.seq ?? 0) + 1,
     generatedAt: now, receivedAt: now, points, sizeBytes: 0,
-    ...(compacted ? { compactedThrough: previous.compactedThrough } : {}) });
+    ...(compacted ? { compactedThrough: previous.compactedThrough } : {}) }, continuity);
 }

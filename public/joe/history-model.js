@@ -6,6 +6,7 @@
 // file never costs the page more than a few milliseconds.
 import { nyDay, marketSession, zonedInstant, NY, GAP_MS } from './time.mjs';
 import { decimalUnits } from './contracts/decimal.mjs';
+import { continuityClaims } from './history-continuity.js';
 
 export const DESK_IDS = Object.freeze(['j', 'joe', 'joel']);
 export const FIELDS = Object.freeze(['equity', 'dayPnl', 'openPnl', 'totalPnl']);
@@ -30,15 +31,17 @@ export const basisKey = d => JSON.stringify([d?.historyBasis ?? null, d?.account
 // for the family, and each desk's bookkeeping basis as an index into a table.
 // Each desk's equity also rides along exactly (BigInt units, null when not
 // observed) for Results, which never takes money from a Number.
-export function toColumns(points) {
+export function toColumns(points, continuity = null, historySeq = continuity?.historySeq) {
   const n = points.length, basisKeys = [], basisIndex = new Map();
-  const t = new Float64Array(n);
+  const t = new Float64Array(n), continuous = new Uint8Array(n);
+  const claims = continuityClaims(continuity, historySeq);
   const col = () => Object.fromEntries(FIELDS.map(f => [f, new Float64Array(n)]));
   const desks = Object.fromEntries(DESK_IDS.map(id => [id, { ...col(), equityUnits: new Array(n).fill(null), basis: new Int32Array(n), identified: new Uint8Array(n) }]));
   const totals = col();
   for (let i = 0; i < n; i++) {
     const p = points[i];
     t[i] = Date.parse(p.t);
+    if (i && claims.has(`${points[i - 1].t}/${p.t}`)) continuous[i] = 1;
     for (const f of FIELDS) totals[f][i] = number(p.totals?.[f]);
     for (const id of DESK_IDS) {
       const d = p.desks?.[id], c = desks[id];
@@ -50,10 +53,10 @@ export function toColumns(points) {
       c.identified[i] = d?.historyBasis || d?.accounting ? 1 : 0;
     }
   }
-  return { n, t, desks, totals, basisKeys };
+  return { n, t, continuous, desks, totals, basisKeys };
 }
 
-export const transferables = cols => [cols.t.buffer, ...Object.values(cols.totals).map(a => a.buffer),
+export const transferables = cols => [cols.t.buffer, cols.continuous.buffer, ...Object.values(cols.totals).map(a => a.buffer),
   ...DESK_IDS.flatMap(id => [...FIELDS.map(f => cols.desks[id][f].buffer), cols.desks[id].basis.buffer, cols.desks[id].identified.buffer])];
 
 // A row that says something about a desk: an identified basis or a value.
@@ -194,20 +197,12 @@ export function chartRows(cols, id, endAt) {
 }
 
 // ---------- Rows the server thinned ----------
-// To stay inside its size limit the server thins its stored history
-// (server/history.mjs, compactPoints) and marks the newest row it thinned
-// (compactedThrough). Its compaction says where it thinned: rows more than
-// GAP_MS apart are a gap in reporting, both rows around one are always kept,
-// and inside a run of continuous reporting no pass leaves more than GAP_MS
-// between kept rows. So the page never infers thinning from neighbouring
-// rows: an interval, thinned or not, is observed only if it is at most
-// GAP_MS, and every longer one is a stretch without data (an estimate,
-// hatched where no chosen desk has a number).
-// Versions before this rule thinned to minutes, then hours between kept
-// rows. Where such a store is still kept, a longer interval at or before
-// compactedThrough may be their thinning as well as an outage: its coverage
-// is unknown, and the tooltip says so.
-export const observedInterval = (cols, i) => i > 0 && i < cols.n && cols.t[i] - cols.t[i - 1] <= GAP_MS;
+// Only an exact sidecar claim can prove a long interval continuous. Missing,
+// damaged, future or sequence-mismatched provenance contributes no claims.
+// Legacy compacted intervals remain coverage unknown, never inferred from
+// adjacent cadence or the mere presence of compactedThrough.
+export const observedInterval = (cols, i) => i > 0 && i < cols.n &&
+  (cols.t[i] - cols.t[i - 1] <= GAP_MS || cols.continuous?.[i] === 1);
 // Inside a stretch without rows, ending at or before compactedThrough.
 export function coverageUnknownAt(cols, x, thinnedThrough) {
   if (!Number.isFinite(thinnedThrough)) return false;
@@ -238,8 +233,8 @@ function clipGap(samples, startAt, endAt) {
 
 // Observed samples (null y marks a gap) plus the dashed continuity groups for
 // one desk, clipped to the visible range ending at the board's current time.
-// Rows further apart than GAP_MS and explicit missing values are estimates;
-// thinned rows need nothing else (see above).
+// Explicit missing values and unproven intervals above GAP_MS are estimates;
+// the sidecar proves which long intervals came from continuous reporting.
 export function continuitySeries(cols, id, range, endAt) {
   const { start, last } = chartRows(cols, id, endAt);
   const earliest = last ? cols.t[0] : null;
@@ -289,7 +284,8 @@ export function continuitySeries(cols, id, range, endAt) {
 // milliseconds; endAt is the board's current time, as for the chart. It runs
 // over the last stretch in which every chosen desk has a number on its
 // current basis and every interval is observed (the chart's own rule: at
-// most GAP_MS between rows), so a stretch it compares is continuous data;
+// most GAP_MS between rows or an exact continuity claim), so a stretch it
+// compares is continuous data;
 // `after` names what ended the stretch before it inside the window (null
 // when the stretch starts with the window's first row): 'gap' for a stretch
 // without rows, 'incomplete-coverage' for missing numbers.

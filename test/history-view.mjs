@@ -11,7 +11,8 @@ const hm = await import('../public/joe/history-model.js');
 const { wheelIntent, createWheelLatch, wheelPixels, wheelZoomFactor, overviewTargets } = await import('../public/joe/chart.js');
 const { wallTicks, historyPointDetails } = await import('../public/joe/history.js');
 const { axisLabels, compareLine } = await builders('history.js', ['axisLabels', 'compareLine']);
-const { compactPoints, boundHistory, measureHistory, HISTORY_WARNING } = await import('../server/history.mjs');
+const { compactPoints, compactHistory, boundHistory, measureHistory, HISTORY_WARNING } = await import('../server/history.mjs');
+const { emptyContinuity, continuityClaims } = await import('../public/joe/history-continuity.js');
 const { CONTRACTS, validateContract } = await import('../contracts/index.mjs');
 const { timeHM } = await import('../public/joe/format.js');
 
@@ -309,22 +310,23 @@ const row = (ms, values) => ({ t: new Date(ms).toISOString(), totals: {},
 // a few cents every row, as on a trading day.
 function stream({ days = 2, cap = Infinity, outages = [], night = true } = {}) {
   let seed = 7, points = [], thinnedThrough = null, passes = 0;
+  const continuity = emptyContinuity(1);
   const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
   const cents = { j: 500000, joe: 500000, joel: 500000 };
   for (let t = K0; t < K0 + days * DAY;) {
     if (!outages.some(([a, b]) => t >= a && t < b)) {
       for (const id of hm.DESK_IDS) cents[id] += Math.round((rand() - 0.5) * 40);
       points.push(row(t, Object.fromEntries(hm.DESK_IDS.map(id => [id, cents[id] / 100]))));
-      if (points.length > cap) { points = compactPoints(points); thinnedThrough = Date.parse(points.at(-1).t); passes++; }
+      if (points.length > cap) { const compacted = compactHistory(points, { continuity }); points = compacted.points; continuity.intervals = compacted.intervals; thinnedThrough = Date.parse(points.at(-1).t); passes++; }
     }
     const hour = new Date(t).getUTCHours();
     t += night && (hour >= 22 || hour < 6) ? 900e3 : 30e3;
   }
-  return { points, cols: hm.toColumns(points), thinnedThrough, passes, end: Date.parse(points.at(-1).t) };
+  return { points, continuity, cols: hm.toColumns(points, continuity), thinnedThrough, passes, end: Date.parse(points.at(-1).t) };
 }
 const bandsOf = (cols, end) => hm.missingBands(hm.DESK_IDS.map(id => hm.continuitySeries(cols, id, 'all', end).gaps));
 // Every interval longer than GAP_MS, as [from, to] times.
-const gapsIn = points => points.flatMap((p, i) => (i && Date.parse(p.t) - Date.parse(points[i - 1].t) > GAP ? [[points[i - 1].t, p.t]] : []));
+const gapsIn = (points, continuity = null) => points.flatMap((p, i) => (i && Date.parse(p.t) - Date.parse(points[i - 1].t) > GAP && !continuityClaims(continuity).has(`${points[i - 1].t}/${p.t}`) ? [[points[i - 1].t, p.t]] : []));
 const steps = points => points.slice(1).map((p, i) => Date.parse(p.t) - Date.parse(points[i].t));
 
 test('JOED-145 thinning: the server and the page share one GAP_MS, longer than the slowest normal cadence', () => {
@@ -338,10 +340,12 @@ test('JOED-145 thinning: two nearby outages keep both bands through one compacti
   const raw = [];
   for (let t = K0; t < K0 + DAY; t += 30e3) if (!outages.some(([a, b]) => t >= a && t < b)) raw.push(row(t, { j: 5000, joe: 5000, joel: 5000 }));
   let points = raw;
+  const continuity = emptyContinuity(1);
   for (const pass of [1, 2, 3]) {
-    points = compactPoints(points);
+    const compacted = compactHistory(points, { continuity });
+    points = compacted.points; continuity.intervals = compacted.intervals;
     assert.ok(points.length < raw.length / 10, `pass ${pass}: thinned to ${points.length} rows`);
-    assert.deepEqual(bandsOf(hm.toColumns(points), Date.parse(points.at(-1).t)), outages.map(([a, b]) => [a - 30e3, b]),
+    assert.deepEqual(bandsOf(hm.toColumns(points, continuity), Date.parse(points.at(-1).t)), outages.map(([a, b]) => [a - 30e3, b]),
       `pass ${pass}: each outage keeps its band, from the last row before it to the first after it`);
   }
 });
@@ -350,7 +354,8 @@ test('JOED-145 thinning: a normally thinned 14-day store draws no band and no es
   const store = stream({ days: 14, cap: 10000 });
   const thinned = steps(store.points).filter((_, i) => Date.parse(store.points[i + 1].t) <= store.thinnedThrough);
   assert.ok(store.passes >= 2 && Math.max(...thinned) > 10 * MIN, `thinned by ${store.passes} passes, up to ${Math.max(...thinned) / MIN} min between kept rows`);
-  assert.ok(Math.max(...steps(store.points)) <= GAP, 'no kept interval is longer than GAP_MS');
+  assert.ok(Math.max(...steps(store.points)) > GAP, 'thinning is no longer blocked by GAP_MS');
+  assert.deepEqual(gapsIn(store.points, store.continuity), [], 'every long kept interval has explicit continuity');
   assert.deepEqual(bandsOf(store.cols, store.end), [], 'thinning and the night cadence draw no band');
   for (const id of hm.DESK_IDS) assert.deepEqual(hm.continuitySeries(store.cols, id, 'all', store.end).gaps, [], `${id}: no estimate either`);
   const all = hm.keptRange(store.cols, store.end), result = hm.sharedWindowCompare(store.cols, hm.DESK_IDS, all, store.end);
@@ -403,14 +408,17 @@ test('JOED-145 compaction: never across a gap, both ends of every run kept, ever
   assert.deepEqual(gaps.map(([a, b]) => Date.parse(b) - Date.parse(a)), [20.5 * MIN, 60.5 * MIN, 300.5 * MIN, 60.5 * MIN], 'four gaps; the 20-minute stretch is not one');
   const ends = [raw[0], ...raw.filter((p, i) => gaps.some(([a, b]) => p.t === a || p.t === b)), raw.at(-1)];
   let points = raw;
+  const continuity = emptyContinuity(1);
   for (const pass of [1, 2, 3]) {
     const before = points;
-    points = compactPoints(points);
+    const compacted = compactHistory(points, { continuity });
+    points = compacted.points; continuity.intervals = compacted.intervals;
     assert.ok(points.length < raw.length / 4 && points.every(p => before.includes(p)), `pass ${pass}: ${points.length} of the rows before it, unchanged`);
-    assert.deepEqual(gapsIn(points), gaps, `pass ${pass}: exactly the gaps the stream had, none merged across, none made by thinning`);
+    assert.deepEqual(gapsIn(points, continuity), gaps, `pass ${pass}: exactly the gaps the stream had, none merged across, none made by thinning`);
     for (const p of ends) assert.ok(points.includes(p), `pass ${pass}: ${p.t} ends a run and is kept`);
-    assert.ok(Math.max(...steps(points).filter(s => s <= GAP)) > 10 * MIN, `pass ${pass}: thinned rows are up to GAP_MS apart`);
-    assert.deepEqual(bandsOf(hm.toColumns(points), Date.parse(points.at(-1).t)), gaps.map(([a, b]) => [Date.parse(a), Date.parse(b)]), `pass ${pass}: the page hatches exactly the gaps`);
+    assert.ok(continuity.intervals.length > 0, `pass ${pass}: explicit continuous thinned intervals`);
+    assert.equal(JSON.stringify(compactHistory(points, { continuity })), JSON.stringify({ points, intervals: continuity.intervals }), 'identical rows AND claims on the next pass');
+    assert.deepEqual(bandsOf(hm.toColumns(points, continuity), Date.parse(points.at(-1).t)), gaps.map(([a, b]) => [Date.parse(a), Date.parse(b)]), `pass ${pass}: the page hatches exactly the gaps`);
   }
 });
 
@@ -424,10 +432,27 @@ test('JOED-145 compaction: the size cap still holds, every gap kept', () => {
   const value = { schema: CONTRACTS.contracts.history, seq: 1, generatedAt: points.at(-1).t, receivedAt: points.at(-1).t, points, sizeBytes: 0 };
   const original = points.slice(), gaps = gapsIn(original);
   assert.ok(measureHistory(value) >= HISTORY_WARNING && gaps.length === 2, 'the store starts over its size warning, with both outages');
-  boundHistory(value);
+  const continuity = emptyContinuity(1);
+  boundHistory(value, continuity);
   assert.ok(value.sizeBytes < HISTORY_WARNING && value.points.length < original.length, `compacted to ${value.sizeBytes} bytes`);
   assert.equal(value.compactedThrough, original.at(-1).t);
   assert.equal(validateContract('history', value).ok, true, 'the contract is unchanged and still holds');
-  assert.deepEqual(gapsIn(value.points), gaps, 'both gaps kept');
+  assert.deepEqual(gapsIn(value.points, continuity), gaps, 'both gaps kept');
   assert.ok(value.points.every(p => original.includes(p)), 'kept rows are unchanged');
+});
+
+
+test('JOED-145 absolute-grid compaction is byte-idempotent, including the 2,880-row reproduction', () => {
+  for (const days of [1, 3, 14]) {
+    const points = Array.from({ length: days * 2880 }, (_, i) => row(K0 + i * 30e3, { j: 5000, joe: 5000, joel: 5000 }));
+    const before = JSON.stringify(points), first = compactPoints(points);
+    assert.equal(JSON.stringify(compactPoints(first)), JSON.stringify(first), `${days} days: no sidecar needed for row idempotence`);
+    const full = compactHistory(points), continuity = { ...emptyContinuity(1), intervals: full.intervals };
+    assert.equal(JSON.stringify(compactHistory(full.points, { continuity })), JSON.stringify(full), `${days} days: claims stable too`);
+    assert.equal(JSON.stringify(points), before, 'pure function: inputs unchanged');
+    // Bucket representatives stay on the same UTC grid if retention moves the
+    // first point inside a bucket; the run's new endpoint is the only addition.
+    const trimmed = compactHistory(points.slice(1));
+    assert.deepEqual(trimmed.points.slice(1), full.points.slice(1));
+  }
 });

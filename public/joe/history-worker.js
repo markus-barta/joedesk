@@ -47,17 +47,18 @@ async function read(url) {
 const clockNow = res => (res.clock ? { at: new Date(Date.parse(res.clock.at) + performance.now() - res.at).toISOString(), precise: res.clock.precise } : null);
 
 async function pollHistory(started) {
-  const res = await read('/joe/history.json');
+  const [res, sidecar] = await Promise.all([read('/joe/history.json'), read('/joe/history-continuity.json')]);
   const accepted = acceptRead('history', res, previous.history);
   previous.history = accepted;
   const value = accepted.value;
   const meta = value ? { schema: value.schema, seq: value.seq, generatedAt: value.generatedAt, receivedAt: value.receivedAt,
     sizeBytes: value.sizeBytes, compactedThrough: value.compactedThrough ?? null, reason: value.reason ?? null, points: value.points.length } : null;
-  const key = JSON.stringify([meta, accepted.reason]);
+  const provenance = sidecar.status === 200 ? sidecar.payload : null;
+  const key = JSON.stringify([meta, accepted.reason, provenance]);
   if (key === posted.history) { self.postMessage({ kind: 'unchanged', feed: 'history', clock: clockNow(res), ms: performance.now() - started }); return; }
   posted.history = key;
   if (!value) { self.postMessage({ kind: 'history', reason: accepted.reason ?? null, meta: null, clock: clockNow(res), ms: performance.now() - started }); return; }
-  const columns = toColumns(value.points);
+  const columns = toColumns(value.points, provenance, value.seq);
   const closes = Object.fromEntries(DESK_IDS.map(id => [id, sessionCloses(columns, id, 'totalPnl', 9)]));
   self.postMessage({ kind: 'history', reason: accepted.reason ?? null, meta, columns, closes, clock: clockNow(res), ms: performance.now() - started }, transferables(columns));
 }

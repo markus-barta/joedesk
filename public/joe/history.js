@@ -8,7 +8,7 @@ import { decimalUnits } from './contracts/decimal.mjs';
 import { cellReason } from './health.js';
 import { exactCell } from './performance.js';
 import { drawChart, eurAxis, axis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor } from './chart.js';
-import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, GAP_MS, continuitySeries, coverageUnknownAt, sharedWindowCompare, basisNotice, toColumns, rowAt, rangeSpanMs,
+import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, coverageUnknownAt, sharedWindowCompare, basisNotice, toColumns, rowAt, rangeSpanMs,
   keptRange, placeWindow, panWindow, zoomWindow, resizeWindow, atLiveEdge, endsAtNewest, followWindow, presetSpan, windowPreset, resolveView,
   missingBands, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
 import { viennaDay, zonedInstant, VIENNA, NY } from './time.mjs';
@@ -169,8 +169,8 @@ function firstAt(xs, x, after = false) {
 
 // Display-only hits use original observations, never the thinned SVG points.
 // An actual observation wins at its timestamp; inside a gap show its estimate.
-// Between two observations the line joins (raw or thinned rows at most
-// GAP_MS apart), the nearest one answers.
+// Between observations joined by proven continuous reporting, the nearest
+// actual observation answers.
 function historyHit(observed, gaps, x) {
   const i = pointAt(observed, x), a = observed[i - 1], b = observed[i];
   const p = !a ? b : !b || x - a.x <= b.x - x ? a : b;
@@ -710,7 +710,7 @@ export function renderHistory(ctx) {
     const excluded = basisNotice(cols, DESK_IDS, range, endAt);
     setText($('#histBasis'), excluded.length ? `This chart shows comparable records for ${excluded.map(id => LABEL[id]).join(' and ')}. Older records on another bookkeeping basis stay in the history file.` : '');
     const thin = thinnedOf(cell);
-    setText($('#histThin'), thin !== null && thin > range[0] ? `Before ${when(Math.min(thin, endAt))} the history is thinned to fit its size limit: the line joins the points kept, at most ${spanText(GAP_MS)} apart. A longer stretch between them is hatched: nothing arrived, or an older version thinned it.` : '');
+    setText($('#histThin'), thin !== null && thin > range[0] ? `Before ${when(Math.min(thin, endAt))} the history is thinned to fit its size limit: the line joins kept observations where continuous reporting is recorded. Other stretches are hatched; where coverage cannot be proved, the tooltip says coverage unknown.` : '');
   } else {
     setText($('#histCompare'), 'Comparing waits for the board server’s clock.');
     setText($('#histBasis'), '');
