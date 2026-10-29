@@ -5,7 +5,7 @@ import { feedAge, panelState } from './contracts/panel-state.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { isRTH } from './time.mjs';
 import { age } from './format.js';
-import { NOT_EXACT_REASONS, stoppedData, trustedCurrent, classifyDays } from './board-state.js';
+import { NOT_EXACT_REASONS, stoppedData, classifyDays, classifyCells } from './board-state.js';
 
 // The contract's freshness bound: two 30-second producer cadences.
 export const STALE_AFTER_S = 60;
@@ -24,6 +24,7 @@ export const REASON_COPY = Object.freeze({
   gateway_degraded: 'the broker connection is unstable — reload; if it persists, tell Amy',
   gateway_unconfirmed: 'the broker connection has not checked in — reload; if still old, tell Amy',
   open_unavailable_rth: 'waiting on broker prices — the desks’ money is still available',
+  open_fault_rth: 'open result is unavailable — reload; if it stays, tell Amy',
   day_pending: 'today’s result is late — reload; if it stays, tell Amy',
   halt_on: 'paper trading is paused — the operator must check',
   gateway_down: 'the broker is offline — tell Amy to check the paper broker connection',
@@ -162,7 +163,11 @@ export function localBoardHealth(states, feeds, now) {
   if (CARRIED_CELLS.some(name => observation(states[name]).retained || stoppedData(states[name]))) return { tone: 'yellow', reason: 'retained_values' };
   if (data.desks.some(desk => desk.state === 'stuck')) return { tone: 'yellow', reason: 'retained_values' };
   if (isRTH(now) && !todayHolds(states, data)) return { tone: 'yellow', reason: 'day_pending' };
-  if (isRTH(now) && !trustedCurrent(states['today.openPnl'])) return { tone: 'yellow', reason: 'open_unavailable_rth' };
+  if (isRTH(now)) {
+    const opens = Object.values(classifyCells(states, data, 'openPnl'));
+    if (opens.some(open => open.kind === 'fault')) return { tone: 'yellow', reason: 'open_fault_rth' };
+    if (opens.some(open => open.kind !== 'exact')) return { tone: 'yellow', reason: 'open_unavailable_rth' };
+  }
   if (NOT_EXACT_TONE === 'yellow' && deskValuesNotExact(states)) return { tone: 'yellow', reason: 'values_not_exact' };
   return { tone: 'green', reason: 'board_ok' };
 }
@@ -200,6 +205,7 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
   const short = {
     values_not_exact: 'Not exact', snapshot_stale: 'Updates late', retained_values: 'Older numbers',
     gateway_degraded: 'Broker unstable', gateway_unconfirmed: 'Broker unsure', open_unavailable_rth: 'Prices pending',
+    open_fault_rth: 'Open unavailable',
     day_pending: 'Result late', refresh_failed: 'Data delayed',
   };
   const control = health.tone === 'red' ? health.reason === 'halt_on' ? 'Emergency stop' : 'Problem' : sentence;
@@ -253,8 +259,13 @@ export function boardDiagnostics(states, feeds, now) {
       const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason)}` : '';
       problems.push(`${LABEL[id]}’s Today is ${lastGood ? 'only a last good value' : 'unavailable'}${why}.`);
     }
-    const open = states['today.openPnl'];
-    if (!trustedCurrent(open)) problems.push(`${PNL_COPY.open} is unavailable during New York regular hours: ${cellReason(open?.reason ?? data.pnlSources?.open?.reason ?? 'feed_not_received')}.`);
+    const opens = classifyCells(states, data, 'openPnl');
+    if (opens.today.kind !== 'exact') problems.push(`${PNL_COPY.open} is unavailable during New York regular hours: ${cellReason(opens.today.reason ?? 'feed_not_received')}.`);
+    for (const id of DESKS) if (opens[id].kind === 'fault') {
+      const lastGood = states[`desks.${id}.openPnl`]?.retained, reason = opens[id].reason;
+      const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason)}` : '';
+      problems.push(`${LABEL[id]}’s Open result is ${lastGood ? 'only a last good value' : 'unavailable'}${why}.`);
+    }
   }
   return problems;
 }

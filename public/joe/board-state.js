@@ -9,6 +9,13 @@ export const RETENTION_SECONDS = 60 * 60;
 export const stoppedData = cell => ['snapshot_stale', 'producer_frozen'].includes(cell?.reason);
 export const outageValue = cell => Boolean(cell?.retained || stoppedData(cell));
 export const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale', 'baseline_pending', 'day_pnl_unavailable']);
+// JOED-157 fix2 decision: the producer uses open_pnl_unavailable for its normal
+// price wait. Only Open gets this explicit exception; every other reason
+// outside NOT_EXACT_REASONS remains a fault, and Today's rule stays unchanged.
+const OPEN_WAITING_REASONS = new Set(['open_pnl_unavailable']);
+// Display the explicit Open wait without relabelling a retained observation.
+export const waitingOnPrices = cell => OPEN_WAITING_REASONS.has(cell?.reason) && !outageValue(cell);
+const notExactReason = (reason, field) => NOT_EXACT_REASONS.has(reason) || (field === 'openPnl' && OPEN_WAITING_REASONS.has(reason));
 // A dash the feed explains as not exact (never a fault, never a last value).
 export const notExactDash = cell => cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason);
 // The board's one test for a value it may treat as current and true: shown,
@@ -18,37 +25,59 @@ export const trustedCurrent = cell => cell?.value != null && cell.state === 'fre
   (cell.valueSource == null || cell.valueSource.status === 'available');
 const DESKS = ['j', 'joe', 'joel'];
 
-// Every channel a Today figure has on the wire besides the board's own cell:
-// its money reason and its source (pnlSources.day status and reason). A desk
+// Every channel a P&L figure has on the wire besides the board's own cell:
+// its money reason and its source's status and reason. A desk
 // without its own source uses the snapshot's, as the selector does.
-export function dayChannels(data, scope) {
+export function pnlChannels(data, scope, field) {
   const desk = scope === 'today' ? null : data?.desks?.find(d => d.id === scope);
   const bag = scope === 'today' ? data?.totals : desk?.money;
-  return { moneyReason: bag?.reasons?.dayPnl ?? null, source: (desk?.pnlSources?.day ?? data?.pnlSources?.day) ?? null };
+  const period = field === 'dayPnl' ? 'day' : 'open';
+  return { moneyReason: bag?.reasons?.[field] ?? null, source: (desk?.pnlSources?.[period] ?? data?.pnlSources?.[period]) ?? null };
 }
-// The one classifier for a Today figure, over every channel: the board's cell
+export const dayChannels = (data, scope) => pnlChannels(data, scope, 'dayPnl');
+// The one classifier for a Today or Open figure, over every channel: the board's cell
 // (value, state, freshness, retention and the reason the selector or the
 // board chose), the money reason and the source's status and reason.
 // - 'fault' wins: any fault reason on any channel, a missing cell, a last good
 //   value or stopped data, or anything that is neither of the two below.
-// - 'notExact': withheld, and every reason on every channel is a not-exact one.
+// - 'notExact': every reason is a not-exact one or an explicit Open price
+//   wait; only that price wait may keep its base retained observation.
 // - 'exact': a trustworthy current value (trustedCurrent) from an available
 //   source, with no reason on any channel; `estimated` marks a session-open estimate.
-export function classifyDay(cell, { moneyReason = null, source = null } = {}) {
+export function classifyCell(cell, { moneyReason = null, source = null } = {}, field = 'dayPnl') {
   const reasons = [cell?.reason, moneyReason, source?.reason].filter(Boolean);
-  const fault = reasons.find(reason => !NOT_EXACT_REASONS.has(reason));
+  const fault = reasons.find(reason => !notExactReason(reason, field));
   if (fault) return { kind: 'fault', reason: fault };
+  const notExact = reasons.find(reason => notExactReason(reason, field));
+  // Pending Open prices may retain their previous observation, as at base.
+  // That producer wait is still a wait; any actual fault above wins first.
+  if (cell && field === 'openPnl' && reasons.some(reason => OPEN_WAITING_REASONS.has(reason))) return { kind: 'notExact', reason: notExact };
   if (!cell || outageValue(cell)) return { kind: 'fault', reason: null };
-  const notExact = reasons.find(reason => NOT_EXACT_REASONS.has(reason));
   if (notExact) return { kind: 'notExact', reason: notExact };
   if (trustedCurrent(cell) && (source == null || source.status === 'available')) {
     return { kind: 'exact', reason: null, estimated: source?.method === 'session-open-estimate' };
   }
   return { kind: 'fault', reason: null };
 }
-// The household Today and each desk's, classified the same way.
-export const classifyDays = (states, data) => Object.fromEntries(['today', ...DESKS].map(scope =>
-  [scope, classifyDay(states[scope === 'today' ? 'today.dayPnl' : `desks.${scope}.dayPnl`], dayChannels(data, scope))]));
+export const classifyDay = (cell, channels) => classifyCell(cell, channels);
+// The household and every desk, classified the same way for either P&L field.
+export const classifyCells = (states, data, field) => Object.fromEntries(['today', ...DESKS].map(scope =>
+  [scope, classifyCell(states[scope === 'today' ? `today.${field}` : `desks.${scope}.${field}`], pnlChannels(data, scope, field), field)]));
+export const classifyDays = (states, data) => classifyCells(states, data, 'dayPnl');
+// Before a snapshot, or while amounts are simply absent, missing cells are
+// not evidence of a broker fault. Explicit reasons, unavailable sources and
+// retained observations still take the normal fault path (JOED-157 fix3).
+export function absentPnl(states, data, field) {
+  if (!data) return true;
+  const plainMissing = scope => {
+    const cell = states[scope === 'today' ? `today.${field}` : `desks.${scope}.${field}`];
+    const { moneyReason, source } = pnlChannels(data, scope, field);
+    return cell?.state === 'not reported' && cell.value == null && !outageValue(cell)
+      && !cell.reason && !moneyReason && !source?.reason && source?.status !== 'unavailable';
+  };
+  const results = classifyCells(states, data, field);
+  return plainMissing('today') && DESKS.filter(id => results[id].kind === 'fault').every(plainMissing);
+}
 const positionKey = row => JSON.stringify([row.scope, row.desk, row.symbol]);
 const unavailable = (cell, reason = cell.reason) => ({ ...cell, state: cell.state === 'fresh' ? 'broken' : cell.state, value: null, retained: false, reason });
 // Hiding a derived amount does not erase the observation's health/grace.
@@ -101,7 +130,7 @@ export function boardStates(feeds, now, previous = {}) {
     // channels (money or source) is the cell's reason: it never hides behind
     // "not exact". A feed or gateway failure still does not replace the scoped
     // not-exact reason (it stays on the header path, JOED-98).
-    const scopedFault = sourceReasons.find(reason => reason && !NOT_EXACT_REASONS.has(reason));
+    const scopedFault = sourceReasons.find(reason => reason && !notExactReason(reason, field));
     const expired = outageValue(cell) && (cell.ageSeconds == null || cell.ageSeconds >= RETENTION_SECONDS);
     // Today belongs to the observation's NY date, even if a real outage or
     // stopped feed spans midnight. Receipt time cannot freshen old evidence.
@@ -122,6 +151,15 @@ export function boardStates(feeds, now, previous = {}) {
       // Value-free evidence for Results after unavailable() clears retained.
       ...(expired ? { outageExpired: true } : {}),
     };
+    // An unavailable Open source without a reason cannot leave a fresh-looking
+    // amount on the cards. Keep its observation, but expose the classifier's fault.
+    if (field === 'openPnl') {
+      const scope = name.startsWith('desks.') ? name.split('.')[1] : 'today';
+      const result = classifyCell(states[name], pnlChannels(data, scope, field), field);
+      if (result.kind === 'fault' && (states[name].state === 'fresh' || OPEN_WAITING_REASONS.has(states[name].reason))) states[name] = {
+        ...states[name], state: 'broken', reason: result.reason ?? 'source_unavailable',
+      };
+    }
   }
   // Recheck policy after every prior-array fallback, including retained_values.
   // Withhold moved rows rather than inventing new scope/desk evidence or age.
@@ -156,13 +194,30 @@ export function boardStates(feeds, now, previous = {}) {
   }
   // Totals and since-start are derived figures. Never display a carried
   // result or combine exact siblings with an outage/missing input. A desk
-  // Today the classifier calls a fault (a value kept beside a fault reason)
-  // is no input for the household Today either (JOED-148).
+  // Today or Open the classifier calls a fault (even beside a value)
+  // is no input for the household total either (JOED-148, JOED-157).
   for (const field of MONEY_FIELDS) {
     const name = `today.${field}`, cell = states[name];
-    const blocked = DESKS.map(id => states[`desks.${id}.${field}`]).find((c, i) => outageValue(c) || c.value == null ||
-      (field === 'dayPnl' && classifyDay(c, dayChannels(data, DESKS[i])).kind === 'fault'));
-    if (outageValue(cell) || (cell.value != null && blocked)) states[name] = withheld(cell, cell.reason ?? blocked?.reason);
+    const inputs = DESKS.map(id => ({ id, cell: states[`desks.${id}.${field}`],
+      result: ['dayPnl', 'openPnl'].includes(field) ? classifyCell(states[`desks.${id}.${field}`], pnlChannels(data, id, field), field) : null }));
+    const faulty = ['dayPnl', 'openPnl'].includes(field) && absentPnl(states, data, field)
+      ? undefined : inputs.find(input => input.result?.kind === 'fault');
+    const blocked = faulty ?? inputs.find(({ cell: c }) => outageValue(c) || c.value == null);
+    const own = faulty ? classifyCell(cell, pnlChannels(data, 'today', field), field) : null;
+    // A stale envelope cannot replace the producer's scoped price-wait copy.
+    // Keep that reason only for transport-aged desks whose own sources are
+    // available and fault-free; any actual desk/source fault still wins below.
+    const waitingThroughOutage = field === 'openPnl' && own?.kind === 'notExact' && OPEN_WAITING_REASONS.has(cell.reason)
+      && inputs.filter(input => input.result.kind === 'fault').every(input => {
+        const { moneyReason, source } = pnlChannels(data, input.id, field);
+        return (input.cell.state === 'stale' || outageValue(input.cell)) && source?.status === 'available'
+          && ![moneyReason, source.reason].some(reason => reason && !notExactReason(reason, field));
+      });
+    // A fault wins the caption even if the household already had a not-exact
+    // dash. Desk order cannot turn that fault into a not-exact explanation.
+    if (outageValue(cell) || (cell.value != null && blocked) || faulty) states[name] = withheld(
+      faulty && cell.state === 'not reported' ? { ...cell, state: 'broken' } : cell,
+      faulty && !waitingThroughOutage ? (own.kind === 'fault' ? own.reason : null) ?? faulty.result.reason ?? 'source_unavailable' : cell.reason ?? blocked?.cell.reason);
   }
   for (const id of DESKS) {
     const name = `desks.${id}.totalPnl`;

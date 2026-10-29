@@ -206,7 +206,7 @@ test('different reasons, ages, retained observations and missing values keep loc
   ctx.states = boardStates(ctx.feeds, ctx.now, ctx.states);
   const doc = htmlDocument(heroLeft(ctx));
   assert.equal(doc.querySelector('[data-cell="hero.open"] .bn').textContent, '—');
-  assert.match(doc.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, /Unavailable · open result not available/);
+  assert.equal(doc.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Waiting on prices');
 });
 
 test('no snapshot keeps every original missing explanation and omits both percentages', () => {

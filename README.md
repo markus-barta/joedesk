@@ -1433,8 +1433,49 @@ value: ‹reason›.” for a desk. The light, the hero's desk names and sentenc
 the cards and Details all use the classifier, while `exactCell` keeps its
 separate money rule (JOED-96 replays). Transport failures and stale or missing
 feeds keep their earlier, higher-ranked warnings. Not-exact values still never
-turn the board red (JOED-103), the open-result rule in regular hours is
-unchanged, and no copy promises when a value becomes exact (A5).
+turn the board red (JOED-103), and no copy promises when a value becomes exact
+(A5).
+
+JOED-157 applies the same classification to Open result. `classifyCell(cell, channels, field = 'dayPnl')`
+is the shared classifier; `pnlChannels(data, scope, field)` gathers the money
+reason and source (desk source, falling back to the household source), and
+`classifyCells(states, data, field)` classifies the household and all three
+desks for `dayPnl` or `openPnl`. The Today APIs remain thin wrappers. Amy's A3
+green-for-not-exact approval applies to Today only. During regular hours,
+Open stays green only when the household and every desk are exact. A not-exact
+Open keeps the existing yellow `open_unavailable_rth` price warning. The producer's
+`open_pnl_unavailable` is an explicit Open-only waiting reason: it keeps “Waiting
+on broker prices” with no reload or “tell Amy” action. Other reasons outside the
+known not-exact set remain faults; Today keeps its original reason set. A fault
+on any channel wins, with yellow `open_fault_rth` and “Open result is unavailable”.
+A desk fault also withholds the household Open amount, including when the
+producer supplied a current total. Household Today and Open captions name the
+faulty desks and their reasons first, using each desk's own state word, followed
+by not-exact desks or desks waiting on prices (for example, “Last good for Joe ·
+not reported by the broker; not exact for J”, or “Unavailable for Joe · not
+reported by the broker; waiting on prices for J and Joel”). Headlines, Details,
+cards and phone summaries agree on those words. Retained observations keep
+their last-good ages. Before any snapshot, or when the household and all faulty
+desks are simply not reported with no reason or unavailable source, the board
+keeps the absent state rather than inventing a fault or blaming desks. The
+cold page still says “No numbers yet: no board data has arrived.”
+Details names each
+faulty desk and its reason and keeps the household problem line for a not-exact
+Open. Its “Open positions” row explains non-exact results
+(“Joe and Joel: exact; J: not exact · ‹reason›”)
+and household-only gaps, rather than showing an available valuation method
+over a fault, including a household fault beside desk gaps. For both Today
+and Open, a faulty blocking desk supplies the withheld household's fault
+caption before any not-exact blocker, regardless of desk order or a preexisting
+not-exact household dash. Open source status alone can invalidate an otherwise
+current amount. Higher-ranked feed and broker warnings retain their priority.
+`test/open-result.mjs` checks all 10,368 combinations of twelve desk conditions
+across three desks and six household conditions (including money-channel and
+source-channel price waits, a household price wait, and an amount beside its
+own fault) against an independent
+plain-words oracle, through the light, hero/summary, Details, cards and phone
+rows. It also covers source fallback, unavailable source status and every
+known not-exact reason; the Today regression suite remains separate.
 
 Amy's A4 (2026-10-29, JOED-148): Since start counts from 10 Sep 2026, 00:00 New
 York, for all three desks. `SINCE_START` in `public/joe/performance.js` holds

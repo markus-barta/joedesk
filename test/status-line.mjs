@@ -29,6 +29,7 @@ const cases = [
   ['yellow', 'gateway_degraded', 'The broker connection is unstable'],
   ['yellow', 'gateway_unconfirmed', 'Broker unsure: last check 1 min ago'],
   ['yellow', 'open_unavailable_rth', 'Waiting on broker prices'],
+  ['yellow', 'open_fault_rth', 'Open result is unavailable'],
   ['yellow', 'day_pending', 'Today’s result is late'],
   ['red', 'halt_on', 'Emergency stop is ON'],
   ['red', 'gateway_down', 'The broker is offline'],

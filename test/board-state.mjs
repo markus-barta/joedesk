@@ -249,10 +249,9 @@ for (const [id, fixture] of Object.entries(heroWordingFixtures(browserSnapshot))
   assert.equal(feed.status, 200, JSON.stringify(feed.errors));
   const feeds = { data: feed }, states = boardStates(feeds, f.now, panelStates({ data: first }, browserSnapshot.receivedAt));
   const status = statusPresentation({ states, feeds, now: f.now });
-  // Amy's A3: a not-exact Today alone keeps the light green in regular hours;
-  // a not-exact or missing open result still warns as before.
+  // Amy's A3 excuses only Today. Open not-exact gaps and faults stay yellow.
   assert.deepEqual([status.tone, status.label, status.reason], id === 'p3-not-exact-yet'
-    ? ['green', 'Board OK', 'board_ok'] : ['yellow', 'Data delayed', 'open_unavailable_rth']);
+    ? ['green', 'Board OK', 'board_ok'] : ['yellow', 'Data delayed', id === 'p3-mixed-not-exact-fault' ? 'open_fault_rth' : 'open_unavailable_rth']);
   const brokenHero = ['today.dayPnl', 'today.openPnl', 'today.totalPnl', 'today.equity', 'paperAccount']
     .filter(name => states[name].state === 'broken');
   assert.deepEqual(brokenHero, id === 'p3-not-exact-yet' ? ['today.dayPnl'] : ['today.dayPnl', 'today.openPnl']);
@@ -270,7 +269,7 @@ for (const [id, fixture] of Object.entries(heroWordingFixtures(browserSnapshot))
     if (id === 'p3-mixed-not-exact-fault') {
       assert.equal(states['today.openPnl'].state, 'broken');
       assert.equal(states['today.openPnl'].value, null);
-      assert.equal(hero.querySelector('[data-cell="hero.open"] .c').textContent, 'Unavailable · not reported by the broker');
+      assert.equal(hero.querySelector('[data-cell="hero.open"] .c').textContent, 'Last good for J, Joe and Joel · not reported by the broker');
     } else assert.equal(states['today.openPnl'].state, 'fresh');
   }
 });
@@ -1492,11 +1491,12 @@ test('JOED-148: different desk reasons name their desks; the section line keeps 
   assert.equal(htmlDocument(heroLeft(all)).querySelector('.say').textContent, 'No desk has an exact result for today.');
   const fault = dayNotExact({ j: 'not_exact_yet', joe: 'source_unavailable' });
   // An outage keeps Joe's last good value (never in the household total); a
-  // cold page has none. Either way Joe's own state is named beside J's.
+  // cold page has none. Either way the household caption leads with the
+  // fault using Joe's own state word, as do Details and the cards.
   const carried = ctx(fault), cold = { ...carried, states: boardStates(carried.feeds, carried.now) };
-  assert.equal(htmlDocument(heroLeft(carried)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Not exact for J; last good for Joe');
+  assert.equal(htmlDocument(heroLeft(carried)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Last good for Joe · not reported by the broker; not exact for J');
   assert.equal(detailsRow(carried, 'Today’s result'), 'Exact for Joel; not exact for J; last good for Joe · not reported by the broker');
-  assert.equal(htmlDocument(heroLeft(cold)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Not exact for J; unavailable for Joe');
+  assert.equal(htmlDocument(heroLeft(cold)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker; not exact for J');
   assert.equal(detailsRow(cold, 'Today’s result'), 'Exact for Joel; not exact for J; unavailable for Joe · not reported by the broker');
 });
 
@@ -1623,7 +1623,7 @@ test('JOED-148 A3: a desk Today shown with a fault reason keeps the light yellow
   const health = boardHealthPresentation(view.states, view.feeds, view.now);
   assert.deepEqual([health.tone, health.reason], ['yellow', 'day_pending']);
   // The hero and Details name Joe's real gap with the same test the light uses.
-  assert.equal(htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Not exact for J; unavailable for Joe');
+  assert.equal(htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker; not exact for J');
   assert.equal(detailsRow(view, 'Today’s result'), 'Exact for Joel; not exact for J; unavailable for Joe · not reported by the broker');
 });
 
@@ -1726,7 +1726,7 @@ test('JOED-148 re-gate High 1: a current household Today never exempts a desk wh
   // withholds it and keeps the exact desks' own results.
   assert.deepEqual([view.states['today.dayPnl'].value, view.states['today.dayPnl'].reason], [null, 'source_unavailable']);
   const hero = htmlDocument(heroLeft(view));
-  assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable · not reported by the broker');
+  assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker');
   assert.equal(hero.querySelector('.say').textContent, `J is up ${eur(decimalUnits('50'))} and Joel is up ${eur(decimalUnits('5'))} today.`);
   assert.equal(todayPercent(view.states, data.pnlSources.day), null);
 });
@@ -1892,7 +1892,9 @@ function daySurfaces(view, desks, household) {
   expect(JSON.stringify(deskLines) === JSON.stringify(own.filter(d => !d.fine).map(d => `${d.name}’s Today ${PROBLEM[d.word]}`)), `Details lines: ${deskLines.join(' ')}`);
   const householdLine = lines.some(line => line.startsWith('Today’s result is unavailable during New York regular hours: '));
   if (!HOUSEHOLD_TODAY[household].fine) expect(householdLine, 'Details: no line for the household Today');
-  else if (household === 'notExact' || own.every(d => d.fine)) expect(!householdLine, 'Details: a household line beside a fine household Today');
+  else if (own.every(d => d.fine)) expect(!householdLine, 'Details: a household line beside a fine household Today');
+  // JOED-157: a not-exact household takes on a desk's fault (fault wins), so Details names it too.
+  if (household === 'notExact' && own.some(d => !d.fine)) expect(householdLine, 'Details: the household Today inherits the desk fault');
   const row = details.querySelectorAll('dd')[details.querySelectorAll('dt').findIndex(dt => dt.textContent === 'Today’s result')].textContent;
   const rowNamed = namedIn(row);
   if (shown) expect(row === 'Counted from 06:00 (midnight in New York)', `Today row: ${row}`);
@@ -1919,7 +1921,8 @@ function daySurfaces(view, desks, household) {
         : household !== 'current' ? ['Today’s result is not available.']
           : [...(notExactDesks.length ? ['No desk has an exact result for today.'] : []), ...(own.some(d => !d.fine) ? ['Today’s result is not available.'] : [])];
     expect(sentences.includes(sentence), `hero sentence: ${sentence}`);
-    expect(!caption === (household === 'nullNoReason'), `hero caption: ${caption}`);
+    // JOED-157: a reason-less household with a faulty desk takes on that fault, so the caption names the desk.
+    expect(!caption === (household === 'nullNoReason' && own.every(d => d.fine)), `hero caption: ${caption}`);
     const named = namedIn(caption);
     for (const [name, word] of named) expect(word !== 'exact' && own.find(d => d.name === name)?.word === word, `hero caption on ${name}: ${caption}`);
     if (named.length) expect(sameNames(named, own.filter(d => d.word !== 'exact')), `hero caption names: ${caption}`);
@@ -1950,6 +1953,13 @@ test('JOED-148: every desk and household Today combination matches the plain-wor
       const label = `household ${HOUSEHOLD_TODAY[household].says}; ${desks.map((option, i) => `${NAMES[DESKS[i]]} ${DESK_TODAY[option].says}`).join('; ')}`;
       assert.deepEqual(daySurfaces(view, desks, household), [], label);
       assert.equal(view.states['today.dayPnl'].value != null, household === 'current' && desks.every(option => option === 'exact'), `${label}: household shown`);
+      // JOED-157: a faulty desk leads the household caption with its own state word,
+      // even after a not-exact desk or beside an already not-exact household dash.
+      if (desks.some(option => !DESK_TODAY[option].fine)) {
+        assert.equal(view.states['today.dayPnl'].reason, 'source_unavailable', `${label}: fault wins household reason`);
+        const caption = heroToday(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent;
+        assert.match(caption.split('; ')[0], /^(Unavailable|Last good|Not reported) for /, `${label}: household caption leads with faults`);
+      }
       count++;
       if (HOUSEHOLD_TODAY[household].fine && desks.every(option => DESK_TODAY[option].fine)) green++;
     }
