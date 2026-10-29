@@ -3,7 +3,7 @@
 // tooltip's nearest value and the time axis on Vienna wall-clock ticks.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { MIN, HOUR, DAY, iso, valid, words, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
+import { MIN, HOUR, DAY, iso, valid, words, point, body, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
 
 const M = await import('../public/joe/account-model.js');
 const { decimalUnits } = await import('../contracts/decimal.mjs');
@@ -232,4 +232,55 @@ test('JOED-156 model: time labels keep their distance on Vienna wall-clock ticks
   const year = M.timeLabels(Date.parse('2026-01-01T00:00:00.000Z') - 200 * DAY, NOW, 1200);
   assert.ok(year.labels.some(l => l.text === '2026'), 'January is its year');
   assert.ok(year.labels.filter(l => l.text !== '2026').every(l => /^[A-Z][a-z]{2}$/.test(l.text)));
+});
+
+// ---------- Fix round 1 (the Codex gate's findings) ----------
+const T10 = Date.parse('2026-10-14T08:00:00.000Z'); // 10:00 Vienna
+const atMin = m => T10 + m * MIN;
+const shortOf = points => M.acceptAccountHistory(body(points, [])).short;
+
+test('JOED-156 fix 1: a window starting on an unavailable snapshot starts at the first value after it, never at an older one', () => {
+  // Five-minute snapshots from 10:00 to 11:00; the 10:10 one is unavailable.
+  const series = shortOf(Array.from({ length: 13 }, (_, i) => point(atMin(5 * i), i === 2 ? null : (27000 + i).toFixed(2))));
+  const change = M.rangeChange(series, [atMin(11), atMin(60)]);
+  assert.equal(iso(change.from), iso(atMin(15)), 'the first value after the unavailable one, not the 10:05 value before it');
+  assert.equal(change.fromStart, false, 'and it does not claim the window’s start');
+  assert.equal(change.change, decimalUnits('27012.00') - decimalUnits('27003.00'));
+  // A gap (more than 20 minutes without a snapshot) right after the value before the start: the same.
+  const gap = shortOf([point(atMin(0), '27000.00'), point(atMin(30), '27001.00'), point(atMin(35), '27002.00')]);
+  const afterGap = M.rangeChange(gap, [atMin(5), atMin(35)]);
+  assert.deepEqual([iso(afterGap.from), afterGap.fromStart], [iso(atMin(30)), false]);
+  // A value with the line running on from it still stands for the start.
+  const kept = M.rangeChange(series, [atMin(22), atMin(60)]);
+  assert.deepEqual([iso(kept.from), kept.fromStart], [iso(atMin(20)), true]);
+  // So does an observation exactly at the start, whatever follows it.
+  const exact = M.rangeChange(gap, [atMin(0), atMin(35)]);
+  assert.deepEqual([iso(exact.from), exact.fromStart], [iso(atMin(0)), true]);
+});
+
+test('JOED-156 fix 2: a window ending inside a run of unavailable snapshots shows the gap up to its edge', () => {
+  // Valid 10:00, unavailable 10:05, 10:10 and 10:15, valid 10:20 and 10:25; the window ends at 10:06.
+  const points = [point(atMin(0), '27000.00'), point(atMin(5), null), point(atMin(10), null), point(atMin(15), null), point(atMin(20), '27001.00'), point(atMin(25), '27002.00')];
+  const { pts, bands } = M.chartPoints(shortOf(points), [atMin(-30), atMin(6)], atMin(30));
+  assert.deepEqual(bands, [[atMin(0), atMin(20)]], 'from the last value to the value after the run: drawn to the edge');
+  assert.ok(pts.some(p => p.v === null) && pts.filter(p => p.v !== null).every(p => p.x === atMin(0) || p.x === atMin(20)), 'the line breaks across it');
+  // A run that reaches the end of the record: to now.
+  assert.deepEqual(M.chartPoints(shortOf(points.slice(0, 4)), [atMin(-30), atMin(6)], atMin(30)).bands, [[atMin(0), atMin(30)]]);
+  // And the closes: a missing day after the window's end still shows.
+  const closes = M.acceptAccountHistory(body([], [
+    { day: '2026-10-10', t: '2026-10-10T20:00:00.000Z', equity: { amount: '1', currency: 'EUR' }, cash: null, equityAt: '2026-10-10T20:00:00.000Z', cashAt: null },
+    { day: '2026-10-12', t: '2026-10-12T20:00:00.000Z', equity: { amount: '2', currency: 'EUR' }, cash: null, equityAt: '2026-10-12T20:00:00.000Z', cashAt: null }])).daily;
+  assert.deepEqual(M.chartPoints(closes, [Date.parse('2026-10-09T00:00:00.000Z'), Date.parse('2026-10-11T00:00:00.000Z')], Date.parse('2026-10-12T21:00:00.000Z')).bands,
+    [[Date.parse('2026-10-10T20:00:00.000Z'), Date.parse('2026-10-12T20:00:00.000Z')]]);
+});
+
+test('JOED-156 fix 3: one resize rule keeps the source’s floor, inside the range, for either edge', () => {
+  const full = [NOW - 40 * DAY, NOW], week = [NOW - 7 * DAY, NOW];
+  assert.deepEqual(M.resizeWithin(full, week, 'from', NOW - 5 * DAY, M.MIN_SPAN.daily), [NOW - 5 * DAY, NOW], 'a resize above the floor is History’s');
+  assert.deepEqual(M.resizeWithin(full, week, 'from', NOW - HOUR, M.MIN_SPAN.daily), [NOW - 3 * DAY, NOW], 'the start edge stops three days before the end');
+  assert.deepEqual(M.resizeWithin(full, week, 'to', NOW - 7 * DAY + HOUR, M.MIN_SPAN.daily), [NOW - 7 * DAY, NOW - 4 * DAY], 'the end edge three days after the start');
+  assert.deepEqual(M.resizeWithin(full, [full[0], full[0] + 7 * DAY], 'to', full[0] - DAY, M.MIN_SPAN.daily), [full[0], full[0] + 3 * DAY], 'never outside the range');
+  assert.deepEqual(M.resizeWithin(full, week, 'from', NOW, M.MIN_SPAN.short), [NOW - 5 * MIN, NOW], 'five minutes of snapshots');
+  const short = [NOW - DAY, NOW];
+  assert.deepEqual(M.resizeWithin(short, short, 'from', NOW, 10 * DAY), short, 'a range shorter than the floor is the narrowest window');
 });

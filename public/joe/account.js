@@ -12,7 +12,7 @@ import { cellReason, capital } from './health.js';
 import { outageValue, trustedCurrent, notExactDash } from './board-state.js';
 import { accountStart, boardSettingsState } from './board-settings.js';
 import { drawChart, axis, eurAxis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor } from './chart.js';
-import { panWindow, zoomWindow, placeWindow, resizeWindow, endsAtNewest, atLiveEdge, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
+import { panWindow, zoomWindow, placeWindow, endsAtNewest, atLiveEdge, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
 import { zonedInstant, VIENNA } from './time.mjs';
 import * as M from './account-model.js';
 
@@ -296,11 +296,14 @@ export function pointDetails(p, x, series) {
 }
 // What a change covers, in a few words for its chip: since when, when it
 // runs to now, else from one end to the other. The title gives it whole.
+// Snapshots name their time: on the same day the time alone, within six
+// days the weekday and time ("since Tue 19:47"), else the date and time.
 const spanChip = ([a, b], source, toNow) => {
-  const at = ms => new Date(ms).toISOString(), sameDay = dayDM(at(a)) === dayDM(at(b));
-  const time = source === 'short' && sameDay;
-  if (toNow) return `since ${time ? timeHM(at(a)) : dayDM(at(a))}`;
-  return time ? `${timeHM(at(a))} – ${timeHM(at(b))}` : `${dayDM(at(a))} – ${dayDM(at(b))}`;
+  const at = ms => new Date(ms).toISOString();
+  if (source === 'daily') return toNow ? `since ${dayDM(at(a))}` : `${dayDM(at(a))} – ${dayDM(at(b))}`;
+  const moment = (ms, sameDay) => (sameDay ? timeHM(at(ms)) : b - ms < 6 * 864e5 ? `${dayDDM(at(ms)).split(' ')[0]} ${timeHM(at(ms))}` : `${dayDM(at(ms))}, ${timeHM(at(ms))}`);
+  const sameDay = dayDM(at(a)) === dayDM(at(b));
+  return toNow ? `since ${moment(a, sameDay)}` : `${moment(a, sameDay)} – ${sameDay ? timeHM(at(b)) : moment(b, false)}`;
 };
 const spanLabel = ([a, b], source, toNow) => {
   const at = ms => new Date(ms).toISOString();
@@ -480,11 +483,14 @@ function setView(next) {
   AS.view = next; AS.follow = endsAtNewest(AS.full, next);
   seen(); requestDraw();
 }
-// A zoom never narrows below the source's floor: minutes of snapshots, days of closes.
+// No window narrows below the source's floor (minutes of snapshots, days of
+// closes): zooms clamp their factor to it, and every resize of an edge, by
+// pointer or key, goes through resizeTo.
+const floorSpan = () => Math.min(M.MIN_SPAN[M.sourceOf(AS.range)], AS.full[1] - AS.full[0]);
 function zoomBy(base, factor, at) {
-  const floor = Math.min(M.MIN_SPAN[M.sourceOf(AS.range)], AS.full[1] - AS.full[0]);
-  return zoomWindow(AS.full, base, Math.max(factor, floor / Math.max(1, base[1] - base[0])), at);
+  return zoomWindow(AS.full, base, Math.max(factor, floorSpan() / Math.max(1, base[1] - base[0])), at);
 }
+const resizeTo = (base, edge, to) => M.resizeWithin(AS.full, base, edge, to, floorSpan());
 function announceWindow() {
   if (!AS.full) return;
   const next = M.accountWindow(AS.full, AS);
@@ -636,7 +642,7 @@ function bindChart(chart, track) {
     if (!d.moved && Math.abs(dx) < 3) return;
     if (!d.moved) { d.moved = true; track.classList.add('dragging'); }
     const per = (AS.full[1] - AS.full[0]) / track.clientWidth;
-    setView(d.kind === 'edge' ? resizeWindow(AS.full, d.start, d.edge, d.start[d.edge === 'from' ? 0 : 1] + dx * per) : panWindow(AS.full, d.start, dx * per));
+    setView(d.kind === 'edge' ? resizeTo(d.start, d.edge, d.start[d.edge === 'from' ? 0 : 1] + dx * per) : panWindow(AS.full, d.start, dx * per));
   });
   const drop = e => {
     const d = input.drag;
@@ -657,7 +663,7 @@ function bindChart(chart, track) {
     if (edge) {
       const at = edge === 'from' ? a : b;
       const to = step ? at + step * w * (e.shiftKey ? 0.5 : 0.1) : { PageUp: at + w, PageDown: at - w, Home: full[0], End: full[1] }[e.key];
-      if (to !== undefined) next = resizeWindow(full, shown, edge, to);
+      if (to !== undefined) next = resizeTo(shown, edge, to);
     } else if (step && e.shiftKey) next = zoomBy(shown, step < 0 ? 1 / 1.5 : 1.5, AS.follow ? b : (a + b) / 2);
     else if (step) next = panWindow(full, shown, step * w * 0.1);
     else if (e.key === 'PageUp' || e.key === 'PageDown') next = panWindow(full, shown, (e.key === 'PageUp' ? 1 : -1) * w);

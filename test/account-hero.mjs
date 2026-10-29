@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
-import { DAY, valid, words, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
+import { MIN, DAY, iso, valid, words, point, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
 
 const M = await import('../public/joe/account-model.js');
 const A = await import('../public/joe/account.js');
@@ -156,7 +156,7 @@ test('JOED-156 hero: each range draws its own store; a range longer than the rec
   svg = p.svg();
   assert.equal(svg.dataset.range, '5D');
   assert.equal(p.text('#acctNote'), 'Recording since 11 Oct, 19:42 · 3 days so far');
-  assert.equal(p.text('#acctChange .acct-rng'), 'since 11 Oct', 'the change says what it covers');
+  assert.equal(p.text('#acctChange .acct-rng'), 'since Sun 19:42', 'the change says what it covers, to the minute');
   assert.equal(words(p.$('#acctChange .acct-rng').getAttribute('title')), 'Change from 11 Oct, 19:42 to now');
   A.chooseRange('6M');
   await p.render();
@@ -313,6 +313,50 @@ test('JOED-156 hero: the tooltip and the keyboard reading say the same words', (
 });
 
 // ---------- Fix round 1 (the Codex gate's findings) ----------
+test('JOED-156 fix 1: a day starting on an unavailable snapshot is no whole 1D: the chip names the time the change starts', async t => {
+  const answer = history();
+  const start = answer.points.findIndex(q => q.t === iso(SNAP - DAY));
+  answer.points[start] = point(SNAP - DAY, null);
+  const p = page(t, { body: answer });
+  await p.render();
+  A.chooseRange('1D');
+  await p.render();
+  assert.equal(p.$('#acctRanges [data-acct-range="1D"]').getAttribute('aria-pressed'), 'true', 'still the 1D window');
+  assert.equal(p.text('#acctChange .acct-rng'), 'since Tue 19:47', 'from the first value after the unavailable one, never the value before it');
+  assert.equal(words(p.$('#acctChange .acct-rng').getAttribute('title')), 'Change from 13 Oct, 19:47 to now');
+});
+
+test('JOED-156 fix 3: the strip’s edges keep the daily closes’ three days, dragged or keyed', async t => {
+  const p = page(t);
+  await p.render();
+  const strip = p.$('#acctStrip'), track = p.$('#acctTrack');
+  strip.removeAttribute = key => { delete strip.attributes[key]; };
+  Object.assign(track, { clientWidth: 800, clientHeight: 40, getBoundingClientRect: () => ({ left: 0 }), setPointerCapture() {} });
+  for (const edge of document.querySelectorAll('#acctStrip [data-edge]')) edge.firstElementChild = edge.querySelector('.grip');
+  const span = () => Number(p.svg().dataset.x1) - Number(p.svg().dataset.x0);
+  const on = selector => ({ closest: s => (s === selector ? { dataset: { edge: 'to' } } : null) });
+  // Pointer: the end edge dragged almost to the strip's start.
+  track.listeners.pointerdown({ pointerId: 1, pointerType: 'mouse', button: 0, clientX: 790, target: on('[data-edge]') });
+  track.listeners.pointermove({ pointerId: 1, clientX: 10 });
+  track.listeners.pointerup({ pointerId: 1, type: 'pointerup', clientX: 10 });
+  await p.render();
+  assert.ok(span() >= 3 * DAY - 1000, `dragged: ${(span() / DAY).toFixed(2)} days`);
+  assert.ok(span() <= 3 * DAY + 1000, 'and no wider than the drag allows');
+  // Keys: Shift with Left on the end edge, again and again.
+  A.chooseRange('1M');
+  await p.render();
+  const to = document.querySelector('#acctStrip [data-edge="to"]');
+  for (let i = 0; i < 40; i++) track.listeners.keydown({ key: 'ArrowLeft', shiftKey: true, altKey: false, ctrlKey: false, metaKey: false, target: { closest: () => to }, preventDefault() {} });
+  await p.render();
+  assert.ok(span() >= 3 * DAY - 1000, `keyed: ${(span() / DAY).toFixed(2)} days`);
+  // Snapshots keep their five minutes the same way.
+  A.chooseRange('1D');
+  await p.render();
+  for (let i = 0; i < 80; i++) track.listeners.keydown({ key: 'ArrowLeft', shiftKey: true, altKey: false, ctrlKey: false, metaKey: false, target: { closest: () => to }, preventDefault() {} });
+  await p.render();
+  assert.ok(span() >= 5 * MIN - 1000 && span() < 10 * MIN, `snapshots: ${(span() / MIN).toFixed(1)} min`);
+});
+
 test('JOED-156 fix 4: a worker reads and converts the account history; the page takes its columns and falls back when it fails', async t => {
   const saved = { Worker: globalThis.Worker, JoeVersion: globalThis.JoeVersion, hooks: globalThis.__joedesk };
   t.after(() => { for (const [k, v] of Object.entries({ Worker: saved.Worker, JoeVersion: saved.JoeVersion, __joedesk: saved.hooks })) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } });
@@ -353,4 +397,15 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
   await A.refreshAccountHistory();
   assert.equal(made.length, 1, 'no new worker after a failure');
   assert.equal(p.reads.length, 2);
+});
+
+test('JOED-156 fix 5: each pointer sees its own Controls list; only the pointer rules set the lists’ display', () => {
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  const shared = css.match(/(?:^|\n)\.acct-keys\s*\{([^}]*)\}/)?.[1];
+  assert.ok(shared !== undefined, 'the lists’ shared rule');
+  assert.doesNotMatch(shared, /display\s*:/, 'the shared rule leaves display to the pointer rules');
+  assert.match(css, /\n\.acct-keys\.hint-fine \{ display: grid; \}/);
+  assert.match(css, /\n\.acct-keys\.hint-touch \{ display: none; \}/);
+  assert.match(css, /@media \(pointer: coarse\) \{ \.acct-keys\.hint-fine \{ display: none; \} \.acct-keys\.hint-touch \{ display: grid; \} \}/);
+  assert.equal([...css.matchAll(/\.acct-keys[^{]*\{[^}]*display:/g)].length, 4, 'no other rule sets their display');
 });

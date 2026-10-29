@@ -9,7 +9,7 @@
 import { viennaDay, zonedInstant, VIENNA } from './time.mjs';
 import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
 import { validInstant } from './contracts/schema-validator.mjs';
-import { placeWindow, resolveView } from './history-model.js';
+import { placeWindow, resolveView, resizeWindow } from './history-model.js';
 import { trustedCurrent } from './board-state.js';
 import { dayDM, timeHM, digits, MONTH, MINUS, NB } from './format.js';
 
@@ -142,6 +142,14 @@ export function presetWindow(full, range) {
 // The window shown: the chosen range, or a window the viewer moved, which
 // follows the newest value while it ends there (History's rules).
 export const accountWindow = (full, { range, view = null, follow = true }) => (view ? resolveView(full, { view, follow }) : presetWindow(full, range));
+// One edge moved, the other kept, never narrower than the source allows
+// (MIN_SPAN: minutes of snapshots, days of closes) and never outside the
+// range. Every resize of the account chart goes through here.
+export function resizeWithin(full, base, edge, to, floor) {
+  const next = resizeWindow(full, base, edge, to), min = Math.min(floor, full[1] - full[0]);
+  if (next[1] - next[0] >= min) return next;
+  return edge === 'from' ? placeWindow(full, min, next[1], 1) : placeWindow(full, min, next[0], 0);
+}
 // The range a window matches, if any: the chosen one first.
 export function windowRange(full, [a, b], source, chosen) {
   if (full[1] - b > Math.max(1000, (b - a) * 0.002)) return null;
@@ -177,20 +185,26 @@ export function recordingText(cov, source, now) {
 // ---------- The change over a window ----------
 const lower = (t, x) => { let lo = 0, hi = t.length; while (lo < hi) { const m = (lo + hi) >> 1; if (t[m] < x) lo = m + 1; else hi = m; } return lo; };
 const upper = (t, x) => { let lo = 0, hi = t.length; while (lo < hi) { const m = (lo + hi) >> 1; if (t[m] <= x) lo = m + 1; else hi = m; } return lo; };
-// Exact: from the value standing at the window's start (the last one before
-// it, if close enough, else the first inside) to the last value inside.
+// Exact: from the value standing at the window's start to the last value
+// inside it. A value stands at the start when it is the last observation at
+// or before it, close enough, and the line runs on from it there: no
+// unavailable observation and no gap follows it before the start. Otherwise
+// (an unavailable observation, a gap, nothing recorded yet) the change starts
+// at the first value after it, and fromStart says it does not cover the start.
 export function rangeChange(series, [x0, x1]) {
-  let e = upper(series.t, x1) - 1;
-  while (e >= 0 && !Number.isFinite(series.v[e])) e--;
-  if (e < 0 || series.t[e] < x0) return null;
-  const tol = TOLERANCE[series.source];
-  let s = upper(series.t, x0) - 1;
-  while (s >= 0 && !Number.isFinite(series.v[s])) s--;
-  if (s < 0 || x0 - series.t[s] > tol) { s = lower(series.t, x0); while (s < e && !Number.isFinite(series.v[s])) s++; }
+  const { t, v, u } = series, n = t.length;
+  let e = upper(t, x1) - 1;
+  while (e >= 0 && !Number.isFinite(v[e])) e--;
+  if (e < 0 || t[e] < x0) return null;
+  const k = upper(t, x0) - 1;
+  const stands = k >= 0 && Number.isFinite(v[k]) && (t[k] === x0 ||
+    (x0 - t[k] <= TOLERANCE[series.source] && (k + 1 >= n || (Number.isFinite(v[k + 1]) && !apart(series, k, k + 1)))));
+  let s = stands ? k : Math.max(0, k + 1);
+  if (!stands) while (s < e && !Number.isFinite(v[s])) s++;
   if (s >= e) return null;
-  const a = series.u[s], b = series.u[e];
-  return { from: series.t[s], to: series.t[e], startUnits: a, endUnits: b, change: b - a,
-    pct: a > 0n ? divRound((b - a) * 10000n, a) : null, fromStart: Math.abs(series.t[s] - x0) <= tol };
+  const a = u[s], b = u[e];
+  return { from: t[s], to: t[e], startUnits: a, endUnits: b, change: b - a,
+    pct: a > 0n ? divRound((b - a) * 10000n, a) : null, fromStart: stands };
 }
 // The whole account against the account start set in Settings.
 export function sinceStart(units, start) {
@@ -240,7 +254,10 @@ export function chartPoints(series, [x0, x1], now, buckets = Infinity) {
   // at the left edge is still drawn as one.
   let i0 = Math.max(0, lower(t, x0) - 1);
   for (let k = 0; i0 > 0 && !Number.isFinite(v[i0]) && k < 10000; k++) i0--;
-  const i1 = Math.min(t.length, upper(t, x1) + 1);
+  // To the value after the window, across unavailable ones, so a gap at the
+  // right edge reaches the edge too.
+  let i1 = Math.min(t.length, upper(t, x1) + 1);
+  while (i1 < t.length && !Number.isFinite(v[i1 - 1])) i1++;
   let prev = -1, missing = false;
   for (let i = i0; i < i1; i++) {
     if (!Number.isFinite(v[i])) { missing = true; continue; }

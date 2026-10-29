@@ -68,8 +68,10 @@ export async function accountHeroChecks({ page, viewport, theme, check, settle, 
     s.range === '1M' && s.source === 'daily' && s.pressed.join() === '1M' && s.chip === '1M' && /^[+−]€[\d.]+,\d\d[+−][\d,]+%1M$/.test(s.change.replace(/\s+/g, '')) && !s.state && s.now && s.points >= 25, s);
   // The hint until the first drag, zoom or key press, remembered in this browser.
   const hintStored = await page.evaluate(`(() => { try { return localStorage.getItem('joedesk-chart-hint-v1'); } catch { return 'unavailable'; } })()`);
-  check('JOED-156', `${tag}: the first-visit hint shows until the first move, then stays gone`,
-    hintStored === '1' ? s.noteKind !== 'hint' : s.noteKind === 'hint' && /^(Drag or scroll sideways to move · (Ctrl|⌘)-scroll or pinch to zoom|Swipe · pinch · double-tap)$/.test(s.note), { hintStored, noteKind: s.noteKind, note: s.note });
+  const pointer = await page.evaluate(`({ coarse: matchMedia('(pointer: coarse)').matches, fine: __audit.visible(document.querySelector('#acctNote .hint-fine')), touch: __audit.visible(document.querySelector('#acctNote .hint-touch')) })`);
+  check('JOED-156', `${tag}: the first-visit hint shows until the first move, then stays gone, in this pointer's words only`,
+    hintStored === '1' ? s.noteKind !== 'hint' : s.noteKind === 'hint' && pointer.coarse === viewport.mobile && pointer.fine === !viewport.mobile && pointer.touch === viewport.mobile &&
+      (viewport.mobile ? s.note === 'Swipe · pinch · double-tap' : /^Drag or scroll sideways to move · (Ctrl|⌘)-scroll or pinch to zoom$/.test(s.note)), { hintStored, noteKind: s.noteKind, note: s.note, pointer });
   check('JOED-156', `${tag}: the account history is read and converted in a worker`, await page.evaluate(`window.__joedesk.accountWorker?.() === true && !window.__joedesk.timings.some(t => t.reason === 'account-accept')`));
   check('JOED-156', `${tag}: Since start asks for the account start in Settings; Cash; kept holdings each in its own currency, never actionable`,
     /Account start not set · set in Settings/.test(s.sub) && /Cash/.test(s.sub) && s.keptActions === 0 &&
@@ -111,13 +113,18 @@ export async function accountHeroChecks({ page, viewport, theme, check, settle, 
   // Controls: a list of the moves for this device, closed by Escape.
   await page.evaluate(`document.getElementById('acctCtl').click()`);
   await settle(page);
-  const pop = await page.evaluate(`({ open: __audit.visible(document.getElementById('acctPop')), expanded: document.getElementById('acctCtl').getAttribute('aria-expanded'), text: [...document.querySelectorAll('#acctPop dl')].filter(__audit.visible).map(d => d.innerText).join(' ') })`);
+  const pop = await page.evaluate(`({ open: __audit.visible(document.getElementById('acctPop')), expanded: document.getElementById('acctCtl').getAttribute('aria-expanded'),
+    text: [...document.querySelectorAll('#acctPop dl')].filter(__audit.visible).map(d => d.innerText).join(' '),
+    fine: __audit.visible(document.querySelector('#acctPop .acct-keys.hint-fine')), touch: __audit.visible(document.querySelector('#acctPop .acct-keys.hint-touch')) })`);
   await page.evaluate(`document.getElementById('acctCtl').focus()`);
   await press(page, 'Escape');
   await settle(page);
   const closed = await page.evaluate(`({ open: __audit.visible(document.getElementById('acctPop')), focused: document.activeElement?.id })`);
-  check('JOED-156', `${tag}: Controls lists the moves for this pointer and closes on Escape, keeping focus`,
-    pop.open && pop.expanded === 'true' && (viewport.mobile ? /Swipe sideways/.test(pop.text) : /scroll sideways/.test(pop.text) && /(Ctrl|⌘) \+ scroll/.test(pop.text)) && !closed.open && closed.focused === 'acctCtl', { pop, closed });
+  // Exactly one list shows: the finger's with touch, the mouse's with a mouse.
+  check('JOED-156', `${tag}: Controls shows only this pointer's list (${viewport.mobile ? 'touch' : 'mouse'}) and closes on Escape, keeping focus`,
+    pop.open && pop.expanded === 'true' && pop.fine === !viewport.mobile && pop.touch === viewport.mobile &&
+    (viewport.mobile ? /Swipe sideways/.test(pop.text) && !/scroll sideways/.test(pop.text) : /scroll sideways/.test(pop.text) && /(Ctrl|⌘) \+ scroll/.test(pop.text) && !/Swipe sideways/.test(pop.text)) &&
+    !closed.open && closed.focused === 'acctCtl', { pop, closed });
   await page.evaluate('document.activeElement?.blur()');
 
   if (!viewport.mobile) {
@@ -169,6 +176,12 @@ export async function accountHeroChecks({ page, viewport, theme, check, settle, 
     const fit = await state();
     check('JOED-156', `${tag}: double-click shows everything loaded`, near(fit.x0, fit.k0, 1000) && near(fit.x1, fit.k1, 1000), fit);
     await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 });
+    // The strip's end edge dragged far left on 1M: the closes keep three days.
+    s = await range('1M');
+    await drag(page, { x: s.track.left + s.track.width - 2, y: s.track.top + s.track.height / 2 }, { x: s.track.left + 4, y: s.track.top + s.track.height / 2 }, 10);
+    await settle(page);
+    const narrow = await state();
+    check('JOED-156', `${tag}: dragging the strip's end edge keeps the closes' three days`, narrow.source === 'daily' && near(narrow.x1 - narrow.x0, 3 * DAY, 60e3) && !narrow.pressed.length, narrow);
     // Remembered in this browser: a reload shows no hint.
     await load(page, url, 'desk');
     const again = await state();
