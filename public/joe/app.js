@@ -6,6 +6,7 @@ import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitSta
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure } from './desk.js';
+import { initAccount, renderAccount } from './account.js';
 import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput } from './history.js';
 import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
 import { boardHealthPresentation } from './health.js';
@@ -51,6 +52,7 @@ function start() {
   document.fonts.addEventListener('loadingdone', queueHeaderFit);
   fitHeader();
   trapDialogs();
+  initAccount();
   const events = createObservedEvents();
   let lastData = null, frame = 0, pending = null, dirtyHistory = true;
   const feed = createFeed(kind => {
@@ -109,7 +111,7 @@ function start() {
     const data = ctx.feeds.data?.value ?? null;
     if (data && data !== lastData) { guard('events', () => events.observe(data)); lastData = data; }
     guard('header', () => renderHeader(ctx));
-    if (screen === 'desk') guard('desk', () => renderDesk(ctx));
+    if (screen === 'desk') { guard('account', () => renderAccount(ctx)); guard('desk', () => renderDesk(ctx)); }
     if (screen === 'history') {
       const moved = guard('history', () => renderHistory(ctx))?.redraw;
       if (moved || dirtyHistory || !['tick', 'results'].includes(reason)) { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }

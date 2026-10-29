@@ -197,6 +197,18 @@ exists. No client may treat missing observations as zero. The route remains
 useful when any independent store is unavailable. Existing History feed headers
 remain desk diagnostics; consumers use body reasons for account-store status.
 
+Desk's whole-account block (JOED-156, `public/joe/account.js` and
+`account-model.js`) is the consumer. It reads this route when Desk is shown,
+then every 60 s (15 s after a failed read, which keeps the last good series
+and says so). 1D and 5D draw `points`, the longer ranges `dailyCloses`
+(`equityAt` and `equity`; a cash-only day draws nothing). Only exact values
+are drawn: an unavailable value, more than 20 minutes between snapshots or a
+missing Vienna day breaks the line with a hatched band, and nothing is drawn
+before the first or after the last value. The value the board shows now joins
+the line only when it is current and exact. A range longer than the record
+says since when it records; the change says what it covers. The store's own
+reason and `discontinuity` appear as one line under the chart.
+
 ## Display-only continuity
 
 History draws a second, gray dashed dataset for each desk. These lines are

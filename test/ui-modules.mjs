@@ -20,6 +20,7 @@ import './feed-robust.mjs';
 import './position-claims.mjs';
 import './history-view.mjs';
 import './account-model.mjs';
+import './account-hero.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
