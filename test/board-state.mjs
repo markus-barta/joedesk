@@ -1578,10 +1578,12 @@ test('JOED-148 A3: a not-exact Today keeps the regular-hours light green and say
     const health = boardHealthPresentation(view.states, view.feeds, view.now);
     assert.deepEqual([health.tone, health.reason, health.label], ['green', 'board_ok', 'Board OK'], JSON.stringify(reasons));
     assert.match(statusPresentation(view, health).sentence, /^Live · updated /);
+    // Details explains it once, in its "Today’s result" row (no second note).
     const details = pop(view), notes = details.querySelectorAll('.st.none').map(note => note.textContent);
     const reason = reasons.joel ? cellReason(reasons.joel) : null;
-    const expected = reasons.joel ? `Today: not exact for J, Joe and Joel${reason === 'not exact' ? '' : ` (${reason})`}` : 'Today: not exact for J and Joe';
-    assert.ok(notes.includes(expected), `${JSON.stringify(reasons)}: ${notes}`);
+    const expected = reasons.joel ? `Not exact for J, Joe and Joel${reason === 'not exact' ? '' : ` · ${reason}`}` : 'Exact for Joel; not exact for J and Joe';
+    assert.equal(detailsRow(view, 'Today’s result'), expected, JSON.stringify(reasons));
+    assert.ok(!notes.some(note => note.startsWith('Today')), `${JSON.stringify(reasons)}: ${notes}`);
     assert.equal(details.querySelectorAll('p').find(p => p.textContent === 'No current problems.')?.textContent, 'No current problems.', 'a not-exact Today is not a problem');
     assert.doesNotMatch(details.textContent, /during New York regular hours|money is unavailable/);
   }
@@ -1653,4 +1655,14 @@ test('JOED-148: trustedCurrent is the one test for a current, true value', () =>
   assert.equal(trustedCurrent({ ...fresh, valueSource: { status: 'available', method: 'session-open-estimate' } }), true, 'an estimate is current; its cards mark it');
   for (const [, gap] of joeTodayGaps) assert.equal(trustedCurrent(gap), false);
   for (const reason of NOT_EXACT_REASONS) assert.equal(trustedCurrent({ ...fresh, value: null, state: 'broken', reason }), false);
+});
+
+// JOED-148 fix round 1 (design review of the JOED-147 mockup): Details states a
+// not-exact Today once, in its "Today’s result" row; no separate note repeats it.
+test('JOED-148: Details carries one line for a not-exact Today', () => {
+  for (const data of [dayNotExact({ j: 'not_exact_yet', joe: 'not_exact_yet' }), JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).mixed]) {
+    const view = ctx(data), text = pop(view).textContent;
+    assert.equal(text.match(/not exact for J\b/g)?.length, 1, text);
+    assert.doesNotMatch(text, /Today: not exact/);
+  }
 });

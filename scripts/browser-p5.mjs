@@ -438,11 +438,12 @@ try {
         const details = await ev(`(() => {
           const pop = document.getElementById('healthPop');
           const notes = [...pop.querySelectorAll('.st')].filter(e => /^(Desk values are not exact|Today: not exact)/.test(e.textContent.trim()));
-          return { open: pop.classList.contains('on'), text: pop.innerText, notes: notes.map(e => ({ text: e.textContent.trim(), tone: e.className, icon: e.querySelector('use').getAttribute('href'), style: getComputedStyle(e).fontStyle })) };
+          const today = [...pop.querySelectorAll('dt')].find(dt => dt.textContent === 'Today’s result')?.nextElementSibling?.textContent ?? null;
+          return { open: pop.classList.contains('on'), text: pop.innerText, today, notes: notes.map(e => ({ text: e.textContent.trim(), tone: e.className, icon: e.querySelector('use').getAttribute('href'), style: getComputedStyle(e).fontStyle })) };
         })()`);
-        // One neutral line for the desk values and one for Today (Amy's A3), never a missing-money alarm.
-        check('not-exact', `${tag} ${i}: Details has one neutral sentence each for desk values and Today and no false missing-money alarms`, details.open && (neutral
-          ? J(details.notes.map(n => n.text)) === J(['Desk values are not exact', 'Today: not exact for J, Joe and Joel']) &&
+        // One neutral line for the desk values; the "Today’s result" row states the not-exact Today once (Amy's A3).
+        check('not-exact', `${tag} ${i}: Details has one neutral sentence, one Today row and no false missing-money alarms`, details.open && (neutral
+          ? J(details.notes.map(n => n.text)) === J(['Desk values are not exact']) && details.today === 'Not exact for J, Joe and Joel' &&
             details.notes.every(n => n.tone === 'st none' && n.icon === '#i-info' && n.style === 'normal') && !details.text.includes('money is unavailable')
           : details.notes.length === 0 && details.text.includes('money is unavailable')), details);
         await key('Escape');

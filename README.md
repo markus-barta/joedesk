@@ -1351,10 +1351,11 @@ point of a session.
 Amy's A3 (2026-10-29, JOED-148) changes one light rule. During New York
 regular hours a household Today that the feed explains as not exact, with
 every desk's own Today either trustworthy and current or withheld as not
-exact, no longer turns the header yellow: the board stays green and Details adds one neutral line, e.g.
-“Today: not exact for J and Joe” (with the reason in parentheses when it adds
-words). Real gaps keep yellow `day_pending`, now worded “Today’s result is
-late — reload; if it stays, tell Amy” (compact “Result late”): a Today without
+exact, no longer turns the header yellow: the board stays green, and Details
+says why once, in its “Today’s result” row (“Exact for Joel; not exact for J
+and Joe · ‹reason›”); no separate note repeats it. Real gaps keep yellow
+`day_pending`, now worded “Today’s result is late — reload; if it stays, tell
+Amy” (compact “Result late”): a Today without
 a reason, with a fault reason, or with any desk whose Today is unavailable,
 only a last good value, or shown with a fault reason or a non-fresh state.
 `trustedCurrent` in `board-state.js` is the one test for a current, true value

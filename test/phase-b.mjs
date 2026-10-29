@@ -61,7 +61,11 @@ test('JOED-103: the shipped mixed Phase B snapshot is not red; unexplained missi
   // keeps the existing regular-hours open-result warning.
   assert.equal(health.tone, 'yellow', 'the regular-hours open-result warning remains');
   assert.equal(health.reason, 'open_unavailable_rth');
-  assert.match(healthPop(ctx, health), /Today: not exact for J \(desk ledger not reconciled\); not exact for Joe \(start-of-day value missing\)/);
+  // Details states the not-exact Today once, in its "Today’s result" row.
+  const details = htmlDocument(healthPop(ctx, health)), rows = details.querySelectorAll('dt').map(dt => dt.textContent);
+  assert.equal(details.querySelectorAll('dd')[rows.indexOf('Today’s result')].textContent,
+    'Exact for Joel; not exact for J · desk ledger not reconciled; not exact for Joe · start-of-day value missing');
+  assert.doesNotMatch(details.textContent, /Today: not exact/);
   assert.match(headerHealth(ctx, health).html, /tone-warn/);
   assert.match(healthPop(ctx, health), /Desk values are not exact(?! yet)/);
   const fault = context(exact);

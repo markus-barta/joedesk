@@ -279,13 +279,12 @@ export function healthPop(ctx, health) {
     rows.push(['Open positions', esc(openMethodLabel(data.pnlSources?.open) ?? `Not available · ${cellReason(data.pnlSources?.open?.reason ?? states['today.openPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Source', `${esc(data.source.label)} · paper only`]);
   }
-  const notes = { day: dayNote(states), since: startsDiffer(feeds) };
+  const notes = { since: startsDiffer(feeds) };
   return `<h3>${icon(TONE_ICON[health.statusTone])}Board status details</h3>
     <p class="status-sentence">${esc(statusPresentation(ctx, health).sentence)}</p>
     ${healthFacts(ctx, health)}
     <p>${problems.length ? esc(problems.join(' ')) : 'No current problems.'}</p>
     ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact', 'info')}</p>` : ''}
-    ${notes.day ? `<p>${st('none', esc(notes.day), 'info')}</p>` : ''}
     ${notes.since ? `<p>${st('warn', esc(notes.since))}</p>` : ''}
     ${rows.length ? `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
     <p>If a light turns yellow or red: reload once. If it stays, tell Amy what the light says and how old the data is.</p>
@@ -360,21 +359,13 @@ export function deskDays(states) {
 }
 const blockingDays = states => deskDays(states).filter(g => !['exact', 'estimated'].includes(g.word));
 // Details: every desk's Today, exact ones first, e.g. "Exact for Joel; not
-// exact for J and Joe · start-of-day value missing".
+// exact for J and Joe · start-of-day value missing". This one row is also
+// how Details explains a green light beside a not-exact Today (Amy's A3).
 const DAY_ORDER = ['exact', 'estimated', NOT_EXACT];
 const dayRank = g => DAY_ORDER.includes(g.word) ? DAY_ORDER.indexOf(g.word) : DAY_ORDER.length;
 export function dayBreakdown(states) {
   const groups = deskDays(states).sort((a, b) => dayRank(a) - dayRank(b) || byDesk(a.ids[0], b.ids[0]));
   return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` · ${g.reason}` : ''}`).join('; '));
-}
-
-// Details, beside a green light (Amy's A3): which desks keep the household
-// Today from being exact, and why, e.g. "Today: not exact for J and Joe".
-export function dayNote(states) {
-  if (!notExactDash(states['today.dayPnl'])) return null;
-  const blocking = blockingDays(states);
-  if (!blocking.length) return `Today: ${statePhrase(states['today.dayPnl'], '').text}`;
-  return `Today: ${blocking.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` (${g.reason})` : ''}`).join('; ')}`;
 }
 
 // Details flags a closed-trade record that starts on another day than the

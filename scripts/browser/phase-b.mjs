@@ -1,6 +1,6 @@
 // Shared P3/P5 CI scenarios. No browser is launched by importing this module.
 import { readFileSync } from 'node:fs';
-import { configure, load, settle, waitFor, VIEWPORTS, THEMES } from './shots.mjs';
+import { configure, load, settle, waitFor, copyText, VIEWPORTS, THEMES } from './shots.mjs';
 import { WIDE_FONT } from './gate.mjs';
 import { setDeskDisclosures } from './desk-disclosures.mjs';
 import { ingress, at, advance } from './board.mjs';
@@ -130,7 +130,8 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
       // Amy's A3: the not-exact Today no longer warns; J's not-exact open result keeps the regular-hours warning.
       check('phase-b', `${tag}: withheld values keep the open-result warning, never a red header, with the not-exact status facts`,
         result.headerTone === 'warn' && result.headerReason === 'open_unavailable_rth' && /Desk values are not exact(?! yet)/.test(result.details) &&
-        result.details.includes('Today: not exact for J (desk ledger not reconciled); not exact for Joe (start-of-day value missing)'), result);
+        copyText(result.details).includes('Exact for Joel; not exact for J · desk ledger not reconciled; not exact for Joe · start-of-day value missing') &&
+        !/Today: not exact/.test(result.details), result);
       check('phase-b', `${tag}: incomplete totals stay dashes with no percentage`, result.day === '—' && result.since === '—' && result.percentages.length === 0, result);
       // JOED-148: Joe's lone not-exact Today keeps its reason on its own dash; the card adds no line.
       check('phase-b', `${tag}: independent exact desk survives ledger and SOD failures`, /desk ledger not reconciled/.test(result.j) &&
