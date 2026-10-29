@@ -9,7 +9,7 @@ import { cellReason } from './health.js';
 import { exactCell } from './performance.js';
 import { drawChart, eurAxis, axis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor } from './chart.js';
 import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, sharedWindowCompare, basisNotice, toColumns, rowAt, rangeSpanMs,
-  keptRange, placeWindow, panWindow, zoomWindow, resizeWindow, atLiveEdge, followWindow, presetSpan, windowPreset, resolveView,
+  keptRange, placeWindow, panWindow, zoomWindow, resizeWindow, atLiveEdge, endsAtNewest, followWindow, presetSpan, windowPreset, resolveView,
   missingBands, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
 import { viennaDay, zonedInstant, VIENNA, NY } from './time.mjs';
 
@@ -58,8 +58,13 @@ function compareLine(cols, bounds, endAt) {
       : result.reason === 'incompatible-basis' ? 'Comparing needs two moments on every chosen desk’s current bookkeeping basis.'
         : result.reason === 'insufficient-points' ? 'Not enough history in this window to compare.' : 'Choose two or more desks to compare them over the same window.';
   }
-  const when = iso => `${dayDDM(iso)}, ${timeHM(iso)}`;
-  return `From ${when(result.startAt)} to ${when(result.endAt)}: ${result.desks.map(d => `${LABEL[d.id]} ${pct(d.pct, 2, true)}`).join(' · ')}`;
+  const when = iso => `${dayDDM(iso)}, ${timeHM(iso)}`, figures = result.desks.map(d => `${LABEL[d.id]} ${pct(d.pct, 2, true)}`).join(' · ');
+  // A comparison that cannot use the whole window names the stretch it uses.
+  if (result.after) {
+    const run = age((Date.parse(result.endAt) - Date.parse(result.startAt)) / 1000);
+    return `Last ${run} ${result.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'without gaps'}, from ${when(result.startAt)}: ${figures}`;
+  }
+  return `From ${when(result.startAt)} to ${when(result.endAt)}: ${figures}`;
 }
 
 // Display-only thinning: per pixel bucket keep the first, lowest, highest and
@@ -97,36 +102,47 @@ function viennaAt(day, hour = 0) {
   return at;
 }
 const nextDay = day => new Date(Date.parse(`${day}T12:00:00Z`) + DAY).toISOString().slice(0, 10);
-// Wall-clock ticks in Vienna every stepMin minutes inside [from, to]; a tick
-// at midnight is a date. Days of a clock change are 23 or 25 hours long, so
-// their hours are placed by the clock, never by elapsed time.
-function wallTicks(from, to, stepMin) {
-  const out = [];
+// Wall-clock ticks in Vienna every stepMin minutes inside [from, to], in
+// order; a tick at midnight is a date. Days of a clock change are 23 or 25
+// hours long: steps within the hour count real time from midnight, so every
+// instant of such a day has its tick (03:00 follows 01:45 in spring, 02:00
+// comes twice in autumn); hour steps are placed by the clock, and an hour the
+// change skips is the next one. No instant is ever listed twice.
+export function wallTicks(from, to, stepMin) {
+  const out = [], seen = new Set();
+  const add = (at, midnight, day) => { if (at >= from && at <= to && !seen.has(at)) { seen.add(at); out.push({ at, midnight, day }); } };
   let day = viennaDay(new Date(Math.floor(from)).toISOString());
   for (let i = 0; i < 40; i++) {
-    const start = viennaAt(day), next = nextDay(day);
+    const start = viennaAt(day), next = nextDay(day), end = viennaAt(next);
     if (start > to) break;
-    if (viennaAt(next) >= from) {
-      const regular = viennaAt(next) - start === DAY;
-      for (let m = 0; m < 1440; m += stepMin) {
-        const hour = Math.floor(m / 60), at = (regular ? start + hour * HOUR : viennaAt(day, hour)) + (m % 60) * 60e3;
-        if (at >= from && at <= to && at !== out.at(-1)?.at) out.push({ at, midnight: m === 0, day });
-      }
+    if (end >= from && stepMin < 60) {
+      const step = stepMin * 60e3;
+      for (let at = start + Math.max(0, Math.ceil((from - start) / step)) * step; at < end && at <= to; at += step) add(at, at === start, day);
+    } else if (end >= from) {
+      const regular = end - start === DAY;
+      for (let hour = 0; hour < 24; hour += stepMin / 60) add(regular ? start + hour * HOUR : viennaAt(day, hour), hour === 0, day);
     }
     day = next;
   }
-  return out;
+  return out.sort((a, b) => a.at - b.at);
 }
 const midnightLines = (from, to) => wallTicks(from, to, 1440).map(t => t.at);
 const dayWord = at => dayDDM(new Date(at).toISOString()).split(NB)[0];
 // Axis labels at least `gap` pixels apart: clock times for a day or two,
-// dates beyond; a label at midnight is always the date.
+// dates beyond; a label at midnight is always the date, and a window that
+// starts during a day names that day at its left edge ("Wed 28" before the
+// midnight line marked "Thu 29").
 function axisLabels(x0, x1, pw, gap = 56) {
   const span = x1 - x0, perMin = pw / (span / 60e3) || 0;
   const stepMin = [5, 10, 15, 30, 60, 120, 180, 360, 720].find(s => s * perMin >= gap);
   const labels = [];
   if (stepMin) {
-    for (const t of wallTicks(x0, x1, stepMin)) labels.push({ x: t.at, text: t.midnight ? dayWord(t.at) : timeHM(new Date(t.at).toISOString()), anchor: 'start' });
+    const ticks = wallTicks(x0, x1, stepMin), lead = ticks[0]?.at === x0 && ticks[0].midnight ? null : x0;
+    if (lead !== null) labels.push({ x: lead, text: dayWord(lead), anchor: 'start' });
+    for (const t of ticks) {
+      if (lead !== null && (t.at - lead) * perMin / 60e3 < gap) continue;
+      labels.push({ x: t.at, text: t.midnight ? dayWord(t.at) : timeHM(new Date(t.at).toISOString()), anchor: 'start' });
+    }
   } else {
     const every = [1, 2, 4, 7, 14].find(n => n * 1440 * perMin >= gap) ?? 14;
     wallTicks(x0, x1, 1440).forEach((t, i) => { if (i % every === 0) labels.push({ x: t.at, text: dayWord(t.at), anchor: 'start' }); });
@@ -367,9 +383,16 @@ function drawOverview(m, range, gaps, bands, [a, b]) {
   // Redrawn when the range moves by a pixel or more, not on every frame.
   const key = `${width}|${height}|${Math.round(range[0])}|${Math.round(range[1] / ((range[1] - range[0]) / width))}`;
   if (m.overview !== key) { plot.innerHTML = overviewSvg(m, range, gaps, bands, width, height); m.overview = key; }
-  const t = overviewTargets({ width, left: toStrip(range, width, a), right: toStrip(range, width, b), hit: coarse() ? 44 : 16 });
+  // The handles may use the room beside the track inside the strip, so a
+  // window narrower than a finger keeps its own target and both edges.
+  const off = track.offsetLeft || 0;
+  const t = overviewTargets({ width, left: toStrip(range, width, a), right: toStrip(range, width, b), hit: coarse() ? 44 : 16,
+    lo: -off, hi: Math.max(width, (mini.clientWidth || 0) - off) });
   const win = $('#histWin'), from = $('#histMini [data-edge="from"]'), to = $('#histMini [data-edge="to"]');
   win.style.left = `${t.win.x}px`; win.style.width = `${t.win.w}px`;
+  // The window's target (its ::after) reaches past a narrow window, never past the strip.
+  win.style.setProperty?.('--hl', `${t.win.hit.x - t.win.x}px`);
+  win.style.setProperty?.('--hr', `${t.win.x + t.win.w - t.win.hit.x - t.win.hit.w}px`);
   for (const [node, box] of [[from, t.from], [to, t.to]]) {
     node.style.left = `${box.x}px`; node.style.width = `${box.w}px`;
     node.firstElementChild.style.left = `${box.gx - box.x}px`;
@@ -391,12 +414,18 @@ function drawOverview(m, range, gaps, bands, [a, b]) {
 const input = { schedule: null, drag: null, touch: null, pinned: false, announce: null, blocksTip: () => false };
 const canPan = () => Boolean(HS.full && HS.shown && HS.shown[1] - HS.shown[0] < (HS.full[1] - HS.full[0]) * 0.999);
 // A person's change of the window. Its width may match a preset again; it
-// follows the newest time while its end rests on the newest time.
+// follows the newest time only while it ends exactly there, so a pan of a
+// single pixel into the past turns Follow off.
 function setView(next) {
   if (!HS.full) return;
-  HS.view = next; HS.follow = atLiveEdge(HS.full, next);
+  HS.view = next; HS.follow = endsAtNewest(HS.full, next);
   input.schedule?.('history-pan');
 }
+// The window a move starts from: the frame on screen while a glide runs,
+// otherwise the window as it stands now. Several wheel events can arrive
+// before the next frame; each builds on the one before, so small moves add
+// up instead of replacing each other.
+const current = () => (motion.from || !HS.full || !HS.shown ? HS.shown : resolveView(HS.full, HS));
 function announceWindow() {
   if (!HS.full || !HS.shown) return;
   const next = resolveView(HS.full, HS);
@@ -423,8 +452,8 @@ export function initHistoryInput({ schedule }) {
   if (/Mac|iPhone|iPad/.test(navigator.platform ?? '')) for (const n of $$('.mod-key')) n.textContent = '⌘';
   const plotWidth = () => lastScale?.pw ?? Math.max(1, chart.clientWidth - 78);
   const perPx = () => (HS.shown ? (HS.shown[1] - HS.shown[0]) / plotWidth() : 0);
-  const chartTime = clientX => {
-    const r = chart.getBoundingClientRect(), [a, b] = HS.shown;
+  const chartTime = (clientX, [a, b] = current()) => {
+    const r = chart.getBoundingClientRect();
     return a + Math.min(1, Math.max(0, (clientX - r.left - (lastScale?.pad.l ?? 64)) / plotWidth())) * (b - a);
   };
   const stripTime = clientX => fromStrip(HS.full, track.clientWidth, clientX - track.getBoundingClientRect().left);
@@ -438,10 +467,11 @@ export function initHistoryInput({ schedule }) {
     if (!HS.full || !HS.shown) return;
     const intent = latch(e, e.timeStamp);
     if (intent === 'page') return;
-    e.preventDefault(); stop();
-    const dx = wheelPixels(e.deltaX, e.deltaMode), dy = wheelPixels(e.deltaY, e.deltaMode);
-    if (intent === 'zoom') setView(zoomWindow(HS.full, HS.shown, wheelZoomFactor(dy), time(e.clientX)));
-    else setView(panWindow(HS.full, HS.shown, (e.shiftKey && Math.abs(dy) > Math.abs(dx) ? dy : dx) * perPx()));
+    e.preventDefault();
+    const base = current(), dx = wheelPixels(e.deltaX, e.deltaMode), dy = wheelPixels(e.deltaY, e.deltaMode);
+    stop();
+    if (intent === 'zoom') setView(zoomWindow(HS.full, base, wheelZoomFactor(dy), time(e.clientX, base)));
+    else setView(panWindow(HS.full, base, (e.shiftKey && Math.abs(dy) > Math.abs(dx) ? dy : dx) * (base[1] - base[0]) / plotWidth()));
   };
   chart.addEventListener('wheel', e => wheel(e, chartTime), { passive: false });
   track.addEventListener('wheel', e => wheel(e, stripTime), { passive: false });
@@ -449,7 +479,7 @@ export function initHistoryInput({ schedule }) {
   // (on a phone the pointer pinch below handles it).
   const touches = new Map();
   let gesture = null;
-  chart.addEventListener('gesturestart', e => { if (!HS.shown || touches.size) return; e.preventDefault(); stop(); gesture = { start: HS.shown, at: chartTime(e.clientX) }; });
+  chart.addEventListener('gesturestart', e => { if (!HS.shown || touches.size) return; const start = current(); e.preventDefault(); stop(); gesture = { start, at: chartTime(e.clientX, start) }; });
   chart.addEventListener('gesturechange', e => { if (!gesture) return; e.preventDefault(); setView(zoomWindow(HS.full, gesture.start, 1 / Math.max(0.05, e.scale), gesture.at)); });
   chart.addEventListener('gestureend', () => { gesture = null; });
 
@@ -459,22 +489,23 @@ export function initHistoryInput({ schedule }) {
   input.blocksTip = () => Boolean(input.drag?.moved || (input.touch && input.touch.mode !== 'scrub'));
   chart.addEventListener('pointerdown', e => {
     if (!HS.shown || e.target.closest('.hist-status')) return;
+    const start = current();
     stop();
     if (e.pointerType !== 'touch') {
       // With everything kept in view there is nothing to drag; hover keeps inspecting.
-      if (e.button === 0 && canPan()) input.drag = { kind: 'chart', id: e.pointerId, x: e.clientX, start: HS.shown, perPx: perPx(), moved: false };
+      if (e.button === 0 && canPan()) input.drag = { kind: 'chart', id: e.pointerId, x: e.clientX, start, perPx: perPx(), moved: false };
       return;
     }
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     clearTimeout(input.touch?.timer);
     if (touches.size === 1) {
-      const t = { mode: 'pending', id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, down: e.timeStamp, start: HS.shown, perPx: perPx() };
+      const t = { mode: 'pending', id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, down: e.timeStamp, start, perPx: perPx() };
       t.timer = setTimeout(() => { if (input.touch === t && t.mode === 'pending') { t.mode = 'scrub'; input.pinned = true; lastScale?.inspectAt(t.lastX); } }, 350);
       input.touch = t;
     } else if (touches.size === 2) {
       const [p, q] = [...touches.values()], mid = (p.x + q.x) / 2;
       unpin();
-      input.touch = { mode: 'pinch', start: HS.shown, spread: Math.max(24, Math.abs(p.x - q.x)), mid, at: chartTime(mid), perPx: perPx() };
+      input.touch = { mode: 'pinch', start, spread: Math.max(24, Math.abs(p.x - q.x)), mid, at: chartTime(mid, start), perPx: perPx() };
     }
   });
   chart.addEventListener('pointermove', e => {
@@ -509,12 +540,16 @@ export function initHistoryInput({ schedule }) {
     }
     if (t.mode === 'pan') setView(panWindow(HS.full, t.start, -dx * t.perPx));
   });
+  // Fingers are tracked by id. Whichever lifts last ends the gesture, pinch or
+  // swipe, so none of its state outlives it and a mouse or pen inspects again.
   const release = e => {
     if (input.drag?.kind === 'chart' && input.drag.id === e.pointerId) { input.drag = null; chart.classList.remove('panning'); return; }
-    if (!touches.delete(e.pointerId) || !input.touch) return;
+    if (!touches.delete(e.pointerId)) return;
     const t = input.touch;
+    if (!touches.size) input.touch = null;
+    if (!t) return;
     clearTimeout(t.timer);
-    if (t.mode === 'pinch') { if (!touches.size) input.touch = null; else t.mode = 'done'; return; }
+    if (t.mode === 'pinch' || t.mode === 'done') { if (touches.size) t.mode = 'done'; return; }
     if (t.id !== e.pointerId) return;
     input.touch = null;
     if (e.type === 'pointercancel') { unpin(); return; }
@@ -532,27 +567,26 @@ export function initHistoryInput({ schedule }) {
   // Keys on the focused chart; the arrows alone stay with point inspection.
   chart.addEventListener('keydown', e => {
     if (e.target !== chart || e.altKey || e.ctrlKey || e.metaKey || !HS.shown) return;
-    const [a, b] = HS.shown, w = b - a, anchor = HS.follow ? b : (a + b) / 2;
-    const next = e.shiftKey && e.key === 'ArrowLeft' ? panWindow(HS.full, HS.shown, -w * 0.1)
-      : e.shiftKey && e.key === 'ArrowRight' ? panWindow(HS.full, HS.shown, w * 0.1)
+    const shown = current(), [a, b] = shown, w = b - a, anchor = HS.follow ? b : (a + b) / 2;
+    const next = e.shiftKey && e.key === 'ArrowLeft' ? panWindow(HS.full, shown, -w * 0.1)
+      : e.shiftKey && e.key === 'ArrowRight' ? panWindow(HS.full, shown, w * 0.1)
         : e.shiftKey && e.key === 'Home' ? placeWindow(HS.full, w, HS.full[0], 0)
           : e.shiftKey && e.key === 'End' ? placeWindow(HS.full, w, HS.full[1], 1)
-            : e.key === '+' || e.key === '=' ? zoomWindow(HS.full, HS.shown, 1 / 1.5, anchor)
-              : e.key === '-' || e.key === '_' ? zoomWindow(HS.full, HS.shown, 1.5, anchor) : null;
+            : e.key === '+' || e.key === '=' ? zoomWindow(HS.full, shown, 1 / 1.5, anchor)
+              : e.key === '-' || e.key === '_' ? zoomWindow(HS.full, shown, 1.5, anchor) : null;
     if (e.key === '0') { e.preventDefault(); historyPreset('all'); announceWindow(); schedule('history-range'); return; }
     if (!next) return;
     e.preventDefault(); stop();
-    HS.view = next; HS.follow = atLiveEdge(HS.full, next);
-    announceWindow(); schedule('history-pan');
+    setView(next); announceWindow();
   });
 
   // The strip: drag the window to pan, drag an edge to resize, click beside
   // the window to centre it there; a drag on the background pans too.
   track.addEventListener('pointerdown', e => {
     if (!HS.full || !HS.shown || (e.pointerType === 'mouse' && e.button !== 0)) return;
-    const edge = e.target.closest('[data-edge]')?.dataset.edge ?? null;
+    const edge = e.target.closest('[data-edge]')?.dataset.edge ?? null, start = current();
     stop();
-    input.drag = { kind: edge ? 'edge' : e.target.closest('#histWin') ? 'window' : 'strip', edge, id: e.pointerId, x: e.clientX, start: HS.shown, moved: false };
+    input.drag = { kind: edge ? 'edge' : e.target.closest('#histWin') ? 'window' : 'strip', edge, id: e.pointerId, x: e.clientX, start, moved: false };
     track.setPointerCapture?.(e.pointerId);
   });
   track.addEventListener('pointermove', e => {
@@ -577,16 +611,16 @@ export function initHistoryInput({ schedule }) {
   track.addEventListener('keydown', e => {
     const target = e.target.closest('#histWin, [data-edge]');
     if (!target || !HS.full || !HS.shown || e.altKey || e.ctrlKey || e.metaKey) return;
-    const full = HS.full, [a, b] = HS.shown, w = b - a, edge = target.dataset.edge;
+    const full = HS.full, shown = current(), [a, b] = shown, w = b - a, edge = target.dataset.edge;
     const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
     let next = null;
     if (edge) {
       const at = edge === 'from' ? a : b;
       const to = step ? at + step * w * (e.shiftKey ? 0.5 : 0.1) : { PageUp: at + w, PageDown: at - w, Home: full[0], End: full[1] }[e.key];
-      if (to !== undefined) next = resizeWindow(full, HS.shown, edge, to);
-    } else if (step && e.shiftKey) next = zoomWindow(full, HS.shown, step < 0 ? 1 / 1.5 : 1.5, HS.follow ? b : (a + b) / 2);
-    else if (step) next = panWindow(full, HS.shown, step * w * 0.1);
-    else if (e.key === 'PageUp' || e.key === 'PageDown') next = panWindow(full, HS.shown, (e.key === 'PageUp' ? 1 : -1) * w);
+      if (to !== undefined) next = resizeWindow(full, shown, edge, to);
+    } else if (step && e.shiftKey) next = zoomWindow(full, shown, step < 0 ? 1 / 1.5 : 1.5, HS.follow ? b : (a + b) / 2);
+    else if (step) next = panWindow(full, shown, step * w * 0.1);
+    else if (e.key === 'PageUp' || e.key === 'PageDown') next = panWindow(full, shown, (e.key === 'PageUp' ? 1 : -1) * w);
     else if (e.key === 'Home') next = placeWindow(full, w, full[0], 0);
     else if (e.key === 'End') next = placeWindow(full, w, full[1], 1);
     if (!next) return;
@@ -657,7 +691,7 @@ const hatch = '<svg viewBox="0 0 22 10" aria-hidden="true"><defs><pattern id="ht
 export function renderHistory(ctx) {
   const tools = toolsHtml();
   patch($('#histDesks'), tools.desks);
-  patch($('#histLegend'), `${DESK_IDS.map(id => `<span class="lg">${swatch(`var(--desk-${id})`, '', 2.4)}${LABEL[id]}</span>`).join('')}<span class="lg">${swatch('var(--est)', '5 4', 1.6)}${term('estimate')} (starts from an assumed ${eur(ASSUMED_BASELINE, false, 0)})</span><span class="lg">${hatch}${term('nodata')}</span>`);
+  patch($('#histLegend'), `${DESK_IDS.map(id => `<span class="lg">${swatch(`var(--desk-${id})`, '', 2.4)}${LABEL[id]}</span>`).join('')}<span class="lg">${swatch('var(--est)', '5 4', 1.6)}${term('estimate')} (drawn, not measured)</span><span class="lg">${hatch}${term('nodata')}</span>`);
   const cell = ctx.states.history;
   const cols = cell?.value?.columns ?? EMPTY;
   const moved = patch($('#histStatus'), statusLine(cell));
@@ -671,7 +705,7 @@ export function renderHistory(ctx) {
     const excluded = basisNotice(cols, DESK_IDS, range, endAt);
     setText($('#histBasis'), excluded.length ? `This chart shows comparable records for ${excluded.map(id => LABEL[id]).join(' and ')}. Older records on another bookkeeping basis stay in the history file.` : '');
     const thin = thinnedOf(cell);
-    setText($('#histThin'), thin !== null && thin > range[0] ? `Before ${when(Math.min(thin, endAt))} the history is thinned to fit its size limit: the line joins the points kept, so a short gap there does not show.` : '');
+    setText($('#histThin'), thin !== null && thin > range[0] ? `Before ${when(Math.min(thin, endAt))} the history is thinned to fit its size limit. The line joins the points kept; a gap there shows only where it is longer than the thinning.` : '');
   } else {
     setText($('#histCompare'), 'Comparing waits for the board server’s clock.');
     setText($('#histBasis'), '');

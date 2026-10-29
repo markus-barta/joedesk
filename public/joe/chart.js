@@ -16,15 +16,18 @@ export function wheelIntent({ deltaX = 0, deltaY = 0, ctrlKey = false, metaKey =
   if (shiftKey && deltaY) return 'pan';
   return 'page';
 }
-// One gesture keeps its first meaning until the wheel rests (quietMs), so a
-// sideways swipe never turns into page scrolling half-way and a page scroll
+// A plain wheel event that is more vertical than sideways always belongs to
+// the page, whatever came before it. Only diagonal trackpad noise (at least
+// as sideways as vertical) keeps the gesture's meaning until the wheel rests
+// (quietMs): a sideways swipe that wobbles keeps panning, and a page scroll
 // that drifts sideways never starts panning. A held ⌘ or Ctrl zooms at once
 // and stops zooming the moment it is released.
 export function createWheelLatch(quietMs = 200) {
   let intent = null, last = -Infinity;
   return (e, now) => {
     const fresh = wheelIntent(e);
-    if (intent === null || now - last > quietMs || fresh === 'zoom' || intent === 'zoom') intent = fresh;
+    const noise = !e.ctrlKey && !e.metaKey && !e.shiftKey && Math.abs(e.deltaX ?? 0) >= Math.abs(e.deltaY ?? 0);
+    if (!noise || intent === null || intent === 'zoom' || now - last > quietMs) intent = fresh;
     last = now;
     return intent;
   };
@@ -32,20 +35,25 @@ export function createWheelLatch(quietMs = 200) {
 // Chrome sends a pinch as about 100·ln(1/scale) per event, so 0,01 per pixel
 // follows the fingers; one mouse-wheel notch zooms by about 40 %.
 export const wheelZoomFactor = dyPx => Math.exp(Math.max(-35, Math.min(35, dyPx)) * 0.01);
-// The overview strip's targets: the window between its two edge handles. A
-// handle's box is `hit` wide around its edge, kept inside the strip; when the
-// window is narrower than both boxes they sit side by side around its middle.
-// Each grip (the visible bar) stays inside its own box, on the edge if it can.
-export function overviewTargets({ width, left, right, hit }) {
-  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-  const box = c => clamp(c - hit / 2, 0, Math.max(0, width - hit));
-  let from = box(left), to = box(right);
-  if (to - from < hit) {
-    const pair = clamp((left + right) / 2 - hit, 0, Math.max(0, width - 2 * hit));
-    from = pair; to = pair + hit;
-  }
-  const grip = (edge, x) => clamp(edge, x + 2, x + hit - 2);
-  return { win: { x: left, w: Math.max(0, right - left) }, from: { x: from, w: hit, gx: grip(left, from) }, to: { x: to, w: hit, gx: grip(right, to) } };
+// The overview strip's targets. The window itself is always a drag target at
+// least `body` wide: the window, or `body` around its middle when narrower,
+// inside the strip. Each edge handle's box is `hit` wide around its edge and
+// kept inside the room [lo, hi] (the strip plus the space beside it); when
+// the window is narrow the handles move outward, off the window's target,
+// and a handle pressed against the room's end narrows instead of covering
+// the window. Each grip (the visible bar) stays inside its own box, on the
+// edge if it can.
+export function overviewTargets({ width, left, right, hit, body = 44, lo = 0, hi = width }) {
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const span = Math.max(0, right - left), bw = Math.min(width, Math.max(body, span));
+  const b0 = clamp((left + right) / 2 - bw / 2, 0, Math.max(0, width - bw)), b1 = b0 + bw;
+  // The middle `body` of that target is never under a handle.
+  const c = (b0 + b1) / 2, p0 = Math.max(b0, c - body / 2), p1 = Math.min(b1, c + body / 2);
+  const fx = Math.min(clamp(left - hit / 2, lo, hi - hit), p0 - hit), tx = Math.max(clamp(right - hit / 2, lo, hi - hit), p1);
+  const from = { x: Math.max(lo, fx), w: 0 }, to = { x: Math.min(hi, tx), w: 0 };
+  from.w = Math.max(0, Math.min(p0, fx + hit) - from.x); to.w = Math.max(0, Math.min(hi, tx + hit) - to.x);
+  const grip = (edge, box) => clamp(edge, box.x + Math.min(2, box.w / 2), box.x + box.w - Math.min(2, box.w / 2));
+  return { win: { x: left, w: span, hit: { x: b0, w: bw } }, from: { ...from, gx: grip(left, from) }, to: { ...to, gx: grip(right, to) } };
 }
 
 function niceStep(raw) {

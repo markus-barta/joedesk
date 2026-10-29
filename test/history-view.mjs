@@ -1,12 +1,17 @@
 // JOED-145: History's shown window (presets, pan, zoom, resize, follow), the
 // overview strip's mapping and targets, the wheel/pinch/scroll rules, the
-// no-data bands and the thinned record. Pure functions, no browser.
+// time axis, the comparison line, the no-data bands and the thinned record.
+// Pure functions, no browser.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import './fixtures/preview-dom.mjs';
+import { builders } from './fixtures/preview-dom.mjs';
 
 const hm = await import('../public/joe/history-model.js');
 const { wheelIntent, createWheelLatch, wheelPixels, wheelZoomFactor, overviewTargets } = await import('../public/joe/chart.js');
+const { wallTicks } = await import('../public/joe/history.js');
+const { axisLabels, compareLine } = await builders('history.js', ['axisLabels', 'compareLine']);
+const { compactPoints } = await import('../server/history.mjs');
+const { timeHM } = await import('../public/joe/format.js');
 
 const MIN = 60e3, HOUR = 3600e3, DAY = 864e5;
 const K0 = Date.parse('2026-10-07T00:00:00.000Z'), K1 = K0 + 7.75 * DAY, RANGE = [K0, K1];
@@ -75,6 +80,19 @@ test('JOED-145 view: Follow keeps the width and the newest time; only a window a
   assert.deepEqual(hm.resolveView(later, { view: past, follow: false }), past);
 });
 
+test('JOED-145 view: a move keeps Follow only if it ends exactly at the newest time; a pixel back leaves it, small moves add up', () => {
+  const day = hm.presetWindow(RANGE, '1d'), perPx = DAY / 800;
+  assert.equal(hm.endsAtNewest(RANGE, day), true);
+  const back = hm.panWindow(RANGE, day, -perPx);
+  assert.equal(hm.endsAtNewest(RANGE, back), false, 'one pixel into the past leaves Follow');
+  assert.equal(hm.atLiveEdge(RANGE, back), true, 'though it is within the two pixels the drawing treats as the end');
+  let w = day;
+  for (let i = 0; i < 10; i++) w = hm.panWindow(RANGE, w, -0.25 * perPx);
+  assert.ok(Math.abs(w[1] - (K1 - 2.5 * perPx)) < 1e-3 && span(w) === DAY, 'ten quarter-pixel moves add up to two and a half pixels');
+  assert.equal(hm.endsAtNewest(RANGE, hm.panWindow(RANGE, w, 10 * perPx)), true, 'a move past the end rests exactly on it and follows again');
+  assert.equal(hm.endsAtNewest(RANGE, hm.zoomWindow(RANGE, day, 0.5, K1)), true, 'zooming at the newest time keeps following');
+});
+
 test('JOED-145 view: presets end at the newest time; Month longer than the kept history shows all of it', () => {
   assert.deepEqual(hm.presetWindow(RANGE, 'all'), RANGE);
   assert.deepEqual(hm.presetWindow(RANGE, '1d'), [K1 - DAY, K1]);
@@ -94,10 +112,24 @@ test('JOED-145 view: presets end at the newest time; Month longer than the kept 
 test('JOED-145 view: a manual view is kept inside the range with its own width', () => {
   assert.deepEqual(hm.resolveView(RANGE, { preset: '1w', view: null }), [K1 - 7 * DAY, K1]);
   const narrow = [K0 + 30e3, K0 + 114e3];
-  assert.deepEqual(hm.resolveView(RANGE, { view: narrow, follow: false }), narrow, 'an explicit narrow view is drawn as asked');
+  assert.deepEqual(hm.resolveView(RANGE, { view: narrow, follow: false }), [K0, K0 + hm.MIN_VIEW_MS], 'a view under five minutes widens to five, inside the range');
   assert.deepEqual(hm.resolveView(RANGE, { view: [K0 - DAY, K0 + DAY], follow: false }), [K0, K0 + 2 * DAY], 'moved inside, same width');
   assert.deepEqual(hm.resolveView(RANGE, { view: [K0 - 40 * DAY, K1 + DAY], follow: false }), RANGE);
   assert.deepEqual(hm.keepInside(RANGE, [K1, K1 + DAY]), [K1 - DAY, K1]);
+});
+
+test('JOED-145 view: every resolve holds the five-minute floor, also after newer history arrives; a view of no width is repaired', () => {
+  const young = [K0, K0 + 2 * MIN];
+  assert.deepEqual(hm.resolveView(young, { view: young, follow: false }), young, 'with two minutes kept, those two minutes are the smallest window');
+  const later = [K0, K0 + DAY];
+  assert.deepEqual(hm.resolveView(later, { view: young, follow: false }), [K0, K0 + 5 * MIN], 'once more is kept, the parked view widens to five minutes');
+  assert.deepEqual(hm.resolveView(later, { view: young, follow: true }), [K0 + DAY - 5 * MIN, K0 + DAY], 'a following one too, at the newest time');
+  const mid = K0 + 6 * HOUR;
+  for (const view of [[mid, mid], [mid + 30e3, mid - 30e3], [mid - 30e3, mid + 30e3]]) {
+    assert.deepEqual(hm.resolveView(later, { view, follow: false }), [mid - 2.5 * MIN, mid + 2.5 * MIN], `${view.map(x => (x - mid) / 1000)} s around its time widens to five minutes there`);
+  }
+  assert.deepEqual(hm.resolveView(later, { view: [K0 + DAY - MIN, K0 + DAY - MIN], follow: false }), [K0 + DAY - 5 * MIN, K0 + DAY], 'near the end it widens inside the range');
+  for (let i = 0; i < 5; i++) assert.ok(span(hm.resolveView([K0, K0 + DAY + i * MIN], { view: [mid, mid], follow: false })) === 5 * MIN, 'and stays repaired as the range grows');
 });
 
 test('JOED-145 view: a glide eases from one window to the next and lands exactly', () => {
@@ -126,23 +158,34 @@ test('JOED-145 overview: the strip maps the whole range onto its width and back'
   assert.equal(hm.fromStrip(RANGE, 0, 10), K0);
 });
 
-test('JOED-145 overview: edge handles keep their boxes inside the strip and apart', () => {
+test('JOED-145 overview: the window stays a 44 px drag target and the edge handles keep their boxes beside it', () => {
   const t = overviewTargets({ width: 800, left: 200, right: 600, hit: 16 });
-  assert.deepEqual(t.win, { x: 200, w: 400 });
+  assert.deepEqual(t.win, { x: 200, w: 400, hit: { x: 200, w: 400 } });
   assert.deepEqual([t.from.x, t.from.w, t.from.gx], [192, 16, 200]);
   assert.deepEqual([t.to.x, t.to.w, t.to.gx], [592, 16, 600]);
-  // A window narrower than two 44 px boxes: the boxes sit side by side around its middle.
+  // A window narrower than a finger (Day on a phone): its target is 44 px
+  // around its middle and the handles sit outside that target.
   const narrow = overviewTargets({ width: 190, left: 100, right: 104, hit: 44 });
-  assert.deepEqual([narrow.from.x, narrow.to.x], [58, 102]);
-  assert.ok(narrow.from.gx >= narrow.from.x && narrow.from.gx <= narrow.from.x + 44 && narrow.to.gx >= narrow.to.x && narrow.to.gx <= narrow.to.x + 44, 'each grip stays in its own box');
-  for (const [left, right] of [[0, 0.4], [0, 190], [189.7, 190], [0, 30], [170, 190]]) {
-    const p = overviewTargets({ width: 190, left, right, hit: 44 });
-    assert.ok(p.from.x >= 0 && p.to.x + p.to.w <= 190, `boxes inside the strip for ${left}–${right}`);
-    assert.ok(p.from.x + p.from.w <= p.to.x + 1e-9, `boxes never overlap for ${left}–${right}`);
-    assert.ok(p.from.gx >= p.from.x && p.from.gx <= p.from.x + p.from.w && p.to.gx >= p.to.x && p.to.gx <= p.to.x + p.to.w);
+  assert.deepEqual(narrow.win.hit, { x: 80, w: 44 });
+  assert.deepEqual([narrow.from.x, narrow.from.w, narrow.to.x, narrow.to.w], [36, 44, 124, 44]);
+  // At the newest time the end handle uses the room beside the track.
+  const live = overviewTargets({ width: 260, left: 241.4, right: 260, hit: 44, lo: -64, hi: 284 });
+  assert.deepEqual(live.win.hit, { x: 216, w: 44 });
+  assert.deepEqual([live.from.x, live.from.w, live.to.x, live.to.w], [172, 44, 260, 24]);
+  for (const [left, right] of [[0, 0.4], [0, 190], [189.7, 190], [0, 30], [170, 190], [100, 104], [60, 130], [95, 95]]) {
+    for (const room of [{}, { lo: -64, hi: 214 }]) {
+      const p = overviewTargets({ width: 190, left, right, hit: 44, ...room }), lo = room.lo ?? 0, hi = room.hi ?? 190;
+      const { x, w } = p.win.hit, c = x + w / 2, mid = (left + right) / 2, at = `${left}–${right} in ${lo}…${hi}`;
+      assert.ok(w >= 44 && x >= 0 && x + w <= 190 && x <= Math.max(left, mid - 22) + 1e-9 && x + w >= Math.min(right, mid + 22) - 1e-9, `a 44 px target over the window for ${at}`);
+      assert.ok(p.from.x + p.from.w <= c - 22 + 1e-9 && p.to.x >= c + 22 - 1e-9, `no handle covers the target's middle 44 px for ${at}`);
+      assert.ok(p.from.x >= lo && p.to.x + p.to.w <= hi + 1e-9 && p.from.w <= 44 && p.to.w <= 44, `handles inside the room for ${at}`);
+      assert.ok(p.from.gx >= p.from.x && p.from.gx <= p.from.x + p.from.w && p.to.gx >= p.to.x && p.to.gx <= p.to.x + p.to.w, `each grip in its own box for ${at}`);
+      if (room.lo !== undefined) assert.ok(p.from.w >= 24 && p.to.w >= 24, `with room beside the track both handles stay reachable for ${at}`);
+    }
   }
   const wide = overviewTargets({ width: 190, left: 0, right: 190, hit: 44 });
   assert.deepEqual([wide.from.x, wide.to.x], [0, 146], 'a full window keeps its handles at the strip ends');
+  assert.deepEqual(overviewTargets({ width: 30, left: 10, right: 12, hit: 16 }).win.hit, { x: 0, w: 30 }, 'a strip narrower than a finger is all target');
 });
 
 test('JOED-145 input: a wheel zooms with ⌘ or Ctrl (pinch), pans sideways, and a plain vertical wheel is the page’s', () => {
@@ -156,14 +199,22 @@ test('JOED-145 input: a wheel zooms with ⌘ or Ctrl (pinch), pans sideways, and
   assert.equal(wheelIntent({}), 'page');
 });
 
-test('JOED-145 input: one gesture keeps its meaning until the wheel rests; a held modifier zooms at once', () => {
+test('JOED-145 input: diagonal noise keeps a gesture’s meaning until the wheel rests; a plain wheel more vertical than sideways is always the page’s', () => {
   let latch = createWheelLatch(200);
   assert.equal(latch({ deltaX: 30, deltaY: 2 }, 0), 'pan');
-  assert.equal(latch({ deltaX: 1, deltaY: 12 }, 16), 'pan', 'a sideways swipe drifting vertical still pans, never scrolls the page half-way');
+  assert.equal(latch({ deltaX: 6, deltaY: 6 }, 8), 'pan', 'a sideways swipe wobbling diagonally keeps panning');
+  assert.equal(latch({ deltaX: 1, deltaY: 12 }, 16), 'page', 'a wheel more vertical than sideways is the page’s at once, even mid-pan');
+  assert.equal(latch({ deltaY: 100 }, 24), 'page', 'a plain vertical wheel right after a sideways pan scrolls the page');
+  assert.equal(latch({ deltaX: 5, deltaY: 4 }, 30), 'page', 'and diagonal noise after it stays with the page');
   assert.equal(latch({ deltaY: 4, ctrlKey: true }, 32), 'zoom', 'a pinch takes over at once');
   assert.equal(latch({ deltaY: 8 }, 48), 'page', 'and stops the moment the modifier is gone');
   assert.equal(latch({ deltaX: 50, deltaY: 1 }, 64), 'page', 'a page scroll drifting sideways never starts panning');
   assert.equal(latch({ deltaX: 50, deltaY: 1 }, 300), 'pan', 'after a rest a new gesture decides again');
+  for (const before of [{ deltaX: 40 }, { deltaX: -40, deltaY: -40 }, { deltaY: 10, shiftKey: true }, { deltaY: -3, ctrlKey: true }]) {
+    latch = createWheelLatch(200);
+    latch(before, 0);
+    for (const e of [{ deltaY: 1 }, { deltaX: 3, deltaY: 4 }, { deltaX: -9, deltaY: -40 }]) assert.equal(latch(e, 10), 'page', `${JSON.stringify(e)} 10 ms after ${JSON.stringify(before)}`);
+  }
   latch = createWheelLatch(200);
   assert.equal(latch({ deltaY: 100 }, 1000), 'page');
   assert.equal(latch({ deltaY: 100 }, 1100), 'page');
@@ -180,6 +231,57 @@ test('JOED-145 input: wheel distances in pixels; zoom factors follow the fingers
   assert.equal(wheelZoomFactor(100), wheelZoomFactor(35), 'one mouse notch is capped at about 40 %');
   assert.ok(Math.abs(wheelZoomFactor(100) - Math.exp(0.35)) < 1e-12);
   assert.equal(wheelZoomFactor(0), 1);
+});
+
+test('JOED-145 axis: on the Vienna spring-forward day every tick is its own instant, in order, one step of real time apart', () => {
+  // Sun 28 Mar 2027: at 02:00 the clocks jump to 03:00.
+  const from = Date.parse('2027-03-27T22:00:00.000Z'), to = Date.parse('2027-03-28T03:00:00.000Z');
+  for (const step of [5, 10, 15, 30]) {
+    const ticks = wallTicks(from, to, step), at = ticks.map(t => t.at), labels = ticks.map(t => timeHM(new Date(t.at).toISOString()));
+    assert.equal(at.length, 5 * 60 / step + 1, `${step} min: every step from 23:00 to 05:00`);
+    assert.ok(at.every((x, i) => !i || x - at[i - 1] === step * MIN), `${step} min: each tick one step after the one before`);
+    assert.equal(new Set(labels).size, labels.length, `${step} min: no label twice`);
+    assert.ok(!labels.some(l => l.startsWith('02:')), `${step} min: no tick in the hour that does not exist`);
+    assert.deepEqual(ticks.filter(t => t.midnight).map(t => t.at), [Date.parse('2027-03-27T23:00:00.000Z')], 'one midnight');
+  }
+  assert.deepEqual(wallTicks(from, to, 60).map(t => timeHM(new Date(t.at).toISOString())), ['23:00', '00:00', '01:00', '03:00', '04:00', '05:00'], 'hour steps stay on the clock');
+  // Sun 25 Oct 2026: 02:00 to 03:00 comes twice; both are real time.
+  const fall = wallTicks(Date.parse('2026-10-24T23:00:00.000Z'), Date.parse('2026-10-25T02:00:00.000Z'), 15).map(t => t.at);
+  assert.ok(fall.length === 13 && fall.every((x, i) => !i || x - fall[i - 1] === 15 * MIN), 'autumn: both 02:00 hours, in order');
+  const week = wallTicks(Date.parse('2027-03-24T00:00:00.000Z'), Date.parse('2027-03-31T00:00:00.000Z'), 180).map(t => t.at);
+  assert.ok(week.every((x, i) => !i || x > week[i - 1]), 'a week across the change stays in order, nothing repeated');
+});
+
+test('JOED-145 axis: a Day view names both dates, the day it starts in at its left edge and the next at the midnight line', () => {
+  // Wed 28 Oct 08:54 to Thu 29 Oct 08:54, Vienna time.
+  const x0 = Date.parse('2026-10-28T07:54:00.000Z'), x1 = x0 + DAY, midnight = Date.parse('2026-10-28T23:00:00.000Z');
+  for (const pw of [280, 520, 800, 1300]) {
+    const labels = axisLabels(x0, x1, pw), px = l => (l.x - x0) / DAY * pw;
+    assert.deepEqual([labels[0].text, labels[0].x], ['Wed 28', x0], `${pw} px: the first label is the day the window starts in`);
+    assert.ok(labels.some(l => l.text === 'Thu 29' && l.x === midnight), `${pw} px: the midnight line carries its date`);
+    assert.ok(labels.every((l, i) => !i || px(l) - px(labels[i - 1]) >= 56 - 1e-9), `${pw} px: labels stay 56 px apart`);
+  }
+  const atMidnight = axisLabels(midnight, midnight + 6 * HOUR, 800);
+  assert.deepEqual([atMidnight[0].text, atMidnight[0].x], ['Thu 29', midnight], 'a window starting at midnight has that date once');
+  assert.equal(atMidnight.filter(l => l.text === 'Thu 29').length, 1);
+});
+
+test('JOED-145 compare: over part of the window the line names the stretch it uses; over all of it, both ends', () => {
+  const at = (ms, j, joe, joel, basis = 'j.v2') => ({ t: new Date(ms).toISOString(), totals: {}, desks: {
+    j: { money: { equity: j === null ? null : { amount: String(j), currency: 'EUR' } }, historyBasis: basis },
+    joe: { money: { equity: { amount: String(joe), currency: 'EUR' } }, historyBasis: 'joe.v2' },
+    joel: { money: { equity: { amount: String(joel), currency: 'EUR' } }, historyBasis: 'joel.v2' } } });
+  const window = [K0, K0 + DAY], end = K0 + DAY, cut = K0 + 20 * HOUR + 38 * MIN;
+  const rows = [];
+  for (let m = 0; m < 20 * 60; m += 30) rows.push(at(K0 + m * MIN, 4900, 5100, 5000));
+  rows.push(at(K0 + 20.5 * HOUR, null, 5100, 5000));
+  for (let ms = cut; ms <= end; ms += 2 * MIN) rows.push(at(ms, ms === end ? 5010 : 5000, ms === end ? 4995 : 5000, 5000));
+  const gap = compareLine(hm.toColumns(rows), window, end);
+  assert.match(gap, /^Last 3.h.22.min without gaps, from Wed 7.Oct, 22:38: J \+0,20.% · Joe −0,10.% · Joel 0,00.%$/, gap);
+  const basis = compareLine(hm.toColumns(rows.map(r => (Date.parse(r.t) < cut ? { ...r, desks: { ...r.desks, j: { ...r.desks.j, historyBasis: 'j.v1' } } } : r)).filter(r => r.desks.j.money.equity)), window, end);
+  assert.match(basis, /^Last 3.h.22.min on the current bookkeeping, from Wed 7.Oct, 22:38: J \+0,20.%/, basis);
+  const whole = compareLine(hm.toColumns(rows.filter(r => Date.parse(r.t) >= cut)), window, end);
+  assert.match(whole, /^From Wed 7.Oct, 22:38 to Thu 8.Oct, 02:00: J \+0,20.%/, whole);
 });
 
 test('JOED-145 bands: hatched only where every chosen desk lacks numbers for more than five minutes', () => {
@@ -214,4 +316,45 @@ test('JOED-145 thinning: rows the server thinned stay connected; explicit nulls 
   assert.ok(kept.gaps.some(g => g[0].x === K0 + 420 * MIN && g[g.length - 1].x === K0 + 440 * MIN), 'a real outage after the mark is still an estimate');
   assert.ok(kept.gaps.some(g => g[0].x === K0 + 360 * MIN && g[g.length - 1].x === K0 + 361 * MIN) === false, 'the step from thinned to raw rows within five minutes is observed');
   assert.deepEqual(hm.continuitySeries(cols, 'j', 'all', end, { thinnedThrough: null }), raw, 'no mark, no change');
+});
+
+// The producer's 30-second stream through the server's own compaction
+// (server/history.mjs): a pass runs whenever the store holds more than `cap`
+// rows, as boundHistory does at its size warning, and marks the newest row it
+// thinned. Money moves a few cents every row, as on a trading day.
+function compacted({ hours = 48, cap = 2400, outage = null } = {}) {
+  let seed = 7, points = [], thinnedThrough = null;
+  const rand = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const cents = { j: 500000, joe: 500000, joel: 500000 };
+  for (let t = K0; t < K0 + hours * HOUR; t += 30e3) {
+    if (outage && t >= outage[0] && t < outage[1]) continue;
+    for (const id of hm.DESK_IDS) cents[id] += Math.round((rand() - 0.5) * 40);
+    points.push(row(t, Object.fromEntries(hm.DESK_IDS.map(id => [id, cents[id] / 100]))));
+    if (points.length > cap) { points = compactPoints(points); thinnedThrough = Date.parse(points.at(-1).t); }
+  }
+  return { cols: hm.toColumns(points), thinnedThrough, end: Date.parse(points.at(-1).t) };
+}
+const bandsOf = ({ cols, thinnedThrough, end }) => hm.missingBands(hm.DESK_IDS.map(id => hm.continuitySeries(cols, id, 'all', end, { thinnedThrough }).gaps));
+
+test('JOED-145 thinning: through the server’s compaction a normal stretch stays joined; an outage longer than the thinning keeps its band', () => {
+  const clean = compacted();
+  const spacing = [...clean.cols.t].slice(1).map((x, i) => x - clean.cols.t[i]).filter((_, i) => clean.cols.t[i + 1] <= clean.thinnedThrough);
+  assert.ok(clean.thinnedThrough > K0 + DAY && Math.max(...spacing) > 10 * MIN, 'the fixture was thinned, to more than ten minutes between kept rows');
+  assert.deepEqual(bandsOf(clean), [], 'thinning alone draws no band');
+  for (const id of hm.DESK_IDS) assert.deepEqual(hm.continuitySeries(clean.cols, id, 'all', clean.end, { thinnedThrough: clean.thinnedThrough }).gaps, [], `${id}: no estimate either`);
+  // Three hours where the rows were thinned once (minutes apart), eight where
+  // they were thinned twice (up to about two hours apart), and 45 minutes
+  // across a Vienna midnight, whose last row before it every pass keeps. An
+  // outage shorter than the thinning step at its age cannot be told apart.
+  for (const [from, to] of [[28, 31], [6, 14], [21.5, 22.25]]) {
+    const outage = [K0 + from * HOUR, K0 + to * HOUR], out = compacted({ outage }), name = new Date(outage[0]).toISOString();
+    assert.ok(out.thinnedThrough > outage[1], `${name}: the outage lies in the thinned part`);
+    const bands = bandsOf(out);
+    assert.equal(bands.length, 1, `${name}: one band`);
+    assert.ok(bands[0][0] <= outage[0] && bands[0][1] >= outage[1] && bands[0][0] >= outage[0] - 3 * HOUR && bands[0][1] <= outage[1] + 3 * HOUR, `${name}: over the outage`);
+    const j = hm.continuitySeries(out.cols, 'j', 'all', out.end, { thinnedThrough: out.thinnedThrough });
+    assert.ok(j.gaps.some(g => g[0].x <= outage[0] && g.at(-1).x >= outage[1]), 'with its dashed estimate');
+  }
+  // Without the mark nothing is thinned, so every wide step reads as missing.
+  assert.ok(bandsOf({ ...clean, thinnedThrough: null }).length > 10);
 });

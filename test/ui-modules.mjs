@@ -39,7 +39,7 @@ const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await im
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
-const { HS, historyChart, downsample, historyPointDetails } = await import('../public/joe/history.js');
+const { HS, historyChart, downsample, historyPointDetails, initHistoryInput, historyPreset } = await import('../public/joe/history.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
 const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
@@ -1562,8 +1562,9 @@ for (const mode of ['mouse', 'touch', 'drag']) test(`history: ${mode} focus leav
 });
 
 test('history: synthetic edges that repeat the same minute and snapped values are skipped', t => {
-  const points = [0.1, 0.8, 1.1, 1.8, 2.1].map((minute, i) => pt(iso(minute), { j: 10 + i, joe: 20 + i, joel: 30 + i }));
-  const h = historyPointer(t, points, { zoom: [T0 + 0.5 * 60000, T0 + 1.9 * 60000] });
+  // Five minutes, the narrowest window, with both edges in an observation's minute.
+  const points = [0.1, 0.8, 1.1, 3, 5.2, 5.9].map((minute, i) => pt(iso(minute), { j: 10 + i, joe: 20 + i, joel: 30 + i }));
+  const h = historyPointer(t, points, { zoom: [T0 + 0.5 * 60000, T0 + 5.5 * 60000] });
   h.focus();
   assert.match(h.live.textContent, /J €\s11,00 observed/);
   const first = h.live.textContent, html = h.tip.innerHTML, x = h.el.querySelector('.xh').getAttribute('x1');
@@ -1573,9 +1574,9 @@ test('history: synthetic edges that repeat the same minute and snapped values ar
   assert.notEqual(h.el.querySelector('.xh').getAttribute('x1'), x, 'crosshair moves with the announcement');
   assert.match(h.live.textContent, /J €\s12,00 observed/);
   h.key('End');
-  assert.match(h.live.textContent, /J €\s13,00 observed/);
+  assert.match(h.live.textContent, /J €\s14,00 observed/);
   h.key('ArrowLeft');
-  assert.match(h.live.textContent, /J €\s12,00 observed/, 'last Left also skips the redundant edge; original same-minute observations stay reachable');
+  assert.match(h.live.textContent, /J €\s13,00 observed/, 'last Left also skips the redundant edge; original same-minute observations stay reachable');
 });
 
 test('history: estimated edges with different values remain inspection points', t => {
@@ -1748,10 +1749,100 @@ test('JOED-145 history: the overview strip shows everything kept and the shown w
     const boxLeft = parseFloat(edge.style.left), boxRight = boxLeft + parseFloat(edge.style.width), grip = boxLeft + parseFloat(edge.firstElementChild.style.left);
     assert.ok(boxLeft <= x && boxRight >= x && Math.abs(grip - x) <= 2, `the ${edge.dataset.edge} handle holds its edge`);
   }
+  // An hour of three days is 8 px of strip: the window keeps a 44 px target
+  // around it, inside the strip, and the handles sit outside that target.
+  win.style.setProperty = function (key, value) { this[key] = value; };
+  draw({ view: [end - 3600e3, end], follow: true });
+  const px = v => parseFloat(v), near = (a, b) => Math.abs(a - b) < 1e-6;
+  assert.ok(near(px(win.style.left), 600 - 600 / 72) && near(px(win.style.width), 600 / 72), 'the window is the hour');
+  const target = [px(win.style.left) + px(win.style['--hl']), px(win.style.left) + px(win.style.width) - px(win.style['--hr'])];
+  assert.ok(near(target[0], 556) && near(target[1], 600), `a 44 px target ending at the strip’s end: ${target}`);
+  const [fromBox, toBox] = [from, to].map(edge => [parseFloat(edge.style.left), parseFloat(edge.style.left) + parseFloat(edge.style.width)]);
+  assert.ok(fromBox[1] <= target[0] && toBox[0] >= target[1] && fromBox[1] - fromBox[0] === 16, 'both handles beside the target, never on it');
   draw({ desks: [] });
   assert.equal(mini.getAttribute('data-off'), '', 'without desks the strip keeps its place but offers nothing');
   for (const node of [win, from, to]) assert.deepEqual([node.getAttribute('tabindex'), node.getAttribute('aria-hidden')], ['-1', 'true']);
   assert.equal(document.querySelector('#histKept').textContent, '');
+});
+
+// History's input on the real page markup: the chart and the strip keep
+// their listeners, and a redraw waits for frame(), as for the next animation
+// frame, so several events can arrive between two drawings.
+function historyInput(t, points, { end = Date.parse(points.at(-1).t), ...state } = {}) {
+  const saved = { document: globalThis.document, matchMedia: globalThis.matchMedia, state: { ...HS } };
+  t.after(() => { globalThis.document = saved.document; globalThis.matchMedia = saved.matchMedia; Object.assign(HS, saved.state); });
+  globalThis.document = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  globalThis.matchMedia = query => ({ matches: /reduce/.test(query) });
+  const chart = document.querySelector('#histChart'), track = document.querySelector('#histTrack'), mini = document.querySelector('#histMini');
+  const listen = node => { const on = {}; node.addEventListener = (type, fn) => { on[type] = fn; }; return on; };
+  const on = { chart: listen(chart), track: listen(track) };
+  listen(document);
+  Object.assign(chart, { clientWidth: 878, clientHeight: 250, getBoundingClientRect: () => ({ left: 0 }), setPointerCapture() {}, contains: () => false });
+  Object.assign(track, { clientWidth: 800, clientHeight: 56, getBoundingClientRect: () => ({ left: 0 }), setPointerCapture() {} });
+  mini.removeAttribute = key => { delete mini.attributes[key]; };
+  for (const edge of mini.querySelectorAll('[data-edge]')) edge.firstElementChild = edge.querySelector('.grip');
+  const tip = chart.querySelector('.ctip');
+  Object.assign(tip, { offsetWidth: 80, offsetHeight: 40 });
+  const ctx = { now: new Date(end).toISOString(), states: { history: { value: { columns: hm.toColumns(points) } } } };
+  let pending = 0;
+  initHistoryInput({ schedule: () => { pending++; } });
+  Object.assign(HS, { desks: hm.DESK_IDS.slice(), preset: '1d', view: null, follow: true, ...state });
+  const frame = () => { pending = 0; historyChart(ctx); return [...HS.shown]; };
+  const target = { closest: () => null };
+  return { chart, tip, frame, pending: () => pending,
+    wheel(e, at) { const event = { deltaX: 0, deltaY: 0, deltaMode: 0, clientX: 464, timeStamp: at, target, prevented: false, preventDefault() { event.prevented = true; }, ...e }; on.chart.wheel(event); return event; },
+    touch(type, id, x, at = 0) { on.chart[type]({ type, pointerId: id, pointerType: 'touch', clientX: x, clientY: 120, button: 0, timeStamp: at, target }); },
+    hover(x) { chart.onpointermove({ clientX: x, target }); return tip.innerHTML; } };
+}
+const threeDays = () => Array.from({ length: 145 }, (_, i) => pt(iso(i * 30), { j: 10 + i, joe: 20, joel: 30 }));
+
+test('JOED-145 input: a sideways wheel of one pixel into the past turns Follow off; small moves before a frame add up', t => {
+  const h = historyInput(t, threeDays());
+  const day = h.frame(), perPx = (day[1] - day[0]) / 800;
+  assert.deepEqual([HS.follow, day[1]], [true, T0 + 72 * 3600e3]);
+  const e = h.wheel({ deltaX: -1 }, 0);
+  assert.ok(e.prevented, 'the chart takes the sideways wheel');
+  assert.equal(HS.follow, false, 'one pixel into the past leaves Follow');
+  let shown = h.frame();
+  assert.ok(Math.abs(shown[1] - (day[1] - perPx)) < 1e-3 && Math.abs(shown[0] - (day[0] - perPx)) < 1e-3, 'and the window moved that pixel');
+  // Ten quarter pixels between two frames, as a slow trackpad sends them.
+  for (let i = 0; i < 10; i++) h.wheel({ deltaX: -0.25 }, 20 + i);
+  assert.ok(h.pending() > 0);
+  shown = h.frame();
+  assert.ok(Math.abs(shown[1] - (day[1] - 3.5 * perPx)) < 1e-3, `ten quarter pixels add up: ${(day[1] - shown[1]) / perPx} px`);
+  assert.ok(Math.abs(shown[1] - shown[0] - (day[1] - day[0])) < 1e-3, 'same width');
+  // Back past the end: the window rests on the newest time and follows again.
+  for (let i = 0; i < 3; i++) h.wheel({ deltaX: 2 }, 40 + i);
+  h.frame();
+  assert.deepEqual([HS.follow, HS.shown[1]], [true, day[1]]);
+  // A plain vertical wheel right after the sideways ones belongs to the page.
+  const page = h.wheel({ deltaY: 120 }, 60);
+  assert.deepEqual([page.prevented, h.pending()], [false, 0], 'never taken, nothing to redraw');
+});
+
+test('JOED-145 input: when the last finger of a pinch lifts no gesture is left, so a mouse inspects again', t => {
+  const h = historyInput(t, threeDays());
+  const day = h.frame();
+  assert.match(h.hover(464), /Vienna time/, 'a mouse inspects before');
+  h.tip.innerHTML = '';
+  for (const [first, last, ending] of [[1, 2, 'pointerup'], [2, 1, 'pointerup'], [1, 2, 'pointercancel']]) {
+    historyPreset('1d'); h.frame();
+    h.touch('pointerdown', 1, 300); h.touch('pointerdown', 2, 500);
+    h.touch('pointermove', 1, 260); h.touch('pointermove', 2, 540);
+    const pinched = h.frame();
+    assert.ok(pinched[1] - pinched[0] < (day[1] - day[0]) * 0.9, 'the pinch zoomed in');
+    h.touch(ending, first, 260, 400);
+    assert.equal(h.hover(464), '', 'one finger still down: no tip');
+    h.touch(ending, last, 540, 420);
+    assert.match(h.hover(464), /Vienna time/, `${ending} of finger ${first}, then ${last}: a mouse inspects again`);
+    h.tip.innerHTML = '';
+    // The fingers are gone: a new single touch starts its own gesture.
+    h.touch('pointerdown', 3, 400, 1000); h.touch('pointermove', 3, 470, 1010);
+    h.frame();
+    h.touch('pointerup', 3, 470, 1020);
+    assert.match(h.hover(464), /Vienna time/, 'after a swipe as well');
+    h.tip.innerHTML = '';
+  }
 });
 
 test('history: basis breaks exclude older records and compare stays on observed, compatible points', () => {

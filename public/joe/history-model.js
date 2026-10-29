@@ -4,7 +4,7 @@
 // comparisons, sparklines, totals or storage. The validated history arrives as
 // typed columns (one row per point, NaN for a missing value) so a 10,000-point
 // file never costs the page more than a few milliseconds.
-import { nyDay, marketSession, zonedInstant, NY } from './time.mjs';
+import { nyDay, viennaDay, marketSession, zonedInstant, NY, VIENNA } from './time.mjs';
 import { decimalUnits } from './contracts/decimal.mjs';
 
 export const DESK_IDS = Object.freeze(['j', 'joe', 'joel']);
@@ -124,6 +124,10 @@ export function resizeWindow(range, [a, b], edge, to) {
 }
 // The newest time is in view (within about two pixels of the window's end).
 export const atLiveEdge = (range, [a, b]) => range[1] - b <= Math.max(1000, (b - a) * 0.002);
+// A window a person moved follows the newest time only if it ends exactly
+// there: every move is clamped exactly onto the range's end, so a pan of a
+// single pixel into the past leaves Follow, and small pans add up.
+export const endsAtNewest = (range, [, b]) => b >= range[1];
 export const followWindow = (range, [a, b]) => placeWindow(range, b - a, range[1], 1);
 export const presetSpan = (range, preset) => Math.min(rangeSpanMs(preset) ?? Infinity, range[1] - range[0]);
 export const presetWindow = (range, preset) => placeWindow(range, presetSpan(range, preset), range[1], 1);
@@ -140,11 +144,15 @@ export function keepInside([k0, k1], [a, b]) {
   return from >= k1 - w ? [k1 - w, k1] : [from, from + w];
 }
 // The window shown: a preset ending at the newest time, or a manual view kept
-// inside the range that follows the newest time while Follow is on.
+// inside the range that follows the newest time while Follow is on. Every
+// resolve holds the current floor: a view chosen while less than five
+// minutes were kept, or one of no width at all, widens to five minutes
+// around its middle once the range allows it.
 export function resolveView(range, { preset = 'all', view = null, follow = true } = {}) {
   if (!view) return presetWindow(range, preset);
-  const [a, b] = keepInside(range, view);
-  return follow ? [range[1] - (b - a), range[1]] : [a, b];
+  const [a, b] = view, span = b - a, min = minSpan(range);
+  if (follow) return placeWindow(range, span, range[1], 1);
+  return span >= min ? keepInside(range, view) : placeWindow(range, min, (a + b) / 2, 0.5);
 }
 export const easeOut = t => 1 - (1 - clamp(t, 0, 1)) ** 3;
 export const lerpWindow = ([a0, b0], [a1, b1], t) => (t >= 1 ? [a1, b1] : [a0 + (a1 - a0) * t, b0 + (b1 - b0) * t]);
@@ -179,6 +187,58 @@ export function chartRows(cols, id, endAt) {
   return { start: latestCompatibleBasis(cols, id, 0, last).start, last };
 }
 
+// ---------- Rows the server thinned ----------
+// To stay inside its size limit the server thins its stored history
+// (server/history.mjs, compactPoints) and marks the newest row it thinned
+// (compactedThrough). Each pass keeps, from every 64 rows, the first and the
+// last, each series' lowest and highest, both sides of every change in which
+// values are present or in the bookkeeping basis, and each Vienna day's last
+// row with a value. Later passes thin the kept rows again, so the spacing
+// grows with age: minutes a day back, about one row a day after a week. The
+// server records nothing where no row ever arrived, so a producer outage and
+// a thinned stretch can look alike. A thinned interval is drawn as observed
+// only where thinning explains it:
+// - it crosses a Vienna midnight only from that day's last row (at most the
+//   observation interval before midnight) into the next day: every day's
+//   last row survives every pass, so any other crossing lost real time;
+// - it is no longer than THIN_TOLERANCE times the longest of the
+//   THIN_NEIGHBOURS kept intervals on either side, the thinning step at that
+//   age.
+// Anything longer stays an estimate (hatched where no chosen desk has a
+// number). The client cannot tell an outage shorter than the thinning step
+// there from thinning: it stays joined, and History says so under the chart.
+// Only the server could keep them apart, by marking the rows around each
+// outage before it thins them.
+export const THIN_NEIGHBOURS = 16, THIN_TOLERANCE = 3;
+const nextDayOf = day => new Date(Date.parse(`${day}T12:00:00Z`) + 864e5).toISOString().slice(0, 10);
+const valued = (cols, i) => FIELDS.some(f => !Number.isNaN(cols.totals[f][i]) || DESK_IDS.some(id => !Number.isNaN(cols.desks[id][f][i])));
+const thinned = new WeakMap();
+// 1 where the interval ending at row i is longer than thinning explains;
+// null without a thinning mark. Cached per history and mark.
+export function unexplainedThinning(cols, thinnedThrough) {
+  if (!Number.isFinite(thinnedThrough) || !cols.n) return null;
+  const hit = thinned.get(cols);
+  if (hit?.through === thinnedThrough) return hit.gaps;
+  const t = cols.t, last = rowAt(cols, thinnedThrough + 1), gaps = new Uint8Array(cols.n);
+  // Vienna midnights from the first kept row to past the last thinned one.
+  const midnights = [];
+  for (let day = viennaDay(new Date(t[0]).toISOString()), m = -Infinity; last && m <= t[last - 1];) {
+    day = nextDayOf(day);
+    midnights.push(m = Date.parse(zonedInstant(day, '00:00:00', VIENNA)));
+  }
+  for (let i = 1, k = 0; i < last; i++) {
+    const a = t[i - 1], b = t[i];
+    while (midnights[k] <= a) k++;
+    if (b - a <= OBSERVATION_INTERVAL_MS) continue;
+    const crossed = midnights[k] <= b && valued(cols, i - 1) && (midnights[k] - a > OBSERVATION_INTERVAL_MS || midnights[k + 1] <= b);
+    let step = 0;
+    for (let j = Math.max(1, i - THIN_NEIGHBOURS); j <= Math.min(last - 1, i + THIN_NEIGHBOURS); j++) if (j !== i) step = Math.max(step, t[j] - t[j - 1]);
+    if (crossed || b - a > THIN_TOLERANCE * step) gaps[i] = 1;
+  }
+  thinned.set(cols, { through: thinnedThrough, gaps });
+  return gaps;
+}
+
 const gapPoint = (x, y, assumption, extra = {}) => ({ x, y, estimated: true, assumption, ...extra });
 function valueAt(samples, x) {
   if (x <= samples[0].x) return samples[0].y;
@@ -202,17 +262,16 @@ function clipGap(samples, startAt, endAt) {
 
 // Observed samples (null y marks a gap) plus the dashed continuity groups for
 // one desk, clipped to the visible range ending at the board's current time.
-// Rows at or before thinnedThrough were thinned by the server to stay inside
-// its size limit (history contract, compaction): wide spacing there is the
-// thinning, not missing data, so those rows stay connected. Explicit missing
-// values survive thinning and stay estimates.
+// Rows at or before thinnedThrough were thinned by the server (see above):
+// spacing there that thinning explains stays connected; longer intervals and
+// explicit missing values stay estimates.
 export function continuitySeries(cols, id, range, endAt, { thinnedThrough = null } = {}) {
   const { start, last } = chartRows(cols, id, endAt);
   const earliest = last ? cols.t[0] : null;
   const [startAt] = rangeWindow(cols, range, endAt);
   const eq = cols.desks[id].equity;
-  const thin = Number.isFinite(thinnedThrough) ? thinnedThrough : -Infinity;
-  const apart = (a, b) => cols.t[b] - cols.t[a] > OBSERVATION_INTERVAL_MS && cols.t[b] > thin;
+  const thin = Number.isFinite(thinnedThrough) ? thinnedThrough : -Infinity, unexplained = unexplainedThinning(cols, thinnedThrough);
+  const apart = (a, b) => cols.t[b] - cols.t[a] > OBSERVATION_INTERVAL_MS && (cols.t[b] > thin || unexplained[b] === 1);
   const inside = rowAt(cols, startAt);
   const from = Math.max(start, inside - 1), seenRows = [];
   const observed = [];
@@ -254,7 +313,10 @@ export function continuitySeries(cols, id, range, endAt, { thinnedThrough = null
 
 // Same-timestamp comparison of the selected desks on the rows the chart draws
 // (observed, latest comparable basis), inside its window [from, to] in
-// milliseconds; endAt is the board's current time, as for the chart.
+// milliseconds; endAt is the board's current time, as for the chart. It runs
+// over the last stretch in which every chosen desk has a number on its
+// current basis; `after` names what ended the stretch before it inside the
+// window (null when the stretch starts with the window's first row).
 export function sharedWindowCompare(cols, ids, bounds, endAt) {
   if (ids.length < 2) return { ok: false, reason: 'insufficient-selection' };
   if (!cols.n) return { ok: false, reason: 'insufficient-points' };
@@ -269,7 +331,7 @@ export function sharedWindowCompare(cols, ids, bounds, endAt) {
     runEnd = i;
   }
   if (runStart < 0 || runEnd <= runStart) return { ok: false, reason: lastBreak };
-  return { ok: true, startAt: new Date(cols.t[runStart]).toISOString(), endAt: new Date(cols.t[runEnd]).toISOString(), desks: ids.map(id => {
+  return { ok: true, startAt: new Date(cols.t[runStart]).toISOString(), endAt: new Date(cols.t[runEnd]).toISOString(), after: runStart > from ? lastBreak : null, desks: ids.map(id => {
     const start = cols.desks[id].equity[runStart], end = cols.desks[id].equity[runEnd];
     return { id, start, end, pct: start === 0 ? null : (end - start) / start * 100 };
   }) };
