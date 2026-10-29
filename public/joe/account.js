@@ -750,6 +750,9 @@ function bindChart(chart, track) {
       if (e.button === 0 && canPan()) input.drag = { id: e.pointerId, x: e.clientX, start, perPx: perPx(), moved: false };
       return;
     }
+    // Hold each finger until it lifts, even beyond the chart: redrawing the
+    // SVG under it ends the browser's own hold and would leave it in touches.
+    chart.setPointerCapture?.(e.pointerId);
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     clearTimeout(input.touch?.timer);
     if (touches.size === 1) {
