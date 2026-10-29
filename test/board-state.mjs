@@ -1995,6 +1995,30 @@ test('JOED-148: every desk and household Today combination matches the plain-wor
   }
   assert.equal(count, 10 ** 3 * 4);
   assert.equal(green, 3 ** 3 * 2, 'green only for fine desks beside a current or not-exact household');
+  // JOED-153 merge gate: Today and Open withheld at once for the same reason,
+  // the open result not being available (contract valid). The same raw state
+  // is no reason to share a line: Today's is a fault in Today's words, Open's
+  // is JOED-157's price wait, on the card and on the one-row card alike.
+  const WAIT = 'open result not available';  // the board's words for open_pnl_unavailable
+  for (const [i, id] of DESKS.entries()) for (const channels of [['money'], ['source'], ['money', 'source']]) {
+    const data = structuredClone(exact);
+    for (const [field, period] of [['dayPnl', 'day'], ['openPnl', 'open']]) for (const [bag, sources] of [[data.desks[i].money, data.desks[i].pnlSources], [data.totals, data.pnlSources]]) {
+      bag[field] = null;
+      if (channels.includes('money')) (bag.reasons ??= {})[field] = 'open_pnl_unavailable';
+      Object.assign(sources[period], { status: 'unavailable', method: null, observedAt: null }, channels.includes('source') ? { reason: 'open_pnl_unavailable' } : {});
+    }
+    const label = `${NAMES[id]}'s Today and Open both withheld, the open result not available (${channels.join(' and ')})`;
+    assert.equal(validateContract('data', data).ok, true, label);
+    const feeds = { data: { value: data } }, view = { feeds, now, states: boardStates(feeds, now, {}) };
+    const doc = htmlDocument(deskCard(view, id)), card = cardToday(doc), row = cardToday(htmlDocument(deskCard(withQuietRecord(view, quiet), id)));
+    const lines = [`Today: unavailable · ${WAIT}`, 'Open result: waiting on prices'];
+    assert.deepEqual(card.lines, lines, `${label}: card lines`);
+    assert.equal(card.caption, TODAY_CAPTION.unavailable, `${label}: card Today caption`);
+    assert.equal(doc.querySelectorAll('.dnums .c')[1]?.textContent, 'Waiting on prices', `${label}: card Open caption`);
+    assert.ok(row.row, `${label}: one row`);
+    assert.deepEqual(row.lines, lines, `${label}: one-row lines`);
+    assert.equal(row.caption, TODAY_CAPTION.unavailable, `${label}: one-row Today caption`);
+  }
 });
 
 // The re-gate's Medium: the household Today withheld as not exact while every

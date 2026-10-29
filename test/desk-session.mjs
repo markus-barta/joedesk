@@ -7,11 +7,11 @@ import { test } from 'node:test';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { validateContract } from '../contracts/index.mjs';
 import { decimalUnits } from '../contracts/decimal.mjs';
-import { zonedInstant, nyDay, NY } from '../time.mjs';
+import { zonedInstant, nyDay, NY, sessionDayName } from '../time.mjs';
 const { boardStates } = await import('../public/joe/board-state.js');
 const { indexResults, rollup, moneyContext, periodOf, periodBase, DESK_IDS } = await import('../public/joe/results-model.js');
 const { resultsView } = await import('../public/joe/results.js');
-const { cellReason, boardHealthPresentation } = await import('../public/joe/health.js');
+const { cellReason, boardHealthPresentation, CELL_REASON } = await import('../public/joe/health.js');
 const { TERMS } = await import('../public/joe/terms.js');
 const { eur } = await import('../public/joe/format.js');
 const { STARTING_MONEY, percentOf, todayBase, todayPercent, exactCell } = await import('../public/joe/performance.js');
@@ -652,6 +652,70 @@ test('JOED-153 M5: a desk start the market calendar does not cover cannot be pro
   startJ('2026-01-02T05:00:00.000Z');
   const inside = context(now, { data, partial: {}, edit: only('2026-01-02', '2026-01-02') });
   assert.equal(desk.noTradesSinceStart(inside, desk.deskFacts(inside), 'j'), '2026-01-02');
+});
+
+// Merge gate, finding 2: the one-row card's status box reserves its worst
+// case, every figure with its longest line, wrapped, at every row width from
+// a 320 px phone up, so no change of state moves the row. Widths are
+// Verdana's advances (1/2048 em; the wide font that stands in for Linux's in
+// the layout checks), 6 % wider for DejaVu Sans and rounding; lines break at
+// spaces only (never inside "23 h 59 min" or a label).
+const VERDANA = Object.fromEntries([
+  ...[720, 806, 940, 1676, 1302, 2204, 1488, 550, 930, 930, 1302, 1676, 745, 930, 745, 930, 1302, 1302, 1302, 1302, 1302, 1302, 1302, 1302, 1302, 1302, 930, 930, 1676, 1676, 1676, 1117,
+    2048, 1400, 1404, 1430, 1578, 1295, 1177, 1588, 1539, 862, 931, 1419, 1140, 1726, 1532, 1612, 1235, 1612, 1424, 1400, 1262, 1499, 1400, 2025, 1403, 1260, 1403, 930, 930, 930, 1676, 1302,
+    1302, 1230, 1276, 1067, 1276, 1220, 720, 1276, 1296, 562, 705, 1212, 562, 1992, 1296, 1243, 1276, 1276, 874, 1067, 807, 1296, 1212, 1676, 1212, 1212, 1076, 1300, 930, 1300, 1676]
+    .map((w, i) => [String.fromCharCode(32 + i), w]),
+  [NB, 720], ['·', 745], ['’', 550], ['‘', 550], ['—', 2048], ['–', 1302], ['−', 1676], ['€', 1302], ['…', 1676], ['“', 940], ['”', 940],
+]);
+test('JOED-153 M5: the one-row status box reserves its worst case at every width from a 320 px phone', () => {
+  const px = word => [...word].reduce((sum, ch) => {
+    assert.ok(VERDANA[ch] !== undefined, `no width for ${JSON.stringify(ch)}`);
+    return sum + VERDANA[ch];
+  }, 0) / 2048 * 11.5 * 1.06;
+  const SPACE = px(' ');
+  // Greedy wrapping at spaces, as the browser does; never more lines at a wider row.
+  const measured = text => text.split(' ').map(px);
+  const lines = (words, width) => {
+    let n = 1, line = words[0];
+    for (const w of words.slice(1)) if (line + SPACE + w <= width) line += SPACE + w; else { n++; line = w; }
+    return n;
+  };
+  const plain = html => htmlDocument(`<div>${html}</div>`).querySelectorAll('.st').map(line => line.textContent);
+  // Every line each figure can say: each reason, age and state, under its
+  // widest label (a dated session, a start day), and the lines two or three
+  // figures share when they say the same words.
+  const reasons = [null, ...Object.keys(CELL_REASON)], ages = [null, 59, 3599, 23 * 3600 + 59 * 60, 999 * 86400];
+  const cells = reasons.flatMap(reason => ages.flatMap(ageSeconds => [
+    { state: 'not reported', value: null }, { state: 'broken', value: null }, { state: 'stale', value: null },
+    { state: 'broken', value: {}, retained: true, valueReceivedAt: NOW }, { state: 'stale', value: {} }, { state: 'broken', value: {} },
+  ].map(cell => ({ ...cell, reason, ageSeconds }))));
+  const widest = labels => labels.reduce((a, b) => (px(b) > px(a) ? b : a));
+  const days = Array.from({ length: 366 }, (_, i) => new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10));
+  const LABELS = { first: [widest(['Today', ...days.map(sessionDayName)])], open: ['Open result'], since: [widest([...days.map(desk.sinceLabel), 'Since start'])] };
+  assert.equal(htmlDocument(deskCard(context(), 'j')).querySelectorAll('.dnums .k')[1].textContent.trim(), LABELS.open[0], 'the Open label');
+  const said = Object.fromEntries(Object.entries(LABELS).map(([slot, [label]]) =>
+    [slot, [...new Set(cells.flatMap(cell => plain(desk.cardStatus('j', [[label, cell]], null, 3))))].map(measured)]));
+  const shared = [...new Set(cells.flatMap(cell => [['first', 'open'], ['open', 'since'], ['first', 'since'], ['first', 'open', 'since']].map(slots =>
+    JSON.stringify([slots, plain(desk.cardStatus('j', slots.map(slot => [LABELS[slot][0], cell]), null, 3))]))))]
+    .map(JSON.parse).map(([slots, texts]) => [slots, texts, texts.map(measured)]);
+  // The reserve app.css gives a row of a width: the box's own, and its container steps.
+  const base = Number(DESK_BLOCK.match(/\n\.drow \.drow-status \{[^}]*\bmin-height: (\d+)px;/)[1]);
+  const steps = [...DESK_BLOCK.matchAll(/@container \(max-width: ([\d.]+)px\) \{ \.drow \.drow-status \{ min-height: (\d+)px; \} \}/g)].map(m => [Number(m[1]), Number(m[2])]);
+  const reserve = width => steps.reduce((h, [max, min]) => (width <= max ? Math.max(h, min) : h), base);
+  // A 320 px phone: the page's 16 px gutters and the open desk's 18 px padding.
+  const NARROWEST = 320 - 2 * 16 - 2 * 18;
+  const widths = [...Array.from({ length: 1300 - NARROWEST + 1 }, (_, i) => NARROWEST + i), ...steps.map(([max]) => max + 0.01)];
+  for (const width of widths) {
+    // Each line's text sits beside its 13 px icon and 5 px gap; 16 px a line, 2 px between lines.
+    const text = width - 18, most = Object.fromEntries(Object.entries(said).map(([slot, list]) => [slot, Math.max(...list.map(words => lines(words, text)))]));
+    const need = 16 * (most.first + most.open + most.since) + 2 * 2;
+    assert.ok(need <= reserve(width), `a ${width} px row needs ${need} px for ${JSON.stringify(most)}; app.css reserves ${reserve(width)} px`);
+    // Lines that several figures share never take more room than their own lines.
+    for (const [slots, texts, words] of shared) {
+      const total = words.reduce((sum, w) => sum + lines(w, text), 0);
+      assert.ok(total <= slots.reduce((sum, slot) => sum + most[slot], 0), `${width} px: ${texts.join(' / ')}`);
+    }
+  }
 });
 
 // Fix round 2, finding 4: the sessions group's touch steps take the gate's

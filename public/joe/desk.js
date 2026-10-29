@@ -1166,7 +1166,11 @@ export function cardStatus(id, cells, board = null, total = cells.length) {
   const groups = [];
   for (const [label, cell] of cells) {
     if ((cell?.state ?? 'not reported') === 'fresh' || sharesBoardCaption(cell, board)) continue;
-    const key = JSON.stringify([cell?.state, cell?.reason, cell?.ageSeconds, cell?.retained, cell?.value == null, cell?.retained ? cell.valueReceivedAt : null]);
+    // Figures share a line only when they would say the same words on their
+    // own (JOED-157: Open's price wait keeps "waiting on prices" beside a
+    // Today with the same raw state), the same age and the same retention.
+    const words = figurePhrase(cell, '', label, 'last good').text;
+    const key = JSON.stringify([cell?.state, cell?.reason, cell?.ageSeconds, cell?.retained, cell?.value == null, cell?.retained ? cell.valueReceivedAt : null, words]);
     const group = groups.find(g => g.key === key);
     if (group) group.labels.push(label); else groups.push({ key, labels: [label], cell });
   }
@@ -1174,7 +1178,8 @@ export function cardStatus(id, cells, board = null, total = cells.length) {
   const seen = new Set();
   return groups.map((g, i) => {
     const reason = g.cell?.reason ? cellReason(g.cell.reason) : null;
-    const p = figurePhrase(g.cell, `card.${id}.${i}`, g.labels.length === 1 ? g.labels[0] : null, 'last good', seen.has(reason) ? reason : null);
+    // Every figure of a group says these words on its own; its first speaks for all.
+    const p = figurePhrase(g.cell, `card.${id}.${i}`, g.labels[0], 'last good', seen.has(reason) ? reason : null);
     seen.add(reason);
     const who = g.labels.length === total ? 'Numbers' : g.labels.length === 2 ? `${g.labels[0]} and ${g.labels[1]}` : g.labels[0];
     return st(p.tone, `${esc(who)}: ${p.text}`, p.icon);

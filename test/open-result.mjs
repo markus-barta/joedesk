@@ -348,6 +348,26 @@ test('JOED-157: every desk and household Open combination matches the plain-word
       count++;
     }
   }
+  // JOED-153 merge gate: Today withheld at once for the same reason as Open's
+  // price wait (contract valid). Open keeps its own word, line and caption;
+  // Today's same raw state, a fault in Today's words, keeps its own line.
+  for (const [i, id] of DESKS.entries()) for (const option of ['waitMoney', 'waitSource']) {
+    const data = combination(DESKS.map((_, k) => (k === i ? option : 'exact')), 'wait').feeds.data.value;
+    for (const [bag, sources] of [[data.desks[i].money, data.desks[i].pnlSources], [data.totals, data.pnlSources]]) {
+      bag.dayPnl = null;
+      if (option === 'waitMoney') (bag.reasons ??= {}).dayPnl = 'open_pnl_unavailable';
+      Object.assign(sources.day, { status: 'unavailable', method: null, observedAt: null }, option === 'waitSource' ? { reason: 'open_pnl_unavailable' } : {});
+    }
+    const label = `${NAMES[i]}'s Today and Open (${option}) withheld at once`, view = viewOf(data);
+    check(validateContract('data', data).ok, 'beside Today: contract', label);
+    const lines = ['Today: unavailable · open result not available', `Open result: ${DESK_OPEN[option].word}`];
+    const card = htmlDocument(deskCard(view, id)), cardLines = card.querySelectorAll('.card-status .st').map(line => line.textContent);
+    check(JSON.stringify(cardLines) === JSON.stringify(lines), 'beside Today: card lines', `${label}: ${cardLines.join(' / ')}`);
+    const captions = card.querySelectorAll('.dnums .c').map(caption => caption.textContent);
+    check(captions[0] === 'Unavailable' && captions[1] === captionOf(DESK_OPEN[option].word), 'beside Today: card captions', `${label}: ${captions.join(' / ')}`);
+    const rowLines = htmlDocument(deskCard(withQuietRecord(view, quiet), id)).querySelectorAll('.drow .drow-status .st').map(line => line.textContent);
+    check(JSON.stringify(rowLines) === JSON.stringify(lines), 'beside Today: one-row lines', `${label}: ${rowLines.join(' / ')}`);
+  }
   t.diagnostic(JSON.stringify({ count, greens, wrongGreens, wrongGreensCurrent, mismatches, examples }));
   assert.equal(count, 12 ** 3 * 6);
   assert.equal(greens, 1);
