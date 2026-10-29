@@ -1350,6 +1350,42 @@ test('P2 packaging: offline allowlist serves shared contracts and rejects arbitr
   assert.deepEqual((await s.request('/healthz')).body, { ok: true, service: 'joe-board', hasData: false });
 });
 
+test('JOED-141: shell, assets and settings responses deny framing', async t => {
+  const s = await setup(t);
+  const actor = { 'x-auth-request-user': FLEET_ACTOR };
+  const cases = [
+    ['/joe/', {}, 200],
+    ['/joe/index.html', {}, 200],
+    ['/joe/', { method: 'HEAD' }, 200],
+    ['/joe', { redirect: 'manual' }, 308],
+    ['/joe/app.js', {}, 200],
+    ['/joe/app.css', {}, 200],
+    ['/joe/settings.js', {}, 200],
+    ['/joe/fleet-config.json', { headers: actor }, 200],
+    ['/joe/fleet-config/actions.json', { headers: actor }, 200],
+    ['/joe/fleet-config.json', {}, 401],
+    ['/joe/fleet-config/propagate', { method: 'POST' }, 403],
+    ['/joe/fleet-config/propagate', { headers: actor }, 405],
+    ['/joe/no-such-file.html', {}, 404],
+    ['/healthz', {}, 200],
+  ];
+  const config = await fetch(s.base + '/joe/fleet-config.json', { headers: actor });
+  const etag = config.headers.get('etag');
+  assert.ok(etag);
+  await config.text();
+  cases.push(['/joe/fleet-config.json', { headers: { ...actor, 'if-none-match': etag } }, 304]);
+  for (const [route, init, status] of cases) {
+    await t.test(`${init.method ?? 'GET'} ${route} (${status})`, async () => {
+      const response = await fetch(s.base + route, init);
+      await response.text();
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get('content-security-policy'), "frame-ancestors 'none'");
+      assert.equal(response.headers.get('x-frame-options'), 'DENY');
+      assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    });
+  }
+});
+
 test('P3 UI: every shipped module is served, legacy layout assets are not, and the state poll carries no history points', async t => {
   const s = await setup(t);
   const shipped = readdirSync(new URL('../public/joe/', import.meta.url)).filter(name => /\.(js|css|html)$/.test(name));

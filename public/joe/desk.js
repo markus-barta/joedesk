@@ -3,7 +3,7 @@
 // are shared once, while different ages and reasons stay beside their values.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
-import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation } from './health.js';
+import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation, executorPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { drawChart, eurAxis } from './chart.js';
@@ -142,7 +142,8 @@ export function executorProblem(data) {
   if (executorProblems.has(data)) return executorProblems.get(data);
   const executor = data.safety.executor;
   const problem = executor?.reason === 'ledger_size_limit' ? 'Trade record is full: new orders refused'
-    : executor?.status === 'degraded' && executor.reason === 'results_capture_failed' ? 'Paper executor degraded: results capture failing, trading continues' : null;
+    : executor?.status === 'degraded' && executor.reason === 'results_capture_failed'
+      ? `Paper executor degraded: ${executorPresentation(executor, data.safety.halt).reason.replace(' — ', ', ')}` : null;
   const ledger = problem ? ledgerSize(executor) : null;
   const sentence = problem ? `${problem}${ledger ? ` (${ledger.text})` : ''}.` : null;
   executorProblems.set(data, sentence);
@@ -457,10 +458,13 @@ function positionReasons(row, cell, sharedReason = null) {
   return `<span class="position-notes"${reasons || day ? '' : ' aria-hidden="true"'}>${day}${reasons}</span>`;
 }
 
+// Unknown quantity remains unknown; only an exact, confirmed zero is flat.
+const openPositionRows = cell => cell?.value?.filter(row => row.quantity == null || decimalUnits(row.quantity) !== 0n);
+
 export function positionsHtml(ctx) {
   const { states } = ctx;
   const cell = states.positions;
-  const rows = cell?.value;
+  const rows = openPositionRows(cell);
   const data = ctx.feeds.data?.value;
   const shared = positionSectionReason(cell);
   const header = `<div class="prow hd"><span></span><span class="sub">Holding</span><span class="sub c-side">${term('side')}</span><span class="sub r c-px">${term('lastprice')}</span><span class="sub c-worth">${term('worth')}</span><span class="sub r">${term('open', 'Open result')}</span><span class="sub r c-opened">Updated</span></div>`;
@@ -623,7 +627,7 @@ export function renderDesk(ctx) {
     ['History', ctx.states.history], ...(!ctx.now ? [['Clock', { state: 'not reported', value: null }]]
       : sessionBounds(ctx.now).reason === 'calendar_unavailable' ? [['Market hours', { state: 'broken', value: null, reason: 'calendar_unavailable' }]] : []),
   ])));
-  $('#positionsTitle').textContent = `Positions · ${ctx.states.positions?.value?.length ?? '—'} open`;
+  $('#positionsTitle').textContent = `Positions · ${openPositionRows(ctx.states.positions)?.length ?? '—'} open`;
   $('#keptTitle').textContent = `Kept holdings · ${ctx.states.kept?.value?.length ?? '—'}`;
   patch($('#positionsSummary'), problemHtml(disclosureProblem([['Positions', ctx.states.positions], ...rowProblems(ctx.states.positions)])));
   patch($('#keptSummary'), problemHtml(disclosureProblem([['Kept holdings', ctx.states.kept], ...rowProblems(ctx.states.kept)])));

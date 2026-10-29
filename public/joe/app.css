@@ -13,7 +13,7 @@
   --live-bg: #b3261e; --live-ink: #ffffff;
   --desk-j: #3d8a37; --desk-joe: #2f6fae; --desk-joel: #8a6240; --est: #8f8c83;
   --seg-bg: rgba(31, 33, 30, .055); --seg-on: #fffefb; --seg-shadow: 0 1px 2px rgba(31, 33, 30, .12), inset 0 0 0 1px rgba(255, 255, 255, .9);
-  --row-hover: rgba(43, 95, 134, .06); --field-bg: #fffefb;
+  --row-hover: rgba(43, 95, 134, .06); --field-bg: #fffefb; --field-line: #7b8075;
   --tip-bg: #1f2124; --tip-ink: #f4f1ea; --tip-ink-2: #c9c5ba;
   --scrim: rgba(24, 23, 19, .34);
   --shadow-card: 0 0 0 1px var(--line), inset 0 1px 0 var(--card-edge), 0 16px 36px -24px rgba(43, 95, 134, .38), 0 2px 6px -3px rgba(31, 33, 30, .08);
@@ -39,7 +39,7 @@
     --live-bg: #c0392b; --live-ink: #ffffff;
     --desk-j: #8ecf78; --desk-joe: #6aaee8; --desk-joel: #c49a6c; --est: #7d7a70;
     --seg-bg: rgba(238, 232, 216, .06); --seg-on: rgba(238, 232, 216, .12); --seg-shadow: 0 1px 2px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 255, 255, .06);
-    --row-hover: rgba(156, 194, 221, .07); --field-bg: rgba(0, 0, 0, .2);
+    --row-hover: rgba(156, 194, 221, .07); --field-bg: rgba(0, 0, 0, .2); --field-line: #858b7f;
     --tip-bg: #f1ede3; --tip-ink: #1b1c19; --tip-ink-2: #4a4a43;
     --scrim: rgba(4, 4, 3, .58);
     --shadow-card: 0 0 0 1px var(--line), inset 0 1px 0 var(--card-edge), 0 18px 40px -24px rgba(0, 0, 0, .7);
@@ -61,7 +61,7 @@
   --live-bg: #c0392b; --live-ink: #ffffff;
   --desk-j: #8ecf78; --desk-joe: #6aaee8; --desk-joel: #c49a6c; --est: #7d7a70;
   --seg-bg: rgba(238, 232, 216, .06); --seg-on: rgba(238, 232, 216, .12); --seg-shadow: 0 1px 2px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 255, 255, .06);
-  --row-hover: rgba(156, 194, 221, .07); --field-bg: rgba(0, 0, 0, .2);
+  --row-hover: rgba(156, 194, 221, .07); --field-bg: rgba(0, 0, 0, .2); --field-line: #858b7f;
   --tip-bg: #f1ede3; --tip-ink: #1b1c19; --tip-ink-2: #4a4a43;
   --scrim: rgba(4, 4, 3, .58);
   --shadow-card: 0 0 0 1px var(--line), inset 0 1px 0 var(--card-edge), 0 18px 40px -24px rgba(0, 0, 0, .7);
@@ -746,6 +746,7 @@ span.dbar, span.vbar { display: block; }
 .step-label > span, .cal-head h3 > span { grid-area: 1 / 1; }
 .step-label > [aria-hidden], .cal-head h3 > [aria-hidden] { visibility: hidden; }
 .step-label { min-width: 210px; width: auto; }
+.agenda-date { display: none; }
 .cal-head h3 { min-width: 136px; width: auto; }
 /* The hero: label, number and sentence on top; the split and the benchmark
    line at the bottom, so a longer sentence never moves the numbers. */
@@ -791,9 +792,12 @@ dialog.dlg::backdrop { background: var(--scrim); }
 .dlg-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 22px 0; }
 .dlg-h h2 { font-size: 17px; font-weight: 650; }
 .dlg-b { padding: 14px 22px 18px; flex: 1; overflow-y: auto; min-height: 0; }
+.dlg-b:focus-visible { outline-offset: -2px; }
 .sheet .dp-sum { margin: 0 0 8px; }
 @media (max-width: 700px) {
   dialog.dlg { margin: auto 0 0; width: 100vw; max-width: 100vw; border-radius: 18px 18px 0 0; max-height: 80vh; }
+  /* Preserve the arrow targets; let long period labels wrap in their track. */
+  .res-tools .step-label { min-width: 0; grid-template-columns: minmax(0, 1fr); white-space: normal; overflow-wrap: anywhere; }
   .dlg-h { padding: 14px 16px 0; }
   .dlg-b { padding: 10px 16px 20px; }
   .tval.tight { font-size: 20px; }
@@ -802,6 +806,15 @@ dialog.dlg::backdrop { background: var(--scrim); }
   .trow .px { grid-column: 2 / -1; text-align: left; }
   .trow .px .ln { justify-content: flex-start; }
   .trow .net { grid-column: 3; grid-row: 1; }
+}
+/* Seven 44 px days plus gutters/gaps do not fit on small phones. Keep
+   full dates in a three-column agenda; the 42 slots retain a stable height. */
+@media (max-width: 382px) {
+  .cal { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cal .dow { display: none; }
+  .cal .cell { min-height: 44px; }
+  .cal .agenda-date { display: inline; }
+  .cal .grid-date { display: none; }
 }
 
 /* ---------- Settings (P5) ----------
@@ -839,22 +852,27 @@ dialog.dlg::backdrop { background: var(--scrim); }
 .keys { display: flex; flex-wrap: wrap; gap: 0 12px; margin: 0; }
 .f-in { min-width: 0; display: flex; flex-direction: column; align-items: flex-end; }
 .f-sub { align-self: flex-start; margin: 2px 0 4px; font-size: 12.5px; }
-.inp { height: 36px; width: 100%; padding: 0 11px; border-radius: 10px; border: 0; box-shadow: inset 0 0 0 1px var(--line-2); background: var(--field-bg); color: var(--ink); }
+.inp { height: 36px; width: 100%; padding: 0 11px; border-radius: 10px; border: 0; box-shadow: inset 0 0 0 1px var(--field-line); background: var(--field-bg); color: var(--ink); }
 @media (hover: hover) { .inp:hover { box-shadow: inset 0 0 0 1px var(--ink-3); } }
 .inp:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 10px; }
 .inp.mono { font-family: var(--mono); font-size: 12.5px; }
-.affix { display: flex; align-items: center; width: 100%; height: 36px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--line-2); background: var(--field-bg); }
+.affix { display: flex; align-items: center; width: 100%; height: 36px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--field-line); background: var(--field-bg); }
 @media (hover: hover) { .affix:hover { box-shadow: inset 0 0 0 1px var(--ink-3); } }
 .affix .inp { box-shadow: none; background: transparent; height: 34px; }
 .affix .ax { padding: 0 0 0 11px; color: var(--ink-3); font-weight: 600; display: flex; align-items: center; }
 .affix.time { width: 150px; }
-.stepper { display: inline-flex; align-items: center; height: 36px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--line-2); background: var(--field-bg); }
+.stepper { display: inline-flex; align-items: center; height: 36px; border-radius: 999px; box-shadow: inset 0 0 0 1px var(--field-line); background: var(--field-bg); }
 .stepper button { width: 36px; height: 36px; border: 0; background: transparent; border-radius: 999px; display: grid; place-items: center; color: var(--ink-2); }
 @media (hover: hover) { .stepper button:hover { background: var(--row-hover); color: var(--ink); } }
 .stepper button:active { transform: translateY(.5px); }
 .stepper input { width: 64px; height: 34px; border: 0; background: transparent; text-align: center; font-weight: 650; color: var(--ink); }
 .stepper input:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; border-radius: 6px; }
 .stepper .u { padding-right: 8px; color: var(--ink-3); font-size: 12.5px; }
+/* Forced colors suppress shadows: keep the editable area identifiable. */
+@media (forced-colors: active) {
+  .inp, .affix, .stepper { border: 1px solid CanvasText; box-shadow: none; }
+  .affix .inp { border: 0; }
+}
 .meter { width: 100%; height: 6px; border-radius: 3px; background: var(--sunken); margin-top: 8px; position: relative; overflow: hidden; }
 .meter i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
 .switch { position: relative; display: inline-flex; align-items: center; gap: 10px; min-height: 36px; border: 0; background: transparent; padding: 0; color: var(--ink); font-weight: 500; text-align: left; }

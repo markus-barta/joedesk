@@ -2,10 +2,27 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261028202622.0.0",
+    APP_VERSION: "261029075623.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 37,
+    RELEASE_SEQUENCE: 38,
     VERSION_HISTORY: [
+      {
+        version: "261029075623.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-29",
+        title: "Reliable settings and accessible Results",
+        changes: [
+          "Enforce saved KEEP changes at once, including after save failures and on retained data.",
+          "Recover from stalled downloads and keep the board clock accurate.",
+          "Keep settings readable when the saved file’s key order changes.",
+          "Show position lists and Results that accurately describe holdings.",
+          "Keep settings fields visible, money and percentages exact, and help text consistent with the board.",
+          "Accept release verification evidence only from GitHub itself.",
+          "Make Results usable with a keyboard and screen reader, including at 320 px.",
+          "Prevent other sites from framing the board.",
+          "Keep masked not-exact values from turning the board red and describe capture honestly during a halt.",
+        ],
+      },
       {
         version: "261028202622.0.0",
         versionScheme: "inspr-calver-3",

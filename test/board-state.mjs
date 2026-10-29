@@ -2,21 +2,26 @@
 import assert from 'node:assert/strict';
 import fs, { readFileSync } from 'node:fs';
 import { createReadModel } from '../server/read-model.mjs';
+import { createJoeServer } from '../server.mjs';
+import { EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
 import { test } from 'node:test';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { heroWordingFixtures } from '../scripts/browser/hero-wording-fixtures.mjs';
 import { panelStates, MONEY_FIELDS } from '../contracts/panel-state.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
-import { validateContract, CONTRACTS } from '../contracts/index.mjs';
+import { validateContract, CONTRACTS, REASONS } from '../contracts/index.mjs';
 import { decimalUnits, unitsDecimal } from '../contracts/decimal.mjs';
+const { sendOutcome } = await import('../public/joe/settings-model.js');
 const { boardStates, NOT_EXACT_REASONS, RETENTION_SECONDS } = await import('../public/joe/board-state.js');
 const { exactCell, rankDesks, todayPercent, sincePercent } = await import('../public/joe/performance.js');
-const { cellView, heroLeft, keptHtml, positionsHtml, compactDesk } = await import('../public/joe/desk.js');
+const { cellView, heroLeft, keptHtml, positionsHtml, compactDesk, healthPop } = await import('../public/joe/desk.js');
+const { statePhrase } = await import('../public/joe/ui.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { resultsView } = await import('../public/joe/results.js');
 const { age } = await import('../public/joe/format.js');
 const { createFeed } = await import('../public/joe/feed.js');
-const { localBoardHealth, boardHealthPresentation, statusPresentation, cellReason, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
+const { localBoardHealth, boardHealthPresentation, statusPresentation, cellReason, CELL_REASON, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
 const { bookkeepingHtml } = await builders('history.js', ['bookkeepingHtml']);
 const exact = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
 const DESKS = ['j', 'joe', 'joel'];
@@ -448,6 +453,63 @@ test('retained position rows cannot feed kept-worth sums or relative bars; per-f
   for (const name of ['positions', 'kept', 'paperAccount']) assert.equal(expired.states[name].value, null, name);
 });
 
+for (const fallback of ['gateway_expiry', 'retained_values', 'failed_read']) test(`JOED-129: current KEEP filters prior arrays after ${fallback}`, () => {
+  const data = structuredClone(exact);
+  data.safety.gateway.checkedAt = at(-50);
+  const policy = structuredClone(JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)))['fleet-config']);
+  const model = createReadModel({ dataDir: '/__joed129_board_memory_only__', clock: () => at(0), write: () => {} });
+  assert.equal(model.observeFleet(policy).ok, true);
+  const ingress = structuredClone(data); delete ingress.receivedAt;
+  assert.equal(model.accept(ingress).ok, true);
+  const before = boardStates(model.feeds(), at(0), model.panels());
+  const symbol = data.positions.rows.find(row => row.scope === 'stage0').symbol;
+  assert.ok(before.positions.value.some(row => row.symbol === symbol));
+  policy.desks.keep.push(symbol); policy.rev = 'fc-000013'; policy.updatedAt = at(10);
+  assert.equal(model.observeFleet(policy).ok, true);
+  const feeds = structuredClone(model.feeds());
+  if (fallback === 'retained_values') {
+    feeds.data.value.positions.reason = 'retained_values';
+    feeds.data.value.safety.gateway.checkedAt = at(0);
+    feeds.data.gatewayProgress = { checkedAt: at(0), advancedAt: at(0), initialAgeMs: 0 };
+  }
+  if (fallback === 'failed_read') feeds.data.reason = 'refresh_failed';
+  const states = boardStates(feeds, at(10), before);
+  const view = { feeds, states, now: at(10) };
+  assert.equal(states.positions.value.some(row => row.symbol === symbol), false, 'new KEEP symbol cannot retain desk attribution');
+  assert.equal(resultsView(view).positions.some(row => row.symbol === symbol), false, 'withheld row cannot supply a desk contribution note');
+  assert.equal(htmlDocument(positionsHtml(view).html).querySelectorAll('.prow:not(.hd) .name b')
+    .some(node => node.textContent === symbol), false);
+  // Withhold the moved row until producer scope agrees. Existing KEEP rows
+  // retain their own provenance and exactness rather than borrowing its age.
+  assert.deepEqual(states.kept.value.map(row => row.symbol), before.kept.value.map(row => row.symbol));
+  for (const name of ['positions', 'kept']) {
+    assert.equal(states[name].retained, true);
+    assert.equal(states[name].valueReceivedAt, before[name].valueReceivedAt);
+    assert.equal(states[name].ageSeconds, 10);
+    assert.equal(states[name].reason, fallback === 'gateway_expiry' ? 'gateway_unconfirmed'
+      : fallback === 'failed_read' ? 'refresh_failed' : 'retained_values');
+  }
+  for (const field of MONEY_FIELDS) {
+    assert.equal(states[`desks.j.${field}`].value, null, 'current KEEP invalidates older affected desk figures');
+    assert.equal(states[`today.${field}`].value, null);
+  }
+  assert.equal(states.paperAccount.value.amount, exact.brokerAccount.equity.amount);
+});
+
+test('JOED-129: retained KEEP arrays also obey removal and the mandatory SXR8/TSLA floor', () => {
+  const data = structuredClone(exact), moved = data.positions.rows.find(row => row.scope === 'stage0');
+  data.safety.gateway.checkedAt = at(-50);
+  moved.scope = 'keep'; moved.desk = null;
+  const policy = { desks: { keep: [moved.symbol] } };
+  const before = boardStates({ data: { value: data }, 'fleet-config': { value: policy } }, at(0));
+  const feeds = { data: { value: data, reason: 'refresh_failed' }, 'fleet-config': { value: { desks: { keep: [] } } } };
+  const states = boardStates(feeds, at(10), before);
+  assert.deepEqual(states.kept.value.map(row => row.symbol).sort(), ['SXR8', 'TSLA']);
+  assert.equal(states.positions.value.some(row => row.symbol === moved.symbol), false, 'no invented desk evidence for a formerly kept row');
+  assert.equal(states.kept.valueReceivedAt, before.kept.valueReceivedAt);
+  assert.equal(states.kept.ageSeconds, 10);
+});
+
 test('caption sizing markup remains unchanged across retention and expiry', () => {
   const reserve = view => htmlDocument(heroLeft(view)).querySelectorAll('.cash-sizing').map(el => el.textContent);
   assert.ok(reserve(ctx(exact)).length > 0);
@@ -787,6 +849,7 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
     for (const name of ['openSync', 'fstatSync', 'readFileSync', 'closeSync']) {
       const original = fs[name];
       t.mock.method(fs, name, (key, ...args) => {
+        if (name === 'readFileSync' && files.has(String(key))) return files.get(String(key));
         if (name === 'openSync' && files.has(String(key))) { const fd = nextFd++; fds.set(fd, String(key)); return fd; }
         if (fds.has(key)) {
           const body = files.get(fds.get(key));
@@ -801,10 +864,83 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
       write: (file, value) => files.set(file, JSON.stringify(value)) };
     const stored = name => files.get(`${options.dataDir}/${name}-state.json`);
     return { model: createReadModel(options), restart: () => createReadModel(options),
+      server: () => createJoeServer(options),
+      replaceFleet: value => files.set(`${options.dataDir}/fleet-config.json`, JSON.stringify(value)),
+      fleetReceipt: () => files.get(`${options.dataDir}/fleet-receipt.json`),
       time: value => { seconds = value; }, stored,
       replaceState: value => files.set(`${options.dataDir}/data-state.json`, JSON.stringify(value)),
       cells: model => boardStates(model.feeds(), at(seconds), model.panels()) };
   }
+  async function fleetRead(server, headers = {}) {
+    let status, responseHeaders, text;
+    await server.listeners('request')[0]({ url: '/joe/fleet-config.json', method: 'GET',
+      headers: { host: 'fixture.invalid', 'x-auth-request-user': 'fixture', ...headers } }, {
+      writeHead(code, value) { status = code; responseHeaders = new Headers(value); },
+      end(value) { text = String(value ?? ''); },
+    });
+    return { status, headers: responseHeaders, text, value: text ? JSON.parse(text) : null };
+  }
+  function reverseKeys(value) {
+    if (Array.isArray(value)) return value.map(reverseKeys);
+    if (value && typeof value === 'object') return Object.fromEntries(
+      Object.entries(value).reverse().map(([key, child]) => [key, reverseKeys(child)]));
+    return value;
+  }
+  for (const nested of [false, true]) test(`JOED-131 F2: reordered ${nested ? 'nested' : 'top-level'} keys preserve settings reads, ETag and receipt across restart`, async t => {
+    const h = harness(t), config = JSON.parse(fs.readFileSync(new URL('../public/joe/fleet-config.example.json', import.meta.url)));
+    config.rev = 'fc-000019'; h.replaceFleet(config);
+    const server = h.server();
+    const first = await fleetRead(server);
+    assert.equal(first.status, 200);
+    const receipt = h.fleetReceipt(), etag = first.headers.get('etag');
+    assert.equal(etag, '"fc-000019"');
+    const reordered = nested ? reverseKeys(config) : Object.fromEntries(Object.entries(config).reverse());
+    assert.deepEqual(reordered, config);
+    assert.notEqual(JSON.stringify(reordered), JSON.stringify(config));
+    assert.equal(validateContract('fleet-config', reordered).ok, true);
+    h.replaceFleet(reordered); h.time(45);
+    // Construct the restart before either read, so it must load the original receipt.
+    for (const current of [server, h.server()]) {
+      const response = await fleetRead(current);
+      assert.equal(response.status, 200);
+      assert.deepEqual(response.value, config);
+      assert.equal(response.headers.get('etag'), etag);
+      assert.equal(response.headers.get('x-joe-received-at'), at(0));
+      assert.equal(response.headers.get('x-joe-feed-reason'), null);
+      const cached = await fleetRead(current, { 'if-none-match': etag });
+      assert.equal(cached.status, 304); assert.equal(cached.text, '');
+      assert.equal(cached.headers.get('x-joe-received-at'), at(0));
+      assert.equal(current.readModel.panels()['fleet-config'].ageSeconds, 45);
+      assert.equal(current.readModel.feeds()['fleet-config'].reason, null);
+      assert.equal(h.fleetReceipt(), receipt, 'unchanged content must not rewrite the receipt');
+    }
+  });
+  for (const [field, change] of [
+    ['nested value', config => { config.desks.maxBusyDesks--; }],
+    ['timestamp', config => { config.updatedAt = at(1); }],
+    ['array order', config => { config.desks.keep.reverse(); }],
+  ]) test(`JOED-131: same-revision ${field} changes still fail closed across restart`, async t => {
+    const h = harness(t), config = JSON.parse(fs.readFileSync(new URL('../public/joe/fleet-config.example.json', import.meta.url)));
+    config.rev = 'fc-000019'; h.replaceFleet(config);
+    const server = h.server();
+    assert.equal((await fleetRead(server)).status, 200);
+    const receipt = h.fleetReceipt(), changed = reverseKeys(config);
+    change(changed); assert.equal(validateContract('fleet-config', changed).ok, true);
+    h.replaceFleet(changed); h.time(45);
+    for (const current of [server, h.server()]) {
+      assert.deepEqual(current.readModel.observeFleet(changed), { ok: false, status: 503, reason: 'contract_invalid' });
+      for (const headers of [{}, { 'if-none-match': '"fc-000019"' }]) {
+        const response = await fleetRead(current, headers);
+        assert.equal(response.status, 503); assert.equal(response.value.reason, 'refresh_failed');
+      }
+      assert.deepEqual(current.readModel.feeds()['fleet-config'].value, config);
+      assert.equal(h.fleetReceipt(), receipt);
+    }
+    h.replaceFleet(config);
+    assert.equal((await fleetRead(server)).status, 200);
+    assert.equal(server.readModel.feeds()['fleet-config'].reason, null);
+    assert.equal(h.fleetReceipt(), receipt);
+  });
   function retained(value, seconds, seq) {
     const copy = ingress(value);
     copy.seq = seq; copy.generatedAt = copy.safety.gateway.checkedAt = at(seconds);
@@ -1025,3 +1161,232 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
     assert.equal(cold.accept(candidate).status, 200, 'rejected sequence is still available');
   });
 }
+
+// JOED-129 request-listener regressions: memory-only, no sockets or host stores.
+{
+  const fixture = JSON.parse(fs.readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
+  const starter = JSON.parse(fs.readFileSync(new URL('../public/joe/fleet-config.example.json', import.meta.url)));
+
+  function harness(t) {
+    const root = '/__joed129_memory_only__';
+    const current = structuredClone(starter); current.rev = 'fc-000019';
+    const files = new Map([[`${root}/fleet-config.json`, JSON.stringify(current)]]);
+    const fds = new Map(); let fd = 1000000, actionWrites = 0, seconds = 0;
+    const faults = { receipt: false, finalize: false };
+    const virtual = p => typeof p === 'string' && p.startsWith(`${root}/`);
+    const missing = () => { throw Object.assign(new Error('synthetic missing'), { code: 'ENOENT' }); };
+    for (const name of ['existsSync', 'openSync', 'fstatSync', 'readFileSync', 'closeSync']) {
+      const original = fs[name];
+      t.mock.method(fs, name, (p, ...args) => {
+        const key = fds.get(p) ?? p;
+        if (!virtual(key)) return original(p, ...args);
+        if (name === 'existsSync') return files.has(key);
+        if (!files.has(key)) return missing();
+        if (name === 'openSync') { const n = fd++; fds.set(n, key); return n; }
+        if (name === 'fstatSync') return { size: Buffer.byteLength(files.get(key)) };
+        if (name === 'closeSync') return fds.delete(p);
+        return args[0] === 'utf8' ? files.get(key) : Buffer.from(files.get(key));
+      });
+    }
+    t.mock.method(fs, 'mkdirSync', p => assert.ok(p === root || virtual(p)));
+    t.mock.method(fs, 'chmodSync', p => assert.ok(virtual(p)));
+    t.mock.method(fs, 'writeFileSync', (p, value) => {
+      assert.ok(virtual(p));
+      if (p.endsWith('fleet-config-actions.json.next') && ++actionWrites === 2 && faults.finalize)
+        throw new Error('synthetic audit failure');
+      files.set(p, String(value));
+    });
+    t.mock.method(fs, 'renameSync', (a, b) => {
+      assert.ok(virtual(a) && virtual(b)); files.set(b, files.get(a)); files.delete(a);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+    const now = () => new Date(Date.parse(fixture.data.receivedAt) + seconds * 1000).toISOString();
+    const server = createJoeServer({ dataDir: root, clock: now, inboxToken: 'synthetic-fixture-only',
+      write: (p, value) => {
+        assert.ok(virtual(p));
+        if (faults.receipt && p.endsWith('fleet-receipt.json')) throw new Error('synthetic receipt failure');
+        files.set(p, JSON.stringify(value));
+      } });
+    async function request(url, { method = 'GET', headers = {}, body } = {}) {
+      const req = new EventEmitter();
+      Object.assign(req, { url, method, headers: { host: 'fixture.invalid', 'x-auth-request-user': 'fixture', ...headers } });
+      let status, payload;
+      const res = { writeHead(s) { status = s; }, end(b) { payload = String(b ?? ''); } };
+      const done = server.listeners('request')[0](req, res);
+      if (body !== undefined) queueMicrotask(() => { req.emit('data', Buffer.from(body)); req.emit('end'); });
+      await done;
+      return { status, body: JSON.parse(payload) };
+    }
+    const propagate = () => {
+      const candidate = structuredClone(current); candidate.desks.keep.push('DEMO');
+      return request('/joe/fleet-config/propagate', { method: 'POST',
+        headers: { origin: 'http://fixture.invalid', 'sec-fetch-site': 'same-origin', 'content-type': 'application/json' },
+        body: JSON.stringify({ baseRev: current.rev, config: candidate }) });
+    };
+    return { model: server.readModel, faults, request, propagate, now,
+      time: value => { seconds = value; }, stored: name => JSON.parse(files.get(`${root}/${name}.json`)) };
+  }
+
+  for (const seconds of [0, -10]) for (const mode of ['control', 'receipt', 'finalize']) test(`JOED-129 F1: ${mode}${seconds < 0 ? ' after clock rollback' : ''} enforces committed KEEP before later inbox/history`, async t => {
+    const h = harness(t); h.time(seconds); h.faults[mode] = true;
+    const sent = await h.propagate();
+    assert.equal(h.stored('fleet-config').rev, 'fc-000020');
+    assert.equal(h.model.feeds()['fleet-config'].value.rev, 'fc-000020', 'committed policy is effective despite ancillary failure');
+    if (mode !== 'control') {
+      const outcome = sendOutcome(sent.status, sent.body, ['desks.keep']);
+      assert.equal(outcome.stored, true, 'Settings must report the committed KEEP change as saved');
+      assert.equal(outcome.rev, 'fc-000020');
+    }
+    assert.equal(sent.status, mode === 'control' ? 200 : 500);
+    assert.equal(sent.body.ok, mode === 'control');
+    assert.equal(h.stored('fleet-config-actions').entries.at(-1).outcome, mode === 'control' ? 'success' : 'pending');
+    const observedAt = new Date(Date.parse(fixture.data.receivedAt) + seconds * 1000).toISOString();
+    assert.equal(h.model.feeds()['fleet-config'].receivedAt, observedAt, 'receipt records the actual observation clock, including rollback');
+    h.time(0);
+    const data = structuredClone(fixture.data); delete data.receivedAt;
+    const pushed = await h.request('/joe/inbox', { method: 'POST',
+      headers: { authorization: 'Bearer synthetic-fixture-only' }, body: JSON.stringify(data) });
+    assert.equal(pushed.status, 200);
+    assert.equal(h.model.panels()['desks.j.equity'].reason, 'source_not_authoritative');
+    for (const field of MONEY_FIELDS) {
+      assert.equal(h.model.feeds().history.value.points.at(-1).desks.j.money[field], null);
+      assert.equal(h.model.feeds().history.value.points.at(-1).totals[field], null);
+    }
+    h.time(10);
+    if (mode === 'receipt') {
+      assert.equal((await h.request('/joe/fleet-config.json')).status, 503, 'failed receipt is retried, never silently acknowledged');
+      assert.equal(h.stored('fleet-receipt').value.rev, 'fc-000019');
+    }
+    h.faults.receipt = false;
+    assert.equal((await h.request('/joe/fleet-config.json')).status, 200);
+    assert.equal(h.stored('fleet-receipt').value.rev, 'fc-000020');
+    assert.equal(h.stored('fleet-receipt').receivedAt, observedAt, 'retry preserves the policy observation age');
+    assert.equal(h.model.feeds().history.value.points.at(-1).desks.j.money.equity, null);
+  });
+}
+
+// Scout3's complete wire matrix. F = generic fault, N = deliberate not-exact,
+// O = stopped/retained outage, T = transport on a feed, A = replay advisory,
+// M = successful history-compaction metadata. Every code also has field scope.
+const reasonMatrix = [
+  ['gateway_down', 'F', 'broker connection down'],
+  ['upstream_lost', 'F', 'broker connection down'],
+  ['gateway_degraded', 'F', 'broker connection unstable'],
+  ['gateway_unconfirmed', 'F', 'broker connection not confirmed'],
+  ['retained_values', 'O', 'carrying the last good value'],
+  ['family_projection_unavailable', 'F', 'desk total incomplete'],
+  ['day_pnl_unavailable', 'N', 'today’s result not available'],
+  ['all_desk_equity_unavailable', 'F', 'desks’ money not available'],
+  ['open_pnl_unavailable', 'F', 'open result not available'],
+  ['baseline_pending', 'N', 'waiting on the start-of-day value'],
+  ['snapshot_stale', 'O', 'updates are late'],
+  ['producer_frozen', 'O', 'updates are stuck'],
+  ['schema_unsupported', 'F', 'last update had an unknown format'],
+  ['contract_invalid', 'F', 'last update was rejected'],
+  ['sequence_replayed', 'A', 'last update repeated an old one'],
+  ['clock_regressed', 'F', 'last update had a clock behind'],
+  ['clock_ahead', 'F', 'last update had a clock ahead'],
+  ['feed_not_received', 'F', 'no data received yet'],
+  ['market_closed', 'F', 'market closed'],
+  ['calendar_unavailable', 'F', 'market calendar not available'],
+  ['refresh_failed', 'T', 'update failed'],
+  ['auth_required', 'T', 'sign-in expired — reload'],
+  ['route_not_found', 'T', 'not found on the board server'],
+  ['source_not_authoritative', 'F', 'held back: the kept-holdings list disagrees'],
+  ['history_size_limit', 'F', 'history is full'],
+  ['history_compacted', 'M', 'history was compacted'],
+  ['ledger_size_limit', 'F', 'trade record is full — new orders refused'],
+  ['history_write_failed', 'F', 'history could not be saved'],
+  ['halt_on', 'F', 'emergency stop is on'],
+  ['executor_broker_disagreement', 'F', 'executor and broker disagree'],
+  ['results_capture_failed', 'F', 'results capture failing'],
+  ['not_exact_yet', 'N', 'not exact yet'],
+  ['source_unavailable', 'F', 'not reported by the broker'],
+  ['desk_unmapped', 'F', 'not matched to a desk'],
+  ['sod_missing', 'N', 'start-of-day value missing'],
+  ['ledger_unreconciled', 'N', 'desk ledger not reconciled'],
+  ['position_stale', 'N', 'position update is old'],
+];
+function reasonedEquity(reason) {
+  const data = structuredClone(exact);
+  for (const bag of [data.totals, data.desks[0].money]) {
+    bag.equity = null;
+    (bag.reasons ??= {}).equity = reason;
+  }
+  assert.equal(validateContract('data', data).ok, true);
+  return data;
+}
+test('JOED-142 reason matrix covers the sealed wire enum and shared dictionary exactly', () => {
+  assert.deepEqual(reasonMatrix.map(([code]) => code).sort(), [...REASONS].sort());
+  assert.deepEqual(Object.keys(CELL_REASON).sort(), [...REASONS].sort());
+  assert.deepEqual(reasonMatrix.filter(([, kind]) => kind === 'N').map(([code]) => code).sort(), [...NOT_EXACT_REASONS].sort());
+});
+for (const [reason, kind, words] of reasonMatrix) test(`JOED-142 reason matrix: ${reason} in board-state, health and UI`, () => {
+  const data = reasonedEquity(reason), feeds = { data: { value: data } }, now = data.receivedAt;
+  const states = boardStates(feeds, now), cell = states['desks.j.equity'];
+  assert.deepEqual([cell.state, cell.value, cell.retained, cell.reason], ['broken', null, false, reason]);
+  assert.deepEqual(localBoardHealth(states, feeds, now), kind === 'N'
+    ? { tone: 'green', reason: 'board_ok' } : { tone: 'red', reason: 'equity_unavailable' });
+  assert.equal(cellReason(reason), words);
+  const phrase = statePhrase(cell, 'matrix');
+  assert.equal(phrase.tone, kind === 'N' ? 'none' : 'bad');
+  assert.equal(phrase.text, kind === 'N' ? `not exact yet${reason === 'not_exact_yet' ? '' : ` · ${words}`}` : `unavailable · ${words}`);
+  // Verified individual observations obey E/O; derived totals remain withheld.
+  const carried = boardStates(feeds, now, previous), retained = carried['desks.j.equity'];
+  assert.equal(retained.value == null, kind === 'N');
+  assert.equal(retained.retained, kind !== 'N');
+  assert.equal(carried['today.equity'].value, null);
+  assert.equal(statePhrase(retained, 'matrix').tone, kind === 'N' ? 'none' : 'warn');
+  assert.deepEqual(localBoardHealth(carried, feeds, now), kind === 'N'
+    ? { tone: 'green', reason: 'board_ok' } : { tone: 'yellow', reason: 'retained_values' });
+  assert.equal(boardStates(feeds, at(RETENTION_SECONDS), previous)['desks.j.equity'].value, null);
+  // Feed scope ranks T separately from rejection/advisory, without losing copy.
+  if (kind !== 'N' && reason !== 'feed_not_received') {
+    const failed = { data: { value: exact, reason } }, selected = boardStates(failed, now, previous);
+    assert.deepEqual(localBoardHealth(selected, failed, now), { tone: 'yellow', reason: kind === 'T' ? 'refresh_failed' : 'retained_values' });
+    assert.equal(selected['desks.j.equity'].state, kind === 'A' ? 'stale' : 'broken');
+  }
+});
+for (const reason of NOT_EXACT_REASONS) for (const failure of ['refresh_failed', 'auth_required', 'route_not_found', 'sequence_replayed', 'contract_invalid']) {
+  test(`JOED-142 F1: ${reason} stays neutral behind ${failure}`, () => {
+    const data = reasonedEquity(reason), now = data.receivedAt;
+    const initial = { data: { value: data } }, prior = boardStates(initial, now);
+    const feeds = { data: { value: data, reason: failure } }, states = boardStates(feeds, now, prior);
+    for (const name of ['today.equity', 'desks.j.equity']) {
+      assert.equal(states[name].value, null);
+      assert.equal(states[name].retained, false);
+      const phrase = statePhrase(states[name], name);
+      assert.equal(phrase.tone, 'none');
+      assert.equal(phrase.icon, 'info');
+      assert.match(phrase.text, /^not exact yet/);
+      assert.ok(phrase.text.includes(cellReason(reason)));
+    }
+    const health = boardHealthPresentation(states, feeds, now);
+    assert.deepEqual([health.tone, health.reason], ['yellow', ['refresh_failed', 'auth_required', 'route_not_found'].includes(failure) ? 'refresh_failed' : 'retained_values']);
+    const details = htmlDocument(healthPop({ states, feeds, now }, health)).textContent;
+    assert.match(details, /Desk values are not exact yet/);
+    assert.ok(details.includes(cellReason(failure)));
+    assert.doesNotMatch(details, /J’s money is unavailable/);
+    assert.equal(feeds.data.reason, failure);
+    // A later exact observation removes the scoped not-exact classification.
+    const recovered = boardStates({ data: { value: exact } }, now, states);
+    assert.equal(recovered['desks.j.equity'].reason, null);
+    assert.notEqual(recovered['desks.j.equity'].value, null);
+  });
+}
+test('JOED-142 F1: masked exactness preserves halt, ledger, broker, stopped-feed and frozen-producer precedence', () => {
+  for (const reason of NOT_EXACT_REASONS) for (const [change, expected] of [
+    [data => Object.assign(data.safety, { halt: true, haltReason: 'halt_on' }), 'halt_on'],
+    [data => { data.safety.executor.reason = 'ledger_size_limit'; }, 'ledger_size_limit'],
+    [data => Object.assign(data.safety.gateway, { apiSessionReady: false, reason: 'gateway_down' }), 'gateway_down'],
+    [() => {}, 'feed_disconnected'],
+    [() => {}, 'producer_stuck'],
+  ]) {
+    const data = reasonedEquity(reason); change(data);
+    const now = expected === 'feed_disconnected' ? at(FEED_STOPPED_S) : data.receivedAt;
+    const feeds = { data: { value: data, reason: 'refresh_failed',
+      ...(expected === 'producer_stuck' ? { generatedAdvancedAt: at(-FEED_STOPPED_S) } : {}) } };
+    assert.deepEqual(localBoardHealth(boardStates(feeds, now, previous), feeds, now), { tone: 'red', reason: expected });
+  }
+});

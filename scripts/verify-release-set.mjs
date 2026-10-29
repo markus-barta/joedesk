@@ -54,7 +54,7 @@ export function validateReleaseSet(m) {
   requireThat(text(m.validation_run.workflow), 'validation_run.workflow: name required');
   let url;
   try { url = new URL(m.validation_run.url); } catch { throw new Error('validation_run.url: valid URL required'); }
-  requireThat(url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash &&
+  requireThat(url.protocol === 'https:' && url.origin === 'https://github.com' && !url.username && !url.password && !url.search && !url.hash &&
     url.pathname === `/${m.source.repository}/actions/runs/${m.validation_run.id}`, 'validation_run.url: must identify this repository and run');
   requireThat(JSON.stringify(m.validation_run.jobs) === JSON.stringify(JOBS), 'validation_run.jobs: package, browser, docker required');
   requireThat(typeof m.generated_at === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(m.generated_at) &&

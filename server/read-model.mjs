@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { CONTRACTS, REASONS, validateContract } from '../contracts/index.mjs';
 import { acceptSnapshot } from '../contracts/accept.mjs';
 import { panelStates, panelState, DATA_PANELS, MONEY_FIELDS } from '../contracts/panel-state.mjs';
@@ -81,6 +82,7 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
   const rejectionFile = path.join(dataDir, 'feed-rejections.json');
   const fleetFile = path.join(dataDir, 'fleet-receipt.json');
   let state = null, history = null, rejections = {}, fleet = null, storageInvalid = false, historyStorageInvalid = false;
+  let fleetReceiptPending = false;
   let results = null, resultsStorageInvalid = false;
   // One exemption until a successful results acceptance; restart re-arms it.
   let rolloverResendPending = false;
@@ -314,15 +316,21 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       rejections['fleet-config'] = 'refresh_failed'; return failed(503, 'refresh_failed');
     }
     if (fleet?.value.rev === value.rev) {
-      if (JSON.stringify(fleet.value) !== JSON.stringify(value)) { rejections['fleet-config'] = 'contract_invalid'; return failed(503, 'contract_invalid'); }
-      delete rejections['fleet-config']; return { ok: true };
+      if (!isDeepStrictEqual(fleet.value, value)) { rejections['fleet-config'] = 'contract_invalid'; return failed(503, 'contract_invalid'); }
+      if (!fleetReceiptPending) { delete rejections['fleet-config']; return { ok: true }; }
+    } else {
+      const now = clock();
+      // The validated source policy governs immediately, even when its
+      // ancillary receipt cannot be saved. Never fall back to the old KEEP.
+      // Record the actual observation time even if the clock moved backwards;
+      // the previous policy's receipt must not delay enforcing this one.
+      fleet = { value, receivedAt: now };
+      fleetReceiptPending = true;
     }
-    const now = clock();
-    if (fleet && Date.parse(now) < Date.parse(fleet.receivedAt)) return failed(503, 'clock_regressed');
-    const next = { value, receivedAt: now };
-    try { write(fleetFile, next, CONTRACTS.limits['fleet-config'] + 4096); }
+    // Retry the original observation without renewing its age.
+    try { write(fleetFile, fleet, CONTRACTS.limits['fleet-config'] + 4096); }
     catch { rejections['fleet-config'] = 'refresh_failed'; return failed(503, 'refresh_failed'); }
-    fleet = next; delete rejections['fleet-config']; return { ok: true };
+    fleetReceiptPending = false; delete rejections['fleet-config']; return { ok: true };
   }
   function view(now = clock()) {
     const selected = panels(now);

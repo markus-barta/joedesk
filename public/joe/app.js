@@ -50,7 +50,6 @@ function start() {
   for (const el of [header, word, wordText, $('#hdrHealth'), header.querySelector('.nav')]) headerFit.observe(el);
   document.fonts.addEventListener('loadingdone', queueHeaderFit);
   fitHeader();
-  const tips = initTips();
   trapDialogs();
   const events = createObservedEvents();
   let lastData = null, frame = 0, pending = null, dirtyHistory = true, panning = false;
@@ -59,6 +58,7 @@ function start() {
     schedule(kind);
   }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, globalThis.JoeVersion.APP_VERSION,
   { actionsWanted: () => screen === 'settings' });
+  const tips = initTips({ now: () => feed.now() });
   // Read-only: fetches the same three reads now instead of at the next poll.
   window.__joedesk.refresh = () => feed.refresh();
   window.__joedesk.worker = () => feed.usesWorker();
