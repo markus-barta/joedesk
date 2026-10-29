@@ -1315,6 +1315,21 @@ When Today is a broken dash, its local caption states the reason unless the
 board's state line already explains it. This includes pending start-of-day
 results and every revision-10 exactness reason; repeated section reasons stay shared.
 
+JOED-148 (board only, no figure changes meaning) states each dash's reason once
+and promises no time. `not_exact_yet` reads “not exact”; the other not-exact
+reasons add their own words (“Not exact · start-of-day value missing”). A
+not-exact household Today names the desks that keep it from being exact,
+from the board's own per-desk cells (“Not exact for J and Joe”); a reason that
+every desk shares needs no names, and other desk states keep their own word
+(“Not exact for J; last good for Joe”). Today's sentence never repeats a reason
+that the caption or section line shows. It gives each exact desk's own Today
+(“Joel is flat today.”), or “No desk has an exact result for today.” Dashes are
+named “‹label›: not exact · ‹reason›”, never “not reported”; their info icon is
+a pointer tip hidden from screen readers, so the reason is spoken once. A desk
+card adds no line for a not-exact Today that is its only problem: the icon and
+the dash's name and title carry it. Details' “Today’s result” row lists every
+desk, exact ones first (“Exact for Joel; not exact for J and Joe”).
+
 Release 35 (JOED-96, Markus Desk f3b46a8d) extends this outage policy to a
 stopped DATA feed (`snapshot_stale`) or frozen producer (`producer_frozen`).
 Individual observations keep their stale value, caption, age and reason below
@@ -1528,7 +1543,7 @@ keep their precedence.
 
 JOED-57 treats null desk equity with `not_exact_yet` as deliberately uncaptured,
 so an otherwise healthy board stays **Board OK** and Details adds one neutral
-“Desk values are not exact yet” line. Other missing reasons stay red except for
+“Desk values are not exact” line. Other missing reasons stay red except for
 the bounded broker-check gap above; retained values, stuck desks and regular-session result warnings keep
 their existing rules. `NOT_EXACT_TONE` in `health.js` defaults to `green`;
 `yellow` opts into `values_not_exact` after those checks. Null not-exact cells
@@ -1547,8 +1562,9 @@ the status and its label. These browser assertions run in PR CI.
 
 The reason enum appends `not_exact_yet` (the broker reports it, but it is not
 yet captured exactly) and `source_unavailable` (the broker did not report it,
-or did not report it in the required currency). Board copy is “not exact yet”
-and “not reported by the broker”. `source_not_authoritative` still means the
+or did not report it in the required currency). Board copy is “not exact”
+(JOED-148: the board cannot say when a value becomes exact) and “not reported
+by the broker”. `source_not_authoritative` still means the
 kept-holdings list disagrees. Desk and KEEP null values show an accessible
 em dash plus visible per-row reasons; KEEP remains read-only. A missing
 market-value summand makes the entire kept worth unavailable with its reason,
@@ -1657,7 +1673,7 @@ for the standard fixture's All desks and individual-desk selections; its
 existing tick/filter geometry checks include the figure and percentage slot.
 
 A snapshot state shared by money cells appears once in the hero's board caption.
-Shared not-exact reasons use “Numbers: not exact yet” in both the hero and
+Shared not-exact reasons use “Numbers: not exact” in both the hero and
 Account section, appending the reason when it adds information. Real faults
 keep `Numbers unavailable · <reason>`. P3 checks each broken hero cell and
 includes synthetic generic, shared and mixed not-exact/fault cases (JOED-107).

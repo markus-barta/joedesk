@@ -3,9 +3,11 @@
 import { TERMS } from './terms.js';
 import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol, cashAmount } from './format.js';
 import { cellReason, capital, CELL_REASON } from './health.js';
-import { NOT_EXACT_REASONS } from './board-state.js';
+import { notExactDash } from './board-state.js';
 import { nyDay, zonedInstant, wall, NY, VIENNA } from './time.mjs';
 
+// The words for every value the feed explains as not exact.
+export const NOT_EXACT = CELL_REASON.not_exact_yet;
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 export const icon = (id, cls = 'i') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${id}"/></svg>`;
@@ -338,8 +340,9 @@ export function statePhrase(cell, key, held = 'last good value', sharedReason = 
   const localWhy = why !== sharedReason ? why : null;
   const suffix = localWhy ? ` · ${esc(localWhy)}` : '';
   const ago = () => ageSpan(key, cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`);
-  if (cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason)) return { tone: 'none', icon: 'info',
-    text: `not exact yet${localWhy === 'not exact yet' ? '' : suffix}`, state };
+  // Said once: the reason follows only when it adds words to "not exact".
+  if (notExactDash(cell)) return { tone: 'none', icon: 'info',
+    text: `${NOT_EXACT}${localWhy === NOT_EXACT ? '' : suffix}`, state };
   if (state === 'fresh') return { tone: 'ok', text: '', state };
   if (state === 'not reported') return { tone: 'none', text: `not reported${suffix}`, state };
   if (cell.value == null) return { tone: 'bad', text: `unavailable${why ? suffix : ' · not available'}`, state };

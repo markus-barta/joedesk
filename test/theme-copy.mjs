@@ -138,7 +138,8 @@ test('JOED-133 Board light help: green allows explained not-exact dashes', () =>
   assert.match(help, /freshness/);
   assert.match(help, /broker connection/);
   assert.match(help, /safety/);
-  assert.match(help, /not exact yet/);
+  assert.match(help, /not exact/);
+  assert.doesNotMatch(help, /not exact yet/, 'the board cannot say when a value becomes exact');
   assert.match(help, /explained dashes/);
   assert.doesNotMatch(help, /every number is fresh and complete/);
 });

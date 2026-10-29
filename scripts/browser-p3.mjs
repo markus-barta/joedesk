@@ -41,12 +41,12 @@ if (nodeModule.registerHooks) {
 export async function resolve(specifier, context, next) { return next(mapped(specifier, context.parentURL), context); }`)}`, import.meta.url);
 }
 const hm = await import('../public/joe/history-model.js');
-const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
+const { boardStates, NOT_EXACT_REASONS, notExactDash } = await import('../public/joe/board-state.js');
 const { cellReason, capital, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
 const { statePhrase } = await import('../public/joe/ui.js');
 const fmt = await import('../public/joe/format.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
-const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
+const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, disclosureProblem, rowProblems, householdDayReason, dashWords } = await import('../public/joe/desk.js');
 const HEALTH_LINES = Object.keys(REASON_COPY).map(reason => statusSentence({ reason, tone: reason === 'board_ok' ? 'green' : 'red' }, { receipt: 9, gatewayAge: 179 }));
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
@@ -687,7 +687,8 @@ try {
         visibleSentence: (() => { const full = document.querySelector('#hdrHealth .status-full'), line = document.getElementById('statusAlertText');
           return [full, line].filter(__audit.visible).map(e => e.textContent); })(),
         cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell]')].map(k => [k.dataset.cell, { state: k.dataset.state, cap: __audit.deskCaption(k) }])),
-        desks: [...document.querySelectorAll('.dcard')].map(c => ({ id: c.id.slice(5), name: c.querySelector('h3')?.innerText, nums: c.querySelectorAll('.dnums > div').length, states: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), status: c.querySelector('.mini-label').innerText, icons: c.querySelectorAll('.cell-state').length })),
+        desks: [...document.querySelectorAll('.dcard')].map(c => ({ id: c.id.slice(5), name: c.querySelector('h3')?.innerText, nums: c.querySelectorAll('.dnums > div').length, states: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), status: c.querySelector('.mini-label').innerText, icons: c.querySelectorAll('.cell-state').length,
+          dayName: c.querySelector('.dnums .bn')?.getAttribute('aria-label') ?? null, dayTitle: c.querySelector('.dnums .bn')?.getAttribute('title') ?? null })),
         boardCaption: document.querySelector('#heroL .board-caption').innerText,
         alertGeometry: (() => { const line = document.getElementById('statusAlert'), button = document.getElementById('statusAlertControl'), text = document.getElementById('statusAlertText');
           const r = text.getBoundingClientRect(), hero = document.querySelector('.hero-primary').getBoundingClientRect();
@@ -742,9 +743,17 @@ try {
       }
       // Shared snapshot captions move to the board once. Different reasons,
       // ages and retained values still belong to the affected number/card.
-      const missingReasons = ui.desks.flatMap(d => ['dayPnl', 'openPnl', 'totalPnl'].map(field => expectedCells[`desks.${d.id}.${field}`])
-        .filter(cell => cell.state !== 'fresh' && !sharesBoardCaption(cell, boardCaption)).map(cell => (cell.reason ? cellReason(cell.reason) : 'not reported')).filter(words => !d.status.includes(words)).map(words => ({ desk: d.name, words, status: d.status })));
-      check('fixtures', `${tag}: every differing desk number keeps its own reason and every affected number keeps a state icon`, !missingReasons.length && ui.desks.every(d => d.icons === d.states.filter(state => state !== 'fresh').length), missingReasons.slice(0, 3));
+      // JOED-148: a not-exact Today that is the card's only problem has no card
+      // line; its reason is on its own dash (name and title), never repeated.
+      const quiet = (d, field) => expectedCells[`desks.${d.id}.${field}`].state === 'fresh' || sharesBoardCaption(expectedCells[`desks.${d.id}.${field}`], boardCaption);
+      const missingReasons = ui.desks.flatMap(d => ['dayPnl', 'openPnl', 'totalPnl'].map(field => [field, expectedCells[`desks.${d.id}.${field}`]])
+        .filter(([, cell]) => cell.state !== 'fresh' && !sharesBoardCaption(cell, boardCaption)).flatMap(([field, cell]) => {
+          const words = cell.reason ? cellReason(cell.reason) : 'not reported';
+          const loneDay = field === 'dayPnl' && notExactDash(cell) && quiet(d, 'openPnl') && quiet(d, 'totalPnl');
+          const ok = loneDay ? d.dayName === `Today: ${dashWords(cell.reason)}` && d.dayTitle === d.dayName && !d.status.includes(words) : d.status.includes(words);
+          return ok ? [] : [{ desk: d.name, field, loneDay, words, status: d.status, dayName: d.dayName }];
+        }));
+      check('fixtures', `${tag}: every differing desk number keeps its own reason (a lone not-exact Today on its dash) and every affected number keeps a state icon`, !missingReasons.length && ui.desks.every(d => d.icons === d.states.filter(state => state !== 'fresh').length), missingReasons.slice(0, 3));
       const repeated = Object.entries(CELL).filter(([key, panel]) => key !== 'hero.day' && sharesBoardCaption(expectedCells[panel], boardCaption) && ui.cells[key].cap);
       check('fixtures', `${tag}: matching money captions appear once on the board`, !repeated.length && (!boardCaption || ui.boardCaption.includes(cellReason(boardCaption.reason))), { repeated, caption: ui.boardCaption });
       const caps = norm([ui.boardCaption, ui.say, ...Object.values(ui.cells).map(c => c.cap)].join(' | '));
@@ -762,8 +771,10 @@ try {
           const inSection = cell.reason && cellReason(cell.reason) === shared;
           const sectionOnBoard = inSection && boardCaption?.reason && cellReason(boardCaption.reason) === shared;
           const phrase = statePhrase(cell, '', 'last good value', shared);
+          // A not-exact household Today names the desks that keep it from being exact.
+          const household = key === 'hero.day' && !onBoard ? householdDayReason(expectedCells, shared) : null;
           const want = onBoard || sectionOnBoard ? capital(statePhrase(boardCaption, '').text)
-            : inSection ? sharedSectionPhrase(cell) : capital(phrase.text);
+            : inSection ? sharedSectionPhrase(cell) : household || capital(phrase.text);
           const inSentence = key === 'hero.day' && cell.value != null;
           const actual = onBoard || inSection ? ui.boardCaption : inSentence ? ui.say : ui.cells[key].cap;
           check('fixtures', `${tag}: ${key} ${NOT_EXACT_REASONS.has(cell.reason) ? 'not-exact' : 'fault'} keeps its own reason locally or in the shared section line`,
@@ -1174,17 +1185,17 @@ try {
     await refresh(`document.getElementById('desk-joe').innerText.includes('open result not available')`);
     ui = await page.evaluate(DESK_TEXT);
     const [j, joe, joel] = ['j', 'joe', 'joel'].map(id => ui.cards.find(c => c.id === id));
-    const today = /^Today: not exact yet · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
+    const today = /^Today: not exact · waiting on the start-of-day value$/, open = /^Open positions: last good, 3\d\ss ago · open result not available$/;
     check('journey', `${tag} broken: each affected desk number has its own line, age and reason`, j.lines.length === 3 && today.test(j.lines[0]) && open.test(j.lines[1]) &&
       /^Since 10\sSep: unavailable · carrying the last good value$/.test(j.lines[2]) && [joe, joel].every(c => c.lines.length === 2 && today.test(c.lines[0]) && open.test(c.lines[1])) &&
       JSON.stringify(j.nums) === '["broken","broken","broken"]' && [joe, joel].every(c => JSON.stringify(c.nums) === '["broken","broken","fresh"]'), ui.cards);
-    check('journey', `${tag} broken: unavailable totals keep their own reasons`, ui.cells['hero.day'].state === 'broken' && /Today’s result is not available: waiting on the start-of-day value\./.test(ui.say) &&
+    check('journey', `${tag} broken: unavailable totals keep their own reasons; Today states its reason once`, ui.cells['hero.day'].state === 'broken' && ui.cells['hero.day'].cap === 'Not exact · waiting on the start-of-day value' && ui.say === 'No desk has an exact result for today.' &&
       /^Unavailable · open result not available$/.test(ui.cells['hero.open'].cap) && /^Unavailable · desk total incomplete$/.test(ui.cells['hero.since'].cap) &&
       ui.cells['hero.equity'].state === 'fresh' && ui.cells['hero.account'].state === 'fresh', { cells: ui.cells, say: ui.say });
     check('no-shift', `${tag}: stale → broken moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
     boxes.push(['broken', await rects(STATE_BOXES)]);
     const rebuiltSay = await page.evaluate(SAY_TIP);
-    check('clamp', `${tag} broken: the pinned tip follows Today's rebuilt sentence`, sayWhole(rebuiltSay) && /waiting on the start-of-day value\.$/.test(rebuiltSay.say), { pinnedSay, rebuiltSay });
+    check('clamp', `${tag} broken: the pinned tip follows Today's rebuilt sentence`, sayWhole(rebuiltSay) && rebuiltSay.say === 'No desk has an exact result for today.' && pinnedSay.say !== rebuiltSay.say, { pinnedSay, rebuiltSay });
     if (!font && viewport.name === '390' && theme === 'light') await shot(page, viewport, '390-light-desk-say-tip', `Desk, broken: Today's one-line phone sentence${rebuiltSay.clamped ? ' with its ellipsis' : ''}, a tap shows it whole in the explanation tip`);
     await key(page, 'Escape');
     await leaveSay(page);

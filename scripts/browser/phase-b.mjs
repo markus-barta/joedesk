@@ -110,6 +110,8 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
         percentages: [...document.querySelectorAll('#heroL .performance-pct')].map(e => e.textContent.replace(/\\s/g, '')),
         j: document.querySelector('#desk-j .desk-detail')?.innerText,
         joe: document.querySelector('#desk-joe .desk-detail')?.innerText,
+        joeDay: (() => { const dash = document.querySelector('#desk-joe .desk-detail .dnums .bn'); return dash ? { name: dash.getAttribute('aria-label'), title: dash.title } : null; })(),
+        joeStatus: document.querySelector('#desk-joe .mini-label')?.innerText,
         joel: text('#desk-joel .dnums'),
         positions: text('#positions'),
         kept: text('#kept'),
@@ -125,9 +127,12 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
     let result = await inspect();
     if (mixed) {
       check('phase-b', `${tag}: withheld values keep the existing Today warning, never a red header, with the not-exact status fact`,
-        result.headerTone === 'warn' && /Desk values are not exact yet/.test(result.details), result);
+        result.headerTone === 'warn' && /Desk values are not exact(?! yet)/.test(result.details), result);
       check('phase-b', `${tag}: incomplete totals stay dashes with no percentage`, result.day === '—' && result.since === '—' && result.percentages.length === 0, result);
-      check('phase-b', `${tag}: independent exact desk survives ledger and SOD failures`, /desk ledger not reconciled/.test(result.j) && /start-of-day value missing/.test(result.joe) && result.joel.includes('+€5,00'), result);
+      // JOED-148: Joe's lone not-exact Today keeps its reason on its own dash; the card adds no line.
+      check('phase-b', `${tag}: independent exact desk survives ledger and SOD failures`, /desk ledger not reconciled/.test(result.j) &&
+        result.joeDay?.name === 'Today: not exact · start-of-day value missing' && result.joeDay.title === result.joeDay.name && !/start-of-day value missing/.test(result.joe) &&
+        result.joeStatus === 'since start · last sessions' && result.joel.includes('+€5,00'), result);
       check('phase-b', `${tag}: stale conid has accessible nulls and one section reason; the fresh conid keeps its worth`,
         result.nulls.length > 0 && result.nulls.every(n => n.text === '—' && n.label === n.title && /position update is old/.test(n.label)) &&
         /position update is old/.test(result.positionReason) && result.positions.includes('$40,01') && !result.positions.includes('$30,02'), result);

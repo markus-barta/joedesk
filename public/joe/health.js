@@ -18,7 +18,7 @@ export const NOT_EXACT_TONE = 'green';
 
 export const REASON_COPY = Object.freeze({
   board_ok: 'numbers are up to date',
-  values_not_exact: 'desk values are not exact yet',
+  values_not_exact: 'desk values are not exact',
   snapshot_stale: 'updates are late — reload; if still late, tell Amy',
   retained_values: 'numbers a bit old — carrying the last good values',
   gateway_degraded: 'the broker connection is unstable — reload; if it persists, tell Amy',
@@ -69,7 +69,8 @@ export const CELL_REASON = Object.freeze({
   halt_on: 'emergency stop is on',
   executor_broker_disagreement: 'executor and broker disagree',
   results_capture_failed: 'results capture failing',
-  not_exact_yet: 'not exact yet',
+  // The board cannot say when a value becomes exact, so its words promise no time.
+  not_exact_yet: 'not exact',
   source_unavailable: 'not reported by the broker',
   desk_unmapped: 'not matched to a desk',
   sod_missing: 'start-of-day value missing',
@@ -193,7 +194,7 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
   const explanation = REASON_COPY[health.reason] ?? FALLBACK_COPY;
   const action = explanation.includes(' — ') ? capital(explanation.split(' — ')[1]) : '';
   const short = {
-    values_not_exact: 'Not exact yet', snapshot_stale: 'Updates late', retained_values: 'Older numbers',
+    values_not_exact: 'Not exact', snapshot_stale: 'Updates late', retained_values: 'Older numbers',
     gateway_degraded: 'Broker unstable', gateway_unconfirmed: 'Broker unsure', open_unavailable_rth: 'Prices pending',
     day_pending: 'Result pending', refresh_failed: 'Data delayed',
   };

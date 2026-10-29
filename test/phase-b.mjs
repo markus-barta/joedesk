@@ -49,7 +49,7 @@ for (const reason of NOT_EXACT_REASONS) test(`JOED-103: ${reason} equity keeps t
   const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
   assert.equal(health.tone, 'green');
   assert.match(headerHealth(ctx, health).html, /tone-ok/);
-  assert.match(healthPop(ctx, health), /Desk values are not exact yet/);
+  assert.match(healthPop(ctx, health), /Desk values are not exact(?! yet)/);
   assert.doesNotMatch(healthPop(ctx, health), /money is unavailable/);
 });
 
@@ -60,7 +60,7 @@ test('JOED-103: the shipped mixed Phase B snapshot is not red; unexplained missi
   assert.equal(health.tone, 'yellow', 'the existing regular-hours Today warning remains');
   assert.equal(health.reason, 'day_pending');
   assert.match(headerHealth(ctx, health).html, /tone-warn/);
-  assert.match(healthPop(ctx, health), /Desk values are not exact yet/);
+  assert.match(healthPop(ctx, health), /Desk values are not exact(?! yet)/);
   const fault = context(exact);
   fault.states['desks.j.equity'] = { state: 'broken', value: null, reason: null };
   const red = boardHealthPresentation(fault.states, fault.feeds, fault.now);
@@ -116,7 +116,7 @@ test('JOED-97 M1: replay the browser journey through the read model before asser
     const card = htmlDocument(deskCard(ctx, id, 50, true));
     const lines = card.querySelectorAll('.mini-label .st');
     const text = card.querySelector('.mini-label').textContent;
-    assert.ok(text.startsWith('Today: not exact yet · waiting on the start-of-day value'), text);
+    assert.ok(text.startsWith('Today: not exact · waiting on the start-of-day value'), text);
     assert.equal(states[`desks.${id}.dayPnl`].value, null);
     assert.equal(states[`desks.${id}.openPnl`].retained, true);
     assert.ok(todayPattern.test(lines[0].textContent), text);
@@ -658,7 +658,14 @@ test('mixed rendering keeps exact desks visible, explains each failure and share
   assert.equal(hero.querySelectorAll('.performance-pct').length, 0);
   const j = htmlDocument(deskCard(ctx, 'j', 50, false));
   assert.equal(j.textContent.match(/desk ledger not reconciled/g)?.length, 1);
-  assert.match(htmlDocument(deskCard(ctx, 'joe', 50, false)).textContent, /start-of-day value missing/);
+  // JOED-148: Joe's lone not-exact Today keeps its reason on its own dash and
+  // info icon; the card adds no line that would repeat it.
+  const joe = htmlDocument(deskCard(ctx, 'joe', 50, false)), joeDay = joe.querySelector('.dnums .bn');
+  assert.equal(joe.querySelector('.mini-label').textContent, 'since start · last sessions');
+  assert.doesNotMatch(joe.textContent, /start-of-day value missing/);
+  assert.equal(joeDay.getAttribute('aria-label'), 'Today: not exact · start-of-day value missing');
+  assert.equal(joeDay.getAttribute('title'), joeDay.getAttribute('aria-label'));
+  assert.equal(joe.querySelector('.dnums .cell-state').getAttribute('title'), 'Not exact · start-of-day value missing');
   assert.equal(htmlDocument(deskCard(ctx, 'joel', 50, false)).querySelectorAll('.dnums .v .bn').length, 3);
   const positions = htmlDocument(positionsHtml(ctx).html);
   assert.equal(positionSectionReason(ctx.states.positions), cellReason('position_stale'));

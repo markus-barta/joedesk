@@ -1,7 +1,7 @@
 // Desk: health line and details, Today, the three desks, positions and the
 // kept holdings. Every number keeps its panel state; matching snapshot captions
 // are shared once, while different ages and reasons stay beside their values.
-import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin } from './ui.js';
+import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, cashCaption, interactionWithin, NOT_EXACT } from './ui.js';
 import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, statusPresentation, executorPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, wall, NY, VIENNA } from './time.mjs';
@@ -12,7 +12,7 @@ import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
 import { STARTING_MONEY, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
-import { NOT_EXACT_REASONS, outageValue, withGenerationAge } from './board-state.js';
+import { NOT_EXACT_REASONS, notExactDash, outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -68,8 +68,7 @@ export function disclosureProblem(candidates) {
   const problems = candidates.flatMap(([label, cell]) => {
     const p = statePhrase(cell, '');
     if (p.state === 'fresh') return [];
-    const inexact = cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason);
-    const state = inexact ? 'not exact yet' : cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
+    const state = notExactDash(cell) ? NOT_EXACT : cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
       : p.state === 'not reported' ? 'not reported' : 'unavailable';
     const reason = cell?.reason ?? (p.state === 'not reported' ? 'feed_not_received' : null);
     // Unavailable money leads even when its honest not-exact icon is neutral;
@@ -150,6 +149,14 @@ export function executorProblem(data) {
   return sentence;
 }
 
+// A dash's accessible name and title after its label: a value the feed sent as
+// not exact says "not exact" (with a reason only when it adds words), never
+// "not reported"; every other missing value keeps its existing words.
+export function dashWords(reason) {
+  const why = reason ? cellReason(reason) : null;
+  return NOT_EXACT_REASONS.has(reason) ? `${NOT_EXACT}${why !== NOT_EXACT ? ` · ${why}` : ''}` : `not reported${why ? ` · ${why}` : ''}`;
+}
+
 // One money cell: the value (or a dash) and a caption for exactly the state
 // the shared selector gave it, with this cell's own age and reason. A fresh
 // value keeps the designed caption.
@@ -157,7 +164,7 @@ export function cellView(cell, key, { signed = true, caption = '', sharedReason 
   const value = cell?.value ?? null;
   const n = amountOf(value);
   const units = value ? decimalUnits(value.amount) : null;
-  const missingLabel = `${label}: not reported${cell?.reason ? ` · ${cellReason(cell.reason)}` : ''}`;
+  const missingLabel = `${label}: ${dashWords(cell?.reason)}`;
   const html = value == null && label ? `<span class="bn muted" role="img" title="${esc(missingLabel)}" aria-label="${esc(missingLabel)}">—</span>` : bn(units, value?.currency ?? 'EUR', signed);
   return { html, caption: stateCaption(cell, key, caption, undefined, sharedReason), state: cell?.state ?? 'not reported', n, units };
 }
@@ -177,6 +184,9 @@ export function sharesBoardCaption(cell, board) {
 function cellIcon(cell, sharedReason = null) {
   if (!cell || cell.state === 'fresh') return '';
   const p = statePhrase(cell, '');
+  // A not-exact dash names itself (dashWords); its info icon only marks it, with
+  // the same words as a pointer tip, so a screen reader hears the reason once.
+  if (notExactDash(cell)) return `<span class="cell-state tone-${p.tone}" aria-hidden="true" title="${esc(capital(statePhrase(cell, '', undefined, sharedReason).text))}">${icon(p.icon)}</span>`;
   const label = `${capital(p.state)}${cell.reason && cellReason(cell.reason) !== sharedReason ? ` · ${cellReason(cell.reason)}` : ''}`;
   return `<span class="cell-state tone-${p.tone}" role="img" aria-label="${esc(label)}">${icon(p.icon ?? TONE_ICON[p.tone])}</span>`;
 }
@@ -244,7 +254,8 @@ export function healthPop(ctx, health) {
       const ms = gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed);
       return `${esc(desk.label)}: ${ms == null ? 'not reported' : `${ageSpan(`pop.hb.${desk.id}`, `${age(ms / 1000)} ago`)}`}`;
     }).join(' · ')]);
-    rows.push(['Today’s result', esc(dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
+    rows.push(['Today’s result', esc(notExactDash(states['today.dayPnl']) ? dayBreakdown(states)
+      : dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Open positions', esc(openMethodLabel(data.pnlSources?.open) ?? `Not available · ${cellReason(data.pnlSources?.open?.reason ?? states['today.openPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Source', `${esc(data.source.label)} · paper only`]);
   }
@@ -252,7 +263,7 @@ export function healthPop(ctx, health) {
     <p class="status-sentence">${esc(statusPresentation(ctx, health).sentence)}</p>
     ${healthFacts(ctx, health)}
     <p>${problems.length ? esc(problems.join(' ')) : 'No current problems.'}</p>
-    ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact yet', 'info')}</p>` : ''}
+    ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact', 'info')}</p>` : ''}
     ${rows.length ? `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
     <p>If a light turns yellow or red: reload once. If it stays, tell Amy what the light says and how old the data is.</p>
     <p><button type="button" class="btn quiet link" data-go="history" data-anchor="j-accounting">${icon('book')}J’s bookkeeping${icon('chev-r')}</button></p>`;
@@ -301,6 +312,71 @@ function sessionRing(now) {
   return `${svg}<div><b>${title}</b><span>${line}</span><span>${session}</span></div>`;
 }
 
+const byDesk = (a, b) => DESKS.indexOf(a) - DESKS.indexOf(b);
+export const deskNames = ids => ids.length > 1 ? `${ids.slice(0, -1).map(id => LABEL[id]).join(', ')} and ${LABEL[ids.at(-1)]}` : LABEL[ids[0]];
+// Each desk's own Today in plain words, grouped by word and reason in desk
+// order: exact (or estimated) figures, not-exact dashes and other states.
+// Only the board's per-desk cells are read; nothing is computed from money.
+export function deskDays(states) {
+  const groups = [];
+  for (const id of DESKS) {
+    const cell = states[`desks.${id}.dayPnl`];
+    let word, reason = null;
+    if (exactCell(cell) !== null) word = cell.valueSource?.method === 'session-open-estimate' ? 'estimated' : 'exact';
+    else {
+      word = notExactDash(cell) ? NOT_EXACT : cell?.retained ? 'last good' : cell?.state === 'stale' ? 'stale'
+        : (cell?.state ?? 'not reported') === 'not reported' ? 'not reported' : 'unavailable';
+      const why = cell?.reason ? cellReason(cell.reason) : null;
+      reason = why !== word ? why : null;
+    }
+    const group = groups.find(g => g.word === word && g.reason === reason);
+    if (group) group.ids.push(id); else groups.push({ word, reason, ids: [id] });
+  }
+  return groups;
+}
+const blockingDays = states => deskDays(states).filter(g => !['exact', 'estimated'].includes(g.word));
+// Details: every desk's Today, exact ones first, e.g. "Exact for Joel; not
+// exact for J and Joe · start-of-day value missing".
+const DAY_ORDER = ['exact', 'estimated', NOT_EXACT];
+const dayRank = g => DAY_ORDER.includes(g.word) ? DAY_ORDER.indexOf(g.word) : DAY_ORDER.length;
+export function dayBreakdown(states) {
+  const groups = deskDays(states).sort((a, b) => dayRank(a) - dayRank(b) || byDesk(a.ids[0], b.ids[0]));
+  return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` · ${g.reason}` : ''}`).join('; '));
+}
+
+// The household Today needs all three desks. When the feed explains its dash
+// as not exact, say once which desks keep it from being exact and why: their
+// shared reason, unless the section line already gives it. A reason common to
+// every desk needs no names. Null when the cell's own caption applies.
+export function householdDayReason(states, sharedReason = null) {
+  if (!notExactDash(states['today.dayPnl'])) return null;
+  const blocking = blockingDays(states);
+  if (!blocking.length) return null;
+  if (blocking.length === 1) {
+    const [{ word, reason, ids }] = blocking, all = ids.length === DESKS.length;
+    if (all && (reason ?? word) === sharedReason) return '';
+    return capital(`${word}${all ? '' : ` for ${deskNames(ids)}`}${reason && reason !== sharedReason ? ` · ${reason}` : ''}`);
+  }
+  // Several states: name the desks per state; each card keeps its own reason.
+  const words = [];
+  for (const g of blocking) {
+    const same = words.find(w => w.word === g.word);
+    if (same) same.ids.push(...g.ids); else words.push({ word: g.word, ids: [...g.ids] });
+  }
+  return capital(words.map(w => `${w.word} for ${deskNames(w.ids.sort(byDesk))}`).join('; '));
+}
+
+// A dashed household Today still knows each exact desk's own Today: "Joel is
+// flat today." Estimates keep their own mark on their cards and are left out.
+function exactDeskSentence(states) {
+  const parts = DESKS.flatMap(id => {
+    const cell = states[`desks.${id}.dayPnl`], units = exactCell(cell);
+    if (units === null || cell.valueSource?.method === 'session-open-estimate') return [];
+    return [`${LABEL[id]} is ${isZero(units) ? 'flat' : `${units > 0n ? 'up' : 'down'} ${eur(units < 0n ? -units : units)}`}`];
+  });
+  return parts.length ? `${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]} today.` : null;
+}
+
 export function heroLeft(ctx) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
@@ -316,13 +392,19 @@ export function heroLeft(ctx) {
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
   const moneyCaptions = [`started with ${eur(STARTING_MONEY, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
   const why = dayCell?.reason ? cellReason(dayCell.reason) : null;
-  // A dashed Today needs its own state/reason unless the section says it.
-  const dayCaption = day.state === 'broken' && day.units === null && !sharesBoardCaption(dayCell, board) && (!shared || why !== shared) ? day.caption : '';
+  const onBoard = sharesBoardCaption(dayCell, board);
+  // A dashed Today states its reason once, here, unless the section says it.
+  // A not-exact household Today names the desks that keep it from being exact.
+  const household = onBoard ? null : householdDayReason(states, shared);
+  const dayCaption = household ?? (day.state === 'broken' && day.units === null && !onBoard && (!shared || why !== shared) ? day.caption : '');
   const dayAmount = day.units === null ? null : eur(day.units < 0n ? -day.units : day.units);
   let say;
   if (day.n == null) {
-    say = data ? `Today’s result is not available${why === shared ? '' : `: ${esc(why ?? 'not reported')}`}.`
-      : day.state === 'not reported' ? 'No numbers yet: no board data has arrived.' : `No numbers: ${esc(why ?? 'not available')}.`;
+    // The sentence never repeats the reason shown in the caption or section
+    // line: it gives what is known instead, each exact desk's own Today.
+    say = !data ? day.state === 'not reported' ? 'No numbers yet: no board data has arrived.' : `No numbers: ${esc(why ?? 'not available')}.`
+      : exactDeskSentence(states) ?? (notExactDash(dayCell) ? 'No desk has an exact result for today.'
+        : `Today’s result is not available${why !== shared && !dayCaption && !onBoard ? `: ${esc(why ?? 'not reported')}` : ''}.`);
   } else if (day.state === 'fresh') {
     const who = 'J, Joe and Joel';
     say = isZero(day.units) ? `Flat today for ${who}.` : `${day.units > 0n ? 'Up' : 'Down'} ${dayAmount} today across ${who}.`;
@@ -381,7 +463,11 @@ function deskCard(ctx, id, maxDay, showBars) {
     const characters = v.units === null ? 1 : eur(v.units, true).length;
     return `<div data-state="${v.state}"><span class="k">${label}${cellIcon(cell, shared)}</span><span class="v" style="--digits:${characters}">${v.html}</span>${extra}</div>`;
   };
-  const status = cardStatus(id, [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]], board);
+  const cells = [['Today', states[`desks.${id}.dayPnl`]], ['Open positions', states[`desks.${id}.openPnl`]], [sinceText, states[`desks.${id}.totalPnl`]]];
+  // A not-exact Today that is the card's only problem needs no line of its own:
+  // its info icon and its dash's name and title already give the reason.
+  const loneNotExactDay = notExactDash(cells[0][1]) && cells.slice(1).every(([, cell]) => cell?.state === 'fresh' || sharesBoardCaption(cell, board));
+  const status = loneNotExactDay ? '' : cardStatus(id, cells, board);
   const learning = learningLine(desk?.learning);
   return `<header>${deskMark(id)}<div class="who"><h3>${esc(desk?.label ?? LABEL[id])}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(info.word + since)}">${info.word}${since}</span></div></div><span class="hb warn">${hb}</span></header>
       <p class="now">${desk ? esc(desk.action) : 'Waiting for the first valid snapshot.'}</p>
@@ -444,7 +530,7 @@ export function positionSectionReason(cell) {
 function positionValue(row, field, cell) {
   const value = row[field];
   if (value != null) return field === 'quantity' ? quantity(value) : money(decimalUnits(value.amount), value.currency);
-  const label = `${POSITION_FIELDS[field]}: not reported · ${rowReason(row, field, cell)}`;
+  const label = `${POSITION_FIELDS[field]}: ${dashWords(row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received')}`;
   return `<span class="position-value" role="img" title="${esc(label)}" aria-label="${esc(label)}">—</span>`;
 }
 function positionReasons(row, cell, sharedReason = null) {

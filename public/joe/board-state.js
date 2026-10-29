@@ -9,6 +9,8 @@ export const RETENTION_SECONDS = 60 * 60;
 export const stoppedData = cell => ['snapshot_stale', 'producer_frozen'].includes(cell?.reason);
 export const outageValue = cell => Boolean(cell?.retained || stoppedData(cell));
 export const NOT_EXACT_REASONS = new Set(['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale', 'baseline_pending', 'day_pnl_unavailable']);
+// A dash the feed explains as not exact (never a fault, never a last value).
+export const notExactDash = cell => cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason);
 const DESKS = ['j', 'joe', 'joel'];
 const positionKey = row => JSON.stringify([row.scope, row.desk, row.symbol]);
 const unavailable = (cell, reason = cell.reason) => ({ ...cell, state: cell.state === 'fresh' ? 'broken' : cell.state, value: null, retained: false, reason });

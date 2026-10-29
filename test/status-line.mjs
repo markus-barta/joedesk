@@ -23,7 +23,7 @@ function context(seconds = 9) {
 }
 const cases = [
   ['green', 'board_ok', 'Live · updated 9 s ago'],
-  ['yellow', 'values_not_exact', 'Desk values are not exact yet'],
+  ['yellow', 'values_not_exact', 'Desk values are not exact'],
   ['yellow', 'snapshot_stale', 'Updates are late'],
   ['yellow', 'retained_values', 'Numbers a bit old'],
   ['yellow', 'gateway_degraded', 'The broker connection is unstable'],
