@@ -136,8 +136,10 @@ try {
       const { nodeId: groupId } = await page.s('DOM.querySelector', { nodeId: doc.nodeId, selector: '#f-cadence-wakeWindows' });
       const { nodes: groups } = await page.s('Accessibility.getPartialAXTree', { nodeId: groupId, fetchRelatives: false });
       test(`${tag}: accessibility tree gives the wake-window group the complete Saved description`, groups.some(n=>n.role?.value==='group' && n.description?.value===owners[1].description));
+      // Discard removes every Saved description. Other descriptions stay, such
+      // as the account start form's help and error text (JOED-155).
       await page.evaluate(`document.getElementById('discardBtn').click()`); await settle(page);
-      test(`${tag}: discarding clears Saved descriptions from primary controls and groups`, await page.evaluate(`!document.querySelector('#setMain [aria-describedby]') && [...document.querySelectorAll('#setMain .vh[id$="-saved"]')].every(e=>e.hidden)`));
+      test(`${tag}: discarding clears Saved descriptions from primary controls and groups`, await page.evaluate(`![...document.querySelectorAll('#setMain [aria-describedby]')].some(e=>e.getAttribute('aria-describedby').split(' ').some(id=>id.endsWith('-saved'))) && [...document.querySelectorAll('#setMain .vh[id$="-saved"]')].every(e=>e.hidden)`));
     } else {
       const stray = await page.evaluate(`(() => { const walker = document.createTreeWalker(document.getElementById('app'), NodeFilter.SHOW_TEXT), bad=[]; for(let n=walker.nextNode();n;n=walker.nextNode()) if(/ ·/.test(n.nodeValue) && n.parentElement.getClientRects().length && getComputedStyle(n.parentElement).visibility!=='hidden') bad.push(n.nodeValue); return bad; })()`);
       test(`${tag}: phone spaces before middle dots do not break`, !stray.length);
