@@ -78,6 +78,15 @@ export async function accountHeroChecks({ page, viewport, theme, check, settle, 
   check('JOED-156', `${tag}: Since start asks for the account start in Settings; Cash; kept holdings each in its own currency, never actionable`,
     /Account start not set · set in Settings/.test(s.sub) && /Cash/.test(s.sub) && s.keptActions === 0 &&
     (viewport.mobile || /incl\. kept holdings SXR8 € 12\.248,00 · TSLA \$ 441,20, each in its own currency/.test(s.sub)), s);
+  // The Since start · Cash line keeps one box in every state (r39 CI): its
+  // tallest forms (every form of Cash) lie unseen and unread in its grid cell.
+  const line = await page.evaluate(`(() => { const box = [...document.querySelectorAll('#acctHero .acct-sub')].find(__audit.visible), fit = box.querySelector('.acct-fit');
+    const sizes = fit.querySelector('.acct-sizes'), forms = [...sizes.children].map(f => f.getBoundingClientRect().height);
+    return { box: box.getBoundingClientRect().height, line: fit.querySelector('.acct-line').getBoundingClientRect().height, tallest: Math.max(...forms), forms: forms.length,
+      hidden: getComputedStyle(sizes).visibility === 'hidden' && sizes.getAttribute('aria-hidden') === 'true' && !__audit.visible(sizes.firstElementChild),
+      inert: !sizes.querySelector('a, button, input, [tabindex], [data-cash], [id], [role]') }; })()`);
+  check('no-shift', `${tag}: the Since start · Cash line keeps the box of its tallest form at this width, unseen and unread`,
+    line.hidden && line.inert && line.forms >= 70 && Math.abs(line.line - line.tallest) <= 0.5 && line.box >= line.tallest - 0.5, line);
 
   // Each range on its own store; a range longer than the record says since when it records.
   const SHIFT = ['#acctHero', '#acctValue', '#acctChange', '#acctSub', '#acctSubN', '#acctRanges', '#acctChart', '#acctStrip', '#acctNote', '#deskHero', '.hero-primary', '#desks', 'footer.foot'];

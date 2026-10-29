@@ -2148,7 +2148,14 @@ worker; its first-visit hint is every chart's (`chartHintSeen`,
 Custom, `createAxisMode('account')`). P3 reads the block where it read the slot: AC-9's paper
 account, AC-19's title, chip and unreported Cash, the fixtures' and journeys'
 account state and change line, the phone first screen and the outage counts;
-P5's Cash phases read its line.
+P5's Cash phases read its line. The Since start · Cash line (on wider screens
+with the kept holdings) keeps one box in every state at every width: its
+tallest forms (every form Cash can take, and every form of the kept holdings,
+each beside the widest of the other parts) lie hidden and unread in the same
+grid cell (`lineForms`), so no state change wraps it into a shift; P5's Cash
+phases also run at 320 px, and name a fault where it is: Cash's own text, the
+screen around it (the page-wide clipping audit), the whole account's boxes,
+and the desk hero below.
 
 JOED-79 changes only Desk at widths up to 480 px. The first screen contains
 the existing header status control and reserved red/yellow problem line,
