@@ -1355,7 +1355,7 @@ try {
       check('AC-28', `sweep ${tag}: nothing reaches past the page's right edge at any of ${n}`, !fail.past.length, fail.past.slice(0, 4));
       check('header', `sweep ${tag}: the status is exactly one line box; header items stay in the row without overlap or a partial wordmark at any of ${n}`, !fail.header.length, fail.header.slice(0, 4));
       check('header', `sweep ${tag}: one nav with Desk, Results and History at every width, the bottom bar up to ${COMPACT} px and the header's above, all in view; Settings is the header's gear; the shown screen is current`, !fail.nav.length, fail.nav.slice(0, 8));
-      check('AC-30', `sweep ${tag}: every header control is a 44 px target at every width, and so is each bottom-bar button up to ${COMPACT} px`, !fail.targets.length, fail.targets.slice(0, 4));
+      check('AC-30', `sweep ${tag}: every header control's real hit region (elementFromPoint) is whole, 44 px each way and shared with no neighbour at every width, and so is each bottom-bar button's up to ${COMPACT} px`, !fail.targets.length, fail.targets.slice(0, 4));
       check('header', `sweep ${tag}: icons are centred (the gear's too), with the phone light's icon aligned to its first line, at every width`, !fail.icons.length, fail.icons.slice(0, 4));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: each desk card's header keeps one box with its longest state and heartbeat texts, with one-line check-ins and a full status title; below 340 px the check-in shares the name row`, !fail.cards.length, fail.cards.slice(0, 4));

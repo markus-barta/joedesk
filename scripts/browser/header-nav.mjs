@@ -1,11 +1,15 @@
 // P3 browser checks for the header, its nav and the hash routes: the nav and
 // the Settings gear push history entries; Back and Forward walk them and
-// return to the place left on the page; a typed address or a plain same-page
+// return to the place left on the page, read before the screen changes and
+// kept also when the browser left it; a typed address or a plain same-page
 // link keeps its screen's query; an unknown route is Desk and an anchor only
 // scrolls. Up to 480 px the nav is a bottom bar (a solid surface docked to the
 // bottom edge with a hairline, three 44 px targets, the page ending above it)
-// at 320–390 px; above, the header keeps the nav in one row. Browser
-// execution belongs to CI; Node tests cover the route rules (test/header-nav.mjs).
+// at 320–390 px; above, the header keeps the nav in one row. A simulated
+// bottom inset (the --safe-bottom property) lifts the bar and the tablet edit
+// bar, with Details and the footer clear of them. Real hit regions
+// (elementFromPoint) stay whole across every fitted step. Browser execution
+// belongs to CI; Node tests cover the route and place rules (test/header-nav.mjs).
 import { scenario, NOW, at } from './board.mjs';
 import { THEMES, configure, load, settle, waitFor } from './shots.mjs';
 import { WIDE_FONT } from './gate.mjs';
@@ -33,8 +37,7 @@ const LAYOUT = `(() => {
       border: [cs.borderTopWidth, cs.borderTopStyle, cs.borderTopColor].join(' '), hairline: '1px solid ' + probe('--line'), buttons },
     headerNav: __audit.visible(document.querySelector('.top .nav')), gear: __audit.visible(document.getElementById('settingsBtn')),
     reserve: parseFloat(getComputedStyle(document.getElementById('main')).paddingBottom), layout: __audit.headerLayout(),
-    targets: [...document.querySelectorAll('.top-in button, .bottom-nav button')].filter(__audit.visible)
-      .map(b => ({ go: b.dataset.go ?? b.id, ...__audit.target(b) })).filter(t => t.width < 43.5 || t.height < 43.5) };
+    targets: __audit.hits([...document.querySelectorAll('.top-in button, .bottom-nav button')].filter(__audit.visible)) };
   scrollTo(0, document.documentElement.scrollHeight);
   out.footBottom = document.querySelector('footer.foot').getBoundingClientRect().bottom;
   scrollTo(0, 0);
@@ -146,6 +149,39 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
       seen.every(s => rowOk(s.layout) && !s.targets.length), seen.map(s => ({ screen: s.screen, fit: s.fit, layout: s.layout, targets: s.targets })));
   }
 
+  // 4a · A simulated 34 px home-indicator inset at 390 px: the bar pads by
+  // it, the page reserve follows, and Details still ends 8 px above the bar.
+  await configure(page, { name: '390', width: 390, height: 844, mobile: true }, 'light');
+  await load(page, b.url, 'desk');
+  await page.evaluate(`document.documentElement.style.setProperty('--safe-bottom', '34px')`); await settle(page);
+  await click('#hdrHealth');
+  const inset = await page.evaluate(`(() => {
+    const nav = document.querySelector('.bottom-nav'), bar = nav.getBoundingClientRect(), pop = document.getElementById('healthPop'), r = pop.getBoundingClientRect();
+    return { open: pop.classList.contains('on'), barTop: bar.top, barHeight: bar.height, padding: parseFloat(getComputedStyle(nav).paddingBottom),
+      reserve: parseFloat(getComputedStyle(document.getElementById('main')).paddingBottom), popTop: r.top, popBottom: r.bottom,
+      tallest: r.top + parseFloat(getComputedStyle(pop).maxHeight), inner: innerHeight };
+  })()`);
+  await click('#hdrHealth');
+  await page.evaluate(`document.documentElement.style.removeProperty('--safe-bottom')`); await settle(page);
+  check('bar', '390 light, a simulated 34 px bottom inset: the bar pads by it (40 px, 103 px tall, still docked), the page reserve follows, and Details ends at least 8 px above the bar at its tallest',
+    inset.open && inset.padding === 40 && Math.abs(inset.barHeight - 103) <= 0.5 && Math.abs(inset.barTop + inset.barHeight - inset.inner) <= 0.5 &&
+    Math.abs(inset.reserve - inset.barHeight) <= 0.5 && inset.tallest <= inset.barTop - 8 + 0.5 && inset.popBottom <= inset.barTop - 8 + 0.5, inset);
+
+  // 4b · At 820 px on Settings a simulated 21 px inset lifts the floating edit
+  // bar by it, and the footer's reserve grows with it.
+  await configure(page, { name: '820', width: 820, height: 900, mobile: false }, 'light');
+  await load(page, b.url, 'settings');
+  await page.evaluate(`document.documentElement.style.setProperty('--safe-bottom', '21px')`); await settle(page);
+  const lifted = await page.evaluate(`(() => {
+    scrollTo(0, document.documentElement.scrollHeight);
+    const bar = document.getElementById('editbar').getBoundingClientRect(), foot = document.querySelector('footer.foot').getBoundingClientRect();
+    const out = { visible: __audit.visible(document.getElementById('editbar')), barTop: bar.top, barBottom: bar.bottom, footBottom: foot.bottom, inner: innerHeight };
+    scrollTo(0, 0); return out;
+  })()`);
+  await page.evaluate(`document.documentElement.style.removeProperty('--safe-bottom')`); await settle(page);
+  check('bar', '820 light Settings, a simulated 21 px bottom inset: the floating edit bar rises by it (8 + 21 px) and, at the end of the page, the footer still ends 12 px above it',
+    lifted.visible && Math.abs(lifted.inner - lifted.barBottom - 29) <= 0.5 && lifted.footBottom <= lifted.barTop - 12 + 0.5, lifted);
+
   // 5 · Tablets and narrow windows, 481–820 px: the nav stays in the header.
   for (const [width, theme, font] of [[481, 'light', null], [481, 'light', WIDE_FONT], [600, 'dark', null], [820, 'light', null], [820, 'dark', WIDE_FONT]]) {
     const viewport = { name: String(width), width, height: 900, mobile: width <= 700 }, tag = `${width} ${theme}${font ? ' wide font' : ''}`;
@@ -161,5 +197,30 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
       seen.every(s => !s.bar.visible && s.headerNav && s.gear && rowOk(s.layout) && s.layout.items.some(i => i.selector === '.nav' && i.visible) && !s.targets.length && s.reserve === 0 && s.scroll <= s.inner),
       seen.map(s => ({ screen: s.screen, fit: s.fit, layout: s.layout, targets: s.targets, reserve: s.reserve })));
     if (width === 481 && font) await shot(page, viewport, '481-light-settings-header-wide', 'Settings at 481 px in the wide font: the narrowest header with the nav in it, after its fitted steps; the gear marked current');
+  }
+
+  // 6 · Real hit regions across the fitting thresholds: PAPER grows until the
+  // header has taken every step; at each step each control's target, as
+  // elementFromPoint finds it, is whole, 44 px each way and shared with no
+  // neighbour (36 px desktop buttons, 44 px tablet and phone buttons).
+  for (const [width, mobile] of [[1024, false], [820, false], [390, true]]) {
+    await configure(page, { name: String(width), width, height: 900, mobile }, 'light');
+    await load(page, b.url, 'desk');
+    const steps = await page.evaluate(`(async () => {
+      const style = document.createElement('style'), seen = new Map();
+      const frames = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))));
+      document.head.append(style);
+      for (let grow = 0; grow <= 1600; grow += 8) {
+        style.textContent = '#modeLabel { padding-right: ' + (10 + grow) + 'px; }';
+        await frames();
+        const fit = document.querySelector('.top-in').dataset.fit;
+        if (!seen.has(fit)) seen.set(fit, __audit.hits([...document.querySelectorAll('.top-in button')].filter(__audit.visible)));
+        if (fit.split(' ').includes('squeeze')) break;
+      }
+      style.remove(); await frames();
+      return [...seen].map(([fit, faults]) => ({ fit, faults }));
+    })()`);
+    check('header', `${width}: growing PAPER walks the header through its fitted steps (${steps.map(s => s.fit || 'none').join(' · ')}); at every step each control's real hit region is whole, 44 px each way and shared with no neighbour`,
+      ['word', 'labels', 'tight', 'icons', 'squeeze'].every(step => steps.some(s => s.fit.split(' ').includes(step))) && steps.every(s => !s.faults.length), steps);
   }
 }

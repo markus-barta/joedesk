@@ -1410,7 +1410,7 @@ try {
       check('AC-28', `sweep ${tag}: no horizontal page scroll at any of ${n}`, !fail.scroll.length, fail.scroll.slice(0, 6));
       check('AC-28', `sweep ${tag}: nothing reaches past the page's right edge at any of ${n}`, !fail.past.length, fail.past.slice(0, 4));
       check('header', `sweep ${tag}: the header stays in its row; one nav (Desk, Results, History) at every width, with Settings as the header's gear and the shown screen current`, !fail.header.length && !fail.nav.length, { header: fail.header.slice(0, 3), nav: fail.nav.slice(0, 6) });
-      check('AC-30', `sweep ${tag}: every header control is a 44 px target at every width, and so is each bottom-bar button`, !fail.targets.length, fail.targets.slice(0, 3));
+      check('AC-30', `sweep ${tag}: every header control's real hit region (elementFromPoint) is whole, 44 px each way and shared with no neighbour at every width, and so is each bottom-bar button's`, !fail.targets.length, fail.targets.slice(0, 3));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
       check('no-shift', `sweep ${tag}: from 710 px the edit bar holds its longest notes and its buttons inside it, inside the window and above the bottom bar`, !fail.bar.length, fail.bar.slice(0, 4));
       check('touch', `sweep ${tag}: read right after each resize, the pointer is touch up to 700 px (no hover, coarse) and a mouse above (hover, fine) at every one of ${n}`, !fail.pointer.length, fail.pointer.slice(0, 8));

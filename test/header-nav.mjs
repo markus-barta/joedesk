@@ -281,12 +281,15 @@ test('bar CSS: hidden by default, shown only up to 480 px with a solid surface, 
   assert.deepEqual(shows.map(b => b.query), ['(max-width: 480px)']);
   const phone = shows[0].body, bar = rule(phone, '.bottom-nav');
   for (const part of [/position:\s*fixed/, /left:\s*0;/, /right:\s*0;/, /bottom:\s*0;/, /background:\s*var\(--surface\)/, /border-top:\s*1px solid var\(--line\)/,
-    /padding:\s*6px max\(8px, env\(safe-area-inset-right, 0px\)\) calc\(6px \+ env\(safe-area-inset-bottom, 0px\)\) max\(8px, env\(safe-area-inset-left, 0px\)\)/]) {
+    /padding:\s*6px max\(8px, var\(--safe-right\)\) calc\(6px \+ var\(--safe-bottom\)\) max\(8px, var\(--safe-left\)\)/]) {
     assert.match(bar, part);
   }
   assert.doesNotMatch(bar, /backdrop-filter|color-mix|border-radius|box-shadow/, 'a solid, docked surface');
   assert.match(rule(phone, '.top .nav'), /display:\s*none/);
-  assert.match(rule(phone, '#main'), /padding-bottom:\s*calc\(var\(--nav-h\) \+ env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.match(rule(phone, '#main'), /padding-bottom:\s*calc\(var\(--nav-h\) \+ var\(--safe-bottom\)\)/);
+  // Every inset reads one property, so a test can stand in for a phone's.
+  assert.match(css, /--safe-bottom:\s*env\(safe-area-inset-bottom, 0px\);\s*--safe-left:\s*env\(safe-area-inset-left, 0px\);\s*--safe-right:\s*env\(safe-area-inset-right, 0px\);/);
+  assert.equal((css.match(/env\(safe-area-inset-/g) ?? []).length, 3, 'env() only where the properties are set');
   // The reserve is the bar itself: its padding, a 56 px button and the hairline.
   const height = Number(/height:\s*(\d+)px/.exec(rule(phone, '.bottom-nav button'))[1]);
   assert.equal(height, 56);
@@ -314,7 +317,61 @@ test('header CSS: every header control is a 44 px target, and each fitted step i
   const tablet = media(css).find(b => b.query === '(max-width: 960px)' && /\.hdr-health\s*\{/.test(b.body));
   assert.match(rule(tablet.body, '.hdr-health'), /flex:\s*1 1 0;\s*width:\s*auto;\s*min-width:\s*128px;\s*max-width:\s*280px;\s*height:\s*44px;/);
   // viewport-fit=cover: content keeps clear of a landscape notch.
-  assert.match(rule(css, '.page'), /padding:\s*0 max\(var\(--gutter\), env\(safe-area-inset-right, 0px\)\) 0 max\(var\(--gutter\), env\(safe-area-inset-left, 0px\)\);/);
+  assert.match(rule(css, '.page'), /padding:\s*0 max\(var\(--gutter\), var\(--safe-right\)\) 0 max\(var\(--gutter\), var\(--safe-left\)\);/);
+});
+
+// The value a property takes at one viewport width: the last declaration in
+// source order among the top-level rules and the simple width queries that
+// apply. A calc() is worked out for a given bottom inset.
+function declared(source, selector, property, width) {
+  let value = null;
+  const scan = body => { const r = rule(body, selector); const m = r && new RegExp(`(?:^|;)\\s*${property}:\\s*([^;]+)`).exec(r); if (m) value = m[1].trim(); };
+  const applies = q => { const max = /^\(max-width: (\d+)px\)$/.exec(q), min = /^\(min-width: (\d+)px\)$/.exec(q); return max ? width <= Number(max[1]) : min ? width >= Number(min[1]) : false; };
+  let at = 0;
+  for (const block of media(source)) { scan(source.slice(at, block.start)); if (applies(block.query)) scan(block.body); at = block.end; }
+  scan(source.slice(at));
+  return value;
+}
+const px = (value, { inset = 0, height = 844 } = {}) => Function(`return (${value.replace(/env\(safe-area-inset-bottom, 0px\)|var\(--safe-bottom\)/g, `${inset}px`)
+  .replace(/var\(--nav-h\)/g, /--nav-h:\s*(\d+)px/.exec(css)[1] + 'px').replace(/(\d+(?:\.\d+)?)dvh/g, (_m, n) => `${n * height / 100}px`)
+  .replace(/calc\(/g, '(').replace(/(\d+(?:\.\d+)?)px/g, '$1')});`)();
+
+test('safe area: Details ends 8 px above the phone bar, whatever the bottom inset adds to it', () => {
+  // The bar: 6 px above a 56 px button, its bottom padding (6 px and the inset), a 1 px hairline.
+  const button = parseFloat(declared(css, '.bottom-nav button', 'height', 390));
+  const below = /\s(calc\(6px \+ (?:var\(--safe-bottom\)|env\(safe-area-inset-bottom, 0px\))\))\s/.exec(` ${declared(css, '.bottom-nav', 'padding', 390)} `)[1];
+  for (const inset of [0, 21, 34]) {
+    const bar = 6 + button + px(below, { inset }) + 1;
+    // Details opens 4 px below the 54 px header.
+    const top = 54 + 4, tallest = top + px(declared(css, '.pop', 'max-height', 390), { inset });
+    assert.ok(tallest <= 844 - bar - 8, `inset ${inset}: Details may end at ${tallest} px, the bar starts at ${844 - bar} px`);
+    assert.equal(px(declared(css, '#main', 'padding-bottom', 390), { inset }), bar, `inset ${inset}: the page's reserve is the bar`);
+  }
+});
+
+test('safe area: at tablet widths the Settings footer keeps 12 px above the floating edit bar, whatever the inset lifts it by', () => {
+  const height = Number(/(\d+)px/.exec(declared(css, '.editbar-in', 'height', 820))[1]);
+  assert.equal(height, 100);
+  for (const inset of [0, 21]) {
+    const bar = px(declared(css, '.editbar', 'bottom', 820), { inset }) + height;
+    const reserve = px(declared(css, 'body[data-screen="settings"] .foot', 'margin-bottom', 820), { inset });
+    assert.ok(reserve - bar >= 12, `inset ${inset}: the footer's reserve ${reserve} px, the edit bar's top ${bar} px up`);
+  }
+});
+
+test('hit regions: tight 36 px icon buttons keep their reach clear of each other, and the gear never shrinks', () => {
+  // Above 960 px the icon buttons draw 36 px and reach 4 px past each side.
+  const reach = (44 - Number(/width:\s*(\d+)px/.exec(rule(outside(css), '.icon-btn'))[1])) / 2;
+  assert.equal(reach, 4);
+  const gap = Number(/gap:\s*(\d+)px/.exec(rule(css, '.top-in[data-fit~="tight"]'))[1]);
+  const margin = parseFloat(declared(css, '.top-in[data-fit~="tight"] .icon-btn', 'margin-left', 1024) ?? '0');
+  assert.ok(gap + margin > 2 * reach, `tight: ${gap + margin} px between icon buttons that reach ${reach} px each`);
+  // At 960 px and below they draw 44 px and reach nowhere; the space goes back.
+  assert.equal(declared(css, '.top .icon-btn', 'width', 820), '44px');
+  assert.equal(declared(css, '.top-in[data-fit~="tight"] .icon-btn', 'margin-left', 820), '0');
+  // Neither header icon button takes part in shrinking the row: the fitted steps do.
+  assert.match(rule(css, '.gear'), /flex:\s*none/);
+  assert.match(rule(css, '.theme-btn'), /flex:\s*none/);
 });
 
 test('money no-wrap: a signed amount stays one unit with its sign, exactly the formatter’s text', () => {

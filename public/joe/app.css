@@ -94,7 +94,7 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .nowrap, .num { white-space: nowrap; }
 .gain { color: var(--gain); } .loss { color: var(--loss); } .muted { color: var(--ink-3); } .ink2 { color: var(--ink-2); }
 .vh { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.page { max-width: var(--maxw); margin: 0 auto; padding: 0 max(var(--gutter), env(safe-area-inset-right, 0px)) 0 max(var(--gutter), env(safe-area-inset-left, 0px)); }
+.page { max-width: var(--maxw); margin: 0 auto; padding: 0 max(var(--gutter), var(--safe-right)) 0 max(var(--gutter), var(--safe-left)); }
 .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-card); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); }
 .pl { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .pl .i { width: 9px; height: 9px; }
@@ -214,7 +214,7 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 
 /* ---------- Desk ---------- */
 .health-wrap { position: relative; }
-.pop { position: absolute; right: max(var(--gutter), env(safe-area-inset-right, 0px)); top: 4px; z-index: 25; width: min(560px, calc(100% - 2 * var(--gutter))); max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-pop); padding: 16px 18px; opacity: 0; visibility: hidden; }
+.pop { position: absolute; right: max(var(--gutter), var(--safe-right)); top: 4px; z-index: 25; width: min(560px, calc(100% - 2 * var(--gutter))); max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-pop); padding: 16px 18px; opacity: 0; visibility: hidden; }
 .health-facts { display: grid; gap: 8px; margin-top: 12px; }
 .health-facts .st { white-space: normal; align-items: flex-start; }
 .health-facts .st > .i { margin-top: 2px; }
@@ -725,7 +725,7 @@ span.dbar, span.vbar { display: block; }
 .foot-data .i { display: inline-block; vertical-align: -3px; margin-right: 6px; }
 .product-version { color: var(--ink); line-height: 44px; min-height: 44px; }
 .version-mode { min-width: 44px; min-height: 44px; margin-left: 8px; padding: 0 6px; background: transparent; color: var(--ink-2); border: 0; font-size: 12px; cursor: pointer; }
-.private { min-height: 100vh; display: grid; place-items: center; padding: 24px max(var(--gutter), env(safe-area-inset-right, 0px)) 24px max(var(--gutter), env(safe-area-inset-left, 0px)); }
+.private { min-height: 100vh; display: grid; place-items: center; padding: 24px max(var(--gutter), var(--safe-right)) 24px max(var(--gutter), var(--safe-left)); }
 .private-card { max-width: 440px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .private-card .brand-i { width: 36px; height: 36px; color: var(--ink); }
 .private-card h1 { font-size: 22px; line-height: 28px; font-weight: 650; }
@@ -1009,7 +1009,7 @@ body[data-screen="settings"] .foot { margin-bottom: 74px; }
 .editbar .note-i .i { width: 16px; height: 16px; }
 .editbar .note-t { min-width: 0; overflow-wrap: anywhere; }
 .edit-btns { display: flex; align-items: center; gap: 8px; flex: none; }
-.toast { position: fixed; right: max(24px, env(safe-area-inset-right, 0px)); bottom: 76px; z-index: 60; display: flex; align-items: flex-start; gap: 8px; background: var(--tip-bg); color: var(--tip-ink); border-radius: 12px; padding: 11px 15px; font-size: 13px; line-height: 1.45; box-shadow: var(--shadow-pop); max-width: min(460px, calc(100vw - 32px)); opacity: 0; visibility: hidden; pointer-events: none; }
+.toast { position: fixed; right: max(24px, var(--safe-right)); bottom: 76px; z-index: 60; display: flex; align-items: flex-start; gap: 8px; background: var(--tip-bg); color: var(--tip-ink); border-radius: 12px; padding: 11px 15px; font-size: 13px; line-height: 1.45; box-shadow: var(--shadow-pop); max-width: min(460px, calc(100vw - 32px)); opacity: 0; visibility: hidden; pointer-events: none; }
 .toast.on { opacity: 1; visibility: visible; }
 .toast .i { margin-top: 2px; }
 body:not([data-screen="settings"]) .toast { bottom: 24px; }
@@ -1088,10 +1088,11 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .rt-row { grid-template-columns: 150px minmax(0, 1fr); gap: 2px 14px; }
   .tbl { table-layout: fixed; }
   .tbl th:nth-child(1) { width: 30%; } .tbl th:nth-child(2) { width: 36%; }
-  .editbar { left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); bottom: calc(8px + env(safe-area-inset-bottom, 0px)); border-radius: 18px; box-shadow: var(--shadow-pop); }
+  .editbar { left: max(8px, var(--safe-left)); right: max(8px, var(--safe-right)); bottom: calc(8px + var(--safe-bottom)); border-radius: 18px; box-shadow: var(--shadow-pop); }
   .editbar-in { padding: 0 14px; }
-  body[data-screen="settings"] .foot { margin-bottom: 120px; }
-  .toast { bottom: calc(122px + env(safe-area-inset-bottom, 0px)); }
+  /* The floating edit bar's 8 px offset, its 100 px and 12 px of air, above the safe area. */
+  body[data-screen="settings"] .foot { margin-bottom: calc(120px + var(--safe-bottom)); }
+  .toast { bottom: calc(122px + var(--safe-bottom)); }
 }
 @media (max-width: 700px) {
   .set-grid { grid-template-columns: minmax(0, 1fr); margin-top: 10px; }
@@ -1113,7 +1114,7 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .set-main code, .set-main .mono, .facts-dl dd { overflow-wrap: anywhere; word-break: break-word; }
   .theme-seg button { min-width: 44px; }
   body[data-screen="settings"] .foot { margin-bottom: 0; }
-  .toast, body:not([data-screen="settings"]) .toast { left: 16px; right: 16px; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); max-width: none; }
+  .toast, body:not([data-screen="settings"]) .toast { left: 16px; right: 16px; bottom: calc(96px + var(--safe-bottom)); max-width: none; }
   .gate { height: 640px; }
   .dlg-f { padding: 12px 16px 16px; }
   .check { min-height: 44px; align-items: center; }
@@ -1213,10 +1214,11 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
    tighten), "icons" (the nav keeps only its icons; each button keeps its
    name) and "squeeze" (the light may narrow below its reserve, without its
    chevron; its whole sentence stays in its title and name). */
-:root { --nav-h: 69px; }
+:root { --nav-h: 69px; --safe-bottom: env(safe-area-inset-bottom, 0px); --safe-left: env(safe-area-inset-left, 0px); --safe-right: env(safe-area-inset-right, 0px); }
 .top .nav button { position: relative; height: 30px; min-width: 44px; }
 .top .hdr-health, .top .icon-btn { position: relative; }
 .top .nav button::after, .top .hdr-health::after, .top .icon-btn::after { content: ""; position: absolute; inset: min(0px, calc((100% - 44px) / 2)); }
+.gear { flex: none; }
 .gear .i { width: 17px; height: 17px; }
 .gear[aria-current="page"] { color: var(--accent-ink); background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent-line); }
 .top-in[data-fit~="word"] .brand .word { display: none; }
@@ -1225,6 +1227,8 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 .top-in[data-fit~="tight"] .nav { margin-left: 0; }
 .top-in[data-fit~="tight"] .nav button { padding-inline: 6px; }
 .top-in[data-fit~="tight"] .hdr-health { gap: 4px; padding-inline: 4px; }
+/* A 36 px icon button reaches 4 px past each side; 9 px from its neighbour keeps every target whole. */
+.top-in[data-fit~="tight"] .icon-btn { margin-left: 7px; }
 .top-in[data-fit~="icons"] .nav .i { display: block; }
 .top-in[data-fit~="icons"] .nav button { padding-inline: 0; }
 .top-in[data-fit~="icons"] .nav button > span { display: none; }
@@ -1233,6 +1237,7 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 @media (max-width: 960px) {
   .top-in { height: 54px; gap: 8px; }
   .top .icon-btn { width: 44px; height: 44px; }
+  .top-in[data-fit~="tight"] .icon-btn { margin-left: 0; }
   /* The light takes the row's free room: at least its reserve for "Live · 59 s", at most 280 px. */
   .hdr-health { flex: 1 1 0; width: auto; min-width: 128px; max-width: 280px; height: 44px; padding: 0 8px; }
 }
@@ -1244,10 +1249,12 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 @media (max-width: 480px) {
   .top .nav { display: none; }
   .hdr-health { min-width: 124px; max-width: none; padding: 0 10px; font-size: 13.5px; }
-  .bottom-nav { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; gap: 4px; padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); background: var(--surface); border-top: 1px solid var(--line); }
+  .bottom-nav { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; gap: 4px; padding: 6px max(8px, var(--safe-right)) calc(6px + var(--safe-bottom)) max(8px, var(--safe-left)); background: var(--surface); border-top: 1px solid var(--line); }
   .bottom-nav button { flex: 1 1 0; min-width: 0; height: 56px; border: 0; border-radius: 18px; background: transparent; color: var(--ink-3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 600; }
   .bottom-nav button .i { width: 20px; height: 20px; }
   .bottom-nav button[aria-current="page"] { color: var(--ink); background: var(--accent-tint); }
-  /* The page ends above the bar, so nothing renders under it. */
-  #main { padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px)); }
+  /* The page ends above the bar, so nothing renders under it, and Details
+     ends 8 px above it: its top is the 54 px header and its 4 px offset. */
+  #main { padding-bottom: calc(var(--nav-h) + var(--safe-bottom)); }
+  .pop { max-height: calc(100dvh - 54px - 4px - 8px - var(--nav-h) - var(--safe-bottom)); }
 }

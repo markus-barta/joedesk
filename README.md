@@ -1731,8 +1731,11 @@ the theme button. Settings left the reading nav; the gear carries
 the nav stays in the header (tablets included); up to 480 px it is a bottom
 bar: a solid surface with a hairline, padded clear of the safe area
 (`viewport-fit=cover`; page gutters keep clear of a landscape notch), and the
-page's content ends above it. Every header control is a 44 px target, whatever
-it draws. When the measured row does not fit, `fitHeader` (app.js) applies
+page's content and Details end above it. Every inset is read once into
+`--safe-bottom`, `--safe-left` and `--safe-right` (app.css), which browser
+checks override to stand in for a phone. Every header control is a 44 px
+target, whatever it draws, and no target overlaps a neighbour's (browser
+checks hit-test them with `elementFromPoint` across the fitted steps). When the measured row does not fit, `fitHeader` (app.js) applies
 steps in order until it does: the wordmark goes, the nav drops its icons, gaps
 tighten, the nav keeps its icons alone (each button keeps its name), and last
 the light narrows without its chevron (its whole sentence stays in its title
