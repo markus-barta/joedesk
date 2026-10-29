@@ -204,7 +204,7 @@ async function deskChecks(page, viewport, theme, snapshot) {
     /^J ([+−]€\s[\d.]+,\d\d|flat) · Joe ([+−]€\s[\d.]+,\d\d|flat) · Joel ([+−]€\s[\d.]+,\d\d|flat)$/.test(copyText(d.say.text)) && d.say.lines === 1 &&
     await page.evaluate(`[...document.querySelectorAll('#heroL .say .num')].every(n => /\\b(gain|loss)\\b/.test(n.className))`), d.say);
   check('M3', `${tag}: the market block is the linear New York day with now, the session and New York's own time; the session line keeps its room while live`,
-    /^New York market\s*open\s*closes 22:00 · 2\sh 17\smin left$/.test(d.market.title) && /^Regular session 15:30–22:00 Vienna$/.test(d.market.sub) && /^New York 13:42 · 6\sh behind$/.test(d.market.ny) &&
+    /^New York market\s*open\s*closes 22:00 · 2\sh\s17\smin left$/.test(d.market.title) && /^Regular session 15:30–22:00 Vienna$/.test(d.market.sub) && /^New York 13:42 · 6\sh behind$/.test(d.market.ny) &&
     /New York day begins at 06:00, regular session 15:30 to 22:00; now 19:42$/.test(d.market.bar ?? '') && close(d.market.slot, 46) && d.market.line, d.market);
   const ranked = snapshot.desks.map((desk, i) => ({ id: desk.id, i, result: decimalUnits(desk.money.totalPnl.amount) })).sort((a, b) => a.result === b.result ? a.i - b.i : a.result > b.result ? -1 : 1).map(desk => desk.id);
   check('AC-20', `${tag}: desks rank by exact since-start result, with no unsupported per-desk percentages`, d.order.join() === ranked.join() && await page.evaluate(`!document.querySelector('.dcard .performance-pct')`), { actual: d.order, expected: ranked });
@@ -896,7 +896,8 @@ try {
         const marks = await page.evaluate(estimateMarks);
         check('fixtures', `${tag}: ${state} estimated Today cells say Estimated visibly, accessibly, without overlapping the complete label and state icon`,
           marks.length === (viewport.mobile ? 6 : 3) && marks.every(m => m.text === 'Estimated' && m.role === 'img' && m.label.startsWith('Estimated from the session open') && m.size >= 10 && !m.title && m.contained && m.separate), marks);
-        const money = await page.evaluate(`Array.from(document.querySelectorAll('.dnums .v > .bn'), el => {
+        // M6: a value is its figure's link, a dash is bare; both are the amount.
+        const money = await page.evaluate(`Array.from(document.querySelectorAll('.dnums .v > .bn, .dnums .v > .fig-link > .bn'), el => {
           const range = document.createRange(); range.selectNodeContents(el);
           const text = range.getBoundingClientRect(), box = el.getBoundingClientRect();
           return { text: el.textContent, left: text.left - box.left, right: box.right - text.right, height: box.height };
@@ -1261,13 +1262,17 @@ try {
     check('journey', `${tag} broken: unavailable totals keep their own reasons; Today states its reason once`, ui.cells['hero.day'].state === 'broken' && ui.cells['hero.day'].cap === 'Not exact · waiting on the start-of-day value' && ui.say === 'No desk has an exact result for today.' &&
       /^Unavailable · open result not available$/.test(ui.cells['hero.open'].cap) && /^Unavailable · desk total incomplete$/.test(ui.cells['hero.since'].cap) &&
       ui.cells['hero.equity'].state === 'fresh' && ui.account.state === 'fresh' && ui.account.line === null, { cells: ui.cells, account: ui.account, say: ui.say });
-    check('no-shift', `${tag}: stale → broken moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
-    boxes.push(['broken', await rects(STATE_BOXES)]);
     const rebuiltSay = await page.evaluate(SAY_TIP);
     check('clamp', `${tag} broken: the pinned tip follows Today's rebuilt sentence`, sayWhole(rebuiltSay) && rebuiltSay.say === 'No desk has an exact result for today.' && pinnedSay.say !== rebuiltSay.say, { pinnedSay, rebuiltSay });
     if (!font && viewport.name === '390' && theme === 'light') await shot(page, viewport, '390-light-desk-say-tip', `Desk, broken: Today's one-line phone sentence${rebuiltSay.clamped ? ' with its ellipsis' : ''}, a tap shows it whole in the explanation tip`);
     await key(page, 'Escape');
     await leaveSay(page);
+    // Measured as fresh and stale were, at the top of the page: clickSay
+    // scrolled the sentence (below the whole account since JOED-153's slot)
+    // to the window's middle, and the sticky header's page position is that
+    // scroll, not a shift.
+    check('no-shift', `${tag}: stale → broken moves nothing on Desk`, !moves(desk0, await rects(DESK_SHIFT)).length, moves(desk0, await rects(DESK_SHIFT)).slice(0, 5));
+    boxes.push(['broken', await rects(STATE_BOXES)]);
     await auditScreen(page, viewport, theme, 'desk (broken numbers)');
     if (!font && (viewport.name !== '1024' || theme === 'light')) await shot(page, viewport, `${viewport.name}-${theme}-desk-state-per-field`, 'Desk, numbers broken field by field: each with its own age and reason');
     await go(page, 'history');

@@ -117,6 +117,15 @@
           if (el.title !== el.textContent || cs.textOverflow !== 'ellipsis' || cs.whiteSpace !== 'nowrap' || cs.overflowX !== 'hidden') failures.push({ el: 'desk status', why: 'missing full title or ellipsis' });
           continue;
         }
+        // JOED-153 (as designed): the hero's session-dated label and a phone
+        // row's state words keep one line and may end in an ellipsis in a
+        // narrow column, with their whole words as the native title and in
+        // their control's name. Require that title and the ellipsis contract.
+        if (el.matches('.cut-line')) {
+          const cs = getComputedStyle(el);
+          if (el.title !== el.textContent || cs.textOverflow !== 'ellipsis' || cs.whiteSpace !== 'nowrap' || cs.overflowX !== 'hidden') failures.push({ el: 'cut line', why: 'missing full title or ellipsis', text: el.textContent.trim().slice(0, 40) });
+          continue;
+        }
         // Phone summaries reserve one line, with every reason in the native
         // title and accessible button text. The existing card is one tap away.
         if (el.matches('.disclosure-warning .summary-text')) {
@@ -356,7 +365,7 @@
           // The page, or the fixed chrome above it (header, bottom bar, Settings' edit bar).
           const layer = Boolean(n.parentElement.closest('header.top, .bottom-nav, .editbar'));
           for (const raw of range.getClientRects()) {
-            const clamp = n.parentElement.closest('[data-clamp], .disclosure-warning .summary-text, .dcard .state > span[title]')?.getBoundingClientRect();
+            const clamp = n.parentElement.closest('[data-clamp], .disclosure-warning .summary-text, .dcard .state > span[title], .cut-line[title]')?.getBoundingClientRect();
             const q = clamp ? { left: Math.max(raw.left, clamp.left), right: Math.min(raw.right, clamp.right), top: Math.max(raw.top, clamp.top), bottom: Math.min(raw.bottom, clamp.bottom), width: Math.min(raw.right, clamp.right) - Math.max(raw.left, clamp.left), height: Math.min(raw.bottom, clamp.bottom) - Math.max(raw.top, clamp.top) } : raw;
             if (q.width > 0.5 && q.height > 0.5) boxes.push({ node: n, text: n.nodeValue.trim().slice(0, 30), layer, q });
           }

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
+import { width, measure, lineCount, VERDANA_BOLD } from './fixtures/text-width.mjs';
 import { validateContract } from '../contracts/index.mjs';
 import { decimalUnits } from '../contracts/decimal.mjs';
 import { zonedInstant, nyDay, NY, sessionDayName } from '../time.mjs';
@@ -101,6 +102,12 @@ test('JOED-153 M1: the first figure names its session in every phase, with its o
     assert.equal(first.querySelector('.hero-k .term').dataset.term, term, now);
     assert.equal(Boolean(first.querySelector('.live-dot')), phase === 'live', `${now}: the live dot only while live`);
     if (href) assert.equal(first.querySelector('.fig-link').getAttribute('href'), href, now);
+    // AC-36 (agm2 sweep, 360–390 px): a label longer than a phone's column
+    // ends in an ellipsis, as designed, with its whole words as its title
+    // and the term's name; it never runs under Since start beside it.
+    const cut = first.querySelector('.hero-k .term .cut-line');
+    assert.equal(cut?.getAttribute('title'), label, now);
+    assert.equal(cut.textContent, label, now);
   }
 });
 
@@ -320,6 +327,13 @@ test('JOED-153: the phone row labels its first figure per phase and counts what 
   assert.deepEqual(last.querySelectorAll('.compact-label').map(l => l.textContent), ['Wed', 'Since']);
   assert.equal(last.querySelector('[data-compact-value="dayPnl"] .bn').textContent, '+€10,00');
   assert.equal(last.querySelector('.compact-word').textContent, `Working · 1${NB}held`);
+  // AC-36 (agm2, 360 px): on the narrowest rows the words end in an ellipsis,
+  // as designed, with their whole text as the title and in the row's name.
+  const word = htmlDocument(desk.compactDesk(context(), 'j')).querySelector('.compact-word .cut-line');
+  assert.equal(word?.getAttribute('title'), `Working · 1${NB}open`);
+  assert.equal(word.textContent, word.getAttribute('title'));
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\.compact-word > \.cut-line \{ display: block; min-width: 0; height: 16px; overflow: hidden; text-overflow: ellipsis; \}/);
 });
 
 test('JOED-153 Partial/Stale markers are Results’ own: same label and words as Results · Day', () => {
@@ -354,6 +368,12 @@ test('JOED-153 M3: the market block states the session, the next one and New Yor
     assert.equal(block.summary, summary, now);
   }
   assert.deepEqual(desk.marketBlock(null).summary, 'Time not known');
+  // agm2 run 40914740151: the browser check's own title pattern (P3, M3)
+  // accepts the block's words, whose ages keep their no-break spaces.
+  const source = readFileSync(new URL('../scripts/browser-p3.mjs', import.meta.url), 'utf8');
+  const pattern = new RegExp(source.match(/check\('M3'[\s\S]*?\/(\^New York market[^/]*)\/\.test\(d\.market\.title\)/)[1]);
+  const title = htmlDocument(desk.marketBlock(NOW).html).querySelector('.mkt-t').children.map(c => c.textContent).join('\n');
+  assert.match(title, pattern);
 });
 
 test('JOED-153 M3: the day bar places New York’s day, the session (early closes included) and now on the Vienna day', () => {
@@ -400,10 +420,14 @@ test('JOED-153 slot, filled by JOED-156: the whole-account block above the hero,
 // width it names, and every inside label its threshold.
 test('JOED-153 M4: every label width the cards can write has its collision rule in app.css', () => {
   const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
-  // A tapped bar (touch) keeps its label, as a hovered or focused one does.
-  const rules = [...css.matchAll(/@container spark \(max-width: ([\d.]+)px\) \{ \.desk-sessions \.bars\[data-need="(\d+)"\] \.b:not\(:hover\):not\(:focus-visible\):not\(\.tapped\) \.bl\.out:not\(\.keep\) \{ visibility: hidden; \} \}/g)];
+  // A tapped bar (touch) keeps its label, as a focused one does; a hovered one
+  // too, where a pointer can hover (touch: no :hover outside that query).
+  const rules = [...css.matchAll(/@container spark \(max-width: ([\d.]+)px\) \{ \.desk-sessions \.bars\[data-need="(\d+)"\] \.b:not\(:focus-visible\):not\(\.tapped\) \.bl\.out:not\(\.keep\) \{ visibility: hidden; \} \}/g)];
   assert.deepEqual(rules.map(m => Number(m[2])), Array.from({ length: 16 }, (_, i) => 100 + 20 * i));
   assert.ok(rules.every(m => Number(m[1]) === Number(m[2]) - 0.02));
+  const reveal = css.indexOf('@media (hover: hover) { .desk-sessions .bars[data-need] .b:hover:not(.tapped) .bl.out:not(.keep) { visibility: visible; } }');
+  assert.ok(reveal > css.lastIndexOf('[data-need="400"]'), 'the hover reveal follows the rules it overrides (equal specificity)');
+  assert.ok(!/:hover/.test(css.replace(/@media \(hover: hover\) \{[^{}]*\{[^{}]*\} \}/g, '').match(/[^{}]*\.bars[^{}]*\{/g).join('')), 'no bars :hover outside @media (hover: hover)');
   const ctx = context(), needs = new Set();
   for (const id of DESK_IDS) { const bars = htmlDocument(deskCard(ctx, id)).querySelector('.bars'); if (bars?.dataset.need) needs.add(bars.dataset.need); }
   assert.ok(needs.size >= 1 && [...needs].every(n => rules.some(m => m[2] === n)), [...needs].join());
@@ -657,29 +681,11 @@ test('JOED-153 M5: a desk start the market calendar does not cover cannot be pro
 // Merge gate, finding 2: the one-row card's status box reserves its worst
 // case, every figure with its longest line, wrapped, at every row width from
 // a 320 px phone up, so no change of state moves the row. Widths are
-// Verdana's advances (1/2048 em; the wide font that stands in for Linux's in
-// the layout checks), 6 % wider for DejaVu Sans and rounding; lines break at
-// spaces only (never inside "23 h 59 min" or a label).
-const VERDANA = Object.fromEntries([
-  ...[720, 806, 940, 1676, 1302, 2204, 1488, 550, 930, 930, 1302, 1676, 745, 930, 745, 930, 1302, 1302, 1302, 1302, 1302, 1302, 1302, 1302, 1302, 1302, 930, 930, 1676, 1676, 1676, 1117,
-    2048, 1400, 1404, 1430, 1578, 1295, 1177, 1588, 1539, 862, 931, 1419, 1140, 1726, 1532, 1612, 1235, 1612, 1424, 1400, 1262, 1499, 1400, 2025, 1403, 1260, 1403, 930, 930, 930, 1676, 1302,
-    1302, 1230, 1276, 1067, 1276, 1220, 720, 1276, 1296, 562, 705, 1212, 562, 1992, 1296, 1243, 1276, 1276, 874, 1067, 807, 1296, 1212, 1676, 1212, 1212, 1076, 1300, 930, 1300, 1676]
-    .map((w, i) => [String.fromCharCode(32 + i), w]),
-  [NB, 720], ['·', 745], ['’', 550], ['‘', 550], ['—', 2048], ['–', 1302], ['−', 1676], ['€', 1302], ['…', 1676], ['“', 940], ['”', 940],
-]);
+// Verdana's (the wide font that stands in for Linux's in the layout checks),
+// 6 % wider for DejaVu Sans and rounding; lines break at spaces only (never
+// inside "23 h 59 min" or a label).
 test('JOED-153 M5: the one-row status box reserves its worst case at every width from a 320 px phone', () => {
-  const px = word => [...word].reduce((sum, ch) => {
-    assert.ok(VERDANA[ch] !== undefined, `no width for ${JSON.stringify(ch)}`);
-    return sum + VERDANA[ch];
-  }, 0) / 2048 * 11.5 * 1.06;
-  const SPACE = px(' ');
-  // Greedy wrapping at spaces, as the browser does; never more lines at a wider row.
-  const measured = text => text.split(' ').map(px);
-  const lines = (words, width) => {
-    let n = 1, line = words[0];
-    for (const w of words.slice(1)) if (line + SPACE + w <= width) line += SPACE + w; else { n++; line = w; }
-    return n;
-  };
+  const px = text => width(text, 11.5, { factor: 1.06 }), measured = text => measure(text, 11.5, { factor: 1.06 }), lines = lineCount;
   const plain = html => htmlDocument(`<div>${html}</div>`).querySelectorAll('.st').map(line => line.textContent);
   // Every line each figure can say: each reason, age and state, under its
   // widest label (a dated session, a start day), and the lines two or three
@@ -716,6 +722,50 @@ test('JOED-153 M5: the one-row status box reserves its worst case at every width
       assert.ok(total <= slots.reduce((sum, slot) => sum + most[slot], 0), `${width} px: ${texts.join(' / ')}`);
     }
   }
+});
+
+// agm2 run 40914740151 (AC-36, no-shift, paper-cash): a card's linked amount
+// keeps the box its dash has, and the summary row keeps one box in every
+// state.
+test('JOED-153 no-shift: card amounts and the summary row keep one box in every state; narrow headers keep the name', () => {
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  const rule = (selector, text = DESK_BLOCK) => text.match(new RegExp(`(?:^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{([^}]*)\\}`))?.[1] ?? '';
+  const media = query => DESK_BLOCK.slice(DESK_BLOCK.indexOf(query)).match(/^[^{]*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+  // A card's amount (AC-36): the link is a block with its amount filling it, as
+  // a bare dash fills the line; an inline link added its own baseline leading.
+  assert.match(rule('.dnums .v > .fig-link'), /display: flex;/);
+  assert.match(rule('.dnums .v > .fig-link > .bn'), /flex: 1 1 auto;/);
+  assert.match(rule('.dnums .v > .bn, .dnums .v > .fig-link > .bn', css), /display: flex; height: 26px;/);
+  // The one-row card keeps its figures inline.
+  assert.match(rule('.drow .dnums .v > .fig-link'), /display: inline-flex;/);
+  // The summary row: one 28 px figure box with or without a value; the small
+  // € adds no leading; the label keeps its state icon's slot.
+  assert.match(rule('.hero .kpi dd > .bn, .hero .kpi dd > .fig-link > .bn'), /height: 28px;/);
+  assert.match(rule('.hero .kpi .bn .u'), /line-height: 1;/);
+  assert.match(rule('.hero .kpi dt > .cell-state'), /position: absolute;/);
+  assert.ok(Number(rule('.hero .kpi dt').match(/padding-right: (\d+)px/)?.[1]) >= 12 + 6, 'the 12 px icon and its gap');
+  for (const state of [undefined, { state: 'stale', ageSeconds: 90, reason: 'snapshot_stale' }]) {
+    const ctx = context();
+    if (state) for (const name of ['today.openPnl', 'today.equity']) ctx.states[name] = { ...ctx.states[name], ...state };
+    for (const kpi of htmlDocument(desk.heroLeft(ctx)).querySelectorAll('.kpi')) {
+      const dt = kpi.querySelector('dt');
+      assert.deepEqual(dt.children.map(c => c.getAttribute('class').split(' ')[0]), state ? ['term', 'cell-state'] : ['term'], 'the icon is the label’s only other element');
+    }
+  }
+  // Wide screens: the figure's column holds a signed six-digit amount in the
+  // wide font, so the caption beside it never moves.
+  const column = Number(rule('.hero .kpi').match(/grid-template-columns: auto minmax\((\d+)px, max-content\) minmax\(0, 1fr\);/)?.[1]);
+  const size = Number(rule('.kpi dd', css).match(/font-size: (\d+)px/)[1]), bold = (text, px) => width(text, px, { table: VERDANA_BOLD });
+  // bn(): arrow .36em + .18em, the sign and digits at −.02em, the € at .5em with .16em of margins (Verdana Bold: the wide font's 650).
+  const widest = bold('+888.888,88', size) - 0.02 * size * 11 + bold('€', size / 2) + 0.16 * size / 2 + 0.54 * size;
+  assert.ok(column >= widest, `${column} px holds ${Math.round(widest)} px`);
+  // Middle widths and phones: the caption takes its own full-width row.
+  assert.match(media('@media (max-width: 1180px)'), /\.hero \.kpi \{ grid-template-columns: auto minmax\(0, 1fr\); \}\s*\n\s*\.hero \.kpi \.c \{ grid-column: 1 \/ -1; \}/);
+  // A card narrower than 310 px (a 360 px phone): the Results link closes the
+  // state's row, so the name keeps its width beside a long check-in.
+  assert.match(media('@container (max-width: 309.98px)'), /\.dcard header \.hb \{ grid-column: 3 \/ 5; \}\s*\n\s*\.dcard header \.card-go \{ grid-row: 2; \}/);
+  // Phones: the one-row card's Results link closes its figures' row (it had no cell).
+  assert.match(media('@media (max-width: 700px)'), /\.drow \.dnums \{ grid-column: 1 \/ 3;[^}]*\}\s*\n\s*\.drow \.hb \{ grid-column: 3; grid-row: 1; \}\s*\n\s*\.drow \.card-go \{ grid-column: 3; grid-row: 2;/);
 });
 
 // Fix round 2, finding 4: the sessions group's touch steps take the gate's

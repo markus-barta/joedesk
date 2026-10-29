@@ -222,7 +222,7 @@ export function compactDesk(ctx, id, facts = deskFacts(ctx)) {
   const counts = positionCounts(ctx.states), held = facts.label?.phase === 'live' ? 'open' : 'held';
   const word = `${info.word}${counts?.[id] ? ` · ${counts[id]}${NB}${held}` : ''}`;
   return `<button type="button" class="desk-disclosure desk-row" data-desk-disclosure="${id}" aria-expanded="${expanded.has(id)}" aria-controls="detail-${id}">
-    ${deskMark(id)}<span class="compact-identity"><strong>${esc(desk?.label ?? LABEL[id])}</strong><span class="compact-word tone-${info.tone}">${icon(info.icon)}${word}</span></span>
+    ${deskMark(id)}<span class="compact-identity"><strong>${esc(desk?.label ?? LABEL[id])}</strong><span class="compact-word tone-${info.tone}">${icon(info.icon)}<span class="cut-line" title="${esc(word)}">${esc(word)}</span></span></span>
     ${first.last ? lastFigure(first.last) : figure('dayPnl', first.label, first.short)}${figure('totalPnl', since, starts.common ? 'Since' : since)}${icon('chev-d', 'i disclosure-chevron')}
     <span class="disclosure-warning">${problemHtml(deskProblem(ctx, id, facts))}</span></button>`;
 }
@@ -779,6 +779,11 @@ const marksText = marks => marks.map(m => ` · ${m.text}`).join('');
 // hears the qualifications too.
 const lastDashName = (prefix, f, marks) => `${prefix}: ${f.reason}${marksText(marks)}`;
 
+// A session-dated label can be longer than a phone's column: one line that
+// ends in an ellipsis there, its whole words as its title and the term's
+// accessible name, as designed; it never runs under the figure beside it.
+const cutLabel = termHtml => termHtml.replace(/>([^<]*)<\/button>$/, (_, words) => `><span class="cut-line" title="${words}">${words}</span></button>`);
+
 // The hero's first figure (M1, A2, P0-1): Today's cell in the session and after
 // the close, read exactly as before; from New York midnight until the open,
 // and on days without a session, the last session's Results · Day figure.
@@ -793,7 +798,7 @@ function heroFirst(ctx, facts, shared, board) {
     const split = `closed ${signedMoney(f.closed)} · still open ${signedMoney(f.open)}`;
     const caption = f.units === null ? `${esc(capital(f.reason))}${marksHtml(marks)}`
       : `<span class="cap-long">${split} · after fees · from the trade record</span><span class="cap-short">${split}</span>${marksHtml(marks)}`;
-    return { caption, html: `<div class="primary" data-cell="hero.day" data-phase="last" data-state="${f.units === null ? 'broken' : marks.length ? 'stale' : 'fresh'}"><div class="hero-k">${icon('clock')}${term('lastsession', label.text)}</div>
+    return { caption, html: `<div class="primary" data-cell="hero.day" data-phase="last" data-state="${f.units === null ? 'broken' : marks.length ? 'stale' : 'fresh'}"><div class="hero-k">${icon('clock')}${cutLabel(term('lastsession', label.text))}</div>
         <div class="display">${value}</div><div class="pct-slot">${pct}</div><span class="c primary-caption">${caption}</span></div>` };
   }
   const dayCell = states['today.dayPnl'], source = data?.pnlSources?.day;
@@ -812,7 +817,7 @@ function heroFirst(ctx, facts, shared, board) {
   const percent = todayPercent(states, source);
   const pct = `${percentHtml(percent)}${percent !== null && base !== null ? ` ${basisTerm('today', base)}` : ''}`;
   const k = label?.phase === 'live' ? '<span class="live-dot" aria-hidden="true"></span>' : icon('clock');
-  return { caption, html: `<div class="primary" data-cell="hero.day" data-phase="${label?.phase ?? 'today'}" data-state="${day.state}"><div class="hero-k">${k}${term(label?.phase === 'closed' ? 'closedday' : 'today', text)}${cellIcon(dayCell, shared)}</div>
+  return { caption, html: `<div class="primary" data-cell="hero.day" data-phase="${label?.phase ?? 'today'}" data-state="${day.state}"><div class="hero-k">${k}${cutLabel(term(label?.phase === 'closed' ? 'closedday' : 'today', text))}${cellIcon(dayCell, shared)}</div>
         <div class="display">${value}</div><div class="pct-slot">${pct}</div>
         <span class="c primary-caption">${caption}</span></div>` };
 }

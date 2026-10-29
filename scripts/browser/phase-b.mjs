@@ -104,10 +104,12 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
     await load(page, b.url);
     await setDeskDisclosures(page, true);
     if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
-    const geometry = () => page.evaluate(`__audit.rects(['.dnums > div', '.dnums .v', '.dnums .v > .bn'])`);
+    // M6: a value is its figure's link, a dash is bare; both are the amount.
+    const AMOUNT = '.dnums .v > .bn, .dnums .v > .fig-link > .bn';
+    const geometry = () => page.evaluate(`__audit.rects(['.dnums > div', '.dnums .v', ${JSON.stringify(AMOUNT)}])`);
     const before = await geometry();
     const moneyContained = async state => {
-      const money = await page.evaluate(`Array.from(document.querySelectorAll('.dnums .v > .bn'), el => {
+      const money = await page.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(AMOUNT)}), el => {
         const range = document.createRange(); range.selectNodeContents(el);
         const text = range.getBoundingClientRect(), box = el.getBoundingClientRect();
         return { text: el.textContent, left: text.left - box.left, right: box.right - text.right, height: box.height };
