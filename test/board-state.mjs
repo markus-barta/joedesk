@@ -249,10 +249,9 @@ for (const [id, fixture] of Object.entries(heroWordingFixtures(browserSnapshot))
   assert.equal(feed.status, 200, JSON.stringify(feed.errors));
   const feeds = { data: feed }, states = boardStates(feeds, f.now, panelStates({ data: first }, browserSnapshot.receivedAt));
   const status = statusPresentation({ states, feeds, now: f.now });
-  // Amy's A3: a not-exact Today alone keeps the light green in regular hours;
-  // a not-exact or missing open result still warns as before.
-  assert.deepEqual([status.tone, status.label, status.reason], id === 'p3-not-exact-yet'
-    ? ['green', 'Board OK', 'board_ok'] : ['yellow', 'Data delayed', 'open_unavailable_rth']);
+  // JOED-157 extends the not-exact rule to Open; an Open fault still warns.
+  assert.deepEqual([status.tone, status.label, status.reason], id === 'p3-mixed-not-exact-fault'
+    ? ['yellow', 'Data delayed', 'open_unavailable_rth'] : ['green', 'Board OK', 'board_ok']);
   const brokenHero = ['today.dayPnl', 'today.openPnl', 'today.totalPnl', 'today.equity', 'paperAccount']
     .filter(name => states[name].state === 'broken');
   assert.deepEqual(brokenHero, id === 'p3-not-exact-yet' ? ['today.dayPnl'] : ['today.dayPnl', 'today.openPnl']);

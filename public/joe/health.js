@@ -5,7 +5,7 @@ import { feedAge, panelState } from './contracts/panel-state.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { isRTH } from './time.mjs';
 import { age } from './format.js';
-import { NOT_EXACT_REASONS, stoppedData, trustedCurrent, classifyDays } from './board-state.js';
+import { NOT_EXACT_REASONS, stoppedData, classifyDays, classifyCells } from './board-state.js';
 
 // The contract's freshness bound: two 30-second producer cadences.
 export const STALE_AFTER_S = 60;
@@ -93,6 +93,7 @@ const CARRIED_CELLS = ['today.equity', 'today.totalPnl', ...DESKS.flatMap(id => 
 // withheld as not exact (classifyDays, every channel). A fault anywhere is a
 // real gap, also beside a current household Today; Details says why.
 const todayHolds = (states, data) => Object.values(classifyDays(states, data)).every(day => day.kind !== 'fault');
+const openHolds = (states, data) => Object.values(classifyCells(states, data, 'openPnl')).every(open => open.kind !== 'fault');
 // Board totals may be hidden while their observations remain usable for health.
 const observation = cell => cell?.health ?? { available: cell?.value != null, retained: cell?.retained, ageSeconds: cell?.ageSeconds };
 
@@ -162,7 +163,7 @@ export function localBoardHealth(states, feeds, now) {
   if (CARRIED_CELLS.some(name => observation(states[name]).retained || stoppedData(states[name]))) return { tone: 'yellow', reason: 'retained_values' };
   if (data.desks.some(desk => desk.state === 'stuck')) return { tone: 'yellow', reason: 'retained_values' };
   if (isRTH(now) && !todayHolds(states, data)) return { tone: 'yellow', reason: 'day_pending' };
-  if (isRTH(now) && !trustedCurrent(states['today.openPnl'])) return { tone: 'yellow', reason: 'open_unavailable_rth' };
+  if (isRTH(now) && !openHolds(states, data)) return { tone: 'yellow', reason: 'open_unavailable_rth' };
   if (NOT_EXACT_TONE === 'yellow' && deskValuesNotExact(states)) return { tone: 'yellow', reason: 'values_not_exact' };
   return { tone: 'green', reason: 'board_ok' };
 }
@@ -253,8 +254,13 @@ export function boardDiagnostics(states, feeds, now) {
       const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason)}` : '';
       problems.push(`${LABEL[id]}’s Today is ${lastGood ? 'only a last good value' : 'unavailable'}${why}.`);
     }
-    const open = states['today.openPnl'];
-    if (!trustedCurrent(open)) problems.push(`${PNL_COPY.open} is unavailable during New York regular hours: ${cellReason(open?.reason ?? data.pnlSources?.open?.reason ?? 'feed_not_received')}.`);
+    const opens = classifyCells(states, data, 'openPnl');
+    if (opens.today.kind === 'fault') problems.push(`${PNL_COPY.open} is unavailable during New York regular hours: ${cellReason(opens.today.reason ?? 'feed_not_received')}.`);
+    for (const id of DESKS) if (opens[id].kind === 'fault') {
+      const lastGood = states[`desks.${id}.openPnl`]?.retained, reason = opens[id].reason;
+      const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason)}` : '';
+      problems.push(`${LABEL[id]}’s Open result is ${lastGood ? 'only a last good value' : 'unavailable'}${why}.`);
+    }
   }
   return problems;
 }

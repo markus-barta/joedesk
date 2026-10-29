@@ -18,15 +18,17 @@ export const trustedCurrent = cell => cell?.value != null && cell.state === 'fre
   (cell.valueSource == null || cell.valueSource.status === 'available');
 const DESKS = ['j', 'joe', 'joel'];
 
-// Every channel a Today figure has on the wire besides the board's own cell:
-// its money reason and its source (pnlSources.day status and reason). A desk
+// Every channel a P&L figure has on the wire besides the board's own cell:
+// its money reason and its source's status and reason. A desk
 // without its own source uses the snapshot's, as the selector does.
-export function dayChannels(data, scope) {
+export function pnlChannels(data, scope, field) {
   const desk = scope === 'today' ? null : data?.desks?.find(d => d.id === scope);
   const bag = scope === 'today' ? data?.totals : desk?.money;
-  return { moneyReason: bag?.reasons?.dayPnl ?? null, source: (desk?.pnlSources?.day ?? data?.pnlSources?.day) ?? null };
+  const period = field === 'dayPnl' ? 'day' : 'open';
+  return { moneyReason: bag?.reasons?.[field] ?? null, source: (desk?.pnlSources?.[period] ?? data?.pnlSources?.[period]) ?? null };
 }
-// The one classifier for a Today figure, over every channel: the board's cell
+export const dayChannels = (data, scope) => pnlChannels(data, scope, 'dayPnl');
+// The one classifier for a Today or Open figure, over every channel: the board's cell
 // (value, state, freshness, retention and the reason the selector or the
 // board chose), the money reason and the source's status and reason.
 // - 'fault' wins: any fault reason on any channel, a missing cell, a last good
@@ -34,7 +36,7 @@ export function dayChannels(data, scope) {
 // - 'notExact': withheld, and every reason on every channel is a not-exact one.
 // - 'exact': a trustworthy current value (trustedCurrent) from an available
 //   source, with no reason on any channel; `estimated` marks a session-open estimate.
-export function classifyDay(cell, { moneyReason = null, source = null } = {}) {
+export function classifyCell(cell, { moneyReason = null, source = null } = {}) {
   const reasons = [cell?.reason, moneyReason, source?.reason].filter(Boolean);
   const fault = reasons.find(reason => !NOT_EXACT_REASONS.has(reason));
   if (fault) return { kind: 'fault', reason: fault };
@@ -46,9 +48,11 @@ export function classifyDay(cell, { moneyReason = null, source = null } = {}) {
   }
   return { kind: 'fault', reason: null };
 }
-// The household Today and each desk's, classified the same way.
-export const classifyDays = (states, data) => Object.fromEntries(['today', ...DESKS].map(scope =>
-  [scope, classifyDay(states[scope === 'today' ? 'today.dayPnl' : `desks.${scope}.dayPnl`], dayChannels(data, scope))]));
+export const classifyDay = (cell, channels) => classifyCell(cell, channels);
+// The household and every desk, classified the same way for either P&L field.
+export const classifyCells = (states, data, field) => Object.fromEntries(['today', ...DESKS].map(scope =>
+  [scope, classifyCell(states[scope === 'today' ? `today.${field}` : `desks.${scope}.${field}`], pnlChannels(data, scope, field))]));
+export const classifyDays = (states, data) => classifyCells(states, data, 'dayPnl');
 const positionKey = row => JSON.stringify([row.scope, row.desk, row.symbol]);
 const unavailable = (cell, reason = cell.reason) => ({ ...cell, state: cell.state === 'fresh' ? 'broken' : cell.state, value: null, retained: false, reason });
 // Hiding a derived amount does not erase the observation's health/grace.
@@ -122,6 +126,15 @@ export function boardStates(feeds, now, previous = {}) {
       // Value-free evidence for Results after unavailable() clears retained.
       ...(expired ? { outageExpired: true } : {}),
     };
+    // An unavailable Open source without a reason cannot leave a fresh-looking
+    // amount on the cards. Keep its observation, but expose the classifier's fault.
+    if (field === 'openPnl') {
+      const scope = name.startsWith('desks.') ? name.split('.')[1] : 'today';
+      const result = classifyCell(states[name], pnlChannels(data, scope, field));
+      if (result.kind === 'fault' && states[name].state === 'fresh') states[name] = {
+        ...states[name], state: 'broken', reason: result.reason ?? 'source_unavailable',
+      };
+    }
   }
   // Recheck policy after every prior-array fallback, including retained_values.
   // Withhold moved rows rather than inventing new scope/desk evidence or age.
@@ -156,12 +169,12 @@ export function boardStates(feeds, now, previous = {}) {
   }
   // Totals and since-start are derived figures. Never display a carried
   // result or combine exact siblings with an outage/missing input. A desk
-  // Today the classifier calls a fault (a value kept beside a fault reason)
-  // is no input for the household Today either (JOED-148).
+  // Today or Open the classifier calls a fault (even beside a value)
+  // is no input for the household total either (JOED-148, JOED-157).
   for (const field of MONEY_FIELDS) {
     const name = `today.${field}`, cell = states[name];
     const blocked = DESKS.map(id => states[`desks.${id}.${field}`]).find((c, i) => outageValue(c) || c.value == null ||
-      (field === 'dayPnl' && classifyDay(c, dayChannels(data, DESKS[i])).kind === 'fault'));
+      (['dayPnl', 'openPnl'].includes(field) && classifyCell(c, pnlChannels(data, DESKS[i], field)).kind === 'fault'));
     if (outageValue(cell) || (cell.value != null && blocked)) states[name] = withheld(cell, cell.reason ?? blocked?.reason);
   }
   for (const id of DESKS) {

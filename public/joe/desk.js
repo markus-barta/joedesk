@@ -12,7 +12,7 @@ import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
 import { STARTING_MONEY, sinceStarts, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
-import { NOT_EXACT_REASONS, notExactDash, classifyDay, classifyDays, dayChannels, outageValue, withGenerationAge } from './board-state.js';
+import { NOT_EXACT_REASONS, notExactDash, classifyDay, classifyDays, classifyCells, dayChannels, outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -271,7 +271,8 @@ export function healthPop(ctx, health) {
     }).join(' · ')]);
     rows.push(['Today’s result', esc(classifyDays(states, data).today.kind === 'notExact' ? dayBreakdown(states, data)
       : dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
-    rows.push(['Open positions', esc(openMethodLabel(data.pnlSources?.open) ?? `Not available · ${cellReason(data.pnlSources?.open?.reason ?? states['today.openPnl']?.reason ?? 'feed_not_received')}`)]);
+    rows.push(['Open positions', esc(Object.values(classifyCells(states, data, 'openPnl')).every(open => open.kind === 'exact')
+      ? openMethodLabel(data.pnlSources?.open) ?? 'Each desk exact' : openBreakdown(states, data))]);
     rows.push(['Source', `${esc(data.source.label)} · paper only`]);
   }
   const notes = { since: startsDiffer(feeds) };
@@ -335,10 +336,10 @@ export const deskNames = ids => ids.length > 1 ? `${ids.slice(0, -1).map(id => L
 // order, from the one classifier the light uses (classifyDays, every channel):
 // exact or estimated figures, not-exact dashes, and faults named by their
 // cell's state. Nothing is computed from money.
-export function deskDays(states, data) {
-  const days = classifyDays(states, data), groups = [];
+export function deskDays(states, data, field = 'dayPnl') {
+  const days = classifyCells(states, data, field), groups = [];
   for (const id of DESKS) {
-    const cell = states[`desks.${id}.dayPnl`], day = days[id];
+    const cell = states[`desks.${id}.${field}`], day = days[id];
     const word = day.kind === 'exact' ? day.estimated ? 'estimated' : 'exact' : day.kind === 'notExact' ? NOT_EXACT
       : cell?.retained ? 'last good' : cell?.state === 'stale' ? 'stale'
         : cell?.value == null && (cell?.state ?? 'not reported') === 'not reported' ? 'not reported' : 'unavailable';
@@ -366,6 +367,19 @@ export function dayBreakdown(states, data) {
     return `Household not exact${why !== NOT_EXACT ? ` · ${why}` : ''}; ${desks}`;
   }
   return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` · ${g.reason}` : ''}`).join('; '));
+}
+
+// Open uses the same classification as the light. A household-only gap must
+// explain itself even when each desk is exact; otherwise name the desk gaps.
+function openBreakdown(states, data) {
+  const groups = deskDays(states, data, 'openPnl').sort((a, b) => dayRank(a) - dayRank(b) || byDesk(a.ids[0], b.ids[0]));
+  const household = classifyCells(states, data, 'openPnl').today;
+  if (household.kind !== 'exact' && groups.every(g => g.word === 'exact')) {
+    const word = household.kind === 'notExact' ? NOT_EXACT : 'unavailable';
+    const why = household.reason ? cellReason(household.reason) : null;
+    return `Household ${word}${why && why !== word ? ` · ${why}` : ''}; each desk exact`;
+  }
+  return groups.map(g => `${deskNames(g.ids)}: ${g.word}${g.reason ? ` · ${g.reason}` : ''}`).join('; ');
 }
 
 // Details flags a closed-trade record that starts on another day than a
