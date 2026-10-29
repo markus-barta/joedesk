@@ -1724,6 +1724,37 @@ green may stay compact on narrow screens. The line ends in an ellipsis when
 necessary and retains a complete title. Its space stays reserved in green, so
 tone changes and ticks cannot move the content.
 
+JOED-152 (the JOED-147 design) keeps the header one row at every width: the
+wordmark, PAPER, Desk · Results · History, the light, Settings as a gear and
+the theme button. Settings left the reading nav; the gear carries
+`aria-current="page"` on Settings, as the nav does on its screen. Above 480 px
+the nav stays in the header (tablets included); up to 480 px it is a bottom
+bar: a solid surface with a hairline, padded clear of the safe area
+(`viewport-fit=cover`; page gutters keep clear of a landscape notch), and the
+page's content ends above it. Every header control is a 44 px target, whatever
+it draws. When the measured row does not fit, `fitHeader` (app.js) applies
+steps in order until it does: the wordmark goes, the nav drops its icons, gaps
+tighten, the nav keeps its icons alone (each button keeps its name), and last
+the light narrows without its chevron (its whole sentence stays in its title
+and name). Only the viewport and the fonts decide the steps, never the light's
+words. `moneyNoWrap()` (ui.js) keeps a signed amount and its sign on one line
+in running text; the header shows no amounts, so the screens' captions adopt it.
+
+Routes (route.js) are `#desk`, `#results`, `#history` and `#settings`, with an
+optional `/anchor` to scroll to (`#settings/mode`, `#history/j-accounting`)
+and an optional `?query` that belongs to the screen
+(`#results?period=day&date=2026-10-28&desk=j`, `#history?range=week&mode=money`).
+The address keeps the screen and its query; an anchor only scrolls, and an
+unknown route is Desk. The nav, the gear, `data-go` controls (with an optional
+`data-query`) and plain clicks on same-page links add a history entry, so Back
+and Forward walk the screens, and Back returns to the place left on the page;
+the first load, Back, Forward and a typed address only correct the address. A
+screen reads its own parameters by registering one reader,
+`onRoute(screen, read)`: `go()` calls it with the route's `URLSearchParams`
+before the screen renders, on every arrival; an absent parameter keeps that
+screen's current choice. Node tests: `test/header-nav.mjs`; browser checks:
+P3's `nav` group (its `routes`, `bar` and `header` checks) and the width sweeps.
+
 The header button and visible problem line open the shared, opaque Details
 dialog on every screen. Its full sentence wraps at the top, in view on opening.
 It holds the former strip's numbers, broker check age, emergency-stop state,

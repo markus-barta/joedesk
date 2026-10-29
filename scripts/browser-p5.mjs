@@ -744,7 +744,7 @@ try {
         check('executor-health', `${tag}: Desk explains executor health without changing the board tone`, desk.open && N(desk.problem) === (c.problem ?? 'No current problems.') && desk.headerTone === c.headerTone, desk);
         check('executor-health', `${tag}: Desk explanation has no overflow or clipping`, desk.horizontal.scroll <= desk.horizontal.client && !desk.clipping.length, desk);
         if (['capture-degraded', 'ledger-full'].includes(c.name)) await crop('#healthPop', `${viewport.name}-${theme}-desk-executor-${c.name}`);
-        await click('.nav [data-go="settings"]');
+        await click('#settingsBtn');
       }
       // The production status renderer: every ranked reason, in the same
       // viewport/font. Fixed geometry, complete title/name, and one-line clamp.
@@ -1381,7 +1381,7 @@ try {
         const media = await pointerMedia(page);
         if (media !== (width <= 700 ? TOUCH : MOUSE)) fail.pointer.push({ width, media });
         await settle(page);
-        const r = await ev(`__audit.sweep(960, null)`);
+        const r = await ev(`__audit.sweep(480, null)`);
         if (r.scroll > r.inner) fail.scroll.push({ width, scroll: r.scroll });
         if (r.past.length) fail.past.push({ width, past: r.past.slice(0, 3) });
         if (r.header.length) fail.header.push({ width, header: r.header });
@@ -1389,7 +1389,7 @@ try {
         if (r.targets.length) fail.targets.push({ width, targets: r.targets });
         if (r.overlaps.length) fail.overlaps.push({ width, overlaps: r.overlaps.slice(0, 3) });
         if (width > 700) {
-          // The edit bar with its longest notes: inside the bar, the bar inside the window, clear of the bottom bar.
+          // The edit bar with its longest notes: inside the bar, the bar inside the window, clear of a bottom bar (phones only).
           const fit = await ev(`(() => { const n = document.getElementById('editNote'), keep = n.innerHTML, faults = [];
             for (const [lead, rest] of ${J(LONGEST)}) {
               n.querySelector('.note-t').innerHTML = '<b>' + lead + '</b> · ' + rest;
@@ -1409,8 +1409,8 @@ try {
       const n = `${widths.length} widths from 390 to 1440 px`;
       check('AC-28', `sweep ${tag}: no horizontal page scroll at any of ${n}`, !fail.scroll.length, fail.scroll.slice(0, 6));
       check('AC-28', `sweep ${tag}: nothing reaches past the page's right edge at any of ${n}`, !fail.past.length, fail.past.slice(0, 4));
-      check('header', `sweep ${tag}: the header stays in its row; one nav at every width`, !fail.header.length && !fail.nav.length, { header: fail.header.slice(0, 3), nav: fail.nav.slice(0, 6) });
-      check('AC-30', `sweep ${tag}: the compact header's buttons and the bottom bar are 44 px targets`, !fail.targets.length, fail.targets.slice(0, 3));
+      check('header', `sweep ${tag}: the header stays in its row; one nav (Desk, Results, History) at every width, with Settings as the header's gear and the shown screen current`, !fail.header.length && !fail.nav.length, { header: fail.header.slice(0, 3), nav: fail.nav.slice(0, 6) });
+      check('AC-30', `sweep ${tag}: every header control is a 44 px target at every width, and so is each bottom-bar button`, !fail.targets.length, fail.targets.slice(0, 3));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
       check('no-shift', `sweep ${tag}: from 710 px the edit bar holds its longest notes and its buttons inside it, inside the window and above the bottom bar`, !fail.bar.length, fail.bar.slice(0, 4));
       check('touch', `sweep ${tag}: read right after each resize, the pointer is touch up to 700 px (no hover, coarse) and a mouse above (hover, fine) at every one of ${n}`, !fail.pointer.length, fail.pointer.slice(0, 8));
@@ -1418,7 +1418,7 @@ try {
     // For the visual check: the edit bar above the bottom bar at a tablet width.
     await openSettings(b, { name: '820', width: 820, height: 1000, mobile: false }, 'light');
     await mouse('[data-bump="1"][data-for="desks.maxBusyDesks"]');
-    await viewShot('820-light-settings-tablet-editbar', 'Settings at 820 px: the edit bar floats above the bottom bar (two rows)');
+    await viewShot('820-light-settings-tablet-editbar', 'Settings at 820 px: the edit bar floats at the bottom (two rows); the nav stays in the header');
     await mouse('#discardBtn');
   }
 
@@ -1608,7 +1608,7 @@ Every screenshot was taken again. What changed, per fix:
   control); only the other symbols are editable. The candidate always starts
   with the floor in its saved order.
 - **Edit bar.** One row above 1180 px; two rows (note, then buttons) at 961 to
-  1180 px; up to 960 px it floats above the bottom bar (\`820-light-settings-tablet-editbar.png\`).
+  1180 px; up to 960 px it floats at the bottom, clear of the safe area, with the nav in the header (\`820-light-settings-tablet-editbar.png\`).
   The note keeps two lines' room, so no state changes the bar.
 - **Saved line (P6 carry-over).** Under a changed control, always one line
   reserved before editing. Long kept lists and wake windows use counts;

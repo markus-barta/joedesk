@@ -18,11 +18,13 @@ import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs
 import { phaseBChecks, deskRankingFocusChecks } from './browser/phase-b.mjs';
 import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
 import { historyControlChecks, historyFollowGrowthChecks } from './browser/history-controls.mjs';
+import { headerNavChecks } from './browser/header-nav.mjs';
 import { parseBoardSweepArgs, createBoardSweepPlan, boardSweepErrors, boardSweepTable } from './board-sweep-plan.mjs';
 
-// The widest window with the compact header (app.css). Plan before any side
-// effects, so invalid CLI options or unhandled breakpoints fail immediately.
-const COMPACT = 960;
+// The widest window with the phone's bottom bar (app.css); above it the nav
+// is in the header. Plan before any side effects, so invalid CLI options or
+// unhandled breakpoints fail immediately.
+const COMPACT = 480;
 const joeDirectory = new URL('../public/joe/', import.meta.url);
 const sweepPlan = createBoardSweepPlan({ mode: parseBoardSweepArgs(process.argv.slice(2)), compact: COMPACT,
   css: readFileSync(new URL('app.css', joeDirectory), 'utf8'),
@@ -1289,6 +1291,10 @@ try {
   await leaveSay(page);
   }
 
+  if (run('nav')) {
+    await headerNavChecks({ page, newBoard, check, shot });
+  }
+
   if (run('sweep')) {
   sweepRan = true;
   const beforeSweep = { checks: results.length, screenshots: shots.length };
@@ -1296,9 +1302,11 @@ try {
   // 7c · AC-28: the 360–1440 px grid ∪ boundaries in full; PRs keep the light grid
   // and dark boundaries, per sweepPlan. Both fonts, every screen, resizing the
   // live page. The page never scrolls sideways, nothing reaches past its
-  // right edge and no text overlaps other text. Up to COMPACT px the header
-  // is the phone's (the nav in the bottom bar, 44 px buttons, the light's
-  // icon on its first line); above, the desktop one. On Desk every light label,
+  // right edge and no text overlaps other text. Up to COMPACT px the nav is the
+  // phone's bottom bar; above, it is in the header, which keeps one row with
+  // its fitted steps. Settings is the header's gear at every width, and every
+  // header control is a 44 px target (the phone light's icon on its first
+  // line). On Desk every light label,
   // with every broker word, keeps the header in its row: nothing leaves it or overlaps,
   // nothing else moves, and the label stays inside its button. Each desk
   // card's header keeps one box with its longest state and heartbeat texts.
@@ -1346,29 +1354,30 @@ try {
       check('AC-28', `sweep ${tag}: no horizontal page scroll at any of ${n}`, !fail.scroll.length, fail.scroll.slice(0, 8));
       check('AC-28', `sweep ${tag}: nothing reaches past the page's right edge at any of ${n}`, !fail.past.length, fail.past.slice(0, 4));
       check('header', `sweep ${tag}: the status is exactly one line box; header items stay in the row without overlap or a partial wordmark at any of ${n}`, !fail.header.length, fail.header.slice(0, 4));
-      check('header', `sweep ${tag}: one nav at every width, the bottom bar up to ${COMPACT} px and the header's above, all four screens in view`, !fail.nav.length, fail.nav.slice(0, 8));
-      check('AC-30', `sweep ${tag}: the compact header's buttons and the bottom bar are 44 px targets up to ${COMPACT} px`, !fail.targets.length, fail.targets.slice(0, 4));
-      check('header', `sweep ${tag}: icons are centred, with the phone light's icon aligned to its first line, at every width`, !fail.icons.length, fail.icons.slice(0, 4));
+      check('header', `sweep ${tag}: one nav with Desk, Results and History at every width, the bottom bar up to ${COMPACT} px and the header's above, all in view; Settings is the header's gear; the shown screen is current`, !fail.nav.length, fail.nav.slice(0, 8));
+      check('AC-30', `sweep ${tag}: every header control is a 44 px target at every width, and so is each bottom-bar button up to ${COMPACT} px`, !fail.targets.length, fail.targets.slice(0, 4));
+      check('header', `sweep ${tag}: icons are centred (the gear's too), with the phone light's icon aligned to its first line, at every width`, !fail.icons.length, fail.icons.slice(0, 4));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: each desk card's header keeps one box with its longest state and heartbeat texts, with one-line check-ins and a full status title; below 340 px the check-in shares the name row`, !fail.cards.length, fail.cards.slice(0, 4));
       if (screen === 'desk') check('no-shift', `sweep ${tag}: ${light.labels.length} status sentences at every width: the fixed control gives its full sentence accessibly, nothing else in the header or the page moves`, !fail.labels.length, fail.labels.slice(0, 4));
       check('touch', `sweep ${tag}: read right after each resize, the pointer is touch up to 700 px (no hover, coarse) and a mouse above (hover, fine) at every one of ${n}`, !fail.pointer.length, fail.pointer.slice(0, 8));
     }
   }
-  // For the visual check: the compact header (720, 800, 880) and, just above
-  // it, the desktop header with the longest light label in the wide font;
-  // the three-column desk cards with check-ins on the name row (1120).
-  for (const [width, theme, screen] of [[720, 'light', 'desk'], [800, 'dark', 'desk'], [880, 'light', 'desk'], [880, 'dark', 'history']]) {
-    const viewport = { name: String(width), width, height: 900, mobile: false };
+  // For the visual check: the header with the nav in it from just above the
+  // bottom bar (490, 600) to the design's tablet (820, 880), Settings with its
+  // gear current; then, just above the bar, the longest light label in the
+  // wide font; the three-column desk cards with check-ins on the name row (1120).
+  for (const [width, theme, screen] of [[490, 'light', 'desk'], [600, 'dark', 'settings'], [820, 'light', 'desk'], [880, 'dark', 'history']]) {
+    const viewport = { name: String(width), width, height: 900, mobile: width <= 700 };
     await configure(page, viewport, theme);
     await load(page, b.url, screen);
-    await shot(page, viewport, `${width}-${theme}-${screen}-header`, `${screen[0].toUpperCase()}${screen.slice(1)} at ${width} px: the compact header (brand, PAPER, the light with its broker word, 44 px theme button) and the nav in the bottom bar${screen === 'desk' && width < 840 ? '; the two-column desk cards put the check-in on the name row' : ''}`);
+    await shot(page, viewport, `${width}-${theme}-${screen}-header`, `${screen[0].toUpperCase()}${screen.slice(1)} at ${width} px: the header (brand, PAPER, Desk · Results · History, the light, the Settings gear${screen === 'settings' ? ' marked current' : ''}, the theme button), fitted to one row; no bottom bar${screen === 'desk' && width > 700 && width < 840 ? '; the two-column desk cards put the check-in on the name row' : ''}`);
   }
   const cards = { name: '1120', width: 1120, height: 900, mobile: false };
   await configure(page, cards, 'light');
   await load(page, b.url, 'desk');
   await shot(page, cards, '1120-light-desk-cards', 'Desk at 1120 px: the desktop header, and the three desk cards (under 340 px wide) with the check-in on the name row');
-  const edge = { name: String(COMPACT + 10), width: COMPACT + 10, height: 900, mobile: false };
+  const edge = { name: String(COMPACT + 10), width: COMPACT + 10, height: 900, mobile: COMPACT + 10 <= 700 };
   await configure(page, edge, 'light');
   await load(page, b.url, 'desk');
   await page.evaluate(`(() => { document.documentElement.style.setProperty('--font', ${JSON.stringify(WIDE_FONT)}); const h = document.getElementById('hdrHealth');
@@ -1377,7 +1386,7 @@ try {
     // Staged for the picture: the resize and clock renders keep these words.
     const html = h.innerHTML; Object.defineProperty(h, 'innerHTML', { configurable: true, get: () => html, set: () => {} }); })()`);
   await settle(page);
-  await shot(page, edge, `${edge.name}-light-desk-header-longest-wide`, `Desk at ${edge.name} px in the wide font, the longest light label put in: the brand yields and gaps tighten as needed; the status and broker word stay on one line inside the button`);
+  await shot(page, edge, `${edge.name}-light-desk-header-longest-wide`, `Desk at ${edge.name} px in the wide font, the longest light label put in: the header's fitted steps keep one row with the nav in it; the status and broker word stay on one line inside the button`);
   sweepErrors.push(...boardSweepErrors(sweepPlan, { checks: results.length - beforeSweep.checks,
     screenshots: shots.length - beforeSweep.screenshots, rounds }));
   }
@@ -1594,12 +1603,17 @@ separately checks the collapsed summaries for every non-green state.
 
 ## Header at every width (AC-28)
 
-Up to ${COMPACT} px the header is the phone's: brand, PAPER, the light (with its
-broker word above 700 px) and a 44 px theme button; the nav is the bottom bar.
-Above ${COMPACT} px it is the desktop header. The wordmark yields to its icon
-when its flex slot is too small; if needed, measured overflow tightens gaps
-and padding. The status and broker columns reserve their widest words in the
-rendered font and remain on one line. Up to 900 px a kept holding has two
+The header is one row at every width: brand, PAPER, Desk · Results · History,
+the light, Settings as a gear and the theme button; every control is a 44 px
+target. Up to ${COMPACT} px the nav is a bottom bar (a solid surface with a
+hairline, padded clear of the safe area; the page ends above it). When the
+measured row does not fit, fitted steps apply in order: the wordmark goes, the
+nav drops its icons, gaps tighten, the nav keeps its icons alone (each keeps
+its name), and last the light narrows without its chevron. The status and
+broker columns reserve their widest words in the rendered font and remain on
+one line. The \`routes\`, \`bar\` and \`header\` checks walk the nav, the gear,
+links and Back/Forward, and measure the bar at 320–390 px and the header at
+481–820 px. Up to 900 px a kept holding has two
 lines. The sweep (\`sweep\`) uses the width plan above in this machine's font
 and the wide one, on every screen: no horizontal page scroll, nothing past the page's right
 edge, no text over other text, the header in one row with one nav, 44 px
@@ -1609,8 +1623,10 @@ moves nothing. Read right after each resize, the pointer is touch up to
 card's state never runs under its heartbeat line: the state can end in an
 ellipsis with a complete title, while the check-in stays on one line. Under
 340 px it shares the name row, with the state below, as on phones. See
-\`720-light-desk-header.png\`, \`800-dark-desk-header.png\`,
-\`880-light-desk-header.png\`, \`880-dark-history-header.png\`,
+\`490-light-desk-header.png\`, \`600-dark-settings-header.png\`,
+\`820-light-desk-header.png\`, \`880-dark-history-header.png\`,
+\`320-light-desk-bottom-bar.png\`, \`390-dark-settings-bottom-bar.png\`,
+\`481-light-settings-header-wide.png\`,
 \`${COMPACT + 10}-light-desk-header-longest-wide.png\` and
 \`1120-light-desk-cards.png\`.
 ${deferredLight.length ? `
