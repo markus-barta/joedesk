@@ -646,6 +646,28 @@ test('JOED-153 M5: a desk start the market calendar does not cover cannot be pro
   assert.equal(desk.noTradesSinceStart(inside, desk.deskFacts(inside), 'j'), '2026-01-02');
 });
 
+// Fix round 2, finding 4: the sessions group's touch steps take the gate's
+// check() with the page. Offline, on a scripted page, they reach all three of
+// their checks without throwing.
+test('JOED-153 browser touch steps run offline with the gate’s own check()', async () => {
+  const { touchChecks } = await import('../scripts/browser/desk-sessions.mjs');
+  // The fifth bar, as the steps tap it: Wed 7 Oct.
+  const href = '#results?period=day&date=2026-10-07&desk=joe';
+  const want = { bars: { joe: SESSIONS.map(day => ({ day, units: 200000000n, href: day === '2026-10-07' ? href : '#', today: false })) } };
+  const first = { shown: true, text: `Wed 7 Oct · +€ 2,00 after fees · from Results Open in Results`, link: href, icon: '#i-chev-r', tapped: true, label: true, inside: true, navigated: [], screen: 'desk' };
+  const closed = { ...first, shown: false, tapped: false };
+  const states = [first, { ...closed, navigated: [href] }, closed, closed];
+  const sent = [], results = [];
+  const page = {
+    async evaluate(expr) { if (expr.includes('.bars-tap')) return states.shift(); return expr.includes('getBoundingClientRect') ? { x: 20, y: 400 } : undefined; },
+    async s(method) { sent.push(method); return {}; },
+  };
+  await touchChecks({ page, check: (ac, name, ok) => results.push([ac, ok, name]), tag: '390 light sessions live', want });
+  assert.deepEqual(results.map(([ac, ok]) => [ac, ok]), [['M4', true], ['M4', true], ['M4', true]], JSON.stringify(results));
+  assert.equal(sent.filter(m => m === 'Input.dispatchTouchEvent').length, 10, 'five taps');
+  assert.equal(states.length, 0);
+});
+
 // The browser check (scripts/browser/desk-sessions.mjs) expects what Desk
 // renders from the same design fixtures, and both fixtures pass the board's
 // ingress, so the browser gate can fail only on what the page draws.

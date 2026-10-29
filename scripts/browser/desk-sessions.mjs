@@ -14,7 +14,7 @@ import * as M from '../../public/joe/results-model.js';
 import * as hm from '../../public/joe/history-model.js';
 import { eur } from '../../public/joe/format.js';
 import { percentOf } from '../../public/joe/performance.js';
-import { barLabel, resultsHref, percentHtml } from '../../public/joe/desk.js';
+import { barLabel, resultsHref, percentHtml, sessionWarning } from '../../public/joe/desk.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 // Thu 15 Oct 2026, 04:00 in New York: before the open, Desk shows Wednesday.
@@ -56,12 +56,13 @@ export function expectedSessions({ record, snapshot, points, nowMs, live }) {
       const units = decimalUnits(deskOf(id).money.dayPnl.amount);
       return { day: k, today: true, href, units, label: barLabel(units), name: `Today · ${sessionDayName(k)}: ${eur(units, true)}, so far · after fees` };
     }
-    // A day without a trade or a change in the record is a dash, as on Results.
-    const { R } = dayOf(k, [id]);
-    if (R.empty) return { day: k, today: false, href, units: null, label: null, name: `${sessionDayName(k)}: no trades recorded` };
+    // A day without a trade or a change in the record is a dash, as on
+    // Results, with the day's own coverage marker.
+    const { R } = dayOf(k, [id]), warning = sessionWarning({ ix, today }, k, [id]);
+    if (R.empty) return { day: k, today: false, href, units: null, label: null, name: `${sessionDayName(k)}: no trades recorded${warning ? ` · ${warning.text}` : ''}` };
     const units = R.units.net;
     return { day: k, today: false, href, units, label: units === null ? null : barLabel(units),
-      name: `${sessionDayName(k)}: ${units === null ? '' : eur(units, true)}, after fees · from Results` };
+      name: `${sessionDayName(k)}: ${units === null ? '' : eur(units, true)}, after fees · from Results${warning ? ` · ${warning.text}` : ''}` };
   })]));
   let last = null;
   if (!live) {
@@ -146,7 +147,9 @@ const TAP_STATE = `(() => {
     label: [...bar.querySelectorAll('.bl')].some(shown), inside: r.left >= c.left - 0.5 && r.right <= c.right + 0.5,
     navigated: window.__barNav ?? [], screen: document.body.dataset.screen };
 })()`;
-async function touchChecks(page, tag, want) {
+// Exported for the offline run of these steps (test/desk-session.mjs); the
+// gate's own check() comes in with the page, never from an outer scope.
+export async function touchChecks({ page, check, tag, want }) {
   const bar = '#desk-joe .bars a.b:nth-of-type(5)', w = want.bars.joe[4];
   const words5 = words(w.units === null ? sessionDayName(w.day) : `${sessionDayName(w.day)} · ${eur(w.units, true)}`);
   await page.evaluate(`window.__barNav = []; addEventListener('hashchange', e => __barNav.push(new URL(e.newURL).hash))`);
@@ -256,7 +259,7 @@ export async function deskSessionChecks({ page, newBoard, check, shot, auditScre
       // Touch (gate finding 5): a first tap shows the tip with the way to
       // Results and stays on Desk; a second tap on the bar opens Results; Escape
       // or a tap elsewhere closes the tip.
-      if (viewport.mobile && live) await touchChecks(page, tag, want);
+      if (viewport.mobile && live) await touchChecks({ page, check, tag, want });
       if (!live) {
         const hero = r.hero, last = want.last;
         check('A2', `${tag}: before the open the hero shows the last session from Results with its base`,
