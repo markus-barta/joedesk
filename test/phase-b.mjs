@@ -11,7 +11,7 @@ import { atomicWrite } from '../server/storage.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { scenario, NOW, at, advance } from '../scripts/browser/board.mjs';
-import { deskRankingSnapshot, mixedHeaderOk, mixedDesksOk } from '../scripts/browser/phase-b.mjs';
+import { deskRankingSnapshot, mixedHeaderOk, mixedDesksOk, DETAIL_MONEY_SELECTOR } from '../scripts/browser/phase-b.mjs';
 const { brokenJourneyTotalsOk } = await import('../scripts/browser/desk-checks.mjs');
 const { heroLeft, positionsHtml, keptHtml, positionSectionReason, cellView, compactDesk, headerHealth, healthPop } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
@@ -36,6 +36,15 @@ const context = data => {
   return { feeds, now, states: panelStates(feeds, now) };
 };
 
+test('JOED-163: Phase B measures all nine detail amounts through mixed and recovered Results links', () => {
+  for (const data of [mixed, exact]) {
+    const ctx = context(data), cards = htmlDocument(['j', 'joe', 'joel'].map(id => deskCard(ctx, id)).join(''));
+    const amounts = cards.querySelectorAll(DETAIL_MONEY_SELECTOR);
+    assert.equal(amounts.length, 9, 'the browser geometry/containment selector includes linked amounts and dashes');
+    assert.ok(amounts.some(el => el.parentElement.tagName === 'a'), 'real Results-linked amounts');
+    assert.equal(amounts.some(el => el.textContent === '—'), data === mixed, 'the mixed view also has direct dashes');
+  }
+});
 const rejects = (data, path, rule) => {
   const result = validateContract('data', data);
   assert.equal(result.ok, false);
