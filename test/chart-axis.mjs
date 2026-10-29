@@ -418,9 +418,9 @@ test('JOED-154 fix 8: a dot is drawn only where all its ink fits in the plot; 5,
   assert.deepEqual(marks, [['above', Math.round(scale.X(3))], ['above', Math.round(scale.X(5))], ['below', Math.round(scale.X(9))], ['above', Math.round(scale.X(12))]],
     '5,01, 4,99 and −4,99 alone, and the newest 4,99, are chevrons at the edges they reach');
   assert.ok(c.el.querySelectorAll('circle').some(d => d.getAttribute('r') === '2' && Math.abs(Number(d.getAttribute('cx')) - scale.X(7)) < 0.11), 'the isolated 4 keeps its dot');
-  // Inspecting a value whose dot would not fit shows its chevron, not the dot; one that fits shows its dot.
+  // Inspecting the newest 4,99, whose dot would not fit: no dot, and its own chevron marks it (no second one); one that fits shows its dot.
   scale.inspectAt(scale.X(12));
-  assert.deepEqual([c.el.querySelector('.xd').getAttribute('visibility'), c.el.querySelector('.xc').getAttribute('visibility')], ['hidden', 'visible']);
+  assert.deepEqual([c.el.querySelector('.xd').getAttribute('visibility'), c.el.querySelector('.xc').getAttribute('visibility')], ['hidden', 'hidden']);
   assert.deepEqual(inkOutside(c.el, scale), []);
   scale.inspectAt(scale.X(11));
   assert.deepEqual([c.el.querySelector('.xd').getAttribute('visibility'), c.el.querySelector('.xc').getAttribute('visibility')], ['visible', 'hidden']);
@@ -454,4 +454,26 @@ test('JOED-154 fix 9: every chevron is drawn once, outside the clipped lines, wh
     assert.equal(marks.length, 1);
     assert.deepEqual(inkOutside(c.el, scale), [], `pad ${JSON.stringify(pad)}: whole inside the chart`);
   }
+});
+
+// ---------- Fix round 4 (the Codex re-gate on 9d98a06) ----------
+test('JOED-154 fix 10: an inspected value beyond a custom axis is marked by one chevron: its own when it has one, else the inspection’s', t => {
+  const c = canvas(t);
+  // The chevrons on show: the drawn ones and the inspection's when visible, by where their tips are.
+  const shown = () => c.el.querySelectorAll('path').filter(p => p.getAttribute('data-beyond') !== null || (p.getAttribute('class') === 'xc' && p.getAttribute('visibility') === 'visible'))
+    .map(p => Math.round(pathPoints(p.getAttribute('d'))[1][0]));
+  const draw = pts => drawChart(c.el, { series: [{ pts, color: 'var(--desk-j)', w: 1.8, area: false }], xDomain: [0, pts.length - 1], zero: true, yFmt: changeAxis, tickGap: 56,
+    axis: { mode: 'custom', min: -5, max: 5 }, tipFmt: () => ({ html: 'J', text: 'J' }) });
+  // The re-gate's case: points 0 and 9, the newest inspected. 9d98a06 showed two identical chevrons.
+  let scale = draw([{ x: 0, v: 0 }, { x: 1, v: 9 }]);
+  scale.inspectAt(scale.X(1));
+  assert.deepEqual(shown(), [Math.round(scale.X(1))], 'one visible chevron for the newest value');
+  // A value beyond the axis inside a line has no chevron of its own: inspecting it shows the inspection's.
+  scale = draw([{ x: 0, v: 0 }, { x: 1, v: 9 }, { x: 2, v: 1 }]);
+  assert.deepEqual(shown(), [], 'nothing marked before inspection: the line is cut at the edge');
+  scale.inspectAt(scale.X(1));
+  assert.deepEqual(shown(), [Math.round(scale.X(1))], 'one chevron while it is inspected');
+  scale.inspectAt(scale.X(2));
+  assert.deepEqual(shown(), [], 'and none once a value that fits is inspected');
+  assert.equal(c.el.querySelector('.xd').getAttribute('visibility'), 'visible');
 });

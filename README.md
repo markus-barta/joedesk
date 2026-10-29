@@ -949,8 +949,12 @@ dot (an isolated value's, the newest value's with its halo, the inspected
 one's) is drawn only where all its ink fits inside the plot; a value beyond
 the axis or at its very edge is instead a small chevron at the edge it
 reaches, drawn once, whole and outside the clipped lines (which are clipped
-to the plot box plus half a line's width). Automatic fits hold their values,
-so their dots are drawn as before. A zero line is drawn whenever zero is in
+to the plot box plus half a line's width); an inspected value that already
+has its chevron is marked by that one alone. Automatic fits (Auto, Max) keep
+their dots exactly as before, a compatibility choice: during a re-fit glide,
+or settled on a chart without a margin, the newest value's ring and halo can
+paint a few pixels past the plot's edge (History's 8 % margin keeps settled
+dots inside). A zero line is drawn whenever zero is in
 view, whether or not a label sits there. The choice is kept per
 chart and viewer in this browser (`createAxisMode(id)`: `get()` and
 `setAxisMode({ mode, min, max })`, which returns `{ ok, choice }` or
