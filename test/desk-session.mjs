@@ -11,7 +11,8 @@ import { zonedInstant, nyDay, NY } from '../time.mjs';
 const { boardStates } = await import('../public/joe/board-state.js');
 const { indexResults, rollup, moneyContext, periodOf, periodBase, DESK_IDS } = await import('../public/joe/results-model.js');
 const { resultsView } = await import('../public/joe/results.js');
-const { cellReason } = await import('../public/joe/health.js');
+const { cellReason, boardHealthPresentation } = await import('../public/joe/health.js');
+const { TERMS } = await import('../public/joe/terms.js');
 const { eur } = await import('../public/joe/format.js');
 const { STARTING_MONEY, percentOf, todayBase, todayPercent, exactCell } = await import('../public/joe/performance.js');
 const desk = await import('../public/joe/desk.js');
@@ -620,8 +621,11 @@ test('JOED-153: a phone row names the Results feed’s fault independently of th
   const retained = c => { c.states.results = { ...c.states.results, state: 'broken', retained: true, reason: 'contract_invalid', ageSeconds: 120 }; return c; };
   const detail = c => htmlDocument(desk.compactDesk(c, 'j')).querySelector('.disclosure-warning .vh')?.textContent ?? '';
   const fault = `Results: last good · 2${NB}min ago · ${cellReason('contract_invalid')}`;
-  // An empty retained record: no figure and no day marker, and still the fault.
-  assert.equal(detail(retained(context(at, { edit: v => ({ ...v, days: [], trades: [] }) }))), fault);
+  // An empty retained record: no figure and no day marker, and still the fault;
+  // its "no trades recorded" sentence says the record is the last good one.
+  const emptyKept = retained(context(at, { edit: v => ({ ...v, days: [], trades: [] }) }));
+  assert.equal(detail(emptyKept), fault);
+  assert.equal(htmlDocument(desk.heroLeft(emptyKept)).querySelector('.say').textContent, `No trades recorded on Wednesday · Results last good, 2${NB}min ago · 1${NB}position held overnight`);
   // A Partial day from a retained record: the day's marker and the feed's fault.
   const both = detail(retained(context(at)));
   assert.ok(both.includes(fault) && both.includes("Last session: partial · this day's record is incomplete. FX missing"), both);
@@ -678,9 +682,9 @@ test('JOED-153 Results feed state on every Desk surface that shows Results data,
   const FEED = {
     ok: { cell: c => c, words: null },
     stale: { cell: c => ({ ...c, state: 'stale', reason: 'snapshot_stale', ageSeconds: 300 }), words: `Results as of 5${NB}min ago · updates are late`,
-      row: `Results: stale · 5${NB}min ago · updates are late`, mark: 'Results stale' },
+      row: `Results: stale · 5${NB}min ago · updates are late`, mark: 'Results stale', short: `Results as of 5${NB}min ago` },
     'retained (last good)': { cell: c => ({ ...c, state: 'broken', retained: true, reason: 'contract_invalid', ageSeconds: 300 }), words: `Last good results, 5${NB}min ago · ${rejected}`,
-      row: `Results: last good · 5${NB}min ago · ${rejected}`, mark: 'Last good' },
+      row: `Results: last good · 5${NB}min ago · ${rejected}`, mark: 'Last good', short: `Results last good, 5${NB}min ago` },
     broken: { cell: () => ({ state: 'broken', value: null, retained: false, reason: 'contract_invalid', ageSeconds: null }), words: `Results unavailable · ${rejected}`,
       row: `Results: unavailable · ${rejected}`, none: true },
   };
@@ -709,11 +713,22 @@ test('JOED-153 Results feed state on every Desk surface that shows Results data,
         const first = htmlDocument(desk.heroLeft(ctx)).querySelector('[data-cell="hero.day"]');
         return [text(first.querySelector('.primary-caption')), (first.querySelector('.fig-link') ?? first.querySelector('.bn')).getAttribute('aria-label')];
       })() : undefined,
+      // Fix round 4: the sentence of Results figures before the open, its tip
+      // (ui.js puts the term's name and the sentence's own nodes there), and
+      // the Details row that names the source. Without a record the sentence
+      // shows no Results figure, so it has nothing to qualify.
+      'hero sentence': phase === 'pre-open' && !feed.none ? text(htmlDocument(desk.heroLeft(ctx)).querySelector('.say')) : undefined,
+      'sentence tip': phase === 'pre-open' && !feed.none ? `${TERMS.today[0]} ${htmlDocument(desk.heroLeft(ctx)).querySelector('.say [data-clamp]').textContent}` : undefined,
+      'details': phase === 'pre-open' && !feed.none ? (() => {
+        const pop = htmlDocument(desk.healthPop(ctx, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now)));
+        const i = pop.querySelectorAll('dt').findIndex(dt => dt.textContent === 'Last session');
+        return pop.querySelectorAll('dd')[i]?.textContent ?? '';
+      })() : undefined,
     };
     for (const [surface, got] of Object.entries(surfaces)) {
       if (got === undefined) continue;
       const parts = [got].flat();
-      const want = surface === 'phone row' ? feed.row : surface === 'hero last session' && !feed.none ? null : feed.words;
+      const want = surface === 'phone row' ? feed.row : ['hero sentence', 'sentence tip'].includes(surface) ? feed.short : surface === 'hero last session' && !feed.none ? null : feed.words;
       let ok;
       if (!feed.words) ok = parts.every(p => !ANY.test(p));
       else if (surface === 'hero last session' && !feed.none) ok = parts[0].includes(feed.mark) && parts[1].includes(feed.words);
@@ -723,8 +738,9 @@ test('JOED-153 Results feed state on every Desk surface that shows Results data,
     }
   }
   assert.deepEqual(failures, []);
-  // 3 phases × 4 states × the surfaces that show Results data there.
-  assert.equal(checked, 37);
+  // 3 phases × 4 states × the surfaces that show Results data there
+  // (round 4 adds the pre-open sentence, its tip and the Details row).
+  assert.equal(checked, 46);
 });
 
 // The browser check (scripts/browser/desk-sessions.mjs) expects what Desk

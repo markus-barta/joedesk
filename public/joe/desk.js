@@ -333,7 +333,10 @@ export function healthPop(ctx, health) {
       : dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
     // Before the open Desk's first figure is the last session's, from Results.
     const label = now ? sessionLabel(now) : null;
-    if (label?.phase === 'last') rows.push(['Last session', esc(`${sessionDayName(label.day)} from Results · Day: closed trades plus still-open movement, after fees`)]);
+    if (label?.phase === 'last') {
+      const feed = feedMark(resultsView(ctx));
+      rows.push(['Last session', esc(`${sessionDayName(label.day)} from Results · Day: closed trades plus still-open movement, after fees${feed ? ` · ${feed.text}` : ''}`)]);
+    }
     rows.push(['Open positions', esc(openMethodLabel(data.pnlSources?.open) ?? `Not available · ${cellReason(data.pnlSources?.open?.reason ?? states['today.openPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Source', `${esc(data.source.label)} · paper only`]);
   }
@@ -645,15 +648,20 @@ export function heroSentence(ctx, facts = deskFacts(ctx)) {
     // without a figure for another reason is not known.
     const quiet = DESKS.filter(id => facts.last[id].kind === 'empty');
     const qualified = f => (f.warning ? ` (${f.warning.label})` : '');
+    // Its figures come from the record: an old or kept record says so here
+    // too, as beside the figure, so the sentence (and its tip) never stands
+    // without it.
+    const feed = feedMark(facts.view), source = feed ? [esc(feed.short)] : [];
     if (days.today.kind === 'notExact') extra.push(`Today: ${householdDayReason(states, data)?.replace(/^Not exact/, NOT_EXACT) || NOT_EXACT}`);
     if (shown.length || (quiet.length && quiet.length < DESKS.length)) {
       const missing = DESKS.filter(id => !shown.includes(id) && !quiet.includes(id));
       return `${weekdayOf(label.day)}: ${[...DESKS.flatMap(id => shown.includes(id) ? [amount(id, facts.last[id].units)] : quiet.includes(id) ? [`${LABEL[id]} no trades recorded${qualified(facts.last[id])}`] : []),
-        ...(missing.length ? [`${deskNames(missing)} not known`] : []), ...extra].join(' · ')}`;
+        ...(missing.length ? [`${deskNames(missing)} not known`] : []), ...source, ...extra].join(' · ')}`;
     }
-    if (quiet.length) return `No trades recorded on ${weekdayOf(label.day)}${qualified(facts.last.all)}${extra.length ? ` · ${extra.join(' · ')}` : '.'}`;
+    const tail = [...source, ...extra];
+    if (quiet.length) return `No trades recorded on ${weekdayOf(label.day)}${qualified(facts.last.all)}${tail.length ? ` · ${tail.join(' · ')}` : '.'}`;
     // No desk has a figure for that day: the figure's caption says why once.
-    return extra.length ? capital(extra.join(' · ')) : `No result for ${weekdayOf(label.day)} from the trade record.`;
+    return extra.length ? capital(tail.join(' · ')) : `No result for ${weekdayOf(label.day)} from the trade record${source.length ? ` · ${source[0]}` : ''}.`;
   }
   const shown = DESKS.flatMap(id => {
     const units = days[id].kind === 'exact' ? exactCell(states[`desks.${id}.dayPnl`]) : null;
@@ -683,7 +691,10 @@ export const recordState = view => view.cell && view.ix && view.cell.state !== '
 // record, where Desk says Results is unavailable instead of showing data.
 export function feedMark(view) {
   const text = recordState(view);
-  return text ? { label: view.cell.retained ? 'Last good' : 'Results stale', text } : null;
+  if (!text) return null;
+  const cell = view.cell, ago = cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`;
+  // `short`: the state and its age, for a sentence that already names the day.
+  return { label: cell.retained ? 'Last good' : 'Results stale', text, short: cell.retained ? `Results last good, ${ago}` : `Results as of ${ago}` };
 }
 // A last-session figure's markers: the day's own Partial/Stale (beside an
 // amount, and beside an empty day's dash, whose "no trades recorded" a
