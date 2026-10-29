@@ -6,6 +6,7 @@ import { setDeskDisclosures } from './desk-disclosures.mjs';
 import { ingress, at, advance } from './board.mjs';
 
 const fixtures = JSON.parse(readFileSync(new URL('../../fixtures/phase-b.json', import.meta.url)));
+export const DETAIL_MONEY_SELECTOR = '.dnums .v .bn';
 
 export function deskRankingSnapshot(data) {
   const next = advance(data, at(data.generatedAt, 10), data.seq + 1, { cents: [0, 0, 0] });
@@ -104,12 +105,12 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
     await load(page, b.url);
     await setDeskDisclosures(page, true);
     if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
-    // M6: a value is its figure's link, a dash is bare; both are the amount.
-    const AMOUNT = '.dnums .v > .bn, .dnums .v > .fig-link > .bn';
-    const geometry = () => page.evaluate(`__audit.rects(['.dnums > div', '.dnums .v', ${JSON.stringify(AMOUNT)}])`);
+    // JOED-153 wraps exact Today/Since figures in Results links. Dashes
+    // remain direct children: measure every amount in both states.
+    const geometry = () => page.evaluate(`__audit.rects(${JSON.stringify(['.dnums > div', '.dnums .v', DETAIL_MONEY_SELECTOR])})`);
     const before = await geometry();
     const moneyContained = async state => {
-      const money = await page.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(AMOUNT)}), el => {
+      const money = await page.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(DETAIL_MONEY_SELECTOR)}), el => {
         const range = document.createRange(); range.selectNodeContents(el);
         const text = range.getBoundingClientRect(), box = el.getBoundingClientRect();
         return { text: el.textContent, left: text.left - box.left, right: box.right - text.right, height: box.height };
@@ -162,8 +163,9 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
       await settle(page);
       result = await inspect();
       await moneyContained('recovered');
+      const after = await geometry();
       check('no-shift', `${tag}: mixed to recovered detail money has exactly 0 px layout shift`,
-        JSON.stringify(before) === JSON.stringify(await geometry()));
+        before.length === 27 && after.length === 27 && JSON.stringify(before) === JSON.stringify(after), { before, after });
     }
     check('phase-b', `${tag}: exact totals render Today and Since start in euros and percent`,
       result.day === '+€50,00' && result.since === '+€150,00' && result.percentages.join() === '+0,33%,+1,00%', result);

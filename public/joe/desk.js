@@ -535,7 +535,7 @@ export function startsDiffer(feeds) {
 // unavailable even if a faulty desk still shows its last good observation;
 // its caption names that desk's own word, as do Details and the cards.
 // For a not-exact Today, preserve the existing shared-reason presentation.
-function householdPnlReason(states, data, field, sharedReason = null) {
+export function householdPnlReason(states, data, field, sharedReason = null) {
   if (absentPnl(states, data, field)) return null;
   const results = classifyCells(states, data, field);
   const faulty = DESKS.filter(id => results[id].kind === 'fault');

@@ -60,6 +60,8 @@ const { periodOf, resultsToday } = await import('../public/joe/results.js');
 const { TERMS } = await import('../public/joe/terms.js');
 const { singleMissingDesk, coupledUnavailable } = await import('../scripts/browser/board.mjs');
 const { switchSetSnapshot, cashSessionSnapshot } = await import('../scripts/browser/settings-fixtures.mjs');
+const { heroProblemCaption } = await import('../scripts/browser/desk-checks.mjs');
+const { heroWordingFixtures } = await import('../scripts/browser/hero-wording-fixtures.mjs');
 
 const read = file => JSON.parse(readFileSync(new URL(`../fixtures/${file}`, import.meta.url)));
 const valid = read('valid.json');
@@ -83,6 +85,23 @@ function board(fixture, { cold = false, display = false } = {}) {
 }
 const fixture = id => read(`failures/${id}.json`);
 const presentation = (id, opts) => { const b = board(fixture(id), { ...opts, display: true }); return health.boardHealthPresentation(b.states, b.feeds, b.now); };
+
+test('JOED-163: P3 fixture captions keep each household’s classified word, desk attribution and shared reason', () => {
+  const derived = { ...heroWordingFixtures(valid.data), 'p3-coupled-unavailable': coupledUnavailable, 'p3-single-missing-desk': singleMissingDesk };
+  for (const id of ['p3-mixed-not-exact-fault', 'p3-not-exact-yet', 'p3-shared-not-exact', 'p3-coupled-unavailable', 'p3-single-missing-desk']) {
+    const ctx = board(derived[id](), { display: true }), hero = htmlDocument(heroLeft(ctx));
+    for (const c of hero.querySelectorAll('[data-cell]')) {
+      if (c.dataset.state === 'fresh') continue;
+      const expected = heroProblemCaption(ctx, c.dataset.cell);
+      const actual = expected.section ? hero.querySelector('.board-caption').textContent
+        : (c.querySelector('.account-caption')?.children[0] ?? c.querySelector('.c')).textContent;
+      const text = expected.text.replace(/<[^>]*>/g, '');
+      assert.equal(expected.section ? actual.includes(text) : actual === text, true, `${id} ${c.dataset.cell}: ${actual} != ${text}`);
+    }
+    if (id === 'p3-mixed-not-exact-fault') assert.deepEqual(heroProblemCaption(ctx, 'hero.open'),
+      { section: false, text: 'Last good for J, Joe and Joel · not reported by the broker' });
+  }
+});
 
 test('format: Austrian digits, true minus, joined units, zero without sign', () => {
   assert.equal(format.money(-4.05, 'EUR', true), '−€ 4,05');

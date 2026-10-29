@@ -2,6 +2,21 @@
 // No production test hooks or storage are needed.
 import { settle } from './shots.mjs';
 
+// JOED-157: the household summary names its faulty desks. The complete
+// reason is stated once across its independent figures, in the title and
+// accessible text; a short first-figure warning need not repeat that reason.
+export function collapsedMoneySummariesOk(snapshot, neutral) {
+  const controls = snapshot.controls.filter(c => ['j', 'joe', 'joel', 'account'].includes(c.key));
+  const reason = neutral ? 'not exact' : 'not reported by the broker';
+  return controls.map(c => c.key).sort().join() === 'account,j,joe,joel' && controls.every(c => {
+    const warning = c.key === 'account' ? `Open result: ${neutral ? 'not exact' : 'unavailable for J, Joe and Joel'}`
+      : `Today: ${neutral ? 'not exact' : 'unavailable · not reported by the broker'}`;
+    return c.hidden && !c.visible && c.expanded === 'false' && c.warning === warning &&
+      c.icon === (neutral ? '#i-info' : '#i-stop') && c.detail.startsWith(warning) && c.detail.includes(reason) &&
+      (neutral || c.detail.split(reason).length === 2) && c.accessible === c.detail;
+  }) && snapshot.horizontal.scroll <= snapshot.horizontal.inner;
+}
+
 export async function setDeskDisclosures(page, open) {
   await page.evaluate(`(() => {
     if (!matchMedia('(max-width: 480px)').matches) return;
@@ -39,7 +54,8 @@ export async function phoneDeskSnapshot(page) {
         detailValues: [...document.querySelectorAll('#detail-' + e.dataset.deskDisclosure + ' .dnums .v .bn')].filter((v, i) => i !== 1).map(v => v.textContent) })),
       controls: controls.map(e => { const body = document.getElementById(e.getAttribute('aria-controls')), summary = e.querySelector('.summary-text');
         return { ...rect(e), key: e.dataset.deskDisclosure, expanded: e.getAttribute('aria-expanded'), hidden: body.hidden, visible: __audit.visible(body),
-          warning: summary?.innerText ?? '', detail: summary?.title ?? '', icon: e.querySelector('.disclosure-warning use')?.getAttribute('href') ?? null }; }),
+          warning: summary?.innerText ?? '', detail: summary?.title ?? '', accessible: e.querySelector('.disclosure-warning .vh')?.textContent ?? '',
+          icon: e.querySelector('.disclosure-warning use')?.getAttribute('href') ?? null }; }),
     };
   })()`);
 }
