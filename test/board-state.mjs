@@ -1821,3 +1821,24 @@ test('JOED-148: every desk and household Today combination matches the plain-wor
   assert.equal(green, 3 ** 3 * 2, 'green only for fine desks beside a current or not-exact household');
 });
 
+// The re-gate's Medium: the household Today withheld as not exact while every
+// desk's own Today is exact. The one "Today’s result" row still says why.
+function householdNotExact(reason) {
+  const data = structuredClone(exact);
+  data.totals.dayPnl = null; (data.totals.reasons ??= {}).dayPnl = reason;
+  Object.assign(data.pnlSources.day, { status: 'unavailable', method: null, observedAt: null, reason });
+  assert.equal(validateContract('data', data).ok, true);
+  return data;
+}
+test('JOED-148 re-gate Medium: a household Today withheld as not exact beside three exact desks is explained in its one Details row', () => {
+  for (const reason of NOT_EXACT_REASONS) {
+    const view = ctx(householdNotExact(reason));
+    assert.deepEqual(localBoardHealth(view.states, view.feeds, view.now), { tone: 'green', reason: 'board_ok' }, reason);
+    assert.equal(detailsRow(view, 'Today’s result'), `Household not exact${reason === 'not_exact_yet' ? '' : ` · ${cellReason(reason)}`}; each desk exact`, reason);
+    const text = pop(view).textContent;
+    assert.equal(text.match(/not exact/gi)?.length, 1, `${reason}: Details says it once: ${text}`);
+  }
+  assert.equal(detailsRow(ctx(householdNotExact('sod_missing')), 'Today’s result'), 'Household not exact · start-of-day value missing; each desk exact');
+  // A desk's own not-exact Today keeps the per-desk row (no household prefix).
+  assert.equal(detailsRow(ctx(dayNotExact({ j: 'not_exact_yet' })), 'Today’s result'), 'Exact for Joe and Joel; not exact for J');
+});
