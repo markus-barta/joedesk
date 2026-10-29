@@ -1,8 +1,14 @@
 import { REASONS } from '../contracts/index.mjs';
 import { validInstant } from '../contracts/schema-validator.mjs';
 import { viennaDay } from '../time.mjs';
+import { decimalUnits } from '../contracts/decimal.mjs';
 
 export const ACCOUNT_FIELDS = Object.freeze(['equity', 'cash']);
+export const ACCOUNT_HISTORY_FORMAT = 'joedesk.account-history.v1';
+export const ACCOUNT_HISTORY_CAP = 2 * 1024 * 1024;
+export const emptyAccountHistory = () => ({ schema: 'inspr.joe.account-series.v1',
+  generatedAt: null, receivedAt: null, points: [] });
+const MAX_AGE = 14 * 86400000;
 export const ACCOUNT_CLOSES_FORMAT = 'joedesk.account-closes-store.v1';
 export const ACCOUNT_CLOSES_SCHEMA = 'inspr.joe.account-closes.v1';
 export const ACCOUNT_CLOSES_CAP = 2 * 1024 * 1024;
@@ -37,6 +43,59 @@ export function validAccountObservation(account) {
     ACCOUNT_FIELDS.every(field => account[field] === null
       ? REASONS.includes(account.reasons?.[field])
       : validInstant(account.observedAt) && exactEUR(account[field]) && account.reasons?.[field] === undefined);
+}
+
+export function validateAccountHistory(value) {
+  if (!keysOnly(value, ['schema', 'generatedAt', 'receivedAt', 'points']) ||
+      value.schema !== 'inspr.joe.account-series.v1' || !Array.isArray(value.points) || value.points.length > 10000 ||
+      !validInstant(value.generatedAt) || !validInstant(value.receivedAt) ||
+      Buffer.byteLength(JSON.stringify({ format: ACCOUNT_HISTORY_FORMAT, value })) > ACCOUNT_HISTORY_CAP - 4096) throw new Error('contract_invalid');
+  let previous;
+  for (const p of value.points) {
+    if (!keysOnly(p, ['t', 'account']) || !validInstant(p.t) || !validAccountObservation(p.account) ||
+        (previous && p.t <= previous) || p.t > value.generatedAt ||
+        (ACCOUNT_FIELDS.some(f => p.account[f] !== null) && p.account.observedAt > p.t)) throw new Error('contract_invalid');
+    previous = p.t;
+  }
+  return value;
+}
+
+// Account compaction has its own endpoints, extrema, null-gap edges and last
+// observations per Vienna day. It neither reads nor influences desk History.
+export function compactAccountPoints(points, bucketSize = 64) {
+  const keep = new Set([0, points.length - 1]);
+  let extrema = new Map(), previousPresence, previousDay, dailyLast = [];
+  for (let i = 0; i < points.length; i++) {
+    if (i % bucketSize === 0) { extrema = new Map(); keep.add(i); if (i) keep.add(i - 1); }
+    const p = points[i], day = viennaDay(p.t), presence = ACCOUNT_FIELDS.map(f => p.account[f] !== null).join(',');
+    if (previousDay && day !== previousDay) { dailyLast.forEach(index => keep.add(index)); dailyLast = []; }
+    if (i && presence !== previousPresence) { keep.add(i - 1); keep.add(i); }
+    ACCOUNT_FIELDS.forEach((field, key) => {
+      if (p.account[field] === null) return;
+      dailyLast[key] = i;
+      const units = decimalUnits(p.account[field].amount), old = extrema.get(field);
+      if (!old) extrema.set(field, { min: units, max: units, minAt: i, maxAt: i });
+      else {
+        if (units < old.min) { old.min = units; old.minAt = i; }
+        if (units > old.max) { old.max = units; old.maxAt = i; }
+      }
+    });
+    if ((i + 1) % bucketSize === 0 || i === points.length - 1) for (const e of extrema.values()) { keep.add(e.minAt); keep.add(e.maxAt); }
+    previousPresence = presence; previousDay = day;
+  }
+  dailyLast.forEach(index => keep.add(index));
+  return points.filter((_, i) => keep.has(i));
+}
+
+export function appendAccountHistory(previous, snapshot, states, now) {
+  if (previous.points.length && snapshot.generatedAt <= previous.points.at(-1).t) return previous;
+  const points = previous.points.filter(p => Date.parse(p.t) >= Date.parse(now) - MAX_AGE);
+  points.push({ t: snapshot.generatedAt, account: accountObservation(snapshot, states) });
+  const next = { ...previous, generatedAt: now, receivedAt: now, points };
+  if (points.length > 10000 || Buffer.byteLength(JSON.stringify(next)) >= ACCOUNT_HISTORY_CAP * 0.8) {
+    next.points = compactAccountPoints(points);
+  }
+  return validateAccountHistory(next);
 }
 
 export const emptyAccountCloses = () => ({ schema: ACCOUNT_CLOSES_SCHEMA, timeZone: 'Europe/Vienna', days: [] });

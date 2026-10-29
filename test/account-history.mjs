@@ -9,8 +9,9 @@ import { atomicWrite } from '../server/storage.mjs';
 import { CONTRACTS, validateContract } from '../contracts/index.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
 import './fixtures/preview-dom.mjs';
-import { historyPoint, compactPoints, boundHistory, historyEnvelope, deskHistory, measureHistory, HISTORY_CAP } from '../server/history.mjs';
-import { accountObservation, validAccountObservation, appendAccountClose, emptyAccountCloses,
+import { historyPoint, compactPoints, boundHistory, historyEnvelope, measureHistory, HISTORY_CAP, HISTORY_WARNING } from '../server/history.mjs';
+import { accountObservation, validAccountObservation, appendAccountHistory, emptyAccountHistory, compactAccountPoints,
+  validateAccountHistory, ACCOUNT_HISTORY_FORMAT, ACCOUNT_HISTORY_CAP, appendAccountClose, emptyAccountCloses,
   validateAccountCloses, accountClosesEnvelope, ACCOUNT_CLOSES_CAP, ACCOUNT_CLOSES_DAYS } from '../server/account-history.mjs';
 import { viennaDay } from '../time.mjs';
 
@@ -26,9 +27,14 @@ function snapshot(seq = 101, t = T0) {
   value.brokerAccount.observedAt = t; value.brokerAccount.cash = eur('100.00000001');
   return value;
 }
-function point(value = snapshot(), previous = {}) {
+function deskPoint(value = snapshot(), previous = {}) {
   const received = { ...value, receivedAt: value.generatedAt };
   return historyPoint(received, panelStates({ data: { value: received } }, received.receivedAt, previous));
+}
+function point(value = snapshot(), previous = {}) {
+  const received = { ...value, receivedAt: value.generatedAt };
+  return appendAccountHistory(emptyAccountHistory(), received,
+    panelStates({ data: { value: received } }, received.receivedAt, previous), received.receivedAt).points[0];
 }
 function setup(t, options = {}) {
   const dataDir = options.dataDir ?? scratch('joed-150-account-');
@@ -82,7 +88,7 @@ test('future account timestamps are unavailable rather than poisoning daily clos
 test('desk fields match the pre-account golden including null reasons and composite basis identity', () => {
   const value = snapshot();
   value.desks[0].accounting = { periodStart: at(-100), method: 'execution-fifo-net-current-fx', detail: 'Synthetic accounting' };
-  const p = point(value), { account, ...desk } = p;
+  const p = deskPoint(value), desk = p;
   const money = (equity, pnl) => ({ equity: eur(equity), dayPnl: eur(pnl), openPnl: eur('0'), totalPnl: eur(pnl) });
   const golden = { t: T0, desks: {
     j: { money: money('4999', '-1'), accounting: value.desks[0].accounting, historyBasis: 'j.paper.v2' },
@@ -97,7 +103,7 @@ test('desk fields match the pre-account golden including null reasons and compos
   golden.desks.j.money.equity = golden.totals.equity = null;
   golden.desks.j.money.reasons = { equity: 'upstream_lost' };
   golden.totals.reasons = { equity: 'family_projection_unavailable' };
-  assert.deepEqual(deskHistory({ points: [gap] }).points[0], golden);
+  assert.deepEqual(gap, golden);
 });
 
 function compactFixture() {
@@ -111,41 +117,79 @@ function compactFixture() {
   });
 }
 
-test('compaction keeps complete account observations at exactly the golden desk indices', () => {
-  const legacy = compactFixture();
-  const enriched = legacy.map((p, i) => ({ ...p, account: accountAt(p.t, i % 5 ? eur(String(i)) : null, eur(String(-i))) }));
-  const kept = compactPoints(enriched), deskKept = compactPoints(legacy);
-  assert.deepEqual(kept.map(p => p.t), deskKept.map(p => p.t));
-  for (const p of kept) assert.equal(p, enriched.find(original => original.t === p.t));
-  assert.deepEqual(deskHistory({ points: kept }).points, deskKept);
+test('desk compaction retains the pre-account golden bytes and indices', () => {
+  const deskKept = compactPoints(compactFixture());
   const digest = createHash('sha256').update(JSON.stringify(deskKept)).digest('hex');
   // Captured from the original compactPoints at base commit 6f89e38.
   assert.equal(digest, '02c28fef756f44c8ab15d1c385f59904b1c46188906e3861d01128e7f03eaf33');
 });
 
-test('automatic compaction bounds enriched history and keeps its account timestamps aligned', () => {
-  const p = point();
-  const value = { schema: CONTRACTS.contracts.history, seq: 1, generatedAt: at(10000), receivedAt: at(10000), sizeBytes: 0,
-    points: Array.from({ length: 10001 }, (_, i) => ({ ...p, t: at(i), account: accountAt(at(i)) })) };
-  boundHistory(value);
-  assert.ok(value.points.length < 10001);
-  assert.ok(value.points.every(p => p.account.observedAt === p.t));
-  assert.equal(value.sizeBytes, Buffer.byteLength(JSON.stringify(historyEnvelope(value))));
-  assert.equal(validateContract('history', deskHistory(value)).ok, true);
+test('desk compaction timing and size count only the original v2 desk envelope', () => {
+  const p = deskPoint();
+  const make = count => ({ schema: CONTRACTS.contracts.history, seq: 1, generatedAt: at(10000), receivedAt: at(10000), sizeBytes: 0,
+    points: Array.from({ length: count }, (_, i) => ({ ...p, t: at(i) })) });
+  // Independently measure the original v2 envelope to locate its size trigger.
+  const originalBytes = value => {
+    let bytes;
+    do { bytes = value.sizeBytes; value.sizeBytes = Buffer.byteLength(JSON.stringify({ format: 'joedesk.history-store.v2', value })); }
+    while (value.sizeBytes !== bytes);
+    return bytes;
+  };
+  let low = 1, high = 10000;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (originalBytes(make(mid)) >= HISTORY_WARNING) high = mid; else low = mid + 1;
+  }
+  const before = make(low - 1), after = make(low);
+  const expectedBytes = originalBytes(before);
+  boundHistory(before); boundHistory(after);
+  assert.equal(before.points.length, low - 1);
+  assert.equal(before.compactedThrough, undefined);
+  assert.equal(before.sizeBytes, expectedBytes);
+  assert.deepEqual(after.points, compactPoints(make(low).points));
+  assert.equal(after.compactedThrough, at(low - 1));
+  const abovePointCap = make(10001); boundHistory(abovePointCap);
+  assert.ok(abovePointCap.points.length < 10001);
 });
 
-test('legacy desk-only store loads without fabricating account observations and upgrades on new ingress', t => {
+test('account compaction is bounded independently and preserves account extrema and gap edges', () => {
+  const points = Array.from({ length: 10001 }, (_, i) => ({ t: at(i), account: accountAt(at(i)) }));
+  points[31].account.equity = eur('-100'); points[32].account.equity = eur('90000');
+  points[47].account = accountAt(at(47), null);
+  const selected = compactAccountPoints(points);
+  for (const i of [0, 31, 32, 46, 47, 48, 10000]) assert.ok(selected.includes(points[i]));
+  const previous = { ...emptyAccountHistory(), generatedAt: at(10000), receivedAt: at(10000), points: points.slice(0, -1) };
+  const value = snapshot(102, at(10000));
+  const next = appendAccountHistory(previous, value, panelStates({ data: { value } }, value.generatedAt), value.generatedAt);
+  assert.ok(next.points.length < 10001);
+  assert.equal(validateAccountHistory(next), next);
+  assert.ok(Buffer.byteLength(JSON.stringify({ format: ACCOUNT_HISTORY_FORMAT, value: next })) < ACCOUNT_HISTORY_CAP);
+  assert.deepEqual(next.points[0], points[0]);
+});
+
+test('legacy desk file remains v2 with no account extensions; account series starts independently', t => {
   const { dataDir } = setup(t);
   const legacy = { ...structuredClone(samples.history), sizeBytes: 0 }; measureHistory(legacy);
-  atomicWrite(join(dataDir, 'history-state.json'), historyEnvelope(legacy), HISTORY_CAP);
+  const file = join(dataDir, 'history-state.json');
+  atomicWrite(file, historyEnvelope(legacy), HISTORY_CAP);
+  const original = readFileSync(file, 'utf8');
   const model = createReadModel({ dataDir, clock: () => T0 });
   assert.deepEqual(model.feeds().history.value, legacy);
-  assert.ok(model.accountHistory().points.every(p => !Object.hasOwn(p, 'account')));
+  assert.deepEqual(model.accountHistory().points, []);
+  assert.equal(readFileSync(file, 'utf8'), original, 'load leaves old disk bytes untouched');
   assert.equal(model.accept(snapshot()).status, 200);
-  const stored = JSON.parse(readFileSync(join(dataDir, 'history-state.json')));
-  assert.equal(stored.format, 'joedesk.history-store.v3');
-  assert.ok(!Object.hasOwn(stored.value.points[0], 'account'));
-  assert.deepEqual(stored.value.points.at(-1).account, point().account);
+  const bytes = readFileSync(file), stored = JSON.parse(bytes);
+  assert.equal(stored.format, 'joedesk.history-store.v2');
+  assert.ok(stored.value.points.every(p => !Object.hasOwn(p, 'account')));
+  assert.equal(stored.value.sizeBytes, bytes.length);
+  assert.deepEqual(model.feeds().history.value, stored.value);
+  const golden = { schema: legacy.schema, seq: legacy.seq + 1, generatedAt: T0, receivedAt: T0,
+    points: [...legacy.points, deskPoint()], sizeBytes: 0 };
+  measureHistory(golden);
+  assert.equal(bytes.toString(), JSON.stringify({ format: 'joedesk.history-store.v2', value: golden }), 'stored desk file matches original shape, version and bytes');
+  assert.deepEqual(model.accountHistory().points, [point()]);
+  const short = JSON.parse(readFileSync(join(dataDir, 'account-history-state.json')));
+  assert.equal(short.format, ACCOUNT_HISTORY_FORMAT);
   const restarted = createReadModel({ dataDir, clock: () => T0 });
   assert.deepEqual(restarted.accountHistory(), model.accountHistory());
   assert.equal(validateContract('history', restarted.feeds().history.value).ok, true);
@@ -206,6 +250,7 @@ test('daily closes persist with mode 0600, survive restart and the 14-day short-
   now = at(15 * 86400);
   assert.equal(model.accept(snapshot(102, now)).status, 200);
   assert.deepEqual(model.feeds().history.value.points.map(p => p.t), [now]);
+  assert.deepEqual(model.accountHistory().points.map(p => p.t), [now]);
   assert.deepEqual(model.accountHistory().dailyCloses.days[0], original);
   assert.equal(model.accountHistory().dailyCloses.days.length, 2);
   assert.deepEqual(createReadModel({ dataDir, clock: () => now }).accountHistory(), model.accountHistory());
@@ -223,20 +268,111 @@ test('daily close uses the actual account observation day, not a new transport d
   assert.equal(model.accountHistory().points.at(-1).account.observedAt, T0);
 });
 
-test('missing/corrupt/oversized daily files start empty with reasons and recover on an exact observation', t => {
-  for (const body of [null, '{', JSON.stringify({ format: 'wrong' }),
-    JSON.stringify(accountClosesEnvelope({ ...emptyAccountCloses(), days: [{ day: 'bad' }] })), ' '.repeat(ACCOUNT_CLOSES_CAP + 1)]) {
-    const { dataDir } = setup(t);
-    const file = join(dataDir, 'account-closes-state.json');
-    if (body !== null) writeFileSync(file, body);
-    const model = createReadModel({ dataDir, clock: () => T0 });
-    assert.deepEqual(model.accountHistory().dailyCloses.days, []);
-    assert.equal(model.accountHistory().dailyCloses.reason, body === null ? 'feed_not_received' : 'contract_invalid');
-    if (body !== null) assert.equal(readFileSync(file, 'utf8'), body, 'read does not overwrite damaged store');
+for (const [name, format, cap] of [
+  ['account-closes-state.json', 'joedesk.account-closes-store.v1', ACCOUNT_CLOSES_CAP],
+  ['account-history-state.json', ACCOUNT_HISTORY_FORMAT, ACCOUNT_HISTORY_CAP],
+]) {
+  const series = model => name.startsWith('account-closes') ? model.accountHistory().dailyCloses : model.accountHistory();
+  const length = view => (view.days ?? view.points).length;
+  test(`${name}: damaged bytes survive the next write and discontinuity survives restart`, t => {
+    for (const body of [null, '{', JSON.stringify({ format: 'wrong' }),
+      JSON.stringify({ format, value: { invalid: true } }), ' '.repeat(cap + 1)]) {
+      const { dataDir } = setup(t), file = join(dataDir, name);
+      if (body !== null) writeFileSync(file, body);
+      let model = createReadModel({ dataDir, clock: () => T0 });
+      assert.equal(length(series(model)), 0);
+      assert.equal(series(model).reason, body === null ? 'feed_not_received' : 'contract_invalid');
+      if (body !== null) assert.equal(readFileSync(file, 'utf8'), body);
+      assert.equal(model.accept(snapshot()).status, 200);
+      assert.equal(length(series(model)), 1);
+      assert.equal(series(model).reason, body === null ? null : 'contract_invalid');
+      if (body !== null) {
+        const marker = series(model).discontinuity;
+        assert.equal(marker.at, T0); assert.equal(marker.reason, 'contract_invalid');
+        assert.equal(readFileSync(join(dataDir, marker.preservedAs), 'utf8'), body);
+        assert.deepEqual(JSON.parse(readFileSync(file)).discontinuity, marker);
+      }
+      const before = series(model);
+      model = createReadModel({ dataDir, clock: () => at(1) });
+      assert.deepEqual(series(model), before);
+      assert.equal(model.accept(snapshot(102, at(1))).status, 200);
+      assert.equal(series(model).reason, body === null ? null : 'contract_invalid');
+      assert.deepEqual(series(model).discontinuity, before.discontinuity);
+    }
+  });
+
+  test(`${name}: future versions are read-only and never overwritten or moved`, t => {
+    for (const version of [2, 10, 100]) {
+      const { dataDir } = setup(t), file = join(dataDir, name);
+      const body = JSON.stringify({ format: format.replace(/v1$/, `v${version}`), value: { future: true },
+        ...(version === 100 ? { padding: ' '.repeat(cap) } : {}) });
+      writeFileSync(file, body);
+      for (let i = 0; i < 2; i++) {
+        const model = createReadModel({ dataDir, clock: () => at(i) });
+        assert.equal(series(model).reason, 'store_version_unsupported');
+        assert.equal(model.accept(snapshot(101 + i, at(i))).status, 200);
+        assert.equal(series(model).reason, 'store_version_unsupported');
+        assert.equal(readFileSync(file, 'utf8'), body);
+        assert.equal(length(series(model)), 0);
+        assert.equal(model.feeds().history.reason, null);
+      }
+      assert.ok(!readdirSync(dataDir).some(n => n.startsWith(name + '.')));
+    }
+  });
+
+  test(`${name}: recovery journal survives interruption after preserving damaged bytes`, t => {
+    const { dataDir } = setup(t), file = join(dataDir, name), body = '{';
+    writeFileSync(file, body);
+    const model = createReadModel({ dataDir, clock: () => T0, write: (target, ...args) => {
+      if (target === file) throw new Error('synthetic recovery interruption');
+      atomicWrite(target, ...args);
+    } });
     assert.equal(model.accept(snapshot()).status, 200);
-    assert.equal(model.accountHistory().dailyCloses.reason, null);
-    assert.equal(model.accountHistory().dailyCloses.days.length, 1);
-  }
+    assert.equal(series(model).reason, 'history_write_failed');
+    const marker = series(model).discontinuity;
+    assert.equal(readFileSync(join(dataDir, marker.preservedAs), 'utf8'), body);
+    const restarted = createReadModel({ dataDir, clock: () => at(1) });
+    assert.equal(series(restarted).reason, 'contract_invalid');
+    assert.deepEqual(series(restarted).discontinuity, marker);
+    assert.equal(restarted.accept(snapshot(102, at(1))).status, 200);
+    assert.equal(series(restarted).reason, 'contract_invalid');
+    assert.deepEqual(series(restarted).discontinuity, marker);
+  });
+
+  test(`${name}: failed preservation journal cannot overwrite damaged bytes`, t => {
+    const { dataDir } = setup(t), file = join(dataDir, name), body = '{';
+    writeFileSync(file, body);
+    const model = createReadModel({ dataDir, clock: () => T0, write: (target, ...args) => {
+      if (target === `${file}.discontinuity.json`) throw new Error('synthetic journal failure');
+      atomicWrite(target, ...args);
+    } });
+    assert.equal(model.accept(snapshot()).status, 200);
+    assert.equal(series(model).reason, 'history_write_failed');
+    assert.equal(readFileSync(file, 'utf8'), body);
+    assert.equal(model.feeds().history.reason, null);
+  });
+}
+
+for (const committed of [false, true]) test(`short account write failure is independent (committed=${committed})`, t => {
+  let now = T0, fail = false;
+  const { dataDir } = setup(t);
+  const model = createReadModel({ dataDir, clock: () => now, write: (file, ...args) => {
+    if (fail && basename(file) === 'account-history-state.json') {
+      if (committed) atomicWrite(file, ...args);
+      throw Object.assign(new Error('synthetic short write failure'), { committed });
+    }
+    atomicWrite(file, ...args);
+  } });
+  model.accept(snapshot()); fail = true; now = at(1);
+  assert.equal(model.accept(snapshot(102, now)).status, 200);
+  assert.equal(model.accountHistory().reason, 'history_write_failed');
+  assert.equal(model.accountHistory().points.length, committed ? 2 : 1);
+  assert.equal(model.accountHistory().dailyCloses.days.length, 2);
+  assert.equal(model.feeds().history.value.points.length, 2);
+  assert.equal(model.feeds().history.reason, null);
+  fail = false; now = at(2);
+  model.accept(snapshot(103, now));
+  assert.equal(model.accountHistory().reason, null);
 });
 
 test('daily store bounds more than five years even with every calendar day recorded', t => {
@@ -290,29 +426,33 @@ for (const committed of [false, true]) test(`daily write failure is independent 
   assert.equal(model.accept(snapshot(103, now)).accountClosesReason, null);
 });
 
-test('short-history corruption cannot prevent independent daily recording', t => {
+test('desk-history corruption cannot prevent independent short account and daily recording', t => {
   const { dataDir } = setup(t);
   writeFileSync(join(dataDir, 'history-state.json'), '{');
   const model = createReadModel({ dataDir, clock: () => T0 });
   assert.equal(model.accept(snapshot()).status, 200);
-  assert.equal(model.accountHistory().reason, 'history_write_failed');
+  assert.equal(model.feeds().history.reason, 'history_write_failed');
+  assert.equal(model.accountHistory().reason, null);
+  assert.equal(model.accountHistory().points.length, 1);
   assert.equal(model.accountHistory().dailyCloses.days.length, 1);
   assert.equal(readFileSync(join(dataDir, 'history-state.json'), 'utf8'), '{');
 });
 
-test('corrupt account extensions fail the short store closed without erasing desk history', t => {
+test('corrupt short account store recovers without affecting desk history or daily closes', t => {
   const { dataDir, model } = setup(t); model.accept(snapshot());
-  const file = join(dataDir, 'history-state.json');
+  const file = join(dataDir, 'account-history-state.json');
   const stored = JSON.parse(readFileSync(file));
-  stored.value.points[0].account.cash.currency = 'USD'; measureHistory(stored.value);
+  stored.value.points[0].account.cash.currency = 'USD';
   writeFileSync(file, JSON.stringify(stored));
   const before = readFileSync(file, 'utf8');
   const restarted = createReadModel({ dataDir, clock: () => at(1) });
-  assert.equal(restarted.feeds().history.reason, 'history_write_failed');
+  assert.equal(restarted.accountHistory().reason, 'contract_invalid');
+  assert.equal(restarted.feeds().history.reason, null);
   assert.deepEqual(restarted.accountHistory().points, []);
   assert.equal(restarted.accept(snapshot(102, at(1))).status, 200);
-  assert.equal(readFileSync(file, 'utf8'), before);
+  assert.equal(readFileSync(join(dataDir, restarted.accountHistory().discontinuity.preservedAs), 'utf8'), before);
   assert.equal(restarted.accountHistory().dailyCloses.days.length, 2);
+  assert.equal(restarted.feeds().history.value.points.length, 2);
 });
 
 test('replays, frozen generations and rejected ingress do not write history or daily closes', t => {
@@ -322,7 +462,7 @@ test('replays, frozen generations and rejected ingress do not write history or d
   assert.equal(model.accept(snapshot()).status, 200); writes.length = 0;
   assert.equal(model.accept(snapshot()).status, 422); assert.deepEqual(writes, []);
   now = at(20); assert.equal(model.accept(snapshot(102)).status, 200);
-  assert.ok(!writes.includes('history-state.json') && !writes.includes('account-closes-state.json'));
+  assert.ok(!writes.includes('history-state.json') && !writes.includes('account-closes-state.json') && !writes.includes('account-history-state.json'));
   writes.length = 0;
   const bad = snapshot(103, now); bad.mode = 'LIVE';
   assert.equal(model.accept(bad).status, 422);
