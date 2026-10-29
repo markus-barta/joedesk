@@ -101,8 +101,8 @@ function accountStartSection() {
         <legend class="vh">Account start amount and date</legend>
         <p id="accountStartHelp" class="sub">Enter the amount and calendar date you chose. Use a decimal point or comma, without grouping. Review both before saving.</p>
         <div class="account-start-inputs">
-          <label for="accountStartAmount">Amount in EUR<input id="accountStartAmount" class="inp" inputmode="decimal" autocomplete="off" aria-describedby="accountStartHelp" required></label>
-          <label for="accountStartDate">Start date<input id="accountStartDate" class="inp" type="date" min="0001-01-01" max="9999-12-31" required></label>
+          <label for="accountStartAmount">Amount in EUR<input id="accountStartAmount" class="inp" inputmode="decimal" autocomplete="off" aria-invalid="false" aria-describedby="accountStartHelp accountStartAmountError" required><span id="accountStartAmountError" class="sub"></span></label>
+          <label for="accountStartDate">Start date<input id="accountStartDate" class="inp" type="date" min="0001-01-01" max="9999-12-31" aria-invalid="false" aria-describedby="accountStartDateError" required><span id="accountStartDateError" class="sub"></span></label>
         </div>
         <label class="check"><input id="accountStartClear" type="checkbox">Leave account start unset and hide the whole account's 'Since start'</label>
         <div class="account-start-actions"><button type="button" class="btn" id="accountStartReview">Review changes</button>
@@ -136,7 +136,14 @@ function renderAccountStart() {
 }
 
 const accountDraft = () => ({ amount: $('#accountStartAmount').value, date: $('#accountStartDate').value, clear: $('#accountStartClear').checked });
+function accountStartErrors(errors = {}) {
+  for (const [field, name] of [['amount', 'Amount'], ['date', 'Date']]) {
+    $(`#accountStart${name}`).setAttribute('aria-invalid', String(Boolean(errors[field])));
+    $(`#accountStart${name}Error`).textContent = errors[field] ?? '';
+  }
+}
 function resetAccountReview() {
+  accountStartErrors();
   accountReview = null;
   $('#accountStartReviewBox').hidden = true;
   $('#accountStartConfirmed').checked = false;
@@ -149,7 +156,17 @@ function resetAccountReview() {
 function reviewAccountStart() {
   if (accountBusy) return;
   const result = M.reviewAccountStart(accountDraft(), boardSettingsState());
-  if (result.error) { $('#accountStartMessage').textContent = result.error; return; }
+  accountStartErrors(result.errors);
+  if (result.error) {
+    accountReview = null;
+    $('#accountStartReviewBox').hidden = true;
+    $('#accountStartConfirmed').checked = false;
+    $('#accountStartMessage').textContent = result.error;
+    renderAccountStart();
+    const first = result.errors?.amount ? 'Amount' : result.errors?.date ? 'Date' : null;
+    if (first) $(`#accountStart${first}`).focus();
+    return;
+  }
   accountReview = result;
   $('#accountStartBefore').textContent = `Before: ${result.before}`;
   $('#accountStartAfter').textContent = `After: ${result.after}`;

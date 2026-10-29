@@ -26,12 +26,22 @@ export function accountStartDraft(start) {
 export function reviewAccountStart(draft, snapshot) {
   if (!accountStartRow(snapshot).editable) return { error: 'Refresh the saved account start before reviewing.' };
   const amount = String(draft.amount ?? '').trim().replace(',', '.');
-  if (!draft.clear && !/^\d+(?:\.\d{1,2})?$/.test(amount)) return { error: 'Enter a positive EUR amount with at most two decimal places; use a decimal point or comma, without grouping.' };
+  const errors = {};
+  if (!draft.clear) {
+    if (!/^\d+(?:\.\d{1,2})?$/.test(amount)) errors.amount = 'Enter a positive EUR amount with at most two decimal places; use a decimal point or comma, without grouping.';
+    else {
+      const error = validateBoardSettings({ accountStart: { amountEur: Number(amount), date: '2000-01-01' } });
+      if (error) errors.amount = error;
+    }
+    const error = validateBoardSettings({ accountStart: { amountEur: 1, date: draft.date } });
+    if (error) errors.date = error;
+  }
+  if (Object.keys(errors).length) return { error: Object.values(errors)[0], errors };
   const value = { accountStart: draft.clear ? null : { amountEur: Number(amount), date: draft.date } };
-  const error = validateBoardSettings(value);
-  if (error) return { error };
-  if (JSON.stringify(value.accountStart) === JSON.stringify(snapshot.accountStart)) return { error: 'Account start matches the saved value.' };
-  return { value, base: JSON.stringify(snapshot.accountStart), before: accountStartRow(snapshot).text,
+  const replacing = ['missing', 'invalid', 'unreadable'].includes(snapshot.reason);
+  if (!replacing && JSON.stringify(value.accountStart) === JSON.stringify(snapshot.accountStart)) return { error: 'Account start matches the saved value.' };
+  return { value, base: JSON.stringify(snapshot.accountStart),
+    before: draft.clear && replacing ? `Replace the ${snapshot.reason} account start with 'not set'.` : accountStartRow(snapshot).text,
     after: accountStartRow({ ...value, reason: value.accountStart ? null : 'unset' }).text };
 }
 

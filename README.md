@@ -2005,7 +2005,10 @@ never the amount or date. Concurrent saves use the last completed replacement.
 
 Settings → **Account start** works on desktop and phone: Edit, enter amount and
 date, Review changes, tick the review box, then Save account start. Point and
-comma decimal input are accepted without grouping. Clearing also requires review.
+comma decimal input are accepted without grouping. Clearing also requires review,
+including replacing missing, invalid or unreadable storage with explicit null; the
+review explains which saved state is being replaced. Invalid amount/date fields
+show their own described errors, and focus moves to the first invalid input.
 An unset value reads “Not set: the whole account's 'Since start' stays hidden
 until you set it.” Missing/corrupt/unreadable storage has an additional explanation.
 The form preserves a failed save's draft and asks for a refresh before retrying.
@@ -2013,6 +2016,11 @@ Fleet policy keeps its existing separate review and propagation flow.
 
 The forthcoming Desk hero can import `accountStart()` from
 `public/joe/board-settings.js` to get a defensive `{amountEur,date}` copy or null.
+`onBoardSettingsChange(callback)` adds an independent listener and returns its
+unsubscribe function, so Settings and the hero can both subscribe. This page
+facade exposes no save or writable factory. Only Settings imports the separate
+`board-settings-write.js` capability; the UI source guard checks that boundary,
+including aliases, namespaces, dynamic imports and re-exports.
 Settings initialization loads it for every screen; visible pages refresh it every
 30 seconds and on focus/visibility return. Failed reads hide the accessor's value
 until a valid response recovers. A 15-second deadline bounds response headers
@@ -2020,7 +2028,7 @@ and body, including saves whose outcome must be checked by refreshing after a ti
 A late GET never overwrites a newer save, and
 editing or a changed server value invalidates the form's prior review. This
 ticket adds no Desk UI. Focused tests are `test/board-settings.mjs`,
-`test/board-settings-route.mjs` and `test/settings-model.mjs`.
+`test/board-settings-route.mjs`, `test/board-settings-guard.mjs` and `test/settings-model.mjs`.
 
 Every app response sends `Content-Security-Policy: frame-ancestors 'none'`
 and `X-Frame-Options: DENY` to prevent framing of the board and its settings

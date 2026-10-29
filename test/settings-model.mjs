@@ -56,6 +56,17 @@ test('account start review validates text without rounding, keeps calendar dates
   assert.equal(M.reviewAccountStart(draft, { accountStart: null, reason: 'invalid' }).error, undefined, 'a corrupt setting can be replaced');
 });
 
+test('JOED-155 Low 2: reviewed unset replaces missing or damaged storage with an honest explanation', () => {
+  for (const reason of ['missing', 'invalid', 'unreadable']) {
+    const review = M.reviewAccountStart({ clear: true }, { accountStart: null, reason });
+    assert.equal(review.error, undefined, reason);
+    assert.deepEqual(review.value, { accountStart: null });
+    assert.equal(review.before, `Replace the ${reason} account start with 'not set'.`);
+    assert.match(review.after, /Not set/);
+  }
+  assert.match(M.reviewAccountStart({ clear: true }, { accountStart: null, reason: 'unset' }).error, /matches the saved/);
+});
+
 test('account start rendered form requires confirmation, invalidates edited/stale reviews and keeps failed drafts', async () => {
   const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
   const board = await import('../public/joe/board-settings.js');
@@ -87,6 +98,29 @@ test('account start rendered form requires confirmation, invalidates edited/stal
     }
     assert.equal($('#accountStartSummary').getAttribute('aria-live'), 'polite');
     $('#accountStartForm').hidden = false;
+    // Low 6: validate each field, describe its own error and focus the first failure.
+    for (const [amount, date, invalid] of [
+      ['', '', ['Amount', 'Date']], ['0', '2024-02-29', ['Amount']],
+      ['1.001', '2024-02-29', ['Amount']], ['12.34', '2023-02-29', ['Date']],
+      ['12.34', '', ['Date']],
+    ]) {
+      $('#accountStartAmount').value = amount; $('#accountStartDate').value = date;
+      page.resetAccountReview(); page.reviewAccountStart();
+      assert.equal(focused, `accountStart${invalid[0]}`);
+      for (const field of ['Amount', 'Date']) {
+        const input = $(`#accountStart${field}`), bad = invalid.includes(field);
+        assert.equal(input.getAttribute('aria-invalid'), String(bad));
+        const errorId = `accountStart${field}Error`;
+        assert.equal(input.getAttribute('aria-describedby').split(/\s+/).includes(errorId), true);
+        assert.equal(Boolean($(`#${errorId}`).textContent), bad);
+      }
+    }
+    $('#accountStartClear').checked = true; page.resetAccountReview();
+    for (const field of ['Amount', 'Date']) {
+      assert.equal($(`#accountStart${field}`).getAttribute('aria-invalid'), 'false');
+      assert.equal($(`#accountStart${field}Error`).textContent, '');
+    }
+    $('#accountStartClear').checked = false; page.resetAccountReview();
     $('#accountStartAmount').value = '12,34'; $('#accountStartDate').value = '2024-02-29';
     page.reviewAccountStart();
     assert.equal(focused, 'accountStartConfirmed');
@@ -133,6 +167,15 @@ test('account start rendered form requires confirmation, invalidates edited/stal
     await page.saveAccountStart(event);
     assert.deepEqual(JSON.parse(calls.at(-1).body), { accountStart: null });
     assert.equal(board.accountStart(), null);
+    for (const reason of ['missing', 'invalid', 'unreadable']) {
+      stored = { accountStart: null, reason }; await board.refreshBoardSettings();
+      $('#accountStartForm').hidden = false; page.resetAccountReview(); page.reviewAccountStart();
+      assert.equal($('#accountStartBefore').textContent, `Before: Replace the ${reason} account start with 'not set'.`);
+      $('#accountStartConfirmed').checked = true;
+      await page.saveAccountStart(event);
+      assert.deepEqual(JSON.parse(calls.at(-1).body), { accountStart: null });
+      assert.deepEqual(board.boardSettingsState(), { accountStart: null, reason: 'unset' });
+    }
   } finally {
     globalThis.fetch = realFetch;
     if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
