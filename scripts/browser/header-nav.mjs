@@ -2,8 +2,9 @@
 // the Settings gear push history entries; Back and Forward walk them and
 // return to the place left on the page, read before the screen changes and
 // kept also when the browser left it; a typed address or a plain same-page
-// link keeps its screen's query; an unknown route is Desk and an anchor only
-// scrolls. Up to 480 px the nav is a bottom bar (a solid surface docked to the
+// link keeps its screen's query, and Results completes a bare #results with
+// the view it shows (README: Results deep links); an unknown route is Desk
+// and an anchor only scrolls. Up to 480 px the nav is a bottom bar (a solid surface docked to the
 // bottom edge with a hairline, three 44 px targets, the page ending above it)
 // at 320–390 px; above, the header keeps the nav in one row. A simulated
 // bottom inset (the --safe-bottom property) lifts the bar and the tablet edit
@@ -52,6 +53,10 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
   check('routes', 'design snapshot accepted', (await b.push(snapshot)).status === 200);
   b.setNow(at(NOW, 9));
   const state = () => page.evaluate(STATE);
+  // Results names the view it shows in its address: this week, the board's
+  // today and all desks on a fresh page (JOED-151 through route.js writeRoute).
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Vienna' }).format(new Date(at(NOW, 9)));
+  const home = `#results?period=week&date=${today}&desk=all`;
   const click = async selector => { await page.evaluate(`document.querySelector(${J(selector)}).click()`); await settle(page); };
   const until = async expression => { await waitFor(page, expression, 5000); await settle(page); };
   const step = async (code, expression) => { await page.evaluate(code); await until(expression); return state(); };
@@ -63,8 +68,8 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
   check('routes', 'the first load shows #desk, with Desk current in both navs', start.screen === 'desk' && start.hash === '#desk' && J(start.current) === J(['desk', 'desk']), start);
   await click('.top-in [data-go="results"]');
   const results = await state();
-  check('routes', 'the nav pushes #results: one new entry, Results current in both navs', results.screen === 'results' && results.hash === '#results' &&
-    results.length === start.length + 1 && J(results.current) === J(['results', 'results']), { start, results });
+  check('routes', 'the nav pushes Results: one new entry, whose address Results completes with its view; Results current in both navs', results.screen === 'results' && results.hash === home &&
+    results.query === home.slice('#results?'.length) && results.length === start.length + 1 && J(results.current) === J(['results', 'results']), { start, results, home });
   await click('#settingsBtn');
   const settings = await state();
   check('routes', 'the gear opens Settings as #settings, one more entry, the gear alone current', settings.screen === 'settings' && settings.hash === '#settings' &&
@@ -82,12 +87,12 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
   const walk = [];
   walk.push(await step('history.back()', `window.__joedesk.route().query === 'range=week&mode=money'`));
   walk.push(await step('history.back()', `document.body.dataset.screen === 'settings'`));
-  walk.push(await step('history.back()', `document.body.dataset.screen === 'results' && window.__joedesk.route().query === ''`));
+  walk.push(await step('history.back()', `document.body.dataset.screen === 'results' && window.__joedesk.route().query === ${J(home.slice('#results?'.length))}`));
   walk.push(await step('history.back()', `document.body.dataset.screen === 'desk'`));
   walk.push(await step('history.forward()', `document.body.dataset.screen === 'results'`));
   check('routes', 'Back walks History (with its query), Settings, Results and Desk; Forward returns to Results; the current marks follow',
     J(walk.map(w => [w.screen, w.hash, w.current.join()])) === J([['history', '#history?range=week&mode=money', 'history,history'], ['settings', '#settings', 'settings'],
-      ['results', '#results', 'results,results'], ['desk', '#desk', 'desk,desk'], ['results', '#results', 'results,results']]), walk);
+      ['results', home, 'results,results'], ['desk', '#desk', 'desk,desk'], ['results', home, 'results,results']]), walk);
 
   // 2 · Back returns to the place left on the page; a new screen opens at its top.
   await load(page, b.url, 'desk');
@@ -122,7 +127,7 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
   await waitFor(page, `Math.abs(scrollY - ${J(reloading.scroll)}) <= 1`, 5000).catch(() => {});
   const reloaded = await state();
   check('routes', 'a reload of Results returns to the place it was left at, once the page has grown to it', reloading.scroll > 100 && reloaded.screen === 'results' &&
-    reloaded.hash === '#results' && Math.abs(reloaded.scroll - reloading.scroll) <= 1, { reloading, reloaded });
+    reloaded.hash === home && Math.abs(reloaded.scroll - reloading.scroll) <= 1, { reloading, reloaded, home });
 
   // 3 · An unknown route is Desk; an anchor scrolls and leaves the address.
   const unknown = await step(`location.hash = '#nowhere?period=day'`, `location.hash === '#desk'`);

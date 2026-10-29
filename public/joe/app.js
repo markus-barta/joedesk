@@ -2,13 +2,13 @@
 // render per animation frame. Settings saves reviewed paper fleet drafts and
 // board display values through separate authenticated routes.
 import { isCanonicalJoeHost } from './host.js';
-import { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, applyRoute, createPlaces } from './route.js';
+import { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute, onAddress, writeRoute, createPlaces } from './route.js';
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure } from './desk.js';
 import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput } from './history.js';
-import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
+import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsUrl } from './results.js';
 import { boardHealthPresentation } from './health.js';
 import { sinceStarts } from './performance.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
@@ -118,7 +118,8 @@ function start() {
       const moved = guard('history', () => renderHistory(ctx))?.redraw;
       if (moved || dirtyHistory || !['tick', 'results'].includes(reason)) { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }
     }
-    if (screen === 'results') guard('results', () => renderResults(ctx));
+    // Results' address follows its view once a link is applied (a correction; README: Results deep links).
+    if (screen === 'results') { const url = guard('results', () => renderResults(ctx)); if (url) writeRoute('results', parseRoute(url).query); }
     if (screen === 'settings') guard('settings', () => renderSettings(ctx));
     window.__joedesk.renders++;
     if (reason !== 'tick') {
@@ -148,16 +149,30 @@ function start() {
   addEventListener('pagehide', places.flush);
   // The reader's own scrolling ends a return still waiting for the page to grow.
   for (const type of ['wheel', 'touchstart', 'keydown', 'mousedown']) addEventListener(type, places.abandon, { passive: true });
+  // The one address path: go() and a shown screen writing its own query
+  // (route.js writeRoute) take the same history step through the same places,
+  // so every write counts against the one budget.
+  function address(target, push) {
+    try {
+      const step = historyStep(location.hash, target, push), url = `${location.pathname}${location.search}${routeHash(target)}`;
+      if (step === 'push') { if (!places.push(url)) places.step(); } else if (step === 'replace') places.replace(url);
+    } catch { places.step(); /* file or sandboxed context: keep the entry it is on */ }
+    shown = target;
+  }
+  // A shown screen's own query: the reader's change pushes, a correction
+  // replaces, and a correction never overwrites an address that changed
+  // outside the page and still waits for follow().
+  onAddress((target, push) => {
+    if (target.screen !== screen || (!push && location.hash !== routeHash(shown))) return false;
+    address(target, push);
+    return true;
+  });
   function go(next, { anchor = null, query = '', push = false, scroll = 0 } = {}) {
     if (!SCREENS.includes(next)) { next = 'desk'; anchor = null; query = ''; }
     const target = { screen: next, query };
     // The address first, while the page still shows the place being left:
     // hiding a screen, closing a dialog or rendering may move it.
-    try {
-      const step = historyStep(location.hash, target, push), address = `${location.pathname}${location.search}${routeHash(target)}`;
-      if (step === 'push') { if (!places.push(address)) places.step(); } else if (step === 'replace') places.replace(address);
-    } catch { places.step(); /* file or sandboxed context: keep the entry it is on */ }
-    shown = target;
+    address(target, push);
     screen = next;
     tips.hide();
     for (const s of SCREENS) $(`#scr-${s}`).classList.toggle('on', s === next);
@@ -263,25 +278,31 @@ function start() {
   // a day drive every number; on a phone a day opens its trades in a sheet.
   for (const root of [$('#daypanel'), $('#daySheet')]) root.addEventListener('copy', copyDayText);
   const view = () => resultsView(context());
+  // Results reads its link before it renders (route.js onRoute); a link that
+  // waits for the record keeps its address until Results applies it once
+  // (results.js). Each change of the view pushes its address (writeRoute).
+  onRoute('results', (_params, route) => requestResultsRoute(route.query));
+  const commit = () => writeRoute('results', parseRoute(resultsUrl(view())).query, { push: true });
   $('#periodSeg').addEventListener('click', e => {
     const b = e.target.closest('[data-period]');
     if (!b) return;
-    RS.period = b.dataset.period;
-    if (RS.period === 'ytd' || RS.period === 'all') RS.anchor = view().today;
+    choosePeriod(b.dataset.period, view());
+    commit();
     render('results-period');
   });
-  $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { RS.desk = b.dataset.desk; render('results-desk'); } });
-  $('#prevPer').addEventListener('click', () => { stepPeriod(-1, view()); render('results-step'); });
-  $('#nextPer').addEventListener('click', () => { stepPeriod(1, view()); render('results-step'); });
-  $('#prevMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m ? [y, m - 1] : [y - 1, 11]; RS.moved = true; render('results-month'); });
-  $('#nextMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m === 11 ? [y + 1, 0] : [y, m + 1]; RS.moved = true; render('results-month'); });
+  $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { chooseDesk(b.dataset.desk); commit(); render('results-desk'); } });
+  $('#prevPer').addEventListener('click', () => { stepPeriod(-1, view()); commit(); render('results-step'); });
+  $('#nextPer').addEventListener('click', () => { stepPeriod(1, view()); commit(); render('results-step'); });
+  // The month on show is not part of the link: a day selects, a month only browses.
+  $('#prevMonth').addEventListener('click', () => { showMonth(-1); render('results-month'); });
+  $('#nextMonth').addEventListener('click', () => { showMonth(1); render('results-month'); });
   let sheetFrom = null;
   $('#cal').addEventListener('click', e => {
     const c = e.target.closest('[data-day]');
-    if (!c) return;
+    if (!c || c.disabled) return;
     const v = view();
-    RS.sel = c.dataset.day; RS.moved = true;
-    if (['day', 'week', 'month'].includes(RS.period) && RS.sel <= v.today) RS.anchor = RS.sel;
+    if (!selectDay(c.dataset.day, v)) return;
+    commit();
     render('results-day');
     if (isPhone()) { sheetFrom = RS.sel; openDaySheet(v, RS.sel, { pointer: fromPointer(e) }); }
   });

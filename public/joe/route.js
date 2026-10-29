@@ -130,3 +130,14 @@ export function createPlaces(win, { every = 500, budget = 60, wait = 15000 } = {
 const readers = new Map();
 export const onRoute = (screen, read) => { readers.set(screen, read); };
 export const applyRoute = route => readers.get(route.screen)?.(new URLSearchParams(route.query ?? ''), route);
+
+// A shown screen writes its own query into the address, through the same
+// history steps as go() and so within the one budget (createPlaces): the
+// reader's own change of what the screen shows (Results' period, day or desk)
+// pushes an entry, so Back returns to the view before; a correction of the
+// same view replaces the address, and never one that changed outside the page
+// and still waits for follow(). app.js installs the one writer. True when the
+// screen is shown and its address is written (or already right).
+let writer = null;
+export const onAddress = write => { writer = write; };
+export const writeRoute = (screen, query = '', { push = false } = {}) => Boolean(writer?.({ screen, query }, push));

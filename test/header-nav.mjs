@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import { createContext, runInContext } from 'node:vm';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
 
-const { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute, createPlaces } = await import('../public/joe/route.js');
+const { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute, onAddress, createPlaces } = await import('../public/joe/route.js');
 const { moneyNoWrap } = await import('../public/joe/ui.js');
 const { MINUS, NB } = await import('../public/joe/format.js');
 const html = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8');
@@ -154,13 +154,14 @@ function browser() {
     reload() { listeners = new Map(); timers.clear(); observers.clear(); rendered.clear(); y = 0; data = false; },
   };
 }
-// app.js's own navigation (go, follow and the first load), run against that
-// browser. Everything else go() touches is a quiet stand-in.
+// app.js's own navigation (go, the one address path with its screen writer,
+// follow and the first load), run against that browser. Everything else go()
+// touches is a quiet stand-in.
 const REGIONS = [/^  let shown = [\s\S]*?^  function go\(next[\s\S]*?^  \}$/m, /^  const follow = [\s\S]*?addEventListener\('hashchange', follow\);$/m,
   /^  try \{ history\.scrollRestoration[\s\S]*?^  go\(first\.screen[^\n]*$/m];
 function boot(source, b) {
   const code = REGIONS.map(re => { const m = re.exec(source); assert.ok(m, `app.js region ${re}`); return m[0]; }).join('\n');
-  const ctx = { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, applyRoute, createPlaces,
+  const ctx = { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, applyRoute, onAddress, createPlaces,
     screen: 'desk', dirtyHistory: false, __joedesk: {}, tips: { hide() {} }, closePop() {}, forgetCharts() {}, forgetResults() {},
     feed: { refreshActions() {} }, guard: (_name, fn) => fn(), render: () => b.render(), SETTINGS_SECTIONS: [], showSection() {},
     $: selector => ({ classList: { toggle: (_name, on) => { if (on) b.show(selector.slice('#scr-'.length)); } } }), $$: () => [],

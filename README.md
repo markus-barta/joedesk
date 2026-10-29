@@ -1081,16 +1081,25 @@ counted partial days says **No trades recorded**, as on the calendar month
 line; without them it says **No trades**. Open-position gains or losses keep
 their **Up/Down € …** sentence and its hint; the calendar month line keeps its
 own coverage hint even when the hero cannot state a result.
-Phones at ≤ 700 px keep a two-line sentence reserve inside a fixed 301 px left
-column; its content needs 300.75 px with three lines, leaving slack for a long
-sentence and hint without moving the split or benchmark. The browser assertions
-require the longest eligible empty wording, with **Paper results start on
-30 Sep 2026** and the older **week of 21 Sep**, to fit three lines at 360/390
-without moving the split rows, benchmark, chart, legend or tiles. Desktop keeps
-the original 340 px left column (280 px at ≤ 1180 px); hinted result and empty
-sentences may use three lines at 768/1024. At 1440 they keep two lines where
-they fit, otherwise three, with the same exact zero-movement requirement and
-the hint unbroken.
+The hero's figure column has fixed rows (JOED-151): its heading, the figure
+with its percentage line, a three-line sentence row and the split, so a
+sentence of one to three lines never moves the split, chart, legend or tiles.
+The two explanations that can run longer, a change of basis and an unknown
+result, carry their longest copy invisibly in the same row (all three desks,
+a Wednesday in May, and each of the widest period phrases), so the split
+starts below the sentence's last line and stays put while the view switches
+within that state; the row grows only for them. Browser assertions at
+320 and 390 px require that for a basis change of one desk and of all
+three, and for an unknown result.
+Phones at ≤ 700 px keep at least a two-line sentence box in that row. The
+browser assertions require the longest eligible empty wording, with **Paper
+results start on 30 Sep 2026** and the older **week of 21 Sep**, to fit three
+lines at 360/390 without moving the split rows, chart, legend or tiles.
+Desktop uses the design's 300 px column (280 px at ≤ 1180 px); at ≤ 900 px
+the chart moves under the figures and the sentence spans the hero. Hinted
+result and empty sentences may use three lines at 768/1024. At 1440 they keep
+two lines where they fit, otherwise three, with the same exact zero-movement
+requirement and the hint unbroken.
 The dedicated `period-hint` browser scenario checks zero movement of tiles and
 hero children at 360/390/768/1024/1440, the desktop line limits, warning-icon contrast
 and clipping. It also forbids middle dots in both lines and splitting either
@@ -1134,9 +1143,12 @@ the formatter emits `1M` for € 999.000. Its five calendar crops show October's
 ±€ 1.200.000, gain, loss, zero, k and missing-day warning, under `JOED_QA_DIR`.
 The generated `index.md` and CI log retain the measurement table.
 
-Day-detail trade amounts keep their full value on one right-aligned line.
-Their columns grow to fit, with the original 92 px minimum for short amounts
-on desktop. Names keep at least 120 px and wrap between whole words; only
+Day-detail trade amounts keep their full value on one right-aligned line,
+with "after fees" under it. Their columns grow to fit, with the original 92 px
+minimum for short amounts on desktop. Each trade has two lines (JOED-151): the
+symbol, name and meta beside the amount, then the prices as traded, the
+trade's own recorded rate ("at € 0,90 per $"; none for a euro price) and its
+fees. Names keep at least 120 px and wrap between whole words; only
 an individual token wider than the column may break internally. English
 company letter runs of eight or more contain deterministic soft hyphens,
 with at least three source letters before, between and after opportunities.
@@ -1150,17 +1162,18 @@ Meta units (desk, side/quantity, close time and holding duration) stay together 
 between units. Each middle dot is a nowrap suffix of the preceding unit;
 after layout and resize, line-ending dots use `visibility: hidden`, retaining
 their width so lines stay stable and the next line starts flush.
-Entry/exit prices wrap first, then the entire panel uses the 11 px small token
-if any row needs it, then fees may wrap. Wider panels recover their regular
-price size together. Phone amount
-columns size to their content, while prices and fees span the second row
-beneath the company and amount columns.
+Entry/exit prices and the rate wrap first, then the entire panel uses the
+11 px small token if any row needs it, then fees may wrap. Wider panels recover
+their regular price size together. Phone amount columns size to their content;
+at every width the prices, rate and fees span the second row beneath the
+company and amount columns, so the amount never yields to them.
 The focused `trade-amount` browser scenario checks −€ 100.000,12,
 +€ 999.999,99 and −€ 1.000.000,12 beside USD price pairs with up to eight decimals at
 1440/1024/390/360 in both themes, through the real inbox and worker/fallback.
-It asserts exact amount, price and fee text, no clipping or row overflow,
-common right edges, desktop-only 92 px sizing, phone content sizing, wrapping
-of the eight-decimal pair at 1440, and exactly 0 px outer movement on open/close.
+It asserts exact amount, price, rate and fee text, no clipping or row overflow,
+common right edges, desktop-only 92 px sizing, phone content sizing, the price
+line under the name (also for the eight-decimal pair at 1440), and exactly
+0 px outer movement on open/close.
 Range rectangles check every name/meta word, atomic meta units, the 120 px
 desktop name floor, full panel-header visibility and the price/fee yield order.
 Per-character Range measurements exclude U+00AD, require every broken-word
@@ -1330,6 +1343,81 @@ directory, including `vienna-date.mjs`, and re-pin to `release/contracts.json`'s
 and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.
+
+### Results screen: layout and deep links (JOED-151)
+
+Results follows the approved board design (JOED-147). Under the period tabs
+(Day · Week · Month · This year · All), the stepper and the desk filter, one
+hero card names what it shows (“Result · All desks · this week”), then the
+figure, the All-desks percentage with the money it divides by (“+0,16 % of
+€ 14.973,88”), one sentence and the split (closed trades, still open, before
+fees, fees) as signed amounts in no-wrap spans. The chart sits beside the
+figures and under them at ≤ 900 px; its legend names the line (“Result so far
+· All desks”), the dashed zero and “No index chosen”, which replaces the
+former benchmark row. Eight compact tiles (four columns, two at ≤ 1180 px, one
+at ≤ 382 px) keep their info controls; a value steps its size down to its
+tile, and phones give each value of a pair its own line. By desk is one card:
+J, Joe, Joel, then All desks, every bar coloured by its own sign; the facts
+column shows above 700 px. The calendar and the selected day's trades share
+one card, and a listed day ends with “Prices in USD, as traded. Fees and
+results in EUR at each trade’s Interactive Brokers rate (€ per $). Kept
+holdings never appear here.” (plain words: no control joins the phone
+sheet's focus order). Phones keep the day sheet; its body ends above the
+home indicator (the bottom inset, `--safe-bottom`, added to its 20 px bottom
+padding, 20 px where unsupported). Numbers, bases, Partial/Stale markers,
+empty and error states are unchanged.
+
+All Results-only CSS is one block in `public/joe/app.css`, between
+`Results (one block)` and `end of Results`; a unit test fails if a
+Results-only rule appears outside it. The hero chart has one seam:
+`renderCurve` (`public/joe/results.js`) describes the line (points, time
+domain, colour, the period-start money for the minimum span, the design's
+quiet time marks, axis labels, tracking marker, words) and `drawResultChart`
+draws that description, today with `chart.js`: one thin line without an
+area, a dashed zero, and a mark at each Vienna midnight in a week, each
+Monday up to 120 days, otherwise each first of a month. The shared
+time-chart component replaces only `drawResultChart`.
+
+**Deep links.** A Results view has one address:
+
+```
+#results?period=day|week|month|year|all&date=YYYY-MM-DD&desk=all|j|joe|joel
+```
+
+- `period`: `day`, `week`, `month`, `year` (This year) or `all` (All time).
+- `date`: the calendar's selected day, a Vienna date inside the period. Day
+  is that date; Week is the Monday-to-Sunday Vienna week that contains it;
+  Month its calendar month; `year` its calendar year (this year runs to
+  today, an earlier year is the whole calendar year); All the whole record.
+- `desk`: `all`, `j`, `joe` or `joel`.
+
+The page keeps the selected day inside the period shown, so one date names
+both: choosing Day, Week or Month shows the one that contains the selected
+day, and selecting a day moves the period to it; This year is this calendar
+year, so a selected day of another year gives way to today; All holds any
+day. Days still ahead are disabled on the calendar, as the stepper stops at
+today. The month the calendar shows is not part of the link.
+
+Every parameter is optional: a missing one keeps the current view, which on a
+fresh page is This week, today and All desks. Invalid values (unknown words,
+impossible dates, dates after today or before the stepper's first month) fall
+back silently. A link from outside waits until the record's tracking start
+and the server's date are known, as a cold load begins before both; it is
+then checked and applied once, and the address keeps it meanwhile. A newer
+address replaces a waiting link, and any change of the view drops it. A link
+whose date is today keeps following the board's today.
+Examples: `/joe/#results?period=day&date=2026-10-28&desk=j` (one session for
+J), `#results?period=all` (All time), `#results?desk=joe`. The address always
+shows the current view in this canonical form with all three parameters (the
+nav's bare `#results` too, once Results shows its view). Each change of
+period, desk, step or selected day adds a history entry, so Back and Forward
+restore every view, each at the reader's place on it; a link from another
+screen opens its view, and `#results/<element-id>` still scrolls to an
+element. Results goes through the one router (route.js): it reads a link with
+`onRoute` before it renders, also one that arrives while Results is shown
+(go() hides tips and closes the day sheet first), and writes its address with
+`writeRoute`, a push for the reader's change and a correction otherwise.
+Desk's links use this format; History has its own `#history?…`.
 
 ### Phase B exact money (JOED-85, contract-set revision 10)
 
@@ -1829,7 +1917,13 @@ after the load), unless the reader scrolls first or 15 s pass. A
 screen reads its own parameters by registering one reader,
 `onRoute(screen, read)`: `go()` calls it with the route's `URLSearchParams`
 before the screen renders, on every arrival; an absent parameter keeps that
-screen's current choice. Node tests: `test/header-nav.mjs`; browser checks:
+screen's current choice. A shown screen writes its own query with
+`writeRoute(screen, query, { push })`: the reader's own change of the view
+pushes an entry, so Back returns to the view before; a correction replaces
+the address, and never one that changed outside the page and still waits for
+`follow()`. Both take go()'s history step through the same places, so they
+count against the one budget. Results (JOED-151) is the first screen with a
+reader and a writer. Node tests: `test/header-nav.mjs`; browser checks:
 P3's `nav` group (its `routes`, `bar` and `header` checks) and the width sweeps.
 
 The header button and visible problem line open the shared, opaque Details
@@ -1874,8 +1968,9 @@ browser render-budget validation remains in CI. The base includes open-position
 movement without summing closed trades alone or rounding either input to cents. Individual
 desks, empty periods, basis changes, unknown/non-exact results and unknown or
 nonpositive bases omit the percentage. The shared Desk formatter retains its
-two decimals, signs and tones, with “of the money at the period start” in the
-figure's accessible text and the formula in the existing Result explanation.
+two decimals, signs and tones. Since JOED-151 the percentage sits under the
+euros with its base, “of € …”, a term that opens the existing Result
+explanation; “the money at the period start” stays in the accessible text.
 Both figure columns reserve their width when the percentage is absent, with
 tabular numerals and fixed height. Results unit tests cover the exact base,
 rounding boundaries, Since start parity and omissions. P4's existing number
