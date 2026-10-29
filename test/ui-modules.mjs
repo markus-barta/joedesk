@@ -40,7 +40,8 @@ const { panelStates } = await import('../contracts/panel-state.mjs');
 const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
 const { isRTH } = await import('../time.mjs');
 const format = await import('../public/joe/format.js');
-const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await import('../public/joe/ui.js');
+const { cashCaption, stateCaption, reservedCaption, statePhrase, st, CAPTION_PHRASES, CAPTION_RESERVE } = await import('../public/joe/ui.js');
+const { measure, lineCount } = await import('./fixtures/text-width.mjs');
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
@@ -180,8 +181,22 @@ test('cash captions: Amy’s label and caption stay fixed; every null and stale 
 test('hero captions: every reason reserves retained, stale, broken and null wording with real ages', () => {
   const sizing = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
   const html = reservedCaption('after fees', ['after fees']);
-  const phrases = sizing(html);
-  assert.ok(phrases.includes('after fees'));
+  // Every phrase the real caption builder writes is a candidate; the box lays
+  // out the longest (JOED-147 render budget), measured below to reserve them all.
+  const phrases = CAPTION_PHRASES;
+  assert.deepEqual(sizing(html), ['after fees', ...CAPTION_RESERVE]);
+  assert.ok(CAPTION_RESERVE.length <= 16 && CAPTION_RESERVE.every(text => phrases.includes(text)));
+  const plain = text => text.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  // 12 px captions that may break inside a word (overflow-wrap: anywhere), in
+  // the wide font and a font 15 % narrower: at every width the laid-out
+  // phrases need as many lines as the tallest phrase of all.
+  for (const factor of [1, 0.85]) {
+    const all = phrases.map(text => measure(plain(text), 12, { factor })), laid = CAPTION_RESERVE.map(text => measure(plain(text), 12, { factor }));
+    for (let max = 40; max <= 1200; max++) {
+      const most = Math.max(...laid.map(m => lineCount(m, max, { anywhere: true })));
+      assert.ok(all.every(m => lineCount(m, max, { anywhere: true }) <= most), `${max} px (×${factor})`);
+    }
+  }
   assert.ok(phrases.includes('Not reported'));
   assert.ok(phrases.includes('Unavailable · not available'));
   for (const [reason, why] of Object.entries(health.CELL_REASON)) {
@@ -207,7 +222,7 @@ test('hero captions: every reason reserves retained, stale, broken and null word
   assert.ok(phrases.every(text => !text.includes('data-age')));
   const visible = stateCaption({ state: 'broken', value: {}, retained: true, reason: 'gateway_unconfirmed', ageSeconds: 90 }, 'hero.open');
   assert.match(reservedCaption(visible, ['after fees']), /<span class="account-caption"><span>Last good value, <span class="age" data-age="hero.open">1 min ago<\/span> · broker connection not confirmed<\/span>/);
-  assert.deepEqual(sizing(reservedCaption(visible, ['after fees'])), phrases, 'reserve stays identical across states');
+  assert.deepEqual(sizing(reservedCaption(visible, ['after fees'])), sizing(html), 'reserve stays identical across states');
 });
 
 // JOED-153: Open result and Desks' money stay in the desk hero; the paper account
@@ -228,7 +243,7 @@ test('hero captions: the two supporting KPIs keep the same reserve through sessi
     actual.forEach((html, i) => {
       assert.match(html, /<span class="c"><span class="account-caption">/);
       assert.deepEqual(reserve(html), reserve(baseline[i]));
-      assert.ok(reserve(html).includes('Last good value, 999 days ago · broker connection not confirmed'));
+      assert.ok(CAPTION_RESERVE.every(text => reserve(html).includes(text)), 'the tallest state phrases');
     });
   }
   assert.ok(reserve(baseline[1]).includes('started with € 15.000'));

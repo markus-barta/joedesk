@@ -382,7 +382,7 @@ export function stateCaption(cell, key, fresh = '', held, sharedReason = null) {
 // Use the real caption builder for every state/reason combination. Days and
 // hours exercise both long ages and the longest unbroken age token; unknown
 // ages have their own wording. Sizing copies never tick or enter accessibility.
-const CAPTION_SIZING = [...new Set([null, ...Object.keys(CELL_REASON)].flatMap(reason =>
+export const CAPTION_PHRASES = [...new Set([null, ...Object.keys(CELL_REASON)].flatMap(reason =>
   [null, 999 * 86400, 23 * 3600 + 59 * 60].flatMap(ageSeconds => [
     { state: 'not reported', value: null },
     { state: 'broken', value: null },
@@ -390,7 +390,16 @@ const CAPTION_SIZING = [...new Set([null, ...Object.keys(CELL_REASON)].flatMap(r
     { state: 'stale', value: {} },
     { state: 'broken', value: {} },
   ].map(cell => stateCaption({ ...cell, reason, ageSeconds }, 'sizing').replace(AGE_RE, '$2')))
-))].map(text => `<span class="cash-sizing" aria-hidden="true">${text}</span>`).join('');
+))];
+// A caption's box is as tall as its tallest phrase, and the tallest phrases
+// are the longest: the sixteen longest are laid out, not all 401 (every Desk
+// update rebuilt some 1,200 hidden boxes for the hero's three captions).
+// ui-modules.mjs measures that they reserve every phrase's lines at every
+// width, in the wide font and in a narrower one.
+const plainLength = text => text.replace(/&[#\w]+;/g, '&').length;
+export const CAPTION_RESERVE = CAPTION_PHRASES.map((text, i) => ({ text, i }))
+  .sort((a, b) => plainLength(b.text) - plainLength(a.text) || a.i - b.i).slice(0, 16).map(p => p.text);
+const CAPTION_SIZING = CAPTION_RESERVE.map(text => `<span class="cash-sizing" aria-hidden="true">${text}</span>`).join('');
 export function reservedCaption(caption, freshCaptions) {
   const fresh = [...new Set(freshCaptions)].map(text =>
     `<span class="cash-sizing" aria-hidden="true">${stateCaption({ state: 'fresh' }, '', text)}</span>`).join('');
