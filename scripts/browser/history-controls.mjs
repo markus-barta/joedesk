@@ -290,10 +290,23 @@ export async function historyControlChecks({ page, viewport, theme, check, settl
   await settle(page);
   t = await state();
   check('JOED-145', `${tag}: a pinch zooms the chart in`, t.x1 - t.x0 < (s.x1 - s.x0) * 0.8 && t.lines >= 3, { s, t });
+  // The pinch's fingers lift beyond the chart (they spread past its top and
+  // bottom): the chart still ends that gesture, so the next swipe pans.
+  s = t;
+  const after = plot(s, 0.5);
+  await swipe(page, { x: after.x - 60, y: after.y }, { x: after.x + 60, y: after.y });
+  await settle(page);
+  t = await state();
+  check('JOED-145', `${tag}: after a pinch whose fingers lift beyond the chart, a sideways swipe still pans`, t.x0 < s.x0 - (s.x1 - s.x0) * 0.05 &&
+    near(t.x1 - t.x0, s.x1 - s.x0, 1000) && t.follow === 'false', { s, t });
   // Day on the strip is narrower than a finger: the point at the window's
   // centre is the window itself, not an edge handle, and dragging it pans.
-  await page.evaluate('window.scrollTo(0, 0)');
-  s = await preset('1d');
+  // The strip comes on screen first, as a reader scrolls to it: at the top
+  // of the page it lies under the bottom bar or past the screen's edge.
+  await preset('1d');
+  await page.evaluate(`document.getElementById('histMini').scrollIntoView({ block: 'center', behavior: 'instant' })`);
+  await settle(page);
+  s = await state();
   const centre = { x: s.win.left + s.win.width / 2, y: s.track.top + s.track.height / 2 };
   const hit = await page.evaluate(`(() => { const el = document.elementFromPoint(${centre.x}, ${centre.y}); return { id: el?.id ?? null, edge: el?.closest('[data-edge]')?.dataset.edge ?? null }; })()`);
   await swipe(page, centre, { x: centre.x - 40, y: centre.y });
