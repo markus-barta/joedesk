@@ -282,6 +282,58 @@ test('JOED-148 A4: a desk’s own accounting start wins; another Results start l
   for (const id of ['j', 'joe', 'joel']) assert.equal(htmlDocument(deskCard(ctx, id, 10, true)).querySelectorAll('.dnums .term')[2].textContent, 'Since start');
   const details = htmlDocument(healthPop(ctx, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now)));
   const flag = details.querySelectorAll('.st.warn').map(e => e.textContent);
-  assert.ok(flag.includes('Since start dates differ: Results start on 12 Sep, the desks’ bookkeeping on 10 Sep. Desk shows no date until they agree.'), flag.join(' | '));
+  assert.ok(flag.includes('Since start dates differ: Results start on 12 Sep; J, Joe and Joel count from 10 Sep. Desk shows no date until they agree.'), flag.join(' | '));
   assert.equal(boardHealthPresentation(ctx.states, ctx.feeds, ctx.now).tone, 'green', 'a date question never changes the light');
+});
+
+// JOED-148 fix round 1 (gate finding 2): Results is checked against each desk's
+// effective start (its own accounting date, else SINCE_START), never against the
+// fallback alone, and the warning names the days the desks actually count from.
+const accountingStart = (ctx, ids, periodStart) => {
+  for (const desk of ctx.feeds.data.value.desks) if (ids.includes(desk.id)) desk.accounting = { periodStart, method: 'execution-fifo-net-current-fx' };
+};
+const sinceView = ctx => {
+  const hero = htmlDocument(heroLeft(ctx));
+  for (const node of hero.querySelectorAll('.cash-sizing')) node.remove();
+  const details = htmlDocument(healthPop(ctx, boardHealthPresentation(ctx.states, ctx.feeds, ctx.now)));
+  return {
+    hero: hero.querySelector('[data-cell="hero.since"] .term').textContent,
+    money: hero.querySelector('[data-cell="hero.equity"] .account-caption').children[0].textContent,
+    cards: ['j', 'joe', 'joel'].map(id => htmlDocument(deskCard(ctx, id, 10, true)).querySelectorAll('.dnums .term')[2].textContent),
+    warning: details.querySelectorAll('.st.warn').map(e => e.textContent).find(text => text.startsWith('Since start dates differ')) ?? null,
+  };
+};
+test('JOED-148 A4: desks that all send 12 Sep beside Results on 12 Sep read "Since 12 Sep" with no warning', () => {
+  const ctx = context();
+  accountingStart(ctx, ['j', 'joe', 'joel'], '2026-09-12T04:00:00.000Z');
+  ctx.feeds.results = { value: { trackingStart: '2026-09-12' } };
+  const starts = sinceStarts(ctx.feeds);
+  assert.deepEqual([starts.common, starts.conflict, starts.differ], ['2026-09-12', false, []]);
+  assert.deepEqual(sinceView(ctx), { hero: 'Since 12 Sep', money: `started with ${eur(STARTING_MONEY, false, 0)} on 12 Sep`,
+    cards: ['Since 12 Sep', 'Since 12 Sep', 'Since 12 Sep'], warning: null });
+});
+
+test('JOED-148 A4: mixed and contradicting starts name each desk’s effective day in the warning', () => {
+  const nb = ' ';
+  for (const [what, own, results, expected] of [
+    ['every desk’s own date against another Results day', ['j', 'joe', 'joel'], '2026-09-10',
+      { hero: `Since 12${nb}Sep`, cards: [`Since 12${nb}Sep`, `Since 12${nb}Sep`, `Since 12${nb}Sep`],
+        warning: `Since start dates differ: Results start on 10${nb}Sep; J, Joe and Joel count from 12${nb}Sep.` }],
+    ['J’s own date agrees, the fallback does not', ['j'], '2026-09-12',
+      { hero: 'Since start', cards: [`Since 12${nb}Sep`, 'Since start', 'Since start'],
+        warning: `Since start dates differ: Results start on 12${nb}Sep; J counts from 12${nb}Sep, Joe and Joel from 10${nb}Sep. Desk shows no date for Joe and Joel until they agree.` }],
+    ['J’s own date disagrees, the fallback agrees', ['j'], '2026-09-10',
+      { hero: 'Since start', cards: [`Since 12${nb}Sep`, `Since 10${nb}Sep`, `Since 10${nb}Sep`],
+        warning: `Since start dates differ: Results start on 10${nb}Sep; J counts from 12${nb}Sep, Joe and Joel from 10${nb}Sep.` }],
+    ['no own dates against another Results day', [], '2026-09-12',
+      { hero: 'Since start', cards: ['Since start', 'Since start', 'Since start'],
+        warning: `Since start dates differ: Results start on 12${nb}Sep; J, Joe and Joel count from 10${nb}Sep. Desk shows no date until they agree.` }],
+  ]) {
+    const ctx = context();
+    accountingStart(ctx, own, '2026-09-12T04:00:00.000Z');
+    ctx.feeds.results = { value: { trackingStart: results } };
+    const view = sinceView(ctx);
+    assert.deepEqual({ hero: view.hero, cards: view.cards, warning: view.warning }, expected, what);
+    assert.doesNotMatch(view.warning, /bookkeeping on/, `${what}: never the fallback alone`);
+  }
 });

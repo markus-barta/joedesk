@@ -1376,9 +1376,13 @@ basis from the configured money (“of € 15.000 · after fees, incl. open
 positions”), Desks' money reads “started with € 15.000 on 10 Sep”, and phone
 rows say “Since” under a phone-only “Since 10 Sep” in the Desks heading. When
 desks start on different days the hero says “Since start” and each card keeps
-its own date. If Results' `trackingStart` names another day, Desk shows no date
-(“Since start”) and Details flags “Since start dates differ: …”; the light is
-unaffected. Since start's explanation retires “J’s bookkeeping starts on its own
+its own date. Results' `trackingStart` is checked against each desk's
+effective day (its own accounting date, else 10 Sep), never against the
+fallback alone. A desk's own date stays shown; a fallback day that Results
+contradicts becomes “Since start”. Details then names the actual days, e.g.
+“Since start dates differ: Results start on 12 Sep; J counts from 12 Sep, Joe
+and Joel from 10 Sep. Desk shows no date for Joe and Joel until they agree.”
+The light is unaffected. Since start's explanation retires “J’s bookkeeping starts on its own
 date” and resolves its day, starting money, each desk's share and “Same start as
 Results · All time” (only once Results agrees) from those values at display time.
 

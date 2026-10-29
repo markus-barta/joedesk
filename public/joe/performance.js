@@ -13,21 +13,25 @@ export const STARTING_MONEY = decimalUnits('15000');
 export const SINCE_START = '2026-09-10';
 const DESK_IDS = ['j', 'joe', 'joel'];
 
-// The New York day each desk's Since start counts from, or null when unknown:
-// the desk's own accounting.periodStart when the feed sends one, else
-// SINCE_START, unless the closed-trade record (Results' trackingStart) starts
-// on another day; then the board cannot tell which is right and shows no date.
-// `common` is the day all three share, if they do.
+// Each desk's Since start as a New York day. `effective` is the day it counts
+// from: its own accounting.periodStart when the feed sends one, else
+// SINCE_START. The closed-trade record (Results' trackingStart) is checked
+// against those effective days, never against the fallback alone: `differ`
+// lists the desks whose day it contradicts. An own accounting date is
+// authoritative and stays shown; a fallback day that Results contradicts is
+// not shown (null in `days`). `common` is the shown day all three share.
 export function sinceStarts(feeds) {
   const desks = feeds?.data?.value?.desks ?? [];
   const trackingStart = feeds?.results?.value?.trackingStart ?? null;
-  const conflict = Boolean(trackingStart) && trackingStart !== SINCE_START;
-  const days = Object.fromEntries(DESK_IDS.map(id => {
-    const own = desks.find(desk => desk.id === id)?.accounting?.periodStart;
-    return [id, own ? nyDay(own) : conflict ? null : SINCE_START];
+  const own = Object.fromEntries(DESK_IDS.map(id => {
+    const periodStart = desks.find(desk => desk.id === id)?.accounting?.periodStart;
+    return [id, periodStart ? nyDay(periodStart) : null];
   }));
+  const effective = Object.fromEntries(DESK_IDS.map(id => [id, own[id] ?? SINCE_START]));
+  const differ = trackingStart ? DESK_IDS.filter(id => effective[id] !== trackingStart) : [];
+  const days = Object.fromEntries(DESK_IDS.map(id => [id, own[id] ?? (differ.includes(id) ? null : SINCE_START)]));
   const common = days.j && DESK_IDS.every(id => days[id] === days.j) ? days.j : null;
-  return { days, common, trackingStart, conflict };
+  return { days, effective, own, common, trackingStart, differ, conflict: differ.length > 0 };
 }
 
 export function exactMoney(value) {

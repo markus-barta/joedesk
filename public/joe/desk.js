@@ -11,7 +11,7 @@ import { intraday } from './history-model.js';
 import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
-import { STARTING_MONEY, SINCE_START, sinceStarts, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
+import { STARTING_MONEY, sinceStarts, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
 import { NOT_EXACT_REASONS, notExactDash, trustedCurrent, outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
@@ -368,11 +368,21 @@ export function dayBreakdown(states) {
   return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` · ${g.reason}` : ''}`).join('; '));
 }
 
-// Details flags a closed-trade record that starts on another day than the
-// board's Since start; Desk then shows no date until the two agree.
+// Details flags a closed-trade record that starts on another day than a
+// desk's effective Since start, naming the days each desk actually counts
+// from, and which desks Desk then shows without a date until they agree.
 export function startsDiffer(feeds) {
   const starts = sinceStarts(feeds);
-  return starts.conflict ? `Since start dates differ: Results start on ${dayText(starts.trackingStart)}, the desks’ bookkeeping on ${dayText(SINCE_START)}. Desk shows no date until they agree.` : null;
+  if (!starts.conflict) return null;
+  const groups = [];
+  for (const id of DESKS) {
+    const group = groups.find(g => g.day === starts.effective[id]);
+    if (group) group.ids.push(id); else groups.push({ day: starts.effective[id], ids: [id] });
+  }
+  const counts = groups.map((g, i) => `${deskNames(g.ids)}${i ? '' : g.ids.length > 1 ? ' count' : ' counts'} from ${dayText(g.day)}`).join(', ');
+  const undated = DESKS.filter(id => starts.days[id] === null);
+  const shown = undated.length ? ` Desk shows no date${undated.length === DESKS.length ? '' : ` for ${deskNames(undated)}`} until they agree.` : '';
+  return `Since start dates differ: Results start on ${dayText(starts.trackingStart)}; ${counts}.${shown}`;
 }
 
 // The household Today needs all three desks. When the feed explains its dash
