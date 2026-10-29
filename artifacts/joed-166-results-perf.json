@@ -1,4 +1,259 @@
 {
+  "fix2": {
+    "session": "68c02380-6c40-47a4-825c-4c2c36ef3132",
+    "recorded_at": "2026-10-29T23:27:04.835813+00:00",
+    "scope": "Fix the optional eager coordinate cache for every per-date conversion failure; preserve normal cached coordinates, existing curve fallback and fix1 historical marks. No new browser/performance measurement.",
+    "parent": "ca08b87a4b33dd8eb798a23363346a0d0a2bb960",
+    "changes": {
+      "date_keys": "Extract the entire wall date rather than ten characters; dateKey pads the year to at least four digits without truncating year 10000.",
+      "optional_cache": "closeCoordinate catches conversion errors per date, rejects non-finite timestamps and coordinates outside (UTC midnight of date, UTC midnight + 24h]. This range contains the following Vienna midnight and excludes silently remapped early years. NaN continues through the existing transfer and curve fallback.",
+      "preserved": "No curve, timeMarks, contract, presentation, fixture, render-budget or policy changes."
+    },
+    "fail_on_parent": {
+      "method": "Final regression tests unchanged, synchronous Node load hook supplies results-model.js verbatim from git show of parent; no worktree changes.",
+      "name_pattern": "JOED-166 extreme trades:",
+      "results": [
+        {
+          "timezone": "UTC",
+          "exit": 1,
+          "tests": 4,
+          "passed": 0,
+          "failed": 4,
+          "failures": [
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required"
+          ],
+          "year_1_failure": "Expected padded complete date 0001-06-15; actual parent key 1-06-15 11"
+        },
+        {
+          "timezone": "Europe/Vienna",
+          "exit": 1,
+          "tests": 4,
+          "passed": 0,
+          "failed": 4,
+          "failures": [
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required"
+          ],
+          "year_1_failure": "Expected padded complete date 0001-06-15; actual parent key 1-06-15 11"
+        },
+        {
+          "timezone": "America/New_York",
+          "exit": 1,
+          "tests": 4,
+          "passed": 0,
+          "failed": 4,
+          "failures": [
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required"
+          ],
+          "year_1_failure": "Expected padded complete date 0001-06-15; actual parent key 1-06-15 11"
+        }
+      ],
+      "full_log": "/tmp/joed-166-fix2-parent-68c02380.json"
+    },
+    "regression_coverage": {
+      "trades": [
+        {
+          "instant": "0999-06-15T10:00:00.000Z",
+          "vienna_date": "0999-06-15"
+        },
+        {
+          "instant": "9999-12-31T23:00:00.000Z",
+          "vienna_date": "10000-01-01"
+        },
+        {
+          "instant": "0001-06-15T10:00:00.000Z",
+          "vienna_date": "0001-06-15"
+        },
+        {
+          "instant": "9999-12-31T23:59:59.999Z",
+          "vienna_date": "10000-01-01"
+        }
+      ],
+      "fixtures": [
+        "empty",
+        "scratches"
+      ],
+      "rows": "Absent, full and partial for four-digit dates; no day row at the year-10000 rollover, outside the day-row contract.",
+      "paths": [
+        "indexResults and structured transfer",
+        "actual history-worker.js poll and transfer",
+        "createFeed main-thread fallback"
+      ],
+      "assertions": [
+        "complete padded Vienna date",
+        "unsupported coordinate remains NaN",
+        "ordinary cached coordinates unchanged",
+        "all trades and exact trade result retained",
+        "fresh fallback cell",
+        "modern rollup and curve unchanged (ignore best/worst internal indexes shifted by adding an earlier trade)"
+      ]
+    },
+    "validation": {
+      "node": "v24.20.0",
+      "started_at": "2026-10-29T23:26:05.500868+00:00",
+      "finished_at": "2026-10-29T23:30:47.185934+00:00",
+      "invocation": "Each test:ui and test:contracts unit file alone, serially, under three TZs; node --test --test-reporter=tap.",
+      "zones": [
+        "UTC",
+        "Europe/Vienna",
+        "America/New_York"
+      ],
+      "runs": 45,
+      "passed": 3129,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "files": [
+        {
+          "file": "test/ui-modules.mjs",
+          "passed_by_zone": [
+            314,
+            314,
+            314
+          ]
+        },
+        {
+          "file": "test/status-line.mjs",
+          "passed_by_zone": [
+            44,
+            44,
+            44
+          ]
+        },
+        {
+          "file": "test/performance-glance.mjs",
+          "passed_by_zone": [
+            28,
+            28,
+            28
+          ]
+        },
+        {
+          "file": "test/board-state.mjs",
+          "passed_by_zone": [
+            212,
+            212,
+            212
+          ]
+        },
+        {
+          "file": "test/open-result.mjs",
+          "passed_by_zone": [
+            11,
+            11,
+            11
+          ]
+        },
+        {
+          "file": "test/phone-first-screen.mjs",
+          "passed_by_zone": [
+            17,
+            17,
+            17
+          ]
+        },
+        {
+          "file": "test/desk-session.mjs",
+          "passed_by_zone": [
+            32,
+            32,
+            32
+          ]
+        },
+        {
+          "file": "test/results-model.mjs",
+          "passed_by_zone": [
+            116,
+            116,
+            116
+          ]
+        },
+        {
+          "file": "test/settings-model.mjs",
+          "passed_by_zone": [
+            27,
+            27,
+            27
+          ]
+        },
+        {
+          "file": "test/contracts.mjs",
+          "passed_by_zone": [
+            96,
+            96,
+            96
+          ]
+        },
+        {
+          "file": "test/phase-b.mjs",
+          "passed_by_zone": [
+            45,
+            45,
+            45
+          ]
+        },
+        {
+          "file": "test/failure-fixtures.mjs",
+          "passed_by_zone": [
+            26,
+            26,
+            26
+          ]
+        },
+        {
+          "file": "test/time-vectors.mjs",
+          "passed_by_zone": [
+            34,
+            34,
+            34
+          ]
+        },
+        {
+          "file": "test/account-history.mjs",
+          "passed_by_zone": [
+            40,
+            40,
+            40
+          ]
+        },
+        {
+          "file": "test/account-history-endpoint.mjs",
+          "passed_by_zone": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "full_log": "/tmp/joed-166-fix2-validation-68c02380.json"
+    },
+    "syntax_check": {
+      "command": "node --check",
+      "files": 17,
+      "exit": 0
+    },
+    "checks": {
+      "check_release": 0,
+      "check_package": 0,
+      "git_diff_check": 0
+    },
+    "fixed_payload_sha256": {
+      "public/joe/results-model.js": "0645e1b9702b1251b58d9d501f8946799b6eedfa3a3f5b307f972345c6e8af29"
+    },
+    "candidate": {
+      "version": "261029192345.0.0",
+      "closure_sha256": "f5259b0452a1dc206c176677531fcee03e218d72b0abbcb0d4f3ca33f57cedfe",
+      "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+      "presentation_source_commit": "01b3080948c21899cbbacbfa3447da6799af1b56",
+      "reseal": "Separate following commit under the unchanged unpublished candidate coordinate, as authorized in the fix2 brief; only results-model payload entry and closure pin change."
+    },
+    "boundaries": "No push, deployment, browser, review gate, subagent or other model CLI. Coordinator owns cross-family review after worker exit; the broader Linux performance blocker remains open."
+  },
   "fix1": {
     "session": "c8706ae3-95d7-4cd7-a0a6-a742aa8a42db",
     "recorded_at": "2026-10-29T22:58:36.874Z",

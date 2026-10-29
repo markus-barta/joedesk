@@ -132,6 +132,71 @@ test('JOED-166 close coordinates: contract-valid extreme dates preserve indexing
   }
 });
 
+for (const [name, instant, date] of [
+  ['year-999 reproducer', '0999-06-15T10:00:00.000Z', '0999-06-15'],
+  ['year-10000 rollover reproducer', '9999-12-31T23:00:00.000Z', '10000-01-01'],
+  ['year-1 trade', '0001-06-15T10:00:00.000Z', '0001-06-15'],
+  ['year-9999 final instant trade', '9999-12-31T23:59:59.999Z', '10000-01-01'],
+]) test(`JOED-166 extreme trades: ${name} survives indexing, worker transfer and main-thread fallback`, { timeout: 5000 }, async () => {
+  const { createFeed } = await import('../public/joe/feed.js');
+  const realWorker = globalThis.Worker, realFetch = globalThis.fetch, realSelf = globalThis.self;
+  const ctx = ctxOf([E('5000'), E('5000'), E('5000')]);
+  try {
+    for (const fixtureName of ['empty', 'scratches']) for (const coverage of date.length === 10 ? ['absent', 'full', 'partial'] : ['absent']) {
+      const value = fixture(fixtureName), before = M.indexResults(value), trade = fixture('scratches').trades[0];
+      trade.id = 'rt-extreme1';
+      trade.openedAt = trade.closedAt = trade.fx.observedAt = instant;
+      value.trades.push(trade);
+      // Contract day rows have four-digit years; a Vienna rollover can exceed them.
+      if (coverage !== 'absent' && date.length === 10) {
+        value.days.push({ ...closeDay(date, '5000'), coverage,
+          ...(coverage === 'partial' ? { partialReasons: ['history_gap'] } : {}) });
+      }
+      assert.ok(validateContract('results', value).ok, `${name}, ${coverage}: contract-valid trade`);
+      const indexed = M.indexResults(value);
+      const transferred = structuredClone(indexed, { transfer: M.transferables(indexed) });
+      assert.equal(indexed.close.at.byteLength, 0, 'close coordinates are transferred');
+      globalThis.fetch = async () => new Response(JSON.stringify(value), { headers: { 'X-Joe-Server-Now': value.receivedAt } });
+      const message = new Promise(resolve => {
+        globalThis.self = { postMessage: (data, transfer) => resolve(structuredClone(data, { transfer })) };
+      });
+      await import(`../public/joe/history-worker.js?joed166-fix2-${name}-${fixtureName}-${coverage}`);
+      self.onmessage({ data: 'results' });
+      const reply = await message;
+      assert.equal(reply.kind, 'results');
+      assert.ok(reply.index, 'the actual worker returns an index');
+      globalThis.Worker = undefined;
+      const feed = createFeed(() => {});
+      await feed.refreshResults();
+      assert.equal(feed.usesWorker(), false);
+      const cell = feed.select().states.results;
+      assert.equal(cell.state, 'fresh');
+      for (const ix of [transferred, reply.index, cell.value.index]) {
+        assert.deepEqual(ix.dates, [...before.dates, date].sort(), 'the complete Vienna date has a padded year and no truncation');
+        const at = ix.dates.indexOf(date);
+        assert.ok(Number.isNaN(ix.close.at[at]), 'an unsupported close coordinate is left uncached');
+        for (const k of before.dates) assert.equal(ix.close.at[ix.dates.indexOf(k)], before.close.at[before.dates.indexOf(k)], 'normal coordinates stay cached');
+        assert.equal(ix.trades.n, before.trades.n + 1);
+        assert.ok([...ix.trades.closedAt].includes(Date.parse(instant)));
+        assert.deepEqual(M.dayResult(ix, date, ALL), { count: 1, units: decimalUnits(trade.netEur.amount), net: unitsNumber(decimalUnits(trade.netEur.amount)) });
+        const actual = roll(ix, 'week', today, ALL, ctx), expected = roll(before, 'week', today, ALL, ctx);
+        // An earlier trade shifts internal array indexes; stable IDs and all money stay equal.
+        for (const key of ['best', 'worst']) {
+          if (actual[key]) delete actual[key].k;
+          if (expected[key]) delete expected[key].k;
+        }
+        assert.deepEqual(actual, expected);
+        const per = M.periodOf('week', today, today, ix.meta.trackingStart);
+        assert.deepEqual(M.curve(ix, per, ALL, ctx), M.curve(before, per, ALL, ctx));
+      }
+    }
+  } finally {
+    globalThis.Worker = realWorker; globalThis.fetch = realFetch;
+    if (realSelf === undefined) delete globalThis.self;
+    else globalThis.self = realSelf;
+  }
+});
+
 test('JOED-30 results: partial dates, empty desks and nullable summaries validate and survive worker transfer', () => {
   const value = fixture('partial-day');
   value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial', partialReasons: ['history_gap'] });
