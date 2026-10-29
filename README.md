@@ -919,6 +919,49 @@ description includes its refresh status and inspection instructions. A data
 update or wheel zoom hides a hovering pointer tooltip until the pointer moves
 again, avoiding stale values after a redraw.
 
+History opens in **Change** (JOED-154, the approved JOED-147 design): every
+desk's line is its change in euros since the left edge of the shown window,
+so all lines start at 0 on a zero line; **Money** shows each desk's money as
+observed. Only the numbers move: the interval classifier, the hatched bands,
+the dashed estimates and "coverage unknown" are exactly those of Money, and
+the scale's ±0,5 % floor is always taken of the money, so a change of a few
+cents never fills the chart. The comparison line and the tooltip follow the
+measure: "Change from … to …: J −€ 1,20 · …" (exact, from the stored
+decimals) and, in Money, each desk's money at both ends with an arrow
+between them. The address names the view,
+`#history?range=fit|day|week|month&desk=all|none|j,joe,joel&mode=change|money`
+(`readHistoryRoute(params)` reads it, also as JOED-152's
+`onRoute('history', readHistoryRoute)`; `historyQuery()` writes it in place
+on every change); an unreadable part keeps the current choice. A manual pan
+or zoom is not part of the address.
+
+The vertical axis is a choice of the shared chart component (`chart.js`):
+**Auto** re-fits to the shown window on every pan and zoom, gliding over
+180 ms (at once with reduced motion); **Max** holds every value the chart has
+loaded, so moving never rescales it (in Change: the largest fall and rise
+from any kept value to a later one); **Custom** takes a bottom and a top in
+euros of the current measure (a point or a comma, no grouping), says
+"Custom axis" on the chart and names values beyond it. The choice is kept per
+chart and viewer in this browser (`createAxisMode(id)`: `get()` and
+`setAxisMode({ mode, min, max })`, which returns `{ ok, choice }` or
+`{ ok: false, field, error }`; `drawChart` takes it as `axis`, with
+`yValues`, `maxValues`, `tickGap`, `ease`, `easeKey` and `again`; without
+`axis` every chart draws as before). History keeps one choice per measure
+(`history.change`, `history.money`); the account chart (JOED-156) and the
+Results chart can adopt it with their own ids. Every label on History's axes
+and strip keeps at least 56 px from the next, at every width. **Controls**,
+one small button under the strip, opens the gestures and keys and the
+vertical axis; the button again, Escape (focus returns to it) or a click
+outside closes it. A first-visit hint ("Drag or swipe to move · ⌘/Ctrl-scroll
+or pinch to zoom"; on touch screens "Swipe · pinch · double-tap") goes after
+the first drag, swipe, zoom or key and stays gone; its room stays, so nothing
+moves. On a phone (480 px or less) Change | Money and the presets share one
+row under the desks and Follow, so the chart starts higher. Within a measure
+nothing moves: the comparison keeps the height of the longest line its
+measure can write. Node tests: `test/chart-axis.mjs`, `test/history-view.mjs`,
+`test/ui-modules.mjs`; browser checks: `historyDesignChecks` in
+`scripts/browser/history-controls.mjs` (P3).
+
 P2 persists `data-state.json` (snapshot plus progress and retained-cell receipts),
 `history-state.json` and `results-state.json` as independent atomic/fsynced
 envelopes (mode 0600). Results snapshots, receipts, generation progress and
@@ -2214,7 +2257,7 @@ the health signal and next action but does not restart the Gateway or pusher.
 ### Preserved contracts
 
 - Storage: `/var/lib/joe-board/data.json`, `history.json`, `fleet-config.json`, `fleet-config-actions.json`
-- Browser `localStorage` keys: `joe-board-theme-v1` (light, dark or system) and `joe-board-observed-events-v1` (desk changes this browser saw). The GridStack layout keys of the old board are left untouched and unread; the rebuilt board has no layout manager or layout storage.
+- Browser `localStorage` keys: `joe-board-theme-v1` (light, dark or system), `joe-board-observed-events-v1` (desk changes this browser saw), `joe-board-chart-axes-v1` (each chart's vertical axis when not Auto) and `joe-board-chart-hint-v1` (the charts' first-visit hint was seen). The GridStack layout keys of the old board are left untouched and unread; the rebuilt board has no layout manager or layout storage.
 - Fleet Config requires Diff → Confirm before Propagate. Save Preview remains browser-local; Propagate writes only a paper-mode config revision and its durable action record. Secret slots list agenix/Janus capability and path refs only and always show REDACTED; they never display plaintext credentials. HOSTD-52 rotation remains a response hook. See `docs/joe-fleet-config-secrets.md`.
 - Gateway light: yellow means the paper connection is unstable or its check-in is late; red means the Gateway reports down. These are health readings, not settings that Fleet Config can fix.
 - API paths: `/healthz`, `/readyz`, `/joe/*`, `/joe/fleet-config.json`, `/joe/fleet-config/actions.json`, `/joe/fleet-config/propagate`
