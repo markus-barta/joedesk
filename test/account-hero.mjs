@@ -588,10 +588,14 @@ test('JOED-156 fix 5: each pointer sees its own Controls list; only the pointer 
 });
 
 // ---------- r39: the Since start · Cash line's lines, a cheap and honest bound ----------
-// The line reserves, by the block's own width (container queries), the lines
-// its longest form needs within the documented bound: amounts up to €1e9
-// (Since start, Cash, each kept holding), ±99.999,99 %, a start up to €1e9.
-// Beyond the bound the line wraps on, visibly; no money figure is clipped.
+// The line reserves, by the block's content width (container queries), the
+// lines its longest form needs within the documented bound: amounts up to
+// €1e9 (Since start, Cash, each kept holding), ±99.999,99 %, a start up to
+// €1e9, at any width from LINE_FLOOR up, in either form (the phone's and the
+// wide one). No layout's narrowest width is assumed: a container query reads
+// the real content width, so a scrollbar, page zoom or a side panel lands in
+// the band for the width it leaves. Beyond the bound, or below the floor, the
+// line wraps on, visibly; no money figure is clipped.
 //
 // Widths: the board's fonts as read from their files, with the page's
 // tabular figures (fixtures/account-line-metrics.json): SF Pro at 12 px
@@ -604,7 +608,7 @@ test('JOED-156 fix 5: each pointer sees its own Controls list; only the pointer 
 // Coverage: greedy line breaking never needs fewer lines when a word or a
 // space widens or the line narrows (each line then starts no later), so a
 // field at its maximal digit count (each digit at the widest) bounds every
-// shorter value of it, and the narrowest width of each step bounds the step.
+// shorter value of it, and the narrowest width of each band bounds the band.
 // Everything else is enumerated: every Since start wording and both signs,
 // both start forms (whole euros, cents) on the widest date, Cash as a value
 // (both signs) or a dash beside every reason, and the kept holdings as two or
@@ -652,30 +656,51 @@ function lineCount(words, width) {
   }
   return lines;
 }
+// The bands, from the floor up: below `below` px of content width (the
+// rule's max-width is `below` − 0.02 px), `lines` lines; from the last width
+// on, the base rule's two. app.css and the browser check
+// (scripts/browser/account-hero.mjs) follow this table.
+const LINE_FLOOR = 240;
+const RESERVE = {
+  narrow: { px: 12, lineHeight: 17, steps: [[291, 4], [408, 3], [Infinity, 2]] },
+  wide: { px: 12.5, lineHeight: 18, steps: [[242, 10], [251, 9], [307, 8], [348, 7], [389, 6], [489, 5], [612, 4], [864, 3], [Infinity, 2]] },
+};
 
-test('JOED-156 r39: the Since start · Cash line reserves the lines its longest form needs at every width, in the board’s fonts', () => {
-  // The rule: by the block's width, lines × line height; above the last width, two lines.
+test('JOED-156 r39: the Since start · Cash line’s bands run contiguous from the 240 px floor to infinity, in app.css and in the browser check', () => {
   const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
-  const RESERVE = {
-    narrow: { px: 12, lineHeight: 17, from: 260, steps: [[291, 4], [408, 3], [Infinity, 2]] },
-    wide: { px: 12.5, lineHeight: 18, from: 397, steps: [[489, 5], [612, 4], [864, 3], [Infinity, 2]] },
-  };
-  assert.match(css, /\n\.acct-hero \{ container: acct \/ inline-size; \}/);
+  assert.match(css, /\n\.acct-hero \{ container: acct \/ inline-size; \}/, 'the block is the container: its content width decides');
+  // Every rule on the container; widths in hundredths of a px, a rule on N.98 px applying up to N·100 + 98.
+  const rules = [...css.matchAll(/@container acct \(max-width: (\d+)\.98px\) \{ \.acct-sub\.acct-(narrow|wide) \{ min-height: (\d+)px; \} \}/g)]
+    .map(([, n, kind, minHeight]) => ({ upTo: +n * 100 + 98, kind, minHeight: +minHeight }));
+  assert.equal(rules.length, css.match(/@container acct\b/g).length, 'no other rule on the container');
+  const base = { wide: +css.match(/\n\.acct-sub \{ min-height: (\d+)px;/)[1], narrow: +css.match(/\n {2}\.acct-sub \{ min-height: (\d+)px;/)[1] };
+  for (const [kind, { lineHeight, steps }] of Object.entries(RESERVE)) {
+    // The table rises from above the floor to infinity, its lines falling to two.
+    assert.ok(steps[0][0] > LINE_FLOOR && steps.at(-1)[0] === Infinity && steps.at(-1)[1] === 2, `${kind}: the table spans the floor to infinity`);
+    steps.slice(1).forEach(([below, lines], i) => assert.ok(below > steps[i][0] && lines < steps[i][1], `${kind}: ${below} px after ${steps[i][0]} px`));
+    // The cascade at a width: the last rule that applies wins (one selector),
+    // else the base two lines; both sides change only at an edge, so the
+    // floor, every edge and a hundredth past each cover every width up from it.
+    const own = rules.filter(r => r.kind === kind);
+    const cascade = w => (own.filter(r => w <= r.upTo).at(-1)?.minHeight ?? base[kind]) / lineHeight;
+    const proved = w => steps.find(([below]) => below === Infinity || w <= below * 100 - 2)[1];
+    const edges = [...own.map(r => r.upTo), ...steps.slice(0, -1).map(([below]) => below * 100 - 2)];
+    const probes = [LINE_FLOOR * 100, ...edges.flatMap(e => [e, e + 1]), 1e8].filter(w => w >= LINE_FLOOR * 100);
+    for (const w of probes) assert.equal(cascade(w), proved(w), `${kind} at ${w / 100} px: app.css reserves the lines proved`);
+  }
+  // The browser check holds the line to the same table.
+  const p3 = readFileSync(new URL('../scripts/browser/account-hero.mjs', import.meta.url), 'utf8');
+  const [, narrow, wide] = p3.match(/\(line\.narrow \? (\[\[[^:]*\]\]) : (\[\[[^)]*\]\])\)/) ?? [];
+  const table = s => JSON.parse(s.replaceAll('Infinity', '"∞"')).map(([below, lines]) => [below === '∞' ? Infinity : below, lines]);
+  assert.deepEqual({ narrow: table(narrow), wide: table(wide) }, { narrow: RESERVE.narrow.steps, wide: RESERVE.wide.steps });
+});
+
+test('JOED-156 r39: the Since start · Cash line reserves the lines its longest form needs at every width from the floor, in the board’s fonts', () => {
+  // The premises: the line's size and figures, in either form.
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
   assert.match(css, /\n\.acct-sub \{ min-height: 36px; margin-top: 6px; font-size: 12\.5px; line-height: 18px;/, 'two lines of 18 px at 12,5 px');
   assert.match(css, /\n {2}\.acct-sub \{ min-height: 34px; margin-top: 4px; font-size: 12px; line-height: 17px; \}/, 'on a phone two lines of 17 px at 12 px');
   assert.match(css, /\n {2}font: 14px\/1\.5 var\(--font\); font-variant-numeric: tabular-nums;/, 'the page’s tabular figures');
-  for (const [kind, { lineHeight, steps }] of Object.entries(RESERVE)) {
-    for (const [below, lines] of steps.filter(([below]) => below !== Infinity)) {
-      assert.ok(css.includes(`@container acct (max-width: ${below - 1}.98px) { .acct-sub.acct-${kind} { min-height: ${lines * lineHeight}px; } }`), `${kind}: ${lines} lines below ${below} px`);
-    }
-  }
-  // The block's width at the narrowest widths the board serves: the phone's
-  // (320 px) and the first width with the wide line (481 px).
-  assert.match(css, /\n\.acct-hero \{ position: relative; padding: 20px 26px 14px;/);
-  assert.match(css, /\n {2}\.acct-hero \{ padding: 14px; margin-bottom: 12px; \}/);
-  assert.match(css, /--gutter: 28px;/);
-  assert.match(css, /@media \(max-width: 700px\) \{\n {2}:root \{ --gutter: 16px; \}/);
-  assert.deepEqual([320 - 2 * 16 - 2 * 14, 481 - 2 * 16 - 2 * 26], [RESERVE.narrow.from, RESERVE.wide.from]);
 
   // Every form within the bound, as the page writes it (subParts), its
   // fields at their maximal digit counts.
@@ -724,19 +749,22 @@ test('JOED-156 r39: the Since start · Cash line reserves the lines its longest 
   assert.ok(tails.some(h => text(h).endsWith(`incl. kept holdings — · ${CELL_REASON[longest]}`)));
   assert.ok(heads.length >= 1140 && tails.length === 7 + 1 + Object.keys(CELL_REASON).length, `${heads.length} heads × ${tails.length} tails`);
 
-  // At the narrowest width of each step, every form fits the lines reserved there.
+  // At the narrowest width of each band, every form fits the lines reserved
+  // there: the floor, then just past the band before (its rule's max-width,
+  // below − 0.02 px).
   const joined = (head, tail) => head.slice(0, -1).concat([{ w: head.at(-1).w + tail[0].w, gap: head.at(-1).gap }], tail.slice(1));
   for (const [fontName, font] of Object.entries(LINE_FONTS)) {
-    const lines = { narrow: narrow.map(h => [lineWords(h, font, 12)]),
-      wide: (() => { const t = tails.map(h => lineWords(h, font, 12.5)); return heads.map(h => { const w = lineWords(h, font, 12.5); return t.map(tail => joined(w, tail)); }); })() };
-    for (const [kind, { from, steps }] of Object.entries(RESERVE)) {
-      let at = from;
+    const { narrow: { px: phone }, wide: { px: wider } } = RESERVE;
+    const lines = { narrow: narrow.map(h => [lineWords(h, font, phone)]),
+      wide: (() => { const t = tails.map(h => lineWords(h, font, wider)); return heads.map(h => { const w = lineWords(h, font, wider); return t.map(tail => joined(w, tail)); }); })() };
+    for (const [kind, { steps }] of Object.entries(RESERVE)) {
+      let at = LINE_FLOOR;
       for (const [below, reserved] of steps) {
         let need = 0;
         for (const group of lines[kind]) for (const w of group) need = Math.max(need, lineCount(w, at));
         assert.ok(need <= reserved, `${fontName} ${kind} at ${at} px of line: ${need} lines needed, ${reserved} reserved`);
         if (below === Infinity) break;
-        at = below;
+        at = below - 0.02;
       }
     }
   }

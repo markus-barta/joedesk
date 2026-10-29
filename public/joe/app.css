@@ -1593,16 +1593,26 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 .acct-state > [data-clamp] { display: block; min-width: 0; height: 20px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acct-dbtn { display: none; }
 .acct-sub { min-height: 36px; margin-top: 6px; font-size: 12.5px; line-height: 18px; color: var(--ink-3); }
-/* The Since start · Cash line (on wider screens with the kept holdings) keeps,
-   by the block's own width, the lines its longest form needs within the
-   documented bound: amounts up to €1e9, ±99.999,99 %, every Cash reason and
-   wording, in SF Pro and DejaVu Sans with tabular figures (proved in
-   test/account-hero.mjs). Beyond the bound the line wraps on, visibly; no
-   money figure is ever clipped. */
+/* The Since start · Cash line, in either form (the phone's, and the wider
+   screens' with the kept holdings), keeps by the block's content width the
+   lines its longest form needs within the documented bound: amounts up to
+   €1e9, ±99.999,99 %, every Cash reason and wording, in SF Pro and DejaVu Sans
+   with tabular figures, at any width from 240 px up (proved in
+   test/account-hero.mjs, which also holds these bands contiguous from 240 px
+   to infinity). A container query reads the real content width, so a
+   scrollbar, page zoom or a side panel lands in the band for the width it
+   leaves; no layout's narrowest width is assumed. Beyond the bound, or below
+   240 px, the line wraps on, visibly; no money figure is ever clipped. A
+   narrower band comes after the wider ones, so it wins below its width. */
 .acct-hero { container: acct / inline-size; }
 @container acct (max-width: 863.98px) { .acct-sub.acct-wide { min-height: 54px; } }
 @container acct (max-width: 611.98px) { .acct-sub.acct-wide { min-height: 72px; } }
 @container acct (max-width: 488.98px) { .acct-sub.acct-wide { min-height: 90px; } }
+@container acct (max-width: 388.98px) { .acct-sub.acct-wide { min-height: 108px; } }
+@container acct (max-width: 347.98px) { .acct-sub.acct-wide { min-height: 126px; } }
+@container acct (max-width: 306.98px) { .acct-sub.acct-wide { min-height: 144px; } }
+@container acct (max-width: 250.98px) { .acct-sub.acct-wide { min-height: 162px; } }
+@container acct (max-width: 241.98px) { .acct-sub.acct-wide { min-height: 180px; } }
 @container acct (max-width: 407.98px) { .acct-sub.acct-narrow { min-height: 51px; } }
 @container acct (max-width: 290.98px) { .acct-sub.acct-narrow { min-height: 68px; } }
 .acct-sub b, .acct-details b { color: var(--ink-2); font-weight: 600; }
