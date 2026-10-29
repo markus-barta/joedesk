@@ -378,6 +378,36 @@ test('JOED-156 hero: the chart’s input follows History: zoom at the pointer, s
   assert.ok(Number(p.svg().dataset.x1) - Number(p.svg().dataset.x0) >= 3 * DAY - 1000);
 });
 
+test('JOED-164 input: the account chart holds each finger until it lifts, so a pinch ending beyond the chart leaves the next swipe free to pan', async t => {
+  const p = page(t), held = new Set(), captured = [];
+  p.chart.setPointerCapture = id => { held.add(id); captured.push(id); };
+  const touch = (type, id, x, y, at) => {
+    // A finger lifted outside reaches the chart only if the chart holds it.
+    if (type !== 'pointerup' || (y >= 0 && y <= p.chart.clientHeight) || held.has(id)) {
+      p.chart.listeners[type]({ type, pointerId: id, pointerType: 'touch', button: 0, clientX: x, clientY: y, timeStamp: at });
+    }
+    if (type === 'pointerup') held.delete(id);
+  };
+  const frame = () => [Number(p.svg().dataset.x0), Number(p.svg().dataset.x1)];
+  await p.render();
+  A.chooseRange('1D'); await p.render();
+  const day = frame();
+  touch('pointerdown', 1, 300, 60, 0); touch('pointerdown', 2, 500, 180, 0);
+  touch('pointermove', 1, 260, 20, 10); touch('pointermove', 2, 540, 220, 10);
+  await p.render();
+  const zoomed = frame();
+  assert.ok(zoomed[1] - zoomed[0] < day[1] - day[0], 'the pinch zoomed');
+  touch('pointerup', 1, 250, -40, 20); touch('pointerup', 2, 560, 300, 20);
+  const before = frame();
+  touch('pointerdown', 3, 400, 120, 1000);
+  for (const [x, at] of [[430, 1010], [460, 1020], [470, 1030]]) touch('pointermove', 3, x, 120, at);
+  await p.render();
+  const after = frame();
+  touch('pointerup', 3, 470, 120, 1040);
+  assert.ok(after[0] < before[0] && Math.abs(after[1] - after[0] - (before[1] - before[0])) < 1000, 'the next swipe pans, same width');
+  assert.deepEqual(captured, [1, 2, 3], 'both pinch fingers and the later swipe are held by the chart');
+});
+
 test('JOED-156 hero: the tooltip and the keyboard reading say the same words', () => {
   const h = M.acceptAccountHistory(history());
   const short = A.pointDetails({ x: h.short.t[10], v: h.short.v[10], u: h.short.u[10], i: 10, gap: false }, h.short.t[10], h.short);
