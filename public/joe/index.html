@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <base href="/joe/">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <title>JoeDesk</title>
   <script>
@@ -96,7 +96,7 @@
   <symbol id="i-desk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="8" rx="1.6"/><rect x="13.5" y="3.5" width="7" height="5" rx="1.6"/><rect x="13.5" y="11.5" width="7" height="9" rx="1.6"/><rect x="3.5" y="14.5" width="7" height="6" rx="1.6"/></symbol>
   <symbol id="i-results" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="16" rx="2.2"/><path d="M3.5 9.5h17M8 3v3M16 3v3"/><rect x="7" y="12.5" width="3" height="3" rx=".6"/><rect x="12" y="12.5" width="3" height="3" rx=".6"/></symbol>
   <symbol id="i-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 20.5h17"/><path d="m4.5 15.5 4.5-5 4 3 6.5-8"/></symbol>
-  <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 7h5m6 0h5M4 17h9m4 0h3"/><circle cx="12" cy="7" r="2.5"/><circle cx="15" cy="17" r="2.5"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.6a1.8 1.8 0 0 1 3.4 0l.3.9a1.8 1.8 0 0 0 2.5 1l.9-.4a1.8 1.8 0 0 1 2.4 2.4l-.4.9a1.8 1.8 0 0 0 1 2.5l.9.3a1.8 1.8 0 0 1 0 3.4l-.9.3a1.8 1.8 0 0 0-1 2.5l.4.9a1.8 1.8 0 0 1-2.4 2.4l-.9-.4a1.8 1.8 0 0 0-2.5 1l-.3.9a1.8 1.8 0 0 1-3.4 0l-.3-.9a1.8 1.8 0 0 0-2.5-1l-.9.4a1.8 1.8 0 0 1-2.4-2.4l.4-.9a1.8 1.8 0 0 0-1-2.5l-.9-.3a1.8 1.8 0 0 1 0-3.4l.9-.3a1.8 1.8 0 0 0 1-2.5l-.4-.9A1.8 1.8 0 0 1 6.8 5.1l.9.4a1.8 1.8 0 0 0 2.5-1z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-work" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-6 5 12 2.5-6h4"/></symbol>
   <symbol id="i-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.8v.2"/></symbol>
@@ -156,12 +156,12 @@
     <div class="brand" role="img" aria-label="JoeDesk"><svg class="i" aria-hidden="true"><use href="#i-logo"/></svg><span class="word"><span>JoeDesk</span></span></div>
     <span class="mode-label" id="modeLabel" role="status" aria-label="Mode: paper trading"><svg class="i" aria-hidden="true"><use href="#i-paper"/></svg>PAPER</span>
     <nav class="nav seg" aria-label="Screens">
-      <button type="button" data-go="desk"><svg class="i" aria-hidden="true"><use href="#i-desk"/></svg>Desk</button>
-      <button type="button" data-go="results"><svg class="i" aria-hidden="true"><use href="#i-results"/></svg>Results</button>
-      <button type="button" data-go="history"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>History</button>
-      <button type="button" data-go="settings"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
+      <button type="button" data-go="desk" aria-label="Desk"><svg class="i" aria-hidden="true"><use href="#i-desk"/></svg><span>Desk</span></button>
+      <button type="button" data-go="results" aria-label="Results"><svg class="i" aria-hidden="true"><use href="#i-results"/></svg><span>Results</span></button>
+      <button type="button" data-go="history" aria-label="History"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg><span>History</span></button>
     </nav>
     <button type="button" class="hdr-health" id="hdrHealth" aria-expanded="false" aria-controls="healthPop" aria-haspopup="dialog" aria-label="Loading board status. Open status details."><svg class="i tone-none" aria-hidden="true"><use href="#i-ring"/></svg><span class="lbl"><b>Loading</b></span></button>
+    <button type="button" class="icon-btn gear" id="settingsBtn" data-go="settings" aria-label="Settings"><svg class="i" aria-hidden="true"><use href="#i-gear"/></svg></button>
     <button type="button" class="icon-btn theme-btn" id="themeBtn" aria-label="Switch to dark theme"><svg class="i sun" aria-hidden="true"><use href="#i-sun"/></svg><svg class="i moon" aria-hidden="true"><use href="#i-moon"/></svg></button>
   </div>
   <div class="page health-wrap"><div class="pop" id="healthPop" role="dialog" aria-label="Board status details" tabindex="-1"></div></div>
@@ -321,11 +321,11 @@
   </div>
 </div>
 
+<!-- Phones: the reading screens in a bottom bar; Settings stays the header's gear -->
 <nav class="bottom-nav" aria-label="Screens">
   <button type="button" data-go="desk"><svg class="i" aria-hidden="true"><use href="#i-desk"/></svg>Desk</button>
   <button type="button" data-go="results"><svg class="i" aria-hidden="true"><use href="#i-results"/></svg>Results</button>
   <button type="button" data-go="history"><svg class="i" aria-hidden="true"><use href="#i-history"/></svg>History</button>
-  <button type="button" data-go="settings"><svg class="i" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
 </nav>
 
 <!-- The LIVE gate: three fixed-size steps; it ends disabled and never sends anything -->

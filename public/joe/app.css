@@ -94,7 +94,7 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .nowrap, .num { white-space: nowrap; }
 .gain { color: var(--gain); } .loss { color: var(--loss); } .muted { color: var(--ink-3); } .ink2 { color: var(--ink-2); }
 .vh { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.page { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--gutter); }
+.page { max-width: var(--maxw); margin: 0 auto; padding: 0 max(var(--gutter), env(safe-area-inset-right, 0px)) 0 max(var(--gutter), env(safe-area-inset-left, 0px)); }
 .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-card); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); }
 .pl { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .pl .i { width: 9px; height: 9px; }
@@ -122,14 +122,14 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .tip b { display: block; font-weight: 650; margin-bottom: 2px; }
 .tip .t2 { display: block; color: var(--tip-ink-2); margin-top: 5px; font: 500 11px/1.5 var(--mono); }
 
-/* ---------- Header (glass, the one ambient Paimos touch) ---------- */
+/* ---------- Header (glass, the one ambient Paimos touch) ----------
+   Its widths, the Settings gear, the fitted steps and the phone's bottom bar
+   are in "Header, nav and the phone's bottom bar" at the end. */
 .top { position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--canvas) 74%, transparent); -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2); box-shadow: 0 1px 0 var(--line); }
 .top-in { height: 58px; display: flex; align-items: center; gap: 12px; }
-.brand { display: flex; flex: 0 1 auto; min-width: 24px; align-items: center; font-size: 15.5px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
+.brand { display: flex; flex: none; align-items: center; font-size: 15.5px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
 .brand .i { width: 24px; height: 24px; }
-/* Only the wordmark yields. Its inner span retains the font's natural width;
-   the fit observer hides the whole word whenever this flex slot is narrower. */
-.brand .word { min-width: 0; overflow: hidden; }
+/* The wordmark leaves whole when the row is short (the "word" step); it never shows in part. */
 .brand .word > span { display: block; width: max-content; padding-left: 9px; }
 .mode-label { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; border-radius: 7px; background: var(--paper-bg); color: var(--paper-ink); box-shadow: inset 0 0 0 1px var(--paper-line); font-size: 12px; font-weight: 650; letter-spacing: .08em; white-space: nowrap; flex: none; }
 .mode-label .i { width: 15px; height: 15px; }
@@ -163,12 +163,6 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .status-alert > button > .i { flex: none; width: 16px; height: 16px; }
 .status-alert > button > span { display: block; flex: 1; min-width: 0; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-alert[data-visible] > button { visibility: visible; }
-/* After the brand has yielded, tighten space only if the measured row still
-   needs it. No viewport or font-width estimate decides this density. */
-.top-in[data-tight] { gap: 2px; }
-.top-in[data-tight] .nav { margin-left: 0; }
-.top-in[data-tight] .nav button { padding-inline: 6px; }
-.top-in[data-tight] .hdr-health { padding-inline: 0; }
 .theme-btn { flex: none; }
 .icon-btn { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); }
 @media (hover: hover) { .icon-btn:hover { background: var(--row-hover); color: var(--ink); } }
@@ -220,7 +214,7 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 
 /* ---------- Desk ---------- */
 .health-wrap { position: relative; }
-.pop { position: absolute; right: var(--gutter); top: 4px; z-index: 25; width: min(560px, calc(100% - 2 * var(--gutter))); max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-pop); padding: 16px 18px; opacity: 0; visibility: hidden; }
+.pop { position: absolute; right: max(var(--gutter), env(safe-area-inset-right, 0px)); top: 4px; z-index: 25; width: min(560px, calc(100% - 2 * var(--gutter))); max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-pop); padding: 16px 18px; opacity: 0; visibility: hidden; }
 .health-facts { display: grid; gap: 8px; margin-top: 12px; }
 .health-facts .st { white-space: normal; align-items: flex-start; }
 .health-facts .st > .i { margin-top: 2px; }
@@ -488,21 +482,6 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .desk-grid .dcard:last-child { grid-column: 1 / 3; }
 }
 
-/* ---------- Compact header (phones and narrow windows) ----------
-   Up to 960 px the nav moves to the bottom bar and the header's buttons are
-   44 px. Above 700 px the light keeps its broker word. Within either layout,
-   the brand shrinks first; measured overflow selects tighter spacing. */
-@media (max-width: 960px) {
-  .top-in { height: 54px; gap: 8px; }
-  .nav { display: none; }
-  .hdr-health { width: min(350px, calc(100vw - 214px)); padding: 0 8px; height: 44px; }
-  .top .icon-btn { width: 44px; height: 44px; }
-  .bottom-nav { display: flex; position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 30; padding: 4px; border-radius: 22px; background: color-mix(in srgb, var(--surface) 90%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow-pop); }
-  .bottom-nav button { flex: 1; height: 56px; border: 0; background: transparent; color: var(--ink-3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 600; border-radius: 18px; }
-  .bottom-nav button .i { width: 20px; height: 20px; }
-  .bottom-nav button[aria-current="page"] { color: var(--ink); background: var(--accent-tint); }
-  .foot { margin-bottom: 84px; }
-}
 /* Up to 900 px a kept row has two lines: the holding and its worth, then the
    kept label under the holding. Its side and last price are already in the
    holding's second line. */
@@ -517,7 +496,6 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 @media (max-width: 700px) {
   :root { --gutter: 16px; }
   body { font-size: 15px; }
-  .hdr-health { width: min(350px, calc(100vw - 202px)); }
   .icon-btn { width: 44px; height: 44px; }
   .seg button { height: 44px; min-width: 44px; padding: 0 10px; }
   .btn { height: 44px; }
@@ -747,7 +725,7 @@ span.dbar, span.vbar { display: block; }
 .foot-data .i { display: inline-block; vertical-align: -3px; margin-right: 6px; }
 .product-version { color: var(--ink); line-height: 44px; min-height: 44px; }
 .version-mode { min-width: 44px; min-height: 44px; margin-left: 8px; padding: 0 6px; background: transparent; color: var(--ink-2); border: 0; font-size: 12px; cursor: pointer; }
-.private { min-height: 100vh; display: grid; place-items: center; padding: 24px var(--gutter); }
+.private { min-height: 100vh; display: grid; place-items: center; padding: 24px max(var(--gutter), env(safe-area-inset-right, 0px)) 24px max(var(--gutter), env(safe-area-inset-left, 0px)); }
 .private-card { max-width: 440px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .private-card .brand-i { width: 36px; height: 36px; color: var(--ink); }
 .private-card h1 { font-size: 22px; line-height: 28px; font-weight: 650; }
@@ -763,11 +741,6 @@ span.dbar, span.vbar { display: block; }
   .kpi .c { min-height: 3lh; }
   .positions .pstate { min-height: 48px; }
   .kept .pstate { min-height: 62px; }
-  /* Keep the status and icon on one line, inside the existing 44 px target. */
-  .top-in { gap: 6px; }
-  .hdr-health { padding: 0; gap: 2px; }
-  /* Loading keeps the icon's space so every status has the same width. */
-  .hdr-health .i.tone-none { visibility: hidden; }
 }
 
 /* ---------- Results (P4) ---------- */
@@ -1023,9 +996,10 @@ dialog.dlg::backdrop { background: var(--scrim); }
 }
 
 /* The edit bar: fixed at the bottom on Settings, one row above 1180 px and
-   two rows below (the note, then the buttons). Up to 960 px it floats above
-   the bottom bar; phones are read-only and have none. Its note keeps two
-   lines' room, so no state changes its height. */
+   two rows below (the note, then the buttons). Up to 960 px it floats at the
+   bottom, clear of the safe area (the nav stays in the header there); phones
+   are read-only and have none. Its note keeps two lines' room, so no state
+   changes its height. */
 .editbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 28; background: color-mix(in srgb, var(--surface) 94%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: 0 -1px 0 var(--line-2); display: none; }
 body[data-screen="settings"] .editbar { display: block; }
 body[data-screen="settings"] .foot { margin-bottom: 74px; }
@@ -1035,7 +1009,7 @@ body[data-screen="settings"] .foot { margin-bottom: 74px; }
 .editbar .note-i .i { width: 16px; height: 16px; }
 .editbar .note-t { min-width: 0; overflow-wrap: anywhere; }
 .edit-btns { display: flex; align-items: center; gap: 8px; flex: none; }
-.toast { position: fixed; right: 24px; bottom: 76px; z-index: 60; display: flex; align-items: flex-start; gap: 8px; background: var(--tip-bg); color: var(--tip-ink); border-radius: 12px; padding: 11px 15px; font-size: 13px; line-height: 1.45; box-shadow: var(--shadow-pop); max-width: min(460px, calc(100vw - 32px)); opacity: 0; visibility: hidden; pointer-events: none; }
+.toast { position: fixed; right: max(24px, env(safe-area-inset-right, 0px)); bottom: 76px; z-index: 60; display: flex; align-items: flex-start; gap: 8px; background: var(--tip-bg); color: var(--tip-ink); border-radius: 12px; padding: 11px 15px; font-size: 13px; line-height: 1.45; box-shadow: var(--shadow-pop); max-width: min(460px, calc(100vw - 32px)); opacity: 0; visibility: hidden; pointer-events: none; }
 .toast.on { opacity: 1; visibility: visible; }
 .toast .i { margin-top: 2px; }
 body:not([data-screen="settings"]) .toast { bottom: 24px; }
@@ -1114,10 +1088,10 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .rt-row { grid-template-columns: 150px minmax(0, 1fr); gap: 2px 14px; }
   .tbl { table-layout: fixed; }
   .tbl th:nth-child(1) { width: 30%; } .tbl th:nth-child(2) { width: 36%; }
-  .editbar { left: 8px; right: 8px; bottom: 76px; border-radius: 18px; box-shadow: var(--shadow-pop); }
+  .editbar { left: max(8px, env(safe-area-inset-left, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); bottom: calc(8px + env(safe-area-inset-bottom, 0px)); border-radius: 18px; box-shadow: var(--shadow-pop); }
   .editbar-in { padding: 0 14px; }
-  body[data-screen="settings"] .foot { margin-bottom: 196px; }
-  .toast { bottom: 196px; }
+  body[data-screen="settings"] .foot { margin-bottom: 120px; }
+  .toast { bottom: calc(122px + env(safe-area-inset-bottom, 0px)); }
 }
 @media (max-width: 700px) {
   .set-grid { grid-template-columns: minmax(0, 1fr); margin-top: 10px; }
@@ -1138,8 +1112,8 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .f-saved { display: none; }
   .set-main code, .set-main .mono, .facts-dl dd { overflow-wrap: anywhere; word-break: break-word; }
   .theme-seg button { min-width: 44px; }
-  body[data-screen="settings"] .foot { margin-bottom: 84px; }
-  .toast, body:not([data-screen="settings"]) .toast { left: 16px; right: 16px; bottom: 96px; max-width: none; }
+  body[data-screen="settings"] .foot { margin-bottom: 0; }
+  .toast, body:not([data-screen="settings"]) .toast { left: 16px; right: 16px; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); max-width: none; }
   .gate { height: 640px; }
   .dlg-f { padding: 12px 16px 16px; }
   .check { min-height: 44px; align-items: center; }
@@ -1225,4 +1199,55 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   #chartDetail { padding: 0 12px 12px; }
   .positions-section .sec-h, .kept-section .sec-h { margin: 0 0 8px; }
   #positionsDetail, #keptDetail { padding: 0 12px 12px; }
+}
+
+/* ---------- Header, nav and the phone's bottom bar ----------
+   One row at every width: the brand, PAPER, Desk · Results · History, the
+   light (it opens Details), Settings as a gear and the theme button. Above
+   480 px the nav stays in the header; up to 480 px it is a bottom bar: a
+   solid surface with a hairline, padded clear of the safe area, and the
+   page's content ends above it. Every header control is a 44 px target,
+   whatever it draws. When the row does not fit, app.js (fitHeader) adds
+   these steps in order, keeping the earlier ones: "word" (the wordmark
+   goes), "labels" (the nav drops its icons), "tight" (gaps and padding
+   tighten), "icons" (the nav keeps only its icons; each button keeps its
+   name) and "squeeze" (the light may narrow below its reserve, without its
+   chevron; its whole sentence stays in its title and name). */
+:root { --nav-h: 69px; }
+.top .nav button { position: relative; height: 30px; min-width: 44px; }
+.top .hdr-health, .top .icon-btn { position: relative; }
+.top .nav button::after, .top .hdr-health::after, .top .icon-btn::after { content: ""; position: absolute; inset: min(0px, calc((100% - 44px) / 2)); }
+.gear .i { width: 17px; height: 17px; }
+.gear[aria-current="page"] { color: var(--accent-ink); background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent-line); }
+.top-in[data-fit~="word"] .brand .word { display: none; }
+.top-in[data-fit~="labels"] .nav .i { display: none; }
+.top-in[data-fit~="tight"] { gap: 2px; }
+.top-in[data-fit~="tight"] .nav { margin-left: 0; }
+.top-in[data-fit~="tight"] .nav button { padding-inline: 6px; }
+.top-in[data-fit~="tight"] .hdr-health { gap: 4px; padding-inline: 4px; }
+.top-in[data-fit~="icons"] .nav .i { display: block; }
+.top-in[data-fit~="icons"] .nav button { padding-inline: 0; }
+.top-in[data-fit~="icons"] .nav button > span { display: none; }
+.top-in[data-fit~="squeeze"] .hdr-health { min-width: 0; padding-inline: 2px; }
+.top-in[data-fit~="squeeze"] .hdr-health > .status-chevron { display: none; }
+@media (max-width: 960px) {
+  .top-in { height: 54px; gap: 8px; }
+  .top .icon-btn { width: 44px; height: 44px; }
+  /* The light takes the row's free room: at least its reserve for "Live · 59 s", at most 280 px. */
+  .hdr-health { flex: 1 1 0; width: auto; min-width: 128px; max-width: 280px; height: 44px; padding: 0 8px; }
+}
+@media (max-width: 700px) {
+  .top-in { gap: 6px; }
+  /* Loading keeps the icon's space so every status has the same width. */
+  .hdr-health .i.tone-none { visibility: hidden; }
+}
+@media (max-width: 480px) {
+  .top .nav { display: none; }
+  .hdr-health { min-width: 124px; max-width: none; padding: 0 10px; font-size: 13.5px; }
+  .bottom-nav { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; gap: 4px; padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px)); background: var(--surface); border-top: 1px solid var(--line); }
+  .bottom-nav button { flex: 1 1 0; min-width: 0; height: 56px; border: 0; border-radius: 18px; background: transparent; color: var(--ink-3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 600; }
+  .bottom-nav button .i { width: 20px; height: 20px; }
+  .bottom-nav button[aria-current="page"] { color: var(--ink); background: var(--accent-tint); }
+  /* The page ends above the bar, so nothing renders under it. */
+  #main { padding-bottom: calc(var(--nav-h) + env(safe-area-inset-bottom, 0px)); }
 }

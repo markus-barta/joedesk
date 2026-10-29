@@ -30,15 +30,19 @@ if (!isCanonicalJoeHost(location.hostname)) {
 }
 
 function start() {
-  // CSS shrinks only the brand before any essential item. Hide an incomplete
-  // wordmark, then tighten gaps if even the icon-only row needs more room.
-  // Visibility never changes sizes, so observing the result cannot oscillate.
-  const header = $('.top-in'), word = header.querySelector('.brand .word'), wordText = word.firstElementChild;
+  // The header keeps one row. While its last control, the theme button, does
+  // not fit, add the next step (app.css: the wordmark goes, the nav drops its
+  // icons, gaps tighten, the nav keeps only its icons, then the light may
+  // narrow), keeping the earlier ones. Each pass starts from none, and only
+  // the viewport and the fonts decide the steps, never the light's words, so
+  // no tick or state change moves the header and refitting cannot oscillate.
+  const header = $('.top-in'), themeBtn = $('#themeBtn');
+  const FIT = ['word', 'labels', 'tight', 'icons', 'squeeze'];
+  const overflows = () => themeBtn.getBoundingClientRect().right > header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight) + 0.02;
   const fitHeader = () => {
-    header.removeAttribute('data-tight');
-    const row = header.getBoundingClientRect(), css = getComputedStyle(header);
-    if ($('#themeBtn').getBoundingClientRect().right > row.right - parseFloat(css.paddingRight) + 0.02) header.setAttribute('data-tight', '');
-    word.style.visibility = wordText.getBoundingClientRect().width > word.getBoundingClientRect().width + 0.02 ? 'hidden' : '';
+    let steps = 0;
+    header.dataset.fit = '';
+    while (steps < FIT.length && overflows()) header.dataset.fit = FIT.slice(0, ++steps).join(' ');
     fitStatusLine($('#hdrHealth'), $('#statusAlert'));
   };
   // Apply size changes in the next frame, outside ResizeObserver delivery.
@@ -47,7 +51,7 @@ function start() {
     if (!headerFrame) headerFrame = requestAnimationFrame(() => { headerFrame = 0; fitHeader(); });
   };
   const headerFit = new ResizeObserver(queueHeaderFit);
-  for (const el of [header, word, wordText, $('#hdrHealth'), header.querySelector('.nav')]) headerFit.observe(el);
+  for (const el of [header, $('#modeLabel'), header.querySelector('.brand .word > span'), header.querySelector('.nav'), $('#hdrHealth')]) headerFit.observe(el);
   document.fonts.addEventListener('loadingdone', queueHeaderFit);
   fitHeader();
   trapDialogs();
