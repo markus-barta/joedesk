@@ -17,7 +17,7 @@ import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { phaseBChecks, deskRankingFocusChecks } from './browser/phase-b.mjs';
 import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
-import { historyControlChecks } from './browser/history-controls.mjs';
+import { historyControlChecks, historyFollowGrowthChecks } from './browser/history-controls.mjs';
 import { parseBoardSweepArgs, createBoardSweepPlan, boardSweepErrors, boardSweepTable } from './board-sweep-plan.mjs';
 
 // The widest window with the compact header (app.css). Plan before any side
@@ -1388,6 +1388,30 @@ try {
       if (viewport.name === '1024') await shot(page, viewport, `${viewport.name}-${theme}-history-state-${id}`, `History, P1 fixture ${id} (${want.state})`);
     }
   }
+  // 8a · Follow while newer history arrives (JOED-145 r1), on its own board so
+  // the design scenario keeps its history: every later observation is a
+  // snapshot pushed through the real server, two hours after the one before.
+  {
+    const { snapshot, history } = scenario(NOW);
+    const b = await newBoard({ history });
+    b.setNow(NOW);
+    check('JOED-145', 'Follow board: design snapshot accepted', (await b.push(snapshot)).status === 200);
+    let last = snapshot;
+    const grow = async () => {
+      const when = at(last.generatedAt, 2 * 3600);
+      last = advance(last, when, last.seq + 1);
+      b.setNow(when);
+      const r = await b.push(last);
+      check('JOED-145', `Follow board: the later snapshot at ${when} is accepted`, r.status === 200, r.body);
+      return Date.parse(when);
+    };
+    for (const [viewport, theme] of [[VIEWPORTS[1], 'light'], [VIEWPORTS[2], 'dark']]) {
+      await configure(page, viewport, theme);
+      await load(page, b.url, 'history');
+      await settle(page);
+      await historyFollowGrowthChecks({ page, viewport, theme, check, settle, grow });
+    }
+  }
   }
 
   if (run('basis')) {
@@ -1413,8 +1437,11 @@ try {
       const r = hm.sharedWindowCompare(cols, ids, [x0, x1], endAt);
       if (!r.ok) return { r, text: null, onChart: false };
       const point = (id, iso) => drawn[id].find(p => p.x === Date.parse(iso))?.y;
-      return { r, onChart: r.desks.every(d => d.start === point(d.id, r.startAt) && d.end === point(d.id, r.endAt)),
-        text: `From ${fmt.dayDDM(r.startAt)}, ${fmt.timeHM(r.startAt)} to ${fmt.dayDDM(r.endAt)}, ${fmt.timeHM(r.endAt)}: ${r.desks.map(d => `${LABEL[d.id]} ${fmt.pct(d.pct, 2, true)}`).join(' · ')}` };
+      const when = iso => `${fmt.dayDDM(iso)}, ${fmt.timeHM(iso)}`, figures = r.desks.map(d => `${LABEL[d.id]} ${fmt.pct(d.pct, 2, true)}`).join(' · ');
+      // Over part of the window the line names the stretch it compares (history.js, compareLine).
+      const text = r.after ? `Last ${fmt.age((Date.parse(r.endAt) - Date.parse(r.startAt)) / 1000)} ${r.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'without gaps'}, from ${when(r.startAt)}: ${figures}`
+        : `From ${when(r.startAt)} to ${when(r.endAt)}: ${figures}`;
+      return { r, onChart: r.desks.every(d => d.start === point(d.id, r.startAt) && d.end === point(d.id, r.endAt)), text };
     };
     const view = `(() => { const s = document.querySelector('#histChart > svg'); return { x0: Number(s.dataset.x0), x1: Number(s.dataset.x1), label: s.getAttribute('aria-label'),
       compare: document.getElementById('histCompare').innerText, basis: document.getElementById('histBasis').innerText }; })()`;

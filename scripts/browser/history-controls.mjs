@@ -1,10 +1,13 @@
 // History's window controls in the real page (JOED-145): the overview strip
 // (drag the window, resize its edges, click beside it, keys on its sliders),
 // the presets and Follow, the chart's own input (⌘/Ctrl-wheel zoom at the
-// pointer, a plain wheel scrolls the page, sideways wheel and drag pan,
-// double-click fits, Shift with the arrows) and, on a phone, touch, 320 to
-// 390 px widths and 44 px targets. No preset or desk switch moves anything.
+// pointer, a plain wheel scrolls the page, also right after a sideways pan,
+// sideways wheel and drag pan, double-click fits, Shift with the arrows) and,
+// on a phone, touch, the narrow Day window on the strip, 320 to 390 px widths
+// and 44 px targets. No preset or desk switch moves anything. Follow with
+// newer history arriving through the server is historyFollowGrowthChecks.
 // The page runs with reduced motion (configure), so every jump lands at once.
+import { waitFor } from './shots.mjs';
 
 const MOD = { Alt: 1, Ctrl: 2, Meta: 4, Shift: 8 };
 const CODE = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Home: 36, End: 35, PageUp: 33, PageDown: 34, '+': 187, '-': 189, 0: 48 };
@@ -33,7 +36,7 @@ const STATE = `(() => {
     focused: document.activeElement?.id || document.activeElement?.dataset?.edge || null, live: document.getElementById('histLive').textContent,
     scrollY, scrollWidth: document.documentElement.scrollWidth, innerWidth };
 })()`;
-const MIN = 60e3, DAY = 864e5;
+const MIN = 60e3, HOUR = 3600e3, DAY = 864e5;
 const near = (a, b, tolerance) => Math.abs(a - b) <= tolerance;
 
 async function drag(page, from, to, { steps = 6, modifiers = 0 } = {}) {
@@ -128,14 +131,6 @@ export async function historyControlChecks({ page, viewport, theme, check, settl
     await settle(page);
     t = await state();
     check('JOED-145', `${tag}: Follow returns the window to the newest time, same width, pressed`, t.follow === 'true' && near(t.x1, t.k1, 1000) && near(t.x1 - t.x0, width, 1000), t);
-    await page.evaluate(`document.getElementById('histFollow').click()`);
-    await settle(page);
-    const frozen = await state();
-    await page.evaluate('window.__joedesk.refresh()');
-    await new Promise(resolve => setTimeout(resolve, 400));
-    await settle(page);
-    t = await state();
-    check('JOED-145', `${tag}: Follow off keeps the window where it is while newer history arrives`, frozen.follow === 'false' && t.follow === 'false' && t.x0 === frozen.x0 && t.x1 === frozen.x1, { frozen, t });
 
     // The chart: ⌘-wheel and Ctrl-wheel zoom around the pointer; a plain
     // vertical wheel scrolls the page; a sideways wheel and a drag pan.
@@ -168,7 +163,18 @@ export async function historyControlChecks({ page, viewport, theme, check, settl
     await settle(page);
     t = await state();
     check('JOED-145', `${tag}: a sideways wheel (two-finger swipe) pans earlier by its distance, same width`, near(s.x0 - t.x0, 200 * chartPerPx, 3 * chartPerPx) && near(t.x1 - t.x0, s.x1 - s.x0, 1000) && t.follow === 'false', { s, t });
+    // A plain vertical wheel straight after a sideways one, well inside the
+    // 200 ms a gesture keeps its meaning, still belongs to the page.
     s = t;
+    await wheel(page, plot(s, 0.5), { deltaX: -40 });
+    await wheel(page, plot(s, 0.5), { deltaY: 240 });
+    await settle(page);
+    t = await state();
+    check('JOED-145', `${tag}: a plain vertical wheel right after a sideways pan scrolls the page; the window moved only by the pan`, t.scrollY > s.scrollY &&
+      near(s.x0 - t.x0, 40 * chartPerPx, 3 * chartPerPx) && near(t.x1 - t.x0, s.x1 - s.x0, 1000), { s, t, before: s.scrollY, after: t.scrollY });
+    await page.evaluate('window.scrollTo(0, 0)');
+    await settle(page);
+    s = await state();
     await drag(page, plot(s, 0.5), { x: plot(s, 0.5).x + 120, y: plot(s, 0.5).y });
     await settle(page);
     t = await state();
@@ -267,6 +273,18 @@ export async function historyControlChecks({ page, viewport, theme, check, settl
   await settle(page);
   t = await state();
   check('JOED-145', `${tag}: a pinch zooms the chart in`, t.x1 - t.x0 < (s.x1 - s.x0) * 0.8 && t.lines >= 3, { s, t });
+  // Day on the strip is narrower than a finger: the point at the window's
+  // centre is the window itself, not an edge handle, and dragging it pans.
+  await page.evaluate('window.scrollTo(0, 0)');
+  s = await preset('1d');
+  const centre = { x: s.win.left + s.win.width / 2, y: s.track.top + s.track.height / 2 };
+  const hit = await page.evaluate(`(() => { const el = document.elementFromPoint(${centre.x}, ${centre.y}); return { id: el?.id ?? null, edge: el?.closest('[data-edge]')?.dataset.edge ?? null }; })()`);
+  await swipe(page, centre, { x: centre.x - 40, y: centre.y });
+  await settle(page);
+  t = await state();
+  const stripPerPx = (s.k1 - s.k0) / s.track.width;
+  check('JOED-145', `${tag}: on Day the strip's narrow window is the target at its centre, and dragging it 40 px pans by 40 px of strip time`, s.win.width < 44 &&
+    hit.id === 'histWin' && hit.edge === null && near(s.x0 - t.x0, 40 * stripPerPx, 4 * stripPerPx) && near(t.x1 - t.x0, s.x1 - s.x0, 1000) && t.follow === 'false', { s, t, hit, centre });
   await preset('1w');
   for (const width of [320, 360, 390]) {
     await configure(page, { ...viewport, name: String(width), width }, theme);
@@ -283,4 +301,44 @@ export async function historyControlChecks({ page, viewport, theme, check, settl
   }
   await configure(page, viewport, theme);
   await settle(page);
+}
+
+// Whether the strip draws an observation at `when` (ms): J's line there
+// reaches `when`'s place on the strip, within a pixel and a half.
+const arrived = when => `(() => { const mini = document.getElementById('histMini'), svg = document.querySelector('#histMiniPlot svg');
+  const d = svg?.querySelector('path[stroke="var(--desk-j)"]')?.getAttribute('d') ?? '', end = d.match(/([\\d.]+) [\\d.-]+$/);
+  const k0 = Number(mini.dataset.k0), k1 = Number(mini.dataset.k1), w = Number(svg?.getAttribute('width'));
+  return Boolean(end && k1 >= ${when} && Number(end[1]) >= (${when} - k0) / (k1 - k0) * w - 1.5); })()`;
+
+// Follow while newer history arrives (JOED-145 r1). `grow` pushes a later
+// observation through the real server and returns its time; the page then
+// reads it. Following, the Day window moves to the new newest time; parked,
+// it stays exactly where it is while the kept range and the strip grow.
+export async function historyFollowGrowthChecks({ page, viewport, theme, check, settle, grow }) {
+  const tag = `${viewport.name} ${theme} history follow`;
+  const state = () => page.evaluate(STATE);
+  const arrive = async () => {
+    const when = await grow();
+    await page.evaluate('window.__joedesk.refresh()');
+    await waitFor(page, arrived(when));
+    await settle(page);
+    return when;
+  };
+  await page.evaluate(`document.querySelector('#histRange [data-range="1d"]').click()`);
+  await settle(page);
+  let s = await state(), when = await arrive(), t = await state();
+  check('JOED-145', `${tag}: following, a later observation moves the Day window to the new newest time, same width`, s.follow === 'true' && t.follow === 'true' &&
+    t.k1 >= when && t.x1 > s.x1 + HOUR && near(t.x1, t.k1, 1000) && near(t.x1 - t.x0, s.x1 - s.x0, 1000) && t.pressed.join() === '1d', { s, t, when });
+  await page.evaluate(`document.getElementById('histFollow').click()`);
+  await settle(page);
+  s = await state();
+  when = await arrive();
+  t = await state();
+  const scale = (s.k1 - s.k0) / (t.k1 - t.k0);
+  check('JOED-145', `${tag}: parked, the window stays where it is while the kept range and the strip grow`, s.follow === 'false' && t.follow === 'false' &&
+    t.x0 === s.x0 && t.x1 === s.x1 && t.k1 >= when && t.k1 > s.k1 + HOUR && t.win.left < s.win.left - 1 && near(t.win.width, s.win.width * scale, 1), { s, t, when });
+  await page.evaluate(`document.getElementById('histFollow').click()`);
+  await settle(page);
+  t = await state();
+  check('JOED-145', `${tag}: Follow on again takes the window to the new newest time, same width`, t.follow === 'true' && near(t.x1, t.k1, 1000) && near(t.x1 - t.x0, s.x1 - s.x0, 1000), t);
 }
