@@ -2,7 +2,7 @@
 // kept holdings. Every number keeps its panel state; matching snapshot captions
 // are shared once, while different ages and reasons stay beside their values.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, interactionWithin, NOT_EXACT, dashWords } from './ui.js';
-import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB } from './format.js';
+import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB, joinUnits } from './format.js';
 import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, STUCK_REASON, statusPresentation, executorPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, viennaDay, wall, NY, VIENNA, sessionLabel, sessionDayName, zoneGap, USUAL_GAP_HOURS } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
@@ -222,7 +222,7 @@ export function compactDesk(ctx, id, facts = deskFacts(ctx)) {
   const counts = positionCounts(ctx.states), held = facts.label?.phase === 'live' ? 'open' : 'held';
   const word = `${info.word}${counts?.[id] ? ` · ${counts[id]}${NB}${held}` : ''}`;
   return `<button type="button" class="desk-disclosure desk-row" data-desk-disclosure="${id}" aria-expanded="${expanded.has(id)}" aria-controls="detail-${id}">
-    ${deskMark(id)}<span class="compact-identity"><strong>${esc(desk?.label ?? LABEL[id])}</strong><span class="compact-word tone-${info.tone}">${icon(info.icon)}<span class="cut-line" title="${esc(word)}">${esc(word)}</span></span></span>
+    ${deskMark(id)}<span class="compact-identity"><strong>${esc(desk?.label ?? LABEL[id])}</strong><span class="compact-word tone-${info.tone}">${icon(info.icon)}<span class="cut-line" title="${cutWords(esc(word))}">${cutWords(esc(word))}</span></span></span>
     ${first.last ? lastFigure(first.last) : figure('dayPnl', first.label, first.short)}${figure('totalPnl', since, starts.common ? 'Since' : since)}${icon('chev-d', 'i disclosure-chevron')}
     <span class="disclosure-warning">${problemHtml(deskProblem(ctx, id, facts))}</span></button>`;
 }
@@ -779,10 +779,12 @@ const marksText = marks => marks.map(m => ` · ${m.text}`).join('');
 // hears the qualifications too.
 const lastDashName = (prefix, f, marks) => `${prefix}: ${f.reason}${marksText(marks)}`;
 
-// A session-dated label can be longer than a phone's column: one line that
-// ends in an ellipsis there, its whole words as its title and the term's
-// accessible name, as designed; it never runs under the figure beside it.
-const cutLabel = termHtml => termHtml.replace(/>([^<]*)<\/button>$/, (_, words) => `><span class="cut-line" title="${words}">${words}</span></button>`);
+// A line that may end in an ellipsis on a phone (the session-dated label, a
+// phone row's words): its whole words are its title and its control's name.
+// Its separators and units are joined as the page joins them on a phone
+// (app.js fixUnits), so the words on screen are exactly the title's.
+const cutWords = html => joinUnits(html, { joinDot: true });
+const cutLabel = termHtml => termHtml.replace(/>([^<]*)<\/button>$/, (_, words) => `><span class="cut-line" title="${cutWords(words)}">${cutWords(words)}</span></button>`);
 
 // The hero's first figure (M1, A2, P0-1): Today's cell in the session and after
 // the close, read exactly as before; from New York midnight until the open,

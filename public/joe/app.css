@@ -1234,7 +1234,10 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 .hero .kpi dd { display: contents; }
 .hero .kpi dd > .bn, .hero .kpi dd > .fig-link > .bn { display: inline-flex; height: 28px; }
 .hero .kpi .bn .u { line-height: 1; }
-.hero .kpi .c { height: auto; min-height: 0; }
+/* The caption sits at the figure's text line by its top, not by its first
+   baseline: a caption with no words of its own (a state the board caption
+   says) has no baseline, and the row would change height by 2 px. */
+.hero .kpi .c { height: auto; min-height: 0; align-self: start; margin-top: 9px; }
 .desk-scope { grid-column: 1 / -1; grid-row: 3; min-height: 40px; margin: 0; padding: 11px 0; border-top: 1px dashed var(--line); font-size: 12px; line-height: 18px; color: var(--ink-3); }
 /* M3: the market block, a linear Vienna day 00–24. */
 .session.mkt { display: block; min-width: 0; }
@@ -1395,7 +1398,7 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .hero .kpis { grid-row: 3; }
   .desk-scope { grid-row: 4; }
   .hero .kpi { grid-template-columns: auto minmax(0, 1fr); }
-  .hero .kpi .c { grid-column: 1 / -1; }
+  .hero .kpi .c { grid-column: 1 / -1; margin-top: 0; }
 }
 @container (max-width: 339.98px) {
   .dcard .who { display: contents; }
@@ -1414,7 +1417,7 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   /* A phone row's state and what the desk holds: one line that, on the
      narrowest rows, ends in an ellipsis with its whole words in its title and
      the row's name, as designed (never cut silently, AC-36). */
-  .compact-word > .cut-line { display: block; min-width: 0; height: 16px; overflow: hidden; text-overflow: ellipsis; }
+  .compact-word > .cut-line { display: block; min-width: 0; height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .pct-slot .basis { display: none; }
   .primary-caption .cap-long { display: none; }
   .primary-caption .cap-short { display: inline; }

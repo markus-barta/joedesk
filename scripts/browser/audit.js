@@ -123,7 +123,10 @@
         // their control's name. Require that title and the ellipsis contract.
         if (el.matches('.cut-line')) {
           const cs = getComputedStyle(el);
-          if (el.title !== el.textContent || cs.textOverflow !== 'ellipsis' || cs.whiteSpace !== 'nowrap' || cs.overflowX !== 'hidden') failures.push({ el: 'cut line', why: 'missing full title or ellipsis', text: el.textContent.trim().slice(0, 40) });
+          // The page joins units and, on a phone, separators in text (app.js
+          // fixUnits), never in a title: the words shown must be the title's.
+          if (el.title !== el.textContent || cs.textOverflow !== 'ellipsis' || cs.whiteSpace !== 'nowrap' || cs.overflowX !== 'hidden') failures.push({ el: 'cut line', why: 'missing full title or ellipsis', text: el.textContent.trim().slice(0, 40),
+            sameTitle: el.title === el.textContent, css: [cs.textOverflow, cs.whiteSpace, cs.overflowX].join(' ') });
           continue;
         }
         // Phone summaries reserve one line, with every reason in the native

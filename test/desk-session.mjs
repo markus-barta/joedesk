@@ -8,13 +8,13 @@ import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { width, measure, lineCount, VERDANA_BOLD } from './fixtures/text-width.mjs';
 import { validateContract } from '../contracts/index.mjs';
 import { decimalUnits } from '../contracts/decimal.mjs';
-import { zonedInstant, nyDay, NY, sessionDayName } from '../time.mjs';
+import { zonedInstant, nyDay, NY, sessionDayName, sessionLabel } from '../time.mjs';
 const { boardStates } = await import('../public/joe/board-state.js');
 const { indexResults, rollup, moneyContext, periodOf, periodBase, DESK_IDS } = await import('../public/joe/results-model.js');
 const { resultsView } = await import('../public/joe/results.js');
 const { cellReason, boardHealthPresentation, CELL_REASON } = await import('../public/joe/health.js');
 const { TERMS } = await import('../public/joe/terms.js');
-const { eur } = await import('../public/joe/format.js');
+const { eur, joinUnits } = await import('../public/joe/format.js');
 const { STARTING_MONEY, percentOf, todayBase, todayPercent, exactCell } = await import('../public/joe/performance.js');
 const desk = await import('../public/joe/desk.js');
 // JOED-156: the whole-account block that fills the slot above the hero.
@@ -98,7 +98,10 @@ test('JOED-153 M1: the first figure names its session in every phase, with its o
   ]) {
     const ctx = context(now), hero = htmlDocument(desk.heroLeft(ctx)), first = hero.querySelector('[data-cell="hero.day"]');
     assert.equal(first.dataset.phase, phase, now);
-    assert.equal(first.querySelector('.hero-k .term').textContent, label, now);
+    // On screen the separators keep to their words, as the page joins them
+    // on a phone (fixUnits), so the title is the words shown everywhere.
+    const shown = label.replace(/ (?=·)/g, NB);
+    assert.equal(first.querySelector('.hero-k .term').textContent, shown, now);
     assert.equal(first.querySelector('.hero-k .term').dataset.term, term, now);
     assert.equal(Boolean(first.querySelector('.live-dot')), phase === 'live', `${now}: the live dot only while live`);
     if (href) assert.equal(first.querySelector('.fig-link').getAttribute('href'), href, now);
@@ -106,8 +109,35 @@ test('JOED-153 M1: the first figure names its session in every phase, with its o
     // ends in an ellipsis, as designed, with its whole words as its title
     // and the term's name; it never runs under Since start beside it.
     const cut = first.querySelector('.hero-k .term .cut-line');
-    assert.equal(cut?.getAttribute('title'), label, now);
-    assert.equal(cut.textContent, label, now);
+    assert.equal(cut?.getAttribute('title'), shown, now);
+    assert.equal(cut.textContent, shown, now);
+    assert.equal(joinUnits(cut.textContent, { joinDot: true }), cut.textContent, `${now}: the phone's own joining changes nothing`);
+  }
+});
+
+// agm2 run 40929090877: the dated label ends in an ellipsis only on a phone.
+// Above 700 px its column holds the longest label of every session day of a
+// year, with its dot or clock, its state icon and their gaps, in the wide
+// font (Verdana Bold for 600). The column, from app.css: the page (1240 px at
+// most, 28 px gutters), the hero's 26 px padding, beside the market block
+// (2fr : 1.3fr, 32 px) above 1180 px, and half the figures (32 px apart).
+test('JOED-153 M1: the session-dated label never needs its ellipsis above a phone', () => {
+  const labels = new Set();
+  for (let i = 0; i < 366; i++) {
+    const day = new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10);
+    for (const hm of ['08:00:00', '14:00:00', '17:00:00']) {
+      const label = sessionLabel(zonedInstant(day, hm, NY));
+      if (label) labels.add(JSON.stringify([label.phase, label.text.replace(/ (?=·)/g, NB)]));
+    }
+  }
+  const need = [...labels].map(JSON.parse).map(([phase, text]) =>
+    (phase === 'live' ? 8 + 2 * 2 : 15) + 8 + width(text, 13.5, { table: VERDANA_BOLD }) + 8 + 12 + 3);
+  assert.ok(need.length > 300, 'a year of sessions, each phase');
+  const widest = Math.max(...need);
+  for (let vw = 701; vw <= 1440; vw++) {
+    const hero = Math.min(vw, 1240) - 2 * 28 - 2 * 26, primary = vw > 1180 ? (hero - 32) * 2 / 3.3 : hero;
+    const column = (primary - 32) / 2;
+    assert.ok(widest <= column, `${vw} px: the label needs ${widest.toFixed(1)} px, its column is ${column.toFixed(1)} px`);
   }
 });
 
@@ -322,18 +352,19 @@ test('JOED-153 M5: one row only when the record proves no trades for the whole p
 
 test('JOED-153: the phone row labels its first figure per phase and counts what is held', () => {
   assert.deepEqual(htmlDocument(desk.compactDesk(context(), 'j')).querySelectorAll('.compact-label').map(l => l.textContent), ['Today', 'Since']);
-  assert.equal(htmlDocument(desk.compactDesk(context(), 'j')).querySelector('.compact-word').textContent, `Working · 1${NB}open`);
+  assert.equal(htmlDocument(desk.compactDesk(context(), 'j')).querySelector('.compact-word').textContent, `Working${NB}· 1${NB}open`);
   const last = htmlDocument(desk.compactDesk(context('2026-10-15T12:00:00.000Z'), 'j'));
   assert.deepEqual(last.querySelectorAll('.compact-label').map(l => l.textContent), ['Wed', 'Since']);
   assert.equal(last.querySelector('[data-compact-value="dayPnl"] .bn').textContent, '+€10,00');
-  assert.equal(last.querySelector('.compact-word').textContent, `Working · 1${NB}held`);
+  assert.equal(last.querySelector('.compact-word').textContent, `Working${NB}· 1${NB}held`);
   // AC-36 (agm2, 360 px): on the narrowest rows the words end in an ellipsis,
   // as designed, with their whole text as the title and in the row's name.
   const word = htmlDocument(desk.compactDesk(context(), 'j')).querySelector('.compact-word .cut-line');
-  assert.equal(word?.getAttribute('title'), `Working · 1${NB}open`);
+  assert.equal(word?.getAttribute('title'), `Working${NB}· 1${NB}open`);
+  assert.equal(joinUnits(word.textContent, { joinDot: true }), word.textContent, 'the phone’s own joining (app.js fixUnits) changes nothing');
   assert.equal(word.textContent, word.getAttribute('title'));
   const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
-  assert.match(css, /\.compact-word > \.cut-line \{ display: block; min-width: 0; height: 16px; overflow: hidden; text-overflow: ellipsis; \}/);
+  assert.match(css, /\.compact-word > \.cut-line \{ display: block; min-width: 0; height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; \}/);
 });
 
 test('JOED-153 Partial/Stale markers are Results’ own: same label and words as Results · Day', () => {
@@ -760,7 +791,10 @@ test('JOED-153 no-shift: card amounts and the summary row keep one box in every 
   const widest = bold('+888.888,88', size) - 0.02 * size * 11 + bold('€', size / 2) + 0.16 * size / 2 + 0.54 * size;
   assert.ok(column >= widest, `${column} px holds ${Math.round(widest)} px`);
   // Middle widths and phones: the caption takes its own full-width row.
-  assert.match(media('@media (max-width: 1180px)'), /\.hero \.kpi \{ grid-template-columns: auto minmax\(0, 1fr\); \}\s*\n\s*\.hero \.kpi \.c \{ grid-column: 1 \/ -1; \}/);
+  assert.match(media('@media (max-width: 1180px)'), /\.hero \.kpi \{ grid-template-columns: auto minmax\(0, 1fr\); \}\s*\n\s*\.hero \.kpi \.c \{ grid-column: 1 \/ -1; margin-top: 0; \}/);
+  // agm2 run 40929090877 (1440, fresh -> stale: the row 41 -> 39 px): the
+  // caption is placed by its top, never by a first baseline it may not have.
+  assert.match(rule('.hero .kpi .c'), /align-self: start; margin-top: 9px;/);
   // A card narrower than 310 px (a 360 px phone): the Results link closes the
   // state's row, so the name keeps its width beside a long check-in.
   assert.match(media('@container (max-width: 309.98px)'), /\.dcard header \.hb \{ grid-column: 3 \/ 5; \}\s*\n\s*\.dcard header \.card-go \{ grid-row: 2; \}/);

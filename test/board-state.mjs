@@ -116,7 +116,8 @@ for (const midnight of ['2026-10-15T04:00:00.000Z', '2026-11-03T05:00:00.000Z'])
       const hero = htmlDocument(heroLeft(view)), first = hero.querySelector('[data-cell="hero.day"]');
       const lastDay = midnight === '2026-10-15T04:00:00.000Z' ? 'Wed 14\u00a0Oct' : 'Mon 2\u00a0Nov';
       assert.equal(first.dataset.phase, 'last');
-      assert.equal(first.querySelector('.hero-k').textContent, `Last session · ${lastDay}`);
+      // The label's separator keeps to its words, as a phone joins it (JOED-153 cut line).
+      assert.equal(first.querySelector('.hero-k').textContent, `Last session\u00a0· ${lastDay}`);
       assert.equal(first.querySelector('.primary-caption').textContent, 'Results unavailable · no data received yet');
       assert.equal(first.querySelector('.bn').getAttribute('aria-label'), `Last session · ${lastDay}: Results unavailable · no data received yet`);
       assert.match(hero.querySelector('.say').textContent, /(?:^|· )Today: not exact · waiting on the start-of-day value$/);
