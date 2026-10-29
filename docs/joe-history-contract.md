@@ -31,11 +31,14 @@ or `source_unavailable` when the field was absent. The account's own
 `observedAt` is preserved; a timestamp ahead of snapshot generation is withheld
 with `clock_ahead`.
 
-`history-state.json` uses envelope `joedesk.history-store.v3` with the existing
-history value and an optional `account` on each stored point. Older
-`joedesk.history-store.v2` files load unchanged; their points have no `account`
-and mean **not recorded**, never zero. New points have this extension
-(value-free shape):
+`history-state.json` remains `joedesk.history-store.v2`, with exactly the
+pre-JOED-150 desk fields, size measurement, compaction trigger and selection.
+The persisted desk file contains no account data. Its `sizeBytes` is the byte
+length of that desk envelope alone.
+
+Account samples live in **`account-history-state.json`**, envelope format
+`joedesk.account-history.v1`. The value has schema `inspr.joe.account-series.v1`,
+`generatedAt`, `receivedAt`, and chronological `points`. An account point is:
 
 ```json
 {
@@ -49,24 +52,21 @@ and mean **not recorded**, never zero. New points have this extension
 }
 ```
 
-The timestamp `t` remains the accepted snapshot generation, just as for desk
-history. `account.observedAt` is the broker observation time, or null if the
-account was absent. Each of equity/cash is independently exact or null;
-`reasons` contains the null fields only. An existing reason-bearing value is
-unavailable even if it contains an amount. No account identifiers are copied.
+The timestamp `t` is the accepted snapshot generation; `account.observedAt` is
+the broker observation time, or null when absent. Each field is independently
+exact or null; `reasons` contains only null fields. Reason-bearing values are
+unavailable even when they contain an amount. No account identifiers are copied.
+Older desk-only files do not create account points: absent means not recorded,
+never zero.
 
-Desk compaction selects exactly the same indices from identical desk inputs:
-endpoints, per-series extrema, gap edges, final observed values per Vienna day,
-and composite desk-basis transitions. It retains or removes an entire point,
-including its account observation. Account-only extrema/gaps do not change the
-desk selection; the short account series is therefore thinned at those same
-indices. This preserves all desk comparison and basis behavior. The complete
-persisted envelope, account extensions included, stays bounded by 8 MiB;
-compaction starts at 80% or above 10,000 points, with the existing 14-day cut.
-`sizeBytes` still measures the complete persisted envelope. The desk API omits
-account fields while retaining this storage-size diagnostic. Both the desk
-projection and account extensions are validated before writing and after load.
-A corrupt short store keeps the existing fail-closed recovery policy.
+This store independently retains 14 days, with a 2 MiB envelope cap and a
+10,000-point limit. At 80% size or above the point limit, one bounded compaction
+pass keeps account endpoints, equity/cash extrema, both sides of null gaps,
+and the last exact field observations per Vienna day. If still above either
+limit, it refuses the write and reports `history_write_failed`. It does not
+share desk timestamps or compaction decisions. A failed account write cannot
+stop desk History or daily-close recording, and desk corruption cannot stop
+either account series. All three stores write in the accepted snapshot step.
 
 ## Daily account closes
 
@@ -109,12 +109,36 @@ The store retains the latest **2,196 observed calendar dates** (at least six
 years even when every date is recorded), bounded to **2 MiB**. Sparse data may
 span longer. It survives restart, short-history compaction and the 14-day cut;
 short-history corruption or size failure cannot stop independent daily capture.
-Missing or corrupt/oversized files start with empty daily data and report
-`feed_not_received` or `contract_invalid`, respectively. Loading never rewrites
-a damaged file; the next exact observation can atomically start a new store.
-Write failures retain prior committed data and report `history_write_failed`;
-a later successful write clears the reason. A rename followed by directory-sync
-failure honors the committed data while reporting the failed durability check.
+Both account stores use the following independent recovery policy:
+
+- A missing file starts empty with `feed_not_received`, clearing after its
+  first successful recording. No older account observations are invented.
+- A corrupt, oversized or unknown-format file starts empty with
+  `contract_invalid`. Before the first replacement write, the server atomically
+  renames its bytes to `<filename>.damaged-<UTC instant>` (adding a numeric
+  suffix on collision), then fsyncs the directory. The damaged bytes survive.
+- Recovery adds `{ discontinuity: { at, reason: "contract_invalid", preservedAs } }`
+  to the new envelope and API series. `preservedAs` is the damaged basename.
+  Its reason stays visible after successful writes and restarts. A bounded,
+  atomic mode-0600 `<filename>.discontinuity.json` journal records the same
+  marker before the rename, so an interruption before replacement cannot hide
+  the loss. Keep that journal and preserved file with backups.
+- Recognized future versions (`v2` and higher) stay untouched and read-only,
+  returning `store_version_unsupported`. New observations continue to the
+  other stores. This release never overwrites or quarantines a future format.
+- Write failures retain committed data and report `history_write_failed`.
+  Successful writes clear a transient write reason; a durable discontinuity
+  remains `contract_invalid`. A rename followed by directory-sync failure
+  honors the committed data while reporting the failed durability check.
+
+### Release 39 rollback
+
+A pre-JOED-150 server continues to load the unchanged desk v2 file and simply
+ignores `account-history-state.json` and `account-closes-state.json`, including
+their recovery journals and preserved damaged copies. No desk-store conversion
+is required. Keep the new files with the data backup: rollback pauses account
+capture, and returning to this server resumes it without filling that gap.
+Future account formats remain read-only if this release is used as a rollback.
 
 ## Read-only account endpoint
 
@@ -133,8 +157,7 @@ Value-free response shape:
   "receivedAt": "<short-history receipt UTC instant or null>",
   "reason": null,
   "points": [
-    { "t": "<snapshot generation UTC instant>", "account": "<account observation above>" },
-    { "t": "<legacy snapshot generation UTC instant>" }
+    { "t": "<snapshot generation UTC instant>", "account": "<account observation above>" }
   ],
   "dailyCloses": {
     "schema": "inspr.joe.account-closes.v1",
@@ -145,12 +168,14 @@ Value-free response shape:
 }
 ```
 
-`points` is chronological and matches the short History's retained timestamps;
-`account` is absent on old points. `days` is chronological with unique date keys.
-The top-level reason describes the short History feed; `dailyCloses.reason`
-independently describes daily storage. Empty series are arrays, timestamps are
-null before short History exists, and no client may treat missing observations
-as zero. The route remains useful when either independent store is unavailable.
+`points` is chronological in the independent short account store; it need not
+match desk History timestamps. `days` has chronological unique date keys. The
+top-level reason and optional `discontinuity` describe short account storage;
+`dailyCloses.reason` and its optional `discontinuity` describe daily storage.
+Empty series are arrays, and timestamps are null before short account History
+exists. No client may treat missing observations as zero. The route remains
+useful when any independent store is unavailable. Existing History feed headers
+remain desk diagnostics; consumers use body reasons for account-store status.
 
 ## Display-only continuity
 
