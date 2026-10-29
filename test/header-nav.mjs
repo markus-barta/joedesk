@@ -1,5 +1,6 @@
 // The header and its routes under Node: hash routes with each screen's own
-// query, the history steps, links, route readers, the place each history
+// query, the history steps, links, route readers, a shown screen writing its
+// own query (Results' deep links, results.js), the place each history
 // entry keeps (app.js's own navigation code in a simulated browser), the
 // header and bottom-bar markup, the CSS that keeps the bar on phones clear of
 // the safe area, and the money no-wrap helper. Browser CI
@@ -8,9 +9,22 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { createContext, runInContext } from 'node:vm';
+import * as nodeModule from 'node:module';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
 
-const { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute, onAddress, createPlaces } = await import('../public/joe/route.js');
+// results.js as the board serves it: time.mjs and contracts/ come from the
+// repo root (test/results-model.mjs maps them the same way).
+const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
+  (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
+  ? new URL(`../../${specifier.slice(2)}`, parentURL).href : specifier);
+if (nodeModule.registerHooks) {
+  nodeModule.registerHooks({ resolve: (specifier, context, next) => next(mapped(specifier, context.parentURL), context) });
+} else {
+  nodeModule.register(`data:text/javascript,${encodeURIComponent(`const mapped = ${mapped.toString()};
+export async function resolve(specifier, context, next) { return next(mapped(specifier, context.parentURL), context); }`)}`, import.meta.url);
+}
+const { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute, onAddress, writeRoute, createPlaces } = await import('../public/joe/route.js');
+const results = await import('../public/joe/results.js');
 const { moneyNoWrap } = await import('../public/joe/ui.js');
 const { MINUS, NB } = await import('../public/joe/format.js');
 const html = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8');
@@ -156,16 +170,16 @@ function browser() {
 }
 // app.js's own navigation (go, the one address path with its screen writer,
 // follow and the first load), run against that browser. Everything else go()
-// touches is a quiet stand-in.
+// touches is a quiet stand-in; a test may put its own in (`extra`).
 const REGIONS = [/^  let shown = [\s\S]*?^  function go\(next[\s\S]*?^  \}$/m, /^  const follow = [\s\S]*?addEventListener\('hashchange', follow\);$/m,
   /^  try \{ history\.scrollRestoration[\s\S]*?^  go\(first\.screen[^\n]*$/m];
-function boot(source, b) {
+function boot(source, b, extra = {}) {
   const code = REGIONS.map(re => { const m = re.exec(source); assert.ok(m, `app.js region ${re}`); return m[0]; }).join('\n');
   const ctx = { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, applyRoute, onAddress, createPlaces,
     screen: 'desk', dirtyHistory: false, __joedesk: {}, tips: { hide() {} }, closePop() {}, forgetCharts() {}, forgetResults() {},
     feed: { refreshActions() {} }, guard: (_name, fn) => fn(), render: () => b.render(), SETTINGS_SECTIONS: [], showSection() {},
     $: selector => ({ classList: { toggle: (_name, on) => { if (on) b.show(selector.slice('#scr-'.length)); } } }), $$: () => [],
-    document: { body: { dataset: {} }, getElementById: () => null, documentElement: {} } };
+    document: { body: { dataset: {} }, getElementById: () => null, documentElement: {} }, ...extra };
   Object.defineProperties(ctx, Object.getOwnPropertyDescriptors(b.win));
   ctx.window = ctx;
   createContext(ctx);
@@ -293,6 +307,117 @@ test('places: many short scrolls stay within the history budget, navigation goes
   b.tick(31000);
   assert.equal(b.entries[b.index].state.joeScrollY, y, 'the last place is in the entry, for a reload');
   assert.ok(b.peak() <= 62, `${b.peak()} history calls in some 30 s, the two navigations included`);
+});
+
+test('screen writer: the reader’s own change of a shown screen pushes one entry, a correction replaces, Back and Forward return to each view and place', () => {
+  const b = browser(), go = boot(app, b), reads = [];
+  onRoute('results', (_params, route) => reads.push(route.query));
+  try {
+    go('results', { push: true });
+    const opened = b.entries.length, week = 'period=week&date=2026-10-14&desk=all', day = 'period=day&date=2026-10-12&desk=j';
+    // A correction: the same entry now names the view.
+    assert.equal(writeRoute('results', week), true);
+    assert.deepEqual([b.win.location.hash, b.entries.length], [`#results?${week}`, opened]);
+    // The reader's own change: one new entry, the page left where it is; the same view again adds none.
+    b.scroll(800);
+    assert.equal(writeRoute('results', day, { push: true }), true);
+    assert.equal(writeRoute('results', day, { push: true }), true);
+    assert.deepEqual([b.win.location.hash, b.entries.length, b.win.scrollY], [`#results?${day}`, opened + 1, 800]);
+    // Only the shown screen writes its query.
+    assert.equal(writeRoute('history', 'range=week'), false);
+    assert.equal(writeRoute('history', 'range=week', { push: true }), false);
+    assert.equal(b.win.location.hash, `#results?${day}`);
+    // Back and Forward: each entry's view, read before it renders, at its place.
+    b.scroll(300);
+    b.traverse(-1);
+    assert.deepEqual([b.win.location.hash, reads.at(-1), b.win.scrollY], [`#results?${week}`, week, 800]);
+    b.traverse(1);
+    assert.deepEqual([b.win.location.hash, reads.at(-1), b.win.scrollY], [`#results?${day}`, day, 300]);
+    // A correction never overwrites an address that changed outside the page and still waits for follow().
+    b.typed('#results?desk=joe', () => assert.equal(writeRoute('results', day), false));
+    assert.deepEqual([b.win.location.hash, reads.at(-1)], ['#results?desk=joe', 'desk=joe']);
+    // app.js writes Results' address only through it: a change pushes, the render corrects.
+    assert.match(app, /const commit = \(\) => writeRoute\('results', parseRoute\(resultsUrl\(view\(\)\)\)\.query, \{ push: true \}\);/);
+    assert.match(app, /if \(url\) writeRoute\('results', parseRoute\(url\)\.query\);/);
+    assert.doesNotMatch(app.replace(/^\s*\/\/.*$/gm, ''), /history\.(?:push|replace)State/, 'no other history call in app.js');
+  } finally {
+    onRoute('results', undefined);
+  }
+});
+
+test('screen writer: fifty changes of the view in 30 s between scrolls stay within WebKit’s limit, each keeps its entry, and the last place is saved', () => {
+  const b = browser(), go = boot(app, b);
+  go('results', { push: true });
+  const opened = b.entries.length;
+  let y = 0;
+  for (let i = 0; i < 50; i++) {
+    for (let k = 0; k < 3; k++) { y = 40 + (y + 37) % 1500; b.scroll(y); b.tick(100); }
+    b.fire('scrollend');
+    b.tick(300);
+    writeRoute('results', `period=day&date=2026-10-${String(1 + (i % 14)).padStart(2, '0')}&desk=${['all', 'j', 'joe', 'joel'][i % 4]}`, { push: true });
+  }
+  assert.ok(b.peak() <= 100, `${b.peak()} history calls in some 30 s: the saves yield to the pushes`);
+  assert.equal(b.entries.length, opened + 50, 'every change has its own entry');
+  b.scroll(1234);
+  b.tick(31000);
+  assert.equal(b.entries[b.index].state.joeScrollY, 1234, 'the last place is in the entry, for a reload');
+});
+
+test('Results links through follow(): a link that arrives while Results is shown closes what is open, reaches Results before it renders, keeps its address while it waits, then applies once', () => {
+  const b = browser(), seen = [], spies = { tips: 0, pop: 0, dialogs: 0 };
+  const go = boot(app, b, {
+    tips: { hide: () => { spies.tips++; } }, closePop: () => { spies.pop++; },
+    $$: selector => (selector === 'dialog[open]' ? [{ close: () => { spies.dialogs++; } }] : []),
+    render: () => { seen.push(['render', results.resultsRoutePending()]); b.render(); },
+  });
+  // app.js's own Results reader, here with a note of each call.
+  assert.match(app, /onRoute\('results', \(_params, route\) => requestResultsRoute\(route\.query\)\);/);
+  onRoute('results', (_params, route) => { seen.push(['read', route.query]); return results.requestResultsRoute(route.query); });
+  // The record and the server's date once they are in: what renderResults does
+  // with a waiting link, and the address app.js then corrects to.
+  const warm = { today: '2026-10-14', clock: true, ix: {}, trackingStart: '2026-09-10' };
+  const shownQuery = () => { results.settleResultsRoute(warm); return parseRoute(results.resultsUrl(warm)).query; };
+  const saved = { ...results.RS };
+  try {
+    Object.assign(results.RS, { period: 'week', anchor: '2026-10-14', sel: '2026-10-14', desk: 'all', cal: [2026, 9], moved: false });
+    go('results', { push: true });
+    const week = 'period=week&date=2026-10-14&desk=all';
+    assert.equal(writeRoute('results', shownQuery()), true);
+    assert.equal(b.win.location.hash, `#results?${week}`);
+    b.scroll(700);
+    const entries = b.entries.length;
+    Object.assign(spies, { tips: 0, pop: 0, dialogs: 0 });
+    seen.length = 0;
+    const link = 'period=day&date=2026-10-12&desk=j';
+    b.typed(`#results?${link}`);
+    assert.deepEqual(seen, [['read', link], ['render', true]], 'Results reads the link before it renders; the link waits; the second event is the same entry');
+    assert.deepEqual(spies, { tips: 1, pop: 1, dialogs: 1 }, 'tips hidden, Details and the day sheet closed');
+    assert.deepEqual([b.win.location.hash, b.entries.length, b.win.scrollY], [`#results?${link}`, entries + 1, 0],
+      'the address keeps the link; only the browser’s entry; a new entry opens at its top');
+    // While it waits, the render path writes nothing (renderResults gives no address).
+    assert.equal(results.resultsRoutePending(), true);
+    // The record and the date are in: the link applies once; its address already names the view.
+    const calls = b.calls.length;
+    assert.equal(writeRoute('results', shownQuery()), true);
+    assert.equal(b.calls.length, calls, 'no history call for an address that is already right');
+    assert.deepEqual([results.RS.period, results.RS.sel, results.RS.desk], ['day', '2026-10-12', 'j']);
+    assert.equal(results.settleResultsRoute(warm), false, 'applied once');
+    // A link that names only the desk: Results completes its address in place.
+    b.typed('#results?desk=joe');
+    const partial = b.entries.length;
+    assert.equal(writeRoute('results', shownQuery()), true);
+    assert.deepEqual([b.win.location.hash, b.entries.length], ['#results?period=day&date=2026-10-12&desk=joe', partial]);
+    // Back past both links: the view before them, read before it renders, at its place.
+    seen.length = 0;
+    b.traverse(-2);
+    assert.deepEqual(seen, [['read', week], ['render', true]]);
+    assert.equal(writeRoute('results', shownQuery()), true);
+    assert.deepEqual([b.win.location.hash, b.win.scrollY, results.RS.period, results.RS.sel, results.RS.desk], [`#results?${week}`, 700, 'week', '2026-10-14', 'all']);
+  } finally {
+    onRoute('results', undefined);
+    results.requestResultsRoute('');
+    Object.assign(results.RS, saved);
+  }
 });
 
 test('header markup: brand, PAPER, Desk · Results · History, the light, the Settings gear and the theme button, in that order', () => {
