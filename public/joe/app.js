@@ -6,7 +6,7 @@ import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitSta
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure } from './desk.js';
-import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput } from './history.js';
+import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput, initHistoryControls, historyQuery, readHistoryRoute } from './history.js';
 import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
 import { boardHealthPresentation } from './health.js';
 import { sinceStarts } from './performance.js';
@@ -113,6 +113,7 @@ function start() {
     if (screen === 'history') {
       const moved = guard('history', () => renderHistory(ctx))?.redraw;
       if (moved || dirtyHistory || !['tick', 'results'].includes(reason)) { guard('history chart', () => historyChart(ctx)); dirtyHistory = false; }
+      historyAddress();
     }
     if (screen === 'results') guard('results', () => renderResults(ctx));
     if (screen === 'settings') guard('settings', () => renderSettings(ctx));
@@ -129,7 +130,26 @@ function start() {
     const why = reason;
     frame = requestAnimationFrame(() => { const r = pending ?? why; pending = null; render(r); });
   }
-  function go(next, anchor) {
+  // "#history?range=day&mode=money", "#settings/mode": a screen, an anchor
+  // to scroll to and a query that belongs to the screen.
+  const routeOf = hash => {
+    const raw = (hash || '#desk').slice(1), mark = raw.indexOf('?');
+    const [name, anchor] = (mark < 0 ? raw : raw.slice(0, mark)).split('/');
+    return { name, anchor, query: mark < 0 ? '' : raw.slice(mark + 1) };
+  };
+  // History's address names its preset, desks and measure; it is rewritten
+  // in place whenever they change, unless an address from outside the page
+  // (Back, Forward, a typed one) still waits for hashchange.
+  let routed = location.hash;
+  function historyAddress() {
+    if (screen !== 'history' || location.hash !== routed) return;
+    const hash = `#history?${historyQuery()}`;
+    if (hash === routed) return;
+    // The entry's own state stays (a router may keep the reader's place there).
+    try { history.replaceState(history.state, '', hash); } catch { return; /* file or sandboxed context */ }
+    routed = location.hash;
+  }
+  function go(next, anchor, query = '') {
     if (!SCREENS.includes(next)) next = 'desk';
     screen = next;
     tips.hide();
@@ -138,7 +158,9 @@ function start() {
     $$('.nav button, .bottom-nav button').forEach(b => { if (b.dataset.go === next) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     closePop();
     for (const dialog of $$('dialog[open]')) dialog.close();
-    try { history.replaceState(null, '', `#${next}`); } catch { /* file or sandboxed context */ }
+    if (next === 'history' && query) guard('history route', () => readHistoryRoute(query));
+    try { history.replaceState(null, '', next === 'history' ? `#history?${historyQuery()}` : `#${next}`); } catch { /* file or sandboxed context */ }
+    routed = location.hash;
     dirtyHistory = true; forgetCharts(); forgetResults();
     if (next === 'settings') feed.refreshActions();
     render('screen');
@@ -226,8 +248,15 @@ function start() {
     if (!b) return;
     historyPreset(b.dataset.range); dirtyHistory = true; render('history-range');
   });
+  // Change | Money: what the lines measure (the window and the desks stay).
+  $('#histMeasure').addEventListener('click', e => {
+    const b = e.target.closest('[data-measure]');
+    if (!b || b.dataset.measure === HS.measure) return;
+    HS.measure = b.dataset.measure; dirtyHistory = true; render('history-measure');
+  });
   $('#histFollow').addEventListener('click', () => { toggleFollow(); dirtyHistory = true; render('history-follow'); });
   initHistoryInput({ schedule });
+  initHistoryControls({ schedule });
 
   // Results: the period and desk switches, the stepper, the month arrows and
   // a day drive every number; on a phone a day opens its trades in a sheet.
@@ -264,7 +293,14 @@ function start() {
   });
   sheet.addEventListener('close', () => { if (sheetFrom) document.querySelector(`#cal [data-day="${sheetFrom}"]`)?.focus({ preventScroll: true }); sheetFrom = null; });
 
-  addEventListener('hashchange', () => { const [next, anchor] = location.hash.slice(1).split('/'); if (next !== screen) go(next, anchor); });
+  // A link from elsewhere, Back or Forward. History reads its own query, also
+  // while it is shown; another screen's address only changes the screen.
+  addEventListener('hashchange', () => {
+    const r = routeOf(location.hash);
+    routed = location.hash;
+    if (r.name !== screen) { go(r.name, r.anchor, r.query); return; }
+    if (r.name === 'history' && r.query) { guard('history route', () => readHistoryRoute(r.query)); dirtyHistory = true; render('history-route'); }
+  });
   let resize = 0;
   addEventListener('resize', () => { cancelAnimationFrame(resize); resize = requestAnimationFrame(() => { forgetCharts(); forgetResults(); dirtyHistory = true; render('resize'); }); });
   // With System chosen the page follows the OS live (CSS); the header button's words follow too.
@@ -291,7 +327,7 @@ function start() {
   initSettings({ feed, tips, schedule });
   initVersionDisplay();
   $('#footShield').innerHTML = `${icon('shield')}Read-only paper board · nothing here can place a trade`;
-  const [first, anchor] = (location.hash || '#desk').slice(1).split('/');
-  go(first, anchor);
+  const first = routeOf(location.hash);
+  go(first.name, first.anchor, first.query);
   feed.start();
 }
