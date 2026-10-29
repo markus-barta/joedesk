@@ -1773,7 +1773,7 @@ const DESK_TODAY = {
   lastGood: { says: 'only a last good value from before an outage', fine: false, word: 'last good', reason: BROKER, value: true,
     card: `Today: last good, ${age(30)} ago · ${BROKER}`, phone: `Today: last good · ${BROKER}` },
   valueKeptFaultMoney: { says: 'a value kept beside a fault on the money channel', fine: false, word: 'unavailable', reason: BROKER, value: true,
-    card: `Today: ${BROKER} · as of ${age(30)} ago`, phone: `Today: unavailable · ${BROKER}` },
+    card: `Today: unavailable · ${BROKER} · as of ${age(30)} ago`, phone: `Today: unavailable · ${BROKER}` },
 };
 // The household's Today, and whether it is fine:
 const HOUSEHOLD_TODAY = {
@@ -1791,20 +1791,21 @@ const HOUSEHOLD_TODAY = {
 //   today across J, Joe and Joel". Otherwise the hero shows a dash. When the
 //   dash has a caption, the sentence gives each exact desk's own result and
 //   no other desk's, or says that no desk is exact (Today withheld as not
-//   exact) or that Today's result is not available (a fault); without a
+//   exact with every desk fine) or that Today's result is not available (an
+//   own or inherited fault wins even beside a not-exact household); without a
 //   caption, the sentence itself says that Today's result is not available.
 // - The hero's dash has a caption unless the household Today came with no
-//   reason at all. The caption names a desk only in that desk's own word,
-//   never an exact desk, and when it names any desk it names every desk that
-//   is not exact. When everything is fine it says "Not exact" and nothing
-//   worse; when anything is not fine, the caption or the sentence says so.
+//   reason at all and every desk is fine. The caption names a desk only in
+//   that desk's own word, never an exact desk, and when it names any desk it
+//   names every desk that is not exact. When everything is fine it says
+//   "Not exact" and nothing worse; otherwise the caption or sentence says so.
 // - Details states each desk whose Today is not fine once, in its own words,
 //   and no other desk. A household Today that is not fine gets its own line;
-//   one withheld as not exact, or current beside fine desks, gets none. The
-//   "Today’s result" row lists every desk exactly once in
-//   its own word and reason whenever it lists desks, and it must whenever the
-//   household Today is withheld as not exact; otherwise it gives the
-//   household's own source ("Counted from …", or "Not available · …").
+//   one withheld as not exact, or current beside fine desks, gets none unless
+//   it inherits a desk's fault. The "Today’s result" row lists every desk
+//   exactly once in its own word and reason whenever it lists desks, and must
+//   do so when the household Today is withheld as not exact; otherwise it
+//   gives the household's own source ("Counted from …", or "Not available · …").
 // - Each card and each phone row shows the desk's own value or a dash. A dash
 //   is named with its reason; the desk's problem, if any, is its one line.
 const NAMES = { j: 'J', joe: 'Joe', joel: 'Joel' };
@@ -1880,6 +1881,7 @@ function daySurfaces(view, desks, household) {
   const wrong = [], expect = (ok, what) => { if (!ok) wrong.push(what); };
   const own = desks.map((option, i) => ({ id: DESKS[i], name: NAMES[DESKS[i]], reason: null, ...DESK_TODAY[option] }));
   const fine = HOUSEHOLD_TODAY[household].fine && own.every(d => d.fine);
+  const householdFault = !HOUSEHOLD_TODAY[household].fine || own.some(d => !d.fine);
   const shown = household === 'current' && own.every(d => d.word === 'exact');
   const exactDesks = own.filter(d => d.word === 'exact'), notExactDesks = own.filter(d => d.word === 'not exact');
   // The light.
@@ -1917,9 +1919,8 @@ function daySurfaces(view, desks, household) {
   } else {
     const sentences = !caption ? ['Today’s result is not available.']
       : exactDesks.length ? [`${inWords(exactDesks.map(d => OWN_DAY[d.id]))} today.`]
-      : household === 'notExact' ? ['No desk has an exact result for today.']
-        : household !== 'current' ? ['Today’s result is not available.']
-          : [...(notExactDesks.length ? ['No desk has an exact result for today.'] : []), ...(own.some(d => !d.fine) ? ['Today’s result is not available.'] : [])];
+      : householdFault ? ['Today’s result is not available.']
+        : ['No desk has an exact result for today.'];
     expect(sentences.includes(sentence), `hero sentence: ${sentence}`);
     // JOED-157: a reason-less household with a faulty desk takes on that fault, so the caption names the desk.
     expect(!caption === (household === 'nullNoReason' && own.every(d => d.fine)), `hero caption: ${caption}`);
