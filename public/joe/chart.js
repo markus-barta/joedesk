@@ -316,13 +316,26 @@ export function drawChart(el, o) {
   const Y = v => pad.t + (ax.hi - v) / (ax.hi - ax.lo) * ph;
   // With a label gap, the labels are checked where they are drawn.
   if (o.tickGap) ax = { ...ax, ticks: apartTicks(ax.ticks, t => Number((Y(t) + 3.5).toFixed(1)), t => (o.yFmt ? o.yFmt(t, ax.step) : String(t)), o.tickGap) };
-  // A dot belongs inside the plot; one beyond the axis (a custom axis, or a
-  // frame of an eased change) is not drawn.
+  // Dots. On a custom axis a dot is drawn only where all its ink fits inside
+  // the plot box: its centre ± its radius and half its stroke (SINGLE an
+  // isolated value's dot, RING the newest value's and the inspected one's,
+  // HALO the newest's breathing halo at its widest); a value whose dot does
+  // not fit is a chevron at the edge it reaches. An automatic fit holds all
+  // its values (History's with an 8 % margin), so a dot is drawn wherever its
+  // value is in view, as on every chart before; a frame of a glide that has
+  // not caught up with a value leaves that value's dot out.
+  const SINGLE = 2, RING = 4 + 2 / 2, HALO = 5 * 2.2, WING = 4 + 2 / 2;
   const inPlot = y => y >= pad.t - 0.5 && y <= pad.t + ph + 0.5;
-  const beyond = (x, above, color) => {
-    const y = above ? pad.t + 1 : pad.t + ph - 1, d = above ? 5 : -5;
-    return `<path d="M${(x - 4).toFixed(1)} ${(y + d).toFixed(1)} L${x.toFixed(1)} ${y.toFixed(1)} L${(x + 4).toFixed(1)} ${(y + d).toFixed(1)}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-beyond="${above ? 'above' : 'below'}"/>`;
+  const fits = (cy, extent) => (custom ? cy - extent >= pad.t - 1e-6 && cy + extent <= pad.t + ph + 1e-6 : inPlot(cy));
+  // A chevron at the edge a value reaches, its wings kept inside the chart's width.
+  const chevron = (x, cy) => {
+    const above = cy < pad.t + ph / 2, tip = above ? pad.t + 1 : pad.t + ph - 1, d = above ? 5 : -5, cx = Math.min(W - WING, Math.max(WING, x));
+    return { side: above ? 'above' : 'below', d: `M${(cx - 4).toFixed(1)} ${(tip + d).toFixed(1)} L${cx.toFixed(1)} ${tip.toFixed(1)} L${(cx + 4).toFixed(1)} ${(tip + d).toFixed(1)}` };
   };
+  const CHEVRON = 'fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+  // One chevron per value, drawn after the clipped lines (never clipped).
+  const marks = new Map();
+  const markBeyond = (si, p, color) => { const key = `${si}|${p.x}`; if (!marks.has(key)) marks.set(key, { ...chevron(X(p.x), Y(p.v)), color }); };
   const first = !drawn.has(el.id) && !reduced();
   drawn.add(el.id);
   const clip = `cl-${el.id}`, hatch = `ht-${el.id}`;
@@ -359,12 +372,11 @@ export function drawChart(el, o) {
     for (const p of s.pts) { if (p.v === null || p.v === undefined) { segs.push([]); continue; } segs[segs.length - 1].push(p); }
     for (const seg of segs) {
       if (!seg.length) continue;
-      // An isolated value is a dot inside the plot; beyond a custom axis, a
-      // chevron at the edge it lies past (as the newest value is).
+      // An isolated value is a dot where it fits; on a custom axis, else a chevron.
       if (seg.length === 1 && !s.estimate) {
-        const cx = X(seg[0].x), cy = Y(seg[0].v);
-        if (inPlot(cy)) g += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="2" fill="${s.color}"/>`;
-        else if (custom) g += beyond(cx, cy < pad.t, s.color);
+        const p = seg[0], cy = Y(p.v);
+        if (fits(cy, SINGLE)) g += `<circle cx="${X(p.x).toFixed(1)}" cy="${cy.toFixed(1)}" r="2" fill="${s.color}"/>`;
+        else if (custom && p.x >= x0 && p.x <= x1) markBeyond(si, p, s.color);
         continue;
       }
       const line = seg.map((p, i) => `${i ? 'L' : 'M'}${X(p.x).toFixed(1)} ${Y(p.v).toFixed(1)}`).join(' ');
@@ -375,19 +387,22 @@ export function drawChart(el, o) {
     }
   });
   g += '</g>';
-  // End dots sit outside the clip so a point on the right edge stays whole.
-  // A newest value beyond a custom axis is a chevron at the edge it lies past.
-  for (const s of o.series) {
+  // End dots sit outside the clip so a point on the right edge stays whole;
+  // its halo only where all of it fits too. The chevrons follow, once each.
+  o.series.forEach((s, si) => {
     const last = [...s.pts].reverse().find(p => p.v !== null && p.v !== undefined);
     if (s.endDot !== false && !s.estimate && last && last.x >= x0 && last.x <= x1) {
-      const cx = X(last.x), cy = Y(last.v), i = s.pts.lastIndexOf(last), isolated = !(i > 0 && s.pts[i - 1]?.v != null);
-      if (inPlot(cy)) g += `${s.live && !reduced() ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="${s.color}" class="dot-live" opacity=".35"/>` : ''}<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="var(--surface)" stroke="${s.color}" stroke-width="2"/>`;
-      else if (custom && !isolated) g += beyond(cx, cy < pad.t, s.color);
+      const cx = X(last.x), cy = Y(last.v);
+      if (fits(cy, RING)) g += `${s.live && !reduced() && fits(cy, HALO) ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="${s.color}" class="dot-live" opacity=".35"/>` : ''}<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="var(--surface)" stroke="${s.color}" stroke-width="2"/>`;
+      else if (custom) markBeyond(si, last, s.color);
     }
-  }
+  });
+  for (const m of marks.values()) g += `<path d="${m.d}" ${CHEVRON} style="stroke:${m.color}" data-beyond="${m.side}"/>`;
   if (o.marker) g += `<line x1="${X(o.marker.x).toFixed(1)}" x2="${X(o.marker.x).toFixed(1)}" y1="${pad.t}" y2="${pad.t + ph}" stroke="var(--line-2)"/><text x="${(X(o.marker.x) + 6).toFixed(1)}" y="${pad.t + 11}" text-anchor="start">${esc(o.marker.text)}</text>`;
   const hits = o.series.map((s, i) => (s.estimate || s.noHit ? null : i)).filter(i => i !== null);
   g += `<line class="xh" x1="0" x2="0" y1="${pad.t}" y2="${pad.t + ph}" stroke="var(--ink-3)" stroke-dasharray="2 3" visibility="hidden"/>${hits.map(i => `<circle class="xd" r="4" fill="var(--surface)" stroke="${o.series[i].color}" stroke-width="2" visibility="hidden"/>`).join('')}`;
+  // A custom axis also marks an inspected value whose dot does not fit.
+  if (custom) g += hits.map(i => `<path class="xc" d="" ${CHEVRON} style="stroke:${o.series[i].color}" visibility="hidden"/>`).join('');
   // A result chart is zero-based; given a base it also keeps the money
   // chart's minimum span. Both are promises of the automatic fits: a custom
   // axis is the reader's own, makes neither and says so on the chart.
@@ -398,7 +413,7 @@ export function drawChart(el, o) {
   // ax is the range drawn this frame; target the one an eased change settles on.
   const scale = { X, Y, pad, pw, ph, W, H, x0, x1, ax, target, axis: choice };
   if (!tip || !o.tipFmt) { el.onpointermove = null; el.onpointerleave = null; return scale; }
-  const xh = el.querySelector('.xh'), xds = [...el.querySelectorAll('.xd')];
+  const xh = el.querySelector('.xh'), xds = [...el.querySelectorAll('.xd')], xcs = [...el.querySelectorAll('.xc')];
   const show = (xv, announce = false) => {
     const near = o.hitTest ? o.hitTest(xv) : hits.map(i => {
       let best = null;
@@ -409,11 +424,18 @@ export function drawChart(el, o) {
     if (!anchor && !announce) return;
     const cx = X(anchor?.x ?? xv);
     xh.setAttribute('x1', cx); xh.setAttribute('x2', cx); xh.setAttribute('visibility', 'visible');
-    // An inspected value beyond the axis keeps its words in the tip, not a dot off the plot.
+    // The inspected values: a dot where it fits whole, on a custom axis a
+    // chevron where it does not; the tip keeps the words either way.
     xds.forEach((d, i) => {
-      const cy = near[i] && !near[i].estimated ? Y(near[i].v) : NaN;
-      if (!inPlot(cy)) { d.setAttribute('visibility', 'hidden'); return; }
-      d.setAttribute('cx', X(near[i].x)); d.setAttribute('cy', cy); d.setAttribute('visibility', 'visible');
+      const c = xcs[i], cy = near[i] && !near[i].estimated ? Y(near[i].v) : NaN;
+      if (Number.isFinite(cy) && fits(cy, RING)) {
+        d.setAttribute('cx', X(near[i].x)); d.setAttribute('cy', cy); d.setAttribute('visibility', 'visible');
+        c?.setAttribute('visibility', 'hidden');
+        return;
+      }
+      d.setAttribute('visibility', 'hidden');
+      if (!c) return;
+      if (Number.isFinite(cy)) { c.setAttribute('d', chevron(X(near[i].x), cy).d); c.setAttribute('visibility', 'visible'); } else c.setAttribute('visibility', 'hidden');
     });
     const content = o.tipFmt(near, xv);
     tip.innerHTML = typeof content === 'string' ? content : content.html;
@@ -424,7 +446,7 @@ export function drawChart(el, o) {
     tip.style.top = `${Math.max(0, Math.min(H - th, (anchor ? Y(anchor.v) : pad.t + ph / 2) - th - 10))}px`;
   };
   // A hidden tip goes back to the corner so it can never widen the page.
-  const hide = () => { tip.classList.remove('on'); tip.style.left = '0px'; tip.style.top = '0px'; xh.setAttribute('visibility', 'hidden'); xds.forEach(d => d.setAttribute('visibility', 'hidden')); };
+  const hide = () => { tip.classList.remove('on'); tip.style.left = '0px'; tip.style.top = '0px'; xh.setAttribute('visibility', 'hidden'); [...xds, ...xcs].forEach(d => d.setAttribute('visibility', 'hidden')); };
   const inspectAt = clientX => {
     const r = el.getBoundingClientRect(), mx = clientX - r.left, xv = x0 + (mx - pad.l) / pw * (x1 - x0);
     if (mx < pad.l - 4 || mx > pad.l + pw + 4) return false;

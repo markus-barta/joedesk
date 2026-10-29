@@ -386,3 +386,72 @@ test('JOED-154 fix 7: the zero line is drawn whenever zero is in view, whichever
     assert.equal(zeroLines(c.el, scale).length, 1, JSON.stringify(o));
   }
 });
+
+// ---------- Fix round 3 (the Codex re-gate on 3cae300) ----------
+// Every dot's and chevron's ink: circles by radius, half their stroke and the
+// halo's widest breath (×2,2); chevrons by their points and half their stroke.
+function inkOutside(el, scale) {
+  const top = scale.pad.t, bottom = scale.pad.t + scale.ph, out = [];
+  for (const d of el.querySelectorAll('circle')) {
+    if (d.getAttribute('cy') === null || d.getAttribute('visibility') === 'hidden') continue;
+    const cy = Number(d.getAttribute('cy')), r = Number(d.getAttribute('r')) * (d.getAttribute('class') === 'dot-live' ? 2.2 : 1) + Number(d.getAttribute('stroke-width') ?? 0) / 2;
+    if (cy - r < top - 1e-6 || cy + r > bottom + 1e-6) out.push({ circle: d.getAttribute('class') ?? `r${d.getAttribute('r')}`, from: cy - r, to: cy + r });
+  }
+  for (const m of el.querySelectorAll('path').filter(p => p.getAttribute('data-beyond') !== null || (p.getAttribute('class') === 'xc' && p.getAttribute('visibility') === 'visible'))) {
+    for (const [x, y] of pathPoints(m.getAttribute('d'))) if (y - 1 < top - 1e-6 || y + 1 > bottom + 1e-6 || x - 1 < 0 || x + 1 > scale.W) out.push({ chevron: m.getAttribute('d'), x, y });
+  }
+  return out;
+}
+
+test('JOED-154 fix 8: a dot is drawn only where all its ink fits in the plot; 5,01 and 4,99 on Custom −5 to 5 at 300 px, History’s line width, are chevrons', t => {
+  const c = canvas(t);
+  // History's series: line width 1,8, live (a breathing halo once motion is on). Isolated 5,01, 4,99, 4 and −4,99; the newest 4,99.
+  const pts = [{ x: 0, v: 0 }, { x: 1, v: 1 }, { x: 2, v: null }, { x: 3, v: 5.01 }, { x: 4, v: null }, { x: 5, v: 4.99 }, { x: 6, v: null }, { x: 7, v: 4 }, { x: 8, v: null },
+    { x: 9, v: -4.99 }, { x: 10, v: null }, { x: 11, v: 2 }, { x: 12, v: 4.99 }];
+  const series = [{ pts, color: 'var(--desk-j)', w: 1.8, live: true, area: false }];
+  const o = { series, xDomain: [0, 12], zero: true, yFmt: changeAxis, tickGap: 56, axis: { mode: 'custom', min: -5, max: 5 }, tipFmt: () => ({ html: 'J', text: 'J' }) };
+  drawChart(c.el, o);
+  c.motion.reduce = false;
+  const scale = drawChart(c.el, o);
+  assert.deepEqual(inkOutside(c.el, scale), [], 'no ink outside the plot (3cae300 drew 5,01 at cy 11,7 and 4,99 up to 10,3, above the plot at 12)');
+  const marks = c.el.querySelectorAll('[data-beyond]').map(m => [m.getAttribute('data-beyond'), Math.round(pathPoints(m.getAttribute('d'))[1][0])]);
+  assert.deepEqual(marks, [['above', Math.round(scale.X(3))], ['above', Math.round(scale.X(5))], ['below', Math.round(scale.X(9))], ['above', Math.round(scale.X(12))]],
+    '5,01, 4,99 and −4,99 alone, and the newest 4,99, are chevrons at the edges they reach');
+  assert.ok(c.el.querySelectorAll('circle').some(d => d.getAttribute('r') === '2' && Math.abs(Number(d.getAttribute('cx')) - scale.X(7)) < 0.11), 'the isolated 4 keeps its dot');
+  // Inspecting a value whose dot would not fit shows its chevron, not the dot; one that fits shows its dot.
+  scale.inspectAt(scale.X(12));
+  assert.deepEqual([c.el.querySelector('.xd').getAttribute('visibility'), c.el.querySelector('.xc').getAttribute('visibility')], ['hidden', 'visible']);
+  assert.deepEqual(inkOutside(c.el, scale), []);
+  scale.inspectAt(scale.X(11));
+  assert.deepEqual([c.el.querySelector('.xd').getAttribute('visibility'), c.el.querySelector('.xc').getAttribute('visibility')], ['visible', 'hidden']);
+  assert.deepEqual(inkOutside(c.el, scale), []);
+  // A newest value whose ring fits but whose halo would not: the ring alone.
+  const near = scale.ax.hi - (7 / scale.ph) * (scale.ax.hi - scale.ax.lo);
+  drawChart(c.el, { ...o, series: [{ ...series[0], pts: [{ x: 0, v: 0 }, { x: 12, v: near }] }] });
+  assert.deepEqual(c.el.querySelectorAll('circle').filter(d => d.getAttribute('cy') !== null).map(d => d.getAttribute('class') ?? 'ring'), ['ring']);
+  assert.deepEqual(inkOutside(c.el, scale), []);
+  // An automatic fit holds its values: an edge value keeps its newest dot, as before.
+  drawChart(c.el, { ...o, axis: { mode: 'auto' } });
+  assert.equal(c.el.querySelectorAll('[data-beyond]').length, 0);
+  assert.ok(c.el.querySelectorAll('circle').some(d => d.getAttribute('r') === '4' && d.getAttribute('cy') !== null));
+});
+
+test('JOED-154 fix 9: every chevron is drawn once, outside the clipped lines, whole: an isolated newest value at 600 px keeps both wings', t => {
+  const c = canvas(t);
+  const draw = (pts, more = {}) => drawChart(c.el, { series: [{ pts, color: 'var(--desk-j)', w: 1.8, area: false }], xDomain: [0, 2], zero: true, yFmt: changeAxis, tickGap: 56, axis: { mode: 'custom', min: -5, max: 5 }, ...more });
+  // The re-gate's case: the newest value follows a gap and sits at the window's end.
+  let scale = draw([{ x: 0, v: 0 }, { x: 1, v: null }, { x: 2, v: 9 }]);
+  let marks = c.el.querySelectorAll('[data-beyond]');
+  assert.equal(marks.length, 1, 'one chevron, not two');
+  assert.equal(marks[0].closest('g[clip-path]'), null, 'outside the clipped group (3cae300 drew it inside, its right wing cut at 586)');
+  const wings = pathPoints(marks[0].getAttribute('d')).map(([x]) => x);
+  assert.deepEqual(wings.map(x => Math.round(x)), [582, 586, 590], 'both wings, centred on its time at 586');
+  assert.deepEqual(inkOutside(c.el, scale), []);
+  // Where a time sits at the chart's very edge, the chevron moves in just enough to stay whole.
+  for (const [pad, x] of [[{ r: 0 }, 2], [{ l: 0 }, 0]]) {
+    scale = draw([{ x: 0, v: x === 0 ? 9 : 0 }, { x: 1, v: null }, { x: 2, v: x === 2 ? 9 : 0 }], { pad });
+    marks = c.el.querySelectorAll('[data-beyond]');
+    assert.equal(marks.length, 1);
+    assert.deepEqual(inkOutside(c.el, scale), [], `pad ${JSON.stringify(pad)}: whole inside the chart`);
+  }
+});
