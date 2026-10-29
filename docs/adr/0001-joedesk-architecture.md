@@ -1561,3 +1561,25 @@ aborted publications remain excluded. Reseal only this candidate's runtime
 closure. Contracts revision 10, the approved presentation bundle, legacy anchor
 and historical artifacts remain unchanged. This local preparation grants no
 publication or deployment approval.
+
+## Release 39 candidate (JOED-159)
+
+Reserve `261029192345.0.0` at `2026-10-29T19:23:45Z` as `inspr-calver-3`, stable sequence 39,
+for JOED-144: whole-account value and chart, History Change mode with minimap,
+natural pan/zoom and axis modes, session-dated Desk labels and bars, Results
+redesign with deep links, the header/Settings gear and phone bottom bar,
+one honest reason per dash, a quieter board, account start in Settings, and
+recorded account history (JOED-145, 148, 150–157, 160–164).
+
+Previous sequence 38 (`261029075623.0.0`) was published to main at
+`9ec65b46709201669d65fcc04f6a21b1bb567e31`; release set verified in run
+`40846643125` (JOED-143), never deployed. Its disposition uses the existing
+`superseded-before-deployment` value. Markus requested release 39 directly
+on 2026-10-29, without settling or waiting. Last deployed remains sequence 37
+(`261028202622.0.0`), live since `2026-10-29T07:51:18Z` (JOED-122). About orders
+39, 38, 37 through 26, then legacy; release 38 retains its own note.
+
+Reseal the integrated runtime closure once. Contracts revision 10 and contract
+set `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
+shared presentation pin, legacy anchor and published artifacts remain unchanged.
+This local candidate grants no publication or deployment approval.

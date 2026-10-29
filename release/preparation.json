@@ -1,13 +1,13 @@
 {
   "schema": "joedesk.release-preparation.v1",
-  "ticket": "JOED-143",
+  "ticket": "JOED-159",
   "status": "candidate",
   "reservation": {
     "version_scheme": "inspr-calver-3",
-    "version": "261029075623.0.0",
+    "version": "261029192345.0.0",
     "release_channel": "stable",
-    "release_sequence": 38,
-    "reserved_at": "2026-10-29T07:56:23Z"
+    "release_sequence": 39,
+    "reserved_at": "2026-10-29T19:23:45Z"
   },
   "anchor": {
     "legacy_scheme": "calendar",
@@ -134,16 +134,15 @@
   "previous_release": {
     "product": "JoeDesk",
     "version_scheme": "inspr-calver-3",
-    "version": "261028202622.0.0",
+    "version": "261029075623.0.0",
     "release_channel": "stable",
-    "release_sequence": 37,
+    "release_sequence": 38,
     "status": "published-candidate",
-    "note": "live on csb0 since 2026-10-29T07:51:18Z (JOED-122)",
     "source_branch": "main",
-    "source_commit": "aedc666492a6379bf946900ce8521d105a70ede5",
-    "release_set_ticket": "JOED-122",
-    "disposition": "deployed",
-    "deployed": true
+    "source_commit": "9ec65b46709201669d65fcc04f6a21b1bb567e31",
+    "release_set_ticket": "JOED-143",
+    "disposition": "superseded-before-deployment",
+    "note": "Published to main; release set verified in run 40846643125 (JOED-143), never deployed. Superseded directly by release 39 per Markus on 2026-10-29: release 39 ASAP; no settling or waiting."
   },
   "legacy_deployment_inventory": {
     "board_source_pin": "db621bf",

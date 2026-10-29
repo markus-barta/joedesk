@@ -2,13 +2,16 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261029075623.0.0` (`inspr-calver-3`, stable sequence 38), reserved once at `2026-10-29T07:56:23Z` for the sweeps 2 and 3 fixes (JOED-129–134, JOED-140–142, release [JOED-143](https://aeon.barta.cm/p/JOED/JOED-143)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261029192345.0.0` (`inspr-calver-3`, stable sequence 39), reserved once at `2026-10-29T19:23:45Z` for the board redesign (JOED-144, release [JOED-159](https://aeon.barta.cm/p/JOED/JOED-159)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
 **Last deployed release:** `inspr-calver-3` / `261028202622.0.0` / sequence 37,
 published on `main` at `aedc666492a6379bf946900ce8521d105a70ede5` under JOED-122,
-live on csb0 since `2026-10-29T07:51:18Z` (JOED-122). `previous_release` and
-`last_deployed_release` both record that release. This history does not claim
-adoption for sequence 38. Sequence 36 (`261028081016.0.0`) was previously deployed
+live on csb0 since `2026-10-29T07:51:18Z` (JOED-122). `last_deployed_release` records that release. `previous_release` records sequence 38
+(`261029075623.0.0`), published to main at `9ec65b46709201669d65fcc04f6a21b1bb567e31`
+with its release set verified in run `40846643125` (JOED-143), but never deployed.
+Its disposition is `superseded-before-deployment`: Markus requested release 39
+directly on 2026-10-29, without settling or waiting. This history does not claim
+adoption for sequence 39. Sequence 36 (`261028081016.0.0`) was previously deployed
 at `2026-10-28T20:23:05Z` (JOED-106). Sequence 35 (`261027124551.0.0`) was previously deployed
 at `2026-10-27T20:18:18Z` (JOED-99). Sequence 34 (`261026232616.0.0`) was previously deployed
 at `2026-10-27T03:30:43Z` (JOED-97). Sequence 33 (`261026070713.0.0`) was previously deployed
@@ -33,14 +36,14 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build,
+`previous_release` from `last_deployed_release`. About lists the current build, published sequence 38,
 deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-38 candidate has not been published. The candidate
+cutover**. The sequence-39 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -90,7 +93,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261029075623.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261029192345.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -2612,3 +2615,29 @@ Reseal only this candidate's runtime closure. Keep revision-10 contracts, the
 approved shared presentation pin, legacy anchor and historical artifacts
 unchanged. Review, publication, deployment and live verification remain with
 the coordinator; this reservation grants none of those approvals.
+
+### Release 39 preparation (JOED-159)
+
+Reserve `261029192345.0.0` at `2026-10-29T19:23:45Z`, stable sequence 39, for the
+JOED-144 board redesign. Sequence 38 (`261029075623.0.0`) was published on main
+`9ec65b46709201669d65fcc04f6a21b1bb567e31`; its release set was verified in run
+`40846643125` (JOED-143), but it was never deployed. Reuse the historical
+`superseded-before-deployment` disposition. Markus requested release 39 ASAP
+on 2026-10-29 with no settling or waiting. Last deployed stays sequence 37
+(`261028202622.0.0`), live since `2026-10-29T07:51:18Z` (JOED-122).
+About orders 39, 38, 37 through 26, then legacy; release 38 keeps its own note.
+
+- See the whole account’s value at the top, with a stock-app chart from 1D to All and an overview strip.
+- Explore History in Change mode with a minimap, natural pan and zoom, and Auto, Max or Custom axes.
+- Read dated Desk results with Last session, one market-day bar and labelled session bars for each desk.
+- Explore redesigned Results by period, desk, calendar day and trade, with links back to the same view.
+- Use the quieter header, the Settings gear and the phone bottom bar to move around the board.
+- Get one honest reason for each missing number, with fewer repeated warnings and no empty chart box.
+- Set the account’s starting amount and date in Settings to give Since start a known basis.
+- Build account history from newly recorded values, with daily closes for longer chart ranges.
+
+Reseal the integrated runtime closure once. Contracts revision 10, contract set
+`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
+shared presentation pin and legacy anchor remain unchanged. This candidate
+grants no publication or deployment approval; the coordinator owns the
+cross-family gate, publication and live verification.
