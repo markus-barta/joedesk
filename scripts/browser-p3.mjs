@@ -49,6 +49,7 @@ const { boardStates, NOT_EXACT_REASONS, notExactDash } = await import('../public
 const { cellReason, capital, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
 const { statePhrase } = await import('../public/joe/ui.js');
 const fmt = await import('../public/joe/format.js');
+const { historyChangeText } = await import('./browser/history-compare.mjs');
 const { STARTING_MONEY } = await import('../public/joe/performance.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
 const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, disclosureProblem, rowProblems, householdDayReason, dashWords } = await import('../public/joe/desk.js');
@@ -1524,18 +1525,13 @@ try {
     b.setNow(at(NOW, 9));
     const served = await (await fetch(`${b.url}history.json`, { headers: { 'x-auth-request-user': ACTOR } })).json();
     const cols = hm.toColumns(served.points), endAt = Date.parse(at(NOW, 9)), ids = ['j', 'joe', 'joel'];
-    const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
     const drawn = Object.fromEntries(ids.map(id => [id, hm.continuitySeries(cols, id, '1w', endAt).observed.filter(p => p.y !== null)]));
     // The comparison line the chart's own points give for a window, and whether its numbers are those points.
     const expected = ([x0, x1]) => {
       const r = hm.sharedWindowCompare(cols, ids, [x0, x1], endAt);
       if (!r.ok) return { r, text: null, onChart: false };
       const point = (id, iso) => drawn[id].find(p => p.x === Date.parse(iso))?.y;
-      const when = iso => `${fmt.dayDDM(iso)}, ${fmt.timeHM(iso)}`, figures = r.desks.map(d => `${LABEL[d.id]} ${fmt.pct(d.pct, 2, true)}`).join(' · ');
-      // Over part of the window the line names the stretch it compares (history.js, compareLine).
-      const text = r.after ? `Last ${fmt.age((Date.parse(r.endAt) - Date.parse(r.startAt)) / 1000)} ${r.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'with continuous data'}, from ${when(r.startAt)}: ${figures}`
-        : `From ${when(r.startAt)} to ${when(r.endAt)}: ${figures}`;
-      return { r, onChart: r.desks.every(d => d.start === point(d.id, r.startAt) && d.end === point(d.id, r.endAt)), text };
+      return { r, onChart: r.desks.every(d => d.start === point(d.id, r.startAt) && d.end === point(d.id, r.endAt)), text: historyChangeText(r) };
     };
     const view = `(() => { const s = document.querySelector('#histChart > svg'); return { x0: Number(s.dataset.x0), x1: Number(s.dataset.x1), label: s.getAttribute('aria-label'),
       compare: document.getElementById('histCompare').innerText, basis: document.getElementById('histBasis').innerText }; })()`;

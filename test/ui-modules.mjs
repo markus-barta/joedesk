@@ -1850,7 +1850,7 @@ function historyInput(t, points, { end = Date.parse(points.at(-1).t), ...state }
   const target = { closest: () => null };
   return { chart, tip, frame, pending: () => pending,
     wheel(e, at) { const event = { deltaX: 0, deltaY: 0, deltaMode: 0, clientX: 464, timeStamp: at, target, prevented: false, preventDefault() { event.prevented = true; }, ...e }; on.chart.wheel(event); return event; },
-    touch(type, id, x, at = 0) { on.chart[type]({ type, pointerId: id, pointerType: 'touch', clientX: x, clientY: 120, button: 0, timeStamp: at, target }); },
+    touch(type, id, x, at = 0, y = 120) { on.chart[type]({ type, pointerId: id, pointerType: 'touch', clientX: x, clientY: y, button: 0, timeStamp: at, target }); },
     hover(x) { chart.onpointermove({ clientX: x, target }); return tip.innerHTML; } };
 }
 const threeDays = () => Array.from({ length: 145 }, (_, i) => pt(iso(i * 30), { j: 10 + i, joe: 20, joel: 30 }));
@@ -1877,6 +1877,31 @@ test('JOED-145 input: a sideways wheel of one pixel into the past turns Follow o
   // A plain vertical wheel right after the sideways ones belongs to the page.
   const page = h.wheel({ deltaY: 120 }, 60);
   assert.deepEqual([page.prevented, h.pending()], [false, 0], 'never taken, nothing to redraw');
+});
+
+test('JOED-161 pinch: spreading horizontally, vertically or diagonally halves the window around the same time', t => {
+  const h = historyInput(t, threeDays());
+  for (const [dx, dy] of [[50, 0], [0, 50], [30, 40]]) {
+    historyPreset('1d');
+    const start = h.frame(), mid = (start[0] + start[1]) / 2;
+    h.touch('pointerdown', 1, 464 - dx, 1000, 120 - dy);
+    h.touch('pointerdown', 2, 464 + dx, 1000, 120 + dy);
+    h.touch('pointermove', 1, 464 - 2 * dx, 1010, 120 - 2 * dy);
+    h.touch('pointermove', 2, 464 + 2 * dx, 1010, 120 + 2 * dy);
+    const zoom = h.frame(), at = `${dx},${dy}`;
+    assert.equal(zoom[1] - zoom[0], (start[1] - start[0]) / 2, `${at}: twice the finger distance halves the span`);
+    assert.equal((zoom[0] + zoom[1]) / 2, mid, `${at}: the midpoint keeps its time`);
+    assert.equal(HS.follow, false, `${at}: zooming into the middle parks the window`);
+    // Moving both fingers sideways keeps the new scale and pans by that
+    // distance on the zoomed chart, even while the fingers are vertical.
+    h.touch('pointermove', 1, 484 - 2 * dx, 1020, 120 - 2 * dy);
+    h.touch('pointermove', 2, 484 + 2 * dx, 1020, 120 + 2 * dy);
+    const moved = h.frame();
+    assert.equal(moved[1] - moved[0], zoom[1] - zoom[0], `${at}: translation keeps the span`);
+    assert.equal(zoom[0] - moved[0], 20 / 800 * (zoom[1] - zoom[0]), `${at}: translation pans at the new scale`);
+    h.touch('pointerup', 1, 484 - 2 * dx, 1040, 120 - 2 * dy);
+    h.touch('pointerup', 2, 484 + 2 * dx, 1040, 120 + 2 * dy);
+  }
 });
 
 test('JOED-145 input: when the last finger of a pinch lifts no gesture is left, so a mouse inspects again', t => {

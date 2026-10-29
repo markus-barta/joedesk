@@ -917,7 +917,9 @@ observed, estimated, or no value here. Inspection keeps focus across redraws
 and uses the existing fixed chart box and reduced-motion behavior. The chart's
 description includes its refresh status and inspection instructions. A data
 update or wheel zoom hides a hovering pointer tooltip until the pointer moves
-again, avoiding stale values after a redraw.
+again, avoiding stale values after a redraw. A two-finger pinch measures the
+distance between the fingers in any direction (horizontal, vertical or
+diagonal); spreading them zooms in around their midpoint's time.
 
 History opens in **Change** (JOED-154, the approved JOED-147 design): every
 desk's line is its change in euros since the left edge of the shown window,
