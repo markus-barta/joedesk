@@ -504,7 +504,7 @@ async function assertDesignLayout(page, viewport, tag) {
   assert.equal(N(g.eyebrow), N('Result · All desks · this week'), `${tag}: the hero names result, desks and period`);
   assert.ok(g.below, `${tag}: the percentage sits under the euros`);
   assert.equal(g.leftovers, 0, `${tag}: no benchmark row, tile icon or tile footer`);
-  assert.ok(g.fx?.startsWith('Prices in USD, as traded. Fees and results in EUR at each trade’s IB rate (€ per $).'), `${tag}: the day explains its currencies`);
+  assert.ok(g.fx?.startsWith('Prices in USD, as traded. Fees and results in EUR at each trade’s Interactive Brokers rate (€ per $).'), `${tag}: the day explains its currencies`);
   // This week at the design clock (Wed 14 Oct, 19:42) marks Tue's and Wed's midnights.
   assert.equal(g.marks, 2, `${tag}: the week's chart marks each midnight so far`);
 }

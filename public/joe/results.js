@@ -517,12 +517,13 @@ function dayContent(view, k, desks) {
 }
 
 // How a listed day reads: prices as traded, euro at each trade's own rate. A
-// day without listed trades has no prices to explain.
+// day without listed trades has no prices to explain. Plain words only: a
+// control here would join the phone sheet's focus order after its body.
 function currencyNote(day) {
   const list = day.currencies ?? [];
   if (!list.length) return '';
   const usd = list.length === 1 && list[0] === 'USD';
-  return `<p class="dp-fx">${icon('info')}<span>${usd ? 'Prices in USD, as traded.' : 'Prices as traded, each in its own currency.'} Fees and results in EUR at each trade’s ${term('ib', 'IB')} rate${usd ? ' (€ per $)' : ''}. Kept holdings never appear here.</span></p>`;
+  return `<p class="dp-fx">${icon('info')}<span>${usd ? 'Prices in USD, as traded.' : 'Prices as traded, each in its own currency.'} Fees and results in EUR at each trade’s Interactive Brokers rate${usd ? ' (€ per $)' : ''}. Kept holdings never appear here.</span></p>`;
 }
 
 // The sheet already has room for every reason. Remove the one-way disclosure

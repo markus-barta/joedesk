@@ -1993,8 +1993,9 @@ test('JOED-151 trades: each row shows the trade’s own rate as recorded; a list
     assert.deepEqual(rates.map(el => el.textContent), ['at € 0,90 per $', 'at € 0,85861234 per $'], 'at least two decimals, all recorded ones');
     assert.ok(rates.every(el => el.parentElement.getAttribute('class') === 'ln'), 'the rate sits with the prices');
     const note = doc.querySelector('.dp-fx');
-    assert.equal(textOf(note.children.at(-1).textContent), 'Prices in USD, as traded. Fees and results in EUR at each trade’s IB rate (€ per $). Kept holdings never appear here.');
-    assert.equal(note.querySelector('.term').dataset.term, 'ib');
+    assert.equal(textOf(note.children.at(-1).textContent), 'Prices in USD, as traded. Fees and results in EUR at each trade’s Interactive Brokers rate (€ per $). Kept holdings never appear here.');
+    // No control in the note: the phone sheet's focus order stays Close, then its body (JOED-140).
+    assert.equal(note.querySelectorAll('button').length + note.querySelectorAll('a').length + note.querySelectorAll('[tabindex]').length, 0);
     assert.equal(doc.querySelectorAll('.dp-fx').length, 1);
   }
   const euro = { ...tradeOf('rt-rate-eur', 'j', '2026-10-13T15:00:00.000Z', '1'), entryPrice: { amount: '70', currency: 'EUR' }, exitPrice: { amount: '71', currency: 'EUR' },
@@ -2002,7 +2003,7 @@ test('JOED-151 trades: each row shows the trade’s own rate as recorded; a list
   const e = render(record([closeDay('2026-10-13', '5001')], [euro]), '2026-10-14T12:00:00.000Z', '2026-10-13');
   assert.equal(htmlDocument(e.panel).querySelectorAll('[aria-label]').filter(el => el.getAttribute('aria-label') === 'Exchange rate').length, 0, 'a euro price has no rate to show');
   assert.equal(textOf(htmlDocument(e.panel).querySelector('.dp-fx').children.at(-1).textContent),
-    'Prices as traded, each in its own currency. Fees and results in EUR at each trade’s IB rate. Kept holdings never appear here.');
+    'Prices as traded, each in its own currency. Fees and results in EUR at each trade’s Interactive Brokers rate. Kept holdings never appear here.');
   const none = render(record([closeDay('2026-10-13', '5000')], [usd]), '2026-10-14T12:00:00.000Z', '2026-10-12');
   assert.equal(htmlDocument(none.panel).querySelectorAll('.dp-fx').length, 0, 'a day without listed trades has no prices to explain');
 });
