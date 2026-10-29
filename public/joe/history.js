@@ -1,18 +1,26 @@
-// History: each desk's money as observed, with dotted estimated gaps, J's
-// bookkeeping with its captured results, and the desk changes this browser saw.
-import { $, $$, icon, term, st, pl, inlineMark, swatch, ageSpan, patch, isPhone, statePhrase, stateCaption } from './ui.js';
-import { esc, amountOf, eur, pct, age, dayDDM, dayDM, timeHM, money, NB } from './format.js';
+// History: each desk's money as observed, dashed where a desk's numbers are
+// estimated and hatched where no numbers arrived, an overview strip of all
+// kept history with the shown window, J's bookkeeping with its captured
+// results, and the desk changes this browser saw.
+import { $, $$, icon, term, st, pl, inlineMark, swatch, ageSpan, patch, statePhrase, stateCaption } from './ui.js';
+import { esc, amountOf, eur, pct, age, dayDDM, dayDM, timeHM, money, digits, NB } from './format.js';
 import { decimalUnits } from './contracts/decimal.mjs';
 import { cellReason } from './health.js';
 import { exactCell } from './performance.js';
-import { drawChart, eurAxis } from './chart.js';
-import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, sharedWindowCompare, basisNotice, toColumns, rangeWindow } from './history-model.js';
+import { drawChart, eurAxis, axis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor } from './chart.js';
+import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, sharedWindowCompare, basisNotice, toColumns, rowAt, rangeSpanMs,
+  keptRange, placeWindow, panWindow, zoomWindow, resizeWindow, atLiveEdge, endsAtNewest, followWindow, presetSpan, windowPreset, resolveView,
+  missingBands, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
 import { viennaDay, zonedInstant, VIENNA, NY } from './time.mjs';
 
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
 const EMPTY = toColumns([]);
-export const HS = { desks: DESK_IDS.slice(), range: '1w', zoom: null, full: null };
+// The chosen desks, the last chosen preset, a manual window (null while a
+// preset shows) and whether the window follows the newest time. full and
+// shown are the kept range and the window drawn last, for the input below.
+export const HS = { desks: DESK_IDS.slice(), preset: '1w', view: null, follow: true, full: null, shown: null };
 const RANGE_WORD = { '1d': 'last day', '1w': 'last week', '1m': 'last month', all: 'all kept history' };
+const DAY = 864e5, HOUR = 3600e3;
 
 function toolsHtml() {
   return {
@@ -35,11 +43,12 @@ function statusLine(cell) {
   return `<div class="hist-state" data-state="${p.state}">${st(p.tone, text)}${retry}</div>`;
 }
 
-// The window the chart shows and the comparison uses: the range ending at the
-// board's current time, or its zoom.
+// The window the comparison uses: the one the chart settles on (a glide
+// between two windows draws the frames in between, never compares them).
 export function historyWindow(cols, endAt) {
-  return HS.zoom ?? rangeWindow(cols, HS.range, endAt);
+  return resolveView(keptRange(cols, endAt), HS);
 }
+const thinnedOf = cell => { const at = Date.parse(cell?.value?.compactedThrough ?? ''); return Number.isFinite(at) ? at : null; };
 
 function compareLine(cols, bounds, endAt) {
   if (HS.desks.length < 2) return 'Choose two or more desks to compare them over the same window.';
@@ -49,8 +58,13 @@ function compareLine(cols, bounds, endAt) {
       : result.reason === 'incompatible-basis' ? 'Comparing needs two moments on every chosen desk’s current bookkeeping basis.'
         : result.reason === 'insufficient-points' ? 'Not enough history in this window to compare.' : 'Choose two or more desks to compare them over the same window.';
   }
-  const when = iso => `${dayDDM(iso)}, ${timeHM(iso)}`;
-  return `From ${when(result.startAt)} to ${when(result.endAt)}: ${result.desks.map(d => `${LABEL[d.id]} ${pct(d.pct, 2, true)}`).join(' · ')}`;
+  const when = iso => `${dayDDM(iso)}, ${timeHM(iso)}`, figures = result.desks.map(d => `${LABEL[d.id]} ${pct(d.pct, 2, true)}`).join(' · ');
+  // A comparison that cannot use the whole window names the stretch it uses.
+  if (result.after) {
+    const run = age((Date.parse(result.endAt) - Date.parse(result.startAt)) / 1000);
+    return `Last ${run} ${result.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'without gaps'}, from ${when(result.startAt)}: ${figures}`;
+  }
+  return `From ${when(result.startAt)} to ${when(result.endAt)}: ${figures}`;
 }
 
 // Display-only thinning: per pixel bucket keep the first, lowest, highest and
@@ -75,16 +89,66 @@ export function downsample(pts, x0, x1, buckets) {
   return out;
 }
 
-function midnightLines(from, to) {
-  const lines = [];
-  let day = viennaDay(new Date(from).toISOString());
-  for (let i = 0; i < 40; i++) {
-    const at = Date.parse(zonedInstant(day, '00:00:00', VIENNA));
-    if (at > to) break;
-    if (at >= from) lines.push(at);
-    day = new Date(Date.parse(`${day}T12:00:00Z`) + 864e5).toISOString().slice(0, 10);
+// Vienna wall-clock instants, cached: every frame asks for the same few days.
+const instants = new Map();
+function viennaAt(day, hour = 0) {
+  const key = `${day}T${hour}`;
+  let at = instants.get(key);
+  if (at === undefined) {
+    if (instants.size > 2000) instants.clear();
+    at = Date.parse(zonedInstant(day, `${String(hour).padStart(2, '0')}:00:00`, VIENNA));
+    instants.set(key, at);
   }
-  return lines;
+  return at;
+}
+const nextDay = day => new Date(Date.parse(`${day}T12:00:00Z`) + DAY).toISOString().slice(0, 10);
+// Wall-clock ticks in Vienna every stepMin minutes inside [from, to], in
+// order; a tick at midnight is a date. Days of a clock change are 23 or 25
+// hours long: steps within the hour count real time from midnight, so every
+// instant of such a day has its tick (03:00 follows 01:45 in spring, 02:00
+// comes twice in autumn); hour steps are placed by the clock, and an hour the
+// change skips is the next one. No instant is ever listed twice.
+export function wallTicks(from, to, stepMin) {
+  const out = [], seen = new Set();
+  const add = (at, midnight, day) => { if (at >= from && at <= to && !seen.has(at)) { seen.add(at); out.push({ at, midnight, day }); } };
+  let day = viennaDay(new Date(Math.floor(from)).toISOString());
+  for (let i = 0; i < 40; i++) {
+    const start = viennaAt(day), next = nextDay(day), end = viennaAt(next);
+    if (start > to) break;
+    if (end >= from && stepMin < 60) {
+      const step = stepMin * 60e3;
+      for (let at = start + Math.max(0, Math.ceil((from - start) / step)) * step; at < end && at <= to; at += step) add(at, at === start, day);
+    } else if (end >= from) {
+      const regular = end - start === DAY;
+      for (let hour = 0; hour < 24; hour += stepMin / 60) add(regular ? start + hour * HOUR : viennaAt(day, hour), hour === 0, day);
+    }
+    day = next;
+  }
+  return out.sort((a, b) => a.at - b.at);
+}
+const midnightLines = (from, to) => wallTicks(from, to, 1440).map(t => t.at);
+const dayWord = at => dayDDM(new Date(at).toISOString()).split(NB)[0];
+// Axis labels at least `gap` pixels apart: clock times for a day or two,
+// dates beyond; a label at midnight is always the date, and a window that
+// starts during a day names that day at its left edge ("Wed 28" before the
+// midnight line marked "Thu 29").
+function axisLabels(x0, x1, pw, gap = 56) {
+  const span = x1 - x0, perMin = pw / (span / 60e3) || 0;
+  const stepMin = [5, 10, 15, 30, 60, 120, 180, 360, 720].find(s => s * perMin >= gap);
+  const labels = [];
+  if (stepMin) {
+    const ticks = wallTicks(x0, x1, stepMin), lead = ticks[0]?.at === x0 && ticks[0].midnight ? null : x0;
+    if (lead !== null) labels.push({ x: lead, text: dayWord(lead), anchor: 'start' });
+    for (const t of ticks) {
+      if (lead !== null && (t.at - lead) * perMin / 60e3 < gap) continue;
+      labels.push({ x: t.at, text: t.midnight ? dayWord(t.at) : timeHM(new Date(t.at).toISOString()), anchor: 'start' });
+    }
+  } else {
+    const every = [1, 2, 4, 7, 14].find(n => n * 1440 * perMin >= gap) ?? 14;
+    wallTicks(x0, x1, 1440).forEach((t, i) => { if (i % every === 0) labels.push({ x: t.at, text: dayWord(t.at), anchor: 'start' }); });
+  }
+  // A label never runs past the plot's right edge.
+  return labels.filter(l => (l.x - x0) / span * pw < pw - 40);
 }
 
 // First point at or after x; both observations and gap samples are ordered.
@@ -93,10 +157,17 @@ function pointAt(points, x) {
   while (lo < hi) { const mid = (lo + hi) >>> 1; if (points[mid].x < x) lo = mid + 1; else hi = mid; }
   return lo;
 }
+// Index bounds in sorted times: the first at or after x, the first after x.
+function firstAt(xs, x, after = false) {
+  let lo = 0, hi = xs.length;
+  while (lo < hi) { const mid = (lo + hi) >>> 1; if (xs[mid] < x || (after && xs[mid] === x)) lo = mid + 1; else hi = mid; }
+  return lo;
+}
 
 // Display-only hits use original observations, never the thinned SVG points.
 // An actual observation wins at its timestamp; inside a gap show its estimate.
-function historyHit(observed, gaps, x) {
+// Where the server thinned old rows, the nearest kept observation answers.
+function historyHit(observed, gaps, x, thin = null) {
   const i = pointAt(observed, x), a = observed[i - 1], b = observed[i];
   const p = !a ? b : !b || x - a.x <= b.x - x ? a : b;
   if (p?.x === x) return { x: p.x, v: p.y };
@@ -106,7 +177,8 @@ function historyHit(observed, gaps, x) {
     const v = right.x === left.x ? right.y : left.y + (right.y - left.y) * ((x - left.x) / (right.x - left.x));
     return { x, v, estimated: true };
   }
-  return p && Math.abs(p.x - x) <= OBSERVATION_INTERVAL_MS ? { x: p.x, v: p.y } : null;
+  const thinned = thin !== null && a && b && b.x <= thin;
+  return p && (thinned || Math.abs(p.x - x) <= OBSERVATION_INTERVAL_MS) ? { x: p.x, v: p.y } : null;
 }
 
 // One wording for the visible tooltip and the polite keyboard announcement.
@@ -119,78 +191,443 @@ export function historyPointDetails(near, x, desks) {
   return { text: lines.join('\n'), html: `<b>${esc(lines[0])}</b>${lines.slice(1).map(line => `<br>${esc(line)}`).join('')}` };
 }
 
+// ---------- The drawn model ----------
+// Rebuilt only when the history, the desk choice, the thinning mark or the
+// rows up to the board's time change. Between updates only each desk's
+// trailing estimate (its held last value, or the assumed start of a desk
+// never observed) reaches the board's current time, so a frame of panning or
+// zooming never walks the whole history.
+let model = null;
+function deskModel(cols, id, endAt, thin) {
+  const s = continuitySeries(cols, id, 'all', endAt, { thinnedThrough: thin });
+  const end = s.gaps.at(-1);
+  const tail = end && end.at(-1).x === endAt && ['last-value-carry', 'no-history-baseline'].includes(end[0].assumption) ? end : null;
+  const hits = s.observed.filter(p => p.y !== null);
+  return { id, lines: s.observed.map(p => ({ x: p.x, v: p.y })), hits, body: tail ? s.gaps.slice(0, -1) : s.gaps, tail };
+}
+function historyModel(cols, endAt, thin) {
+  const last = rowAt(cols, endAt + 1), desks = HS.desks.join();
+  if (!model || !last || model.cols !== cols || model.desks !== desks || model.last !== last || model.thin !== thin) {
+    const models = HS.desks.map(id => deskModel(cols, id, endAt, thin));
+    // Every original moment keyboard inspection can stop at, in order.
+    const xs = [...new Set(models.flatMap(m => [...m.lines.map(p => p.x), ...m.body.flatMap(g => g.map(p => p.x)), ...(m.tail ? [m.tail[0].x] : [])]))].sort((a, b) => a - b);
+    model = { cols, desks, last, thin, models, xs, overview: null };
+  }
+  return model;
+}
+function gapsAt(m, endAt) {
+  const lastSeen = m.hits.at(-1);
+  const from = m.tail?.[0] ?? (lastSeen ? { x: lastSeen.x, y: lastSeen.y, estimated: true, assumption: 'last-value-carry', observedBoundary: true } : null);
+  if (!from || endAt <= from.x) return m.body;
+  return [...m.body, [from, { x: endAt, y: from.y, estimated: true, assumption: from.assumption }]];
+}
+// A line's value at x, between its neighbours (null across a break).
+function lineAt(pts, x) {
+  const k = pointAt(pts, x), a = pts[k - 1], b = pts[k];
+  if (b?.x === x) return b.v;
+  if (!a || !b || a.v === null || b.v === null) return null;
+  return a.v + (b.v - a.v) * ((x - a.x) / (b.x - a.x));
+}
+const segmentAt = (g, x) => g[0].y + (g[g.length - 1].y - g[0].y) * ((x - g[0].x) / ((g[g.length - 1].x - g[0].x) || 1));
+
+// ---------- Motion ----------
+// Preset jumps, Fit all and centring ease over about 200 ms; with reduced
+// motion they land at once. The target is resolved every frame, so a glide
+// that follows the newest time still ends exactly on it.
+const motion = { from: null, start: 0 };
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+function glide() {
+  if (HS.shown && input.schedule && !reducedMotion()) { motion.from = HS.shown.slice(); motion.start = performance.now(); }
+}
+function frameWindow(target) {
+  if (!motion.from) return target;
+  const t = (performance.now() - motion.start) / 200;
+  if (t >= 1) { motion.from = null; return target; }
+  input.schedule('history-anim');
+  return lerpWindow(motion.from, target, easeOut(t));
+}
+
+// ---------- The chart ----------
+const when = ms => { const at = new Date(Math.round(ms)).toISOString(); return `${dayDDM(at)}, ${timeHM(at)}`; };
+function spanText(ms) {
+  if (ms >= 2 * DAY) return `${digits(ms / DAY, ms >= 10 * DAY || Math.abs(ms / DAY - Math.round(ms / DAY)) < 0.05 ? 0 : 1)}${NB}days`;
+  if (ms >= 2 * HOUR) return `${Math.round(ms / HOUR)}${NB}h`;
+  return `${Math.max(1, Math.round(ms / 60e3))}${NB}min`;
+}
+function chartLabel(range, shown) {
+  const pressed = windowPreset(range, shown, HS.preset);
+  if (pressed === 'all' || (pressed && presetSpan(range, pressed) < rangeSpanMs(pressed))) return `Each desk’s money, ${RANGE_WORD.all}`;
+  if (pressed && HS.follow && atLiveEdge(range, shown)) return `Each desk’s money, ${RANGE_WORD[pressed]}`;
+  return `Each desk’s money, zoomed: ${when(shown[0])} to ${when(shown[1])} Vienna time`;
+}
+let lastScale = null;
 export function historyChart(ctx) {
   const el = $('#histChart');
   const top = Math.ceil($('#histStatus')?.offsetHeight ?? 0);
   const inspection = { description: 'histStatus histInspectHelp', live: $('#histLive'), points: [] };
   if (!ctx.now) {
-    HS.full = null;
-    return drawChart(el, { series: [], xDomain: [0, 1], empty: true, inspect: inspection, pad: { t: 12 + top }, emptyText: 'Waiting for the board server’s clock', label: 'Each desk’s money: the board server’s time is not known yet' });
+    HS.full = null; HS.shown = null; overviewOff();
+    return (lastScale = drawChart(el, { series: [], xDomain: [0, 1], empty: true, inspect: inspection, pad: { t: 12 + top }, emptyText: 'Waiting for the board server’s clock', label: 'Each desk’s money: the board server’s time is not known yet' }));
   }
   const cell = ctx.states.history;
   const cols = cell?.value?.columns ?? EMPTY;
-  const endAt = Date.parse(ctx.now);
-  const model = HS.desks.map(id => ({ id, ...continuitySeries(cols, id, HS.range, endAt) }));
-  const hitPoints = model.map(m => m.observed.filter(p => p.y !== null));
-  HS.full = rangeWindow(cols, HS.range, endAt);
-  const [x0, x1] = historyWindow(cols, endAt);
-  const inView = p => p.x >= x0 && p.x <= x1;
-  const series = [];
-  const firsts = [];
-  for (const m of model) {
-    const observed = m.observed.map(p => ({ x: p.x, v: p.y }));
-    const firstSeen = observed.find(p => p.v !== null && inView(p));
-    const firstGap = m.gaps.flat().find(inView);
-    firsts.push(firstSeen?.v ?? firstGap?.y ?? ASSUMED_BASELINE);
-    for (const gap of m.gaps) series.push({ pts: gap.map(p => ({ x: p.x, v: p.y })), color: 'var(--est)', dotted: true, desk: m.id });
-    series.push({ pts: observed, color: `var(--desk-${m.id})`, w: 1.8, live: true, desk: m.id });
-  }
-  const base = firsts.length ? firsts.reduce((a, b) => a + b, 0) / firsts.length : ASSUMED_BASELINE;
-  // Only what is visible sets the scale; the floor is ±0,5 % of the first visible money.
-  const edge = (pts, x) => {
-    for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1], b = pts[i];
-      if (a.x <= x && b.x >= x && a.v !== null && b.v !== null) return b.x === a.x ? b.v : a.v + (b.v - a.v) * ((x - a.x) / (b.x - a.x));
+  const endAt = Date.parse(ctx.now), thin = thinnedOf(cell);
+  const m = historyModel(cols, endAt, thin);
+  const range = keptRange(cols, endAt);
+  const gaps = m.models.map(d => gapsAt(d, endAt));
+  const bands = missingBands(gaps);
+  const target = resolveView(range, HS);
+  const [x0, x1] = frameWindow(target);
+  HS.full = range; HS.shown = [x0, x1];
+  const pw = Math.max(1, el.clientWidth - 78);
+  const series = [], firsts = [], yValues = [];
+  m.models.forEach((d, i) => {
+    const from = Math.max(0, pointAt(d.lines, x0) - 1), to = Math.min(d.lines.length, pointAt(d.lines, x1) + 1);
+    const visible = downsample(d.lines.slice(from, to), x0, x1, Math.max(200, el.clientWidth));
+    let first = null;
+    for (const p of visible) if (p.v !== null && p.x >= x0 && p.x <= x1) { yValues.push(p.v); first ??= p.v; }
+    for (const x of [x0, x1]) { const v = lineAt(d.lines, x); if (v !== null) yValues.push(v); }
+    let firstGap = null;
+    // Each estimate is one straight segment (its markers lie on it).
+    for (const g of gaps[i]) {
+      if (g[g.length - 1].x < x0 || g[0].x > x1) continue;
+      const a = Math.max(x0, g[0].x), b = Math.min(x1, g[g.length - 1].x);
+      yValues.push(segmentAt(g, a), segmentAt(g, b));
+      firstGap ??= segmentAt(g, a);
+      series.push({ pts: [{ x: g[0].x, v: g[0].y }, { x: g[g.length - 1].x, v: g[g.length - 1].y }], color: 'var(--est)', estimate: true, desk: d.id });
     }
-    return null;
-  };
-  const yValues = series.flatMap(s => [...s.pts.filter(inView).map(p => p.v), edge(s.pts, x0), edge(s.pts, x1)]).filter(Number.isFinite);
-  const visible = series.map(s => ({ ...s, pts: s.dotted ? s.pts : downsample(s.pts, x0, x1, Math.max(200, el.clientWidth)) }));
-  const span = x1 - x0, daily = span > 2 * 864e5;
-  const phone = el.clientWidth < 700;
-  const xLabels = [];
-  if (daily) {
-    const lines = midnightLines(x0, x1);
-    const every = span > 10 * 864e5 ? (phone ? 4 : 2) : phone ? 2 : 1;
-    lines.forEach((x, i) => { if (i % every === 0 && x < x1 - span * 0.06) xLabels.push({ x, text: dayDDM(new Date(x).toISOString()).replace(/ \w+$/, ''), anchor: 'start' }); });
-  } else {
-    const step = span > 864e5 * 1.2 ? 6 * 3600e3 : span > 6 * 3600e3 ? (phone ? 6 : 4) * 3600e3 : 3600e3;
-    for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) if (x < x1 - span * 0.06) xLabels.push({ x, text: timeHM(new Date(x).toISOString()), anchor: 'start' });
-  }
-  const hitTest = xv => model.map((m, i) => historyHit(hitPoints[i], m.gaps, xv));
+    firsts.push(first ?? firstGap ?? ASSUMED_BASELINE);
+    series.push({ pts: visible, color: `var(--desk-${d.id})`, w: 1.8, live: true, area: false, desk: d.id });
+  });
+  const base = firsts.length ? firsts.reduce((a, b) => a + b, 0) / firsts.length : ASSUMED_BASELINE;
+  const hitTest = xv => m.models.map((d, i) => historyHit(d.hits, gaps[i], xv, thin));
   const tipFmt = (near, xv) => historyPointDetails(near, xv, HS.desks);
-  const points = [...new Set([x0, x1, ...model.flatMap(m => [...m.observed.map(p => p.x), ...m.gaps.flatMap(g => g.map(p => p.x))])])]
-    .filter(x => x >= x0 && x <= x1).sort((a, b) => a - b);
+  const points = [x0, ...m.xs.slice(firstAt(m.xs, x0), firstAt(m.xs, x1, true)), x1].filter((x, i, list) => x !== list[i - 1]);
   // Synthetic window edges can snap to an observation in the same minute.
   // Keep every original observation, but skip an edge that repeats its neighbour.
   for (const edge of [x0, x1]) {
     const i = points.indexOf(edge), adjacent = points[i === 0 ? 1 : i - 1];
-    if (i < 0 || adjacent === undefined || hitPoints.some(pts => pts.some(p => p.x === edge))) continue;
+    if (i < 0 || adjacent === undefined || m.models.some(d => d.hits[pointAt(d.hits, edge)]?.x === edge)) continue;
     if (tipFmt(hitTest(edge), edge).text === tipFmt(hitTest(adjacent), adjacent).text) points.splice(i, 1);
   }
   const scale = drawChart(el, {
-    series: visible, xDomain: [x0, x1], base, yValues, yFmt: eurAxis, ticks: 5, pad: { t: 12 + top },
-    vlines: midnightLines(x0, x1).map(x => ({ x })), xLabels,
+    series, xDomain: [x0, x1], base, yValues, margin: 0.08, yFmt: eurAxis, ticks: 5, pad: { t: 12 + top },
+    vlines: midnightLines(x0, x1).map(x => ({ x, dashed: true })), xLabels: axisLabels(x0, x1, pw), bands, now: endAt,
     empty: !HS.desks.length, emptyText: 'Choose a desk to draw its line',
-    label: `Each desk’s money, ${RANGE_WORD[HS.range]}${HS.zoom ? ', zoomed' : ''}`,
-    isPanning: () => Boolean(ctx.panning?.()),
+    label: chartLabel(range, [x0, x1]),
+    isPanning: () => Boolean(ctx.panning?.() || input.blocksTip()), isPinned: () => input.pinned,
     inspect: { ...inspection, points },
     hitTest, tipFmt,
   });
+  lastScale = scale;
+  el.classList.toggle('pannable', canPan());
   // The drawn window, for the zoom and pan checks.
   const svg = el.querySelector(':scope > svg');
   if (svg) { svg.dataset.x0 = String(Math.round(x0)); svg.dataset.x1 = String(Math.round(x1)); }
+  if (input.announce && inspection.live) { inspection.live.textContent = input.announce; input.announce = null; }
+  if (HS.desks.length && range[1] > range[0]) drawOverview(m, range, gaps, bands, [x0, x1]);
+  else overviewOff();
   return scale;
+}
+
+// ---------- The overview strip ----------
+// The whole kept range of the chosen desks as compact lines on one shared,
+// honest scale (the same ±0,5 % floor as the chart), with the shown window
+// and its two edge handles kept in step with the chart.
+const coarse = () => matchMedia('(pointer: coarse), (max-width: 700px)').matches;
+function overviewSvg(m, range, gaps, bands, width, height) {
+  const [k0, k1] = range, X = x => toStrip(range, width, x).toFixed(1);
+  const top = 5, bottom = height - 17;
+  const lines = m.models.map(d => downsample(d.lines, k0, k1, Math.max(50, Math.round(width))));
+  const values = [];
+  for (const l of lines) for (const p of l) if (p.v !== null) values.push(p.v);
+  for (const g of gaps.flat()) values.push(g[0].y, g[g.length - 1].y);
+  if (!values.length) return '';
+  const firsts = lines.map((l, i) => l.find(p => p.v !== null)?.v ?? gaps[i][0]?.[0].y ?? ASSUMED_BASELINE);
+  const ax = axis(Math.min(...values), Math.max(...values), 2, firsts.reduce((a, b) => a + b, 0) / firsts.length);
+  const Y = v => (top + (ax.hi - v) / (ax.hi - ax.lo) * (bottom - top)).toFixed(1);
+  let g = bands.length ? '<defs><pattern id="ht-mini" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="var(--line-2)" stroke-width="1.2"/></pattern></defs>' : '';
+  for (const [a, b] of bands) g += `<rect x="${X(a)}" y="0" width="${Math.max(1, toStrip(range, width, b) - toStrip(range, width, a)).toFixed(1)}" height="${bottom + 3}" fill="url(#ht-mini)"/>`;
+  const days = wallTicks(k0, k1, 1440), every = [1, 2, 4, 7, 14].find(n => n * DAY / (k1 - k0) * width >= 46) ?? 14;
+  days.forEach((t, i) => {
+    g += `<line x1="${X(t.at)}" x2="${X(t.at)}" y1="0" y2="${bottom + 3}" stroke="var(--line)"/>`;
+    if (i % every === 0 && toStrip(range, width, t.at) < width - 34) g += `<text x="${(toStrip(range, width, t.at) + 3).toFixed(1)}" y="${height - 4}">${esc(dayWord(t.at))}</text>`;
+  });
+  gaps.forEach(list => { for (const s of list) g += `<path d="M${X(s[0].x)} ${Y(s[0].y)} L${X(s[s.length - 1].x)} ${Y(s[s.length - 1].y)}" fill="none" stroke="var(--est)" stroke-width="1" stroke-dasharray="3 3"/>`; });
+  m.models.forEach((d, i) => {
+    let path = '', pen = false;
+    for (const p of lines[i]) { if (p.v === null) { pen = false; continue; } path += `${pen ? 'L' : 'M'}${X(p.x)} ${Y(p.v)}`; pen = true; }
+    if (path) g += `<path d="${path}" fill="none" stroke="var(--desk-${d.id})" stroke-width="1.3" stroke-linejoin="round"/>`;
+  });
+  return `<svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true" focusable="false">${g}</svg>`;
+}
+const setAttrs = (node, attrs) => { for (const [k, v] of Object.entries(attrs)) if (node.getAttribute(k) !== String(v)) node.setAttribute(k, String(v)); };
+const setText = (node, text) => { if (node && node.textContent !== text) node.textContent = text; };
+function overviewOff() {
+  const mini = $('#histMini');
+  if (!mini) return;
+  mini.setAttribute('data-off', '');
+  for (const n of [$('#histWin'), ...$$('#histMini [data-edge]')]) setAttrs(n, { tabindex: '-1', 'aria-hidden': 'true' });
+  const plot = $('#histMiniPlot');
+  if (plot && plot.innerHTML) plot.innerHTML = '';
+  if (model) model.overview = null;
+  setText($('#histKept'), '');
+}
+function drawOverview(m, range, gaps, bands, [a, b]) {
+  const mini = $('#histMini'), track = $('#histTrack'), plot = $('#histMiniPlot');
+  if (!mini || !track || !plot) return;
+  const width = track.clientWidth, height = track.clientHeight;
+  if (!width || !height) return;
+  mini.removeAttribute('data-off');
+  setAttrs(mini, { 'data-k0': Math.round(range[0]), 'data-k1': Math.round(range[1]) });
+  // Redrawn when the range moves by a pixel or more, not on every frame.
+  const key = `${width}|${height}|${Math.round(range[0])}|${Math.round(range[1] / ((range[1] - range[0]) / width))}`;
+  if (m.overview !== key) { plot.innerHTML = overviewSvg(m, range, gaps, bands, width, height); m.overview = key; }
+  // The handles may use the room beside the track inside the strip, so a
+  // window narrower than a finger keeps its own target and both edges.
+  const off = track.offsetLeft || 0;
+  const t = overviewTargets({ width, left: toStrip(range, width, a), right: toStrip(range, width, b), hit: coarse() ? 44 : 16,
+    lo: -off, hi: Math.max(width, (mini.clientWidth || 0) - off) });
+  const win = $('#histWin'), from = $('#histMini [data-edge="from"]'), to = $('#histMini [data-edge="to"]');
+  win.style.left = `${t.win.x}px`; win.style.width = `${t.win.w}px`;
+  // The window's target (its ::after) reaches past a narrow window, never past the strip.
+  win.style.setProperty?.('--hl', `${t.win.hit.x - t.win.x}px`);
+  win.style.setProperty?.('--hr', `${t.win.x + t.win.w - t.win.hit.x - t.win.hit.w}px`);
+  for (const [node, box] of [[from, t.from], [to, t.to]]) {
+    node.style.left = `${box.x}px`; node.style.width = `${box.w}px`;
+    node.firstElementChild.style.left = `${box.gx - box.x}px`;
+  }
+  const min = ms => Math.round(ms / 60e3), kept = spanText(range[1] - range[0]), live = HS.follow && atLiveEdge(range, [a, b]);
+  setAttrs(win, { tabindex: '0', 'aria-hidden': 'false', 'aria-valuemin': min(range[0]), 'aria-valuemax': min(range[1] - (b - a)), 'aria-valuenow': min(a),
+    'aria-valuetext': `${when(a)} to ${when(b)} Vienna time, ${spanText(b - a)} of ${kept} kept${live ? ', following the newest' : ''}` });
+  setAttrs(from, { tabindex: '0', 'aria-hidden': 'false', 'aria-valuemin': min(range[0]), 'aria-valuemax': min(b), 'aria-valuenow': min(a), 'aria-valuetext': `From ${when(a)} Vienna time` });
+  setAttrs(to, { tabindex: '0', 'aria-hidden': 'false', 'aria-valuemin': min(a), 'aria-valuemax': min(range[1]), 'aria-valuenow': min(b), 'aria-valuetext': `To ${when(b)} Vienna time${live ? ', the newest' : ''}` });
+  const label = $('#histKept');
+  if (label && label.textContent !== kept) label.textContent = kept;
+}
+
+// ---------- Input ----------
+// Who owns what: on the chart, Left and Right inspect points (JOED-121) and
+// Shift with them moves the window; plus and minus zoom; 0 shows all. On
+// the strip, the window and its edges are sliders. A pointer drags the chart
+// sideways; a plain vertical wheel always scrolls the page.
+const input = { schedule: null, drag: null, touch: null, pinned: false, announce: null, blocksTip: () => false };
+const canPan = () => Boolean(HS.full && HS.shown && HS.shown[1] - HS.shown[0] < (HS.full[1] - HS.full[0]) * 0.999);
+// A person's change of the window. Its width may match a preset again; it
+// follows the newest time only while it ends exactly there, so a pan of a
+// single pixel into the past turns Follow off.
+function setView(next) {
+  if (!HS.full) return;
+  HS.view = next; HS.follow = endsAtNewest(HS.full, next);
+  input.schedule?.('history-pan');
+}
+// The window a move starts from: the frame on screen while a glide runs,
+// otherwise the window as it stands now. Several wheel events can arrive
+// before the next frame; each builds on the one before, so small moves add
+// up instead of replacing each other.
+const current = () => (motion.from || !HS.full || !HS.shown ? HS.shown : resolveView(HS.full, HS));
+function announceWindow() {
+  if (!HS.full || !HS.shown) return;
+  const next = resolveView(HS.full, HS);
+  input.announce = `Showing ${when(next[0])} to ${when(next[1])} Vienna time${HS.follow ? ', following the newest' : ''}`;
+}
+// A preset: its span (Fit all: everything kept) ending at the newest time.
+export function historyPreset(preset) {
+  glide();
+  HS.preset = preset; HS.view = null; HS.follow = true;
+}
+// Follow on keeps the window's width and moves it to the newest time; off
+// keeps it where it is while newer history arrives.
+export function toggleFollow() {
+  if (!HS.full || !HS.shown) { HS.follow = !HS.follow; return; }
+  if (HS.follow) { HS.view = HS.shown.slice(); HS.follow = false; return; }
+  glide();
+  HS.view = followWindow(HS.full, HS.shown); HS.follow = true;
+}
+const fitAll = () => { historyPreset('all'); input.schedule?.('history-range'); };
+
+export function initHistoryInput({ schedule }) {
+  input.schedule = schedule;
+  const chart = $('#histChart'), track = $('#histTrack');
+  if (/Mac|iPhone|iPad/.test(navigator.platform ?? '')) for (const n of $$('.mod-key')) n.textContent = '⌘';
+  const plotWidth = () => lastScale?.pw ?? Math.max(1, chart.clientWidth - 78);
+  const perPx = () => (HS.shown ? (HS.shown[1] - HS.shown[0]) / plotWidth() : 0);
+  const chartTime = (clientX, [a, b] = current()) => {
+    const r = chart.getBoundingClientRect();
+    return a + Math.min(1, Math.max(0, (clientX - r.left - (lastScale?.pad.l ?? 64)) / plotWidth())) * (b - a);
+  };
+  const stripTime = clientX => fromStrip(HS.full, track.clientWidth, clientX - track.getBoundingClientRect().left);
+  const stop = () => { motion.from = null; };
+  const unpin = () => { if (input.pinned) { input.pinned = false; lastScale?.release(); } };
+
+  // Wheel and trackpad: ⌘/Ctrl or a pinch zooms around the pointer, a
+  // sideways swipe pans, a plain vertical wheel is the page's.
+  const latch = createWheelLatch();
+  const wheel = (e, time) => {
+    if (!HS.full || !HS.shown) return;
+    const intent = latch(e, e.timeStamp);
+    if (intent === 'page') return;
+    e.preventDefault();
+    const base = current(), dx = wheelPixels(e.deltaX, e.deltaMode), dy = wheelPixels(e.deltaY, e.deltaMode);
+    stop();
+    if (intent === 'zoom') setView(zoomWindow(HS.full, base, wheelZoomFactor(dy), time(e.clientX, base)));
+    else setView(panWindow(HS.full, base, (e.shiftKey && Math.abs(dy) > Math.abs(dx) ? dy : dx) * (base[1] - base[0]) / plotWidth()));
+  };
+  chart.addEventListener('wheel', e => wheel(e, chartTime), { passive: false });
+  track.addEventListener('wheel', e => wheel(e, stripTime), { passive: false });
+  // Safari reports a trackpad pinch as gesture events, not as a Ctrl wheel
+  // (on a phone the pointer pinch below handles it).
+  const touches = new Map();
+  let gesture = null;
+  chart.addEventListener('gesturestart', e => { if (!HS.shown || touches.size) return; const start = current(); e.preventDefault(); stop(); gesture = { start, at: chartTime(e.clientX, start) }; });
+  chart.addEventListener('gesturechange', e => { if (!gesture) return; e.preventDefault(); setView(zoomWindow(HS.full, gesture.start, 1 / Math.max(0.05, e.scale), gesture.at)); });
+  chart.addEventListener('gestureend', () => { gesture = null; });
+
+  // Mouse and pen: drag pans after 3 px, double-click shows everything kept.
+  // Touch: a clear sideways swipe pans (a vertical one scrolls the page), two
+  // fingers pinch and pan, a tap or a long press inspects, a double tap fits.
+  input.blocksTip = () => Boolean(input.drag?.moved || (input.touch && input.touch.mode !== 'scrub'));
+  chart.addEventListener('pointerdown', e => {
+    if (!HS.shown || e.target.closest('.hist-status')) return;
+    const start = current();
+    stop();
+    if (e.pointerType !== 'touch') {
+      // With everything kept in view there is nothing to drag; hover keeps inspecting.
+      if (e.button === 0 && canPan()) input.drag = { kind: 'chart', id: e.pointerId, x: e.clientX, start, perPx: perPx(), moved: false };
+      return;
+    }
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    clearTimeout(input.touch?.timer);
+    if (touches.size === 1) {
+      const t = { mode: 'pending', id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, down: e.timeStamp, start, perPx: perPx() };
+      t.timer = setTimeout(() => { if (input.touch === t && t.mode === 'pending') { t.mode = 'scrub'; input.pinned = true; lastScale?.inspectAt(t.lastX); } }, 350);
+      input.touch = t;
+    } else if (touches.size === 2) {
+      const [p, q] = [...touches.values()], mid = (p.x + q.x) / 2;
+      unpin();
+      input.touch = { mode: 'pinch', start, spread: Math.max(24, Math.abs(p.x - q.x)), mid, at: chartTime(mid, start), perPx: perPx() };
+    }
+  });
+  chart.addEventListener('pointermove', e => {
+    const d = input.drag;
+    if (d?.kind === 'chart' && d.id === e.pointerId) {
+      const dx = e.clientX - d.x;
+      if (!d.moved && Math.abs(dx) < 3) return;
+      if (!d.moved) { d.moved = true; chart.setPointerCapture(e.pointerId); chart.classList.add('panning'); lastScale?.release(); }
+      setView(panWindow(HS.full, d.start, -dx * d.perPx));
+      return;
+    }
+    if (!touches.has(e.pointerId) || !input.touch) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const t = input.touch;
+    if (t.mode === 'pinch') {
+      if (touches.size !== 2) return;
+      const [p, q] = [...touches.values()], spread = Math.max(24, Math.abs(p.x - q.x)), mid = (p.x + q.x) / 2;
+      const zoomed = zoomWindow(HS.full, t.start, t.spread / spread, t.at);
+      setView(panWindow(HS.full, zoomed, -(mid - t.mid) * t.perPx * (zoomed[1] - zoomed[0]) / (t.start[1] - t.start[0])));
+      return;
+    }
+    if (t.id !== e.pointerId) return;
+    t.lastX = e.clientX;
+    const dx = e.clientX - t.x, dy = e.clientY - t.y;
+    if (t.mode === 'pending') {
+      if (Math.hypot(dx, dy) < 8) return;
+      clearTimeout(t.timer);
+      if (Math.abs(dx) <= Math.abs(dy)) { t.mode = 'page'; return; }
+      unpin();
+      t.mode = canPan() ? 'pan' : 'scrub';
+      if (t.mode === 'scrub') input.pinned = true;
+    }
+    if (t.mode === 'pan') setView(panWindow(HS.full, t.start, -dx * t.perPx));
+  });
+  // Fingers are tracked by id. Whichever lifts last ends the gesture, pinch or
+  // swipe, so none of its state outlives it and a mouse or pen inspects again.
+  const release = e => {
+    if (input.drag?.kind === 'chart' && input.drag.id === e.pointerId) { input.drag = null; chart.classList.remove('panning'); return; }
+    if (!touches.delete(e.pointerId)) return;
+    const t = input.touch;
+    if (!touches.size) input.touch = null;
+    if (!t) return;
+    clearTimeout(t.timer);
+    if (t.mode === 'pinch' || t.mode === 'done') { if (touches.size) t.mode = 'done'; return; }
+    if (t.id !== e.pointerId) return;
+    input.touch = null;
+    if (e.type === 'pointercancel') { unpin(); return; }
+    if (t.mode !== 'pending' || e.timeStamp - t.down > 300) return;
+    const tap = input.lastTap;
+    if (tap && e.timeStamp - tap.at < 300 && Math.abs(e.clientX - tap.x) < 24) { input.lastTap = null; unpin(); fitAll(); return; }
+    input.lastTap = { at: e.timeStamp, x: e.clientX };
+    input.pinned = Boolean(lastScale?.inspectAt(e.clientX));
+  };
+  chart.addEventListener('pointerup', release);
+  chart.addEventListener('pointercancel', release);
+  chart.addEventListener('dblclick', e => { if (!e.target.closest('.hist-status')) fitAll(); });
+  document.addEventListener('pointerdown', e => { if (!chart.contains(e.target)) unpin(); }, true);
+
+  // Keys on the focused chart; the arrows alone stay with point inspection.
+  chart.addEventListener('keydown', e => {
+    if (e.target !== chart || e.altKey || e.ctrlKey || e.metaKey || !HS.shown) return;
+    const shown = current(), [a, b] = shown, w = b - a, anchor = HS.follow ? b : (a + b) / 2;
+    const next = e.shiftKey && e.key === 'ArrowLeft' ? panWindow(HS.full, shown, -w * 0.1)
+      : e.shiftKey && e.key === 'ArrowRight' ? panWindow(HS.full, shown, w * 0.1)
+        : e.shiftKey && e.key === 'Home' ? placeWindow(HS.full, w, HS.full[0], 0)
+          : e.shiftKey && e.key === 'End' ? placeWindow(HS.full, w, HS.full[1], 1)
+            : e.key === '+' || e.key === '=' ? zoomWindow(HS.full, shown, 1 / 1.5, anchor)
+              : e.key === '-' || e.key === '_' ? zoomWindow(HS.full, shown, 1.5, anchor) : null;
+    if (e.key === '0') { e.preventDefault(); historyPreset('all'); announceWindow(); schedule('history-range'); return; }
+    if (!next) return;
+    e.preventDefault(); stop();
+    setView(next); announceWindow();
+  });
+
+  // The strip: drag the window to pan, drag an edge to resize, click beside
+  // the window to centre it there; a drag on the background pans too.
+  track.addEventListener('pointerdown', e => {
+    if (!HS.full || !HS.shown || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    const edge = e.target.closest('[data-edge]')?.dataset.edge ?? null, start = current();
+    stop();
+    input.drag = { kind: edge ? 'edge' : e.target.closest('#histWin') ? 'window' : 'strip', edge, id: e.pointerId, x: e.clientX, start, moved: false };
+    track.setPointerCapture?.(e.pointerId);
+  });
+  track.addEventListener('pointermove', e => {
+    const d = input.drag;
+    if (!d || d.kind === 'chart' || d.id !== e.pointerId) return;
+    const dx = e.clientX - d.x;
+    if (!d.moved && Math.abs(dx) < 3) return;
+    if (!d.moved) { d.moved = true; track.classList.add('dragging'); }
+    const per = (HS.full[1] - HS.full[0]) / track.clientWidth;
+    setView(d.kind === 'edge' ? resizeWindow(HS.full, d.start, d.edge, d.start[d.edge === 'from' ? 0 : 1] + dx * per) : panWindow(HS.full, d.start, dx * per));
+  });
+  const drop = e => {
+    const d = input.drag;
+    if (!d || d.kind === 'chart' || d.id !== e.pointerId) return;
+    input.drag = null; track.classList.remove('dragging');
+    if (d.moved || d.kind !== 'strip' || e.type !== 'pointerup') return;
+    glide();
+    setView(placeWindow(HS.full, d.start[1] - d.start[0], stripTime(e.clientX), 0.5));
+  };
+  track.addEventListener('pointerup', drop);
+  track.addEventListener('pointercancel', drop);
+  track.addEventListener('keydown', e => {
+    const target = e.target.closest('#histWin, [data-edge]');
+    if (!target || !HS.full || !HS.shown || e.altKey || e.ctrlKey || e.metaKey) return;
+    const full = HS.full, shown = current(), [a, b] = shown, w = b - a, edge = target.dataset.edge;
+    const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[e.key];
+    let next = null;
+    if (edge) {
+      const at = edge === 'from' ? a : b;
+      const to = step ? at + step * w * (e.shiftKey ? 0.5 : 0.1) : { PageUp: at + w, PageDown: at - w, Home: full[0], End: full[1] }[e.key];
+      if (to !== undefined) next = resizeWindow(full, shown, edge, to);
+    } else if (step && e.shiftKey) next = zoomWindow(full, shown, step < 0 ? 1 / 1.5 : 1.5, HS.follow ? b : (a + b) / 2);
+    else if (step) next = panWindow(full, shown, step * w * 0.1);
+    else if (e.key === 'PageUp' || e.key === 'PageDown') next = panWindow(full, shown, (e.key === 'PageUp' ? 1 : -1) * w);
+    else if (e.key === 'Home') next = placeWindow(full, w, full[0], 0);
+    else if (e.key === 'End') next = placeWindow(full, w, full[1], 1);
+    if (!next) return;
+    e.preventDefault(); stop();
+    if (!step) glide();
+    setView(next);
+  });
 }
 
 function capturedHtml(desk) {
@@ -250,27 +687,34 @@ function eventsHtml(ctx) {
   return list.map(e => `<li><span class="ev">${icon(EVENT_ICON[e.kind] ?? 'info')}</span><div><div>${esc(e.summary)}</div><div class="m">${dayDDM(e.snapshotAt)}, ${timeHM(e.snapshotAt)} · ${LABEL[e.deskId] ?? esc(e.deskId)} · ${EVENT_WORD[e.kind] ?? esc(e.kind)} · ${esc(e.sourceLabel)}</div></div></li>`).join('');
 }
 
+const hatch = '<svg viewBox="0 0 22 10" aria-hidden="true"><defs><pattern id="ht-lg" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="var(--ink-3)" stroke-width="1.2"/></pattern></defs><rect x="1" y="0.5" width="20" height="9" rx="2" fill="url(#ht-lg)"/></svg>';
 export function renderHistory(ctx) {
   const tools = toolsHtml();
   patch($('#histDesks'), tools.desks);
-  $$('#histRange button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.range === HS.range)));
-  $('#resetZoom').disabled = !HS.zoom;
-  patch($('#histLegend'), `${DESK_IDS.map(id => `<span class="lg">${swatch(`var(--desk-${id})`, '', 2.4)}${LABEL[id]}</span>`).join('')}<span class="lg">${swatch('var(--est)', '1.5 3.5', 1.6)}${term('estimate')} (starts from an assumed ${eur(ASSUMED_BASELINE, false, 0)})</span>`);
+  patch($('#histLegend'), `${DESK_IDS.map(id => `<span class="lg">${swatch(`var(--desk-${id})`, '', 2.4)}${LABEL[id]}</span>`).join('')}<span class="lg">${swatch('var(--est)', '5 4', 1.6)}${term('estimate')} (drawn, not measured)</span><span class="lg">${hatch}${term('nodata')}</span>`);
   const cell = ctx.states.history;
   const cols = cell?.value?.columns ?? EMPTY;
   const moved = patch($('#histStatus'), statusLine(cell));
+  let pressed = HS.view ? null : HS.preset;
   if (ctx.now) {
-    const endAt = Date.parse(ctx.now), bounds = historyWindow(cols, endAt);
-    const excluded = basisNotice(cols, HS.desks, bounds, endAt);
-    $('#histCompare').textContent = compareLine(cols, bounds, endAt);
-    $('#histBasis').textContent = excluded.length ? `This chart shows comparable records for ${excluded.map(id => LABEL[id]).join(' and ')}. Older records on another bookkeeping basis stay in the history file.` : '';
+    const endAt = Date.parse(ctx.now), range = keptRange(cols, endAt), bounds = resolveView(range, HS);
+    pressed = windowPreset(range, bounds, HS.preset);
+    setText($('#histCompare'), compareLine(cols, bounds, endAt));
+    // Named over everything kept and every desk, so switching desks or the
+    // window never moves the lines below.
+    const excluded = basisNotice(cols, DESK_IDS, range, endAt);
+    setText($('#histBasis'), excluded.length ? `This chart shows comparable records for ${excluded.map(id => LABEL[id]).join(' and ')}. Older records on another bookkeeping basis stay in the history file.` : '');
+    const thin = thinnedOf(cell);
+    setText($('#histThin'), thin !== null && thin > range[0] ? `Before ${when(Math.min(thin, endAt))} the history is thinned to fit its size limit. The line joins the points kept; a gap there shows only where it is longer than the thinning.` : '');
   } else {
-    $('#histCompare').textContent = 'Comparing waits for the board server’s clock.';
-    $('#histBasis').textContent = '';
+    setText($('#histCompare'), 'Comparing waits for the board server’s clock.');
+    setText($('#histBasis'), '');
+    setText($('#histThin'), '');
   }
+  for (const b of $$('#histRange button')) setAttrs(b, { 'aria-pressed': b.dataset.range === pressed });
+  const follow = $('#histFollow');
+  if (follow) setAttrs(follow, { 'aria-pressed': HS.follow });
   patch($('#jAcct'), bookkeepingHtml(ctx));
   patch($('#events'), eventsHtml(ctx));
   return { redraw: moved };
 }
-
-export const zoomable = () => !isPhone();

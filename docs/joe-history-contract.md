@@ -61,21 +61,46 @@ break in the measured data.
 
 ## Display-only continuity
 
-History draws a second, gray dotted dataset for each desk. These lines are
+History draws a second, gray dashed dataset for each desk. These lines are
 explicitly estimated: linear interpolation across missing or null spans and
 observation intervals longer than five minutes, plus a last-value carry to the
 current chart time. A leading segment uses an assumed €5,000 baseline; its
-starting time is a display assumption based on the retained history and visible
-range, not an authoritative founding timestamp. With no observations, a gray
-€5,000 guide is shown while the board still reports missing data.
+starting time is a display assumption based on the retained history, not an
+authoritative founding timestamp. With no observations, a gray €5,000 guide is
+shown while the board still reports missing data. Where no chosen desk has a
+number for more than five minutes, the chart also hatches that stretch (one
+legend entry, "No data"); a desk missing alone is shown by its dashed line.
 
-The renderer builds continuity before clipping to 1D, 1W, 1M or ALL, so a window
-inside an outage still contains a line. Solid observations keep the desk color;
-gray segments and their tooltips identify the assumption. Range windows end at
-the current chart time. This policy applies to each newly encountered gap.
-Estimates are never written to `history.json`, counted as broker observations,
-or used by P&L, comparison or sparkline calculations. Historical accounting
-boundaries remain intact; the display layer does not recover missing records.
+Rows at or before `compactedThrough` were thinned by the server to stay inside
+its size limit (`compactPoints`: per 64 rows the bucket ends, each series'
+extrema, both sides of every presence or basis change, and each Vienna day's
+last valued row; later passes thin the kept rows again, so spacing grows with
+age). The server records nothing where no row arrived, so an outage and a
+thinned stretch can look alike. The display connects a thinned interval as
+observed, with the tooltip naming the nearest kept observation, only where
+thinning explains it: it does not cross a Vienna midnight except from that
+day's last row (at most five minutes before midnight) into the next day, and
+it is no longer than three times the longest of the 16 kept intervals on
+either side. Longer intervals stay estimates and, where no chosen desk has a
+number, hatched no-data bands. Explicit null values survive thinning and stay
+estimates. An outage shorter than the thinning step at its age cannot be told
+apart from thinning; History says so under the chart.
+
+The renderer builds continuity over the whole kept history before clipping to
+the shown window, so a window inside an outage still contains a line. Solid
+observations keep the desk color; gray segments and their tooltips identify the
+assumption. The window is a preset (Fit all, Day, Week, Month; a preset longer
+than the kept history shows all of it) or a manual view chosen on the chart or
+its overview strip; it never leaves the kept history, never shows less than
+five minutes (a narrower manual view is widened around its middle each time the
+window is resolved, also once newer history allows it), and ends at the current
+chart time while it follows the newest. A move by pan, zoom, drag or keys keeps
+following only if the window still ends exactly at the newest time.
+The comparison always uses the window the chart settles on. This policy applies
+to each newly encountered gap. Estimates are never written to `history.json`,
+counted as broker observations, or used by P&L, comparison or sparkline
+calculations. Historical accounting boundaries remain intact; the display layer
+does not recover missing records.
 
 When selected J has a validated captured backfill curve in the current
 snapshot, the History tile also shows it in a distinct native-currency panel.

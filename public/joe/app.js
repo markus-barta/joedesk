@@ -7,7 +7,7 @@ import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitSta
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure } from './desk.js';
-import { renderHistory, historyChart, HS } from './history.js';
+import { renderHistory, historyChart, HS, historyPreset, toggleFollow, initHistoryInput } from './history.js';
 import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
 import { boardHealthPresentation } from './health.js';
 import { sinceStarts } from './performance.js';
@@ -53,7 +53,7 @@ function start() {
   fitHeader();
   trapDialogs();
   const events = createObservedEvents();
-  let lastData = null, frame = 0, pending = null, dirtyHistory = true, panning = false;
+  let lastData = null, frame = 0, pending = null, dirtyHistory = true;
   const feed = createFeed(kind => {
     if (kind === 'history') dirtyHistory = true;
     schedule(kind);
@@ -66,7 +66,7 @@ function start() {
 
   // Every render has a selection: before the server's clock is known, each
   // panel still shows its own state and reason, and nothing needs an age.
-  const context = () => ({ ...feed.select(), events, panning: () => panning });
+  const context = () => ({ ...feed.select(), events });
 
   function guard(name, fn) {
     try { return fn(); } catch (error) {
@@ -212,7 +212,8 @@ function start() {
   $('#themeBtn').addEventListener('click', () => { toggleTheme(); schedule('theme'); });
   window.__joedesk.setTheme = setTheme;
 
-  // History controls: desk toggles, range, zoom and pan (desktop), retry.
+  // History controls: desk toggles, the window presets and Follow; the chart
+  // and its overview strip take their own pointer, wheel and keys.
   $('#histDesks').addEventListener('click', e => {
     const b = e.target.closest('[data-hdesk]');
     if (!b) return;
@@ -224,69 +225,10 @@ function start() {
   $('#histRange').addEventListener('click', e => {
     const b = e.target.closest('[data-range]');
     if (!b) return;
-    HS.range = b.dataset.range; HS.zoom = null; dirtyHistory = true; render('history-range');
+    historyPreset(b.dataset.range); dirtyHistory = true; render('history-range');
   });
-  $('#resetZoom').addEventListener('click', () => { HS.zoom = null; dirtyHistory = true; render('history-zoom'); });
-  const chartEl = $('#histChart');
-  const domain = () => (HS.full ? { full: HS.full, current: HS.zoom ?? HS.full } : null);
-  chartEl.addEventListener('wheel', e => {
-    if (isPhone()) return;
-    const d = domain();
-    if (!d?.current) return;
-    e.preventDefault();
-    const r = chartEl.getBoundingClientRect(), padL = 64, pw = r.width - padL - 14;
-    const [x0, x1] = d.current, at = x0 + Math.min(1, Math.max(0, (e.clientX - r.left - padL) / pw)) * (x1 - x0);
-    const factor = e.deltaY < 0 ? 0.8 : 1.25;
-    let a = at - (at - x0) * factor, b = at + (x1 - at) * factor;
-    const [f0, f1] = d.full;
-    if (b - a >= f1 - f0) { HS.zoom = null; } else { if (a < f0) { b += f0 - a; a = f0; } if (b > f1) { a -= b - f1; b = f1; } HS.zoom = [Math.max(f0, a), Math.min(f1, b)]; }
-    if (HS.zoom && HS.zoom[1] - HS.zoom[0] < 30 * 60e3) HS.zoom = [at - 15 * 60e3, at + 15 * 60e3];
-    dirtyHistory = true; schedule('history-zoom');
-  }, { passive: false });
-  let drag = null;
-  chartEl.addEventListener('pointerdown', e => {
-    if (!e.shiftKey || !HS.zoom || isPhone()) return;
-    drag = { x: e.clientX, zoom: HS.zoom.slice() }; panning = true;
-    chartEl.setPointerCapture(e.pointerId);
-  });
-  chartEl.addEventListener('pointermove', e => {
-    if (!drag) return;
-    const d = domain();
-    const r = chartEl.getBoundingClientRect(), pw = r.width - 78;
-    const shift = -(e.clientX - drag.x) / pw * (drag.zoom[1] - drag.zoom[0]);
-    let a = drag.zoom[0] + shift, b = drag.zoom[1] + shift;
-    if (a < d.full[0]) { b += d.full[0] - a; a = d.full[0]; }
-    if (b > d.full[1]) { a -= b - d.full[1]; b = d.full[1]; }
-    HS.zoom = [a, b]; dirtyHistory = true; schedule('history-pan');
-  });
-  const endDrag = () => { drag = null; panning = false; };
-  chartEl.addEventListener('pointerup', endDrag);
-  chartEl.addEventListener('pointercancel', endDrag);
-  // Pinch to zoom on touch: two fingers scale the time window around their middle.
-  const touches = new Map();
-  let pinch = null;
-  const spread = () => { const [a, b] = [...touches.values()]; return Math.abs(a - b); };
-  chartEl.addEventListener('pointerdown', e => {
-    if (e.pointerType !== 'touch' || !HS.full) return;
-    touches.set(e.pointerId, e.clientX);
-    if (touches.size === 2) {
-      const r = chartEl.getBoundingClientRect(), [x0, x1] = HS.zoom ?? HS.full, mid = ([...touches.values()].reduce((a, b) => a + b) / 2 - r.left - 64) / (r.width - 78);
-      pinch = { spread: Math.max(20, spread()), zoom: [x0, x1], at: x0 + Math.min(1, Math.max(0, mid)) * (x1 - x0) };
-    }
-  });
-  chartEl.addEventListener('pointermove', e => {
-    if (!touches.has(e.pointerId)) return;
-    touches.set(e.pointerId, e.clientX);
-    if (!pinch || touches.size !== 2) return;
-    const [f0, f1] = HS.full, ratio = pinch.spread / Math.max(20, spread());
-    let a = pinch.at - (pinch.at - pinch.zoom[0]) * ratio, b = pinch.at + (pinch.zoom[1] - pinch.at) * ratio;
-    if (b - a >= f1 - f0) HS.zoom = null;
-    else { if (a < f0) { b += f0 - a; a = f0; } if (b > f1) { a -= b - f1; b = f1; } HS.zoom = [a, b]; }
-    dirtyHistory = true; schedule('history-zoom');
-  });
-  const endTouch = e => { touches.delete(e.pointerId); if (touches.size < 2) pinch = null; };
-  chartEl.addEventListener('pointerup', endTouch);
-  chartEl.addEventListener('pointercancel', endTouch);
+  $('#histFollow').addEventListener('click', () => { toggleFollow(); dirtyHistory = true; render('history-follow'); });
+  initHistoryInput({ schedule });
 
   // Results: the period and desk switches, the stepper, the month arrows and
   // a day drive every number; on a phone a day opens its trades in a sheet.

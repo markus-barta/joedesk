@@ -428,6 +428,33 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .events .ev .i { width: 15px; height: 15px; }
 .events .m { color: var(--ink-3); font-size: 12px; }
 svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
+/* Follow is a toggle: pressed while the window keeps the newest time in view. */
+.hist-follow .i { width: 8px; height: 8px; color: var(--ink-3); }
+.hist-follow[aria-pressed="true"] { background: var(--accent-tint); color: var(--accent-ink); }
+.hist-follow[aria-pressed="true"] .i { color: var(--accent); }
+.hist-chart.pannable { cursor: grab; }
+.hist-chart.panning { cursor: grabbing; }
+/* The overview strip lines up with the chart's plot (64 px of money axis on
+   the left, 14 px on the right). The window is a tint between two grips. Its
+   target is at least 44 px wide; on a touch screen or phone each grip has a
+   box of up to 44 px beside it, in the room around the track when the window
+   is narrow (history.js, overviewTargets). */
+.hist-mini { position: relative; height: 56px; margin-top: 8px; user-select: none; -webkit-user-select: none; touch-action: pan-y; }
+.mini-kept { position: absolute; left: 0; top: 0; width: 56px; height: 40px; display: flex; align-items: center; justify-content: flex-end; font: 500 10.5px var(--mono); color: var(--ink-3); white-space: nowrap; }
+.mini-track { position: absolute; top: 0; bottom: 0; left: 64px; right: 14px; border-radius: 8px; background: var(--sunken); cursor: pointer; touch-action: pan-y; }
+.mini-plot, .mini-plot svg { position: absolute; inset: 0; display: block; overflow: visible; }
+.mini-plot text { font: 500 10px var(--mono); fill: var(--ink-3); }
+.mini-win { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: var(--accent-tint); cursor: grab; }
+/* A window narrower than a finger keeps a 44 px target around its middle,
+   inside the strip; history.js sets how far it reaches past each side. */
+.mini-win::after { content: ''; position: absolute; top: 0; bottom: 0; left: var(--hl, 0px); right: var(--hr, 0px); }
+.mini-h { position: absolute; top: 0; bottom: 0; z-index: 1; cursor: ew-resize; }
+.mini-h .grip { position: absolute; top: 9px; bottom: 21px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--accent); }
+.mini-track.dragging, .mini-track.dragging .mini-win { cursor: grabbing; }
+.mini-win:focus-visible, .mini-h:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 6px; }
+.hist-mini[data-off] .mini-win, .hist-mini[data-off] .mini-h { visibility: hidden; }
+.hint-touch { display: none; }
+@media (pointer: coarse) { .hint-fine { display: none; } .hint-touch { display: inline; } }
 
 .bottom-nav { display: none; }
 .phone-only, .t-short { display: none; }
@@ -560,6 +587,10 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   #calSum { display: none; }
   .hist-tools .seg { max-width: 100%; }
   .hcard { padding: 14px 10px 10px; }
+  /* The strip reaches into the card's padding, so the end handle keeps a
+     24 px box beside the newest time; the track stays in line with the plot. */
+  .hist-mini { margin-right: -10px; }
+  .mini-track { right: 24px; }
   .hist-chart { height: 260px; }
   .hist-cols { grid-template-columns: 1fr; }
   .facts-dl { grid-template-columns: 1fr; }
@@ -810,6 +841,8 @@ dialog.dlg::backdrop { background: var(--scrim); }
 /* Seven 44 px days plus gutters/gaps do not fit on small phones. Keep
    full dates in a three-column agenda; the 42 slots retain a stable height. */
 @media (max-width: 382px) {
+  /* The comparison may need a third line on the narrowest phones. */
+  .hist-compare { min-height: 3lh; }
   .cal { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .cal .dow { display: none; }
   .cal .cell { min-height: 44px; }
@@ -872,6 +905,8 @@ dialog.dlg::backdrop { background: var(--scrim); }
 @media (forced-colors: active) {
   .inp, .affix, .stepper { border: 1px solid CanvasText; box-shadow: none; }
   .affix .inp { border: 0; }
+  .mini-win { outline: 1px solid Highlight; }
+  .mini-h .grip { background: Highlight; }
 }
 .meter { width: 100%; height: 6px; border-radius: 3px; background: var(--sunken); margin-top: 8px; position: relative; overflow: hidden; }
 .meter i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }

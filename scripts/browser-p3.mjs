@@ -17,6 +17,7 @@ import { TERMS } from '../public/joe/terms.js';
 import { createGate, proportional, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { phaseBChecks, deskRankingFocusChecks } from './browser/phase-b.mjs';
 import { createGroupTiming, groupTimingTable } from './browser/group-timing.mjs';
+import { historyControlChecks, historyFollowGrowthChecks } from './browser/history-controls.mjs';
 import { parseBoardSweepArgs, createBoardSweepPlan, boardSweepErrors, boardSweepTable } from './board-sweep-plan.mjs';
 
 // The widest window with the compact header (app.css). Plan before any side
@@ -340,10 +341,9 @@ async function historyChecks(page, viewport, theme) {
   for (const range of ['1d', '1w', '1m', 'all']) {
     await page.evaluate(`document.querySelector('#histRange [data-range="${range}"]').click()`);
     await settle(page);
-    const c = await page.evaluate(`(() => { const s = document.querySelector('#histChart > svg'); return { base: Number(s.dataset.base), lo: Number(s.dataset.ylo), hi: Number(s.dataset.yhi), est: s.querySelectorAll('[data-estimate]').length, lines: s.querySelectorAll('path[stroke^="var(--desk-"]').length }; })()`);
+    const c = await page.evaluate(`(() => { const s = document.querySelector('#histChart > svg'); return { base: Number(s.dataset.base), lo: Number(s.dataset.ylo), hi: Number(s.dataset.yhi), est: s.querySelectorAll('[data-estimate]').length, gaps: s.querySelectorAll('[data-gap]').length, lines: s.querySelectorAll('path[stroke^="var(--desk-"]').length }; })()`);
     check('AC-21', `${tag} ${range}: y span ≥ 1 % of the first visible money`, c.hi - c.lo >= c.base * 0.01 - 1e-6 && c.base > 14000 / 3 && c.lines >= 3, c);
-    if (range === '1w') check('AC-21', `${tag}: the outage is drawn as a dotted estimate`, c.est >= 3, c);
-    if (range === '1m') check('AC-21', `${tag}: the month range leads in from the assumed € 5.000, dotted`, c.est >= 3, c);
+    if (range === '1w') check('AC-21', `${tag}: the outage is drawn as a dashed estimate over one hatched no-data band`, c.est >= 3 && c.gaps >= 1, c);
   }
   await page.evaluate(`document.querySelector('#histRange [data-range="1w"]').click()`);
   await settle(page);
@@ -371,32 +371,24 @@ async function historyChecks(page, viewport, theme) {
     normalizeInspection(inspection.visible) === normalizeInspection(inspection.announced), inspection);
   await key(page, 'Escape');
   await page.evaluate('document.activeElement?.blur()');
+  await historyControlChecks({ page, viewport, theme, check, settle, configure, rects, moves });
   if (!viewport.mobile) {
     const box = await page.evaluate(`(() => { const r = document.querySelector('#histChart').getBoundingClientRect(); return { x: r.left + r.width * 0.6, y: r.top + r.height / 2 }; })()`);
-    await page.s('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240 });
+    await page.s('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240, modifiers: 2 });
     await settle(page);
-    const zoomed = await page.evaluate(`({ reset: !document.getElementById('resetZoom').disabled, label: document.querySelector('#histChart > svg').getAttribute('aria-label'), span: Number(document.querySelector('#histChart > svg').dataset.yhi) - Number(document.querySelector('#histChart > svg').dataset.ylo), base: Number(document.querySelector('#histChart > svg').dataset.base) })`);
-    check('AC-21', `${tag}: wheel zoom on desktop, Reset zoom enabled, scale still honest`, zoomed.reset && /zoomed/.test(zoomed.label) && zoomed.span >= zoomed.base * 0.01 - 1e-6, zoomed);
-    const windowOf = `(() => { const s = document.querySelector('#histChart > svg'); return { x0: Number(s.dataset.x0), x1: Number(s.dataset.x1), w: document.getElementById('histChart').getBoundingClientRect().width, label: s.getAttribute('aria-label') }; })()`;
-    const before = await page.evaluate(windowOf);
-    await page.s('Input.dispatchMouseEvent', { type: 'mousePressed', x: box.x, y: box.y, button: 'left', modifiers: 8, clickCount: 1 });
-    await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x + 120, y: box.y, button: 'left', modifiers: 8 });
-    await page.s('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x + 120, y: box.y, button: 'left', modifiers: 8, clickCount: 1 });
-    await settle(page);
-    const panned = await page.evaluate(windowOf);
-    // Dragging 120 px right moves the window earlier by 120 px of time, same width.
-    const expectShift = 120 / (before.w - 78) * (before.x1 - before.x0);
-    check('AC-21', `${tag}: shift-drag pans the window by the dragged distance, keeping its width`, /zoomed/.test(panned.label) &&
-      Math.abs((before.x0 - panned.x0) - expectShift) < expectShift * 0.05 + 1000 && Math.abs((panned.x1 - panned.x0) - (before.x1 - before.x0)) < 1000, { before, panned, expectShift });
+    const zoomed = await page.evaluate(`({ label: document.querySelector('#histChart > svg').getAttribute('aria-label'), span: Number(document.querySelector('#histChart > svg').dataset.yhi) - Number(document.querySelector('#histChart > svg').dataset.ylo), base: Number(document.querySelector('#histChart > svg').dataset.base) })`);
+    check('AC-21', `${tag}: Ctrl-wheel zoom on desktop keeps the scale honest`, /zoomed/.test(zoomed.label) && zoomed.span >= zoomed.base * 0.01 - 1e-6, zoomed);
     await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y });
     await settle(page);
     const tip = await page.evaluate(`(() => { const t = document.getElementById('histTip'); return { on: t.classList.contains('on'), ...__audit.opaque(t), text: t.innerText }; })()`);
     check('AC-41', `${tag}: the history tip is opaque`, tip.on && tip.bgAlpha === 1 && tip.opacity === 1, tip);
     if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-history-zoomed`, 'History zoomed with the crosshair tip');
     await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
-    await page.evaluate(`document.getElementById('resetZoom').click()`);
+    await page.evaluate(`document.querySelector('#histRange [data-range="all"]').click()`);
     await settle(page);
-    check('AC-21', `${tag}: Reset zoom returns to the range`, await page.evaluate(`document.getElementById('resetZoom').disabled`));
+    check('AC-21', `${tag}: Fit all returns to everything kept`, await page.evaluate(`document.querySelector('#histRange [data-range="all"]').getAttribute('aria-pressed') === 'true' && !/zoomed/.test(document.querySelector('#histChart > svg').getAttribute('aria-label'))`));
+    await page.evaluate(`document.querySelector('#histRange [data-range="1w"]').click()`);
+    await settle(page);
   }
 }
 
@@ -458,7 +450,7 @@ async function route(rules) {
 // The two state lines that clamp, and the wide font that stands in for Linux's.
 const STATE_BOXES = ['#statusAlert', '#hdrHealth', '#heroL .say'];
 const DESK_SHIFT = [...SHIFT_SELECTORS, '#hdrHealth', '#heroL .say', '#heroL .kpi .c', '#positions .pstate', '#kept .keep-cap', '#kept .pstate', '#kept .prow'];
-const HIST_SHIFT = ['.hist-tools', '.hcard', '#histChart', '#histCompare', '.hist-help', '.hist-cols', '#jAcct', '#jAcct .facts-dl', '#events', 'footer.foot'];
+const HIST_SHIFT = ['.hist-tools', '.hcard', '#histChart', '#histCompare', '#histMini', '.hist-help', '.hist-cols', '#jAcct', '#jAcct .facts-dl', '#events', 'footer.foot'];
 // Copy assertions treat phone NBSP-dot and desktop space-dot as the same
 // words. P6 separately asserts the actual nonbreaking DOM characters.
 const copyExpression = expression => `(${copyText.toString()})(${expression})`;
@@ -1411,6 +1403,30 @@ try {
       if (viewport.name === '1024') await shot(page, viewport, `${viewport.name}-${theme}-history-state-${id}`, `History, P1 fixture ${id} (${want.state})`);
     }
   }
+  // 8a · Follow while newer history arrives (JOED-145 r1), on its own board so
+  // the design scenario keeps its history: every later observation is a
+  // snapshot pushed through the real server, two hours after the one before.
+  {
+    const { snapshot, history } = scenario(NOW);
+    const b = await newBoard({ history });
+    b.setNow(NOW);
+    check('JOED-145', 'Follow board: design snapshot accepted', (await b.push(snapshot)).status === 200);
+    let last = snapshot;
+    const grow = async () => {
+      const when = at(last.generatedAt, 2 * 3600);
+      last = advance(last, when, last.seq + 1);
+      b.setNow(when);
+      const r = await b.push(last);
+      check('JOED-145', `Follow board: the later snapshot at ${when} is accepted`, r.status === 200, r.body);
+      return Date.parse(when);
+    };
+    for (const [viewport, theme] of [[VIEWPORTS[1], 'light'], [VIEWPORTS[2], 'dark']]) {
+      await configure(page, viewport, theme);
+      await load(page, b.url, 'history');
+      await settle(page);
+      await historyFollowGrowthChecks({ page, viewport, theme, check, settle, grow });
+    }
+  }
   }
 
   if (run('basis')) {
@@ -1436,14 +1452,18 @@ try {
       const r = hm.sharedWindowCompare(cols, ids, [x0, x1], endAt);
       if (!r.ok) return { r, text: null, onChart: false };
       const point = (id, iso) => drawn[id].find(p => p.x === Date.parse(iso))?.y;
-      return { r, onChart: r.desks.every(d => d.start === point(d.id, r.startAt) && d.end === point(d.id, r.endAt)),
-        text: `From ${fmt.dayDDM(r.startAt)}, ${fmt.timeHM(r.startAt)} to ${fmt.dayDDM(r.endAt)}, ${fmt.timeHM(r.endAt)}: ${r.desks.map(d => `${LABEL[d.id]} ${fmt.pct(d.pct, 2, true)}`).join(' · ')}` };
+      const when = iso => `${fmt.dayDDM(iso)}, ${fmt.timeHM(iso)}`, figures = r.desks.map(d => `${LABEL[d.id]} ${fmt.pct(d.pct, 2, true)}`).join(' · ');
+      // Over part of the window the line names the stretch it compares (history.js, compareLine).
+      const text = r.after ? `Last ${fmt.age((Date.parse(r.endAt) - Date.parse(r.startAt)) / 1000)} ${r.after === 'incompatible-basis' ? 'on the current bookkeeping' : 'without gaps'}, from ${when(r.startAt)}: ${figures}`
+        : `From ${when(r.startAt)} to ${when(r.endAt)}: ${figures}`;
+      return { r, onChart: r.desks.every(d => d.start === point(d.id, r.startAt) && d.end === point(d.id, r.endAt)), text };
     };
     const view = `(() => { const s = document.querySelector('#histChart > svg'); return { x0: Number(s.dataset.x0), x1: Number(s.dataset.x1), label: s.getAttribute('aria-label'),
       compare: document.getElementById('histCompare').innerText, basis: document.getElementById('histBasis').innerText }; })()`;
     const zoomAt = async (fraction, notches) => {
       const box = await page.evaluate(`(() => { const r = document.getElementById('histChart').getBoundingClientRect(); return { x: r.left + 64 + (r.width - 78) * ${fraction}, y: r.top + r.height / 2 }; })()`);
-      for (let i = 0; i < notches; i++) { await page.s('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240 }); await settle(page); }
+      // ⌘ or Ctrl zooms; a plain vertical wheel would scroll the page.
+      for (let i = 0; i < notches; i++) { await page.s('Input.dispatchMouseEvent', { type: 'mouseWheel', x: box.x, y: box.y, deltaX: 0, deltaY: -240, modifiers: 2 }); await settle(page); }
       await page.s('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 });
       await settle(page);
       return page.evaluate(view);
@@ -1467,7 +1487,7 @@ try {
         await auditScreen(page, viewport, theme, 'history (zoomed before a basis change)');
         await shot(page, viewport, `${viewport.name}-${theme}-history-basis-zoomed-before`, 'History zoomed before J’s bookkeeping change: no J comparison, the notice names J');
       }
-      await page.evaluate(`document.getElementById('resetZoom').click()`);
+      await page.evaluate(`document.querySelector('#histRange [data-range="1w"]').click()`);
       await settle(page);
       const across = await zoomAt(0.97, 3);
       const x = expected([across.x0, across.x1]);

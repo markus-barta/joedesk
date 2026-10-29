@@ -251,20 +251,31 @@
     <div class="hist-tools">
       <div class="seg" role="group" aria-label="Desks" id="histDesks"></div>
       <div class="seg" role="group" aria-label="Range" id="histRange">
+        <button type="button" data-range="all" aria-pressed="false">Fit all</button>
         <button type="button" data-range="1d" aria-pressed="false">Day</button>
         <button type="button" data-range="1w" aria-pressed="true">Week</button>
         <button type="button" data-range="1m" aria-pressed="false">Month</button>
-        <button type="button" data-range="all" aria-pressed="false">All</button>
       </div>
-      <button type="button" class="btn quiet" id="resetZoom" disabled>Reset zoom</button>
+      <button type="button" class="btn quiet hist-follow" id="histFollow" aria-pressed="true" aria-describedby="histFollowHelp"><svg class="i" aria-hidden="true"><use href="#i-dot"/></svg>Follow</button>
+      <p class="vh" id="histFollowHelp">Keeps the newest history in view. Moving the window back in time turns it off.</p>
     </div>
     <section class="card hcard" aria-label="Desk money over time">
       <div class="legend" id="histLegend"></div>
       <div class="hist-compare"><p id="histCompare"></p></div>
       <div class="chart hist-chart" id="histChart"><div class="hist-status" id="histStatus"></div><div class="ctip" id="histTip" aria-hidden="true"></div></div>
-      <p class="vh" id="histInspectHelp">Use Left and Right to inspect history points, Home and End for the ends, and Page Up and Page Down for larger steps. Escape leaves inspection; Tab moves to the next control.</p>
+      <p class="vh" id="histInspectHelp">Use Left and Right to inspect history points, Home and End for the ends, and Page Up and Page Down for larger steps. Shift with Left and Right moves the shown window, plus and minus zoom, and 0 shows all kept history. Escape leaves inspection; Tab moves to the next control.</p>
       <div class="vh" id="histLive" aria-live="polite" aria-atomic="true"></div>
-      <p class="hist-help"><span id="histBasis"></span> Vienna time · thin lines mark midnight · wheel or pinch to zoom · shift-drag to pan · JoeDesk keeps the last 14 days</p>
+      <div class="hist-mini" id="histMini" data-off role="group" aria-label="All kept history, with the shown window">
+        <span class="mini-kept" id="histKept" aria-hidden="true"></span>
+        <div class="mini-track" id="histTrack">
+          <div class="mini-plot" id="histMiniPlot"></div>
+          <div class="mini-win" id="histWin" role="slider" tabindex="-1" aria-hidden="true" aria-label="Shown window" aria-describedby="histMiniHelp" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"></div>
+          <div class="mini-h" data-edge="from" role="slider" tabindex="-1" aria-hidden="true" aria-label="Start of the shown window" aria-describedby="histMiniHelp" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><span class="grip"></span></div>
+          <div class="mini-h" data-edge="to" role="slider" tabindex="-1" aria-hidden="true" aria-label="End of the shown window" aria-describedby="histMiniHelp" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><span class="grip"></span></div>
+        </div>
+      </div>
+      <p class="vh" id="histMiniHelp">Left and Right move the shown window by a tenth, Page Up and Page Down by its width, Home and End to the oldest and newest history; Shift with Left and Right makes it narrower or wider. On an edge, Left and Right move that edge.</p>
+      <p class="hist-help"><span id="histBasis"></span> <span id="histThin"></span> Vienna time · dashed lines mark midnight · <span class="hint-fine">drag to move, <span class="mod-key">Ctrl</span> + scroll or pinch to zoom, double-click to see all</span><span class="hint-touch">swipe sideways to move, pinch to zoom, double-tap to see all</span> · JoeDesk keeps the last 14 days</p>
     </section>
     <div class="hist-cols">
       <div>
