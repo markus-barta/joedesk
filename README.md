@@ -1424,22 +1424,26 @@ feeds keep their earlier, higher-ranked warnings. Not-exact values still never
 turn the board red (JOED-103), and no copy promises when a value becomes exact
 (A5).
 
-JOED-157 applies the same classification to Open result. `classifyCell(cell, channels)`
+JOED-157 applies the same classification to Open result. `classifyCell(cell, channels, field = 'dayPnl')`
 is the shared classifier; `pnlChannels(data, scope, field)` gathers the money
 reason and source (desk source, falling back to the household source), and
 `classifyCells(states, data, field)` classifies the household and all three
 desks for `dayPnl` or `openPnl`. The Today APIs remain thin wrappers. Amy's A3
 green-for-not-exact approval applies to Today only. During regular hours,
 Open stays green only when the household and every desk are exact. A not-exact
-Open keeps the existing yellow `open_unavailable_rth` price warning. A fault
+Open keeps the existing yellow `open_unavailable_rth` price warning. The producer's
+`open_pnl_unavailable` is an explicit Open-only waiting reason: it keeps “Waiting
+on broker prices” with no reload or “tell Amy” action. Other reasons outside the
+known not-exact set remain faults; Today keeps its original reason set. A fault
 on any channel wins, with yellow `open_fault_rth` and “Open result is unavailable”.
 A desk fault also withholds the household Open amount, including when the
 producer supplied a current total. Household Today and Open captions name the
 faulty desks and their reasons first, followed by any not-exact desks (for
 example, “Unavailable for Joe · not reported by the broker; not exact for J”).
-Cards and phone summaries retain the desk's
-own warning; Details names each faulty desk and its reason. Its “Open positions”
-row explains non-exact results (“Joe and Joel: exact; J: not exact · ‹reason›”)
+Cards and phone summaries retain the desk's own warning; Details names each
+faulty desk and its reason and keeps the household problem line for a not-exact
+Open. Its “Open positions” row explains non-exact results
+(“Joe and Joel: exact; J: not exact · ‹reason›”)
 and household-only gaps, rather than showing an available valuation method
 over a fault, including a household fault beside desk gaps. For both Today
 and Open, a faulty blocking desk supplies the withheld household's fault

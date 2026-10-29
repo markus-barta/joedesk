@@ -417,7 +417,8 @@ function householdPnlReason(states, data, field, sharedReason = null) {
     const cell = states[`today.${field}`], reason = results.today.reason;
     // Keep a figure's own fault, shared outage wording and retained ages.
     // Desk attribution explains only a household dash inherited from desks.
-    if (cell?.value != null || outageValue(cell) || (reason && cellReason(reason) === sharedReason)
+    if (cell?.value != null || outageValue(cell) || NOT_EXACT_REASONS.has(cell?.reason)
+      || (reason && cellReason(reason) === sharedReason && states.gateway?.reason && cellReason(states.gateway.reason) === sharedReason)
       || (reason !== 'source_unavailable' && !faulty.some(id => results[id].reason === reason))) return null;
     const groups = [];
     for (const id of faulty) {
@@ -426,12 +427,14 @@ function householdPnlReason(states, data, field, sharedReason = null) {
       const group = groups.find(g => g.reason === reason);
       if (group) group.ids.push(id); else groups.push({ ids: [id], reason });
     }
-    const parts = groups.map(g => `unavailable for ${deskNames(g.ids)}${g.reason ? ` · ${g.reason}` : ''}`);
+    const parts = groups.map(g => `unavailable for ${deskNames(g.ids)}${g.reason && g.reason !== sharedReason ? ` · ${g.reason}` : ''}`);
     const notExact = DESKS.filter(id => results[id].kind === 'notExact');
     if (notExact.length) parts.push(`not exact for ${deskNames(notExact)}`);
     return capital(parts.join('; '));
   }
   if (results.today.kind !== 'notExact') return null;
+  // Open's explicit price-wait exception keeps its existing cell copy.
+  if (field === 'openPnl' && !NOT_EXACT_REASONS.has(results.today.reason)) return null;
   const blocking = deskDays(states, data, field).filter(g => !['exact', 'estimated'].includes(g.word));
   if (!blocking.length) return null;
   if (blocking.length === 1) {

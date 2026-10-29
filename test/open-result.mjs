@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
-import { validateContract } from '../contracts/index.mjs';
+import { validateContract, REASONS } from '../contracts/index.mjs';
 const board = await import('../public/joe/board-state.js');
 const { localBoardHealth, boardHealthPresentation, boardDiagnostics, statusPresentation } = await import('../public/joe/health.js');
 const { heroLeft, healthPop, compactDesk } = await import('../public/joe/desk.js');
@@ -106,12 +106,75 @@ test('JOED-157 fix2: household Open captions name faulty desks before not-exact 
     'Open positions: unavailable for Joe · not reported by the broker; not exact for J');
 });
 
+test('JOED-157 fix2: a shared fault reason keeps the faulty desk named in Today and Open', () => {
+  const data = combination(['exact', 'faultMoney', 'exact'], 'current').feeds.data.value;
+  (data.desks[1].money.reasons ??= {}).dayPnl = 'source_unavailable';
+  const hero = htmlDocument(heroLeft(viewOf(data)));
+  assert.equal(hero.querySelector('.board-caption').textContent, 'Numbers unavailable · not reported by the broker');
+  assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe');
+  assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Unavailable for Joe');
+});
+
 test('JOED-157: Details keeps the household own fault beside desk gaps', () => {
   const data = combination(['notExactMoney', 'exact', 'exact'], 'valueKeptFaultMoney').feeds.data.value;
-  data.totals.reasons.openPnl = 'open_pnl_unavailable';
+  data.totals.reasons.openPnl = 'history_write_failed';
   const view = viewOf(data), row = detailsRow(htmlDocument(healthPop(view, boardHealthPresentation(view.states, view.feeds, now))), 'Open positions');
-  assert.match(row, /Household unavailable · open result not available/);
+  assert.match(row, /Household unavailable · history could not be saved/);
   assert.match(row, /J: not exact/);
+});
+
+test('JOED-157 fix2: open_pnl_unavailable is an Open-only broker-price wait on every channel', () => {
+  for (const scope of ['today', ...DESKS]) for (const channel of ['cell', 'money', 'source']) {
+    const data = structuredClone(exact), desk = data.desks.find(desk => desk.id === scope);
+    const money = desk ? desk.money : data.totals, source = desk ? desk.pnlSources.open : data.pnlSources.open;
+    const key = scope === 'today' ? 'today.openPnl' : `desks.${scope}.openPnl`;
+    money.openPnl = null;
+    Object.assign(source, { status: 'unavailable', method: null, observedAt: null });
+    if (channel === 'money') (money.reasons ??= {}).openPnl = 'open_pnl_unavailable';
+    if (channel === 'source') source.reason = 'open_pnl_unavailable';
+    const view = viewOf(data, previous);
+    if (channel === 'cell') {
+      view.states[key].reason = 'open_pnl_unavailable';
+      // Rebuild the derived household from this cell-only observation.
+      if (scope !== 'today') view.states['today.openPnl'] = { ...view.states[key] };
+    }
+    const label = `${scope} ${channel}`;
+    assert.deepEqual(localBoardHealth(view.states, view.feeds, now), { tone: 'yellow', reason: 'open_unavailable_rth' }, label);
+    const status = statusPresentation(view);
+    assert.equal(status.sentence, 'Waiting on broker prices', label);
+    assert.doesNotMatch(`${status.alert} ${status.announcement}`, /tell Amy|reload/i, label);
+    assert.equal(view.states['today.openPnl'].value, null, label);
+    assert.equal(board.classifyCells(view.states, data, 'openPnl')[scope].kind, 'notExact', label);
+    if (scope !== 'today' && channel !== 'cell') assert.equal(view.states[key].retained, true, `${label}: base retained observation survives the price wait`);
+    // A waiting channel must never excuse a real fault on another channel.
+    if (channel === 'source') (money.reasons ??= {}).openPnl = 'source_unavailable';
+    else source.reason = 'source_unavailable';
+    assert.equal(board.classifyCells(view.states, data, 'openPnl')[scope].kind, 'fault', label);
+    assert.equal(localBoardHealth(view.states, view.feeds, now).reason, 'open_fault_rth', label);
+    const rebuilt = viewOf(data, previous);
+    assert.equal(localBoardHealth(rebuilt.states, rebuilt.feeds, now).reason, 'open_fault_rth', label);
+    assert.equal(rebuilt.states[key].reason, 'source_unavailable', `${label}: real fault replaces the wait caption`);
+  }
+  const fresh = { state: 'fresh', value: { amount: '1', currency: 'EUR' }, retained: false, reason: null };
+  assert.equal(board.classifyDay(fresh, { moneyReason: 'open_pnl_unavailable' }).kind, 'fault', 'Today keeps its existing rule');
+  const notExact = ['not_exact_yet', 'sod_missing', 'ledger_unreconciled', 'position_stale', 'baseline_pending', 'day_pnl_unavailable'];
+  for (const reason of [...REASONS, 'unknown_open_reason']) {
+    if (notExact.includes(reason) || reason === 'open_pnl_unavailable') continue;
+    for (const channel of ['cell', 'money', 'source']) {
+      const cell = { ...fresh, ...(channel === 'cell' ? { reason } : {}) };
+      const channels = channel === 'money' ? { moneyReason: reason } : channel === 'source' ? { source: { status: 'available', reason } } : {};
+      assert.equal(board.classifyCell(cell, channels, 'openPnl').kind, 'fault', `${reason} ${channel}`);
+    }
+  }
+});
+
+test('JOED-157 fix2: not-exact household Open retains its Details problem line', () => {
+  const view = combination(['exact', 'exact', 'exact'], 'notExact');
+  const diagnostic = 'The open result is unavailable during New York regular hours: not exact.';
+  assert.deepEqual(boardDiagnostics(view.states, view.feeds, now), [diagnostic]);
+  const pop = htmlDocument(healthPop(view, boardHealthPresentation(view.states, view.feeds, now)));
+  assert.match(pop.textContent, /The open result is unavailable during New York regular hours: not exact\./);
+  assert.equal(detailsRow(pop, 'Open positions'), 'Household not exact; each desk exact');
 });
 
 test('JOED-157: every desk and household Open combination matches the plain-words oracle through light and renderers (5000 cases)', t => {

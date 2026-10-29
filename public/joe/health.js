@@ -260,7 +260,7 @@ export function boardDiagnostics(states, feeds, now) {
       problems.push(`${LABEL[id]}’s Today is ${lastGood ? 'only a last good value' : 'unavailable'}${why}.`);
     }
     const opens = classifyCells(states, data, 'openPnl');
-    if (opens.today.kind === 'fault') problems.push(`${PNL_COPY.open} is unavailable during New York regular hours: ${cellReason(opens.today.reason ?? 'feed_not_received')}.`);
+    if (opens.today.kind !== 'exact') problems.push(`${PNL_COPY.open} is unavailable during New York regular hours: ${cellReason(opens.today.reason ?? 'feed_not_received')}.`);
     for (const id of DESKS) if (opens[id].kind === 'fault') {
       const lastGood = states[`desks.${id}.openPnl`]?.retained, reason = opens[id].reason;
       const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason)}` : '';
