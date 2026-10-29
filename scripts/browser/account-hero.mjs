@@ -70,6 +70,7 @@ export async function accountHeroChecks({ page, viewport, theme, check, settle, 
   const hintStored = await page.evaluate(`(() => { try { return localStorage.getItem('joedesk-chart-hint-v1'); } catch { return 'unavailable'; } })()`);
   check('JOED-156', `${tag}: the first-visit hint shows until the first move, then stays gone`,
     hintStored === '1' ? s.noteKind !== 'hint' : s.noteKind === 'hint' && /^(Drag or scroll sideways to move · (Ctrl|⌘)-scroll or pinch to zoom|Swipe · pinch · double-tap)$/.test(s.note), { hintStored, noteKind: s.noteKind, note: s.note });
+  check('JOED-156', `${tag}: the account history is read and converted in a worker`, await page.evaluate(`window.__joedesk.accountWorker?.() === true && !window.__joedesk.timings.some(t => t.reason === 'account-accept')`));
   check('JOED-156', `${tag}: Since start asks for the account start in Settings; Cash; kept holdings each in its own currency, never actionable`,
     /Account start not set · set in Settings/.test(s.sub) && /Cash/.test(s.sub) && s.keptActions === 0 &&
     (viewport.mobile || /incl\. kept holdings SXR8 € 12\.248,00 · TSLA \$ 441,20, each in its own currency/.test(s.sub)), s);

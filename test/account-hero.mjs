@@ -34,7 +34,7 @@ function page(t, { phone = false, storage = new Map(), body: answer = history() 
     : storage });
   const reads = [];
   globalThis.fetch = async url => { reads.push(String(url)); const a = typeof answer === 'function' ? answer() : answer; return { type: 'basic', status: a?.status ?? 200, json: async () => a?.status ? {} : a }; };
-  A.forgetAccountHistory(); A.forgetHint();
+  A.forgetAccountHistory(); A.forgetHint(); A.forgetAccountWorker?.();
   Object.assign(A.AS, { range: '1M', view: null, follow: true, details: false, full: null, shown: null });
   A.initAccount();
   // The browser reflects the hidden attribute as a property; this DOM does not.
@@ -296,18 +296,61 @@ test('JOED-156 hero: the chart’s input follows History: zoom at the pointer, s
 
 test('JOED-156 hero: the tooltip and the keyboard reading say the same words', () => {
   const h = M.acceptAccountHistory(history());
-  const short = A.pointDetails({ x: h.short.t[10], v: h.short.v[10], amount: h.short.amount[10], i: 10, gap: false }, h.short.t[10], h.short);
+  const short = A.pointDetails({ x: h.short.t[10], v: h.short.v[10], u: h.short.u[10], i: 10, gap: false }, h.short.t[10], h.short);
   assert.match(words(short.text), /^\w{3} \d{1,2} \w{3}, \d\d:\d\d Vienna time\n€ 27\.005,00$/);
   assert.equal(words(short.html.replace(/<[^>]+>/g, '\n').replace(/\n+/g, '\n').trim()), words(short.text));
   const gap = A.pointDetails({ x: 0, v: 1, gap: true, why: 'gateway_down' }, Date.parse('2026-10-13T11:00:00.000Z'), h.short);
   assert.equal(words(gap.text), 'Tue 13 Oct, 13:00 Vienna time\nNo value recorded here · broker connection down');
   const live = M.withLive(h.daily, { t: SNAP, observedAt: valid.data.brokerAccount.observedAt, amount: '28000' });
-  const today = A.pointDetails({ x: live.t.at(-1), v: 28000, amount: '28000', i: live.t.length - 1, gap: false }, live.t.at(-1), live);
+  const today = A.pointDetails({ x: live.t.at(-1), v: 28000, u: live.u.at(-1), i: live.t.length - 1, gap: false }, live.t.at(-1), live);
   assert.equal(words(today.text), 'Wed 14 Oct · so far today\n€ 28.000,00 at 19:42 Vienna time');
   const seenAs = d => words(d.html.replace(/<br>/g, '\n').replace(/<[^>]+>/g, ''));
   assert.equal(seenAs(today), words(today.text), 'the tooltip shows exactly the words read aloud');
   assert.equal(seenAs(short), words(short.text));
   assert.equal(seenAs(gap), words(gap.text));
-  const yesterday = A.pointDetails({ x: live.t.at(-2), v: 1, amount: live.amount.at(-2), i: live.t.length - 2, gap: false }, live.t.at(-2), live);
+  const yesterday = A.pointDetails({ x: live.t.at(-2), v: 1, u: live.u.at(-2), i: live.t.length - 2, gap: false }, live.t.at(-2), live);
   assert.match(words(yesterday.text), /^Tue 13 Oct · last value of the day\n€ [\d.]+,\d\d at 21:30 Vienna time$/);
+});
+
+// ---------- Fix round 1 (the Codex gate's findings) ----------
+test('JOED-156 fix 4: a worker reads and converts the account history; the page takes its columns and falls back when it fails', async t => {
+  const saved = { Worker: globalThis.Worker, JoeVersion: globalThis.JoeVersion, hooks: globalThis.__joedesk };
+  t.after(() => { for (const [k, v] of Object.entries({ Worker: saved.Worker, JoeVersion: saved.JoeVersion, __joedesk: saved.hooks })) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } });
+  const made = [], sent = [];
+  let reply = () => ({ kind: 'account', status: 200, reason: null, value: M.acceptAccountHistory(history()), key: 'k1', ms: 4 });
+  globalThis.Worker = class {
+    constructor(url, options) { made.push({ url: String(url), options }); }
+    postMessage(data) { sent.push(data); const out = reply(data); queueMicrotask(() => (out === 'fail' ? this.onerror(new Error('worker failed')) : this.onmessage({ data: out }))); }
+  };
+  globalThis.JoeVersion = { APP_VERSION: '261029075623.0.0' };
+  globalThis.__joedesk = { timings: [] };
+  const p = page(t);
+  await p.render();
+  assert.deepEqual(p.reads, [], 'nothing is read or parsed on the page');
+  assert.equal(made.length, 1);
+  assert.match(made[0].url, /\/joe\/v\/261029075623\.0\.0\/account-worker\.js$/, 'under this release’s own path');
+  assert.deepEqual(made[0].options, { type: 'module' });
+  assert.deepEqual(sent[0], { read: 'account', have: null });
+  assert.equal(p.svg().dataset.source, 'daily');
+  assert.equal(globalThis.__joedesk.accountWorker(), true);
+  assert.deepEqual(globalThis.__joedesk.timings.map(x => x.reason), ['account-worker'], 'the worker’s time, no page-side accept');
+  // The next read names what the page holds; an unchanged reply keeps its columns.
+  reply = data => ({ kind: 'unchanged', feed: 'account', key: data.have, ms: 1 });
+  await A.refreshAccountHistory();
+  assert.deepEqual(sent[1], { read: 'account', have: 'k1' });
+  assert.equal(p.svg().dataset.source, 'daily');
+  assert.equal(document.querySelector('#acctHero').dataset.history, 'ok');
+  // A worker's failed read keeps the last good history and says why.
+  reply = () => ({ kind: 'account', status: 401, reason: 'auth_required', value: null, key: null, ms: 1 });
+  await A.refreshAccountHistory();
+  assert.match(p.text('#acctNote'), /^Update failed · showing what loaded \d+ s ago$/);
+  // A failed worker hands its read to the page, and reads stay there.
+  reply = () => 'fail';
+  await A.refreshAccountHistory();
+  assert.deepEqual(p.reads, ['./account-history.json'], 'the page reads instead');
+  assert.equal(globalThis.__joedesk.accountWorker(), false);
+  assert.equal(globalThis.__joedesk.timings.at(-1).reason, 'account-accept');
+  await A.refreshAccountHistory();
+  assert.equal(made.length, 1, 'no new worker after a failure');
+  assert.equal(p.reads.length, 2);
 });

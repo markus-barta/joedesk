@@ -34,25 +34,38 @@ const TOLERANCE = { short: SHORT_GAP_MS, daily: 1.5 * DAY };
 export const MIN_SPAN = Object.freeze({ short: 5 * MIN, daily: 3 * DAY });
 
 // ---------- The read ----------
+// A series is compact columns, the same in the read worker and on the page:
+// times (t, ms), values for drawing (v, NaN where unavailable), exact amounts
+// (u, BigInt units of 10⁻⁸ EUR), why each unavailable value is missing (why,
+// an index into reasons, 0 for a value) and, for closes, the Vienna day.
+// The typed columns move from the worker to the page by transfer.
 const DECIMAL = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]{1,8})?$/;
 const exactEur = m => Boolean(m) && typeof m === 'object' && m.currency === 'EUR' && typeof m.amount === 'string' && m.amount.length <= 32 && DECIMAL.test(m.amount);
 const reasonOf = r => (typeof r === 'string' && /^[a-z_]{1,64}$/.test(r) ? r : null);
 const lossOf = d => (d && typeof d === 'object' && validInstant(d.at) ? { at: d.at, reason: reasonOf(d.reason) } : null);
 const invalid = () => { throw new Error('contract_invalid'); };
-// The endpoint's body as two typed series. Anything outside the documented
-// shape refuses the whole read (the last good one stays), like every feed.
+const I64 = 2n ** 63n;
+// Exact units that fit a 64-bit column (about ± € 92 billion), or refused.
+const unitsOf = amount => { const u = decimalUnits(amount); if (u >= I64 || u < -I64) invalid(); return u; };
+const columns = (source, n) => ({ source, t: new Float64Array(n), v: new Float64Array(n), u: new BigInt64Array(n), why: new Uint8Array(n),
+  reasons: [], day: source === 'daily' ? [] : null });
+// The endpoint's body as two series. Anything outside the documented shape
+// refuses the whole read (the last good one stays), like every feed.
 export function acceptAccountHistory(body) {
   if (!body || body.schema !== 'inspr.joe.account-history.v1' || !Array.isArray(body.points) || !Array.isArray(body.dailyCloses?.days)) invalid();
-  const short = { source: 'short', t: [], v: [], amount: [], why: [], day: null };
+  const short = columns('short', body.points.length), codes = new Map();
   let last = -Infinity;
-  for (const p of body.points) {
+  body.points.forEach((p, i) => {
     const t = validInstant(p?.t) ? Date.parse(p.t) : NaN, equity = p?.account?.equity;
     if (!(t > last) || (equity !== null && !exactEur(equity))) invalid();
-    last = t;
-    short.t.push(t); short.amount.push(equity ? equity.amount : null); short.v.push(equity ? Number(equity.amount) : NaN);
-    short.why.push(equity ? null : reasonOf(p.account?.reasons?.equity) ?? 'source_unavailable');
-  }
-  const daily = { source: 'daily', t: [], v: [], amount: [], why: [], day: [] };
+    last = t; short.t[i] = t;
+    if (equity) { short.u[i] = unitsOf(equity.amount); short.v[i] = Number(equity.amount); return; }
+    short.v[i] = NaN;
+    const why = reasonOf(p.account?.reasons?.equity) ?? 'source_unavailable';
+    if (!codes.has(why)) { if (codes.size >= 255) invalid(); codes.set(why, codes.size + 1); short.reasons.push(why); }
+    short.why[i] = codes.get(why);
+  });
+  const kept = [];
   let lastDay = '';
   last = -Infinity;
   for (const d of body.dailyCloses.days) {
@@ -63,14 +76,22 @@ export function acceptAccountHistory(body) {
     const t = validInstant(d.equityAt) ? Date.parse(d.equityAt) : NaN;
     if (!exactEur(d.equity) || !(t > last) || viennaDay(d.equityAt) !== d.day) invalid();
     last = t;
-    daily.t.push(t); daily.amount.push(d.equity.amount); daily.v.push(Number(d.equity.amount)); daily.why.push(null); daily.day.push(d.day);
+    kept.push([t, d]);
   }
+  const daily = columns('daily', kept.length);
+  kept.forEach(([t, d], i) => { daily.t[i] = t; daily.u[i] = unitsOf(d.equity.amount); daily.v[i] = Number(d.equity.amount); daily.day.push(d.day); });
   return {
     short: { ...short, reason: reasonOf(body.reason), loss: lossOf(body.discontinuity) },
     daily: { ...daily, reason: reasonOf(body.dailyCloses.reason), loss: lossOf(body.dailyCloses.discontinuity) },
   };
 }
-export const emptySeries = source => ({ source, t: [], v: [], amount: [], why: [], day: source === 'daily' ? [] : null, reason: null, loss: null });
+// The buffers a read worker hands over (each column has its own buffer).
+export const accountTransferables = value => [value.short, value.daily].flatMap(s => [s.t.buffer, s.v.buffer, s.u.buffer, s.why.buffer]);
+export const emptySeries = source => ({ ...columns(source, 0), reason: null, loss: null });
+// Why the value at i is missing, or null for a value.
+export const reasonAt = (series, i) => (series.why[i] ? series.reasons[series.why[i] - 1] ?? null : null);
+// Rows [a, b) of a series, as a series.
+export const sliceSeries = (s, a, b) => ({ ...s, t: s.t.slice(a, b), v: s.v.slice(a, b), u: s.u.slice(a, b), why: s.why.slice(a, b), day: s.day ? s.day.slice(a, b) : null });
 
 // ---------- The live edge ----------
 // The account value the board shows now, when it is current and exact: the
@@ -80,6 +101,7 @@ export function liveObservation(cell, data) {
   if (!trustedCurrent(cell) || !exactEur(cell.value)) return null;
   const t = validInstant(data?.generatedAt) ? Date.parse(data.generatedAt) : NaN, observedAt = data?.brokerAccount?.observedAt;
   if (!Number.isFinite(t) || !validInstant(observedAt) || Date.parse(observedAt) > t) return null;
+  try { unitsOf(cell.value.amount); } catch { return null; }
   return { t, observedAt, amount: cell.value.amount };
 }
 // The series with the live value at its end: after the newest snapshot, or
@@ -88,9 +110,10 @@ export function liveObservation(cell, data) {
 export function withLive(series, live) {
   if (!live || !series.v.some(Number.isFinite)) return series;
   const n = series.t.length, add = (at, day, replace) => {
-    const keep = replace ? n - 1 : n, cut = a => a.slice(0, keep);
-    return { ...series, t: [...cut(series.t), at], v: [...cut(series.v), Number(live.amount)], amount: [...cut(series.amount), live.amount],
-      why: [...cut(series.why), null], day: series.day ? [...cut(series.day), day] : null, live: at };
+    const keep = replace ? n - 1 : n;
+    const put = (column, x) => { const out = new column.constructor(keep + 1); out.set(column.subarray(0, keep)); out[keep] = x; return out; };
+    return { ...series, t: put(series.t, at), v: put(series.v, Number(live.amount)), u: put(series.u, unitsOf(live.amount)), why: put(series.why, 0),
+      day: series.day ? [...series.day.slice(0, keep), day] : null, live: at };
   };
   if (series.source === 'short') return n && series.t[n - 1] >= live.t ? series : add(live.t, null, false);
   const at = Date.parse(live.observedAt), day = viennaDay(live.observedAt), lastDay = series.day[n - 1];
@@ -165,7 +188,7 @@ export function rangeChange(series, [x0, x1]) {
   while (s >= 0 && !Number.isFinite(series.v[s])) s--;
   if (s < 0 || x0 - series.t[s] > tol) { s = lower(series.t, x0); while (s < e && !Number.isFinite(series.v[s])) s++; }
   if (s >= e) return null;
-  const a = decimalUnits(series.amount[s]), b = decimalUnits(series.amount[e]);
+  const a = series.u[s], b = series.u[e];
   return { from: series.t[s], to: series.t[e], startUnits: a, endUnits: b, change: b - a,
     pct: a > 0n ? divRound((b - a) * 10000n, a) : null, fromStart: Math.abs(series.t[s] - x0) <= tol };
 }
@@ -181,6 +204,11 @@ export const pctText = hundredths => (hundredths === null || typeof hundredths !
 
 // ---------- What the chart draws ----------
 const nextDay = day => new Date(Date.parse(`${day}T12:00:00Z`) + DAY).toISOString().slice(0, 10);
+// Two neighbouring values with a gap between them: more than the snapshot
+// cadence apart, or closes that are not on consecutive calendar days.
+function apart(series, a, b) {
+  return series.day ? series.day[b] !== nextDay(series.day[a]) : series.t[b] - series.t[a] > SHORT_GAP_MS;
+}
 // Display thinning per pixel bucket: first, lowest, highest and last, and
 // every break, so extremes and gaps survive.
 export function downsample(pts, x0, x1, buckets) {
@@ -213,11 +241,10 @@ export function chartPoints(series, [x0, x1], now, buckets = Infinity) {
   let i0 = Math.max(0, lower(t, x0) - 1);
   for (let k = 0; i0 > 0 && !Number.isFinite(v[i0]) && k < 10000; k++) i0--;
   const i1 = Math.min(t.length, upper(t, x1) + 1);
-  const apart = (a, b) => (series.day ? series.day[b] !== nextDay(series.day[a]) : t[b] - t[a] > SHORT_GAP_MS);
   let prev = -1, missing = false;
   for (let i = i0; i < i1; i++) {
     if (!Number.isFinite(v[i])) { missing = true; continue; }
-    if (prev >= 0 && (missing || apart(prev, i))) { pts.push({ x: (t[prev] + t[i]) / 2, v: null }); bands.push([t[prev], t[i]]); }
+    if (prev >= 0 && (missing || apart(series, prev, i))) { pts.push({ x: (t[prev] + t[i]) / 2, v: null }); bands.push([t[prev], t[i]]); }
     pts.push({ x: t[i], v: v[i] });
     prev = i; missing = false;
   }
@@ -239,8 +266,8 @@ export function pointNear(series, x) {
   const k = a < 0 ? (b < n ? b : -1) : b >= n || x - t[a] <= t[b] - x ? a : b;
   if (k < 0) return null;
   const reach = series.day ? 0.75 * DAY : SHORT_GAP_MS / 2;
-  const why = any !== k && !Number.isFinite(v[any]) && Math.abs(t[any] - x) < Math.abs(t[k] - x) ? series.why[any] ?? 'source_unavailable' : null;
-  return { i: k, x: t[k], v: v[k], amount: series.amount[k], day: series.day?.[k] ?? null, stands: Math.abs(t[k] - x) <= reach && !why, why };
+  const why = any !== k && !Number.isFinite(v[any]) && Math.abs(t[any] - x) < Math.abs(t[k] - x) ? reasonAt(series, any) ?? 'source_unavailable' : null;
+  return { i: k, x: t[k], v: v[k], u: series.u[k], day: series.day?.[k] ?? null, stands: Math.abs(t[k] - x) <= reach && !why, why };
 }
 export const observedTimes = (series, [x0, x1]) => series.t.filter((x, i) => x >= x0 && x <= x1 && Number.isFinite(series.v[i]));
 // The value extents of the window (the values inside it and where its line
@@ -257,8 +284,7 @@ export function extents(series, [x0, x1]) {
   }
   for (const x of [x0, x1]) {
     const b = lower(t, x), a = b - 1;
-    if (a < 0 || b >= t.length || !Number.isFinite(v[a]) || !Number.isFinite(v[b])) continue;
-    if (series.day ? series.day[b] !== nextDay(series.day[a]) : t[b] - t[a] > SHORT_GAP_MS) continue;
+    if (a < 0 || b >= t.length || !Number.isFinite(v[a]) || !Number.isFinite(v[b]) || apart(series, a, b)) continue;
     take(v[a] + (v[b] - v[a]) * ((x - t[a]) / (t[b] - t[a] || 1)));
   }
   return { visible: lo <= hi ? [lo, hi] : null, loaded: alo <= ahi ? [alo, ahi] : null };

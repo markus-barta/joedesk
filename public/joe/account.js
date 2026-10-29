@@ -24,7 +24,7 @@ const MIN = 60e3;
 export const AS = { range: '1M', view: null, follow: true, details: false, full: null, shown: null };
 // The account history as last read: the accepted series (kept through failed
 // reads), why the last read failed, and when to read again.
-const store = { value: null, reason: 'loading', loadedAt: null, version: 0, busy: false, next: 0 };
+const store = { value: null, reason: 'loading', loadedAt: null, key: null, version: 0, busy: false, next: 0 };
 const READ_MS = 60000, RETRY_MS = 15000, TIMEOUT_MS = 15000;
 const phone = () => matchMedia('(max-width: 480px)').matches;
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -145,8 +145,17 @@ export function subParts(ctx, start = accountStart(), settings = boardSettingsSt
 }
 
 // ---------- The account history ----------
-// One bounded read, like the board's other reads: same origin, no cache,
-// no redirects; a failed read keeps the last good series and says why.
+// Read by a worker (account-worker.js) that parses and checks it off the
+// main thread and hands over compact columns; without module workers, or
+// when the worker fails, the same read and checks run here. A failed read
+// keeps the last good series and says why. The worker is started on the
+// first read, under this release's own path, as feed.js starts History's.
+const timing = (reason, ms) => {
+  const list = globalThis.__joedesk?.timings;
+  if (!Array.isArray(list) || !Number.isFinite(ms)) return;
+  list.push({ reason, ms, at: performance.now() });
+  if (list.length > 200) list.shift();
+};
 async function read(url) {
   const controller = new AbortController();
   let timer;
@@ -163,26 +172,71 @@ async function read(url) {
   } catch { return { status: 0 }; } finally { clearTimeout(timer); }
 }
 const readReason = status => ([301, 302, 303, 307, 308, 401, 403].includes(status) ? 'auth_required' : status === 404 ? 'route_not_found' : 'refresh_failed');
-// Takes an endpoint body; on a refused one the last good series stays.
+// Takes an endpoint body read on the page; on a refused one the last good series stays.
 export function useAccountHistory(body, at = performance.now()) {
   try {
     store.value = M.acceptAccountHistory(body);
-    store.reason = null; store.loadedAt = at; store.version++;
+    store.reason = null; store.loadedAt = at; store.key = null; store.version++;
     return true;
   } catch { store.reason = 'contract_invalid'; return false; }
 }
-export const forgetAccountHistory = () => Object.assign(store, { value: null, reason: 'loading', loadedAt: null, version: store.version + 1, busy: false, next: 0 });
+// A worker's or the page's reply; returns whether the history is current.
+function useReply(reply) {
+  if (reply?.kind === 'unchanged' && store.value) { store.reason = null; store.loadedAt = performance.now(); return true; }
+  if (reply?.kind === 'account' && reply.value) {
+    Object.assign(store, { value: reply.value, reason: null, loadedAt: performance.now(), key: reply.key ?? null, version: store.version + 1 });
+    return true;
+  }
+  store.reason = reply?.reason ?? 'refresh_failed';
+  return false;
+}
+let worker, waiting = null;
+function startWorker() {
+  if (worker !== undefined) return worker;
+  worker = null;
+  const version = globalThis.JoeVersion?.APP_VERSION;
+  if (!version || typeof Worker !== 'function') return worker;
+  try {
+    const w = new Worker(new URL(`./v/${encodeURIComponent(version)}/account-worker.js`, import.meta.url), { type: 'module' });
+    w.onmessage = ({ data }) => { const done = waiting; waiting = null; done?.(data); };
+    // A failed worker hands its read in flight to the page, and reads stay here.
+    w.onerror = () => { worker = null; const done = waiting; waiting = null; done?.(null); };
+    worker = w;
+  } catch { worker = null; }
+  return worker;
+}
+async function readOnPage() {
+  const started = performance.now(), res = await read('./account-history.json');
+  if (res.status !== 200) return { kind: 'account', status: res.status, reason: readReason(res.status), value: null };
+  try {
+    const value = M.acceptAccountHistory(res.body);
+    timing('account-accept', performance.now() - started);
+    return { kind: 'account', status: 200, reason: null, value };
+  } catch { return { kind: 'account', status: 200, reason: 'contract_invalid', value: null }; }
+}
 async function refresh() {
   store.busy = true;
-  const res = await read('./account-history.json');
-  const ok = res.status === 200 && useAccountHistory(res.body);
-  if (res.status !== 200) store.reason = readReason(res.status);
+  const w = startWorker();
+  let reply = null;
+  if (w) {
+    let guard;
+    reply = await Promise.race([
+      new Promise(resolve => { waiting = resolve; w.postMessage({ read: 'account', have: store.value ? store.key : null }); }),
+      new Promise(resolve => { guard = setTimeout(() => resolve({ kind: 'account', status: 0, reason: 'refresh_failed', value: null }), TIMEOUT_MS + 5000); }),
+    ]);
+    clearTimeout(guard); waiting = null;
+    if (reply) timing('account-worker', reply.ms);
+  }
+  const ok = useReply(reply ?? await readOnPage());
   store.busy = false;
   store.next = performance.now() + (ok ? READ_MS : RETRY_MS);
   if (last.ctx) renderAccount(last.ctx);
 }
-// Read now (a retry, or a test), whatever the schedule says.
+export const forgetAccountHistory = () => Object.assign(store, { value: null, reason: 'loading', loadedAt: null, key: null, version: store.version + 1, busy: false, next: 0 });
+// Read now (a retry, the budget run, a test), whatever the schedule says.
 export const refreshAccountHistory = () => refresh();
+// Forget the worker (tests): the next read starts a new one.
+export const forgetAccountWorker = () => { worker = undefined; waiting = null; };
 // The live value at the end of the chosen source, kept per series and value.
 const merged = { key: null, series: null };
 function seriesFor(source, live) {
@@ -231,7 +285,7 @@ export function pointDetails(p, x, series) {
     const lines = [`${whenText(x)} Vienna time`, `No value recorded here${p.why ? ` · ${cellReason(p.why)}` : ''}`];
     return { text: lines.join('\n'), html: `<b>${esc(lines[0])}</b><br>${esc(lines[1])}` };
   }
-  const at = new Date(p.x).toISOString(), value = money(decimalUnits(p.amount));
+  const at = new Date(p.x).toISOString(), value = money(p.u);
   if (series.source === 'daily') {
     const today = p.i === series.t.length - 1 && series.live === p.x;
     const lines = [`${dayDDM(at)} · ${today ? 'so far today' : 'last value of the day'}`, `${value} at ${timeHM(at)} Vienna time`];
@@ -685,6 +739,10 @@ export function initAccount() {
   const root = $('#acctHero');
   if (!root) return;
   root.innerHTML = accountSkeleton();
+  // The board's own read-only hooks: read the account history now, and
+  // whether a worker reads it (the browser budget checks both).
+  const hooks = globalThis.__joedesk;
+  if (hooks && typeof hooks === 'object') Object.assign(hooks, { refreshAccount: () => refresh(), accountWorker: () => Boolean(worker) });
   $('#acctRanges').addEventListener('click', e => {
     const b = e.target.closest('[data-acct-range]');
     if (b) chooseRange(b.dataset.acctRange);

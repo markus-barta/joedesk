@@ -9,7 +9,7 @@ import { panelStates } from '../../contracts/panel-state.mjs';
 import { validateContract } from '../../contracts/index.mjs';
 import { acceptSnapshot } from '../../contracts/accept.mjs';
 import { historyEnvelope, historyPoint, measureHistory, HISTORY_CAP } from '../../server/history.mjs';
-import { ACCOUNT_HISTORY_FORMAT, ACCOUNT_HISTORY_CAP, ACCOUNT_CLOSES_CAP, accountClosesEnvelope, validateAccountHistory, validateAccountCloses } from '../../server/account-history.mjs';
+import { ACCOUNT_HISTORY_FORMAT, ACCOUNT_HISTORY_CAP, ACCOUNT_CLOSES_CAP, ACCOUNT_CLOSES_DAYS, accountClosesEnvelope, validateAccountHistory, validateAccountCloses } from '../../server/account-history.mjs';
 import { atomicWrite } from '../../server/storage.mjs';
 import { nyDay, isRTH, viennaDay, zonedInstant, VIENNA } from '../../time.mjs';
 
@@ -162,12 +162,19 @@ export function scenario(now = NOW, { historyFrom = '2026-10-07T00:00:00.000Z', 
 // three days of five-minute snapshots up to a minute before now, with a
 // two-hour outage, ending on the snapshot's € 31.482,75; and 40 Vienna days
 // of last values with one day missing. Cash rides along; kept holdings are
-// inside the value, as on the feed.
+// inside the value, as on the feed. largest: the most the server keeps, for
+// the render budget: two-minute snapshots up to just below the store's
+// compaction line (80 % of 2 MiB, with room for the budget's pushes; under
+// 10.000 points and 14 days) and every one of the 2.196 days of closes.
 const euros = cents => ({ amount: (cents / 100).toFixed(2), currency: 'EUR' });
-export function accountScenario(now = NOW, { closeDays = 40, missingDay = 10, outage = ['2026-10-13T09:00:00.000Z', '2026-10-13T11:00:00.000Z'] } = {}) {
+export function accountScenario(now = NOW, { closeDays = 40, missingDay = 10, outage = ['2026-10-13T09:00:00.000Z', '2026-10-13T11:00:00.000Z'], largest = false } = {}) {
+  if (largest) { closeDays = ACCOUNT_CLOSES_DAYS + 1; missingDay = -1; outage = ['2000-01-01T00:00:00.000Z', '2000-01-01T00:00:00.000Z']; }
   const R = random(20261029), end = Date.parse(now) - 60000, raw = [];
+  const step = (largest ? 2 : 5) * 60000;
+  const sample = JSON.stringify({ t: now, account: { observedAt: now, equity: euros(3110000), cash: euros(421277) } }).length + 1;
+  const count = largest ? Math.min(9990, Math.floor((ACCOUNT_HISTORY_CAP * 0.8 - 65536) / sample)) : Math.floor(3 * 864e5 / step) + 1;
   let cents = 3110000;
-  for (let t = end - 3 * 864e5; t <= end; t += 5 * 60000) {
+  for (let t = end - (count - 1) * step; t <= end; t += step) {
     const iso = new Date(t).toISOString();
     if (t >= Date.parse(outage[0]) && t < Date.parse(outage[1])) continue;
     if (isRTH(iso)) cents += Math.round((R() - 0.47) * 900);

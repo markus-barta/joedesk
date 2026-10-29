@@ -14,8 +14,14 @@ test('JOED-156 model: the endpoint becomes two typed series; anything off the do
   assert.equal(h.daily.source, 'daily');
   assert.ok(h.short.t.length > 800 && h.daily.t.length === 39);
   const gap = h.short.v.findIndex(Number.isNaN);
-  assert.ok(gap > 0 && h.short.amount[gap] === null && h.short.why[gap] === 'gateway_down', 'an unavailable value is a gap with its reason, never zero');
-  assert.equal(h.short.amount[0], '27000.00', 'exact decimal strings are kept');
+  assert.ok(gap > 0 && h.short.u[gap] === 0n && M.reasonAt(h.short, gap) === 'gateway_down' && M.reasonAt(h.short, gap - 1) === null, 'an unavailable value is a gap with its reason, never a value');
+  assert.equal(h.short.u[0], decimalUnits('27000.00'), 'exact amounts are kept, as units');
+  // Compact columns, each with its own buffer, ready to transfer from a worker.
+  assert.ok(h.short.t instanceof Float64Array && h.short.v instanceof Float64Array && h.short.u instanceof BigInt64Array && h.short.why instanceof Uint8Array);
+  assert.ok(h.daily.t instanceof Float64Array && Array.isArray(h.daily.day) && h.short.day === null);
+  const buffers = M.accountTransferables(h);
+  assert.equal(buffers.length, 8);
+  assert.equal(new Set(buffers).size, 8, 'no buffer twice');
   assert.deepEqual(h.daily.day.slice(-2), ['2026-10-13', '2026-10-14']);
   assert.ok(!h.daily.day.includes('2026-10-01'), 'a missing day stays missing');
   // A day that recorded only cash has no account value.
@@ -30,6 +36,7 @@ test('JOED-156 model: the endpoint becomes two typed series; anything off the do
     b => { b.points[3].t = '2026-10-12 10:00'; },
     b => { b.dailyCloses.days.reverse(); },
     b => { b.dailyCloses.days[2].equityAt = b.dailyCloses.days[3].equityAt; },
+    b => { b.points[3].account.equity = { amount: '92233720369', currency: 'EUR' }; },
     b => { delete b.dailyCloses; },
   ];
   for (const change of bad) { const b = history(); change(b); assert.throws(() => M.acceptAccountHistory(b), /contract_invalid/); }
@@ -53,11 +60,12 @@ test('JOED-156 model: only a current, exact account value joins the chart, after
   assert.equal(M.liveObservation(ctx.states.paperAccount, { ...ctx.feeds.data.value, brokerAccount: { ...ctx.feeds.data.value.brokerAccount, observedAt: iso(SNAP + 1000) } }), null);
   const h = M.acceptAccountHistory(history());
   const short = M.withLive(h.short, live);
-  assert.deepEqual([short.t.at(-1), short.amount.at(-1), short.live, short.t.length], [SNAP, '28000', SNAP, h.short.t.length + 1]);
+  assert.deepEqual([short.t.at(-1), short.u.at(-1), short.live, short.t.length], [SNAP, decimalUnits('28000'), SNAP, h.short.t.length + 1]);
+  assert.ok(short.u instanceof BigInt64Array && short.why.at(-1) === 0, 'still compact columns');
   assert.equal(M.withLive(short, live), short, 'the same snapshot never joins twice');
   assert.equal(M.withLive(h.short, { ...live, t: h.short.t.at(-1) }), h.short, 'nor one the server already recorded');
   const daily = M.withLive(h.daily, live);
-  assert.deepEqual([daily.t.length, daily.day.at(-1), daily.amount.at(-1), daily.t.at(-1)], [h.daily.t.length, '2026-10-14', '28000', SNAP], 'today’s close so far is replaced');
+  assert.deepEqual([daily.t.length, daily.day.at(-1), daily.u.at(-1), daily.t.at(-1)], [h.daily.t.length, '2026-10-14', decimalUnits('28000'), SNAP], 'today’s close so far is replaced');
   const older = M.withLive(h.daily, { ...live, observedAt: '2026-10-14T17:00:00.000Z' });
   assert.equal(older, h.daily, 'an older observation never replaces a newer close');
   const nextDay = M.withLive(h.daily, { t: SNAP + DAY, observedAt: iso(SNAP + DAY), amount: '28100.5' });
@@ -96,9 +104,9 @@ test('JOED-156 model: a range without enough history says since when it records,
   assert.equal(say(h.daily, 'All'), '', 'All is everything recorded');
   assert.equal(say(h.short, '1D'), '');
   assert.equal(say(h.short, '5D'), 'Recording since 11 Oct, 19:42 · 3 days so far');
-  const one = { ...h.daily, t: h.daily.t.slice(-1), v: h.daily.v.slice(-1), amount: h.daily.amount.slice(-1), day: h.daily.day.slice(-1), why: [null] };
+  const one = M.sliceSeries(h.daily, h.daily.t.length - 1, h.daily.t.length);
   assert.equal(say(one, '1M'), 'Recording since 14 Oct · 1 day so far');
-  const fresh = { ...h.short, t: h.short.t.slice(-30), v: h.short.v.slice(-30), amount: h.short.amount.slice(-30), why: h.short.why.slice(-30) };
+  const fresh = M.sliceSeries(h.short, h.short.t.length - 30, h.short.t.length);
   assert.equal(say(fresh, '1D'), 'Recording since 14 Oct, 17:12 · 2 h so far');
   assert.deepEqual(M.coverage(M.emptySeries('daily'), '1M', NOW), { recorded: false, complete: false });
   for (const text of [say(h.daily, '6M'), say(h.short, '5D'), 'Recording since 30 Sep, 23:59 · 23 h so far', `Recording since 30 Sep · 2196 days so far`]) {
@@ -132,7 +140,7 @@ test('JOED-156 model: the change over a window is exact, from the value standing
   const outage = [Date.parse('2026-10-13T11:00:00.000Z'), SNAP];
   const after = M.rangeChange(short, outage);
   assert.deepEqual([iso(after.from), after.fromStart], ['2026-10-13T12:02:22.000Z', false]);
-  const one = { ...short, t: short.t.slice(-1), v: short.v.slice(-1), amount: short.amount.slice(-1), why: [null] };
+  const one = M.sliceSeries(short, short.t.length - 1, short.t.length);
   assert.equal(M.rangeChange(one, [SNAP - HOUR, SNAP]), null, 'one value is no change');
   assert.equal(M.rangeChange(M.emptySeries('short'), [0, 1]), null);
   // A short window still starts at the value standing at its start.

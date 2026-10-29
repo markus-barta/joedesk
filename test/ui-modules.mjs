@@ -21,6 +21,7 @@ import './position-claims.mjs';
 import './history-view.mjs';
 import './account-model.mjs';
 import './account-hero.mjs';
+import './account-worker.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -2063,7 +2064,7 @@ test('browser budget: every timing-only combination gets one final re-measure, w
 
 test('browser budget: any non-timing or unknown failure prevents a re-measure even with timing breaches', () => {
   for (const key of ['measured', 'worker', 'historyRead', 'noMainThreadHistory', 'drawn', 'deskPushes', 'historyPushes',
-    'finite', 'redraws', 'historyReads', 'nearMaximum', 'notCompacted', 'unknownBudget']) {
+    'finite', 'redraws', 'historyReads', 'nearMaximum', 'notCompacted', 'accountWorker', 'accountReads', 'noMainThreadAccount', 'unknownBudget']) {
     for (const timingOK of [true, false]) {
       const first = { [key]: false, patchBudget: timingOK, historyBudget: timingOK, renderBudget: timingOK, taskBudget: timingOK };
       for (const second of [null, Object.fromEntries(Object.keys(first).map(key => [key, true]))]) {
@@ -2098,20 +2099,25 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
       if (source.includes('tasks: window.__budgetTasks.snapshot()')) {
         const task = { startTime: phase === 'cold' ? 210 : 150, duration: sample.taskMs ?? 60, attribution: [] };
         return { timings: [...timings('history-worker', 3, 10), ...timings('history', 3, sample.historyMs ?? 10)],
-          tasks: { tasks: sample.taskMs === null ? [] : [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400 };
+          tasks: { tasks: sample.taskMs === null ? [] : [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400,
+          accountWorker: sample.accountWorker ?? true };
       }
       if (source.includes('timings.splice(0)')) {
         reads++;
-        return { timings: reads === 2 ? timings('data', sample.pushes ?? 5, sample.patchMs ?? 10) : [], end: reads * 100 };
+        // The Desk updates: their renders, and (JOED-156) one account worker read each.
+        return { timings: reads === 2 ? [...timings('data', sample.pushes ?? 5, sample.patchMs ?? 10),
+          ...timings('account-worker', sample.accountReads ?? sample.pushes ?? 5, 7), ...timings('account-accept', sample.mainThreadAccount ?? 0, 30)] : [], end: reads * 100 };
       }
       if (source.includes("filter(t => t.reason === 'history').length")) return 0;
-      assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()', source);
+      if (source.includes("filter(t => t.reason === 'account-worker').length")) return 0;
+      assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()' || source === 'window.__joedesk.refresh(); window.__joedesk.refreshAccount?.()', source);
     },
   };
   const context = { decideTaskGuard, TIMING_GUARDS, observeBudgetTasks, attributeBudgetTasks,
     max: list => list.length ? Math.max(...list) : NaN,
     VIEWPORTS: [{ name: '390' }], NOW: '2026-10-14T17:42:22.000Z', ACTOR: 'fixture',
     largeScenario: (now, points = 9000) => ({ snapshot: { seq: 1001 }, history: { receivedAt: now, points: Array(points) } }),
+    accountScenario: (now, { largest } = {}) => ({ largest, short: { points: Array(largest ? 9057 : 841) }, daily: { days: Array(largest ? 2196 : 38) } }),
     wideSnapshot: (snapshot, when, seq, shift) => ({ when, seq, shift }), at: (base, seconds) => `${base}/${seconds}`,
     configure: async () => {}, go: async () => {}, settle: async () => {}, waitFor: async () => {},
     load: async (page, url, panel) => {
@@ -2125,8 +2131,8 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
   };
   const execute = runInNewContext(`(${runBudget.toString()})`, context);
   const traces = await execute({ page, limits,
-    newBoard: async ({ history }) => {
-      const board = { history, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
+    newBoard: async ({ history, accountHistory }) => {
+      const board = { history, accountHistory, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
         async push(payload) { this.pushes.push(payload); return { status: 200 }; } };
       boards.push(board);
       return board;
@@ -2160,6 +2166,21 @@ test('browser budget: cold and live re-measure on fresh boards, retaining both a
   assert.match(table, /Attempt/);
   assert.equal(table.match(/1\/2 \(re-measured\)/g).length, 2);
   assert.equal(table.match(/2\/2 \(re-measured\)/g).length, 2);
+});
+
+test('JOED-156 browser budget: the live boards carry the largest account history, read by its worker on every Desk update', async () => {
+  const { checks, boards, loads } = await simulatedBudget();
+  const liveBoards = boards.filter(b => b.history.points.length === 7200);
+  assert.ok(liveBoards.length >= 1 && liveBoards.every(b => b.accountHistory?.largest === true && b.accountHistory.short.points.length === 9057));
+  assert.ok(boards.filter(b => b.history.points.length === 9000).every(b => b.accountHistory === undefined), 'the cold History read stays as it was');
+  const account = checks.find(c => c.name.includes('whole account'));
+  assert.ok(account?.ok && /9057 snapshots, 2196 closes/.test(account.name), account?.name);
+  for (const sample of [{ accountWorker: false }, { accountReads: 4 }, { mainThreadAccount: 1 }]) {
+    const failed = await simulatedBudget({ live: [sample, sample] });
+    assert.ok(failed.checks.some(c => !c.ok && c.name.includes('whole account')), JSON.stringify(sample));
+    assert.equal(failed.loads.live, 1, 'not a timing breach: no re-measure');
+  }
+  assert.deepEqual(loads, { cold: 1, live: 1 });
 });
 
 test('browser budget: runBudget stops after reproduced breaches and does not retry other failed checks', async () => {
