@@ -586,3 +586,122 @@ test('JOED-156 fix 5: each pointer sees its own Controls list; only the pointer 
   assert.match(css, /@media \(pointer: coarse\) \{ \.acct-keys\.hint-fine \{ display: none; \} \.acct-keys\.hint-touch \{ display: grid; \} \}/);
   assert.equal([...css.matchAll(/\.acct-keys[^{]*\{[^}]*display:/g)].length, 4, 'no other rule sets their display');
 });
+
+// ---------- r39: the Since start · Cash line's lines, a cheap and honest bound ----------
+// The line reserves, by the block's own width (container queries), the lines
+// its longest form needs: amounts up to €1e9 (Since start, Cash, each kept
+// holding), ±99.999,99 %, Cash with or without a value beside every reason
+// (the longest included), every Since start wording, the kept holdings as the
+// fleet keeps them (two symbols). Widths come from the board's fonts, read
+// from their files (fixtures/account-line-metrics.json): SF Pro at 12 px
+// (opsz 17, regular and semibold) and DejaVu Sans (book and bold), the Linux
+// fallback the CI renders with. Lines break here only at ordinary spaces
+// outside a no-wrap amount or holding, never at a hyphen or beside a
+// separator: fewer breaks than the browser has, so never fewer lines. A form
+// beyond these bounds wraps on, visibly; no money figure is clipped.
+const LINE_FONTS = JSON.parse(readFileSync(new URL('./fixtures/account-line-metrics.json', import.meta.url), 'utf8'));
+const { CELL_REASON } = await import('../public/joe/health.js');
+const ENTITY = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" };
+function lineWords(html, font, px) {
+  const words = [0], open = [];
+  let bold = 0, nowrap = 0;
+  for (const m of html.matchAll(/<(\/?)(b|span|a)([^>]*)>|([^<]+)/g)) {
+    if (m[4] !== undefined) {
+      const text = m[4].replace(/&(amp|lt|gt|quot|#39);/g, e => ENTITY[e]);
+      (nowrap ? [text] : text.split(' ')).forEach((part, k) => {
+        if (k) words.push(0);
+        for (const ch of part) {
+          const w = font[bold ? 'bold' : 'regular'][ch];
+          assert.ok(w !== undefined, `no width for ${JSON.stringify(ch)}`);
+          words[words.length - 1] += w * px;
+        }
+      });
+    } else if (m[1]) ({ bold, nowrap } = open.pop());
+    else {
+      open.push({ bold, nowrap });
+      if (m[2] === 'b' || m[2] === 'a' || /set-link/.test(m[3])) bold = 1;
+      if (/nowrap/.test(m[3])) nowrap = 1;
+      // A separator: 1 px and 9 px each side, joined to its neighbours.
+      if (/acct-sep/.test(m[3])) words[words.length - 1] += 19;
+    }
+  }
+  return words.filter(w => w > 0);
+}
+function lineCount(words, width, space) {
+  let lines = 1, used = 0;
+  for (const w of words) {
+    if (!used) used = w;
+    else if (used + space + w <= width) used += space + w;
+    else { lines++; used = w; }
+  }
+  return lines;
+}
+
+test('JOED-156 r39: the Since start · Cash line reserves the lines its longest form needs at every width, in the board’s fonts', () => {
+  // The rule: by the block's width, lines × line height; above the last width, two lines.
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  const RESERVE = {
+    narrow: { px: 12, lineHeight: 17, from: 260, steps: [[291, 4], [408, 3], [Infinity, 2]] },
+    wide: { px: 12.5, lineHeight: 18, from: 397, steps: [[489, 5], [596, 4], [857, 3], [Infinity, 2]] },
+  };
+  assert.match(css, /\n\.acct-hero \{ container: acct \/ inline-size; \}/);
+  assert.match(css, /\n\.acct-sub \{ min-height: 36px; margin-top: 6px; font-size: 12\.5px; line-height: 18px;/, 'two lines of 18 px at 12,5 px');
+  assert.match(css, /\n {2}\.acct-sub \{ min-height: 34px; margin-top: 4px; font-size: 12px; line-height: 17px; \}/, 'on a phone two lines of 17 px at 12 px');
+  for (const [kind, { lineHeight, steps }] of Object.entries(RESERVE)) {
+    for (const [below, lines] of steps.filter(([below]) => below !== Infinity)) {
+      assert.ok(css.includes(`@container acct (max-width: ${below - 1}.98px) { .acct-sub.acct-${kind} { min-height: ${lines * lineHeight}px; } }`), `${kind}: ${lines} lines below ${below} px`);
+    }
+  }
+  // The block's width at the widths the board serves: the phone's narrowest
+  // (320 px) and the first width with the wide line (481 px).
+  assert.match(css, /\n\.acct-hero \{ position: relative; padding: 20px 26px 14px;/);
+  assert.match(css, /\n {2}\.acct-hero \{ padding: 14px; margin-bottom: 12px; \}/);
+  assert.match(css, /--gutter: 28px;/);
+  assert.match(css, /@media \(max-width: 700px\) \{\n {2}:root \{ --gutter: 16px; \}/);
+  assert.deepEqual([320 - 2 * 16 - 2 * 14, 481 - 2 * 16 - 2 * 26], [RESERVE.narrow.from, RESERVE.wide.from]);
+
+  // Every form within the bounds, as the page writes it.
+  const money = (amount, currency = 'EUR') => ({ amount, currency }), big = '-1000000000.00';
+  const reasons = Object.keys(CELL_REASON);
+  const longest = reasons.reduce((a, b) => (CELL_REASON[b].length > CELL_REASON[a].length ? b : a));
+  const cashes = [{ state: 'fresh', value: money(big), reason: null }, { state: 'not reported', value: null, reason: null },
+    ...reasons.flatMap(reason => [{ state: 'broken', value: null, reason }, { state: 'broken', value: money(big), reason, retained: false }])];
+  const kepts = [{ state: 'fresh', reason: null, value: [{ symbol: 'SXR8', marketValue: money(big) }, { symbol: 'TSLA', marketValue: money(big, 'USD') }] },
+    { state: 'fresh', reason: null, value: [] }, ...reasons.map(reason => ({ state: 'broken', reason, value: null }))];
+  // Since start at its widest: −€ 1.000.000.000,00 at −99.999,99 % (a start of
+  // € 1.000.000,10), or against the largest start (€ 999.999.999,99), each on
+  // the widest date in either font; and every wording while it is not set.
+  const fonts = Object.entries(LINE_FONTS).filter(([, f]) => f.regular);
+  const account = units => ({ state: 'fresh', value: money(units), reason: null, retained: false, ageSeconds: 9 });
+  const sinceWide = date => A.subParts({ states: { paperAccount: account('-998999999.9'), paperCash: cashes[0], kept: kepts[1] } }, { amountEur: 1000000.1, date }, { reason: null }).wide;
+  const span = (html, font) => lineWords(html, font, 12.5).reduce((sum, w) => sum + w, 0);
+  const months = Array.from({ length: 12 }, (_, i) => `2025-${String(i + 1).padStart(2, '0')}-28`);
+  const dates = [...new Set(fonts.map(([, font]) => months.reduce((a, b) => (span(sinceWide(b), font) > span(sinceWide(a), font) ? b : a))))];
+  const starts = [...dates.flatMap(date => [[account('-998999999.9'), { amountEur: 1000000.1, date }, { reason: null }], [account('-0.01'), { amountEur: 999999999.99, date }, { reason: null }]]),
+    ...['missing', 'refresh_failed', 'invalid', 'loading'].map(reason => [account(big), null, { reason }])];
+  const lines = { narrow: [], wide: [] };
+  for (const [paperAccount, start, settings] of starts) for (const paperCash of cashes) {
+    lines.narrow.push(A.subParts({ states: { paperAccount, paperCash, kept: kepts[0] } }, start, settings).narrow);
+    for (const kept of kepts) lines.wide.push(A.subParts({ states: { paperAccount, paperCash, kept } }, start, settings).wide);
+  }
+  const plainText = html => words(html.replace(/<[^>]+>/g, ''));
+  assert.ok(lines.narrow.some(h => plainText(h) === 'Since start −€ 1.000.000.000,00 (−99.999,99 %) · Cash −€ 1.000.000.000,00'), 'the widest figures are there');
+  assert.ok(lines.narrow.some(h => plainText(h).endsWith(`Cash −€ 1.000.000.000,00 · ${CELL_REASON[longest]}`)), `the longest Cash reason (${longest}) beside the widest value`);
+  assert.ok(lines.wide.some(h => /€ 999\.999\.999,99 on/.test(plainText(h))), 'the largest start');
+  assert.ok(lines.wide.some(h => plainText(h).includes('incl. kept holdings SXR8 −€ 1.000.000.000,00 · TSLA −$ 1.000.000.000,00, each in its own currency')));
+
+  // At the narrowest width of each step (greedy wrapping never needs more
+  // lines on a wider line), the longest form fits the lines reserved there.
+  for (const [fontName, font] of fonts) {
+    for (const [kind, { px, from, steps }] of Object.entries(RESERVE)) {
+      const all = lines[kind].map(h => lineWords(h, font, px)), space = font.regular[' '] * px;
+      let at = from;
+      for (const [below, reserved] of steps) {
+        const need = Math.max(...all.map(w => lineCount(w, at, space)));
+        assert.ok(need <= reserved, `${fontName} ${kind} at ${at} px of line: ${need} lines needed, ${reserved} reserved`);
+        if (below === Infinity) break;
+        at = below;
+      }
+    }
+  }
+});

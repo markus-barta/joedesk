@@ -1548,6 +1548,17 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 .acct-state > [data-clamp] { display: block; min-width: 0; height: 20px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acct-dbtn { display: none; }
 .acct-sub { min-height: 36px; margin-top: 6px; font-size: 12.5px; line-height: 18px; color: var(--ink-3); }
+/* The Since start · Cash line (on wider screens with the kept holdings) keeps,
+   by the block's own width, the lines its longest form needs: amounts up to
+   €1e9, ±99.999,99 %, every Cash reason, in SF Pro and DejaVu Sans
+   (test/account-hero.mjs). Longer still wraps on, visibly; no money figure is
+   ever clipped. */
+.acct-hero { container: acct / inline-size; }
+@container acct (max-width: 856.98px) { .acct-sub.acct-wide { min-height: 54px; } }
+@container acct (max-width: 595.98px) { .acct-sub.acct-wide { min-height: 72px; } }
+@container acct (max-width: 488.98px) { .acct-sub.acct-wide { min-height: 90px; } }
+@container acct (max-width: 407.98px) { .acct-sub.acct-narrow { min-height: 51px; } }
+@container acct (max-width: 290.98px) { .acct-sub.acct-narrow { min-height: 68px; } }
 .acct-sub b, .acct-details b { color: var(--ink-2); font-weight: 600; }
 /* A missing Cash is a muted dash, as every dash on Desk. */
 .acct-sub b.muted { color: var(--ink-3); }
