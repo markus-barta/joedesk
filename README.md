@@ -1323,7 +1323,9 @@ from the board's own per-desk cells (“Not exact for J and Joe”); a reason th
 every desk shares needs no names, and other desk states keep their own word
 (“Not exact for J; last good for Joe”). Today's sentence never repeats a reason
 that the caption or section line shows. It gives each exact desk's own Today
-(“Joel is flat today.”), or “No desk has an exact result for today.” Dashes are
+(“Joel is flat today.”), or “No desk has an exact result for today.” A dash
+with neither (a household Today missing without a reason) keeps its statement
+in the sentence: “Today’s result is not available.” Dashes are
 named “‹label›: not exact · ‹reason›”, never “not reported”, and so is a
 not-exact Cash on Desk and in Settings (caption “not exact”, name “Cash: not
 exact”), through one shared `dashWords` in `ui.js`; their info icon is

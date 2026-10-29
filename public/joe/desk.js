@@ -447,9 +447,11 @@ export function heroLeft(ctx) {
   let say;
   if (day.n == null) {
     // The sentence never repeats the reason shown in the caption or section
-    // line: it gives what is known instead, each exact desk's own Today.
+    // line: it gives what is known instead, each exact desk's own Today. A dash
+    // with neither keeps its one statement here.
+    const stated = Boolean(dayCaption) || onBoard || (shared != null && why === shared);
     say = !data ? day.state === 'not reported' ? 'No numbers yet: no board data has arrived.' : `No numbers: ${esc(why ?? 'not available')}.`
-      : exactDeskSentence(states, data) ?? (classifyDays(states, data).today.kind === 'notExact' ? 'No desk has an exact result for today.'
+      : (stated ? exactDeskSentence(states, data) : null) ?? (classifyDays(states, data).today.kind === 'notExact' ? 'No desk has an exact result for today.'
         : `Today’s result is not available${why !== shared && !dayCaption && !onBoard ? `: ${esc(why ?? 'not reported')}` : ''}.`);
   } else if (day.state === 'fresh') {
     const who = 'J, Joe and Joel';
