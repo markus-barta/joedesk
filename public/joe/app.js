@@ -139,7 +139,11 @@ function start() {
   };
   // History's address names its preset, desks and measure; it is rewritten
   // in place whenever they change, unless an address from outside the page
-  // (Back, Forward, a typed one) still waits for hashchange.
+  // (Back, Forward, a typed one) still waits for hashchange. With JOED-152's
+  // route.js this reduces to two hooks: onRoute('history', readHistoryRoute)
+  // reads the query on every arrival, and historyAddress() after each History
+  // render replaces the entry with #history?<historyQuery()>, keeping
+  // history.state, skipping while the address differs from the route shown.
   let routed = location.hash;
   function historyAddress() {
     if (screen !== 'history' || location.hash !== routed) return;
@@ -254,7 +258,8 @@ function start() {
     if (!b || b.dataset.measure === HS.measure) return;
     HS.measure = b.dataset.measure; dirtyHistory = true; render('history-measure');
   });
-  $('#histFollow').addEventListener('click', () => { toggleFollow(); dirtyHistory = true; render('history-follow'); });
+  // Follow and its phone copy (index.html) are one toggle.
+  for (const b of $$('[data-follow]')) b.addEventListener('click', () => { toggleFollow(); dirtyHistory = true; render('history-follow'); });
   initHistoryInput({ schedule });
   initHistoryControls({ schedule });
 

@@ -40,7 +40,7 @@ const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await im
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
-const { HS, historyChart, downsample, historyPointDetails, initHistoryInput, historyPreset, historyAxis, historyQuery, readHistoryRoute } = await import('../public/joe/history.js');
+const { HS, historyChart, downsample, historyPointDetails, initHistoryInput, initHistoryControls, historyPreset, historyAxis, historyQuery, readHistoryRoute } = await import('../public/joe/history.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
 const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
@@ -1998,6 +1998,54 @@ test('JOED-154 history: the address names the preset, desks and measure; reading
   assert.equal(historyQuery(), 'range=day&desk=none&mode=money');
   readHistoryRoute('range=fit&desk=all&mode=change');
   assert.equal(historyQuery(), 'range=fit&desk=all&mode=change');
+});
+
+test('JOED-154 fix 3: a corrected bound is valid again: invalid, corrected, then Enter leaves both fields valid, the focused one included', t => {
+  const saved = { document: globalThis.document, state: { ...HS, desks: HS.desks.slice() } };
+  t.after(() => { globalThis.document = saved.document; Object.assign(HS, saved.state); historyAxis('change').setAxisMode({ mode: 'auto' }); });
+  globalThis.document = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  const on = new Map(), listen = (node, name) => { node.addEventListener = (type, fn) => on.set(`${name}:${type}`, fn); };
+  const [ctl, axisSeg, form, min, max] = ['#histCtl', '#histAxis', '#histAxisForm', '#histAxisMin', '#histAxisMax'].map(id => document.querySelector(id));
+  listen(ctl, 'ctl'); listen(axisSeg, 'axis'); listen(form, 'form'); listen(document, 'document');
+  for (const field of [ctl, min, max]) field.focus = () => { document.activeElement = field; };
+  Object.assign(HS, { measure: 'change' });
+  initHistoryControls({ schedule: () => {} });
+  historyAxis('change').setAxisMode({ mode: 'custom', min: -10, max: 10 });
+  const submit = () => on.get('form:submit')({ preventDefault() {} });
+  const state = () => [min, max].map(f => [f.getAttribute('aria-invalid'), f.getAttribute('aria-describedby')]);
+  min.value = '4.950'; max.value = '30'; min.focus();
+  submit();
+  assert.deepEqual(state(), [['true', 'histAxisUnit histAxisError'], ['false', 'histAxisUnit']], 'the unreadable bottom is invalid and names the error');
+  assert.match(document.querySelector('#histAxisError').textContent, /without grouping/);
+  assert.equal(document.activeElement, min);
+  min.value = '-12';
+  submit();
+  assert.deepEqual(state(), [['false', 'histAxisUnit'], ['false', 'histAxisUnit']], 'both valid again, the focused one included');
+  assert.equal(document.querySelector('#histAxisError').textContent, '');
+  assert.deepEqual(historyAxis('change').get(), { mode: 'custom', min: -12, max: 30 });
+  assert.deepEqual([min.value, max.value], ['−12', '30'], 'the fields show the bounds as read');
+  // A top that is not above the bottom marks the top only, and a new choice clears it.
+  max.value = '-20'; max.focus();
+  submit();
+  assert.deepEqual(state(), [['false', 'histAxisUnit'], ['true', 'histAxisUnit histAxisError']]);
+  on.get('axis:click')({ target: { closest: () => document.querySelector('#histAxis [data-axis="auto"]') } });
+  assert.deepEqual(state(), [['false', 'histAxisUnit'], ['false', 'histAxisUnit']]);
+});
+
+test('JOED-154 fix 4: the History tools take no CSS order, so Tab follows what the eye sees; a phone shows Follow between the desks and Change | Money, as in the page', () => {
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /hist-tools|hist-view|hist-follow|histDesks|histFollow|histMeasure|histRange/.test(selector));
+  assert.ok(rules.length > 4);
+  assert.deepEqual(rules.filter(([, , body]) => /(^|[\s;])order\s*:/.test(body)).map(([selector]) => selector.trim()), [], 'no rule reorders them');
+  const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  const ids = [], walk = node => { for (const child of node.children) if (typeof child !== 'string') { if (['histDesks', 'histFollowPhone', 'histMeasure', 'histRange', 'histFollow'].includes(child.id)) ids.push(child.id); walk(child); } };
+  walk(doc.querySelector('.hist-tools'));
+  assert.deepEqual(ids, ['histDesks', 'histFollowPhone', 'histMeasure', 'histRange', 'histFollow'], 'page order: desks, Follow (phone), Change | Money, presets, Follow (wider)');
+  assert.ok(['#histFollowPhone', '#histFollow'].every(id => doc.querySelector(id).getAttribute('data-follow') !== null), 'both are the one Follow toggle');
+  // Which copy shows: the phone one only at 480 px or less, the other above.
+  assert.match(css, /\.hist-follow-phone \{ display: none; \}/);
+  const phone = css.slice(css.indexOf('@media (max-width: 480px) {\n  .hist-tools { gap: 8px; }'));
+  assert.match(phone.slice(0, phone.indexOf('\n}')), /\.hist-view > \.grow, #histFollow \{ display: none; \}[\s\S]*\.hist-follow-phone \{ display: inline-flex;/);
 });
 
 test('history: basis breaks exclude older records and compare stays on observed, compatible points', () => {

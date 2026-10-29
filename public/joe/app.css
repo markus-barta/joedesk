@@ -455,8 +455,13 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .hist-mini[data-off] .mini-win, .hist-mini[data-off] .mini-h { visibility: hidden; }
 .hint-touch { display: none; }
 @media (pointer: coarse) { .hint-fine { display: none; } .hint-touch { display: inline; } }
-/* Desks and Change | Money on the left, the presets and Follow on the right. */
-.hist-tools > .grow { flex: 1; }
+/* Desks and Change | Money on the left, the presets and Follow on the right.
+   The view group is part of the one row (display: contents) until a phone
+   gives it a row of its own; Follow has a phone copy after the desks, so the
+   Tab order is the visual order at every width, with no CSS order. */
+.hist-view { display: contents; }
+.hist-view > .grow { flex: 1; }
+.hist-follow-phone { display: none; }
 /* The comparison keeps the height of the longest line its measure can write
    (an invisible copy under it), so presets, desks and the window move nothing. */
 .hist-compare { display: grid; }
@@ -494,11 +499,10 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
    row, so the chart starts higher (the narrowest screens wrap instead). */
 @media (max-width: 480px) {
   .hist-tools { gap: 8px; }
-  .hist-tools > .grow { display: none; }
-  #histDesks { order: 1; }
-  #histFollow { order: 2; margin-left: auto; padding: 0 10px; }
-  #histMeasure { order: 3; }
-  #histRange { order: 4; flex: 1 1 0; }
+  .hist-view { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  .hist-view > .grow, #histFollow { display: none; }
+  .hist-follow-phone { display: inline-flex; margin-left: auto; padding: 0 10px; }
+  #histRange { flex: 1 1 0; }
   #histMeasure button { padding: 0 8px; }
   #histRange button { flex: 1 1 auto; padding: 0 6px; }
   .ctl-list { grid-template-columns: minmax(0, 1fr); gap: 0; }

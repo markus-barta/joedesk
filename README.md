@@ -942,7 +942,9 @@ The vertical axis is a choice of the shared chart component (`chart.js`):
 loaded, so moving never rescales it (in Change: the largest fall and rise
 from any kept value to a later one); **Custom** takes a bottom and a top in
 euros of the current measure (a point or a comma, no grouping), says
-"Custom axis" on the chart and names values beyond it. The choice is kept per
+"Custom axis" on the chart and names values beyond it; no dot is ever drawn
+off the plot, and a newest value beyond the axis is a small chevron at the
+edge it lies past. The choice is kept per
 chart and viewer in this browser (`createAxisMode(id)`: `get()` and
 `setAxisMode({ mode, min, max })`, which returns `{ ok, choice }` or
 `{ ok: false, field, error }`; `drawChart` takes it as `axis`, with
@@ -950,14 +952,21 @@ chart and viewer in this browser (`createAxisMode(id)`: `get()` and
 `axis` every chart draws as before). History keeps one choice per measure
 (`history.change`, `history.money`); the account chart (JOED-156) and the
 Results chart can adopt it with their own ids. Every label on History's axes
-and strip keeps at least 56 px from the next, at every width. **Controls**,
+and strip keeps at least 56 px from the next as drawn (to a tenth of a
+pixel), at every width: ticks sit on whole cents, a label never repeats, and
+a range too small for two ticks is labelled at its bounds. Money labels on a
+2,5 step keep their decimal on every chart: before JOED-154 such a step
+printed whole euros, so Desk's day chart and the Results curve labelled the
+2,5 and 7,5 lines "3" and "8". **Controls**,
 one small button under the strip, opens the gestures and keys and the
 vertical axis; the button again, Escape (focus returns to it) or a click
 outside closes it. A first-visit hint ("Drag or swipe to move · ⌘/Ctrl-scroll
 or pinch to zoom"; on touch screens "Swipe · pinch · double-tap") goes after
 the first drag, swipe, zoom or key and stays gone; its room stays, so nothing
 moves. On a phone (480 px or less) Change | Money and the presets share one
-row under the desks and Follow, so the chart starts higher. Within a measure
+row under the desks and Follow, so the chart starts higher. Tab follows what
+the eye sees at every width: Follow has a phone copy after the desks (one
+toggle, `data-follow`), no CSS reorders the tools. Within a measure
 nothing moves: the comparison keeps the height of the longest line its
 measure can write. Node tests: `test/chart-axis.mjs`, `test/history-view.mjs`,
 `test/ui-modules.mjs`; browser checks: `historyDesignChecks` in

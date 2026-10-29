@@ -13,7 +13,7 @@
 import { waitFor, load } from './shots.mjs';
 
 const MOD = { Alt: 1, Ctrl: 2, Meta: 4, Shift: 8 };
-const CODE = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Home: 36, End: 35, PageUp: 33, PageDown: 34, '+': 187, '-': 189, 0: 48 };
+const CODE = { ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Home: 36, End: 35, PageUp: 33, PageDown: 34, Tab: 9, Escape: 27, '+': 187, '-': 189, 0: 48 };
 const KEY_CODE = { '+': 'Equal', '-': 'Minus', 0: 'Digit0' };
 export async function press(page, key, modifiers = 0) {
   const text = key.length === 1 ? { text: key } : {};
@@ -90,7 +90,7 @@ export async function historyControlChecks({ page, viewport, theme, check, settl
 
   // No layout shift within a measure (JOED-154: Change and Money each keep
   // their own heights): presets and desk switches move nothing around them.
-  const SHIFT = ['.hist-tools', '#histMeasure', '#histRange', '#histFollow', '.hcard', '#histChart', '#histCompare', '#histMini', '.hist-foot', '#histCtl', '.hist-help', '.hist-cols', 'footer.foot'];
+  const SHIFT = ['.hist-tools', '#histMeasure', '#histRange', '#histFollow', '#histFollowPhone', '.hcard', '#histChart', '#histCompare', '#histMini', '.hist-foot', '#histCtl', '.hist-help', '.hist-cols', 'footer.foot'];
   for (const measure of ['change', 'money']) {
     await page.evaluate(`document.querySelector('#histMeasure [data-measure="${measure}"]').click()`);
     await settle(page);
@@ -301,7 +301,8 @@ export async function historyControlChecks({ page, viewport, theme, check, settl
     await settle(page);
     const fit = await page.evaluate(`(() => {
       const r = el => el.getBoundingClientRect(), inside = el => r(el).left >= -0.5 && r(el).right <= document.documentElement.clientWidth + 0.5;
-      const targets = [...document.querySelectorAll('#histMeasure button, #histRange button, #histFollow, #histCtl, #histMini [data-edge]')].map(el => ({ id: el.dataset.measure ?? el.dataset.range ?? el.dataset.edge ?? el.id, w: r(el).width, h: r(el).height, inside: inside(el) }));
+      // Follow is the copy this width shows (index.html: one before Change | Money on a phone).
+      const targets = [...document.querySelectorAll('#histMeasure button, #histRange button, [data-follow], #histCtl, #histMini [data-edge]')].filter(el => el.getClientRects().length).map(el => ({ id: el.dataset.measure ?? el.dataset.range ?? el.dataset.edge ?? el.id, w: r(el).width, h: r(el).height, inside: inside(el) }));
       const win = document.getElementById('histWin'), after = getComputedStyle(win, '::after'), inset = k => parseFloat(after[k]) || 0;
       return { scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth, targets,
         win: { w: r(win).width - inset('left') - inset('right'), h: r(win).height - inset('top') - inset('bottom') }, strip: inside(document.getElementById('histMini')) };
@@ -388,7 +389,18 @@ const LABELS = `(() => {
   const sorted = list => list.slice().sort((a, b) => a - b), apart = list => sorted(list).slice(1).map((v, i) => v - sorted(list)[i]);
   return { y: apart(y), x: apart(x), strip: apart(strip), counts: [y.length, x.length, strip.length] };
 })()`;
-const ROWS = `(() => { const r = id => document.getElementById(id).getBoundingClientRect(); return { desks: r('histDesks').top, follow: r('histFollow').top, measure: r('histMeasure').top, range: r('histRange').top, chart: r('histChart').top }; })()`;
+const ROWS = `(() => { const r = id => document.getElementById(id).getBoundingClientRect(); return { desks: r('histDesks').top, follow: r('histFollowPhone').top, wideFollow: r('histFollow').width, measure: r('histMeasure').top, range: r('histRange').top, chart: r('histChart').top }; })()`;
+// The History tools as the eye reads them (row by row, then left to right)
+// and the one Tab is on; the key names a control by what it does.
+const TOOL_KEY = `el => !el ? null : el.dataset.hdesk ? 'desk:' + el.dataset.hdesk : el.dataset.measure ? 'show:' + el.dataset.measure : el.dataset.range ? 'range:' + el.dataset.range : el.id`;
+const TOOLS = `(() => {
+  const key = ${TOOL_KEY}, list = [...document.querySelectorAll('.hist-tools button')].filter(el => el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden');
+  const boxes = list.map(el => ({ key: key(el), top: el.getBoundingClientRect().top, left: el.getBoundingClientRect().left })).sort((a, b) => a.top - b.top);
+  let row = 0, rowTop = boxes[0]?.top ?? 0;
+  for (const b of boxes) { if (b.top - rowTop > 12) { row++; rowTop = b.top; } b.row = row; }
+  return { visual: boxes.sort((a, b) => a.row - b.row || a.left - b.left).map(b => b.key), rows: row + 1, first: key(list[0]) };
+})()`;
+const FOCUSED_TOOL = `(${TOOL_KEY})(document.activeElement?.closest('.hist-tools') ? document.activeElement : null)`;
 
 export async function historyDesignChecks({ page, viewport, theme, check, settle, rects, moves }) {
   const tag = `${viewport.name} ${theme} history design`;
@@ -434,8 +446,16 @@ export async function historyDesignChecks({ page, viewport, theme, check, settle
   if (viewport.mobile) {
     const rows = await page.evaluate(ROWS);
     check('JOED-154', `${tag}: on a phone Change | Money and the presets share one row, under the desks and Follow`, Math.abs(rows.measure - rows.range) <= 0.5 &&
-      rows.measure > rows.desks + 20 && Math.abs(rows.follow - rows.desks) <= 8 && rows.chart > rows.range, rows);
+      rows.measure > rows.desks + 20 && Math.abs(rows.follow - rows.desks) <= 8 && rows.wideFollow === 0 && rows.chart > rows.range, rows);
   }
+  // Tab walks the tools in the order the eye reads them, row by row.
+  const tools = await page.evaluate(TOOLS), walked = [];
+  await page.evaluate(`document.querySelector('.hist-tools button').focus()`);
+  walked.push(await page.evaluate(FOCUSED_TOOL));
+  for (let i = 1; i < tools.visual.length; i++) { await press(page, 'Tab'); walked.push(await page.evaluate(FOCUSED_TOOL)); }
+  check('JOED-154', `${tag}: Tab walks Desks, Follow, Change | Money and the presets in the order they are seen`, walked.join() === tools.visual.join() &&
+    tools.visual.includes('show:change') && tools.visual.filter(k => /^histFollow/.test(k)).length === 1 && (!viewport.mobile || tools.visual.indexOf('histFollowPhone') < tools.visual.indexOf('show:change')), { walked, visual: tools.visual, rows: tools.rows });
+  await page.evaluate('document.activeElement?.blur()');
 
   // Controls: the button opens the keys and the axis; Escape closes and
   // gives focus back, so does a click outside; nothing widens the page.

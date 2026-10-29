@@ -8,7 +8,7 @@ import { esc, amountOf, eur, age, dayDDM, dayDM, timeHM, money, digits, MINUS, N
 import { decimalUnits } from './contracts/decimal.mjs';
 import { cellReason } from './health.js';
 import { exactCell } from './performance.js';
-import { drawChart, eurAxis, changeAxis, axis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor, createAxisMode, chartHintSeen, dismissChartHint } from './chart.js';
+import { drawChart, eurAxis, changeAxis, axis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor, createAxisMode, chartHintSeen, dismissChartHint, DRAWN_SLACK } from './chart.js';
 import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, coverageUnknownAt, sharedWindowCompare, basisNotice, toColumns, rowAt, rangeSpanMs,
   keptRange, placeWindow, panWindow, zoomWindow, resizeWindow, atLiveEdge, endsAtNewest, followWindow, presetSpan, windowPreset, resolveView,
   missingBands, easeOut, lerpWindow, toStrip, fromStrip, parseHistoryRoute, historyRouteQuery, changeExtremes } from './history-model.js';
@@ -187,8 +187,10 @@ const dayWord = at => dayDDM(new Date(at).toISOString()).split(NB)[0];
 // window that starts during a day names that day at its left edge ("Wed 28"
 // before the midnight line marked "Thu 29"). Steps are planned from the
 // average pixels per minute; a last pass drops any label a short day (the
-// spring clock change) or the left-edge date brings closer than `gap`.
-function axisLabels(x0, x1, pw, gap = 56) {
+// spring clock change) or the left-edge date brings closer than `gap`. The
+// gap includes chart.js's DRAWN_SLACK, so labels drawn to a tenth of a pixel
+// stay 56 px apart.
+function axisLabels(x0, x1, pw, gap = 56 + DRAWN_SLACK) {
   const span = x1 - x0, perMin = pw / (span / 60e3) || 0;
   const stepMin = [5, 10, 15, 30, 60, 120, 180, 360, 720].find(s => s * perMin >= gap);
   const labels = [];
@@ -462,12 +464,12 @@ function overviewSvg(m, range, gaps, bands, width, height) {
   let g = bands.length ? '<defs><pattern id="ht-mini" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="var(--line-2)" stroke-width="1.2"/></pattern></defs>' : '';
   for (const [a, b] of bands) g += `<rect x="${X(a)}" y="0" width="${Math.max(1, toStrip(range, width, b) - toStrip(range, width, a)).toFixed(1)}" height="${bottom + 3}" fill="url(#ht-mini)"/>`;
   const days = wallTicks(k0, k1, 1440), every = [1, 2, 4, 7, 14].find(n => n * DAY / (k1 - k0) * width >= 56) ?? 14;
-  // Day labels keep 56 px apart, also across a 23-hour day.
+  // Day labels keep 56 px apart as drawn, also across a 23-hour day.
   let labelled = -Infinity;
   days.forEach((t, i) => {
     g += `<line x1="${X(t.at)}" x2="${X(t.at)}" y1="0" y2="${bottom + 3}" stroke="var(--line)"/>`;
     const at = toStrip(range, width, t.at);
-    if (i % every === 0 && at < width - 34 && at - labelled >= 56) { g += `<text x="${(at + 3).toFixed(1)}" y="${height - 4}">${esc(dayWord(t.at))}</text>`; labelled = at; }
+    if (i % every === 0 && at < width - 34 && at - labelled >= 56 + DRAWN_SLACK) { g += `<text x="${(at + 3).toFixed(1)}" y="${height - 4}">${esc(dayWord(t.at))}</text>`; labelled = at; }
   });
   gaps.forEach(list => { for (const s of list) g += `<path d="M${X(s[0].x)} ${Y(s[0].y)} L${X(s[s.length - 1].x)} ${Y(s[s.length - 1].y)}" fill="none" stroke="var(--est)" stroke-width="1" stroke-dasharray="3 3"/>`; });
   m.models.forEach((d, i) => {
@@ -764,6 +766,13 @@ const AXIS_NOTE = {
 };
 const typedBound = n => `${n < 0 ? MINUS : ''}${String(Math.abs(n)).replace('.', ',')}`;
 const axisShown = { key: null };
+// A field's validation state: invalid fields name the error, valid ones only
+// the unit. Set on every check, whatever has focus.
+function markBound(field, invalid) {
+  if (!field) return;
+  field.setAttribute('aria-invalid', String(invalid));
+  field.setAttribute('aria-describedby', invalid ? 'histAxisUnit histAxisError' : 'histAxisUnit');
+}
 function syncAxisControls(force = false) {
   const choice = historyAxis().get(), pop = $('#histControls');
   if (!pop) return;
@@ -779,7 +788,8 @@ function syncAxisControls(force = false) {
   axisShown.key = key;
   for (const [id, value] of [['#histAxisMin', choice.min], ['#histAxisMax', choice.max]]) {
     const field = $(id);
-    if (field && document.activeElement !== field) { field.value = choice.mode === 'custom' ? typedBound(value) : ''; field.setAttribute('aria-invalid', 'false'); }
+    markBound(field, false);
+    if (field && document.activeElement !== field) field.value = choice.mode === 'custom' ? typedBound(value) : '';
   }
   setText($('#histAxisError'), '');
 }
@@ -823,13 +833,14 @@ export function initHistoryControls({ schedule }) {
     const min = $('#histAxisMin'), max = $('#histAxisMax');
     const result = historyAxis().setAxisMode({ mode: 'custom', min: min.value, max: max.value });
     if (!result.ok) {
-      min.setAttribute('aria-invalid', String(result.field === 'min'));
-      max.setAttribute('aria-invalid', String(result.field === 'max'));
+      markBound(min, result.field === 'min');
+      markBound(max, result.field === 'max');
       setText($('#histAxisError'), result.error);
       (result.field === 'min' ? min : max).focus();
       return;
     }
-    // The fields show the bounds as read, the focused one included.
+    // Both fields are valid again and show the bounds as read, the focused one included.
+    for (const field of [min, max]) markBound(field, false);
     min.value = typedBound(result.choice.min); max.value = typedBound(result.choice.max);
     applied();
   });
@@ -923,8 +934,7 @@ export function renderHistory(ctx) {
     setText($('#histThin'), '');
   }
   for (const b of $$('#histRange button')) setAttrs(b, { 'aria-pressed': b.dataset.range === pressed });
-  const follow = $('#histFollow');
-  if (follow) setAttrs(follow, { 'aria-pressed': HS.follow });
+  for (const follow of $$('[data-follow]')) setAttrs(follow, { 'aria-pressed': HS.follow });
   patch($('#jAcct'), bookkeepingHtml(ctx));
   patch($('#events'), eventsHtml(ctx));
   return { redraw: moved };
