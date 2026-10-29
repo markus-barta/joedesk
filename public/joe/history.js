@@ -491,7 +491,7 @@ export function initHistoryInput({ schedule }) {
   // Mouse and pen: drag pans after 3 px, double-click shows everything kept.
   // Touch: a clear sideways swipe pans (a vertical one scrolls the page), two
   // fingers pinch and pan, a tap or a long press inspects, a double tap fits.
-  input.blocksTip = () => Boolean(input.drag?.moved || (input.touch && input.touch.mode !== 'scrub'));
+  input.blocksTip = () => Boolean(input.drag?.moved || (input.touch && input.touch.phase !== 'scrub'));
   chart.addEventListener('pointerdown', e => {
     if (!HS.shown || e.target.closest('.hist-status')) return;
     const start = current();
@@ -504,13 +504,13 @@ export function initHistoryInput({ schedule }) {
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     clearTimeout(input.touch?.timer);
     if (touches.size === 1) {
-      const t = { mode: 'pending', id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, down: e.timeStamp, start, perPx: perPx() };
-      t.timer = setTimeout(() => { if (input.touch === t && t.mode === 'pending') { t.mode = 'scrub'; input.pinned = true; lastScale?.inspectAt(t.lastX); } }, 350);
+      const t = { phase: 'pending', id: e.pointerId, x: e.clientX, y: e.clientY, lastX: e.clientX, down: e.timeStamp, start, perPx: perPx() };
+      t.timer = setTimeout(() => { if (input.touch === t && t.phase === 'pending') { t.phase = 'scrub'; input.pinned = true; lastScale?.inspectAt(t.lastX); } }, 350);
       input.touch = t;
     } else if (touches.size === 2) {
       const [p, q] = [...touches.values()], mid = (p.x + q.x) / 2;
       unpin();
-      input.touch = { mode: 'pinch', start, spread: Math.max(24, Math.abs(p.x - q.x)), mid, at: chartTime(mid, start), perPx: perPx() };
+      input.touch = { phase: 'pinch', start, spread: Math.max(24, Math.abs(p.x - q.x)), mid, at: chartTime(mid, start), perPx: perPx() };
     }
   });
   chart.addEventListener('pointermove', e => {
@@ -525,7 +525,7 @@ export function initHistoryInput({ schedule }) {
     if (!touches.has(e.pointerId) || !input.touch) return;
     touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const t = input.touch;
-    if (t.mode === 'pinch') {
+    if (t.phase === 'pinch') {
       if (touches.size !== 2) return;
       const [p, q] = [...touches.values()], spread = Math.max(24, Math.abs(p.x - q.x)), mid = (p.x + q.x) / 2;
       const zoomed = zoomWindow(HS.full, t.start, t.spread / spread, t.at);
@@ -535,15 +535,15 @@ export function initHistoryInput({ schedule }) {
     if (t.id !== e.pointerId) return;
     t.lastX = e.clientX;
     const dx = e.clientX - t.x, dy = e.clientY - t.y;
-    if (t.mode === 'pending') {
+    if (t.phase === 'pending') {
       if (Math.hypot(dx, dy) < 8) return;
       clearTimeout(t.timer);
-      if (Math.abs(dx) <= Math.abs(dy)) { t.mode = 'page'; return; }
+      if (Math.abs(dx) <= Math.abs(dy)) { t.phase = 'page'; return; }
       unpin();
-      t.mode = canPan() ? 'pan' : 'scrub';
-      if (t.mode === 'scrub') input.pinned = true;
+      t.phase = canPan() ? 'pan' : 'scrub';
+      if (t.phase === 'scrub') input.pinned = true;
     }
-    if (t.mode === 'pan') setView(panWindow(HS.full, t.start, -dx * t.perPx));
+    if (t.phase === 'pan') setView(panWindow(HS.full, t.start, -dx * t.perPx));
   });
   // Fingers are tracked by id. Whichever lifts last ends the gesture, pinch or
   // swipe, so none of its state outlives it and a mouse or pen inspects again.
@@ -554,11 +554,11 @@ export function initHistoryInput({ schedule }) {
     if (!touches.size) input.touch = null;
     if (!t) return;
     clearTimeout(t.timer);
-    if (t.mode === 'pinch' || t.mode === 'done') { if (touches.size) t.mode = 'done'; return; }
+    if (t.phase === 'pinch' || t.phase === 'done') { if (touches.size) t.phase = 'done'; return; }
     if (t.id !== e.pointerId) return;
     input.touch = null;
     if (e.type === 'pointercancel') { unpin(); return; }
-    if (t.mode !== 'pending' || e.timeStamp - t.down > 300) return;
+    if (t.phase !== 'pending' || e.timeStamp - t.down > 300) return;
     const tap = input.lastTap;
     if (tap && e.timeStamp - tap.at < 300 && Math.abs(e.clientX - tap.x) < 24) { input.lastTap = null; unpin(); fitAll(); return; }
     input.lastTap = { at: e.timeStamp, x: e.clientX };
