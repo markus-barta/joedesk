@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync, writeFileSync, statSync, readdirSync } from 'node:fs';
+import fs from 'node:fs';
+import { readFileSync, writeFileSync, statSync, readdirSync, renameSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
@@ -326,6 +327,66 @@ for (const [name, format, cap] of [
 ]) {
   const series = model => name.startsWith('account-closes') ? model.accountHistory().dailyCloses : model.accountHistory();
   const length = view => (view.days ?? view.points).length;
+  test(`${name}: transient reads preserve the file and retry before appending`, t => {
+    for (const suffix of ['', '.discontinuity.json']) for (const code of ['EMFILE', 'EIO', 'EACCES']) {
+      const { dataDir, model } = setup(t), file = join(dataDir, name);
+      model.accept(snapshot());
+      const before = readFileSync(file, 'utf8');
+      const open = fs.openSync;
+      let fail = true;
+      const mocked = t.mock.method(fs, 'openSync', function(target, ...args) {
+        if (target === file + suffix && fail) throw Object.assign(new Error('synthetic read failure'), { code });
+        return open.call(this, target, ...args);
+      });
+      try {
+        const restarted = createReadModel({ dataDir, clock: () => at(1) });
+        assert.equal(series(restarted).reason, 'history_write_failed');
+        assert.equal(restarted.accept(snapshot(102, at(1))).status, 200);
+        fail = false;
+        assert.equal(readFileSync(file, 'utf8'), before);
+        assert.ok(!readdirSync(dataDir).some(n => n.startsWith(name + '.')));
+        assert.equal(restarted.accept(snapshot(103, at(2))).status, 200);
+        assert.equal(series(restarted).reason, null);
+        assert.equal(length(series(restarted)), 2);
+        const stored = JSON.parse(readFileSync(file)).value;
+        assert.deepEqual((stored.days ?? stored.points)[0], (JSON.parse(before).value.days ?? JSON.parse(before).value.points)[0]);
+        assert.equal(series(restarted).discontinuity, undefined);
+      } finally { mocked.mock.restore(); }
+    }
+  });
+
+  test(`${name}: invalid recovery journals stay read-only until an operator restores them`, t => {
+    for (const body of ['{', JSON.stringify({ invalid: true })]) {
+      const { dataDir, model } = setup(t), file = join(dataDir, name), journal = `${file}.discontinuity.json`;
+      model.accept(snapshot());
+      const before = readFileSync(file, 'utf8');
+      writeFileSync(journal, body);
+      const restarted = createReadModel({ dataDir, clock: () => at(1) });
+      assert.equal(series(restarted).reason, 'contract_invalid');
+      assert.equal(restarted.accept(snapshot(102, at(1))).status, 200);
+      assert.equal(readFileSync(file, 'utf8'), before);
+      assert.equal(readFileSync(journal, 'utf8'), body);
+    }
+  });
+
+  test(`${name}: a later corruption receives a new loss timestamp and preserved name`, t => {
+    const { dataDir } = setup(t), file = join(dataDir, name);
+    writeFileSync(file, '{');
+    const first = createReadModel({ dataDir, clock: () => T0 });
+    first.accept(snapshot());
+    const old = series(first).discontinuity;
+    // Simulate an operator retiring the preserved copy while retaining the journal.
+    renameSync(join(dataDir, old.preservedAs), join(dataDir, 'retired-damaged-copy'));
+    writeFileSync(file, '{second corruption');
+    const second = createReadModel({ dataDir, clock: () => at(1) });
+    second.accept(snapshot(102, at(1)));
+    const marker = series(second).discontinuity;
+    assert.equal(marker.at, at(1));
+    assert.notEqual(marker.preservedAs, old.preservedAs);
+    assert.equal(readFileSync(join(dataDir, marker.preservedAs), 'utf8'), '{second corruption');
+    assert.deepEqual(series(createReadModel({ dataDir, clock: () => at(2) })).discontinuity, marker);
+  });
+
   test(`${name}: damaged bytes survive the next write and discontinuity survives restart`, t => {
     for (const body of [null, '{', JSON.stringify({ format: 'wrong' }),
       JSON.stringify({ format, value: { invalid: true } }), ' '.repeat(cap + 1)]) {

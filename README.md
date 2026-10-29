@@ -867,6 +867,9 @@ Desk `history-state.json` stays byte-compatible v2: its fields, compaction timin
 and `sizeBytes` remain desk-only. Authenticated GET-only
 `/joe/account-history.json` exposes the account points and independent daily
 closes. Each of the three stores writes independently in the snapshot step.
+Account points preserve the same accepted producer timestamps as desk points;
+both envelopes use server receipt time. The contract's shared five-second
+producer-skew tolerance applies without clamping point timestamps.
 
 `account-closes-state.json` stores the last exact value of each field per
 **Vienna calendar day**, using the broker's observation time and separate
@@ -882,7 +885,15 @@ Damaged/oversized/unknown-format bytes are atomically preserved as
 `discontinuity: {at, reason, preservedAs}` keeps `contract_invalid` visible
 after recovery and restart; a bounded `<filename>.discontinuity.json` journal
 protects the rename/replacement interruption window. Future versions remain
-untouched and read-only with `store_version_unsupported`. Store failures are
+untouched and read-only with `store_version_unsupported`. Temporary file or
+journal read errors leave bytes in place, report `history_write_failed`, and
+retry the load before appending. Invalid journals keep the affected store
+read-only with `contract_invalid`. Loss markers never expire automatically;
+each later corruption gets a new timestamp/name. To recover a journal or
+acknowledge a loss, stop the server and retain a complete backup, then restore
+a matching valid store/journal pair, or clear the valid envelope's
+`discontinuity` and retire its journal together. Restart and verify the series;
+acknowledgment does not reconstruct missing data. Store failures are
 independent. See [the History contract](docs/joe-history-contract.md) for
 stored shapes, recovery, retention and the endpoint. No pusher contract or
 chart UI changes are part of this recording work.
