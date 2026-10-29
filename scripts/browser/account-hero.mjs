@@ -3,7 +3,8 @@
 // the screen; the value, its change for the range, Since start, Cash and the
 // kept holdings each in its own currency; the seven ranges on their own
 // stores; an honest note where a range is longer than the record; the
-// tooltip and the keyboard reading; History's natural input; Controls; the
+// tooltip and the keyboard reading; History's natural input; Controls with
+// the vertical axis (Auto · Max · Custom); the
 // first-visit hint, remembered; on wider screens the overview strip, on a
 // phone Account details and no strip. A range change moves nothing.
 // The page runs with reduced motion (configure), so every jump lands at once.
@@ -126,6 +127,43 @@ export async function accountHeroChecks({ page, viewport, theme, check, settle, 
     pop.open && pop.expanded === 'true' && pop.fine === !viewport.mobile && pop.touch === viewport.mobile &&
     (viewport.mobile ? /Swipe sideways/.test(pop.text) && !/scroll sideways/.test(pop.text) : /scroll sideways/.test(pop.text) && /(Ctrl|⌘) \+ scroll/.test(pop.text) && !/Swipe sideways/.test(pop.text)) &&
     !closed.open && closed.focused === 'acctCtl', { pop, closed });
+  await page.evaluate('document.activeElement?.blur()');
+
+  // The vertical axis in Controls, JOED-154's (one choice for this chart, 'account'):
+  // Max holds everything loaded while the window changes, Custom starts from
+  // the axis on screen and takes the viewer's bounds (an unreadable one is
+  // refused with its reason), Auto re-fits and forgets the stored choice.
+  const AXIS = `(() => { const svg = document.querySelector('#acctChart > svg'), field = id => document.getElementById(id);
+    return { axis: svg?.dataset.axis ?? null, ylo: Number(svg?.dataset.ylo), yhi: Number(svg?.dataset.yhi), note: Boolean(svg?.querySelector('[data-axis-note]')),
+      pressed: [...document.querySelectorAll('#acctAxis [data-axis]')].filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.axis),
+      form: Boolean(field('acctAxisForm')) && !field('acctAxisForm').hidden, min: field('acctAxisMin')?.value ?? null, max: field('acctAxisMax')?.value ?? null,
+      error: field('acctAxisError')?.textContent ?? '', invalid: field('acctAxisMin')?.getAttribute('aria-invalid') ?? null,
+      saved: (() => { try { return JSON.parse(localStorage.getItem('joe-board-chart-axes-v1') ?? '{}').account ?? null; } catch { return 'unavailable'; } })() }; })()`;
+  const axisChoose = async mode => { await page.evaluate(`document.querySelector('#acctAxis [data-axis="${mode}"]').click()`); await settle(page); return page.evaluate(AXIS); };
+  const axisSubmit = async (lo, hi) => { await page.evaluate(`(() => { document.getElementById('acctAxisMin').value = ${JSON.stringify(lo)}; document.getElementById('acctAxisMax').value = ${JSON.stringify(hi)}; document.getElementById('acctAxisForm').requestSubmit(); })()`); await settle(page); return page.evaluate(AXIS); };
+  const bound = text => Number(String(text).replace('−', '-').replace(',', '.'));
+  await page.evaluate(`document.getElementById('acctCtl').click()`);
+  await settle(page);
+  const held = await axisChoose('max');
+  await page.evaluate(`document.querySelector('#acctRanges [data-acct-range="6M"]').click()`);
+  await settle(page);
+  const wider = await page.evaluate(AXIS);
+  await page.evaluate(`document.querySelector('#acctRanges [data-acct-range="1M"]').click()`);
+  await settle(page);
+  check('JOED-156', `${tag}: Max holds everything loaded while the window changes, remembered for this chart`, held.axis === 'max' && held.pressed.join() === 'max' &&
+    wider.axis === 'max' && wider.ylo === held.ylo && wider.yhi === held.yhi && held.saved?.mode === 'max', { held, wider });
+  let axis = await axisChoose('custom');
+  check('JOED-156', `${tag}: Custom starts from the axis on screen`, axis.axis === 'custom' && axis.form && axis.ylo === bound(axis.min) && axis.yhi === bound(axis.max) && axis.note, axis);
+  axis = await axisSubmit('30000', '33000,5');
+  check('JOED-156', `${tag}: Custom draws exactly the viewer's bottom and top, in euros`, axis.axis === 'custom' && axis.ylo === 30000 && axis.yhi === 33000.5 && !axis.error &&
+    axis.saved?.min === 30000 && axis.saved?.max === 33000.5, axis);
+  axis = await axisSubmit('30.000', '33000');
+  check('JOED-156', `${tag}: an unreadable bound is refused with its reason, the axis unchanged`, axis.ylo === 30000 && axis.yhi === 33000.5 && axis.invalid === 'true' && /without grouping/.test(axis.error), axis);
+  axis = await axisChoose('auto');
+  check('JOED-156', `${tag}: Auto again re-fits and forgets the stored choice`, axis.axis === 'auto' && !axis.form && axis.saved === null, axis);
+  await page.evaluate(`document.getElementById('acctCtl').focus()`);
+  await press(page, 'Escape');
+  await settle(page);
   await page.evaluate('document.activeElement?.blur()');
 
   if (!viewport.mobile) {

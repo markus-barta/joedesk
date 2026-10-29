@@ -11,7 +11,7 @@ import { decimalUnits } from './contracts/decimal.mjs';
 import { cellReason, capital } from './health.js';
 import { outageValue, trustedCurrent, NOT_EXACT_REASONS } from './board-state.js';
 import { accountStart, boardSettingsState } from './board-settings.js';
-import { drawChart, axis, eurAxis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor, chartHintSeen, dismissChartHint } from './chart.js';
+import { drawChart, axis, eurAxis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor, chartHintSeen, dismissChartHint, createAxisMode } from './chart.js';
 import { panWindow, zoomWindow, placeWindow, endsAtNewest, atLiveEdge, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
 import { zonedInstant, VIENNA } from './time.mjs';
 import * as M from './account-model.js';
@@ -39,14 +39,13 @@ const startMoney = start => { const cents = Math.round(start.amountEur * 100); r
 // A plain link: the router (route.js) opens Settings at the account start.
 const settingsLink = words => `<a class="set-link" href="#settings/set-account">${words}</a>`;
 
-// TODO(JOED-154): the vertical axis (Auto · Max · Custom, remembered per
-// chart) belongs to the shared chart component, which JOED-154 builds into
-// chart.js for History. Until it lands this chart is Auto: it re-fits to the
-// window shown. Then set `axis` here (its mode and bounds, for the chart id
-// 'account'): every option in chartOptions reaches drawChart unchanged, and
-// `loaded` is the extent of everything this chart has loaded, which Max fits.
-// The axis control then joins the Controls list (see controlsHtml).
-export const chartOptions = { axis: null };
+// The vertical axis, every time chart's (JOED-154, chart.js): Auto fits the
+// shown window and glides with every move, Max holds everything loaded (the
+// store drawn: snapshots or daily closes), Custom is the viewer's own bottom
+// and top in euros. One choice for this chart, 'account', remembered per
+// viewer in this browser; Controls offers it.
+const yAxis = createAxisMode('account');
+export const accountAxis = () => yAxis;
 
 // The first-visit hint under the chart is every chart's (chart.js): shown
 // until the first drag, zoom or key on any chart, then never again in this
@@ -346,9 +345,11 @@ const spanLabel = ([a, b], source, toNow) => {
   return `${dayDM(at(a))}, ${timeHM(at(a))} – ${toNow ? 'now' : sameDay ? timeHM(at(b)) : `${dayDM(at(b))}, ${timeHM(at(b))}`}`;
 };
 
-function chartLabel(source, range) {
-  return range ? `The whole paper account, kept holdings included, ${M.RANGE_WORD[range]}, in euros`
-    : `The whole paper account, kept holdings included, zoomed: ${spanLabel(AS.shown, source, false)} Vienna time, in euros`;
+function chartLabel(source, range, choice = { mode: 'auto' }) {
+  const axisWords = choice.mode === 'max' ? '; vertical axis fixed to everything loaded'
+    : choice.mode === 'custom' ? `; custom vertical axis from ${money(choice.min, 'EUR')} to ${money(choice.max, 'EUR')}` : '';
+  return range ? `The whole paper account, kept holdings included, ${M.RANGE_WORD[range]}, in euros${axisWords}`
+    : `The whole paper account, kept holdings included, zoomed: ${spanLabel(AS.shown, source, false)} Vienna time, in euros${axisWords}`;
 }
 function draw() {
   const el = $('#acctChart');
@@ -373,13 +374,16 @@ function draw() {
   const following = AS.follow && atLiveEdge(full, [x0, x1]);
   const range = M.windowRange(full, [x0, x1], source, AS.range);
   const hitTest = x => { const p = M.pointNear(series, x); return [!p ? null : p.stands ? { ...p, gap: false } : { x, v: p.v, gap: true, why: p.why, estimated: true }]; };
-  // Auto: the values in the window, with the money charts' honest minimum span (base).
+  // Auto: the values in the window, with the money charts' honest minimum span
+  // (base); Max: every value loaded; Custom: the viewer's own bounds.
+  const choice = yAxis.get();
   last.scale = drawChart(el, {
-    ...chartOptions, loaded: ext.loaded,
+    // Max keeps one base too (the lowest value loaded), so no window rescales it.
+    axis: choice, maxValues: ext.loaded ?? null, ease: 180, easeKey: source, again: requestDraw,
     series: [{ pts, color: 'var(--accent)', w: 1.9, live: following && Boolean(series.live), area: false }],
-    xDomain: [x0, x1], base, yValues: ext.visible ?? [], margin: 0.08, yFmt: eurK, ticks, pad, bands,
+    xDomain: [x0, x1], base: choice.mode === 'max' && ext.loaded ? ext.loaded[0] : base, yValues: ext.visible ?? [], margin: 0.08, yFmt: eurK, ticks, pad, bands,
     vlines: time.lines, xLabels: time.labels, now: following ? endAt : null,
-    emptyText: 'No value recorded in this window', label: chartLabel(source, range),
+    emptyText: 'No value recorded in this window', label: chartLabel(source, range, choice),
     isPanning: () => Boolean(input.drag?.moved || (input.touch && input.touch.phase !== 'scrub')), isPinned: () => input.pinned,
     inspect: { ...inspect, points: M.observedTimes(series, [x0, x1]) },
     hitTest, tipFmt: (near, x) => pointDetails(near[0], x, series),
@@ -503,7 +507,7 @@ export function renderAccount(ctx) {
   root.dataset.history = store.value ? 'ok' : store.reason ?? 'ok';
   const el = $('#acctChart'), now = ctx.now ? Date.parse(ctx.now) : null;
   const live = M.liveObservation(ctx.states.paperAccount, ctx.feeds.data?.value);
-  const key = JSON.stringify([store.version, store.reason, live?.t, live?.amount, AS.range, AS.view, AS.follow, el?.clientWidth, el?.clientHeight, chartOptions.axis, now === null ? null : Math.floor(now / MIN), phone()]);
+  const key = JSON.stringify([store.version, store.reason, live?.t, live?.amount, AS.range, AS.view, AS.follow, el?.clientWidth, el?.clientHeight, yAxis.get(), now === null ? null : Math.floor(now / MIN), phone()]);
   if (key !== last.key || motion.from) { last.key = key; draw(); } else syncWindowParts();
 }
 
@@ -729,7 +733,85 @@ export function controlsHtml() {
   </dl><dl class="acct-keys hint-touch">
     <dt>Swipe sideways</dt><dd>move in time</dd><dt>Pinch</dt><dd>zoom</dd>
     <dt>Double-tap</dt><dd>show everything loaded</dd><dt>Tap or hold</dt><dd>read a value</dd>
-  </dl>`;
+  </dl><div class="ctl-axis">
+    <p class="ctl-h" id="acctAxisName">Vertical axis</p>
+    <div class="seg" role="group" aria-labelledby="acctAxisName" aria-describedby="acctAxisNote" id="acctAxis">
+      <button type="button" data-axis="auto" aria-pressed="true">Auto</button><button type="button" data-axis="max" aria-pressed="false">Max</button><button type="button" data-axis="custom" aria-pressed="false">Custom</button>
+    </div>
+    <p class="ctl-note" id="acctAxisNote">${AXIS_NOTE.auto}</p>
+    <form class="ctl-custom" id="acctAxisForm" novalidate hidden>
+      <label for="acctAxisMin">Bottom</label><input class="inp" id="acctAxisMin" inputmode="decimal" autocomplete="off" aria-invalid="false" aria-describedby="acctAxisUnit">
+      <label for="acctAxisMax">Top</label><input class="inp" id="acctAxisMax" inputmode="decimal" autocomplete="off" aria-invalid="false" aria-describedby="acctAxisUnit">
+      <button type="submit" class="btn">Apply</button>
+      <p class="ctl-note" id="acctAxisUnit">In euros, for example 980000 or 985000,50.</p>
+      <p class="ctl-err" id="acctAxisError" aria-live="polite"></p>
+    </form>
+  </div>`;
+}
+// The vertical axis in Controls, as on History: Auto, Max and Custom apply at
+// once; Custom starts from the axis on screen, and its bottom and top apply
+// with Enter or Apply. A bound that cannot be read is refused with its reason.
+const AXIS_NOTE = {
+  auto: 'Fits the shown window and glides with every move.',
+  max: 'Holds everything loaded, so moving never rescales.',
+  custom: 'Your own bottom and top, in euros.',
+};
+const typedBound = n => `${n < 0 ? MINUS : ''}${String(Math.abs(n)).replace('.', ',')}`;
+const axisShown = { key: null };
+function markBound(field, invalid) {
+  if (!field) return;
+  field.setAttribute('aria-invalid', String(invalid));
+  field.setAttribute('aria-describedby', invalid ? 'acctAxisUnit acctAxisError' : 'acctAxisUnit');
+}
+const axisError = text => { const error = $('#acctAxisError'); if (error && error.textContent !== text) error.textContent = text; };
+// The control follows the saved choice; the fields only when the choice
+// changes, never while the viewer is typing in them.
+function syncAxisControls(force = false) {
+  if (!$('#acctAxis')) return;
+  const choice = yAxis.get();
+  for (const b of $$('#acctAxis [data-axis]')) setAttrs(b, { 'aria-pressed': b.dataset.axis === choice.mode });
+  const note = $('#acctAxisNote');
+  if (note && note.textContent !== AXIS_NOTE[choice.mode]) note.textContent = AXIS_NOTE[choice.mode];
+  const form = $('#acctAxisForm');
+  if (form) form.hidden = choice.mode !== 'custom';
+  const key = `${choice.mode}|${choice.min}|${choice.max}`;
+  if (!force && axisShown.key === key) return;
+  axisShown.key = key;
+  for (const [id, value] of [['#acctAxisMin', choice.min], ['#acctAxisMax', choice.max]]) {
+    const field = $(id);
+    markBound(field, false);
+    if (field && document.activeElement !== field) field.value = choice.mode === 'custom' ? typedBound(value) : '';
+  }
+  axisError('');
+}
+function axisChanged() { syncAxisControls(true); last.key = null; requestDraw(); }
+export function chooseAxis(mode) {
+  if (mode !== 'custom') { yAxis.setAxisMode({ mode }); axisChanged(); return; }
+  if (yAxis.get().mode !== 'custom') {
+    // Custom starts from the axis on screen, in whole euros.
+    const shown = last.scale?.target, lo = Math.floor(shown?.lo ?? 0), hi = Math.ceil(shown?.hi ?? 1);
+    const result = yAxis.setAxisMode({ mode: 'custom', min: lo, max: hi > lo ? hi : lo + 1 });
+    if (!result.ok) { syncAxisControls(true); axisError(result.error); return; }
+  }
+  axisChanged();
+  $('#acctAxisMin')?.focus();
+}
+export function applyCustomAxis() {
+  const min = $('#acctAxisMin'), max = $('#acctAxisMax');
+  if (!min || !max) return false;
+  const result = yAxis.setAxisMode({ mode: 'custom', min: min.value, max: max.value });
+  if (!result.ok) {
+    markBound(min, result.field === 'min');
+    markBound(max, result.field === 'max');
+    axisError(result.error);
+    (result.field === 'min' ? min : max).focus();
+    return false;
+  }
+  // Both fields read again as the bounds now drawn.
+  for (const field of [min, max]) markBound(field, false);
+  min.value = typedBound(result.choice.min); max.value = typedBound(result.choice.max);
+  axisChanged();
+  return true;
 }
 function openControls(open) {
   const pop = $('#acctPop'), button = $('#acctCtl');
@@ -738,6 +820,7 @@ function openControls(open) {
     pop.innerHTML = controlsHtml();
     if (isMac()) for (const k of $$('#acctPop .mod-key')) k.textContent = '⌘';
   }
+  if (open) syncAxisControls(true);
   pop.hidden = !open;
   button.setAttribute('aria-expanded', String(open));
 }
@@ -745,6 +828,9 @@ function bindControls() {
   const button = $('#acctCtl'), pop = $('#acctPop'), foot = $('#acctHero .acct-foot');
   if (!button || !pop || !foot) return;
   button.addEventListener('click', () => openControls(pop.hidden));
+  // The vertical axis inside: its three choices and Custom's form (filled on first open).
+  pop.addEventListener('click', e => { const b = e.target?.closest?.('[data-axis]'); if (b) chooseAxis(b.dataset.axis); });
+  pop.addEventListener('submit', e => { e.preventDefault(); applyCustomAxis(); });
   // Escape, a press outside or focus leaving closes it; Escape keeps focus on Controls.
   foot.addEventListener('keydown', e => { if (e.key === 'Escape' && !pop.hidden) { e.preventDefault(); openControls(false); button.focus({ preventScroll: true }); } });
   document.addEventListener('pointerdown', e => { if (!pop.hidden && !foot.contains(e.target)) openControls(false); }, true);

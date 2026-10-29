@@ -961,8 +961,10 @@ chart and viewer in this browser (`createAxisMode(id)`: `get()` and
 `{ ok: false, field, error }`; `drawChart` takes it as `axis`, with
 `yValues`, `maxValues`, `tickGap`, `ease`, `easeKey` and `again`; without
 `axis` every chart draws as before). History keeps one choice per measure
-(`history.change`, `history.money`); the account chart (JOED-156) and the
-Results chart can adopt it with their own ids. Every label on History's axes
+(`history.change`, `history.money`); the account chart (JOED-156) keeps one
+(`account`), offered in its own Controls as on History (Max holds every value
+of the store it draws, snapshots or daily closes); the Results chart can adopt
+it with its own id. Every label on History's axes
 and strip keeps at least 56 px from the next as drawn (to a tenth of a
 pixel), at every width: ticks sit on whole cents, a label never repeats, and
 a range too small for two ticks is labelled at its bounds. Money labels on a
@@ -2140,7 +2142,8 @@ Account details (the kept holdings, the start), the ranges and a 120 px
 chart. Its link to the account start is a plain route link
 (`#settings/set-account`); its chart reads the account history in a module
 worker; its first-visit hint is every chart's (`chartHintSeen`,
-`dismissChartHint`). P3 reads the block where it read the slot: AC-9's paper
+`dismissChartHint`); its Controls offer the vertical axis (Auto · Max ·
+Custom, `createAxisMode('account')`). P3 reads the block where it read the slot: AC-9's paper
 account, AC-19's title, chip and unreported Cash, the fixtures' and journeys'
 account state and change line, the phone first screen and the outage counts;
 P5's Cash phases read its line.

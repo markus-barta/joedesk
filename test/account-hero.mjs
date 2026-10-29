@@ -9,7 +9,7 @@ import { MIN, DAY, iso, valid, words, point, SNAP, NOW, history, ctxFor } from '
 
 const M = await import('../public/joe/account-model.js');
 const A = await import('../public/joe/account.js');
-const { chartHintSeen, dismissChartHint, forgetChartMemory, CHART_HINT_KEY } = await import('../public/joe/chart.js');
+const { chartHintSeen, dismissChartHint, forgetChartMemory, createAxisMode, CHART_HINT_KEY, CHART_AXES_KEY } = await import('../public/joe/chart.js');
 
 // ---------- The hero on the real page ----------
 // The Node DOM has no events: record listeners per element and run them by hand.
@@ -25,9 +25,14 @@ function page(t, { phone = false, storage = new Map(), body: answer = history() 
     Object.assign(A.AS, { range: '1M', view: null, follow: true, details: false, full: null, shown: null });
   });
   proto.addEventListener = function (type, fn) { (this.listeners ??= {})[type] = fn; };
-  const focus = Object.getOwnPropertyDescriptor(proto, 'focus');
+  const focus = Object.getOwnPropertyDescriptor(proto, 'focus'), contains = Object.getOwnPropertyDescriptor(proto, 'contains');
   proto.focus = function () { globalThis.document.activeElement = this; };
-  t.after(() => { if (focus) Object.defineProperty(proto, 'focus', focus); else delete proto.focus; });
+  // patch() keeps focus where it is: it asks whether an element holds it.
+  proto.contains = function (node) { for (let n = node; n; n = n.parentElement) if (n === this) return true; return false; };
+  t.after(() => {
+    if (focus) Object.defineProperty(proto, 'focus', focus); else delete proto.focus;
+    if (contains) Object.defineProperty(proto, 'contains', contains); else delete proto.contains;
+  });
   globalThis.document = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
   globalThis.matchMedia = query => ({ matches: /reduce/.test(query) || (phone && /max-width: (480|700)px|coarse/.test(query)) });
   // The charts' memory (the hint, the vertical axis) is the window's storage, as on a page.
@@ -245,7 +250,7 @@ test('JOED-156 hero: on a phone the short eyebrow, one Since start · Cash line,
   assert.ok(svg && Number(svg.dataset.points) > 0, 'the chart draws at phone size');
 });
 
-test('JOED-156 hero: Controls lists the moves for this device; the chart keeps a marked hook for the shared vertical axis', async t => {
+test('JOED-156 hero: Controls lists the moves for this device and offers the vertical axis', async t => {
   const p = page(t);
   await p.render();
   const button = p.$('#acctCtl'), pop = p.$('#acctPop');
@@ -256,13 +261,78 @@ test('JOED-156 hero: Controls lists the moves for this device; the chart keeps a
   assert.match(words(pop.querySelector('.acct-keys.hint-fine').textContent), /Drag, or scroll sideways\s*move in time/);
   assert.match(words(pop.querySelector('.acct-keys.hint-touch').textContent), /Double-tap\s*show everything loaded/);
   assert.doesNotMatch(pop.innerHTML, /[←→↑↓]/, 'keys are words, never arrow glyphs');
+  // The vertical axis, as on History: three choices, Auto by default, Custom's form hidden.
+  const group = pop.querySelector('#acctAxis');
+  assert.deepEqual([group.getAttribute('role'), group.getAttribute('aria-labelledby'), group.getAttribute('aria-describedby')], ['group', 'acctAxisName', 'acctAxisNote']);
+  assert.equal(p.text('#acctAxisName'), 'Vertical axis');
+  assert.deepEqual(group.querySelectorAll('[data-axis]').map(b => [b.dataset.axis, b.textContent, b.getAttribute('aria-pressed')]),
+    [['auto', 'Auto', 'true'], ['max', 'Max', 'false'], ['custom', 'Custom', 'false']]);
+  assert.equal(p.text('#acctAxisNote'), 'Fits the shown window and glides with every move.');
+  assert.equal(pop.querySelector('#acctAxisForm').hidden, true);
   p.$('#acctHero .acct-foot').listeners.keydown({ key: 'Escape', preventDefault() {} });
   assert.equal(button.getAttribute('aria-expanded'), 'false');
   assert.equal(pop.hidden, true);
-  assert.deepEqual(Object.keys(A.chartOptions), ['axis']);
-  assert.equal(A.chartOptions.axis, null, 'Auto until the shared axis modes land');
   const source = readFileSync(new URL('../public/joe/account.js', import.meta.url), 'utf8');
-  assert.match(source, /TODO\(JOED-154\)/, 'the hook names the History phase that owns the axis modes');
+  assert.doesNotMatch(source, /TODO\(JOED-154\)|chartOptions/, 'the hook is gone: the chart uses JOED-154’s axis modes');
+  assert.match(source, /createAxisMode\('account'\)/, 'one choice for this chart');
+});
+
+test('JOED-147 merge: the account chart’s vertical axis is JOED-154’s: Auto, Max and Custom in Controls, one choice for this chart, remembered', async t => {
+  const storage = new Map();
+  const p = page(t, { storage });
+  await p.render();
+  let svg = p.svg();
+  assert.equal(svg.dataset.axis, 'auto', 'Auto by default: the month shown, with the honest minimum span');
+  p.$('#acctCtl').listeners.click();
+  const pop = p.$('#acctPop');
+  const choose = async mode => { pop.listeners.click({ target: pop.querySelector(`[data-axis="${mode}"]`) }); await p.render(); svg = p.svg(); };
+  const pressed = () => pop.querySelectorAll('#acctAxis [data-axis]').filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.axis);
+  const saved = () => JSON.parse(storage.get(CHART_AXES_KEY) ?? '{}');
+  // Max: every value loaded (forty days of closes and the value now), not only the month shown.
+  await choose('max');
+  const loaded = [...history().dailyCloses.days.map(d => Number(d.equity.amount)), 28000];
+  assert.deepEqual([svg.dataset.axis, pressed(), p.text('#acctAxisNote')], ['max', ['max'], 'Holds everything loaded, so moving never rescales.']);
+  assert.ok(Number(svg.dataset.ylo) <= Math.min(...loaded) && Number(svg.dataset.yhi) >= Math.max(...loaded), `${svg.dataset.ylo} – ${svg.dataset.yhi}`);
+  assert.match(p.chart.getAttribute('aria-label'), /vertical axis fixed to everything loaded$/);
+  const held = [svg.dataset.ylo, svg.dataset.yhi];
+  A.chooseRange('6M');
+  await p.render();
+  assert.deepEqual([p.svg().dataset.ylo, p.svg().dataset.yhi], held, 'another window, the same axis');
+  A.chooseRange('1M');
+  await p.render();
+  assert.deepEqual(saved(), { account: { mode: 'max' } });
+  // Custom starts from the axis on screen, in whole euros.
+  await choose('custom');
+  const form = pop.querySelector('#acctAxisForm'), min = pop.querySelector('#acctAxisMin'), max = pop.querySelector('#acctAxisMax');
+  assert.deepEqual([form.hidden, pressed(), document.activeElement], [false, ['custom'], min]);
+  assert.deepEqual([svg.dataset.axis, svg.dataset.ylo, svg.dataset.yhi], ['custom', min.value, max.value], 'the fields hold the bounds drawn');
+  // A bound that cannot be read is refused with its reason; nothing changes.
+  const submit = async (lo, hi) => { min.value = lo; max.value = hi; pop.listeners.submit({ preventDefault() {} }); await p.render(); svg = p.svg(); };
+  const before = [svg.dataset.ylo, svg.dataset.yhi];
+  await submit('25.000', '30000');
+  assert.deepEqual([min.getAttribute('aria-invalid'), min.getAttribute('aria-describedby')], ['true', 'acctAxisUnit acctAxisError']);
+  assert.match(p.text('#acctAxisError'), /without grouping/);
+  assert.deepEqual([svg.dataset.ylo, svg.dataset.yhi], before);
+  await submit('30000', '25000');
+  assert.equal(p.text('#acctAxisError'), 'The top must be above the bottom.');
+  assert.equal(max.getAttribute('aria-invalid'), 'true');
+  // Exactly the viewer's bottom and top, said on the chart and in its name.
+  await submit('25000', '30000,50');
+  assert.deepEqual([svg.dataset.axis, Number(svg.dataset.ylo), Number(svg.dataset.yhi), p.text('#acctAxisError')], ['custom', 25000, 30000.5, '']);
+  assert.deepEqual([min.value, max.value, min.getAttribute('aria-invalid')], ['25000', '30000,5', 'false']);
+  assert.ok(svg.querySelector('[data-axis-note]'), 'a custom axis says so on the chart');
+  assert.match(words(p.chart.getAttribute('aria-label')), /custom vertical axis from € 25\.000,00 to € 30\.000,50$/);
+  // One choice for this chart: History's stays its own.
+  assert.deepEqual(saved(), { account: { mode: 'custom', min: 25000, max: 30000.5 } });
+  assert.deepEqual(createAxisMode('history.change').get(), { mode: 'auto' });
+  // Remembered in this browser: a reload (the memory read again) keeps it.
+  forgetChartMemory();
+  assert.deepEqual(A.accountAxis().get(), { mode: 'custom', min: 25000, max: 30000.5 });
+  await p.render(ctxFor({ now: NOW + 60000 }));
+  assert.deepEqual([p.svg().dataset.axis, Number(p.svg().dataset.ylo)], ['custom', 25000]);
+  // Auto again re-fits and forgets the stored choice.
+  await choose('auto');
+  assert.deepEqual([svg.dataset.axis, form.hidden, saved()], ['auto', true, {}]);
 });
 
 test('JOED-156 hero: the chart’s input follows History: zoom at the pointer, sideways pans, a plain wheel is the page’s', async t => {
