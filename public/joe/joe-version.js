@@ -2,10 +2,23 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261028081016.0.0",
+    APP_VERSION: "261028202622.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 36,
+    RELEASE_SEQUENCE: 37,
     VERSION_HISTORY: [
+      {
+        version: "261028202622.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-28",
+        title: "Clearer states and easier history",
+        changes: [
+          "Keep last-good values tied to their original observations, even when the feed repeats old data.",
+          "Warn in the header when a desk's own numbers are stale or frozen, and describe not-exact values consistently.",
+          "Show settings outages honestly, preserve drafts, show exact capital caps, and keep saved limits if the settings file goes missing.",
+          "Show complete history tooltips and let keyboard users inspect chart points and reopen explanations.",
+          "Open trade details for every accepted company name and show very small prices instead of zero.",
+        ],
+      },
       {
         version: "261028081016.0.0",
         versionScheme: "inspr-calver-3",
