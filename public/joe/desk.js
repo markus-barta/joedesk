@@ -77,7 +77,7 @@ export function disclosureProblem(candidates) {
   const problems = candidates.flatMap(([label, cell]) => {
     // A figure's own marker (Results' Partial or Stale, the record's state, a
     // missing day's money), in its own words.
-    if (cell?.mark) return [{ tone: cell.mark.tone, icon: cell.mark.icon, priority: cell.mark.tone === 'bad' ? 3 : severity[cell.mark.tone] ?? 2,
+    if (cell?.mark) return [{ tone: cell.mark.tone, icon: cell.mark.icon, priority: cell.mark.priority ?? (cell.mark.tone === 'bad' ? 3 : severity[cell.mark.tone] ?? 2),
       why: null, reason: cell.mark.why, label: `${label}: ${cell.mark.state}` }];
     const p = statePhrase(cell, '');
     if (p.state === 'fresh') return [];
@@ -135,20 +135,27 @@ const PUSHER_STATUS = new Set(['Paper desk values are available.', 'Some paper d
 function deskProblem(ctx, id, facts = null) {
   const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
   const first = facts?.label?.phase === 'last' ? lastSessionProblems(facts.view, facts.last[id]) : [['Today', ctx.states[`desks.${id}.dayPnl`]]];
+  // The card shows Results' bars (and before the open its first figure) in
+  // every phase, so the row names the Results feed's own state in every phase:
+  // an old or kept record, or a failed read. A record that has simply not
+  // arrived yet is the bars' own note in the session; before the open it is
+  // the row's first figure, so the row says it then.
+  const feed = facts?.view ? resultsFeedProblem(facts.view) : null;
+  const sayFeed = feed && (facts.label?.phase === 'last' || feed.state !== 'not reported');
   const cells = [...first, [termLabel('open'), ctx.states[`desks.${id}.openPnl`]], [sinceLabel(sinceStarts(ctx.feeds).days[id]), ctx.states[`desks.${id}.totalPnl`]]];
   if (desk?.state === 'stuck') cells.unshift(['Desk stuck', { state: 'broken', value: null }]);
   if (desk?.learning?.status === 'blocked') cells.push(['Learning blocked', { state: 'broken', value: null }]);
   const elapsed = ctx.feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(ctx.now) - Date.parse(ctx.feeds.data.generatedAdvancedAt)) : 0;
   const heartbeat = desk?.heartbeatAt ? gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, ctx.feeds.data.value.generatedAt, elapsed) : null;
   if (desk && carriesCheckIns(ctx.feeds.data.value) && (heartbeat == null || heartbeat / 1000 >= STALE_AFTER_S)) cells.unshift(['Check-in', { state: heartbeat == null ? 'not reported' : 'stale', value: heartbeat }]);
+  if (sayFeed) cells.push(['Results', feed]);
   return disclosureProblem(cells);
 }
 // The last session's figure as row problems: the day's own Partial/Stale
-// marker (beside an amount or an empty day's dash), a day whose money is not
-// known, and, independently of both, the Results feed's own state: a rejected
-// read shows the last good record, an old record is old, a missing one is
-// missing. A dash that only states a fact (no trades, before the start, a
-// basis change) adds nothing itself.
+// marker (beside an amount or an empty day's dash) and a day whose money is
+// not known. The Results feed's own state is its own row problem (deskProblem).
+// A dash that only states a fact (no trades, before the start, a basis change)
+// adds nothing itself.
 function lastSessionProblems(view, f) {
   const out = [];
   if (!f) return out;
@@ -156,16 +163,21 @@ function lastSessionProblems(view, f) {
     out.push([termLabel('lastsession'), { mark: { state: f.warning.label.toLowerCase(), why: f.warning.text.replace(/^(Partial|Stale): /, ''), tone: 'warn', icon: 'half' } }]);
   }
   if (f.kind === 'money') out.push([termLabel('lastsession'), { mark: { state: 'unavailable', why: f.reason, tone: 'bad', icon: TONE_ICON.bad } }]);
-  const feed = resultsFeedProblem(view);
-  if (feed) out.push(['Results', feed]);
   return out;
 }
-// The Results feed's own state as a cell, or null while it is fresh and used.
+// The Results feed's own state as a row problem, or null while it is fresh
+// and used: a record kept after a rejected read is "last good", an old one
+// "stale", each with its age and reason; without a record, its reason.
 export function resultsFeedProblem(view) {
   const cell = view.cell;
+  if (view.ix) {
+    if (!cell || cell.state === 'fresh') return null;
+    const ago = cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`;
+    // A refused refresh outranks a day's marker in the row's one visible line.
+    return { mark: { state: cell.retained ? 'last good' : 'stale', why: cell.reason ? `${ago} · ${cellReason(cell.reason)}` : ago, tone: 'warn', icon: 'half', priority: cell.retained ? 3 : 2 } };
+  }
   if (!cell || cell.state === 'not reported') return { state: 'not reported', value: null, reason: view.reason ?? 'feed_not_received' };
-  if (!view.ix) return { state: 'broken', value: null, reason: view.reason ?? cell.reason ?? null };
-  return cell.state === 'fresh' ? null : cell;
+  return { state: 'broken', value: null, reason: view.reason ?? cell.reason ?? null };
 }
 // The phone's one-line desk row (JOED-79): the desk, what it is doing, its
 // first figure for the session the hero names (labelled "Today" or by the
@@ -187,10 +199,10 @@ export function compactDesk(ctx, id, facts = deskFacts(ctx)) {
   // Before the open: the last session's Results figure, with Results' marker
   // (its words are in the row's warning line, visible and in the name).
   const lastFigure = f => {
-    const mark = lastMark(facts.view, f);
-    const name = f.units === null ? lastDashName(`${LABEL[id]} · ${first.label}`, f, mark) : `${LABEL[id]} · ${first.label}: ${eur(f.units, true)}`;
+    const marks = lastMarks(facts.view, f);
+    const name = f.units === null ? lastDashName(`${LABEL[id]} · ${first.label}`, f, marks) : `${LABEL[id]} · ${first.label}: ${eur(f.units, true)}${marksText(marks)}`;
     const html = f.units === null ? `<span class="bn muted" role="img" title="${esc(name)}" aria-label="${esc(name)}">—</span>` : bn(f.units);
-    const marker = mark ? `<span class="compact-state tone-warn" role="img" aria-label="${esc(mark.label)}">${icon('half')}</span>` : '';
+    const marker = marks.length ? `<span class="compact-state tone-warn" role="img" aria-label="${esc(marks.map(m => m.label).join(', '))}">${icon('half')}</span>` : '';
     return `<span class="compact-figure" data-compact-value="dayPnl" style="--digits:${f.units === null ? 1 : eur(f.units, true).length}"><span class="compact-label">${first.short}${marker}</span>${html}</span>`;
   };
   const counts = positionCounts(ctx.states), held = facts.label?.phase === 'live' ? 'open' : 'held';
@@ -664,20 +676,25 @@ const plainText = html => html.replace(/<[^>]+>/g, '');
 // Results' record state, when it is not fresh, beside a figure taken from it.
 export const recordState = view => view.cell && view.ix && view.cell.state !== 'fresh'
   ? capital(plainText(statePhrase(view.cell, 'desk.results', 'last good results').text).replace(/^as of/, 'Results as of')) : null;
-// The one marker beside a figure from the record, wherever it is shown (hero,
-// card, phone row): Results' own Partial/Stale for that day, else the record's
-// state when it is not fresh.
-export function figureMark(view, f) {
-  if (f.warning) return f.warning;
-  const record = recordState(view);
-  return record ? { label: 'Stale', text: record } : null;
+// The Results feed's own state beside anything Desk takes from the record
+// (Last session, the last sessions' bars, the one-row claim), in every phase:
+// "Last good" after a rejected read, "Results stale" for an old record, each
+// with its age and reason. Null while the record is fresh, and without a
+// record, where Desk says Results is unavailable instead of showing data.
+export function feedMark(view) {
+  const text = recordState(view);
+  return text ? { label: view.cell.retained ? 'Last good' : 'Results stale', text } : null;
 }
-// A last-session figure's marker: beside a shown amount, and beside an empty
-// day's dash, whose "no trades recorded" a capture gap could hide trades in.
-const lastMark = (view, f) => (f.units !== null || f.kind === 'empty' ? figureMark(view, f) : null);
-// A dash's own name: its reason, then its marker's words, so a screen reader
-// hears the qualification too.
-const lastDashName = (prefix, f, mark) => `${prefix}: ${f.reason}${mark ? ` · ${mark.text}` : ''}`;
+// A last-session figure's markers: the day's own Partial/Stale (beside an
+// amount, and beside an empty day's dash, whose "no trades recorded" a
+// capture gap could hide trades in) and the feed's state. Both are said;
+// neither hides the other.
+const lastMarks = (view, f) => [f.units !== null || f.kind === 'empty' ? f.warning : null, f.kind === 'feed' ? null : feedMark(view)].filter(Boolean);
+const marksHtml = marks => marks.map(markHtml).join('');
+const marksText = marks => marks.map(m => ` · ${m.text}`).join('');
+// A dash's own name: its reason, then its markers' words, so a screen reader
+// hears the qualifications too.
+const lastDashName = (prefix, f, marks) => `${prefix}: ${f.reason}${marksText(marks)}`;
 
 // The hero's first figure (M1, A2, P0-1): Today's cell in the session and after
 // the close, read exactly as before; from New York midnight until the open,
@@ -685,15 +702,15 @@ const lastDashName = (prefix, f, mark) => `${prefix}: ${f.reason}${mark ? ` · $
 function heroFirst(ctx, facts, shared, board) {
   const { states } = ctx, data = ctx.feeds.data?.value, label = facts.label, today = facts.view.today;
   if (label?.phase === 'last') {
-    const f = facts.last.all, mark = lastMark(facts.view, f);
-    const name = f.units === null ? lastDashName(label.text, f, mark) : `${label.text}: ${eur(f.units, true)}`;
+    const f = facts.last.all, marks = lastMarks(facts.view, f);
+    const name = f.units === null ? lastDashName(label.text, f, marks) : `${label.text}: ${eur(f.units, true)}${marksText(marks)}`;
     const value = f.units === null ? `<span class="bn muted" role="img" title="${esc(name)}" aria-label="${esc(name)}">—</span>`
       : figureLink(bn(f.units), resultsHref('day', label.day, 'all'), `${name}. Opens Results for that day.`);
     const pct = f.units === null ? '' : `${percentHtml(f.percent)}${f.percent !== null && f.base !== null ? ` ${basisTerm('result', f.base)}` : ''}`;
     const split = `closed ${signedMoney(f.closed)} · still open ${signedMoney(f.open)}`;
-    const caption = f.units === null ? `${esc(capital(f.reason))}${markHtml(mark)}`
-      : `<span class="cap-long">${split} · after fees · from the trade record</span><span class="cap-short">${split}</span>${markHtml(mark)}`;
-    return { caption, html: `<div class="primary" data-cell="hero.day" data-phase="last" data-state="${f.units === null ? 'broken' : mark ? 'stale' : 'fresh'}"><div class="hero-k">${icon('clock')}${term('lastsession', label.text)}</div>
+    const caption = f.units === null ? `${esc(capital(f.reason))}${marksHtml(marks)}`
+      : `<span class="cap-long">${split} · after fees · from the trade record</span><span class="cap-short">${split}</span>${marksHtml(marks)}`;
+    return { caption, html: `<div class="primary" data-cell="hero.day" data-phase="last" data-state="${f.units === null ? 'broken' : marks.length ? 'stale' : 'fresh'}"><div class="hero-k">${icon('clock')}${term('lastsession', label.text)}</div>
         <div class="display">${value}</div><div class="pct-slot">${pct}</div><span class="c primary-caption">${caption}</span></div>` };
   }
   const dayCell = states['today.dayPnl'], source = data?.pnlSources?.day;
@@ -895,6 +912,9 @@ function barsHtml(ctx, facts, id) {
   if (!facts.view.ix) return { head: 'Last sessions', html: why(capital(resultsDay(facts.view, label.day, [id]).reason)) };
   const items = facts.bars[id].map(b => (b.today ? { ...b, ...todayBar(ctx, id) } : b));
   if (!items.length) return { head: 'Last sessions', html: why('No session since paper results started') };
+  // The record's own state when it is not fresh, on every bar taken from it
+  // and in the bars' caption (today's bar is Today, not the record).
+  const feed = feedMark(facts.view), feedNote = feed ? ` · ${feed.text}` : '';
   const vals = items.map(b => (b.units === null ? null : Number(b.units) / 1e8)), known = vals.filter(v => v !== null);
   const hi = Math.max(0, ...known), lo = Math.min(0, ...known), span = hi - lo, plot = BAR_BOX - 2 * LABEL_ROOM;
   const z = span > 0 ? LABEL_ROOM + hi / span * plot : BAR_BOX / 2;
@@ -906,7 +926,7 @@ function barsHtml(ctx, facts, id) {
   const bars = items.map((b, i) => {
     const href = resultsHref('day', b.day, id), when = b.today ? `Today · ${sessionDayName(b.day)}` : sessionDayName(b.day);
     if (b.units === null) {
-      const why = `${b.reason}${b.warning ? ` · ${b.warning.text}` : ''}`;
+      const why = `${b.reason}${b.warning ? ` · ${b.warning.text}` : ''}${b.today ? '' : feedNote}`;
       return `<a class="b${b.today ? ' today' : ''}" data-day="${b.day}" href="${href}" aria-label="${esc(`${when}: ${why}`)}"><i class="nx" style="top:${(z - 9).toFixed(1)}px;height:18px"></i><span class="bt" aria-hidden="true"><b>${esc(when)}</b><span>${esc(why)}</span></span></a>`;
     }
     const v = vals[i], flat = isZero(b.units), h = flat ? (b.today ? 3 : 2) : Math.max(3, Math.abs(v) / span * plot);
@@ -914,7 +934,7 @@ function barsHtml(ctx, facts, id) {
     // so its label always sits on the other side of zero.
     const top = flat ? z - h / 2 : v > 0 ? z - h : z, inside = !flat && !b.today && h >= LABEL_LINE + 4;
     const tone = flat ? 'flat' : v > 0 ? 'gain' : 'loss', amount = eur(b.units, true);
-    const note = b.today ? b.estimated ? 'estimated from the session open' : 'so far · after fees' : `after fees · from Results${b.warning ? ` · ${b.warning.text}` : ''}`;
+    const note = b.today ? b.estimated ? 'estimated from the session open' : 'so far · after fees' : `after fees · from Results${b.warning ? ` · ${b.warning.text}` : ''}${feedNote}`;
     const keep = i === iMax || i === iMin || b.today ? ' keep' : '', c = labels[i].length;
     const own = inside ? `<span class="bl in" data-c="${c}" style="${v > 0 ? 'top' : 'bottom'}:2px" aria-hidden="true">${labels[i]}</span>` : '';
     return `<a class="b${b.today ? ' today' : ''}${inside ? ' has-in' : ''}" data-c="${c}" data-day="${b.day}" href="${href}" aria-label="${esc(`${when}: ${amount}, ${note}`)}"><i class="${tone}${b.today ? ' live' : ''}${b.estimated ? ' est' : ''}" style="top:${top.toFixed(1)}px;height:${h.toFixed(1)}px">${own}</i><span class="bl out ${tone}${keep}" style="top:${zly(v, flat).toFixed(1)}px" aria-hidden="true">${labels[i]}</span><span class="bt" aria-hidden="true"><b>${esc(when)}</b> · ${amount}<span>${esc(note)}</span></span></a>`;
@@ -924,8 +944,8 @@ function barsHtml(ctx, facts, id) {
   // below it only the extremes and today keep theirs (app.css, @container spark).
   const need = Math.min(400, Math.max(100, Math.ceil((items.length * (58 * chars + 40) - 40) / 200) * 20));
   const last = items.at(-1);
-  return { head: `Last ${items.length} session${items.length === 1 ? '' : 's'}`,
-    html: `<div class="bars" role="group" aria-label="${esc(`${LABEL[id]}: last ${items.length} sessions, each session’s result after fees`)}" data-lc="${chars}" data-need="${need}"><span class="bz" style="top:${z.toFixed(1)}px"></span>${bars}</div>
+  return { head: `Last ${items.length} session${items.length === 1 ? '' : 's'}`, feed,
+    html: `<div class="bars" role="group" aria-label="${esc(`${LABEL[id]}: last ${items.length} sessions, each session’s result after fees${feedNote}`)}" data-lc="${chars}" data-need="${need}"><span class="bz" style="top:${z.toFixed(1)}px"></span>${bars}</div>
       <div class="bars-ax"><span>${sessionDayName(items[0].day)}</span><span>${last.today ? 'today' : sessionDayName(last.day)}</span></div>` };
 }
 
@@ -1012,11 +1032,11 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
   // The first figure, by phase.
   let firstNum;
   if (first.last) {
-    const f = first.last, mark = lastMark(facts.view, f);
-    const name = f.units === null ? lastDashName(`${LABEL[id]} · ${first.label}`, f, mark) : `${LABEL[id]} · ${first.label}: ${eur(f.units, true)}`;
+    const f = first.last, marks = lastMarks(facts.view, f);
+    const name = f.units === null ? lastDashName(`${LABEL[id]} · ${first.label}`, f, marks) : `${LABEL[id]} · ${first.label}: ${eur(f.units, true)}${marksText(marks)}`;
     const html = f.units === null ? `<span class="bn muted" role="img" title="${esc(name)}" aria-label="${esc(name)}">—</span>` : figureLink(bn(f.units), resultsHref('day', first.day, id), `${name}. Opens Results for that day.`);
-    firstNum = num(term(first.termKey, first.label), html, null, f.units === null ? `${esc(capital(f.reason))}${markHtml(mark)}` : `closed ${signedMoney(f.closed)} · still open ${signedMoney(f.open)}${markHtml(mark)}`,
-      f.units === null ? 'broken' : mark ? 'stale' : 'fresh', f.units === null ? 1 : eur(f.units, true).length);
+    firstNum = num(term(first.termKey, first.label), html, null, f.units === null ? `${esc(capital(f.reason))}${marksHtml(marks)}` : `closed ${signedMoney(f.closed)} · still open ${signedMoney(f.open)}${marksHtml(marks)}`,
+      f.units === null ? 'broken' : marks.length ? 'stale' : 'fresh', f.units === null ? 1 : eur(f.units, true).length);
   } else {
     const v = cellView(first.cell, `d.${id}.day`, { label: first.label, sharedReason: shared });
     firstNum = num(term(first.termKey, first.label), linked(v, resultsHref('day', first.day, id), `${LABEL[id]} · ${first.label}: ${v.units === null ? '' : eur(v.units, true)}. Opens Results for that day.`), first.cell,
@@ -1028,9 +1048,10 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
     sinceCell, cardCaption(sinceCell, 'after fees', board), sinceV.state, sinceV.units === null ? 1 : eur(sinceV.units, true).length, '', sinceV.units === null);
   const go = `<a class="card-go" href="${resultsHref('week', today, id)}" aria-label="${esc(`Results for ${LABEL[id]}`)}">Results${icon('chev-r')}</a>`;
   const name = esc(desk?.label ?? LABEL[id]);
-  const quietSince = noTradesSinceStart(ctx, facts, id);
+  const quietSince = noTradesSinceStart(ctx, facts, id), feed = feedMark(facts.view);
   if (quietSince) {
-    return `<div class="drow">${deskMark(id)}<div class="who"><h3>${name}</h3><span class="sep" aria-hidden="true"> · </span><span class="state st ${info.tone}">${icon(info.icon)}<span>${info.word.toLowerCase()}${since} · no trades since ${dayText(quietSince)} · ${positionsWord(states, id, held)}</span></span></div>
+    // The claim comes from the record: an old record says so beside it.
+    return `<div class="drow">${deskMark(id)}<div class="who"><h3>${name}</h3><span class="sep" aria-hidden="true"> · </span><span class="state st ${info.tone}">${icon(info.icon)}<span>${info.word.toLowerCase()}${since} · no trades since ${dayText(quietSince)}${marksHtml(feed ? [feed] : [])} · ${positionsWord(states, id, held)}</span></span></div>
       <div class="dnums">${firstNum}${sinceNum}</div><span class="hb warn">${hb}</span>${go}</div>`;
   }
   const detail = desk?.state === 'stuck' ? STUCK_REASON : desk ? positionsWord(states, id, held) : '';
@@ -1043,8 +1064,11 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
   // problem needs no line: its info icon and its dash's name and title give it.
   const loneNotExactDay = first.cell !== undefined && classifyDay(first.cell, dayChannels(data, id)).kind === 'notExact'
     && cells.slice(1).every(([, cell]) => cell?.state === 'fresh' || sharesBoardCaption(cell, board));
-  const status = loneNotExactDay ? '' : cardStatus(id, cells, board, 3);
   const bars = barsHtml(ctx, facts, id), learning = learningLine(desk?.learning);
+  // The status lines cover the bars; when those come from an old record, the
+  // record's state is one of the lines, as it is the bars' caption otherwise.
+  const cellStatus = loneNotExactDay ? '' : cardStatus(id, cells, board, 3);
+  const status = cellStatus && bars.feed ? `${cellStatus}${st('warn', esc(bars.feed.text), 'half')}` : cellStatus;
   return `<header>${deskMark(id)}<div class="who"><h3>${name}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(`${info.word}${since}${detail ? `${NB}· ${plainText(detail)}` : ''}`)}">${info.word}${since}${detail ? `<span class="detail">${NB}· ${detail}</span>` : ''}</span></div></div><span class="hb warn">${hb}</span>${go}</header>
       ${activity ? `<p class="now">${activity}</p>` : ''}
       <div class="dnums">
@@ -1052,7 +1076,7 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
         ${num(term('open'), openV.html, openCell, cardCaption(openCell, counts ? positionsText(counts[id]) : '', board), openV.state, openV.units === null ? 1 : eur(openV.units, true).length, '', openV.units === null)}
         ${sinceNum}
       </div>
-      <div class="spark desk-sessions${status ? ' off' : ''}"><div class="spark-h"><span><b>${bars.head}</b> · each session’s result in €, after fees</span></div>${bars.html}<div class="bars-tap" hidden></div>${status ? `<div class="card-status">${status}</div>` : ''}</div>
+      <div class="spark desk-sessions${status ? ' off' : ''}"><div class="spark-h"><span><b>${bars.head}</b> · ${bars.feed ? st('warn', esc(bars.feed.text), 'half') : 'each session’s result in €, after fees'}</span></div>${bars.html}<div class="bars-tap" hidden></div>${status ? `<div class="card-status">${status}</div>` : ''}</div>
       ${learning ? `<footer>${icon('learning')}<span>${term('learning')}: ${esc(learning)}${desk.learning.status === 'blocked' ? ' · blocked' : ''}</span></footer>` : ''}`;
 }
 

@@ -288,7 +288,8 @@ export async function deskSessionChecks({ page, newBoard, check, shot, auditScre
     })`);
     check('M4', 'sessions stale: today’s bar turns into a dashed outline without a number; the past sessions keep Results’ figures',
       stale.length === 3 && stale.every(x => x.n === 10 && x.today && x.dashed && !x.live && x.labels === 0 && x.name?.startsWith(`Today · ${sessionDayName(SESSIONS.at(-1))}: `) && !x.name.includes('€') &&
-        JSON.stringify(x.past) === JSON.stringify(want.bars[x.id].slice(0, -1).map(w => w.name))), stale);
+        // The record is old by then too: every bar from it says so (fix round 3).
+        x.past.length === 9 && x.past.every((n, i) => n.startsWith(`${want.bars[x.id][i].name} · Results as of `) && n.endsWith(' · updates are late'))), stale);
     await quietJoelChecks({ page, newBoard, check });
   }
 }

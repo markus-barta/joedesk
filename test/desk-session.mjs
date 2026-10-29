@@ -484,9 +484,9 @@ test('JOED-153: a phone row keeps the last session’s marker and the record’s
   const old = context(at, { partial: {} });
   old.states.results = { ...old.states.results, state: 'stale', reason: 'snapshot_stale', ageSeconds: 300 };
   const stale = htmlDocument(desk.compactDesk(old, 'j'));
-  assert.equal(stale.querySelector('[data-compact-value="dayPnl"] .compact-state').getAttribute('aria-label'), 'Stale');
-  // The record's own state is a problem of its own (fix round 2, finding 2).
-  assert.equal(summary(stale)[0], 'Results: stale · updates are late');
+  assert.equal(stale.querySelector('[data-compact-value="dayPnl"] .compact-state').getAttribute('aria-label'), 'Results stale');
+  // The record's own state is a problem of its own, with its age (fix rounds 2 and 3).
+  assert.equal(summary(stale)[0], `Results: stale · 5${NB}min ago · updates are late`);
   // Results unavailable: the row says so; a fact (no trades recorded) is no problem.
   assert.equal(summary(htmlDocument(desk.compactDesk(context(at, { results: false }), 'j')))[0], 'Results: not reported · no data received yet');
   assert.equal(summary(htmlDocument(desk.compactDesk(context(at, { edit: v => ({ ...v, days: [], trades: [] }) }), 'j')))[0], '');
@@ -619,7 +619,7 @@ test('JOED-153: a phone row names the Results feed’s fault independently of th
   const at = '2026-10-15T12:00:00.000Z';
   const retained = c => { c.states.results = { ...c.states.results, state: 'broken', retained: true, reason: 'contract_invalid', ageSeconds: 120 }; return c; };
   const detail = c => htmlDocument(desk.compactDesk(c, 'j')).querySelector('.disclosure-warning .vh')?.textContent ?? '';
-  const fault = `Results: last good · ${cellReason('contract_invalid')}`;
+  const fault = `Results: last good · 2${NB}min ago · ${cellReason('contract_invalid')}`;
   // An empty retained record: no figure and no day marker, and still the fault.
   assert.equal(detail(retained(context(at, { edit: v => ({ ...v, days: [], trades: [] }) }))), fault);
   // A Partial day from a retained record: the day's marker and the feed's fault.
@@ -668,6 +668,65 @@ test('JOED-153 browser touch steps run offline with the gate’s own check()', a
   assert.equal(states.length, 0);
 });
 
+// Fix round 3: wherever Desk shows something from Results (the last
+// sessions' bars, Last session, the status lines over the bars, the phone row
+// that sums up the card), the Results feed's own state is said there, in every
+// phase. Table: phase × feed state × surface.
+test('JOED-153 Results feed state on every Desk surface that shows Results data, in every phase', () => {
+  const PHASES = { 'pre-open': '2026-10-15T12:00:00.000Z', live: NOW, 'after the close': '2026-10-14T21:00:00.000Z' };
+  const rejected = cellReason('contract_invalid');
+  const FEED = {
+    ok: { cell: c => c, words: null },
+    stale: { cell: c => ({ ...c, state: 'stale', reason: 'snapshot_stale', ageSeconds: 300 }), words: `Results as of 5${NB}min ago · updates are late`,
+      row: `Results: stale · 5${NB}min ago · updates are late`, mark: 'Results stale' },
+    'retained (last good)': { cell: c => ({ ...c, state: 'broken', retained: true, reason: 'contract_invalid', ageSeconds: 300 }), words: `Last good results, 5${NB}min ago · ${rejected}`,
+      row: `Results: last good · 5${NB}min ago · ${rejected}`, mark: 'Last good' },
+    broken: { cell: () => ({ state: 'broken', value: null, retained: false, reason: 'contract_invalid', ageSeconds: null }), words: `Results unavailable · ${rejected}`,
+      row: `Results: unavailable · ${rejected}`, none: true },
+  };
+  const ANY = /Results as of|Last good results|Results unavailable|Results stale|Last good|Results:/;
+  const failures = [];
+  let checked = 0;
+  for (const [phase, at] of Object.entries(PHASES)) for (const [state, feed] of Object.entries(FEED)) {
+    const make = (cells = null) => {
+      const ctx = context(at, { partial: {} });
+      ctx.states.results = feed.cell(ctx.states.results);
+      if (cells) Object.assign(ctx.states, cells);
+      return ctx;
+    };
+    const ctx = make(), card = htmlDocument(deskCard(ctx, 'j'));
+    // A card with one broken figure: its status lines cover the bars.
+    const covered = htmlDocument(deskCard(make({ 'desks.j.openPnl': { state: 'broken', value: null, reason: 'source_unavailable', ageSeconds: null } }), 'j'));
+    const row = htmlDocument(desk.compactDesk(ctx, 'j'));
+    const surfaces = {
+      // The bars' caption and accessible names; without a record, the bars' own box says why.
+      'card bars': feed.none ? text(card.querySelector('.bars-why'))
+        : [text(card.querySelector('.spark-h')), card.querySelector('.bars').getAttribute('aria-label'), ...card.querySelectorAll('.bars .b').slice(0, -1).map(b => b.getAttribute('aria-label'))],
+      // The status lines show over bars taken from a record; without one there is nothing of Results under them.
+      'card status': feed.none ? undefined : text(covered.querySelector('.card-status')),
+      'phone row': [row.querySelector('.disclosure-warning .summary-text')?.textContent ?? '', row.querySelector('.disclosure-warning .vh')?.textContent ?? ''],
+      'hero last session': phase === 'pre-open' ? (() => {
+        const first = htmlDocument(desk.heroLeft(ctx)).querySelector('[data-cell="hero.day"]');
+        return [text(first.querySelector('.primary-caption')), (first.querySelector('.fig-link') ?? first.querySelector('.bn')).getAttribute('aria-label')];
+      })() : undefined,
+    };
+    for (const [surface, got] of Object.entries(surfaces)) {
+      if (got === undefined) continue;
+      const parts = [got].flat();
+      const want = surface === 'phone row' ? feed.row : surface === 'hero last session' && !feed.none ? null : feed.words;
+      let ok;
+      if (!feed.words) ok = parts.every(p => !ANY.test(p));
+      else if (surface === 'hero last session' && !feed.none) ok = parts[0].includes(feed.mark) && parts[1].includes(feed.words);
+      else ok = parts.every(p => p.includes(want));
+      checked++;
+      if (!ok) failures.push({ phase, state, surface, want: want ?? feed.mark, got: parts });
+    }
+  }
+  assert.deepEqual(failures, []);
+  // 3 phases × 4 states × the surfaces that show Results data there.
+  assert.equal(checked, 37);
+});
+
 // The browser check (scripts/browser/desk-sessions.mjs) expects what Desk
 // renders from the same design fixtures, and both fixtures pass the board's
 // ingress, so the browser gate can fail only on what the page draws.
@@ -705,7 +764,8 @@ test('JOED-153 browser fixture: the session checks expect what Desk renders from
         assert.equal(bars.length, 10);
         assert.ok(today.querySelector('i.nx') && !today.querySelector('i.live') && today.querySelectorAll('.bl').length === 0, id);
         assert.match(today.getAttribute('aria-label'), new RegExp(`^Today · Wed 14${NB}Oct: [^€]+$`));
-        assert.deepEqual(bars.slice(0, -1).map(b => b.getAttribute('aria-label')), want.bars[id].slice(0, -1).map(w => w.name));
+        // The record is a minute old by then: every bar from it says so (fix round 3).
+        assert.deepEqual(bars.slice(0, -1).map(b => b.getAttribute('aria-label')), want.bars[id].slice(0, -1).map(w => `${w.name} · Results as of 1${NB}min ago · updates are late`));
       }
     }
     if (!live) {
@@ -730,6 +790,8 @@ test('JOED-153 browser fixture: the session checks expect what Desk renders from
     const feeds = { data: { value: data }, results: { value: { ...quietIndex.meta, index: quietIndex } } };
     const ctx = { feeds, now: later, states: boardStates(feeds, later) }, facts = desk.deskFacts(ctx);
     assert.deepEqual(DESK_IDS.map(id => desk.noTradesSinceStart(ctx, facts, id)), [null, null, '2026-09-10'], later);
-    assert.ok(text(htmlDocument(deskCard(ctx, 'joel')).querySelector('.drow .who')).endsWith(`· no trades since 10${NB}Sep · ${held}`), later);
+    // A minute later the record is old too: the claim from it says so.
+    const who = text(htmlDocument(deskCard(ctx, 'joel')).querySelector('.drow .who'));
+    assert.ok(who.includes(`· no trades since 10${NB}Sep`) && who.endsWith(`· ${held}`) && who.includes('Results stale') === (later === at(P3_NOW, 75)), who);
   }
 });
