@@ -994,7 +994,10 @@ test('JOED-83: the hero keeps Desk signs/tones and reads the percentage with its
     const doc = htmlDocument(html), percent = doc.querySelector('.performance-pct');
     assert.equal(percent.textContent, text);
     assert.equal(percent.getAttribute('class'), `performance-pct${tone ? ` ${tone}` : ''}`);
-    assert.equal(doc.querySelector('.period-percent-slot .vh').textContent, ' of the money at the period start');
+    // JOED-151: the base is shown beside the percentage; its meaning stays spoken.
+    assert.equal(doc.querySelector('.period-percent-slot .vh').textContent, ', the money at the period start');
+    assert.equal(doc.querySelector('.period-percent-slot .of').textContent, 'of €\u00a015.000,00');
+    assert.equal(doc.querySelector('.period-percent-slot .of').dataset.term, 'result');
     assert.equal(doc.querySelector('.result-figure').getAttribute('role'), 'group');
     assert.ok(doc.querySelector('.display .bn'));
   }
@@ -1825,4 +1828,113 @@ test('JOED-30 rev 5 phone disclosure: removes its control and focuses the first 
   page.toggleDayReasons(button);
   assert.equal(extra.hidden, false);
   assert.deepEqual(events, [['remove'], ['focus', { preventScroll: true }]]);
+});
+
+// ---------- JOED-151: the approved Results design ----------
+
+test('JOED-151 hero: it names result, desks and period, shows the base beside the percentage and a signed split', () => {
+  const render = heroCapture(), now = '2026-10-14T17:42:22.000Z';
+  // J closes Friday 9 Oct at € 5.001: the week's base is € 15.000 plus that € 1.
+  const value = record([closeDay('2026-10-09', '5001'), closeDay('2026-10-12', '5001')], [tradeOf('rt-hero-win', 'j', '2026-10-12T15:00:00.000Z', '2', '0.5'),
+    tradeOf('rt-hero-loss', 'joe', '2026-10-13T15:00:00.000Z', '-1', '0.25')]);
+  const all = htmlDocument(render(value, now, 'week', today, ALL, [E('5001.5'), E('4999'), E('5000')]).html);
+  assert.equal(all.querySelector('.hero-k').textContent, 'Result · All desks · this week');
+  assert.equal(all.querySelector('.hero-k .term').dataset.term, 'result');
+  assert.ok(all.querySelector('.performance-pct'), 'All desks shows its percentage');
+  assert.equal(all.querySelector('.period-percent-slot .of').textContent, `of € ${fmt.digits(E('15001'))}`, 'the base: € 15.000 plus the result before the week');
+  const dd = all.querySelectorAll('.split dd');
+  assert.deepEqual(dd.map(d => d.textContent), ['+€\u00a01,00', '−€\u00a01,50', '+€\u00a01,75', '−€\u00a00,75']);
+  assert.deepEqual(dd.slice(0, 3).map(d => d.querySelector('.nw').getAttribute('class')), ['nw gain', 'nw loss', 'nw gain'],
+    'amounts sit in no-wrap spans, coloured by their sign');
+  assert.equal(dd[3].querySelector('.nw').getAttribute('class'), 'nw', 'fees carry no gain or loss colour');
+  assert.equal(all.querySelectorAll('.bench').length, 0, 'the benchmark moved to the chart legend');
+  const joe = htmlDocument(render(value, now, 'month', today, ['joe'], [E('5001.5'), E('4999'), E('5000')]).html);
+  assert.equal(joe.querySelector('.hero-k').textContent, 'Result · Joe · this month');
+  assert.equal(joe.querySelector('.period-percent-slot').textContent, '', 'an individual desk has no percentage and no base');
+});
+
+const { TERMS } = await import('../public/joe/terms.js');
+const { renderTiles: tilesOf, renderBreakdown: breakdownOf } = await (await import('./fixtures/preview-dom.mjs')).builders('results.js', ['renderTiles', 'renderBreakdown']);
+function markupOf(render) {
+  const before = globalThis.document, node = markupNode();
+  globalThis.document = { querySelector: () => node, activeElement: null };
+  try { render(); } finally { if (before === undefined) delete globalThis.document; else globalThis.document = before; }
+  return htmlDocument(node.innerHTML);
+}
+
+test('JOED-151 tiles: eight compact tiles keep their explanations; values size from their own text', () => {
+  const ix = M.indexResults(record([closeDay('2026-10-12', '5001')], [tradeOf('rt-tile-win', 'j', '2026-10-12T15:00:00.000Z', '2', '0.5'),
+    tradeOf('rt-tile-loss', 'joe', '2026-10-13T15:00:00.000Z', '-1', '0.25')]));
+  const R = roll(ix, 'week', today, ALL, ctxOf([E('5001.5'), E('4999'), E('5000')]));
+  for (const doc of [markupOf(() => tilesOf(R)), markupOf(() => tilesOf(null))]) {
+    const tiles = doc.querySelectorAll('.tile');
+    assert.deepEqual(tiles.map(t => t.dataset.tile), ['trades', 'won', 'avgtrade', 'pf', 'typical', 'besttrade', 'dip', 'bestday']);
+    for (const tile of tiles) {
+      const key = tile.dataset.tile, info = tile.querySelector('.metric-info');
+      assert.equal(tile.querySelector('h3').textContent, TERMS[key][0]);
+      assert.equal(info.getAttribute('aria-label'), `Learn about ${TERMS[key][0]}`);
+      assert.equal(info.dataset.term, key);
+      const value = tile.querySelector('.tval');
+      assert.equal(value.getAttribute('style'), `--characters:${Math.max(1, value.textContent.length)}`, key);
+      assert.ok(tile.querySelector('.tmean').textContent.trim(), `${key} says what it means`);
+    }
+    assert.equal(doc.querySelectorAll('.ico-sq').length + doc.querySelectorAll('.tfoot').length, 0, 'no icon squares or footers');
+  }
+  const pair = markupOf(() => tilesOf(R)).querySelector('[data-tile="typical"] .tval');
+  assert.equal(pair.querySelectorAll('.pair-value').length, 2, 'a pair keeps both values and each one’s own length');
+});
+
+test('JOED-151 By desk: one card that ends in All desks, every bar coloured by its own sign', () => {
+  const ix = M.indexResults(record([closeDay('2026-10-12', '5001')], [tradeOf('rt-bd-win', 'j', '2026-10-12T15:00:00.000Z', '2', '0.5'),
+    tradeOf('rt-bd-loss', 'joe', '2026-10-13T15:00:00.000Z', '-1', '0.25')]));
+  const inputs = ctxOf([E('5001.5'), E('4999'), E('5000')]);
+  const rows = [...ALL.map(d => roll(ix, 'week', today, [d], inputs)), roll(ix, 'week', today, ALL, inputs)];
+  const doc = markupOf(() => breakdownOf({ ix, today }, M.periodOf('week', today, today), ALL, rows));
+  assert.deepEqual(doc.querySelectorAll('.brow').map(r => r.dataset.row), ['j', 'joe', 'joel', 'all']);
+  const total = doc.querySelector('[data-row="all"]');
+  assert.equal(total.querySelector('.who').textContent, 'All desks');
+  assert.equal(total.querySelectorAll('.dmark').length, 0);
+  assert.match(total.querySelector('.track .b').getAttribute('style'), /background:var\(--gain\)/, 'the total is coloured by its sign too');
+  assert.match(doc.querySelector('[data-row="joe"] .track .b').getAttribute('style'), /background:var\(--loss\)/);
+  assert.match(doc.querySelector('[data-row="j"] .facts').textContent, /^1 trade · 100 % won · fees € 0,50$/);
+  const index = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8');
+  assert.match(index, /<div class="card bdcard" id="breakdown"><\/div>/, 'By desk is one card');
+});
+
+test('JOED-151 trades: each row shows the trade’s own rate as recorded; a listed day explains its currencies', t => {
+  const render = calendarCapture(t);
+  const usd = tradeOf('rt-rate-usd', 'j', '2026-10-13T15:00:00.000Z', '1');
+  const precise = { ...tradeOf('rt-rate-precise', 'joe', '2026-10-13T16:00:00.000Z', '1'), fx: { ...usd.fx, rate: '0.85861234' } };
+  const r = render(record([closeDay('2026-10-13', '5002')], [usd, precise]), '2026-10-14T12:00:00.000Z', '2026-10-13');
+  for (const html of [r.panel, r.sheet]) {
+    const doc = htmlDocument(html), rates = doc.querySelectorAll('[aria-label]').filter(el => el.getAttribute('aria-label') === 'Exchange rate');
+    assert.deepEqual(rates.map(el => el.textContent), ['at € 0,90 per $', 'at € 0,85861234 per $'], 'at least two decimals, all recorded ones');
+    assert.ok(rates.every(el => el.parentElement.getAttribute('class') === 'ln'), 'the rate sits with the prices');
+    const note = doc.querySelector('.dp-fx');
+    assert.equal(textOf(note.children.at(-1).textContent), 'Prices in USD, as traded. Fees and results in EUR at each trade’s IB rate (€ per $). Kept holdings never appear here.');
+    assert.equal(note.querySelector('.term').dataset.term, 'ib');
+    assert.equal(doc.querySelectorAll('.dp-fx').length, 1);
+  }
+  const euro = { ...tradeOf('rt-rate-eur', 'j', '2026-10-13T15:00:00.000Z', '1'), entryPrice: { amount: '70', currency: 'EUR' }, exitPrice: { amount: '71', currency: 'EUR' },
+    fx: { ...usd.fx, base: 'EUR', rate: '1' } };
+  const e = render(record([closeDay('2026-10-13', '5001')], [euro]), '2026-10-14T12:00:00.000Z', '2026-10-13');
+  assert.equal(htmlDocument(e.panel).querySelectorAll('[aria-label]').filter(el => el.getAttribute('aria-label') === 'Exchange rate').length, 0, 'a euro price has no rate to show');
+  assert.equal(textOf(htmlDocument(e.panel).querySelector('.dp-fx').children.at(-1).textContent),
+    'Prices as traded, each in its own currency. Fees and results in EUR at each trade’s IB rate. Kept holdings never appear here.');
+  const none = render(record([closeDay('2026-10-13', '5000')], [usd]), '2026-10-14T12:00:00.000Z', '2026-10-12');
+  assert.equal(htmlDocument(none.panel).querySelectorAll('.dp-fx').length, 0, 'a day without listed trades has no prices to explain');
+});
+
+test('JOED-151 CSS: every Results-only rule lives in one delimited block', () => {
+  const css = resultsCss();
+  const open = '/* ==================== Results (one block) ====================', close = '/* ==================== end of Results ==================== */';
+  const start = css.indexOf(open), end = css.indexOf(close);
+  assert.ok(start > 0 && end > start && css.indexOf(open, start + 1) < 0 && css.indexOf(close, end + 1) < 0, 'one block, opened and closed once');
+  const outside = `${css.slice(0, start)}${css.slice(end + close.length)}`.replace(/\/\*[\s\S]*?\*\//g, '');
+  const results = /^(?:\.res-tools|\.step(?:-label)?|\.rhero(?:-[lr])?|\.result-figure|\.period-percent-slot|\.rchart|\.res-(?:status|state)|\.tiles?|\.tile-top|\.tval|\.tmean|\.pair-value|\.metric-info|\.bdcard|\.bars|\.brow|\.track|\.calcard|\.cal(?:-head|-legend)?|\.cell|\.dow|\.wk|\.ramp|\.agenda-date|#calSum|#cal|\.daypanel|\.dp-[\w-]+|\.trow|\.sheet|\.lg-b|button\.cell)(?![\w-])/;
+  const leaked = [...outside.matchAll(/([^{}]+)\{/g)].map(([, prelude]) => prelude.trim())
+    .filter(prelude => !prelude.startsWith('@') && prelude.split(',').map(s => s.trim()).every(s => results.test(s)));
+  assert.deepEqual(leaked, [], 'Results-only selectors outside the block');
+  const inside = css.slice(start, end);
+  for (const rule of ['.rhero {', '.tile {', '.bdcard {', '.trow .px {', '.trow .net::after {', '.dp-fx {', '@media (max-width: 382px) {']) assert.ok(inside.includes(rule), rule);
 });

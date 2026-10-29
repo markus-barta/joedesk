@@ -1,11 +1,12 @@
 // Results: the period switch and the desk switch drive every number, all
 // from the closed-trade record (results v2) by spec r3 §4.2: the hero with
 // its result-so-far chart, eight tiles, By desk, the calendar and a day's
-// trades. Before a valid push arrives Results shows its existing unavailable
-// state: dashes, never a zero or an estimate.
+// trades, laid out as the approved board design. Before a valid push arrives
+// Results shows its existing unavailable state: dashes, never a zero or an
+// estimate.
 import { $, $$, icon, term, deskMark, inlineMark, swatch, patch, bn, pl, st, symBadge, ageSpan, statePhrase, openDialog } from './ui.js';
 import { TERMS } from './terms.js';
-import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age, quantity } from './format.js';
+import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age, quantity, currencySymbol } from './format.js';
 import { cellReason, STALE_AFTER_S } from './health.js';
 import { drawChart, eurAxis } from './chart.js';
 import { viennaDay } from './time.mjs';
@@ -62,7 +63,9 @@ export function stepPeriod(dir, view) {
 
 const D = '<span class="bn muted">—</span>';
 const deskSet = () => (RS.desk === 'all' ? DESKS.slice() : [RS.desk]);
-const whoOf = desks => (desks.length === 3 ? 'J, Joe and Joel' : LABEL[desks[0]]);
+const whoOf = desks => (desks.length === 3 ? 'All desks' : LABEL[desks[0]]);
+// A signed amount that never wraps or parts from its sign, coloured by its sign.
+const signed = u => (isZero(u) ? `<span class="nw">${money(0)}</span>` : `<span class="nw ${u > 0n ? 'gain' : 'loss'}">${eur(u, true)}</span>`);
 const names = ids => (ids.length === 1 ? LABEL[ids[0]] : `${ids.slice(0, -1).map(d => LABEL[d]).join(', ')} and ${LABEL[ids[ids.length - 1]]}`);
 // Money text is formatted from exact units (BigInt), never from a Number.
 const absUnits = u => (u < 0n ? -u : u);
@@ -166,52 +169,58 @@ function heroSentence(view, per, R, partialDays) {
   return `${signedWord(R.units.net)} ${per.phrase}.`;
 }
 
+// The hero names what it shows (result, desks, period) above the figure, its
+// percentage with the base it divides by, the sentence and the split. Each row
+// keeps a fixed line box, so no sentence or amount moves another row.
 export function renderHero(view, per, desks, R) {
   const none = !R || R.empty;
   const percent = M.periodPercent(view.ix, view, per, desks, R);
+  // The money at the period start, shown only beside the percentage it bases.
+  const base = percent === null ? null : M.periodBase(view.ix, view, per, desks);
+  const baseText = base === null ? '' : eur(base);
   const percentMarkup = percentHtml(percent);
-  const percentDigits = percent === null ? 1 : digits(percent * UNIT / 100n, 2).length + (percent ? 1 : 0) + 2;
+  const percentDigits = percent === null ? 1 : digits(percent * UNIT / 100n, 2).length + (percent ? 1 : 0) + 2 + (baseText ? 4 + baseText.length : 0);
   const resultDigits = none || R.net === null ? 1 : eur(R.units.net, true).length;
   // Coverage qualifies a stated result, not an explanation of a missing one.
   const partialDays = view.ix && !R.cut && (R.empty || R.net !== null) ? M.countPartialDays(view.ix, per, view.today) : 0;
   const sentence = heroSentence(view, per, R, partialDays);
   patch($('#rheroL'), `
-    <div class="hero-k">${icon('results')}<span>${term('result')} · ${esc(whoOf(desks))}</span></div>
+    <div class="hero-k">${icon('results')}<span>${term('result')} · ${esc(whoOf(desks))} · ${esc(per.head)}</span></div>
     <div class="result-figure" role="group" aria-label="Period result" style="--result-digits:${resultDigits};--percent-digits:${percentDigits}">
       <div class="display">${none || R.net === null ? D : bn(R.units.net)}</div>
-      <div class="period-percent-slot">${percentMarkup}${percent === null ? '' : '<span class="vh"> of the money at the period start</span>'}</div>
+      <div class="period-percent-slot">${percentMarkup}${percent === null ? '' : ` <button type="button" class="term of" data-term="result">of <span class="nw">${esc(baseText)}</span></button><span class="vh">, the money at the period start</span>`}</div>
     </div>
     <p class="say">${esc(partialDays ? sentence.replace(/\.$/, '') : sentence)}${partialHint(partialDays)}</p>
     <dl class="split">
-      <dt>${term('closed')}</dt><dd>${none ? '—' : pl(R.units.realised)}</dd>
-      <dt>${term('stillopen')}</dt><dd>${none || R.unreal === null ? '—' : pl(R.units.unreal)}</dd>
-      <dt>${term('beforefees')}</dt><dd>${none ? '—' : pl(R.units.gross)}</dd>
-      <dt>${term('fees')}</dt><dd class="num">${none ? '—' : eur(-R.units.fees)}</dd>
-    </dl>
-    <div class="bench"><span>${term('benchmark')}</span><span class="muted">No index chosen</span></div>`);
+      <dt>${term('closed')}</dt><dd>${none ? '—' : signed(R.units.realised)}</dd>
+      <dt>${term('stillopen')}</dt><dd>${none || R.unreal === null ? '—' : signed(R.units.unreal)}</dd>
+      <dt>${term('beforefees')}</dt><dd>${none ? '—' : signed(R.units.gross)}</dd>
+      <dt>${term('fees')}</dt><dd class="num">${none ? '—' : `<span class="nw">${eur(-R.units.fees)}</span>`}</dd>
+    </dl>`);
 }
 
-const TILE_ICON = { trades: 'repeat', won: 'target', avgtrade: 'equal', pf: 'scale', typical: 'updown', besttrade: 'award', dip: 'dip', bestday: 'days' };
-const tile = (k, val, mean, foot = 'From closed trades · after fees', tight = false) => `<article class="card tile" role="listitem" data-tile="${k}"><div class="tile-top"><span class="ico-sq">${icon(TILE_ICON[k])}</span><h3>${TERMS[k][0]}</h3><button type="button" class="learn metric-info" data-term="${k}" data-learn="1" aria-expanded="false" aria-label="Learn about ${TERMS[k][0]}">${icon('info')}</button></div><div class="tval${tight ? ' tight' : ''}">${val}</div><p class="tmean">${mean}</p><div class="tfoot">${icon('receipt')}${foot}</div></article>`;
-const two = (a, b) => {
-  const size = html => Math.max(1, html.replace(/<[^>]*>/g, '').length);
-  return `<span class="pair-value" style="--characters:${size(a)}">${a}</span><span class="pair-value" style="--characters:${size(b) + 1}"><span class="sl">/</span>${b}</span>`;
-};
-// Two signed amounts share a tile; long ones step the size down, never clip.
-const tightPair = (...values) => values.filter(v => v != null).reduce((n, v) => n + eur(v, true).length, 0) > 17;
+// The eight tiles: a title with its explanation behind the info control, one
+// value that steps its size down to the tile's width (never clips) and what
+// it means. Their order and meanings follow spec r3 §4.2.
+const TILES = ['trades', 'won', 'avgtrade', 'pf', 'typical', 'besttrade', 'dip', 'bestday'];
+const size = html => Math.max(1, html.replace(/<[^>]*>/g, '').length);
+const tile = (k, val, mean) => `<article class="card tile" role="listitem" data-tile="${k}"><div class="tile-top"><h3>${TERMS[k][0]}</h3><button type="button" class="learn metric-info" data-term="${k}" data-learn="1" aria-expanded="false" aria-label="Learn about ${TERMS[k][0]}">${icon('info')}</button></div><div class="tval" style="--characters:${size(val)}">${val}</div><p class="tmean">${mean}</p></article>`;
+// Two signed amounts share a tile: one line where there is room, else one
+// line each (phones). Each part carries its own length for that case.
+const two = (a, b) => `<span class="pair-value" style="--characters:${size(a)}">${a}</span><span class="pair-value" style="--characters:${size(b) + 1}"><span class="sl">/</span>${b}</span>`;
 const tradeName = t => `${esc(t.symbol)} (${LABEL[t.desk]})`;
 
 // Best and worst day: one value and "only day" for a period with one trading
 // day; else both, with their dates (equal days are two days, never one).
 export function dayTile(R) {
-  if (!R?.bestDay) return { val: D, mean: 'No trading day', tight: false };
-  if (R.days === 1) return { val: bn(R.bestDay.units), mean: `${M.fmtDDM(R.bestDay.date)} · only day`, tight: false };
-  return { val: two(bn(R.bestDay.units), bn(R.worstDay.units)), mean: `${M.fmtDDM(R.bestDay.date)} · ${M.fmtDDM(R.worstDay.date)}`, tight: tightPair(R.bestDay.units, R.worstDay.units) };
+  if (!R?.bestDay) return { val: D, mean: 'No trading day' };
+  if (R.days === 1) return { val: bn(R.bestDay.units), mean: `${M.fmtDDM(R.bestDay.date)} · only day` };
+  return { val: two(bn(R.bestDay.units), bn(R.worstDay.units)), mean: `${M.fmtDDM(R.bestDay.date)} · ${M.fmtDDM(R.worstDay.date)}` };
 }
 
 function renderTiles(R) {
   if (!R) {
-    patch($('#tiles'), Object.keys(TILE_ICON).map(k => tile(k, D, 'Unavailable', k === 'dip' ? 'From the desks’ money' : undefined)).join(''));
+    patch($('#tiles'), TILES.map(k => tile(k, D, 'Unavailable')).join(''));
     return;
   }
   const n = R.trades, decided = R.won + R.lost, u = R.units;
@@ -224,21 +233,22 @@ function renderTiles(R) {
     tile('avgtrade', R.expectancy === null ? D : bn(u.expectancy), R.expectancy === null ? 'No finished trades'
       : isZero(u.expectancy) ? 'A typical trade breaks even' : u.expectancy > 0n ? 'A typical trade earns' : 'A typical trade loses, after fees'),
     tile('pf', R.pf === null ? D : `<span class="num">${digits(R.pf)}</span>`, R.pf === null ? 'Needs a losing trade' : R.pf > 1 ? 'Above 1: won more than lost' : R.pf < 1 ? 'Below 1: lost more than won' : 'Exactly 1: won as much as lost'),
-    tile('typical', typical, R.sizeRatio !== null ? `A win is ${digits(R.sizeRatio)} times a loss` : 'Needs a win and a loss', undefined, tightPair(u.avgWin, u.avgLoss)),
-    tile('besttrade', extremes, R.best && R.worst ? `${tradeName(R.best)} · ${tradeName(R.worst)}` : R.best ? `${tradeName(R.best)} · no losing trade` : R.worst ? `No winning trade · ${tradeName(R.worst)}` : 'No finished trades',
-      undefined, tightPair(R.best?.units.net, R.worst?.units.net)),
+    tile('typical', typical, R.sizeRatio !== null ? `A win is ${digits(R.sizeRatio)} times a loss` : 'Needs a win and a loss'),
+    tile('besttrade', extremes, R.best && R.worst ? `${tradeName(R.best)} · ${tradeName(R.worst)}` : R.best ? `${tradeName(R.best)} · no losing trade` : R.worst ? `No winning trade · ${tradeName(R.worst)}` : 'No finished trades'),
     tile('dip', R.empty || R.dd === null ? D : bn(u.dd), R.empty ? 'No change in this period' : R.cut ? 'Bookkeeping basis changed' : R.dd === null ? 'The desks’ money is not available'
-      : R.dd === 0 ? 'Never below its high point' : `${pct(-R.ddPct, 2)} below the high point`, 'From the desks’ money'),
-    tile('bestday', days.val, days.mean, undefined, days.tight),
+      : R.dd === 0 ? 'Never below its high point' : `${pct(-R.ddPct, 2)} below the high point`),
+    tile('bestday', days.val, days.mean),
   ].join(''));
 }
 
+// Every desk and All desks on one scale; the row of the chosen desks is tinted.
 function renderBreakdown(view, per, desks, rows) {
-  const list = [...DESKS.map(d => ({ id: d, name: LABEL[d] })), { id: 'all', name: 'Total' }];
+  const list = [...DESKS.map(d => ({ id: d, name: LABEL[d] })), { id: 'all', name: 'All desks' }];
+  const who = r => `<div class="who">${r.id === 'all' ? '' : deskMark(r.id)}${r.name}</div>`;
   if (!rows) {
     patch($('#breakdown'), list.map(r => `
     <div class="brow${r.id === 'all' ? ' total' : ''}${RS.desk === r.id ? ' sel' : ''}" data-row="${r.id}">
-      <div class="who">${r.id === 'all' ? '<span class="dmark" aria-hidden="true"><svg viewBox="0 0 28 28"><use href="#i-logo"/></svg></span>' : deskMark(r.id)}${r.name}</div>
+      ${who(r)}
       <div class="track" role="img" aria-label="${r.name}: unavailable"><span class="z"></span></div>
       <div class="val"><span class="muted">—</span></div>
       <div class="facts">Unavailable</div>
@@ -248,13 +258,13 @@ function renderBreakdown(view, per, desks, rows) {
   const max = Math.max(...rows.map(x => (x.net === null || x.empty ? 0 : Math.abs(x.net))), 0.01);
   patch($('#breakdown'), list.map((r, i) => {
     const x = rows[i], shown = !x.empty && x.net !== null, w = shown ? Math.abs(x.net) / max * 50 : 0;
-    const bar = shown && Math.abs(x.net) >= 0.005 ? `<span class="b" data-v="${x.net}" style="${x.net > 0 ? `left:50%;width:${w.toFixed(3)}%` : `right:50%;width:${w.toFixed(3)}%`};background:${r.id === 'all' ? 'var(--ink-2)' : x.net > 0 ? 'var(--gain)' : 'var(--loss)'}"></span>` : '';
+    const bar = shown && Math.abs(x.net) >= 0.005 ? `<span class="b" data-v="${x.net}" style="${x.net > 0 ? `left:50%;width:${w.toFixed(3)}%` : `right:50%;width:${w.toFixed(3)}%`};background:${x.net > 0 ? 'var(--gain)' : 'var(--loss)'}"></span>` : '';
     return `
     <div class="brow${r.id === 'all' ? ' total' : ''}${RS.desk === r.id ? ' sel' : ''}" data-row="${r.id}">
-      <div class="who">${r.id === 'all' ? '<span class="dmark" aria-hidden="true"><svg viewBox="0 0 28 28"><use href="#i-logo"/></svg></span>' : deskMark(r.id)}${r.name}</div>
+      ${who(r)}
       <div class="track" role="img" aria-label="${r.name}: ${x.empty ? 'no change' : x.cut ? 'bookkeeping basis changed' : x.net === null ? 'not known yet' : eur(x.units.net, true)}"><span class="z"></span>${bar}</div>
       <div class="val">${shown ? pl(x.units.net) : '<span class="muted">—</span>'}</div>
-      <div class="facts">${x.trades ? `${plural(x.trades, 'trade')} · ${x.winRate === null ? 'none decided' : `${x.winRate}${NB}% won`} · fees ${eur(x.units.fees)}` : 'No trades'}</div>
+      <div class="facts">${x.trades ? `${plural(x.trades, 'trade')} · ${x.winRate === null ? 'none decided' : `${x.winRate}${NB}% won`} · fees <span class="nw">${eur(x.units.fees)}</span>` : 'No trades'}</div>
     </div>`;
   }).join(''));
 }
@@ -337,13 +347,13 @@ export function renderCalendar(view, per, desks) {
     <span class="nowrap"><span class="ramp"><i style="background:var(--g1)"></i><i style="background:var(--g2)"></i><i style="background:var(--g3)"></i><i style="background:var(--g4)"></i></span> Gain</span>
     <span>${!ix ? 'Tints appear once results arrive' : max > 0n ? `Darkest: ${eur(max * 3n / 4n)} to ${eur(max)} in a day` : 'No trading day yet'}</span>`);
   const day = dayContent(view, RS.sel, desks);
-  patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${dayNote(day)}</div>`);
+  patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${dayNote(day)}${currencyNote(day)}</div>`);
   fitTradeRows($('#daypanel'));
   fitDaySummary($('#daypanel'));
   const sheet = $('#daySheet');
   if (sheet?.open) {
     $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(RS.sel)}`;
-    patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}`);
+    patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}${currencyNote(day)}`);
     fitTradeRows($('#sheetBody'));
     fitDaySummary($('#sheetBody'));
     fitDaySheet(sheet);
@@ -390,11 +400,18 @@ const price = p => money(decimalUnits(p.amount), p.currency, false, Math.max(2, 
 const softHyphens = word => word.replace(/\p{L}{8,}/gu, letters => letters.replace(/(\p{L}{3})(?=\p{L}{3})/gu, '$1\u00ad'));
 const tradeWords = text => text.split(/(\s+)/u).map(word => /^\s+$/u.test(word) ? esc(word) : `<span class="word">${esc(softHyphens(word))}</span>`).join('');
 const metaSuffix = '<span class="meta-sep" aria-hidden="true"> ·</span>';
+// The trade's own rate as recorded: euro per one unit of its price currency.
+// A price already in euro has no rate to show.
+function rate(t) {
+  if (!t.fx?.rate || t.fx.base === 'EUR') return '';
+  const shown = money(decimalUnits(t.fx.rate), 'EUR', false, Math.max(2, (t.fx.rate.split('.')[1] ?? '').length));
+  return `<span role="group" aria-label="Exchange rate">at ${shown} per ${esc(currencySymbol(t.fx.base))}</span>`;
+}
 function tradeRows(ts) {
   return `<div role="list" aria-label="Closed trades">${ts.map(t => `<div class="trow" data-trade="${esc(t.id)}" role="listitem">
     ${symBadge(t.symbol, t.desk)}
     <div class="name" lang="en"><b class="word">${esc(t.symbol)}</b>${t.company ? ` · ${tradeWords(t.company)}` : ''}<span class="meta"><span class="meta-unit">${inlineMark(t.desk)} ${LABEL[t.desk]}${metaSuffix}</span> <span class="meta-unit">${icon(t.side === 'short' ? 'short' : 'long', 'i side')} ${t.side === 'short' ? 'Short' : 'Long'} ${esc(quantity(t.quantity))}${metaSuffix}</span> <span class="meta-unit">closed ${timeHM(new Date(t.closedAt).toISOString())}${metaSuffix}</span> <span class="meta-unit">${held(t)}</span></span></div>
-    <div class="px"><span class="ln"><span role="group" aria-label="Entry price">${price(t.entry)}</span><span role="group" aria-label="Exit price">${icon('arrow')}${price(t.exit)}</span></span><span class="fee">fees ${eur(t.units.fees)}</span></div>
+    <div class="px"><span class="ln"><span role="group" aria-label="Entry price">${price(t.entry)}</span><span role="group" aria-label="Exit price">${icon('arrow')}${price(t.exit)}</span>${rate(t)}</span><span class="fee">fees ${eur(t.units.fees)}</span></div>
     <div class="net" role="group" aria-label="Net after fees">${pl(t.units.net)}</div>
   </div>`).join('')}</div>`;
 }
@@ -466,7 +483,17 @@ function dayContent(view, k, desks) {
   const reasons = partial && !missingDay(ix, k, desks) ? M.partialReasons(ix.partialDetails?.get(k)) : [];
   const note = reasons.length || k === today ? '' : warning?.note ?? (partial ? PARTIAL_REASON : '');
   const positionNote = opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`).join(' ');
-  return { sum, body, note, reasons, deskNote: partial && desks.length === 1 && (note || reasons.length) ? M.PARTIAL_DESK_NOTE : '', positionNote };
+  return { sum, body, note, reasons, deskNote: partial && desks.length === 1 && (note || reasons.length) ? M.PARTIAL_DESK_NOTE : '', positionNote,
+    currencies: [...new Set(ts.flatMap(t => [t.entry.currency, t.exit.currency, ...(t.fx?.base ? [t.fx.base] : [])]))] };
+}
+
+// How a listed day reads: prices as traded, euro at each trade's own rate. A
+// day without listed trades has no prices to explain.
+function currencyNote(day) {
+  const list = day.currencies ?? [];
+  if (!list.length) return '';
+  const usd = list.length === 1 && list[0] === 'USD';
+  return `<p class="dp-fx">${icon('info')}<span>${usd ? 'Prices in USD, as traded.' : 'Prices as traded, each in its own currency.'} Fees and results in EUR at each trade’s ${term('ib', 'IB')} rate${usd ? ' (€ per $)' : ''}. Kept holdings never appear here.</span></p>`;
 }
 
 // The sheet already has room for every reason. Remove the one-way disclosure
@@ -524,7 +551,7 @@ export function openDaySheet(view, k, { pointer = false } = {}) {
   // Rebuild even when patch's cached source matches the last opening: the
   // disclosure may have removed itself from that DOM in the meantime.
   patch($('#sheetBody'), '');
-  patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}`);
+  patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}${currencyNote(day)}`);
   openDialog(sheet, { pointer });
   fitTradeRows($('#sheetBody'));
   fitDaySummary($('#sheetBody'));
@@ -555,22 +582,25 @@ function renderStatus(view) {
 }
 
 // ---------- The hero chart: result so far, from € 0 ----------
+// renderCurve describes the period's line; drawResultChart, the one seam to
+// the chart renderer, draws that description. The shared time-chart
+// component replaces only drawResultChart: the points, scale and words stay.
 function renderCurve(view, per, desks, R, mctx) {
   const el = $('#curve'), color = desks.length === 1 ? `var(--desk-${desks[0]})` : 'var(--accent)';
-  patch($('#curveLegend'), `<span class="lg"><b class="lg-b">${term('result', 'Result')} so far · ${esc(per.head)}</b></span><span class="lg">${swatch(color)}${esc(whoOf(desks))}</span><span class="lg">${swatch('var(--ink-3)', '', 1.4)}Zero</span><span class="lg muted">${swatch('var(--est)', '1 3.5', 1.6)}No index chosen</span>`);
+  patch($('#curveLegend'), `<span class="lg">${swatch(color)}<span>Result so far · ${esc(whoOf(desks))}</span></span><span class="lg">${swatch('var(--ink-3)', '3 3', 1.4)}Zero</span><span class="lg muted">${swatch('var(--est)', '1 3.5', 1.6)}${term('benchmark', 'No index chosen')}</span>`);
   const top = 12 + Math.ceil($('#resStatus')?.offsetHeight ?? 0);
   if (!view.ix) {
-    drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: 'Results are unavailable', label: 'Result so far: unavailable', pad: { t: top } });
+    drawResultChart(el, { empty: 'Results are unavailable', label: 'Result so far: unavailable', top });
     return;
   }
   const c = M.curve(view.ix, per, desks, mctx);
   const pts = c.pts, known = pts.filter(p => p.v !== null);
   if (c.cut) {
-    drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: cutText(c.cut), label: `Result so far, ${per.lab}: not shown, ${cutText(c.cut)}`, pad: { t: top } });
+    drawResultChart(el, { empty: cutText(c.cut), label: `Result so far, ${per.lab}: not shown, ${cutText(c.cut)}`, top });
     return;
   }
   if (R.empty || known.length < 2) {
-    drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: R.net === null && !R.empty ? 'The desks’ money is not available' : 'No change in this period', label: `Result so far, ${per.lab}: ${R.empty ? 'no change' : 'not known yet'}`, pad: { t: top } });
+    drawResultChart(el, { empty: R.net === null && !R.empty ? 'The desks’ money is not available' : 'No change in this period', label: `Result so far, ${per.lab}: ${R.empty ? 'no change' : 'not known yet'}`, top });
     return;
   }
   // Trades closed at each intraday point, for the crosshair.
@@ -592,14 +622,30 @@ function renderCurve(view, per, desks, R, mctx) {
   const middle = known.reduce((a, p) => (Math.abs(p.x - (x0 + x1) / 2) < Math.abs(a.x - (x0 + x1) / 2) ? p : a));
   const marks = [first, ...(middle.x - first.x > span / 5 && last.x - middle.x > span / 5 ? [middle] : []), last];
   const trackAt = c.day ? (view.trackingStart && per.start <= view.trackingStart ? x0 : null) : c.tracking;
-  drawChart(el, {
-    series: [{ pts, color, live: per.end >= view.today }], xDomain: [x0, x1], zero: true, strongZero: true, yFmt: eurAxis, ticks: 4,
+  drawResultChart(el, {
+    pts, domain: [x0, x1], color, live: per.end >= view.today, top,
     // Honest scale: zero is always in view, and the span is at least ±0,5 % of the
     // desks' money at the period start, so a few euros never look like a crash.
-    base: M.unitsCents(c.startE), pad: { t: top },
+    base: M.unitsCents(c.startE),
     xLabels: marks.map((p, i, list) => ({ x: p.x, text: axisText(p), anchor: i === 0 ? 'start' : i === list.length - 1 ? 'end' : 'middle' })),
     marker: trackAt !== null && trackAt !== undefined ? { x: trackAt, text: `tracking from ${M.fmtDM(view.trackingStart)}` } : null,
     label: `Result so far, ${per.lab}: ${R.net === null ? 'not known yet' : eur(R.units.net, true)}`,
     tipFmt: n => `<b>${esc(n[0].lab)}</b> · result so far ${eur(n[0].u ?? n[0].v, true)}`,
+  });
+}
+
+// The seam. A description is either { empty, label, top } or the line: its
+// points ({ x, v, u, lab }, v null for a break), x domain, colour, whether it
+// runs to now, the period-start money for the minimum span, axis labels, the
+// tracking marker, the accessible label and the crosshair text. The design's
+// line: one thin stroke without an area, its end marked, zero dashed (CSS).
+function drawResultChart(el, spec) {
+  if (spec.empty) {
+    drawChart(el, { series: [], xDomain: [0, 1], empty: true, emptyText: spec.empty, label: spec.label, pad: { t: spec.top } });
+    return;
+  }
+  drawChart(el, {
+    series: [{ pts: spec.pts, color: spec.color, live: spec.live, w: 1.8, area: false }], xDomain: spec.domain, zero: true, strongZero: true, yFmt: eurAxis, ticks: 4,
+    base: spec.base, pad: { t: spec.top }, xLabels: spec.xLabels, marker: spec.marker, label: spec.label, tipFmt: spec.tipFmt,
   });
 }

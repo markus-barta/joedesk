@@ -187,7 +187,9 @@ export function indexResults(value) {
     trades.desk[k] = desk; trades.date[k] = date; trades.closedAt[k] = closed[order[k]]; trades.openedAt[k] = Date.parse(t.openedAt);
     trades.net[k] = net; trades.gross[k] = decimalUnits(t.grossEur.amount); trades.fees[k] = decimalUnits(t.feesEur.amount);
     // Company text may contain FIELD; JSON escapes it before offsets are measured.
-    const record = [t.id, t.symbol, JSON.stringify(t.company ?? ''), t.side, t.quantity, t.entryPrice.amount, t.entryPrice.currency, t.exitPrice.amount, t.exitPrice.currency].join(FIELD);
+    // The trade's own rate (quote EUR per one base unit) is shown as recorded.
+    const record = [t.id, t.symbol, JSON.stringify(t.company ?? ''), t.side, t.quantity, t.entryPrice.amount, t.entryPrice.currency, t.exitPrice.amount, t.exitPrice.currency,
+      t.fx?.base ?? '', t.fx?.rate ?? ''].join(FIELD);
     text.push(record); trades.offsets[k] = length; length += record.length;
     symbols.set(t.symbol, (symbols.get(t.symbol) ?? 0) | (1 << desk));
     agg.count[cell]++; agg.net[cell] += net; agg.gross[cell] += trades.gross[k]; agg.fees[cell] += trades.fees[k];
@@ -495,9 +497,9 @@ export function rollup(ix, per, desks, ctx) {
 // One trade for display, from the index.
 export function trade(ix, k) {
   const t = ix.trades;
-  const [id, symbol, company, side, quantity, entry, entryCur, exit, exitCur] = t.blob.slice(t.offsets[k], t.offsets[k + 1]).split(FIELD);
+  const [id, symbol, company, side, quantity, entry, entryCur, exit, exitCur, fxBase, fxRate] = t.blob.slice(t.offsets[k], t.offsets[k + 1]).split(FIELD);
   return { k, id, desk: DESK_IDS[t.desk[k]], symbol, company: JSON.parse(company) || null, side, quantity,
-    entry: { amount: entry, currency: entryCur }, exit: { amount: exit, currency: exitCur },
+    entry: { amount: entry, currency: entryCur }, exit: { amount: exit, currency: exitCur }, fx: fxRate ? { base: fxBase, rate: fxRate } : null,
     date: ix.dates[t.date[k]], closedAt: t.closedAt[k], openedAt: t.openedAt[k],
     net: cents(t.net[k]), gross: cents(t.gross[k]), fees: cents(t.fees[k]), units: { net: t.net[k], gross: t.gross[k], fees: t.fees[k] } };
 }

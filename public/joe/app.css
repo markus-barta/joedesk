@@ -201,8 +201,6 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 @media (hover: hover) { .btn.quiet:hover { background: var(--row-hover); color: var(--ink); } }
 .btn:disabled, .btn[aria-disabled="true"] { cursor: not-allowed; background: transparent; color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line-2); }
 .btn.quiet:disabled { box-shadow: none; }
-.step { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.step-label { width: 210px; text-align: center; font-weight: 600; white-space: nowrap; }
 
 /* ---------- Charts ---------- */
 .chart { position: relative; }
@@ -299,118 +297,6 @@ svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .keep-cap { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); font-size: 13px; padding: 8px 0 6px; min-height: calc(2lh + 14px); }
 .keep-cap .i { color: var(--ink-3); margin-top: 2px; }
 
-/* ---------- Results ---------- */
-.res-tools { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin: 18px 0 18px; }
-.res-tools .grow { flex: 1; }
-.rhero { padding: 22px 26px 20px; display: grid; grid-template-columns: 340px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0 34px; height: 352px; }
-.rhero .display { font-size: 40px; line-height: 48px; }
-.result-figure { display: grid; grid-template-columns: minmax(0, 1fr) 9ch; align-items: end; gap: 10px; height: 54px; flex: none; font-size: 16px; }
-.result-figure .display, .period-percent-slot { min-width: 0; container-type: inline-size; }
-.result-figure .display { height: 48px; }
-.result-figure .display > .bn { font-size: min(40px, calc(100cqw / var(--result-digits) * 1.5)); }
-.period-percent-slot { height: 24px; line-height: 24px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.period-percent-slot .performance-pct { font-size: min(16px, calc(100cqw / var(--percent-digits) * 1.5)); }
-.rhero .say { font-size: 14px; color: var(--ink-2); min-height: 42px; }
-.rhero .say .st { vertical-align: top; }
-.split { margin: 14px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 13.5px; padding-top: 14px; border-top: 1px solid var(--line); }
-.split dt { color: var(--ink-2); } .split dd { margin: 0; text-align: right; white-space: nowrap; }
-.rhero-l { display: flex; flex-direction: column; min-height: 0; }
-.bench { margin-top: auto !important; display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 13px; }
-.rhero-r { display: flex; flex-direction: column; min-width: 0; }
-.rhero-r .legend { justify-content: space-between; min-height: 44px; align-content: flex-start; }
-.rchart { height: 272px; flex: none; margin-top: 10px; }
-.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
-.tile { padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 6px; height: 200px; min-width: 0; }
-.tile-top { display: flex; align-items: flex-start; gap: 9px; min-height: 38px; }
-.tile-top h3 { align-self: center; }
-.tile-top h3 { flex: 1; min-width: 0; font-size: 13.5px; line-height: 18px; font-weight: 600; }
-.tval { font-size: 30px; line-height: 36px; font-weight: 650; letter-spacing: -.025em; white-space: nowrap; margin-top: 2px; }
-.tval .sl { font-size: 18px; color: var(--ink-3); font-weight: 500; margin: 0 6px; }
-.tval small { font-size: 14px; font-weight: 500; color: var(--ink-2); margin-left: 3px; letter-spacing: 0; }
-.tmean { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
-.tfoot { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
-.tfoot .i { width: 12px; height: 12px; }
-.bars { display: grid; gap: 2px; }
-.brow { display: grid; grid-template-columns: 150px minmax(0, 1fr) 110px 280px; gap: 0 18px; align-items: center; height: 48px; padding: 0 6px; border-radius: 10px; }
-.brow.sel { background: var(--accent-tint); }
-.brow .who { display: flex; align-items: center; gap: 9px; font-weight: 650; }
-.brow .who .dmark { width: 28px; height: 28px; border-radius: 8px; }
-.brow .who .dmark svg { width: 18px; height: 18px; }
-.track { position: relative; height: 12px; }
-.track::before { content: ""; position: absolute; left: 0; right: 0; top: 5.5px; height: 1px; background: var(--line); }
-.track .z { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--line-2); }
-.track .b { position: absolute; top: 0; height: 12px; border-radius: 4px; }
-.brow .val { text-align: right; font-weight: 650; }
-.brow .facts { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; text-align: right; }
-.brow.total { margin-top: 6px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; }
-.calcard { padding: 18px 20px 18px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0 26px; }
-.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 36px; }
-.cal-head h3 { font-size: 15px; font-weight: 650; width: 136px; text-align: center; white-space: nowrap; }
-#calSum { flex-shrink: 0; white-space: nowrap; }
-#calSum .month-short, #calSum.compact .month-long { display: none; }
-#calSum.compact .month-short { display: inline; }
-#calSum .st, .dp-sum .st { vertical-align: top; }
-.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) 78px; gap: 5px; margin-top: 8px; }
-.dow { font-size: 11.5px; color: var(--ink-3); height: 20px; padding-left: 8px; }
-.cell { position: relative; height: 62px; border-radius: 10px; padding: 7px 6px; border: 0; background: transparent; color: var(--ink); text-align: left; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; overflow: hidden; }
-@media (hover: hover) { button.cell:hover { box-shadow: inset 0 0 0 1px var(--line-2); } }
-.cell .d { font-size: 12px; line-height: 1.2; }
-/* Reserve the amount line even before a partial record adds its unknown dash. */
-.cell .v { font-size: 12.5px; font-weight: 650; line-height: 1.2; min-height: 1.2em; white-space: nowrap; }
-.cell .pl { gap: 3px; }
-.cell .n { font-size: 11px; line-height: 1.2; }
-.cell .day-warning { position: absolute; top: 7px; right: 6px; line-height: 1; }
-.cell.out { visibility: hidden; }
-.cell.none { box-shadow: inset 0 0 0 1px var(--line); }
-.cell.we .d, .cell.fut .d, .cell.none .n, .cell.we .n { color: var(--ink-3); }
-.cell.day-incomplete .n { color: var(--ink); }
-.cell.flat { background: var(--flat); }
-.cell.g1 { background: var(--g1); } .cell.g2 { background: var(--g2); } .cell.g3 { background: var(--g3); } .cell.g4 { background: var(--g4); }
-.cell.l1 { background: var(--l1); } .cell.l2 { background: var(--l2); } .cell.l3 { background: var(--l3); } .cell.l4 { background: var(--l4); }
-.cell.inper { box-shadow: inset 0 0 0 1px var(--accent-line); }
-.cell.today .d { font-weight: 700; }
-.cell.today::before { content: ""; position: absolute; top: 7px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
-.cell.sel { box-shadow: inset 0 0 0 2px var(--accent); }
-@media (hover: hover) { button.cell.sel:hover { box-shadow: inset 0 0 0 2px var(--accent); } }
-.cell .vs { display: none; }
-.wk { height: 62px; padding: 7px 2px 7px 8px; display: flex; flex-direction: column; justify-content: space-between; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
-.wk .v { font-size: 13px; font-weight: 650; color: var(--ink); }
-.cal-legend { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--ink-3); }
-.ramp { display: inline-flex; gap: 2px; vertical-align: middle; }
-.ramp i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
-.daypanel { display: flex; flex-direction: column; min-width: 0; height: 506px; padding-left: 26px; border-left: 1px solid var(--line); }
-.dp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; }
-.dp-head h3 { font-size: 15px; font-weight: 650; white-space: nowrap; }
-.dp-sum { color: var(--ink-2); font-size: 13px; line-height: 20px; white-space: nowrap; }
-.dp-head h3, .dp-head .dp-sum { flex-shrink: 0; }
-.dp-list { flex: 1; overflow-y: auto; margin-top: 8px; }
-.trow { display: grid; grid-template-columns: 38px minmax(120px, 1fr) minmax(0, max-content) minmax(92px, max-content); gap: 2px 12px; align-items: center; padding: 10px 2px; border-top: 1px solid var(--line); }
-.trow .name b { font-weight: 650; }
-.trow .name .meta { display: block; color: var(--ink-3); font-size: 12px; }
-.trow .px { display: grid; grid-template-columns: minmax(0, 1fr) max-content; column-gap: 8px; align-items: start; min-width: 0; text-align: right; font-size: 13px; color: var(--ink-2); white-space: normal; }
-.trow .px .ln { display: inline-flex; align-items: center; gap: 5px; }
-.trow .px .ln .i { width: 12px; height: 12px; color: var(--ink-3); }
-.trow .px .fee { grid-column: 2; display: block; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
-.trow .net { grid-column: 4; grid-row: 1; text-align: right; font-weight: 650; white-space: nowrap; }
-.dp-empty { padding: 22px 0; color: var(--ink-2); display: flex; gap: 10px; align-items: flex-start; }
-.dp-empty .i { color: var(--ink-3); margin-top: 2px; }
-/* Reserve the reason boxes' inline-end overhang inside the note. */
-.dp-note { padding: 10px 0 0; padding-inline-end: 4px; color: var(--ink-3); font-size: 12px; display: flex; gap: 7px; }
-.dp-note .i { width: 14px; height: 14px; margin-top: 1px; flex-shrink: 0; }
-/* The text column keeps its full width when the disclosure is removed. */
-.dp-note-copy { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.dp-note-copy > p { margin: 0; }
-.dp-note-lines { min-width: 0; }
-.dp-note-lead, .dp-reason, .dp-desk-note, .dp-reasons-extra { display: block; }
-/* Every reason keeps its text aligned and leaves 2 px clear of the inset ring. */
-.dp-reason { padding-inline: 4px; margin-inline: -4px; }
-.dp-reason[tabindex="-1"]:focus-visible { outline-offset: -2px; }
-.dp-reasons-more { display: block; width: 100%; min-height: 44px; text-align: left; padding: 0; border: 0; background: transparent; color: var(--ink-2); font: inherit; }
-/* The measured full-content height survives removal of the disclosure. */
-.sheet .dlg-in { height: 100%; }
-.sheet .dlg-h { flex-shrink: 0; }
-.sheet .dlg-b { scrollbar-gutter: stable; }
-
 /* ---------- History ---------- */
 .hist-tools { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin: 18px 0 12px; }
 .hist-help { font-size: 12.5px; color: var(--ink-3); margin-top: 8px; }
@@ -446,14 +332,9 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 
 /* ---------- Middle widths ---------- */
 @media (max-width: 1180px) {
-  .rhero { grid-template-columns: 280px minmax(0, 1fr); gap: 0 24px; }
-  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .prow { grid-template-columns: 38px minmax(0, 1.4fr) 100px 100px minmax(120px, 1fr) 110px; }
   .prow .c-opened { display: none; }
   .kept .prow { grid-template-columns: 38px minmax(0, 1.4fr) 100px 100px minmax(120px, 1fr) 236px; }
-  .calcard { grid-template-columns: 1fr; }
-  .daypanel { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); margin-top: 18px; padding-top: 12px; }
-  .brow { grid-template-columns: 130px minmax(0, 1fr) 100px 220px; }
   .nav button { padding: 0 10px; }
 }
 @media (max-width: 1100px) {
@@ -496,7 +377,6 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .btn { height: 44px; }
   .learn { height: 44px; padding: 0 13px; }
   .learn::after { inset: 0; }
-  .step .icon-btn { width: 44px; height: 44px; }
   .scr-h { margin-top: 18px; }
   .sec-h .sub { flex-basis: 100%; }
   .hero { padding: 18px 16px 16px; }
@@ -519,45 +399,7 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .kept .kept-label { justify-content: flex-start; }
   .term::after { inset: -13px -12px; }
   .kept { padding: 4px 12px 8px; }
-  .res-tools { gap: 8px; }
-  .res-tools .seg { width: 100%; }
-  .res-tools .seg button { flex: 1; padding: 0 4px; }
-  .res-tools .step { width: 100%; justify-content: space-between; }
-  .step-label { flex: 1; width: auto; }
   .t-long { display: none; } .t-short { display: inline; }
-  .rhero { grid-template-columns: 1fr; grid-template-rows: auto auto; height: auto; padding: 18px 16px; }
-  /* Three sentence lines need 300.75 px: label 20.25 + number 54 +
-     sentence 65 + split 117 + benchmark 44.5 (including margins/borders).
-     Round up so the split's auto margin still has slack on the third line. */
-  .rhero-l { height: 301px; display: flex; flex-direction: column; }
-  .rhero .say { min-height: 2lh; flex-shrink: 0; }
-  .rhero-r { height: 300px; margin-top: 8px; }
-  .rhero-r .legend { flex-direction: column; align-items: flex-start; gap: 3px; }
-  .rchart { height: 196px; }
-  .tiles { grid-template-columns: 1fr; gap: 10px; }
-  .tile { height: 200px; padding: 12px 12px 8px; }
-  .tile-top { flex-wrap: wrap; min-height: 32px; }
-  .tile .ico-sq { display: none; }
-  .tval { font-size: 24px; line-height: 30px; }
-  .tval .sl { font-size: 15px; margin: 0 3px; }
-  .tmean { white-space: normal; }
-  .brow { grid-template-columns: 96px minmax(0, 1fr) 92px; height: 56px; }
-  .brow .facts { display: none; }
-  .calcard { padding: 14px 4px; }
-  .cal { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
-  .wk, .dow.wkh { display: none; }
-  .dow { padding-left: 4px; }
-  .cell { height: 52px; padding: 5px 3px; border-radius: 8px; }
-  .cell .day-warning { top: 5px; right: 3px; }
-  .cell .v { font-size: 11.5px; } .cell .n { display: none; }
-  .cell .pl { gap: 2px; } .cell .pl .i { width: 7px; height: 7px; }
-  .cell .vl { display: none; } .cell .vs { display: inline; }
-  /* Scaled phone amounts keep the 10 px floor, including M/B/T and e forms. */
-  #cal .cell .vs .pl.sc, #cal .cell .vs .pl.sx { font-size: 10px; }
-  .cell.today::before { top: 5px; right: 5px; }
-  .daypanel { display: none; }
-  .cal-head .icon-btn { width: 44px; height: 44px; }
-  #calSum { display: none; }
   .hist-tools .seg { max-width: 100%; }
   .hcard { padding: 14px 10px 10px; }
   .hist-chart { height: 260px; }
@@ -619,15 +461,6 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 }
 .cell-state { display: inline-flex; vertical-align: middle; margin-left: 3px; }
 .cell-state .i { width: 12px; height: 12px; }
-.tile .metric-info { width: 26px; height: 26px; padding: 0; justify-content: center; box-shadow: none; }
-.tile .metric-info .i { width: 15px; height: 15px; }
-.tile .metric-info::after { inset: -9px; }
-.tile .tval { height: 56px; flex: none; }
-.tile { container-type: inline-size; }
-/* Two fixed rows; a long exact numeral scales within its actual card width.
-   Leave room for the SVG arrow and slash even in the wider fallback font. */
-.tile .tval .pair-value { display: block; font-size: min(22px, calc((100cqw - 18px) / var(--characters) * 1.45)); line-height: 26px; }
-.tile .tval .sl { font-size: 14px; margin: 0 5px 0 0; }
 .kpi .c { min-height: 16px; }
 .session > div { min-width: 0; }
 .ring-t { font: 650 11px var(--font); fill: var(--ink); }
@@ -709,8 +542,6 @@ span.dbar, span.vbar { display: block; }
 .sec-h.small { margin: 22px 0 6px; }
 .sec-h.small h2 { font-size: 14px; }
 .events .ev-empty div { color: var(--ink-2); }
-.lg-b { font-weight: 650; color: var(--ink); }
-.cell.nw .d { color: var(--ink); }
 .foot .foot-data { display: block; }
 .foot .foot-data span { display: inline; }
 .foot-data .i { display: inline-block; vertical-align: -3px; margin-right: 6px; }
@@ -739,53 +570,7 @@ span.dbar, span.vbar { display: block; }
   .hdr-health .i.tone-none { visibility: hidden; }
 }
 
-/* ---------- Results (P4) ---------- */
-/* The stepper label and the month title keep one width: their widest forms
-   sit invisibly in the same grid cell, in whatever font the browser has. */
-.step-label, .cal-head h3 { display: inline-grid; justify-items: center; }
-.step-label > span, .cal-head h3 > span { grid-area: 1 / 1; }
-.step-label > [aria-hidden], .cal-head h3 > [aria-hidden] { visibility: hidden; }
-.step-label { min-width: 210px; width: auto; }
-.agenda-date { display: none; }
-.cal-head h3 { min-width: 136px; width: auto; }
-/* The hero: label, number and sentence on top; the split and the benchmark
-   line at the bottom, so a longer sentence never moves the numbers. */
-.rhero-l .split { margin-top: auto; }
-.rhero-l .bench { margin-top: 12px !important; }
-.rhero-l .say { margin-top: 2px; }
-/* The record's own state sits in the chart's fixed box; the plot starts below it. */
-.res-status { position: absolute; left: 0; right: 0; top: 0; z-index: 2; font-size: 12.5px; color: var(--ink-2); pointer-events: none; }
-.res-state .st { white-space: normal; align-items: flex-start; }
-.res-state .st .i { margin-top: 2px; }
-/* A value keeps the box of its line, with or without a sign, unit or arrow:
-   the smaller € and slash never add leading, so a dash and a number match. */
-.rhero .bn .u, .tval .bn .u, .tval .sl, .tval small { line-height: 1; }
-.rhero-l .split dd { height: 1lh; }
-.brow .val { height: 24px; display: flex; align-items: center; justify-content: flex-end; }
-/* A row's facts take a second line in a wide font rather than run past their cell. */
-.brow .facts { white-space: normal; line-height: 16px; }
-.tval.tight { font-size: 23px; }
-.tval .bn .ar { width: 12px; height: 12px; }
-/* Keep whole words together. Only an individual token wider than the name
-   column can break at its soft hyphens; anywhere is the final fallback if
-   even a fragment cannot fit inside the constrained inline block. */
-.trow .name { min-width: 120px; word-break: normal; overflow-wrap: normal; hyphens: manual; }
-.trow .name .word { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
-.trow .name .meta-unit { display: inline-block; white-space: nowrap; }
-.trow .name .meta-sep.line-end { visibility: hidden; }
-.trow .name .i.side { width: 12px; height: 12px; display: inline; vertical-align: -1px; }
-.trow .name .i.im { width: 13px; height: 13px; vertical-align: -2px; }
-.trow .px .ln { display: inline-flex; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; column-gap: 5px; white-space: normal; }
-.trow .px .ln > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-/* fitTradeRows tries the wrapped pair first, then the panel-wide small token,
-   then permits the fee to wrap. Amount sizing is independent of these steps. */
-.trow .px.small, .trow .px.small .fee { font-size: var(--trade-price-small); }
-.trow .px.wrap-fee { grid-template-columns: minmax(0, 1fr); }
-.trow .px.wrap-fee .fee { grid-column: 1; white-space: normal; }
-.trow.prices-below .px { grid-column: 2 / -1; }
-.cell.pre .d { color: var(--ink-3); }
-.wk > span:first-child:empty::before { content: "\00a0"; }
-/* Phones: a day's trades open in a bottom sheet. */
+/* ---------- Dialogs (shared chrome; the Results sheet adds its own rules) ---------- */
 dialog.dlg { padding: 0; border: 0; border-radius: 18px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-pop); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
 dialog.dlg::backdrop { background: var(--scrim); }
 .dlg-in { display: flex; flex-direction: column; max-height: inherit; }
@@ -793,29 +578,259 @@ dialog.dlg::backdrop { background: var(--scrim); }
 .dlg-h h2 { font-size: 17px; font-weight: 650; }
 .dlg-b { padding: 14px 22px 18px; flex: 1; overflow-y: auto; min-height: 0; }
 .dlg-b:focus-visible { outline-offset: -2px; }
-.sheet .dp-sum { margin: 0 0 8px; }
 @media (max-width: 700px) {
   dialog.dlg { margin: auto 0 0; width: 100vw; max-width: 100vw; border-radius: 18px 18px 0 0; max-height: 80vh; }
-  /* Preserve the arrow targets; let long period labels wrap in their track. */
-  .res-tools .step-label { min-width: 0; grid-template-columns: minmax(0, 1fr); white-space: normal; overflow-wrap: anywhere; }
   .dlg-h { padding: 14px 16px 0; }
   .dlg-b { padding: 10px 16px 20px; }
-  .tval.tight { font-size: 20px; }
+}
+
+/* ==================== Results (one block) ====================
+   Every Results-only rule lives here, in the approved board design (JOED-147
+   phase JOED-151); no other screen uses these selectors. Each region keeps a
+   fixed line box or row, so switching the period, desk, day or month, and any
+   amount or sentence, moves nothing (exactly 0 px). Dialog chrome is shared
+   and stays with the dialog rules just above. */
+
+/* Controls: period tabs, the stepper, the desk filter. The stepper label and
+   the month title keep one width: their widest forms sit invisibly in the
+   same grid cell, in whatever font the browser has. */
+.res-tools { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin: 14px 0 12px; }
+.res-tools .grow { flex: 1; }
+.step { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.step-label, .cal-head h3 { display: inline-grid; justify-items: center; text-align: center; white-space: nowrap; }
+.step-label > span, .cal-head h3 > span { grid-area: 1 / 1; }
+.step-label > [aria-hidden], .cal-head h3 > [aria-hidden] { visibility: hidden; }
+.step-label { min-width: 210px; font-weight: 600; }
+
+/* The hero: what it shows (result, desks, period), the figure, its percentage
+   with the money it divides by, one sentence, then the split. Fixed rows: a
+   sentence of one, two or three lines never moves a number. */
+.rhero { padding: 20px 22px 16px; display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0 28px; }
+.rhero-l { display: grid; grid-template-rows: 20px 78px 67px auto; min-width: 0; }
+.rhero .hero-k { display: flex; align-items: center; gap: 8px; height: 20px; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.rhero .hero-k .i { width: 15px; height: 15px; color: var(--ink-3); }
+.result-figure { display: grid; grid-template-rows: 56px 22px; min-width: 0; }
+.result-figure .display, .period-percent-slot { min-width: 0; container-type: inline-size; }
+.result-figure .display { display: flex; align-items: center; height: 56px; margin: 0; font-size: 44px; line-height: 56px; font-weight: 650; letter-spacing: -.03em; }
+.result-figure .display > .bn { font-size: min(44px, calc(100cqw / var(--result-digits) * 1.5)); }
+.period-percent-slot { height: 22px; line-height: 22px; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.period-percent-slot > .performance-pct { font-size: min(15px, calc(100cqw / var(--percent-digits) * 1.5)); }
+.period-percent-slot > .term.of { font-size: min(13px, calc(100cqw / var(--percent-digits) * 1.3)); font-weight: 500; color: var(--ink-3); }
+.rhero .say { align-self: start; margin-top: 4px; min-height: 2lh; font-size: 14px; line-height: 21px; color: var(--ink); }
+.rhero .say .st { vertical-align: top; }
+.rhero-l .split { margin: 12px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; }
+.rhero-l .split dt { color: var(--ink-2); }
+.rhero-l .split dd { height: 1lh; margin: 0; text-align: right; white-space: nowrap; font-weight: 600; }
+/* A value keeps the box of its line, with or without a sign, unit or arrow:
+   the smaller € and slash never add leading, so a dash and a number match. */
+.rhero .bn .u, .tval .bn .u, .tval .sl, .tval small { line-height: 1; }
+.rhero-r { display: flex; flex-direction: column; min-width: 0; }
+.rhero-r .legend { justify-content: flex-start; gap: 6px 16px; min-height: 20px; align-content: flex-start; }
+/* The record's own state sits in the chart's fixed box; the plot starts below it. */
+.rchart { height: 258px; flex: none; margin-top: 8px; }
+.res-status { position: absolute; left: 0; right: 0; top: 0; z-index: 2; font-size: 12.5px; color: var(--ink-2); pointer-events: none; }
+.res-state .st { white-space: normal; align-items: flex-start; }
+.res-state .st .i { margin-top: 2px; }
+/* The design's quiet zero line: dashed, at its existing weight. */
+.rchart svg line[stroke-width="1.4"] { stroke-dasharray: 3 3; }
+
+/* Eight tiles: title with its explanation behind the info control, one value
+   that steps its size down to the tile's own width (never clips), what it means. */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.tile { container-type: inline-size; display: grid; grid-template-rows: 26px 30px 18px; row-gap: 2px; min-width: 0; padding: 12px 14px 11px; }
+.tile-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tile-top h3 { flex: 1; min-width: 0; font-size: 12.5px; line-height: 18px; font-weight: 600; color: var(--ink-2); }
+.tile .metric-info { width: 26px; height: 26px; padding: 0; justify-content: center; box-shadow: none; }
+.tile .metric-info .i { width: 15px; height: 15px; }
+.tile .metric-info::after { inset: -9px; }
+/* Room is left for the SVG arrows and the slash, also in the wider fallback font. */
+.tval { height: 30px; font-size: min(22px, calc((100cqw - 32px) / var(--characters) * 1.45)); line-height: 30px; font-weight: 650; letter-spacing: -.02em; white-space: nowrap; }
+.tval .bn .ar { width: .5em; height: .5em; }
+.tval .sl { font-size: .7em; font-weight: 500; color: var(--ink-3); margin: 0 6px; }
+.tval small { font-size: .64em; font-weight: 500; color: var(--ink-2); margin-left: 3px; letter-spacing: 0; }
+.tmean { font-size: 12px; line-height: 18px; color: var(--ink-3); white-space: nowrap; }
+
+/* By desk: every desk and All desks on one scale, in one card. */
+.bdcard { display: grid; gap: 4px; padding: 8px; }
+.brow { display: grid; grid-template-columns: 110px minmax(0, 1fr) 110px 280px; gap: 0 14px; align-items: center; height: 40px; padding: 0 8px; border-radius: 10px; }
+.brow.sel { background: var(--accent-tint); }
+.brow.total { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; }
+.brow .who { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 650; white-space: nowrap; }
+.brow .who .dmark { width: 24px; height: 24px; border-radius: 7px; }
+.brow .who .dmark svg { width: 16px; height: 16px; }
+.track { position: relative; height: 12px; }
+.track::before { content: ""; position: absolute; left: 0; right: 0; top: 5.5px; height: 1px; background: var(--line); }
+.track .z { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--line-2); }
+.track .b { position: absolute; top: 0; height: 12px; border-radius: 4px; }
+.brow .val { height: 24px; display: flex; align-items: center; justify-content: flex-end; font-weight: 650; }
+/* A row's facts take a second line in a wide font rather than run past their cell. */
+.brow .facts { color: var(--ink-3); font-size: 12px; line-height: 16px; text-align: right; white-space: normal; }
+
+/* The calendar and the selected day's trades share one card. */
+.calcard { padding: 16px 18px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 0 24px; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 36px; }
+.cal-head h3 { min-width: 136px; font-size: 15px; font-weight: 650; }
+#calSum { flex-shrink: 0; white-space: nowrap; }
+#calSum .month-short, #calSum.compact .month-long { display: none; }
+#calSum.compact .month-short { display: inline; }
+#calSum .st, .dp-sum .st { vertical-align: top; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) 78px; gap: 5px; margin-top: 8px; }
+.dow { font-size: 11px; color: var(--ink-3); height: 20px; padding-left: 7px; }
+.cell { position: relative; height: 62px; border-radius: 9px; padding: 7px 6px; border: 0; background: transparent; color: var(--ink); text-align: left; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; overflow: hidden; }
+@media (hover: hover) { button.cell:hover { box-shadow: inset 0 0 0 1px var(--line-2); } }
+.cell .d { font-size: 11.5px; line-height: 1.2; }
+/* Reserve the amount line even before a partial record adds its unknown dash. */
+.cell .v { font-size: 12.5px; font-weight: 650; line-height: 1.2; min-height: 1.2em; white-space: nowrap; }
+.cell .pl { gap: 3px; }
+.cell .n { font-size: 11px; line-height: 1.2; }
+.cell .day-warning { position: absolute; top: 7px; right: 6px; line-height: 1; }
+.cell.out { visibility: hidden; }
+.cell.none { box-shadow: inset 0 0 0 1px var(--line); }
+.cell.we .d, .cell.fut .d, .cell.none .n, .cell.we .n { color: var(--ink-3); }
+.cell.day-incomplete .n { color: var(--ink); }
+.cell.flat { background: var(--flat); }
+.cell.g1 { background: var(--g1); } .cell.g2 { background: var(--g2); } .cell.g3 { background: var(--g3); } .cell.g4 { background: var(--g4); }
+.cell.l1 { background: var(--l1); } .cell.l2 { background: var(--l2); } .cell.l3 { background: var(--l3); } .cell.l4 { background: var(--l4); }
+.cell.inper { box-shadow: inset 0 0 0 1px var(--accent-line); }
+.cell.today .d { font-weight: 700; }
+.cell.today::before { content: ""; position: absolute; top: 7px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
+.cell.sel { box-shadow: inset 0 0 0 2px var(--accent); }
+@media (hover: hover) { button.cell.sel:hover { box-shadow: inset 0 0 0 2px var(--accent); } }
+.cell .vs { display: none; }
+.cell.pre .d { color: var(--ink-3); }
+.cell.nw .d { color: var(--ink); }
+.agenda-date { display: none; }
+.wk { height: 62px; padding: 7px 2px 7px 8px; display: flex; flex-direction: column; justify-content: space-between; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.wk .v { font-size: 13px; font-weight: 650; color: var(--ink); }
+.wk > span:first-child:empty::before { content: "\00a0"; }
+.cal-legend { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--ink-3); }
+.ramp { display: inline-flex; gap: 2px; vertical-align: middle; }
+.ramp i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+/* A day's trades: symbol, name and meta, the result after fees; the prices as
+   traded with the trade's own rate and its fees on the line below. */
+.daypanel { display: flex; flex-direction: column; min-width: 0; height: 506px; }
+.dp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; }
+.dp-head h3 { font-size: 15px; font-weight: 650; white-space: nowrap; }
+.dp-sum { color: var(--ink-2); font-size: 13px; line-height: 20px; white-space: nowrap; }
+.dp-head h3, .dp-head .dp-sum { flex-shrink: 0; }
+.dp-list { flex: 1; overflow-y: auto; margin-top: 8px; }
+.trow { display: grid; grid-template-columns: 38px minmax(120px, 1fr) minmax(92px, max-content); gap: 2px 12px; align-items: center; padding: 9px 2px; border-top: 1px solid var(--line); }
+.trow:first-child { border-top: 0; }
+/* Keep whole words together. Only an individual token wider than the name
+   column can break at its soft hyphens; anywhere is the final fallback if
+   even a fragment cannot fit inside the constrained inline block. */
+.trow .name { min-width: 120px; word-break: normal; overflow-wrap: normal; hyphens: manual; }
+.trow .name b { font-weight: 650; }
+.trow .name .meta { display: block; color: var(--ink-3); font-size: 12px; }
+.trow .name .word { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+.trow .name .meta-unit { display: inline-block; white-space: nowrap; }
+.trow .name .meta-sep.line-end { visibility: hidden; }
+.trow .name .i.side { width: 12px; height: 12px; display: inline; vertical-align: -1px; }
+.trow .name .i.im { width: 13px; height: 13px; vertical-align: -2px; }
+.trow .px { grid-column: 2 / -1; grid-row: 2; display: grid; grid-template-columns: minmax(0, max-content) max-content; justify-content: start; column-gap: 10px; align-items: start; min-width: 0; text-align: left; font-size: 12.5px; color: var(--ink-2); white-space: normal; }
+.trow .px .ln { display: inline-flex; max-width: 100%; flex-wrap: wrap; justify-content: flex-start; align-items: center; column-gap: 8px; white-space: normal; }
+.trow .px .ln > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.trow .px .ln .i { width: 12px; height: 12px; color: var(--ink-3); }
+.trow .px .fee { grid-column: 2; display: block; white-space: nowrap; }
+/* fitTradeRows tries the wrapped pair first, then the panel-wide small token,
+   then permits the fee to wrap. Amount sizing is independent of these steps. */
+.trow .px.small, .trow .px.small .fee { font-size: var(--trade-price-small); }
+.trow .px.wrap-fee { grid-template-columns: minmax(0, 1fr); }
+.trow .px.wrap-fee .fee { grid-column: 1; white-space: normal; }
+.trow.prices-below .px { grid-column: 2 / -1; }
+/* The amount's own words sit under it; the group's name already says them. */
+.trow .net { grid-column: 3; grid-row: 1; align-self: start; position: relative; text-align: right; font-weight: 650; white-space: nowrap; }
+.trow .net::after { content: "after fees"; position: absolute; top: 100%; right: 0; font-size: 11.5px; font-weight: 500; color: var(--ink-3); white-space: nowrap; }
+.dp-empty { padding: 22px 0; color: var(--ink-2); display: flex; gap: 10px; align-items: flex-start; }
+.dp-empty .i { color: var(--ink-3); margin-top: 2px; }
+/* Reserve the reason boxes' inline-end overhang inside the note. */
+.dp-note { padding: 10px 0 0; padding-inline-end: 4px; color: var(--ink-3); font-size: 12px; display: flex; gap: 7px; }
+.dp-note .i { width: 14px; height: 14px; margin-top: 1px; flex-shrink: 0; }
+/* The text column keeps its full width when the disclosure is removed. */
+.dp-note-copy { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.dp-note-copy > p { margin: 0; }
+.dp-note-lines { min-width: 0; }
+.dp-note-lead, .dp-reason, .dp-desk-note, .dp-reasons-extra { display: block; }
+/* Every reason keeps its text aligned and leaves 2 px clear of the inset ring. */
+.dp-reason { padding-inline: 4px; margin-inline: -4px; }
+.dp-reason[tabindex="-1"]:focus-visible { outline-offset: -2px; }
+.dp-reasons-more { display: block; width: 100%; min-height: 44px; text-align: left; padding: 0; border: 0; background: transparent; color: var(--ink-2); font: inherit; }
+/* How a listed day's prices, rates and euro amounts read. */
+.dp-fx { display: flex; gap: 7px; margin: 0; padding: 12px 0 0; color: var(--ink-3); font-size: 12px; }
+.dp-fx .i { width: 14px; height: 14px; margin-top: 1px; flex-shrink: 0; }
+/* Phones: a day's trades open in a bottom sheet. The measured full-content
+   height survives removal of the disclosure. */
+.sheet .dlg-in { height: 100%; }
+.sheet .dlg-h { flex-shrink: 0; }
+.sheet .dlg-b { scrollbar-gutter: stable; }
+.sheet .dp-sum { margin: 0 0 8px; }
+
+@media (max-width: 1180px) {
+  .rhero { grid-template-columns: 280px minmax(0, 1fr); gap: 0 24px; }
+  .rhero-r .legend { min-height: 44px; }
+  .rchart { height: 234px; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .brow { grid-template-columns: 110px minmax(0, 1fr) 100px 220px; }
+  .calcard { grid-template-columns: minmax(0, 1fr); }
+  .daypanel { margin-top: 16px; }
+}
+/* Tablets: the chart sits under the figures, as in the design. */
+@media (max-width: 900px) {
+  .rhero { grid-template-columns: minmax(0, 1fr); }
+  .rhero-r { margin-top: 14px; }
+  .rchart { height: 220px; }
+}
+@media (max-width: 700px) {
+  .res-tools { gap: 8px; }
+  .res-tools .seg { width: 100%; }
+  .res-tools .seg button { flex: 1; padding: 0 4px; }
+  .res-tools .step { width: 100%; justify-content: space-between; }
+  /* Preserve the arrow targets; let long period labels wrap in their track. */
+  .res-tools .step-label { min-width: 0; grid-template-columns: minmax(0, 1fr); white-space: normal; overflow-wrap: anywhere; flex: 1; }
+  .rhero { padding: 18px 16px; }
+  .rchart { height: 196px; }
+  .tiles { gap: 8px; }
+  .tile { grid-template-rows: 34px 52px 32px; padding: 10px 12px 9px; }
+  .tile-top { align-items: flex-start; }
+  .tile-top h3 { line-height: 17px; }
+  .tval { height: 52px; }
+  /* Phones put a pair's two values on their own lines, each sized to the tile. */
+  .tval .pair-value { display: block; font-size: min(22px, calc((100cqw - 18px) / var(--characters) * 1.45)); line-height: 26px; }
+  .tval .pair-value .sl { margin: 0 5px 0 0; }
+  .tmean { line-height: 16px; white-space: normal; }
+  .brow { grid-template-columns: 96px minmax(0, 1fr) 92px; height: 48px; }
+  .brow .facts { display: none; }
+  .calcard { padding: 14px 4px; }
+  .cal { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+  .wk, .dow.wkh { display: none; }
+  .dow { padding-left: 4px; }
+  .cell { height: 52px; padding: 5px 3px; border-radius: 8px; }
+  .cell .day-warning { top: 5px; right: 3px; }
+  .cell .v { font-size: 11.5px; } .cell .n { display: none; }
+  .cell .pl { gap: 2px; } .cell .pl .i { width: 7px; height: 7px; }
+  .cell .vl { display: none; } .cell .vs { display: inline; }
+  /* Scaled phone amounts keep the 10 px floor, including M/B/T and e forms. */
+  #cal .cell .vs .pl.sc, #cal .cell .vs .pl.sx { font-size: 10px; }
+  .cell.today::before { top: 5px; right: 5px; }
+  .daypanel { display: none; }
+  .cal-head .icon-btn { width: 44px; height: 44px; }
+  #calSum { display: none; }
   .trow { grid-template-columns: 38px minmax(0, 1fr) auto; }
   .trow .name { min-width: 0; }
-  .trow .px { grid-column: 2 / -1; text-align: left; }
-  .trow .px .ln { justify-content: flex-start; }
-  .trow .net { grid-column: 3; grid-row: 1; }
 }
 /* Seven 44 px days plus gutters/gaps do not fit on small phones. Keep
-   full dates in a three-column agenda; the 42 slots retain a stable height. */
+   full dates in a three-column agenda; the 42 slots retain a stable height.
+   The tiles take one column so their titles keep two lines. */
 @media (max-width: 382px) {
   .cal { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .cal .dow { display: none; }
   .cal .cell { min-height: 44px; }
   .cal .agenda-date { display: inline; }
   .cal .grid-date { display: none; }
+  .tiles { grid-template-columns: minmax(0, 1fr); }
 }
+/* ==================== end of Results ==================== */
 
 /* ---------- Settings (P5) ----------
    Mode first, then Runtime state, every fleet setting, How it works, Where

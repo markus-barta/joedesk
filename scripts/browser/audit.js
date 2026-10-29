@@ -202,7 +202,8 @@
     },
     gui27() {
       const out = { italics: [], borders: [], pills: [], uppercase: [], cards: [], boxes: [] };
-      const primary = ['hero', 'dcard', 'rhero', 'tile', 'calcard', 'hcard', 'mode-panel'];
+      // By desk is one of Results' primary objects in the approved design (JOED-151).
+      const primary = ['hero', 'dcard', 'rhero', 'tile', 'bdcard', 'calcard', 'hcard', 'mode-panel'];
       for (const el of document.querySelectorAll('body *')) {
         if (!visible(el) || el.closest('svg')) continue;
         const cs = getComputedStyle(el), r = el.getBoundingClientRect();

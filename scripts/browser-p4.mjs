@@ -232,12 +232,13 @@ const RES = `(() => {
       const euros = document.querySelector('#rheroL .display'), euroBox = euros.getBoundingClientRect();
       range.selectNodeContents(euros);
       const euroGlyphs = range.getBoundingClientRect();
-      return { text: t(value), explanation: slot.querySelector('.vh')?.textContent ?? '', tone: value?.className ?? '',
+      return { text: t(value), explanation: slot.querySelector('.vh')?.textContent ?? '', tone: value?.className ?? '', base: t(slot.querySelector('.of')),
         tabular: getComputedStyle(slot).fontVariantNumeric.includes('tabular-nums'),
+        // JOED-151: the percentage and its base sit on their own line under the euros.
         fits: (!glyphs || glyphs.left >= bounds.left - 0.5 && glyphs.right <= bounds.right + 0.5) && slot.scrollWidth <= slot.clientWidth &&
-          euroGlyphs.left >= euroBox.left - 0.5 && euroGlyphs.right <= euroBox.right + 0.5 && euroBox.right <= bounds.left - 4 };
+          euroGlyphs.left >= euroBox.left - 0.5 && euroGlyphs.right <= euroBox.right + 0.5 && euroBox.bottom <= bounds.top + 0.5 };
     })(),
-    split: [...document.querySelectorAll('#rheroL .split dd')].map(t), bench: t(document.querySelector('#rheroL .bench')),
+    split: [...document.querySelectorAll('#rheroL .split dd')].map(t),
     tiles: [...document.querySelectorAll('#tiles .tile')].map(el => ({ k: el.dataset.tile, val: t(el.querySelector('.tval')), mean: t(el.querySelector('.tmean')), head: t(el.querySelector('h3')) })),
     rows: [...document.querySelectorAll('#breakdown .brow')].map(el => ({ row: el.dataset.row, sel: el.classList.contains('sel'), bg: getComputedStyle(el).backgroundColor, val: t(el.querySelector('.val')), facts: el.querySelector('.facts').textContent, bar: el.querySelector('.track .b') ? Number(el.querySelector('.track .b').dataset.v) : null })),
     cal: { title: t(document.querySelector('#calTitle .cur')), sum: document.getElementById('calSum').textContent, slots: document.querySelectorAll('#cal .cell').length, weeks: document.querySelectorAll('#cal .wk').length,
@@ -260,7 +261,8 @@ function expected(ix, inputs, period, anchor, desk) {
   const per = M.periodOf(period, anchor, inputs.today, ix.meta.trackingStart);
   const ctx = desksOf => M.moneyContext(ix, inputs, per, desksOf);
   const R = M.rollup(ix, per, desks, ctx(desks));
-  return { per, R, percent: M.periodPercent(ix, inputs, per, desks, R),
+  return { per, R, percent: M.periodPercent(ix, inputs, per, desks, R), base: M.periodBase(ix, inputs, per, desks),
+    who: desk === 'all' ? 'All desks' : { j: 'J', joe: 'Joe', joel: 'Joel' }[desk],
     rows: [...DESKS.map(d => M.rollup(ix, per, [d], ctx([d]))), M.rollup(ix, per, DESKS, ctx(DESKS))] };
 }
 
@@ -271,10 +273,13 @@ function compare(tag, r, e, requirePercent = false) {
   const want = (what, got, expect) => { if (N(got) !== N(expect)) facts.push({ what, got, expect }); };
   want('stepper', r.label, per.lab);
   want('by desk heading', r.bd, `By desk · ${per.head}`);
-  want('chart legend', r.legend[0], `Result so far · ${per.head}`);
+  // JOED-151: the hero names what it shows; the chart's legend names the line.
+  want('hero heading', r.who, `Result · ${e.who} · ${per.head}`);
+  want('chart legend', r.legend[0], `Result so far · ${e.who}`);
   want('net', r.display, none || R.net === null ? '—' : money(R.net));
   want('period percentage (all desks only)', r.percent.text, percentHtml(e.percent).replace(/<[^>]+>/g, ''));
-  want('period percentage explanation', r.percent.explanation, e.percent === null ? '' : ' of the money at the period start');
+  want('period percentage explanation', r.percent.explanation, e.percent === null ? '' : ', the money at the period start');
+  want('period percentage base', r.percent.base, e.percent === null ? '' : `of ${fmt.eur(e.base)}`);
   want('period percentage tone', r.percent.tone, e.percent === null ? '' : `performance-pct${e.percent ? e.percent > 0n ? ' gain' : ' loss' : ''}`);
   if (requirePercent && (e.percent === null || !r.percent.text.includes('%'))) facts.push({ what: 'standard All desks fixture must show a period percentage', got: r.percent });
   if (!r.percent.tabular || !r.percent.fits) facts.push({ what: 'period percentage tabular numerals and bounds', got: r.percent });
@@ -294,15 +299,16 @@ function compare(tag, r, e, requirePercent = false) {
   want('biggest dip', tile('dip').val, none || R.dd === null ? '—' : money(R.dd));
   const oneDay = R.bestDay && R.bestDay.date === R.worstDay.date;
   want('best and worst day', tile('bestday').val, !R.bestDay ? '—' : oneDay ? money(R.bestDay.net) : two(R.bestDay.net, R.worstDay.net));
-  // AC-10: no tile and not the hero carries a period label.
-  const periodWords = /\b(this week|last week|today|yesterday|this month|this year|all time)\b/i;
-  if (r.tiles.some(x => periodWords.test(`${x.head} ${x.mean}`)) || periodWords.test(r.who)) facts.push({ what: 'period label on a tile or the hero' });
+  // AC-10: the period shows only in the stepper and the two headings (the
+  // hero's and By desk's): never on a tile or in the chart's legend.
+  const periodWords = /\b(this week|last week|today|yesterday|this month|last month|this year|last year|all time)\b/i;
+  if (r.tiles.some(x => periodWords.test(`${x.head} ${x.mean}`)) || periodWords.test(r.legend.join(' '))) facts.push({ what: 'period label on a tile or in the legend' });
   ['j', 'joe', 'joel', 'all'].forEach((id, i) => {
     const x = e.rows[i], row = r.rows[i];
     want(`by desk ${id}`, row.val, x.empty || x.net === null ? '—' : money(x.net));
     if (!N(row.facts).startsWith(N(x.trades ? `${x.trades} trade` : 'No trades'))) facts.push({ what: `by desk ${id} facts`, got: row.facts, trades: x.trades });
   });
-  check('AC-10', `${tag}: every number, the stepper and both headings follow ${per.p} · ${r.who.split('·').pop().trim()}`, !facts.length, facts.slice(0, 6));
+  check('AC-10', `${tag}: every number, the stepper and both headings follow ${per.p} · ${e.who}`, !facts.length, facts.slice(0, 6));
   return facts;
 }
 
@@ -330,8 +336,8 @@ function calendarFacts(r, ix, desks, today, trackingStart) {
   return faults;
 }
 
-const SHIFT = ['.res-tools', '#periodSeg', '#deskSeg', '#prevPer', '#perLabel', '#nextPer', '#rhero', '#rheroL .hero-k', '#rheroL .result-figure', '#rheroL .display', '#rheroL .period-percent-slot', '#rheroL .split', '#rheroL .bench',
-  '#curveLegend', '#curve', '.tile', '.tile .tval', '.tile .tfoot', '#bdTitle', '.brow', '.brow .val', '.brow .track', '.calcard', '.cal-head', '#calTitle', '#prevMonth', '#nextMonth',
+const SHIFT = ['.res-tools', '#periodSeg', '#deskSeg', '#prevPer', '#perLabel', '#nextPer', '#rhero', '#rheroL .hero-k', '#rheroL .result-figure', '#rheroL .display', '#rheroL .period-percent-slot', '#rheroL .split',
+  '#curveLegend', '#curve', '.tile', '.tile .tval', '.tile .tmean', '#bdTitle', '#breakdown', '.brow', '.brow .val', '.brow .track', '.calcard', '.cal-head', '#calTitle', '#prevMonth', '#nextMonth',
   '.cal-legend', '#daypanel', '.dp-head', 'footer.foot'];
 const SAY = ['#rheroL .say'];
 // The calendar's 42 day slots, 6 week cells and the weekday row, hidden ones
@@ -467,6 +473,39 @@ async function assertLongSheetKeyboard(page, day) {
   assert.equal(await page.evaluate('document.activeElement?.dataset.day'), day, 'Escape returns focus to selected day');
 }
 
+// JOED-151 (hard assertions, no change to the check inventory): the approved
+// layout at this width. The hero's chart sits beside its 300/280 px figure
+// column above 900 px and under it below; tiles take 4, 2 or 1 columns; By
+// desk is one card ending in All desks; the percentage and its base sit
+// under the euros; no benchmark row or tile footer remains; a listed day
+// explains its currencies.
+async function assertDesignLayout(page, viewport, tag) {
+  const g = await page.evaluate(`(() => {
+    const box = sel => document.querySelector(sel)?.getBoundingClientRect().toJSON() ?? null;
+    const display = box('#rheroL .display'), percent = box('#rheroL .period-percent-slot');
+    return { width: document.documentElement.clientWidth, left: box('#rheroL'), chart: box('#curve'),
+      tiles: getComputedStyle(document.getElementById('tiles')).gridTemplateColumns.split(' ').length,
+      card: document.getElementById('breakdown').classList.contains('card'),
+      rows: [...document.querySelectorAll('#breakdown .brow')].map(r => r.dataset.row).join(),
+      total: document.querySelector('#breakdown [data-row="all"] .who').textContent.trim(),
+      eyebrow: document.querySelector('#rheroL .hero-k').innerText,
+      below: Boolean(display && percent && percent.top >= display.bottom - 0.5),
+      leftovers: document.querySelectorAll('#rheroL .bench, #tiles .tfoot, #tiles .ico-sq').length,
+      fx: document.querySelector('#daypanel .dp-fx')?.textContent ?? null };
+  })()`);
+  assert.equal(g.tiles, g.width > 1180 ? 4 : g.width > 382 ? 2 : 1, `${tag}: tile columns`);
+  if (g.width > 900) {
+    assert.equal(g.left.width, g.width > 1180 ? 300 : 280, `${tag}: hero figure column`);
+    assert.ok(g.chart.left >= g.left.right, `${tag}: the chart sits beside the figures`);
+  } else assert.ok(g.chart.top >= g.left.bottom, `${tag}: the chart sits under the figures`);
+  assert.ok(g.card && g.rows === 'j,joe,joel,all' && g.total === 'All desks', `${tag}: By desk is one card ending in All desks`);
+  assert.equal(N(g.eyebrow), N('Result · All desks · this week'), `${tag}: the hero names result, desks and period`);
+  assert.ok(g.below, `${tag}: the percentage sits under the euros`);
+  assert.equal(g.leftovers, 0, `${tag}: no benchmark row, tile icon or tile footer`);
+  assert.ok(g.fx?.startsWith('Prices in USD, as traded. Fees and results in EUR at each trade’s IB rate (€ per $).'), `${tag}: the day explains its currencies`);
+}
+
+
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
 const engine = await browser.send('Browser.getVersion');
 const reference = `${engine.product} (headless, ${process.platform} ${process.arch}), ${cpus()[0]?.model ?? 'unknown CPU'}, ${cpus().length} cores, Node ${process.version}`;
@@ -541,6 +580,7 @@ try {
       await auditScreen(page, viewport, theme, 'results');
       if (viewport.mobile) await assertNarrowResults(page, viewport, theme);
       await checkMetricGeometry(page, tag);
+      await assertDesignLayout(page, viewport, tag);
       const help = await page.evaluate(`[...document.querySelectorAll('#tiles .metric-info')].map(b => ({ key: b.dataset.term, name: b.getAttribute('aria-label'), text: b.textContent, icon: b.querySelector('use')?.getAttribute('href'), title: b.closest('.tile').querySelector('h3').textContent }))`);
       check('AC-39', `${tag}: all eight metric help controls are labeled info icons`, help.length === 8 && help.every(b => b.name === 'Learn about ' + b.title && !b.text.trim() && b.icon === '#i-info'), help);
       await page.s('Emulation.setFocusEmulationEnabled', { enabled: true });
@@ -576,7 +616,7 @@ try {
         compare(`${tag} ${period} ${desk}`, r, e, desk === 'all');
         // AC-13: J, Joe, Joel and Total, the chosen one tinted.
         const tinted = r.rows.filter(x => x.sel);
-        check('AC-13', `${tag} ${period} ${desk}: By desk lists J, Joe, Joel and Total; the chosen row is tinted`, r.rows.map(x => x.row).join() === 'j,joe,joel,all' && tinted.length === 1 && tinted[0].row === desk && tinted[0].bg !== 'rgba(0, 0, 0, 0)', r.rows.map(x => [x.row, x.sel, x.bg]));
+        check('AC-13', `${tag} ${period} ${desk}: By desk lists J, Joe, Joel and All desks; the chosen row is tinted`, r.rows.map(x => x.row).join() === 'j,joe,joel,all' && tinted.length === 1 && tinted[0].row === desk && tinted[0].bg !== 'rgba(0, 0, 0, 0)', r.rows.map(x => [x.row, x.sel, x.bg]));
         // AC-42: By desk bars proportional on one shared scale.
         const bars = await page.evaluate(`__audit.bars('#breakdown .track .b')`);
         check('AC-42', `${tag} ${period} ${desk}: By desk bars are proportional on one shared scale`, !proportional(bars, 'by desk'), proportional(bars, 'by desk'));
@@ -1155,6 +1195,7 @@ try {
             priceColumn: getComputedStyle(px).gridColumn, right: n.right, amountInside: a.left >= n.left && a.right <= n.right,
             amountInPanel: a.left >= panel.left && a.right <= panel.right,
             rowInside: r.left >= bounds.left && r.right <= bounds.right && row.scrollWidth <= row.clientWidth,
+            pxTop: p.top, nameBottom: nameBounds.bottom, afterFees: getComputedStyle(net, '::after').content,
             pxFits: px.scrollWidth <= px.clientWidth && pieces.every(piece => piece.left >= p.left && piece.right <= p.right && piece.scroll <= piece.client), pieces };
         });
         const head = document.querySelector('#daypanel .dp-head'), summary = head.querySelector('.dp-sum');
@@ -1170,10 +1211,17 @@ try {
         const row = detail.rows.find(r => r.id === `rt-amount-${id}`);
         check('trade-amount', `${tag} ${id}: exact amount stays on one line and never clips`,
           row?.text === text && row.nowrap && row.scroll <= row.client && row.amountInside, row);
-        check('trade-amount', `${tag} ${id}: both full prices and the fee fit without losing digits`,
+        // JOED-151: the trade's own rate (the fixture records 1) sits beside its prices.
+        check('trade-amount', `${tag} ${id}: both full prices, the trade's rate and the fee fit without losing digits`,
           row?.pxFits && JSON.stringify(row.pieces.map(p => p.text)) === JSON.stringify([
-            `$${NB}${entry}`, `$${NB}${exit}`, `fees €${NB}${fee}`,
+            `$${NB}${entry}`, `$${NB}${exit}`, `at €${NB}1,00 per $`, `fees €${NB}${fee}`,
           ]), row);
+      }
+      // JOED-151 (hard assertions): each row is the design's two lines, the
+      // price line under the name, and the amount carries its own words.
+      for (const row of detail.rows) {
+        assert.ok(row.pxTop >= row.nameBottom - 0.5, `${tag} ${row.id}: the price line sits under the name`);
+        assert.equal(row.afterFees, '"after fees"', `${tag} ${row.id}: the amount reads after fees`);
       }
       check('trade-amount', `${tag}: no row overflows its detail surface and every amount shares the right edge`,
         detail.scroll <= detail.client && detail.rows.every(r => r.rowInside && r.right === detail.rows[0].right), detail);
@@ -1241,9 +1289,11 @@ try {
           h.rects.every(r => r.left >= h.panel.left && r.right <= h.panel.right && r.top >= h.panel.top && r.bottom <= h.panel.bottom), h);
       }
       if (viewport.name === '1440') {
+        // JOED-151: prices have their own line under the name, so the full
+        // amount never yields to them (they used to share one row and wrap).
         const long = detail.rows.find(r => r.id === 'rt-amount-million');
-        check('trade-amount', `${tag}: eight-decimal prices wrap before the full amount loses space`,
-          long?.pxFits && long.pieces[1].top > long.pieces[0].top, long);
+        check('trade-amount', `${tag}: eight-decimal prices take their own line, so the full amount never loses space`,
+          long?.pxFits && long.pxTop >= long.nameBottom - 0.5, long);
       }
       check('trade-amount', `${tag}: the expected ${fallback ? 'fallback' : 'worker'} renders the fixture`,
         (await page.evaluate('window.__joedesk.worker()')) === !fallback);
@@ -1681,7 +1731,7 @@ try {
     const { board } = await designBoard('2026-10-16T12:00:00.000Z');
     const { baseline, partial, empty, unknown } = periodHintResults(board.clock());
     const fixed = ['#rhero', '#rheroL .hero-k', '#rheroL .result-figure', '#rheroL .display', '#rheroL .period-percent-slot', '#rheroL .split', '#rheroL .split dt', '#rheroL .split dd',
-      '#rheroL .bench', '#curveLegend', '#curve', '.tile', '#calTitle', '#cal', '#calLegend'];
+      '#curveLegend', '#curve', '.tile', '#calTitle', '#cal', '#calLegend'];
     const sameGeometry = (before, after) => JSON.stringify(before) === JSON.stringify(after);
     const splitDelta = (before, after) => after.find(r => r.key === '#rheroL .split#0').top - before.find(r => r.key === '#rheroL .split#0').top;
     // Keep two lines at 1440 wherever they fit; otherwise allow three in the
@@ -1722,6 +1772,7 @@ try {
         noMiddleDot: !say.textContent.includes('·') && !month.textContent.includes('·'),
         monthHintUnbroken: !month.getClientRects().length || unbroken(monthHint, parseFloat(getComputedStyle(month).lineHeight)),
         height: box.height, contentHeight: content.height, lineHeight: parseFloat(cs.lineHeight), width: box.width,
+        column: say.parentElement.getBoundingClientRect().width,
         hintUnbroken: unbroken(hint, parseFloat(cs.lineHeight)),
         clipped: say.scrollWidth > say.clientWidth || rects.some(r => r.left < box.left - .5 || r.right > box.right + .5 || r.bottom > box.bottom + .5),
         icon: Boolean(svg?.querySelector('use[href="#i-half"]')), fg, bg, contrast: fg ? (Math.max(x, y) + .05) / (Math.min(x, y) + .05) : null,
@@ -1734,7 +1785,7 @@ try {
       const file = `${viewport.name}-${theme}-results-period-${suffix}-hero.png`;
       const { data } = await page.s('Page.captureScreenshot', { format: 'png', clip, captureBeyondViewport: true });
       writeFileSync(join(QA_DIR, file), Buffer.from(data, 'base64'));
-      shots.push({ file, what: suffix === 'hint' ? 'Full hero and unchanged chart: original 340/280 px desktop columns, incl. 2 partial days, including one escalated date' : 'Full hero and chart: no partial hint, with the same two-line phone reserve' });
+      shots.push({ file, what: suffix === 'hint' ? 'Full hero and unchanged chart: the design\'s 300/280 px desktop columns (the whole hero at 768), incl. 2 partial days, including one escalated date' : 'Full hero and chart: no partial hint, with the same two-line phone reserve' });
     };
     const viewports = [...VIEWPORTS, { name: '360', width: 360, height: 800, mobile: true },
       { name: '768', width: 768, height: 1024, mobile: false }];
@@ -1751,8 +1802,10 @@ try {
       await waitFor(page, 'document.querySelector("#tiles .tval .num")');
       const geometry = await rects(page, fixed), reserve = await probe(), baselineChart = await chart();
       check('period-hint', `${tag}: baseline has no hint and no clipping`, !reserve.hint && !reserve.clipped, reserve);
-      if (!viewport.mobile) check('period-hint', `${tag}: original desktop hero column width is retained`,
-        reserve.width === (viewport.width <= 1180 ? 280 : 340), reserve);
+      // JOED-151: the design's 300 px hero column (280 px up to 1180 px); up
+      // to 900 px the chart sits under the figures and the sentence spans the hero.
+      if (!viewport.mobile) check('period-hint', `${tag}: the design's desktop hero column width holds`,
+        reserve.width === (viewport.width <= 900 ? reserve.column : viewport.width <= 1180 ? 280 : 300) && (viewport.width > 900 || reserve.column > 300), reserve);
       if (viewport.name === '390') await crop(viewport, theme, 'no-hint');
       requireView('period-hint', 'partial', viewport, theme);
       await push(partial);
@@ -1765,7 +1818,7 @@ try {
           const p = await probe(), next = await rects(page, fixed), maxLines = lineLimit(viewport, p);
           check('period-hint', `${tag} ${period} ${desk}: correct whole-day hint; no tile or By-desk hints`,
             p.hint === (count ? 'incl. 2 partial days' : null) && !p.otherHints && (!count || p.icon), p);
-          check('period-hint', `${tag} ${period} ${desk}: tiles, split rows, benchmark, legend, chart and calendar move exactly 0 px`,
+          check('period-hint', `${tag} ${period} ${desk}: tiles, split rows, legend, chart and calendar move exactly 0 px`,
             sameGeometry(geometry, next), { before: geometry, after: next });
           check('period-hint', `${tag} ${period} ${desk}: no clipping, at most ${maxLines} sentence lines and the hint never splits`,
             !p.clipped && p.hintUnbroken && p.monthHintUnbroken && p.contentHeight <= maxLines * p.lineHeight + 1 &&
@@ -1829,7 +1882,7 @@ try {
         check('period-hint', `${tag}: widest older-week no-trade wording moves hero children and tiles exactly 0 px`,
           sameGeometry(geometry, olderGeometry), { splitTopDeltaPx: splitDelta(geometry, olderGeometry), sentence: older, before: geometry, after: olderGeometry });
         // Toggle the warning alone for that widest phrase; even the third
-        // line must leave the split, benchmark, chart, legend and tiles fixed.
+        // line must leave the split, chart, legend and tiles fixed.
         await page.evaluate(`document.querySelector('#rheroL .say').textContent = ${JSON.stringify(olderWeek + '.')}`);
         const olderPlain = await probe(), olderPlainGeometry = await rects(page, fixed);
         check('period-hint', `${tag}: removing the widest older-week hint moves hero children and tiles exactly 0 px`,
@@ -2709,9 +2762,12 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   start (AC-17): about ±€ 75 for all desks, ±€ 25 for one. A week of +€ 23
   therefore uses part of the height instead of all of it; a few euros never
   look like a crash. The zero line is the period-start line.
-- **Hero layout.** The split and the benchmark line sit at the bottom of the
-  hero, the sentence under the number; a sentence of one, two or three lines
-  never moves a number (wide font included).
+- **Hero layout (JOED-151, the approved design).** The hero names result,
+  desks and period; the percentage and its base sit under the number, the
+  sentence in a fixed three-line row, then the split; a sentence of one, two
+  or three lines never moves a number (wide font included). The benchmark
+  ("No index chosen") is in the chart legend. The chart sits beside the
+  300/280 px figure column and under it at ≤ 900 px.
 - **Best and worst trade** name each trade by symbol and desk ("UBER (Joel)")
   rather than the company, so a long company name can never clip the tile.
 - **Calendar.** US market holidays read "closed", like weekends. Weeks still
@@ -2737,8 +2793,8 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   unknown-result explanations never carry a hero hint; the month line keeps
   its own coverage count. Phones reserve at least two sentence lines; the empty form with
   the wide date 30 Sep 2026 and the older week of 21 Sep must fit three at
-  360/390 without moving hero children or tiles. Desktop keeps its original
-  340/280 px columns and permits three lines at 768/1024. At 1440 two lines
+  360/390 without moving hero children or tiles. Desktop uses the design's
+  300/280 px columns (the whole hero at 768) and permits three lines at 768/1024. At 1440 two lines
   remain the expectation wherever they fit, otherwise three; all eligible long
   amount/date probes require the same exact 0 px geometry.
   Neither the hero sentence nor the month line contains a middle dot, so no
@@ -2756,7 +2812,8 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
   uses real ingress at 1440/1024/390/360 in light and dark, including the
   phone fallback. It checks full −€ 100.000,12, +€ 999.999,99 and
   −€ 1.000.000,12 results beside USD entry/exit prices with up to eight
-  decimals and fees. At 1440 the eight-decimal pair must wrap.
+  decimals, the trade's rate and fees. Prices take their own line under the
+  name at every width (JOED-151), also the eight-decimal pair at 1440.
   Amounts must fit without rounding or clipping, share their right edge,
   and keep the original 92 px minimum on desktop. Phone amount columns
   size to their content, with prices spanning the second row. Desktop names
@@ -2856,7 +2913,7 @@ Compare with \`joed-19-joedesk-approved.html\` (Results).
 | AC-10 switches drive every number; period only in the stepper and the two headings | \`AC-10\`: every period × desk at six combos and every step, against the model | \`periods\` |
 | AC-11 no layout shift (±0.5 px) | \`AC-11\`: switches, steps, month arrows, day selection; wide font at 390/1024/1440 | — |
 | AC-12 §4.2 exactly | \`AC-12\`: scratches, no losers, drawdown fixtures as shown | \`win rate with scratches\`, \`profit factor with no losers\`, \`drawdown\` (Day intraday), \`empty period\`, \`net, realised, …\`, \`decimal\`, \`fx\` |
-| AC-13 By desk J, Joe, Joel, Total; chosen row tinted | \`AC-13\` | \`by desk\` (desks add up to the total) |
+| AC-13 By desk J, Joe, Joel, All desks; chosen row tinted | \`AC-13\` | \`by desk\` (desks add up to the total) |
 | AC-14 6 rows; day states and tints; sign + tint, desktop/week arrows | \`AC-14\` (three months, plus the Vienna-date months) | \`calendar\` |
 | AC-15 a day shows exactly its trades; phones open the sheet | \`AC-15\` (panel; sheet, Escape, ×, focus back) | \`calendar\` (rows = count, oldest first) |
 | AC-16 designed empty/unavailable states | \`AC-16\` (empty record, August before tracking, no push received) | \`empty period\`, \`read\` |
