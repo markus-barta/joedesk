@@ -11,6 +11,7 @@ import { zonedInstant, nyDay, NY } from '../time.mjs';
 const { boardStates } = await import('../public/joe/board-state.js');
 const { indexResults, rollup, moneyContext, periodOf, periodBase, DESK_IDS } = await import('../public/joe/results-model.js');
 const { resultsView } = await import('../public/joe/results.js');
+const { cellReason } = await import('../public/joe/health.js');
 const { eur } = await import('../public/joe/format.js');
 const { STARTING_MONEY, percentOf, todayBase, todayPercent, exactCell } = await import('../public/joe/performance.js');
 const desk = await import('../public/joe/desk.js');
@@ -119,8 +120,9 @@ test('JOED-153 A2: before the open the hero shows the last session’s Results �
   assert.equal(first.querySelector('.primary-caption .st').getAttribute('title'), `Partial: this day's record is incomplete. FX missing`);
   assert.equal(first.dataset.state, 'stale');
   // The sentence: each desk's figure for that session, then the positions held.
-  // Joel neither traded nor moved: the record says no trades, never € 0 (gate finding 2).
-  assert.equal(hero.querySelector('.say').textContent, `Wednesday: J +€${NB}10,00 · Joe +€${NB}2,00 · Joel no trades · 1${NB}position held overnight`);
+  // Joel neither traded nor moved: the record says no trades recorded, never
+  // € 0, with that day's Partial marker (gate findings 2 and, round 2, 1).
+  assert.equal(hero.querySelector('.say').textContent, `Wednesday: J +€${NB}10,00 · Joe +€${NB}2,00 · Joel no trades recorded (Partial) · 1${NB}position held overnight`);
   assert.deepEqual(hero.querySelectorAll('.say .num').map(n => n.getAttribute('class')), ['num gain', 'num gain'], 'sign colours');
 });
 
@@ -483,9 +485,10 @@ test('JOED-153: a phone row keeps the last session’s marker and the record’s
   old.states.results = { ...old.states.results, state: 'stale', reason: 'snapshot_stale', ageSeconds: 300 };
   const stale = htmlDocument(desk.compactDesk(old, 'j'));
   assert.equal(stale.querySelector('[data-compact-value="dayPnl"] .compact-state').getAttribute('aria-label'), 'Stale');
-  assert.equal(summary(stale)[0], `Last session: stale · Results as of 5${NB}min ago · updates are late`);
+  // The record's own state is a problem of its own (fix round 2, finding 2).
+  assert.equal(summary(stale)[0], 'Results: stale · updates are late');
   // Results unavailable: the row says so; a fact (no trades recorded) is no problem.
-  assert.equal(summary(htmlDocument(desk.compactDesk(context(at, { results: false }), 'j')))[0], 'Last session: not reported · no data received yet');
+  assert.equal(summary(htmlDocument(desk.compactDesk(context(at, { results: false }), 'j')))[0], 'Results: not reported · no data received yet');
   assert.equal(summary(htmlDocument(desk.compactDesk(context(at, { edit: v => ({ ...v, days: [], trades: [] }) }), 'j')))[0], '');
   // In the session the Today cell is the row's figure, as before.
   assert.equal(htmlDocument(desk.compactDesk(context(), 'j')).querySelectorAll('[data-compact-value="dayPnl"] .compact-state').length, 0);
@@ -581,6 +584,66 @@ test('JOED-153 browser checks: AC-9 and the percent text hold on the page’s ow
   assert.equal(keptOnlyInAccount(d), true, JSON.stringify(d));
   const day = decimalUnits(snapshot.totals.dayPnl.amount), equity = decimalUnits(snapshot.totals.equity.amount), since = decimalUnits(snapshot.totals.totalPnl.amount);
   assert.deepEqual(hero.querySelectorAll('.performance-pct').map(p => p.textContent), [percentText(day, equity - day), percentText(since, decimalUnits('15000'))]);
+});
+
+// Fix round 2, finding 1: a capture gap can hide trades, so a day without
+// recorded trades on it is "no trades recorded" with its Partial marker, on
+// every surface and in every name, never "no trades".
+test('JOED-153 A2: a capture-gap day without recorded trades is “no trades recorded (Partial)”, marked everywhere', () => {
+  const ctx = context('2026-10-15T12:00:00.000Z', { partial: { '2026-10-14': ['capture_gap'] } });
+  const warning = desk.sessionWarning(resultsView(ctx), '2026-10-14', ['joel']);
+  assert.equal(warning.label, 'Partial');
+  const say = htmlDocument(desk.heroLeft(ctx)).querySelector('.say').textContent;
+  assert.match(say, /· Joel no trades recorded \(Partial\) ·/);
+  assert.doesNotMatch(say, /Joel no trades(?! recorded)/);
+  const named = `Joel · Wed 14${NB}Oct: no trades recorded · ${warning.text}`;
+  // The phone row: the marker by the dash, its name, and the row's warning line.
+  const row = htmlDocument(desk.compactDesk(ctx, 'joel')), figure = row.querySelector('[data-compact-value="dayPnl"]');
+  assert.equal(figure.querySelector('.compact-state').getAttribute('aria-label'), 'Partial');
+  assert.equal(figure.querySelector('.bn').getAttribute('aria-label'), named);
+  assert.equal(row.querySelector('.disclosure-warning .summary-text').textContent, `Last session: partial · ${warning.text.replace(/^Partial: /, '')}`);
+  // The card: the same name, the marker in the caption, and the day's bar.
+  const card = htmlDocument(deskCard(ctx, 'joel'));
+  assert.equal(card.querySelector('.dnums .v .bn').getAttribute('aria-label'), named);
+  assert.equal(card.querySelector('.dnums .c .st').textContent, 'Partial');
+  assert.equal(card.querySelectorAll('.bars .b').at(-1).getAttribute('aria-label'), `Wed 14${NB}Oct: no trades recorded · ${warning.text}`);
+  // A fully covered quiet day stays unqualified, and still never "no trades".
+  const covered = htmlDocument(desk.heroLeft(context('2026-10-15T12:00:00.000Z', { partial: {} }))).querySelector('.say').textContent;
+  assert.match(covered, /· Joel no trades recorded ·/);
+});
+
+// Fix round 2, finding 2: the Results feed's own fault is a row problem of
+// its own, whatever the day's figure or marker: a rejected read keeps the
+// last good record, and the row says so.
+test('JOED-153: a phone row names the Results feed’s fault independently of the day’s figure or marker', () => {
+  const at = '2026-10-15T12:00:00.000Z';
+  const retained = c => { c.states.results = { ...c.states.results, state: 'broken', retained: true, reason: 'contract_invalid', ageSeconds: 120 }; return c; };
+  const detail = c => htmlDocument(desk.compactDesk(c, 'j')).querySelector('.disclosure-warning .vh')?.textContent ?? '';
+  const fault = `Results: last good · ${cellReason('contract_invalid')}`;
+  // An empty retained record: no figure and no day marker, and still the fault.
+  assert.equal(detail(retained(context(at, { edit: v => ({ ...v, days: [], trades: [] }) }))), fault);
+  // A Partial day from a retained record: the day's marker and the feed's fault.
+  const both = detail(retained(context(at)));
+  assert.ok(both.includes(fault) && both.includes("Last session: partial · this day's record is incomplete. FX missing"), both);
+  // A fresh, fully covered record adds nothing.
+  assert.equal(detail(context(at, { partial: {} })), '');
+});
+
+// Fix round 2, finding 3: the coverage proof must reach the desk's start, and
+// a day outside the pinned market calendar (2026–2028) proves nothing.
+test('JOED-153 M5: a desk start the market calendar does not cover cannot be proved: the normal card', () => {
+  const now = '2026-01-05T12:00:00.000Z', data = snapshotAt(new Date(Date.parse(now) - 9000).toISOString());
+  const startJ = iso => { data.desks.find(d => d.id === 'j').accounting = { periodStart: iso, method: 'execution-fifo-net-current-fx', detail: 'Test start.' }; };
+  const flat = date => ({ date, desks: Object.fromEntries(DESK_IDS.map(id => [id, { equityClose: money(5000), realisedNet: money(0), fees: money(0), trades: 0 }])) });
+  const only = (trackingStart, ...dates) => v => ({ ...v, trackingStart, days: dates.map(flat), trades: [] });
+  startJ('2025-12-01T05:00:00.000Z');
+  const outside = context(now, { data, partial: {}, edit: only('2025-12-01', '2026-01-02') });
+  assert.equal(desk.noTradesSinceStart(outside, desk.deskFacts(outside), 'j'), null);
+  assert.equal(htmlDocument(deskCard(outside, 'j')).querySelectorAll('.drow').length, 0, 'no “no trades since 1 Dec”');
+  // Inside the calendar the same kind of record does prove it: one row.
+  startJ('2026-01-02T05:00:00.000Z');
+  const inside = context(now, { data, partial: {}, edit: only('2026-01-02', '2026-01-02') });
+  assert.equal(desk.noTradesSinceStart(inside, desk.deskFacts(inside), 'j'), '2026-01-02');
 });
 
 // The browser check (scripts/browser/desk-sessions.mjs) expects what Desk

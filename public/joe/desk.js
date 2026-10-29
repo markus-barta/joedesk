@@ -134,8 +134,7 @@ const PUSHER_STATUS = new Set(['Paper desk values are available.', 'Some paper d
 // marker or its fault is the problem instead of the Today cell's.
 function deskProblem(ctx, id, facts = null) {
   const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
-  const last = facts?.label?.phase === 'last' ? lastSessionProblem(facts.view, facts.last[id]) : null;
-  const first = facts?.label?.phase === 'last' ? (last ? [[termLabel('lastsession'), last]] : []) : [['Today', ctx.states[`desks.${id}.dayPnl`]]];
+  const first = facts?.label?.phase === 'last' ? lastSessionProblems(facts.view, facts.last[id]) : [['Today', ctx.states[`desks.${id}.dayPnl`]]];
   const cells = [...first, [termLabel('open'), ctx.states[`desks.${id}.openPnl`]], [sinceLabel(sinceStarts(ctx.feeds).days[id]), ctx.states[`desks.${id}.totalPnl`]]];
   if (desk?.state === 'stuck') cells.unshift(['Desk stuck', { state: 'broken', value: null }]);
   if (desk?.learning?.status === 'blocked') cells.push(['Learning blocked', { state: 'broken', value: null }]);
@@ -144,18 +143,29 @@ function deskProblem(ctx, id, facts = null) {
   if (desk && carriesCheckIns(ctx.feeds.data.value) && (heartbeat == null || heartbeat / 1000 >= STALE_AFTER_S)) cells.unshift(['Check-in', { state: heartbeat == null ? 'not reported' : 'stale', value: heartbeat }]);
   return disclosureProblem(cells);
 }
-// The last session's figure as a row problem: Results' marker beside a shown
-// amount, Results' own fault, or a day whose money is not known. A dash that
-// only states a fact (no trades, before the start, a basis change) is none.
-function lastSessionProblem(view, f) {
-  if (!f) return null;
-  if (f.units !== null) {
-    const mark = figureMark(view, f);
-    return mark ? { mark: { state: mark.label.toLowerCase(), why: mark.text.replace(/^(Partial|Stale): /, ''), tone: 'warn', icon: 'half' } } : null;
+// The last session's figure as row problems: the day's own Partial/Stale
+// marker (beside an amount or an empty day's dash), a day whose money is not
+// known, and, independently of both, the Results feed's own state: a rejected
+// read shows the last good record, an old record is old, a missing one is
+// missing. A dash that only states a fact (no trades, before the start, a
+// basis change) adds nothing itself.
+function lastSessionProblems(view, f) {
+  const out = [];
+  if (!f) return out;
+  if ((f.units !== null || f.kind === 'empty') && f.warning) {
+    out.push([termLabel('lastsession'), { mark: { state: f.warning.label.toLowerCase(), why: f.warning.text.replace(/^(Partial|Stale): /, ''), tone: 'warn', icon: 'half' } }]);
   }
-  if (f.kind === 'feed') return { state: !view.cell || view.cell.state === 'not reported' ? 'not reported' : 'broken', value: null, reason: view.reason ?? 'feed_not_received' };
-  if (f.kind === 'money') return { mark: { state: 'unavailable', why: f.reason, tone: 'bad', icon: TONE_ICON.bad } };
-  return null;
+  if (f.kind === 'money') out.push([termLabel('lastsession'), { mark: { state: 'unavailable', why: f.reason, tone: 'bad', icon: TONE_ICON.bad } }]);
+  const feed = resultsFeedProblem(view);
+  if (feed) out.push(['Results', feed]);
+  return out;
+}
+// The Results feed's own state as a cell, or null while it is fresh and used.
+export function resultsFeedProblem(view) {
+  const cell = view.cell;
+  if (!cell || cell.state === 'not reported') return { state: 'not reported', value: null, reason: view.reason ?? 'feed_not_received' };
+  if (!view.ix) return { state: 'broken', value: null, reason: view.reason ?? cell.reason ?? null };
+  return cell.state === 'fresh' ? null : cell;
 }
 // The phone's one-line desk row (JOED-79): the desk, what it is doing, its
 // first figure for the session the hero names (labelled "Today" or by the
@@ -177,9 +187,9 @@ export function compactDesk(ctx, id, facts = deskFacts(ctx)) {
   // Before the open: the last session's Results figure, with Results' marker
   // (its words are in the row's warning line, visible and in the name).
   const lastFigure = f => {
-    const name = `${LABEL[id]} · ${first.label}: ${f.units === null ? f.reason : eur(f.units, true)}`;
+    const mark = lastMark(facts.view, f);
+    const name = f.units === null ? lastDashName(`${LABEL[id]} · ${first.label}`, f, mark) : `${LABEL[id]} · ${first.label}: ${eur(f.units, true)}`;
     const html = f.units === null ? `<span class="bn muted" role="img" title="${esc(name)}" aria-label="${esc(name)}">—</span>` : bn(f.units);
-    const mark = f.units === null ? null : figureMark(facts.view, f);
     const marker = mark ? `<span class="compact-state tone-warn" role="img" aria-label="${esc(mark.label)}">${icon('half')}</span>` : '';
     return `<span class="compact-figure" data-compact-value="dayPnl" style="--digits:${f.units === null ? 1 : eur(f.units, true).length}"><span class="compact-label">${first.short}${marker}</span>${html}</span>`;
   };
@@ -617,16 +627,19 @@ export function heroSentence(ctx, facts = deskFacts(ctx)) {
   if (held && counts?.all) extra.push(positionsText(counts.all, held));
   if (label?.phase === 'last') {
     const shown = DESKS.filter(id => facts.last[id].units !== null);
-    // A desk the record shows without a trade or a change is said as such,
-    // never as € 0; a desk without a figure for another reason is not known.
+    // A desk the record shows without a trade or a change is said as the
+    // record says it, "no trades recorded" with the day's own coverage marker
+    // (a capture gap can hide trades), never as € 0 or "no trades"; a desk
+    // without a figure for another reason is not known.
     const quiet = DESKS.filter(id => facts.last[id].kind === 'empty');
+    const qualified = f => (f.warning ? ` (${f.warning.label})` : '');
     if (days.today.kind === 'notExact') extra.push(`Today: ${householdDayReason(states, data)?.replace(/^Not exact/, NOT_EXACT) || NOT_EXACT}`);
     if (shown.length || (quiet.length && quiet.length < DESKS.length)) {
       const missing = DESKS.filter(id => !shown.includes(id) && !quiet.includes(id));
-      return `${weekdayOf(label.day)}: ${[...DESKS.flatMap(id => shown.includes(id) ? [amount(id, facts.last[id].units)] : quiet.includes(id) ? [`${LABEL[id]} no trades`] : []),
+      return `${weekdayOf(label.day)}: ${[...DESKS.flatMap(id => shown.includes(id) ? [amount(id, facts.last[id].units)] : quiet.includes(id) ? [`${LABEL[id]} no trades recorded${qualified(facts.last[id])}`] : []),
         ...(missing.length ? [`${deskNames(missing)} not known`] : []), ...extra].join(' · ')}`;
     }
-    if (quiet.length) return `No trades recorded on ${weekdayOf(label.day)}${extra.length ? ` · ${extra.join(' · ')}` : '.'}`;
+    if (quiet.length) return `No trades recorded on ${weekdayOf(label.day)}${qualified(facts.last.all)}${extra.length ? ` · ${extra.join(' · ')}` : '.'}`;
     // No desk has a figure for that day: the figure's caption says why once.
     return extra.length ? capital(extra.join(' · ')) : `No result for ${weekdayOf(label.day)} from the trade record.`;
   }
@@ -659,6 +672,12 @@ export function figureMark(view, f) {
   const record = recordState(view);
   return record ? { label: 'Stale', text: record } : null;
 }
+// A last-session figure's marker: beside a shown amount, and beside an empty
+// day's dash, whose "no trades recorded" a capture gap could hide trades in.
+const lastMark = (view, f) => (f.units !== null || f.kind === 'empty' ? figureMark(view, f) : null);
+// A dash's own name: its reason, then its marker's words, so a screen reader
+// hears the qualification too.
+const lastDashName = (prefix, f, mark) => `${prefix}: ${f.reason}${mark ? ` · ${mark.text}` : ''}`;
 
 // The hero's first figure (M1, A2, P0-1): Today's cell in the session and after
 // the close, read exactly as before; from New York midnight until the open,
@@ -666,13 +685,13 @@ export function figureMark(view, f) {
 function heroFirst(ctx, facts, shared, board) {
   const { states } = ctx, data = ctx.feeds.data?.value, label = facts.label, today = facts.view.today;
   if (label?.phase === 'last') {
-    const f = facts.last.all, mark = figureMark(facts.view, f);
-    const name = `${label.text}: ${f.units === null ? f.reason : eur(f.units, true)}`;
+    const f = facts.last.all, mark = lastMark(facts.view, f);
+    const name = f.units === null ? lastDashName(label.text, f, mark) : `${label.text}: ${eur(f.units, true)}`;
     const value = f.units === null ? `<span class="bn muted" role="img" title="${esc(name)}" aria-label="${esc(name)}">—</span>`
       : figureLink(bn(f.units), resultsHref('day', label.day, 'all'), `${name}. Opens Results for that day.`);
     const pct = f.units === null ? '' : `${percentHtml(f.percent)}${f.percent !== null && f.base !== null ? ` ${basisTerm('result', f.base)}` : ''}`;
     const split = `closed ${signedMoney(f.closed)} · still open ${signedMoney(f.open)}`;
-    const caption = f.units === null ? esc(capital(f.reason))
+    const caption = f.units === null ? `${esc(capital(f.reason))}${markHtml(mark)}`
       : `<span class="cap-long">${split} · after fees · from the trade record</span><span class="cap-short">${split}</span>${markHtml(mark)}`;
     return { caption, html: `<div class="primary" data-cell="hero.day" data-phase="last" data-state="${f.units === null ? 'broken' : mark ? 'stale' : 'fresh'}"><div class="hero-k">${icon('clock')}${term('lastsession', label.text)}</div>
         <div class="display">${value}</div><div class="pct-slot">${pct}</div><span class="c primary-caption">${caption}</span></div>` };
@@ -821,8 +840,13 @@ function recordedQuiet(view, start, id, trades) {
   if (!ix || !start || !view.trackingStart || view.trackingStart > start || trades?.[id] !== 0) return null;
   for (const k of ix.partialDays) if (k >= start && (k < view.today || ix.partialDetails.get(k)?.partialReasons?.length)) return null;
   for (const k of ix.missingDays) if (k >= start) return null;
+  // Every day back to the desk's start: a session needs its summary, and a day
+  // the market calendar does not cover proves nothing, so the claim fails.
   const at = new Map(ix.dates.map((d, i) => [d, i])), desk = DESKS.indexOf(id);
-  for (const k of sessionDays(RM.addDays(view.today, -1), 4000, start)) {
+  for (let k = RM.addDays(view.today, -1); k >= start; k = RM.addDays(k, -1)) {
+    const s = sessionBounds(zonedInstant(k, '12:00:00', NY));
+    if (s.reason === 'calendar_unavailable') return null;
+    if (!s.openAt) continue;
     const i = at.get(k);
     if (i === undefined || !ix.close.state[i * 3 + desk]) return null;
   }
@@ -882,7 +906,8 @@ function barsHtml(ctx, facts, id) {
   const bars = items.map((b, i) => {
     const href = resultsHref('day', b.day, id), when = b.today ? `Today · ${sessionDayName(b.day)}` : sessionDayName(b.day);
     if (b.units === null) {
-      return `<a class="b${b.today ? ' today' : ''}" data-day="${b.day}" href="${href}" aria-label="${esc(`${when}: ${b.reason}`)}"><i class="nx" style="top:${(z - 9).toFixed(1)}px;height:18px"></i><span class="bt" aria-hidden="true"><b>${esc(when)}</b><span>${esc(b.reason)}</span></span></a>`;
+      const why = `${b.reason}${b.warning ? ` · ${b.warning.text}` : ''}`;
+      return `<a class="b${b.today ? ' today' : ''}" data-day="${b.day}" href="${href}" aria-label="${esc(`${when}: ${why}`)}"><i class="nx" style="top:${(z - 9).toFixed(1)}px;height:18px"></i><span class="bt" aria-hidden="true"><b>${esc(when)}</b><span>${esc(why)}</span></span></a>`;
     }
     const v = vals[i], flat = isZero(b.units), h = flat ? (b.today ? 3 : 2) : Math.max(3, Math.abs(v) / span * plot);
     // Today's 60 % fill cannot carry a small label at 4.5:1 in the dark theme,
@@ -987,10 +1012,10 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
   // The first figure, by phase.
   let firstNum;
   if (first.last) {
-    const f = first.last, name = `${LABEL[id]} · ${first.label}: ${f.units === null ? f.reason : eur(f.units, true)}`;
+    const f = first.last, mark = lastMark(facts.view, f);
+    const name = f.units === null ? lastDashName(`${LABEL[id]} · ${first.label}`, f, mark) : `${LABEL[id]} · ${first.label}: ${eur(f.units, true)}`;
     const html = f.units === null ? `<span class="bn muted" role="img" title="${esc(name)}" aria-label="${esc(name)}">—</span>` : figureLink(bn(f.units), resultsHref('day', first.day, id), `${name}. Opens Results for that day.`);
-    const mark = figureMark(facts.view, f);
-    firstNum = num(term(first.termKey, first.label), html, null, f.units === null ? esc(capital(f.reason)) : `closed ${signedMoney(f.closed)} · still open ${signedMoney(f.open)}${markHtml(mark)}`,
+    firstNum = num(term(first.termKey, first.label), html, null, f.units === null ? `${esc(capital(f.reason))}${markHtml(mark)}` : `closed ${signedMoney(f.closed)} · still open ${signedMoney(f.open)}${markHtml(mark)}`,
       f.units === null ? 'broken' : mark ? 'stale' : 'fresh', f.units === null ? 1 : eur(f.units, true).length);
   } else {
     const v = cellView(first.cell, `d.${id}.day`, { label: first.label, sharedReason: shared });
