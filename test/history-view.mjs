@@ -15,6 +15,7 @@ const { compactPoints, compactHistory, boundHistory, measureHistory, HISTORY_WAR
 const { emptyContinuity, continuityClaims } = await import('../public/joe/history-continuity.js');
 const { CONTRACTS, validateContract } = await import('../contracts/index.mjs');
 const { timeHM } = await import('../public/joe/format.js');
+const { historyChangeText } = await import('../scripts/browser/history-compare.mjs');
 
 const MIN = 60e3, HOUR = 3600e3, DAY = 864e5, GAP = 20 * MIN;
 const K0 = Date.parse('2026-10-07T00:00:00.000Z'), K1 = K0 + 7.75 * DAY, RANGE = [K0, K1];
@@ -367,6 +368,23 @@ test('JOED-154 compare: a change is exact from the stored decimals, not a differ
   assert.ok(1000.115 - 1000.11 < 0.005, 'the float difference would read € 0,00');
   assert.match(compareLine(cols, [K0, K0 + MIN], K0 + MIN, 'change').text, /: J \+€.0,01 · Joe €.0,00 · Joel €.0,00$/);
   assert.match(compareLine(cols, [K0, K0 + MIN], K0 + MIN, 'money').text, /: J €.1\.000,11 to €.1\.000,12 · /, 'Money rounds each exact end half away from zero');
+});
+
+test('JOED-161 browser oracle: Change names both ends or the truthful partial stretch, in exact signed euros', () => {
+  const NB = '\u00a0';
+  const result = { ok: true, startAt: new Date(K0).toISOString(), endAt: new Date(K0 + MIN).toISOString(), after: null, desks: [
+    // At half a cent the floating-point difference would round down.
+    { id: 'j', start: 1000.11, end: 1000.115, startUnits: 100011000000n, endUnits: 100011500000n },
+    { id: 'joe', start: 1000.115, end: 1000.11, startUnits: 100011500000n, endUnits: 100011000000n },
+    { id: 'joel', start: 1000.11, end: 1000.11, startUnits: 100011000000n, endUnits: 100011000000n },
+  ] };
+  const figures = `J +€${NB}0,01 · Joe −€${NB}0,01 · Joel €${NB}0,00`;
+  assert.equal(historyChangeText(result), `Change from Wed 7${NB}Oct, 02:00 to Wed 7${NB}Oct, 02:01: ${figures}`);
+  for (const after of ['gap', 'incomplete-coverage']) {
+    assert.equal(historyChangeText({ ...result, after }), `Change in the last 1${NB}min with continuous data, from Wed 7${NB}Oct, 02:00: ${figures}`);
+  }
+  assert.equal(historyChangeText({ ...result, after: 'incompatible-basis' }), `Change in the last 1${NB}min on the current bookkeeping, from Wed 7${NB}Oct, 02:00: ${figures}`);
+  assert.equal(historyChangeText({ ok: false, reason: 'incompatible-basis' }), null, 'no figures when no shared comparable interval exists');
 });
 
 test('JOED-145 bands: hatched only where every chosen desk lacks numbers for more than five minutes', () => {
