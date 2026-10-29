@@ -485,7 +485,7 @@ const HIST_SHIFT = ['.hist-tools', '.hcard', '#histChart', '#histCompare', '#his
 // words. P6 separately asserts the actual nonbreaking DOM characters.
 const copyExpression = expression => `(${copyText.toString()})(${expression})`;
 const DESK_TEXT = copyExpression(`(() => ({
-  label: document.querySelector('#hdrHealth .status-full').textContent, market: document.querySelector('#heroSession .mkt-t')?.innerText,
+  label: document.querySelector('#hdrHealth .status-full').textContent, market: document.querySelector('#heroSession .mkt-t')?.innerText, marketSub: document.querySelector('#heroSession .mkt-s')?.innerText ?? '',
   cells: Object.fromEntries([...document.querySelectorAll('#heroL [data-cell], #accountSlot [data-cell]')].map(c => [c.dataset.cell, { state: c.dataset.state, cap: __audit.deskCaption(c) }])),
   cards: [...document.querySelectorAll('.dcard')].map(c => ({ id: c.id.slice(5), lines: [...c.querySelectorAll('.card-status .st')].map(n => n.innerText), label: c.querySelector('.spark-h')?.innerText ?? '', status: c.querySelector('.card-status')?.innerText ?? '', nums: [...c.querySelectorAll('.dnums > div')].map(d => d.dataset.state), icons: c.querySelectorAll('.cell-state').length })),
   boardCaption: document.querySelector('#heroL .board-caption').innerText,
@@ -1038,8 +1038,8 @@ try {
         const words = cellReason(reason);
         const ui = await page.evaluate(DESK_TEXT);
         const cellsOk = Object.values(ui.cells).every(c => c.state === 'broken') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => c.cap === `Unavailable · ${words}`);
-        check('cold', `${tag}: no clock, yet every panel shows broken with its reason`, ui.label === 'No board data' && ui.ring === 'Time not known' && cellsOk && ui.say === `No numbers: ${words}.` &&
-          ui.cards.every(c => c.label === `Numbers: unavailable · ${words}` && c.nums.every(x => x === 'broken')) && ui.positions === `Position detail is unavailable: ${words}.` &&
+        check('cold', `${tag}: no clock, yet every panel shows broken with its reason`, ui.label === 'No board data' && /^Time not known/.test(ui.marketSub) && cellsOk && ui.say === `No numbers: ${words}.` &&
+          ui.cards.every(c => c.status === `Numbers: unavailable · ${words}` && c.nums.every(x => x === 'broken')) && ui.positions === `Position detail is unavailable: ${words}.` &&
           ui.kept === `Kept holdings are unavailable: ${words}.` && ui.strip.includes(`No data · ${words}`) && !/Data from|refreshes every/.test(ui.foot) && ui.alert.startsWith('No board data') && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
         if (name === 'auth') {
           await auditScreen(page, viewport, theme, 'desk (cold, no clock)');
@@ -1087,8 +1087,8 @@ try {
       check('cold', `${tag}: History draws its own observed lines and stays fresh`, h.state === 'fresh' && !h.status && h.lines >= 3 && worker, { h, worker });
       await go(page, 'desk');
       const ui = await page.evaluate(DESK_TEXT);
-      check('cold', `${tag}: Desk shows not found per panel, with the market clock from History's read`, ui.ring !== 'Time not known' && Object.values(ui.cells).every(c => c.state === 'broken') &&
-        ui.cards.every(c => c.label === 'Numbers: unavailable · not found on the board server'), ui);
+      check('cold', `${tag}: Desk shows not found per panel, with the market clock from History's read`, !/^Time not known/.test(ui.marketSub) && Object.values(ui.cells).every(c => c.state === 'broken') &&
+        ui.cards.every(c => c.status === 'Numbers: unavailable · not found on the board server'), ui);
       await unroute();
       page.errors.length = 0;
     }
@@ -1121,9 +1121,9 @@ try {
       const caps = Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').map(([, c]) => c.cap);
       check('passthrough', `${tag}: retained observations keep their age; totals, since-start and the kept sum show dashes`, /^Last good value, 3\d\ss ago · last update repeated an old one$/.test(ui.boardCaption) &&
         caps.filter(c => c === 'Unavailable').length === 3 && caps.filter(c => c === '').length === 1 &&
-        ui.cards.every(c => /^Since .+: unavailable · last update repeated an old one$/.test(c.label) && c.icons === 3) &&
+        ui.cards.every(c => /^Since .+: unavailable · last update repeated an old one$/.test(c.status) && c.icons === 3) &&
         /^Last good positions, 3\d\ss ago · last update repeated an old one$/.test(ui.positions) &&
-        /^Last good values, 3\d\ss ago · last update repeated an old one · worth —$/.test(ui.kept), { caps, cards: ui.cards.map(c => c.label), positions: ui.positions, kept: ui.kept });
+        /^Last good values, 3\d\ss ago · last update repeated an old one · worth —$/.test(ui.kept), { caps, cards: ui.cards.map(c => c.status), positions: ui.positions, kept: ui.kept });
       if (viewport.name === '1024') await shot(page, viewport, `${viewport.name}-${theme}-desk-state-replayed`, 'Desk, replayed push: last good values stay stale with their age');
     }
   }
