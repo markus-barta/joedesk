@@ -380,7 +380,7 @@ test('active nav: the screen already shown adds no entry, whatever query it gave
       go(name, { push: true });
       go(name, { anchor: 'nowhere', push: true });
       assert.deepEqual([b.win.location.hash, b.entries.length], [hash, entries], `${name}: the shown screen adds no entry`);
-      assert.deepEqual(reads, [own ?? '', own ?? ''], `${name}: the screen reads its own query, its view unchanged`);
+      assert.deepEqual(reads, [], `${name}: the screen as it is: its reader does not run again`);
       b.traverse(-1);
       assert.equal(b.win.location.hash, '#desk', `${name}: Back leaves it for Desk`);
       // Another query for the shown screen is another place: one entry, and Back returns.
@@ -393,6 +393,61 @@ test('active nav: the screen already shown adds no entry, whatever query it gave
       }
     } finally {
       onRoute(name, undefined);
+    }
+  }
+});
+
+test('active nav: the screen already shown keeps its state; its reader does not run again for its own nav, the gear or an anchor (Results’ browsed month, History’s view)', () => {
+  // Results, through app.js's own reader and the real results.js.
+  {
+    const b = browser(), go = boot(app, b), reads = [];
+    const warm = { today: '2026-10-14', clock: true, ix: {}, trackingStart: '2026-09-10' };
+    // What renderResults does with a waiting link, and the address app.js then corrects to.
+    const shownQuery = () => { results.settleResultsRoute(warm); return parseRoute(results.resultsUrl(warm)).query; };
+    const saved = { ...results.RS };
+    onRoute('results', (_params, route) => { reads.push(route.query); return results.requestResultsRoute(route.query); });
+    try {
+      Object.assign(results.RS, { period: 'week', anchor: '2026-10-14', sel: '2026-10-14', desk: 'all', cal: [2026, 9], moved: false });
+      go('results', { push: true });
+      assert.equal(writeRoute('results', shownQuery()), true);
+      // The gate's case: select 14 Oct, then browse to September without selecting a day.
+      assert.equal(results.selectDay('2026-10-14', warm), true);
+      results.showMonth(-1);
+      assert.deepEqual(results.RS.cal, [2026, 8]);
+      const hash = b.win.location.hash, entries = b.entries.length;
+      reads.length = 0;
+      // Results' nav button again, and a plain link to #results/cal.
+      for (const request of [{ push: true }, { anchor: 'cal', push: true }]) {
+        go('results', request);
+        assert.equal(writeRoute('results', shownQuery()), true);
+        assert.deepEqual(results.RS.cal, [2026, 8], `${JSON.stringify(request)}: September stays on show`);
+      }
+      assert.deepEqual(reads, [], 'the reader does not run for the screen as it is');
+      assert.deepEqual([b.win.location.hash, b.entries.length, results.RS.sel], [hash, entries, '2026-10-14']);
+      // A typed #results/cal is an arrival: it reaches the reader empty, and September stays too.
+      b.typed('#results/cal');
+      assert.equal(writeRoute('results', shownQuery()), true);
+      assert.deepEqual([reads, results.RS.cal, b.win.location.hash], [[''], [2026, 8], hash]);
+    } finally {
+      onRoute('results', undefined);
+      results.requestResultsRoute('');
+      Object.assign(results.RS, saved);
+    }
+  }
+  // History: a reader that resets its view, as one taking JOED-154's query would.
+  {
+    const b = browser(), go = boot(app, b);
+    let view = 'zoomed', reads = 0;
+    onRoute('history', () => { reads++; view = 'reset'; });
+    try {
+      go('history', { push: true });
+      assert.equal(writeRoute('history', 'range=fit&desk=all&mode=change'), true);
+      view = 'zoomed'; reads = 0;
+      go('history', { push: true });
+      go('history', { anchor: 'j-accounting', push: true });
+      assert.deepEqual([view, reads, b.win.location.hash], ['zoomed', 0, '#history?range=fit&desk=all&mode=change']);
+    } finally {
+      onRoute('history', undefined);
     }
   }
 });

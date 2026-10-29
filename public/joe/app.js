@@ -172,7 +172,11 @@ function start() {
     // The reader's own way onto the screen already shown (its nav button, the
     // gear, a bare link or anchor) asks for that screen as it is: it keeps the
     // query the screen gave its address, so no entry repeats the shown view.
-    if (push && !query && next === shown.screen) query = shown.query;
+    // Nothing in the address changed, so the screen's reader does not run
+    // again and its state stays (Results' browsed month); only the scroll or
+    // the anchor applies.
+    const asIs = push && !query && next === shown.screen;
+    if (asIs) query = shown.query;
     const target = { screen: next, query };
     // The address first, while the page still shows the place being left:
     // hiding a screen, closing a dialog or rendering may move it.
@@ -187,7 +191,7 @@ function start() {
     for (const dialog of $$('dialog[open]')) dialog.close();
     dirtyHistory = true; forgetCharts(); forgetResults();
     if (next === 'settings') feed.refreshActions();
-    guard('route', () => applyRoute(target));
+    if (!asIs) guard('route', () => applyRoute(target));
     render('screen');
     if (next === 'settings' && SETTINGS_SECTIONS.some(s => s.id === anchor)) { places.abandon(); showSection(anchor); }
     else if (anchor) { places.abandon(); document.getElementById(anchor)?.scrollIntoView({ block: 'start' }); } else places.arrive(scroll);
