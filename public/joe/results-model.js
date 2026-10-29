@@ -230,7 +230,10 @@ export function indexResults(value) {
   }
   trades.offsets[n] = length;
   trades.blob = text.join('');
-  const close = { amount: exact(cells), state: new Uint8Array(cells), entry: new Int32Array(cells).fill(-1) };
+  // The chart places a close at the following Vienna midnight. Resolve it
+  // once with the index in the worker, instead of during a period switch.
+  const close = { amount: exact(cells), state: new Uint8Array(cells), entry: new Int32Array(cells).fill(-1),
+    at: Float64Array.from(dates, k => viennaMidnight(addDays(k, 1))) };
   for (const day of value.days) {
     const i = di.get(day.date);
     for (const [id, d] of Object.entries(day.desks)) {
@@ -611,7 +614,7 @@ export function curve(ix, per, desks, ctx) {
   for (let i = i0; i < i1; i++) {
     const k = ix.dates[i];
     if (k === ctx.today || !sel.some(desk => ix.close.state[i * 3 + desk])) continue;
-    point(k, viennaMidnight(addDays(k, 1)), equityAt(ix, desks, k, ctx));
+    point(k, ix.close.at[i], equityAt(ix, desks, k, ctx));
   }
   if (live) point(end, x1, equityAt(ix, desks, end, ctx), { now: true });
   return { pts, startE, day: false, domain: [x0, x1], tracking };

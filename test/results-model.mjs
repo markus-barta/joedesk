@@ -76,6 +76,20 @@ test('JOED-28 results: server missing-day warnings survive indexing and worker t
   assert.equal(before.missingDays.size, 0);
 });
 
+test('JOED-166 close coordinates: worker transfer preserves the next Vienna midnight across both clock changes', () => {
+  const dates = ['2026-03-28', '2026-03-29', '2026-03-30', '2026-10-24', '2026-10-25', '2026-10-26'];
+  const ix = M.indexResults(record(dates.map(k => closeDay(k, '5000')), [], dates[0]));
+  const expected = dates.map(k => M.viennaMidnight(M.addDays(k, 1)));
+  const copy = structuredClone(ix, { transfer: M.transferables(ix) });
+  assert.equal(ix.close.at.byteLength, 0, 'coordinates transfer rather than copy');
+  assert.deepEqual([...copy.close.at], expected);
+  assert.equal(expected[1] - expected[0], 23 * 3600000);
+  assert.equal(expected[4] - expected[3], 25 * 3600000);
+  const per = M.periodOf('all', today, today, dates[0]);
+  const curve = M.curve(copy, per, ALL, ctxOf([E('5000'), E('5000'), E('5000')]));
+  assert.deepEqual(curve.pts.filter(p => dates.includes(p.k) && !p.now && !p.edge).map(p => p.x), expected.slice(0, 3));
+});
+
 test('JOED-30 results: partial dates, empty desks and nullable summaries validate and survive worker transfer', () => {
   const value = fixture('partial-day');
   value.days.push({ date: '2026-10-13', desks: {}, coverage: 'partial', partialReasons: ['history_gap'] });
@@ -2021,6 +2035,29 @@ test('JOED-151 chart: quiet time marks at Vienna midnights, by the length of the
   assert.deepEqual(year, ['2025-11-01', '2025-12-01', '2026-01-01', '2026-02-01', '2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01',
     '2026-07-01', '2026-08-01', '2026-09-01', '2026-10-01'].map(at));
   assert.deepEqual(page.timeMarks('2026-10-14', at('2026-10-14'), at('2026-10-14') + 3600000), [], 'nothing inside a single hour');
+});
+
+test('JOED-166 time marks: sparse traversal matches the daily reference across DST and interval boundaries', () => {
+  const reference = (start, x0, x1) => {
+    const days = (x1 - x0) / 864e5, marks = [];
+    for (let k = M.addDays(start, 1), x = M.viennaMidnight(k); x < x1; k = M.addDays(k, 1), x = M.viennaMidnight(k)) {
+      if (days <= 16 || (days <= 120 ? M.dowOf(k) === 1 : k.endsWith('-01'))) marks.push(x);
+    }
+    return marks;
+  };
+  for (const start of ['2024-01-31', '2024-02-29', '2025-12-31', '2026-03-23', '2026-10-19', '2026-10-25']) {
+    const x0 = M.viennaMidnight(start);
+    for (const length of [0, 1, 7, 16, 31, 120, 121, 365, 380]) {
+      const midnight = M.viennaMidnight(M.addDays(start, length));
+      for (const x1 of [midnight - 1, midnight, midnight + 1, midnight + 12 * 3600000]) {
+        assert.deepEqual(page.timeMarks(start, x0, x1), reference(start, x0, x1), `${start}: ${length} days ending ${x1}`);
+      }
+    }
+    for (const boundary of [16, 120]) for (const delta of [-1, 0, 1]) {
+      const x1 = x0 + boundary * 864e5 + delta;
+      assert.deepEqual(page.timeMarks(start, x0, x1), reference(start, x0, x1), `${start}: ${boundary}-day threshold ${delta}`);
+    }
+  }
 });
 
 test('JOED-151 CSS: every Results-only rule lives in one delimited block', () => {

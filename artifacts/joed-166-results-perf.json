@@ -1,0 +1,1519 @@
+{
+  "ticket": "JOED-166",
+  "session": "bd1cb3ab-6692-4f33-9bad-134e71b931f4",
+  "recorded_at": "2026-10-29T22:23:02.196375+00:00",
+  "status": "Partial optimization; the CI blocker is not demonstrated resolved. No push, deployment or review gate.",
+  "source": {
+    "release38": "9ec65b46709201669d65fcc04f6a21b1bb567e31",
+    "release39_before": "4b913c7a17ea41bebc07823f74a9275624ab7bdf",
+    "changed_payload_sha256": {
+      "public/joe/results.js": "a829637a1d6a486fe54add11433cfbc693edfc85f8e940769fdcd7e1fd22bfd8",
+      "public/joe/results-model.js": "e1d111a20313f892c9ff2fb45c151a199ac891a8eb5d0c6bf2cc4222c82b256c"
+    }
+  },
+  "environment": {
+    "cpu": "Apple M5 Max",
+    "cores": 18,
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v24.20.0",
+    "browser": "HeadlessChrome/153.0.8010.12",
+    "zone": "Europe/Vienna",
+    "browsers_at_once": 1
+  },
+  "harness": {
+    "command": "TZ=Europe/Vienna node /tmp/joed-166-budget-bd1cb3ab.mjs <worktree> <output.json>",
+    "entry": "scripts/browser/results-budget.mjs: runResultsBudget with unchanged CI_GUARD, fixture, eleven clicks and remeasurement policy",
+    "source": "import { pathToFileURL } from 'node:url';\nimport { writeFileSync } from 'node:fs';\nconst [root, output, mode = 'budget'] = process.argv.slice(2);\nconst mod = name => import(pathToFileURL(`${root}/scripts/browser/${name}.mjs`));\nconst { launch, openPage } = await mod('cdp');\nconst { startBoard, ACTOR } = await mod('board');\nconst { runResultsBudget, serveResults } = await mod('results-budget');\nconst { CI_GUARD } = await mod('budget');\nconst browser = await launch({ commandTimeout: 60000 });\nconst boards = [], checks = [], details = [];\ntry {\n  console.log(JSON.stringify({ root, runnerPid: process.pid, engine: await browser.send('Browser.getVersion'), processes: await browser.send('SystemInfo.getProcessInfo') }));\n  const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });\n  if (mode.includes('trace')) await browser.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline.stack,v8.execute', transferMode: 'ReturnAsStream' });\n  if (mode === 'profile') {\n    await page.s('Profiler.enable');\n    await page.s('Profiler.setSamplingInterval', { interval: 100 });\n  }\n  const tracedServe = async (record, board) => {\n    const close = await serveResults(browser, page, board, record);\n    return async () => {\n      \n      await close();\n    };\n  };\n  let profileNo = 0;\n  if (mode.includes('wide')) await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `addEventListener('DOMContentLoaded', () => document.documentElement.style.setProperty('--font', 'Verdana, \\\"DejaVu Sans\\\", sans-serif'))` });\n  const evaluate = page.evaluate;\n  page.evaluate = async (...args) => {\n    if (mode === 'profile' && args[0] === 'window.__joedesk.timings.length = 0') await page.s('Profiler.start');\n    const result = await evaluate(...args);\n    if (mode === 'profile' && args[0].includes('timings: window.__joedesk.timings.slice()')) {\n      const { profile } = await page.s('Profiler.stop');\n      writeFileSync(`${output}.${++profileNo}.cpuprofile`, JSON.stringify(profile));\n    }\n    if (args[0].includes('timings: window.__joedesk.timings.slice()')) details.push(result.timings);\n    return result;\n  };\n  const rows = await runResultsBudget({ page, newBoard: async options => { const b = await startBoard(options); boards.push(b); return b; },\n    check: (ac, name, ok, detail) => { checks.push({ ac, name, ok, detail }); }, limits: CI_GUARD, serve: tracedServe });\n  if (mode.includes('trace')) {\n    const completed = new Promise(resolve => browser.on(m => { if (m.method === 'Tracing.tracingComplete') resolve(m.params.stream); }));\n    await browser.send('Tracing.end');\n    const stream = await completed;\n    let data = '';\n    while (true) { const part = await browser.send('IO.read', { handle: stream }); data += part.data; if (part.eof) break; }\n    await browser.send('IO.close', { handle: stream });\n    writeFileSync(`${output}.trace.json`, data);\n  }\n  writeFileSync(output, JSON.stringify({ root, mode, rows, checks, details, errors: page.errors }, null, 2) + '\\n');\n  console.log(JSON.stringify({ rows, errors: page.errors, passed: checks.filter(c => c.ok).length, total: checks.length }));\n} finally {\n  await browser.close();\n  for (const board of boards) await board.close();\n  console.log('Closed browser and all owned boards');\n}\n",
+    "measurement_policy": "Three complete, sequential r38 / r39-before / r39-after rounds; report every sample and median, without choosing favorable runs."
+  },
+  "conclusions": {
+    "verified_added_cost": "JOED-151 b543a6f timeMarks resolved every calendar midnight before rejecting unmarked dates (379 calls for 12 annual marks). Original CPU profile: timeMarks inclusive 4.76 ms over three viewport click sequences.",
+    "fix": "Visit only dates drawn by the chart; precompute each recorded close coordinate in the existing worker index and transfer its Float64Array, avoiding main-thread timezone conversion for close points. The transfer list already enumerates typed close columns.",
+    "ci_limitation": "The reported Linux CI doubling was not reproduced on macOS (also probed Chrome 149). Optimizing dates improves the cold All switch, not the worst switch dominated by calendar/trade layout. The target of matching release 38 worst-switch ratios is not demonstrated; JOED-166 must remain open pending coordinator investigation/CI.",
+    "behavior": "Money, dates, marks, copy, layout, routes and deep links are preserved; no contract/budget/fixture edits. Equivalence tests exercise leap dates, both DST transitions, exact 16/120-day thresholds and midnight boundaries; transfer test checks 23/25-hour close intervals and curve coordinates."
+  },
+  "summary": {
+    "r38": {
+      "1440": {
+        "worst_switch_ms_median": 11,
+        "cold_all_switch_ms_median": 9.2,
+        "worst_switch_ms_samples": [
+          12.6,
+          10.6,
+          11
+        ]
+      },
+      "1024": {
+        "worst_switch_ms_median": 9.3,
+        "cold_all_switch_ms_median": 8.6,
+        "worst_switch_ms_samples": [
+          9.3,
+          8.9,
+          9.7
+        ]
+      },
+      "390": {
+        "worst_switch_ms_median": 10.6,
+        "cold_all_switch_ms_median": 8.7,
+        "worst_switch_ms_samples": [
+          10.4,
+          10.6,
+          11.1
+        ]
+      }
+    },
+    "r39-before": {
+      "1440": {
+        "worst_switch_ms_median": 12.3,
+        "cold_all_switch_ms_median": 11.5,
+        "worst_switch_ms_samples": [
+          11.8,
+          12.3,
+          13.1
+        ]
+      },
+      "1024": {
+        "worst_switch_ms_median": 9.8,
+        "cold_all_switch_ms_median": 9.3,
+        "worst_switch_ms_samples": [
+          9.8,
+          9.7,
+          10.7
+        ]
+      },
+      "390": {
+        "worst_switch_ms_median": 10.2,
+        "cold_all_switch_ms_median": 10,
+        "worst_switch_ms_samples": [
+          9.5,
+          11.7,
+          10.2
+        ]
+      }
+    },
+    "r39-after": {
+      "1440": {
+        "worst_switch_ms_median": 12.5,
+        "cold_all_switch_ms_median": 7.2,
+        "worst_switch_ms_samples": [
+          13.1,
+          12.1,
+          12.5
+        ]
+      },
+      "1024": {
+        "worst_switch_ms_median": 10,
+        "cold_all_switch_ms_median": 5.6,
+        "worst_switch_ms_samples": [
+          10.2,
+          10,
+          9.8
+        ]
+      },
+      "390": {
+        "worst_switch_ms_median": 11.8,
+        "cold_all_switch_ms_median": 6,
+        "worst_switch_ms_samples": [
+          10.2,
+          13.2,
+          11.8
+        ]
+      }
+    }
+  },
+  "runs": [
+    {
+      "label": "r38",
+      "round": 1,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 12.600000143051147,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.299999952316284,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.399999856948853,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          12.3,
+          7.6,
+          3.9,
+          4.4,
+          3.1,
+          12.6,
+          5.9,
+          0.6,
+          6.5,
+          6.5,
+          10.2
+        ],
+        [
+          8.6,
+          6.6,
+          3.5,
+          4,
+          2.6,
+          9.3,
+          5.1,
+          0.5,
+          4.7,
+          4.7,
+          8
+        ],
+        [
+          8,
+          4.7,
+          2.8,
+          4,
+          2.5,
+          4.8,
+          3.8,
+          0.5,
+          5.4,
+          5.8,
+          10.4
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r38",
+      "round": 2,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.600000143051147,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 8.900000095367432,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.599999904632568,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          9.2,
+          5.5,
+          3.5,
+          4.5,
+          3.3,
+          10.6,
+          5.9,
+          0.6,
+          5.1,
+          5.5,
+          9
+        ],
+        [
+          8.5,
+          6.4,
+          3.5,
+          4.1,
+          2.8,
+          8.9,
+          4.7,
+          0.6,
+          4.7,
+          5.4,
+          8.7
+        ],
+        [
+          8.7,
+          5.5,
+          3.4,
+          4,
+          2.7,
+          5.5,
+          4.4,
+          0.5,
+          5.4,
+          5.7,
+          10.6
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r38",
+      "round": 3,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 11,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.700000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 11.100000143051147,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          8.9,
+          5.7,
+          3.6,
+          4.6,
+          3.2,
+          11,
+          6,
+          0.7,
+          6.4,
+          6.8,
+          10.8
+        ],
+        [
+          8.9,
+          6.2,
+          4,
+          4.5,
+          3,
+          9.7,
+          5.3,
+          0.6,
+          5.2,
+          5.5,
+          9.1
+        ],
+        [
+          9.4,
+          6.4,
+          3.5,
+          4.2,
+          2.9,
+          5.2,
+          4.5,
+          0.5,
+          5.3,
+          5.9,
+          11.1
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-before",
+      "round": 1,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 11.799999952316284,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.799999952316284,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.5,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          11.5,
+          5.4,
+          3.6,
+          4.7,
+          2.9,
+          11.8,
+          6.1,
+          0.7,
+          5.6,
+          6.5,
+          10.7
+        ],
+        [
+          8.5,
+          6.2,
+          3.1,
+          4,
+          2.4,
+          9.8,
+          4.9,
+          0.6,
+          4.8,
+          5.4,
+          9.1
+        ],
+        [
+          8.8,
+          4.6,
+          3.1,
+          3.7,
+          2.3,
+          4.8,
+          3.8,
+          0.7,
+          4.7,
+          5.4,
+          9.5
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-before",
+      "round": 2,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 12.299999952316284,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.700000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 11.700000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          11.3,
+          5.5,
+          3.8,
+          4.4,
+          3.3,
+          12.3,
+          6.6,
+          0.7,
+          6.2,
+          6.3,
+          11
+        ],
+        [
+          9.3,
+          5.1,
+          3.2,
+          3.9,
+          2.4,
+          9.7,
+          4.8,
+          0.7,
+          4.6,
+          5.7,
+          8.7
+        ],
+        [
+          10,
+          6.1,
+          3.6,
+          4.5,
+          2.7,
+          5.1,
+          3.9,
+          0.7,
+          5.3,
+          6,
+          11.7
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-before",
+      "round": 3,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 13.099999904632568,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.699999809265137,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.199999809265137,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          11.7,
+          5.7,
+          3.9,
+          4.5,
+          2.9,
+          13.1,
+          6.5,
+          1.5,
+          6.1,
+          7.1,
+          11
+        ],
+        [
+          9.3,
+          5.5,
+          3.6,
+          4.6,
+          2.8,
+          10.1,
+          5.5,
+          0.7,
+          6.2,
+          6.2,
+          10.7
+        ],
+        [
+          10.2,
+          6.6,
+          3.3,
+          3.7,
+          2.6,
+          5.1,
+          3.8,
+          0.6,
+          5.1,
+          6.3,
+          9.7
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-after",
+      "round": 1,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 13.099999904632568,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.200000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.200000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          6.9,
+          5.4,
+          3.7,
+          4.6,
+          3.3,
+          13.1,
+          5.9,
+          0.6,
+          5.7,
+          6.1,
+          9.4
+        ],
+        [
+          5.3,
+          4.7,
+          2.9,
+          3.8,
+          2.7,
+          10.2,
+          5,
+          0.6,
+          5,
+          5.8,
+          8.7
+        ],
+        [
+          5.6,
+          5.7,
+          3.2,
+          3.7,
+          2.6,
+          5.1,
+          4,
+          0.6,
+          5.3,
+          6.5,
+          10.2
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-after",
+      "round": 2,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 12.100000143051147,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 13.200000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          7.2,
+          5,
+          3.8,
+          4.9,
+          2.9,
+          12.1,
+          5.7,
+          1.3,
+          5.5,
+          5.9,
+          10.1
+        ],
+        [
+          6.2,
+          5.3,
+          3.9,
+          4.5,
+          2.6,
+          10,
+          5.3,
+          1.2,
+          6.9,
+          9.3,
+          9.7
+        ],
+        [
+          6.9,
+          5.4,
+          4.6,
+          5.6,
+          5,
+          6,
+          5.1,
+          0.6,
+          6.8,
+          6.9,
+          13.2
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-after",
+      "round": 3,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 12.5,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.800000190734863,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 11.799999952316284,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          8.2,
+          5.5,
+          3.8,
+          4.3,
+          3.6,
+          12.5,
+          5.6,
+          1.3,
+          5.7,
+          6.2,
+          10.6
+        ],
+        [
+          5.6,
+          4.4,
+          3,
+          4.3,
+          2.8,
+          9.5,
+          4.6,
+          0.6,
+          5.4,
+          5.3,
+          9.8
+        ],
+        [
+          6,
+          6.4,
+          3.1,
+          4,
+          2.8,
+          5.4,
+          4,
+          0.7,
+          5.1,
+          5.4,
+          11.8
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    }
+  ],
+  "time_marks_microbenchmark": {
+    "method": "Ten alternating before/after calls with separate cold model module instances, after priming the real fixture close dates as curve does. Same twelve output marks in each pair.",
+    "samples": [
+      {
+        "before": {
+          "ms": 1.2,
+          "midnight_calls": 379,
+          "marks": 12
+        },
+        "after": {
+          "ms": 0.2,
+          "midnight_calls": 12,
+          "marks": 12
+        }
+      },
+      {
+        "after": {
+          "ms": 0.2,
+          "midnight_calls": 12,
+          "marks": 12
+        },
+        "before": {
+          "ms": 1.3,
+          "midnight_calls": 379,
+          "marks": 12
+        }
+      },
+      {
+        "before": {
+          "ms": 1.2,
+          "midnight_calls": 379,
+          "marks": 12
+        },
+        "after": {
+          "ms": 0.1,
+          "midnight_calls": 12,
+          "marks": 12
+        }
+      },
+      {
+        "after": {
+          "ms": 0.1,
+          "midnight_calls": 12,
+          "marks": 12
+        },
+        "before": {
+          "ms": 1.2,
+          "midnight_calls": 379,
+          "marks": 12
+        }
+      },
+      {
+        "before": {
+          "ms": 1,
+          "midnight_calls": 379,
+          "marks": 12
+        },
+        "after": {
+          "ms": 0.2,
+          "midnight_calls": 12,
+          "marks": 12
+        }
+      },
+      {
+        "after": {
+          "ms": 0.1,
+          "midnight_calls": 12,
+          "marks": 12
+        },
+        "before": {
+          "ms": 1.2,
+          "midnight_calls": 379,
+          "marks": 12
+        }
+      },
+      {
+        "before": {
+          "ms": 1.1,
+          "midnight_calls": 379,
+          "marks": 12
+        },
+        "after": {
+          "ms": 0.1,
+          "midnight_calls": 12,
+          "marks": 12
+        }
+      },
+      {
+        "after": {
+          "ms": 0.1,
+          "midnight_calls": 12,
+          "marks": 12
+        },
+        "before": {
+          "ms": 1.1,
+          "midnight_calls": 379,
+          "marks": 12
+        }
+      },
+      {
+        "before": {
+          "ms": 1.2,
+          "midnight_calls": 379,
+          "marks": 12
+        },
+        "after": {
+          "ms": 0.2,
+          "midnight_calls": 12,
+          "marks": 12
+        }
+      },
+      {
+        "after": {
+          "ms": 0,
+          "midnight_calls": 12,
+          "marks": 12
+        },
+        "before": {
+          "ms": 1.3,
+          "midnight_calls": 379,
+          "marks": 12
+        }
+      }
+    ]
+  },
+  "tests": {
+    "node_check": [
+      "public/joe/results.js",
+      "public/joe/results-model.js",
+      "test/ui-modules.mjs",
+      "test/status-line.mjs",
+      "test/performance-glance.mjs",
+      "test/board-state.mjs",
+      "test/open-result.mjs",
+      "test/phone-first-screen.mjs",
+      "test/desk-session.mjs",
+      "test/results-model.mjs",
+      "test/settings-model.mjs"
+    ],
+    "ui_matrix": [
+      {
+        "zone": "UTC",
+        "file": "test/ui-modules.mjs",
+        "tests": 314,
+        "pass": 314,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/status-line.mjs",
+        "tests": 44,
+        "pass": 44,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/performance-glance.mjs",
+        "tests": 28,
+        "pass": 28,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/board-state.mjs",
+        "tests": 212,
+        "pass": 212,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/open-result.mjs",
+        "tests": 11,
+        "pass": 11,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/phone-first-screen.mjs",
+        "tests": 17,
+        "pass": 17,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/desk-session.mjs",
+        "tests": 32,
+        "pass": 32,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/results-model.mjs",
+        "tests": 110,
+        "pass": 110,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/settings-model.mjs",
+        "tests": 27,
+        "pass": 27,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/ui-modules.mjs",
+        "tests": 314,
+        "pass": 314,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/status-line.mjs",
+        "tests": 44,
+        "pass": 44,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/performance-glance.mjs",
+        "tests": 28,
+        "pass": 28,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/board-state.mjs",
+        "tests": 212,
+        "pass": 212,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/open-result.mjs",
+        "tests": 11,
+        "pass": 11,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/phone-first-screen.mjs",
+        "tests": 17,
+        "pass": 17,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/desk-session.mjs",
+        "tests": 32,
+        "pass": 32,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/results-model.mjs",
+        "tests": 110,
+        "pass": 110,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/settings-model.mjs",
+        "tests": 27,
+        "pass": 27,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/ui-modules.mjs",
+        "tests": 314,
+        "pass": 314,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/status-line.mjs",
+        "tests": 44,
+        "pass": 44,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/performance-glance.mjs",
+        "tests": 28,
+        "pass": 28,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/board-state.mjs",
+        "tests": 212,
+        "pass": 212,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/open-result.mjs",
+        "tests": 11,
+        "pass": 11,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/phone-first-screen.mjs",
+        "tests": 17,
+        "pass": 17,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/desk-session.mjs",
+        "tests": 32,
+        "pass": 32,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/results-model.mjs",
+        "tests": 110,
+        "pass": 110,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/settings-model.mjs",
+        "tests": 27,
+        "pass": 27,
+        "fail": 0,
+        "skipped": 0
+      }
+    ],
+    "failed": [],
+    "check_joe_ui": {
+      "ok": true,
+      "files": 32,
+      "terms": 32
+    }
+  },
+  "candidate_reseal": {
+    "decision": "Keep 261029192345.0.0. check-release derives reservation from previous release 38; test/release accepts the same pending reservation. Release preparation declares candidate reservation is not a published release. No release-set manifest exists for this candidate per coordinator brief; no immutable artifact is rewritten. Seal in a separate commit.",
+    "version": "261029192345.0.0",
+    "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+    "presentation_source_commit": "01b3080948c21899cbbacbfa3447da6799af1b56"
+  },
+  "processes": {
+    "final_matrix_started": [
+      {
+        "root": "/tmp/joed-166-r38-bd1cb3ab",
+        "runnerPid": 30536,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 30537,
+              "cpuTime": 0.077944
+            },
+            {
+              "type": "GPU",
+              "id": 30546,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 30547,
+              "cpuTime": 0.018958
+            }
+          ]
+        }
+      },
+      {
+        "root": "/tmp/joed-166-r39-before-bd1cb3ab",
+        "runnerPid": 31879,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 31880,
+              "cpuTime": 0.057157
+            },
+            {
+              "type": "GPU",
+              "id": 31881,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 31882,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/Users/markus/Code/joedesk-worktrees/joed-166-r39-results-perf",
+        "runnerPid": 33004,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 33009,
+              "cpuTime": 0.048739
+            },
+            {
+              "type": "GPU",
+              "id": 33012,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 33013,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/tmp/joed-166-r38-bd1cb3ab",
+        "runnerPid": 34239,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 34243,
+              "cpuTime": 0.04758
+            },
+            {
+              "type": "GPU",
+              "id": 34250,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 34251,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/tmp/joed-166-r39-before-bd1cb3ab",
+        "runnerPid": 35316,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 35317,
+              "cpuTime": 0.050818
+            },
+            {
+              "type": "GPU",
+              "id": 35318,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 35319,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/Users/markus/Code/joedesk-worktrees/joed-166-r39-results-perf",
+        "runnerPid": 36456,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 36461,
+              "cpuTime": 0.049898
+            },
+            {
+              "type": "GPU",
+              "id": 36469,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 36470,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/tmp/joed-166-r38-bd1cb3ab",
+        "runnerPid": 38161,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 38163,
+              "cpuTime": 0.063304
+            },
+            {
+              "type": "GPU",
+              "id": 38165,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 38166,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/tmp/joed-166-r39-before-bd1cb3ab",
+        "runnerPid": 39325,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 39331,
+              "cpuTime": 0.055123
+            },
+            {
+              "type": "GPU",
+              "id": 39336,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 39337,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/Users/markus/Code/joedesk-worktrees/joed-166-r39-results-perf",
+        "runnerPid": 40694,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 40711,
+              "cpuTime": 0.052545
+            },
+            {
+              "type": "GPU",
+              "id": 40755,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 40757,
+              "cpuTime": 0
+            }
+          ]
+        }
+      }
+    ],
+    "teardown": "Every driver awaited browser.close() and board.close() in finally. Earlier diagnostic process IDs are in the execution transcript; all drivers completed with teardown messages."
+  }
+}
