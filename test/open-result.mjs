@@ -7,7 +7,7 @@ import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
 import { validateContract } from '../contracts/index.mjs';
 const board = await import('../public/joe/board-state.js');
-const { localBoardHealth, boardHealthPresentation, boardDiagnostics } = await import('../public/joe/health.js');
+const { localBoardHealth, boardHealthPresentation, boardDiagnostics, statusPresentation } = await import('../public/joe/health.js');
 const { heroLeft, healthPop, compactDesk } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const exact = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
@@ -23,9 +23,10 @@ const detailsRow = (pop, name) => {
   return pop.querySelectorAll('dd')[keys.findIndex(node => node.textContent === name)]?.textContent;
 };
 
-// An exact current result and an explained not-exact dash are fine. A fault,
-// an unexplained missing result or a last good result is not fine. Amounts
-// beside a fault remain observations, with a warning; they cannot form a total.
+// Open is green only when every result is exact. Explained not-exact gaps
+// keep the existing price warning; faults get unavailable wording. `fine`
+// below means no fault, so diagnostics distinguish faults from not-exact gaps.
+// Amounts beside a fault remain observations but cannot form a desk total.
 const DESK_OPEN = {
   exact: { fine: true, word: 'exact', amount: true },
   notExactMoney: { fine: true, word: 'not exact', amount: false, reason: 'not exact' },
@@ -39,20 +40,23 @@ const DESK_OPEN = {
   valueKeptFaultMoney: { fine: false, word: 'unavailable', amount: true, reason: 'not reported by the broker' },
 };
 const HOUSEHOLD_OPEN = {
-  current: { fine: true, word: 'exact' },
+  current: { fine: true, word: 'exact', amount: true },
   notExact: { fine: true, word: 'not exact', reason: 'not exact' },
   fault: { fine: false, word: 'unavailable', reason: 'not reported by the broker' },
   nullNoReason: { fine: false, word: 'not reported' },
+  valueKeptFaultMoney: { fine: false, word: 'unavailable', amount: true, reason: 'not reported by the broker' },
 };
-// A household total needs three exact desks. The first desk preventing that
-// supplies its missing-total caption; the light still checks ALL three desks.
+// Independent outcome rule: any faulty desk makes the household unavailable,
+// never not exact, regardless of desk order or the household's original dash.
+// Otherwise a total needs three exact desks, and a not-exact input explains
+// why a current total is withheld. An own household fault stays a fault.
 function oracle(desks, household) {
   const own = HOUSEHOLD_OPEN[household], inputs = desks.map(option => DESK_OPEN[option]);
-  const blocking = inputs.find(input => input.word !== 'exact');
-  return { inputs, fine: own.fine && inputs.every(input => input.fine),
-    shown: household === 'current' && !blocking,
-    word: household === 'current' && blocking ? blocking.word === 'not exact' ? 'not exact' : 'unavailable' : own.word,
-    reason: household === 'current' && blocking ? blocking.reason : own.reason };
+  const deskFault = inputs.some(input => !input.fine), allExact = inputs.every(input => input.word === 'exact');
+  const green = own.word === 'exact' && allExact, fault = !own.fine || deskFault;
+  return { inputs, green, fault, shown: Boolean(own.amount) && allExact,
+    word: deskFault ? 'unavailable' : own.word === 'exact' && !allExact ? 'not exact' : own.word,
+    reason: deskFault ? 'not reported by the broker' : own.word === 'exact' && !allExact ? 'not exact' : own.reason };
 }
 
 function combination(desks, household) {
@@ -79,20 +83,29 @@ function combination(desks, household) {
     if (option === 'valueKeptFaultMoney') (money.reasons ??= {}).openPnl = 'source_unavailable';
   });
   const reason = { notExact: 'not_exact_yet', fault: 'source_unavailable', nullNoReason: null }[household];
-  if (household !== 'current') withhold(data.totals, data.pnlSources.open, reason, reason);
+  if (household === 'valueKeptFaultMoney') (data.totals.reasons ??= {}).openPnl = 'source_unavailable';
+  else if (household !== 'current') withhold(data.totals, data.pnlSources.open, reason, reason);
   return viewOf(data, prior);
 }
 
 test('JOED-157: household-current shape never exempts a desk open fault (contract valid)', () => {
   const view = combination(['exact', 'valueKeptFaultMoney', 'exact'], 'current');
   assert.equal(validateContract('data', view.feeds.data.value).ok, true);
-  assert.deepEqual(localBoardHealth(view.states, view.feeds, now), { tone: 'yellow', reason: 'open_unavailable_rth' });
+  assert.deepEqual(localBoardHealth(view.states, view.feeds, now), { tone: 'yellow', reason: 'open_fault_rth' });
   assert.equal(view.states['today.openPnl'].value, null);
   assert.equal(view.states['today.openPnl'].reason, 'source_unavailable');
   assert.match(boardDiagnostics(view.states, view.feeds, now).join(' '), /Joe’s Open result is unavailable: not reported by the broker/);
 });
 
-test('JOED-157: every desk and household Open combination matches the plain-words oracle through light and renderers (4000 cases)', t => {
+test('JOED-157: Details keeps the household own fault beside desk gaps', () => {
+  const data = combination(['notExactMoney', 'exact', 'exact'], 'valueKeptFaultMoney').feeds.data.value;
+  data.totals.reasons.openPnl = 'open_pnl_unavailable';
+  const view = viewOf(data), row = detailsRow(htmlDocument(healthPop(view, boardHealthPresentation(view.states, view.feeds, now))), 'Open positions');
+  assert.match(row, /Household unavailable · open result not available/);
+  assert.match(row, /J: not exact/);
+});
+
+test('JOED-157: every desk and household Open combination matches the plain-words oracle through light and renderers (5000 cases)', t => {
   const mismatches = {}, examples = [];
   let count = 0, greens = 0, wrongGreens = 0, wrongGreensCurrent = 0;
   const check = (ok, category, label) => {
@@ -105,21 +118,25 @@ test('JOED-157: every desk and household Open combination matches the plain-word
       const desks = [j, joe, joel], expected = oracle(desks, household), view = combination(desks, household);
       const label = `${household}: J ${j}; Joe ${joe}; Joel ${joel}`;
       const health = localBoardHealth(view.states, view.feeds, now);
-      check(health.tone === (expected.fine ? 'green' : 'yellow') && health.reason === (expected.fine ? 'board_ok' : 'open_unavailable_rth'), 'light', label);
-      if (health.tone === 'green' && !expected.fine) { wrongGreens++; if (household === 'current') wrongGreensCurrent++; }
-      if (expected.fine) greens++;
+      check(health.tone === (expected.green ? 'green' : 'yellow') && health.reason === (expected.green ? 'board_ok' : expected.fault ? 'open_fault_rth' : 'open_unavailable_rth'), 'light', label);
+      const status = statusPresentation(view);
+      check(expected.green || status.sentence === (expected.fault ? 'Open result is unavailable' : 'Waiting on broker prices'), 'light wording', label);
+      if (health.tone === 'green' && !expected.green) { wrongGreens++; if (household === 'current') wrongGreensCurrent++; }
+      if (expected.green) greens++;
       check((view.states['today.openPnl'].value != null) === expected.shown, 'household amount', label);
 
       const hero = htmlDocument(heroLeft(view));
       check((hero.querySelector('[data-cell="hero.open"] .bn').textContent !== '—') === expected.shown, 'hero amount', label);
       const summary = hero.querySelector('.account-section .summary-text')?.textContent ?? '';
-      check(expected.shown ? !summary.includes('Open positions:') : summary.includes(`Open positions: ${expected.word}`), 'hero summary', label);
-      if (!expected.shown && expected.reason) check(summary.includes(expected.reason), 'hero reason', label);
+      check(expected.word === 'exact' ? !summary.includes('Open positions:') : summary.includes(`Open positions: ${expected.word}`), 'hero summary', label);
+      if (expected.reason) check(summary.includes(expected.reason), 'hero reason', label);
+      if (expected.fault) check(!summary.includes('Open positions: not exact'), 'fault wins household caption', label);
 
       const pop = htmlDocument(healthPop(view, boardHealthPresentation(view.states, view.feeds, now)));
       const row = detailsRow(pop, 'Open positions');
       check(Boolean(row), 'Details row exists', label);
-      if (expected.inputs.every(input => input.word === 'exact') && !expected.shown) {
+      if (expected.fault) check(row.includes('Household unavailable'), 'household fault Details', label);
+      if (expected.inputs.every(input => input.word === 'exact') && expected.word !== 'exact') {
         check(row.includes(`Household ${expected.word === 'not exact' ? 'not exact' : 'unavailable'}`) && row.includes('each desk exact'), 'household-only Details', label);
         if (expected.reason) check(row.includes(expected.reason), 'household-only reason', label);
       }
@@ -150,8 +167,8 @@ test('JOED-157: every desk and household Open combination matches the plain-word
     }
   }
   t.diagnostic(JSON.stringify({ count, greens, wrongGreens, wrongGreensCurrent, mismatches, examples }));
-  assert.equal(count, 4000);
-  assert.equal(greens, 54);
+  assert.equal(count, 5000);
+  assert.equal(greens, 1);
   assert.deepEqual(mismatches, {});
 });
 
@@ -172,7 +189,7 @@ test('JOED-157: shared classifier and Open channels cover source fallback, statu
     data.desks[1].money.reasons = { openPnl: reason };
     Object.assign(data.desks[1].pnlSources.open, { status: 'unavailable', reason, method: null, observedAt: null });
     const view = viewOf(data, previous);
-    assert.equal(localBoardHealth(view.states, view.feeds, now).tone, 'green', reason);
+    assert.deepEqual(localBoardHealth(view.states, view.feeds, now), { tone: 'yellow', reason: 'open_unavailable_rth' }, reason);
     assert.equal(view.states['today.openPnl'].value, null, reason);
     assert.equal(board.classifyCells(view.states, data, 'openPnl').joe.kind, 'notExact', reason);
     data.desks[1].pnlSources.open.reason = 'source_unavailable';

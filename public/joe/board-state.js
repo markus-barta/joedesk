@@ -173,9 +173,16 @@ export function boardStates(feeds, now, previous = {}) {
   // is no input for the household total either (JOED-148, JOED-157).
   for (const field of MONEY_FIELDS) {
     const name = `today.${field}`, cell = states[name];
-    const blocked = DESKS.map(id => states[`desks.${id}.${field}`]).find((c, i) => outageValue(c) || c.value == null ||
-      (['dayPnl', 'openPnl'].includes(field) && classifyCell(c, pnlChannels(data, DESKS[i], field)).kind === 'fault'));
-    if (outageValue(cell) || (cell.value != null && blocked)) states[name] = withheld(cell, cell.reason ?? blocked?.reason);
+    const inputs = DESKS.map(id => ({ cell: states[`desks.${id}.${field}`],
+      result: ['dayPnl', 'openPnl'].includes(field) ? classifyCell(states[`desks.${id}.${field}`], pnlChannels(data, id, field)) : null }));
+    const faulty = inputs.find(input => input.result?.kind === 'fault');
+    const blocked = faulty ?? inputs.find(({ cell: c }) => outageValue(c) || c.value == null);
+    const own = faulty ? classifyCell(cell, pnlChannels(data, 'today', field)) : null;
+    // A fault wins the caption even if the household already had a not-exact
+    // dash. Desk order cannot turn that fault into a not-exact explanation.
+    if (outageValue(cell) || (cell.value != null && blocked) || faulty) states[name] = withheld(
+      faulty && cell.state === 'not reported' ? { ...cell, state: 'broken' } : cell,
+      faulty ? (own.kind === 'fault' ? own.reason : null) ?? faulty.result.reason ?? 'source_unavailable' : cell.reason ?? blocked?.cell.reason);
   }
   for (const id of DESKS) {
     const name = `desks.${id}.totalPnl`;

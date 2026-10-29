@@ -440,7 +440,7 @@ test('health: capture leaves board health unchanged; the full ledger is red imme
     Object.assign(feeds.data.value.safety.gateway, { apiSessionReady: false, reason });
     assert.equal(view(panelStates(feeds, b.now, b.states), feeds).reason, reason);
   }
-  for (const [name, expected] of [['today.dayPnl', 'day_pending'], ['today.openPnl', 'open_unavailable_rth']]) {
+  for (const [name, expected] of [['today.dayPnl', 'day_pending'], ['today.openPnl', 'open_fault_rth']]) {
     const states = structuredClone(b.states);
     states[name].value = null;
     assert.equal(view(states).reason, expected);
@@ -910,8 +910,8 @@ test('health: not-exact values still run gateway, stuck-desk, transport, feed an
   }
   const payload = switchSetSnapshot(valid.data.generatedAt);
   const rth = board({ feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) }, { cold: true });
-  // JOED-157: explained not-exact Today and Open results both stay green.
-  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'board_ok');
+  // Amy's A3 excuses Today only; a not-exact Open still warns in regular hours.
+  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
   // A household Today with no reason on any channel (cell, money, source) is a real gap.
   const gap = { ...rth, states: { ...rth.states }, feeds: { ...rth.feeds, data: { ...rth.feeds.data, value: structuredClone(rth.feeds.data.value) } } };
   delete gap.feeds.data.value.totals.reasons.dayPnl;
@@ -919,7 +919,7 @@ test('health: not-exact values still run gateway, stuck-desk, transport, feed an
   gap.states['today.dayPnl'] = { value: null, reason: null, state: 'broken', retained: false };
   assert.equal(health.localBoardHealth(gap.states, gap.feeds, gap.now).reason, 'day_pending', 'a Today without a reason is a real gap');
   rth.states['today.dayPnl'] = { state: 'fresh', value: { amount: '0', currency: 'EUR' }, reason: null, retained: false };
-  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'board_ok');
+  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
 });
 
 test('health: the single NOT_EXACT_TONE constant can opt into yellow, after other checks', async () => {

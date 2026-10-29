@@ -269,7 +269,12 @@ export function healthPop(ctx, health) {
       const ms = gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed);
       return `${esc(desk.label)}: ${ms == null ? 'not reported' : `${ageSpan(`pop.hb.${desk.id}`, `${age(ms / 1000)} ago`)}`}`;
     }).join(' · ')]);
-    rows.push(['Today’s result', esc(classifyDays(states, data).today.kind === 'notExact' ? dayBreakdown(states, data)
+    const days = classifyDays(states, data), ownDay = dayChannels(data, 'today');
+    const ownDayReasons = [ownDay.moneyReason, ownDay.source?.reason].filter(Boolean);
+    // A fault inherited from a desk changes the household caption, while the
+    // existing per-desk row still explains its original not-exact total.
+    const inheritedDayFault = DESKS.some(id => days[id].kind === 'fault') && ownDayReasons.length > 0 && ownDayReasons.every(reason => NOT_EXACT_REASONS.has(reason));
+    rows.push(['Today’s result', esc(days.today.kind === 'notExact' || inheritedDayFault ? dayBreakdown(states, data)
       : dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Open positions', esc(Object.values(classifyCells(states, data, 'openPnl')).every(open => open.kind === 'exact')
       ? openMethodLabel(data.pnlSources?.open) ?? 'Each desk exact' : openBreakdown(states, data))]);
@@ -370,14 +375,17 @@ export function dayBreakdown(states, data) {
 }
 
 // Open uses the same classification as the light. A household-only gap must
-// explain itself even when each desk is exact; otherwise name the desk gaps.
+// explain itself even when each desk is exact. Keep household faults beside
+// the desk breakdown too, so a desk gap never drops the household's fault.
 function openBreakdown(states, data) {
   const groups = deskDays(states, data, 'openPnl').sort((a, b) => dayRank(a) - dayRank(b) || byDesk(a.ids[0], b.ids[0]));
   const household = classifyCells(states, data, 'openPnl').today;
-  if (household.kind !== 'exact' && groups.every(g => g.word === 'exact')) {
+  const eachExact = groups.every(g => g.word === 'exact');
+  if (household.kind === 'fault' || (household.kind === 'notExact' && eachExact)) {
     const word = household.kind === 'notExact' ? NOT_EXACT : 'unavailable';
     const why = household.reason ? cellReason(household.reason) : null;
-    return `Household ${word}${why && why !== word ? ` · ${why}` : ''}; each desk exact`;
+    const desks = eachExact ? 'each desk exact' : groups.map(g => `${deskNames(g.ids)}: ${g.word}${g.reason ? ` · ${g.reason}` : ''}`).join('; ');
+    return `Household ${word}${why && why !== word ? ` · ${why}` : ''}; ${desks}`;
   }
   return groups.map(g => `${deskNames(g.ids)}: ${g.word}${g.reason ? ` · ${g.reason}` : ''}`).join('; ');
 }

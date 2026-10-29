@@ -601,7 +601,7 @@ try {
     ['a-dead-session-current-money', 'broken', 'Needs fix'], ['h-secondary-position-source', 'broken', 'Needs fix'], ['i-oversize-data', 'broken', 'Needs fix'],
     ['g-expired-sso', 'broken', 'Data delayed'], ['d-routing-stub', 'broken', 'Data delayed'],
     ['p3-single-missing-desk', 'broken', 'Data delayed'], ['p3-coupled-unavailable', 'broken', 'Data delayed'],
-    ['p3-not-exact-yet', 'broken', 'Board OK'], ['p3-shared-not-exact', 'broken', 'Board OK'],
+    ['p3-not-exact-yet', 'broken', 'Board OK'], ['p3-shared-not-exact', 'broken', 'Data delayed'],
     ['p3-mixed-not-exact-fault', 'broken', 'Data delayed'],
   ];
   // ADR deferred P3 rows, derived from valid.json; expected states come from
