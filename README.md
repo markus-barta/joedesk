@@ -889,8 +889,10 @@ before snapshot/history writes, so a higher valid sequence can recover normally.
 Legacy data/history files are neither migrated nor overwritten automatically;
 P6 owns the compatible backup and cutover. History's `sizeBytes` measures its
 complete UTF-8 storage envelope; compaction begins at 80% of 8 MiB, preserves
-endpoints/extrema/gap edges/per-desk basis transitions, and prunes its 14-day
-window by server time. Successful compaction reports the advisory
+endpoints/extrema/gap edges/per-desk basis transitions and both rows around
+every reporting gap (rows more than `GAP_MS`, 20 minutes, apart), leaves at
+most `GAP_MS` between kept rows otherwise, and prunes its 14-day window by
+server time. Successful compaction reports the advisory
 `history_compacted` state until the compacted range (`compactedThrough`) leaves
 retention; it does not mark history broken. Actual `history_size_limit` and
 `history_write_failed` alarms remain broken until a successful history write

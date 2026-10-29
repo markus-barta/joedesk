@@ -62,29 +62,38 @@ break in the measured data.
 ## Display-only continuity
 
 History draws a second, gray dashed dataset for each desk. These lines are
-explicitly estimated: linear interpolation across missing or null spans and
-observation intervals longer than five minutes, plus a last-value carry to the
-current chart time. A leading segment uses an assumed €5,000 baseline; its
+explicitly estimated: linear interpolation across null values and across rows
+more than 20 minutes apart, plus a last-value carry to the current chart time.
+The 20 minutes are `GAP_MS` in `time.mjs`, one value shared by the server and
+the page: the longest time between two rows that still counts as continuous
+reporting, above the producer's slowest normal cadence (one snapshot every
+900 s overnight). A leading segment uses an assumed €5,000 baseline; its
 starting time is a display assumption based on the retained history, not an
 authoritative founding timestamp. With no observations, a gray €5,000 guide is
 shown while the board still reports missing data. Where no chosen desk has a
 number for more than five minutes, the chart also hatches that stretch (one
-legend entry, "No data"); a desk missing alone is shown by its dashed line.
+legend entry, "No data"); a stretch without rows lasts more than 20 minutes,
+so it is always hatched, and a desk missing alone is shown by its dashed line.
 
 Rows at or before `compactedThrough` were thinned by the server to stay inside
 its size limit (`compactPoints`: per 64 rows the bucket ends, each series'
 extrema, both sides of every presence or basis change, and each Vienna day's
-last valued row; later passes thin the kept rows again, so spacing grows with
-age). The server records nothing where no row arrived, so an outage and a
-thinned stretch can look alike. The display connects a thinned interval as
-observed, with the tooltip naming the nearest kept observation, only where
-thinning explains it: it does not cross a Vienna midnight except from that
-day's last row (at most five minutes before midnight) into the next day, and
-it is no longer than three times the longest of the 16 kept intervals on
-either side. Longer intervals stay estimates and, where no chosen desk has a
-number, hatched no-data bands. Explicit null values survive thinning and stay
-estimates. An outage shorter than the thinning step at its age cannot be told
-apart from thinning; History says so under the chart.
+last valued row; later passes thin the kept rows again). Compaction is
+gap-preserving and so says where it thinned. Rows more than `GAP_MS` apart are
+a gap in reporting, and both rows around a gap are always kept: a pass never
+merges across one, and every run of continuous reporting keeps its first and
+last row. Inside a run no pass leaves more than `GAP_MS` between kept rows.
+Every interval therefore says what it is without a mark on any row, so this
+contract and the history store stay as they are and older pages and servers
+read them unchanged: an interval of at most `GAP_MS` is continuous reporting,
+thinned or not, drawn as observed with the tooltip naming the nearest kept
+row; a longer one is exactly a gap in the rows that arrived, drawn as an
+estimate and hatched. The page infers nothing from neighbouring rows.
+Versions before this rule thinned old rows to hours apart. Where such rows
+are still kept, a longer interval at or before `compactedThrough` may be that
+thinning as well as an outage: it stays no data, and its tooltip adds
+"Thinned or not reported: coverage unknown". Explicit null values survive
+thinning and stay estimates.
 
 The renderer builds continuity over the whole kept history before clipping to
 the shown window, so a window inside an outage still contains a line. Solid
@@ -96,7 +105,12 @@ five minutes (a narrower manual view is widened around its middle each time the
 window is resolved, also once newer history allows it), and ends at the current
 chart time while it follows the newest. A move by pan, zoom, drag or keys keeps
 following only if the window still ends exactly at the newest time.
-The comparison always uses the window the chart settles on. This policy applies
+The comparison always uses the window the chart settles on, over the last
+stretch of continuous data in it: every chosen desk has a number on its
+current basis and every interval is observed by the same rule. A stretch that
+starts after the window's first row is named ("Last 3 h 22 min with
+continuous data, from …", or "on the current bookkeeping" after a basis
+change); nothing is claimed across a stretch without rows. This policy applies
 to each newly encountered gap. Estimates are never written to `history.json`,
 counted as broker observations, or used by P&L, comparison or sparkline
 calculations. Historical accounting boundaries remain intact; the display layer
