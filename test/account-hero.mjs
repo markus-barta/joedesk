@@ -10,6 +10,8 @@ import { MIN, DAY, iso, valid, words, point, SNAP, NOW, history, ctxFor } from '
 const M = await import('../public/joe/account-model.js');
 const A = await import('../public/joe/account.js');
 const { chartHintSeen, dismissChartHint, forgetChartMemory, createAxisMode, CHART_HINT_KEY, CHART_AXES_KEY } = await import('../public/joe/chart.js');
+const { CELL_REASON, cellReason } = await import('../public/joe/health.js');
+const { dashWords } = await import('../public/joe/ui.js');
 
 // ---------- The hero on the real page ----------
 // The Node DOM has no events: record listeners per element and run them by hand.
@@ -585,4 +587,47 @@ test('JOED-156 fix 5: each pointer sees its own Controls list; only the pointer 
   assert.match(css, /\n\.acct-keys\.hint-touch \{ display: none; \}/);
   assert.match(css, /@media \(pointer: coarse\) \{ \.acct-keys\.hint-fine \{ display: none; \} \.acct-keys\.hint-touch \{ display: grid; \} \}/);
   assert.equal([...css.matchAll(/\.acct-keys[^{]*\{[^}]*display:/g)].length, 4, 'no other rule sets their display');
+});
+
+// ---------- r39 CI: one box per line, in every state ----------
+test('JOED-156 r39 fit: the Since start · Cash line keeps one box in every state: its tallest forms lie hidden in the same grid cell', async t => {
+  const p = page(t);
+  await p.render();
+  const elements = el => el.children.filter(n => typeof n !== 'string');
+  for (const [box, line, sizes] of [['#acctSubBox', 'acctSub', 'acctSubSizes'], ['#acctSubNBox', 'acctSubN', 'acctSubNSizes']]) {
+    const fit = p.$(box).querySelector('.acct-fit');
+    assert.deepEqual(elements(fit).map(c => c.id), [line, sizes], 'the line and its forms share the grid cell');
+    assert.equal(p.$(`#${sizes}`).getAttribute('aria-hidden'), 'true');
+    assert.doesNotMatch(p.$(`#${sizes}`).innerHTML, /<a |href=|data-cash|role=| id=|tabindex|data-term/, 'inert text: no link, name, control or term');
+  }
+  assert.match(p.text('#acctSubN'), /^Account start loading · Cash — · not reported · no data received yet$/, 'the line itself is only the line');
+  const forms = id => elements(p.$(id)).map(f => words(f.textContent));
+  const narrow = forms('#acctSubNSizes'), wide = forms('#acctSubSizes');
+  // Every form Cash can take (JOED-49/148), beside the widest of the other parts.
+  for (const reason of Object.keys(CELL_REASON)) {
+    for (const cash of [`Cash — · ${dashWords(reason)}`, `Cash −€ 9.999.999,99 · ${cellReason(reason)}`]) {
+      assert.ok(narrow.includes(`Account start loading · ${cash}`), cash);
+      assert.ok(wide.some(f => f.startsWith('Account start loading') && f.includes(cash)), cash);
+    }
+    assert.ok(wide.some(f => f.endsWith(`incl. kept holdings — · ${cellReason(reason)}`)), reason);
+  }
+  for (const cash of ['Cash −€ 9.999.999,99', 'Cash — · not reported']) assert.ok(narrow.includes(`Account start loading · ${cash}`), cash);
+  assert.ok(wide.some(f => f.endsWith('incl. kept holdings SXR8 −€ 9.999.999,99 · TSLA −$ 9.999.999,99, each in its own currency')), 'the kept symbols last listed, at their widest');
+  assert.ok(wide.some(f => f.endsWith('no kept holdings in this snapshot')));
+  // The forms follow what sizes them (the start, the kept symbols), never the state.
+  const before = [p.$('#acctSubSizes').innerHTML, p.$('#acctSubNSizes').innerHTML];
+  for (const ctx of [ctxFor({ now: SNAP + 75000 }), ctxFor({ mutate: d => { d.brokerAccount = { equity: null, reason: 'source_unavailable', scope: d.brokerAccount.scope, observedAt: d.brokerAccount.observedAt }; } })]) {
+    await p.render(ctx);
+    assert.deepEqual([p.$('#acctSubSizes').innerHTML, p.$('#acctSubNSizes').innerHTML], before);
+  }
+  // A set start: the widest Since start figures.
+  const set = A.lineForms({ amountEur: 1000000, date: '2025-06-02' }, { reason: null });
+  const first = htmlDocument(set.narrow).children.filter(n => typeof n !== 'string')[0];
+  assert.match(words(first.textContent), /^Since start −€ 9\.999\.999,99 \(−999,99 %\) · Cash /);
+  assert.notEqual(set.key, A.lineForms(null, { reason: 'missing' }).key);
+  // One grid cell: the box is as tall as the tallest form; the forms are unseen.
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\n\.acct-fit, \.acct-sizes \{ display: grid; min-width: 0; \}/);
+  assert.match(css, /\n\.acct-fit > span, \.acct-sizes > span \{ grid-area: 1 \/ 1; min-width: 0; \}/);
+  assert.match(css, /\n\.acct-sizes \{ visibility: hidden; \}/);
 });

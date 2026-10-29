@@ -1548,6 +1548,11 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 .acct-state > [data-clamp] { display: block; min-width: 0; height: 20px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .acct-dbtn { display: none; }
 .acct-sub { min-height: 36px; margin-top: 6px; font-size: 12.5px; line-height: 18px; color: var(--ink-3); }
+/* One box in every state, at every width: the line's tallest forms lie hidden
+   in its grid cell (account.js lineForms), so no state change moves anything. */
+.acct-fit, .acct-sizes { display: grid; min-width: 0; }
+.acct-fit > span, .acct-sizes > span { grid-area: 1 / 1; min-width: 0; }
+.acct-sizes { visibility: hidden; }
 .acct-sub b, .acct-details b { color: var(--ink-2); font-weight: 600; }
 /* A missing Cash is a muted dash, as every dash on Desk. */
 .acct-sub b.muted { color: var(--ink-3); }
