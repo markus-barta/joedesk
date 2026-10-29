@@ -45,6 +45,7 @@ const { boardStates, NOT_EXACT_REASONS, notExactDash } = await import('../public
 const { cellReason, capital, CELL_REASON, REASON_COPY, statusSentence, boardHealthPresentation, statusPresentation } = await import('../public/joe/health.js');
 const { statePhrase } = await import('../public/joe/ui.js');
 const fmt = await import('../public/joe/format.js');
+const { STARTING_MONEY } = await import('../public/joe/performance.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
 const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, disclosureProblem, rowProblems, householdDayReason, dashWords } = await import('../public/joe/desk.js');
 const HEALTH_LINES = Object.keys(REASON_COPY).map(reason => statusSentence({ reason, tone: reason === 'board_ok' ? 'green' : 'red' }, { receipt: 9, gatewayAge: 179 }));
@@ -137,9 +138,11 @@ async function deskChecks(page, viewport, theme, expectedMini, snapshot) {
     }; })()`).then(copyText);
   check('AC-18', `${tag}: one live header control and no fresh card check-ins or visible status strip`, /Live/.test(d.header) && !d.boardOkElsewhere && !d.freshCheckins && !await page.evaluate(`Boolean(document.querySelector('#health, .hstrip, #footData'))`), d);
   const kpiNames = d.kpis.map(k => k.dt);
-  check('AC-19', `${tag}: Today and Since start remain primary, with four supporting figures and their captions intact`, Boolean(d.display) && d.primary.length === 2 && d.primary.map(p => p.label).join() === 'Today,Since start' && d.kpis.length === 4 && kpiNames.join() === 'Open positions,Desks’ money,Paper account,Cash' &&
-    d.kpis[0].cap === 'still moving until closed' && /started with €\s15\.000/.test(d.kpis[1].cap) && d.kpis[2].cap === 'includes the kept holdings' && d.kpis[3].cap === 'cash · as the broker reports it' &&
-    await page.evaluate(`__audit.deskCaption(document.querySelector('[data-cell="hero.since"]')) === 'after fees'`), { primary: d.primary, kpis: d.kpis });
+  // Amy's A4: Since start names its day (10 Sep 2026, New York) and its basis, the configured starting money.
+  const sinceCaption = copyText(await page.evaluate(`__audit.deskCaption(document.querySelector('[data-cell="hero.since"]'))`));
+  check('AC-19', `${tag}: Today and Since start remain primary, with four supporting figures and their captions intact`, Boolean(d.display) && d.primary.length === 2 && d.primary.map(p => p.label).join() === 'Today,Since 10\u00a0Sep' && d.kpis.length === 4 && kpiNames.join() === 'Open positions,Desks’ money,Paper account,Cash' &&
+    d.kpis[0].cap === 'still moving until closed' && /^started with €\s15\.000 on 10\sSep$/.test(d.kpis[1].cap) && d.kpis[2].cap === 'includes the kept holdings' && d.kpis[3].cap === 'cash · as the broker reports it' &&
+    sinceCaption === `of ${fmt.eur(STARTING_MONEY, false, 0)} · after fees, incl. open positions`, { primary: d.primary, kpis: d.kpis, sinceCaption });
   check('AC-19', `${tag}: unreported Cash is a muted dash with its reason in the caption`, d.kpis[3].value === '—' && d.kpis[3].muted && d.kpis[3].cashReason === 'not reported · no data received yet', d.kpis[3]);
   const day = decimalUnits(snapshot.totals.dayPnl.amount), equity = decimalUnits(snapshot.totals.equity.amount), since = decimalUnits(snapshot.totals.totalPnl.amount);
   const percent = (result, base) => { const n = divRound(result * 10000n, base); return `${n < 0n ? '−' : n > 0n ? '+' : ''}${fmt.digits(n * UNIT / 100n)} %`; };

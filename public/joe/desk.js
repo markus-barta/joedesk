@@ -11,12 +11,15 @@ import { intraday } from './history-model.js';
 import { learningLine } from './events.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { decimalUnits, divRound, unitsDecimal, UNIT } from './contracts/decimal.mjs';
-import { STARTING_MONEY, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
+import { STARTING_MONEY, SINCE_START, sinceStarts, exactCell, todayPercent, sincePercent, rankDesks } from './performance.js';
 import { NOT_EXACT_REASONS, notExactDash, outageValue, withGenerationAge } from './board-state.js';
 
 const DESKS = ['j', 'joe', 'joel'];
 const LABEL = { j: 'J', joe: 'Joe', joel: 'Joel' };
 const TONE_ICON = { ok: 'ok', warn: 'half', bad: 'stop', none: 'ring' };
+// "10 Sep" for a New York day; "Since 10 Sep", or "Since start" when the day is unknown.
+const dayText = day => dayDM(zonedInstant(day, '12:00:00', NY), NY);
+export const sinceLabel = day => day ? `Since ${dayText(day)}` : 'Since start';
 const STATE = {
   working: { tone: 'ok', icon: 'work', word: 'Working' },
   'sit-out': { tone: 'none', icon: 'pause', word: 'Sitting out' },
@@ -123,7 +126,7 @@ export function activityLine(desk) {
 
 function deskProblem(ctx, id) {
   const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
-  const cells = [['Today', ctx.states[`desks.${id}.dayPnl`]], ['Open positions', ctx.states[`desks.${id}.openPnl`]], ['Since start', ctx.states[`desks.${id}.totalPnl`]], ['History', ctx.states.history]];
+  const cells = [['Today', ctx.states[`desks.${id}.dayPnl`]], ['Open positions', ctx.states[`desks.${id}.openPnl`]], [sinceLabel(sinceStarts(ctx.feeds).days[id]), ctx.states[`desks.${id}.totalPnl`]], ['History', ctx.states.history]];
   if (desk?.state === 'stuck') cells.unshift(['Desk stuck', { state: 'broken', value: null }]);
   if (desk?.learning?.status === 'blocked') cells.push(['Learning blocked', { state: 'broken', value: null }]);
   const elapsed = ctx.feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(ctx.now) - Date.parse(ctx.feeds.data.generatedAdvancedAt)) : 0;
@@ -135,15 +138,18 @@ export function compactDesk(ctx, id) {
   const desk = ctx.feeds.data?.value?.desks.find(d => d.id === id);
   const info = STATE[desk?.state] ?? { tone: 'none', icon: 'ring', word: 'Not reported' };
   const shared = sharedSectionReason(['dayPnl', 'openPnl', 'totalPnl'].map(name => ctx.states[`desks.${id}.${name}`]));
-  const figure = (name, label) => {
+  // One start day for all desks sits once in the phone's Desks heading, read
+  // before the rows; each row then says "Since" (a dash keeps the whole label).
+  const starts = sinceStarts(ctx.feeds), since = sinceLabel(starts.days[id]);
+  const figure = (name, label, shown = label) => {
     const cell = ctx.states[`desks.${id}.${name}`], value = cellView(cell, `compact.${id}.${name}`, { label });
     const marker = cellIcon(cell, shared).replace('cell-state', 'compact-state');
     const characters = value.units === null ? 1 : eur(value.units, true).length;
-    return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${label}${marker}${name === 'dayPnl' ? dayEstimateMark(ctx, id) : ''}</span>${value.html}</span>`;
+    return `<span class="compact-figure" data-compact-value="${name}" style="--digits:${characters}"><span class="compact-label">${shown}${marker}${name === 'dayPnl' ? dayEstimateMark(ctx, id) : ''}</span>${value.html}</span>`;
   };
   return `<button type="button" class="desk-disclosure desk-row" data-desk-disclosure="${id}" aria-expanded="${expanded.has(id)}" aria-controls="detail-${id}">
     ${deskMark(id)}<span class="compact-identity"><strong>${esc(desk?.label ?? LABEL[id])}</strong><span class="compact-word tone-${info.tone}">${icon(info.icon)}${info.word}</span></span>
-    ${figure('dayPnl', 'Today')}${figure('totalPnl', 'Since start')}${icon('chev-d', 'i disclosure-chevron')}
+    ${figure('dayPnl', 'Today')}${figure('totalPnl', since, starts.common ? 'Since' : since)}${icon('chev-d', 'i disclosure-chevron')}
     <span class="disclosure-warning">${problemHtml(deskProblem(ctx, id))}</span></button>`;
 }
 
@@ -273,12 +279,14 @@ export function healthPop(ctx, health) {
     rows.push(['Open positions', esc(openMethodLabel(data.pnlSources?.open) ?? `Not available · ${cellReason(data.pnlSources?.open?.reason ?? states['today.openPnl']?.reason ?? 'feed_not_received')}`)]);
     rows.push(['Source', `${esc(data.source.label)} · paper only`]);
   }
+  const notes = { day: dayNote(states), since: startsDiffer(feeds) };
   return `<h3>${icon(TONE_ICON[health.statusTone])}Board status details</h3>
     <p class="status-sentence">${esc(statusPresentation(ctx, health).sentence)}</p>
     ${healthFacts(ctx, health)}
     <p>${problems.length ? esc(problems.join(' ')) : 'No current problems.'}</p>
     ${deskValuesNotExact(states) ? `<p>${st('none', 'Desk values are not exact', 'info')}</p>` : ''}
-    ${dayNote(states) ? `<p>${st('none', esc(dayNote(states)), 'info')}</p>` : ''}
+    ${notes.day ? `<p>${st('none', esc(notes.day), 'info')}</p>` : ''}
+    ${notes.since ? `<p>${st('warn', esc(notes.since))}</p>` : ''}
     ${rows.length ? `<dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : ''}
     <p>If a light turns yellow or red: reload once. If it stays, tell Amy what the light says and how old the data is.</p>
     <p><button type="button" class="btn quiet link" data-go="history" data-anchor="j-accounting">${icon('book')}J’s bookkeeping${icon('chev-r')}</button></p>`;
@@ -368,6 +376,13 @@ export function dayNote(states) {
   return `Today: ${blocking.map(g => `${g.word} for ${deskNames(g.ids)}${g.reason ? ` (${g.reason})` : ''}`).join('; ')}`;
 }
 
+// Details flags a closed-trade record that starts on another day than the
+// board's Since start; Desk then shows no date until the two agree.
+export function startsDiffer(feeds) {
+  const starts = sinceStarts(feeds);
+  return starts.conflict ? `Since start dates differ: Results start on ${dayText(starts.trackingStart)}, the desks’ bookkeeping on ${dayText(SINCE_START)}. Desk shows no date until they agree.` : null;
+}
+
 // The household Today needs all three desks. When the feed explains its dash
 // as not exact, say once which desks keep it from being exact and why: their
 // shared reason, unless the section line already gives it. A reason common to
@@ -414,7 +429,11 @@ export function heroLeft(ctx) {
     return `<div class="kpi" data-cell="${key}" data-state="${v.state}"><dt>${term(termKey, label)}${cellIcon(states[name], shared)}</dt><dd>${v.html}<span class="c">${caption}</span></dd></div>`;
   };
   const jIncomplete = data && (states['desks.j.equity']?.value == null || states['desks.j.totalPnl']?.value == null);
-  const moneyCaptions = [`started with ${eur(STARTING_MONEY, false, 0)}`, 'J’s bookkeeping incomplete · desk total unavailable'];
+  // Since start counts from one known day for all desks, or the hero names none.
+  const starts = sinceStarts(feeds), sinceText = sinceLabel(starts.common);
+  const started = `started with ${eur(STARTING_MONEY, false, 0)}`;
+  const moneyCaptions = [starts.common ? `${started} on ${dayText(starts.common)}` : started, 'J’s bookkeeping incomplete · desk total unavailable', started];
+  const sinceCaption = `of ${eur(STARTING_MONEY, false, 0)} · after fees, incl. open positions`;
   const why = dayCell?.reason ? cellReason(dayCell.reason) : null;
   const onBoard = sharesBoardCaption(dayCell, board);
   // A dashed Today states its reason once, here, unless the section says it.
@@ -438,7 +457,7 @@ export function heroLeft(ctx) {
     // Not fresh: the amount, then this value's own state, age and reason.
     say = `${isZero(day.units) ? 'Flat' : `${day.units > 0n ? 'Up' : 'Down'} ${dayAmount}`} today.${sharesBoardCaption(dayCell, board) ? '' : ` ${day.caption}.`}`;
   }
-  const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: 'after fees', sharedReason: shared, label: 'Since start' });
+  const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: sinceCaption, sharedReason: shared, label: sinceText });
   const sharedCell = shared ? Object.values(states).find(cell => cell?.reason && cellReason(cell.reason) === shared && cell.state !== 'fresh') : null;
   const boardText = [board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : '',
     shared && (!board?.reason || cellReason(board.reason) !== shared) ? st(statePhrase(sharedCell, '').tone, sharedSectionPhrase(sharedCell), statePhrase(sharedCell, '').icon) : ''].filter(Boolean).join(' ');
@@ -446,10 +465,10 @@ export function heroLeft(ctx) {
       <div class="primary" data-cell="hero.day" data-state="${day.state}"><div class="hero-k">${icon('clock')}${term('today')}${cellIcon(dayCell, shared)}</div>
         <div class="display">${day.html}</div><div class="pct-slot">${percentHtml(todayPercent(states, data?.pnlSources?.day))}</div>
         <span class="c primary-caption">${dayCaption}</span></div>
-      <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since')}${cellIcon(sinceCell, shared)}</div>
+      <div class="primary since-primary" data-cell="hero.since" data-state="${since.state}"><div class="hero-k">${term('since', sinceText)}${cellIcon(sinceCell, shared)}</div>
         <div class="display">${since.html}</div><div class="pct-slot">${percentHtml(sincePercent(states))}</div>
-        <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, ['after fees'])}</span>
-        <button type="button" class="phone-primary-note" data-say="since" aria-label="About Since start" aria-expanded="false"${sharesBoardCaption(sinceCell, board) ? ' disabled' : ''}><span data-clamp="3">${sharesBoardCaption(sinceCell, board) ? '&#160;' : stateCaption(sinceCell, 'hero.phone.since', 'after fees', undefined, shared)}</span></button></div>
+        <span class="c primary-caption">${reservedCaption(sharesBoardCaption(sinceCell, board) ? '' : since.caption, [sinceCaption])}</span>
+        <button type="button" class="phone-primary-note" data-say="since" aria-label="About Since start" aria-expanded="false"${sharesBoardCaption(sinceCell, board) ? ' disabled' : ''}><span data-clamp="3">${sharesBoardCaption(sinceCell, board) ? '&#160;' : stateCaption(sinceCell, 'hero.phone.since', sinceCaption, undefined, shared)}</span></button></div>
     </div>
     <button type="button" class="say" data-say="today" aria-expanded="false"><span data-clamp="2">${say}</span></button>
     <p class="board-caption">${boardText}</p></div>
@@ -478,8 +497,9 @@ function deskCard(ctx, id, maxDay, showBars) {
   const shared = sharedSectionReason(['dayPnl', 'openPnl', 'totalPnl'].map(name => states[`desks.${id}.${name}`]));
   const dayV = cellView(states[`desks.${id}.dayPnl`], `d.${id}.day`, { label: 'Today' });
   const openV = cellView(states[`desks.${id}.openPnl`], `d.${id}.open`, { label: 'Open positions' });
-  const sinceV = cellView(states[`desks.${id}.totalPnl`], `d.${id}.since`, { label: 'Since start' });
-  const sinceText = desk?.accounting?.periodStart ? `Since ${dayDM(desk.accounting.periodStart, NY)}` : 'Since start';
+  // The desk's own accounting start wins; else the board's verified start (A4).
+  const sinceText = sinceLabel(sinceStarts(feeds).days[id]);
+  const sinceV = cellView(states[`desks.${id}.totalPnl`], `d.${id}.since`, { label: sinceText });
   const bar = showBars && exactCell(states[`desks.${id}.dayPnl`]) !== null && dayV.n != null && !isZero(dayV.n)
     ? `<i data-v="${dayV.n}" style="${dayV.n > 0 ? 'left' : 'right'}:50%;width:${(Math.abs(dayV.n) / maxDay * 50).toFixed(3)}%;background:var(--${dayV.n > 0 ? 'gain' : 'loss'})"></i>` : '';
   const board = boardCaptionCell(ctx);
@@ -729,6 +749,8 @@ export function renderDesk(ctx) {
   const data = ctx.feeds.data?.value;
   const working = data ? data.desks.filter(d => d.state === 'working').length : 0;
   $('#desksSub').textContent = data ? `${working} of 3 working · kept holdings left out` : 'Waiting for the first valid snapshot';
+  const desksSince = $('#desksSince'), common = sinceStarts(ctx.feeds).common, sinceHeading = common ? sinceLabel(common) : '';
+  if (desksSince && desksSince.textContent !== sinceHeading) desksSince.textContent = sinceHeading;
   const days = DESKS.map(id => exactCell(ctx.states[`desks.${id}.dayPnl`]) === null ? null : amountOf(ctx.states[`desks.${id}.dayPnl`].value));
   const showBars = days.every(v => v != null);
   const maxDay = Math.max(...days.filter(v => v != null).map(Math.abs), 0.01);

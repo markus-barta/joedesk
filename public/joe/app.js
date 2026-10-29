@@ -10,6 +10,7 @@ import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure
 import { renderHistory, historyChart, HS } from './history.js';
 import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText } from './results.js';
 import { boardHealthPresentation } from './health.js';
+import { sinceStarts } from './performance.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { initSettings, renderSettings, showSection, SECTIONS as SETTINGS_SECTIONS } from './settings.js';
 import { NB, joinUnits } from './format.js';
@@ -58,7 +59,7 @@ function start() {
     schedule(kind);
   }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, globalThis.JoeVersion.APP_VERSION,
   { actionsWanted: () => screen === 'settings' });
-  const tips = initTips({ now: () => feed.now() });
+  const tips = initTips({ now: () => feed.now(), since: () => sinceStarts(feed.feeds) });
   // Read-only: fetches the same three reads now instead of at the next poll.
   window.__joedesk.refresh = () => feed.refresh();
   window.__joedesk.worker = () => feed.usesWorker();

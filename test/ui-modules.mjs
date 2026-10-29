@@ -202,6 +202,7 @@ test('hero captions: three supporting KPIs keep the same reserve through session
     });
   }
   assert.ok(reserve(baseline[1]).includes('started with € 15.000'));
+  assert.ok(reserve(baseline[1]).includes('started with € 15.000 on 10 Sep'), 'the dated caption reserves its own line');
   assert.ok(reserve(baseline[1]).includes('J’s bookkeeping incomplete · desk total unavailable'));
 });
 
@@ -1207,7 +1208,7 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
     const card = htmlDocument(deskCard(ctx, id, 10, false));
     const status = card.querySelector('.mini-label').textContent;
     assert.equal(status.match(/broker connection down/g).length, 1, id);
-    assert.match(status, /Since start: last good, 2\smin ago$/);
+    assert.match(status, /Since 10\sSep: last good, 2\smin ago$/);
     const compact = htmlDocument(compactDesk(ctx, id));
     assert.equal(compact.querySelector('.summary-text').textContent.match(/broker connection down/g).length, 1);
     assert.equal(compact.querySelector('.vh').textContent.match(/broker connection down/g).length, 1);

@@ -1361,6 +1361,22 @@ earlier, higher-ranked warnings. Not-exact values still never turn the board
 red (JOED-103), the open-result rule in regular hours is unchanged, and no copy
 promises when a value becomes exact (A5).
 
+Amy's A4 (2026-10-29, JOED-148): Since start counts from 10 Sep 2026, 00:00 New
+York, for all three desks. `SINCE_START` in `public/joe/performance.js` holds
+that New York day beside `STARTING_MONEY`, citing the pusher's `PERIOD_START`
+(J's `FIXED_PERIOD_START` is the same instant). A desk's own
+`accounting.periodStart`, when the feed sends one, wins for that desk. The hero
+and the cards read “Since 10 Sep”; the hero caption gives the percentage's
+basis from the configured money (“of € 15.000 · after fees, incl. open
+positions”), Desks' money reads “started with € 15.000 on 10 Sep”, and phone
+rows say “Since” under a phone-only “Since 10 Sep” in the Desks heading. When
+desks start on different days the hero says “Since start” and each card keeps
+its own date. If Results' `trackingStart` names another day, Desk shows no date
+(“Since start”) and Details flags “Since start dates differ: …”; the light is
+unaffected. Since start's explanation retires “J’s bookkeeping starts on its own
+date” and resolves its day, starting money, each desk's share and “Same start as
+Results · All time” (only once Results agrees) from those values at display time.
+
 Release 35 (JOED-96, Markus Desk f3b46a8d) extends this outage policy to a
 stopped DATA feed (`snapshot_stale`) or frozen producer (`producer_frozen`).
 Individual observations keep their stale value, caption, age and reason below

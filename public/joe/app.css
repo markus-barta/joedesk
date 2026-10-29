@@ -1102,7 +1102,7 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 
 /* JOED-79: wrappers keep the existing grid/flex items above 480 px. */
 .account-section, .desk-section, .disclosure-body { display: contents; }
-.desk-disclosure, .compact-row, .phone-primary-note, .account-state { display: none; }
+.desk-disclosure, .compact-row, .phone-primary-note, .account-state, .desks-since { display: none; }
 .collapsed-summary { display: contents; }
 .expanded-summary { display: none; }
 @media (max-width: 480px) {
@@ -1120,6 +1120,8 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   #heroL .board-caption { height: 36px; line-height: 18px; margin: 0; }
   .desks-heading { order: 2; margin: 16px 0 8px; gap: 0 8px; }
   .desks-heading .sub { line-height: 18px; }
+  /* Rows say "Since"; the one start day for all desks stays on the heading's first line. */
+  .desks-heading .desks-since { display: inline; color: var(--ink-3); font-size: 13px; line-height: 22px; white-space: nowrap; }
   #desks { order: 3; gap: 8px; }
   #desks .dcard { padding: 0; gap: 0; }
   .compact-row { display: contents; }

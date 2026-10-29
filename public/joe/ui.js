@@ -1,9 +1,10 @@
 // Shared pieces: icons from the inline sprite, terms, big numbers, desk marks
 // and the one opaque tip. Everything returns escaped HTML strings.
 import { TERMS } from './terms.js';
-import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol, cashAmount } from './format.js';
+import { esc, money, eur, digits, tone, arrowOf, isZero, known, age, dayFull, MINUS, currencySymbol, cashAmount } from './format.js';
 import { cellReason, capital, CELL_REASON } from './health.js';
 import { notExactDash } from './board-state.js';
+import { STARTING_MONEY, sinceStarts } from './performance.js';
 import { nyDay, zonedInstant, wall, NY, VIENNA } from './time.mjs';
 
 // The words for every value the feed explains as not exact.
@@ -14,8 +15,18 @@ export const icon = (id, cls = 'i') => `<svg class="${cls}" aria-hidden="true"><
 // Entries added at run time (each fleet setting's Learn tip) beside the fixed dictionary.
 const added = new Map();
 export const addTerms = entries => { for (const [key, entry] of Object.entries(entries)) added.set(key, entry); };
-const entryOf = (key, now = null) => {
+// Since start's explanation states the board's configured basis, never a
+// literal: the start day (unless Results' record disagrees), the starting
+// money, each desk's share, and Results' agreement once its record says so.
+function sinceHelp(text, since = sinceStarts(null)) {
+  const day = since.common, money = eur(STARTING_MONEY, false, 0);
+  return text.replace('{since}', day ? ` on ${dayFull(zonedInstant(day, '12:00:00', NY), NY)} (New York trading day)` : '')
+    .replaceAll('{startingMoney}', money).replace('{deskMoney}', eur(STARTING_MONEY / 3n, false, 0))
+    .replace('{sameStart}', day && since.trackingStart === day ? ' Same start as Results · All time.' : '');
+}
+const entryOf = (key, now = null, since = null) => {
   const entry = TERMS[key] ?? added.get(key);
+  if (key === 'since') return [entry[0], sinceHelp(entry[1], since ?? undefined), entry[2]];
   if (key !== 'today') return entry;
   // Resolve at each tip render, including after midnight. Intl supplies both
   // zones' offsets at NY midnight itself, even on a clock-change Sunday.
@@ -66,7 +77,7 @@ export function fitStatusLine(control, line, narrow = matchMedia('(max-width: 11
 // A clamped sentence (data-say) shows itself whole there on a click, tap or
 // keyboard focus; hovering it shows nothing, as its words are already in view.
 const TRIGGER = '[data-term], [data-say]';
-export function initTips({ now = () => null } = {}) {
+export function initTips({ now = () => null, since = () => null } = {}) {
   const tip = $('#tip');
   let anchor = null, pinned = false, quiet = null, at = null, dismissal = null;
   let restoreFocus = null;
@@ -100,7 +111,7 @@ export function initTips({ now = () => null } = {}) {
       tip.innerHTML = `<b>${esc(TERMS[el.dataset.say][0])}</b>${el.querySelector('[data-clamp]')?.innerHTML ?? ''}`;
       return true;
     }
-    const entry = entryOf(el.dataset.term, now());
+    const entry = entryOf(el.dataset.term, now(), since());
     if (!entry) return false;
     tip.innerHTML = `<b>${esc(entry[0])}</b>${esc(entry[1])}<span class="t2">${el.dataset.learn ? 'Term' : 'Also called'}: ${esc(entry[2])}</span>`;
     return true;
