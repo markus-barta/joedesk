@@ -1307,7 +1307,9 @@ column shows above 700 px. The calendar and the selected day's trades share
 one card, and a listed day ends with “Prices in USD, as traded. Fees and
 results in EUR at each trade’s Interactive Brokers rate (€ per $). Kept
 holdings never appear here.” (plain words: no control joins the phone
-sheet's focus order). Phones keep the day sheet. Numbers, bases, Partial/Stale markers,
+sheet's focus order). Phones keep the day sheet; its body ends above the
+home indicator (`env(safe-area-inset-bottom)` added to its 20 px bottom
+padding, 20 px where unsupported). Numbers, bases, Partial/Stale markers,
 empty and error states are unchanged.
 
 All Results-only CSS is one block in `public/joe/app.css`, between

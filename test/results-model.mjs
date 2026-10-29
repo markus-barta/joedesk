@@ -2210,3 +2210,7 @@ test('JOED-151 r1 hero: a change of basis or an unknown result reserves its long
   assert.match(css, /\.rhero \.say-size\s*\{[^}]*margin-top:\s*4px;\s*font-size:\s*14px;\s*line-height:\s*21px;\s*visibility:\s*hidden;/, 'the reserve sets text as the sentence does');
   assert.match(css, /\.rhero \.say-size > span\s*\{\s*grid-area:\s*1 \/ 1;\s*\}/);
 });
+
+test('JOED-151 r1 sheet: the phone day sheet ends above the home indicator', () => {
+  assert.match(maxWidthRules(resultsCss(), 700), /\.sheet \.dlg-b\s*\{\s*padding-bottom:\s*20px;\s*padding-bottom:\s*calc\(20px \+ env\(safe-area-inset-bottom, 0px\)\);\s*\}/);
+});

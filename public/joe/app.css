@@ -830,6 +830,8 @@ dialog.dlg::backdrop { background: var(--scrim); }
   #calSum { display: none; }
   .trow { grid-template-columns: 38px minmax(0, 1fr) auto; }
   .trow .name { min-width: 0; }
+  /* The sheet ends above the home indicator once the page may cover it. */
+  .sheet .dlg-b { padding-bottom: 20px; padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
 }
 /* Seven 44 px days plus gutters/gaps do not fit on small phones. Keep
    full dates in a three-column agenda; the 42 slots retain a stable height.
