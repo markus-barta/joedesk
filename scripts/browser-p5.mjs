@@ -379,7 +379,7 @@ try {
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
       shots.push({ file: `${name}.png`, what: `Rev-9 desk values not exact: ${name}` });
     };
-    const boxes = ['header.top', '.top-in > :not(nav)', '#hdrHealth .lbl', '#hdrHealth b', '#statusAlert', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .mini'];
+    const boxes = ['header.top', '.top-in > :not(nav)', '#hdrHealth .lbl', '#hdrHealth b', '#statusAlert', '#accountSlot', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .spark'];
     for (const viewport of [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }]) for (const theme of THEMES) {
       const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b);
       b.setNow(base.generatedAt);
@@ -388,7 +388,7 @@ try {
       check('not-exact', `${tag}: real ingress accepts null desk values and account NAV/cash`, accepted.status === 200, accepted);
       b.setNow(at(base.generatedAt, 9));
       await configure(page, viewport, theme); await load(page, b.url, 'desk');
-      await waitFor(page, `document.querySelectorAll('.mini-label .st').length === 3`);
+      await waitFor(page, `document.querySelectorAll('.card-status .st').length === 3`);
       const baseline = await rects(boxes);
       for (const [i, reason] of ['not_exact_yet', 'source_unavailable', 'not_exact_yet'].entries()) {
         if (i) {
@@ -420,7 +420,7 @@ try {
           const h = document.getElementById('hdrHealth'), hi = h.querySelector('svg');
           return { word: h.title, headerIcon: hi.querySelector('use').getAttribute('href'), headerColour: getComputedStyle(hi).color,
             ok: probe('--ok'), bad: probe('--bad'), neutral: probe('--ink-3'),
-            cards: [...document.querySelectorAll('.mini-label .st')].map(e => ({ text: e.textContent.trim(), tone: e.className,
+            cards: [...document.querySelectorAll('.card-status .st')].map(e => ({ text: e.textContent.trim(), tone: e.className,
               icon: e.querySelector('use').getAttribute('href'), colour: getComputedStyle(e.querySelector('svg')).color, style: getComputedStyle(e).fontStyle })),
             nulls: [...document.querySelectorAll('.dnums .bn')].every(e => e.textContent === '—'),
             headerLayout: (${headerLayout.toString()})(), horizontal: __audit.horizontal(), clipping: __audit.clipping(), gui: __audit.gui27() };
@@ -488,7 +488,8 @@ try {
         await configure(page, viewport, theme);
         await load(page, b.url, screen);
         if (screen === 'settings') await waitFor(page, `document.querySelector('#rtRows [data-cash="rt.cash"]')`);
-        const selector = screen === 'desk' ? '#heroL .cash-kpi' : '#rtRows .rt-row:last-child';
+        // JOED-153: on Desk, Cash sits with the paper account in the whole-account slot above the hero.
+        const selector = screen === 'desk' ? '#accountSlot .cash-kpi' : '#rtRows .rt-row:last-child';
         const cashKey = screen === 'desk' ? 'hero.cash' : 'rt.cash';
         const surface = screen === 'desk' ? 'desk-hero-cash' : 'settings-account-cash';
         // Cash now has its own Desk figure; track all four secondary cells too.
@@ -496,7 +497,7 @@ try {
         const measure = () => ev(`(() => {
           const parent = document.querySelector(${J(selector)}), p = parent.getBoundingClientRect();
           const nodes = [parent, parent.querySelector('.cash-reserve'), parent.querySelector('[data-cash]')];
-          if (${J(screen)} === 'desk') nodes.push(...document.querySelectorAll('#heroL .kpi'), document.getElementById('deskHero'));
+          if (${J(screen)} === 'desk') nodes.push(...document.querySelectorAll('#accountSlot .kpi'), document.getElementById('accountSlot'), document.getElementById('deskHero'));
           return nodes.map((e, i) => { const r = e.getBoundingClientRect(); return { key: i, top: r.top - p.top, left: r.left - p.left, width: r.width, height: r.height }; });
         })()`);
         const baseline = await measure();
@@ -510,7 +511,8 @@ try {
             const r = e.getBoundingClientRect(), p = parent.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(e);
             const glyphs = [...range.getClientRects()].map(g => ({ left: g.left, right: g.right, top: g.top, bottom: g.bottom }));
             const cs = getComputedStyle(e);
-            return { text: e.innerText.trim(), label: e.closest('.cash-block').querySelector('.cash-label').innerText, caption: e.closest('.cash-block').querySelector('.cash-caption').innerText, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'), section: document.querySelector('#heroL .board-caption')?.innerText ?? '',
+            return { text: e.innerText.trim(), label: e.closest('.cash-block').querySelector('.cash-label').innerText, caption: e.closest('.cash-block').querySelector('.cash-caption').innerText, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'),
+              section: [document.querySelector('#heroL .board-caption')?.innerText ?? '', document.querySelector('#accountSlot .account-slot-state')?.innerText ?? ''].join(' '),
               fits: glyphs.every(g => g.left >= p.left - 0.5 && g.right <= p.right + 0.5 && g.top >= p.top - 0.5 && g.bottom <= p.bottom + 0.5),
               clipped: e.scrollWidth > e.clientWidth || e.scrollHeight > e.clientHeight, style: cs.fontStyle,
               horizontal: __audit.horizontal(), clipping: __audit.clipping() };
@@ -536,12 +538,12 @@ try {
           if (screen === 'desk' && viewport.width <= 480) {
             await setDeskDisclosures(page, false);
             const collapsed = await phoneDeskSnapshot(page).then(copyText);
-            const account = collapsed.controls.find(c => c.key === 'account');
-            check('phone-first', `${tag}: collapsed Account carries every non-green cash reason`,
+            const account = collapsed.controls.find(c => c.key === 'whole');
+            check('phone-first', `${tag}: collapsed Whole account carries every non-green cash reason`,
               account.hidden && account.expanded === 'false' && (phase === 'value' || phase === 'recovered' || (Boolean(account.icon) && account.detail.includes(why))) && collapsed.horizontal.scroll <= collapsed.horizontal.inner, account);
             await setDeskDisclosures(page, true);
           }
-          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? viewport.width <= 480 ? '#accountSection' : '#deskHero' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
+          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? '#accountSlot' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
         }
       }
     }
@@ -570,9 +572,9 @@ try {
         check('phone-first', `${tag}: fresh panels with partial rows retain warnings and row reasons when collapsed`, sections.length === 2 && sections.every(c => c.hidden && Boolean(c.icon) && /not exact|not reported by the broker/.test(c.warning)), sections);
         await setDeskDisclosures(page, true);
       }
-      const figureSelectors = ['#deskHero', '#heroL .kpi', '#heroL .cash-reserve', '#desks', '.dcard'];
+      const figureSelectors = ['#accountSlot', '#deskHero', '#heroL .kpi', '#accountSlot .cash-reserve', '#desks', '.dcard'];
       const figureBoxes = await rects(figureSelectors);
-      const figures = () => ev(`({ values: [...document.querySelectorAll('#heroL .display, #heroL .kpi dd > .bn, #heroL [data-cash], .dcard .dnums .v')].map(e => e.innerText), count: document.getElementById('posSub').innerText })`);
+      const figures = () => ev(`({ values: [...document.querySelectorAll('#heroL .display, #heroL .kpi dd .bn, #heroL .kpi .c, #accountSlot .kpi dd .bn, #accountSlot [data-cash], .dcard .dnums .v')].map(e => e.innerText), count: document.getElementById('posSub').innerText })`);
       const before = await figures();
       snapshot.seq++;
       snapshot.positions.rows.unshift({ ...structuredClone(unmapped), updatedAt: NOW });

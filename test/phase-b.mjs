@@ -695,17 +695,18 @@ test('JOED-148: Phase B mixed browser evidence accepts the phone’s no-break sp
   const desktop = {
     headerTone: 'warn', headerReason: 'open_unavailable_rth',
     details: 'Desk values are not exact Today’s resultExact for Joel; not exact for J · desk ledger not reconciled; not exact for Joe · start-of-day value missing',
-    j: 'Numbers: not exact · desk ledger not reconciled', joe: 'Joe is sitting out. Today — since start · last sessions', joel: '+€5,00€5.025,00',
+    j: 'Numbers: not exact · desk ledger not reconciled', joe: 'Joe Sitting out · no positions Results Today — Not exact today Last sessions · each session’s result in €, after fees', joel: '+€5,00€5.025,00',
     joeDay: { name: 'Today: not exact · start-of-day value missing', title: 'Today: not exact · start-of-day value missing' },
-    joeStatus: 'since start · last sessions',
+    joeStatus: null, joeBars: 'Last sessions · each session’s result in €, after fees',
   };
-  const onPhone = { ...desktop, details: phone(desktop.details), j: phone(desktop.j), joe: phone(desktop.joe), joeStatus: phone(desktop.joeStatus) };
+  const onPhone = { ...desktop, details: phone(desktop.details), j: phone(desktop.j), joe: phone(desktop.joe), joeBars: phone(desktop.joeBars) };
   for (const result of [desktop, onPhone]) {
     assert.equal(mixedHeaderOk(result), true);
     assert.equal(mixedDesksOk(result), true);
   }
   // The checks still reject the old copy and a repeated Today line.
   assert.equal(mixedDesksOk({ ...onPhone, joeStatus: 'Today: not exact · start-of-day value missing' }), false);
+  assert.equal(mixedDesksOk({ ...onPhone, joeBars: undefined }), false);
   assert.equal(mixedHeaderOk({ ...onPhone, details: `${onPhone.details} Today: not exact for J and Joe` }), false);
   assert.equal(mixedDesksOk({ ...desktop, joeDay: { ...desktop.joeDay, title: 'Today: not reported · start-of-day value missing' } }), false);
 });

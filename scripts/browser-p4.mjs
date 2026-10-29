@@ -928,13 +928,15 @@ try {
       check('P3-follow-up', `${tag}: fresh desk check-ins are hidden`, await page.evaluate(`![...document.querySelectorAll('.dcard .hb')].some(e => e.textContent.trim())`));
       board.setNow(at(NOW, 75)); await page.evaluate('window.__joedesk.refresh()'); await settle(page);
       const cards = await page.evaluate(`[...document.querySelectorAll('.dcard header')].map(h => {
-        const b = el => el.getBoundingClientRect(), name = b(h.querySelector('h3')), hb = b(h.querySelector('.hb')), head = b(h), state = b(h.querySelector('.state'));
+        const b = el => el.getBoundingClientRect(), name = b(h.querySelector('h3')), hb = b(h.querySelector('.hb')), head = b(h), state = b(h.querySelector('.state')), go = b(h.querySelector('.card-go'));
         const term = h.querySelector('.hb .term'), r = b(term), a = getComputedStyle(term, '::after');
         const lines = Math.round(hb.height / parseFloat(getComputedStyle(h.querySelector('.hb')).lineHeight));
-        return { id: h.closest('.dcard').id, sameRow: Math.abs((hb.top + hb.bottom) / 2 - (name.top + name.bottom) / 2) < 4 && hb.bottom <= state.top + 1, right: Math.abs(hb.right - head.right) < 1, lines,
+        // JOED-153 M5: the card's one Results link closes the name row; the check-in sits right before it.
+        return { id: h.closest('.dcard').id, sameRow: Math.abs((hb.top + hb.bottom) / 2 - (name.top + name.bottom) / 2) < 4 && hb.bottom <= state.top + 1,
+          right: hb.right <= go.left + 0.5 && go.left - hb.right <= 12 && Math.abs(go.right - head.right) < 1 && Math.abs((go.top + go.bottom) / 2 - (name.top + name.bottom) / 2) < 4, lines,
           hit: [r.width - parseFloat(a.left) - parseFloat(a.right), r.height - parseFloat(a.top) - parseFloat(a.bottom)], visibleHit: a.backgroundColor === 'rgba(0, 0, 0, 0)' && a.borderStyle === 'none' };
       })`);
-      check('P3-follow-up', `${tag}: every desk card keeps "Checked in … ago" right-aligned on its name row, one line, with an invisible 44 px hit area`,
+      check('P3-follow-up', `${tag}: every desk card keeps "Checked in … ago" on its name row right before the card's Results link, one line, with an invisible 44 px hit area`,
         cards.length === 3 && cards.every(c => c.sameRow && c.right && c.lines === 1 && c.hit[0] >= 43.5 && c.hit[1] >= 43.5 && c.visibleHit), cards);
       const targets = await page.evaluate('__audit.targets()');
       check('AC-30', `${tag}: 44 px targets on Desk`, !targets.length, targets.slice(0, 4));

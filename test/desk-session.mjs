@@ -362,3 +362,58 @@ test('JOED-153 M4: every label width the cards can write has its collision rule 
   assert.ok(needs.size >= 1 && [...needs].every(n => rules.some(m => m[2] === n)), [...needs].join());
   for (const c of [2, 3, 4, 5, 6, 7]) assert.match(css, new RegExp(`@container spark \\(min-width: \\d+px\\) \\{ \\.bars \\.b\\[data-c="${c}"\\] \\.bl\\.in \\{ display: block; \\}`));
 });
+
+// The browser check (scripts/browser/desk-sessions.mjs) expects what Desk
+// renders from the same design fixtures, and both fixtures pass the board's
+// ingress, so the browser gate can fail only on what the page draws.
+test('JOED-153 browser fixture: the session checks expect what Desk renders from the design record', async () => {
+  const { expectedSessions, SESSIONS, BEFORE_OPEN } = await import('../scripts/browser/desk-sessions.mjs');
+  const { scenario, NOW: P3_NOW, at, preflightSnapshot } = await import('../scripts/browser/board.mjs');
+  const { designResults } = await import('../scripts/browser/results.mjs');
+  const { toColumns } = await import('../public/joe/history-model.js');
+  for (const when of [P3_NOW, BEFORE_OPEN]) {
+    const live = when === P3_NOW, { snapshot, history } = scenario(when);
+    const data = preflightSnapshot('data', snapshot, null, when).value;
+    const pushed = designResults(when); delete pushed.receivedAt;
+    const results = preflightSnapshot('results', pushed, null, when).value;
+    const now = at(when, 9), want = expectedSessions({ record: results, snapshot, points: history.points, nowMs: Date.parse(now), live });
+    const index = indexResults(results);
+    const feeds = { data: { value: data }, history: { value: { columns: toColumns(history.points) } }, results: { value: { ...index.meta, index } } };
+    const states = boardStates(feeds, now);
+    states.results = { state: 'fresh', value: { ...index.meta, index }, reason: null, ageSeconds: 9 };
+    const ctx = { feeds, now, states };
+    assert.equal(desk.deskFacts(ctx).label.phase, live ? 'live' : 'last');
+    for (const id of DESK_IDS) {
+      assert.deepEqual(want.bars[id].map(w => w.day), SESSIONS);
+      assert.ok(want.bars[id].every(w => w.units !== null), `${id}: every session has a figure`);
+      const bars = htmlDocument(deskCard(ctx, id)).querySelectorAll('.bars .b');
+      assert.deepEqual(bars.map(b => [b.getAttribute('href'), b.getAttribute('aria-label'), b.querySelector('.bl.out').textContent, /\btoday\b/.test(b.getAttribute('class'))]),
+        want.bars[id].map(w => [w.href, w.name, w.label, w.today]), `${id} at ${when}`);
+    }
+    if (live) {
+      // The browser's stale step: 75 s later, with the board's own Results state.
+      const later = at(when, 75), staleStates = boardStates(feeds, later);
+      assert.equal(staleStates['today.dayPnl'].state, 'stale');
+      const stale = { feeds, now: later, states: staleStates };
+      for (const id of DESK_IDS) {
+        const bars = htmlDocument(deskCard(stale, id)).querySelectorAll('.bars .b'), today = bars.at(-1);
+        assert.equal(bars.length, 10);
+        assert.ok(today.querySelector('i.nx') && !today.querySelector('i.live') && today.querySelectorAll('.bl').length === 0, id);
+        assert.match(today.getAttribute('aria-label'), new RegExp(`^Today · Wed 14${NB}Oct: [^€]+$`));
+        assert.deepEqual(bars.slice(0, -1).map(b => b.getAttribute('aria-label')), want.bars[id].slice(0, -1).map(w => w.name));
+      }
+    }
+    if (!live) {
+      const first = htmlDocument(desk.heroLeft(ctx)).querySelector('[data-cell="hero.day"]');
+      assert.equal(first.querySelector('.fig-link').getAttribute('href'), '#results?period=day&date=2026-10-14&desk=all');
+      assert.equal(first.querySelector('.fig-link').getAttribute('aria-label'), `Last session · Wed 14${NB}Oct: ${eur(want.last.units, true)}. Opens Results for that day.`);
+      assert.equal(first.querySelector('.pct-slot .basis').textContent, `of ${eur(want.last.base)}`);
+      assert.equal(first.querySelector('.pct-slot .performance-pct').textContent, desk.percentHtml(want.last.percent).replace(/<[^>]+>/g, ''));
+      for (const id of DESK_IDS) {
+        const link = htmlDocument(deskCard(ctx, id)).querySelector('.dnums .fig-link');
+        assert.equal(link.getAttribute('href'), `#results?period=day&date=2026-10-14&desk=${id}`);
+        assert.ok(link.getAttribute('aria-label').includes(`: ${eur(want.last.desks[id], true)}. Opens Results`), id);
+      }
+    }
+  }
+});
