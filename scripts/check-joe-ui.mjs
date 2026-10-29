@@ -38,17 +38,32 @@ required(/display:\s*block\s*;/.test(reasonsMore) && /width:\s*100%\s*;/.test(re
 // Fleet policy has one writer. Display settings use a separate bounded route;
 // only Settings imports either save function. Neither path can set live mode.
 const WRITER = 'fleet-write.js';
+const DISPLAY_WRITER = 'board-settings-write.js';
 for (const [name, text] of modules) {
+  if (!['settings.js', 'board-settings.js', DISPLAY_WRITER].includes(name)) {
+    // Match the capability module, regardless of imported binding, alias,
+    // namespace, dynamic import or re-export syntax. The facade is checked below.
+    required(!/board-settings-write\.js|\b(?:createBoardSettings|saveBoardSettings)\b/.test(text), `${name}: only Settings may import the board display writer`);
+  }
   if (name === WRITER) continue;
-  if (name !== 'board-settings.js') required(!/method:\s*['"`](POST|PUT|PATCH|DELETE)/i.test(text) && !/\/inbox|fleet-config\/propagate/.test(text), `${name}: the board only reads`);
+  if (name !== DISPLAY_WRITER) required(!/method:\s*['"`](POST|PUT|PATCH|DELETE)/i.test(text) && !/\/inbox|fleet-config\/propagate/.test(text), `${name}: the board only reads`);
   if (name !== 'settings.js') required(!/from\s+['"]\.\/fleet-write\.js['"]|import\(\s*['"]\.\/fleet-write/.test(text), `${name}: only Settings may import the fleet settings' writer`);
-  if (!['settings.js', 'board-settings.js'].includes(name)) required(!/\bsaveBoardSettings\b/.test(text), `${name}: only Settings may save board display settings`);
 }
 {
-  const display = files['board-settings.js'] ?? '';
-  required(/fetcher\('\.\/board-settings\.json',/.test(display) && /request\('POST', value\)/.test(display), 'board-settings.js: display writes stay on the board settings route');
-  required(/validateBoardSettings\(value\)/.test(display) && /credentials: 'same-origin'/.test(display), 'board-settings.js: validated same-origin display writes');
-  required(!/\/inbox|fleet-config\/propagate/.test(display), 'board-settings.js: display settings never write feeds or fleet policy');
+  const facade = (files['board-settings.js'] ?? '').replace(/\/\/[^\n]*/g, '');
+  const readExports = [...facade.matchAll(/export\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]\s*;/g)];
+  const expected = {
+    './board-settings-validation.js': ['validateBoardSettings'],
+    './board-settings-write.js': ['accountStart', 'boardSettingsState', 'refreshBoardSettings', 'onBoardSettingsChange'],
+  };
+  required(readExports.length === 2 && readExports.every(([, names, path]) =>
+    expected[path] && JSON.stringify(names.split(',').map(name => name.trim()).sort()) === JSON.stringify([...expected[path]].sort())) &&
+    facade.replace(/export\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]\s*;/g, '').trim() === '',
+    'board-settings.js: only Settings may access saves; the page facade exports only the named read APIs and validation');
+  const display = files[DISPLAY_WRITER] ?? '';
+  required(/fetcher\('\.\/board-settings\.json',/.test(display) && /request\('POST', value\)/.test(display), 'board-settings-write.js: display writes stay on the board settings route');
+  required(/validateBoardSettings\(value\)/.test(display) && /credentials: 'same-origin'/.test(display), 'board-settings-write.js: validated same-origin display writes');
+  required(!/\/inbox|fleet-config\/propagate/.test(display), 'board-settings-write.js: display settings never write feeds or fleet policy');
 }
 {
   const writer = files[WRITER] ?? '';

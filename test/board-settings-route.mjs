@@ -118,10 +118,16 @@ test('failed atomic writes return a clear failure and preserve the previous base
 
 test('new module is served on the existing release paths without changing release coordinates', async t => {
   const s = await setup(t);
-  for (const route of ['/joe/board-settings.js', `/joe/v/${release.version}/board-settings.js`]) {
-    const response = await fetch(s.headers.origin + route);
-    assert.equal(response.status, 200);
-    assert.match(response.headers.get('content-type'), /javascript/);
-    assert.match(await response.text(), /export const accountStart/);
+  for (const [name, content] of [
+    ['board-settings.js', /export \{ accountStart/],
+    ['board-settings-validation.js', /export function validateBoardSettings/],
+    ['board-settings-write.js', /export function createBoardSettings/],
+  ]) {
+    for (const route of [`/joe/${name}`, `/joe/v/${release.version}/${name}`]) {
+      const response = await fetch(s.headers.origin + route);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get('content-type'), /javascript/);
+      assert.match(await response.text(), content);
+    }
   }
 });

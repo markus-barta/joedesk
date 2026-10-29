@@ -4,7 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { createBoardSettingsStore, validateBoardSettings, BOARD_SETTINGS_MAX_BYTES } from '../server/board-settings.mjs';
-import { createBoardSettings, accountStart } from '../public/joe/board-settings.js';
+import { accountStart } from '../public/joe/board-settings.js';
+import { createBoardSettings } from '../public/joe/board-settings-write.js';
 
 const value = { accountStart: { amountEur: 12.34, date: '2024-02-29' } };
 function temporary(t) { const root = scratch('joed-155-store-'); t.after(() => discard(root, 'board settings unit test')); return root; }
@@ -131,5 +132,28 @@ test('fetch/body timeouts abort, hide the base, release the save lock and ignore
     assert.equal(client.accountStart(), null);
     const retry = await client.save(value);
     assert.equal(retry.ok, true, 'timed-out save releases its lock for a later request');
+  }
+});
+
+test('JOED-155 Low 4: Settings and hero listeners coexist and unsubscribe independently', async () => {
+  const board = await import('../public/joe/board-settings.js');
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  let offSettings, offHero;
+  globalThis.fetch = async () => response({ ...value, reason: null });
+  try {
+    offSettings = board.onBoardSettingsChange(() => calls.push('settings'));
+    offHero = board.onBoardSettingsChange(() => calls.push('hero'));
+    await board.refreshBoardSettings();
+    assert.deepEqual(calls, ['settings', 'hero']);
+    offSettings(); offSettings();
+    await board.refreshBoardSettings();
+    assert.deepEqual(calls, ['settings', 'hero', 'hero']);
+    offHero(); await board.refreshBoardSettings();
+    assert.deepEqual(calls, ['settings', 'hero', 'hero']);
+  } finally {
+    if (typeof offSettings === 'function') offSettings();
+    if (typeof offHero === 'function') offHero();
+    globalThis.fetch = originalFetch;
   }
 });

@@ -10,7 +10,8 @@ import { panelState } from './contracts/panel-state.mjs';
 import { setTheme, storedTheme } from './theme.js';
 import { validateContract } from './contracts/index.mjs';
 import { sendFleetDraft } from './fleet-write.js';
-import { boardSettingsState, refreshBoardSettings, saveBoardSettings, onBoardSettingsChange } from './board-settings.js';
+import { boardSettingsState, refreshBoardSettings, onBoardSettingsChange } from './board-settings.js';
+import { saveBoardSettings } from './board-settings-write.js';
 import * as M from './settings-model.js';
 
 export const SECTIONS = Object.freeze([

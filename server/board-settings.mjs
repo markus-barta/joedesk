@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { readJson, atomicWrite } from './storage.mjs';
-import { validateBoardSettings } from '../public/joe/board-settings.js';
+import { validateBoardSettings } from '../public/joe/board-settings-validation.js';
 
 export { validateBoardSettings };
 export const BOARD_SETTINGS_MAX_BYTES = 4096;
