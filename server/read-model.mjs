@@ -10,6 +10,10 @@ import { validInstant } from '../contracts/schema-validator.mjs';
 import { viennaDay } from '../contracts/vienna-date.mjs';
 import { atomicWrite, readJson } from './storage.mjs';
 import { appendHistory, historyEnvelope, HISTORY_CAP, measureHistory } from './history.mjs';
+import { accountObservation, emptyAccountCloses, appendAccountClose, validateAccountCloses,
+  ACCOUNT_CLOSES_FORMAT, ACCOUNT_CLOSES_CAP, emptyAccountHistory, appendAccountHistory,
+  validateAccountHistory, ACCOUNT_HISTORY_FORMAT, ACCOUNT_HISTORY_CAP } from './account-history.mjs';
+import { openAccountStore } from './account-store.mjs';
 
 const STATE_CAP = 2 * 1024 * 1024;
 const FORMAT = 'joedesk.data-store.v2';
@@ -145,6 +149,12 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     history = null;
     if (!isMissing(error)) { historyStorageInvalid = true; rejections.history = 'history_write_failed'; }
   }
+  const accountShort = openAccountStore({ file: path.join(dataDir, 'account-history-state.json'),
+    format: ACCOUNT_HISTORY_FORMAT, cap: ACCOUNT_HISTORY_CAP, empty: emptyAccountHistory,
+    validate: validateAccountHistory, clock, write });
+  const accountDaily = openAccountStore({ file: path.join(dataDir, 'account-closes-state.json'),
+    format: ACCOUNT_CLOSES_FORMAT, cap: ACCOUNT_CLOSES_CAP, empty: emptyAccountCloses,
+    validate: validateAccountCloses, clock, write });
   try {
     results = readJson(resultsFile, RESULTS_CAP);
     if (results.format !== RESULTS_FORMAT || !validateContract('results', results.feed?.value).ok ||
@@ -286,7 +296,18 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
       // before replying, since the producer's retry will be a replay.
       stateSyncFailed = true;
     }
+    const generationAdvanced = !state || Date.parse(accepted.value.generatedAt) > Date.parse(state.feed.value.generatedAt);
     state = next; delete rejections.data;
+    // All three series advance in the snapshot step, with independent failure
+    // handling. Neither account store can change desk bytes or compaction.
+    if (generationAdvanced) {
+      accountShort.append(previous => appendAccountHistory(previous, accepted.value, selected, now));
+      accountDaily.append(previous => {
+        const observation = accountObservation(accepted.value, selected);
+        return observation.observedAt === null ? previous
+          : appendAccountClose(previous, observation.observedAt, observation);
+      });
+    }
     // Snapshot is durable even if the independent history store fails.
     let historyReason = rejections.history ?? null;
     // An unreadable history store stays untouched until operator recovery.
@@ -306,7 +327,8 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     }
     if (stateSyncFailed) return reject('refresh_failed', 500);
     try { persistReasons(); } catch { rejections.data = 'refresh_failed'; return failed(500, 'refresh_failed'); }
-    return { ok: true, status: 200, reason: null, receivedAt: now, historyPoints: history?.points.length ?? 0, historyReason };
+    return { ok: true, status: 200, reason: null, receivedAt: now, historyPoints: history?.points.length ?? 0, historyReason,
+      accountClosesReason: accountDaily.view().reason };
   }
   function observeFleet(value) {
     const checked = validateContract('fleet-config', value);
@@ -378,7 +400,9 @@ export function createReadModel({ dataDir, clock = () => new Date().toISOString(
     }
     return { serverNow: now, feeds: feeds(), panels: selected, data: value };
   }
-  return { accept, acceptResults, reject, feeds, panels, view, observeFleet,
+  const accountHistory = () => ({ ...accountShort.view(), schema: 'inspr.joe.account-history.v1',
+    dailyCloses: accountDaily.view() });
+  return { accept, acceptResults, reject, feeds, panels, view, observeFleet, accountHistory,
     fleetFailure: () => { rejections['fleet-config'] = 'refresh_failed'; },
     hasData: () => Boolean(state) };
 }

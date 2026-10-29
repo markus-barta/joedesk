@@ -34,7 +34,7 @@ const FLEET_ACTOR = /^[A-Za-z0-9][A-Za-z0-9@._+-]{0,159}$/;
 const TOKEN_FILE = "/run/secrets/joe-board-push-token";
 const MAX_BODY = 262144;
 
-const PROTECTED_READS = new Set(["/joe/data.json", "/joe/history.json", "/joe/results.json", "/joe/state.json", "/joe/fleet-config.json", "/joe/fleet-config/actions.json"]);
+const PROTECTED_READS = new Set(["/joe/data.json", "/joe/history.json", "/joe/account-history.json", "/joe/results.json", "/joe/state.json", "/joe/fleet-config.json", "/joe/fleet-config/actions.json"]);
 // Offline native imports share this exact package with server acceptance.
 const CONTRACT_FILES = Object.freeze(Object.fromEntries([
   "index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "vienna-date.mjs", "accept.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
@@ -640,6 +640,10 @@ function handleStatic(req, res, urlPath) {
     sendJson(res, feed.value ? 200 : 503, feed.value ?? { ok: false, schema: CONTRACTS.contracts.history, reason: feed.reason }, feedHeaders("history"));
     return;
   }
+  if (urlPath === "/joe/account-history.json") {
+    sendJson(res, 200, model.accountHistory(), feedHeaders("history"));
+    return;
+  }
   if (urlPath === "/joe/results.json") {
     const feed = model.feeds().results;
     sendJson(res, feed.value ? 200 : 503, feed.value ?? { ok: false, schema: CONTRACTS.contracts.results, reason: feed.reason }, feedHeaders("results"));
@@ -720,6 +724,10 @@ const server = http.createServer(async (req, res) => {
 
     if (PROTECTED_READS.has(urlPath) && !fleetActor(req)) {
       sendJson(res, 401, { ok: false, reason: "auth_required" });
+      return;
+    }
+    if (urlPath === "/joe/account-history.json" && req.method !== "GET") {
+      sendJson(res, 405, { ok: false, error: "method not allowed" }, { Allow: "GET" });
       return;
     }
 

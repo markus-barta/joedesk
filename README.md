@@ -862,6 +862,38 @@ worker (shared `acceptRead`, then indexed once) and uses its existing
 live/stale/rejected/unavailable states. History stores only observations
 and null gaps, never the UI's assumed/interpolated continuity values.
 
+JOED-150 records exact whole-account EUR equity/cash (including kept holdings)
+in **`account-history-state.json`**, envelope `joedesk.account-history.v1`.
+It has its own 14-day retention, bounded account compaction and 2 MiB cap.
+Desk `history-state.json` stays byte-compatible v2: its fields, compaction timing
+and `sizeBytes` remain desk-only. Authenticated GET-only
+`/joe/account-history.json` exposes the account points and independent daily
+closes. Each of the three stores writes independently in the snapshot step.
+
+`account-closes-state.json` stores the last exact value of each field per
+**Vienna calendar day**, using the broker's observation time and separate
+field timestamps. Missing fields/days remain missing; nothing carries into
+another day. These are last-observed daily values, not NY market closing
+valuations. The latest 2,196 observed dates (at least six years of daily data)
+fit a bounded 2 MiB atomic/fsynced mode-0600 store that survives restart and
+the short series' 14-day cut.
+
+For either account store, missing files start empty with `feed_not_received`.
+Damaged/oversized/unknown-format bytes are atomically preserved as
+`<filename>.damaged-<UTC instant>` before a replacement write. A durable
+`discontinuity: {at, reason, preservedAs}` keeps `contract_invalid` visible
+after recovery and restart; a bounded `<filename>.discontinuity.json` journal
+protects the rename/replacement interruption window. Future versions remain
+untouched and read-only with `store_version_unsupported`. Store failures are
+independent. See [the History contract](docs/joe-history-contract.md) for
+stored shapes, recovery, retention and the endpoint. No pusher contract or
+chart UI changes are part of this recording work.
+
+**Release 39 rollback:** a pre-JOED-150 server loads the unchanged desk v2 file
+and ignores both new account files and their recovery journals/preserved copies.
+No desk conversion is required. Retain these files in backups; account capture
+pauses during rollback and resumes afterward without inventing missing values.
+
 History's chart is one keyboard stop. Keyboard focus starts inspection;
 clicking or tapping leaves the pointer tooltip alone, and arrow keys can then
 start inspection. Left/Right inspect the original observations and gap samples;
