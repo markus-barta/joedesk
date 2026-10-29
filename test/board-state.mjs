@@ -19,6 +19,7 @@ const { cellView, heroLeft, keptHtml, positionsHtml, compactDesk, healthPop } = 
 const { statePhrase } = await import('../public/joe/ui.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { resultsView } = await import('../public/joe/results.js');
+const { quietResults, withQuietRecord } = await import('./fixtures/quiet-record.mjs');
 const { age, eur } = await import('../public/joe/format.js');
 const { createFeed } = await import('../public/joe/feed.js');
 const { localBoardHealth, boardHealthPresentation, statusPresentation, boardDiagnostics, cellReason, CELL_REASON, RETAINED_GRACE_S, FEED_STOPPED_S } = await import('../public/joe/health.js');
@@ -1847,14 +1848,19 @@ function heroToday(html) {
 // rows repeat across cases, so each distinct markup is parsed and read once.
 const cardToday = doc => {
   const cell = doc.querySelector('.dnums .bn');
-  // JOED-153: a card's status lines sit over its bars (.card-status).
-  return { figure: cell.textContent, name: cell.getAttribute('aria-label'), lines: doc.querySelectorAll('.card-status .st').map(line => line.textContent) };
+  // JOED-153: a card's status lines sit over its bars (.card-status); a
+  // one-row card keeps them on its own line (.drow-status).
+  return { figure: cell.textContent, name: cell.getAttribute('aria-label'), caption: doc.querySelector('.dnums .c')?.textContent ?? null,
+    row: Boolean(doc.querySelector('.drow')), lines: doc.querySelectorAll('.card-status .st').concat(doc.querySelectorAll('.drow-status .st')).map(line => line.textContent) };
 };
+// The Today caption under a card's figure, in the state's own word (the
+// status line gives the age and reason): JOED-153 with JOED-157's words.
+const TODAY_CAPTION = { exact: 'so far · after fees', 'not exact': 'Not exact today', 'not reported': 'Not reported', 'last good': 'Last good', unavailable: 'Unavailable' };
 const phoneToday = doc => {
   const cell = doc.querySelector('[data-compact-value="dayPnl"] .bn');
   return { figure: cell.textContent, name: cell.getAttribute('aria-label'), line: doc.querySelector('.summary-text')?.textContent ?? null };
 };
-const readCards = new Map(), readRows = new Map();
+const readCards = new Map(), readRows = new Map(), readQuietRows = new Map();
 const readOnce = (seen, html, read) => seen.get(html) ?? seen.set(html, read(htmlDocument(html))).get(html);
 function dayCombination(desks, household) {
   const data = structuredClone(exact), prior = {};
@@ -1887,7 +1893,7 @@ function dayCombination(desks, household) {
   return { feeds, now, states };
 }
 // Every surface against the oracle; returns what is wrong, in words.
-function daySurfaces(view, desks, household) {
+function daySurfaces(view, desks, household, quiet) {
   const wrong = [], expect = (ok, what) => { if (!ok) wrong.push(what); };
   const own = desks.map((option, i) => ({ id: DESKS[i], name: NAMES[DESKS[i]], reason: null, ...DESK_TODAY[option] }));
   const fine = HOUSEHOLD_TODAY[household].fine && own.every(d => d.fine);
@@ -1954,6 +1960,11 @@ function daySurfaces(view, desks, household) {
     expect(card.figure === (d.value ? FIGURE[d.id] : '—'), `${d.name}'s card: ${card.figure}`);
     if (!d.value) expect(dashNamed(card.name, d), `${d.name}'s card dash: ${card.name}`);
     expect(JSON.stringify(card.lines) === JSON.stringify(d.card ? [d.card] : []), `${d.name}'s card lines: ${card.lines.join(' / ')}`);
+    expect(card.caption === TODAY_CAPTION[d.word], `${d.name}'s card caption: ${card.caption}`);
+    // One row (a record proving no trades): the same figure, caption and lines.
+    const row = readOnce(readQuietRows, deskCard(withQuietRecord(view, quiet), d.id), cardToday);
+    expect(row.row && row.figure === card.figure && row.caption === card.caption && JSON.stringify(row.lines) === JSON.stringify(card.lines),
+      `${d.name}'s one-row card: ${row.row} ${row.figure} ${row.caption} ${row.lines.join(' / ')}`);
     const phone = readOnce(readRows, compactDesk(view, d.id), phoneToday);
     expect(phone.figure === (d.value ? FIGURE[d.id] : '—'), `${d.name}'s phone row: ${phone.figure}`);
     if (!d.value) expect(dashNamed(phone.name, d), `${d.name}'s phone dash: ${phone.name}`);
@@ -1961,13 +1972,15 @@ function daySurfaces(view, desks, household) {
   }
   return wrong;
 }
-test('JOED-148: every desk and household Today combination matches the plain-words oracle on every surface (4000 cases)', () => {
+test('JOED-148: every desk and household Today combination matches the plain-words oracle on every surface (4000 cases)', async () => {
   let count = 0, green = 0;
+  // JOED-153 merge gate: the cards' Today caption and the one-row card too.
+  const now = at(30), quiet = await quietResults(now.slice(0, 10), now);
   for (const j of Object.keys(DESK_TODAY)) for (const joe of Object.keys(DESK_TODAY)) for (const joel of Object.keys(DESK_TODAY)) {
     for (const household of Object.keys(HOUSEHOLD_TODAY)) {
       const desks = [j, joe, joel], view = dayCombination(desks, household);
       const label = `household ${HOUSEHOLD_TODAY[household].says}; ${desks.map((option, i) => `${NAMES[DESKS[i]]} ${DESK_TODAY[option].says}`).join('; ')}`;
-      assert.deepEqual(daySurfaces(view, desks, household), [], label);
+      assert.deepEqual(daySurfaces(view, desks, household, quiet), [], label);
       assert.equal(view.states['today.dayPnl'].value != null, household === 'current' && desks.every(option => option === 'exact'), `${label}: household shown`);
       // JOED-157: a faulty desk leads the household caption with its own state word,
       // even after a not-exact desk or beside an already not-exact household dash.

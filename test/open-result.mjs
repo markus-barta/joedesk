@@ -9,6 +9,8 @@ import { validateContract, REASONS } from '../contracts/index.mjs';
 const board = await import('../public/joe/board-state.js');
 const { localBoardHealth, boardHealthPresentation, boardDiagnostics, statusPresentation } = await import('../public/joe/health.js');
 const { heroLeft, healthPop, compactDesk } = await import('../public/joe/desk.js');
+const { quietResults, withQuietRecord } = await import('./fixtures/quiet-record.mjs');
+const { viennaDay } = await import('../time.mjs');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const exact = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
 const DESKS = ['j', 'joe', 'joel'], NAMES = ['J', 'Joe', 'Joel'];
@@ -252,8 +254,12 @@ test('JOED-157 fix2: not-exact household Open retains its Details problem line',
   assert.equal(detailsRow(pop, 'Open positions'), 'Household not exact; each desk exact');
 });
 
-test('JOED-157: every desk and household Open combination matches the plain-words oracle through light and renderers (10368 cases)', t => {
+test('JOED-157: every desk and household Open combination matches the plain-words oracle through light and renderers (10368 cases)', async t => {
   const mismatches = {}, examples = [];
+  // JOED-153 merge gate: the cards' Open caption and the one-row card. A
+  // complete record without trades makes every desk one row.
+  const quiet = await quietResults(viennaDay(now), now);
+  const STATE_CAPTION = /^(Waiting on prices|Not exact|Unavailable|Not reported|Last good)$/, captionOf = word => word[0].toUpperCase() + word.slice(1);
   let count = 0, greens = 0, wrongGreens = 0, wrongGreensCurrent = 0;
   const check = (ok, category, label) => {
     if (ok) return;
@@ -322,6 +328,15 @@ test('JOED-157: every desk and household Open combination matches the plain-word
         check(cardLine.includes('Open result:') === (input.word !== 'exact'), 'card status', `${label}: ${name}`);
         if (input.word !== 'exact') check(cardLine.includes(`Open result: ${input.word}`), 'card agrees with desk word', `${label}: ${name}`);
         if (input.reason) check(cardLine.includes(input.reason), 'card reason', `${label}: ${name}`);
+        // The Open caption says what the status line says (JOED-157's words).
+        const openCaption = card.querySelectorAll('.dnums .c')[1]?.textContent ?? '';
+        check(input.word === 'exact' ? !STATE_CAPTION.test(openCaption) : openCaption === captionOf(input.word), 'card Open caption', `${label}: ${name}: ${openCaption}`);
+        // One row keeps the same lines: Open's state, age and reason.
+        const row = htmlDocument(deskCard(withQuietRecord(view, quiet), id)), rowLine = row.querySelector('.drow .drow-status')?.textContent;
+        check(rowLine !== undefined, 'one row', `${label}: ${name}`);
+        check((rowLine ?? '').includes('Open result:') === (input.word !== 'exact'), 'one-row status', `${label}: ${name}`);
+        if (input.word !== 'exact') check((rowLine ?? '').includes(`Open result: ${input.word}`), 'one-row agrees with desk word', `${label}: ${name}`);
+        if (input.reason) check((rowLine ?? '').includes(input.reason), 'one-row reason', `${label}: ${name}`);
 
         const phone = htmlDocument(compactDesk(view, id));
         const phoneLine = phone.querySelector('.summary-text')?.textContent ?? '';

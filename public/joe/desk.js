@@ -645,14 +645,17 @@ function closedTrades(ix) {
 // sessions. Recomputed only when the record, History, a bookkeeping cut or the
 // session changes; Today's own figures are read from the states on every
 // render. A cut at "now" lies after every past day, so it never changes them.
-let factsMemo = null;
+// The last few distinct inputs' facts: the page shows one board at a time,
+// and a check that alternates two (with and without a record) stays cheap.
+const factsMemos = [];
 export function deskFacts(ctx) {
   const now = ctx.now ?? null, label = now ? sessionLabel(now) : null;
   const view = resultsView(ctx);
   const cuts = JSON.stringify(view.cuts.filter(c => !c.now).map(c => [c.desk, c.from, c.at]));
   const starts = sinceStarts(ctx.feeds).effective;
   const key = [view.ix, view.cols, view.reason, view.today, view.trackingStart, label?.phase, label?.day, cuts, JSON.stringify(starts)];
-  if (!factsMemo || key.some((v, i) => v !== factsMemo.key[i])) {
+  let memo = factsMemos.find(m => m.key.every((v, i) => v === key[i]));
+  if (!memo) {
     const ts = view.trackingStart, trades = closedTrades(view.ix);
     const last = label?.phase === 'last'
       ? Object.fromEntries([['all', DESKS], ...DESKS.map(id => [id, [id]])].map(([k, ids]) => [k, resultsDay(view, label.day, ids)])) : null;
@@ -660,9 +663,11 @@ export function deskFacts(ctx) {
     const bars = Object.fromEntries(DESKS.map(id => [id, days.map(k => label.phase !== 'last' && k === label.day
       ? { day: k, today: true } : { day: k, ...resultsDay(view, k, [id]) })]));
     const quiet = Object.fromEntries(DESKS.map(id => [id, recordedQuiet(view, starts[id], id, trades)]));
-    factsMemo = { key, value: { last, days, bars, trades, quiet } };
+    memo = { key, value: { last, days, bars, trades, quiet } };
+    factsMemos.unshift(memo);
+    if (factsMemos.length > 4) factsMemos.pop();
   }
-  return { ...factsMemo.value, label, view, now };
+  return { ...memo.value, label, view, now };
 }
 
 // The fresh positions panel's open desk positions, all desks and per desk: the
@@ -888,13 +893,22 @@ function deskFirst(ctx, facts, id) {
   return { cell: ctx.states[`desks.${id}.dayPnl`], label: dated ? sessionDayName(label.day) : 'Today', short: dated ? sessionDayName(label.day).slice(0, 3) : 'Today',
     termKey: dated ? 'closedday' : 'today', day: label?.day ?? facts.view.today };
 }
-// A card figure's caption: its designed words while it has a value; under a
-// dash only its state's words ("Not exact today", "Unavailable"). The reason
-// stays where JOED-148 put it: on the dash's own name and title and, unless
+// A card figure's caption: its designed words while its value is current;
+// otherwise only its state's word, the word its status line uses ("Waiting on
+// prices", "Not exact today", "Last good", "Unavailable"). The reason stays
+// where JOED-148 put it: on the dash's own name and title and, unless
 // Today's not-exact dash is the card's only problem, on the status line.
-function cardCaption(cell, designed, board, today = '') {
-  if (cell?.value != null) return designed;
+function cardCaption(cell, designed, board, today = '', label = null) {
+  // JOED-157's Open words, as the status line says them: a price wait is
+  // waiting, never "Unavailable".
+  if (label === OPEN && waitingOnPrices(cell)) return 'Waiting on prices';
+  // A current value, or one that is only old (the board says how old): its
+  // designed words.
+  if (cell?.value != null && (cell.state === 'fresh' || (cell.state === 'stale' && !cell.retained))) return designed;
   if (sharesBoardCaption(cell, board)) return '';
+  // A value kept from before a fault is the state's own word, never the
+  // designed words of a current one.
+  if (cell?.value != null) return cell.retained ? 'Last good' : 'Unavailable';
   return notExactDash(cell) ? `Not exact${today}` : (cell?.state ?? 'not reported') === 'not reported' ? 'Not reported' : 'Unavailable';
 }
 // M5: a desk is one row only when Results' record proves it has not traded:
@@ -1101,40 +1115,42 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
   } else {
     const v = cellView(first.cell, `d.${id}.day`, { label: first.label, sharedReason: shared });
     firstNum = num(term(first.termKey, first.label), linked(v, resultsHref('day', first.day, id), `${LABEL[id]} · ${first.label}: ${v.units === null ? '' : eur(v.units, true)}. Opens Results for that day.`), first.cell,
-      cardCaption(first.cell, 'so far · after fees', board, first.label === 'Today' ? ' today' : ''), v.state, v.units === null ? 1 : eur(v.units, true).length, dayEstimateMark(ctx, id), v.units === null);
+      cardCaption(first.cell, 'so far · after fees', board, first.label === 'Today' ? ' today' : '', first.label), v.state, v.units === null ? 1 : eur(v.units, true).length, dayEstimateMark(ctx, id), v.units === null);
   }
   const openV = cellView(openCell, `d.${id}.open`, { label: termLabel('open'), sharedReason: shared });
   const sinceV = cellView(sinceCell, `d.${id}.since`, { label: sinceText, sharedReason: shared });
   const sinceNum = num(term('since', sinceText), linked(sinceV, resultsHref('all', today, id), `${LABEL[id]} · ${sinceText}: ${sinceV.units === null ? '' : eur(sinceV.units, true)}. Opens Results for all time.`),
-    sinceCell, cardCaption(sinceCell, 'after fees', board), sinceV.state, sinceV.units === null ? 1 : eur(sinceV.units, true).length, '', sinceV.units === null);
+    sinceCell, cardCaption(sinceCell, 'after fees', board, '', sinceText), sinceV.state, sinceV.units === null ? 1 : eur(sinceV.units, true).length, '', sinceV.units === null);
   const go = `<a class="card-go" href="${resultsHref('week', today, id)}" aria-label="${esc(`Results for ${LABEL[id]}`)}">Results${icon('chev-r')}</a>`;
   const name = esc(desk?.label ?? LABEL[id]);
   const quietSince = noTradesSinceStart(ctx, facts, id), feed = feedMark(facts.view);
-  if (quietSince) {
-    // The claim comes from the record: an old record says so beside it.
-    return `<div class="drow">${deskMark(id)}<div class="who"><h3>${name}</h3><span class="sep" aria-hidden="true"> · </span><span class="state st ${info.tone}">${icon(info.icon)}<span>${info.word.toLowerCase()}${since} · no trades since ${dayText(quietSince)}${marksHtml(feed ? [feed] : [])} · ${positionsWord(states, id, held)}</span></span></div>
-      <div class="dnums">${firstNum}${sinceNum}</div><span class="hb warn">${hb}</span>${go}</div>`;
-  }
-  const detail = desk?.state === 'stuck' ? STUCK_REASON : desk ? positionsWord(states, id, held) : '';
-  // Only a real activity sentence is shown; the pusher's valuation status
-  // sentences say nothing about what the desk is doing (JOED-148 P0-5).
-  const activity = !desk ? 'Waiting for the first valid snapshot.' : PUSHER_STATUS.has(desk.action) ? '' : esc(desk.action);
   // Every number that is not fresh gets its own line, age and reason; numbers
   // that share all three share a line, and a reason the whole snapshot shares
   // is on the hero's line instead. A not-exact Today that is the card's only
   // problem needs no line: its info icon and its dash's name and title give it.
   const loneNotExactDay = first.cell !== undefined && classifyDay(first.cell, dayChannels(data, id)).kind === 'notExact'
     && cells.slice(1).every(([, cell]) => cell?.state === 'fresh' || sharesBoardCaption(cell, board));
+  const cellStatus = loneNotExactDay ? '' : cardStatus(id, cells, board, 3);
+  if (quietSince) {
+    // One row still says every figure's state, age and reason, Open's too
+    // (it shows no Open figure), on its own reserved line.
+    // The claim comes from the record: an old record says so beside it.
+    return `<div class="drow">${deskMark(id)}<div class="who"><h3>${name}</h3><span class="sep" aria-hidden="true"> · </span><span class="state st ${info.tone}">${icon(info.icon)}<span>${info.word.toLowerCase()}${since} · no trades since ${dayText(quietSince)}${marksHtml(feed ? [feed] : [])} · ${positionsWord(states, id, held)}</span></span></div>
+      <div class="dnums">${firstNum}${sinceNum}</div><span class="hb warn">${hb}</span>${go}<div class="drow-status"${cellStatus ? '' : ' aria-hidden="true"'}>${cellStatus}</div></div>`;
+  }
+  const detail = desk?.state === 'stuck' ? STUCK_REASON : desk ? positionsWord(states, id, held) : '';
+  // Only a real activity sentence is shown; the pusher's valuation status
+  // sentences say nothing about what the desk is doing (JOED-148 P0-5).
+  const activity = !desk ? 'Waiting for the first valid snapshot.' : PUSHER_STATUS.has(desk.action) ? '' : esc(desk.action);
   const bars = barsHtml(ctx, facts, id), learning = learningLine(desk?.learning);
   // The status lines cover the bars; when those come from an old record, the
   // record's state is one of the lines, as it is the bars' caption otherwise.
-  const cellStatus = loneNotExactDay ? '' : cardStatus(id, cells, board, 3);
   const status = cellStatus && bars.feed ? `${cellStatus}${st('warn', esc(bars.feed.text), 'half')}` : cellStatus;
   return `<header>${deskMark(id)}<div class="who"><h3>${name}</h3><div class="state st ${info.tone}">${icon(info.icon)}<span title="${esc(`${info.word}${since}${detail ? `${NB}· ${plainText(detail)}` : ''}`)}">${info.word}${since}${detail ? `<span class="detail">${NB}· ${detail}</span>` : ''}</span></div></div><span class="hb warn">${hb}</span>${go}</header>
       ${activity ? `<p class="now">${activity}</p>` : ''}
       <div class="dnums">
         ${firstNum}
-        ${num(term('open'), openV.html, openCell, cardCaption(openCell, counts ? positionsText(counts[id]) : '', board), openV.state, openV.units === null ? 1 : eur(openV.units, true).length, '', openV.units === null)}
+        ${num(term('open'), openV.html, openCell, cardCaption(openCell, counts ? positionsText(counts[id]) : '', board, '', OPEN), openV.state, openV.units === null ? 1 : eur(openV.units, true).length, '', openV.units === null)}
         ${sinceNum}
       </div>
       <div class="spark desk-sessions${status ? ' off' : ''}"><div class="spark-h"><span><b>${bars.head}</b> · ${bars.feed ? st('warn', esc(bars.feed.text), 'half') : 'each session’s result in €, after fees'}</span></div>${bars.html}<div class="bars-tap" hidden></div>${status ? `<div class="card-status">${status}</div>` : ''}</div>

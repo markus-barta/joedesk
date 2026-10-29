@@ -1352,6 +1352,11 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 .drow .dnums .v > .bn, .drow .dnums .v > .fig-link > .bn { display: inline-flex; height: auto; font-size: inherit; }
 .drow .dnums .c { min-height: 0; }
 .drow .dnums > div[data-state="fresh"] .c { display: none; }
+/* The row's own status lines (every figure's state, age and reason, Open's
+   too), on one reserved line so a change of state does not move the row. */
+.drow .drow-status { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 2px; min-height: 16px; margin-top: 4px; }
+.drow .drow-status .st { align-items: flex-start; gap: 5px; white-space: normal; font-size: 11.5px; line-height: 16px; color: var(--ink-2); }
+.drow .drow-status .st .i { width: 13px; height: 13px; margin-top: 1px; }
 /* Middle widths: the market block goes under the figures. */
 @media (max-width: 1180px) {
   .hero { grid-template-columns: minmax(0, 1fr); }
