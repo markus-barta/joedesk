@@ -94,6 +94,23 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
   const opened = await state();
   const returned = await step('history.back()', `document.body.dataset.screen === 'desk'`);
   check('routes', 'Back to Desk restores the scroll position it was left at; Results opened at its top', left.scroll > 100 && opened.scroll === 0 && Math.abs(returned.scroll - left.scroll) <= 1, { left, opened, returned });
+  // The place is read before the screen changes: a Desk taller than any other
+  // screen, left 5000 px down, comes back there, not clamped to Results' height.
+  await load(page, b.url, 'desk');
+  await page.evaluate(`(() => { const s = document.createElement('div'); s.id = 'placeProbe'; s.style.height = '6000px'; document.getElementById('scr-desk').append(s); scrollTo(0, 5000); })()`); await settle(page);
+  const deepLeft = await state();
+  await click('.top-in [data-go="results"]');
+  const deepBack = await step('history.back()', `document.body.dataset.screen === 'desk'`);
+  await page.evaluate(`document.getElementById('placeProbe').remove()`);
+  check('routes', 'the place is read before the screen changes: Desk left 5000 px down comes back there, not clamped to the shorter Results', deepLeft.scroll === 5000 && Math.abs(deepBack.scroll - 5000) <= 1, { deepLeft, deepBack });
+  // Leaving by the browser keeps the place too: Desk, Results, scroll Results, Back, Forward.
+  await load(page, b.url, 'desk');
+  await click('.top-in [data-go="results"]');
+  await page.evaluate('scrollTo(0, Math.min(700, document.documentElement.scrollHeight - innerHeight))'); await settle(page);
+  const onResults = await state();
+  const backToDesk = await step('history.back()', `document.body.dataset.screen === 'desk'`);
+  const forwardAgain = await step('history.forward()', `document.body.dataset.screen === 'results'`);
+  check('routes', 'Desk, Results, scroll Results, Back, Forward: Results comes back where Back left it, and Desk at its top', onResults.scroll > 100 && backToDesk.scroll === 0 && Math.abs(forwardAgain.scroll - onResults.scroll) <= 1, { onResults, backToDesk, forwardAgain });
 
   // 3 · An unknown route is Desk; an anchor scrolls and leaves the address.
   const unknown = await step(`location.hash = '#nowhere?period=day'`, `location.hash === '#desk'`);

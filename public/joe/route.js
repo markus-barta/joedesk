@@ -40,6 +40,52 @@ export function linkRoute(event, link) {
   return route.known ? route : null;
 }
 
+// Where the reader was, per history entry. Every entry the board shows gets
+// an id in its state. The place is read before anything on the page changes
+// and kept for the entry being left, whether by the board's own navigation
+// (leave) or by Back, Forward or a typed address (step), so Back and Forward
+// both return to it. It is also written into the entry's state while reading
+// (at most every `every` ms, so WebKit's budget of 100 history calls per
+// 30 s stays free for navigation; at once when a scroll ends and when the
+// page is hidden), so it survives a reload. A save never writes into an
+// entry the board has not taken up yet (one the browser just made).
+export function createPlaces(win, { every = 500 } = {}) {
+  // Ids are unique per page, so entries from before a reload never collide.
+  const kept = new Map(), doc = Math.random().toString(36).slice(2, 10);
+  let entry = null, count = 0, last = -Infinity, timer = 0;
+  const current = () => win.history.state?.joeEntry ?? null;
+  const write = state => { try { win.history.replaceState({ ...win.history.state, ...state }, ''); } catch { /* the history budget or a sandbox */ } };
+  const cancel = () => { win.clearTimeout(timer); timer = 0; };
+  const keep = () => { const y = win.scrollY; kept.set(entry, y); write({ joeScrollY: y }); };
+  const save = () => {
+    cancel();
+    if (entry === null || current() !== entry) return;
+    last = win.performance.now();
+    keep();
+  };
+  return {
+    save,
+    scrolled() { if (!timer) timer = win.setTimeout(save, Math.max(0, every - (win.performance.now() - last))); },
+    // The entry is new (Back, Forward, a typed address, the first load): the
+    // entry left keeps the place the page still shows; take this one up.
+    // False when it is the entry already taken up (the step's second event).
+    step() {
+      const id = current();
+      if (entry !== null && id === entry) return false;
+      cancel();
+      if (entry !== null) kept.set(entry, win.scrollY);
+      entry = id ?? `${doc}.${++count}`;
+      if (id === null) write({ joeEntry: entry });
+      return true;
+    },
+    // Leaving by the board's own navigation, before anything changes.
+    leave() { cancel(); if (entry !== null && current() === entry) keep(); },
+    // The state for the entry the board pushes next.
+    next() { entry = `${doc}.${++count}`; return { joeEntry: entry }; },
+    saved: () => kept.get(entry) ?? win.history.state?.joeScrollY ?? 0,
+  };
+}
+
 // A screen with detail parameters registers one reader. go() calls it before
 // the screen renders, on every arrival (the nav, a link, Back, Forward or a
 // typed address), with the route's parameters, possibly none: a parameter

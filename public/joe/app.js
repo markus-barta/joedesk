@@ -2,7 +2,7 @@
 // render per animation frame. Settings saves reviewed paper fleet drafts and
 // board display values through separate authenticated routes.
 import { isCanonicalJoeHost } from './host.js';
-import { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, applyRoute } from './route.js';
+import { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, applyRoute, createPlaces } from './route.js';
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
@@ -134,15 +134,28 @@ function start() {
     frame = requestAnimationFrame(() => { const r = pending ?? why; pending = null; render(r); });
   }
   // Every way onto a screen ends here (route.js). The reader's own navigation
-  // (push) adds a history entry and remembers where they were on the page;
-  // the first load, Back and Forward only correct the address. The address
-  // keeps the screen and its query, which the screen's route reader gets
-  // before it renders; an anchor only scrolls.
+  // (push) adds a history entry; the first load, Back and Forward only
+  // correct the address. Each entry keeps the reader's place (createPlaces):
+  // saved while scrolling and on every departure, restored on return. The
+  // address keeps the screen and its query, which the screen's route reader
+  // gets before it renders; an anchor only scrolls.
   let shown = { screen, query: '' };
   window.__joedesk.route = () => ({ ...shown });
+  const places = createPlaces(window);
+  addEventListener('scroll', places.scrolled, { passive: true });
+  addEventListener('scrollend', places.save);
+  addEventListener('pagehide', places.save);
   function go(next, { anchor = null, query = '', push = false, scroll = 0 } = {}) {
     if (!SCREENS.includes(next)) { next = 'desk'; anchor = null; query = ''; }
     const target = { screen: next, query };
+    // The address first, while the page still shows the place being left:
+    // hiding a screen, closing a dialog or rendering may move it.
+    try {
+      const step = historyStep(location.hash, target, push), address = `${location.pathname}${location.search}${routeHash(target)}`;
+      if (step === 'push') { places.leave(); history.pushState(places.next(), '', address); }
+      else if (step === 'replace') history.replaceState(history.state, '', address);
+    } catch { places.step(); /* file or sandboxed context: keep the entry it is on */ }
+    shown = target;
     screen = next;
     tips.hide();
     for (const s of SCREENS) $(`#scr-${s}`).classList.toggle('on', s === next);
@@ -151,12 +164,6 @@ function start() {
     $$('.top-in [data-go], .bottom-nav [data-go]').forEach(b => { if (b.dataset.go === next) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     closePop();
     for (const dialog of $$('dialog[open]')) dialog.close();
-    try {
-      const step = historyStep(location.hash, target, push), address = `${location.pathname}${location.search}${routeHash(target)}`;
-      if (step === 'push') { history.replaceState({ ...history.state, joeScrollY: scrollY }, ''); history.pushState(null, '', address); }
-      else if (step === 'replace') history.replaceState(history.state, '', address);
-    } catch { /* file or sandboxed context */ }
-    shown = target;
     dirtyHistory = true; forgetCharts(); forgetResults();
     if (next === 'settings') feed.refreshActions();
     guard('route', () => applyRoute(target));
@@ -286,13 +293,13 @@ function start() {
   sheet.addEventListener('close', () => { if (sheetFrom) document.querySelector(`#cal [data-day="${sheetFrom}"]`)?.focus({ preventScroll: true }); sheetFrom = null; });
 
   // Back, Forward, a typed address or a link the browser followed itself:
-  // show what the address says, where the reader left that page when they
-  // left it by the nav (Back), else at its top. Back and Forward fire both
-  // events; the second finds the route already shown.
+  // the entry left keeps the place the page still shows; show what the
+  // address says, where the reader last was on it (a new entry: its top).
+  // Back and Forward fire both events; the second finds the entry taken up.
   const follow = () => {
-    const next = parseRoute(location.hash);
-    if (next.known && !next.anchor && sameRoute(next, shown)) return;
-    go(next.screen, { anchor: next.anchor, query: next.query, scroll: history.state?.joeScrollY ?? 0 });
+    const moved = places.step(), next = parseRoute(location.hash);
+    if (!moved && next.known && !next.anchor && sameRoute(next, shown)) return;
+    go(next.screen, { anchor: next.anchor, query: next.query, scroll: places.saved() });
   };
   addEventListener('popstate', follow);
   addEventListener('hashchange', follow);
@@ -324,6 +331,7 @@ function start() {
   $('#footShield').innerHTML = `${icon('shield')}Read-only paper board · nothing here can place a trade`;
   // go() puts each screen back where the reader left it; the browser need not.
   try { history.scrollRestoration = 'manual'; } catch { /* go() still scrolls */ }
+  places.step();
   const first = parseRoute(location.hash || '#desk');
   go(first.screen, { anchor: first.anchor, query: first.query });
   feed.start();

@@ -1,13 +1,16 @@
 // The header and its routes under Node: hash routes with each screen's own
-// query, the history steps, links, route readers, the header and bottom-bar
-// markup, the CSS that keeps the bar on phones, and the money no-wrap helper.
-// Browser CI (scripts/browser/header-nav.mjs, the P3/P5 sweeps) owns pixels.
+// query, the history steps, links, route readers, the place each history
+// entry keeps (app.js's own navigation code in a simulated browser), the
+// header and bottom-bar markup, the CSS that keeps the bar on phones clear of
+// the safe area, and the money no-wrap helper. Browser CI
+// (scripts/browser/header-nav.mjs, the P3/P5 sweeps) owns pixels.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { createContext, runInContext } from 'node:vm';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
 
-const { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute } = await import('../public/joe/route.js');
+const { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute, createPlaces } = await import('../public/joe/route.js');
 const { moneyNoWrap } = await import('../public/joe/ui.js');
 const { MINUS, NB } = await import('../public/joe/format.js');
 const html = readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8');
@@ -95,6 +98,122 @@ test('route readers: each screen gets its own parameters before it renders, poss
   } finally {
     onRoute('results', undefined); onRoute('history', undefined);
   }
+});
+
+// A browser for the navigation code: session history with states (Back and
+// Forward fire popstate, then hashchange when the fragment differs; a typed
+// address adds a browser-made entry), a page as tall as the shown screen (one
+// not yet rendered is short, so the scroll position clamps as in a real
+// layout), timers and events.
+function browser() {
+  const entries = [{ hash: '#desk', state: null }], listeners = new Map(), timers = new Map(), rendered = new Set();
+  const tall = { desk: 3000, results: 2400, history: 2400, settings: 2400 };
+  let index = 0, clock = 0, timerId = 0, visible = 'desk', y = 0, writes = 0;
+  const max = () => Math.max(0, 110 + (rendered.has(visible) ? tall[visible] : 600) - 800);
+  const hashOf = url => new URL(url, 'http://board.test/joe/').hash;
+  const fire = type => { for (const fn of listeners.get(type) ?? []) fn({ type }); };
+  const win = {
+    history: {
+      get state() { return structuredClone(entries[index].state); },
+      replaceState(state, _title, url) { writes++; entries[index] = { hash: url === undefined ? entries[index].hash : hashOf(url), state: structuredClone(state) }; },
+      pushState(state, _title, url) { writes++; entries.splice(index + 1, Infinity, { hash: hashOf(url), state: structuredClone(state) }); index++; },
+    },
+    location: { get hash() { return entries[index].hash; }, pathname: '/joe/', search: '' },
+    get scrollY() { y = Math.min(y, max()); return y; },
+    scrollTo(_x, to) { y = Math.max(0, Math.min(to, max())); },
+    setTimeout(fn, ms) { timers.set(++timerId, { at: clock + ms, fn }); return timerId; },
+    clearTimeout(id) { timers.delete(id); },
+    performance: { now: () => clock, timeOrigin: 1761700000000 },
+    addEventListener(type, fn) { listeners.set(type, [...(listeners.get(type) ?? []), fn]); },
+  };
+  return { win, entries, get index() { return index; }, get writes() { return writes; },
+    show: screen => { visible = screen; }, render: () => { rendered.add(visible); },
+    scroll(to) { y = Math.max(0, Math.min(to, max())); fire('scroll'); },
+    tick(ms) { clock += ms; for (const [id, t] of [...timers].sort((a, b) => a[1].at - b[1].at)) if (t.at <= clock && timers.delete(id)) t.fn(); },
+    traverse(delta) { const from = entries[index].hash; index += delta; fire('popstate'); if (entries[index].hash !== from) fire('hashchange'); },
+    typed(hash, before = () => {}) { entries.splice(index + 1, Infinity, { hash, state: null }); index++; before(); fire('popstate'); fire('hashchange'); },
+  };
+}
+// app.js's own navigation (go, follow and the first load), run against that
+// browser. Everything else go() touches is a quiet stand-in.
+const REGIONS = [/^  let shown = [\s\S]*?^  function go\(next[\s\S]*?^  \}$/m, /^  const follow = [\s\S]*?addEventListener\('hashchange', follow\);$/m,
+  /^  try \{ history\.scrollRestoration[\s\S]*?^  go\(first\.screen[^\n]*$/m];
+function boot(source, b) {
+  const code = REGIONS.map(re => { const m = re.exec(source); assert.ok(m, `app.js region ${re}`); return m[0]; }).join('\n');
+  const ctx = { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, applyRoute, createPlaces,
+    screen: 'desk', dirtyHistory: false, __joedesk: {}, tips: { hide() {} }, closePop() {}, forgetCharts() {}, forgetResults() {},
+    feed: { refreshActions() {} }, guard: (_name, fn) => fn(), render: () => b.render(), SETTINGS_SECTIONS: [], showSection() {},
+    $: selector => ({ classList: { toggle: (_name, on) => { if (on) b.show(selector.slice('#scr-'.length)); } } }), $$: () => [],
+    document: { body: { dataset: {} }, getElementById: () => null } };
+  Object.defineProperties(ctx, Object.getOwnPropertyDescriptors(b.win));
+  ctx.window = ctx;
+  createContext(ctx);
+  runInContext(code, ctx);
+  return runInContext('go', ctx);
+}
+
+test('places: the place is read before the page changes, so a screen taller than the next one comes back where it was left', () => {
+  const b = browser(), go = boot(app, b);
+  b.scroll(2000);
+  go('results', { push: true });
+  assert.equal(b.win.scrollY, 0, 'Results opens at its top');
+  b.traverse(-1);
+  assert.equal(b.win.location.hash, '#desk');
+  assert.equal(b.win.scrollY, 2000, 'Back returns to Desk 2000 px down, not clamped to the shorter, unrendered Results');
+});
+
+test('places: Back and Forward return to the place the browser left (Desk, Results, scroll, Back, Forward)', () => {
+  for (const wait of [0, 1000]) {
+    const b = browser(), go = boot(app, b);
+    go('results', { push: true });
+    b.scroll(1500);
+    b.tick(wait);
+    b.traverse(-1);
+    assert.equal(b.win.scrollY, 0, 'Desk was left at its top');
+    b.traverse(1);
+    assert.equal(b.win.location.hash, '#results');
+    assert.equal(b.win.scrollY, 1500, `Forward returns to Results 1500 px down (${wait} ms after the scroll)`);
+    b.traverse(-1);
+    assert.equal(b.win.scrollY, 0);
+  }
+});
+
+test('places: a browser-made entry gets no save from the screen before it, opens at its top, and Back returns', () => {
+  const b = browser(), go = boot(app, b);
+  go('results', { push: true });
+  b.scroll(1500);
+  // The pending save runs after the browser made the entry, before the board takes it up.
+  b.typed('#history?range=week&mode=money', () => b.tick(1000));
+  assert.equal(b.win.location.hash, '#history?range=week&mode=money');
+  assert.equal(b.entries[b.index].state?.joeScrollY, undefined, 'no place written into the new entry');
+  assert.equal(b.win.scrollY, 0, 'History opens at its top');
+  b.traverse(-1);
+  assert.equal(b.win.scrollY, 1500, 'Back returns to Results where it was left');
+});
+
+test('places: saved while reading at most every 500 ms and at once on scrollend or leaving; a reload finds them', () => {
+  const b = browser(), places = createPlaces(b.win);
+  b.render();
+  assert.equal(places.step(), true, 'the first entry is taken up');
+  assert.equal(places.step(), false, 'the same entry again is no step');
+  const id = b.entries[0].state.joeEntry;
+  assert.ok(id);
+  const before = b.writes;
+  for (let t = 0; t < 2000; t += 16) { b.scroll(t); places.scrolled(); b.tick(16); }
+  assert.ok(b.writes - before <= 5, `${b.writes - before} saves for 2 s of scrolling`);
+  b.scroll(2100); places.save();
+  assert.equal(b.entries[0].state.joeScrollY, 2100, 'scrollend saves at once');
+  b.scroll(1200); places.leave();
+  assert.equal(b.entries[0].state.joeScrollY, 1200, 'leaving saves the place read now');
+  assert.equal(b.entries[0].state.joeEntry, id, 'the entry keeps its id');
+  // A reload: a new page on the same entry restores from its state.
+  const again = createPlaces(b.win);
+  again.step();
+  assert.equal(again.saved(), 1200);
+  assert.equal(b.entries[0].state.joeEntry, id);
+  // A next entry gets its own id.
+  const next = again.next();
+  assert.notEqual(next.joeEntry, id);
 });
 
 test('header markup: brand, PAPER, Desk · Results · History, the light, the Settings gear and the theme button, in that order', () => {
