@@ -627,7 +627,7 @@ export function initHistoryInput({ schedule }) {
     } else if (touches.size === 2) {
       const [p, q] = [...touches.values()], mid = (p.x + q.x) / 2;
       unpin();
-      input.touch = { phase: 'pinch', start, spread: Math.max(24, Math.abs(p.x - q.x)), mid, at: chartTime(mid, start), perPx: perPx() };
+      input.touch = { phase: 'pinch', start, spread: Math.max(24, Math.hypot(p.x - q.x, p.y - q.y)), mid, at: chartTime(mid, start), perPx: perPx() };
     }
   });
   chart.addEventListener('pointermove', e => {
@@ -644,7 +644,7 @@ export function initHistoryInput({ schedule }) {
     const t = input.touch;
     if (t.phase === 'pinch') {
       if (touches.size !== 2) return;
-      const [p, q] = [...touches.values()], spread = Math.max(24, Math.abs(p.x - q.x)), mid = (p.x + q.x) / 2;
+      const [p, q] = [...touches.values()], spread = Math.max(24, Math.hypot(p.x - q.x, p.y - q.y)), mid = (p.x + q.x) / 2;
       const zoomed = zoomWindow(HS.full, t.start, t.spread / spread, t.at);
       setView(panWindow(HS.full, zoomed, -(mid - t.mid) * t.perPx * (zoomed[1] - zoomed[0]) / (t.start[1] - t.start[0])));
       return;
