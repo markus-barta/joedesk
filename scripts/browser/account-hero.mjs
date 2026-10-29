@@ -85,7 +85,7 @@ export async function accountHeroChecks({ page, viewport, theme, check, settle, 
     const range = document.createRange(); range.selectNodeContents(box);
     return { width: hero.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight), narrow: box.classList.contains('acct-narrow'),
       height: box.getBoundingClientRect().height, lineHeight, used: Math.round(range.getBoundingClientRect().height / lineHeight) }; })()`);
-  const reserved = (line.narrow ? [[291, 4], [408, 3], [Infinity, 2]] : [[489, 5], [596, 4], [857, 3], [Infinity, 2]]).find(([below]) => line.width < below)[1];
+  const reserved = (line.narrow ? [[291, 4], [408, 3], [Infinity, 2]] : [[489, 5], [612, 4], [864, 3], [Infinity, 2]]).find(([below]) => line.width < below)[1];
   check('no-shift', `${tag}: the Since start · Cash line keeps the ${reserved} lines reserved at ${Math.round(line.width)} px of block, its text within them`,
     Math.abs(line.height - reserved * line.lineHeight) <= 0.5 && line.used <= reserved, { ...line, reserved });
 
