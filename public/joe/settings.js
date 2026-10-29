@@ -10,10 +10,13 @@ import { panelState } from './contracts/panel-state.mjs';
 import { setTheme, storedTheme } from './theme.js';
 import { validateContract } from './contracts/index.mjs';
 import { sendFleetDraft } from './fleet-write.js';
+import { boardSettingsState, refreshBoardSettings, onBoardSettingsChange } from './board-settings.js';
+import { saveBoardSettings } from './board-settings-write.js';
 import * as M from './settings-model.js';
 
 export const SECTIONS = Object.freeze([
   { id: 'set-mode', nav: 'Mode', icon: 'shield' },
+  { id: 'set-account', nav: 'Account start', icon: 'wallet' },
   { id: 'set-runtime', nav: 'Runtime state', icon: 'gauge' },
   ...M.GROUPS.map(g => ({ id: `set-${g.id}`, nav: g.nav, icon: g.icon })),
   { id: 'set-how', nav: 'How fleet settings work', icon: 'help' },
@@ -28,6 +31,7 @@ const TOAST_MS = 4400;
 let feed = null, tips = null, rerender = () => {};
 let state = M.editState();
 let restored = false, fieldsKey = null, lastCtx = null, pinnedSec = null, gateStep = 1, lastNote = null;
+let accountReview = null, accountBusy = false;
 
 // Long keys may break after a dot or the file name, never inside a word.
 const breakable = text => esc(text).replace(/([.#/])/g, '$1<wbr>');
@@ -83,6 +87,119 @@ function runtimeSection() {
     ${secHead('gauge', 'h-rt', 'Runtime state', 'What the board sees right now. Read-only: nothing here can be changed, paused or restarted. Secrets, tokens and full account numbers are never shown.')}
     <div class="rt" id="rtRows"></div>
   </section>`;
+}
+
+function accountStartSection() {
+  return `<section class="set-sec" id="set-account" aria-labelledby="h-account">
+    ${secHead('wallet', 'h-account', 'Account start', 'The starting value of the whole paper account in EUR, including kept holdings and cash. Saved for this board.')}
+    <p id="accountStartSummary" class="account-start-summary" role="status" aria-live="polite"></p>
+    <p id="accountStartReason" class="sub"></p>
+    <div class="account-start-actions"><button type="button" class="btn" id="accountStartEdit" aria-expanded="false" aria-controls="accountStartForm">Edit account start</button>
+      <button type="button" class="btn" id="accountStartRetry">Refresh account start</button></div>
+    <form id="accountStartForm" class="account-start-form" hidden novalidate aria-label="Edit account start" aria-describedby="accountStartHelp accountStartMessage">
+      <fieldset id="accountStartFields">
+        <legend class="vh">Account start amount and date</legend>
+        <p id="accountStartHelp" class="sub">Enter the amount and calendar date you chose. Use a decimal point or comma, without grouping. Review both before saving.</p>
+        <div class="account-start-inputs">
+          <label for="accountStartAmount">Amount in EUR<input id="accountStartAmount" class="inp" inputmode="decimal" autocomplete="off" aria-invalid="false" aria-describedby="accountStartHelp accountStartAmountError" required><span id="accountStartAmountError" class="sub"></span></label>
+          <label for="accountStartDate">Start date<input id="accountStartDate" class="inp" type="date" min="0001-01-01" max="9999-12-31" aria-invalid="false" aria-describedby="accountStartDateError" required><span id="accountStartDateError" class="sub"></span></label>
+        </div>
+        <label class="check"><input id="accountStartClear" type="checkbox">Leave account start unset and hide the whole account's 'Since start'</label>
+        <div class="account-start-actions"><button type="button" class="btn" id="accountStartReview">Review changes</button>
+          <button type="button" class="btn" id="accountStartCancel">Cancel</button></div>
+        <div id="accountStartReviewBox" hidden>
+          <p id="accountStartBefore"></p><p id="accountStartAfter"></p>
+          <label class="check"><input id="accountStartConfirmed" type="checkbox">I reviewed the account start amount and date</label>
+          <button type="submit" class="btn primary" id="accountStartSave" disabled>Save account start</button>
+        </div>
+      </fieldset>
+    </form>
+    <p id="accountStartMessage" class="sub" role="status" aria-live="polite"></p>
+  </section>`;
+}
+
+function renderAccountStart() {
+  const snapshot = boardSettingsState(), row = M.accountStartRow(snapshot);
+  patch($('#accountStartSummary'), esc(row.text));
+  patch($('#accountStartReason'), esc(row.note));
+  $('#accountStartEdit').disabled = accountBusy || !row.editable;
+  $('#accountStartRetry').disabled = accountBusy;
+  $('#accountStartFields').disabled = accountBusy;
+  $('#accountStartReview').disabled = accountBusy || !row.editable;
+  if (accountReview && (!row.editable || accountReview.base !== JSON.stringify(snapshot.accountStart))) {
+    accountReview = null;
+    $('#accountStartReviewBox').hidden = true;
+    $('#accountStartConfirmed').checked = false;
+    $('#accountStartMessage').textContent = 'The saved account start changed or could not be checked. Review again before saving.';
+  }
+  $('#accountStartSave').disabled = accountBusy || !row.editable || !accountReview || !$('#accountStartConfirmed').checked;
+}
+
+const accountDraft = () => ({ amount: $('#accountStartAmount').value, date: $('#accountStartDate').value, clear: $('#accountStartClear').checked });
+function accountStartErrors(errors = {}) {
+  for (const [field, name] of [['amount', 'Amount'], ['date', 'Date']]) {
+    $(`#accountStart${name}`).setAttribute('aria-invalid', String(Boolean(errors[field])));
+    $(`#accountStart${name}Error`).textContent = errors[field] ?? '';
+  }
+}
+function resetAccountReview() {
+  accountStartErrors();
+  accountReview = null;
+  $('#accountStartReviewBox').hidden = true;
+  $('#accountStartConfirmed').checked = false;
+  $('#accountStartMessage').textContent = '';
+  const clear = $('#accountStartClear').checked;
+  $('#accountStartAmount').disabled = clear;
+  $('#accountStartDate').disabled = clear;
+  renderAccountStart();
+}
+function reviewAccountStart() {
+  if (accountBusy) return;
+  const result = M.reviewAccountStart(accountDraft(), boardSettingsState());
+  accountStartErrors(result.errors);
+  if (result.error) {
+    accountReview = null;
+    $('#accountStartReviewBox').hidden = true;
+    $('#accountStartConfirmed').checked = false;
+    $('#accountStartMessage').textContent = result.error;
+    renderAccountStart();
+    const first = result.errors?.amount ? 'Amount' : result.errors?.date ? 'Date' : null;
+    if (first) $(`#accountStart${first}`).focus();
+    return;
+  }
+  accountReview = result;
+  $('#accountStartBefore').textContent = `Before: ${result.before}`;
+  $('#accountStartAfter').textContent = `After: ${result.after}`;
+  $('#accountStartConfirmed').checked = false;
+  $('#accountStartReviewBox').hidden = false;
+  $('#accountStartMessage').textContent = '';
+  renderAccountStart();
+  $('#accountStartConfirmed').focus();
+}
+async function saveAccountStart(event) {
+  event.preventDefault();
+  renderAccountStart();
+  if (accountBusy || !accountReview || !$('#accountStartConfirmed').checked) return;
+  // Rebuild from the controls so even an unannounced edit cannot send a
+  // different value from the one the reader reviewed.
+  const checked = M.reviewAccountStart(accountDraft(), boardSettingsState());
+  if (checked.error || JSON.stringify(checked.value) !== JSON.stringify(accountReview.value)) {
+    resetAccountReview(); $('#accountStartMessage').textContent = 'Review the current amount and date before saving.'; return;
+  }
+  accountBusy = true; renderAccountStart();
+  $('#accountStartMessage').textContent = 'Saving account start…';
+  const result = await saveBoardSettings(accountReview.value);
+  accountBusy = false; accountReview = null;
+  $('#accountStartConfirmed').checked = false;
+  $('#accountStartReviewBox').hidden = true;
+  if (result.ok) {
+    $('#accountStartForm').hidden = true;
+    $('#accountStartEdit').setAttribute('aria-expanded', 'false');
+  }
+  renderAccountStart();
+  $('#accountStartMessage').textContent = result.ok ? 'Account start saved for this board.' : `Account start was not confirmed as saved: ${result.error} Refresh before retrying; your draft is kept.`;
+  (result.ok ? $('#accountStartEdit') : $('#accountStartRetry')).focus();
+  rerender('board-settings');
 }
 
 function groupSection(g) {
@@ -149,7 +266,7 @@ function aboutSection() {
 
 function buildSkeleton() {
   $('#setNav').innerHTML = SECTIONS.map((s, i) => `<a href="#settings/${s.id}" data-sec="${s.id}"${i === 0 ? ' class="on" aria-current="true"' : ''}>${icon(s.icon)}<span>${esc(s.nav)}</span></a>`).join('');
-  $('#setMain').innerHTML = [modeSection(), runtimeSection(), ...M.GROUPS.map(groupSection), howSection(), sourceSection(), logSection(), appearanceSection(), aboutSection()].join('');
+  $('#setMain').innerHTML = [modeSection(), accountStartSection(), runtimeSection(), ...M.GROUPS.map(groupSection), howSection(), sourceSection(), logSection(), appearanceSection(), aboutSection()].join('');
 }
 
 // ---------- Fleet setting fields ----------
@@ -423,6 +540,7 @@ function renderBar(ctx) {
 // ---------- Rendering ----------
 export function renderSettings(ctx) {
   lastCtx = ctx;
+  renderAccountStart();
   const config = loadedConfig(ctx);
   const before = state;
   state = M.adopt(state, config, ctx.feeds['fleet-config']?.reason ?? null);
@@ -579,6 +697,39 @@ export function initSettings(options) {
   addTerms(M.FIELD_TERMS);
   buildSkeleton();
   renderFields(true);
+  renderAccountStart();
+  onBoardSettingsChange(() => { renderAccountStart(); rerender('board-settings'); });
+  refreshBoardSettings();
+  // Keep the accessor current even while Desk is selected. Hidden pages do
+  // no background work; returning to the page rechecks the saved value.
+  setInterval(() => { if (!document.hidden) refreshBoardSettings(); }, 30000);
+  addEventListener('focus', () => refreshBoardSettings());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshBoardSettings(); });
+  $('#accountStartEdit').addEventListener('click', () => {
+    if (accountBusy || !M.accountStartRow(boardSettingsState()).editable) return;
+    const draft = M.accountStartDraft(boardSettingsState().accountStart);
+    $('#accountStartAmount').value = draft.amount;
+    $('#accountStartDate').value = draft.date;
+    $('#accountStartClear').checked = false;
+    $('#accountStartForm').hidden = false;
+    $('#accountStartEdit').setAttribute('aria-expanded', 'true');
+    resetAccountReview();
+    $('#accountStartAmount').focus();
+  });
+  $('#accountStartRetry').addEventListener('click', () => refreshBoardSettings());
+  $('#accountStartForm').addEventListener('input', resetAccountReview);
+  // The confirmation tick changes only send eligibility, not the draft.
+  $('#accountStartConfirmed').addEventListener('input', event => event.stopPropagation());
+  $('#accountStartConfirmed').addEventListener('change', renderAccountStart);
+  $('#accountStartReview').addEventListener('click', reviewAccountStart);
+  $('#accountStartForm').addEventListener('submit', saveAccountStart);
+  $('#accountStartCancel').addEventListener('click', () => {
+    if (accountBusy) return;
+    resetAccountReview();
+    $('#accountStartForm').hidden = true;
+    $('#accountStartEdit').setAttribute('aria-expanded', 'false');
+    $('#accountStartEdit').focus();
+  });
   const main = $('#scr-settings');
 
   main.addEventListener('input', e => {

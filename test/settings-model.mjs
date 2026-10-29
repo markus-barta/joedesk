@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
+import { runInNewContext } from 'node:vm';
+import { SETTINGS_SECTION_IDS, PHONE_SETTINGS_NOTE, fleetSettingsControls } from '../scripts/browser/settings-checks.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -22,6 +24,223 @@ const { withNextFleetRevision } = await import('../fleet-config.mjs');
 const schema = JSON.parse(readFileSync(new URL('../contracts/fleet-config.schema.json', import.meta.url)));
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const NB = '\u00a0'; // numbers never part from their units
+
+test('Settings browser expectations include Account start in both rendered sections and canonical sub-nav links', async () => {
+  const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
+  const previous = globalThis.document;
+  const doc = htmlDocument('<nav id="setNav"></nav><main id="setMain"></main>');
+  doc.documentElement = { dataset: {} };
+  globalThis.document = doc;
+  try {
+    const page = await builders('settings.js', ['buildSkeleton', 'renderFields']);
+    const { addTerms } = await import('../public/joe/ui.js');
+    addTerms(M.FIELD_TERMS);
+    page.buildSkeleton();
+    const main = doc.querySelector('#setMain');
+    const sections = main.children.filter(node => typeof node !== 'string' && node.matches('.set-sec'));
+    assert.deepEqual(sections.map(node => node.id), SETTINGS_SECTION_IDS);
+    const links = doc.querySelectorAll('#setNav a');
+    assert.deepEqual(links.map(node => node.dataset.sec), SETTINGS_SECTION_IDS);
+    assert.deepEqual(links.map(node => node.getAttribute('href')), SETTINGS_SECTION_IDS.map(id => `#settings/${id}`));
+    assert.equal(links[1].textContent, 'Account start');
+
+    // Render the real cold/unavailable fleet fields alongside the independent
+    // account form. The old page-wide selector counted its four hidden inputs.
+    page.renderFields(true);
+    assert.deepEqual(main.querySelectorAll('input').map(node => node.id), [
+      'accountStartAmount', 'accountStartDate', 'accountStartClear', 'accountStartConfirmed',
+    ]);
+    // The small Node DOM handles individual selectors; supply native union
+    // semantics while running the exact function serialized by the browser gate.
+    const root = { querySelectorAll: selector => [...new Set(selector.split(',').flatMap(part => main.querySelectorAll(part.trim())))] };
+    const controls = () => Array.from(runInNewContext(`(${fleetSettingsControls.toString()})(root)`, { root }));
+    assert.equal(controls().length, 0);
+    assert.equal(main.querySelectorAll('[data-value]').some(node => node.textContent === 'Not available'), true);
+
+    // Hidden or disabled fleet controls still fail, across every control type.
+    // Excluding only visible inputs would conceal a real outage regression.
+    const group = doc.querySelector('#grp-desks');
+    for (const html of [
+      '<input id="unexpected" hidden disabled>', '<select id="unexpected" hidden disabled></select>',
+      '<textarea id="unexpected" hidden disabled></textarea>', '<button id="unexpected" role="switch" hidden disabled></button>',
+      '<button id="unexpected" data-bump="1" hidden disabled></button>', '<button id="unexpected" class="tog" hidden disabled></button>',
+      '<button id="unexpected" data-wwdel="0" hidden disabled></button>', '<button id="wwAdd" hidden disabled></button>',
+    ]) {
+      group.insertAdjacentHTML('afterbegin', html);
+      assert.equal(controls().length, 1, html);
+      group.children[0].remove();
+    }
+    // A control outside the account section cannot evade the assertion by
+    // reusing an account input id, or by being outside the usual fleet rows.
+    doc.querySelector('#set-how').insertAdjacentHTML('afterbegin', '<input id="accountStartAmount">');
+    assert.equal(controls().length, 1);
+  } finally { globalThis.document = previous; }
+});
+
+test('phone Settings note exactly describes the independent account and appearance settings', async () => {
+  const { htmlDocument } = await import('./fixtures/preview-dom.mjs');
+  const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  assert.equal(doc.querySelector('.set-phone-note').textContent.trim(), PHONE_SETTINGS_NOTE);
+});
+
+test('account start row shows the saved EUR amount/date or exact honest unset text with a reason', () => {
+  const unset = "Not set: the whole account's 'Since start' stays hidden until you set it.";
+  const accountStart = { amountEur: 12.34, date: '2024-02-29' };
+  assert.deepEqual(M.accountStartRow({ accountStart, reason: null }), { text: `Account start: €${NB}12,34 on 2024-02-29`, note: '', editable: true });
+  for (const reason of ['missing', 'invalid', 'unreadable', 'unset', 'loading', 'refresh_failed']) {
+    const row = M.accountStartRow({ accountStart: null, reason });
+    assert.equal(row.text, unset);
+    assert.equal(row.editable, !['loading', 'refresh_failed'].includes(reason));
+    if (reason !== 'unset') assert.ok(row.note);
+  }
+  assert.match(M.accountStartRow({ accountStart, reason: 'refresh_failed' }).text, /Not set/);
+  assert.equal(M.accountStartRow({ accountStart: {}, reason: null }).editable, false);
+  assert.deepEqual(M.accountStartDraft(null), { amount: '', date: '', clear: false }, 'no sample defaults');
+  assert.deepEqual(M.accountStartDraft(accountStart), { amount: '12.34', date: '2024-02-29', clear: false });
+});
+
+test('account start review validates text without rounding, keeps calendar dates and permits a reviewed clear', () => {
+  const snapshot = { accountStart: null, reason: 'missing' };
+  const draft = { amount: '12,34', date: '2024-02-29', clear: false };
+  const review = M.reviewAccountStart(draft, snapshot);
+  assert.deepEqual(review.value, { accountStart: { amountEur: 12.34, date: '2024-02-29' } });
+  assert.equal(review.base, 'null'); assert.match(review.before, /Not set/);
+  assert.equal(review.after, `Account start: €${NB}12,34 on 2024-02-29`);
+  for (const amount of ['', '0', '-1', '1.001', '1,001', '1.234,56', '1,234.56', '1e2', 'Infinity', '0x10']) assert.ok(M.reviewAccountStart({ ...draft, amount }, snapshot).error, amount);
+  assert.ok(M.reviewAccountStart({ ...draft, date: '2023-02-29' }, snapshot).error);
+  const saved = { ...review.value, reason: null };
+  assert.match(M.reviewAccountStart(draft, saved).error, /matches the saved/);
+  const clear = M.reviewAccountStart({ amount: '', date: '', clear: true }, saved);
+  assert.deepEqual(clear.value, { accountStart: null }); assert.match(clear.after, /Not set/);
+  for (const reason of ['loading', 'refresh_failed']) assert.match(M.reviewAccountStart(draft, { accountStart: null, reason }).error, /Refresh/);
+  assert.equal(M.reviewAccountStart(draft, { accountStart: null, reason: 'invalid' }).error, undefined, 'a corrupt setting can be replaced');
+});
+
+test('JOED-155 Low 2: reviewed unset replaces missing or damaged storage with an honest explanation', () => {
+  for (const reason of ['missing', 'invalid', 'unreadable']) {
+    const review = M.reviewAccountStart({ clear: true }, { accountStart: null, reason });
+    assert.equal(review.error, undefined, reason);
+    assert.deepEqual(review.value, { accountStart: null });
+    assert.equal(review.before, `Replace the ${reason} account start with 'not set'.`);
+    assert.match(review.after, /Not set/);
+  }
+  assert.match(M.reviewAccountStart({ clear: true }, { accountStart: null, reason: 'unset' }).error, /matches the saved/);
+});
+
+test('account start rendered form requires confirmation, invalidates edited/stale reviews and keeps failed drafts', async () => {
+  const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
+  const board = await import('../public/joe/board-settings.js');
+  const realDocument = globalThis.document, realFetch = globalThis.fetch;
+  const doc = htmlDocument('<nav id="setNav"></nav><main id="setMain"></main>');
+  let focused = null, calls = [], stored = { accountStart: null, reason: 'missing' }, fail = false;
+  const selectAll = doc.querySelectorAll.bind(doc);
+  doc.querySelectorAll = selector => selectAll(selector).map(el => { el.focus = () => { focused = el.id; }; return el; });
+  globalThis.document = doc;
+  globalThis.fetch = async (_, init) => {
+    calls.push(init);
+    if (init.method === 'POST') {
+      if (fail) return { status: 500, json: async () => ({ ok: false, error: 'fixture store failure' }) };
+      stored = { ...JSON.parse(init.body), reason: JSON.parse(init.body).accountStart ? null : 'unset' };
+      return { status: 200, json: async () => ({ ok: true, ...stored }) };
+    }
+    return { status: 200, json: async () => stored };
+  };
+  const $ = selector => doc.querySelector(selector);
+  const event = { preventDefault() {} };
+  try {
+    await board.refreshBoardSettings();
+    const page = await builders('settings.js', ['buildSkeleton', 'renderAccountStart', 'reviewAccountStart', 'saveAccountStart', 'resetAccountReview']);
+    page.buildSkeleton(); page.renderAccountStart();
+    assert.match($('#accountStartSummary').textContent, /Not set/);
+    assert.equal($('#accountStartAmount').getAttribute('placeholder'), null);
+    for (const [input, label] of [['accountStartAmount', 'Amount in EUR'], ['accountStartDate', 'Start date']]) {
+      assert.match($(`label[for="${input}"]`).textContent, new RegExp(label));
+    }
+    assert.equal($('#accountStartSummary').getAttribute('aria-live'), 'polite');
+    $('#accountStartForm').hidden = false;
+    // Low 6: validate each field, describe its own error and focus the first failure.
+    for (const [amount, date, invalid] of [
+      ['', '', ['Amount', 'Date']], ['0', '2024-02-29', ['Amount']],
+      ['1.001', '2024-02-29', ['Amount']], ['12.34', '2023-02-29', ['Date']],
+      ['12.34', '', ['Date']],
+    ]) {
+      $('#accountStartAmount').value = amount; $('#accountStartDate').value = date;
+      page.resetAccountReview(); page.reviewAccountStart();
+      assert.equal(focused, `accountStart${invalid[0]}`);
+      for (const field of ['Amount', 'Date']) {
+        const input = $(`#accountStart${field}`), bad = invalid.includes(field);
+        assert.equal(input.getAttribute('aria-invalid'), String(bad));
+        const errorId = `accountStart${field}Error`;
+        assert.equal(input.getAttribute('aria-describedby').split(/\s+/).includes(errorId), true);
+        assert.equal(Boolean($(`#${errorId}`).textContent), bad);
+      }
+    }
+    $('#accountStartClear').checked = true; page.resetAccountReview();
+    for (const field of ['Amount', 'Date']) {
+      assert.equal($(`#accountStart${field}`).getAttribute('aria-invalid'), 'false');
+      assert.equal($(`#accountStart${field}Error`).textContent, '');
+    }
+    $('#accountStartClear').checked = false; page.resetAccountReview();
+    $('#accountStartAmount').value = '12,34'; $('#accountStartDate').value = '2024-02-29';
+    page.reviewAccountStart();
+    assert.equal(focused, 'accountStartConfirmed');
+    assert.equal($('#accountStartSave').disabled, true);
+    const count = calls.length;
+    await page.saveAccountStart(event);
+    assert.equal(calls.length, count, 'unchecked review never writes');
+    $('#accountStartConfirmed').checked = true;
+    $('#accountStartAmount').value = '13.34';
+    await page.saveAccountStart(event);
+    assert.equal(calls.length, count, 'unannounced control changes never send the prior review');
+    assert.match($('#accountStartMessage').textContent, /Review the current/);
+    page.reviewAccountStart(); $('#accountStartConfirmed').checked = true;
+    await page.saveAccountStart(event);
+    assert.equal(calls.at(-1).method, 'POST');
+    assert.deepEqual(JSON.parse(calls.at(-1).body), { accountStart: { amountEur: 13.34, date: '2024-02-29' } });
+    assert.equal($('#accountStartForm').hidden, true);
+    assert.equal(focused, 'accountStartEdit');
+    assert.equal($('#accountStartSummary').textContent, `Account start: €${NB}13,34 on 2024-02-29`);
+    assert.equal($('#accountStartMessage').textContent, 'Account start saved for this board.');
+
+    $('#accountStartForm').hidden = false;
+    $('#accountStartAmount').value = '14.34'; page.reviewAccountStart();
+    $('#accountStartConfirmed').checked = true;
+    stored = { accountStart: { amountEur: 15.34, date: '2024-02-29' }, reason: null };
+    await board.refreshBoardSettings(); page.renderAccountStart();
+    assert.equal($('#accountStartSave').disabled, true);
+    assert.equal($('#accountStartReviewBox').hidden, true);
+    assert.match($('#accountStartMessage').textContent, /saved account start changed/);
+
+    page.reviewAccountStart(); $('#accountStartConfirmed').checked = true; fail = true;
+    await page.saveAccountStart(event);
+    assert.equal($('#accountStartForm').hidden, false);
+    assert.equal($('#accountStartAmount').value, '14.34');
+    assert.equal($('#accountStartSave').disabled, true);
+    assert.equal(focused, 'accountStartRetry');
+    assert.match($('#accountStartMessage').textContent, /fixture store failure.*Refresh before retrying/);
+    assert.equal(board.accountStart(), null);
+    assert.match($('#accountStartReason').textContent, /could not be refreshed/);
+    fail = false; await board.refreshBoardSettings();
+    $('#accountStartClear').checked = true; page.resetAccountReview();
+    assert.equal($('#accountStartAmount').disabled, true);
+    page.reviewAccountStart(); $('#accountStartConfirmed').checked = true;
+    await page.saveAccountStart(event);
+    assert.deepEqual(JSON.parse(calls.at(-1).body), { accountStart: null });
+    assert.equal(board.accountStart(), null);
+    for (const reason of ['missing', 'invalid', 'unreadable']) {
+      stored = { accountStart: null, reason }; await board.refreshBoardSettings();
+      $('#accountStartForm').hidden = false; page.resetAccountReview(); page.reviewAccountStart();
+      assert.equal($('#accountStartBefore').textContent, `Before: Replace the ${reason} account start with 'not set'.`);
+      $('#accountStartConfirmed').checked = true;
+      await page.saveAccountStart(event);
+      assert.deepEqual(JSON.parse(calls.at(-1).body), { accountStart: null });
+      assert.deepEqual(board.boardSettingsState(), { accountStart: null, reason: 'unset' });
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+    if (realDocument === undefined) delete globalThis.document; else globalThis.document = realDocument;
+  }
+});
 
 test('P6 Saved captions: window and long symbol counts, complete strings for accessible ellipsis', () => {
   assert.equal(M.savedText(M.FIELD['cadence.wakeWindows'], '[]'), '0 wake windows');

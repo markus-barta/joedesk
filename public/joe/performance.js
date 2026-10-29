@@ -3,8 +3,36 @@
 // aggregate practice capital, never infer individual bases from current equity.
 import { decimalUnits, divRound } from './contracts/decimal.mjs';
 import { NOT_EXACT_REASONS, outageValue } from './board-state.js';
+import { nyDay } from './time.mjs';
 
 export const STARTING_MONEY = decimalUnits('15000');
+// Since start counts from the paper desks' verified ledger start, one New York
+// trading day for all three desks: the board pusher's PERIOD_START
+// 2026-09-10T04:00:00Z (desk-ledger.mjs; J's FIXED_PERIOD_START in
+// family-ledger.mjs is the same instant). Amy confirmed it on 2026-10-29 (A4).
+export const SINCE_START = '2026-09-10';
+const DESK_IDS = ['j', 'joe', 'joel'];
+
+// Each desk's Since start as a New York day. `effective` is the day it counts
+// from: its own accounting.periodStart when the feed sends one, else
+// SINCE_START. The closed-trade record (Results' trackingStart) is checked
+// against those effective days, never against the fallback alone: `differ`
+// lists the desks whose day it contradicts. An own accounting date is
+// authoritative and stays shown; a fallback day that Results contradicts is
+// not shown (null in `days`). `common` is the shown day all three share.
+export function sinceStarts(feeds) {
+  const desks = feeds?.data?.value?.desks ?? [];
+  const trackingStart = feeds?.results?.value?.trackingStart ?? null;
+  const own = Object.fromEntries(DESK_IDS.map(id => {
+    const periodStart = desks.find(desk => desk.id === id)?.accounting?.periodStart;
+    return [id, periodStart ? nyDay(periodStart) : null];
+  }));
+  const effective = Object.fromEntries(DESK_IDS.map(id => [id, own[id] ?? SINCE_START]));
+  const differ = trackingStart ? DESK_IDS.filter(id => effective[id] !== trackingStart) : [];
+  const days = Object.fromEntries(DESK_IDS.map(id => [id, own[id] ?? (differ.includes(id) ? null : SINCE_START)]));
+  const common = days.j && DESK_IDS.every(id => days[id] === days.j) ? days.j : null;
+  return { days, effective, own, common, trackingStart, differ, conflict: differ.length > 0 };
+}
 
 export function exactMoney(value) {
   if (value?.currency !== 'EUR') return null;
@@ -22,13 +50,21 @@ export function percentOf(result, base) {
     ? divRound(result * 10000n, base) : null;
 }
 
-export function todayPercent(states, source) {
+// The money Today's percentage divides by: the desks' money at the start of
+// today, that is their exact money now minus today's exact result, both from
+// one snapshot. Null whenever todayPercent has no percentage to show.
+export function todayBase(states, source) {
   if (source?.method === 'session-open-estimate') return null;
   const day = states['today.dayPnl'], equity = states['today.equity'];
   const result = exactCell(day), moneyNow = exactCell(equity);
   // Never combine observations from different snapshots into a new baseline.
   if (result === null || moneyNow === null || day.valueReceivedAt !== equity.valueReceivedAt) return null;
-  return percentOf(result, moneyNow - result);
+  return moneyNow - result > 0n ? moneyNow - result : null;
+}
+
+export function todayPercent(states, source) {
+  const base = todayBase(states, source);
+  return base === null ? null : percentOf(exactCell(states['today.dayPnl']), base);
 }
 
 export const sincePercent = states => percentOf(exactCell(states['today.totalPnl']), STARTING_MONEY);

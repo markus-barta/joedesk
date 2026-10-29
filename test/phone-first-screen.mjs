@@ -5,15 +5,48 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
-import { cashSessionSnapshot, designSnapshot } from '../scripts/browser/settings-fixtures.mjs';
+import { cashSessionSnapshot, designSnapshot, switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { preflightSnapshot } from '../scripts/browser/board.mjs';
+import { collapsedMoneySummariesOk } from '../scripts/browser/desk-disclosures.mjs';
+import { copyText } from '../scripts/browser/shots.mjs';
 const { compactDesk, disclosureProblem, rowProblems, syncDeskDisclosures, toggleDeskDisclosure, heroLeft } = await import('../public/joe/desk.js');
+const { boardStates } = await import('../public/joe/board-state.js');
+// JOED-156: the whole-account block fills the slot above the hero.
+const A = await import('../public/joe/account.js');
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const cell = (state, reason = null, value = null, retained = false) => ({ state, reason, value, retained });
 function context() {
   const feeds = { data: { value: structuredClone(valid.data) } }, now = valid.data.receivedAt;
   return { feeds, now, states: panelStates(feeds, now) };
 }
+
+test('JOED-163: switch-set collapsed summaries keep attributed faults and one complete accessible reason', () => {
+  for (const reason of ['not_exact_yet', 'source_unavailable', 'not_exact_yet']) {
+    const data = switchSetSnapshot(); data.receivedAt = data.generatedAt;
+    for (const bag of [data.totals, ...data.desks.map(d => d.money)]) for (const field of Object.keys(bag.reasons)) bag.reasons[field] = reason;
+    for (const source of Object.values(data.pnlSources)) source.reason = reason;
+    const feeds = { data: { value: data } }, now = data.generatedAt, ctx = { feeds, now, states: boardStates(feeds, now) };
+    const controls = ['account', 'j', 'joe', 'joel'].map(key => {
+      const doc = htmlDocument(key === 'account' ? heroLeft(ctx) : compactDesk(ctx, key));
+      const summary = doc.querySelector('.disclosure-warning .summary-text');
+      return { key, hidden: true, visible: false, expanded: 'false', warning: summary.textContent, detail: summary.getAttribute('title'),
+        accessible: doc.querySelector('.disclosure-warning .vh').textContent, icon: doc.querySelector('.disclosure-warning use').getAttribute('href') };
+    });
+    const snapshot = copyText({ controls, horizontal: { scroll: 390, inner: 390 } }), neutral = reason === 'not_exact_yet';
+    assert.equal(collapsedMoneySummariesOk(snapshot, neutral), true, JSON.stringify(snapshot.controls));
+    const reject = mutate => { const bad = structuredClone(snapshot); mutate(bad); assert.equal(collapsedMoneySummariesOk(bad, neutral), false); };
+    reject(s => { s.controls[0].detail = s.controls[0].warning; s.controls[0].accessible = ''; });
+    reject(s => { s.controls[0].warning = 'Open result: unavailable'; });
+    reject(s => { s.controls[0].icon = '#i-check'; });
+    reject(s => { s.controls[1].visible = true; });
+    reject(s => { s.controls[1].key = 'account'; });
+    reject(s => { s.horizontal.scroll++; });
+    if (!neutral) {
+      reject(s => { s.controls[0].detail = s.controls[0].warning; s.controls[0].accessible = s.controls[0].detail; });
+      reject(s => { s.controls[0].detail += ' · not reported by the broker'; s.controls[0].accessible = s.controls[0].detail; });
+    }
+  }
+});
 
 test('summary selects the worst actual state and retains every independent reason', () => {
   assert.equal(disclosureProblem([['Cash', cell('fresh', null, {})]]), null);
@@ -37,8 +70,8 @@ test('opened not-exact desk summaries leave shared reasons in the body and keep 
     const p = disclosureProblem(candidates);
     assert.equal(p.icon, 'info');
     assert.equal(p.expanded, null, `${reason}: no repeated detail in the expanded header`);
-    assert.equal(p.sharedReason, reason === 'not_exact_yet' ? 'not exact yet' : 'start-of-day value missing');
-    assert.equal(p.text, reason === 'not_exact_yet' ? 'Today: not exact yet' : 'Today: not exact yet · start-of-day value missing');
+    assert.equal(p.sharedReason, reason === 'not_exact_yet' ? 'not exact' : 'start-of-day value missing');
+    assert.equal(p.text, reason === 'not_exact_yet' ? 'Today: not exact' : 'Today: not exact · start-of-day value missing');
     const mixed = disclosureProblem([...candidates, ['History', cell('stale', 'snapshot_stale', {})]]);
     assert.equal(mixed.expanded.detail, 'History: stale · updates are late');
   }
@@ -47,15 +80,39 @@ test('opened not-exact desk summaries leave shared reasons in the body and keep 
 test('one-line summaries expose every independent reason in the accessible button text', () => {
   const ctx = context();
   ctx.states['today.openPnl'] = cell('broken', 'not_exact_yet');
-  ctx.states.paperAccount = cell('stale', 'snapshot_stale', { amount: '12.34', currency: 'EUR' });
-  ctx.states.paperCash = cell('broken', 'gateway_unconfirmed');
+  ctx.states['today.equity'] = cell('stale', 'snapshot_stale', { amount: '12.34', currency: 'EUR' });
   const doc = htmlDocument(heroLeft(ctx)), warning = doc.querySelector('.disclosure-warning');
   const summary = warning.querySelector('.summary-text'), accessible = warning.querySelector('.vh');
   assert.equal(summary.getAttribute('aria-hidden'), 'true', 'do not announce the short reason twice');
   assert.equal(accessible.textContent, summary.getAttribute('title'));
-  for (const label of ['Open positions: not exact yet', 'Paper account: stale', 'Cash: unavailable']) {
-    assert.ok(accessible.textContent.includes(label));
+  assert.doesNotMatch(accessible.textContent, /not exact yet/);
+  // JOED-153: the phone section is the desks' money; the whole account left it for the slot above the hero.
+  assert.equal(doc.querySelector('[data-desk-disclosure="account"] span').textContent, 'Desks’ money');
+  for (const label of ['Open result: not exact', 'Desks’ money: stale']) assert.ok(accessible.textContent.includes(label), label);
+  assert.doesNotMatch(accessible.textContent, /Paper account|Cash/);
+});
+
+test('the whole account above the hero states its own figures in place, with their reasons, open on a phone', () => {
+  const ctx = context();
+  ctx.states.paperAccount = cell('stale', 'snapshot_stale', { amount: '12.34', currency: 'EUR' });
+  ctx.states.paperCash = cell('broken', 'gateway_unconfirmed');
+  // The value keeps its own state words: never shown as current.
+  const value = htmlDocument(A.valueHtml(ctx.states.paperAccount)).querySelector('.bn');
+  assert.equal(value.textContent, '€12,34');
+  const state = A.stateLine(ctx.states.paperAccount);
+  assert.equal(state.tone, 'warn');
+  assert.match(state.text, /updates are late/);
+  // Cash keeps its own reason beside its dash, in the phone's Since start · Cash line too.
+  const parts = A.subParts(ctx, null, { reason: 'missing' });
+  for (const html of [parts.wide, parts.narrow]) {
+    const cash = htmlDocument(html).querySelector('[data-cash="acct.cash"]');
+    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported · broker connection not confirmed');
+    assert.equal(cash.getAttribute('aria-label'), 'Cash not reported · broker connection not confirmed');
+    assert.equal(cash.dataset.state, 'broken');
   }
+  // On a phone the block is open, no collapsed section of its own: the
+  // problems sit in place, on the first screen (the P3 phone-first checks).
+  assert.equal(htmlDocument(A.accountSkeleton()).querySelectorAll('[data-desk-disclosure]').length, 0);
 });
 
 test('cash session fixture passes real ingress while preserving desk content and withholding current money', () => {
@@ -91,19 +148,19 @@ test('fresh position panels expose null-field and unmatched-desk problems in the
   const p = disclosureProblem([['Positions', c], ...rowProblems(c)]);
   assert.equal(p.tone, 'bad');
   assert.match(p.text, /AAA desk: unavailable/);
-  assert.match(p.detail, /AAA Worth: not exact yet/);
+  assert.match(p.detail, /AAA Worth: not exact(?! yet)/);
   assert.deepEqual(rowProblems(cell('broken')), []);
 });
 
-test('missing Cash keeps the figure’s default reason in its collapsed Account summary', () => {
+test('missing Cash keeps the figure’s default reason in the whole account above the hero', () => {
   const ctx = context();
   for (const absent of [undefined, cell('not reported')]) {
     ctx.states.paperCash = absent;
-    const doc = htmlDocument(heroLeft(ctx));
-    const summary = doc.querySelector('.disclosure-warning .summary-text');
-    assert.equal(summary.textContent, 'Cash: not reported · no data received yet');
-    assert.equal(doc.querySelector('.disclosure-warning use').getAttribute('href'), '#i-ring');
-    assert.match(doc.querySelector('.cash-reason').textContent, /no data received yet/);
+    const cash = htmlDocument(A.subParts(ctx, null, { reason: 'missing' }).narrow).querySelector('[data-cash="acct.cash"]');
+    assert.equal(cash.querySelector('b.muted').textContent, '—');
+    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported · no data received yet');
+    assert.equal(cash.getAttribute('aria-label'), 'Cash not reported · no data received yet');
+    assert.doesNotMatch(heroLeft(ctx), /data-cash=/, 'Cash is not a desk figure');
   }
 });
 
@@ -115,7 +172,7 @@ test('unavailable money leads an old check-in without losing its neutral not-exa
     for (const name of ['dayPnl', 'openPnl', 'totalPnl']) ctx.states[`desks.${desk.id}.${name}`] = cell('broken', reason);
     const doc = htmlDocument(compactDesk(ctx, desk.id));
     const summary = doc.querySelector('.disclosure-warning .summary-text');
-    assert.match(summary.textContent, reason === 'not_exact_yet' ? /Today: not exact yet/ : /Today: unavailable · not reported by the broker/);
+    assert.match(summary.textContent, reason === 'not_exact_yet' ? /Today: not exact(?! yet)/ : /Today: unavailable · not reported by the broker/);
     assert.equal(doc.querySelector('.disclosure-warning use').getAttribute('href'), reason === 'not_exact_yet' ? '#i-info' : '#i-stop');
     assert.match(summary.getAttribute('title'), /Check-in: stale/);
   }
@@ -296,27 +353,76 @@ test('real patches retain disclosure visibility and pin/focus on a rebuilt visib
   }
 });
 
-test('expanding measured chart boxes plots observed closes and current values on the first render', async t => {
-  const { drawHeroChart, drawMiniCharts } = await builders('desk.js', ['drawHeroChart', 'drawMiniCharts']);
+test('an expanded, measured session line plots observed points on the first render and names its last one', async t => {
+  const { drawHeroChart } = await builders('desk.js', ['drawHeroChart']);
   const ctx = context();
-  const doc = htmlDocument(`<div id="heroChart"></div>${['j', 'joe', 'joel'].map(id => `<div id="mini-${id}"><div class="mini-label"></div></div>`).join('')}`);
-  const charts = [doc.querySelector('#heroChart'), ...['j', 'joe', 'joel'].map(id => doc.querySelector(`#mini-${id}`))];
+  const doc = htmlDocument('<div id="heroChart"><div class="ctip"></div></div><div id="sessAxis"></div>');
+  const chart = doc.querySelector('#heroChart');
   for (const [key, value] of Object.entries({ document: doc, matchMedia: () => ({ matches: true }) })) {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     t.after(() => { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; });
   }
-  const history = { closes: Object.fromEntries(['j', 'joe', 'joel'].map(id => [id, [{ v: -1.25 }, { v: 2.5 }]])) };
-  drawHeroChart(ctx, null); drawMiniCharts(ctx, history);
-  assert.equal(doc.querySelectorAll('svg').length, 0, 'collapsed boxes cannot be measured or cached as drawn');
-  for (const chart of charts) { chart.clientWidth = 322; chart.clientHeight = 84; }
-  drawHeroChart(ctx, null); drawMiniCharts(ctx, history);
-  assert.equal(doc.querySelectorAll('svg').length, 4);
-  for (const id of ['j', 'joe', 'joel']) {
-    const svg = doc.querySelector(`#mini-${id} svg`);
-    const current = Number(ctx.states[`desks.${id}.totalPnl`].value.amount);
-    assert.equal(svg.dataset.values, `-1.25 2.5 ${current}`);
-    assert.equal(svg.getAttribute('data-zero'), '1');
-    assert.equal(svg.querySelectorAll('[data-estimate]').length, 0);
+  // Two observed points inside the open session (synthetic values).
+  const { toColumns } = await import('../public/joe/history-model.js');
+  const point = (t, amount) => ({ t, totals: { dayPnl: { amount, currency: 'EUR' } } });
+  const history = { columns: toColumns([point('2026-10-14T14:00:00.000Z', '-1'), point('2026-10-14T17:30:00.000Z', '2')]), seq: 2 };
+  assert.equal(drawHeroChart(ctx, history), true, 'a line exists');
+  assert.equal(doc.querySelectorAll('svg').length, 0, 'a collapsed box cannot be measured or cached as drawn');
+  chart.clientWidth = 322; chart.clientHeight = 28;
+  drawHeroChart(ctx, history);
+  assert.equal(doc.querySelectorAll('svg').length, 1);
+  assert.equal(chart.hidden, false);
+  assert.equal(doc.querySelector('svg').getAttribute('data-zero'), '1', 'a result line includes zero');
+  assert.equal(doc.querySelector('#sessAxis .sl-v').textContent, '+€\u00a02,00 at 19:30', 'the last observed point, with its time; never called now');
+  assert.equal(doc.querySelector('#sessAxis .sl-v').getAttribute('class'), 'sl-v gain');
+  assert.deepEqual(doc.querySelectorAll('#sessAxis span').map(s => s.textContent), ['15:30', '+€\u00a02,00 at 19:30', '22:00']);
+});
+
+// JOED-148 P0-6: no empty chart box. Without a line the box is hidden and
+// holds nothing; the market block already says when the session runs.
+test('Today’s chart renders only with a line: no clock, a day without a session, before the open and no points leave no box', async t => {
+  const { drawHeroChart } = await builders('desk.js', ['drawHeroChart']);
+  const { toColumns } = await import('../public/joe/history-model.js');
+  const doc = htmlDocument('<div id="heroChart"><div class="ctip"></div></div>'), chart = doc.querySelector('#heroChart');
+  // Reduced motion: the synthetic DOM has no path geometry for the draw-in.
+  for (const [key, value] of Object.entries({ document: doc, matchMedia: query => ({ matches: query.includes('reduced-motion') }) })) {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    t.after(() => { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; });
   }
+  chart.clientWidth = 600; chart.clientHeight = 28;
+  const point = (t, amount) => ({ t, totals: { dayPnl: { amount, currency: 'EUR' } } });
+  // Tuesday's whole session and Wednesday's first hours, as History holds them at 17:42 New York time.
+  const session = { columns: toColumns([point('2026-10-13T15:00:00.000Z', '3'), point('2026-10-13T19:00:00.000Z', '4'),
+    point('2026-10-14T14:00:00.000Z', '-1'), point('2026-10-14T17:30:00.000Z', '2')]), seq: 4 };
+  const tuesday = { columns: toColumns([point('2026-10-13T15:00:00.000Z', '3'), point('2026-10-13T19:00:00.000Z', '4')]), seq: 2 };
+  const ctx = now => ({ ...context(), now });
+  // Wed 14 Oct: during the session the line draws; a later redraw after the line vanishes removes the box.
+  assert.equal(drawHeroChart(ctx('2026-10-14T17:42:22.000Z'), session), true);
+  assert.equal(chart.hidden, false);
+  assert.equal(chart.querySelectorAll(':scope > svg').length, 1);
+  assert.equal(drawHeroChart(ctx('2026-10-14T22:00:00.000Z'), session), true, 'after the close the session keeps its line');
+  for (const [why, view, history] of [
+    ['no clock', { ...context(), now: null }, session],
+    ['before the open', ctx('2026-10-14T12:00:00.000Z'), tuesday],
+    ['a weekend day', ctx('2026-10-17T15:00:00.000Z'), session],
+    ['no result points', ctx('2026-10-14T17:42:22.000Z'), { columns: toColumns([]), seq: 0 }],
+    ['no history', ctx('2026-10-14T17:42:22.000Z'), null],
+  ]) {
+    assert.equal(drawHeroChart(view, history), false, why);
+    assert.equal(chart.hidden, true, `${why}: the box takes no space`);
+    assert.equal(chart.querySelectorAll(':scope > svg').length, 0, `${why}: no empty chart text`);
+    assert.equal(drawHeroChart(ctx('2026-10-14T17:42:22.000Z'), session), true, `${why}: the line returns`);
+    assert.equal(chart.hidden, false);
+  }
+  // The static page starts without the box, so a phase without a line never shows one.
+  const page = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
+  assert.notEqual(page.querySelector('#heroChart').getAttribute('hidden'), null);
+  assert.equal(page.querySelector('#chartTitle').textContent, 'New York market');
+  // JOED-153 M3: the line's room exists only in the session and after the close.
+  assert.ok(page.querySelector('#sessSlot #heroChart'), 'the chart sits in its reserved slot');
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\n\.sess-slot \{ display: none; \}/);
+  assert.match(css, /#deskHero\[data-phase="live"\] \.sess-slot, #deskHero\[data-phase="closed"\] \.sess-slot \{ display: block; height: 46px;/);
 });
