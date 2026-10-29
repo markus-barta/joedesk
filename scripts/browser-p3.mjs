@@ -49,8 +49,10 @@ const fmt = await import('../public/joe/format.js');
 const { STARTING_MONEY } = await import('../public/joe/performance.js');
 const { decimalUnits, divRound, UNIT } = await import('../contracts/decimal.mjs');
 const { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, disclosureProblem, rowProblems, householdDayReason, dashWords } = await import('../public/joe/desk.js');
-// JOED-153: Desk beside a Results record (it reads the page's model, so after the hooks).
+// JOED-153: Desk beside a Results record, and the pure parts of the Desk
+// checks (both read the page's model, so after the hooks).
 const { deskSessionChecks } = await import('./browser/desk-sessions.mjs');
+const { percentText, keptOnlyInAccount } = await import('./browser/desk-checks.mjs');
 const HEALTH_LINES = Object.keys(REASON_COPY).map(reason => statusSentence({ reason, tone: reason === 'board_ok' ? 'green' : 'red' }, { receipt: 9, gatewayAge: 179 }));
 
 const QA_DIR = process.env.JOED_QA_DIR ?? join(homedir(), '.local/share/joedesk-qa/p3');
@@ -163,7 +165,7 @@ async function deskChecks(page, viewport, theme, snapshot) {
     d.scope === 'Desk figures never include the kept holdings. The whole account, with them, is at the top.' && /^Desks J, Joe and Joel · their €\s15\.000 practice capital|^Desks · €\s15\.000 practice capital/.test(d.eyebrow), { primary: d.primary, kpis: d.kpis, slot: d.slot, sinceCaption, scope: d.scope, eyebrow: d.eyebrow });
   check('AC-19', `${tag}: unreported Cash is a muted dash with its reason in the caption`, d.slot[1].value === '—' && d.slot[1].muted && d.slot[1].cashReason === 'not reported · no data received yet', d.slot[1]);
   const day = decimalUnits(snapshot.totals.dayPnl.amount), equity = decimalUnits(snapshot.totals.equity.amount), since = decimalUnits(snapshot.totals.totalPnl.amount);
-  const percent = (result, base) => { const n = divRound(result * 10000n, base); return `${n < 0n ? '−' : n > 0n ? '+' : ''}${fmt.digits(n * UNIT / 100n)} %`; };
+  const percent = percentText;
   check('AC-19', `${tag}: primary euros and percentages use the exact start-of-day and since-start bases, and Today names its base`, d.primary[0].value.replace(/\s/g, '') === fmt.eur(day, true).replace(/\s/g, '') && d.primary[1].value.replace(/\s/g, '') === fmt.eur(since, true).replace(/\s/g, '') &&
     d.primary[0].pct === percent(day, equity - day) && d.primary[1].pct === percent(since, decimalUnits('15000')) && copyText(d.primary[0].basis) === copyText(`of ${fmt.eur(equity - day)}`), d.primary);
   check('M6', `${tag}: the primary figures open Results for their day and for all time`, d.primary[0].link === '#results?period=day&date=2026-10-14&desk=all' && d.primary[1].link === '#results?period=all&date=2026-10-14&desk=all' &&
@@ -196,9 +198,8 @@ async function deskChecks(page, viewport, theme, snapshot) {
   check('AC-42', `${tag}: worth bars proportional within each currency`, viewport.mobile || (worth.length >= 2 && !proportional(worth, 'worth')), worth);
   check('AC-7', `${tag}: kept symbols only under Kept holdings`, !d.positions.some(s => ['SXR8', 'TSLA'].includes(s)) && d.kept.map(k => k.sym).join() === 'SXR8,TSLA' && d.kept.every(k => k.label) && !d.notJoe, { positions: d.positions, kept: d.kept });
   check('AC-8', `${tag}: kept rows are inert`, d.kept.every(k => k.interactive === 0 && !k.pointer), d.kept);
-  check('AC-9', `${tag}: kept values counted only in the paper account`, /Left out of every desk result and of Results; counted in the paper account \(€\s31\.482,75\)/.test(d.keptCap) &&
-    /^Worth €\s12\.248,00 and \$\s441,20 now, each in its own currency\.$/.test(d.keptState) &&
-    d.kpis[1].value.replace(/\s/g, '') === '€14.997,18' && d.kpis[2].value.replace(/\s/g, '') === '€31.482,75', { cap: d.keptCap, state: d.keptState, equity: d.kpis[1].value });
+  // JOED-153: the paper account (with the kept holdings) is the whole-account slot's first figure.
+  check('AC-9', `${tag}: kept values counted only in the paper account`, keptOnlyInAccount(d), { cap: d.keptCap, state: d.keptState, equity: d.kpis[1]?.value, account: d.slot[0]?.value });
 
   // Details popover: opaque, anchored, closes on Escape, moves nothing.
   const before = await page.evaluate(`__audit.rects(${JSON.stringify(SHIFT_SELECTORS)})`);

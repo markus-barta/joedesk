@@ -563,11 +563,31 @@ test('JOED-153 M4 touch: first tap shows the tip, a second tap or its link opens
   assert.match(DESK_BLOCK, /\.desk-sessions \.bars-tap \{[^}]*background: var\(--tip-bg\)/);
 });
 
+// Gate finding 7: P3's Desk checks must read the page as it now is. On the
+// design scenario the page's own render passes AC-9 (the paper account is the
+// whole-account slot's first figure, no longer a hero figure) and writes its
+// percentages exactly as the check expects them (with the no-break space).
+test('JOED-153 browser checks: AC-9 and the percent text hold on the page’s own render of the P3 design scenario', async () => {
+  const { keptOnlyInAccount, percentText } = await import('../scripts/browser/desk-checks.mjs');
+  const { scenario, NOW: P3_NOW, at, preflightSnapshot } = await import('../scripts/browser/board.mjs');
+  const { snapshot } = scenario(P3_NOW);
+  const now = at(P3_NOW, 9), feeds = { data: { value: preflightSnapshot('data', snapshot, null, P3_NOW).value }, results: { value: null, reason: 'feed_not_received' } };
+  const ctx = { feeds, now, states: boardStates(feeds, now) };
+  const hero = htmlDocument(desk.heroLeft(ctx)), slot = htmlDocument(desk.accountSlot(ctx)), kept = htmlDocument(desk.keptHtml(ctx));
+  const value = k => (k.querySelector('dd .bn') ?? k.querySelector('.cash-amount'))?.textContent;
+  const d = { kpis: hero.querySelectorAll('.kpi').map(k => ({ value: value(k) })), slot: slot.querySelectorAll('.kpi').map(k => ({ value: value(k) })),
+    keptCap: text(kept.querySelector('.keep-cap')), keptState: text(kept.querySelector('.pstate')) };
+  assert.equal(d.kpis.length, 2, 'the hero keeps Open result and Desks’ money only');
+  assert.equal(keptOnlyInAccount(d), true, JSON.stringify(d));
+  const day = decimalUnits(snapshot.totals.dayPnl.amount), equity = decimalUnits(snapshot.totals.equity.amount), since = decimalUnits(snapshot.totals.totalPnl.amount);
+  assert.deepEqual(hero.querySelectorAll('.performance-pct').map(p => p.textContent), [percentText(day, equity - day), percentText(since, decimalUnits('15000'))]);
+});
+
 // The browser check (scripts/browser/desk-sessions.mjs) expects what Desk
 // renders from the same design fixtures, and both fixtures pass the board's
 // ingress, so the browser gate can fail only on what the page draws.
 test('JOED-153 browser fixture: the session checks expect what Desk renders from the design record', async () => {
-  const { expectedSessions, SESSIONS, BEFORE_OPEN } = await import('../scripts/browser/desk-sessions.mjs');
+  const { expectedSessions, SESSIONS, BEFORE_OPEN, quietJoelResults } = await import('../scripts/browser/desk-sessions.mjs');
   const { scenario, NOW: P3_NOW, at, preflightSnapshot } = await import('../scripts/browser/board.mjs');
   const { designResults } = await import('../scripts/browser/results.mjs');
   const { toColumns } = await import('../public/joe/history-model.js');
@@ -615,5 +635,16 @@ test('JOED-153 browser fixture: the session checks expect what Desk renders from
         assert.ok(link.getAttribute('aria-label').includes(`: ${eur(want.last.desks[id], true)}. Opens Results`), id);
       }
     }
+  }
+  // The one-row variant (quietJoelChecks): accepted; Joel is one row with his
+  // positions inside, and keeps it when the positions panel goes stale.
+  const quiet = quietJoelResults(P3_NOW); delete quiet.receivedAt;
+  const quietIndex = indexResults(preflightSnapshot('results', quiet, null, P3_NOW).value);
+  const data = preflightSnapshot('data', scenario(P3_NOW).snapshot, null, P3_NOW).value;
+  for (const [later, held] of [[at(P3_NOW, 9), `1${NB}position`], [at(P3_NOW, 75), 'positions not current']]) {
+    const feeds = { data: { value: data }, results: { value: { ...quietIndex.meta, index: quietIndex } } };
+    const ctx = { feeds, now: later, states: boardStates(feeds, later) }, facts = desk.deskFacts(ctx);
+    assert.deepEqual(DESK_IDS.map(id => desk.noTradesSinceStart(ctx, facts, id)), [null, null, '2026-09-10'], later);
+    assert.ok(text(htmlDocument(deskCard(ctx, 'joel')).querySelector('.drow .who')).endsWith(`· no trades since 10${NB}Sep · ${held}`), later);
   }
 });

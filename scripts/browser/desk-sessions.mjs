@@ -5,7 +5,7 @@
 // importing it launches nothing. Import it after the page-module resolve
 // hooks (browser-p3.mjs registers them): it reads the page's own model.
 import { scenario, NOW, at, ACTOR } from './board.mjs';
-import { designResults } from './results.mjs';
+import { designResults, withTradeSummaries } from './results.mjs';
 import { VIEWPORTS, THEMES, configure, load, settle, waitFor } from './shots.mjs';
 import { setDeskDisclosures } from './desk-disclosures.mjs';
 import { sessionDayName } from '../../time.mjs';
@@ -26,6 +26,14 @@ export const SESSIONS = ['2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06',
 const words = text => String(text ?? '').replace(/\s+/g, ' ').trim();
 // Amounts compare without their spaces: the figure markup puts none after €.
 const bare = text => String(text ?? '').replace(/\s+/g, '');
+
+// The design record with Joel's trades taken out (every day summary
+// recomputed): a record that covers his whole period and shows no trade, so
+// his card is one row (M5), whatever his positions panel does.
+export function quietJoelResults(when) {
+  const record = designResults(when);
+  return withTradeSummaries({ ...record, trades: record.trades.filter(t => t.desk !== 'joel') });
+}
 
 // What Desk must show, from the record and the page's inputs through Results'
 // own model (as P4's expected()): each desk's Day figure per session; live,
@@ -48,7 +56,10 @@ export function expectedSessions({ record, snapshot, points, nowMs, live }) {
       const units = decimalUnits(deskOf(id).money.dayPnl.amount);
       return { day: k, today: true, href, units, label: barLabel(units), name: `Today · ${sessionDayName(k)}: ${eur(units, true)}, so far · after fees` };
     }
-    const units = dayOf(k, [id]).R.units.net;
+    // A day without a trade or a change in the record is a dash, as on Results.
+    const { R } = dayOf(k, [id]);
+    if (R.empty) return { day: k, today: false, href, units: null, label: null, name: `${sessionDayName(k)}: no trades recorded` };
+    const units = R.units.net;
     return { day: k, today: false, href, units, label: units === null ? null : barLabel(units),
       name: `${sessionDayName(k)}: ${units === null ? '' : eur(units, true)}, after fees · from Results` };
   })]));
@@ -117,6 +128,49 @@ async function focusBar(page, id, index) {
   })()`);
 }
 
+// One touch tap at the centre of an element (CDP touch, as a finger would).
+async function tapOn(page, selector) {
+  await page.evaluate(`document.querySelector(${JSON.stringify(selector)}).scrollIntoView({ block: 'center' })`);
+  await settle(page);
+  const r = await page.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.s('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [r] });
+  await page.s('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await settle(page);
+}
+const TAP_STATE = `(() => {
+  const tip = document.querySelector('#desk-joe .bars-tap'), bar = document.querySelectorAll('#desk-joe .bars a.b')[4], card = document.getElementById('desk-joe');
+  const shown = e => Boolean(e && !e.hidden && e.getClientRects().length && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility === 'visible');
+  const r = tip.getBoundingClientRect(), c = card.getBoundingClientRect();
+  return { shown: shown(tip), text: tip.innerText.replace(/\\s+/g, ' ').trim(), link: tip.querySelector('a.bars-go')?.getAttribute('href') ?? null,
+    icon: tip.querySelector('a.bars-go use')?.getAttribute('href') ?? null, tapped: bar.classList.contains('tapped'),
+    label: [...bar.querySelectorAll('.bl')].some(shown), inside: r.left >= c.left - 0.5 && r.right <= c.right + 0.5,
+    navigated: window.__barNav ?? [], screen: document.body.dataset.screen };
+})()`;
+async function touchChecks(page, tag, want) {
+  const bar = '#desk-joe .bars a.b:nth-of-type(5)', w = want.bars.joe[4];
+  const words5 = words(w.units === null ? sessionDayName(w.day) : `${sessionDayName(w.day)} · ${eur(w.units, true)}`);
+  await page.evaluate(`window.__barNav = []; addEventListener('hashchange', e => __barNav.push(new URL(e.newURL).hash))`);
+  await tapOn(page, bar);
+  const first = await page.evaluate(TAP_STATE);
+  check('M4', `${tag} touch: a first tap on a bar shows its tip (date, exact amount, Open in Results) and its label, and stays on Desk`,
+    first.shown && first.text.startsWith(words5) && first.text.endsWith('Open in Results') && first.link === w.href && first.icon === '#i-chev-r' &&
+    first.tapped && first.label && first.inside && !first.navigated.length && first.screen === 'desk', { ...first, want: words5, href: w.href });
+  await tapOn(page, bar);
+  const second = await page.evaluate(TAP_STATE);
+  check('M4', `${tag} touch: a second tap on the same bar opens Results for that day`, second.navigated[0] === w.href && !second.shown, second);
+  await page.evaluate(`window.__barNav = []`);
+  await tapOn(page, bar);
+  await page.s('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await page.s('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await settle(page);
+  const escaped = await page.evaluate(TAP_STATE);
+  await tapOn(page, bar);
+  await tapOn(page, '#desk-joe .desk-detail header h3');
+  const elsewhere = await page.evaluate(TAP_STATE);
+  check('M4', `${tag} touch: Escape or a tap elsewhere closes the tip without opening Results`,
+    !escaped.shown && !escaped.tapped && !elsewhere.shown && !elsewhere.tapped && !elsewhere.navigated.length, { escaped, elsewhere });
+}
+
 const alpha = color => { const m = color.match(/^rgba\(.*,\s*([\d.]+)\)$/) ?? color.match(/\/\s*([\d.]+)\)$/); return m ? Number(m[1]) : 1; };
 const overlap = (a, b) => Math.max(0, Math.min(a.r, b.r) - Math.max(a.l, b.l)) * Math.max(0, Math.min(a.b, b.b) - Math.max(a.t, b.t));
 
@@ -156,7 +210,7 @@ export async function deskSessionChecks({ page, newBoard, check, shot, auditScre
         const gains = d.bars.filter((x, i) => ws[i].units > 0n), losses = d.bars.filter((x, i) => ws[i].units < 0n);
         const tall = Math.max(0, ...gains.map(x => x.bar.h)) + Math.max(0, ...losses.map(x => x.bar.h));
         return { id, tall, zero: d.zero?.t, tones: d.bars.map((x, i) => [x.tone, String(ws[i].units)]),
-          ok: d.bars.every((x, i) => { const u = ws[i].units, tone = u > 0n ? 'gain' : u < 0n ? 'loss' : 'flat';
+          ok: d.bars.every((x, i) => { const u = ws[i].units, tone = u === null ? 'nx' : u > 0n ? 'gain' : u < 0n ? 'loss' : 'flat';
             return x.tone.split(' ').includes(tone) && (u > 0n ? Math.abs(x.bar.b - d.zero.t) <= 0.6 : u < 0n ? Math.abs(x.bar.t - d.zero.t) <= 0.6 : true); }) && Math.abs(tall - 50) <= 1 };
       });
       check('M4', `${tag}: every card is on its own scale, sign-coloured, from its zero line`, scale.every(s => s.ok), scale);
@@ -180,7 +234,8 @@ export async function deskSessionChecks({ page, newBoard, check, shot, auditScre
         });
         const clashes = [];
         for (let i = 0; i < seen.length; i++) for (let j = i + 1; j < seen.length; j++) if (overlap(seen[i].label, seen[j].label) > 0.5) clashes.push([seen[i].text, seen[j].text]);
-        const boxWidth = d.box.w, all = d.bars.every(x => x.label);
+        // A bar without a figure (a dashed outline) has no value to label.
+        const boxWidth = d.box.w, all = d.bars.every((x, i) => x.label || ws[i].units === null);
         return { id, placed, clashes, kept: d.bars.every(x => !x.keep || x.label), all, need: d.need, boxWidth,
           ok: placed && !clashes.length && d.bars.every(x => !x.keep || x.label) && (boxWidth <= d.need - 0.02 || all) };
       });
@@ -192,11 +247,16 @@ export async function deskSessionChecks({ page, newBoard, check, shot, auditScre
       const tips = [];
       for (const index of [0, 4, 9]) {
         const t = await focusBar(page, 'joe', index), w = want.bars.joe[index];
-        tips.push({ index, ...t, want: words(`${w.today ? `Today · ${sessionDayName(w.day)}` : sessionDayName(w.day)} · ${eur(w.units, true)}`) });
+        const when = w.today ? `Today · ${sessionDayName(w.day)}` : sessionDayName(w.day);
+        tips.push({ index, ...t, want: words(w.units === null ? when : `${when} · ${eur(w.units, true)}`) });
       }
       check('M4', `${tag}: keyboard focus on a bar shows its label and a tip with the date and the exact amount, inside the card`,
-        tips.every(t => t.focused && t.tip && t.label && t.inside && t.text.startsWith(t.want)), tips);
+        tips.every((t, k) => t.focused && t.tip && (t.label || want.bars.joe[[0, 4, 9][k]].units === null) && t.inside && t.text.startsWith(t.want)), tips);
       await page.evaluate('document.activeElement?.blur()');
+      // Touch (gate finding 5): a first tap shows the tip with the way to
+      // Results and stays on Desk; a second tap on the bar opens Results; Escape
+      // or a tap elsewhere closes the tip.
+      if (viewport.mobile && live) await touchChecks(page, tag, want);
       if (!live) {
         const hero = r.hero, last = want.last;
         check('A2', `${tag}: before the open the hero shows the last session from Results with its base`,
@@ -226,5 +286,41 @@ export async function deskSessionChecks({ page, newBoard, check, shot, auditScre
     check('M4', 'sessions stale: today’s bar turns into a dashed outline without a number; the past sessions keep Results’ figures',
       stale.length === 3 && stale.every(x => x.n === 10 && x.today && x.dashed && !x.live && x.labels === 0 && x.name?.startsWith(`Today · ${sessionDayName(SESSIONS.at(-1))}: `) && !x.name.includes('€') &&
         JSON.stringify(x.past) === JSON.stringify(want.bars[x.id].slice(0, -1).map(w => w.name))), stale);
+    await quietJoelChecks({ page, newBoard, check });
+  }
+}
+
+// M5 (gate findings 4 and 6): a record that proves Joel has not traded makes
+// his card one row. Only the record decides, so when the positions panel goes
+// stale the row says so and neither the layout nor the grid's columns move.
+async function quietJoelChecks({ page, newBoard, check }) {
+  const { snapshot, history } = scenario(NOW);
+  const b = await newBoard({ history });
+  b.setNow(NOW);
+  check('M5', 'sessions quiet Joel: the design snapshot is accepted', (await b.push(snapshot)).status === 200);
+  const record = quietJoelResults(NOW); delete record.receivedAt;
+  const accepted = await b.pushResults(record);
+  check('M5', 'sessions quiet Joel: the record without Joel’s trades is accepted', accepted.status === 200, accepted.body);
+  const read = () => page.evaluate(`({ layout: [...document.querySelectorAll('.dcard')].map(c => c.id.slice(5) + ':' + c.dataset.layout).sort().join(),
+    rows: document.querySelector('.desk-grid').dataset.rows, columns: getComputedStyle(document.querySelector('.desk-grid')).gridTemplateColumns.split(' ').length,
+    joel: document.querySelector('#desk-joel .drow .who')?.innerText.replace(/\\s+/g, ' ').trim() ?? null, reason: document.getElementById('hdrHealth').dataset.reason })`);
+  for (const viewport of [VIEWPORTS[0], VIEWPORTS[2]]) {
+    const tag = `${viewport.name} light quiet Joel`;
+    b.setNow(at(NOW, 9));
+    await configure(page, viewport, 'light');
+    await load(page, b.url, 'desk');
+    await setDeskDisclosures(page, true);
+    await waitFor(page, `document.getElementById('desk-joel')?.dataset.layout === 'row'`);
+    await settle(page);
+    const fresh = await read();
+    check('M5', `${tag}: one row from the record (no trades since 10 Sep), its positions inside`,
+      fresh.layout === 'j:card,joe:card,joel:row' && fresh.rows === '1' && /· no trades since 10 Sep · 1 position$/.test(fresh.joel ?? ''), fresh);
+    b.setNow(at(NOW, 75));
+    await page.evaluate('window.__joedesk.refresh()');
+    await waitFor(page, `document.querySelector('#hdrHealth').dataset.reason === 'snapshot_stale'`);
+    await settle(page);
+    const stale = await read();
+    check('M5', `${tag}: positions going stale change the row’s words, never the layout or the grid’s columns`,
+      stale.layout === fresh.layout && stale.rows === fresh.rows && stale.columns === fresh.columns && /· positions not current$/.test(stale.joel ?? ''), { fresh, stale });
   }
 }
