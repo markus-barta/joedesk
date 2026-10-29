@@ -11,7 +11,7 @@ import { atomicWrite } from '../server/storage.mjs';
 import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { switchSetSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { scenario, NOW, at, advance } from '../scripts/browser/board.mjs';
-import { deskRankingSnapshot } from '../scripts/browser/phase-b.mjs';
+import { deskRankingSnapshot, mixedHeaderOk, mixedDesksOk } from '../scripts/browser/phase-b.mjs';
 const { heroLeft, positionsHtml, keptHtml, positionSectionReason, cellView, compactDesk, headerHealth, healthPop } = await import('../public/joe/desk.js');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { todayPercent, sincePercent, rankDesks } = await import('../public/joe/performance.js');
@@ -683,4 +683,27 @@ test('mixed rendering keeps exact desks visible, explains each failure and share
     assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
   }
   assert.match(positions.textContent, /\$\s*40,01/, 'fresh callbacks remain exact beside the stale row');
+});
+
+// JOED-148 fix round 1 (gate finding 3): the Phase B browser evidence must hold
+// at 390/360 px, where the page joins "·" to the word before it with a
+// no-break space, and at desktop widths, where it does not.
+test('JOED-148: Phase B mixed browser evidence accepts the phone’s no-break space before “·”', () => {
+  const phone = text => text.replace(/ ·/g, ' ·');
+  const desktop = {
+    headerTone: 'warn', headerReason: 'open_unavailable_rth',
+    details: 'Desk values are not exact Today’s resultExact for Joel; not exact for J · desk ledger not reconciled; not exact for Joe · start-of-day value missing',
+    j: 'Numbers: not exact · desk ledger not reconciled', joe: 'Joe is sitting out. Today — since start · last sessions', joel: '+€5,00€5.025,00',
+    joeDay: { name: 'Today: not exact · start-of-day value missing', title: 'Today: not exact · start-of-day value missing' },
+    joeStatus: 'since start · last sessions',
+  };
+  const onPhone = { ...desktop, details: phone(desktop.details), j: phone(desktop.j), joe: phone(desktop.joe), joeStatus: phone(desktop.joeStatus) };
+  for (const result of [desktop, onPhone]) {
+    assert.equal(mixedHeaderOk(result), true);
+    assert.equal(mixedDesksOk(result), true);
+  }
+  // The checks still reject the old copy and a repeated Today line.
+  assert.equal(mixedDesksOk({ ...onPhone, joeStatus: 'Today: not exact · start-of-day value missing' }), false);
+  assert.equal(mixedHeaderOk({ ...onPhone, details: `${onPhone.details} Today: not exact for J and Joe` }), false);
+  assert.equal(mixedDesksOk({ ...desktop, joeDay: { ...desktop.joeDay, title: 'Today: not reported · start-of-day value missing' } }), false);
 });
