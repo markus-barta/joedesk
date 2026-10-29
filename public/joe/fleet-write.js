@@ -1,6 +1,6 @@
-// The board's one write: a reviewed paper draft of the fleet settings, sent to
-// the board server's propagate route as { baseRev, config }. Nothing else in
-// the UI sends a request that changes anything. The mode stays paper: a
+// The fleet policy write: a reviewed paper draft of the fleet settings, sent
+// to the board server's propagate route as { baseRev, config }. Board display
+// settings have their own writer. The mode stays paper: a
 // candidate in any other mode, or not based on the version it names, is
 // refused here before any request is made.
 const ROUTE = './fleet-config/propagate';

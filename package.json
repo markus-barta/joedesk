@@ -9,7 +9,8 @@
   },
   "scripts": {
     "check": "node scripts/check-release.mjs && node scripts/check-package.mjs && node scripts/check-joe-ui.mjs && node scripts/check-fleet-config.mjs && node scripts/check-position-contract.mjs",
-    "test": "npm run test:contracts && npm run test:ui && npm run test:release && node scripts/run-server-contract.mjs",
+    "test": "npm run test:contracts && npm run test:ui && npm run test:board-settings && npm run test:release && node scripts/run-server-contract.mjs",
+    "test:board-settings": "node --test --test-concurrency=2 test/board-settings.mjs test/board-settings-route.mjs test/board-settings-guard.mjs",
     "test:release": "node --test --test-concurrency=2 test/release.mjs test/release-set.mjs",
     "smoke:release": "node scripts/smoke-release.mjs",
     "release:evidence": "node scripts/release-evidence.mjs",

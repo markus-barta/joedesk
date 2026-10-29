@@ -18,6 +18,7 @@ import { createReadModel } from "./server/read-model.mjs";
 import { healthProjection } from "./server/health.mjs";
 import { withNextFleetRevision } from "./fleet-config.mjs";
 import { normalizeFleetConfig, appendFleetNormalizationAudit, validateFleetActions, FLEET_ACTION_LOG_MAX } from "./server/fleet-normalization.mjs";
+import { createBoardSettingsStore, validateBoardSettings } from "./server/board-settings.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, "public", "joe");
@@ -26,6 +27,7 @@ export function createJoeServer({ dataDir = "/var/lib/joe-board", clock = () => 
 // Fixed container paths (not taken from request or free-form env paths).
 const DATA_DIR = dataDir;
 const model = createReadModel({ dataDir, clock, ...(write ? { write } : {}) });
+const boardSettings = createBoardSettingsStore({ dataDir, ...(write ? { write } : {}) });
 const FLEET_CONFIG_FILE = path.join(DATA_DIR, "fleet-config.json");
 const FLEET_ACTION_LOG_FILE = path.join(DATA_DIR, "fleet-config-actions.json");
 const FLEET_CONFIG_EXAMPLE = path.join(PUBLIC, "fleet-config.example.json");
@@ -34,7 +36,7 @@ const FLEET_ACTOR = /^[A-Za-z0-9][A-Za-z0-9@._+-]{0,159}$/;
 const TOKEN_FILE = "/run/secrets/joe-board-push-token";
 const MAX_BODY = 262144;
 
-const PROTECTED_READS = new Set(["/joe/data.json", "/joe/history.json", "/joe/account-history.json", "/joe/results.json", "/joe/state.json", "/joe/fleet-config.json", "/joe/fleet-config/actions.json"]);
+const PROTECTED_READS = new Set(["/joe/data.json", "/joe/history.json", "/joe/account-history.json", "/joe/results.json", "/joe/state.json", "/joe/fleet-config.json", "/joe/fleet-config/actions.json", "/joe/board-settings.json"]);
 // Offline native imports share this exact package with server acceptance.
 const CONTRACT_FILES = Object.freeze(Object.fromEntries([
   "index.mjs", "read.mjs", "schema-validator.mjs", "semantics.mjs", "vienna-date.mjs", "accept.mjs", "decimal.mjs", "gateway.mjs", "panel-state.mjs",
@@ -53,7 +55,7 @@ function feedHeaders(kind) {
 // The UI is plain ES modules; every served asset is listed here explicitly.
 const UI_MODULES = ["app.js", "host.js", "ui.js", "terms.js", "format.js", "health.js", "feed.js", "board-state.js", "events.js",
   "desk.js", "performance.js", "history.js", "history-model.js", "history-worker.js", "chart.js", "results.js", "results-model.js", "theme.js",
-  "settings.js", "settings-model.js", "fleet-write.js", "version-display.js"];
+  "settings.js", "settings-model.js", "board-settings.js", "board-settings-validation.js", "board-settings-write.js", "fleet-write.js", "version-display.js"];
 const VENDOR_FILES = Object.freeze(Object.fromEntries(['display.json', 'version.js', 'presentation.js', 'version-interaction.js', 'schemes.json', 'package.json', 'manifest.json']
   .map(name => [`/joe/vendor/calver/${name}`, `vendor/calver/${name}`])));
 const STATIC_FILES = Object.freeze({
@@ -419,6 +421,39 @@ function sendFleetActions(res) {
   }
 }
 
+async function handleBoardSettings(req, res) {
+  // Mirror handleFleetPropagate: same trusted proxy identity, browser origin
+  // check, JSON content type and bounded body. No machine-token write path.
+  if (req.method !== "POST") return sendJson(res, 405, { ok: false, error: "method not allowed" });
+  const actor = fleetActor(req);
+  if (!actor) return sendJson(res, 403, { ok: false, error: "Zitadel-authenticated user required" });
+  const log = (outcome, reason) => console.info(JSON.stringify({ event: "board_settings_write", at: clock(), actor,
+    changedKeys: ["accountStart"], outcome, reason }));
+  const fail = (status, error, reason) => {
+    log("failure", reason);
+    return sendJson(res, status, { ok: false, error });
+  };
+  if (!requestIsSameOrigin(req)) return fail(403, "same-origin authenticated browser required", "origin_rejected");
+  if (!String(req.headers["content-type"] || "").toLowerCase().startsWith("application/json")) return fail(415, "content-type must be application/json", "content_type_rejected");
+  let raw;
+  try { raw = await readBody(req, MAX_BODY); }
+  catch (err) { return fail(err.code === "TOO_LARGE" ? 413 : 400, err.code === "TOO_LARGE" ? "body too large" : "bad body",
+    err.code === "TOO_LARGE" ? "body_too_large" : "body_rejected"); }
+  let body;
+  try { body = JSON.parse(raw.toString("utf8")); }
+  catch { return fail(400, "invalid json", "json_rejected"); }
+  const error = validateBoardSettings(body);
+  if (error) return fail(422, error, "validation_rejected");
+  log("pending", "write_started");
+  let saved;
+  try { saved = boardSettings.save(body); }
+  catch (err) {
+    return fail(500, err.committed ? "board settings replaced but durability could not be confirmed; reload before retrying" : "board settings store failed", "store_failed");
+  }
+  log("success", "saved");
+  return sendJson(res, 200, { ok: true, ...saved });
+}
+
 async function handleFleetPropagate(req, res) {
   if (req.method !== "POST") {
     sendJson(res, 405, { ok: false, error: "method not allowed" });
@@ -620,6 +655,10 @@ async function handleFleetPropagate(req, res) {
 }
 
 function handleStatic(req, res, urlPath) {
+  if (urlPath === "/joe/board-settings.json") {
+    sendJson(res, 200, boardSettings.read());
+    return;
+  }
   if (urlPath === "/joe/fleet-config.json") {
     sendFleetConfig(req, res);
     return;
@@ -705,6 +744,13 @@ const server = http.createServer(async (req, res) => {
     const host = req.headers.host || "localhost";
     const u = new URL(req.url || "/", `http://${host}`);
     const urlPath = u.pathname;
+
+    // POST authenticates inside its handler, matching Fleet Config's 403
+    // response. GET/HEAD use the protected-read 401 path below.
+    if (urlPath === "/joe/board-settings.json" && !["GET", "HEAD"].includes(req.method)) {
+      await handleBoardSettings(req, res);
+      return;
+    }
 
     if (urlPath === "/joe") {
       send(res, 308, "", { Location: `/joe/${u.search}` });
