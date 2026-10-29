@@ -173,8 +173,9 @@ function compactFixture() {
 test('desk compaction retains the pre-account golden bytes and indices', () => {
   const deskKept = compactPoints(compactFixture());
   const digest = createHash('sha256').update(JSON.stringify(deskKept)).digest('hex');
-  // Captured from the original compactPoints at base commit 6f89e38.
-  assert.equal(digest, '02c28fef756f44c8ab15d1c385f59904b1c46188906e3861d01128e7f03eaf33');
+  // Captured from JOED-145's gap-preserving UTC-grid compactPoints (release-39 integration b80425b; it replaced
+  // the 6f89e38 compactor on purpose). The invariant: JOED-150's account stores never alter desk compaction.
+  assert.equal(digest, 'b47223b50102269107b260c4ef90fe7c7e44c5d45fc6dd80707ba05171b5c18d');
 });
 
 test('desk compaction timing and size count only the original v2 desk envelope', () => {

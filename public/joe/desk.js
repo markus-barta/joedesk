@@ -354,7 +354,7 @@ const blockingDays = (states, data) => deskDays(states, data).filter(g => !['exa
 // exact for J and Joe · start-of-day value missing". This one row is also
 // how Details explains a green light beside a not-exact Today (Amy's A3).
 // A household withheld as not exact while every desk is exact says so itself:
-// "Household not exact · ‹reason›; each desk exact".
+// "Household not exact · <reason>; each desk exact".
 const DAY_ORDER = ['exact', 'estimated', NOT_EXACT];
 const dayRank = g => DAY_ORDER.includes(g.word) ? DAY_ORDER.indexOf(g.word) : DAY_ORDER.length;
 export function dayBreakdown(states, data) {
