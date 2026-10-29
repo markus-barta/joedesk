@@ -121,10 +121,15 @@ test('route readers: each screen gets its own parameters before it renders, poss
 // or rendered before its data is in, is short, so the scroll position clamps
 // as in a real layout); a reload (the same entry, a new page at its top, its
 // data still coming); ResizeObserver, timers and events.
-function browser() {
-  const entries = [{ hash: '#desk', state: null }], timers = new Map(), rendered = new Set(), observers = new Set(), calls = [];
+function browser({ historyLimit = Infinity, previousEntries = 0 } = {}) {
+  const entries = [...Array.from({ length: previousEntries }, (_, i) => ({ hash: `#desk?old=${i}`, state: null })), { hash: '#desk', state: null }];
+  const timers = new Map(), rendered = new Set(), observers = new Set(), calls = [];
   const tall = { desk: 3000, results: 2400, history: 2400, settings: 2400 };
-  let listeners = new Map(), index = 0, clock = 0, timerId = 0, visible = 'desk', y = 0, data = true;
+  let listeners = new Map(), index = previousEntries, clock = 0, timerId = 0, visible = 'desk', y = 0, data = true;
+  const push = entry => {
+    entries.splice(index + 1, Infinity, entry); index++;
+    if (entries.length > historyLimit) { entries.shift(); index--; }
+  };
   const max = () => Math.max(0, 110 + (rendered.has(visible) ? tall[visible] : 600) - 800);
   const hashOf = url => new URL(url, 'http://board.test/joe/').hash;
   const fire = type => { for (const fn of listeners.get(type) ?? []) fn({ type }); };
@@ -135,9 +140,10 @@ function browser() {
   class ResizeObserver { constructor(callback) { this.callback = callback; } observe() { observers.add(this); } disconnect() { observers.delete(this); } }
   const win = {
     history: {
+      get length() { return entries.length; },
       get state() { return structuredClone(entries[index].state); },
       replaceState(state, _title, url) { spend(); entries[index] = { hash: url === undefined ? entries[index].hash : hashOf(url), state: structuredClone(state) }; },
-      pushState(state, _title, url) { spend(); entries.splice(index + 1, Infinity, { hash: hashOf(url), state: structuredClone(state) }); index++; },
+      pushState(state, _title, url) { spend(); push({ hash: hashOf(url), state: structuredClone(state) }); },
     },
     location: { get hash() { return entries[index].hash; }, pathname: '/joe/', search: '' },
     get scrollY() { y = Math.min(y, max()); return y; },
@@ -164,7 +170,7 @@ function browser() {
       clock = end;
     },
     traverse(delta) { const from = entries[index].hash; index += delta; fire('popstate'); if (entries[index].hash !== from) fire('hashchange'); },
-    typed(hash, before = () => {}) { entries.splice(index + 1, Infinity, { hash, state: null }); index++; before(); fire('popstate'); fire('hashchange'); },
+    typed(hash, before = () => {}) { push({ hash, state: null }); before(); fire('popstate'); fire('hashchange'); },
     reload() { listeners = new Map(); timers.clear(); observers.clear(); rendered.clear(); y = 0; data = false; },
   };
 }
@@ -186,6 +192,29 @@ function boot(source, b, extra = {}) {
   runInContext(code, ctx);
   return runInContext('go', ctx);
 }
+
+test('routes: a full 50-entry browser history still pushes one place per arrival, canonical corrections replace it, and the active gear adds none', () => {
+  const b = browser({ historyLimit: 50, previousEntries: 49 }), go = boot(app, b);
+  const home = '#results?period=week&date=2026-10-14&desk=all';
+  const linked = '#history?range=week&desk=all&mode=money';
+  const deep = '#results?period=day&date=2026-10-28&desk=j';
+  go('results', { push: true });
+  assert.equal(writeRoute('results', home.split('?')[1]), true);
+  go('settings', { push: true });
+  const before = structuredClone(b.entries);
+  go('settings', { push: true });
+  assert.deepEqual(b.entries, before, 'the active gear repeats neither the entry nor its state');
+  const link = linkRoute({ button: 0 }, { getAttribute: name => name === 'href' ? '#history?range=week&mode=money' : null });
+  go(link.screen, { ...link, push: true });
+  assert.equal(writeRoute('history', linked.split('?')[1]), true);
+  b.typed(deep);
+  assert.equal(b.win.history.length, 50, 'a push evicts an old entry: length cannot count new arrivals here');
+  assert.deepEqual(b.entries.slice(-5).map(e => e.hash), ['#desk', home, '#settings', linked, deep]);
+  assert.equal(new Set(b.entries.slice(-5).map(e => e.state.joeEntry)).size, 5, 'five distinct places, including the typed arrival');
+  const walk = [];
+  for (const delta of [-1, -1, -1, -1, 1]) { b.traverse(delta); walk.push(b.win.location.hash); }
+  assert.deepEqual(walk, [linked, '#settings', home, '#desk', home], 'exact Back/Forward sequence, without duplicate canonical entries');
+});
 
 test('places: the place is read before the page changes, so a screen taller than the next one comes back where it was left', () => {
   const b = browser(), go = boot(app, b);

@@ -64,8 +64,12 @@ export async function headerNavChecks({ page, newBoard, check, shot }) {
   // 1 · One straight walk through the screens at 1024 px, then Back and Forward.
   await configure(page, { name: '1024', width: 1024, height: 768, mobile: false }, 'light');
   await load(page, b.url, 'desk');
+  // P3 reuses one target: earlier cases can fill Chromium's 50-entry history.
+  // Start this walk at one entry so exact counts still detect extra pushes,
+  // including a screen completing its own address by replacement.
+  await page.s('Page.resetNavigationHistory');
   const start = await state();
-  check('routes', 'the first load shows #desk, with Desk current in both navs', start.screen === 'desk' && start.hash === '#desk' && J(start.current) === J(['desk', 'desk']), start);
+  check('routes', 'the first load shows #desk in one history entry, with Desk current in both navs', start.screen === 'desk' && start.hash === '#desk' && start.length === 1 && J(start.current) === J(['desk', 'desk']), start);
   await click('.top-in [data-go="results"]');
   const results = await state();
   check('routes', 'the nav pushes Results: one new entry, whose address Results completes with its view; Results current in both navs', results.screen === 'results' && results.hash === home &&
