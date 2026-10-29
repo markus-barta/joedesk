@@ -1,0 +1,227 @@
+// JOED-156: the whole account's model as pure functions: the endpoint's two
+// series, the live edge, ranges, honest coverage, exact changes, gaps, the
+// tooltip's nearest value and the time axis on Vienna wall-clock ticks.
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { MIN, HOUR, DAY, iso, valid, words, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
+
+const M = await import('../public/joe/account-model.js');
+const { decimalUnits } = await import('../contracts/decimal.mjs');
+
+test('JOED-156 model: the endpoint becomes two typed series; anything off the documented shape is refused', () => {
+  const h = M.acceptAccountHistory(history());
+  assert.equal(h.short.source, 'short');
+  assert.equal(h.daily.source, 'daily');
+  assert.ok(h.short.t.length > 800 && h.daily.t.length === 39);
+  const gap = h.short.v.findIndex(Number.isNaN);
+  assert.ok(gap > 0 && h.short.amount[gap] === null && h.short.why[gap] === 'gateway_down', 'an unavailable value is a gap with its reason, never zero');
+  assert.equal(h.short.amount[0], '27000.00', 'exact decimal strings are kept');
+  assert.deepEqual(h.daily.day.slice(-2), ['2026-10-13', '2026-10-14']);
+  assert.ok(!h.daily.day.includes('2026-10-01'), 'a missing day stays missing');
+  // A day that recorded only cash has no account value.
+  const cashOnly = history();
+  cashOnly.dailyCloses.days[0] = { ...cashOnly.dailyCloses.days[0], equity: null, equityAt: null, cash: { amount: '1', currency: 'EUR' }, cashAt: cashOnly.dailyCloses.days[0].t };
+  assert.equal(M.acceptAccountHistory(cashOnly).daily.t.length, 38);
+  const bad = [
+    b => { b.schema = 'inspr.joe.account-history.v2'; },
+    b => { b.points.reverse(); },
+    b => { b.points[3].account.equity = { amount: '1e5', currency: 'EUR' }; },
+    b => { b.points[3].account.equity = { amount: '100', currency: 'USD' }; },
+    b => { b.points[3].t = '2026-10-12 10:00'; },
+    b => { b.dailyCloses.days.reverse(); },
+    b => { b.dailyCloses.days[2].equityAt = b.dailyCloses.days[3].equityAt; },
+    b => { delete b.dailyCloses; },
+  ];
+  for (const change of bad) { const b = history(); change(b); assert.throws(() => M.acceptAccountHistory(b), /contract_invalid/); }
+  const lost = history();
+  lost.dailyCloses.reason = 'contract_invalid';
+  lost.dailyCloses.discontinuity = { at: '2026-10-12T08:00:00.000Z', reason: 'contract_invalid', preservedAs: 'account-closes-state.json.damaged-x' };
+  lost.reason = 'history_write_failed';
+  const seen = M.acceptAccountHistory(lost);
+  assert.deepEqual([seen.short.reason, seen.daily.reason, seen.daily.loss?.at], ['history_write_failed', 'contract_invalid', '2026-10-12T08:00:00.000Z']);
+});
+
+
+test('JOED-156 model: only a current, exact account value joins the chart, after the last snapshot or as today’s close so far', () => {
+  const ctx = ctxFor();
+  const live = M.liveObservation(ctx.states.paperAccount, ctx.feeds.data.value);
+  assert.deepEqual(live, { t: SNAP, observedAt: valid.data.brokerAccount.observedAt, amount: '28000' });
+  // Stale, not exact, unavailable or observed after the snapshot: nothing joins.
+  assert.equal(M.liveObservation(ctxFor({ now: SNAP + 75000 }).states.paperAccount, ctx.feeds.data.value), null, 'a stale value is never the live edge');
+  const notExact = ctxFor({ mutate: d => { d.brokerAccount = { ...d.brokerAccount, equity: null, reason: 'not_exact_yet' }; } });
+  assert.equal(M.liveObservation(notExact.states.paperAccount, notExact.feeds.data.value), null);
+  assert.equal(M.liveObservation(ctx.states.paperAccount, { ...ctx.feeds.data.value, brokerAccount: { ...ctx.feeds.data.value.brokerAccount, observedAt: iso(SNAP + 1000) } }), null);
+  const h = M.acceptAccountHistory(history());
+  const short = M.withLive(h.short, live);
+  assert.deepEqual([short.t.at(-1), short.amount.at(-1), short.live, short.t.length], [SNAP, '28000', SNAP, h.short.t.length + 1]);
+  assert.equal(M.withLive(short, live), short, 'the same snapshot never joins twice');
+  assert.equal(M.withLive(h.short, { ...live, t: h.short.t.at(-1) }), h.short, 'nor one the server already recorded');
+  const daily = M.withLive(h.daily, live);
+  assert.deepEqual([daily.t.length, daily.day.at(-1), daily.amount.at(-1), daily.t.at(-1)], [h.daily.t.length, '2026-10-14', '28000', SNAP], 'today’s close so far is replaced');
+  const older = M.withLive(h.daily, { ...live, observedAt: '2026-10-14T17:00:00.000Z' });
+  assert.equal(older, h.daily, 'an older observation never replaces a newer close');
+  const nextDay = M.withLive(h.daily, { t: SNAP + DAY, observedAt: iso(SNAP + DAY), amount: '28100.5' });
+  assert.deepEqual([nextDay.t.length, nextDay.day.at(-1)], [h.daily.t.length + 1, '2026-10-15']);
+  assert.equal(M.withLive(h.daily, null), h.daily);
+  const none = M.emptySeries('short');
+  assert.equal(M.withLive(none, live), none, 'the live value alone is no history');
+});
+
+test('JOED-156 model: ranges end now; YTD starts at Vienna midnight on 1 January; a range longer than the record shows all of it', () => {
+  const full = [Date.parse('2024-03-01T00:00:00.000Z'), NOW];
+  for (const [range, span] of [['1D', DAY], ['5D', 5 * DAY], ['1M', 30 * DAY], ['6M', 182 * DAY], ['1Y', 365 * DAY]]) {
+    assert.deepEqual(M.presetWindow(full, range), [NOW - span, NOW], range);
+  }
+  assert.deepEqual(M.presetWindow(full, 'YTD'), [Date.parse('2025-12-31T23:00:00.000Z'), NOW], 'Vienna is UTC+1 on 1 January');
+  assert.deepEqual(M.presetWindow(full, 'All'), full);
+  const short = [NOW - 3 * DAY, NOW];
+  assert.deepEqual(M.presetWindow(short, '5D'), short, 'five days asked, three recorded: all three');
+  assert.deepEqual(M.presetWindow(short, '1D'), [NOW - DAY, NOW]);
+  // A moved window follows the newest value only while it ends there.
+  assert.deepEqual(M.accountWindow(short, { range: '1D', view: [NOW - 2 * DAY, NOW - DAY], follow: false }), [NOW - 2 * DAY, NOW - DAY]);
+  assert.deepEqual(M.accountWindow(short, { range: '1D', view: [NOW - 2 * DAY, NOW - DAY], follow: true }), [NOW - DAY, NOW]);
+  assert.equal(M.windowRange(short, [NOW - DAY, NOW], 'short', '1D'), '1D');
+  assert.equal(M.windowRange(short, short, 'short', '5D'), '5D', 'the chosen range wins when two ranges show the same window');
+  assert.equal(M.windowRange(short, [NOW - DAY - HOUR, NOW - HOUR], 'short', '1D'), null, 'a window in the past is no range');
+  assert.deepEqual(M.RANGES, ['1D', '5D', '1M', '6M', 'YTD', '1Y', 'All']);
+  assert.deepEqual(M.RANGES.map(M.sourceOf), ['short', 'short', 'daily', 'daily', 'daily', 'daily', 'daily']);
+});
+
+test('JOED-156 model: a range without enough history says since when it records, never extrapolates', () => {
+  const h = M.acceptAccountHistory(history());
+  const say = (series, range, now = NOW) => words(M.recordingText(M.coverage(series, range, now), series.source, now));
+  assert.equal(say(h.daily, '1M'), '', 'a month is recorded');
+  assert.equal(say(h.daily, '6M'), 'Recording since 5 Sep · 39 days so far');
+  assert.equal(say(h.daily, 'YTD'), 'Recording since 5 Sep · 39 days so far');
+  assert.equal(say(h.daily, 'All'), '', 'All is everything recorded');
+  assert.equal(say(h.short, '1D'), '');
+  assert.equal(say(h.short, '5D'), 'Recording since 11 Oct, 19:42 · 3 days so far');
+  const one = { ...h.daily, t: h.daily.t.slice(-1), v: h.daily.v.slice(-1), amount: h.daily.amount.slice(-1), day: h.daily.day.slice(-1), why: [null] };
+  assert.equal(say(one, '1M'), 'Recording since 14 Oct · 1 day so far');
+  const fresh = { ...h.short, t: h.short.t.slice(-30), v: h.short.v.slice(-30), amount: h.short.amount.slice(-30), why: h.short.why.slice(-30) };
+  assert.equal(say(fresh, '1D'), 'Recording since 14 Oct, 17:12 · 2 h so far');
+  assert.deepEqual(M.coverage(M.emptySeries('daily'), '1M', NOW), { recorded: false, complete: false });
+  for (const text of [say(h.daily, '6M'), say(h.short, '5D'), 'Recording since 30 Sep, 23:59 · 23 h so far', `Recording since 30 Sep · 2196 days so far`]) {
+    assert.ok(words(text).length <= 56, `fits two phone lines: ${text}`);
+  }
+  for (const reason of ['history_write_failed', 'store_version_unsupported', 'contract_invalid', 'feed_not_received', null]) {
+    const note = M.storeNote({ reason, loss: null });
+    assert.ok(note.length <= 56, note);
+    assert.equal(Boolean(note), ['history_write_failed', 'store_version_unsupported', 'contract_invalid'].includes(reason));
+  }
+  assert.equal(words(M.storeNote({ reason: 'contract_invalid', loss: { at: '2026-10-12T08:00:00.000Z' } })), 'Recording restarted 12 Oct after the store was damaged');
+});
+
+test('JOED-156 model: the change over a window is exact, from the value standing at its start', () => {
+  const h = M.acceptAccountHistory(history());
+  const live = { t: SNAP, observedAt: valid.data.brokerAccount.observedAt, amount: '28000' };
+  const daily = M.withLive(h.daily, live);
+  const month = M.rangeChange(daily, M.presetWindow([daily.t[0], NOW], '1M'));
+  // The month starts on 14 Sep 19:42; the 13 Sep close stands for it.
+  assert.equal(iso(month.from), '2026-09-13T19:30:00.000Z');
+  assert.equal(month.to, SNAP);
+  assert.equal(month.startUnits, decimalUnits('26200.00'));
+  assert.equal(month.change, decimalUnits('28000') - decimalUnits('26200.00'));
+  assert.equal(month.pct, 687n, '1.800 of 26.200 is 6,87 % (half away from zero)');
+  assert.equal(month.fromStart, true);
+  // Six months: the record starts later, so the change says from when.
+  const half = M.rangeChange(daily, M.presetWindow([daily.t[0], NOW], '6M'));
+  assert.deepEqual([iso(half.from), half.fromStart], ['2026-09-05T19:30:00.000Z', true], 'the window is the record, which starts there');
+  // A window starting inside a gap starts at the first value inside it.
+  const short = M.withLive(h.short, live);
+  const outage = [Date.parse('2026-10-13T11:00:00.000Z'), SNAP];
+  const after = M.rangeChange(short, outage);
+  assert.deepEqual([iso(after.from), after.fromStart], ['2026-10-13T12:02:22.000Z', false]);
+  const one = { ...short, t: short.t.slice(-1), v: short.v.slice(-1), amount: short.amount.slice(-1), why: [null] };
+  assert.equal(M.rangeChange(one, [SNAP - HOUR, SNAP]), null, 'one value is no change');
+  assert.equal(M.rangeChange(M.emptySeries('short'), [0, 1]), null);
+  // A short window still starts at the value standing at its start.
+  assert.equal(iso(M.rangeChange(short, [SNAP - 1000, SNAP]).from), iso(SNAP - 5 * MIN));
+});
+
+test('JOED-156 model: Since start uses the Settings start exactly; percentages are hundredths, signed with a true minus', () => {
+  const s = M.sinceStart(decimalUnits('985100.10'), { amountEur: 1000000, date: '2025-06-02' });
+  assert.equal(s.change, decimalUnits('-14899.90'));
+  assert.equal(s.pct, -149n);
+  assert.equal(words(M.pctText(s.pct)), '−1,49 %');
+  assert.equal(words(M.pctText(675n)), '+6,75 %');
+  assert.equal(words(M.pctText(0n)), '0,00 %');
+  assert.equal(M.pctText(null), '—');
+  assert.equal(M.sinceStart(decimalUnits('12.34'), { amountEur: 12.34, date: '2024-02-29' }).change, 0n);
+  assert.equal(M.sinceStart(null, { amountEur: 1, date: '2024-02-29' }), null, 'no value, no figure');
+  assert.equal(M.sinceStart(decimalUnits('1'), null), null, 'no start, no figure');
+});
+
+test('JOED-156 model: gaps break the line and are hatched; values are never joined across them or drawn past the last one', () => {
+  const h = M.acceptAccountHistory(history());
+  const short = h.short;
+  const day = [SNAP - 2 * DAY, SNAP];
+  const { pts, bands } = M.chartPoints(short, day, NOW);
+  const breaks = pts.filter(p => p.v === null);
+  assert.ok(breaks.length >= 2, 'the outage and the unavailable value each break the line');
+  const outage = bands.find(([a, b]) => a < Date.parse('2026-10-13T10:00:00.000Z') && b > Date.parse('2026-10-13T12:00:00.000Z'));
+  assert.ok(outage && outage[1] - outage[0] < 2 * HOUR + 10 * MIN, 'the two-hour outage is one band between the values around it');
+  const unavailable = bands.find(([a, b]) => a < Date.parse('2026-10-14T09:02:22.000Z') && b > Date.parse('2026-10-14T09:02:22.000Z'));
+  assert.ok(unavailable && unavailable[1] - unavailable[0] === 10 * MIN, 'one unavailable value: a band from the value before to the one after');
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].v === null || pts[i - 1].v === null) continue;
+    assert.ok(pts[i].x - pts[i - 1].x <= M.SHORT_GAP_MS, 'joined values are at most the gap rule apart');
+  }
+  // Stopped recording: a band from the last value to now, and no line there.
+  const stopped = M.chartPoints(short, [SNAP - DAY, SNAP + 3 * HOUR], SNAP + 3 * HOUR);
+  assert.deepEqual(stopped.bands.at(-1), [short.t.at(-1), SNAP + 3 * HOUR]);
+  assert.ok(stopped.pts.filter(p => p.v !== null).every(p => p.x <= short.t.at(-1)));
+  // Closes join from one calendar day to the next only.
+  const daily = M.chartPoints(h.daily, [h.daily.t[0], NOW], NOW);
+  assert.equal(daily.bands.length, 1, 'the missing day is the one gap');
+  assert.deepEqual(daily.bands[0].map(iso), ['2026-09-30T19:30:00.000Z', '2026-10-02T19:30:00.000Z']);
+  // Thinning for drawing keeps the extremes and every break.
+  const many = Array.from({ length: 4000 }, (_, i) => ({ x: i, v: i === 1234 ? 99 : i === 2345 ? -99 : i % 7 }));
+  many.splice(3000, 0, { x: 2999.5, v: null });
+  const thin = M.downsample(many, 0, 4000, 100);
+  assert.ok(thin.length < many.length / 4 && thin.some(p => p.v === 99) && thin.some(p => p.v === -99) && thin.some(p => p.v === null));
+});
+
+test('JOED-156 model: the tooltip names the nearest recorded value, or says none was recorded there and why', () => {
+  const h = M.acceptAccountHistory(history());
+  const at = Date.parse('2026-10-14T08:00:00.000Z');
+  const near = M.pointNear(h.short, at + 2 * MIN);
+  assert.equal(near.stands, true);
+  assert.ok(Math.abs(near.x - (at + 2 * MIN)) <= 2.5 * MIN);
+  const outage = M.pointNear(h.short, Date.parse('2026-10-13T11:00:00.000Z'));
+  assert.equal(outage.stands, false, 'an hour from any value');
+  const unavailable = M.pointNear(h.short, Date.parse('2026-10-14T09:02:22.000Z'));
+  assert.deepEqual([unavailable.stands, unavailable.why], [false, 'gateway_down']);
+  assert.equal(M.pointNear(M.emptySeries('short'), at), null);
+  const closeDay = M.pointNear(h.daily, Date.parse('2026-10-05T06:00:00.000Z'));
+  assert.equal(closeDay.day, '2026-10-04', 'the nearest close');
+  // The axis fits the window's values and where its line crosses each edge.
+  const window = [Date.parse('2026-10-14T07:01:00.000Z'), Date.parse('2026-10-14T07:59:00.000Z')];
+  const ext = M.extents(h.short, window);
+  const inside = h.short.v.filter((v, i) => h.short.t[i] >= window[0] && h.short.t[i] <= window[1]);
+  assert.ok(ext.visible[0] < Math.min(...inside) && ext.visible[1] > Math.max(...inside), 'edge crossings widen the fit slightly');
+  assert.deepEqual(ext.loaded, [27000, Math.max(...h.short.v.filter(Number.isFinite))]);
+});
+
+test('JOED-156 model: time labels keep their distance on Vienna wall-clock ticks, in every timezone the test runs', () => {
+  const day = M.timeLabels(NOW - DAY, NOW, 900);
+  assert.ok(day.labels.length >= 6);
+  for (let i = 1; i < day.labels.length; i++) assert.ok((day.labels[i].x - day.labels[i - 1].x) / DAY * 900 >= 56);
+  const midnight = day.labels.find(l => l.date);
+  assert.equal(iso(midnight.x), '2026-10-13T22:00:00.000Z', 'Vienna midnight in summer time');
+  assert.equal(words(midnight.text), '14 Oct');
+  assert.ok(day.labels.filter(l => !l.date).every(l => /^\d\d:\d\d$/.test(l.text)));
+  assert.ok(day.lines.every(l => l.dashed) && day.lines.length === 1, 'a dashed line at the one midnight');
+  // The autumn clock change: no instant twice, in order.
+  const change = M.timeLabels(Date.parse('2026-10-24T22:00:00.000Z'), Date.parse('2026-10-25T23:00:00.000Z'), 1600);
+  const xs = change.labels.map(l => l.x);
+  assert.deepEqual(xs, [...new Set(xs)].sort((a, b) => a - b));
+  const month = M.timeLabels(NOW - 30 * DAY, NOW, 900);
+  assert.ok(month.labels.length >= 3 && month.labels.every(l => l.date && /^\d{1,2}\s\w{3}$/.test(words(l.text))));
+  const weeks = M.timeLabels(NOW - 90 * DAY, NOW, 900);
+  assert.ok(weeks.labels.length >= 6 && weeks.labels.every(l => new Date(l.x + 2 * HOUR).getUTCDay() === 1), 'weeks start on Monday, Vienna time');
+  assert.ok(weeks.lines.every(l => !l.dashed) && weeks.lines.length === weeks.labels.length, 'a faint line behind each label');
+  const year = M.timeLabels(Date.parse('2026-01-01T00:00:00.000Z') - 200 * DAY, NOW, 1200);
+  assert.ok(year.labels.some(l => l.text === '2026'), 'January is its year');
+  assert.ok(year.labels.filter(l => l.text !== '2026').every(l => /^[A-Z][a-z]{2}$/.test(l.text)));
+});
