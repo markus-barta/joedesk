@@ -51,17 +51,86 @@ export function resultsView(ctx) {
   const positions = positionsCell?.state === 'fresh' && !outageValue(positionsCell)
     ? (positionsCell.value ?? []).filter(p => p.scope === 'stage0' && DESKS.includes(p.desk) && !keep.includes(p.symbol)
       && p.quantity != null && decimalUnits(p.quantity) !== 0n) : [];
-  return { today, cell, ix, reason, trackingStart: ix?.meta.trackingStart ?? null, todayUnits, moneyCells, nowMs, cols,
+  return { today, clock: Boolean(ctx.now), cell, ix, reason, trackingStart: ix?.meta.trackingStart ?? null, todayUnits, moneyCells, nowMs, cols,
     cuts: M.basisCuts(cols, current, nowMs), basis: DESKS.map(id => (current[id] ? basisKey(current[id]) : '')).join('|'), positionsCell, positions };
 }
 
+// ---------- What the controls change (app.js) ----------
+// The selected day always lies inside the shown period (All takes any day),
+// so one date names both and a link restores exactly what was shown. Days
+// still ahead are not selectable, as the stepper stops at today. A user's
+// own change also drops a link that is still waiting (below).
 export function stepPeriod(dir, view) {
+  pendingRoute = null;
   RS.anchor = RS.sel = M.stepAnchor(RS.period, RS.anchor, dir, view.today, view.trackingStart);
   RS.cal = M.ymOf(RS.anchor);
   RS.moved = true;
 }
 
+// Day, Week and Month show the one that contains the selected day. This year
+// is this calendar year, as its tab says (an earlier year comes only from a
+// link or a day of that year), so a day of another year gives way to today.
+// All holds every day.
+function setPeriod(period, today) {
+  const sel = RS.sel ?? today;
+  RS.period = period;
+  if (period === 'ytd' && sel.slice(0, 4) !== today.slice(0, 4)) {
+    RS.anchor = RS.sel = today; RS.cal = M.ymOf(today); RS.moved = false;
+    return;
+  }
+  RS.anchor = period === 'all' ? today : sel;
+}
+
+export function choosePeriod(period, view) {
+  pendingRoute = null;
+  setPeriod(period, view.today);
+}
+
+export function chooseDesk(desk) {
+  pendingRoute = null;
+  RS.desk = desk;
+}
+
+// Returns whether the day became the selected one: a link can name every
+// day the calendar lets you select, and nothing after today.
+export function selectDay(k, view) {
+  if (!k || k > view.today || k < M.firstStep(view.trackingStart)) return false;
+  pendingRoute = null;
+  RS.sel = k;
+  // The period follows the day: Day that day, Week and Month the ones that
+  // contain it, This year its calendar year. All keeps the whole record.
+  if (RS.period !== 'all') RS.anchor = k;
+  RS.moved = k !== view.today;
+  return true;
+}
+
+export function showMonth(dir) {
+  pendingRoute = null;
+  const [y, m] = RS.cal;
+  RS.cal = dir < 0 ? (m ? [y, m - 1] : [y - 1, 11]) : (m === 11 ? [y + 1, 0] : [y, m + 1]);
+  RS.moved = true;
+}
+
 // ---------- Deep links (README: Results deep links) ----------
+// A link from outside waits until the record's tracking start and the server's
+// date are known: a cold load starts before either, and the browser's date
+// or a fallback start could reject a valid link. Then it is checked and
+// applied once. A newer address replaces it, even one that names nothing;
+// a user's change drops it. Returns whether a link waits.
+let pendingRoute = null;
+export function requestResultsRoute(query) {
+  const route = M.parseResultsRoute(query);
+  pendingRoute = route.period || route.date || route.desk ? query : null;
+  return pendingRoute !== null;
+}
+export const resultsRoutePending = () => pendingRoute !== null;
+export function settleResultsRoute(view) {
+  if (pendingRoute === null || !view.clock || !view.ix) return false;
+  const query = pendingRoute;
+  pendingRoute = null;
+  return applyResultsRoute(query, view);
+}
+
 // A link sets what it names. Each missing or invalid part keeps the current
 // view, which on a fresh page is This week, today and All desks; a date after
 // today or before the first step is invalid too. Returns whether it applied.
@@ -69,24 +138,24 @@ export function applyResultsRoute(query, view) {
   const route = M.parseResultsRoute(query), today = view.today;
   const date = route.date && route.date <= today && route.date >= M.firstStep(view.trackingStart) ? route.date : null;
   if (!route.period && !route.desk && !date) return false;
-  if (route.period) RS.period = route.period;
   if (route.desk) RS.desk = route.desk;
   if (date) {
-    // The period is the one that contains the date, which also becomes the
-    // selected day; a link to today keeps following the board's today.
-    RS.anchor = RS.sel = date;
+    // The date becomes the selected day and the period the one that contains
+    // it (an earlier calendar year too); a link to today keeps following the
+    // board's today.
+    RS.period = route.period ?? RS.period;
+    RS.anchor = RS.period === 'all' ? today : date;
+    RS.sel = date;
     RS.cal = M.ymOf(date);
     RS.moved = date !== today;
-  }
+  } else if (route.period) setPeriod(route.period, today);
   return true;
 }
 
-// The view as its canonical link: the period, a day inside it and the desk.
+// The view as its canonical link: the period, the selected day (which lies
+// inside it) and the desk.
 export function resultsUrl(view) {
-  const today = view.today, anchor = RS.anchor ?? today, sel = RS.sel ?? anchor;
-  const per = M.periodOf(RS.period, anchor, today, view.trackingStart);
-  const date = sel >= per.start && sel <= (per.end < today ? per.end : today) ? sel : anchor;
-  return `#results?${M.resultsRoute({ period: RS.period, date, desk: RS.desk })}`;
+  return `#results?${M.resultsRoute({ period: RS.period, date: RS.sel ?? RS.anchor ?? view.today, desk: RS.desk })}`;
 }
 
 const D = '<span class="bn muted">—</span>';
@@ -165,9 +234,13 @@ export function renderResults(ctx) {
   const view = resultsView(ctx);
   const { today, ix } = view;
   if (!RS.moved || !RS.anchor) { RS.anchor = RS.sel = today; RS.cal = M.ymOf(today); }
+  // A waiting link applies against the authoritative today and tracking start.
+  settleResultsRoute(view);
   const sig = [ix, view.cols, view.reason, view.cell?.state, today, view.todayUnits.join(), view.moneyCells.map(c => c?.reason).join(), view.basis, view.positions.map(p => `${p.desk}|${p.symbol}|${p.company}|${p.openedAt}`).join(),
     JSON.stringify(RS), $('#curve').clientWidth, $('#daySheet')?.open];
-  if (last && sig.every((v, i) => v === last[i])) { renderStatus(view); return resultsUrl(view); }
+  // While a link waits, the address keeps it (app.js writes nothing).
+  const address = () => (pendingRoute === null ? resultsUrl(view) : '');
+  if (last && sig.every((v, i) => v === last[i])) { renderStatus(view); return address(); }
   last = sig;
   const per = M.periodOf(RS.period, RS.anchor, today, view.trackingStart);
   const desks = deskSet();
@@ -187,7 +260,7 @@ export function renderResults(ctx) {
   renderCalendar(view, per, desks);
   renderStatus(view);
   renderCurve(view, per, desks, R, mctx);
-  return resultsUrl(view);
+  return address();
 }
 
 function heroSentence(view, per, R, partialDays) {
@@ -363,7 +436,7 @@ export function renderCalendar(view, per, desks) {
       // warning on a neutral no-trade cell uses the warning token.
       const cls = ['cell', s.cls, warning ? 'day-incomplete' : '', k === today ? 'today' : '', k === RS.sel ? 'sel' : '', inPer(k) ? 'inper' : ''].filter(Boolean).join(' ');
       const value = s.r ? `<span class="vl">${plain(s.r.units)}</span><span class="vs">${compact(s.r.units)}</span>` : s.dash ? '<span class="muted">—</span>' : '';
-      html += `<button type="button" class="${cls}" data-day="${k}" aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${warning ? `; ${esc(warning.text)}` : ''}"><span class="d"><span class="agenda-date">${M.fmtDDM(k)}</span><span class="grid-date">${Number(k.slice(8))}</span></span>${warning ? `<span class="day-warning st${warning.label === 'Partial' && s.cls === 'none' ? ' warn' : ''}" title="${esc(warning.text)}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${warning ? warning.label : s.note}</span></button>`;
+      html += `<button type="button" class="${cls}" data-day="${k}"${s.cls === 'fut' ? ' disabled' : ''} aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${warning ? `; ${esc(warning.text)}` : ''}"><span class="d"><span class="agenda-date">${M.fmtDDM(k)}</span><span class="grid-date">${Number(k.slice(8))}</span></span>${warning ? `<span class="day-warning st${warning.label === 'Partial' && s.cls === 'none' ? ' warn' : ''}" title="${esc(warning.text)}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${warning ? warning.label : s.note}</span></button>`;
     }
     // A week still ahead has nothing to sum yet.
     const ahead = wk > today;

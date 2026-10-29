@@ -2036,3 +2036,132 @@ test('JOED-151 CSS: every Results-only rule lives in one delimited block', () =>
   const inside = css.slice(start, end);
   for (const rule of ['.rhero {', '.tile {', '.bdcard {', '.trow .px {', '.trow .net::after {', '.dp-fx {', '@media (max-width: 382px) {']) assert.ok(inside.includes(rule), rule);
 });
+
+// ---------- JOED-151 fix round 1 (Codex gate): a link keeps the selected day
+// and waits for the record; the hero's sentence never runs into the split ----------
+
+const routeState = () => ({ period: page.RS.period, anchor: page.RS.anchor, sel: page.RS.sel, desk: page.RS.desk, cal: page.RS.cal, moved: page.RS.moved });
+const freshRoute = day => ({ period: 'week', anchor: day, sel: day, desk: 'all', cal: M.ymOf(day), moved: false });
+const queryOf = url => url.slice('#results?'.length);
+// What the page shows and its link names: the period's dates and label, the
+// selected day, the desk, whether the view follows today, and the link.
+function shownRoute(view) {
+  const per = M.periodOf(page.RS.period, page.RS.anchor, view.today, view.trackingStart);
+  return { period: page.RS.period, sel: page.RS.sel, desk: page.RS.desk, start: per.start, end: per.end, lab: per.lab, moved: page.RS.moved, url: page.resultsUrl(view) };
+}
+
+test('JOED-151 r1 deep links: the selected day survives every change; reopening the link and Back and Forward restore it', t => {
+  const saved = { ...page.RS };
+  t.after(() => { Object.assign(page.RS, saved); page.requestResultsRoute(''); });
+  const view = { today: '2026-10-29', trackingStart: '2025-11-03', clock: true, ix: {} };
+  // The gate's case: All, a September day, then Week.
+  Object.assign(page.RS, freshRoute(view.today));
+  page.choosePeriod('all', view);
+  assert.equal(page.selectDay('2026-09-15', view), true);
+  const all = shownRoute(view);
+  assert.equal(all.url, '#results?period=all&date=2026-09-15&desk=all');
+  page.choosePeriod('week', view);
+  const week = shownRoute(view);
+  assert.deepEqual([week.sel, week.start, week.end, week.url], ['2026-09-15', '2026-09-14', '2026-09-20', '#results?period=week&date=2026-09-15&desk=all'],
+    'Week shows the week of the selected day, and the link names that day');
+  Object.assign(page.RS, freshRoute(view.today));
+  assert.equal(page.applyResultsRoute(queryOf(week.url), view), true);
+  assert.deepEqual(shownRoute(view), week, 'reopening the link on a fresh page');
+  page.applyResultsRoute(queryOf(all.url), view);
+  assert.deepEqual(shownRoute(view), all, 'Back');
+  page.applyResultsRoute(queryOf(week.url), view);
+  assert.deepEqual(shownRoute(view), week, 'Forward');
+
+  // Every period, any selectable day, then every period and two desks: the
+  // selected day lies in the period shown, the link names exactly that view,
+  // and each history entry (what app.js pushes per change) restores its view.
+  const periods = ['day', 'week', 'month', 'ytd', 'all'];
+  for (const first of periods) for (const day of ['2026-10-29', '2026-10-26', '2026-09-15', '2026-01-01', '2025-12-31', '2025-08-01']) {
+    for (const next of periods) for (const desk of ['all', 'j']) {
+      const why = `${first}, ${day}, ${next}, ${desk}`, entries = [];
+      Object.assign(page.RS, freshRoute(view.today));
+      page.choosePeriod(first, view); entries.push(shownRoute(view));
+      assert.equal(page.selectDay(day, view), true, why); entries.push(shownRoute(view));
+      page.choosePeriod(next, view); entries.push(shownRoute(view));
+      page.chooseDesk(desk); entries.push(shownRoute(view));
+      // This year is this calendar year: a day of another year gives way to today.
+      assert.equal(entries.at(-1).sel, next === 'ytd' && day.slice(0, 4) !== view.today.slice(0, 4) ? view.today : day, why);
+      // All holds every selectable day, also those before paper results start.
+      for (const entry of entries) assert.ok(entry.sel >= (entry.period === 'all' ? M.firstStep(view.trackingStart) : entry.start) && entry.sel <= entry.end && entry.sel <= view.today,
+        `${why}: ${entry.url} shows its day`);
+      Object.assign(page.RS, freshRoute(view.today));
+      page.applyResultsRoute(queryOf(entries.at(-1).url), view);
+      assert.deepEqual(shownRoute(view), entries.at(-1), `${why}: reopening`);
+      for (const entry of [...entries].reverse().concat(entries)) {
+        page.applyResultsRoute(queryOf(entry.url), view);
+        assert.deepEqual(shownRoute(view), entry, `${why}: Back or Forward to ${entry.url}`);
+      }
+    }
+  }
+  // A day a link could not name is not selectable: after today or before the first step.
+  Object.assign(page.RS, freshRoute(view.today));
+  const before = routeState();
+  for (const day of ['2026-10-30', '2027-01-01', '2025-07-31', '', undefined]) {
+    assert.equal(page.selectDay(day, view), false, String(day));
+    assert.deepEqual(routeState(), before, String(day));
+  }
+  // A link with only a period behaves as the tab does.
+  page.selectDay('2026-09-15', view);
+  page.applyResultsRoute('period=month', view);
+  assert.deepEqual([page.RS.period, page.RS.sel, page.resultsUrl(view)], ['month', '2026-09-15', '#results?period=month&date=2026-09-15&desk=all']);
+});
+
+test('JOED-151 r1 calendar: days still ahead are disabled, so they never change the view outside the history', t => {
+  const render = calendarCapture(t);
+  const r = render(record([closeDay('2026-10-13', '5001')]), '2026-10-14T12:00:00.000Z', '2026-10-13');
+  const days = htmlDocument(r.html).querySelectorAll('[data-day]');
+  assert.equal(days.length, 31);
+  for (const button of days) assert.equal(button.getAttribute('disabled') !== null, button.dataset.day > '2026-10-14', button.dataset.day);
+  assert.ok(days.filter(b => b.getAttribute('disabled') !== null).every(b => b.getAttribute('class').split(' ').includes('fut')), 'exactly the days still ahead');
+  const css = resultsCss();
+  assert.match(css, /\.cell:disabled\s*\{\s*cursor:\s*default;\s*\}/);
+  assert.match(css, /button\.cell:not\(:disabled\):hover/, 'a day still ahead shows no hover ring');
+});
+
+test('JOED-151 r1 deep links: a cold link waits for the record and the server’s date, then applies once', t => {
+  const saved = { ...page.RS };
+  t.after(() => { Object.assign(page.RS, saved); page.requestResultsRoute(''); });
+  const link = 'period=day&date=2026-06-15&desk=all';
+  // A cold load routes before the feeds: the browser's date and no record.
+  const cold = { today: '2026-10-29', clock: false, ix: null, trackingStart: null };
+  const warm = { today: '2026-10-29', clock: true, ix: {}, trackingStart: '2026-03-02' };
+  assert.ok('2026-06-15' < M.firstStep(cold.trackingStart) && '2026-06-15' >= M.firstStep(warm.trackingStart), 'only the provisional floor rejects June');
+  Object.assign(page.RS, freshRoute(cold.today));
+  const fresh = routeState();
+  assert.equal(page.requestResultsRoute(link), true);
+  for (const early of [cold, { ...cold, clock: true }, { ...warm, clock: false }]) {
+    assert.equal(page.settleResultsRoute(early), false, JSON.stringify(early));
+    assert.equal(page.resultsRoutePending(), true, 'the link still waits');
+    assert.deepEqual(routeState(), fresh, 'nothing applied yet');
+  }
+  assert.equal(page.settleResultsRoute(warm), true);
+  assert.equal(page.resultsRoutePending(), false);
+  assert.deepEqual(routeState(), { period: 'day', anchor: '2026-06-15', sel: '2026-06-15', desk: 'all', cal: [2026, 5], moved: true });
+  assert.equal(page.resultsUrl(warm), `#results?${link}`, 'the address keeps the link it was given');
+  assert.equal(page.settleResultsRoute(warm), false, 'applied once');
+  // Invalid parts still fall back silently once the bounds are known: before
+  // the record's first step, or after the server's today (the browser was ahead).
+  for (const [query, browser] of [['period=day&date=2026-02-28&desk=j', '2026-10-29'], ['period=day&date=2026-10-30&desk=j', '2026-10-30']]) {
+    Object.assign(page.RS, freshRoute(warm.today));
+    page.requestResultsRoute(query);
+    assert.equal(page.settleResultsRoute({ ...cold, today: browser }), false);
+    page.settleResultsRoute(warm);
+    assert.deepEqual(routeState(), { ...freshRoute(warm.today), period: 'day', desk: 'j' }, query);
+  }
+  // Nothing valid: nothing waits. A newer address replaces a waiting link,
+  // even one that names nothing; a change of the user's drops it.
+  assert.equal(page.requestResultsRoute('period=quarter&date=2026-02-30&desk=bob'), false);
+  for (const change of [() => page.requestResultsRoute(''), () => page.choosePeriod('month', warm), () => page.chooseDesk('joe'),
+    () => page.selectDay('2026-10-28', warm), () => page.stepPeriod(-1, warm), () => page.showMonth(-1)]) {
+    Object.assign(page.RS, freshRoute(warm.today));
+    page.requestResultsRoute(link);
+    change();
+    assert.equal(page.resultsRoutePending(), false, change.toString());
+    assert.equal(page.settleResultsRoute(warm), false);
+  }
+});

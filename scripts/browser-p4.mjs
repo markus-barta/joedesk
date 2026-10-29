@@ -512,8 +512,11 @@ async function assertDesignLayout(page, viewport, tag) {
 // JOED-151 (hard assertions): the Results deep link
 // #results?period=…&date=…&desk=… opens its view; each change of the view is
 // a history entry that Back and Forward restore; missing parts keep the view
-// and invalid ones fall back silently.
-async function assertResultsLinks(page, ix, inputs) {
+// and invalid ones fall back silently. Fix round 1: the link carries the
+// selected day itself (All, a September day, then Week keeps that day through
+// Back, Forward and reopening); days still ahead are not selectable; a cold
+// link waits for the record, so a June link survives for a record from March.
+async function assertResultsLinks(page, ix, inputs, board, record) {
   const today = inputs.today, ts = ix.meta.trackingStart;
   const day = [...ix.dates].reverse().find(k => k < today && M.dayResult(ix, k, ['j']).count);
   const state = () => page.evaluate(`({ hash: location.hash,
@@ -521,11 +524,12 @@ async function assertResultsLinks(page, ix, inputs) {
     desk: document.querySelector('#deskSeg [aria-pressed="true"]')?.dataset.desk,
     label: document.querySelector('#perLabel .cur')?.innerText, sel: document.querySelector('#cal .sel')?.dataset.day,
     display: document.querySelector('#rheroL .display')?.innerText })`);
-  const expect = async (want, why) => {
+  const expect = async (want, why, index = ix) => {
     const hash = `#results?period=${want.period === 'ytd' ? 'year' : want.period}&date=${want.date}&desk=${want.desk}`;
-    await waitFor(page, `location.hash === ${JSON.stringify(hash)}`);
+    await waitFor(page, `location.hash === ${JSON.stringify(hash)} && document.querySelector('#periodSeg [aria-pressed="true"]')?.dataset.period === ${JSON.stringify(want.period)}
+      && document.querySelector('#cal .sel')?.dataset.day === ${JSON.stringify(want.date)}`);
     await settle(page);
-    const got = await state(), e = expected(ix, inputs, want.period, want.date, want.desk);
+    const got = await state(), e = expected(index, inputs, want.period, want.date, want.desk);
     assert.equal(got.period, want.period, `${why}: period`);
     assert.equal(got.desk, want.desk, `${why}: desk`);
     assert.equal(N(got.label), N(e.per.lab), `${why}: stepper`);
@@ -554,6 +558,51 @@ async function assertResultsLinks(page, ix, inputs) {
   assert.equal(M.periodOf('ytd', day, today, ts).lab, `This year · since 1${NB}Jan`);
   await go(`#results?period=week&date=${today}&desk=all`);
   await expect({ period: 'week', date: today, desk: 'all' }, 'back to today');
+
+  // Fix round 1 · the selected day is in the link. The gate's case: All, a
+  // September day (the calendar a month back), then Week.
+  const september = [...ix.dates].find(k => k.startsWith('2026-09-') && M.dayResult(ix, k, DESKS).count);
+  assert.ok(september, 'the design record has a September day with trades');
+  await click(page, '#periodSeg [data-period="all"]');
+  await expect({ period: 'all', date: today, desk: 'all' }, 'All');
+  await click(page, '#prevMonth');
+  await click(page, `#cal [data-day="${september}"]`);
+  await expect({ period: 'all', date: september, desk: 'all' }, 'a September day under All');
+  await click(page, '#periodSeg [data-period="week"]');
+  await expect({ period: 'week', date: september, desk: 'all' }, 'Week shows the week of the selected day');
+  await page.evaluate('history.back()');
+  await expect({ period: 'all', date: september, desk: 'all' }, 'Back restores the day under All');
+  await page.evaluate('history.forward()');
+  await expect({ period: 'week', date: september, desk: 'all' }, 'Forward restores its week');
+  // Days still ahead are not selectable: no change of view, no history entry.
+  await click(page, '#nextMonth');
+  const ahead = await page.evaluate(`(() => ({ entries: history.length, days: [...document.querySelectorAll('#cal [data-day]')]
+    .filter(b => b.dataset.day > ${JSON.stringify(today)}).map(b => ({ day: b.dataset.day, disabled: b.disabled, fut: b.classList.contains('fut') })) }))()`);
+  assert.ok(ahead.days.length && ahead.days.every(d => d.disabled && d.fut), 'every day still ahead is disabled');
+  await click(page, `#cal [data-day="${ahead.days[0].day}"]`);
+  assert.equal(await page.evaluate('history.length'), ahead.entries, 'a day still ahead adds no history entry');
+  await click(page, '#prevMonth');
+  await expect({ period: 'week', date: september, desk: 'all' }, 'a day still ahead changes nothing');
+  // Reopening the link in a fresh page restores the same view.
+  await load(page, board.url, (await page.evaluate('location.hash')).slice(1));
+  await expect({ period: 'week', date: september, desk: 'all' }, 'reopened in a fresh page');
+
+  // Fix round 1 · a cold link waits for the record and the server's date. A
+  // record tracking from 2 March opens a June link that the provisional floor
+  // (1 Aug) would have refused; an invalid date still falls back silently.
+  const march = designResults(NOW, { trackingStart: '2026-03-02' }), marchIx = M.indexResults(march);
+  assert.equal(M.firstStep(marchIx.meta.trackingStart), '2026-03-01');
+  assert.ok('2026-06-15' < M.firstStep(null), 'only the provisional floor refuses June');
+  try {
+    await serve(served(march, board));
+    await load(page, board.url, 'results?period=day&date=2026-06-15&desk=all');
+    await expect({ period: 'day', date: '2026-06-15', desk: 'all' }, 'a cold June link for a record from March', marchIx);
+    await load(page, board.url, 'results?period=day&date=2026-02-27&desk=j');
+    await expect({ period: 'day', date: today, desk: 'j' }, 'a cold date before the first step falls back to today; the rest applies', marchIx);
+  } finally {
+    await serve(served(record, board));
+    await load(page, board.url, 'results');
+  }
 }
 
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
@@ -757,7 +806,7 @@ try {
       // Kept holdings never appear on Results.
       const kept = await page.evaluate(`/\\b(SXR8|TSLA)\\b/.test(document.getElementById('scr-results').innerText)`);
       check('AC-9', `${tag}: no kept holding appears on Results`, !kept);
-      if (viewport.name === '1440' && theme === 'light') await assertResultsLinks(page, ix, inputs);
+      if (viewport.name === '1440' && theme === 'light') await assertResultsLinks(page, ix, inputs, board, record);
     }
     // More views for the visual check.
     for (const [viewport, theme, period, desk, name, what] of [[VIEWPORTS[0], 'light', 'day', 'all', 'day', 'Day: today, all desks (intraday points from History)'],

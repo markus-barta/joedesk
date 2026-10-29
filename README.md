@@ -1321,17 +1321,27 @@ time-chart component replaces only `drawResultChart`.
 ```
 
 - `period`: `day`, `week`, `month`, `year` (This year) or `all` (All time).
-- `date`: a Vienna date inside the period, which is also the calendar's
-  selected day. Day is that date; Week is the Monday-to-Sunday Vienna week
-  that contains it; Month its calendar month; `year` its calendar year (this
-  year runs to today, an earlier year is the whole calendar year); All the
-  whole record.
+- `date`: the calendar's selected day, a Vienna date inside the period. Day
+  is that date; Week is the Monday-to-Sunday Vienna week that contains it;
+  Month its calendar month; `year` its calendar year (this year runs to
+  today, an earlier year is the whole calendar year); All the whole record.
 - `desk`: `all`, `j`, `joe` or `joel`.
+
+The page keeps the selected day inside the period shown, so one date names
+both: choosing Day, Week or Month shows the one that contains the selected
+day, and selecting a day moves the period to it; This year is this calendar
+year, so a selected day of another year gives way to today; All holds any
+day. Days still ahead are disabled on the calendar, as the stepper stops at
+today. The month the calendar shows is not part of the link.
 
 Every parameter is optional: a missing one keeps the current view, which on a
 fresh page is This week, today and All desks. Invalid values (unknown words,
 impossible dates, dates after today or before the stepper's first month) fall
-back silently. A link whose date is today keeps following the board's today.
+back silently. A link from outside waits until the record's tracking start
+and the server's date are known, as a cold load begins before both; it is
+then checked and applied once, and the address keeps it meanwhile. A newer
+address replaces a waiting link, and any change of the view drops it. A link
+whose date is today keeps following the board's today.
 Examples: `/joe/#results?period=day&date=2026-10-28&desk=j` (one session for
 J), `#results?period=all` (All time), `#results?desk=joe`. The address always
 shows the current view in this canonical form with all three parameters. Each

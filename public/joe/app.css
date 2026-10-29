@@ -677,7 +677,9 @@ dialog.dlg::backdrop { background: var(--scrim); }
 .cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) 78px; gap: 5px; margin-top: 8px; }
 .dow { font-size: 11px; color: var(--ink-3); height: 20px; padding-left: 7px; }
 .cell { position: relative; height: 62px; border-radius: 9px; padding: 7px 6px; border: 0; background: transparent; color: var(--ink); text-align: left; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; overflow: hidden; }
-@media (hover: hover) { button.cell:hover { box-shadow: inset 0 0 0 1px var(--line-2); } }
+@media (hover: hover) { button.cell:not(:disabled):hover { box-shadow: inset 0 0 0 1px var(--line-2); } }
+/* Days still ahead are not selectable; their date and name stay. */
+.cell:disabled { cursor: default; }
 .cell .d { font-size: 11.5px; line-height: 1.2; }
 /* Reserve the amount line even before a partial record adds its unknown dash. */
 .cell .v { font-size: 12.5px; font-weight: 650; line-height: 1.2; min-height: 1.2em; white-space: nowrap; }

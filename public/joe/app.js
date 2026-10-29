@@ -8,7 +8,7 @@ import { createFeed } from './feed.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure } from './desk.js';
 import { renderHistory, historyChart, HS } from './history.js';
-import { renderResults, RS, stepPeriod, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, applyResultsRoute, resultsUrl } from './results.js';
+import { renderResults, RS, stepPeriod, choosePeriod, chooseDesk, selectDay, showMonth, resultsView, openDaySheet, toggleDayReasons, forgetResults, copyDayText, requestResultsRoute, resultsRoutePending, resultsUrl } from './results.js';
 import { boardHealthPresentation } from './health.js';
 import { setTheme, toggleTheme, syncThemeButton } from './theme.js';
 import { initSettings, renderSettings, showSection, SECTIONS as SETTINGS_SECTIONS } from './settings.js';
@@ -158,8 +158,10 @@ function start() {
     closePop();
     for (const dialog of $$('dialog[open]')) dialog.close();
     // Results reads its own query; another screen's query stays for that screen.
-    if (next === 'results') applyResultsRoute(query, view());
-    setHash(next === 'results' ? resultsUrl(view()) : `#${next}${query ? `?${query}` : ''}`);
+    // A Results link waits for the record and the server's date (results.js),
+    // and the address keeps it meanwhile.
+    if (next === 'results') requestResultsRoute(query);
+    setHash(next !== 'results' ? `#${next}${query ? `?${query}` : ''}` : resultsRoutePending() ? location.hash : resultsUrl(view()));
     dirtyHistory = true; forgetCharts(); forgetResults();
     if (next === 'settings') feed.refreshActions();
     render('screen');
@@ -316,23 +318,22 @@ function start() {
   $('#periodSeg').addEventListener('click', e => {
     const b = e.target.closest('[data-period]');
     if (!b) return;
-    RS.period = b.dataset.period;
-    if (RS.period === 'ytd' || RS.period === 'all') RS.anchor = view().today;
+    choosePeriod(b.dataset.period, view());
     commit();
     render('results-period');
   });
-  $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { RS.desk = b.dataset.desk; commit(); render('results-desk'); } });
+  $('#deskSeg').addEventListener('click', e => { const b = e.target.closest('[data-desk]'); if (b) { chooseDesk(b.dataset.desk); commit(); render('results-desk'); } });
   $('#prevPer').addEventListener('click', () => { stepPeriod(-1, view()); commit(); render('results-step'); });
   $('#nextPer').addEventListener('click', () => { stepPeriod(1, view()); commit(); render('results-step'); });
-  $('#prevMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m ? [y, m - 1] : [y - 1, 11]; RS.moved = true; render('results-month'); });
-  $('#nextMonth').addEventListener('click', () => { const [y, m] = RS.cal; RS.cal = m === 11 ? [y + 1, 0] : [y, m + 1]; RS.moved = true; render('results-month'); });
+  // The month on show is not part of the link: a day selects, a month only browses.
+  $('#prevMonth').addEventListener('click', () => { showMonth(-1); render('results-month'); });
+  $('#nextMonth').addEventListener('click', () => { showMonth(1); render('results-month'); });
   let sheetFrom = null;
   $('#cal').addEventListener('click', e => {
     const c = e.target.closest('[data-day]');
-    if (!c) return;
+    if (!c || c.disabled) return;
     const v = view();
-    RS.sel = c.dataset.day; RS.moved = true;
-    if (['day', 'week', 'month'].includes(RS.period) && RS.sel <= v.today) RS.anchor = RS.sel;
+    if (!selectDay(c.dataset.day, v)) return;
     commit();
     render('results-day');
     if (isPhone()) { sheetFrom = RS.sel; openDaySheet(v, RS.sel, { pointer: fromPointer(e) }); }
@@ -354,8 +355,7 @@ function start() {
     if (r.name === 'results' && screen === 'results') {
       tips.hide();
       for (const dialog of $$('dialog[open]')) dialog.close();
-      applyResultsRoute(r.query, view());
-      setHash(resultsUrl(view()));
+      if (!requestResultsRoute(r.query)) setHash(resultsUrl(view()));
       render('results-link');
       return;
     }
