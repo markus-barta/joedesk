@@ -425,7 +425,9 @@ export function drawChart(el, o) {
     const cx = X(anchor?.x ?? xv);
     xh.setAttribute('x1', cx); xh.setAttribute('x2', cx); xh.setAttribute('visibility', 'visible');
     // The inspected values: a dot where it fits whole, on a custom axis a
-    // chevron where it does not; the tip keeps the words either way.
+    // chevron where it does not, unless the value already has its chevron
+    // (the newest or an isolated value): that one marks it, never a second.
+    // The tip keeps the words either way.
     xds.forEach((d, i) => {
       const c = xcs[i], cy = near[i] && !near[i].estimated ? Y(near[i].v) : NaN;
       if (Number.isFinite(cy) && fits(cy, RING)) {
@@ -435,7 +437,7 @@ export function drawChart(el, o) {
       }
       d.setAttribute('visibility', 'hidden');
       if (!c) return;
-      if (Number.isFinite(cy)) { c.setAttribute('d', chevron(X(near[i].x), cy).d); c.setAttribute('visibility', 'visible'); } else c.setAttribute('visibility', 'hidden');
+      if (Number.isFinite(cy) && !marks.has(`${hits[i]}|${near[i].x}`)) { c.setAttribute('d', chevron(X(near[i].x), cy).d); c.setAttribute('visibility', 'visible'); } else c.setAttribute('visibility', 'hidden');
     });
     const content = o.tipFmt(near, xv);
     tip.innerHTML = typeof content === 'string' ? content : content.html;
