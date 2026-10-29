@@ -62,14 +62,25 @@ function niceStep(raw) {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
 }
 const r2 = n => Math.round(n * 100) / 100;
-// The smallest nice step whose labels stay `gap` px apart on `px` of axis,
+// A nice step that labels can state exactly: 1, 2, 2,5 or 5 times a power of
+// ten, at least a cent, and no 2,5 below 0,1 (0,025 is no cent). Ticks on it
+// are whole cents, so rounding them to cents never moves or merges one.
+function centStep(raw) {
+  const p = 10 ** Math.floor(Math.log10(Math.max(raw, 1e-9))), f = raw / p;
+  for (const m of [1, 2, 2.5, 5]) if (f <= m * (1 + 1e-9) && (m !== 2.5 || p >= 0.1)) return Math.max(0.01, r2(m * p) || m * p);
+  return Math.max(0.01, 10 * p);
+}
+// The smallest such step whose labels stay `gap` px apart on `px` of axis,
 // counted after the range is rounded out to whole steps.
 function pixelStep(lo, hi, { px, gap }) {
   const most = Math.max(1, Math.floor(px / gap));
-  let step = niceStep((hi - lo) / most);
-  for (let i = 0; i < 12 && Math.ceil(hi / step - 1e-9) - Math.floor(lo / step + 1e-9) > most; i++) step = niceStep(step * 1.000001);
+  let step = centStep((hi - lo) / most);
+  for (let i = 0; i < 16 && Math.ceil(hi / step - 1e-9) - Math.floor(lo / step + 1e-9) > most; i++) step = centStep(step * 1.000001);
   return step;
 }
+// Labels are drawn to a tenth of a pixel: a plan for gap + 0,1 keeps every
+// drawn distance at gap or more.
+export const DRAWN_SLACK = 0.1;
 
 // `room` ({ px, gap }) picks the step from the axis's length in pixels, so
 // labels keep at least `gap` px apart at every size; without it, about `n`
@@ -84,14 +95,36 @@ export function axis(lo, hi, n = 4, base = 0, zero = false, room = null) {
   return { lo: a, hi: b, ticks, step };
 }
 // An axis over exactly [lo, hi] (a custom axis, or one frame of an eased
-// change): ticks on the nice step that keeps labels `gap` px apart.
+// change): ticks on the cent step that keeps labels `gap` px apart. A range
+// too small for two of them is labelled at its bounds, in whole cents, when
+// those are far enough apart; never two labels for the same cent.
 export function fixedAxis(lo, hi, room = null, n = 4) {
-  const span = Math.max(hi - lo, 1e-6);
-  const step = niceStep(room?.px > 0 && room.gap > 0 ? span * room.gap / room.px : span / n), ticks = [];
-  for (let k = Math.ceil(lo / step - 1e-9); k * step <= hi + step * 1e-9 && ticks.length < 200; k++) ticks.push(r2(k * step));
+  const span = Math.max(hi - lo, 1e-6), pixels = room?.px > 0 && room.gap > 0;
+  const step = centStep(pixels ? span * room.gap / room.px : span / n), ticks = [];
+  for (let k = Math.ceil(lo / step - 1e-9); k * step <= hi + step * 1e-9 && ticks.length < 200; k++) ticks.push(r2(k * step) || 0);
+  if (ticks.length < 2) {
+    const a = Math.ceil(lo * 100 - 1e-6) / 100, b = Math.floor(hi * 100 + 1e-6) / 100;
+    if (a < b && (!pixels || (b - a) / span * room.px >= room.gap)) return { lo, hi, ticks: [a, b], step: Number.isInteger(a) && Number.isInteger(b) ? 1 : 0.01 };
+  }
   return { lo, hi, ticks, step };
 }
-// Whole euros for whole steps; a 2,5 step keeps its decimal.
+// The ticks to label as they are drawn (`at`: a tick's drawn coordinate):
+// neighbours at least `gap` px apart with different labels, walking out from
+// zero when it is a tick, so a zero line always stays.
+function apartTicks(ticks, at, label, gap) {
+  if (ticks.length < 2) return ticks;
+  const from = Math.max(0, ticks.findIndex(t => Math.abs(t) < 1e-9)), keep = [ticks[from]];
+  for (const dir of [-1, 1]) {
+    let last = ticks[from];
+    for (let i = from + dir; i >= 0 && i < ticks.length; i += dir) {
+      if (Math.abs(at(ticks[i]) - at(last)) >= gap && label(ticks[i]) !== label(last)) { keep.push(ticks[i]); last = ticks[i]; }
+    }
+  }
+  return keep.sort((a, b) => a - b);
+}
+// Whole euros for whole steps; a 2,5 step keeps its decimal. Before
+// JOED-154 a 2,5 step printed whole euros, so 2,5 and 7,5 read "3" and "8"
+// on every chart (Desk's day, Results); now each label states its value.
 const stepDigits = step => (step < 1 ? 2 : Number.isInteger(step) ? 0 : 1);
 export const eurAxis = (t, step) => `${t < 0 ? MINUS : ''}€${NB}${digits(t, stepDigits(step))}`;
 // A change: signed, so +€ 20 and −€ 20 read apart from € 0.
@@ -261,7 +294,7 @@ export function drawChart(el, o) {
     return null;
   }
   const choice = o.axis ? axisChoice(o.axis) : AUTO, custom = choice.mode === 'custom';
-  const room = o.tickGap ? { px: ph, gap: o.tickGap } : null;
+  const room = o.tickGap ? { px: ph, gap: o.tickGap + DRAWN_SLACK } : null;
   let target;
   if (custom) target = fixedAxis(choice.min, choice.max, room, o.ticks || 4);
   else {
@@ -271,10 +304,19 @@ export function drawChart(el, o) {
     if (o.margin) { const m = (hi - lo) * o.margin; lo -= m; hi += m; }
     target = axis(lo, hi, o.ticks || 4, o.base || 0, Boolean(o.zero), room);
   }
-  const ax = o.ease > 0 ? easedAxis(el, target, o, room) : target;
+  let ax = o.ease > 0 ? easedAxis(el, target, o, room) : target;
   const [x0, x1] = o.xDomain;
   const X = x => pad.l + (x1 === x0 ? pw / 2 : (x - x0) / (x1 - x0) * pw);
   const Y = v => pad.t + (ax.hi - v) / (ax.hi - ax.lo) * ph;
+  // With a label gap, the labels are checked where they are drawn.
+  if (o.tickGap) ax = { ...ax, ticks: apartTicks(ax.ticks, t => Number((Y(t) + 3.5).toFixed(1)), t => (o.yFmt ? o.yFmt(t, ax.step) : String(t)), o.tickGap) };
+  // A dot belongs inside the plot; one beyond the axis (a custom axis, or a
+  // frame of an eased change) is not drawn.
+  const inPlot = y => y >= pad.t - 0.5 && y <= pad.t + ph + 0.5;
+  const beyond = (x, above, color) => {
+    const y = above ? pad.t + 1 : pad.t + ph - 1, d = above ? 5 : -5;
+    return `<path d="M${(x - 4).toFixed(1)} ${(y + d).toFixed(1)} L${x.toFixed(1)} ${y.toFixed(1)} L${(x + 4).toFixed(1)} ${(y + d).toFixed(1)}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-beyond="${above ? 'above' : 'below'}"/>`;
+  };
   const first = !drawn.has(el.id) && !reduced();
   drawn.add(el.id);
   const clip = `cl-${el.id}`, hatch = `ht-${el.id}`;
@@ -314,10 +356,13 @@ export function drawChart(el, o) {
   });
   g += '</g>';
   // End dots sit outside the clip so a point on the right edge stays whole.
+  // A newest value beyond a custom axis is a chevron at the edge it lies past.
   for (const s of o.series) {
     const last = [...s.pts].reverse().find(p => p.v !== null && p.v !== undefined);
     if (s.endDot !== false && !s.estimate && last && last.x >= x0 && last.x <= x1) {
-      g += `${s.live && !reduced() ? `<circle cx="${X(last.x).toFixed(1)}" cy="${Y(last.v).toFixed(1)}" r="5" fill="${s.color}" class="dot-live" opacity=".35"/>` : ''}<circle cx="${X(last.x).toFixed(1)}" cy="${Y(last.v).toFixed(1)}" r="4" fill="var(--surface)" stroke="${s.color}" stroke-width="2"/>`;
+      const cx = X(last.x), cy = Y(last.v);
+      if (inPlot(cy)) g += `${s.live && !reduced() ? `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="5" fill="${s.color}" class="dot-live" opacity=".35"/>` : ''}<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4" fill="var(--surface)" stroke="${s.color}" stroke-width="2"/>`;
+      else if (custom) g += beyond(cx, cy < pad.t, s.color);
     }
   }
   if (o.marker) g += `<line x1="${X(o.marker.x).toFixed(1)}" x2="${X(o.marker.x).toFixed(1)}" y1="${pad.t}" y2="${pad.t + ph}" stroke="var(--line-2)"/><text x="${(X(o.marker.x) + 6).toFixed(1)}" y="${pad.t + 11}" text-anchor="start">${esc(o.marker.text)}</text>`;
@@ -344,7 +389,12 @@ export function drawChart(el, o) {
     if (!anchor && !announce) return;
     const cx = X(anchor?.x ?? xv);
     xh.setAttribute('x1', cx); xh.setAttribute('x2', cx); xh.setAttribute('visibility', 'visible');
-    xds.forEach((d, i) => { if (!near[i] || near[i].estimated) { d.setAttribute('visibility', 'hidden'); return; } d.setAttribute('cx', X(near[i].x)); d.setAttribute('cy', Y(near[i].v)); d.setAttribute('visibility', 'visible'); });
+    // An inspected value beyond the axis keeps its words in the tip, not a dot off the plot.
+    xds.forEach((d, i) => {
+      const cy = near[i] && !near[i].estimated ? Y(near[i].v) : NaN;
+      if (!inPlot(cy)) { d.setAttribute('visibility', 'hidden'); return; }
+      d.setAttribute('cx', X(near[i].x)); d.setAttribute('cy', cy); d.setAttribute('visibility', 'visible');
+    });
     const content = o.tipFmt(near, xv);
     tip.innerHTML = typeof content === 'string' ? content : content.html;
     if (announce && live && live.textContent !== content.text) live.textContent = content.text;

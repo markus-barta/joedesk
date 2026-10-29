@@ -8,7 +8,7 @@ import { htmlDocument } from './fixtures/preview-dom.mjs';
 
 const chart = await import('../public/joe/chart.js');
 const { axis, fixedAxis, eurAxis, changeAxis, axisChoice, axisBound, customAxis, createAxisMode, chartHintSeen, dismissChartHint, forgetChartMemory,
-  drawChart, AXIS_MODES, AXIS_LIMIT, CHART_AXES_KEY, CHART_HINT_KEY } = chart;
+  drawChart, AXIS_MODES, AXIS_LIMIT, CHART_AXES_KEY, CHART_HINT_KEY, DRAWN_SLACK } = chart;
 const NB = ' ', MINUS = '−';
 
 // A browser's storage for one test: a Map, or one that throws like a blocked
@@ -157,14 +157,15 @@ test('JOED-154 axis labels: Money and Change euros; a 2,5 step keeps its decimal
 
 // drawChart on the Node test DOM. matchMedia answers reduced motion unless a
 // test says otherwise.
-function canvas(t, { reduce = true } = {}) {
+function canvas(t, { reduce = true, height = 300 } = {}) {
   const saved = { document: globalThis.document, matchMedia: globalThis.matchMedia };
   t.after(() => { globalThis.document = saved.document; globalThis.matchMedia = saved.matchMedia; });
-  globalThis.document = htmlDocument(`<div id="axisChart${Math.random().toString(36).slice(2)}"></div>`);
+  globalThis.document = htmlDocument(`<div id="axisChart${Math.random().toString(36).slice(2)}"><div class="ctip"></div></div>`);
   const motion = { reduce };
   globalThis.matchMedia = query => ({ matches: /reduce/.test(query) ? motion.reduce : false });
   const el = document.querySelector('div');
-  Object.assign(el, { clientWidth: 600, clientHeight: 300 });
+  Object.assign(el, { clientWidth: 600, clientHeight: height, getBoundingClientRect: () => ({ left: 0, top: 0 }) });
+  Object.assign(el.querySelector('.ctip'), { offsetWidth: 80, offsetHeight: 40 });
   const svg = () => el.querySelector(':scope > svg');
   return { el, motion, svg, range: () => [Number(svg().getAttribute('data-ylo')), Number(svg().getAttribute('data-yhi'))] };
 }
@@ -238,4 +239,94 @@ test('JOED-154 drawChart: a new range glides over the ease time, landing exactly
   draw([0, 10], 'money');
   assert.deepEqual(c.range(), [first.lo, first.hi], 'with reduced motion every change lands at once');
   assert.equal(again, 2);
+});
+
+// ---------- Fix round 1 (the Codex gate on 5451d58) ----------
+const pathPoints = d => [...d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])]);
+// A money label as drawn ("+€ 2,5", "−€ 1.000.000") read back as a number.
+const amount = text => Number(text.replace(/[€+\s\u00a0]/g, '').replace(MINUS, '-').replace(/\./g, '').replace(',', '.'));
+// The drawn money labels, top to bottom: their y, words, value, and the value
+// at the height of their own grid line.
+function drawnLabels(el, scale) {
+  const lines = el.querySelectorAll('line').filter(l => l.getAttribute('x1') === String(scale.pad.l) && l.getAttribute('y1') === l.getAttribute('y2'));
+  return el.querySelectorAll('text').filter(n => n.getAttribute('text-anchor') === 'end' && Number(n.getAttribute('x')) < scale.pad.l).map(n => {
+    const y = Number(n.getAttribute('y')), line = lines.find(l => Math.abs(Number(l.getAttribute('y1')) + 3.5 - y) <= 0.11);
+    const at = line ? scale.ax.hi - (Number(line.getAttribute('y1')) - scale.pad.t) / scale.ph * (scale.ax.hi - scale.ax.lo) : NaN;
+    return { y, text: n.textContent, value: amount(n.textContent), at };
+  }).sort((a, b) => a.y - b.y);
+}
+
+test('JOED-154 fix 1: a value beyond a custom axis never puts a dot outside the plot; the newest is a chevron at the edge it lies past', t => {
+  const c = canvas(t);
+  const series = [{ pts: [{ x: 0, v: 0 }, { x: 1, v: 3 }, { x: 2, v: -100 }], color: 'var(--desk-j)', area: false, live: true }];
+  const scale = drawChart(c.el, { series, xDomain: [0, 2], zero: true, yFmt: changeAxis, tickGap: 56, axis: { mode: 'custom', min: -5, max: 5 }, tipFmt: () => ({ html: 'J', text: 'J' }) });
+  const inside = y => y >= scale.pad.t - 0.5 && y <= scale.pad.t + scale.ph + 0.5, placed = () => c.el.querySelectorAll('circle').filter(d => d.getAttribute('cy') !== null);
+  assert.deepEqual(placed().filter(d => !inside(Number(d.getAttribute('cy')))).map(d => d.getAttribute('cy')), [], 'no end dot off the plot (it was at cy 2784 on 5451d58)');
+  const marks = c.el.querySelectorAll('[data-beyond]');
+  assert.deepEqual(marks.map(m => m.getAttribute('data-beyond')), ['below'], 'the newest value is marked below the axis');
+  assert.ok(pathPoints(marks[0].getAttribute('d')).every(([x, y]) => inside(y) && Math.abs(x - scale.X(2)) <= 4), 'inside the plot, at its time');
+  assert.ok(c.el.querySelectorAll('[data-axis-note]').some(n => /below it/.test(n.textContent)), 'as the note says');
+  // Inspecting the newest point: its words go to the tip, no dot leaves the plot.
+  scale.inspectAt(scale.X(2));
+  const dot = c.el.querySelector('.xd');
+  assert.equal(dot.getAttribute('visibility'), 'hidden');
+  scale.inspectAt(scale.X(1));
+  assert.ok(dot.getAttribute('visibility') === 'visible' && inside(Number(dot.getAttribute('cy'))), 'a value inside the axis keeps its dot');
+  // Above the axis too, and an automatic fit is unchanged: its newest dot stays.
+  drawChart(c.el, { series: [{ ...series[0], pts: [{ x: 0, v: 0 }, { x: 1, v: 80 }] }], xDomain: [0, 1], zero: true, yFmt: changeAxis, tickGap: 56, axis: { mode: 'custom', min: -5, max: 5 } });
+  assert.deepEqual(c.el.querySelectorAll('[data-beyond]').map(m => m.getAttribute('data-beyond')), ['above']);
+  drawChart(c.el, { series, xDomain: [0, 2], zero: true, yFmt: changeAxis, tickGap: 56, axis: { mode: 'auto' } });
+  assert.equal(c.el.querySelectorAll('[data-beyond]').length, 0);
+  assert.ok(placed().length === 1 && inside(Number(placed()[0].getAttribute('cy'))), 'Auto holds the value, so its dot is drawn');
+});
+
+test('JOED-154 fix 2: custom ranges draw neighbouring labels at least 56 px apart, each a different, true value, tiny ranges included', t => {
+  assert.deepEqual(fixedAxis(0, 0.01, { px: 200, gap: 56 }).ticks, [0, 0.01], 'the gate’s case: two cents, two labels (5451d58 drew 0,01 twice)');
+  for (const height of [140, 200, 236, 300, 340]) {
+    for (const [min, max] of [[0, 0.01], [0, 0.03], [-0.05, 0.05], [0.01, 0.09], [0, 0.004], [4999.99, 5000.01], [4937, 5061], [-25, 40.5], [-12, 30.5], [0, 1], [-1e6, 1e6]]) {
+      const c = canvas(t, { height });
+      const scale = drawChart(c.el, { series: line([min, max]), xDomain: [0, 1], zero: true, yFmt: changeAxis, tickGap: 56, axis: { mode: 'custom', min, max } });
+      const labels = drawnLabels(c.el, scale), at = `${min}…${max} on ${scale.ph} px`;
+      labels.forEach((l, i) => {
+        if (i) assert.ok(l.y - labels[i - 1].y >= 56, `${at}: ${labels[i - 1].text} and ${l.text} drawn ${(l.y - labels[i - 1].y).toFixed(1)} px apart`);
+        assert.ok(Math.abs(l.value - l.at) <= 0.005 + 0.06 * (max - min) / scale.ph, `${at}: ${l.text} sits on its own value (${l.at})`);
+      });
+      assert.equal(new Set(labels.map(l => l.text)).size, labels.length, `${at}: no label twice`);
+      assert.ok(labels.length >= (max - min >= 0.01 && scale.ph >= 56 ? 2 : 1), `${at}: ${labels.map(l => l.text)}`);
+    }
+  }
+  // The same holds while a range glides, and in Auto and Max.
+  for (const mode of ['auto', 'max']) {
+    const c = canvas(t, { height: 236 });
+    const scale = drawChart(c.el, { series: line([-37, 23]), xDomain: [0, 1], zero: true, base: 5000, margin: 0.08, yFmt: changeAxis, tickGap: 56, axis: { mode }, maxValues: [-60, 41] });
+    const labels = drawnLabels(c.el, scale);
+    assert.ok(labels.length >= 2 && labels.every((l, i) => !i || l.y - labels[i - 1].y >= 56) && labels.some(l => l.text === `€${NB}0`), `${mode}: ${labels.map(l => l.text)}`);
+  }
+  assert.equal(DRAWN_SLACK, 0.1, 'labels are planned a tenth of a pixel wider, as they are drawn');
+});
+
+test('JOED-154 fix 5: every chart’s money labels state the value of their own line, a 2,5 step included (before JOED-154, 2,5 read "3")', t => {
+  // The call shapes of Desk's day chart (desk.js), the Results curve (results.js), and History in Money and Change (history.js).
+  const shapes = {
+    desk: { zero: true, ticks: 3, yFmt: eurAxis, pad: { l: 52 } },
+    results: { zero: true, strongZero: true, yFmt: eurAxis, ticks: 4 },
+    money: { base: 5000, margin: 0.08, yFmt: eurAxis, ticks: 5, tickGap: 56, axis: { mode: 'auto' } },
+    change: { zero: true, base: 5000, margin: 0.08, yFmt: changeAxis, ticks: 5, tickGap: 56, axis: { mode: 'auto' } },
+  };
+  let twoAndAHalf = 0;
+  for (const [name, o] of Object.entries(shapes)) {
+    for (const values of [[0, 7.4], [0, 9.9], [-3, 6], [0, 0.6], [4990, 5010], [-37, 23], [0, 120], [2.5, 12.4]]) {
+      const c = canvas(t, { height: name === 'desk' ? 160 : 300 });
+      const scale = drawChart(c.el, { series: line(values), xDomain: [0, 1], ...o });
+      const labels = drawnLabels(c.el, scale), at = `${name} ${values}`;
+      assert.ok(labels.length >= 2, at);
+      for (const l of labels) assert.ok(Math.abs(l.value - l.at) <= 1e-6 + 0.06 * (scale.ax.hi - scale.ax.lo) / scale.ph, `${at}: "${l.text}" states the value of its line, ${l.at}`);
+      if (scale.ax.step === 2.5) { twoAndAHalf++; assert.ok(labels.some(l => /2,5$/.test(l.text)) || labels.some(l => /7,5$/.test(l.text)), `${at}: ${labels.map(l => l.text)}`); }
+    }
+  }
+  assert.ok(twoAndAHalf > 0, 'a 2,5 step was drawn');
+  // Desk's day chart from € 0 to € 7,40: the labels read 2,5 and 7,5, not 3 and 8.
+  const c = canvas(t, { height: 160 });
+  drawChart(c.el, { series: line([0, 7.4]), xDomain: [0, 1], ...shapes.desk });
+  assert.deepEqual(c.el.querySelectorAll('text').filter(n => n.getAttribute('text-anchor') === 'end').map(n => n.textContent), [`€${NB}0,0`, `€${NB}2,5`, `€${NB}5,0`, `€${NB}7,5`]);
 });
