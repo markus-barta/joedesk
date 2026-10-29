@@ -94,7 +94,7 @@ test('JOED-105: the browser refresh changes the real ranking while J’s term an
   assert.equal(model.accept(next).status, 200);
   const after = view();
   assert.deepEqual(rankDesks(after.states, order), ['joe', 'j', 'joel']);
-  assert.equal(deskCard(after, 'j', 50, true), deskCard(before, 'j', 50, true));
+  assert.equal(deskCard(after, 'j'), deskCard(before, 'j'));
   assert.equal(compactDesk(after, 'j'), compactDesk(before, 'j'));
 });
 
@@ -120,9 +120,9 @@ test('JOED-97 M1: replay the browser journey through the read model before asser
   const journey = readFileSync(new URL('../scripts/browser-p3.mjs', import.meta.url), 'utf8');
   const todayPattern = new RegExp(journey.match(/const today = \/(.+)\/, open = /)[1]);
   for (const id of ['j', 'joe', 'joel']) {
-    const card = htmlDocument(deskCard(ctx, id, 50, true));
-    const lines = card.querySelectorAll('.mini-label .st');
-    const text = card.querySelector('.mini-label').textContent;
+    const card = htmlDocument(deskCard(ctx, id));
+    const lines = card.querySelectorAll('.card-status .st');
+    const text = card.querySelector('.card-status').textContent;
     assert.ok(text.startsWith('Today: not exact · waiting on the start-of-day value'), text);
     assert.equal(states[`desks.${id}.dayPnl`].value, null);
     assert.equal(states[`desks.${id}.openPnl`].retained, true);
@@ -286,7 +286,7 @@ test('JOED-97 fix3 L2: upgrading a current legacy Today estimate preserves its s
     assert.equal(cell.retained, true);
     assert.equal(cell.valueObservedAt, fixture.payload.pnlSources.day.observedAt);
     assert.deepEqual(cell.valueSource, fixture.payload.pnlSources.day);
-    for (const html of [deskCard(ctx, id, 50, true), compactDesk(ctx, id)]) {
+    for (const html of [deskCard(ctx, id), compactDesk(ctx, id)]) {
       assert.equal(htmlDocument(html).querySelectorAll('.estimate-mark').length, 1);
     }
   }
@@ -315,7 +315,7 @@ test('JOED-97 L4: retained estimates keep their original source and mark through
     const ctx = render();
     assert.equal(ctx.states[`desks.${id}.dayPnl`].retained, true);
     assert.deepEqual(ctx.states[`desks.${id}.dayPnl`].valueSource, fixture.payload.pnlSources.day);
-    for (const html of [deskCard(ctx, id, 50, true), compactDesk(ctx, id)]) assert.equal(htmlDocument(html).querySelectorAll('.estimate-mark').length, 1);
+    for (const html of [deskCard(ctx, id), compactDesk(ctx, id)]) assert.equal(htmlDocument(html).querySelectorAll('.estimate-mark').length, 1);
   }
   now = at(fixture.receivedAt, 3600);
   assert.equal(htmlDocument(compactDesk(render(), 'j')).querySelectorAll('.estimate-mark').length, 0, 'expired estimate is a dash');
@@ -554,7 +554,7 @@ test('exact money renders through the real selectors, with Today and Since start
   assert.equal(doc.querySelectorAll('.performance-pct').length, 2);
   assert.equal(doc.querySelector('[data-cell="hero.day"] .bn').textContent, '+€50,00');
   assert.equal(doc.querySelector('[data-cell="hero.since"] .bn').textContent, '+€150,00');
-  assert.match(htmlDocument(deskCard(ctx, 'j', 50, true)).textContent, /\+€4,60/);
+  assert.match(htmlDocument(deskCard(ctx, 'j')).textContent, /\+€4,60/);
   const positions = htmlDocument(positionsHtml(ctx).html);
   assert.match(positions.textContent, /\$\s*20,01/);
   assert.match(positions.textContent, /\$\s*40,01/);
@@ -569,7 +569,7 @@ test('JOED-97 fix4: detail sizing counts the displayed signed amount, including 
     const data = structuredClone(exact);
     data.desks[0].money.totalPnl = amount === null ? null : { amount, currency: 'EUR' };
     if (amount === null) data.desks[0].money.reasons = { totalPnl: 'source_unavailable' };
-    const doc = htmlDocument(deskCard(context(data), 'j', 50, false));
+    const doc = htmlDocument(deskCard(context(data), 'j'));
     const value = doc.querySelectorAll('.dnums .v')[2];
     assert.equal(value.getAttribute('style'), `--digits:${digits}`, `width budget for ${amount}`);
     assert.equal(value.querySelectorAll('.bn').length, 1);
@@ -663,17 +663,19 @@ test('position worth bars use exact magnitudes on independent native-currency sc
 test('mixed rendering keeps exact desks visible, explains each failure and shares repeated reasons once', () => {
   const ctx = context(mixed), hero = htmlDocument(heroLeft(ctx));
   assert.equal(hero.querySelectorAll('.performance-pct').length, 0);
-  const j = htmlDocument(deskCard(ctx, 'j', 50, false));
+  const j = htmlDocument(deskCard(ctx, 'j'));
   assert.equal(j.textContent.match(/desk ledger not reconciled/g)?.length, 1);
   // JOED-148: Joe's lone not-exact Today keeps its reason on its own dash and
   // info icon; the card adds no line that would repeat it.
-  const joe = htmlDocument(deskCard(ctx, 'joe', 50, false)), joeDay = joe.querySelector('.dnums .bn');
-  assert.equal(joe.querySelector('.mini-label').textContent, 'since start · last sessions');
+  const joe = htmlDocument(deskCard(ctx, 'joe')), joeDay = joe.querySelector('.dnums .bn');
+  assert.equal(joe.querySelector('.card-status'), null, 'no status line covers the bars');
+  assert.equal(joe.querySelector('.dnums .c').textContent, 'Not exact today', 'the dash says its state, not again its reason');
+  assert.equal(joe.querySelector('.dnums .c').getAttribute('aria-hidden'), 'true', 'a screen reader hears the dash’s own name once');
   assert.doesNotMatch(joe.textContent, /start-of-day value missing/);
   assert.equal(joeDay.getAttribute('aria-label'), 'Today: not exact · start-of-day value missing');
   assert.equal(joeDay.getAttribute('title'), joeDay.getAttribute('aria-label'));
   assert.equal(joe.querySelector('.dnums .cell-state').getAttribute('title'), 'Not exact · start-of-day value missing');
-  assert.equal(htmlDocument(deskCard(ctx, 'joel', 50, false)).querySelectorAll('.dnums .v .bn').length, 3);
+  assert.equal(htmlDocument(deskCard(ctx, 'joel')).querySelectorAll('.dnums .v .bn').length, 3);
   const positions = htmlDocument(positionsHtml(ctx).html);
   assert.equal(positionSectionReason(ctx.states.positions), cellReason('position_stale'));
   assert.equal(positions.textContent.match(/position update is old/g)?.length, 1);
@@ -693,17 +695,18 @@ test('JOED-148: Phase B mixed browser evidence accepts the phone’s no-break sp
   const desktop = {
     headerTone: 'warn', headerReason: 'open_unavailable_rth',
     details: 'Desk values are not exact Today’s resultExact for Joel; not exact for J · desk ledger not reconciled; not exact for Joe · start-of-day value missing',
-    j: 'Numbers: not exact · desk ledger not reconciled', joe: 'Joe is sitting out. Today — since start · last sessions', joel: '+€5,00€5.025,00',
+    j: 'Numbers: not exact · desk ledger not reconciled', joe: 'Joe Sitting out · no positions Results Today — Not exact today Last sessions · each session’s result in €, after fees', joel: '+€5,00€5.025,00',
     joeDay: { name: 'Today: not exact · start-of-day value missing', title: 'Today: not exact · start-of-day value missing' },
-    joeStatus: 'since start · last sessions',
+    joeStatus: null, joeBars: 'Last sessions · each session’s result in €, after fees',
   };
-  const onPhone = { ...desktop, details: phone(desktop.details), j: phone(desktop.j), joe: phone(desktop.joe), joeStatus: phone(desktop.joeStatus) };
+  const onPhone = { ...desktop, details: phone(desktop.details), j: phone(desktop.j), joe: phone(desktop.joe), joeBars: phone(desktop.joeBars) };
   for (const result of [desktop, onPhone]) {
     assert.equal(mixedHeaderOk(result), true);
     assert.equal(mixedDesksOk(result), true);
   }
   // The checks still reject the old copy and a repeated Today line.
   assert.equal(mixedDesksOk({ ...onPhone, joeStatus: 'Today: not exact · start-of-day value missing' }), false);
+  assert.equal(mixedDesksOk({ ...onPhone, joeBars: undefined }), false);
   assert.equal(mixedHeaderOk({ ...onPhone, details: `${onPhone.details} Today: not exact for J and Joe` }), false);
   assert.equal(mixedDesksOk({ ...desktop, joeDay: { ...desktop.joeDay, title: 'Today: not reported · start-of-day value missing' } }), false);
 });

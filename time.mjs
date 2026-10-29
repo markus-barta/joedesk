@@ -82,3 +82,72 @@ export function nextOpen(instant) {
   }
   return null;
 }
+
+const shiftDay = (day, days) => new Date(Date.parse(`${day}T12:00:00.000Z`) + days * 86400000).toISOString().slice(0, 10);
+
+// The last regular session that closed at or before the instant: its New York
+// day with the session's UTC open and close, from the pinned calendar. Null
+// when a day on the way back lies outside the calendar: no session is assumed.
+export function previousSession(instant) {
+  const first = nyDay(instant), at = Date.parse(instant);
+  for (let offset = 0; offset < 12; offset++) {
+    const s = sessionBounds(zonedInstant(shiftDay(first, -offset), '12:00:00', NY));
+    if (s.reason === 'calendar_unavailable') return null;
+    if (s.closeAt && Date.parse(s.closeAt) <= at) return { day: s.day, openAt: s.openAt, closeAt: s.closeAt };
+  }
+  return null;
+}
+
+// A New York date as Desk names a session: "Thu 29 Oct" (day and month never part).
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export function sessionDayName(day) {
+  const d = new Date(`${day}T12:00:00.000Z`);
+  return `${DOW[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`;
+}
+
+// The session Desk's first figure is about at an instant, and its dated label:
+// - live: during the regular session of the instant's New York day,
+//   "Today · Thu 29 Oct · live";
+// - closed: from that session's close until New York midnight,
+//   "Thu 29 Oct · session closed";
+// - last: from New York midnight until the open, and all day on a day without
+//   a session (weekends, holidays): "Last session · Wed 28 Oct".
+// `day` is the session's New York date, which is also its Vienna date (a
+// regular session never crosses midnight in Vienna). Null when the pinned
+// calendar cannot say.
+export function sessionLabel(instant) {
+  const s = sessionBounds(instant);
+  if (s.reason === 'calendar_unavailable') return null;
+  const at = Date.parse(instant);
+  if (s.openAt && at >= Date.parse(s.openAt)) {
+    const phase = at < Date.parse(s.closeAt) ? 'live' : 'closed';
+    return { phase, day: s.day, openAt: s.openAt, closeAt: s.closeAt,
+      text: phase === 'live' ? `Today · ${sessionDayName(s.day)} · live` : `${sessionDayName(s.day)} · session closed` };
+  }
+  const last = previousSession(instant);
+  return last && { phase: 'last', ...last, text: `Last session · ${sessionDayName(last.day)}` };
+}
+
+// How many hours New York is behind Vienna at an instant (usually 6; 5 in the
+// weeks the two clocks change on different dates), and while it is not the
+// usual 6, the Vienna date on which that ends. Both zones' own rules decide;
+// the change is found to the hour, never assumed.
+const gapAt = ms => {
+  const iso = new Date(ms).toISOString();
+  return (Date.parse(`${wall(iso, VIENNA).replace(' ', 'T')}Z`) - Date.parse(`${wall(iso, NY).replace(' ', 'T')}Z`)) / 3600000;
+};
+export const USUAL_GAP_HOURS = 6;
+export function zoneGap(instant) {
+  if (!validInstant(instant)) throw new TypeError('UTC instant required');
+  const at = Date.parse(instant), hours = gapAt(at);
+  if (hours === USUAL_GAP_HOURS) return { hours, until: null };
+  // A day at a time to the first day that differs, then an hour at a time within it.
+  for (let day = 1; day <= 60; day++) {
+    if (gapAt(at + day * 86400000) === hours) continue;
+    for (let ms = at + (day - 1) * 86400000 + 3600000; ; ms += 3600000) {
+      if (gapAt(ms) !== hours) return { hours, until: viennaDay(new Date(ms).toISOString()) };
+    }
+  }
+  return { hours, until: null };
+}

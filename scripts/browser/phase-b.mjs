@@ -89,7 +89,8 @@ export const mixedHeaderOk = result => result.headerTone === 'warn' && result.he
   !/Today: not exact/.test(result.details);
 export const mixedDesksOk = result => /desk ledger not reconciled/.test(result.j) &&
   result.joeDay?.name === 'Today: not exact · start-of-day value missing' && result.joeDay.title === result.joeDay.name &&
-  !/start-of-day value missing/.test(result.joe) && copyText(result.joeStatus) === 'since start · last sessions' && result.joel.includes('+€5,00');
+  !/start-of-day value missing/.test(result.joe) && result.joeStatus === null &&
+  copyText(result.joeBars) === 'Last sessions · each session’s result in €, after fees' && result.joel.includes('+€5,00');
 
 export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, mixed = false }) {
   for (const viewport of [...VIEWPORTS, { ...VIEWPORTS[2], name: '360', width: 360 }]) for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
@@ -123,7 +124,8 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
         j: document.querySelector('#desk-j .desk-detail')?.innerText,
         joe: document.querySelector('#desk-joe .desk-detail')?.innerText,
         joeDay: (() => { const dash = document.querySelector('#desk-joe .desk-detail .dnums .bn'); return dash ? { name: dash.getAttribute('aria-label'), title: dash.title } : null; })(),
-        joeStatus: document.querySelector('#desk-joe .mini-label')?.innerText,
+        joeStatus: document.querySelector('#desk-joe .card-status')?.innerText ?? null,
+        joeBars: document.querySelector('#desk-joe .spark-h')?.innerText,
         joel: text('#desk-joel .dnums'),
         positions: text('#positions'),
         kept: text('#kept'),

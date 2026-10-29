@@ -118,7 +118,7 @@ test('desk check-ins disappear while fresh and return at the existing 60-second 
   data.desks[0].heartbeatAt = data.generatedAt;
   for (const seconds of [0, 59, 60, 61]) {
     const current = { ...ctx, now: at(ctx.now, seconds) };
-    const html = deskCard(current, 'j', 100, false);
+    const html = deskCard(current, 'j');
     assert.equal(html.includes('data-term="heartbeat"'), seconds >= 60, String(seconds));
     if (seconds >= 60) assert.match(html, /class="hb warn"/);
   }
@@ -167,12 +167,12 @@ test('missing or invalid check-ins fall back to snapshot age only once it is sta
     const ctx = context(0);
     ctx.feeds.data.value.desks[0].heartbeatAt = heartbeatAt;
     for (const seconds of [0, 59, 60, 61]) {
-      const html = deskCard({ ...ctx, now: at(ctx.now, seconds) }, 'j', 100, false);
+      const html = deskCard({ ...ctx, now: at(ctx.now, seconds) }, 'j');
       assert.equal(html.includes('Data <span class="age" data-age="hb.j"'), seconds >= 60);
       assert.ok(!html.includes('data-term="heartbeat"'));
     }
   }
-  assert.ok(!deskCard({ feeds: {}, states: {}, now: valid.data.receivedAt }, 'j', 100, false).includes('data-age="hb.j"'));
+  assert.ok(!deskCard({ feeds: {}, states: {}, now: valid.data.receivedAt }, 'j').includes('data-age="hb.j"'));
 });
 
 test('term tips capture native focus, survive an unrelated Details close, and suppress only synchronous handoff focus', async t => {

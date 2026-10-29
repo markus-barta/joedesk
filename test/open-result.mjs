@@ -40,7 +40,7 @@ test('JOED-157 fix3: cold boardStates preserves the browser first-load state and
     assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent,
       rejected ? 'Unavailable · not found on the board server' : 'Not reported');
     const summary = hero.querySelector('.account-section .summary-text').textContent;
-    assert.equal(summary, rejected ? 'Open positions: unavailable · not found on the board server' : 'Open positions: not reported · no data received yet');
+    assert.equal(summary, rejected ? 'Open result: unavailable · not found on the board server' : 'Open result: not reported · no data received yet');
     assert.doesNotMatch(hero.textContent, /Unavailable for|unavailable for/);
   }
 });
@@ -156,7 +156,7 @@ test('JOED-157 fix2: household Open captions name faulty desks before not-exact 
   assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent,
     'Unavailable for Joe · not reported by the broker; not exact for J');
   assert.equal(hero.querySelector('.account-section .summary-text').textContent,
-    'Open positions: unavailable for Joe · not reported by the broker; not exact for J');
+    'Open result: unavailable for Joe · not reported by the broker; not exact for J');
 });
 
 test('JOED-157 fix3: price waits and last-good desks keep their own words in fault-first headlines', () => {
@@ -167,16 +167,16 @@ test('JOED-157 fix3: price waits and last-good desks keep their own words in fau
   ]) {
     const view = combination(desks, 'notExact'), hero = htmlDocument(heroLeft(view));
     assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, caption);
-    assert.equal(hero.querySelector('.account-section .summary-text').textContent, `Open positions: ${caption[0].toLowerCase()}${caption.slice(1)}`);
+    assert.equal(hero.querySelector('.account-section .summary-text').textContent, `Open result: ${caption[0].toLowerCase()}${caption.slice(1)}`);
     const row = detailsRow(htmlDocument(healthPop(view, boardHealthPresentation(view.states, view.feeds, now))), 'Open positions');
     desks.forEach((option, i) => {
       const word = DESK_OPEN[option].word;
       if (word === 'exact') return;
       const group = row.split('; ').find(text => new RegExp(`\\b${NAMES[i]}\\b`).test(text));
       assert.ok(group?.includes(`: ${word}`), `${NAMES[i]} in ${row}`);
-      const card = htmlDocument(deskCard(view, DESKS[i], 50, true));
-      assert.match(card.querySelector('.mini-label').textContent, new RegExp(`Open positions: ${word}`));
-      assert.match(htmlDocument(compactDesk(view, DESKS[i])).querySelector('.summary-text').textContent, new RegExp(`Open positions: ${word}`));
+      const card = htmlDocument(deskCard(view, DESKS[i]));
+      assert.match((card.querySelector('.card-status')?.textContent ?? ''), new RegExp(`Open result: ${word}`));
+      assert.match(htmlDocument(compactDesk(view, DESKS[i])).querySelector('.summary-text').textContent, new RegExp(`Open result: ${word}`));
     });
   }
 });
@@ -275,21 +275,21 @@ test('JOED-157: every desk and household Open combination matches the plain-word
       const hero = htmlDocument(heroLeft(view));
       check((hero.querySelector('[data-cell="hero.open"] .bn').textContent !== '—') === expected.shown, 'hero amount', label);
       const summary = hero.querySelector('.account-section .summary-text')?.textContent ?? '';
-      check(expected.word === 'exact' ? !summary.includes('Open positions:') : summary.includes(`Open positions: ${expected.word}`), 'hero summary', label);
+      check(expected.word === 'exact' ? !summary.includes('Open result:') : summary.includes(`Open result: ${expected.word}`), 'hero summary', label);
       const deskFault = expected.inputs.some(input => !input.fine);
       if (!deskFault && HOUSEHOLD_OPEN[household].reason && !HOUSEHOLD_OPEN[household].fine)
         check(summary.includes(HOUSEHOLD_OPEN[household].reason), 'own household fault reason', label);
-      if (expected.fault) check(!summary.includes('Open positions: not exact'), 'fault wins household caption', label);
+      if (expected.fault) check(!summary.includes('Open result: not exact'), 'fault wins household caption', label);
       if (deskFault) {
         const caption = hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent;
         for (const text of [caption, summary]) {
           const groups = text.split('; ');
-          check(new RegExp(`^(${expected.inputs.filter(input => !input.fine).map(input => input.word).join('|')}) for `, 'i').test(groups[0].replace('Open positions: ', '')), 'fault caption first', label);
+          check(new RegExp(`^(${expected.inputs.filter(input => !input.fine).map(input => input.word).join('|')}) for `, 'i').test(groups[0].replace('Open result: ', '')), 'fault caption first', label);
           const faultPositions = [], waitPositions = [];
           expected.inputs.forEach((input, i) => {
             if (input.word === 'exact') return;
             const group = groups.find(group => new RegExp(`\\b${NAMES[i]}\\b`).test(group));
-            check(Boolean(group) && new RegExp(`^(?:Open positions: )?${input.word} for `, 'i').test(group), 'caption agrees with desk word', `${label}: ${NAMES[i]}`);
+            check(Boolean(group) && new RegExp(`^(?:Open result: )?${input.word} for `, 'i').test(group), 'caption agrees with desk word', `${label}: ${NAMES[i]}`);
             (input.fine ? waitPositions : faultPositions).push(groups.indexOf(group));
             if (input.reason && input.reason !== input.word && !input.fine) check(group?.includes(input.reason), 'fault caption desk reason', `${label}: ${NAMES[i]}`);
           });
@@ -316,16 +316,16 @@ test('JOED-157: every desk and household Open combination matches the plain-word
           if (input.reason && input.reason !== input.word) check(group?.[3] === input.reason, 'Details desk reason', `${label}: ${name}`);
         } else check(expected.inputs.every(input => input.word === 'exact'), 'Details names desk gaps', label);
 
-        const card = htmlDocument(deskCard(view, id, 50, true));
+        const card = htmlDocument(deskCard(view, id));
         check((card.querySelectorAll('.dnums .bn')[1].textContent !== '—') === input.amount, 'card amount', `${label}: ${name}`);
-        const cardLine = card.querySelector('.mini-label').textContent;
-        check(cardLine.includes('Open positions:') === (input.word !== 'exact'), 'card status', `${label}: ${name}`);
-        if (input.word !== 'exact') check(cardLine.includes(`Open positions: ${input.word}`), 'card agrees with desk word', `${label}: ${name}`);
+        const cardLine = (card.querySelector('.card-status')?.textContent ?? '');
+        check(cardLine.includes('Open result:') === (input.word !== 'exact'), 'card status', `${label}: ${name}`);
+        if (input.word !== 'exact') check(cardLine.includes(`Open result: ${input.word}`), 'card agrees with desk word', `${label}: ${name}`);
         if (input.reason) check(cardLine.includes(input.reason), 'card reason', `${label}: ${name}`);
 
         const phone = htmlDocument(compactDesk(view, id));
         const phoneLine = phone.querySelector('.summary-text')?.textContent ?? '';
-        check(input.word === 'exact' ? !phoneLine.includes('Open positions:') : phoneLine.includes(`Open positions: ${input.word}`), 'phone summary', `${label}: ${name}`);
+        check(input.word === 'exact' ? !phoneLine.includes('Open result:') : phoneLine.includes(`Open result: ${input.word}`), 'phone summary', `${label}: ${name}`);
         if (input.reason) check(phoneLine.includes(input.reason), 'phone reason', `${label}: ${name}`);
         // Changing Open must never change the phone's Today amount.
         check(phone.querySelector('[data-compact-value="dayPnl"] .bn').textContent !== '—', 'Today unchanged', `${label}: ${name}`);
@@ -379,7 +379,7 @@ test('JOED-157: shared classifier and Open channels cover source fallback, statu
     if (scope === 'joe') {
       assert.equal(view.states['today.openPnl'].value, null, channel);
       assert.equal(view.states['desks.joe.openPnl'].state, 'broken', channel);
-      assert.match(htmlDocument(compactDesk(view, 'joe')).querySelector('.summary-text').textContent, /Open positions: unavailable/, channel);
+      assert.match(htmlDocument(compactDesk(view, 'joe')).querySelector('.summary-text').textContent, /Open result: unavailable/, channel);
     }
   }
 });

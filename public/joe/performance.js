@@ -50,13 +50,21 @@ export function percentOf(result, base) {
     ? divRound(result * 10000n, base) : null;
 }
 
-export function todayPercent(states, source) {
+// The money Today's percentage divides by: the desks' money at the start of
+// today, that is their exact money now minus today's exact result, both from
+// one snapshot. Null whenever todayPercent has no percentage to show.
+export function todayBase(states, source) {
   if (source?.method === 'session-open-estimate') return null;
   const day = states['today.dayPnl'], equity = states['today.equity'];
   const result = exactCell(day), moneyNow = exactCell(equity);
   // Never combine observations from different snapshots into a new baseline.
   if (result === null || moneyNow === null || day.valueReceivedAt !== equity.valueReceivedAt) return null;
-  return percentOf(result, moneyNow - result);
+  return moneyNow - result > 0n ? moneyNow - result : null;
+}
+
+export function todayPercent(states, source) {
+  const base = todayBase(states, source);
+  return base === null ? null : percentOf(exactCell(states['today.dayPnl']), base);
 }
 
 export const sincePercent = states => percentOf(exactCell(states['today.totalPnl']), STARTING_MONEY);

@@ -46,7 +46,7 @@ function deskTitle(ctx) {
   const before = { document: globalThis.document, matchMedia: globalThis.matchMedia };
   const nodes = new Map(), stop = new Error('markup captured');
   const sink = key => {
-    if (!nodes.has(key)) nodes.set(key, { innerHTML: '', textContent: '',
+    if (!nodes.has(key)) nodes.set(key, { innerHTML: '', textContent: '', dataset: {},
       querySelectorAll: () => [], querySelector: selector => sink(`${key} ${selector}`) });
     return nodes.get(key);
   };

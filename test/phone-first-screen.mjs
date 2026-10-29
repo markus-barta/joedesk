@@ -7,7 +7,7 @@ import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { panelStates } from '../contracts/panel-state.mjs';
 import { cashSessionSnapshot, designSnapshot } from '../scripts/browser/settings-fixtures.mjs';
 import { preflightSnapshot } from '../scripts/browser/board.mjs';
-const { compactDesk, disclosureProblem, rowProblems, syncDeskDisclosures, toggleDeskDisclosure, heroLeft } = await import('../public/joe/desk.js');
+const { compactDesk, disclosureProblem, rowProblems, syncDeskDisclosures, toggleDeskDisclosure, heroLeft, accountSlot } = await import('../public/joe/desk.js');
 const valid = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const cell = (state, reason = null, value = null, retained = false) => ({ state, reason, value, retained });
 function context() {
@@ -47,16 +47,31 @@ test('opened not-exact desk summaries leave shared reasons in the body and keep 
 test('one-line summaries expose every independent reason in the accessible button text', () => {
   const ctx = context();
   ctx.states['today.openPnl'] = cell('broken', 'not_exact_yet');
-  ctx.states.paperAccount = cell('stale', 'snapshot_stale', { amount: '12.34', currency: 'EUR' });
-  ctx.states.paperCash = cell('broken', 'gateway_unconfirmed');
+  ctx.states['today.equity'] = cell('stale', 'snapshot_stale', { amount: '12.34', currency: 'EUR' });
   const doc = htmlDocument(heroLeft(ctx)), warning = doc.querySelector('.disclosure-warning');
   const summary = warning.querySelector('.summary-text'), accessible = warning.querySelector('.vh');
   assert.equal(summary.getAttribute('aria-hidden'), 'true', 'do not announce the short reason twice');
   assert.equal(accessible.textContent, summary.getAttribute('title'));
   assert.doesNotMatch(accessible.textContent, /not exact yet/);
-  for (const label of ['Open positions: not exact', 'Paper account: stale', 'Cash: unavailable']) {
-    assert.ok(accessible.textContent.includes(label));
-  }
+  // JOED-153: the phone section is the desks' money; the whole account left it for the slot above the hero.
+  assert.equal(doc.querySelector('[data-desk-disclosure="account"] span').textContent, 'Desks’ money');
+  for (const label of ['Open result: not exact', 'Desks’ money: stale']) assert.ok(accessible.textContent.includes(label), label);
+  assert.doesNotMatch(accessible.textContent, /Paper account|Cash/);
+});
+
+test('the slot above the hero states the whole account’s own figures in place, with their reasons', () => {
+  const ctx = context();
+  ctx.states.paperAccount = cell('stale', 'snapshot_stale', { amount: '12.34', currency: 'EUR' });
+  ctx.states.paperCash = cell('broken', 'gateway_unconfirmed');
+  const slot = htmlDocument(accountSlot(ctx));
+  assert.equal(slot.querySelector('[data-cell="hero.account"]').dataset.state, 'stale');
+  assert.match(slot.querySelector('[data-cell="hero.account"] .cell-state').getAttribute('aria-label'), /^Stale · updates are late/);
+  assert.match(slot.querySelector('.cash-reason').textContent, /not reported · broker connection not confirmed/);
+  // On a phone the slot is one collapsed section; its one-line summary keeps every reason.
+  const control = slot.querySelector('[data-desk-disclosure="whole"]');
+  assert.equal(control.getAttribute('aria-controls'), 'wholeDetail');
+  const accessible = control.querySelector('.vh').textContent;
+  for (const label of ['Paper account: stale', 'Cash: unavailable']) assert.ok(accessible.includes(label), label);
 });
 
 test('cash session fixture passes real ingress while preserving desk content and withholding current money', () => {
@@ -96,15 +111,15 @@ test('fresh position panels expose null-field and unmatched-desk problems in the
   assert.deepEqual(rowProblems(cell('broken')), []);
 });
 
-test('missing Cash keeps the figure’s default reason in its collapsed Account summary', () => {
+test('missing Cash keeps the figure’s default reason in the slot above the hero', () => {
   const ctx = context();
   for (const absent of [undefined, cell('not reported')]) {
     ctx.states.paperCash = absent;
-    const doc = htmlDocument(heroLeft(ctx));
-    const summary = doc.querySelector('.disclosure-warning .summary-text');
-    assert.equal(summary.textContent, 'Cash: not reported · no data received yet');
-    assert.equal(doc.querySelector('.disclosure-warning use').getAttribute('href'), '#i-ring');
-    assert.match(doc.querySelector('.cash-reason').textContent, /no data received yet/);
+    const doc = htmlDocument(accountSlot(ctx));
+    assert.equal(doc.querySelector('.cash-amount').textContent, '—');
+    assert.match(doc.querySelector('.cash-reason').textContent, /^not reported · no data received yet$/);
+    assert.equal(doc.querySelector('[data-cash="hero.cash"]').getAttribute('aria-label'), 'Cash not reported · no data received yet');
+    assert.doesNotMatch(heroLeft(ctx), /data-cash=/, 'Cash is not a desk figure');
   }
 });
 
@@ -297,35 +312,30 @@ test('real patches retain disclosure visibility and pin/focus on a rebuilt visib
   }
 });
 
-test('expanding measured chart boxes plots observed closes and current values on the first render', async t => {
-  const { drawHeroChart, drawMiniCharts } = await builders('desk.js', ['drawHeroChart', 'drawMiniCharts']);
+test('an expanded, measured session line plots observed points on the first render and names its last one', async t => {
+  const { drawHeroChart } = await builders('desk.js', ['drawHeroChart']);
   const ctx = context();
-  const doc = htmlDocument(`<div id="heroChart"></div>${['j', 'joe', 'joel'].map(id => `<div id="mini-${id}"><div class="mini-label"></div></div>`).join('')}`);
-  const charts = [doc.querySelector('#heroChart'), ...['j', 'joe', 'joel'].map(id => doc.querySelector(`#mini-${id}`))];
+  const doc = htmlDocument('<div id="heroChart"><div class="ctip"></div></div><div id="sessAxis"></div>');
+  const chart = doc.querySelector('#heroChart');
   for (const [key, value] of Object.entries({ document: doc, matchMedia: () => ({ matches: true }) })) {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     t.after(() => { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; });
   }
-  // Today's chart has two observed points inside the open session (synthetic values).
+  // Two observed points inside the open session (synthetic values).
   const { toColumns } = await import('../public/joe/history-model.js');
   const point = (t, amount) => ({ t, totals: { dayPnl: { amount, currency: 'EUR' } } });
-  const history = { closes: Object.fromEntries(['j', 'joe', 'joel'].map(id => [id, [{ v: -1.25 }, { v: 2.5 }]])),
-    columns: toColumns([point('2026-10-14T14:00:00.000Z', '-1'), point('2026-10-14T17:30:00.000Z', '2')]), seq: 2 };
+  const history = { columns: toColumns([point('2026-10-14T14:00:00.000Z', '-1'), point('2026-10-14T17:30:00.000Z', '2')]), seq: 2 };
   assert.equal(drawHeroChart(ctx, history), true, 'a line exists');
-  drawMiniCharts(ctx, history);
-  assert.equal(doc.querySelectorAll('svg').length, 0, 'collapsed boxes cannot be measured or cached as drawn');
-  for (const chart of charts) { chart.clientWidth = 322; chart.clientHeight = 84; }
-  drawHeroChart(ctx, history); drawMiniCharts(ctx, history);
-  assert.equal(doc.querySelectorAll('svg').length, 4);
-  assert.equal(charts[0].hidden, false);
-  for (const id of ['j', 'joe', 'joel']) {
-    const svg = doc.querySelector(`#mini-${id} svg`);
-    const current = Number(ctx.states[`desks.${id}.totalPnl`].value.amount);
-    assert.equal(svg.dataset.values, `-1.25 2.5 ${current}`);
-    assert.equal(svg.getAttribute('data-zero'), '1');
-    assert.equal(svg.querySelectorAll('[data-estimate]').length, 0);
-  }
+  assert.equal(doc.querySelectorAll('svg').length, 0, 'a collapsed box cannot be measured or cached as drawn');
+  chart.clientWidth = 322; chart.clientHeight = 28;
+  drawHeroChart(ctx, history);
+  assert.equal(doc.querySelectorAll('svg').length, 1);
+  assert.equal(chart.hidden, false);
+  assert.equal(doc.querySelector('svg').getAttribute('data-zero'), '1', 'a result line includes zero');
+  assert.equal(doc.querySelector('#sessAxis .sl-v').textContent, '+€\u00a02,00 at 19:30', 'the last observed point, with its time; never called now');
+  assert.equal(doc.querySelector('#sessAxis .sl-v').getAttribute('class'), 'sl-v gain');
+  assert.deepEqual(doc.querySelectorAll('#sessAxis span').map(s => s.textContent), ['15:30', '+€\u00a02,00 at 19:30', '22:00']);
 });
 
 // JOED-148 P0-6: no empty chart box. Without a line the box is hidden and
@@ -334,12 +344,13 @@ test('Today’s chart renders only with a line: no clock, a day without a sessio
   const { drawHeroChart } = await builders('desk.js', ['drawHeroChart']);
   const { toColumns } = await import('../public/joe/history-model.js');
   const doc = htmlDocument('<div id="heroChart"><div class="ctip"></div></div>'), chart = doc.querySelector('#heroChart');
-  for (const [key, value] of Object.entries({ document: doc, matchMedia: () => ({ matches: false }) })) {
+  // Reduced motion: the synthetic DOM has no path geometry for the draw-in.
+  for (const [key, value] of Object.entries({ document: doc, matchMedia: query => ({ matches: query.includes('reduced-motion') }) })) {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
     t.after(() => { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; });
   }
-  chart.clientWidth = 600; chart.clientHeight = 196;
+  chart.clientWidth = 600; chart.clientHeight = 28;
   const point = (t, amount) => ({ t, totals: { dayPnl: { amount, currency: 'EUR' } } });
   // Tuesday's whole session and Wednesday's first hours, as History holds them at 17:42 New York time.
   const session = { columns: toColumns([point('2026-10-13T15:00:00.000Z', '3'), point('2026-10-13T19:00:00.000Z', '4'),
@@ -367,5 +378,10 @@ test('Today’s chart renders only with a line: no clock, a day without a sessio
   // The static page starts without the box, so a phase without a line never shows one.
   const page = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
   assert.notEqual(page.querySelector('#heroChart').getAttribute('hidden'), null);
-  assert.equal(page.querySelector('#chartTitle').textContent, 'Market hours');
+  assert.equal(page.querySelector('#chartTitle').textContent, 'New York market');
+  // JOED-153 M3: the line's room exists only in the session and after the close.
+  assert.ok(page.querySelector('#sessSlot #heroChart'), 'the chart sits in its reserved slot');
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  assert.match(css, /\n\.sess-slot \{ display: none; \}/);
+  assert.match(css, /#deskHero\[data-phase="live"\] \.sess-slot, #deskHero\[data-phase="closed"\] \.sess-slot \{ display: block; height: 46px;/);
 });

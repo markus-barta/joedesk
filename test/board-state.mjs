@@ -74,7 +74,7 @@ for (const id of ['b-weekend-no-sod', 'j-ny-midnight-gap']) test(`JOED-94 ${id}:
     assert.equal(day.value, null); assert.equal(day.retained, false);
     assert.equal(day.reason, fixture.payload.desks.find(d => d.id === desk).money.reasons.dayPnl);
     assert.notEqual(states[`desks.${desk}.totalPnl`].value, null);
-    const card = htmlDocument(deskCard(view, desk, 50, true));
+    const card = htmlDocument(deskCard(view, desk));
     assert.equal(card.querySelector('.dnums .bn').textContent, '—');
     const phone = htmlDocument(compactDesk(view, desk));
     assert.equal(phone.querySelector('[data-compact-value="dayPnl"] .bn').textContent, '—');
@@ -101,7 +101,7 @@ for (const midnight of ['2026-10-15T04:00:00.000Z', '2026-11-03T05:00:00.000Z'])
       assert.equal(states[`desks.${desk}.dayPnl`].value, null, desk);
       assert.equal(states[`desks.${desk}.dayPnl`].retained, false);
       assert.equal(states[`desks.${desk}.dayPnl`].reason, current === feeds ? 'baseline_pending' : 'source_unavailable');
-      assert.equal(htmlDocument(deskCard(view, desk, 50, true)).querySelector('.dnums .bn').textContent, '—');
+      assert.equal(htmlDocument(deskCard(view, desk)).querySelector('.dnums .bn').textContent, '—');
       assert.equal(htmlDocument(compactDesk(view, desk)).querySelector('[data-compact-value="dayPnl"] .bn').textContent, '—');
       assert.notEqual(states[`desks.${desk}.equity`].value, null, 'other outage last-good stays');
     }
@@ -109,22 +109,25 @@ for (const midnight of ['2026-10-15T04:00:00.000Z', '2026-11-03T05:00:00.000Z'])
     assert.equal(todayPercent(states), null);
     if (current === feeds) assert.notEqual(sincePercent(states), null, 'Since start has no day boundary');
     if (current === feeds) {
-      // JOED-148: one reason, once. Every desk waits for the new day, so the
-      // caption needs no names and the sentence does not repeat the reason.
-      const hero = htmlDocument(heroLeft(view));
-      assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Not exact · waiting on the start-of-day value');
-      assert.equal(hero.querySelector('.say').textContent, 'No desk has an exact result for today.');
-      assert.equal(hero.querySelector('[data-cell="hero.day"] .bn').getAttribute('aria-label'), 'Today: not exact · waiting on the start-of-day value');
-      // A lone not-exact Today has no card line: its dash and icon carry it.
-      const card = htmlDocument(deskCard(view, 'j', 50, true));
-      assert.equal(card.querySelector('.mini-label').textContent, 'since start · last sessions');
+      // JOED-153 A2: from New York midnight until the open the first figure is
+      // the last session's, from Results (not received here: one plain reason).
+      // Today's own not-exact state is said once, in the sentence (A5: no timing).
+      const hero = htmlDocument(heroLeft(view)), first = hero.querySelector('[data-cell="hero.day"]');
+      const lastDay = midnight === '2026-10-15T04:00:00.000Z' ? 'Wed 14\u00a0Oct' : 'Mon 2\u00a0Nov';
+      assert.equal(first.dataset.phase, 'last');
+      assert.equal(first.querySelector('.hero-k').textContent, `Last session · ${lastDay}`);
+      assert.equal(first.querySelector('.primary-caption').textContent, 'Results unavailable · no data received yet');
+      assert.equal(first.querySelector('.bn').getAttribute('aria-label'), `Last session · ${lastDay}: Results unavailable · no data received yet`);
+      assert.match(hero.querySelector('.say').textContent, /(?:^|· )Today: not exact · waiting on the start-of-day value$/);
+      assert.equal(hero.querySelector('.say').textContent.match(/waiting on the start-of-day value/g).length, 1);
+      // The card's figure is the last session's too; Today's reason is not repeated on it.
+      const card = htmlDocument(deskCard(view, 'j'));
+      assert.equal(card.querySelector('.card-status'), null);
       assert.doesNotMatch(card.textContent, /not exact|start-of-day/);
       const dash = card.querySelector('.dnums .bn');
-      assert.equal(dash.getAttribute('aria-label'), 'Today: not exact · waiting on the start-of-day value');
+      assert.equal(dash.getAttribute('aria-label'), `J · ${lastDay}: Results unavailable · no data received yet`);
       assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
-      const mark = card.querySelector('.dnums .cell-state');
-      assert.deepEqual([mark.getAttribute('aria-hidden'), mark.getAttribute('title'), mark.getAttribute('aria-label')],
-        ['true', 'Not exact · waiting on the start-of-day value', null], 'the info icon is a pointer tip, never a second spoken reason');
+      assert.equal(card.querySelector('.dnums .term').dataset.term, 'lastsession');
     }
   }
   const delayed = structuredClone(data); delayed.generatedAt = delayed.receivedAt = delayed.safety.gateway.checkedAt = midnight;
@@ -149,7 +152,7 @@ test('JOED-95: session estimates are visible and accessible beside all desktop a
   assert.equal(feed.status, 200);
   const feeds = { data: feed }, now = fixture.now, view = { feeds, now, states: boardStates(feeds, now) };
   assert.match(heroLeft(view), /Estimated from the session open/);
-  for (const desk of DESKS) for (const render of [v => deskCard(v, desk, 50, true), v => compactDesk(v, desk)]) {
+  for (const desk of DESKS) for (const render of [v => deskCard(v, desk), v => compactDesk(v, desk)]) {
     const estimated = htmlDocument(render(view)), exactDoc = htmlDocument(render(ctx(exact, 0)));
     const marks = estimated.querySelectorAll('.estimate-mark');
     assert.equal(marks.length, 1);
@@ -171,7 +174,7 @@ test('JOED-95: session estimates are visible and accessible beside all desktop a
   }
   const outageFeeds = { data: { value: missing('source_unavailable') } };
   const outage = { feeds: outageFeeds, now: at(30), states: boardStates(outageFeeds, at(30), view.states) };
-  for (const desk of DESKS) for (const render of [v => deskCard(v, desk, 50, true), v => compactDesk(v, desk)]) {
+  for (const desk of DESKS) for (const render of [v => deskCard(v, desk), v => compactDesk(v, desk)]) {
     assert.equal(outage.states[`desks.${desk}.dayPnl`].retained, true);
     assert.equal(htmlDocument(render(outage)).querySelectorAll('.estimate-mark').length, 1, 'last-good estimate keeps its mark');
   }
@@ -592,7 +595,7 @@ for (const frozen of [false, true]) test(`JOED-96 ${frozen ? 'producer_frozen' :
       assert.match(kept.querySelector('.pstate').textContent, /updates are (late|stuck) · worth —$/);
       assert.match(kept.querySelector('.keep-cap').textContent, /paper account \(—\)/);
       for (const id of DESKS) {
-        assert.equal(htmlDocument(deskCard(view, id, 50, true)).querySelectorAll('.dbar i').length, 0);
+        assert.equal(htmlDocument(deskCard(view, id)).querySelectorAll('.dbar i').length, 0);
         assert.notEqual(states[`desks.${id}.dayPnl`].value, null, 'individual Today remains visible');
       }
     } else {
@@ -1009,7 +1012,7 @@ for (const seeded of [false, true]) test(`JOED-120 F2: legacy non-null retained_
         assert.equal(cell.valueSource.method, 'session-open-estimate', name);
         assert.equal(cell.valueObservedAt, estimate.pnlSources.day.observedAt, name);
       }
-      for (const desk of DESKS) for (const render of [v => deskCard(v, desk, 50, true), v => compactDesk(v, desk)]) {
+      for (const desk of DESKS) for (const render of [v => deskCard(v, desk), v => compactDesk(v, desk)]) {
         const marks = htmlDocument(render(view)).querySelectorAll('.estimate-mark');
         assert.equal(marks.length, 1, `${desk}: kept desktop/phone Today has its estimate mark`);
         assert.equal(marks[0].textContent, 'Estimated');
@@ -1443,17 +1446,19 @@ test('JOED-148: the household Today names the desks that keep it from being exac
   assert.equal(today.querySelector('.primary-caption').textContent, 'Not exact for J and Joe');
   assert.equal(today.querySelector('.bn').getAttribute('aria-label'), 'Today: not exact');
   assert.equal(today.querySelector('.cell-state').getAttribute('aria-hidden'), 'true', 'the icon marks the dash; the caption speaks');
-  // The sentence gives what is known instead of repeating the reason.
-  assert.equal(hero.querySelector('.say').textContent, `Joel is up ${eur(decimalUnits('5'))} today.`);
+  // The sentence gives what is known instead of repeating the reason: each
+  // exact desk's own Today (JOED-153: the per-desk breakdown), then Open result.
+  const open = ` · open result ${eur(exactCell(view.states['today.openPnl']), true)}`;
+  assert.equal(hero.querySelector('.say').textContent, `Joel ${eur(decimalUnits('5'), true)}${open}`);
   assert.equal(hero.querySelector('.board-caption').textContent, '');
   const words = visibleText(hero.querySelector('.hero-primary')).match(/not exact/gi) ?? [];
   assert.equal(words.length, 1, 'the hero states the reason once');
   assert.equal(detailsRow(view, 'Today’s result'), 'Exact for Joel; not exact for J and Joe');
   // Joel's own flat or negative day reads the same way.
-  for (const [amount, move] of [['0', 'flat'], ['-1.25', `down ${eur(decimalUnits('1.25'))}`]]) {
+  for (const [amount, move] of [['0', 'flat'], ['-1.25', eur(decimalUnits('-1.25'), true)]]) {
     const data = dayNotExact({ j: 'not_exact_yet', joe: 'not_exact_yet' });
     data.desks.find(d => d.id === 'joel').money.dayPnl.amount = amount;
-    assert.equal(htmlDocument(heroLeft(ctx(data))).querySelector('.say').textContent, `Joel is ${move} today.`);
+    assert.equal(htmlDocument(heroLeft(ctx(data))).querySelector('.say').textContent, `Joel ${move}${open}`);
   }
 });
 
@@ -1462,18 +1467,20 @@ for (const reason of NOT_EXACT_REASONS) test(`JOED-148 ${reason}: each dash stat
   const view = ctx(dayNotExact({ j: reason }));
   const hero = htmlDocument(heroLeft(view));
   assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, `Not exact for J${reason === 'not_exact_yet' ? '' : ` · ${words}`}`);
-  assert.equal(hero.querySelector('.say').textContent, `Joe is down ${eur(decimalUnits('5'))} and Joel is up ${eur(decimalUnits('5'))} today.`);
+  assert.equal(hero.querySelector('.say').textContent, `Joe ${eur(decimalUnits('-5'), true)} · Joel ${eur(decimalUnits('5'), true)} · open result ${eur(exactCell(view.states['today.openPnl']), true)}`);
   assert.equal(detailsRow(view, 'Today’s result'), `Exact for Joe and Joel; not exact for J${reason === 'not_exact_yet' ? '' : ` · ${words}`}`);
-  // J's card: the info icon and the dash carry the reason; no card line repeats it.
-  const card = htmlDocument(deskCard(view, 'j', 50, true)), dash = card.querySelector('.dnums .bn'), mark = card.querySelector('.dnums .cell-state');
-  assert.equal(card.querySelector('.mini-label').textContent, 'since start · last sessions');
+  // J's card: the info icon and the dash carry the reason; no card line repeats
+  // it, and the caption under the dash says only its state (JOED-153 M5).
+  const card = htmlDocument(deskCard(view, 'j')), dash = card.querySelector('.dnums .bn'), mark = card.querySelector('.dnums .cell-state');
+  assert.equal(card.querySelector('.card-status'), null);
+  assert.equal(card.querySelector('.dnums .c').textContent, 'Not exact today');
   assert.equal(dash.getAttribute('aria-label'), `Today: ${named}`);
   assert.equal(dash.getAttribute('title'), `Today: ${named}`);
   assert.deepEqual([mark.getAttribute('aria-hidden'), mark.getAttribute('title')], ['true', `${named[0].toUpperCase()}${named.slice(1)}`]);
   // The phone row keeps the reason visible once, in its warning line.
   const phone = htmlDocument(compactDesk(view, 'j'));
   assert.equal(phone.querySelector('.summary-text').textContent, `Today: ${named}`);
-  for (const html of [heroLeft(view), deskCard(view, 'j', 50, true), compactDesk(view, 'j'), healthPop(view, boardHealthPresentation(view.states, view.feeds, view.now))]) {
+  for (const html of [heroLeft(view), deskCard(view, 'j'), compactDesk(view, 'j'), healthPop(view, boardHealthPresentation(view.states, view.feeds, view.now))]) {
     assert.doesNotMatch(html, /not exact yet|not reported · not exact/);
   }
 });
@@ -1483,7 +1490,7 @@ test('JOED-148: different desk reasons name their desks; the section line keeps 
   const view = ctx(mixed), hero = htmlDocument(heroLeft(view));
   assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Not exact for J and Joe');
   assert.equal(hero.querySelector('.board-caption').textContent, 'Numbers: not exact · desk ledger not reconciled');
-  assert.equal(hero.querySelector('.say').textContent, `Joel is up ${eur(decimalUnits('5'))} today.`);
+  assert.equal(hero.querySelector('.say').textContent, `Joel ${eur(decimalUnits('5'), true)}`, 'no exact Open result here, so none is said');
   assert.equal(detailsRow(view, 'Today’s result'), 'Exact for Joel; not exact for J · desk ledger not reconciled; not exact for Joe · start-of-day value missing');
   // Every desk blocked for one reason needs no names; a fault keeps its own word.
   const all = ctx(dayNotExact({ j: 'sod_missing', joe: 'sod_missing', joel: 'sod_missing' }));
@@ -1508,8 +1515,8 @@ test('JOED-148: a card line stays when the not-exact Today is not the card’s o
   data.totals.openPnl = null; data.totals.reasons.openPnl = 'source_unavailable';
   Object.assign(data.pnlSources.open, { status: 'unavailable', method: null, observedAt: null, reason: 'source_unavailable' });
   assert.equal(validateContract('data', data).ok, true);
-  const lines = htmlDocument(deskCard(ctx(data), 'j', 50, true)).querySelectorAll('.mini-label .st').map(line => line.textContent);
-  assert.deepEqual(lines, ['Today: not exact', `Open positions: last good, ${age(30)} ago · not reported by the broker`]);
+  const lines = htmlDocument(deskCard(ctx(data), 'j')).querySelectorAll('.card-status .st').map(line => line.textContent);
+  assert.deepEqual(lines, ['Today: not exact', `Open result: last good, ${age(30)} ago · not reported by the broker`]);
 });
 
 // JOED-148 P0-5: the v2 feed sends no learning and no check-ins, and its desk
@@ -1526,13 +1533,13 @@ const pop = view => htmlDocument(healthPop(view, boardHealthPresentation(view.st
 test('JOED-148: no Learning line without learning; the line returns when the feed reports learning', () => {
   const data = quietV2(), view = ctx(data);
   for (const id of DESKS) {
-    const card = htmlDocument(deskCard(view, id, 50, true));
+    const card = htmlDocument(deskCard(view, id));
     assert.equal(card.querySelector('footer'), null, `${id}: no permanent "Learning: not reported"`);
     assert.doesNotMatch(card.textContent, /Learning|not reported/);
   }
   data.desks[0].learning = { status: 'blocked', headline: 'Synthetic headline', detail: 'Synthetic detail', iteration: 2 };
   assert.equal(validateContract('data', data).ok, true);
-  const footer = htmlDocument(deskCard(ctx(data), 'j', 50, true)).querySelector('footer');
+  const footer = htmlDocument(deskCard(ctx(data), 'j')).querySelector('footer');
   assert.equal(footer.textContent, 'Learning: Synthetic headline · Synthetic detail · round 2 · blocked');
 });
 
@@ -1558,16 +1565,19 @@ test('JOED-148: check-in warnings and the Checked in row appear only when the fe
 
 test('JOED-148: the pusher’s valuation sentences give way to the desk’s state; real activity stays', () => {
   const data = quietV2(), view = ctx(data);
-  const line = id => htmlDocument(deskCard(view, id, 50, true)).querySelector('.now').textContent;
-  assert.deepEqual(DESKS.map(line), ['J is working.', 'Joe is sitting out.', 'Joel is sitting out.']);
+  // JOED-153 M5: the card's header says what the desk is doing; no line repeats the pusher.
+  const card = id => htmlDocument(deskCard(view, id));
+  for (const id of DESKS) assert.equal(card(id).querySelector('.now'), null, id);
+  assert.deepEqual(DESKS.map(id => card(id).querySelector('header .state span').textContent.split(/\s· /)[0]), ['Working', 'Sitting out', 'Sitting out']);
+  assert.doesNotMatch(DESKS.map(id => card(id).textContent).join(' '), /values are|Valuation/);
   data.desks[0].state = 'stuck';
-  assert.equal(htmlDocument(deskCard(ctx(data), 'j', 50, true)).querySelector('.now').textContent, 'J is stuck: its trading activity can’t be confirmed.');
+  assert.match(htmlDocument(deskCard(ctx(data), 'j')).querySelector('header .state span').textContent, /^Stuck\s· its trading activity can’t be confirmed$/);
   assert.ok(boardDiagnostics(ctx(data).states, ctx(data).feeds, ctx(data).now).includes('J is stuck: its trading activity can’t be confirmed.'));
   assert.doesNotMatch(boardDiagnostics(ctx(data).states, ctx(data).feeds, ctx(data).now).join(' '), /values are|Valuation/);
   // A desk's own activity sentence is news and stays verbatim (escaped).
   data.desks[0].action = 'Synthetic <b>activity</b> sentence.';
-  assert.equal(htmlDocument(deskCard(ctx(data), 'j', 50, true)).querySelector('.now').textContent, 'Synthetic <b>activity</b> sentence.');
-  assert.ok(deskCard(ctx(data), 'j', 50, true).includes('Synthetic &lt;b&gt;activity&lt;/b&gt; sentence.'));
+  assert.equal(htmlDocument(deskCard(ctx(data), 'j')).querySelector('.now').textContent, 'Synthetic <b>activity</b> sentence.');
+  assert.ok(deskCard(ctx(data), 'j').includes('Synthetic &lt;b&gt;activity&lt;/b&gt; sentence.'));
 });
 
 // JOED-148 A3 (Amy 2026-10-29): during regular hours a Today the feed explains
@@ -1727,7 +1737,7 @@ test('JOED-148 re-gate High 1: a current household Today never exempts a desk wh
   assert.deepEqual([view.states['today.dayPnl'].value, view.states['today.dayPnl'].reason], [null, 'source_unavailable']);
   const hero = htmlDocument(heroLeft(view));
   assert.equal(hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker');
-  assert.equal(hero.querySelector('.say').textContent, `J is up ${eur(decimalUnits('50'))} and Joel is up ${eur(decimalUnits('5'))} today.`);
+  assert.equal(hero.querySelector('.say').textContent, `J ${eur(decimalUnits('50'), true)} · Joel ${eur(decimalUnits('5'), true)}${exactCell(view.states['today.openPnl']) === null ? '' : ` · open result ${eur(exactCell(view.states['today.openPnl']), true)}`}`);
   assert.equal(todayPercent(view.states, data.pnlSources.day), null);
 });
 
@@ -1742,7 +1752,7 @@ test('JOED-148 re-gate High 2: a not-exact money reason never masks a faulty sou
   assert.deepEqual([view.states['desks.joe.dayPnl'].value, view.states['desks.joe.dayPnl'].reason], [null, 'source_unavailable']);
   assert.equal(htmlDocument(heroLeft(view)).querySelector('[data-cell="hero.day"] .primary-caption').textContent, 'Unavailable for Joe · not reported by the broker');
   assert.equal(detailsRow(view, 'Today’s result'), 'Exact for J and Joel; unavailable for Joe · not reported by the broker');
-  assert.equal(htmlDocument(deskCard(view, 'joe', 50, true)).querySelector('.mini-label').textContent, 'Today: unavailable · not reported by the broker');
+  assert.equal(htmlDocument(deskCard(view, 'joe')).querySelector('.card-status').textContent, 'Today: unavailable · not reported by the broker');
 });
 
 // Every combination of the desks' and the household's Today channels during
@@ -1810,11 +1820,10 @@ const HOUSEHOLD_TODAY = {
 //   is named with its reason; the desk's problem, if any, is its one line.
 const NAMES = { j: 'J', joe: 'Joe', joel: 'Joel' };
 const FIGURE = { j: '+€50,00', joe: '−€5,00', joel: '+€5,00' };  // the fixture's desk results
-const OWN_DAY = { j: `J is up ${eur(decimalUnits('50'))}`, joe: `Joe is down ${eur(decimalUnits('5'))}`, joel: `Joel is up ${eur(decimalUnits('5'))}` };
+const OWN_FIGURE = { j: eur(decimalUnits('50'), true), joe: eur(decimalUnits('-5'), true), joel: eur(decimalUnits('5'), true) };
 const FAULT_WORDS = /unavailable|not available|not reported|last good/i;
 const PROBLEM = { unavailable: `is unavailable: ${BROKER}.`, 'not reported': 'is unavailable.', 'last good': `is only a last good value: ${BROKER}.` };
 const SOURCE_ROW = /^(?:Counted from 06:00 \(midnight in New York\)|Not available · .+)$/;
-const inWords = ids => ids.length > 1 ? `${ids.slice(0, -1).join(', ')} and ${ids.at(-1)}` : ids[0];
 // "Exact for Joel; not exact for J and Joe · reason" as [name, word, reason] per named desk.
 const namedIn = text => text.split('; ').flatMap(group => {
   const m = group.match(/^(exact|estimated|not exact|unavailable|not reported|last good|stale) for (.+?)(?: · (.+))?$/i);
@@ -1838,7 +1847,8 @@ function heroToday(html) {
 // rows repeat across cases, so each distinct markup is parsed and read once.
 const cardToday = doc => {
   const cell = doc.querySelector('.dnums .bn');
-  return { figure: cell.textContent, name: cell.getAttribute('aria-label'), lines: doc.querySelectorAll('.mini-label .st').map(line => line.textContent) };
+  // JOED-153: a card's status lines sit over its bars (.card-status).
+  return { figure: cell.textContent, name: cell.getAttribute('aria-label'), lines: doc.querySelectorAll('.card-status .st').map(line => line.textContent) };
 };
 const phoneToday = doc => {
   const cell = doc.querySelector('[data-compact-value="dayPnl"] .bn');
@@ -1913,12 +1923,17 @@ function daySurfaces(view, desks, household) {
   const hero = heroToday(heroLeft(view)), day = hero.querySelector('[data-cell="hero.day"]'), figure = day.querySelector('.bn');
   const caption = day.querySelector('.primary-caption').textContent, sentence = hero.querySelector('.say').textContent;
   expect(figure.textContent === (shown ? '+€50,00' : '—'), `hero figure: ${figure.textContent}`);
+  // JOED-153: the sentence is the per-desk breakdown of the exact desks
+  // ("J +€ 50,00 · Joe −€ 5,00 · Joel +€ 5,00"), with the open result when
+  // the household Today is not shown; a shown Today has its designed caption.
+  const open = exactCell(view.states['today.openPnl']);
+  const breakdown = (desks, withOpen) => [...desks.map(d => `${d.name} ${OWN_FIGURE[d.id]}`), ...(withOpen && open !== null ? [`open result ${eur(open, true)}`] : [])].join(' · ');
   if (shown) {
-    expect(caption === '', `hero caption: ${caption}`);
-    expect(sentence === `Up ${eur(decimalUnits('50'))} today across J, Joe and Joel.`, `hero sentence: ${sentence}`);
+    expect(caption === 'since New York midnight · after fees', `hero caption: ${caption}`);
+    expect(sentence === breakdown(own, false), `hero sentence: ${sentence}`);
   } else {
     const sentences = !caption ? ['Today’s result is not available.']
-      : exactDesks.length ? [`${inWords(exactDesks.map(d => OWN_DAY[d.id]))} today.`]
+      : exactDesks.length ? [breakdown(exactDesks, true)]
       : householdFault ? ['Today’s result is not available.']
         : ['No desk has an exact result for today.'];
     expect(sentences.includes(sentence), `hero sentence: ${sentence}`);
@@ -1935,7 +1950,7 @@ function daySurfaces(view, desks, household) {
   }
   // Each card's Today cell and line, and each phone row.
   for (const d of own) {
-    const card = readOnce(readCards, deskCard(view, d.id, 50, true), cardToday);
+    const card = readOnce(readCards, deskCard(view, d.id), cardToday);
     expect(card.figure === (d.value ? FIGURE[d.id] : '—'), `${d.name}'s card: ${card.figure}`);
     if (!d.value) expect(dashNamed(card.name, d), `${d.name}'s card dash: ${card.name}`);
     expect(JSON.stringify(card.lines) === JSON.stringify(d.card ? [d.card] : []), `${d.name}'s card lines: ${card.lines.join(' / ')}`);
@@ -2002,7 +2017,9 @@ test('JOED-148: a hero dash without a caption keeps its statement in the sentenc
   const hero = htmlDocument(heroLeft(ctx(data)));
   assert.deepEqual([hero.querySelector('[data-cell="hero.day"] .bn').textContent, hero.querySelector('[data-cell="hero.day"] .primary-caption').textContent], ['—', '']);
   assert.equal(hero.querySelector('.say').textContent, 'Today’s result is not available.');
-  // With a caption, the sentence gives what is known instead.
-  assert.equal(htmlDocument(heroLeft(ctx(householdNotExact('not_exact_yet')))).querySelector('.say').textContent,
-    `J is up ${eur(decimalUnits('50'))}, Joe is down ${eur(decimalUnits('5'))} and Joel is up ${eur(decimalUnits('5'))} today.`);
+  // With a caption, the sentence gives what is known instead: each desk's own
+  // Today and the open result (JOED-153's breakdown).
+  const captioned = ctx(householdNotExact('not_exact_yet'));
+  assert.equal(htmlDocument(heroLeft(captioned)).querySelector('.say').textContent,
+    `J ${eur(decimalUnits('50'), true)} · Joe ${eur(decimalUnits('-5'), true)} · Joel ${eur(decimalUnits('5'), true)} · open result ${eur(exactCell(captioned.states['today.openPnl']), true)}`);
 });
