@@ -2641,14 +2641,22 @@ IANA Europe/Vienna uses whole-hour CET/CEST offsets (UTC+1/+2) in that
 window; the lower bound excludes LMT and wartime rules, and the upper bound
 limits reliance on recurring future rules. Modern closes are indexed once
 and transferred; quiet chart marks visit only dates that will be drawn.
-Every other date retains the pre-speed-up (`4b913c7`) key derivation,
-ordering and lazy chart conversion, including its early-year, year-10000
-rollover and 1890 hour-rounding quirks. Full four-digit keys sort numerically
-across historical and modern ranges; noncanonical legacy keys retain their
-original ordering for compatibility. No calendar/schema expansion is implied.
+JOED-168 corrects dates outside that window: exact Vienna offsets retain
+historical seconds (including LMT), Gregorian year 0 stays year 0, and keys
+use at least four year digits without truncating the year-10000 rollover.
+Numeric calendar ordering is shared by indexing, lookups, period boundaries,
+close carry and partial-day counts. Calendar arithmetic preserves years 0–99
+and the BC day preceding year 0; historical chart conversion remains lazy.
+The modern cache and chart conversion policy remain unchanged. No market
+calendar or schema expansion is implied; year 10000 can arise only as a
+derived Vienna date of a schema-valid UTC instant.
 `test/results-model.mjs` pins the complete baseline module by SHA256 and
-compares 2,000 payloads (seed `0x166f3003`) through the actual read worker and
-main-thread fallback, including the full schema year range, DST and both window edges.
+compares 2,000 seeded payloads per host timezone (seed `0x166f3003`) through
+the actual read worker and main-thread fallback. Modern-only payloads retain
+the frozen `4b913c7` reference; mixed/extreme payloads use an independent
+explicit-era Gregorian reference with civil-day arithmetic and raw-record
+scans. Named regressions cover both mixed-year ordering failures, year 0,
+LMT midnight to the millisecond, DST and both modern-window edges.
 
 Reseal the integrated runtime closure once. Contracts revision 10, contract set
 `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
