@@ -11,7 +11,7 @@ import { decimalUnits } from './contracts/decimal.mjs';
 import { cellReason, capital } from './health.js';
 import { outageValue, trustedCurrent, NOT_EXACT_REASONS } from './board-state.js';
 import { accountStart, boardSettingsState } from './board-settings.js';
-import { drawChart, axis, eurAxis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor, chartHintSeen, dismissChartHint, createAxisMode } from './chart.js';
+import { drawChart, chartAxis, chartDots, axis, eurAxis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor, chartHintSeen, dismissChartHint, createAxisMode } from './chart.js';
 import { panWindow, zoomWindow, placeWindow, endsAtNewest, atLiveEdge, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
 import { zonedInstant, VIENNA } from './time.mjs';
 import * as M from './account-model.js';
@@ -650,19 +650,18 @@ function moveLive() {
   if (d.choice.mode === 'custom') {
     if (!d.notes || (ext.visible[1] > ax.hi) !== d.notes.above || (ext.visible[0] < ax.lo) !== d.notes.below) return false;
   } else {
-    const max = d.choice.mode === 'max' && ext.loaded, [lo, hi] = max ? ext.loaded : ext.visible, m = (hi - lo) * AXIS_MARGIN;
-    const next = axis(lo - m, hi + m, d.ticks, (max ? ext.loaded[0] : d.baseIsLive ? series.v[n] : d.base) || 0);
+    const next = chartAxis({ axis: d.choice, maxValues: ext.loaded, margin: AXIS_MARGIN, ticks: d.ticks,
+      base: d.choice.mode === 'max' && ext.loaded ? ext.loaded[0] : d.baseIsLive ? series.v[n] : d.base }, ext.visible, d.scale.ph);
     if (next.lo !== target.lo || next.hi !== target.hi || next.step !== target.step) return false;
   }
   if (d.tail) {
     const tail = M.gapToNow(series, n, settled) ? null : M.liveTail(series, [d.x0, d.x1], d.buckets, d.thinned);
     if (!tail || tail.from !== d.tail.from) return false;
     // The end dot and its halo where a drawing draws them (drawChart's fits).
-    const { X, Y, pad, ph } = d.scale, x = series.t[n], cy = Y(series.v[n]), custom = d.choice.mode === 'custom', inX = x >= d.x0 && x <= d.x1;
-    const fits = r => (custom ? cy - r >= pad.t - 1e-6 && cy + r <= pad.t + ph + 1e-6 : cy >= pad.t - 0.5 && cy <= pad.t + ph + 0.5);
-    const ring = inX && fits(4 + 2 / 2), halo = ring && d.following && !reducedMotion() && fits(5 * 2.2);
+    const { X, Y } = d.scale, x = series.t[n], cy = Y(series.v[n]);
+    const { ring, halo, beyond } = chartDots(d.scale).end(x, series.v[n], d.following);
     const nowAt = d.following && settled >= d.x0 && settled <= d.x1;
-    if (ring !== Boolean(d.ring) || halo !== Boolean(d.halo) || (custom && inX && !ring) || nowAt !== Boolean(d.now)) return false;
+    if (ring !== Boolean(d.ring) || halo !== Boolean(d.halo) || beyond || nowAt !== Boolean(d.now)) return false;
     d.path.setAttribute('d', `M${[...d.before, ...tail.pts.map(p => vertex(d.scale, p))].join(' L')}`);
     for (const dot of [d.ring, d.halo]) if (dot) { dot.setAttribute('cx', X(x).toFixed(1)); dot.setAttribute('cy', cy.toFixed(1)); }
     if (d.now) {
