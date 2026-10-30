@@ -2156,7 +2156,7 @@ caption covers the desk figures. Cash is Desk's Cash figure (JOED-49) in the
 block's “Since start · Cash” line, as designed (“Cash € 4.212,77”; Settings
 keeps the caption “cash · as the broker reports it”): two decimals, the
 broker's exact lexeme in its title and accessible name, a missing Cash a
-muted dash with “not reported · ‹reason›” (“no data received yet” when none
+muted dash with its reason stated once (“no data received yet” when none
 came), a not-exact one “not exact” (JOED-148) and an outage's kept Cash
 withheld (JOED-91); a reason the account value shares is said once, in the
 change line. On a phone the block stays open, first on the screen (no

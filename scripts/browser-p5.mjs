@@ -531,8 +531,8 @@ try {
           // session) is said once, in the whole account's change line.
           const shared = screen === 'desk' && ['stale', 'session'].includes(phase);
           // JOED-148: a not-exact Cash is named "not exact" like every other dash, on Desk and in Settings.
-          const missing = phase === 'not-exact' ? 'not exact' : `not reported${shared ? '' : ` · ${why}`}`;
-          const cashState = hasValue ? phase === 'stale' && !shared ? ` · ${why}` : '' : ` · ${missing}`;
+          const missing = shared ? '' : why;
+          const cashState = hasValue ? phase === 'stale' && !shared ? ` · ${why}` : '' : missing ? ` · ${missing}` : '';
           // Desk (the whole account's line, as designed): "Cash", the amount or a dash, its state. Settings: the account row's figure.
           const expected = screen === 'desk' ? `Cash ${hasValue ? '€ 12.345,68' : '—'}${cashState}`
             : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'not exact' : why;
