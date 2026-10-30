@@ -244,13 +244,13 @@
     },
     {
       "path": "public/joe/results-model.js",
-      "size": 36911,
-      "sha256": "0645e1b9702b1251b58d9d501f8946799b6eedfa3a3f5b307f972345c6e8af29"
+      "size": 38112,
+      "sha256": "7505fd121c7737d1f60184aa2306e94416870d7f7fdfbc3b6c30ed51ca9ec41a"
     },
     {
       "path": "public/joe/results.js",
-      "size": 51906,
-      "sha256": "46a66506c5d01a699a69dcb4d911dc6408a1e2af134816b7452ad0554faaa27e"
+      "size": 52406,
+      "sha256": "2fd99f7d3d48e17829897837fdd719a61c51ae891db63228d902cd6ead91cbb8"
     },
     {
       "path": "public/joe/route.js",
