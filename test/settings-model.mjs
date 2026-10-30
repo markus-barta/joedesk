@@ -812,7 +812,7 @@ test('JOED-158 p6: Saved-description refusal evaluates all whitespace-separated 
   const expression = source.split('discarding clears Saved descriptions')[1]?.match(/page\.evaluate\(`([^`]+)`\)/)?.[1];
   assert.ok(expression);
   const evaluated = runInNewContext('`' + expression + '`');
-  for (const value of ['f-saved\tother', 'other\nf-saved', 'other\r\nf-saved', 'f-saved  other']) {
+  for (const value of ['f-saved\tother', 'other\nf-saved', 'other\r\nf-saved', 'f-saved  other', 'other\nf-saved\nextra']) {
     const document = { querySelectorAll: selector => selector.includes('[aria-describedby]')
       ? [{ getAttribute: () => value }] : [{ hidden: true }] };
     assert.equal(runInNewContext(evaluated, { document }), false, JSON.stringify(value));
