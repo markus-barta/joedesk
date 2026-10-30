@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261030085000.0.0",
+  "version": "261030154842.0.0",
   "release_channel": "stable",
-  "release_sequence": 40,
+  "release_sequence": 41,
   "status": "candidate",
-  "note": "Follow-ups to the board redesign: exact extreme dates in Results, single-reason Cash, steadier CI speed checks (JOED-158, JOED-168, JOED-169)"
+  "note": "Faster Results switching on the build machine: fit rows by measuring once, legacy fitting only where a row overflows (JOED-170)"
 }
