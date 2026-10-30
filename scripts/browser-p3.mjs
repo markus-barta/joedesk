@@ -1158,11 +1158,14 @@ try {
           return { headline: line.textContent, title: document.getElementById('hdrHealth').title,
             details: document.getElementById('healthPop').textContent, value: document.getElementById('acctValue').textContent,
             caption: document.getElementById('acctChange').textContent, reload: __audit.visible(reload) && reload.textContent === 'Reload',
+            boardCaption: document.querySelector('.board-caption')?.textContent,
+            heroAges: document.querySelectorAll('#heroL [data-age]').length,
             lineFits: line.scrollHeight <= line.clientHeight + 1, worker: window.__joedesk.worker() };
         })()`);
         check('signed-out', `${tag}: a 302 to SSO shows the sign-in headline, reload and last-known values; no Amy or broker blame`,
           ui.headline === 'Signed out — reload to sign in' && ui.title === ui.headline && ui.reload && ui.lineFits && ui.worker &&
           ui.value === before && /last known/i.test(ui.caption) && /unknown while signed out/.test(ui.details) &&
+          /last known value.*unknown while signed out/i.test(ui.boardCaption) && ui.heroAges === 0 &&
           !/Amy|updates stopped|has not checked in|broker is offline/i.test(`${ui.headline} ${ui.details}`) && !page.errors.length, { ui, errors: page.errors });
         await page.evaluate(`document.getElementById('hdrHealth').click()`);
         check('signed-out', `${tag}: Details offers the same reload action`, await page.evaluate(`document.getElementById('healthPop').classList.contains('on') && Boolean(document.querySelector('#healthPop [data-sign-in-reload]'))`));

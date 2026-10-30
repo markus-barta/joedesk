@@ -9,14 +9,14 @@ export function serverClock(headers) {
   return date && Number.isFinite(Date.parse(date)) ? { at: new Date(Date.parse(date)).toISOString(), precise: false } : null;
 }
 
-export async function readJSON(url, init = {}, { text = false } = {}) {
+export async function readJSON(url, init = {}, { text = false, fetcher = (...args) => fetch(...args), timeoutMs = 15000 } = {}) {
   const controller = new AbortController();
-  let timer, clock = null, at;
+  let timer, clock = null, at, timedOut = false;
   try {
     return await Promise.race([
-      new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('Read timed out')); }, 15000); }),
+      new Promise((_, reject) => { timer = setTimeout(() => { timedOut = true; controller.abort(); reject(new Error('Read timed out')); }, timeoutMs); }),
       (async () => {
-        const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', ...init, redirect: 'manual', signal: controller.signal });
+        const response = await fetcher(url, { cache: 'no-store', credentials: 'same-origin', ...init, redirect: 'manual', signal: controller.signal });
         at = performance.now();
         clock = serverClock(response.headers);
         const crossedOrigin = response.redirected && response.url && new URL(response.url).origin !== new URL(url, globalThis.location?.href ?? import.meta.url).origin;
@@ -40,7 +40,7 @@ export async function readJSON(url, init = {}, { text = false } = {}) {
           ...(ok ? { auth: false } : {}), clock, at };
       })(),
     ]);
-  } catch { return { status: 0, clock, at }; } finally { clearTimeout(timer); }
+  } catch { return { status: 0, clock, at, ...(timedOut ? { timedOut: true } : {}) }; } finally { clearTimeout(timer); }
 }
 
 export const readFailure = ({ auth, status }) => auth ? 'auth_required' : status === 404 ? 'route_not_found' : 'refresh_failed';

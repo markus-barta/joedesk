@@ -61,7 +61,7 @@ for (const [name, text] of modules) {
     facade.replace(/export\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]\s*;/g, '').trim() === '',
     'board-settings.js: only Settings may access saves; the page facade exports only the named read APIs and validation');
   const display = files[DISPLAY_WRITER] ?? '';
-  required(/fetcher\('\.\/board-settings\.json',/.test(display) && /request\('POST', value\)/.test(display), 'board-settings-write.js: display writes stay on the board settings route');
+  required(/readJSON\('\.\/board-settings\.json',/.test(display) && /request\('POST', value\)/.test(display), 'board-settings-write.js: display writes stay on the board settings route through the shared transport');
   required(/validateBoardSettings\(value\)/.test(display) && /credentials: 'same-origin'/.test(display), 'board-settings-write.js: validated same-origin display writes');
   required(!/\/inbox|fleet-config\/propagate/.test(display), 'board-settings-write.js: display settings never write feeds or fleet policy');
 }

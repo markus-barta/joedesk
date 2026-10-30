@@ -13,7 +13,7 @@ const auth = {};
 async function read(url) {
   const res = await readJSON(url);
   auth[url] = res.auth;
-  return { ...res, reason: res.headers?.get('X-Joe-Feed-Reason') ?? res.payload?.reason ?? undefined,
+  return { ...res, reason: res.headers?.get('X-Joe-Feed-Reason') ?? (res.status === 200 ? undefined : res.payload?.reason),
     generatedAdvancedAt: res.headers?.get('X-Joe-Generated-Advanced-At') ?? undefined };
 }
 

@@ -2364,11 +2364,16 @@ recognizes SSO redirects (including opaque and followed cross-origin redirects),
 HTML error remains an update failure. Each affected endpoint must answer
 successfully before its auth failure clears; unrelated reads cannot restore Live.
 The board keeps last-known values, labels their panel ages and broker connection
-as unknown while signed out, and removes feed/broker blame from status Details.
-Scoped not-exact dash reasons keep their own single explanation. Recovery restores
+as unknown while signed out, including the shared hero caption. Missing values
+also say unknown while signed out; their original reasons remain in Details as
+last-known diagnostics. Protected board-settings reads use the same transport
+and participate in endpoint-specific sign-in recovery. Recovery restores
 the normal health ranking, including stale-feed and broker reasons when present.
 `test/feed-robust.mjs` covers response shapes, worker/page reads, precedence and
-recovery (also imported by `test/ui-modules.mjs`). P3's `signed-out` group checks a
+recovery (also imported by `test/ui-modules.mjs`), plus the named fix1 regressions
+for hero ages, missing-value reasons, settings auth, successful history compaction
+metadata, transport registration/version pinning and last-known card captions.
+P3's `signed-out` group checks a
 state.json 302 to SSO, retained values, Reload and recovery at all standard widths
 and themes; run it later on agm2 with `JOED_P3_ONLY=signed-out node scripts/browser-p3.mjs`.
 

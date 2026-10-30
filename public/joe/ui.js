@@ -359,7 +359,7 @@ export function patch(el, html) {
 // `held` names a retained value ("last good value", "last good positions").
 export function statePhrase(cell, key, held = 'last good value', sharedReason = null) {
   const state = cell?.state ?? 'not reported';
-  if (cell?.signedOut && !notExactDash(cell) && (cell.value != null || !cell.reason)) return { tone: 'none', icon: 'ring', state,
+  if (cell?.signedOut) return { tone: 'none', icon: 'ring', state,
     text: `${cell.value == null ? 'unavailable' : 'last known value'} · unknown while signed out` };
   const why = cell?.reason ? cellReason(cell.reason) : null;
   const localWhy = why !== sharedReason ? why : null;

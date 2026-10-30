@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import './fixtures/preview-dom.mjs';
+import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 const { createFeed } = await import('../public/joe/feed.js');
 const { statusPresentation } = await import('../public/joe/health.js');
 const { readJSON, createBoardSession, boardSession } = await import('../public/joe/transport.js');
 const { brokerState, boardDiagnostics } = await import('../public/joe/health.js');
 const { statePhrase } = await import('../public/joe/ui.js');
-const { headerHealth, healthPop } = await import('../public/joe/desk.js');
+const { headerHealth, healthPop, heroLeft, boardCaptionCell, sharedSectionPhrase, cellView } = await import('../public/joe/desk.js');
+const { cardCaption } = await builders('desk.js', ['cardCaption']);
+const { createBoardSettings } = await import('../public/joe/board-settings-write.js');
 const { history: accountHistory } = await import('./fixtures/account-fixtures.mjs');
 
 function property(t, key, value) {
@@ -18,6 +20,8 @@ function property(t, key, value) {
 
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const stamp = fixture.data.receivedAt;
+// Layout reserves contain off-screen example captions, never reader copy.
+const readerDocument = html => htmlDocument(html.replace(/<span class="cash-sizing"[^>]*>[\s\S]*?<\/span>/g, ''));
 const turn = () => new Promise(resolve => setImmediate(resolve));
 const payloadFor = url => url.includes('state.json') ? { serverNow: stamp, feeds: { data: { value: fixture.data } }, panels: {} }
   : url.includes('actions.json') ? { schema: 'inspr.joe.fleet-config.actions.v1', entries: [] }
@@ -221,6 +225,123 @@ const authResponses = {
   'HTML fragment': () => new Response('<form action="/login">Sign in</form>'),
   'followed cross-origin redirect': () => ({ status: 200, redirected: true, url: 'https://auth.inspr.at/sign-in', headers: new Headers(), json: async () => ({}) }),
 };
+
+test('JOED-173 fix1 High: hero caption has no ticking age after a warm state read redirects to SSO', async t => {
+  const clock = scheduler(t);
+  property(t, 'Worker', undefined);
+  let refused = false;
+  t.mock.method(globalThis, 'fetch', async url => refused && String(url).endsWith('state.json') ? authResponses['302 to SSO']() : reply(url));
+  const feed = createFeed(() => {});
+  t.after(feed.stop);
+  await feed.refresh();
+  clock.advance(9000); refused = true; await feed.refresh();
+  for (const elapsed of [0, 1000, 240000]) {
+    clock.advance(elapsed);
+    const ctx = feed.select(), caption = boardCaptionCell(ctx);
+    assert.equal(caption.signedOut, true);
+    assert.equal(caption.ageSeconds, null);
+    const hero = readerDocument(heroLeft(ctx));
+    assert.match(hero.querySelector('.board-caption').textContent, /Last known value · unknown while signed out/);
+    assert.equal(hero.querySelectorAll('[data-age]').length, 0, 'no visible hero age can tick');
+    assert.doesNotMatch(hero.textContent, /last good|\d+\s*s ago/i);
+  }
+});
+
+test('JOED-173 fix1 Medium: signed-out missing cells and shared hero copy override broker reasons', async t => {
+  property(t, 'Worker', undefined);
+  const failed = JSON.parse(readFileSync(new URL('../fixtures/failures/a-gateway-up-but-dead.json', import.meta.url)));
+  let refused = false;
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (refused && String(url).endsWith('history.json')) return authResponses['401']();
+    if (String(url).endsWith('state.json')) return new Response(JSON.stringify({ serverNow: failed.now,
+      feeds: { data: { value: { ...failed.payload, receivedAt: failed.receivedAt } } }, panels: {} }));
+    return reply(url);
+  });
+  const feed = createFeed(() => {});
+  t.after(feed.stop);
+  await feed.refresh(); refused = true; await feed.refresh();
+  const ctx = feed.select();
+  assert.equal(ctx.states.session, 'signed-out');
+  for (const cell of Object.values(ctx.states).filter(c => c?.signedOut && c.value == null && c.reason)) {
+    const original = structuredClone(cell);
+    assert.equal(statePhrase(cell, 'missing').text, 'unavailable · unknown while signed out');
+    assert.equal(sharedSectionPhrase(cell), 'Numbers unavailable · unknown while signed out');
+    assert.doesNotMatch(cellView(cell, 'missing', { label: 'Open result' }).html, /broker connection down/i);
+    assert.deepEqual(cell, original, 'presentation preserves the diagnostic reason');
+  }
+  const hero = readerDocument(heroLeft(ctx));
+  assert.doesNotMatch(hero.textContent, /broker connection down|waiting on prices/i);
+  assert.match(hero.textContent, /unknown while signed out/);
+  assert.match(healthPop(ctx, statusPresentation(ctx)), /Last known diagnostics before sign-out:.*broker connection down/);
+  assert.equal(ctx.feeds.data.value.desks[0].money.reasons.equity, failed.payload.desks[0].money.reasons.equity);
+});
+
+for (const [name, response] of Object.entries(authResponses)) test(`JOED-173 fix1 Medium: protected board settings joins shared auth classification: ${name}`, async t => {
+  property(t, 'Worker', undefined);
+  let refused = false;
+  const good = { accountStart: null, reason: 'unset' };
+  t.mock.method(globalThis, 'fetch', async url => String(url).endsWith('board-settings.json')
+    ? refused ? response() : new Response(JSON.stringify(good)) : reply(url));
+  const feed = createFeed(() => {}, () => {}, '', { session: boardSession });
+  const settings = createBoardSettings();
+  t.after(() => { feed.stop(); boardSession.observe('/joe/board-settings.json', { auth: false }); });
+  await feed.refresh(); await settings.refresh();
+  assert.equal(statusPresentation(feed.select()).reason, 'board_ok');
+  refused = true; await settings.refresh();
+  assert.equal(statusPresentation(feed.select()).reason, 'signed-out');
+  assert.equal(settings.snapshot().reason, 'auth_required');
+  await feed.refresh();
+  assert.equal(statusPresentation(feed.select()).reason, 'signed-out', 'ordinary feeds cannot clear settings auth evidence');
+  refused = false; await settings.refresh();
+  assert.equal(statusPresentation(feed.select()).reason, 'board_ok');
+});
+
+test('JOED-173 fix1 Medium: HTTP 200 history_compacted metadata stays accepted in worker and page', async t => {
+  let worker;
+  const history = { ...fixture.history, reason: 'history_compacted', compactedThrough: fixture.history.points[0].t };
+  const messages = [];
+  property(t, 'self', { postMessage(data) { messages.push(data); worker.onmessage({ data }); } });
+  await import('../public/joe/history-worker.js?joed173-fix1-compacted');
+  const handle = self.onmessage;
+  const workerClass = class { constructor() { worker = this; } postMessage(data) { handle({ data }); } };
+  property(t, 'Worker', workerClass);
+  t.mock.method(globalThis, 'fetch', async url => String(url).endsWith('history.json') ? new Response(JSON.stringify(history)) : reply(url));
+  for (const mode of ['worker', 'page']) {
+    globalThis.Worker = mode === 'worker' ? workerClass : undefined;
+    const feed = createFeed(() => {});
+    t.after(feed.stop);
+    await feed.refresh();
+    assert.equal(feed.feeds.history.reason, null, `${mode}: successful metadata is not a feed failure`);
+    assert.equal(feed.feeds.history.value.reason, 'history_compacted');
+    assert.equal(feed.feeds.history.value.compactedThrough, history.compactedThrough);
+    assert.equal(feed.select().states.history.retained, false);
+  }
+  assert.equal(messages.find(m => m.kind === 'history').reason, null);
+});
+
+test('JOED-173 fix1 Medium: transport is registered in package modules and pinned in the page import map', () => {
+  const source = file => readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
+  const modules = text => JSON.parse(text.match(/const UI_MODULES = (\[[\s\S]*?\]);/)[1]);
+  const server = modules(source('server.mjs')), checker = modules(source('scripts/check-package.mjs'));
+  assert.ok(checker.includes('transport.js'), 'package checker registers transport');
+  assert.deepEqual(checker.toSorted(), server.toSorted());
+  const map = JSON.parse(source('public/joe/index.html').match(/<script type="importmap">([\s\S]*?)<\/script>/)[1]);
+  const pkg = JSON.parse(source('package.json'));
+  assert.equal(map.imports['/joe/transport.js'], `/joe/transport.js?v=${pkg.version}`);
+});
+
+test('JOED-173 fix1 Low: retained card figures consistently say last known while signed out', async t => {
+  property(t, 'Worker', undefined);
+  let refused = false;
+  t.mock.method(globalThis, 'fetch', async url => refused && String(url).endsWith('state.json') ? authResponses['401']() : reply(url));
+  const feed = createFeed(() => {});
+  t.after(feed.stop);
+  await feed.refresh(); refused = true; await feed.refresh();
+  const cell = feed.select().states['desks.j.equity'];
+  assert.ok(cell.retained && cell.value != null);
+  assert.equal(cardCaption(cell, 'designed caption', null), 'Last known');
+  assert.equal(cardCaption({ ...cell, signedOut: false }, 'designed caption', null), 'Last good', 'ordinary retained copy is preserved');
+});
 for (const route of ['state.json', 'history.json', 'results.json', 'account-history.json', 'healthz']) {
   for (const [name, response] of Object.entries(authResponses)) test(`JOED-173 shared boundary: ${route}, ${name}`, async t => {
     t.mock.method(globalThis, 'fetch', async (_url, init) => { assert.equal(init.redirect, 'manual'); return response(); });

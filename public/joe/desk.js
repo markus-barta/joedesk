@@ -70,7 +70,7 @@ export function sharedSectionReason(cells) {
 
 // Shared hero and Account lines use the same not-exact words as the cards.
 export function sharedSectionPhrase(cell) {
-  if (cell?.signedOut && cell.value != null && !notExactDash(cell)) return 'Last known values · unknown while signed out';
+  if (cell?.signedOut) return `${cell.value == null ? 'Numbers unavailable' : 'Last known values'} · unknown while signed out`;
   return cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason)
     ? `Numbers: ${statePhrase(cell, '').text}`
     : `Numbers unavailable · ${esc(cellReason(cell.reason))}`;
@@ -80,6 +80,7 @@ export function sharedSectionPhrase(cell) {
 // Today's fault vocabulary and last-good observation ages stay unchanged.
 function figurePhrase(cell, key, label, held, sharedReason = null) {
   const p = statePhrase(cell, key, held, sharedReason);
+  if (cell?.signedOut) return p;
   if (label === OPEN && waitingOnPrices(cell)) return { ...p, text: 'waiting on prices' };
   if (['Today', OPEN].includes(label) && cell?.state === 'broken' && cell.value != null && !cell.retained)
     return { ...p, text: `unavailable · ${p.text}` };
@@ -97,6 +98,7 @@ export function disclosureProblem(candidates) {
       why: null, reason: cell.mark.why, label: `${label}: ${cell.mark.state}` }];
     const p = figurePhrase(cell, '', label);
     if (p.state === 'fresh') return [];
+    if (cell?.signedOut) return [{ tone: p.tone, icon: p.icon, priority: 3, why: null, reason: null, label: `${label}: ${p.text}` }];
     const state = label === OPEN && waitingOnPrices(cell) ? 'waiting on prices'
       : notExactDash(cell) ? NOT_EXACT : cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
       : p.state === 'not reported' ? 'not reported' : 'unavailable';
@@ -256,8 +258,8 @@ export function cellView(cell, key, { signed = true, caption = '', sharedReason 
   const value = cell?.value ?? null;
   const n = amountOf(value);
   const units = value ? decimalUnits(value.amount) : null;
-  const priceWait = label === OPEN && waitingOnPrices(cell);
-  const missingLabel = `${label}: ${priceWait ? 'waiting on prices' : dashWords(cell?.reason)}`;
+  const priceWait = !cell?.signedOut && label === OPEN && waitingOnPrices(cell);
+  const missingLabel = `${label}: ${cell?.signedOut ? 'unknown while signed out' : priceWait ? 'waiting on prices' : dashWords(cell?.reason)}`;
   const html = value == null && label ? `<span class="bn muted" role="img" title="${esc(missingLabel)}" aria-label="${esc(missingLabel)}">—</span>` : bn(units, value?.currency ?? 'EUR', signed);
   return { html, caption: priceWait ? 'Waiting on prices' : stateCaption(cell, key, caption, undefined, sharedReason), state: cell?.state ?? 'not reported', n, units };
 }
@@ -268,6 +270,7 @@ export function boardCaptionCell(ctx) {
   const data = ctx.feeds.data?.value;
   if (!data || !ctx.now) return null;
   const cell = withGenerationAge(panelState(ctx.feeds.data, data, null, ctx.now), ctx.feeds.data, ctx.now);
+  if (ctx.states.session === 'signed-out') return { ...cell, signedOut: true, state: 'broken', ageSeconds: null, retained: true };
   return cell.state === 'fresh' ? null : cell;
 }
 export function sharesBoardCaption(cell, board) {
@@ -277,10 +280,10 @@ export function sharesBoardCaption(cell, board) {
 function cellIcon(cell, sharedReason = null, figureLabel = null) {
   if (!cell || cell.state === 'fresh') return '';
   const p = figurePhrase(cell, '', figureLabel);
-  if (figureLabel === OPEN && waitingOnPrices(cell)) return `<span class="cell-state tone-${p.tone}" role="img" aria-label="Waiting on prices">${icon(p.icon)}</span>`;
+  if (!cell.signedOut && figureLabel === OPEN && waitingOnPrices(cell)) return `<span class="cell-state tone-${p.tone}" role="img" aria-label="Waiting on prices">${icon(p.icon)}</span>`;
   // A not-exact dash names itself (dashWords); its info icon only marks it, with
   // the same words as a pointer tip, so a screen reader hears the reason once.
-  if (notExactDash(cell)) return `<span class="cell-state tone-${p.tone}" aria-hidden="true" title="${esc(capital(statePhrase(cell, '', undefined, sharedReason).text))}">${icon(p.icon)}</span>`;
+  if (!cell.signedOut && notExactDash(cell)) return `<span class="cell-state tone-${p.tone}" aria-hidden="true" title="${esc(capital(statePhrase(cell, '', undefined, sharedReason).text))}">${icon(p.icon)}</span>`;
   const label = cell.signedOut ? capital(p.text) : `${capital(p.state)}${cell.reason && cellReason(cell.reason) !== sharedReason ? ` · ${cellReason(cell.reason)}` : ''}`;
   return `<span class="cell-state tone-${p.tone}" role="img" aria-label="${esc(label)}">${icon(p.icon ?? TONE_ICON[p.tone])}</span>`;
 }
@@ -334,9 +337,13 @@ export function healthPop(ctx, health) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
   const problems = boardDiagnostics(states, feeds, now);
-  if (health.reason === 'signed-out') return `<h3>${icon('ring')}Board status details</h3>
+  if (health.reason === 'signed-out') {
+    const reasons = [...new Set(Object.values(states).filter(cell => cell?.reason && cell.reason !== 'auth_required').map(cell => cellReason(cell.reason)))];
+    return `<h3>${icon('ring')}Board status details</h3>
     <p class="status-sentence">Signed out — reload to sign in</p>${healthFacts(ctx, health)}
-    <p>${esc(problems.join(' '))}</p><p><button type="button" class="btn" data-sign-in-reload>Reload</button></p>`;
+    <p>${esc(problems.join(' '))}</p>${reasons.length ? `<p>Last known diagnostics before sign-out: ${esc(reasons.join('; '))}.</p>` : ''}
+    <p><button type="button" class="btn" data-sign-in-reload>Reload</button></p>`;
+  }
   const executor = executorProblem(data);
   if (executor) problems.push(executor);
   const rows = [];
@@ -543,6 +550,7 @@ export function startsDiffer(feeds) {
 // its caption names that desk's own word, as do Details and the cards.
 // For a not-exact Today, preserve the existing shared-reason presentation.
 export function householdPnlReason(states, data, field, sharedReason = null) {
+  if (states[`today.${field}`]?.signedOut) return null;
   if (absentPnl(states, data, field)) return null;
   const results = classifyCells(states, data, field);
   const faulty = DESKS.filter(id => results[id].kind === 'fault');
@@ -918,6 +926,7 @@ function deskFirst(ctx, facts, id) {
 // where JOED-148 put it: on the dash's own name and title and, unless
 // Today's not-exact dash is the card's only problem, on the status line.
 function cardCaption(cell, designed, board, today = '', label = null) {
+  if (cell?.signedOut) return cell.value != null ? 'Last known' : 'Unavailable';
   // JOED-157's Open words, as the status line says them: a price wait is
   // waiting, never "Unavailable".
   if (label === OPEN && waitingOnPrices(cell)) return 'Waiting on prices';
