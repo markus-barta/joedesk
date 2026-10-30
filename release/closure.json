@@ -1,6 +1,6 @@
 {
   "schema": "joedesk.runtime-closure.v1",
-  "candidate_version": "261030085000.0.0",
+  "candidate_version": "261030154842.0.0",
   "files": [
     {
       "path": "contracts/accept.mjs",
@@ -100,7 +100,7 @@
     {
       "path": "package.json",
       "size": 1750,
-      "sha256": "a50fe844901ba34de493c711d8ce5959d9ceb8880de0bdaa749a906d10c0be21"
+      "sha256": "24e204299ad43958cf6aaa67848dfaf5d1eff4713ea2ba52c978d6e696ae4f32"
     },
     {
       "path": "public/joe/account-model.js",
@@ -230,12 +230,12 @@
     {
       "path": "public/joe/index.html",
       "size": 45742,
-      "sha256": "574a826a03bfd0886b4fe11da856f1078e28fef5bc01d60757a092e2abcfa3d0"
+      "sha256": "c57ad36e91e7b82c8f0c1c4cefea2f58b8f20890682d44091ec016e1e336f036"
     },
     {
       "path": "public/joe/joe-version.js",
-      "size": 20630,
-      "sha256": "8663bf33819efec7bf000d6109b0731a74ca18117952c549b2dd2b1803ead51e"
+      "size": 20896,
+      "sha256": "37ea6ab9f632ac746df036f36409d5fa3164d65c1eb6269b9dbe495e13779db7"
     },
     {
       "path": "public/joe/performance.js",
@@ -244,13 +244,13 @@
     },
     {
       "path": "public/joe/results-model.js",
-      "size": 39379,
-      "sha256": "0ae65ce819213ebb3717339f0e2d675bbe16a62001c68e4952986df096374665"
+      "size": 39691,
+      "sha256": "d915b244170f9b6e1d0be0807745394c3e63c7558c9d49fdcebdc6969522fabb"
     },
     {
       "path": "public/joe/results.js",
-      "size": 52916,
-      "sha256": "24b24bd1f2fe0fc652f6ac97adea207de2a9c9852f68fb81fd747249f850f6ea"
+      "size": 59051,
+      "sha256": "fcc1d0fca045a58fd2178a2596fcab2df4d2e1f71eaae605af1ac7e6f4660026"
     },
     {
       "path": "public/joe/route.js",
@@ -324,8 +324,8 @@
     },
     {
       "path": "release.json",
-      "size": 335,
-      "sha256": "57f2034fdd9f43b112abe1914ed057c5d3e5cf9764b1fd1710750c4f9f09a074"
+      "size": 321,
+      "sha256": "7127ded2247bfc6568236dc55a62326e658ec605e70237642da7a510991d00b0"
     },
     {
       "path": "release/contracts.json",
@@ -340,7 +340,7 @@
     {
       "path": "release/preparation.json",
       "size": 6788,
-      "sha256": "93467e0bef21ef71a565219af0c9b0c68587fd040dcbcce54fe5c2b6532bb1ef"
+      "sha256": "64817efdfc638c3129dfa808e95d9a2fc6ebcce05993e7f3118db1ffd1fa79b9"
     },
     {
       "path": "release/versioning.mjs",

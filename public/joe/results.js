@@ -297,9 +297,9 @@ export const sentenceReserve = (view, R) => (!view.ix || !R ? [] : R.cut ? SENTE
 // keeps a fixed line box, so no sentence or amount moves another row.
 export function renderHero(view, per, desks, R) {
   const none = !R || R.empty;
-  const percent = M.periodPercent(view.ix, view, per, desks, R);
-  // The money at the period start, shown only beside the percentage it bases.
-  const base = percent === null ? null : M.periodBase(view.ix, view, per, desks);
+  // One quote: the percentage and the money it divides by. A second prefix
+  // search would repeat the work periodPercent already does.
+  const { percent, base } = M.periodQuote(view.ix, view, per, desks, R);
   const baseText = base === null ? '' : eur(base);
   const percentMarkup = percentHtml(percent);
   const percentDigits = percent === null ? 1 : digits(percent * UNIT / 100n, 2).length + (percent ? 1 : 0) + 2 + (baseText ? 4 + baseText.length : 0);
@@ -440,7 +440,6 @@ export function renderCalendar(view, per, desks) {
     ? `${signedWord(monthUnits)} <span class="month-long">over ${plural(monthDays, 'trading day')}</span><span class="month-short">in ${plural(monthDays, 'day')}</span>`
     : partialDays ? 'No trades recorded this month' : 'No trades this month';
   patch($('#calSum'), `${monthSum}${partialHint(partialDays)}`);
-  fitMonthSummary($('#calSum'));
   const start = M.monday(first);
   const inPer = k => (RS.period === 'day' || RS.period === 'week') && M.compareDates(k, per.start) >= 0 && M.compareDates(k, per.end) <= 0;
   let html = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow" aria-hidden="true">${d}</div>`).join('') + '<div class="dow wkh" aria-hidden="true">Week</div>';
@@ -472,31 +471,39 @@ export function renderCalendar(view, per, desks) {
     <span>${!ix ? 'Tints appear once results arrive' : max > 0n ? `Darkest: ${eur(max * 3n / 4n)} to ${eur(max)} in a day` : 'No trading day yet'}</span>`);
   const day = dayContent(view, RS.sel, desks);
   patch($('#daypanel'), `<div class="dp-head"><h3>Trades on ${M.fmtDDM(RS.sel)}</h3><span class="dp-sum">${day.sum}</span></div><div class="dp-list">${day.body}${dayNote(day)}${currencyNote(day)}</div>`);
-  fitTradeRows($('#daypanel'));
-  fitDaySummary($('#daypanel'));
+  const roots = [$('#daypanel')];
   const sheet = $('#daySheet');
   if (sheet?.open) {
     $('#sheetTitle').textContent = `Trades on ${M.fmtDDM(RS.sel)}`;
     patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}${currencyNote(day)}`);
-    fitTradeRows($('#sheetBody'));
-    fitDaySummary($('#sheetBody'));
-    fitDaySheet(sheet);
+    roots.push($('#sheetBody'));
   }
+  fitLayouts(roots, $('#calSum'), sheet?.open ? sheet : null);
 }
 
-// Measure in the actual font and available room. Keep fixed line heights;
-// shorten the month wording and drop the optional trade count before money.
-function fitMonthSummary(el) {
-  if (!el?.getBoundingClientRect || !el.clientWidth) return;
-  el.classList.remove('compact');
-  if (el.parentElement.scrollWidth > el.parentElement.clientWidth) el.classList.add('compact');
+// Measure full wording and the visible count on natural-state copies in
+// the very same read pass as the trades; the live summary is never reset.
+function prepareMonthSummary(el, copies) {
+  if (!el?.cloneNode || !styleOf(el) || styleOf(el).display === 'none') return () => () => {};
+  const parent = measurementCopy(el.parentElement, copies);
+  const sum = parent.querySelector('#calSum');
+  token(sum, 'compact', false);
+  return () => {
+    const compact = Boolean(sum.clientWidth && parent.scrollWidth > parent.clientWidth);
+    return () => token(el, 'compact', compact);
+  };
 }
-function fitDaySummary(root) {
+function prepareDaySummary(root, copies) {
   const sum = root?.querySelector?.('.dp-sum'), count = sum?.querySelector('.dp-trades');
-  if (!count || !sum.clientWidth) return;
-  count.hidden = false;
+  if (!count || !sum.cloneNode || !styleOf(sum)) return () => () => {};
   const head = root.querySelector('.dp-head');
-  if (sum.scrollWidth > sum.clientWidth || (head && head.scrollWidth > head.clientWidth)) count.hidden = true;
+  const copy = measurementCopy(head ?? sum, copies);
+  const nextSum = head ? copy.querySelector('.dp-sum') : copy;
+  nextSum.querySelector('.dp-trades').hidden = false;
+  return () => {
+    const hidden = Boolean(nextSum.clientWidth && (nextSum.scrollWidth > nextSum.clientWidth || (head && copy.scrollWidth > copy.clientWidth)));
+    return Object.assign(() => { if (count.hidden !== hidden) count.hidden = hidden; }, { summary: sum, hidden });
+  };
 }
 
 // ---------- A day's trades ----------
@@ -540,10 +547,81 @@ function tradeRows(ts) {
   </div>`).join('')}</div>`;
 }
 
-// Use the rendered font and column, rather than viewport thresholds: a pair
-// can wrap normally before either single price needs the small type token.
-// Rerenders/resizes reset the steps so a wider column recovers its normal size.
-export function fitTradeRows(root) {
+// Natural rows share their real scrolling container on a measurement copy.
+// Every fit scans only through the first overflow; any overflow delegates
+// the entire live panel to the frozen legacy fitter, without simulation.
+const token = (el, name, on) => { if (el && el.classList.contains(name) !== on) el.classList.toggle(name, on); };
+const styleOf = el => globalThis.getComputedStyle?.(el);
+const columnOf = row => {
+  const px = row.querySelector('.px'), ln = px?.querySelector('.ln');
+  return { row, px, ln, prices: [...ln?.children ?? []].filter(el => el?.classList),
+    fee: px?.querySelector('.fee'), units: [...row.querySelectorAll('.meta-unit')] };
+};
+function measurementCopy(el, copies, preserveHeight = false) {
+  const copy = el.cloneNode(true), cs = styleOf(el);
+  // Keep the same selector ancestry, inherited typography, box sizing and
+  // fractional content width. Fixed positioning keeps copies out of flow.
+  Object.assign(copy.style, { position: 'fixed', left: '-100000px', top: '0',
+    width: cs.width, height: preserveHeight ? cs.height : 'auto', maxHeight: preserveHeight ? cs.maxHeight : 'none', visibility: 'hidden', pointerEvents: 'none' });
+  copy.setAttribute('aria-hidden', 'true');
+  copy.inert = true;
+  copies.push([el.parentElement, copy]);
+  return copy;
+}
+const overflows = (el, column) => {
+  const box = column.getBoundingClientRect(), range = document.createRange();
+  range.selectNodeContents(el);
+  return el.scrollWidth > el.clientWidth || [...range.getClientRects()].some(r => r.left < box.left || r.right > box.right);
+};
+// Exactly the legacy first-decision predicate, including its short circuits.
+const needsFit = ({ px, ln, prices, fee }) => px.clientWidth &&
+  (prices.some(el => overflows(el, ln)) || overflows(fee, px));
+
+function measureLineEnds(units) {
+  // Metadata still fits when a price column alone is hidden.
+  const active = units.map(unit => Boolean(unit.querySelector('.meta-sep') && unit.clientWidth));
+  const boxes = units.map((unit, i) => active[i] || active[i - 1] ? unit.getBoundingClientRect() : null);
+  return active.map((on, i) => on ? !boxes[i + 1] || boxes[i + 1].top >= boxes[i].bottom - 0.5 : null);
+}
+
+function applyPlan(columns, plan) {
+  columns.forEach((col, i) => {
+    const step = plan[i];
+    token(col.px, 'small', step.small);
+    token(col.px, 'wrap-fee', step.wrap);
+    token(col.row, 'prices-below', step.below);
+    col.units.forEach((unit, u) => {
+      if (step.lineEnds[u] !== null) token(unit.querySelector('.meta-sep'), 'line-end', step.lineEnds[u]);
+    });
+  });
+}
+function prepareTrades(root, copies) {
+  const columns = [...root?.querySelectorAll?.('.trow') ?? []].map(columnOf);
+  if (!columns.length) return () => () => {};
+  // Non-browser markup callers have no CSSOM and cannot measure layout.
+  if (!globalThis.getComputedStyle) return () => () => {
+    for (const col of columns) { token(col.row, 'prices-below', false); token(col.px, 'small', false); token(col.px, 'wrap-fee', false); }
+  };
+  // Preserve the full panel's fixed height and flex/overflow descendants.
+  // Restoring natural rows inside it restores the natural scrollbar too.
+  const copy = measurementCopy(root, copies, true);
+  const probe = [...copy.querySelectorAll('.trow')].map(columnOf);
+  for (const col of probe) {
+    token(col.row, 'prices-below', false);
+    token(col.px, 'small', false);
+    token(col.px, 'wrap-fee', false);
+  }
+  return () => {
+    // No attached-copy writes during this scan. Stop at the first witness:
+    // a full prescan would duplicate work the legacy fitter short-circuits.
+    if (probe.some(needsFit)) return () => fitTradeRowsLegacy(root);
+    // With no natural overflow the legacy second pass cannot add a class.
+    const plan = probe.map(col => ({ small: false, wrap: false, below: false, lineEnds: measureLineEnds(col.units) }));
+    return () => applyPlan(columns, plan);
+  };
+}
+// Frozen verbatim from 9becb33 (private name/export only changed).
+function fitTradeRowsLegacy(root) {
   const rows = [...root?.querySelectorAll?.('.trow') ?? []];
   const columns = rows.map(row => {
     const px = row.querySelector('.px');
@@ -582,6 +660,24 @@ export function fitTradeRows(root) {
     }
   }
 }
+
+function fitLayouts(roots, month = null, sheet = null) {
+  const copies = [];
+  try {
+    const read = roots.map(root => prepareTrades(root, copies));
+    read.push(...roots.map(root => prepareDaySummary(root, copies)));
+    read.push(prepareMonthSummary(month, copies));
+    for (const [parent, copy] of copies) parent.appendChild(copy);
+    const write = read.map(measure => measure());
+    // Remove measurement copies before applying any live class/visibility.
+    for (const [, copy] of copies) copy.remove();
+    for (const apply of write) apply();
+    if (sheet) fitDaySheet(sheet);
+  } finally {
+    for (const [, copy] of copies) if (copy.parentElement) copy.remove();
+  }
+}
+export function fitTradeRows(root) { fitLayouts([root]); }
 
 function dayContent(view, k, desks) {
   const { ix, today } = view;
@@ -642,28 +738,49 @@ function dayNote(day, sheet = false) {
   return content ? `<div class="dp-note">${icon('info')}<div class="dp-note-copy">${content}</div></div>` : '';
 }
 
-// Measure after the house typography observer joins numbers and units, still
-// before paint, so wrapping matches the text that will actually be shown.
-// The collapsed body leaves this room at the bottom; CSS caps it at 80vh.
-// body.scrollHeight includes the gap before the separate positions paragraph.
+// The typography MutationObserver joins units before this microtask, as in
+// the legacy sheet fitter. Both disclosure heights still finish before any
+// live summary/height write in this deferred pass.
 function fitDaySheet(sheet) {
   if (!sheet?.getBoundingClientRect) return;
   queueMicrotask(() => {
-    if (!sheet.open) return;
-    const extra = sheet.querySelector('.dp-reasons-extra'), button = sheet.querySelector('.dp-reasons-more');
-    if (extra && !button) return;
-    sheet.style.height = '';
-    const body = sheet.querySelector('.dlg-b');
-    fitDaySummary(body);
-    if (!extra || !button) return;
-    const head = sheet.querySelector('.dlg-h'), collapsed = body.scrollHeight;
-    extra.hidden = false;
-    button.hidden = true;
-    const height = Math.ceil(head.getBoundingClientRect().height + Math.max(collapsed, body.scrollHeight));
-    extra.hidden = true;
-    button.hidden = false;
-    sheet.style.height = `${height}px`;
+    if (!sheet.open || (sheet.querySelector('.dp-reasons-extra') && !sheet.querySelector('.dp-reasons-more'))) return;
+    const copies = [], body = sheet.querySelector('.dlg-b');
+    try {
+      const read = prepareDaySummary(body, copies);
+      for (const [parent, copy] of copies) parent.appendChild(copy);
+      const summary = read();
+      for (const [, copy] of copies) copy.remove();
+      const height = measureSheetHeight(sheet, summary, copies);
+      for (const [, copy] of copies) copy.remove();
+      summary();
+      height();
+    } finally {
+      for (const [, copy] of copies) if (copy.parentElement) copy.remove();
+    }
   });
+}
+
+// Prepare both sheet disclosure states from the fitted, unit-joined live body.
+// These copies stay detached while their classes/visibility are set. Their
+// heights are read before the deferred summary and height writes.
+function measureSheetHeight(sheet, summary, copies) {
+  if (!sheet?.getBoundingClientRect) return () => {};
+  const extra = sheet.querySelector('.dp-reasons-extra'), button = sheet.querySelector('.dp-reasons-more');
+  if (extra && !button) return () => {};
+  if (!extra || !button) return () => { sheet.style.height = ''; };
+  const body = sheet.querySelector('.dlg-b'), head = sheet.querySelector('.dlg-h');
+  const start = copies.length;
+  const collapsed = measurementCopy(body, copies), expanded = measurementCopy(body, copies);
+  for (const copy of [collapsed, expanded]) {
+    const count = copy.querySelector('.dp-trades');
+    if (count && summary.summary) count.hidden = summary.hidden;
+  }
+  expanded.querySelector('.dp-reasons-extra').hidden = false;
+  expanded.querySelector('.dp-reasons-more').hidden = true;
+  for (const [parent, copy] of copies.slice(start)) parent.appendChild(copy);
+  const height = Math.ceil(head.getBoundingClientRect().height + Math.max(collapsed.scrollHeight, expanded.scrollHeight));
+  return () => { sheet.style.height = `${height}px`; };
 }
 
 // Opened by a tap, focus goes to the sheet's heading without a ring; from the
@@ -678,9 +795,7 @@ export function openDaySheet(view, k, { pointer = false } = {}) {
   patch($('#sheetBody'), '');
   patch($('#sheetBody'), `<p class="dp-sum">${day.sum}</p>${day.body}${dayNote(day, true)}${currencyNote(day)}`);
   openDialog(sheet, { pointer });
-  fitTradeRows($('#sheetBody'));
-  fitDaySummary($('#sheetBody'));
-  fitDaySheet(sheet);
+  fitLayouts([$('#sheetBody')], null, sheet);
 }
 
 // ---------- The record's own state, inside the chart's fixed box ----------

@@ -482,13 +482,13 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
     postMessage(data) { sent.push(data); const out = reply(data); queueMicrotask(() => (out === 'fail' ? (this.onerror(new Error('worker failed')), this.onerror(new Error('and again'))) : this.onmessage({ data: out }))); }
     terminate() { this.terminated = true; }
   };
-  globalThis.JoeVersion = { APP_VERSION: '261030085000.0.0' };
+  globalThis.JoeVersion = { APP_VERSION: '261030154842.0.0' };
   globalThis.__joedesk = { timings: [] };
   const p = page(t);
   await p.render();
   assert.deepEqual(p.reads, [], 'nothing is read or parsed on the page');
   assert.equal(made.length, 1);
-  assert.match(made[0].url, /\/joe\/v\/261030085000\.0\.0\/account-worker\.js$/, 'under this release’s own path');
+  assert.match(made[0].url, /\/joe\/v\/261030154842\.0\.0\/account-worker\.js$/, 'under this release’s own path');
   assert.deepEqual(made[0].options, { type: 'module' });
   assert.deepEqual(sent[0], { read: 'account', have: null });
   assert.equal(p.svg().dataset.source, 'daily');
@@ -531,7 +531,7 @@ test('JOED-156 fix round 2: a worker that never answers is terminated after the 
     postMessage() { this.posts++; if (this.terminated) throw new Error('posted to a terminated worker'); }
     terminate() { this.terminated = true; }
   };
-  globalThis.JoeVersion = { APP_VERSION: '261030085000.0.0' };
+  globalThis.JoeVersion = { APP_VERSION: '261030154842.0.0' };
   globalThis.__joedesk = { timings: [] };
   const p = page(t);
   await p.render();
@@ -571,7 +571,7 @@ test('JOED-156 fix round 2: two reads asked at once are one read, so a healthy w
     postMessage() { const n = ++this.posts; queueMicrotask(() => this.onmessage({ data: { kind: 'account', status: 200, reason: null, value: M.acceptAccountHistory(history()), key: `k${n}`, ms: 2 } })); }
     terminate() { this.terminated = true; }
   };
-  globalThis.JoeVersion = { APP_VERSION: '261030085000.0.0' };
+  globalThis.JoeVersion = { APP_VERSION: '261030154842.0.0' };
   globalThis.__joedesk = { timings: [] };
   const p = page(t);
   await p.render();
@@ -597,7 +597,7 @@ test('JOED-156 fix round 2: a worker that refuses the post fails like one that n
     postMessage() { throw new Error('the post was refused'); }
     terminate() { this.terminated = true; }
   };
-  globalThis.JoeVersion = { APP_VERSION: '261030085000.0.0' };
+  globalThis.JoeVersion = { APP_VERSION: '261030154842.0.0' };
   globalThis.__joedesk = { timings: [] };
   const p = page(t);
   await p.render();

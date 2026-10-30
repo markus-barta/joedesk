@@ -1611,3 +1611,28 @@ anchor and historical artifacts remain unchanged. The saved presentation config
 and templates match the local approved source; the offline bundle remains
 active in footer/About. This local candidate grants no publication or deployment
 approval. The coordinator owns the cross-family gate, publication and live verification.
+
+## Release 41 candidate (JOED-172)
+
+Reserve `261030154842.0.0` at `2026-10-30T15:48:42Z` as `inspr-calver-3`, stable sequence 41,
+for faster Results switching on the build machine (JOED-170): measure natural
+rows in order, stop at the first overflow, and use the legacy fitter for an
+overflowing panel. Timing budgets remain unchanged.
+
+Previous and last deployed release are sequence 40 (`261030085000.0.0`), main
+`2ad813216785f7b6fd4b506a26b9a7bc29d72ebc` (JOED-171), live on csb0 since
+`2026-10-30T11:34:29Z`, adopted at `2026-10-30T11:35:36Z` as recorded in
+`adoption/261030085000.0.0.json`. Reuse disposition `deployed` and
+`deployed: true`; adoption is evidenced by that existing record. About orders
+41, 40, 39, 38, 37 through 26, then legacy; release 40 retains its original entry.
+Earlier release-preparation sections describe their reservation-time state.
+
+- Switch Results views faster while keeping rows readable.
+
+Reseal the integrated runtime closure. Contracts revision 10 and contract set
+`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
+shared presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`, legacy
+anchor and historical artifacts remain unchanged. The saved presentation config
+and templates match the local approved source; the offline bundle remains
+active in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.

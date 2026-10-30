@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
 import * as exactReference from './fixtures/results-exact-reference.mjs';
 import './results-page.mjs';
+import './results-layout.mjs';
 
 const mapped = (specifier, parentURL) => {
   // The fixture is the exact, SHA256-pinned 4b913c7 module, including imports.
