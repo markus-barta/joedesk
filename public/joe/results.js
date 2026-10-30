@@ -760,7 +760,16 @@ function renderCurve(view, per, desks, R, mctx) {
 // The design's quiet time marks, at Vienna midnights inside the domain: every
 // day up to 16 days, every Monday up to 120 days, else every first of a month.
 export function timeMarks(start, x0, x1) {
-  const days = (x1 - x0) / 864e5, out = [], end = viennaDay(new Date(x1).toISOString());
+  const days = (x1 - x0) / 864e5, out = [];
+  // Outside the proven window use 4b913c7's daily traversal verbatim. In
+  // particular, do not reinterpret early-year keys or historical midnights.
+  if (!M.isModernResultsDate(start) || !M.isModernResultsInstant(x0) || !M.isModernResultsInstant(x1)) {
+    for (let k = M.addDays(start, 1), x = M.viennaMidnight(k); x < x1; k = M.addDays(k, 1), x = M.viennaMidnight(k)) {
+      if (days <= 16 || (days <= 120 ? M.dowOf(k) === 1 : k.endsWith('-01'))) out.push(x);
+    }
+    return out;
+  }
+  const end = viennaDay(new Date(x1).toISOString());
   const nextMonth = k => M.addDays(M.dateKey(...M.ymOf(k), 1), M.daysIn(...M.ymOf(k)));
   // Only resolve midnights that will be drawn. Walking every calendar day
   // made the first All-time switch resolve a year's unmarked weekends too.

@@ -2636,14 +2636,19 @@ About orders 39, 38, 37 through 26, then legacy; release 38 keeps its own note.
 - Set the account’s starting amount and date in Settings to give Since start a known basis.
 - Build account history from newly recorded values, with daily closes for longer chart ranges.
 
-Results keeps contract-valid extreme dates and trades in its index, with
-complete Vienna date keys and years padded to at least four digits. Eager
-close coordinates are optional: conversion errors, non-finite values and
-coordinates outside the following Vienna midnight's UTC-day range remain
-uncached. Charts retain the previous per-date path when an uncached close is
-used; normal dates keep their transferred coordinates. Sparse chart marks use
-the exact Vienna endpoint date, including historical offsets with minutes
-and seconds.
+JOED-166 bounds the Results speed-up to Vienna dates in **1950–2199**.
+IANA Europe/Vienna uses whole-hour CET/CEST offsets (UTC+1/+2) in that
+window; the lower bound excludes LMT and wartime rules, and the upper bound
+limits reliance on recurring future rules. Modern closes are indexed once
+and transferred; quiet chart marks visit only dates that will be drawn.
+Every other date retains the pre-speed-up (`4b913c7`) key derivation,
+ordering and lazy chart conversion, including its early-year, year-10000
+rollover and 1890 hour-rounding quirks. Full four-digit keys sort numerically
+across historical and modern ranges; noncanonical legacy keys retain their
+original ordering for compatibility. No calendar/schema expansion is implied.
+`test/results-model.mjs` pins the complete baseline module by SHA256 and
+compares 2,000 payloads (seed `0x166f3003`) through the actual read worker and
+main-thread fallback, including the full schema year range, DST and both window edges.
 
 Reseal the integrated runtime closure once. Contracts revision 10, contract set
 `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved

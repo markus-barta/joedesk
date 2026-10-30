@@ -1,4 +1,287 @@
 {
+  "fix3": {
+    "session": {
+      "name": "joed-166-r39-results-perf-fix3",
+      "id": "74f03fe2-46df-4fff-88d3-5f9054abe4af",
+      "role": "builder",
+      "started": "2026-10-30T00:00:58Z"
+    },
+    "recorded_at": "2026-10-30T00:12:55.562135+00:00",
+    "status": "Supplied fix3 brief complete locally; coordinator owns cross-family gate, CI performance verdict and any publication/deployment. JOED-166 remains open.",
+    "base_commit": "7d9c73ac9bfaf76d9d2e41c14dc1335696932eac",
+    "window": {
+      "vienna_dates": "1950-01-01 through 2199-12-31 inclusive",
+      "utc_instants": "[1949-12-31T23:00:00.000Z, 2199-12-31T23:00:00.000Z)",
+      "reason": "Whole-hour CET/CEST offsets; lower bound excludes LMT and wartime rules; upper bound conservatively limits future recurring rules.",
+      "tz_evidence": {
+        "node_tzdb": "2026a",
+        "icu": "78.3",
+        "node": "v24.20.0",
+        "intl_monthly_samples": 6000,
+        "intl_offsets": [
+          "GMT+01:00",
+          "GMT+02:00"
+        ],
+        "zdump_command": "zdump -v -c 1950,2200 Europe/Vienna",
+        "zdump_filtered_transition_rows": 880,
+        "zdump_offset_seconds": [
+          3600,
+          7200
+        ]
+      }
+    },
+    "implementation": {
+      "dates": "Outside the window, preserve 4b913c7 hour rounding, era-less wall().slice(0,10), unpadded dateKey and ordering. No ancient-date repair.",
+      "sort": "Full four-digit date keys compare numerically, including mixed canonical historical/modern ranges. Noncanonical legacy keys retain original lexical ordering; fixed-width numeric order matches the existing binary search without added switch work. Trade instants sort numerically.",
+      "closes": "Only modern dates eagerly resolve next-midnight coordinates; all other entries transfer NaN and use the exact original lazy chart path if requested.",
+      "marks": "Sparse traversal only when start and both domain endpoints are modern; otherwise use the original daily loop verbatim.",
+      "untouched": "No JOED-167 account, desk, app or chart files changed."
+    },
+    "differential": {
+      "seed_hex": "0x166f3003",
+      "seed_decimal": 376385539,
+      "cases_per_timezone": 2000,
+      "total_cases": 6000,
+      "range": [
+        "0000-01-01T00:00:00.000Z",
+        "9999-12-31T23:59:59.999Z"
+      ],
+      "explicit_edges": [
+        "year 0 and leap day",
+        "years 1–999 and Date.UTC 0–99 remapping",
+        "1890 LMT and 1893 offset transition",
+        "1950/2200 window boundaries and preceding millisecond",
+        "1980 midnight DST transitions",
+        "2026 DST transitions",
+        "9999-12-31T23:00:00.000Z",
+        "maximum accepted instant"
+      ],
+      "mixtures": "500 modern-only and 1500 mixed schema-wide/early/modern payloads per zone; shuffled trades, tied instants, exact fractional and large money, nullable/partial/empty closes, missing-day diagnostics.",
+      "reference": "test/fixtures/results-model-4b913c7.mjs is a byte-for-byte frozen copy of the complete pre-dc66f8d model from 4b913c7; import resolution only is mapped by the test hook.",
+      "reference_sha256": "60a14349b927a17a0bd02efc508a5ebf6ceffaa2f3e13043bb574df03578dcbc",
+      "paths": [
+        "actual history-worker.js handler and transferable reply",
+        "actual createFeed main-thread fallback",
+        "direct index"
+      ],
+      "assertions": [
+        "all frozen index columns equal, excluding only the added close.at cache",
+        "cache equals baseline next midnight only inside window; NaN elsewhere",
+        "dayResult and tradesOn for every represented key, raw day and adjacent day",
+        "day/week/month/all rollups and period derivation for two live contexts and three desk selections per payload",
+        "bounded curves, including identical legacy conversion errors"
+      ],
+      "named_tests": "Four previous extreme-trade tests retained, with absent/full/partial schema rows; three named Codex reproducers retained. Modern coordinate sentinels and Intl call counts verify cached closes and sparse marks.",
+      "parent_red": [
+        {
+          "tz": "UTC",
+          "exit": 1,
+          "failed": [
+            "JOED-166 compatibility reproducer: Codex five-digit rollover mixed with a modern trade",
+            "JOED-166 compatibility reproducer: Codex astronomical year zero keeps the old era-less key",
+            "JOED-166 compatibility reproducer: Codex 1890 LMT keeps the pre-existing hour-rounding result",
+            "JOED-166 differential property: 2000 seeded whole-schema payloads equal 4b913c7 in worker and fallback"
+          ],
+          "log": "/tmp/joed-166-fix3-parent-UTC.tap"
+        },
+        {
+          "tz": "Europe/Vienna",
+          "exit": 1,
+          "failed": [
+            "JOED-166 compatibility reproducer: Codex five-digit rollover mixed with a modern trade",
+            "JOED-166 compatibility reproducer: Codex astronomical year zero keeps the old era-less key",
+            "JOED-166 compatibility reproducer: Codex 1890 LMT keeps the pre-existing hour-rounding result",
+            "JOED-166 differential property: 2000 seeded whole-schema payloads equal 4b913c7 in worker and fallback"
+          ],
+          "log": "/tmp/joed-166-fix3-parent-Europe-Vienna.tap"
+        },
+        {
+          "tz": "America/New_York",
+          "exit": 1,
+          "failed": [
+            "JOED-166 compatibility reproducer: Codex five-digit rollover mixed with a modern trade",
+            "JOED-166 compatibility reproducer: Codex astronomical year zero keeps the old era-less key",
+            "JOED-166 compatibility reproducer: Codex 1890 LMT keeps the pre-existing hour-rounding result",
+            "JOED-166 differential property: 2000 seeded whole-schema payloads equal 4b913c7 in worker and fallback"
+          ],
+          "log": "/tmp/joed-166-fix3-parent-America-New_York.tap"
+        }
+      ],
+      "parent_red_reason": "On unchanged 7d9c73a, the five-digit/year-zero key regressions, out-of-window eager coordinates, and differential column comparison fail in all three zones. The pre-existing LMT misdate itself is deliberately preserved."
+    },
+    "validation": {
+      "syntax_files": [
+        {
+          "file": "public/joe/results-model.js",
+          "exit": 0
+        },
+        {
+          "file": "public/joe/results.js",
+          "exit": 0
+        },
+        {
+          "file": "test/fixtures/results-model-4b913c7.mjs",
+          "exit": 0
+        },
+        {
+          "file": "scripts/check-release.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/ui-modules.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/status-line.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/performance-glance.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/board-state.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/open-result.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/phone-first-screen.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/desk-session.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/results-model.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/settings-model.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/contracts.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/phase-b.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/failure-fixtures.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/time-vectors.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/account-history.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/account-history-endpoint.mjs",
+          "exit": 0
+        }
+      ],
+      "unit_files": [
+        "test/ui-modules.mjs",
+        "test/status-line.mjs",
+        "test/performance-glance.mjs",
+        "test/board-state.mjs",
+        "test/open-result.mjs",
+        "test/phone-first-screen.mjs",
+        "test/desk-session.mjs",
+        "test/results-model.mjs",
+        "test/settings-model.mjs",
+        "test/contracts.mjs",
+        "test/phase-b.mjs",
+        "test/failure-fixtures.mjs",
+        "test/time-vectors.mjs",
+        "test/account-history.mjs",
+        "test/account-history-endpoint.mjs"
+      ],
+      "unit_runs": 45,
+      "passed": 3162,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "timezones": {
+        "UTC": {
+          "runs": 15,
+          "passed": 1054
+        },
+        "Europe/Vienna": {
+          "runs": 15,
+          "passed": 1054
+        },
+        "America/New_York": {
+          "runs": 15,
+          "passed": 1054
+        }
+      },
+      "checks": [
+        {
+          "command": [
+            "node",
+            "scripts/check-release.mjs"
+          ],
+          "exit": 0,
+          "output": "{\"ok\":true,\"candidate\":\"261029192345.0.0\",\"contractSet\":\"3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350\",\"presentation\":\"integrated\",\"authoritative\":false}"
+        },
+        {
+          "command": [
+            "node",
+            "scripts/check-package.mjs"
+          ],
+          "exit": 0,
+          "output": "{\n  \"ok\": true,\n  \"name\": \"joedesk\",\n  \"version\": \"261029192345.0.0\",\n  \"joeVersion\": \"261029192345.0.0\",\n  \"staticAssets\": 44,\n  \"versionedModules\": 55\n}"
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit": 0,
+          "output": ""
+        }
+      ],
+      "full_log_manifest": "/tmp/joed-166-fix3-validation.json"
+    },
+    "source_sha256": {
+      "public/joe/results-model.js": "7505fd121c7737d1f60184aa2306e94416870d7f7fdfbc3b6c30ed51ca9ec41a",
+      "public/joe/results.js": "2fd99f7d3d48e17829897837fdd719a61c51ae891db63228d902cd6ead91cbb8",
+      "test/results-model.mjs": "4428256463b04c876f99ba6ce03cbe9b1878909a036d19c32ced1d681ad4a5d2",
+      "test/fixtures/results-model-4b913c7.mjs": "60a14349b927a17a0bd02efc508a5ebf6ceffaa2f3e13043bb574df03578dcbc"
+    },
+    "candidate_reseal": {
+      "version": "261029192345.0.0",
+      "scheme": "inspr-calver-3",
+      "sequence": 39,
+      "closure_sha256": "5ed459bda8a25fad3564f769b7c8feadb8953cbc35efb8dc87d9100dcda9ad5f",
+      "changed_payload_entries": [
+        "public/joe/results-model.js",
+        "public/joe/results.js"
+      ],
+      "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+      "presentation_source": "01b3080948c21899cbbacbfa3447da6799af1b56",
+      "authority": "Unpublished candidate only; no review, publication or deployment approval."
+    },
+    "constraints_observed": [
+      "No push",
+      "No deployment",
+      "No review gate",
+      "No other model CLI",
+      "No subagent",
+      "No browser",
+      "No change to JOED-167 files"
+    ]
+  },
   "fix2": {
     "session": "68c02380-6c40-47a4-825c-4c2c36ef3132",
     "recorded_at": "2026-10-29T23:27:04.835813+00:00",

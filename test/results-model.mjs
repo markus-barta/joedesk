@@ -5,13 +5,19 @@
 // mirrors that mapping.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
 
-const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
-  (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
-  ? new URL(`../../${specifier.slice(2)}`, parentURL).href : specifier);
+const mapped = (specifier, parentURL) => {
+  // The fixture is the exact, SHA256-pinned 4b913c7 module, including imports.
+  if (parentURL?.endsWith('/test/fixtures/results-model-4b913c7.mjs')) parentURL = new URL('../../public/joe/results-model.js', parentURL).href;
+  return (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
+    (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/')))
+    ? new URL(`../../${specifier.slice(2)}`, parentURL).href
+    : parentURL?.includes('/public/joe/') && specifier.startsWith('./') ? new URL(specifier, parentURL).href : specifier;
+};
 if (nodeModule.registerHooks) {
   nodeModule.registerHooks({ resolve: (specifier, context, next) => next(mapped(specifier, context.parentURL), context) });
 } else {
@@ -20,6 +26,7 @@ export async function resolve(specifier, context, next) { return next(mapped(spe
 }
 
 const M = await import('../public/joe/results-model.js');
+const prior = await import('./fixtures/results-model-4b913c7.mjs');
 const page = await import('../public/joe/results.js');
 const fmt = await import('../public/joe/format.js');
 const { bn } = await import('../public/joe/ui.js');
@@ -133,23 +140,25 @@ test('JOED-166 close coordinates: contract-valid extreme dates preserve indexing
 });
 
 for (const [name, instant, date] of [
-  ['year-999 reproducer', '0999-06-15T10:00:00.000Z', '0999-06-15'],
-  ['year-10000 rollover reproducer', '9999-12-31T23:00:00.000Z', '10000-01-01'],
-  ['year-1 trade', '0001-06-15T10:00:00.000Z', '0001-06-15'],
-  ['year-9999 final instant trade', '9999-12-31T23:59:59.999Z', '10000-01-01'],
+  ['year-999 reproducer', '0999-06-15T10:00:00.000Z', '999-06-15 '],
+  ['year-10000 rollover reproducer', '9999-12-31T23:00:00.000Z', '10000-01-0'],
+  ['year-1 trade', '0001-06-15T10:00:00.000Z', '1-06-15 11'],
+  ['year-9999 final instant trade', '9999-12-31T23:59:59.999Z', '10000-01-0'],
 ]) test(`JOED-166 extreme trades: ${name} survives indexing, worker transfer and main-thread fallback`, { timeout: 5000 }, async () => {
   const { createFeed } = await import('../public/joe/feed.js');
   const realWorker = globalThis.Worker, realFetch = globalThis.fetch, realSelf = globalThis.self;
   const ctx = ctxOf([E('5000'), E('5000'), E('5000')]);
+  const coverageDate = instant.startsWith('9999-12-31T23:') ? null : instant.slice(0, 10);
   try {
-    for (const fixtureName of ['empty', 'scratches']) for (const coverage of date.length === 10 ? ['absent', 'full', 'partial'] : ['absent']) {
+    for (const fixtureName of ['empty', 'scratches']) for (const coverage of coverageDate ? ['absent', 'full', 'partial'] : ['absent']) {
       const value = fixture(fixtureName), before = M.indexResults(value), trade = fixture('scratches').trades[0];
       trade.id = 'rt-extreme1';
       trade.openedAt = trade.closedAt = trade.fx.observedAt = instant;
       value.trades.push(trade);
-      // Contract day rows have four-digit years; a Vienna rollover can exceed them.
-      if (coverage !== 'absent' && date.length === 10) {
-        value.days.push({ ...closeDay(date, '5000'), coverage,
+      // Preserve full/partial four-digit coverage as well as the legacy
+      // trade key; an overflow into year 10000 has no schema-valid day row.
+      if (coverage !== 'absent') {
+        value.days.push({ ...closeDay(coverageDate, '5000'), coverage,
           ...(coverage === 'partial' ? { partialReasons: ['history_gap'] } : {}) });
       }
       assert.ok(validateContract('results', value).ok, `${name}, ${coverage}: contract-valid trade`);
@@ -172,7 +181,7 @@ for (const [name, instant, date] of [
       const cell = feed.select().states.results;
       assert.equal(cell.state, 'fresh');
       for (const ix of [transferred, reply.index, cell.value.index]) {
-        assert.deepEqual(ix.dates, [...before.dates, date].sort(), 'the complete Vienna date has a padded year and no truncation');
+        assertPriorIndex(ix, prior.indexResults(value), `${name}, ${coverage}`);
         const at = ix.dates.indexOf(date);
         assert.ok(Number.isNaN(ix.close.at[at]), 'an unsupported close coordinate is left uncached');
         for (const k of before.dates) assert.equal(ix.close.at[ix.dates.indexOf(k)], before.close.at[before.dates.indexOf(k)], 'normal coordinates stay cached');
@@ -195,6 +204,204 @@ for (const [name, instant, date] of [
     if (realSelf === undefined) delete globalThis.self;
     else globalThis.self = realSelf;
   }
+});
+
+// Frozen byte-for-byte from 4b913c7:public/joe/results-model.js. Import mapping
+// above changes resolution only, never the reference's functions or ordering.
+const priorBytes = readFileSync(new URL('./fixtures/results-model-4b913c7.mjs', import.meta.url));
+test('JOED-166 differential reference: frozen 4b913c7 bytes stay pinned', () => {
+  assert.equal(createHash('sha256').update(priorBytes).digest('hex'), '60a14349b927a17a0bd02efc508a5ebf6ceffaa2f3e13043bb574df03578dcbc');
+});
+
+// Exercise the actual worker handler and the actual feed fallback. Reusing
+// one worker per test also tests accepting successive indexes, not just cold
+// starts. No browser, replacement indexer or mocked acceptance boundary.
+async function resultReadPaths(tag) {
+  const { createFeed } = await import('../public/joe/feed.js');
+  const saved = { Worker: globalThis.Worker, fetch: globalThis.fetch, self: globalThis.self };
+  let handler;
+  globalThis.self = {};
+  await import(`../public/joe/history-worker.js?joed166-fix3-${tag}`);
+  handler = self.onmessage;
+  globalThis.Worker = undefined;
+  return {
+    async read(value) {
+      globalThis.fetch = async () => new Response(JSON.stringify(value), { headers: { 'X-Joe-Server-Now': value.receivedAt } });
+      const message = new Promise(resolve => { globalThis.self = { postMessage: (data, transfer) => resolve(structuredClone(data, { transfer })) }; });
+      handler({ data: 'results' });
+      const reply = await message;
+      assert.equal(reply.kind, 'results');
+      assert.ok(reply.index, 'the worker must return an accepted index');
+      const feed = createFeed(() => {});
+      await feed.refreshResults();
+      assert.equal(feed.usesWorker(), false);
+      const cell = feed.select().states.results;
+      assert.equal(cell.state, 'fresh');
+      return [reply.index, cell.value.index];
+    },
+    restore() {
+      globalThis.Worker = saved.Worker; globalThis.fetch = saved.fetch;
+      if (saved.self === undefined) delete globalThis.self;
+      else globalThis.self = saved.self;
+    },
+  };
+}
+
+function assertPriorIndex(ix, expected, label) {
+  const { at, ...close } = ix.close;
+  assert.deepEqual({ ...ix, close }, expected, `${label}: every legacy index column`);
+  assert.equal(at.length, ix.dates.length);
+  for (let i = 0; i < at.length; i++) {
+    const k = ix.dates[i];
+    const modern = /^\d{4}-\d{2}-\d{2}$/.test(k) && k >= '1950-01-01' && k < '2200-01-01';
+    assert.equal(at[i], modern ? prior.viennaMidnight(prior.addDays(k, 1)) : NaN, `${label}: optional close ${k}`);
+  }
+}
+
+for (const [name, instant, expectedKey] of [
+  ['Codex five-digit rollover mixed with a modern trade', '9999-12-31T23:00:00.000Z', '10000-01-0'],
+  ['Codex astronomical year zero keeps the old era-less key', '0000-01-01T00:00:00.000Z', '1-01-01 01'],
+  ['Codex 1890 LMT keeps the pre-existing hour-rounding result', '1890-06-15T22:55:00.000Z', '1890-06-15'],
+]) test(`JOED-166 compatibility reproducer: ${name}`, async () => {
+  const value = record(['0000-01-01', '0001-01-01', '1000-01-01', '1890-06-15', '1890-06-16', '2026-10-13', '9999-12-31'].map(date => closeDay(date, '5000')),
+    [tradeOf('rt-extreme1', 'j', instant, '0.01'), tradeOf('rt-modern', 'joe', '2026-10-13T10:00:00.000Z', '-1')], '1000-01-01');
+  const expected = prior.indexResults(value), paths = await resultReadPaths(name);
+  assert.equal(M.viennaDate(Date.parse(instant)), expectedKey);
+  try {
+    for (const ix of await paths.read(value)) {
+      assertPriorIndex(ix, expected, name);
+      for (const date of [...new Set([...expected.dates, '0000-01-01', '0001-01-01', '10000-01-01'])]) {
+        assert.deepEqual(M.dayResult(ix, date, ALL), prior.dayResult(expected, date, ALL));
+        assert.deepEqual(M.tradesOn(ix, date, ALL), prior.tradesOn(expected, date, ALL));
+        for (const p of ['day', 'week', 'month', 'all']) {
+          const per = prior.periodOf(p, date, today, value.trackingStart);
+          assert.deepEqual(M.rollup(ix, per, ALL, ctxOf()), prior.rollup(expected, per, ALL, ctxOf()));
+        }
+      }
+    }
+  } finally { paths.restore(); }
+});
+
+test('JOED-166 modern window: Vienna bounds exclude both adjacent instants and cache only 1950–2199 closes', () => {
+  for (const [at, modern] of [
+    ['1949-12-31T22:59:59.999Z', false], ['1949-12-31T23:00:00.000Z', true],
+    ['2199-12-31T22:59:59.999Z', true], ['2199-12-31T23:00:00.000Z', false],
+  ]) {
+    assert.equal(M.isModernResultsInstant(Date.parse(at)), modern, at);
+    assert.equal(M.viennaDate(Date.parse(at)), prior.viennaDate(Date.parse(at)), at);
+  }
+  const dates = ['1890-06-15', '1949-12-31', '1950-01-01', '1980-04-05', '1980-04-06',
+    '1980-09-27', '1980-09-28', '2026-03-29', '2026-10-25', '2199-12-31', '2200-01-01', '9999-12-31'];
+  const ix = M.indexResults(record(dates.map(k => closeDay(k, '5000'))));
+  for (let i = 0; i < dates.length; i++) assert.equal(ix.close.at[i],
+    M.isModernResultsDate(dates[i]) ? prior.viennaMidnight(prior.addDays(dates[i], 1)) : NaN, dates[i]);
+});
+
+test('JOED-166 modern switches: curves consume transferred coordinates and sparse marks visit only drawn dates', () => {
+  const dates = ['2026-03-28', '2026-03-29', '2026-03-30'];
+  const ix = structuredClone(M.indexResults(record(dates.map(k => closeDay(k, '5000')), [], dates[0])));
+  const per = M.periodOf('week', dates[0], today, dates[0]);
+  const ctx = ctxOf();
+  assert.deepEqual(M.curve(ix, per, ALL, ctx), prior.curve(prior.indexResults(record(dates.map(k => closeDay(k, '5000')), [], dates[0])), per, ALL, ctx));
+  // A distinct coordinate sentinel proves the renderer uses the indexed
+  // column, rather than deriving another midnight for each plotted close.
+  for (let i = 0; i < ix.close.at.length; i++) ix.close.at[i] += 123;
+  const pts = M.curve(ix, per, ALL, ctx).pts.filter(p => dates.includes(p.k) && !p.edge);
+  assert.deepEqual(pts.map(p => p.x), [ix.close.at[0], ix.close.at[1]]);
+  const start = '2025-10-01', x0 = M.viennaMidnight(start), x1 = M.viennaMidnight('2026-10-15');
+  let calls = 0;
+  const original = Intl.DateTimeFormat.prototype.formatToParts;
+  try {
+    Intl.DateTimeFormat.prototype.formatToParts = function (...args) { calls++; return original.apply(this, args); };
+    const marks = page.timeMarks(start, x0, x1);
+    assert.equal(marks.length, 12);
+    assert.ok(calls <= marks.length * 3 + 1, `at most one endpoint and three Intl calls per drawn mark; saw ${calls}`);
+  } finally { Intl.DateTimeFormat.prototype.formatToParts = original; }
+});
+
+const DIFFERENTIAL_SEED = 0x166f3003;
+const DIFFERENTIAL_CASES = 2000;
+test('JOED-166 differential property: 2000 seeded whole-schema payloads equal 4b913c7 in worker and fallback', { timeout: 120000 }, async () => {
+  let state = DIFFERENTIAL_SEED;
+  const random = () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return (state >>> 0) / 4294967296; };
+  const pick = values => values[Math.floor(random() * values.length)];
+  const min = Date.parse('0000-01-01T00:00:00.000Z'), max = Date.parse('9999-12-31T23:59:59.999Z');
+  const instant = (from, through) => new Date(from + Math.floor(random() * (through - from + 1))).toISOString();
+  const edges = ['0000-01-01T00:00:00.000Z', '0000-02-29T23:59:59.999Z', '0001-06-15T10:00:00.000Z',
+    '0099-12-31T23:00:00.000Z', '0100-01-01T00:00:00.000Z', '0999-06-15T10:00:00.000Z',
+    '1890-06-15T22:55:00.000Z', '1893-03-31T22:54:39.000Z',
+    '1949-12-31T22:59:59.999Z', '1949-12-31T23:00:00.000Z',
+    '1980-04-05T23:00:00.000Z', '1980-09-27T22:00:00.000Z',
+    '2026-03-29T00:59:59.999Z', '2026-03-29T01:00:00.000Z', '2026-10-25T01:00:00.000Z',
+    '2199-12-31T22:59:59.999Z', '2199-12-31T23:00:00.000Z',
+    '9999-12-31T23:00:00.000Z', '9999-12-31T23:59:59.999Z'];
+  const paths = await resultReadPaths('property');
+  try {
+    for (let c = 0; c < DIFFERENTIAL_CASES; c++) {
+      // Every fourth case is modern-only; others mix a required edge, an
+      // arbitrary instant anywhere in the schema, and modern trades. Extra
+      // early-year sampling covers 0–999 densely, including Date.UTC's 0–99.
+      const modern = () => instant(Date.parse('2000-01-01T00:00:00.000Z'), Date.parse('2026-10-14T17:40:00.000Z'));
+      const times = c % 4 === 0 ? [modern(), modern()] : [edges[c % edges.length], instant(min, max), modern(),
+        instant(min, Date.parse('0999-12-31T23:59:59.999Z'))];
+      for (let n = Math.floor(random() * 5); n > 0; n--) times.push(c % 4 === 0 ? modern() : instant(min, max));
+      const trades = times.map((at, i) => tradeOf(`rt-${c}-${i}`, pick(ALL), at,
+        pick(['0', '0.0049', '-0.0049', '0.005', '-0.005', '0.01', '-1.23456789', '999999999999.12345678']), pick(['0', '0.1'])));
+      // Shuffle input order independently of close time and preserve ties.
+      if (c % 7 === 0) trades.push({ ...structuredClone(trades[0]), id: `rt-${c}-tie` });
+      for (let i = trades.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [trades[i], trades[j]] = [trades[j], trades[i]]; }
+      const dates = [...new Set(['2026-10-13', ...times.filter(() => random() < 0.6).map(at => at.slice(0, 10))])];
+      const days = dates.map(date => {
+        if (random() < 0.25) return { date, desks: {}, coverage: 'partial', partialReasons: ['history_gap'] };
+        const d = closeDay(date, pick(['5000', '4999.995', '5001.23456789', null]), pick(['5000', null]), pick(['5000', null]));
+        if (random() < 0.3) { d.coverage = 'partial'; d.partialReasons = ['history_gap']; }
+        return d;
+      });
+      const value = record(days, trades, pick(dates));
+      value.seq = c + 1;
+      if (c % 3 === 0) value.missingDays = [pick(dates)];
+      assert.ok(validateContract('results', value).ok, `seed ${DIFFERENTIAL_SEED}, case ${c}: contract-valid`);
+      const expected = prior.indexResults(value);
+      const indexes = await paths.read(value);
+      indexes.push(structuredClone(M.indexResults(value), { transfer: [] }));
+      for (const [path, ix] of indexes.entries()) assertPriorIndex(ix, expected, `case ${c}, path ${path}`);
+      // Every represented day, including malformed legacy trade keys, plus
+      // adjacent days exercises empty cells and every distinct week/month.
+      // Equal full columns above also cover empty intervals between them.
+      const queries = [...new Set([...expected.dates, ...dates, ...dates.flatMap(k => [prior.addDays(k, -1), prior.addDays(k, 1)])])];
+      const curveOutcome = (model, ix, per) => {
+        try { return { value: model.curve(ix, per, ALL, ctxOf()) }; }
+        catch (e) { return { error: [e.name, e.message] }; }
+      };
+      for (const anchor of ['2026-10-13', dates[dates.length - 1]]) {
+        const per = prior.periodOf('week', anchor, today, value.trackingStart);
+        const wanted = curveOutcome(prior, expected, per);
+        for (const ix of indexes.slice(0, 2)) assert.deepEqual(curveOutcome(M, ix, per), wanted, `case ${c}: bounded curve`);
+      }
+      const contexts = [ctxOf(), ctxOf([E('5001'), null, E('4999')], { today: pick(dates), nowMs: null })];
+      const desks = [ALL, [pick(ALL)], c % 2 ? ['j', 'joe'] : ['joe', 'joel']];
+      for (const ctx of contexts) for (const selected of desks) {
+        const periods = new Map();
+        for (const date of queries) {
+          const dayExpected = prior.dayResult(expected, date, selected), tradeExpected = prior.tradesOn(expected, date, selected);
+          for (const ix of indexes.slice(0, 2)) {
+            assert.deepEqual(M.dayResult(ix, date, selected), dayExpected, `case ${c}: day ${date}`);
+            assert.deepEqual(M.tradesOn(ix, date, selected), tradeExpected, `case ${c}: tradesOn ${date}`);
+          }
+          for (const p of ['day', 'week', 'month', 'all']) {
+            const per = prior.periodOf(p, date, ctx.today, value.trackingStart);
+            assert.deepEqual(M.periodOf(p, date, ctx.today, value.trackingStart), per, `case ${c}: period derivation`);
+            periods.set(`${p}:${per.start}:${per.end}`, per);
+          }
+        }
+        for (const per of periods.values()) {
+          const wanted = prior.rollup(expected, per, selected, ctx);
+          for (const ix of indexes.slice(0, 2)) assert.deepEqual(M.rollup(ix, per, selected, ctx), wanted,
+            `seed ${DIFFERENTIAL_SEED}, case ${c}: ${per.p} ${per.start}..${per.end}`);
+        }
+      }
+    }
+  } finally { paths.restore(); }
 });
 
 test('JOED-30 results: partial dates, empty desks and nullable summaries validate and survive worker transfer', () => {
