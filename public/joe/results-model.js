@@ -50,7 +50,7 @@ export function partialReasonLabel(day) {
 export function countPartialDays(ix, per, today) {
   let count = 0;
   for (const day of ix?.partialDays ?? []) {
-    if (day >= per.start && day <= per.end && day < today) count++;
+    if (compareDates(day, per.start) >= 0 && compareDates(day, per.end) <= 0 && compareDates(day, today) < 0) count++;
   }
   return count;
 }
@@ -60,35 +60,51 @@ export function countPartialDays(ix, per, today) {
 // Europe/Vienna uses CET/CEST (3600/7200 seconds) throughout this window;
 // LMT ended in 1893. 1950 excludes LMT and the wartime rule changes,
 // and 2199 is a conservative finite ceiling on the recurring EU rules.
-// Bounds are Vienna midnights, in UTC. Outside them preserve 4b913c7's hour
-// rounding, era-less wall().slice(0, 10) and unpadded keys, including quirks.
+// Bounds are Vienna midnights, in UTC. Outside them use the exact offset,
+// including historical seconds, and astronomical years (1 BC is year 0).
 const MODERN_START = Date.parse('1949-12-31T23:00:00.000Z');
 const MODERN_END = Date.parse('2199-12-31T23:00:00.000Z');
 export const isModernResultsInstant = ms => ms >= MODERN_START && ms < MODERN_END;
 export const isModernResultsDate = k => /^\d{4}-\d{2}-\d{2}$/.test(k) && k >= '1950-01-01' && k < '2200-01-01';
-// One UTC hour has one Vienna date in the modern window. Keep the same
-// hour cache outside it too: correcting its historical behavior is separate.
+// One UTC hour has one Vienna date in the modern window only.
 const hourDays = new Map();
+const offsetFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: VIENNA, timeZoneName: 'longOffset' });
+function viennaOffset(ms) {
+  const name = offsetFormatter.formatToParts(new Date(ms)).find(p => p.type === 'timeZoneName').value;
+  if (name === 'GMT') return 0;
+  const [, sign, h, m = '0', s = '0'] = /^GMT([+-])(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(name);
+  return (sign === '-' ? -1 : 1) * (Number(h) * 3600 + Number(m) * 60 + Number(s)) * 1000;
+}
 export function viennaDate(ms) {
+  if (!isModernResultsInstant(ms)) return kOf(new Date(ms + viennaOffset(ms)));
   const hour = Math.floor(ms / 3600000);
   let day = hourDays.get(hour);
   if (day === undefined) {
     const local = wall(new Date(hour * 3600000).toISOString(), VIENNA);
-    if (isModernResultsInstant(ms)) {
-      const [y, m, d] = local.split(' ')[0].split('-');
-      day = dateKey(Number(y), Number(m) - 1, Number(d));
-    } else day = local.slice(0, 10);
+    const [y, m, d] = local.split(' ')[0].split('-');
+    day = dateKey(Number(y), Number(m) - 1, Number(d));
     if (hourDays.size >= 100000) hourDays.clear();
     hourDays.set(hour, day);
   }
   return day;
 }
-// The instant a Vienna date begins (its midnight is never inside a DST change).
+// The instant a Vienna date begins. Preserve the modern chart policy;
+// historical dates can have a repeated midnight (for example 1916-10-01).
 const midnights = new Map();
 export function viennaMidnight(k) {
   let ms = midnights.get(k);
   if (ms === undefined) {
-    ms = Date.parse(zonedInstant(k, '00:00:00', VIENNA));
+    if (isModernResultsDate(k)) ms = Date.parse(zonedInstant(k, '00:00:00', VIENNA));
+    else {
+      const target = parse(k).getTime();
+      let lo = target - 43200000, hi = target + 43200000;
+      while (lo < hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        if (mid + viennaOffset(mid) < target) lo = mid + 1;
+        else hi = mid;
+      }
+      ms = lo;
+    }
     if (midnights.size >= 8192) midnights.clear();
     midnights.set(k, ms);
   }
@@ -96,21 +112,25 @@ export function viennaMidnight(k) {
 }
 
 const pad = n => String(n).padStart(2, '0');
-export const dateKey = (y, m, d) => `${y >= 1950 && y < 2200 ? String(y).padStart(4, '0') : y}-${pad(m + 1)}-${pad(d)}`;
-const parse = k => { const [y, m, d] = k.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); };
+export const dateKey = (y, m, d) => `${y < 0 ? '-' : ''}${String(Math.abs(y)).padStart(4, '0')}-${pad(m + 1)}-${pad(d)}`;
+const parts = k => /^(-?\d+)-(\d{2})-(\d{2})$/.exec(k).slice(1).map(Number);
+const utcDate = (y, m, d) => { const dt = new Date(0); dt.setUTCFullYear(y, m, d); return dt; };
+const parse = k => { const [y, m, d] = parts(k); return utcDate(y, m - 1, d); };
 const kOf = dt => dateKey(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
 export const addDays = (k, n) => { const d = parse(k); d.setUTCDate(d.getUTCDate() + n); return kOf(d); };
 export const dowOf = k => parse(k).getUTCDay();
+export const dayOf = k => parse(k).getUTCDate();
 export const ymOf = k => [parse(k).getUTCFullYear(), parse(k).getUTCMonth()];
 export const monday = k => addDays(k, -((dowOf(k) + 6) % 7));
-export const daysIn = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+export const daysIn = (y, m) => utcDate(y, m + 1, 0).getUTCDate();
 export const isWeekend = k => dowOf(k) === 0 || dowOf(k) === 6;
 // A US market holiday (the pinned calendar): no regular session on that date.
 const holidays = new Map();
 export function marketHoliday(k) {
   if (!holidays.has(k)) {
     if (holidays.size >= 4096) holidays.clear();
-    holidays.set(k, !isWeekend(k) && marketSession(zonedInstant(k, '12:00:00', NY)).reason === 'market_closed');
+    // The pinned market calendar has no holidays outside the modern window.
+    holidays.set(k, isModernResultsDate(k) && !isWeekend(k) && marketSession(zonedInstant(k, '12:00:00', NY)).reason === 'market_closed');
   }
   return holidays.get(k);
 }
@@ -122,17 +142,17 @@ const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct
 export const MONTH = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 export const fmtDM = k => { const d = parse(k); return `${d.getUTCDate()}${NB}${MON[d.getUTCMonth()]}`; };
 export const fmtDDM = k => `${DOW[dowOf(k)]} ${fmtDM(k)}`;
-export const fmtDay = k => `${fmtDDM(k)} ${k.slice(0, 4)}`;
+export const fmtDay = k => `${fmtDDM(k)} ${k.slice(0, -6)}`;
 function rangeLabel(s, e, today) {
-  const a = parse(s), b = parse(e), year = b.getUTCFullYear() === Number(today.slice(0, 4)) ? '' : ` ${b.getUTCFullYear()}`;
+  const a = parse(s), b = parse(e), year = b.getUTCFullYear() === ymOf(today)[0] ? '' : ` ${b.getUTCFullYear()}`;
   return a.getUTCMonth() === b.getUTCMonth() ? `${a.getUTCDate()}–${b.getUTCDate()}${NB}${MON[b.getUTCMonth()]}${year}`
     : `${fmtDM(s)}${a.getUTCFullYear() === b.getUTCFullYear() ? '' : ` ${a.getUTCFullYear()}`} – ${fmtDM(e)}${year}`;
 }
 
 // The stepper stops at 1 Aug of the first tracked year (never after tracking starts).
 export function firstStep(trackingStart) {
-  const floor = `${(trackingStart ?? '2026-08-01').slice(0, 4)}-08-01`;
-  return trackingStart && trackingStart < floor ? `${trackingStart.slice(0, 7)}-01` : floor;
+  const [y, m] = ymOf(trackingStart ?? '2026-08-01'), floor = dateKey(y, 7, 1);
+  return trackingStart && compareDates(trackingStart, floor) < 0 ? dateKey(y, m, 1) : floor;
 }
 
 // A period: its dates, the stepper label, the heading token and the sentence phrase.
@@ -157,10 +177,10 @@ export function periodOf(p, a, today, trackingStart = null) {
   if (p === 'ytd') {
     // The anchor's calendar year: this year runs to today. An earlier year,
     // reached through a deep link, is that whole calendar year.
-    const ty = Number(today.slice(0, 4));
-    if (y >= ty) return { p, start: `${today.slice(0, 4)}-01-01`, end: today, lab: `This year · since 1${NB}Jan`, head: 'this year', phrase: 'this year' };
+    const ty = ymOf(today)[0];
+    if (y >= ty) return { p, start: dateKey(ty, 0, 1), end: today, lab: `This year · since 1${NB}Jan`, head: 'this year', phrase: 'this year' };
     const prev = y === ty - 1;
-    return { p, start: `${y}-01-01`, end: `${y}-12-31`, lab: prev ? `Last year · ${y}` : `${y}`, head: prev ? 'last year' : `${y}`, phrase: prev ? 'last year' : `in ${y}` };
+    return { p, start: dateKey(y, 0, 1), end: dateKey(y, 11, 31), lab: prev ? `Last year · ${y}` : `${y}`, head: prev ? 'last year' : `${y}`, phrase: prev ? 'last year' : `in ${y}` };
   }
   const start = trackingStart ?? firstStep(null);
   return { p: 'all', start, end: today, lab: trackingStart ? `All time · since ${fmtDM(trackingStart)}` : 'All time', head: 'all time',
@@ -174,7 +194,7 @@ export function stepAnchor(period, anchor, dir, today, trackingStart = null) {
   if (period === 'week') a.setUTCDate(a.getUTCDate() + 7 * dir);
   if (period === 'month') { a.setUTCDate(1); a.setUTCMonth(a.getUTCMonth() + dir); }
   const k = kOf(a), first = firstStep(trackingStart);
-  return k > today ? today : k < first ? first : k;
+  return compareDates(k, today) > 0 ? today : compareDates(k, first) < 0 ? first : k;
 }
 
 // ---------- Deep links ----------
@@ -186,7 +206,7 @@ export function stepAnchor(period, anchor, dir, today, trackingStart = null) {
 const ROUTE_PERIOD = new Map([['day', 'day'], ['week', 'week'], ['month', 'month'], ['year', 'ytd'], ['all', 'all']]);
 const ROUTE_NAME = new Map([...ROUTE_PERIOD].map(([name, period]) => [period, name]));
 const ROUTE_DESKS = new Set(['all', ...DESK_IDS]);
-const validDate = k => /^\d{4}-\d{2}-\d{2}$/.test(k) && kOf(parse(k)) === k;
+const validDate = k => /^-?\d{4,}-\d{2}-\d{2}$/.test(k) && kOf(parse(k)) === k;
 export function parseResultsRoute(query) {
   const params = new URLSearchParams(String(query ?? '').replace(/^\?/, ''));
   const value = key => params.get(key)?.trim().toLowerCase() ?? '';
@@ -204,19 +224,18 @@ const cmpTrade = (ms, ids) => (a, b) => ms[a] - ms[b] || (ids[a] < ids[b] ? -1 :
 // contract accepts can wrap (a BigInt64Array would, past € 92 billion).
 const exact = n => new Array(n).fill(0n);
 
-// Only modern dates resolve a close eagerly. All other dates retain the old
-// lazy chart path, so even an unused unsupported date cannot crash indexing.
+// Only modern dates resolve a close eagerly. Historical and expanded years
+// use exact conversion lazily, keeping the modern index fast.
 function closeCoordinate(k) {
   return isModernResultsDate(k) ? viennaMidnight(addDays(k, 1)) : NaN;
 }
 
-// Compare full four-digit keys numerically, including mixed modern/historical
-// ranges. Noncanonical keys produced by the frozen legacy derivation must keep
-// its lexical ordering; repairing those keys would change pre-speed-up results.
-const numericDate = k => /^\d{4}-\d{2}-\d{2}$/.test(k) ? Number(k.replaceAll('-', '')) : NaN;
-function compareDates(a, b) {
-  const x = numericDate(a), y = numericDate(b);
-  return Number.isNaN(x) || Number.isNaN(y) ? (a < b ? -1 : a > b ? 1 : 0) : x - y;
+// Fixed-width schema dates retain their cheap ordering. Expanded years and
+// the preceding day of year 0 use the same numeric calendar order everywhere.
+const numericDate = k => { const [y, m, d] = parts(k); return y * 10000 + m * 100 + d; };
+export function compareDates(a, b) {
+  if (a.length === 10 && b.length === 10) return a < b ? -1 : a > b ? 1 : 0;
+  return numericDate(a) - numericDate(b);
 }
 
 // One pass over a validated results v2 payload. Trades are sorted by closedAt;
@@ -261,7 +280,7 @@ export function indexResults(value) {
   trades.blob = text.join('');
   // The chart places a close at the following Vienna midnight. Resolve it
   // once with the index in the worker, instead of during a period switch.
-  // Keep unsupported dates too; use the old per-date path if a chart needs them.
+  // Other dates resolve lazily if a chart needs them.
   const close = { amount: exact(cells), state: new Uint8Array(cells), entry: new Int32Array(cells).fill(-1),
     at: Float64Array.from(dates, closeCoordinate) };
   for (const day of value.days) {
@@ -313,18 +332,17 @@ export const transferables = ix => [...Object.values(ix.agg), ...Object.values(i
 // trades: the record is then not authoritative and no number is derived.
 export const keptInRecord = (ix, keep) => ix.symbols.filter(s => keep.includes(s));
 
-// First index with dates[i] > k. Fixed-width numeric keys have the same
-// lexical order; legacy noncanonical keys retain that original order too.
+// First index with dates[i] > k, in the index's numeric calendar order.
 function upper(dates, k) {
   let lo = 0, hi = dates.length;
-  while (lo < hi) { const mid = (lo + hi) >> 1; if (dates[mid] <= k) lo = mid + 1; else hi = mid; }
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (compareDates(dates[mid], k) <= 0) lo = mid + 1; else hi = mid; }
   return lo;
 }
 
 // The date of a desk's latest close on or before a Vienna date (null before
 // tracking starts or before its first close).
 function closeDate(ix, desk, k) {
-  if (k < ix.meta.trackingStart) return null;
+  if (compareDates(k, ix.meta.trackingStart) < 0) return null;
   const i = upper(ix.dates, k) - 1;
   const at = i < 0 ? -1 : ix.close.entry[i * 3 + desk];
   return at < 0 ? null : ix.dates[at];
@@ -334,7 +352,7 @@ function closeDate(ix, desk, k) {
 // € 5.000 before tracking starts or before its first close. Null when the
 // record says the close is unknown.
 export function closeUnits(ix, desk, k) {
-  if (k < ix.meta.trackingStart) return START_EQUITY;
+  if (compareDates(k, ix.meta.trackingStart) < 0) return START_EQUITY;
   const i = upper(ix.dates, k) - 1;
   const at = i < 0 ? -1 : ix.close.entry[i * 3 + desk];
   if (at < 0) return START_EQUITY;
@@ -431,8 +449,8 @@ export function intraday(cols, k, desks) {
 // stands on, or now. The page and the browser gate both build it here.
 export function moneyContext(ix, inputs, per, desks) {
   const ctx = { today: inputs.today, todayUnits: inputs.todayUnits, nowMs: inputs.nowMs ?? null, intraday: null, cut: null };
-  const end = per.end > ctx.today ? ctx.today : per.end;
-  if (per.start > end) return ctx;
+  const end = compareDates(per.end, ctx.today) > 0 ? ctx.today : per.end;
+  if (compareDates(per.start, end) > 0) return ctx;
   const hits = [];
   for (const desk of desks) {
     const d0 = closeDate(ix, DESK_INDEX[desk], addDays(per.start, -1));
@@ -456,15 +474,15 @@ const hundredths = (num, den) => Number(divRound(num * 100n, den)) / 100;
 // rollup on every switch. Live money and basis cuts are checked on every call.
 export function periodBase(ix, inputs, per, desks) {
   if (!ix || desks.length !== DESK_IDS.length || !DESK_IDS.every(id => desks.includes(id))) return null;
-  if (per.p === 'all' || per.start <= ix.meta.trackingStart) return STARTING_MONEY;
+  if (per.p === 'all' || compareDates(per.start, ix.meta.trackingStart) <= 0) return STARTING_MONEY;
   const before = { p: 'all', start: ix.meta.trackingStart, end: addDays(per.start, -1) };
   const ctx = moneyContext(ix, inputs, before, desks);
   if (ctx.cut) return null;
   const startE = equityAt(ix, desks, addDays(before.start, -1), ctx);
   if (startE === null) return null;
-  const end = before.end > ctx.today ? ctx.today : before.end;
+  const end = compareDates(before.end, ctx.today) > 0 ? ctx.today : before.end;
   let endE = startE;
-  if (before.start <= end) {
+  if (compareDates(before.start, end) <= 0) {
     if (end === ctx.today) endE = equityAt(ix, desks, end, ctx);
     else {
       const i = upper(ix.dates, end) - 1, net = i < 0 ? 0n : ix.netPrefix[i];
@@ -486,7 +504,7 @@ export function periodPercent(ix, inputs, per, desks, result) {
 // observed intraday points; every other period (also a Week on its Monday,
 // a Month on its first) uses session closes.
 export function rollup(ix, per, desks, ctx) {
-  const end = per.end > ctx.today ? ctx.today : per.end, day = per.p === 'day', cut = ctx.cut ?? null;
+  const end = compareDates(per.end, ctx.today) > 0 ? ctx.today : per.end, day = per.p === 'day', cut = ctx.cut ?? null;
   const sel = deskIdx(desks);
   const i0 = upper(ix.dates, addDays(per.start, -1)), i1 = upper(ix.dates, end);
   let trades = 0, won = 0, lost = 0, realised = 0n, gross = 0n, fees = 0n, winSum = 0n, lossSum = 0n, best = -1, worst = -1, days = 0;
@@ -514,7 +532,7 @@ export function rollup(ix, per, desks, ctx) {
   // The money: E(S−1) and E(end). Across a change of bookkeeping basis no
   // result is derived (cut); a value that is not known stays unknown.
   const startE = cut ? null : equityAt(ix, desks, addDays(per.start, -1), ctx);
-  const endE = cut ? null : per.start > end ? startE : equityAt(ix, desks, end, ctx);
+  const endE = cut ? null : compareDates(per.start, end) > 0 ? startE : equityAt(ix, desks, end, ctx);
   const net = startE !== null && endE !== null ? endE - startE : null;
   // Drawdown path: E(S−1), each session's close (Day: every observed intraday
   // point), then E(end). One unknown value on it leaves the drawdown unknown.
@@ -527,7 +545,7 @@ export function rollup(ix, per, desks, ctx) {
     if (e === null) { known = false; break; }
     path.push(e);
   }
-  if (known && per.start <= end) path.push(endE);
+  if (known && compareDates(per.start, end) <= 0) path.push(endE);
   let peak = null, dd = 0n, ddPeak = null;
   for (const v of path) {
     if (peak === null || v > peak) peak = v;
@@ -614,10 +632,10 @@ export const unitsCents = cents;
 // for breaks the line, and before tracking the line is zero by definition.
 // Across a change of bookkeeping basis nothing is drawn (cut).
 export function curve(ix, per, desks, ctx) {
-  const end = per.end > ctx.today ? ctx.today : per.end, day = per.p === 'day';
+  const end = compareDates(per.end, ctx.today) > 0 ? ctx.today : per.end, day = per.p === 'day';
   if (ctx.cut) return { pts: [], startE: null, day, cut: ctx.cut };
   const startE = equityAt(ix, desks, addDays(per.start, -1), ctx);
-  if (startE === null || per.start > end) return { pts: [], startE, day };
+  if (startE === null || compareDates(per.start, end) > 0) return { pts: [], startE, day };
   if (day) {
     const pts = dayWindow((ctx.intraday ?? []).map(p => ({ x: p.t, v: cents(p.units - startE), u: p.units - startE, at: p.t })), per.start);
     const endE = equityAt(ix, desks, end, ctx);
@@ -630,12 +648,12 @@ export function curve(ix, per, desks, ctx) {
   const live = end === ctx.today, ts = ix.meta.trackingStart, sel = deskIdx(desks);
   const x0 = viennaMidnight(per.start);
   const x1 = live && ctx.nowMs !== null ? Math.max(ctx.nowMs, x0 + 1) : viennaMidnight(addDays(end, 1));
-  const tracking = per.start <= ts && ts <= end ? viennaMidnight(ts) : null;
+  const tracking = compareDates(per.start, ts) <= 0 && compareDates(ts, end) <= 0 ? viennaMidnight(ts) : null;
   const pts = [{ x: x0, v: 0, u: 0n, edge: 'start', k: per.start }];
   let prev = addDays(per.start, -1);
-  if (per.start < ts && ts <= end) { pts.push({ x: tracking, v: 0, u: 0n, edge: 'tracking', k: ts }); prev = addDays(ts, -1); }
+  if (compareDates(per.start, ts) < 0 && compareDates(ts, end) <= 0) { pts.push({ x: tracking, v: 0, u: 0n, edge: 'tracking', k: ts }); prev = addDays(ts, -1); }
   // A regular session after tracking starts, strictly between two dates.
-  const missing = (a, b) => { for (let k = addDays(a, 1); k < b; k = addDays(k, 1)) if (k >= ts && !isWeekend(k) && !marketHoliday(k)) return true; return false; };
+  const missing = (a, b) => { for (let k = addDays(a, 1); compareDates(k, b) < 0; k = addDays(k, 1)) if (compareDates(k, ts) >= 0 && !isWeekend(k) && !marketHoliday(k)) return true; return false; };
   const point = (k, x, e, extra) => {
     if (missing(prev, k)) pts.push({ x: (pts[pts.length - 1].x + x) / 2, v: null, gap: true });
     pts.push({ x, v: e === null ? null : cents(e - startE), u: e === null ? null : e - startE, k, ...extra });
@@ -654,6 +672,7 @@ export function curve(ix, per, desks, ctx) {
 // A day's chart shows its regular New York session (in Vienna time), widened
 // to any change outside it; the flat night before it is not drawn.
 function dayWindow(pts, k) {
+  if (!isModernResultsDate(k)) return pts;
   const s = sessionBounds(zonedInstant(k, '12:00:00', NY));
   if (!s.openAt || pts.length < 2) return pts;
   let lo = Date.parse(s.openAt), hi = Date.parse(s.closeAt);

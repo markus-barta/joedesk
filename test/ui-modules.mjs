@@ -123,6 +123,17 @@ test('format: Austrian digits, true minus, joined units, zero without sign', () 
   assert.equal(format.timeHM('2026-10-28T13:30:00.000Z'), '14:30');
 });
 
+for (const [instant, hm, hms] of [
+  ['0000-01-01T12:00:00.000Z', '13:05', '13:05:21'],
+  ['0999-06-15T10:00:00.000Z', '11:05', '11:05:21'],
+  ['9999-12-31T23:30:00.000Z', '00:30', '00:30:00'],
+]) {
+  test(`format: JOED-168 Vienna clock at ${instant} ignores year width`, () => {
+    assert.equal(format.timeHM(instant), hm);
+    assert.equal(format.timeHMS(instant), hms);
+  });
+}
+
 test('host gate: canonical hosts include the production host; others get the privacy stub', () => {
   for (const host of ['hsb1.lan', 'hsb1', 'localhost', '127.0.0.1', '::1', 'HSB1.LAN', '[::1]', '100.64.0.7', '100.64.0.0',
     '100.127.255.255', 'hsb1.tail1234.ts.net', 'foo.hsb1.ts.net', 'hsb1.ts.net', 'cs0.barta.cm', 'cs0', 'CS0.BARTA.CM']) assert.ok(isCanonicalJoeHost(host), host);
