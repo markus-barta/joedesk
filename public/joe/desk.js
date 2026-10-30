@@ -554,9 +554,8 @@ export function householdPnlReason(states, data, field, sharedReason = null) {
     return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${isFault(g) && g.reason && g.reason !== sharedReason ? ` · ${g.reason}` : ''}`).join('; '));
   }
   if (results.today.kind !== 'notExact') return null;
-  // Keep the producer's own price-wait caption through transport-aged desks.
-  // A real desk fault has already replaced that household reason above.
-  if (field === 'openPnl' && results.today.reason === 'open_pnl_unavailable') return null;
+  // Name every desk blocker, including mixed waiting and not-exact states.
+  // With no desk blocker the producer's own household caption stays below.
   const blocking = deskDays(states, data, field).filter(g => !['exact', 'estimated'].includes(g.word));
   if (!blocking.length) return null;
   if (blocking.length === 1) {
