@@ -15,9 +15,9 @@ export function captureMachineLoad({ clock = () => new Date(), cpuList = cpus, l
 export function machineLoadTable(traces, lock = process.env) {
   return `Browser host lock (one acquisition for all CI browser phases):
 
-| State | Wait started (UTC) | Acquired (UTC) | Waited seconds |
-| --- | --- | --- | --- |
-| ${lock.JOED_BROWSER_LOCK_STATE ?? 'unavailable (outside CI wrapper)'} | ${lock.JOED_BROWSER_LOCK_WAIT_STARTED_AT ?? 'unavailable'} | ${lock.JOED_BROWSER_LOCK_ACQUIRED_AT ?? 'unavailable'} | ${lock.JOED_BROWSER_LOCK_WAIT_SECONDS ?? 'unavailable'} |
+| State | Wait started (UTC) | Acquired (UTC) | Waited seconds | Reason |
+| --- | --- | --- | --- | --- |
+| ${lock.JOED_BROWSER_LOCK_STATE ?? 'unavailable (outside CI wrapper)'} | ${lock.JOED_BROWSER_LOCK_WAIT_STARTED_AT ?? 'unavailable'} | ${lock.JOED_BROWSER_LOCK_ACQUIRED_AT ?? 'unavailable'} | ${lock.JOED_BROWSER_LOCK_WAIT_SECONDS ?? 'unavailable'} | ${lock.JOED_BROWSER_LOCK_REASON || 'none recorded'} |
 
 Machine load before each attempt (host-wide browser processes include this browser and its helpers; unavailable counts are not zero):
 

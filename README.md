@@ -483,10 +483,15 @@ release carry-overs, including browser teardown. There is no mid-job release
 or reacquisition. Setup and artifact uploads stay outside the lock. Results
 and Settings still execute after an earlier gate failure; preview checks and
 carry-overs require the preceding gates to pass. The three runners must
-share that host-local filesystem and service user; a missing `flock` or denied
-lock access fails the step. Never unlink this lock file while jobs are running:
-its stable inode is the mutual exclusion boundary. No host configuration or
-runner labels are changed by the workflow. Hosted jobs use their isolated VMs
+share that host-local filesystem and service user for serialization. Missing
+`flock`, denied lock-file access, or a non-timeout acquisition error emits a
+`::warning::` and a step-summary warning, then runs the phases UNLOCKED; timing
+budgets may contend. These runs export `JOED_BROWSER_LOCK_STATE=unavailable`
+and `JOED_BROWSER_LOCK_REASON`; the state and reason appear beside the budget
+tables. A real lock timeout still fails with exit 75 before any phase starts;
+unknown runner environments still refuse execution. Never unlink this lock file
+while jobs are running: its stable inode is the mutual exclusion boundary. No
+host configuration or runner labels are changed by the workflow. Hosted jobs use their isolated VMs
 without the lock; fork PRs retain the hosted-only runner guard.
 
 Jobs can overlap while their browser phases wait for the lock. This preserves

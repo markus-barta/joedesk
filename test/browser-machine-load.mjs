@@ -42,3 +42,16 @@ test('QA machine-load tables retain the job lock wait evidence and distinguish h
   assert.match(machineLoadTable([], { JOED_BROWSER_LOCK_STATE: 'bypassed', JOED_BROWSER_LOCK_WAIT_SECONDS: '0' }), /\| bypassed \| unavailable \| unavailable \| 0 \|/);
   assert.match(machineLoadTable([], {}), /unavailable \(outside CI wrapper\)/);
 });
+
+test('QA machine-load tables show unavailable host lock state and the infrastructure failure reason', () => {
+  for (const reason of ['flock not found', 'cannot open /dev/shm/joedesk-browser.lock', 'flock failed (exit 69)']) {
+    const table = machineLoadTable([], {
+      JOED_BROWSER_LOCK_STATE: 'unavailable', JOED_BROWSER_LOCK_REASON: reason,
+      JOED_BROWSER_LOCK_ACQUIRED_AT: 'unavailable', JOED_BROWSER_LOCK_WAIT_SECONDS: '0',
+    });
+    assert.match(table, /Waited seconds \| Reason/);
+    assert.ok(table.includes(`| unavailable | unavailable | unavailable | 0 | ${reason} |`));
+    assert.ok(table.indexOf(reason) < table.indexOf('Machine load before each attempt'));
+    assert.doesNotMatch(table, /outside CI wrapper/);
+  }
+});

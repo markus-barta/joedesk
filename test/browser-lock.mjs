@@ -37,16 +37,36 @@ test('browser shell retains strict failures, arguments and exit status; unknown 
   for (const kind of ['unknown', '']) assert.equal(spawnSync(bash, [wrapper, script], {
     env: { ...process.env, RUNNER_ENVIRONMENT: kind },
   }).status, 1);
-  // Isolated PATH proves a missing lock utility cannot launch the step.
-  symlinkSync(bash, join(dir, 'bash'));
-  writeFileSync(script, 'exit 0\n');
-  const missing = spawnSync(bash, [wrapper, script], { encoding: 'utf8',
-    env: { ...process.env, PATH: dir, RUNNER_ENVIRONMENT: 'self-hosted' } });
-  assert.equal(missing.status, 127);
-  assert.match(missing.stderr, /flock.*not found/);
 });
 
-test('browser lock acquisition timeout and inaccessible inode fail clearly without launching phases', t => {
+test('browser lock infrastructure failures warn and export unavailable state and reason to unlocked phases', t => {
+  for (const failure of ['missing', 'open-denied', 'open-directory', 'acquisition-error']) {
+    const dir = scratch(`joed-browser-lock-${failure}-`);
+    t.after(() => discard(dir, 'browser lock unavailable test'));
+    const local = hostWrapper(dir), summary = join(dir, 'summary');
+    const lock = join(dir, 'lock');
+    if (failure === 'open-denied') writeFileSync(lock, '', { mode: 0o400 });
+    if (failure !== 'missing') writeFileSync(join(dir, 'flock'), '#!/bin/sh\necho FLOCK_CALLED >&2\nexit 69\n', { mode: 0o700 });
+    const reason = failure === 'missing' ? 'flock not found' : failure.startsWith('open-')
+      ? 'cannot open /dev/shm/joedesk-browser.lock' : 'flock failed (exit 69)';
+    const result = spawnSync(bash, [local, '-c',
+      'printf "PHASE_STARTED state=%s reason=%s acquired=%s\\n" "$JOED_BROWSER_LOCK_STATE" "$JOED_BROWSER_LOCK_REASON" "$JOED_BROWSER_LOCK_ACQUIRED_AT"; exit 7'], {
+      encoding: 'utf8', env: { ...process.env, PATH: dir, RUNNER_ENVIRONMENT: 'self-hosted',
+        GITHUB_STEP_SUMMARY: summary, JOED_TEST_LOCK: failure === 'open-directory' ? dir : lock,
+        JOED_BROWSER_LOCK_STATE: 'held', JOED_BROWSER_LOCK_REASON: 'stale reason', JOED_BROWSER_LOCK_ACQUIRED_AT: 'stale time' },
+    });
+    assert.equal(result.status, 7, result.stderr);
+    const warning = `Browser host lock unavailable (${reason}); running UNLOCKED, timing budgets may contend`;
+    assert.ok(result.stderr.includes(`::warning::${warning}`), result.stderr);
+    assert.ok(readFileSync(summary, 'utf8').includes(warning));
+    assert.ok(result.stdout.includes(`PHASE_STARTED state=unavailable reason=${reason} acquired=unavailable`), result.stdout);
+    assert.doesNotMatch(result.stderr, /::error::/);
+    assert.doesNotMatch(result.stdout, /stale reason|stale time/);
+    if (failure !== 'acquisition-error') assert.doesNotMatch(result.stderr, /FLOCK_CALLED/);
+  }
+});
+
+test('browser lock acquisition timeout fails clearly without launching phases', t => {
   const dir = scratch('joed-browser-lock-timeout-');
   t.after(() => discard(dir, 'browser lock timeout test'));
   const local = hostWrapper(dir), summary = join(dir, 'summary');
@@ -59,11 +79,7 @@ test('browser lock acquisition timeout and inaccessible inode fail clearly witho
   assert.match(result.stdout, /waiting since \d{4}-.*Z \(limit 3600 seconds\)/);
   assert.match(result.stderr, /::error::Browser host lock acquisition failed.*wait limit 3600 seconds.*no browser phases started/);
   assert.match(readFileSync(summary, 'utf8'), /waiting since[\s\S]*acquisition failed/);
-  const denied = spawnSync(bash, [local, '-c', 'echo PHASE_STARTED'], {
-    ...options, env: { ...options.env, JOED_TEST_LOCK: dir },
-  });
-  assert.notEqual(denied.status, 0);
-  assert.doesNotMatch(denied.stdout, /PHASE_STARTED/);
+  assert.doesNotMatch(result.stderr, /::warning::|UNLOCKED/);
 });
 
 test('browser shell queues four whole jobs without replacement, retains one lock across phases and releases after failure', { timeout: 15000 }, async t => {
@@ -92,10 +108,11 @@ appendFileSync(log, id + ' exit\\n');
 process.exitCode = id === '1' ? 7 : 0;
 `);
   const step = join(dir, 'step');
-  writeFileSync(step, '"$JOED_TEST_NODE" "$JOED_TEST_WORKLOAD" "$JOED_TEST_LOG" "$1"\n');
+  writeFileSync(step, 'test "$JOED_BROWSER_LOCK_STATE" = held\ntest -z "$JOED_BROWSER_LOCK_REASON"\n"$JOED_TEST_NODE" "$JOED_TEST_WORKLOAD" "$JOED_TEST_LOG" "$1"\n');
   const workers = Array.from({ length: 4 }, (_, id) => {
     const child = spawn(bash, [local, step, String(id)], {
       env: { ...process.env, PATH: dir, RUNNER_ENVIRONMENT: 'self-hosted', JOED_TEST_LOCK: lock, JOED_TEST_NODE: process.execPath,
+        JOED_BROWSER_LOCK_REASON: 'stale reason',
         GITHUB_STEP_SUMMARY: join(dir, `summary-${id}`), JOED_TEST_WORKLOAD: workload, JOED_TEST_LOG: log }, stdio: ['ignore', 'ignore', 'pipe'],
     });
     let stderr = '';
