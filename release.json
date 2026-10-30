@@ -1,9 +1,9 @@
 {
   "product": "JoeDesk",
   "version_scheme": "inspr-calver-3",
-  "version": "261029192345.0.0",
+  "version": "261030085000.0.0",
   "release_channel": "stable",
-  "release_sequence": 39,
+  "release_sequence": 40,
   "status": "candidate",
-  "note": "Board redesign: whole-account chart, History minimap and natural zoom, session-dated Desk, Results redesign, honest reasons and quieter board (JOED-144)"
+  "note": "Follow-ups to the board redesign: exact extreme dates in Results, single-reason Cash, steadier CI speed checks (JOED-158, JOED-168, JOED-169)"
 }

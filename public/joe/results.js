@@ -9,7 +9,6 @@ import { TERMS } from './terms.js';
 import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age, quantity, currencySymbol } from './format.js';
 import { cellReason, STALE_AFTER_S } from './health.js';
 import { drawChart, eurAxis } from './chart.js';
-import { viennaDay } from './time.mjs';
 import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
 import { basisKey } from './history-model.js';
 import { percentHtml } from './desk.js';
@@ -27,7 +26,10 @@ export const RS = { period: 'week', anchor: null, sel: null, desk: 'all', cal: n
 
 // Before the server's clock is known Results labels its calendar by this
 // browser's date; no number is shown without a clock, so none depends on it.
-export const resultsToday = now => viennaDay(now ?? new Date().toISOString());
+// All instant-derived keys use the index's padded, era-aware conversion.
+// Calendar keys use M.dateKey/addDays, sharing that same canonical form.
+const dateKeyAt = instant => M.viennaDate(instant);
+export const resultsToday = now => dateKeyAt(Date.parse(now ?? new Date().toISOString()));
 
 // The record, its state and everything the numbers need from the snapshot:
 // each desk's money now (only a current value, never a retained one), the
@@ -74,7 +76,7 @@ export function stepPeriod(dir, view) {
 function setPeriod(period, today) {
   const sel = RS.sel ?? today;
   RS.period = period;
-  if (period === 'ytd' && sel.slice(0, 4) !== today.slice(0, 4)) {
+  if (period === 'ytd' && M.ymOf(sel)[0] !== M.ymOf(today)[0]) {
     RS.anchor = RS.sel = today; RS.cal = M.ymOf(today); RS.moved = false;
     return;
   }
@@ -94,7 +96,7 @@ export function chooseDesk(desk) {
 // Returns whether the day became the selected one: a link can name every
 // day the calendar lets you select, and nothing after today.
 export function selectDay(k, view) {
-  if (!k || k > view.today || k < M.firstStep(view.trackingStart)) return false;
+  if (!k || M.compareDates(k, view.today) > 0 || M.compareDates(k, M.firstStep(view.trackingStart)) < 0) return false;
   pendingRoute = null;
   RS.sel = k;
   // The period follows the day: Day that day, Week and Month the ones that
@@ -136,7 +138,7 @@ export function settleResultsRoute(view) {
 // today or before the first step is invalid too. Returns whether it applied.
 export function applyResultsRoute(query, view) {
   const route = M.parseResultsRoute(query), today = view.today;
-  const date = route.date && route.date <= today && route.date >= M.firstStep(view.trackingStart) ? route.date : null;
+  const date = route.date && M.compareDates(route.date, today) <= 0 && M.compareDates(route.date, M.firstStep(view.trackingStart)) >= 0 ? route.date : null;
   if (!route.period && !route.desk && !date) return false;
   if (route.desk) RS.desk = route.desk;
   if (date) {
@@ -200,22 +202,22 @@ const plain = u => calHtml(u, false);
 const compact = u => calHtml(u, true);
 const plural = (n, word) => `${n}${NB}${word}${n === 1 ? '' : 's'}`;
 const signedWord = u => (isZero(u) ? 'Flat' : u > 0n ? `Up ${eur(absUnits(u))}` : `Down ${eur(absUnits(u))}`);
-const startText = ts => (ts ? `${M.fmtDM(ts)} ${ts.slice(0, 4)}` : 'their first trading day');
+const startText = ts => (ts ? `${M.fmtDM(ts)} ${M.ymOf(ts)[0]}` : 'their first trading day');
 // A change of bookkeeping basis, said as such.
-const cutText = cut => `${names(cut.desks)}’s bookkeeping basis changed on ${M.fmtDDM(M.viennaDate(cut.at))}`;
+const cutText = cut => `${names(cut.desks)}’s bookkeeping basis changed on ${M.fmtDDM(dateKeyAt(cut.at))}`;
 
 const missingDay = (ix, k, desks) => ix?.missingDays?.has(k) && M.dayResult(ix, k, desks).count > 0;
 const missingDayText = k => `Stale: daily summary missing for ${M.fmtDay(k)}`;
 const PARTIAL_REASON = M.PARTIAL_REASON;
-const partialDay = (view, k) => k < view.today && view.ix?.partialDays?.has(k);
+const partialDay = (view, k) => M.compareDates(k, view.today) < 0 && view.ix?.partialDays?.has(k);
 const partialHint = count => count ? ` ${st('warn', `incl. ${count} partial day${count === 1 ? '' : 's'}`)}` : '';
 // One warning slot, with a missing summary taking priority over partial coverage.
 function dayWarning(view, k, desks) {
-  if (k >= view.today) return null;
+  if (M.compareDates(k, view.today) >= 0) return null;
   if (missingDay(view.ix, k, desks)) return { label: 'Stale', text: missingDayText(k), note: 'Daily summary missing.' };
   if (partialDay(view, k)) {
     const reason = M.partialReasonLabel(view.ix.partialDetails?.get(k));
-    return k <= M.addDays(view.today, -2)
+    return M.compareDates(k, M.addDays(view.today, -2)) <= 0
       ? { label: 'Stale', text: `Stale: still incomplete; ${reason}`, note: PARTIAL_REASON }
       : { label: 'Partial', text: `Partial: this day's record is incomplete. ${reason}`, note: PARTIAL_REASON };
   }
@@ -249,8 +251,8 @@ export function renderResults(ctx) {
   // The stepper label keeps one width: its widest forms sit invisibly in the same cell.
   patch($('#perLabel'), `<span class="cur">${esc(per.lab)}</span>${['Last week · 28 Sep – 4 Oct', 'This week · 28 Sep – 4 Oct', 'Last month · September', 'Yesterday · Wed 30 Sep', 'All time · since 30 Sep'].map(t => `<span aria-hidden="true">${t}</span>`).join('')}`);
   const stepable = ['day', 'week', 'month'].includes(RS.period);
-  $('#prevPer').disabled = !stepable || per.start <= M.firstStep(view.trackingStart);
-  $('#nextPer').disabled = !stepable || per.end >= today;
+  $('#prevPer').disabled = !stepable || M.compareDates(per.start, M.firstStep(view.trackingStart)) <= 0;
+  $('#nextPer').disabled = !stepable || M.compareDates(per.end, today) >= 0;
   $('#bdTitle').textContent = `By desk · ${per.head}`;
   const mctx = ix ? numbers(view, per, desks) : null;
   const R = ix ? M.rollup(ix, per, desks, mctx) : null;
@@ -405,7 +407,7 @@ function maxDay(ix, desks) {
 // a session without trades, or its trades with their tint (sign + arrow + tint).
 function dayState(view, k, desks, max) {
   const { ix, today } = view;
-  if (k > today) return { cls: 'fut', note: '', aria: 'still ahead' };
+  if (M.compareDates(k, today) > 0) return { cls: 'fut', note: '', aria: 'still ahead' };
   const r = ix ? M.dayResult(ix, k, desks) : { count: 0 };
   if (r.count) {
     const note = plural(r.count, 'trade');
@@ -416,7 +418,7 @@ function dayState(view, k, desks, max) {
   const closed = M.isWeekend(k) || M.marketHoliday(k);
   if (closed) return { cls: 'we', note: 'closed', aria: M.isWeekend(k) ? 'weekend, markets closed' : 'US market holiday, markets closed' };
   if (!ix) return { cls: 'nw', note: '', aria: 'unavailable', dash: true };
-  if (k < view.trackingStart) return { cls: 'we pre', note: '', aria: 'before paper results start' };
+  if (M.compareDates(k, view.trackingStart) < 0) return { cls: 'we pre', note: '', aria: 'before paper results start' };
   return { cls: 'none', note: 'no trades', aria: 'no trades' };
 }
 
@@ -425,8 +427,8 @@ export function renderCalendar(view, per, desks) {
   const [y, m] = RS.cal;
   const first = M.dateKey(y, m, 1);
   patch($('#calTitle'), `<span class="cur">${M.MONTH[m]} ${y}</span><span aria-hidden="true">September 2026</span>`);
-  $('#prevMonth').disabled = first <= M.firstStep(view.trackingStart);
-  $('#nextMonth').disabled = first >= M.dateKey(...M.ymOf(today), 1);
+  $('#prevMonth').disabled = M.compareDates(first, M.firstStep(view.trackingStart)) <= 0;
+  $('#nextMonth').disabled = M.compareDates(first, M.dateKey(...M.ymOf(today), 1)) >= 0;
   const max = ix ? maxDay(ix, desks) : 0n;
   const partialDays = M.countPartialDays(ix, { start: first, end: M.dateKey(y, m, M.daysIn(y, m)) }, today);
   let monthCount = 0, monthUnits = 0n, monthDays = 0;
@@ -440,14 +442,14 @@ export function renderCalendar(view, per, desks) {
   patch($('#calSum'), `${monthSum}${partialHint(partialDays)}`);
   fitMonthSummary($('#calSum'));
   const start = M.monday(first);
-  const inPer = k => (RS.period === 'day' || RS.period === 'week') && k >= per.start && k <= per.end;
+  const inPer = k => (RS.period === 'day' || RS.period === 'week') && M.compareDates(k, per.start) >= 0 && M.compareDates(k, per.end) <= 0;
   let html = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow" aria-hidden="true">${d}</div>`).join('') + '<div class="dow wkh" aria-hidden="true">Week</div>';
   for (let r = 0; r < 6; r++) {
     const wk = M.addDays(start, r * 7);
     let inMonth = false, wkCount = 0, wkUnits = 0n, wkDays = 0;
     for (let c = 0; c < 7; c++) {
       const k = M.addDays(wk, c), [cy, cm] = M.ymOf(k);
-      if (ix && k <= today) { const res = M.dayResult(ix, k, desks); if (res.count) { wkCount += res.count; wkUnits += res.units; wkDays++; } }
+      if (ix && M.compareDates(k, today) <= 0) { const res = M.dayResult(ix, k, desks); if (res.count) { wkCount += res.count; wkUnits += res.units; wkDays++; } }
       if (cy !== y || cm !== m) { html += '<div class="cell out" aria-hidden="true"></div>'; continue; }
       inMonth = true;
       const s = dayState(view, k, desks, max);
@@ -456,10 +458,10 @@ export function renderCalendar(view, per, desks) {
       // warning on a neutral no-trade cell uses the warning token.
       const cls = ['cell', s.cls, warning ? 'day-incomplete' : '', k === today ? 'today' : '', k === RS.sel ? 'sel' : '', inPer(k) ? 'inper' : ''].filter(Boolean).join(' ');
       const value = s.r ? `<span class="vl">${plain(s.r.units)}</span><span class="vs">${compact(s.r.units)}</span>` : s.dash ? '<span class="muted">—</span>' : '';
-      html += `<button type="button" class="${cls}" data-day="${k}"${s.cls === 'fut' ? ' disabled' : ''} aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${warning ? `; ${esc(warning.text)}` : ''}"><span class="d"><span class="agenda-date">${M.fmtDDM(k)}</span><span class="grid-date">${Number(k.slice(8))}</span></span>${warning ? `<span class="day-warning st${warning.label === 'Partial' && s.cls === 'none' ? ' warn' : ''}" title="${esc(warning.text)}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${warning ? warning.label : s.note}</span></button>`;
+      html += `<button type="button" class="${cls}" data-day="${k}"${s.cls === 'fut' ? ' disabled' : ''} aria-pressed="${k === RS.sel}" aria-label="${M.fmtDay(k)}${k === today ? ', today' : ''}: ${esc(s.aria)}${warning ? `; ${esc(warning.text)}` : ''}"><span class="d"><span class="agenda-date">${M.fmtDDM(k)}</span><span class="grid-date">${M.dayOf(k)}</span></span>${warning ? `<span class="day-warning st${warning.label === 'Partial' && s.cls === 'none' ? ' warn' : ''}" title="${esc(warning.text)}" aria-hidden="true">${icon('half')}</span>` : ''}<span class="v">${value}</span><span class="n">${warning ? warning.label : s.note}</span></button>`;
     }
     // A week still ahead has nothing to sum yet.
-    const ahead = wk > today;
+    const ahead = M.compareDates(wk, today) > 0;
     const wkValue = ahead ? '<span class="v"></span>' : !ix ? '<span class="v muted">—</span>' : `<span class="v">${wkCount ? plain(wkUnits) : '—'}</span>`;
     html += inMonth ? `<div class="wk" role="group" aria-label="Week of ${M.fmtDay(wk)}"><span>${!ix || ahead ? '' : wkDays ? plural(wkDays, 'day') : 'no trades'}</span>${wkValue}</div>` : '<div class="wk" style="visibility:hidden" aria-hidden="true"></div>';
   }
@@ -585,23 +587,23 @@ function dayContent(view, k, desks) {
   const { ix, today } = view;
   const ts = ix ? M.tradesOn(ix, k, desks) : [];
   if (!ix) {
-    return { sum: '—', body: `<p class="dp-empty">${icon('info')}<span>${k > today ? `${M.fmtDDM(k)} is still ahead.`
+    return { sum: '—', body: `<p class="dp-empty">${icon('info')}<span>${M.compareDates(k, today) > 0 ? `${M.fmtDDM(k)} is still ahead.`
       : `No closed-trade record for ${M.fmtDDM(k)}: ${esc(cellReason(view.reason))}.`}</span></p>`, note: '' };
   }
   const r = M.dayResult(ix, k, desks);
   const warning = dayWarning(view, k, desks);
-  const partial = k <= today && ix.partialDays?.has(k), incomplete = partial && !ts.length;
+  const partial = M.compareDates(k, today) <= 0 && ix.partialDays?.has(k), incomplete = partial && !ts.length;
   const summary = partial ? ts.length
     ? `<span class="dp-trades">${plural(ts.length, 'trade')} · </span><span class="dp-amount">${eur(r.units, true)} so far</span>`
     : k === today ? 'No trades so far' : 'record incomplete'
     : ts.length ? `${plural(ts.length, 'trade')} · ${eur(r.units, true)}` : 'No trades';
   const sum = warning ? `${st('warn', warning.label)} · ${summary}` : summary;
   const closed = M.isWeekend(k) || M.marketHoliday(k);
-  const why = k > today ? `${M.fmtDDM(k)} is still ahead.` : closed ? `No trades on ${M.fmtDDM(k)}: ${M.isWeekend(k) ? 'weekend' : 'US market holiday'}, markets closed.`
-    : k < view.trackingStart ? `No trades on ${M.fmtDDM(k)}: paper results start on ${startText(view.trackingStart)}.` : `No trades on ${M.fmtDDM(k)}: the desks sat out.`;
+  const why = M.compareDates(k, today) > 0 ? `${M.fmtDDM(k)} is still ahead.` : closed ? `No trades on ${M.fmtDDM(k)}: ${M.isWeekend(k) ? 'weekend' : 'US market holiday'}, markets closed.`
+    : M.compareDates(k, view.trackingStart) < 0 ? `No trades on ${M.fmtDDM(k)}: paper results start on ${startText(view.trackingStart)}.` : `No trades on ${M.fmtDDM(k)}: the desks sat out.`;
   const body = ts.length ? tradeRows(ts) : incomplete ? '' : `<p class="dp-empty">${icon(closed ? 'clock' : 'info')}<span>${esc(why)}</span></p>`;
   // A lot opened this day and still held counts in Still open and on Desk.
-  const opened = (view.positions ?? []).filter(p => p.openedAt && desks.includes(p.desk) && M.viennaDate(Date.parse(p.openedAt)) === k);
+  const opened = (view.positions ?? []).filter(p => p.openedAt && desks.includes(p.desk) && dateKeyAt(Date.parse(p.openedAt)) === k);
   const reasons = partial && !missingDay(ix, k, desks) ? M.partialReasons(ix.partialDetails?.get(k)) : [];
   const note = reasons.length || k === today ? '' : warning?.note ?? (partial ? PARTIAL_REASON : '');
   const positionNote = opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`).join(' ');
@@ -744,9 +746,9 @@ function renderCurve(view, per, desks, R, mctx) {
   const first = known[0], last = known[known.length - 1];
   const middle = known.reduce((a, p) => (Math.abs(p.x - (x0 + x1) / 2) < Math.abs(a.x - (x0 + x1) / 2) ? p : a));
   const marks = [first, ...(middle.x - first.x > span / 5 && last.x - middle.x > span / 5 ? [middle] : []), last];
-  const trackAt = c.day ? (view.trackingStart && per.start <= view.trackingStart ? x0 : null) : c.tracking;
+  const trackAt = c.day ? (view.trackingStart && M.compareDates(per.start, view.trackingStart) <= 0 ? x0 : null) : c.tracking;
   drawResultChart(el, {
-    pts, domain: [x0, x1], color, live: per.end >= view.today, top, grid: c.day ? [] : timeMarks(per.start, x0, x1),
+    pts, domain: [x0, x1], color, live: M.compareDates(per.end, view.today) >= 0, top, grid: c.day ? [] : timeMarks(per.start, x0, x1),
     // Honest scale: zero is always in view, and the span is at least ±0,5 % of the
     // desks' money at the period start, so a few euros never look like a crash.
     base: M.unitsCents(c.startE),
@@ -761,20 +763,19 @@ function renderCurve(view, per, desks, R, mctx) {
 // day up to 16 days, every Monday up to 120 days, else every first of a month.
 export function timeMarks(start, x0, x1) {
   const days = (x1 - x0) / 864e5, out = [];
-  // Outside the proven window use 4b913c7's daily traversal verbatim. In
-  // particular, do not reinterpret early-year keys or historical midnights.
+  // Outside the proven window retain daily traversal and exact midnights.
   if (!M.isModernResultsDate(start) || !M.isModernResultsInstant(x0) || !M.isModernResultsInstant(x1)) {
     for (let k = M.addDays(start, 1), x = M.viennaMidnight(k); x < x1; k = M.addDays(k, 1), x = M.viennaMidnight(k)) {
-      if (days <= 16 || (days <= 120 ? M.dowOf(k) === 1 : k.endsWith('-01'))) out.push(x);
+      if (days <= 16 || (days <= 120 ? M.dowOf(k) === 1 : M.dayOf(k) === 1)) out.push(x);
     }
     return out;
   }
-  const end = viennaDay(new Date(x1).toISOString());
+  const end = dateKeyAt(x1);
   const nextMonth = k => M.addDays(M.dateKey(...M.ymOf(k), 1), M.daysIn(...M.ymOf(k)));
   // Only resolve midnights that will be drawn. Walking every calendar day
   // made the first All-time switch resolve a year's unmarked weekends too.
   let k = days <= 16 ? M.addDays(start, 1) : days <= 120 ? M.addDays(M.monday(start), 7) : nextMonth(start);
-  while (k <= end) {
+  while (M.compareDates(k, end) <= 0) {
     const x = M.viennaMidnight(k);
     if (x >= x1) break;
     out.push(x);

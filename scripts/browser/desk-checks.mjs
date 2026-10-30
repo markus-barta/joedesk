@@ -8,7 +8,7 @@ import { digits } from '../../public/joe/format.js';
 import { divRound, UNIT } from '../../contracts/decimal.mjs';
 import { copyText } from './shots.mjs';
 import { boardCaptionCell, sharesBoardCaption, sharedSectionReason, sharedSectionPhrase, householdPnlReason } from '../../public/joe/desk.js';
-import { waitingOnPrices } from '../../public/joe/board-state.js';
+import { waitingOnPrices, absentPnl } from '../../public/joe/board-state.js';
 import { statePhrase } from '../../public/joe/ui.js';
 import { capital, cellReason } from '../../public/joe/health.js';
 
@@ -21,7 +21,8 @@ export function heroProblemCaption(ctx, key) {
   const onBoard = sharesBoardCaption(cell, board), inSection = cell.reason && cellReason(cell.reason) === shared;
   const sectionOnBoard = inSection && board?.reason && cellReason(board.reason) === shared;
   const field = { 'hero.day': 'dayPnl', 'hero.open': 'openPnl' }[key];
-  const household = field && !onBoard ? householdPnlReason(states, feeds.data?.value, field, shared) : null;
+  const household = field && !onBoard ? householdPnlReason(states, feeds.data?.value, field, shared) ??
+    (key === 'hero.open' && feeds.data?.value && absentPnl(states, feeds.data.value, field) ? 'Unavailable' : null) : null;
   const text = onBoard || sectionOnBoard ? capital(statePhrase(board, '').text)
     : inSection ? sharedSectionPhrase(cell) : household ?? (key === 'hero.open' && waitingOnPrices(cell) ? 'Waiting on prices' : capital(statePhrase(cell, '', 'last good value', shared).text));
   return { section: Boolean(onBoard || inSection), text };

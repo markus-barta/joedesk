@@ -1,0 +1,50 @@
+{
+  "schema": "joedesk.adoption.v1",
+  "version": "261029192345.0.0",
+  "version_scheme": "inspr-calver-3",
+  "release_channel": "stable",
+  "release_sequence": 39,
+  "source": {
+    "commit": "95aa934293c4a96b3ad80b64496b53966bc18360",
+    "tree": "7426d51712ae25461def8ddcf4ebf38a4e6bcafa"
+  },
+  "release_set_sha256": "32125e85c62f0705142068c123a35117b60b17de03b1fd14fe2d04997b2588f4",
+  "image_digest": "sha256:bf0ce1aa1da7dd7e6ba336e6be5935b06c17e84a6c8deef83f4a2b1b9407e621",
+  "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+  "validation_run_id": "40984314557",
+  "decisions": [
+    "d460fa43-0d9d-4831-8897-9248321cf9a0",
+    "dcd81341-18c4-42d8-a543-b0d70ef6fa00",
+    "6b7ec808-4fca-4971-9fd1-d092aef8f582"
+  ],
+  "deployment": {
+    "deployed_at": "2026-10-30T08:44:03Z",
+    "operator_ticket": "JOED-159",
+    "rollback_reference": "JOED-159: revert the csb0 board re-pin (nixcfg #1187, merge f808275469b2054259bd74340317bd34db465809) and switch csb0 to the previous generation 454kkw325wilyjs6hgsl8zdspzyg0p7c-nixos-system-csb0 with the retained sequence-37 image csb0-joe-board:source-aedc666492a6379bf946900ce8521d105a70ede5 (sha256:2f12916143b4e96f48538ce4df2b25a4801838ad920d06c72479e3c9c0e2249c, pull_policy never); board-only switch, hsb0 untouched; pre-switch board backup board-pre-39-20261030T084200Z.tar"
+  },
+  "live_checks": {
+    "joed_live_check": {
+      "status": "pass",
+      "checked_at": "2026-10-30T08:44:41Z"
+    },
+    "ops_t76_live": {
+      "status": "pass",
+      "checked_at": "2026-10-30T08:44:03Z"
+    },
+    "smoke_release": {
+      "status": "pass",
+      "checked_at": "2026-10-30T08:44:00Z"
+    },
+    "spoof_check": {
+      "status": "pass",
+      "checked_at": "2026-10-30T08:44:41Z"
+    }
+  },
+  "markus_ui_look": {
+    "status": "delegated",
+    "checked_at": "2026-10-30T08:45:50Z",
+    "performed_by": "JOED",
+    "delegation": "JOED-42 comment 2026-10-20: Markus delegated the post-switch look to JOED; GET-only served shell/app look: hsb0 pusher state, desks/all four feeds present; release 39 JOED-144 redesign (account hero, History minimap, Settings gear, About 39 > 38, account-history endpoint); all feeds fresh, gateway confirmed, J/Joe/Joel Today exact, KEEP unchanged, rev-10 exactness profile unchanged; same-build agm2 CI screenshots (main run 40984314557 attempt 3)"
+  },
+  "adopted_at": "2026-10-30T08:46:01Z"
+}

@@ -279,7 +279,7 @@ try {
       await editabilityChecks(tag, viewport, fleet);
       const rt = await runtime();
       const want = ['Paper · the board data and the fleet settings both say paper', 'Off · paper trading is not paused', 'Answering · checked 18 s ago (19:42:13)',
-        'Running · broker reachable · brakes off · checked 19:42:13', 'Last numbers 19:42:22 · 9 s old · refreshes every 15 s', 'Board OK · numbers are up to date', 'DU…0597 · € 31.482,75 · checked 9 s ago Cash cash · as the broker reports it not reported · no data received yet'];
+        'Running · broker reachable · brakes off · checked 19:42:13', 'Last numbers 19:42:22 · 9 s old · refreshes every 15 s', 'Board OK · numbers are up to date', 'DU…0597 · € 31.482,75 · checked 9 s ago Cash cash · as the broker reports it no data received yet'];
       const srcs = ['mode', 'safety.halt', 'safety.gateway', 'GET /v1/health on hsb0', 'generatedAt', 'boardHealth', 'brokerAccount.accountHint'];
       check('AC-25', `${tag}: Runtime state shows the seven rows with their sources`, J(rt.map(r => r.lab)) === J(RT_LABELS) && rt.every((r, i) => N(r.val) === N(want[i]) && r.src === srcs[i]), rt);
       if (viewport === VIEWPORTS[0] && theme === 'light') {
@@ -358,7 +358,7 @@ try {
       const tag = `${viewport.name} ${theme} without executor or account hint`;
       await openSettings(bare, viewport, theme);
       const rt = await runtime();
-      check('AC-25', `${tag}: absent proposed fields show "Not reported"`, rt[3].val === 'Not reported' && N(rt[6].val) === 'Account number not reported · € 31.482,75 · checked 9 s ago Cash cash · as the broker reports it not reported · no data received yet', rt);
+      check('AC-25', `${tag}: absent proposed fields show "Not reported"`, rt[3].val === 'Not reported' && N(rt[6].val) === 'Account number not reported · € 31.482,75 · checked 9 s ago Cash cash · as the broker reports it no data received yet', rt);
       await auditScreen(page, viewport, theme, 'settings (not reported)');
       await leakChecks(tag);
       if (viewport.name === '1440') await shot(page, viewport, `${viewport.name}-${theme}-settings-not-reported`, 'Settings without the executor report or the account hint: "Not reported"');
@@ -531,12 +531,12 @@ try {
           // session) is said once, in the whole account's change line.
           const shared = screen === 'desk' && ['stale', 'session'].includes(phase);
           // JOED-148: a not-exact Cash is named "not exact" like every other dash, on Desk and in Settings.
-          const missing = phase === 'not-exact' ? 'not exact' : `not reported${shared ? '' : ` · ${why}`}`;
-          const cashState = hasValue ? phase === 'stale' && !shared ? ` · ${why}` : '' : ` · ${missing}`;
+          const missing = shared ? '' : why;
+          const cashState = hasValue ? phase === 'stale' && !shared ? ` · ${why}` : '' : missing ? ` · ${missing}` : '';
           // Desk (the whole account's line, as designed): "Cash", the amount or a dash, its state. Settings: the account row's figure.
           const expected = screen === 'desk' ? `Cash ${hasValue ? '€ 12.345,68' : '—'}${cashState}`
-            : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'not exact' : `not reported · ${why}`;
-          const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'Cash: not exact' : `Cash not reported · ${why}`;
+            : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'not exact' : why;
+          const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'Cash: not exact' : `Cash ${why}`;
           const labelled = screen === 'desk' ? seen.label === null : seen.label === 'Cash' && N(seen.caption) === brokerCaption;
           check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme and reason locally or once in the section`, N(seen.text) === expected && labelled && seen.title === exact && seen.name === exact && (!shared || seen.section.includes(why)) && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
           // Cash's own text, and then the screen around it: each fault is named
@@ -626,12 +626,12 @@ try {
             colour: row.querySelector('.sym').getAttribute('style'), marks: row.querySelectorAll('.im, .dmark').length,
             dashes: [...row.querySelectorAll('.position-value')].map(e => ({ text: e.textContent, title: e.title, name: e.getAttribute('aria-label') })) }; })(),
         order: [...document.querySelectorAll('#positions .prow:not(.hd) .name > b')].map(e => e.innerText),
-        mark: [...document.querySelectorAll('#positions [aria-label]')].some(e => e.getAttribute('aria-label') === 'Last price: not reported · not reported by the broker' && e.title === e.getAttribute('aria-label') && e.textContent === '—'),
+        mark: [...document.querySelectorAll('#positions [aria-label]')].some(e => e.getAttribute('aria-label') === 'Last price: not reported by the broker' && e.title === e.getAttribute('aria-label') && e.textContent === '—'),
         horizontal: __audit.horizontal(), clipping: __audit.clipping()
       }))()`);
       for (const row of seen.kept) {
         // JOED-148: a not-exact dash is named "not exact", never "not reported".
-        const why = row.symbol === 'SXR8' ? 'not exact' : 'not reported by the broker', dashName = why === 'not exact' ? why : `not reported · ${why}`;
+        const why = row.symbol === 'SXR8' ? 'not exact' : 'not reported by the broker', dashName = why;
         check('positions', `${tag} ${row.symbol}: quantity and values visibly explain their nulls`,
           ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => row.reasons?.includes(`${label}: ${why}`) || seen.worth.includes(why)) &&
           ['Quantity', 'Last price', 'Worth'].every(label => row.dashes.some(d => d.text === '—' && d.title === `${label}: ${dashName}` && d.name === d.title)), row);

@@ -8,6 +8,7 @@ import { scenario, NOW, at } from './board.mjs';
 import { largeResults } from './results.mjs';
 import { VIEWPORTS, configure, load, settle, waitFor } from './shots.mjs';
 import { decideTaskGuard, TIMING_GUARDS } from './budget.mjs';
+import { captureMachineLoad, machineLoadTable } from './machine-load.mjs';
 
 const max = list => (list.length ? Math.max(...list) : NaN);
 
@@ -26,7 +27,7 @@ export async function serveResults(browser, page, board, payload) {
   return async () => { await page.setFetch(null); browser.off(handler); };
 }
 
-export async function runResultsBudget({ page, newBoard, check, limits, serve }) {
+export async function runResultsBudget({ page, newBoard, check, limits, serve, sampleLoad = captureMachineLoad }) {
   const within = (ms, limit) => (limits.atMost ? ms <= limit : ms < limit);
   const bound = limit => `${limits.atMost ? 'at most' : 'under'} ${limit} ms`;
   const { snapshot, history } = scenario(NOW);
@@ -66,12 +67,15 @@ export async function runResultsBudget({ page, newBoard, check, limits, serve })
     for (const viewport of VIEWPORTS) {
       await configure(page, viewport, 'light');
       const conditions = result => Object.assign({}, ...result.checks.map(c => c.conditions));
+      const firstLoad = sampleLoad();
       const first = await measure(viewport);
       let decision = decideTaskGuard(conditions(first), null, limits);
       // Two explicit calls: only a CI timing-only breach gets a second sample.
+      const secondLoad = decision.remeasure ? sampleLoad() : null;
       const second = decision.remeasure ? await measure(viewport) : null;
       if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
       const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
+        machineLoad: i === 0 ? firstLoad : secondLoad,
         attempt: i + 1, attempts: decision.attempts, remeasured: decision.remeasured }));
       traces.push(...rows);
       const result = decision.remeasured ? second : first;
@@ -95,5 +99,7 @@ export function resultsBudgetTable(traces, limits) {
   return `| Width | Record |${remeasured ? ' Attempt |' : ''} Results render worst (ms) | Renders | Long task worst (ms) | Long tasks (≥ 50 ms) | Tasks ≥ ${limits.taskMs} ms |
 | --- | --- |${remeasured ? ' --- |' : ''} --- | --- | --- | --- | --- |
 ${traces.map(r => `| ${r.viewport} | ${r.phase} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |` : ''} ${r.switchWorst.toFixed(1)} | ${r.switches} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} | ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |`).join('\n')}
+
+${machineLoadTable(traces)}
 `;
 }

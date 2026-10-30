@@ -10,6 +10,7 @@ const board = await import('../public/joe/board-state.js');
 const { localBoardHealth, boardHealthPresentation, boardDiagnostics, statusPresentation } = await import('../public/joe/health.js');
 const { heroLeft, healthPop, compactDesk } = await import('../public/joe/desk.js');
 const { quietResults, withQuietRecord } = await import('./fixtures/quiet-record.mjs');
+const { heroProblemCaption } = await import('../scripts/browser/desk-checks.mjs');
 const { viennaDay } = await import('../time.mjs');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const exact = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
@@ -42,30 +43,35 @@ test('JOED-157 fix3: cold boardStates preserves the browser first-load state and
     assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent,
       rejected ? 'Unavailable · not found on the board server' : 'Not reported');
     const summary = hero.querySelector('.account-section .summary-text').textContent;
-    assert.equal(summary, rejected ? 'Open result: unavailable · not found on the board server' : 'Open result: not reported · no data received yet');
+    assert.equal(summary, rejected ? 'Open result: unavailable · not found on the board server' : 'Open result: not reported');
     assert.doesNotMatch(hero.textContent, /Unavailable for|unavailable for/);
   }
 });
 
-test('JOED-157 fix3: absent P&L is not a synthesized fault, but real fault evidence still escalates', () => {
+test('JOED-158: contract-valid absent P&L has no synthesized fault; supplied fault evidence still escalates', () => {
   for (const field of ['dayPnl', 'openPnl']) {
     const data = structuredClone(exact), period = field === 'dayPnl' ? 'day' : 'open';
     data.totals[field] = null;
-    for (const desk of data.desks) desk.money[field] = null;
-    // The source has no fault evidence; null amounts alone mean absent.
+    delete data.pnlSources[period];
+    for (const desk of data.desks) { desk.money[field] = null; delete desk.pnlSources[period]; }
+    assert.equal(validateContract('data', data).ok, true, `${field}: absent source is a valid payload`);
     let view = viewOf(data), hero = htmlDocument(heroLeft(view));
     assert.equal(view.states[`today.${field}`].state, 'not reported');
     assert.equal(view.states[`today.${field}`].reason, null);
     assert.doesNotMatch(hero.textContent, /Unavailable for|unavailable for/);
-    for (const channel of ['money', 'source', 'status', 'lastGood']) {
+    if (field === 'openPnl') {
+      assert.equal(localBoardHealth(view.states, view.feeds, now).tone, 'yellow');
+      assert.equal(hero.querySelector('.account-section .summary-text').textContent, 'Open result: unavailable');
+      assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Unavailable');
+      assert.equal(heroProblemCaption(view, 'hero.open').text, 'Unavailable', 'browser expectation agrees');
+      assert.doesNotMatch(hero.querySelector('.account-section').textContent, /no data received yet/);
+    }
+    for (const channel of ['money', 'source', 'lastGood']) {
       const faulty = structuredClone(data), desk = faulty.desks[1];
       if (channel === 'money') (desk.money.reasons ??= {})[field] = 'source_unavailable';
-      if (channel === 'source') desk.pnlSources[period].reason = 'source_unavailable';
-      if (channel === 'status') desk.pnlSources[period].status = 'unavailable';
-      if (channel === 'lastGood') {
-        desk.pnlSources[period].reason = 'source_unavailable';
-        desk.pnlSources[period].status = 'unavailable';
-      }
+      else desk.pnlSources[period] = { ...exact.desks[1].pnlSources[period],
+        status: 'unavailable', method: null, observedAt: null, reason: 'source_unavailable' };
+      assert.equal(validateContract('data', faulty).ok, true, `${field} ${channel}: fault fixture is valid`);
       const prior = channel === 'lastGood' ? { [`desks.joe.${field}`]: previous[`desks.joe.${field}`] } : {};
       view = viewOf(faulty, prior);
       assert.equal(view.states[`today.${field}`].state, 'broken', `${field} ${channel}`);
@@ -109,7 +115,7 @@ function oracle(desks, household) {
   const deskFault = inputs.some(input => !input.fine), allExact = inputs.every(input => input.word === 'exact');
   const green = own.word === 'exact' && allExact, fault = !own.fine || deskFault;
   return { inputs, green, fault, shown: Boolean(own.amount) && allExact,
-    word: deskFault ? inputs.find(input => !input.fine).word : own.fine && own.word !== 'waiting on prices' && !allExact ? inputs.find(input => input.word !== 'exact').word : own.word };
+    word: deskFault ? inputs.find(input => !input.fine).word : own.fine && !allExact ? inputs.find(input => input.word !== 'exact').word : own.word };
 }
 
 function combination(desks, household) {
@@ -415,6 +421,24 @@ test('JOED-157: shared classifier and Open channels cover source fallback, statu
       assert.equal(view.states['today.openPnl'].value, null, channel);
       assert.equal(view.states['desks.joe.openPnl'].state, 'broken', channel);
       assert.match(htmlDocument(compactDesk(view, 'joe')).querySelector('.summary-text').textContent, /Open result: unavailable/, channel);
+    }
+  }
+});
+
+
+test('JOED-158 Open: mixed waiting and not-exact blockers are all named regardless of wire desk order', () => {
+  for (const options of [['waitMoney', 'notExactMoney', 'exact'], ['notExactMoney', 'waitMoney', 'exact']]) {
+    for (const household of ['current', 'notExact', 'wait']) {
+      const view = combination(options, household), data = view.feeds.data.value;
+      const waiting = NAMES[options.indexOf('waitMoney')], pending = NAMES[options.indexOf('notExactMoney')];
+      const expected = options[0] === 'waitMoney' ? `Waiting on prices for ${waiting}; not exact for ${pending}`
+        : `Not exact for ${pending}; waiting on prices for ${waiting}`;
+      for (const order of [[0, 1, 2], [2, 1, 0], [1, 0, 2]]) {
+        const original = data.desks.slice(); data.desks = order.map(i => original.find(d => d.id === DESKS[i]));
+        const hero = htmlDocument(heroLeft(view));
+        assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, expected);
+        assert.equal(hero.querySelector('.account-section .summary-text').textContent, `Open result: ${expected[0].toLowerCase()}${expected.slice(1)}`);
+      }
     }
   }
 });

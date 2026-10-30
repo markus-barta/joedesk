@@ -9,6 +9,7 @@
 import { largeScenario, wideSnapshot, accountScenario, NOW, at, ACTOR } from './board.mjs';
 import { VIEWPORTS, configure, load, go, settle, waitFor } from './shots.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from './budget-tasks.mjs';
+import { captureMachineLoad, machineLoadTable } from './machine-load.mjs';
 
 export const REFERENCE_DEVICES = Object.freeze(['mbp2606', 'mbp2607']);
 export const REFERENCE_BUDGET = Object.freeze({ name: 'reference budget', patchMs: 16, historyMs: 50, taskMs: 50, atMost: false });
@@ -31,7 +32,7 @@ export function decideTaskGuard(firstConditions, secondConditions, limits) {
     remeasure: timingOnly && !remeasured, remeasured, attempts: remeasured ? 2 : 1 };
 }
 
-export async function runBudget({ page, newBoard, check, limits }) {
+export async function runBudget({ page, newBoard, check, limits, sampleLoad = captureMachineLoad }) {
   const within = (ms, limit) => (limits.atMost ? ms <= limit : ms < limit);
   const bound = limit => `${limits.atMost ? 'at most' : 'under'} ${limit} ms`;
   const tooLong = tasks => tasks.filter(ms => ms >= limits.taskMs);
@@ -50,12 +51,15 @@ export async function runBudget({ page, newBoard, check, limits }) {
   const runViewport = async (viewport, measure) => {
     await configure(page, viewport, 'light');
     const conditions = result => Object.assign({}, ...result.checks.map(c => c.conditions));
+    const firstLoad = sampleLoad();
     const first = await measure(viewport);
     let decision = decideTaskGuard(conditions(first), null, limits);
     // Two explicit calls, never a retry loop: at most once per width/phase.
+    const secondLoad = decision.remeasure ? sampleLoad() : null;
     const second = decision.remeasure ? await measure(viewport) : null;
     if (second) decision = decideTaskGuard(conditions(first), conditions(second), limits);
     const rows = (decision.remeasured ? [first, second] : [first]).map((result, i) => ({ ...result.row,
+      machineLoad: i === 0 ? firstLoad : secondLoad,
       attempt: i + 1, attempts: decision.attempts, remeasured: decision.remeasured,
       offendingTasks: result.row.longTaskDetails.filter(t => t.duration >= limits.taskMs) }));
     traces.push(...rows);
@@ -199,5 +203,7 @@ export function budgetTable(traces, limits) {
   return `| Width | Phase |${remeasured ? ' Attempt |' : ''} Desk patch worst (ms) | History draw worst (ms) | Worker read worst (ms) | Long task worst (ms) | Long tasks (≥ 50 ms) |${guard ? ` Tasks ≥ ${limits.taskMs} ms |` : ''}
 | --- | --- |${remeasured ? ' --- |' : ''} --- | --- | --- | --- | --- |${guard ? ' --- |' : ''}
 ${traces.map(r => `| ${r.viewport} | ${r.phase} |${remeasured ? ` ${r.attempt}/${r.attempts}${r.remeasured ? ' (re-measured)' : ''} |` : ''} ${r.deskWorst?.toFixed?.(1) ?? '—'} | ${(r.historyWorst ?? r.renderWorst)?.toFixed(1)} | ${(r.workerWorst ?? r.workerRead)?.toFixed(1)} | ${r.longTasks.length ? max(r.longTasks).toFixed(1) : '—'} | ${r.longTasks.length} |${guard ? ` ${r.longTasks.filter(ms => ms >= limits.taskMs).length} |` : ''}`).join('\n')}
+
+${machineLoadTable(traces)}
 `;
 }
