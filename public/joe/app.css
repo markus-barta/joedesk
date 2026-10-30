@@ -1211,6 +1211,9 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
 .pct-slot .basis { margin-left: 2px; font-size: 13px; font-weight: 500; color: var(--ink-3); }
 .pct-slot .term.basis { text-decoration-color: color-mix(in srgb, var(--ink-3) 45%, transparent); }
 .performance .primary-caption { min-height: 32px; }
+/* Multi-desk faults keep the existing two-line reserve (three on phones).
+   The full caption stays accessible and is also the element's title. */
+.primary-caption.day-caption { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; max-height: 32px; overflow: hidden; }
 .primary-caption .cap-short { display: none; }
 .primary-caption .st, .dnums .c .st { display: inline-flex; gap: 4px; vertical-align: top; white-space: nowrap; }
 .primary-caption .st .i, .dnums .c .st .i { width: 12px; height: 12px; margin-top: 2px; }
@@ -1449,6 +1452,7 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   #heroL .performance { gap: 12px; }
   #heroL .display { height: 53px; margin-top: 0; }
   #heroL .primary-caption { height: 48px; }
+  #heroL .primary-caption.day-caption { -webkit-line-clamp: 3; line-clamp: 3; max-height: 48px; }
   #heroL .since-primary > .primary-caption { display: none; }
   #heroL .phone-primary-note { display: block; width: 100%; height: 48px; padding: 0; border: 0; background: none; color: var(--ink-3); font-size: 12px; line-height: 16px; text-align: left; }
   .phone-primary-note > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }

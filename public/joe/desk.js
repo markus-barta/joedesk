@@ -822,7 +822,7 @@ function heroFirst(ctx, facts, shared, board) {
   const k = label?.phase === 'live' ? '<span class="live-dot" aria-hidden="true"></span>' : icon('clock');
   return { caption, html: `<div class="primary" data-cell="hero.day" data-phase="${label?.phase ?? 'today'}" data-state="${day.state}"><div class="hero-k">${k}${cutLabel(term(label?.phase === 'closed' ? 'closedday' : 'today', text))}${cellIcon(dayCell, shared)}</div>
         <div class="display">${value}</div><div class="pct-slot">${pct}</div>
-        <span class="c primary-caption">${caption}</span></div>` };
+        <span class="c primary-caption day-caption" title="${esc(plainText(caption))}">${caption}</span></div>` };
 }
 
 const SINCE_CAPTION = 'after fees, incl. open positions';

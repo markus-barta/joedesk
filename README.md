@@ -1533,7 +1533,9 @@ rendered pixel verification remains a coordinator gate. This board-only policy
 does not change revision 10 or require producer re-vendoring.
 When Today is a broken dash, its local caption states the reason unless the
 board's state line already explains it. This includes pending start-of-day
-results and every revision-10 exactness reason; repeated section reasons stay shared.
+results and every revision-10 exactness reason; repeated section reasons stay shared. Multi-desk
+fault captions are capped within the existing two-line reserve (three on phones),
+with their full text retained for accessibility and in the hover title.
 
 Mixed Open blockers name both the desks waiting on prices and the desks whose
 result is not exact, in the same order regardless of the feed's desk ordering.
