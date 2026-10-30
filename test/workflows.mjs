@@ -71,38 +71,80 @@ test('runner expression stays hosted by default and for fork PRs even when opted
 });
 
 const ci = parse(workflows.get('ci.yml'));
-test('CI retains every run and all browser launch steps use the same host lock shell', () => {
+test('CI retains every run and locks all six browser phases once with room for three typical queued jobs', () => {
   assert.equal(ci.concurrency, undefined, 'workflow concurrency must not replace pending PR runs');
   for (const job of Object.values(ci.jobs)) assert.equal(job.concurrency, undefined);
   const steps = ci.jobs.browser.steps.filter(step => /scripts\/(?:browser-p[3456]|preview-capture(?:-ci)?)\.mjs|npm run test:results/.test(step.run ?? ''));
-  assert.equal(steps.length, 6);
-  for (const step of steps) assert.equal(step.shell, 'bash scripts/with-browser-lock.sh {0}', step.name);
+  assert.equal(steps.length, 1, 'no browser execution outside the combined step');
+  assert.equal(steps[0].shell, 'bash scripts/with-browser-lock.sh {0}');
+  assert.equal(ci.jobs.browser.steps.filter(step => step.shell?.includes('with-browser-lock.sh')).length, 1);
+  for (const script of ['browser-p3', 'browser-p5', 'browser-p6', 'preview-capture', 'preview-capture-ci']) {
+    assert.ok(steps[0].run.includes(`scripts/${script}.mjs`));
+  }
+  assert.equal(ci.jobs.browser['timeout-minutes'], 60 + 45 + 15);
 });
-test('Results CI keeps full ×3 on main pushes and full Vienna plus UTC/NY subsets on PRs and dispatch', t => {
-  const step = ci.jobs.browser.steps.find(step => step.name?.startsWith('Results gate'));
-  assert.equal(step.if, 'always()');
-  assert.equal(step.env.JOED_QA_DIR, '${{ runner.temp }}/joedesk-qa/p4');
+
+function simulateBrowserPhases(t, { event = 'push', fail = '' } = {}) {
+  const step = ci.jobs.browser.steps.find(step => step.shell?.includes('with-browser-lock.sh'));
+  const dir = scratch('joed-workflow-phases-');
+  t.after(() => discard(dir, 'workflow browser phases test'));
+  const output = join(dir, 'commands');
+  // Exercise the actual combined shell, replacing only browser/npm entry
+  // points. Never launch a browser, server or real npm command.
+  const fake = `#!/bin/sh
+printf '%s|%s|%s\\n' "$*" "$JOED_QA_DIR" "$TZ" >> "$JOED_PHASE_COMMANDS"
+case "$*" in
+  *"$JOED_FAIL_PHASE"*) if [ -n "$JOED_FAIL_PHASE" ]; then exit 7; fi ;;
+esac
+case "$1" in scripts/preview-capture.mjs) exit 2 ;; esac
+`;
+  for (const command of ['node', 'npm']) writeFileSync(join(dir, command), fake, { mode: 0o700 });
+  const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', step.run], {
+    encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, RUNNER_TEMP: dir,
+      JOED_QA_ROOT: join(dir, 'qa'), GITHUB_EVENT_NAME: event, JOED_PHASE_COMMANDS: output, GITHUB_OUTPUT: join(dir, 'outputs'),
+      JOED_FAIL_PHASE: fail },
+  });
+  return { result, dir, outputs: existsSync(join(dir, 'outputs')) ? readFileSync(join(dir, 'outputs'), 'utf8') : '',
+    commands: readFileSync(output, 'utf8').trim().split('\n').map(line => line.split('|')) };
+}
+
+test('combined browser step preserves all phase arguments, Results zone plans and QA directories for each event', t => {
+  const step = ci.jobs.browser.steps.find(step => step.shell?.includes('with-browser-lock.sh'));
+  assert.equal(step.env.JOED_QA_ROOT, '${{ runner.temp }}/joedesk-qa');
   const artifact = ci.jobs.browser.steps.find(step => step.with?.name === 'joedesk-p4-screenshots');
   assert.equal(artifact.if, 'always()');
   assert.equal(artifact.with.path, '${{ runner.temp }}/joedesk-qa/p4');
-  const dir = scratch('joed-workflow-results-');
-  t.after(() => discard(dir, 'workflow Results matrix test'));
-  // Execute the workflow's real shell branches with a fake npm. No browser,
-  // server, package install or real npm invocation can run here.
-  writeFileSync(join(dir, 'npm'), '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$JOED_RESULTS_COMMANDS"\n', { mode: 0o700 });
   for (const event of ['push', 'pull_request', 'workflow_dispatch']) {
-    const output = join(dir, event);
-    const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c',
-      step.run.replaceAll('${{ github.event_name }}', event)], {
-      encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, JOED_RESULTS_COMMANDS: output },
-    });
+    const { result, dir, commands } = simulateBrowserPhases(t, { event });
     assert.equal(result.status, 0, result.stderr);
-    const commands = readFileSync(output, 'utf8').trim().split('\n');
-    assert.equal(commands.length, 1, `${event}: one gate orchestrator`);
-    assert.ok(commands[0].startsWith('run test:results -- '));
-    assert.deepEqual(parseResultsGateArgs(commands[0].split(' ').slice(3)), event === 'push'
+    assert.equal(commands.length, 6, 'all browser phases execute inside the one shell');
+    assert.equal(commands[0][0], `scripts/browser-p3.mjs ${event === 'pull_request' ? '--subset' : '--full'}`);
+    assert.equal(commands[0][1], join(dir, 'qa/p3'));
+    assert.equal(commands[1][1], join(dir, 'qa/p4'));
+    assert.ok(commands[1][0].startsWith('run test:results -- '));
+    assert.deepEqual(parseResultsGateArgs(commands[1][0].split(' ').slice(3)), event === 'push'
       ? ['UTC', 'Europe/Vienna', 'America/New_York'].map(timeZone => ({ timeZone, mode: 'full' }))
       : [{ timeZone: 'Europe/Vienna', mode: 'full' }, { timeZone: 'UTC', mode: 'subset' }, { timeZone: 'America/New_York', mode: 'subset' }]);
+    assert.deepEqual(commands[2], ['scripts/browser-p5.mjs', join(dir, 'qa/p5'), 'UTC']);
+    assert.match(commands[3][0], /^scripts\/preview-capture.mjs --base-url http:\/\/127.0.0.1:1\/joe\/ --out /);
+    assert.deepEqual(commands[4], [`scripts/preview-capture-ci.mjs ${dir}/joedesk-preview-capture/proxy ${dir}/joedesk-preview-capture/actor`, '', 'UTC']);
+    assert.deepEqual(commands[5], ['scripts/browser-p6.mjs', join(dir, 'qa/p6a'), 'UTC']);
+  }
+});
+
+test('combined step retains failures, runs Results/Settings after earlier failures and gates previews/carry-overs', t => {
+  for (const [fail, count] of [['browser-p3.mjs', 3], ['run test:results', 3], ['browser-p5.mjs', 3],
+    ['preview-capture.mjs', 4], ['preview-capture-ci.mjs', 5], ['browser-p6.mjs', 6]]) {
+    const { result, commands, outputs } = simulateBrowserPhases(t, { fail });
+    assert.notEqual(result.status, 0, fail);
+    assert.equal(commands.length, count, `${fail}: subsequent phases follow the previous failure policy`);
+    assert.equal(outputs, fail === 'browser-p6.mjs' ? 'preview_ready=true\n' : '', 'completed previews survive carry-over failure');
+  }
+  const preview = ci.jobs.browser.steps.find(step => step.with?.name === 'joedesk-preview-capture');
+  assert.equal(preview.if, "always() && steps.browser_phases.outputs.preview_ready == 'true'");
+  for (const name of ['joedesk-p3-screenshots', 'joedesk-p4-screenshots', 'joedesk-p5-screenshots', 'joedesk-p6a-screenshots']) {
+    const artifact = ci.jobs.browser.steps.find(step => step.with?.name === name);
+    assert.equal(artifact.if, 'always()', `${name}: failed checks retain evidence`);
   }
 });
 

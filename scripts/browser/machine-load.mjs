@@ -12,8 +12,14 @@ export function captureMachineLoad({ clock = () => new Date(), cpuList = cpus, l
       /^(?:chrome(?:[-_].*)?|chromium(?:[-_].*)?|headless_shell|Google Chrome(?: Helper.*)?|Chromium(?: Helper.*)?)$/i.test(basename(line.trim()))).length : null };
 }
 
-export function machineLoadTable(traces) {
-  return `Machine load before each attempt (host-wide browser processes include this browser and its helpers; unavailable counts are not zero):
+export function machineLoadTable(traces, lock = process.env) {
+  return `Browser host lock (one acquisition for all CI browser phases):
+
+| State | Wait started (UTC) | Acquired (UTC) | Waited seconds |
+| --- | --- | --- | --- |
+| ${lock.JOED_BROWSER_LOCK_STATE ?? 'unavailable (outside CI wrapper)'} | ${lock.JOED_BROWSER_LOCK_WAIT_STARTED_AT ?? 'unavailable'} | ${lock.JOED_BROWSER_LOCK_ACQUIRED_AT ?? 'unavailable'} | ${lock.JOED_BROWSER_LOCK_WAIT_SECONDS ?? 'unavailable'} |
+
+Machine load before each attempt (host-wide browser processes include this browser and its helpers; unavailable counts are not zero):
 
 | Width | Phase | Attempt | Sampled (UTC) | Loadavg 1 / 5 / 15 min | Logical CPUs | Browser processes |
 | --- | --- | --- | --- | --- | --- | --- |

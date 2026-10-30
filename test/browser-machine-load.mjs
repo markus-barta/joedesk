@@ -31,3 +31,14 @@ test('budget host evidence distinguishes no browsers from unavailable process in
   assert.equal(captureMachineLoad({ ps: () => ({ status: 0, stdout: 'node\nbash\n' }) }).browserProcesses, 0);
   assert.match(machineLoadTable([{ viewport: '1440', phase: 'legacy' }]), /unavailable/);
 });
+
+test('QA machine-load tables retain the job lock wait evidence and distinguish hosted bypass from missing evidence', () => {
+  const table = machineLoadTable([], {
+    JOED_BROWSER_LOCK_STATE: 'held', JOED_BROWSER_LOCK_WAIT_STARTED_AT: '2026-10-30T03:00:00Z',
+    JOED_BROWSER_LOCK_ACQUIRED_AT: '2026-10-30T03:30:00Z', JOED_BROWSER_LOCK_WAIT_SECONDS: '1800',
+  });
+  assert.match(table, /\| held \| 2026-10-30T03:00:00Z \| 2026-10-30T03:30:00Z \| 1800 \|/);
+  assert.ok(table.indexOf('Waited seconds') < table.indexOf('Machine load before each attempt'));
+  assert.match(machineLoadTable([], { JOED_BROWSER_LOCK_STATE: 'bypassed', JOED_BROWSER_LOCK_WAIT_SECONDS: '0' }), /\| bypassed \| unavailable \| unavailable \| 0 \|/);
+  assert.match(machineLoadTable([], {}), /unavailable \(outside CI wrapper\)/);
+});

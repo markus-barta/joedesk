@@ -11,7 +11,7 @@ permissions:
 
 # Keep every PR run: default concurrency replaces older pending runs, even
 # with cancel-in-progress: false (queue: max also has a 100-pending cap).
-# Browser execution steps instead share a host-local flock across agm2 runners.
+# All browser phases share one host-local flock acquisition across agm2 runners.
 
 jobs:
   package:
@@ -48,7 +48,8 @@ jobs:
 
   browser:
     runs-on: ${{ (vars.JOEDESK_AGM2 == 'on' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","agm2"]') || 'ubuntu-latest' }}
-    timeout-minutes: 45
+    # 60 min wait (two typical 30 min runs) + 45 min work + 15 min setup/upload.
+    timeout-minutes: 120
     steps:
       - name: Keep temporary files under RUNNER_TEMP
         run: |
@@ -81,46 +82,41 @@ jobs:
             exit 1
           fi
           printf 'BROWSER_PATH=%s\n' "$browser_path" >> "$GITHUB_ENV"
-      - name: Board UI gate (390/1024/1440, light and dark, P1 fixtures, privacy)
+      - name: Browser gates and preview checks (one lock through all phases and teardown)
+        id: browser_phases
         shell: bash scripts/with-browser-lock.sh {0}
         env:
-          JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p3
-        run: node scripts/browser-p3.mjs ${{ github.event_name == 'pull_request' && '--subset' || '--full' }}
-      - name: Results gate (390/1024/1440, light and dark, results v2 fixtures, Vienna dates, budget)
-        shell: bash scripts/with-browser-lock.sh {0}
-        if: always()
-        env:
-          JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p4
+          JOED_QA_ROOT: ${{ runner.temp }}/joedesk-qa
         run: |
-          if [ '${{ github.event_name }}' = 'push' ]; then
-            npm run test:results -- UTC Europe/Vienna America/New_York
+          # Results and Settings still run after an earlier gate fails, as
+          # their former always() steps did. Retain failure for the job;
+          # preview and carry-over phases require all preceding gates to pass.
+          status=0
+          board_mode=--full
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then board_mode=--subset; fi
+          JOED_QA_DIR="$JOED_QA_ROOT/p3" node scripts/browser-p3.mjs "$board_mode" || status=$?
+          if [ "$GITHUB_EVENT_NAME" = 'push' ]; then
+            JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- UTC Europe/Vienna America/New_York || status=$?
           else
-            npm run test:results -- --full Europe/Vienna --subset UTC America/New_York
+            JOED_QA_DIR="$JOED_QA_ROOT/p4" npm run test:results -- --full Europe/Vienna --subset UTC America/New_York || status=$?
           fi
-      - name: Settings gate (390/1024/1440, light and dark, Fleet Config fixtures, LIVE gate at the network layer, sweep)
-        shell: bash scripts/with-browser-lock.sh {0}
-        if: always()
-        env:
-          JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p5
-          TZ: UTC
-        run: node scripts/browser-p5.mjs
-      - name: Preview capture refuses a 0755 output directory (exit 2, no files)
-        shell: bash scripts/with-browser-lock.sh {0}
-        run: |
+          JOED_QA_DIR="$JOED_QA_ROOT/p5" TZ=UTC node scripts/browser-p5.mjs || status=$?
+          if [ "$status" -ne 0 ]; then exit "$status"; fi
+
+          # Preview capture refuses a 0755 output directory (exit 2, no files).
           bad_out=$(mktemp -d "$RUNNER_TEMP/joedesk-preview-public.XXXXXX")
           chmod 0755 "$bad_out"
           status=0
           node scripts/preview-capture.mjs --base-url http://127.0.0.1:1/joe/ --out "$bad_out" || status=$?
           test "$status" -eq 2
           test -z "$(ls -A "$bad_out")"
-      - name: Preview capture proxy and actor tunnel smoke
-        shell: bash scripts/with-browser-lock.sh {0}
-        env:
-          TZ: UTC
-        run: |
           install -d -m 0700 "$RUNNER_TEMP/joedesk-preview-capture/proxy" "$RUNNER_TEMP/joedesk-preview-capture/actor"
-          node scripts/preview-capture-ci.mjs "$RUNNER_TEMP/joedesk-preview-capture/proxy" "$RUNNER_TEMP/joedesk-preview-capture/actor"
+          TZ=UTC node scripts/preview-capture-ci.mjs "$RUNNER_TEMP/joedesk-preview-capture/proxy" "$RUNNER_TEMP/joedesk-preview-capture/actor"
+          printf 'preview_ready=true\n' >> "$GITHUB_OUTPUT"
+
+          JOED_QA_DIR="$JOED_QA_ROOT/p6a" TZ=UTC node scripts/browser-p6.mjs
       - name: Keep synthetic preview PNGs and value-free summary
+        if: always() && steps.browser_phases.outputs.preview_ready == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: joedesk-preview-capture
@@ -132,12 +128,6 @@ jobs:
         with:
           name: joedesk-p3-screenshots
           path: ${{ runner.temp }}/joedesk-qa/p3
-      - name: Release carry-overs (390/1440, light and dark)
-        shell: bash scripts/with-browser-lock.sh {0}
-        env:
-          JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p6a
-          TZ: UTC
-        run: node scripts/browser-p6.mjs
       - name: Keep the release screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
