@@ -185,6 +185,12 @@ board data/config/audit files, retain exact bytes, use directory mode 0700 and
 file mode 0600, and record sizes/SHA256 in `backup-manifest.json`. Unknown files,
 symlinks, oversized input, incomplete backups and existing destinations fail
 closed; nothing is deleted or overwritten.
+V2 backups also preserve recognized damaged copies and exact `<known v2 store>.next`
+retry files verbatim, including partial non-JSON bytes. These evidence files share
+one limit of 64 copies; the 65th blocks backup until an operator retains the
+needed evidence elsewhere and trashes old copies. Each file remains limited to
+16 MiB and the complete backup to 32 MiB. Retry evidence never replaces the
+validated primary store; verification and restore enforce the same limits.
 
 The command forms are:
 
