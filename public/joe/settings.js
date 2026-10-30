@@ -395,7 +395,7 @@ function syncDraft() {
   const ch = new Set(M.changes(state));
   for (const el of $$('#setMain [data-saved]')) {
     const k = el.dataset.saved, on = ch.has(k);
-    const text = `${state.readAvailable ? 'Saved' : 'Last good'}: ${M.savedText(M.FIELD[k], state.base[k])}`;
+    const text = `${signedOut(lastCtx) ? 'Last known' : state.readAvailable ? 'Saved' : 'Last good'}: ${M.savedText(M.FIELD[k], state.base[k])}`;
     if (el.textContent !== text) el.textContent = text;
     el.title = text;
     if (el.classList.contains('on') !== on) el.classList.toggle('on', on);
@@ -570,7 +570,7 @@ export function renderSettings(ctx) {
     }
   }
   const rebuilt = renderFields(state.config !== before.config);
-  if (!rebuilt && state !== before) syncDraft();
+  if (!rebuilt) syncDraft();
   const hint = ctx.feeds.data?.value?.brokerAccount?.accountHint;
   patch($('#modeLede'), `Every order goes to the practice account${hint ? ` ${term('account', hint)}` : ' on Interactive Brokers'}. No real money moves, and nothing on JoeDesk can change that.`);
   patch($('#rtRows'), runtimeHtml(ctx));

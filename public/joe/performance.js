@@ -40,6 +40,7 @@ export function exactMoney(value) {
 }
 
 export function exactCell(cell) {
+  if (cell?.signedOut && cell.lastKnown) return exactCell(cell.lastKnown);
   if (!cell || outageValue(cell) || !['fresh', 'stale'].includes(cell.state) || NOT_EXACT_REASONS.has(cell.reason)) return null;
   return exactMoney(cell.value);
 }

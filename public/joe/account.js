@@ -83,6 +83,11 @@ export function changeHtml(change, chip, chipTitle) {
 // board shows no figure and says where to set it.
 function sinceParts(cell, start, settings) {
   if (signedOut(cell) || signedOut(settings) || settings?.reason === 'auth_required') {
+    const known = start ?? settings?.lastKnownAccountStart;
+    if (known && cell?.lastKnown) {
+      const parts = sinceParts(cell.lastKnown, known, { reason: null });
+      return Object.fromEntries(Object.entries(parts).map(([key, value]) => [key, value ? `${value} · ${present('', { signedOut: true, value: known }, 'warning')}` : '']));
+    }
     const words = `Since start: ${present('', { signedOut: true, value: start }, 'warning')}`;
     return { wide: words, narrow: words, detail: '' };
   }
@@ -110,7 +115,7 @@ function sinceParts(cell, start, settings) {
 // the change line; the name always carries it.
 export function cashPart(cash, shared = null) {
   if (signedOut(cash)) {
-    const value = cash?.state === 'broken' && cash.retained ? null : cash?.value;
+    const value = cash?.value;
     const n = value ? units(value) : null, caption = present('', cash, 'warning');
     const name = `Cash: ${caption}`;
     return `<span class="acct-cash" data-cash="acct.cash" data-state="${esc(cash?.state ?? 'broken')}" role="group" title="${esc(name)}" aria-label="${esc(name)}">Cash <b>${n === null ? '—' : moneyNoWrap(n, value.currency)}</b> · ${esc(caption)}</span>`;
@@ -137,7 +142,7 @@ export function cashPart(cash, shared = null) {
 export function keptWorth(kept, shared) {
   const rows = kept?.value;
   const own = signedOut(kept) ? ` · ${present('', kept, 'warning')}` : kept?.reason && kept.reason !== shared ? ` · ${esc(cellReason(kept.reason, kept))}` : '';
-  if (!rows || outageValue(kept)) return { html: `<b>—</b>${own}`, rows: null };
+  if (!rows || (!signedOut(kept) && outageValue(kept))) return { html: `<b>—</b>${own}`, rows: null };
   const list = [...rows].sort((a, b) => a.symbol.localeCompare(b.symbol)).map(r => {
     const n = units(r.marketValue);
     return `<b class="nowrap">${esc(r.symbol)} ${n === null ? '—' : esc(money(n, r.marketValue.currency))}</b>`;

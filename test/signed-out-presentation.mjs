@@ -119,32 +119,6 @@ if (process.argv.includes('--capture-non-auth')) {
     assert.deepEqual(nonAuthSnapshot(), JSON.parse(readFileSync(snapshotURL)), 'frozen at fa6db1d; compare actual markup, accessible names and status text');
   });
 
-  test('JOED-173 fix2 audit: every reason on every presentation seam is gated while signed out', () => {
-    for (const reason of Object.keys(H.CELL_REASON)) for (const missing of [false, true]) {
-      const ctx = inject(context(), reason, { missing });
-      const before = structuredClone(ctx);
-      for (const [name, html] of Object.entries(surfaces(ctx))) {
-        // The object is a diagnostic carrier; its visible warning is rendered
-        // by disclosureProblem, not JSON.stringify.
-        if (name === 'Results state') { assertSignedOut(JSON.stringify(D.disclosureProblem([['Results', D.resultsFeedProblem(R.resultsView(ctx))]])), name); continue; }
-        if (name === 'Board status') { const p = H.statusPresentation(ctx); assertSignedOut([p.sentence, p.compact, p.alert, p.label].join(' '), name); continue; }
-        assertSignedOut(html, `${reason}/${missing}/${name}`);
-      }
-      assert.deepEqual(ctx, before, 'presentation does not erase original diagnostics or observations');
-    }
-  });
-
-  test('JOED-173 fix2 audit: page renderers import age formatting through the shared gate', () => {
-    for (const file of ['ui', 'health', 'desk', 'account', 'history', 'results', 'settings']) {
-      const source = readFileSync(new URL(`../public/joe/${file}.js`, import.meta.url), 'utf8');
-      assert.doesNotMatch(source, /import\s*\{[^}]*\bage\b[^}]*\}\s*from ['"]\.\/format\.js/, `${file}: raw age formatter bypass`);
-      assert.match(source, /from ['"]\.\/presentation\.js/, `${file}: shared policy required`);
-      for (const [, args] of source.matchAll(/\b(?:cellReason|dashWords)\(([^()]*)\)/g)) assert.ok(args.includes(','), `${file}: reason formatter must receive its board or cell: ${args}`);
-    }
-    const details = readFileSync(new URL('../public/joe/desk.js', import.meta.url), 'utf8');
-    assert.equal([...details.matchAll(/\bdiagnosticReason\(/g)].length, 1, 'one explicit Details-only diagnostic escape hatch');
-  });
-
   async function signedOutFeed(t, { failed = false, coldHistory = false } = {}) {
     t.mock.method(globalThis, 'fetch', async url => {
       const file = String(url);

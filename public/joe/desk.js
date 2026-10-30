@@ -1177,7 +1177,7 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
   const detail = desk?.state === 'stuck' ? STUCK_REASON : desk ? positionsWord(states, id, held) : '';
   // Only a real activity sentence is shown; the pusher's valuation status
   // sentences say nothing about what the desk is doing (JOED-148 P0-5).
-  const activity = !desk ? 'Waiting for the first valid snapshot.' : PUSHER_STATUS.has(desk.action) ? '' : esc(desk.action);
+  const activity = !desk ? 'Waiting for the first valid snapshot.' : PUSHER_STATUS.has(desk.action) ? '' : esc(presentWarning(desk.action, { signedOut: signedOut(ctx), value: desk.action }));
   const bars = barsHtml(ctx, facts, id), learning = learningLine(desk?.learning);
   // The status lines cover the bars; when those come from an old record, the
   // record's state is one of the lines, as it is the bars' caption otherwise.
@@ -1190,7 +1190,7 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
         ${sinceNum}
       </div>
       <div class="spark desk-sessions${status ? ' off' : ''}"><div class="spark-h"><span><b>${bars.head}</b> · ${bars.feed ? st('warn', esc(bars.feed.text), 'half') : 'each session’s result in €, after fees'}</span></div>${bars.html}<div class="bars-tap" hidden></div>${status ? `<div class="card-status">${status}</div>` : ''}</div>
-      ${learning ? `<footer>${icon('learning')}<span>${term('learning')}: ${esc(learning)}${desk.learning.status === 'blocked' ? ' · blocked' : ''}</span></footer>` : ''}`;
+      ${learning ? `<footer>${icon('learning')}<span>${term('learning')}: ${esc(presentWarning(learning, { signedOut: signedOut(ctx), value: learning }))}${!signedOut(ctx) && desk.learning.status === 'blocked' ? ' · blocked' : ''}</span></footer>` : ''}`;
 }
 
 // The card's numbers that are not fresh, each with its own state, age and

@@ -6,7 +6,8 @@ import { readJSON, boardSession } from './transport.js';
 // A late read may never replace the result of a more recent save.
 export function createBoardSettings({ fetcher = (...args) => fetch(...args), changed = () => {}, timeoutMs = 15000 } = {}) {
   let state = { accountStart: null, reason: 'loading' }, generation = 0, saving = false;
-  const snapshot = () => structuredClone(state);
+  let lastKnownAccountStart = null;
+  const snapshot = () => structuredClone({ ...state, ...(state.reason === 'auth_required' && lastKnownAccountStart ? { lastKnownAccountStart } : {}) });
   const publish = next => { state = next; changed(); };
   async function request(method, value) {
     if (saving) return { ok: false, error: 'Account start is being saved.' };
@@ -27,7 +28,10 @@ export function createBoardSettings({ fetcher = (...args) => fetch(...args), cha
       if ((body.reason === null) !== (settings.accountStart !== null)) throw new Error('Account start could not be checked.');
       if (method === 'POST' && (body.ok !== true || (value.accountStart === null ? settings.accountStart !== null :
         settings.accountStart?.amountEur !== value.accountStart.amountEur || settings.accountStart?.date !== value.accountStart.date))) throw new Error('The saved account start could not be confirmed. Refresh before retrying.');
-      if (current === generation) publish({ ...settings, reason: body.reason });
+      if (current === generation) {
+        lastKnownAccountStart = settings.accountStart;
+        publish({ ...settings, reason: body.reason });
+      }
       return { ok: true };
     } catch (error) {
       if (current === generation) publish({ accountStart: null, reason: failureReason });

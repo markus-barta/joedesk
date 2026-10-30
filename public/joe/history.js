@@ -907,7 +907,7 @@ const EVENT_WORD = { state: 'state', action: 'what it does', learning: 'learning
 function eventsHtml(ctx) {
   const list = ctx.events.recent();
   if (!list.length) return `<li class="ev-empty"><span class="ev">${icon('info')}</span><div>${ctx.events.baseline() ? 'Baseline recorded. Changes appear when later snapshots differ.' : 'Waiting for the first snapshot.'}</div></li>`;
-  return list.map(e => `<li><span class="ev">${icon(EVENT_ICON[e.kind] ?? 'info')}</span><div><div>${esc(e.summary)}</div><div class="m">${dayDDM(e.snapshotAt)}, ${timeHM(e.snapshotAt)} · ${LABEL[e.deskId] ?? esc(e.deskId)} · ${EVENT_WORD[e.kind] ?? esc(e.kind)} · ${esc(e.sourceLabel)}</div></div></li>`).join('');
+  return list.map(e => `<li><span class="ev">${icon(EVENT_ICON[e.kind] ?? 'info')}</span><div><div>${esc(present(e.summary, { signedOut: signedOut(ctx), value: e }, 'warning'))}</div><div class="m">${dayDDM(e.snapshotAt)}, ${timeHM(e.snapshotAt)} · ${LABEL[e.deskId] ?? esc(e.deskId)} · ${EVENT_WORD[e.kind] ?? esc(e.kind)} · ${esc(present(e.sourceLabel, ctx))}</div></div></li>`).join('');
 }
 
 const hatch = '<svg viewBox="0 0 22 10" aria-hidden="true"><defs><pattern id="ht-lg" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="var(--ink-3)" stroke-width="1.2"/></pattern></defs><rect x="1" y="0.5" width="20" height="9" rx="2" fill="url(#ht-lg)"/></svg>';

@@ -2378,11 +2378,30 @@ freshness wording; derived check-in and Results warnings carry the board's
 session too. Cold History and account-start auth failures use that policy,
 and Settings cannot describe an unchecked account start as unset. Details
 retains the original per-value diagnostics, including position-row reasons.
-`test/signed-out-presentation.mjs` audits visible copy and accessible names
-across the page builders for every failure reason, rejects raw age imports
-and reason calls without a presentation context, and freezes non-auth output
-against `fa6db1d`. It is included in the UI unit suite. Its six named review
-reproducers and two presentation audits fail on that baseline.
+Signed-out selections freeze the previously displayed values, including Cash,
+kept holdings, derived Desk amounts and the Since start comparison. Settings
+keeps the last known account-start display separately from its unavailable write
+base; editing/saving still requires a successful authenticated refresh. Activity,
+learning and locally observed History problems use the same presentation gate.
+
+`test/signed-out-pages.mjs` renders complete pages into the preview DOM from
+`index.html`, including dirty Settings, the Results calendar and History events.
+It inspects document text, visible accessibility names and titles at 390 and
+1440 px for all 37 reasons and five auth response shapes (302 to SSO,
+opaqueredirect, 401, 403, HTML body). It checks retained values, missing field
+names, the signed-out headline/Reload and two-second age stability. Eight named
+reproducers fail on `a941776`. Complete non-auth page snapshots are frozen from
+that revision; `test/signed-out-presentation.mjs` retains the earlier exact
+non-auth builder snapshots and focused regressions. Both run in the UI unit suite.
+The preview DOM models shell visibility; Chrome supplies the layout check.
+
+`TZ=UTC node scripts/browser/signed-out-pages.mjs` repeats the rendered-document
+oracle in one browser against synthetic loopback fixtures, including all four
+pages, account hero, Positions/kept, header and phone bar. Its two-second pairs
+advance the real page timers with Chrome virtual time. CI runs it under the
+shared browser lock on agm2 (or the hosted fallback); it closes its browser and
+fixture server in `finally`. Static Settings descriptions may name Amy or the
+broker; assertions reject blame, rather than hiding those descriptions.
 P3's `signed-out` group checks a
 state.json 302 to SSO, retained values, Reload and recovery at all standard widths
 and themes; run it later on agm2 with `JOED_P3_ONLY=signed-out node scripts/browser-p3.mjs`.

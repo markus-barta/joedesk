@@ -195,11 +195,19 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   // server's own panels carry retained last-good values and their receipts.
   // Without any server clock each panel still gets its state and reason: a
   // value that arrived without one cannot be dated, so it is not shown.
+  let lastKnownStates = null;
   function selectStates(input, at, previous) {
     const states = boardStates(input, at, previous);
-    if (!session.signedOut()) return states;
+    if (!session.signedOut()) {
+      lastKnownStates = Object.fromEntries(Object.entries(states).map(([name, cell]) => [name, { ...cell }]));
+      return states;
+    }
     return { ...Object.fromEntries(Object.entries(states).map(([name, cell]) => [name,
-      { ...cell, signedOut: true, state: 'broken', ageSeconds: null, retained: cell.value != null }])), session: 'signed-out' };
+      // Freeze the last displayed selection, including derived amounts that
+      // normal outage policy would withhold. Authentication cannot revalue it.
+      { ...cell, value: (lastKnownStates?.[name] ?? cell).value,
+        lastKnown: lastKnownStates?.[name] ?? cell, signedOut: true, state: 'broken', ageSeconds: null,
+        retained: (lastKnownStates?.[name] ?? cell).value != null }])), session: 'signed-out' };
   }
   function select() {
     const at = now();

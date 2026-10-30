@@ -419,7 +419,7 @@ const CASH_SIZING = [...new Set(Object.keys(CELL_REASON).flatMap(reason =>
 ].map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
 export function cashCaption(cell, key, { figure = false, sharedReason = null } = {}) {
   if (signedOut(cell)) {
-    const value = cell?.state === 'broken' && cell.retained ? null : cell?.value;
+    const value = cell?.value;
     const amount = value == null ? '—' : cashAmount(value).text;
     const caption = present('', cell, 'warning');
     const name = `Cash: ${caption}`;
