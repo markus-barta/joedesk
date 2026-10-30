@@ -56,14 +56,28 @@ export function countPartialDays(ix, per, today) {
 }
 
 // ---------- Vienna dates ----------
-// Vienna's midnight always falls on a whole UTC hour (its offsets are whole
-// hours), so one UTC hour has one Vienna date: one Intl call per hour.
+// The fast path is deliberately limited to Vienna dates in 1950–2199. IANA
+// Europe/Vienna uses CET/CEST (3600/7200 seconds) throughout this window;
+// LMT ended in 1893. 1950 excludes LMT and the wartime rule changes,
+// and 2199 is a conservative finite ceiling on the recurring EU rules.
+// Bounds are Vienna midnights, in UTC. Outside them preserve 4b913c7's hour
+// rounding, era-less wall().slice(0, 10) and unpadded keys, including quirks.
+const MODERN_START = Date.parse('1949-12-31T23:00:00.000Z');
+const MODERN_END = Date.parse('2199-12-31T23:00:00.000Z');
+export const isModernResultsInstant = ms => ms >= MODERN_START && ms < MODERN_END;
+export const isModernResultsDate = k => /^\d{4}-\d{2}-\d{2}$/.test(k) && k >= '1950-01-01' && k < '2200-01-01';
+// One UTC hour has one Vienna date in the modern window. Keep the same
+// hour cache outside it too: correcting its historical behavior is separate.
 const hourDays = new Map();
 export function viennaDate(ms) {
   const hour = Math.floor(ms / 3600000);
   let day = hourDays.get(hour);
   if (day === undefined) {
-    day = wall(new Date(hour * 3600000).toISOString(), VIENNA).slice(0, 10);
+    const local = wall(new Date(hour * 3600000).toISOString(), VIENNA);
+    if (isModernResultsInstant(ms)) {
+      const [y, m, d] = local.split(' ')[0].split('-');
+      day = dateKey(Number(y), Number(m) - 1, Number(d));
+    } else day = local.slice(0, 10);
     if (hourDays.size >= 100000) hourDays.clear();
     hourDays.set(hour, day);
   }
@@ -82,7 +96,7 @@ export function viennaMidnight(k) {
 }
 
 const pad = n => String(n).padStart(2, '0');
-export const dateKey = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
+export const dateKey = (y, m, d) => `${y >= 1950 && y < 2200 ? String(y).padStart(4, '0') : y}-${pad(m + 1)}-${pad(d)}`;
 const parse = k => { const [y, m, d] = k.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)); };
 const kOf = dt => dateKey(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
 export const addDays = (k, n) => { const d = parse(k); d.setUTCDate(d.getUTCDate() + n); return kOf(d); };
@@ -190,6 +204,21 @@ const cmpTrade = (ms, ids) => (a, b) => ms[a] - ms[b] || (ids[a] < ids[b] ? -1 :
 // contract accepts can wrap (a BigInt64Array would, past € 92 billion).
 const exact = n => new Array(n).fill(0n);
 
+// Only modern dates resolve a close eagerly. All other dates retain the old
+// lazy chart path, so even an unused unsupported date cannot crash indexing.
+function closeCoordinate(k) {
+  return isModernResultsDate(k) ? viennaMidnight(addDays(k, 1)) : NaN;
+}
+
+// Compare full four-digit keys numerically, including mixed modern/historical
+// ranges. Noncanonical keys produced by the frozen legacy derivation must keep
+// its lexical ordering; repairing those keys would change pre-speed-up results.
+const numericDate = k => /^\d{4}-\d{2}-\d{2}$/.test(k) ? Number(k.replaceAll('-', '')) : NaN;
+function compareDates(a, b) {
+  const x = numericDate(a), y = numericDate(b);
+  return Number.isNaN(x) || Number.isNaN(y) ? (a < b ? -1 : a > b ? 1 : 0) : x - y;
+}
+
 // One pass over a validated results v2 payload. Trades are sorted by closedAt;
 // every (Vienna date, desk) cell carries its counts and exact sums, and each
 // desk's equity close (0 none that day, 1 a value, 2 reported unknown).
@@ -199,7 +228,7 @@ export function indexResults(value) {
   for (let i = 0; i < n; i++) closed[i] = Date.parse(raw[i].closedAt);
   const order = Array.from({ length: n }, (_, i) => i).sort(cmpTrade(closed, ids));
   const tradeDates = order.map(i => viennaDate(closed[i]));
-  const dates = [...new Set([...value.days.map(d => d.date), ...tradeDates])].sort();
+  const dates = [...new Set([...value.days.map(d => d.date), ...tradeDates])].sort(compareDates);
   const di = new Map(dates.map((d, i) => [d, i]));
   const cells = dates.length * 3;
   const agg = { count: new Int32Array(cells), won: new Int32Array(cells), lost: new Int32Array(cells), net: exact(cells), gross: exact(cells),
@@ -230,7 +259,11 @@ export function indexResults(value) {
   }
   trades.offsets[n] = length;
   trades.blob = text.join('');
-  const close = { amount: exact(cells), state: new Uint8Array(cells), entry: new Int32Array(cells).fill(-1) };
+  // The chart places a close at the following Vienna midnight. Resolve it
+  // once with the index in the worker, instead of during a period switch.
+  // Keep unsupported dates too; use the old per-date path if a chart needs them.
+  const close = { amount: exact(cells), state: new Uint8Array(cells), entry: new Int32Array(cells).fill(-1),
+    at: Float64Array.from(dates, closeCoordinate) };
   for (const day of value.days) {
     const i = di.get(day.date);
     for (const [id, d] of Object.entries(day.desks)) {
@@ -280,7 +313,8 @@ export const transferables = ix => [...Object.values(ix.agg), ...Object.values(i
 // trades: the record is then not authoritative and no number is derived.
 export const keptInRecord = (ix, keep) => ix.symbols.filter(s => keep.includes(s));
 
-// First index with dates[i] > k (dates are sorted ISO strings).
+// First index with dates[i] > k. Fixed-width numeric keys have the same
+// lexical order; legacy noncanonical keys retain that original order too.
 function upper(dates, k) {
   let lo = 0, hi = dates.length;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (dates[mid] <= k) lo = mid + 1; else hi = mid; }
@@ -611,7 +645,7 @@ export function curve(ix, per, desks, ctx) {
   for (let i = i0; i < i1; i++) {
     const k = ix.dates[i];
     if (k === ctx.today || !sel.some(desk => ix.close.state[i * 3 + desk])) continue;
-    point(k, viennaMidnight(addDays(k, 1)), equityAt(ix, desks, k, ctx));
+    point(k, Number.isNaN(ix.close.at[i]) ? viennaMidnight(addDays(k, 1)) : ix.close.at[i], equityAt(ix, desks, k, ctx));
   }
   if (live) point(end, x1, equityAt(ix, desks, end, ctx), { now: true });
   return { pts, startE, day: false, domain: [x0, x1], tracking };

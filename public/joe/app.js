@@ -86,21 +86,22 @@ function start() {
     const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now);
     const head = headerHealth(ctx, health);
     const btn = $('#hdrHealth');
-    if (btn.innerHTML !== head.html) btn.innerHTML = head.html;
+    patch(btn, head.html);
     if (btn.getAttribute('aria-label') !== head.label) btn.setAttribute('aria-label', head.label);
-    btn.dataset.tone = health.statusTone;
-    btn.dataset.reason = health.reason;
+    if (btn.dataset.tone !== health.statusTone) btn.dataset.tone = health.statusTone;
+    if (btn.dataset.reason !== health.reason) btn.dataset.reason = health.reason;
     if (btn.getAttribute('title') !== head.title) {
       if (head.title) btn.setAttribute('title', head.title);
       else btn.removeAttribute('title');
     }
-    root.dataset.joeState = health.statusTone;
+    if (root.dataset.joeState !== health.statusTone) root.dataset.joeState = health.statusTone;
     const alert = $('#statusAlert');
-    alert.dataset.tone = health.statusTone;
-    alert.querySelector('use').setAttribute('href', health.statusTone === 'warn' ? '#i-half' : '#i-stop');
+    if (alert.dataset.tone !== health.statusTone) alert.dataset.tone = health.statusTone;
+    const use = alert.querySelector('use'), href = health.statusTone === 'warn' ? '#i-half' : '#i-stop';
+    if (use.getAttribute('href') !== href) use.setAttribute('href', href);
     const alertText = $('#statusAlertText');
     if (alertText.textContent !== head.alert) alertText.textContent = head.alert;
-    alertText.title = head.alert;
+    if (alertText.title !== head.alert) alertText.title = head.alert;
     fitStatusLine(btn, alert);
     patch($('#healthPop'), healthPop(ctx, health));
     if (announcedStatus !== head.announcementKey) {
@@ -357,21 +358,22 @@ function start() {
   matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { syncThemeButton(); schedule('theme'); });
 
   // Numbers never part from their units, in static and rendered text alike.
-  const fixUnits = node => {
+  const fixUnits = (node, phone) => {
     if (node.nodeType === 3) {
-      let fixed = joinUnits(node.nodeValue, { joinDot: isPhone() });
+      let fixed = joinUnits(node.nodeValue, { joinDot: phone });
       // A separator may start the next inline element (the exact-key line).
-      if (isPhone() && / $/.test(fixed) && node.nextSibling?.textContent?.startsWith('·')) fixed = fixed.slice(0, -1) + NB;
+      if (phone && / $/.test(fixed) && node.nextSibling?.textContent?.startsWith('·')) fixed = fixed.slice(0, -1) + NB;
       if (fixed !== node.nodeValue) node.nodeValue = fixed;
       return;
     }
     if (node.nodeType !== 1) return;
     const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
-    for (let t = walker.nextNode(); t; t = walker.nextNode()) fixUnits(t);
+    for (let t = walker.nextNode(); t; t = walker.nextNode()) fixUnits(t, phone);
   };
-  new MutationObserver(list => { for (const m of list) { if (m.type === 'characterData') fixUnits(m.target); else m.addedNodes.forEach(fixUnits); } })
+  // A synchronous delivery has one viewport, including a large positions patch.
+  new MutationObserver(list => { const phone = isPhone(); for (const m of list) { if (m.type === 'characterData') fixUnits(m.target, phone); else m.addedNodes.forEach(node => fixUnits(node, phone)); } })
     .observe(document.body, { childList: true, subtree: true, characterData: true });
-  fixUnits(document.body);
+  fixUnits(document.body, isPhone());
 
   syncThemeButton();
   initSettings({ feed, tips, schedule });

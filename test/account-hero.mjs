@@ -908,16 +908,19 @@ test('JOED-156 r39 perf: sizes come from a ResizeObserver; a new live value read
   globalThis.ResizeObserver = class { constructor(report) { this.report = report; this.watched = []; observers.push(this); } observe(el) { this.watched.push(el); } disconnect() { this.watched = []; } };
   globalThis.requestAnimationFrame = fn => frames.push(fn);
   const p = page(t), track = p.$('#acctTrack');
+  withStrip(p);
+  track.offsetLeft = 58;
+  p.$('#acctStrip').clientWidth = 900;
   const observer = observers.at(-1);
   assert.deepEqual(observer.watched, [p.chart, track], 'the chart and the strip are watched');
   await p.render(snapshotAt(SNAP, '28000.00'));
   // The first report, at the size drawn: nothing to draw again.
   const first = A.accountDraws().chart;
-  observer.report([{ target: p.chart, contentRect: { width: 900, height: 230 } }, { target: track, contentRect: { width: 0, height: 0 } }]);
+  observer.report([{ target: p.chart, contentRect: { width: 900, height: 230 } }, { target: track, contentRect: { width: 828, height: 40 } }]);
   assert.deepEqual([frames.length, A.accountDraws().chart], [0, first]);
   // Every size read from here on is counted.
   let reads = 0;
-  for (const el of [p.chart, track]) for (const k of ['clientWidth', 'clientHeight', 'offsetLeft']) {
+  for (const el of [p.chart, track, p.$('#acctStrip')]) for (const k of ['clientWidth', 'clientHeight', 'offsetLeft']) {
     let value = el[k];
     Object.defineProperty(el, k, { configurable: true, get: () => { reads++; return value; }, set: v => { value = v; } });
   }
@@ -932,4 +935,8 @@ test('JOED-156 r39 perf: sizes come from a ResizeObserver; a new live value read
   assert.match(p.svg().getAttribute('viewBox'), /^0 0 700 /);
   await p.render(ctx);
   assert.equal(A.accountDraws().chart, count + 1, 'and not again at the next update');
+  const beforeMinute = reads;
+  await p.render(snapshotAt(SNAP + MIN, '28060.00'));
+  assert.equal(A.accountDraws().chart, count + 2, 'the next minute still draws the chart and overview');
+  assert.equal(reads, beforeMinute, 'a complete redraw also reuses the measured chart and handle geometry');
 });

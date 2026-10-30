@@ -217,7 +217,16 @@ export const pctText = hundredths => (hundredths === null || typeof hundredths !
   : `${hundredths < 0n ? MINUS : hundredths > 0n ? '+' : ''}${digits((hundredths < 0n ? -hundredths : hundredths) * (UNIT / 100n), 2)}${NB}%`);
 
 // ---------- What the chart draws ----------
-const nextDay = day => new Date(Date.parse(`${day}T12:00:00Z`) + DAY).toISOString().slice(0, 10);
+// Calendar successors never change. The overview checks every retained close
+// on a draw; do not redo thousands of Date conversions for the same days.
+const nextDays = new Map();
+const nextDay = day => {
+  if (!nextDays.has(day)) {
+    if (nextDays.size >= 4096) nextDays.clear();
+    nextDays.set(day, new Date(Date.parse(`${day}T12:00:00Z`) + DAY).toISOString().slice(0, 10));
+  }
+  return nextDays.get(day);
+};
 // Two neighbouring values with a gap between them: more than the snapshot
 // cadence apart, or closes that are not on consecutive calendar days.
 function apart(series, a, b) {

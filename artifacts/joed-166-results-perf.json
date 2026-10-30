@@ -1,0 +1,2288 @@
+{
+  "fix3": {
+    "session": {
+      "name": "joed-166-r39-results-perf-fix3",
+      "id": "74f03fe2-46df-4fff-88d3-5f9054abe4af",
+      "role": "builder",
+      "started": "2026-10-30T00:00:58Z"
+    },
+    "recorded_at": "2026-10-30T00:12:55.562135+00:00",
+    "status": "Supplied fix3 brief complete locally; coordinator owns cross-family gate, CI performance verdict and any publication/deployment. JOED-166 remains open.",
+    "base_commit": "7d9c73ac9bfaf76d9d2e41c14dc1335696932eac",
+    "window": {
+      "vienna_dates": "1950-01-01 through 2199-12-31 inclusive",
+      "utc_instants": "[1949-12-31T23:00:00.000Z, 2199-12-31T23:00:00.000Z)",
+      "reason": "Whole-hour CET/CEST offsets; lower bound excludes LMT and wartime rules; upper bound conservatively limits future recurring rules.",
+      "tz_evidence": {
+        "node_tzdb": "2026a",
+        "icu": "78.3",
+        "node": "v24.20.0",
+        "intl_monthly_samples": 6000,
+        "intl_offsets": [
+          "GMT+01:00",
+          "GMT+02:00"
+        ],
+        "zdump_command": "zdump -v -c 1950,2200 Europe/Vienna",
+        "zdump_filtered_transition_rows": 880,
+        "zdump_offset_seconds": [
+          3600,
+          7200
+        ]
+      }
+    },
+    "implementation": {
+      "dates": "Outside the window, preserve 4b913c7 hour rounding, era-less wall().slice(0,10), unpadded dateKey and ordering. No ancient-date repair.",
+      "sort": "Full four-digit date keys compare numerically, including mixed canonical historical/modern ranges. Noncanonical legacy keys retain original lexical ordering; fixed-width numeric order matches the existing binary search without added switch work. Trade instants sort numerically.",
+      "closes": "Only modern dates eagerly resolve next-midnight coordinates; all other entries transfer NaN and use the exact original lazy chart path if requested.",
+      "marks": "Sparse traversal only when start and both domain endpoints are modern; otherwise use the original daily loop verbatim.",
+      "untouched": "No JOED-167 account, desk, app or chart files changed."
+    },
+    "differential": {
+      "seed_hex": "0x166f3003",
+      "seed_decimal": 376385539,
+      "cases_per_timezone": 2000,
+      "total_cases": 6000,
+      "range": [
+        "0000-01-01T00:00:00.000Z",
+        "9999-12-31T23:59:59.999Z"
+      ],
+      "explicit_edges": [
+        "year 0 and leap day",
+        "years 1–999 and Date.UTC 0–99 remapping",
+        "1890 LMT and 1893 offset transition",
+        "1950/2200 window boundaries and preceding millisecond",
+        "1980 midnight DST transitions",
+        "2026 DST transitions",
+        "9999-12-31T23:00:00.000Z",
+        "maximum accepted instant"
+      ],
+      "mixtures": "500 modern-only and 1500 mixed schema-wide/early/modern payloads per zone; shuffled trades, tied instants, exact fractional and large money, nullable/partial/empty closes, missing-day diagnostics.",
+      "reference": "test/fixtures/results-model-4b913c7.mjs is a byte-for-byte frozen copy of the complete pre-dc66f8d model from 4b913c7; import resolution only is mapped by the test hook.",
+      "reference_sha256": "60a14349b927a17a0bd02efc508a5ebf6ceffaa2f3e13043bb574df03578dcbc",
+      "paths": [
+        "actual history-worker.js handler and transferable reply",
+        "actual createFeed main-thread fallback",
+        "direct index"
+      ],
+      "assertions": [
+        "all frozen index columns equal, excluding only the added close.at cache",
+        "cache equals baseline next midnight only inside window; NaN elsewhere",
+        "dayResult and tradesOn for every represented key, raw day and adjacent day",
+        "day/week/month/all rollups and period derivation for two live contexts and three desk selections per payload",
+        "bounded curves, including identical legacy conversion errors"
+      ],
+      "named_tests": "Four previous extreme-trade tests retained, with absent/full/partial schema rows; three named Codex reproducers retained. Modern coordinate sentinels and Intl call counts verify cached closes and sparse marks.",
+      "parent_red": [
+        {
+          "tz": "UTC",
+          "exit": 1,
+          "failed": [
+            "JOED-166 compatibility reproducer: Codex five-digit rollover mixed with a modern trade",
+            "JOED-166 compatibility reproducer: Codex astronomical year zero keeps the old era-less key",
+            "JOED-166 compatibility reproducer: Codex 1890 LMT keeps the pre-existing hour-rounding result",
+            "JOED-166 differential property: 2000 seeded whole-schema payloads equal 4b913c7 in worker and fallback"
+          ],
+          "log": "/tmp/joed-166-fix3-parent-UTC.tap"
+        },
+        {
+          "tz": "Europe/Vienna",
+          "exit": 1,
+          "failed": [
+            "JOED-166 compatibility reproducer: Codex five-digit rollover mixed with a modern trade",
+            "JOED-166 compatibility reproducer: Codex astronomical year zero keeps the old era-less key",
+            "JOED-166 compatibility reproducer: Codex 1890 LMT keeps the pre-existing hour-rounding result",
+            "JOED-166 differential property: 2000 seeded whole-schema payloads equal 4b913c7 in worker and fallback"
+          ],
+          "log": "/tmp/joed-166-fix3-parent-Europe-Vienna.tap"
+        },
+        {
+          "tz": "America/New_York",
+          "exit": 1,
+          "failed": [
+            "JOED-166 compatibility reproducer: Codex five-digit rollover mixed with a modern trade",
+            "JOED-166 compatibility reproducer: Codex astronomical year zero keeps the old era-less key",
+            "JOED-166 compatibility reproducer: Codex 1890 LMT keeps the pre-existing hour-rounding result",
+            "JOED-166 differential property: 2000 seeded whole-schema payloads equal 4b913c7 in worker and fallback"
+          ],
+          "log": "/tmp/joed-166-fix3-parent-America-New_York.tap"
+        }
+      ],
+      "parent_red_reason": "On unchanged 7d9c73a, the five-digit/year-zero key regressions, out-of-window eager coordinates, and differential column comparison fail in all three zones. The pre-existing LMT misdate itself is deliberately preserved."
+    },
+    "validation": {
+      "syntax_files": [
+        {
+          "file": "public/joe/results-model.js",
+          "exit": 0
+        },
+        {
+          "file": "public/joe/results.js",
+          "exit": 0
+        },
+        {
+          "file": "test/fixtures/results-model-4b913c7.mjs",
+          "exit": 0
+        },
+        {
+          "file": "scripts/check-release.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/ui-modules.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/status-line.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/performance-glance.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/board-state.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/open-result.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/phone-first-screen.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/desk-session.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/results-model.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/settings-model.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/contracts.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/phase-b.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/failure-fixtures.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/time-vectors.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/account-history.mjs",
+          "exit": 0
+        },
+        {
+          "file": "test/account-history-endpoint.mjs",
+          "exit": 0
+        }
+      ],
+      "unit_files": [
+        "test/ui-modules.mjs",
+        "test/status-line.mjs",
+        "test/performance-glance.mjs",
+        "test/board-state.mjs",
+        "test/open-result.mjs",
+        "test/phone-first-screen.mjs",
+        "test/desk-session.mjs",
+        "test/results-model.mjs",
+        "test/settings-model.mjs",
+        "test/contracts.mjs",
+        "test/phase-b.mjs",
+        "test/failure-fixtures.mjs",
+        "test/time-vectors.mjs",
+        "test/account-history.mjs",
+        "test/account-history-endpoint.mjs"
+      ],
+      "unit_runs": 45,
+      "passed": 3162,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "timezones": {
+        "UTC": {
+          "runs": 15,
+          "passed": 1054
+        },
+        "Europe/Vienna": {
+          "runs": 15,
+          "passed": 1054
+        },
+        "America/New_York": {
+          "runs": 15,
+          "passed": 1054
+        }
+      },
+      "checks": [
+        {
+          "command": [
+            "node",
+            "scripts/check-release.mjs"
+          ],
+          "exit": 0,
+          "output": "{\"ok\":true,\"candidate\":\"261029192345.0.0\",\"contractSet\":\"3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350\",\"presentation\":\"integrated\",\"authoritative\":false}"
+        },
+        {
+          "command": [
+            "node",
+            "scripts/check-package.mjs"
+          ],
+          "exit": 0,
+          "output": "{\n  \"ok\": true,\n  \"name\": \"joedesk\",\n  \"version\": \"261029192345.0.0\",\n  \"joeVersion\": \"261029192345.0.0\",\n  \"staticAssets\": 44,\n  \"versionedModules\": 55\n}"
+        },
+        {
+          "command": [
+            "git",
+            "diff",
+            "--check"
+          ],
+          "exit": 0,
+          "output": ""
+        }
+      ],
+      "full_log_manifest": "/tmp/joed-166-fix3-validation.json"
+    },
+    "source_sha256": {
+      "public/joe/results-model.js": "7505fd121c7737d1f60184aa2306e94416870d7f7fdfbc3b6c30ed51ca9ec41a",
+      "public/joe/results.js": "2fd99f7d3d48e17829897837fdd719a61c51ae891db63228d902cd6ead91cbb8",
+      "test/results-model.mjs": "4428256463b04c876f99ba6ce03cbe9b1878909a036d19c32ced1d681ad4a5d2",
+      "test/fixtures/results-model-4b913c7.mjs": "60a14349b927a17a0bd02efc508a5ebf6ceffaa2f3e13043bb574df03578dcbc"
+    },
+    "candidate_reseal": {
+      "version": "261029192345.0.0",
+      "scheme": "inspr-calver-3",
+      "sequence": 39,
+      "closure_sha256": "5ed459bda8a25fad3564f769b7c8feadb8953cbc35efb8dc87d9100dcda9ad5f",
+      "changed_payload_entries": [
+        "public/joe/results-model.js",
+        "public/joe/results.js"
+      ],
+      "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+      "presentation_source": "01b3080948c21899cbbacbfa3447da6799af1b56",
+      "authority": "Unpublished candidate only; no review, publication or deployment approval."
+    },
+    "constraints_observed": [
+      "No push",
+      "No deployment",
+      "No review gate",
+      "No other model CLI",
+      "No subagent",
+      "No browser",
+      "No change to JOED-167 files"
+    ]
+  },
+  "fix2": {
+    "session": "68c02380-6c40-47a4-825c-4c2c36ef3132",
+    "recorded_at": "2026-10-29T23:27:04.835813+00:00",
+    "scope": "Fix the optional eager coordinate cache for every per-date conversion failure; preserve normal cached coordinates, existing curve fallback and fix1 historical marks. No new browser/performance measurement.",
+    "parent": "ca08b87a4b33dd8eb798a23363346a0d0a2bb960",
+    "changes": {
+      "date_keys": "Extract the entire wall date rather than ten characters; dateKey pads the year to at least four digits without truncating year 10000.",
+      "optional_cache": "closeCoordinate catches conversion errors per date, rejects non-finite timestamps and coordinates outside (UTC midnight of date, UTC midnight + 24h]. This range contains the following Vienna midnight and excludes silently remapped early years. NaN continues through the existing transfer and curve fallback.",
+      "preserved": "No curve, timeMarks, contract, presentation, fixture, render-budget or policy changes."
+    },
+    "fail_on_parent": {
+      "method": "Final regression tests unchanged, synchronous Node load hook supplies results-model.js verbatim from git show of parent; no worktree changes.",
+      "name_pattern": "JOED-166 extreme trades:",
+      "results": [
+        {
+          "timezone": "UTC",
+          "exit": 1,
+          "tests": 4,
+          "passed": 0,
+          "failed": 4,
+          "failures": [
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required"
+          ],
+          "year_1_failure": "Expected padded complete date 0001-06-15; actual parent key 1-06-15 11"
+        },
+        {
+          "timezone": "Europe/Vienna",
+          "exit": 1,
+          "tests": 4,
+          "passed": 0,
+          "failed": 4,
+          "failures": [
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required"
+          ],
+          "year_1_failure": "Expected padded complete date 0001-06-15; actual parent key 1-06-15 11"
+        },
+        {
+          "timezone": "America/New_York",
+          "exit": 1,
+          "tests": 4,
+          "passed": 0,
+          "failed": 4,
+          "failures": [
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required",
+            "Explicit zone, date and time required"
+          ],
+          "year_1_failure": "Expected padded complete date 0001-06-15; actual parent key 1-06-15 11"
+        }
+      ],
+      "full_log": "/tmp/joed-166-fix2-parent-68c02380.json"
+    },
+    "regression_coverage": {
+      "trades": [
+        {
+          "instant": "0999-06-15T10:00:00.000Z",
+          "vienna_date": "0999-06-15"
+        },
+        {
+          "instant": "9999-12-31T23:00:00.000Z",
+          "vienna_date": "10000-01-01"
+        },
+        {
+          "instant": "0001-06-15T10:00:00.000Z",
+          "vienna_date": "0001-06-15"
+        },
+        {
+          "instant": "9999-12-31T23:59:59.999Z",
+          "vienna_date": "10000-01-01"
+        }
+      ],
+      "fixtures": [
+        "empty",
+        "scratches"
+      ],
+      "rows": "Absent, full and partial for four-digit dates; no day row at the year-10000 rollover, outside the day-row contract.",
+      "paths": [
+        "indexResults and structured transfer",
+        "actual history-worker.js poll and transfer",
+        "createFeed main-thread fallback"
+      ],
+      "assertions": [
+        "complete padded Vienna date",
+        "unsupported coordinate remains NaN",
+        "ordinary cached coordinates unchanged",
+        "all trades and exact trade result retained",
+        "fresh fallback cell",
+        "modern rollup and curve unchanged (ignore best/worst internal indexes shifted by adding an earlier trade)"
+      ]
+    },
+    "validation": {
+      "node": "v24.20.0",
+      "started_at": "2026-10-29T23:26:05.500868+00:00",
+      "finished_at": "2026-10-29T23:30:47.185934+00:00",
+      "invocation": "Each test:ui and test:contracts unit file alone, serially, under three TZs; node --test --test-reporter=tap.",
+      "zones": [
+        "UTC",
+        "Europe/Vienna",
+        "America/New_York"
+      ],
+      "runs": 45,
+      "passed": 3129,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "files": [
+        {
+          "file": "test/ui-modules.mjs",
+          "passed_by_zone": [
+            314,
+            314,
+            314
+          ]
+        },
+        {
+          "file": "test/status-line.mjs",
+          "passed_by_zone": [
+            44,
+            44,
+            44
+          ]
+        },
+        {
+          "file": "test/performance-glance.mjs",
+          "passed_by_zone": [
+            28,
+            28,
+            28
+          ]
+        },
+        {
+          "file": "test/board-state.mjs",
+          "passed_by_zone": [
+            212,
+            212,
+            212
+          ]
+        },
+        {
+          "file": "test/open-result.mjs",
+          "passed_by_zone": [
+            11,
+            11,
+            11
+          ]
+        },
+        {
+          "file": "test/phone-first-screen.mjs",
+          "passed_by_zone": [
+            17,
+            17,
+            17
+          ]
+        },
+        {
+          "file": "test/desk-session.mjs",
+          "passed_by_zone": [
+            32,
+            32,
+            32
+          ]
+        },
+        {
+          "file": "test/results-model.mjs",
+          "passed_by_zone": [
+            116,
+            116,
+            116
+          ]
+        },
+        {
+          "file": "test/settings-model.mjs",
+          "passed_by_zone": [
+            27,
+            27,
+            27
+          ]
+        },
+        {
+          "file": "test/contracts.mjs",
+          "passed_by_zone": [
+            96,
+            96,
+            96
+          ]
+        },
+        {
+          "file": "test/phase-b.mjs",
+          "passed_by_zone": [
+            45,
+            45,
+            45
+          ]
+        },
+        {
+          "file": "test/failure-fixtures.mjs",
+          "passed_by_zone": [
+            26,
+            26,
+            26
+          ]
+        },
+        {
+          "file": "test/time-vectors.mjs",
+          "passed_by_zone": [
+            34,
+            34,
+            34
+          ]
+        },
+        {
+          "file": "test/account-history.mjs",
+          "passed_by_zone": [
+            40,
+            40,
+            40
+          ]
+        },
+        {
+          "file": "test/account-history-endpoint.mjs",
+          "passed_by_zone": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "full_log": "/tmp/joed-166-fix2-validation-68c02380.json"
+    },
+    "syntax_check": {
+      "command": "node --check",
+      "files": 17,
+      "exit": 0
+    },
+    "checks": {
+      "check_release": 0,
+      "check_package": 0,
+      "git_diff_check": 0
+    },
+    "fixed_payload_sha256": {
+      "public/joe/results-model.js": "0645e1b9702b1251b58d9d501f8946799b6eedfa3a3f5b307f972345c6e8af29"
+    },
+    "candidate": {
+      "version": "261029192345.0.0",
+      "closure_sha256": "f5259b0452a1dc206c176677531fcee03e218d72b0abbcb0d4f3ca33f57cedfe",
+      "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+      "presentation_source_commit": "01b3080948c21899cbbacbfa3447da6799af1b56",
+      "reseal": "Separate following commit under the unchanged unpublished candidate coordinate, as authorized in the fix2 brief; only results-model payload entry and closure pin change."
+    },
+    "boundaries": "No push, deployment, browser, review gate, subagent or other model CLI. Coordinator owns cross-family review after worker exit; the broader Linux performance blocker remains open."
+  },
+  "fix1": {
+    "session": "c8706ae3-95d7-4cd7-a0a6-a742aa8a42db",
+    "recorded_at": "2026-10-29T22:58:36.874Z",
+    "scope": "Correct only the two confirmed date regressions while retaining cached modern close coordinates and sparse time-mark traversal. No new browser/performance measurement; the original CI limitation still applies.",
+    "parent": "24d1e466fcf35f4742aa385b8e2939bc4b230feb",
+    "changes": {
+      "close_coordinates": "Dates outside 1000-01-01 through 9999-12-30 retain their indexed rows and carry a transferable NaN coordinate. Curve conversion falls back to the previous per-date computation only when the close is used.",
+      "time_marks": "Use the exact Vienna endpoint date from viennaDay rather than the hour-rounded viennaDate cache."
+    },
+    "fail_on_parent": {
+      "method": "Run the final regression tests unchanged; a Node load hook supplies the two production modules verbatim from git show of the parent. No worktree mutation.",
+      "zone": "UTC",
+      "exit": 1,
+      "tests": 2,
+      "passed": 0,
+      "failed": 2,
+      "tests_and_failures": [
+        {
+          "name": "JOED-166 close coordinates: contract-valid extreme dates preserve indexing, worker replies and fallback results",
+          "failure": "TypeError: Explicit zone, date and time required at parent results-model.js:236"
+        },
+        {
+          "name": "JOED-166 time marks: historical Vienna offsets keep every interior midnight",
+          "failure": "At mark + 1 ms, expected [-2524439121000], actual []"
+        }
+      ],
+      "name_pattern": "JOED-166 close coordinates: contract-valid extreme dates|JOED-166 time marks: historical Vienna offsets"
+    },
+    "regression_coverage": {
+      "extreme_dates": [
+        "9999-12-31",
+        "0100-01-01",
+        "0999-12-31",
+        "0000-01-01"
+      ],
+      "fixtures": [
+        "empty",
+        "scratches"
+      ],
+      "paths": [
+        "direct index and transfer",
+        "actual history-worker.js poll and transfer",
+        "createFeed main-thread fallback"
+      ],
+      "preserved": [
+        "extreme row and empty desks",
+        "fixture-day trade result",
+        "current-week rollup",
+        "current-week curve"
+      ],
+      "historical_marks": "1890 Vienna UTC+01:05:21; endpoint - 1 ms, exact endpoint, endpoint + 1 ms"
+    },
+    "validation": {
+      "node": "v24.20.0",
+      "started_at": "2026-10-29T22:53:21.018Z",
+      "finished_at": "2026-10-29T22:58:21.158Z",
+      "invocation": "Each package.json test:ui and test:contracts file run alone with node --test --test-reporter=tap under each TZ, serially.",
+      "zones": [
+        "UTC",
+        "Europe/Vienna",
+        "America/New_York"
+      ],
+      "runs": 45,
+      "passed": 3117,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 0,
+      "files": [
+        {
+          "file": "test/ui-modules.mjs",
+          "passed_by_zone": [
+            314,
+            314,
+            314
+          ]
+        },
+        {
+          "file": "test/status-line.mjs",
+          "passed_by_zone": [
+            44,
+            44,
+            44
+          ]
+        },
+        {
+          "file": "test/performance-glance.mjs",
+          "passed_by_zone": [
+            28,
+            28,
+            28
+          ]
+        },
+        {
+          "file": "test/board-state.mjs",
+          "passed_by_zone": [
+            212,
+            212,
+            212
+          ]
+        },
+        {
+          "file": "test/open-result.mjs",
+          "passed_by_zone": [
+            11,
+            11,
+            11
+          ]
+        },
+        {
+          "file": "test/phone-first-screen.mjs",
+          "passed_by_zone": [
+            17,
+            17,
+            17
+          ]
+        },
+        {
+          "file": "test/desk-session.mjs",
+          "passed_by_zone": [
+            32,
+            32,
+            32
+          ]
+        },
+        {
+          "file": "test/results-model.mjs",
+          "passed_by_zone": [
+            112,
+            112,
+            112
+          ]
+        },
+        {
+          "file": "test/settings-model.mjs",
+          "passed_by_zone": [
+            27,
+            27,
+            27
+          ]
+        },
+        {
+          "file": "test/contracts.mjs",
+          "passed_by_zone": [
+            96,
+            96,
+            96
+          ]
+        },
+        {
+          "file": "test/phase-b.mjs",
+          "passed_by_zone": [
+            45,
+            45,
+            45
+          ]
+        },
+        {
+          "file": "test/failure-fixtures.mjs",
+          "passed_by_zone": [
+            26,
+            26,
+            26
+          ]
+        },
+        {
+          "file": "test/time-vectors.mjs",
+          "passed_by_zone": [
+            34,
+            34,
+            34
+          ]
+        },
+        {
+          "file": "test/account-history.mjs",
+          "passed_by_zone": [
+            40,
+            40,
+            40
+          ]
+        },
+        {
+          "file": "test/account-history-endpoint.mjs",
+          "passed_by_zone": [
+            1,
+            1,
+            1
+          ]
+        }
+      ],
+      "syntax": {
+        "invocation": "node --check",
+        "passed": 18,
+        "files": [
+          "public/joe/results-model.js",
+          "public/joe/results.js",
+          "scripts/check-release.mjs",
+          "test/ui-modules.mjs",
+          "test/status-line.mjs",
+          "test/performance-glance.mjs",
+          "test/board-state.mjs",
+          "test/open-result.mjs",
+          "test/phone-first-screen.mjs",
+          "test/desk-session.mjs",
+          "test/results-model.mjs",
+          "test/settings-model.mjs",
+          "test/contracts.mjs",
+          "test/phase-b.mjs",
+          "test/failure-fixtures.mjs",
+          "test/time-vectors.mjs",
+          "test/account-history.mjs",
+          "test/account-history-endpoint.mjs"
+        ]
+      },
+      "setup": {
+        "initial_failure": "test/contracts.mjs could not load the checkout-only yaml dependency (ERR_MODULE_NOT_FOUND)",
+        "correction": "npm ci --prefix test --ignore-scripts --no-audit --no-fund",
+        "exit": 0
+      }
+    },
+    "fixed_payload_sha256": {
+      "public/joe/results-model.js": "a46ef26ccefd81d696a93f2c805ccb49b864e0f388206ef9585c5a3220bcb7f1",
+      "public/joe/results.js": "46a66506c5d01a699a69dcb4d911dc6408a1e2af134816b7452ad0554faaa27e"
+    },
+    "candidate": {
+      "version": "261029192345.0.0",
+      "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+      "presentation_source_commit": "01b3080948c21899cbbacbfa3447da6799af1b56",
+      "reseal": "Separate following commit; brief confirms unpublished/no release set."
+    },
+    "boundaries": "No push, deployment, browser, review gate, subagent or other model CLI. Coordinator owns the cross-family gate after this worker exits; JOED-166 remains open."
+  },
+  "ticket": "JOED-166",
+  "session": "bd1cb3ab-6692-4f33-9bad-134e71b931f4",
+  "recorded_at": "2026-10-29T22:23:02.196375+00:00",
+  "status": "Partial optimization; the CI blocker is not demonstrated resolved. No push, deployment or review gate.",
+  "source": {
+    "release38": "9ec65b46709201669d65fcc04f6a21b1bb567e31",
+    "release39_before": "4b913c7a17ea41bebc07823f74a9275624ab7bdf",
+    "changed_payload_sha256": {
+      "public/joe/results.js": "a829637a1d6a486fe54add11433cfbc693edfc85f8e940769fdcd7e1fd22bfd8",
+      "public/joe/results-model.js": "e1d111a20313f892c9ff2fb45c151a199ac891a8eb5d0c6bf2cc4222c82b256c"
+    }
+  },
+  "environment": {
+    "cpu": "Apple M5 Max",
+    "cores": 18,
+    "platform": "darwin",
+    "arch": "arm64",
+    "node": "v24.20.0",
+    "browser": "HeadlessChrome/153.0.8010.12",
+    "zone": "Europe/Vienna",
+    "browsers_at_once": 1
+  },
+  "harness": {
+    "command": "TZ=Europe/Vienna node /tmp/joed-166-budget-bd1cb3ab.mjs <worktree> <output.json>",
+    "entry": "scripts/browser/results-budget.mjs: runResultsBudget with unchanged CI_GUARD, fixture, eleven clicks and remeasurement policy",
+    "source": "import { pathToFileURL } from 'node:url';\nimport { writeFileSync } from 'node:fs';\nconst [root, output, mode = 'budget'] = process.argv.slice(2);\nconst mod = name => import(pathToFileURL(`${root}/scripts/browser/${name}.mjs`));\nconst { launch, openPage } = await mod('cdp');\nconst { startBoard, ACTOR } = await mod('board');\nconst { runResultsBudget, serveResults } = await mod('results-budget');\nconst { CI_GUARD } = await mod('budget');\nconst browser = await launch({ commandTimeout: 60000 });\nconst boards = [], checks = [], details = [];\ntry {\n  console.log(JSON.stringify({ root, runnerPid: process.pid, engine: await browser.send('Browser.getVersion'), processes: await browser.send('SystemInfo.getProcessInfo') }));\n  const page = await openPage(browser, { headers: { 'x-auth-request-user': ACTOR } });\n  if (mode.includes('trace')) await browser.send('Tracing.start', { categories: 'devtools.timeline,disabled-by-default-devtools.timeline.stack,v8.execute', transferMode: 'ReturnAsStream' });\n  if (mode === 'profile') {\n    await page.s('Profiler.enable');\n    await page.s('Profiler.setSamplingInterval', { interval: 100 });\n  }\n  const tracedServe = async (record, board) => {\n    const close = await serveResults(browser, page, board, record);\n    return async () => {\n      \n      await close();\n    };\n  };\n  let profileNo = 0;\n  if (mode.includes('wide')) await page.s('Page.addScriptToEvaluateOnNewDocument', { source: `addEventListener('DOMContentLoaded', () => document.documentElement.style.setProperty('--font', 'Verdana, \\\"DejaVu Sans\\\", sans-serif'))` });\n  const evaluate = page.evaluate;\n  page.evaluate = async (...args) => {\n    if (mode === 'profile' && args[0] === 'window.__joedesk.timings.length = 0') await page.s('Profiler.start');\n    const result = await evaluate(...args);\n    if (mode === 'profile' && args[0].includes('timings: window.__joedesk.timings.slice()')) {\n      const { profile } = await page.s('Profiler.stop');\n      writeFileSync(`${output}.${++profileNo}.cpuprofile`, JSON.stringify(profile));\n    }\n    if (args[0].includes('timings: window.__joedesk.timings.slice()')) details.push(result.timings);\n    return result;\n  };\n  const rows = await runResultsBudget({ page, newBoard: async options => { const b = await startBoard(options); boards.push(b); return b; },\n    check: (ac, name, ok, detail) => { checks.push({ ac, name, ok, detail }); }, limits: CI_GUARD, serve: tracedServe });\n  if (mode.includes('trace')) {\n    const completed = new Promise(resolve => browser.on(m => { if (m.method === 'Tracing.tracingComplete') resolve(m.params.stream); }));\n    await browser.send('Tracing.end');\n    const stream = await completed;\n    let data = '';\n    while (true) { const part = await browser.send('IO.read', { handle: stream }); data += part.data; if (part.eof) break; }\n    await browser.send('IO.close', { handle: stream });\n    writeFileSync(`${output}.trace.json`, data);\n  }\n  writeFileSync(output, JSON.stringify({ root, mode, rows, checks, details, errors: page.errors }, null, 2) + '\\n');\n  console.log(JSON.stringify({ rows, errors: page.errors, passed: checks.filter(c => c.ok).length, total: checks.length }));\n} finally {\n  await browser.close();\n  for (const board of boards) await board.close();\n  console.log('Closed browser and all owned boards');\n}\n",
+    "measurement_policy": "Three complete, sequential r38 / r39-before / r39-after rounds; report every sample and median, without choosing favorable runs."
+  },
+  "conclusions": {
+    "verified_added_cost": "JOED-151 b543a6f timeMarks resolved every calendar midnight before rejecting unmarked dates (379 calls for 12 annual marks). Original CPU profile: timeMarks inclusive 4.76 ms over three viewport click sequences.",
+    "fix": "Visit only dates drawn by the chart; precompute each recorded close coordinate in the existing worker index and transfer its Float64Array, avoiding main-thread timezone conversion for close points. The transfer list already enumerates typed close columns.",
+    "ci_limitation": "The reported Linux CI doubling was not reproduced on macOS (also probed Chrome 149). Optimizing dates improves the cold All switch, not the worst switch dominated by calendar/trade layout. The target of matching release 38 worst-switch ratios is not demonstrated; JOED-166 must remain open pending coordinator investigation/CI.",
+    "behavior": "Money, dates, marks, copy, layout, routes and deep links are preserved; no contract/budget/fixture edits. Equivalence tests exercise leap dates, both DST transitions, exact 16/120-day thresholds and midnight boundaries; transfer test checks 23/25-hour close intervals and curve coordinates."
+  },
+  "summary": {
+    "r38": {
+      "1440": {
+        "worst_switch_ms_median": 11,
+        "cold_all_switch_ms_median": 9.2,
+        "worst_switch_ms_samples": [
+          12.6,
+          10.6,
+          11
+        ]
+      },
+      "1024": {
+        "worst_switch_ms_median": 9.3,
+        "cold_all_switch_ms_median": 8.6,
+        "worst_switch_ms_samples": [
+          9.3,
+          8.9,
+          9.7
+        ]
+      },
+      "390": {
+        "worst_switch_ms_median": 10.6,
+        "cold_all_switch_ms_median": 8.7,
+        "worst_switch_ms_samples": [
+          10.4,
+          10.6,
+          11.1
+        ]
+      }
+    },
+    "r39-before": {
+      "1440": {
+        "worst_switch_ms_median": 12.3,
+        "cold_all_switch_ms_median": 11.5,
+        "worst_switch_ms_samples": [
+          11.8,
+          12.3,
+          13.1
+        ]
+      },
+      "1024": {
+        "worst_switch_ms_median": 9.8,
+        "cold_all_switch_ms_median": 9.3,
+        "worst_switch_ms_samples": [
+          9.8,
+          9.7,
+          10.7
+        ]
+      },
+      "390": {
+        "worst_switch_ms_median": 10.2,
+        "cold_all_switch_ms_median": 10,
+        "worst_switch_ms_samples": [
+          9.5,
+          11.7,
+          10.2
+        ]
+      }
+    },
+    "r39-after": {
+      "1440": {
+        "worst_switch_ms_median": 12.5,
+        "cold_all_switch_ms_median": 7.2,
+        "worst_switch_ms_samples": [
+          13.1,
+          12.1,
+          12.5
+        ]
+      },
+      "1024": {
+        "worst_switch_ms_median": 10,
+        "cold_all_switch_ms_median": 5.6,
+        "worst_switch_ms_samples": [
+          10.2,
+          10,
+          9.8
+        ]
+      },
+      "390": {
+        "worst_switch_ms_median": 11.8,
+        "cold_all_switch_ms_median": 6,
+        "worst_switch_ms_samples": [
+          10.2,
+          13.2,
+          11.8
+        ]
+      }
+    }
+  },
+  "runs": [
+    {
+      "label": "r38",
+      "round": 1,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 12.600000143051147,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.299999952316284,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.399999856948853,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          12.3,
+          7.6,
+          3.9,
+          4.4,
+          3.1,
+          12.6,
+          5.9,
+          0.6,
+          6.5,
+          6.5,
+          10.2
+        ],
+        [
+          8.6,
+          6.6,
+          3.5,
+          4,
+          2.6,
+          9.3,
+          5.1,
+          0.5,
+          4.7,
+          4.7,
+          8
+        ],
+        [
+          8,
+          4.7,
+          2.8,
+          4,
+          2.5,
+          4.8,
+          3.8,
+          0.5,
+          5.4,
+          5.8,
+          10.4
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r38",
+      "round": 2,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.600000143051147,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 8.900000095367432,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.599999904632568,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          9.2,
+          5.5,
+          3.5,
+          4.5,
+          3.3,
+          10.6,
+          5.9,
+          0.6,
+          5.1,
+          5.5,
+          9
+        ],
+        [
+          8.5,
+          6.4,
+          3.5,
+          4.1,
+          2.8,
+          8.9,
+          4.7,
+          0.6,
+          4.7,
+          5.4,
+          8.7
+        ],
+        [
+          8.7,
+          5.5,
+          3.4,
+          4,
+          2.7,
+          5.5,
+          4.4,
+          0.5,
+          5.4,
+          5.7,
+          10.6
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r38",
+      "round": 3,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 11,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.700000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 11.100000143051147,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          8.9,
+          5.7,
+          3.6,
+          4.6,
+          3.2,
+          11,
+          6,
+          0.7,
+          6.4,
+          6.8,
+          10.8
+        ],
+        [
+          8.9,
+          6.2,
+          4,
+          4.5,
+          3,
+          9.7,
+          5.3,
+          0.6,
+          5.2,
+          5.5,
+          9.1
+        ],
+        [
+          9.4,
+          6.4,
+          3.5,
+          4.2,
+          2.9,
+          5.2,
+          4.5,
+          0.5,
+          5.3,
+          5.9,
+          11.1
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-before",
+      "round": 1,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 11.799999952316284,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.799999952316284,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.5,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          11.5,
+          5.4,
+          3.6,
+          4.7,
+          2.9,
+          11.8,
+          6.1,
+          0.7,
+          5.6,
+          6.5,
+          10.7
+        ],
+        [
+          8.5,
+          6.2,
+          3.1,
+          4,
+          2.4,
+          9.8,
+          4.9,
+          0.6,
+          4.8,
+          5.4,
+          9.1
+        ],
+        [
+          8.8,
+          4.6,
+          3.1,
+          3.7,
+          2.3,
+          4.8,
+          3.8,
+          0.7,
+          4.7,
+          5.4,
+          9.5
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-before",
+      "round": 2,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 12.299999952316284,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.700000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 11.700000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          11.3,
+          5.5,
+          3.8,
+          4.4,
+          3.3,
+          12.3,
+          6.6,
+          0.7,
+          6.2,
+          6.3,
+          11
+        ],
+        [
+          9.3,
+          5.1,
+          3.2,
+          3.9,
+          2.4,
+          9.7,
+          4.8,
+          0.7,
+          4.6,
+          5.7,
+          8.7
+        ],
+        [
+          10,
+          6.1,
+          3.6,
+          4.5,
+          2.7,
+          5.1,
+          3.9,
+          0.7,
+          5.3,
+          6,
+          11.7
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-before",
+      "round": 3,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 13.099999904632568,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.699999809265137,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.199999809265137,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          11.7,
+          5.7,
+          3.9,
+          4.5,
+          2.9,
+          13.1,
+          6.5,
+          1.5,
+          6.1,
+          7.1,
+          11
+        ],
+        [
+          9.3,
+          5.5,
+          3.6,
+          4.6,
+          2.8,
+          10.1,
+          5.5,
+          0.7,
+          6.2,
+          6.2,
+          10.7
+        ],
+        [
+          10.2,
+          6.6,
+          3.3,
+          3.7,
+          2.6,
+          5.1,
+          3.8,
+          0.6,
+          5.1,
+          6.3,
+          9.7
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-after",
+      "round": 1,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 13.099999904632568,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.200000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10.200000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          6.9,
+          5.4,
+          3.7,
+          4.6,
+          3.3,
+          13.1,
+          5.9,
+          0.6,
+          5.7,
+          6.1,
+          9.4
+        ],
+        [
+          5.3,
+          4.7,
+          2.9,
+          3.8,
+          2.7,
+          10.2,
+          5,
+          0.6,
+          5,
+          5.8,
+          8.7
+        ],
+        [
+          5.6,
+          5.7,
+          3.2,
+          3.7,
+          2.6,
+          5.1,
+          4,
+          0.6,
+          5.3,
+          6.5,
+          10.2
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-after",
+      "round": 2,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 12.100000143051147,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 10,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 13.200000047683716,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          7.2,
+          5,
+          3.8,
+          4.9,
+          2.9,
+          12.1,
+          5.7,
+          1.3,
+          5.5,
+          5.9,
+          10.1
+        ],
+        [
+          6.2,
+          5.3,
+          3.9,
+          4.5,
+          2.6,
+          10,
+          5.3,
+          1.2,
+          6.9,
+          9.3,
+          9.7
+        ],
+        [
+          6.9,
+          5.4,
+          4.6,
+          5.6,
+          5,
+          6,
+          5.1,
+          0.6,
+          6.8,
+          6.9,
+          13.2
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    },
+    {
+      "label": "r39-after",
+      "round": 3,
+      "rows": [
+        {
+          "viewport": "1440",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 12.5,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "1024",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 9.800000190734863,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        },
+        {
+          "viewport": "390",
+          "phase": "14000 trades, 288 days (7.78 MiB)",
+          "switches": 11,
+          "switchWorst": 11.799999952316284,
+          "mainThreadResults": 0,
+          "longTasks": [],
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false
+        }
+      ],
+      "switch_ms": [
+        [
+          8.2,
+          5.5,
+          3.8,
+          4.3,
+          3.6,
+          12.5,
+          5.6,
+          1.3,
+          5.7,
+          6.2,
+          10.6
+        ],
+        [
+          5.6,
+          4.4,
+          3,
+          4.3,
+          2.8,
+          9.5,
+          4.6,
+          0.6,
+          5.4,
+          5.3,
+          9.8
+        ],
+        [
+          6,
+          6.4,
+          3.1,
+          4,
+          2.8,
+          5.4,
+          4,
+          0.7,
+          5.1,
+          5.4,
+          11.8
+        ]
+      ],
+      "checks_passed": 9,
+      "checks_total": 9,
+      "page_errors": []
+    }
+  ],
+  "time_marks_microbenchmark": {
+    "method": "Ten alternating before/after calls with separate cold model module instances, after priming the real fixture close dates as curve does. Same twelve output marks in each pair.",
+    "samples": [
+      {
+        "before": {
+          "ms": 1.2,
+          "midnight_calls": 379,
+          "marks": 12
+        },
+        "after": {
+          "ms": 0.2,
+          "midnight_calls": 12,
+          "marks": 12
+        }
+      },
+      {
+        "after": {
+          "ms": 0.2,
+          "midnight_calls": 12,
+          "marks": 12
+        },
+        "before": {
+          "ms": 1.3,
+          "midnight_calls": 379,
+          "marks": 12
+        }
+      },
+      {
+        "before": {
+          "ms": 1.2,
+          "midnight_calls": 379,
+          "marks": 12
+        },
+        "after": {
+          "ms": 0.1,
+          "midnight_calls": 12,
+          "marks": 12
+        }
+      },
+      {
+        "after": {
+          "ms": 0.1,
+          "midnight_calls": 12,
+          "marks": 12
+        },
+        "before": {
+          "ms": 1.2,
+          "midnight_calls": 379,
+          "marks": 12
+        }
+      },
+      {
+        "before": {
+          "ms": 1,
+          "midnight_calls": 379,
+          "marks": 12
+        },
+        "after": {
+          "ms": 0.2,
+          "midnight_calls": 12,
+          "marks": 12
+        }
+      },
+      {
+        "after": {
+          "ms": 0.1,
+          "midnight_calls": 12,
+          "marks": 12
+        },
+        "before": {
+          "ms": 1.2,
+          "midnight_calls": 379,
+          "marks": 12
+        }
+      },
+      {
+        "before": {
+          "ms": 1.1,
+          "midnight_calls": 379,
+          "marks": 12
+        },
+        "after": {
+          "ms": 0.1,
+          "midnight_calls": 12,
+          "marks": 12
+        }
+      },
+      {
+        "after": {
+          "ms": 0.1,
+          "midnight_calls": 12,
+          "marks": 12
+        },
+        "before": {
+          "ms": 1.1,
+          "midnight_calls": 379,
+          "marks": 12
+        }
+      },
+      {
+        "before": {
+          "ms": 1.2,
+          "midnight_calls": 379,
+          "marks": 12
+        },
+        "after": {
+          "ms": 0.2,
+          "midnight_calls": 12,
+          "marks": 12
+        }
+      },
+      {
+        "after": {
+          "ms": 0,
+          "midnight_calls": 12,
+          "marks": 12
+        },
+        "before": {
+          "ms": 1.3,
+          "midnight_calls": 379,
+          "marks": 12
+        }
+      }
+    ]
+  },
+  "tests": {
+    "node_check": [
+      "public/joe/results.js",
+      "public/joe/results-model.js",
+      "test/ui-modules.mjs",
+      "test/status-line.mjs",
+      "test/performance-glance.mjs",
+      "test/board-state.mjs",
+      "test/open-result.mjs",
+      "test/phone-first-screen.mjs",
+      "test/desk-session.mjs",
+      "test/results-model.mjs",
+      "test/settings-model.mjs"
+    ],
+    "ui_matrix": [
+      {
+        "zone": "UTC",
+        "file": "test/ui-modules.mjs",
+        "tests": 314,
+        "pass": 314,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/status-line.mjs",
+        "tests": 44,
+        "pass": 44,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/performance-glance.mjs",
+        "tests": 28,
+        "pass": 28,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/board-state.mjs",
+        "tests": 212,
+        "pass": 212,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/open-result.mjs",
+        "tests": 11,
+        "pass": 11,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/phone-first-screen.mjs",
+        "tests": 17,
+        "pass": 17,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/desk-session.mjs",
+        "tests": 32,
+        "pass": 32,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/results-model.mjs",
+        "tests": 110,
+        "pass": 110,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "UTC",
+        "file": "test/settings-model.mjs",
+        "tests": 27,
+        "pass": 27,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/ui-modules.mjs",
+        "tests": 314,
+        "pass": 314,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/status-line.mjs",
+        "tests": 44,
+        "pass": 44,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/performance-glance.mjs",
+        "tests": 28,
+        "pass": 28,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/board-state.mjs",
+        "tests": 212,
+        "pass": 212,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/open-result.mjs",
+        "tests": 11,
+        "pass": 11,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/phone-first-screen.mjs",
+        "tests": 17,
+        "pass": 17,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/desk-session.mjs",
+        "tests": 32,
+        "pass": 32,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/results-model.mjs",
+        "tests": 110,
+        "pass": 110,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/settings-model.mjs",
+        "tests": 27,
+        "pass": 27,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/ui-modules.mjs",
+        "tests": 314,
+        "pass": 314,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/status-line.mjs",
+        "tests": 44,
+        "pass": 44,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/performance-glance.mjs",
+        "tests": 28,
+        "pass": 28,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/board-state.mjs",
+        "tests": 212,
+        "pass": 212,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/open-result.mjs",
+        "tests": 11,
+        "pass": 11,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/phone-first-screen.mjs",
+        "tests": 17,
+        "pass": 17,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/desk-session.mjs",
+        "tests": 32,
+        "pass": 32,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/results-model.mjs",
+        "tests": 110,
+        "pass": 110,
+        "fail": 0,
+        "skipped": 0
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/settings-model.mjs",
+        "tests": 27,
+        "pass": 27,
+        "fail": 0,
+        "skipped": 0
+      }
+    ],
+    "failed": [],
+    "check_joe_ui": {
+      "ok": true,
+      "files": 32,
+      "terms": 32
+    }
+  },
+  "candidate_reseal": {
+    "decision": "Keep 261029192345.0.0. check-release derives reservation from previous release 38; test/release accepts the same pending reservation. Release preparation declares candidate reservation is not a published release. No release-set manifest exists for this candidate per coordinator brief; no immutable artifact is rewritten. Seal in a separate commit.",
+    "version": "261029192345.0.0",
+    "contract_set_sha256": "3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350",
+    "presentation_source_commit": "01b3080948c21899cbbacbfa3447da6799af1b56"
+  },
+  "processes": {
+    "final_matrix_started": [
+      {
+        "root": "/tmp/joed-166-r38-bd1cb3ab",
+        "runnerPid": 30536,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 30537,
+              "cpuTime": 0.077944
+            },
+            {
+              "type": "GPU",
+              "id": 30546,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 30547,
+              "cpuTime": 0.018958
+            }
+          ]
+        }
+      },
+      {
+        "root": "/tmp/joed-166-r39-before-bd1cb3ab",
+        "runnerPid": 31879,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 31880,
+              "cpuTime": 0.057157
+            },
+            {
+              "type": "GPU",
+              "id": 31881,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 31882,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/Users/markus/Code/joedesk-worktrees/joed-166-r39-results-perf",
+        "runnerPid": 33004,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 33009,
+              "cpuTime": 0.048739
+            },
+            {
+              "type": "GPU",
+              "id": 33012,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 33013,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/tmp/joed-166-r38-bd1cb3ab",
+        "runnerPid": 34239,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 34243,
+              "cpuTime": 0.04758
+            },
+            {
+              "type": "GPU",
+              "id": 34250,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 34251,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/tmp/joed-166-r39-before-bd1cb3ab",
+        "runnerPid": 35316,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 35317,
+              "cpuTime": 0.050818
+            },
+            {
+              "type": "GPU",
+              "id": 35318,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 35319,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/Users/markus/Code/joedesk-worktrees/joed-166-r39-results-perf",
+        "runnerPid": 36456,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 36461,
+              "cpuTime": 0.049898
+            },
+            {
+              "type": "GPU",
+              "id": 36469,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 36470,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/tmp/joed-166-r38-bd1cb3ab",
+        "runnerPid": 38161,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 38163,
+              "cpuTime": 0.063304
+            },
+            {
+              "type": "GPU",
+              "id": 38165,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 38166,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/tmp/joed-166-r39-before-bd1cb3ab",
+        "runnerPid": 39325,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 39331,
+              "cpuTime": 0.055123
+            },
+            {
+              "type": "GPU",
+              "id": 39336,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 39337,
+              "cpuTime": 0
+            }
+          ]
+        }
+      },
+      {
+        "root": "/Users/markus/Code/joedesk-worktrees/joed-166-r39-results-perf",
+        "runnerPid": 40694,
+        "engine": {
+          "protocolVersion": "1.3",
+          "product": "HeadlessChrome/153.0.8010.12",
+          "revision": "@971a7443b0c9b0a9b2860529b33331b76077ec62",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36",
+          "jsVersion": "15.3.76.4"
+        },
+        "processes": {
+          "processInfo": [
+            {
+              "type": "browser",
+              "id": 40711,
+              "cpuTime": 0.052545
+            },
+            {
+              "type": "GPU",
+              "id": 40755,
+              "cpuTime": 0
+            },
+            {
+              "type": "network.mojom.NetworkService",
+              "id": 40757,
+              "cpuTime": 0
+            }
+          ]
+        }
+      }
+    ],
+    "teardown": "Every driver awaited browser.close() and board.close() in finally. Earlier diagnostic process IDs are in the execution transcript; all drivers completed with teardown messages."
+  }
+}

@@ -273,7 +273,9 @@ function easedAxis(el, target, o, room) {
 // glides a new range over that many ms, calling again() for each next frame
 // (easeKey: a new key lands at once).
 export function drawChart(el, o) {
-  const W = el.clientWidth, H = el.clientHeight;
+  // Callers that already measured the box can draw after their DOM writes
+  // without asking the browser to lay out the page again.
+  const W = o.size?.w ?? el.clientWidth, H = o.size?.h ?? el.clientHeight;
   if (!W || !H) return null;
   const pad = { l: 64, r: 14, t: 12, b: 24, ...(o.pad || {}) };
   const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
