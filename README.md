@@ -2,16 +2,17 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261029192345.0.0` (`inspr-calver-3`, stable sequence 39), reserved once at `2026-10-29T19:23:45Z` for the board redesign (JOED-144, release [JOED-159](https://aeon.barta.cm/p/JOED/JOED-159)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261030085000.0.0` (`inspr-calver-3`, stable sequence 40), reserved once at `2026-10-30T08:50:00Z` for the board redesign follow-ups (JOED-158, JOED-168, JOED-169; release [JOED-171](https://aeon.barta.cm/p/JOED/JOED-171)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261028202622.0.0` / sequence 37,
-published on `main` at `aedc666492a6379bf946900ce8521d105a70ede5` under JOED-122,
-live on csb0 since `2026-10-29T07:51:18Z` (JOED-122). `last_deployed_release` records that release. `previous_release` records sequence 38
-(`261029075623.0.0`), published to main at `9ec65b46709201669d65fcc04f6a21b1bb567e31`
-with its release set verified in run `40846643125` (JOED-143), but never deployed.
-Its disposition is `superseded-before-deployment`: Markus requested release 39
-directly on 2026-10-29, without settling or waiting. This history does not claim
-adoption for sequence 39. Sequence 36 (`261028081016.0.0`) was previously deployed
+**Last deployed release:** `inspr-calver-3` / `261029192345.0.0` / sequence 39,
+published on `main` at `95aa934293c4a96b3ad80b64496b53966bc18360` under JOED-159,
+live on csb0 since `2026-10-30T08:44:03Z` and adopted at `2026-10-30T08:46:01Z`
+(`adoption/261029192345.0.0.json`). Both `previous_release` and
+`last_deployed_release` record sequence 39; its disposition is `deployed` with
+`deployed: true`. Sequence 38 (`261029075623.0.0`) was published but never
+deployed, retaining its historical `superseded-before-deployment` disposition.
+Sequence 37 (`261028202622.0.0`) was previously deployed at
+`2026-10-29T07:51:18Z` (JOED-122). Sequence 36 (`261028081016.0.0`) was previously deployed
 at `2026-10-28T20:23:05Z` (JOED-106). Sequence 35 (`261027124551.0.0`) was previously deployed
 at `2026-10-27T20:18:18Z` (JOED-99). Sequence 34 (`261026232616.0.0`) was previously deployed
 at `2026-10-27T03:30:43Z` (JOED-97). Sequence 33 (`261026070713.0.0`) was previously deployed
@@ -93,7 +94,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261029192345.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261030085000.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -185,6 +186,12 @@ board data/config/audit files, retain exact bytes, use directory mode 0700 and
 file mode 0600, and record sizes/SHA256 in `backup-manifest.json`. Unknown files,
 symlinks, oversized input, incomplete backups and existing destinations fail
 closed; nothing is deleted or overwritten.
+V2 backups also preserve recognized damaged copies and exact `<known v2 store>.next`
+retry files verbatim, including partial non-JSON bytes. These evidence files share
+one limit of 64 copies; the 65th blocks backup until an operator retains the
+needed evidence elsewhere and trashes old copies. Each file remains limited to
+16 MiB and the complete backup to 32 MiB. Retry evidence never replaces the
+validated primary store; verification and restore enforce the same limits.
 
 The command forms are:
 
@@ -464,6 +471,49 @@ Fork PRs always run hosted. Keep the switch unset until OPS registers the runner
 and requires approval for all outside collaborators; `pull_request_target` is
 forbidden. Checkout explicitly cleans the workspace, and CI temporary files and
 npm's cache stay under `RUNNER_TEMP`.
+
+JOED-169: CI keeps every PR run; it has no workflow concurrency group. GitHub's
+default concurrency queue replaces older pending runs even with
+`cancel-in-progress: false`; `queue: max` still cancels overflow beyond 100
+pending runs ([GitHub concurrency semantics](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)).
+Instead, one combined browser step uses `scripts/with-browser-lock.sh`.
+On agm2, `flock` acquires `/dev/shm/joedesk-browser.lock` once for all six
+browser phases: Board, Results (all zones), Settings, both preview checks and
+release carry-overs, including browser teardown. There is no mid-job release
+or reacquisition. Setup and artifact uploads stay outside the lock. Results
+and Settings still execute after an earlier gate failure; preview checks and
+carry-overs require the preceding gates to pass. The three runners must
+share that host-local filesystem and service user for serialization. Missing
+`flock`, denied lock-file access, or a non-timeout acquisition error emits a
+`::warning::` and a step-summary warning, then runs the phases UNLOCKED; timing
+budgets may contend. These runs export `JOED_BROWSER_LOCK_STATE=unavailable`
+and `JOED_BROWSER_LOCK_REASON`; the state and reason appear beside the budget
+tables. A real lock timeout still fails with exit 75 before any phase starts;
+unknown runner environments still refuse execution. Never unlink this lock file
+while jobs are running: its stable inode is the mutual exclusion boundary. No
+host configuration or runner labels are changed by the workflow. Hosted jobs use their isolated VMs
+without the lock; fork PRs retain the hosted-only runner guard.
+
+Jobs can overlap while their browser phases wait for the lock. This preserves
+queued runs without a concurrency-group cap. The job timeout is 120 minutes:
+60 minutes waiting (two typical 30-minute locked runs), 45 minutes for its own
+browser work, and 15 minutes for setup/uploads. `flock --wait 3600` gives lock
+waiting a separate one-hour bound; timeout fails clearly before any browser
+phase starts. This sizes for three overlapping jobs at the typical duration;
+flock makes no FIFO guarantee, so sustained contention can still exhaust the
+explicit wait bound. Timeout or cancellation remains visible; it never
+supersedes another pending PR run. Wait start/acquisition UTC times and waited
+seconds appear in the step log and summary and beside the machine-load tables
+in QA `index.md`; hosted runs report the bypass and zero wait, and commands
+outside the wrapper report unavailable lock evidence. Package/OCI jobs
+and other tenants can still add load; DEVOPS owns agm2's CPU reservation.
+Before each budget attempt, including the one permitted re-measurement, the
+shared budget scripts record UTC sample time, 1/5/15-minute host load averages,
+logical CPU count and host-wide browser process count beside the budget table
+in QA `index.md` (and the reference command's output). Counts include the active
+browser and its helpers; failed process inspection prints `unavailable`, never
+zero. Inspection requests executable names only, not process arguments. Load
+evidence does not change a budget, guard, failure decision or re-measure rule.
 
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
@@ -1527,10 +1577,21 @@ rendered pixel verification remains a coordinator gate. This board-only policy
 does not change revision 10 or require producer re-vendoring.
 When Today is a broken dash, its local caption states the reason unless the
 board's state line already explains it. This includes pending start-of-day
-results and every revision-10 exactness reason; repeated section reasons stay shared.
+results and every revision-10 exactness reason; repeated section reasons stay shared. Multi-desk
+fault captions are capped within the existing two-line reserve (three on phones),
+with their full text retained for accessibility and in the hover title.
+
+Mixed Open blockers name both the desks waiting on prices and the desks whose
+result is not exact, in the same order regardless of the feed's desk ordering.
+An absent P&L source stays absent; it is not evidence of a broker fault.
+Absent Open figures and their summary say “unavailable”, agreeing with the light;
+an all-price-wait household keeps “Waiting on prices” through retained observations.
 
 JOED-148 (board only, no figure changes meaning) states each dash's reason once
-and promises no time. `not_exact_yet` reads “not exact”; the other not-exact
+and promises no time. Other missing figures name their supplied reason directly
+(“Today: not reported by the broker”), or say “not reported” without a reason.
+A reason-less Today or Open summary never claims that board data has not arrived.
+`not_exact_yet` reads “not exact”; the other not-exact
 reasons add their own words (“Not exact · start-of-day value missing”). A
 not-exact household Today names the desks that keep it from being exact,
 from the board's own per-desk cells (“Not exact for J and Joe”); a reason that
@@ -1903,9 +1964,10 @@ separate supporting Cash figure, and Settings appends it to the account
 row. Both use the label “Cash” and caption “cash · as the broker reports it”.
 They show two decimals using exact integer units for display only, with
 the untouched broker lexeme in title and accessible name. Null Cash shows a
-muted dash in the Desk figure with “not reported · [reason]” in its caption;
-Settings retains that wording inline. A not-exact Cash says “not exact”
-instead (JOED-148). Rev-7 omission reads “no data received yet”.
+muted dash in the Desk figure with its reason once beside it; a reason shared
+with the account value stays in the change line. Settings shows the reason
+once inline. Both accessible names carry the same reason. A not-exact Cash
+says “not exact” instead (JOED-148). Rev-7 omission reads “no data received yet”.
 Desk reserves fixed caption lines inside each cell; Settings reserves the actual
 wrapped value/stale/null reason forms, including the session reason at 360 px. They wrap
 text and keep the existing header. P5's `cash` cases cover real ingress, stale, null, API-session loss,
@@ -2138,7 +2200,7 @@ caption covers the desk figures. Cash is Desk's Cash figure (JOED-49) in the
 block's “Since start · Cash” line, as designed (“Cash € 4.212,77”; Settings
 keeps the caption “cash · as the broker reports it”): two decimals, the
 broker's exact lexeme in its title and accessible name, a missing Cash a
-muted dash with “not reported · ‹reason›” (“no data received yet” when none
+muted dash with its reason stated once (“no data received yet” when none
 came), a not-exact one “not exact” (JOED-148) and an outage's kept Cash
 withheld (JOED-91); a reason the account value shares is said once, in the
 change line. On a phone the block stays open, first on the screen (no
@@ -2641,17 +2703,65 @@ IANA Europe/Vienna uses whole-hour CET/CEST offsets (UTC+1/+2) in that
 window; the lower bound excludes LMT and wartime rules, and the upper bound
 limits reliance on recurring future rules. Modern closes are indexed once
 and transferred; quiet chart marks visit only dates that will be drawn.
-Every other date retains the pre-speed-up (`4b913c7`) key derivation,
-ordering and lazy chart conversion, including its early-year, year-10000
-rollover and 1890 hour-rounding quirks. Full four-digit keys sort numerically
-across historical and modern ranges; noncanonical legacy keys retain their
-original ordering for compatibility. No calendar/schema expansion is implied.
+JOED-168 corrects dates outside that window: exact Vienna offsets retain
+historical seconds (including LMT), Gregorian year 0 stays year 0, and keys
+use at least four year digits without truncating the year-10000 rollover.
+Numeric calendar ordering is shared by indexing, lookups, period boundaries,
+close carry and partial-day counts. Calendar arithmetic preserves years 0–99
+and the BC day preceding year 0; historical chart conversion remains lazy.
+The modern cache and chart conversion policy remain unchanged. No market
+calendar or schema expansion is implied; year 10000 can arise only as a
+derived Vienna date of a schema-valid UTC instant.
 `test/results-model.mjs` pins the complete baseline module by SHA256 and
-compares 2,000 payloads (seed `0x166f3003`) through the actual read worker and
-main-thread fallback, including the full schema year range, DST and both window edges.
+compares 2,000 seeded payloads per host timezone (seed `0x166f3003`) through
+the actual read worker and main-thread fallback. Modern-only payloads retain
+the frozen `4b913c7` reference; mixed/extreme payloads use an independent
+explicit-era Gregorian reference with civil-day arithmetic and raw-record
+scans. Named regressions cover both mixed-year ordering failures, year 0,
+LMT midnight to the millisecond, DST and both modern-window edges.
+
+The Results page uses the same canonical Vienna keys as the index, including
+year 0, padded years before 1000 and the year-10000 rollover. Calendar and
+period navigation, route application, YTD selection, day labels and partial
+warnings use numeric/calendar helpers rather than string ordering or fixed
+year positions. `test/results-page.mjs` exercises the actual page renderer
+and controls; the original 11 regressions fail with `RESULTS_PAGE_PARENT=1` against
+`d848cd0` loaded in memory, while modern markup stays byte-identical. These
+tests are also included by `test/results-model.mjs`.
+Clock labels parse hours and minutes independently of the wall-clock year's
+width. Format and Day-view regressions cover closing instants in years 0000,
+0999 and the Vienna year-10000 rollover; all three fail against `6d07151`.
 
 Reseal the integrated runtime closure once. Contracts revision 10, contract set
 `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
 shared presentation pin and legacy anchor remain unchanged. This candidate
 grants no publication or deployment approval; the coordinator owns the
 cross-family gate, publication and live verification.
+
+## Release 40 candidate (JOED-171)
+
+Reserve `261030085000.0.0` at `2026-10-30T08:50:00Z` as `inspr-calver-3`, stable sequence 40,
+for the board redesign follow-ups: exact extreme dates and trade ordering in
+Results (JOED-168), single-reason Cash and honest missing-value wording
+(JOED-158), and steadier CI speed checks with serialized browser jobs and
+machine-load evidence (JOED-169). Timing budgets remain unchanged.
+
+Previous and last deployed release are sequence 39 (`261029192345.0.0`), main
+`95aa934293c4a96b3ad80b64496b53966bc18360` (JOED-159), live on csb0 since
+`2026-10-30T08:44:03Z`, adopted at `2026-10-30T08:46:01Z` as recorded in
+`adoption/261029192345.0.0.json`. Reuse disposition `deployed` and
+`deployed: true`; adoption is evidenced by that existing record. About orders
+40, 39, 38, 37 through 26, then legacy; release 39 retains its original entry.
+Earlier release-preparation sections describe their reservation-time state.
+
+- Keep Results dates and trade ordering correct, even for records from very distant years.
+- Read one clear reason for missing Cash and honest wording for missing desk values.
+- Get steadier release speed checks by running browser checks one job at a time and recording machine load.
+
+Reseal the integrated runtime closure. Contracts revision 10 and contract set
+`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
+shared presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`, legacy
+anchor and historical artifacts remain unchanged. The saved presentation config
+and templates match the local approved source; the offline bundle remains
+active in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.

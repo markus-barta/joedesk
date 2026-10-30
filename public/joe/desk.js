@@ -99,7 +99,7 @@ export function disclosureProblem(candidates) {
     const state = label === OPEN && waitingOnPrices(cell) ? 'waiting on prices'
       : notExactDash(cell) ? NOT_EXACT : cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
       : p.state === 'not reported' ? 'not reported' : 'unavailable';
-    const reason = cell?.reason ?? (p.state === 'not reported' ? 'feed_not_received' : null);
+    const reason = cell?.reason ?? (p.state === 'not reported' && !['Today', OPEN].includes(label) ? 'feed_not_received' : null);
     // Unavailable money leads even when its honest not-exact icon is neutral;
     // an old check-in must not obscure that the row's figures are unknown.
     const priority = cell?.state === 'broken' || state === 'unavailable' ? 3 : severity[p.tone];
@@ -554,9 +554,12 @@ export function householdPnlReason(states, data, field, sharedReason = null) {
     return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${isFault(g) && g.reason && g.reason !== sharedReason ? ` · ${g.reason}` : ''}`).join('; '));
   }
   if (results.today.kind !== 'notExact') return null;
-  // Keep the producer's own price-wait caption through transport-aged desks.
-  // A real desk fault has already replaced that household reason above.
-  if (field === 'openPnl' && results.today.reason === 'open_pnl_unavailable') return null;
+  // An all-price-wait household keeps its producer wording through retained
+  // observations. Mixed not-exact blockers still need every desk named.
+  if (field === 'openPnl' && results.today.reason === 'open_pnl_unavailable' &&
+      !DESKS.some(id => results[id].kind === 'notExact' && results[id].reason !== 'open_pnl_unavailable')) return null;
+  // Name every desk blocker, including mixed waiting and not-exact states.
+  // With no desk blocker the producer's own household caption stays below.
   const blocking = deskDays(states, data, field).filter(g => !['exact', 'estimated'].includes(g.word));
   if (!blocking.length) return null;
   if (blocking.length === 1) {
@@ -823,7 +826,7 @@ function heroFirst(ctx, facts, shared, board) {
   const k = label?.phase === 'live' ? '<span class="live-dot" aria-hidden="true"></span>' : icon('clock');
   return { caption, html: `<div class="primary" data-cell="hero.day" data-phase="${label?.phase ?? 'today'}" data-state="${day.state}"><div class="hero-k">${k}${cutLabel(term(label?.phase === 'closed' ? 'closedday' : 'today', text))}${cellIcon(dayCell, shared)}</div>
         <div class="display">${value}</div><div class="pct-slot">${pct}</div>
-        <span class="c primary-caption">${caption}</span></div>` };
+        <span class="c primary-caption day-caption" title="${esc(plainText(caption))}">${caption}</span></div>` };
 }
 
 const SINCE_CAPTION = 'after fees, incl. open positions';
@@ -834,7 +837,8 @@ export function heroLeft(ctx, facts = deskFacts(ctx)) {
   const board = boardCaptionCell(ctx);
   const shared = data ? sharedSectionReason(['today.dayPnl', 'today.totalPnl', 'today.openPnl', 'today.equity'].map(name => states[name])) : null;
   // JOED-157: a household Open withheld because of desks names them, fault first.
-  const openFault = householdPnlReason(states, data, 'openPnl', shared);
+  const openFault = householdPnlReason(states, data, 'openPnl', shared) ??
+    (data && absentPnl(states, data, 'openPnl') ? 'Unavailable' : null);
   const kpi = (termKey, label, name, key, opts) => {
     const v = cellView(states[name], key, { ...opts, sharedReason: shared, label: label ?? { open: OPEN, desksmoney: 'Desks’ money' }[termKey] });
     const caption = reservedCaption(sharesBoardCaption(states[name], board) ? '' : name === 'today.openPnl' && openFault != null ? esc(openFault) : v.caption, opts.captions ?? [opts.caption]);

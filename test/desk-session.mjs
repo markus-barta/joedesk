@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
 import { width, measure, lineCount, VERDANA_BOLD } from './fixtures/text-width.mjs';
 import { validateContract } from '../contracts/index.mjs';
@@ -109,6 +110,35 @@ test('JOED-167 fresh position sections reuse unchanged rows; changed rows, state
   ctx.states.positions.ageSeconds = 62;
   assert.notEqual(positionsFor(ctx), stale, 'non-fresh captions stay live');
   assert.equal(positionsFor(ctx).html, desk.positionsHtml(ctx).html);
+});
+
+test('JOED-158 positions cache: receipt, reason, retention, KEEP and rejection invalidate a populated section', () => {
+  for (const change of ['receipt', 'reason', 'retention', 'KEEP', 'rejection']) {
+    const ctx = context(), cell = ctx.states.positions, baseline = positionsFor(ctx);
+    assert.equal(positionsFor(ctx), baseline, `${change}: first populate the cache`);
+    if (change === 'receipt') ctx.states.positions = { ...cell, valueReceivedAt: '2026-10-14T17:41:59.000Z' };
+    if (change === 'reason') ctx.states.positions = { ...cell, reason: 'source_unavailable' };
+    if (change === 'retention') ctx.states.positions = { ...cell, state: 'stale', reason: 'snapshot_stale', retained: true, ageSeconds: 65 };
+    if (change === 'KEEP') {
+      const fleet = { desks: { keep: [cell.value[0].symbol] } };
+      ctx.feeds['fleet-config'] = { value: fleet };
+      ctx.states = boardStates(ctx.feeds, ctx.now);
+      assert.ok(ctx.states.kept.value.some(r => r.symbol === fleet.desks.keep[0]));
+    }
+    if (change === 'rejection') ctx.states.positions = { ...cell, state: 'broken', reason: 'contract_invalid', retained: true, ageSeconds: 65 };
+    const changed = positionsFor(ctx);
+    assert.notEqual(changed, baseline, change);
+    assert.deepEqual(changed, desk.positionsHtml(ctx), `${change}: same result as the uncached renderer`);
+    if (change === 'retention' || change === 'rejection') {
+      ctx.states.positions = { ...ctx.states.positions, ageSeconds: 125 };
+      assert.notEqual(positionsFor(ctx).html, changed.html, `${change}: retained ages still tick`);
+    }
+    ctx.states.positions = cell;
+    delete ctx.feeds['fleet-config'];
+    assert.deepEqual(positionsFor(ctx), baseline, `${change}: recovery returns the original fresh section`);
+    const recovered = positionsFor(ctx);
+    assert.equal(positionsFor(ctx), recovered, `${change}: recovered section can be reused`);
+  }
 });
 
 test('JOED-153 M1: the first figure names its session in every phase, with its own link and term', () => {
@@ -999,5 +1029,59 @@ test('JOED-153 browser fixture: the session checks expect what Desk renders from
     // A minute later the record is old too: the claim from it says so.
     const who = text(htmlDocument(deskCard(ctx, 'joel')).querySelector('.drow .who'));
     assert.ok(who.includes(`· no trades since 10${NB}Sep`) && who.endsWith(`· ${held}`) && who.includes('Results stale') === (later === at(P3_NOW, 75)), who);
+  }
+});
+
+
+test('JOED-158 hero caption: three independent desk faults keep complete accessible text inside a capped reserve', () => {
+  const data = structuredClone(JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact);
+  const reasons = ['source_unavailable', 'gateway_down', 'history_write_failed'];
+  for (const [i, row] of data.desks.entries()) {
+    row.money.dayPnl = null; (row.money.reasons ??= {}).dayPnl = reasons[i];
+    Object.assign(row.pnlSources.day, { status: 'unavailable', method: null, observedAt: null, reason: reasons[i] });
+  }
+  data.totals.dayPnl = null; (data.totals.reasons ??= {}).dayPnl = reasons[0];
+  Object.assign(data.pnlSources.day, { status: 'unavailable', method: null, observedAt: null, reason: reasons[0] });
+  assert.equal(validateContract('data', data).ok, true);
+  const feeds = { data: { value: data } }, states = boardStates(feeds, data.receivedAt);
+  const caption = htmlDocument(desk.heroLeft({ feeds, states, now: data.receivedAt })).querySelector('[data-cell="hero.day"] .primary-caption');
+  const expected = 'Unavailable for J · not reported by the broker; unavailable for Joe · broker connection down; unavailable for Joel · history could not be saved';
+  assert.equal(caption.textContent, expected);
+  assert.equal(caption.getAttribute('title'), expected, 'hover keeps the whole caption');
+  assert.equal(caption.getAttribute('aria-hidden'), null, 'complete text remains in accessibility');
+  assert.ok(lineCount(measure(expected, 12, { factor: 1.06 }), 240) > 3, 'reproduce the overflowing multi-desk caption');
+  assert.ok(caption.classList.contains('day-caption'));
+  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
+  const rules = [...css.matchAll(/\.primary-caption\.day-caption\s*\{([^}]+)\}/g)].map(m => m[1]);
+  assert.equal(rules.length, 2, 'desktop and phone caps');
+  assert.match(rules[0], /max-height: 32px/);
+  assert.match(rules[0], /-webkit-line-clamp: 2/);
+  assert.match(rules[0], /overflow: hidden/);
+  assert.match(rules[1], /max-height: 48px/);
+  assert.match(rules[1], /-webkit-line-clamp: 3/);
+});
+
+
+test('JOED-158 caption audit: accept only a whole fixed reserve with complete accessible text and title', () => {
+  const source = readFileSync(new URL('../scripts/browser/audit.js', import.meta.url), 'utf8');
+  const method = source.match(/    clipping\(\) \{[\s\S]*?^    \},/m)?.[0];
+  assert.ok(method);
+  for (const phone of [false, true]) {
+    let height = phone ? 48 : 32;
+    const el = { title: 'Unavailable for J · broker connection down', textContent: 'Unavailable for J · broker connection down',
+      closest: () => null, matches: selector => selector === '.primary-caption.day-caption',
+      getAttribute: () => null, getBoundingClientRect: () => ({ height }) };
+    const style = { webkitLineClamp: phone ? '3' : '2', overflowY: 'hidden', lineHeight: '16px' };
+    const audit = runInNewContext(`({ ${method} })`, { document: { querySelectorAll: () => [el] },
+      visible: () => true, getComputedStyle: () => style, matchMedia: () => ({ matches: phone }) });
+    assert.equal(audit.clipping().length, 0);
+    el.textContent = el.textContent.replace(/ (?=·)/g, '\u00a0');
+    assert.equal(audit.clipping().length, 0, 'phone typography preserves complete title words');
+    el.title = 'Unavailable'; assert.equal(audit.clipping().length, 1, 'a shortened title fails');
+    el.title = el.textContent;
+    style.webkitLineClamp = '1'; assert.equal(audit.clipping().length, 1, 'the wrong cap fails');
+    style.webkitLineClamp = phone ? '3' : '2';
+    height += 16; assert.equal(audit.clipping().length, 1, 'a grown reserve fails'); height -= 16;
+    el.getAttribute = () => 'true'; assert.equal(audit.clipping().length, 1, 'hidden accessible text fails');
   }
 });

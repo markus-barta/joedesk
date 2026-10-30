@@ -32,11 +32,15 @@ function damagedCopy(name) {
   const continuity = /^history-continuity\.json\.damaged-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.exec(name);
   return continuity?.[0] === name;
 }
+// Failed atomic writes are evidence, never replacement state. Match one
+// exact retry name per known v2 store; share the damaged-copy budget.
+const evidenceCopy = name => damagedCopy(name) ||
+  (typeof name === 'string' && name.endsWith('.next') && FILES.v2.includes(name.slice(0, -5)));
 function allowedFiles(boardSchema, names) {
   const allowed = FILES[boardSchema];
   return allowed && names.length <= allowed.length + (boardSchema === 'v2' ? DAMAGED_MAX : 0) &&
-    names.filter(damagedCopy).length <= DAMAGED_MAX &&
-    names.every(name => allowed.includes(name) || (boardSchema === 'v2' && damagedCopy(name)));
+    names.filter(evidenceCopy).length <= DAMAGED_MAX &&
+    names.every(name => allowed.includes(name) || (boardSchema === 'v2' && evidenceCopy(name)));
 }
 // account-store's validMarker is private. Check its persisted three-field shape
 // with the shared instant validator and the exact names its writer generates.

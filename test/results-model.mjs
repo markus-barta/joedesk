@@ -9,6 +9,8 @@ import { createHash } from 'node:crypto';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
+import * as exactReference from './fixtures/results-exact-reference.mjs';
+import './results-page.mjs';
 
 const mapped = (specifier, parentURL) => {
   // The fixture is the exact, SHA256-pinned 4b913c7 module, including imports.
@@ -140,11 +142,11 @@ test('JOED-166 close coordinates: contract-valid extreme dates preserve indexing
 });
 
 for (const [name, instant, date] of [
-  ['year-999 reproducer', '0999-06-15T10:00:00.000Z', '999-06-15 '],
-  ['year-10000 rollover reproducer', '9999-12-31T23:00:00.000Z', '10000-01-0'],
-  ['year-1 trade', '0001-06-15T10:00:00.000Z', '1-06-15 11'],
-  ['year-9999 final instant trade', '9999-12-31T23:59:59.999Z', '10000-01-0'],
-]) test(`JOED-166 extreme trades: ${name} survives indexing, worker transfer and main-thread fallback`, { timeout: 5000 }, async () => {
+  ['year-999 reproducer', '0999-06-15T10:00:00.000Z', '0999-06-15'],
+  ['year-10000 rollover reproducer', '9999-12-31T23:00:00.000Z', '10000-01-01'],
+  ['year-1 trade', '0001-06-15T10:00:00.000Z', '0001-06-15'],
+  ['year-9999 final instant trade', '9999-12-31T23:59:59.999Z', '10000-01-01'],
+]) test(`JOED-168 extreme trades: ${name} survives indexing, worker transfer and main-thread fallback`, { timeout: 5000 }, async () => {
   const { createFeed } = await import('../public/joe/feed.js');
   const realWorker = globalThis.Worker, realFetch = globalThis.fetch, realSelf = globalThis.self;
   const ctx = ctxOf([E('5000'), E('5000'), E('5000')]);
@@ -155,8 +157,7 @@ for (const [name, instant, date] of [
       trade.id = 'rt-extreme1';
       trade.openedAt = trade.closedAt = trade.fx.observedAt = instant;
       value.trades.push(trade);
-      // Preserve full/partial four-digit coverage as well as the legacy
-      // trade key; an overflow into year 10000 has no schema-valid day row.
+      // An overflow into year 10000 has no schema-valid day row.
       if (coverage !== 'absent') {
         value.days.push({ ...closeDay(coverageDate, '5000'), coverage,
           ...(coverage === 'partial' ? { partialReasons: ['history_gap'] } : {}) });
@@ -181,9 +182,9 @@ for (const [name, instant, date] of [
       const cell = feed.select().states.results;
       assert.equal(cell.state, 'fresh');
       for (const ix of [transferred, reply.index, cell.value.index]) {
-        assertPriorIndex(ix, prior.indexResults(value), `${name}, ${coverage}`);
+        assertExactIndex(ix, exactReference.reference(value), `${name}, ${coverage}`);
         const at = ix.dates.indexOf(date);
-        assert.ok(Number.isNaN(ix.close.at[at]), 'an unsupported close coordinate is left uncached');
+        assert.ok(Number.isNaN(ix.close.at[at]), 'a nonmodern close coordinate is left uncached');
         for (const k of before.dates) assert.equal(ix.close.at[ix.dates.indexOf(k)], before.close.at[before.dates.indexOf(k)], 'normal coordinates stay cached');
         assert.equal(ix.trades.n, before.trades.n + 1);
         assert.ok([...ix.trades.closedAt].includes(Date.parse(instant)));
@@ -258,26 +259,105 @@ function assertPriorIndex(ix, expected, label) {
   }
 }
 
+function assertExactIndex(ix, expected, label) {
+  assert.deepEqual(ix.dates, expected.dates, `${label}: numeric date domain`);
+  assert.deepEqual([...ix.trades.date], expected.trades.map(t => expected.dates.indexOf(t.date)), `${label}: monotonic trade date indexes`);
+  assert.deepEqual(Array.from({ length: ix.trades.n }, (_, k) => M.trade(ix, k)), expected.trades.map(t => expected.tradesOn(t.date, ALL).find(row => row.id === t.id)), `${label}: every trade column`);
+  for (const date of expected.dates) {
+    assert.deepEqual(M.dayResult(ix, date, ALL), expected.dayResult(date, ALL), `${label}: indexed day ${date}`);
+    assert.deepEqual(M.tradesOn(ix, date, ALL), expected.tradesOn(date, ALL), `${label}: listed day ${date}`);
+  }
+}
+
+test('JOED-168 LMT: exact second and millisecond at midnight, independent of cache order', () => {
+  const boundary = Date.parse('1890-06-15T22:54:39.000Z');
+  for (const offsets of [[-1, 0, 1, 321000], [321000, 1, 0, -1]]) for (const n of offsets) {
+    assert.equal(M.viennaDate(boundary + n), n < 0 ? '1890-06-15' : '1890-06-16');
+  }
+  for (const date of ['0000-01-01', '0000-02-29', '0099-12-31', '1890-06-16', '1893-04-01', '1916-05-01', '1916-10-01', '2200-01-01', '10000-01-01']) {
+    const at = M.viennaMidnight(date);
+    assert.equal(at, exactReference.midnight(date), date);
+    assert.equal(M.viennaDate(at), date);
+    assert.equal(M.viennaDate(at - 1), exactReference.addDays(date, -1));
+  }
+});
+
+test('JOED-168 year zero: leap arithmetic, preceding BC day, periods and route round-trip', () => {
+  assert.equal(M.addDays('0000-01-01', -1), '-0001-12-31');
+  assert.equal(M.addDays('-0001-12-31', 1), '0000-01-01');
+  assert.equal(M.addDays('0000-02-28', 1), '0000-02-29');
+  assert.equal(M.addDays('0000-02-29', 1), '0000-03-01');
+  assert.equal(M.daysIn(0, 1), 29);
+  assert.equal(M.daysIn(99, 1), 28);
+  assert.deepEqual(M.ymOf('0099-12-31'), [99, 11]);
+  for (const date of ['0000-01-01', '0000-02-29', '0099-12-31', '0100-01-01', '0999-12-31', '9999-12-31', '10000-01-01']) {
+    for (const p of ['day', 'week', 'month', 'ytd', 'all']) {
+      const per = M.periodOf(p, date, '10000-01-02', '0000-01-01');
+      assert.deepEqual({ start: per.start, end: per.end }, exactReference.span(p, date, '10000-01-02', '0000-01-01'));
+    }
+    if (date.length === 10) assert.equal(M.parseResultsRoute(`date=${date}`).date, date);
+  }
+  assert.equal(M.stepAnchor('day', '9999-12-31', 1, '10000-01-02', '9999-01-01'), '10000-01-01');
+  assert.equal(M.firstStep('0000-02-29'), '0000-02-01');
+});
+
+test('JOED-168 year zero and rollover: closes, percentage base, partial count and trades agree in both read paths', async () => {
+  const value = record([
+    closeDay('0000-01-01', '5001'), closeDay('0000-02-29', '5003'), closeDay('0001-01-01', '4999'),
+    { ...closeDay('9999-12-31', '5100'), coverage: 'partial', partialReasons: ['history_gap'] },
+  ], [
+    tradeOf('rt-zero', 'j', '0000-01-01T00:00:00.000Z', '0.01'),
+    tradeOf('rt-leap', 'j', '0000-02-29T12:00:00.000Z', '1'),
+    tradeOf('rt-modern', 'joe', '2026-10-13T10:00:00.000Z', '-1'),
+    tradeOf('rt-rollover', 'j', '9999-12-31T23:00:00.000Z', '2'),
+  ], '0000-01-01');
+  const expected = exactReference.reference(value), paths = await resultReadPaths('zero-and-rollover');
+  const ctx = ctxOf([E('5100'), E('5000'), E('5000')], { today: '10000-01-02', nowMs: null });
+  try {
+    for (const ix of await paths.read(value)) {
+      assertExactIndex(ix, expected, 'zero and rollover');
+      assert.equal(M.closeUnits(ix, 0, '-0001-12-31'), E('5000'));
+      assert.equal(M.closeUnits(ix, 0, '0000-01-01'), E('5001'));
+      assert.equal(M.closeUnits(ix, 0, '0000-02-29'), E('5003'));
+      assert.equal(M.closeUnits(ix, 0, '0001-01-01'), E('4999'));
+      assert.equal(M.closeUnits(ix, 0, '10000-01-01'), E('5100'));
+      for (const date of ['0000-01-01', '0000-02-29', '0001-01-01', '10000-01-01']) for (const p of ['day', 'week', 'month', 'ytd', 'all']) {
+        const per = M.periodOf(p, date, ctx.today, value.trackingStart);
+        assert.deepEqual(M.rollup(ix, per, ALL, ctx), expected.rollup(per, ALL, ctx));
+      }
+      const per = M.periodOf('day', '10000-01-01', ctx.today, value.trackingStart);
+      assert.equal(M.periodBase(ix, ctx, per, ALL), E('15100'));
+      assert.equal(M.countPartialDays(ix, { start: '9999-12-31', end: '10000-01-02' }, ctx.today), 1);
+      assert.equal(M.curve(ix, per, ALL, ctx).day, true, 'the rollover day has a usable chart');
+    }
+  } finally { paths.restore(); }
+});
+
 for (const [name, instant, expectedKey] of [
-  ['Codex five-digit rollover mixed with a modern trade', '9999-12-31T23:00:00.000Z', '10000-01-0'],
-  ['Codex astronomical year zero keeps the old era-less key', '0000-01-01T00:00:00.000Z', '1-01-01 01'],
-  ['Codex 1890 LMT keeps the pre-existing hour-rounding result', '1890-06-15T22:55:00.000Z', '1890-06-15'],
-]) test(`JOED-166 compatibility reproducer: ${name}`, async () => {
+  ['Codex five-digit rollover mixed with a modern trade', '9999-12-31T23:00:00.000Z', '10000-01-01'],
+  ['Codex year-999 mixed with a modern trade', '0999-06-15T10:00:00.000Z', '0999-06-15'],
+  ['Codex astronomical year zero', '0000-01-01T00:00:00.000Z', '0000-01-01'],
+  ['Codex 1890 LMT after midnight inside a UTC hour', '1890-06-15T22:55:00.000Z', '1890-06-16'],
+]) test(`JOED-168 exact reproducer: ${name}`, async () => {
   const value = record(['0000-01-01', '0001-01-01', '1000-01-01', '1890-06-15', '1890-06-16', '2026-10-13', '9999-12-31'].map(date => closeDay(date, '5000')),
     [tradeOf('rt-extreme1', 'j', instant, '0.01'), tradeOf('rt-modern', 'joe', '2026-10-13T10:00:00.000Z', '-1')], '1000-01-01');
-  const expected = prior.indexResults(value), paths = await resultReadPaths(name);
+  const expected = exactReference.reference(value), paths = await resultReadPaths(name);
   assert.equal(M.viennaDate(Date.parse(instant)), expectedKey);
   try {
     for (const ix of await paths.read(value)) {
-      assertPriorIndex(ix, expected, name);
+      assertExactIndex(ix, expected, name);
+      assert.equal(M.tradesOn(ix, '2026-10-13', ALL)[0].id, 'rt-modern', 'mixed ordering keeps the modern trade visible');
       for (const date of [...new Set([...expected.dates, '0000-01-01', '0001-01-01', '10000-01-01'])]) {
-        assert.deepEqual(M.dayResult(ix, date, ALL), prior.dayResult(expected, date, ALL));
-        assert.deepEqual(M.tradesOn(ix, date, ALL), prior.tradesOn(expected, date, ALL));
+        assert.deepEqual(M.dayResult(ix, date, ALL), expected.dayResult(date, ALL));
+        assert.deepEqual(M.tradesOn(ix, date, ALL), expected.tradesOn(date, ALL));
         for (const p of ['day', 'week', 'month', 'all']) {
-          const per = prior.periodOf(p, date, today, value.trackingStart);
-          assert.deepEqual(M.rollup(ix, per, ALL, ctxOf()), prior.rollup(expected, per, ALL, ctxOf()));
+          const per = M.periodOf(p, date, today, value.trackingStart);
+          assert.deepEqual(M.rollup(ix, per, ALL, ctxOf()), expected.rollup(per, ALL, ctxOf()));
         }
       }
+      assert.equal(roll(ix, 'week', '1001-01-01').trades, 0, 'year 10000 never enters week 1000-12-29..1001-01-04');
+      const future = ctxOf(null, { today: '10000-01-02', nowMs: null });
+      assert.deepEqual(roll(ix, 'week', expectedKey, ALL, future), expected.rollup(M.periodOf('week', expectedKey, future.today, value.trackingStart), ALL, future));
     }
   } finally { paths.restore(); }
 });
@@ -321,7 +401,7 @@ test('JOED-166 modern switches: curves consume transferred coordinates and spars
 
 const DIFFERENTIAL_SEED = 0x166f3003;
 const DIFFERENTIAL_CASES = 2000;
-test('JOED-166 differential property: 2000 seeded whole-schema payloads equal 4b913c7 in worker and fallback', { timeout: 120000 }, async () => {
+test('JOED-166/168 differential property: 2000 seeded payloads use frozen modern and exact extreme references in worker and fallback', { timeout: 120000 }, async () => {
   let state = DIFFERENTIAL_SEED;
   const random = () => { state ^= state << 13; state ^= state >>> 17; state ^= state << 5; return (state >>> 0) / 4294967296; };
   const pick = values => values[Math.floor(random() * values.length)];
@@ -341,7 +421,7 @@ test('JOED-166 differential property: 2000 seeded whole-schema payloads equal 4b
       // Every fourth case is modern-only; others mix a required edge, an
       // arbitrary instant anywhere in the schema, and modern trades. Extra
       // early-year sampling covers 0–999 densely, including Date.UTC's 0–99.
-      const modern = () => instant(Date.parse('2000-01-01T00:00:00.000Z'), Date.parse('2026-10-14T17:40:00.000Z'));
+      const modern = () => instant(Date.parse('1949-12-31T23:00:00.000Z'), Date.parse('2199-12-31T22:59:59.999Z'));
       const times = c % 4 === 0 ? [modern(), modern()] : [edges[c % edges.length], instant(min, max), modern(),
         instant(min, Date.parse('0999-12-31T23:59:59.999Z'))];
       for (let n = Math.floor(random() * 5); n > 0; n--) times.push(c % 4 === 0 ? modern() : instant(min, max));
@@ -361,42 +441,53 @@ test('JOED-166 differential property: 2000 seeded whole-schema payloads equal 4b
       value.seq = c + 1;
       if (c % 3 === 0) value.missingDays = [pick(dates)];
       assert.ok(validateContract('results', value).ok, `seed ${DIFFERENTIAL_SEED}, case ${c}: contract-valid`);
-      const expected = prior.indexResults(value);
+      const modernOnly = c % 4 === 0;
+      const expected = modernOnly ? prior.indexResults(value) : exactReference.reference(value);
       const indexes = await paths.read(value);
       indexes.push(structuredClone(M.indexResults(value), { transfer: [] }));
-      for (const [path, ix] of indexes.entries()) assertPriorIndex(ix, expected, `case ${c}, path ${path}`);
-      // Every represented day, including malformed legacy trade keys, plus
-      // adjacent days exercises empty cells and every distinct week/month.
-      // Equal full columns above also cover empty intervals between them.
-      const queries = [...new Set([...expected.dates, ...dates, ...dates.flatMap(k => [prior.addDays(k, -1), prior.addDays(k, 1)])])];
-      const curveOutcome = (model, ix, per) => {
-        try { return { value: model.curve(ix, per, ALL, ctxOf()) }; }
-        catch (e) { return { error: [e.name, e.message] }; }
-      };
+      assert.deepEqual(indexes[0], indexes[1], `case ${c}: worker and main-thread index agree`);
+      assert.deepEqual(indexes[0], indexes[2], `case ${c}: direct index agrees`);
+      if (modernOnly) for (const ix of indexes) assertPriorIndex(ix, expected, `case ${c}`);
+      else assertExactIndex(indexes[0], expected, `case ${c}`);
+      const queries = [...new Set([...expected.dates, ...dates, ...dates.flatMap(k => [exactReference.addDays(k, -1), exactReference.addDays(k, 1)])])];
+      // Short windows exercise lazy historical chart coordinates, without
+      // drawing thousands of years between unrelated trades.
       for (const anchor of ['2026-10-13', dates[dates.length - 1]]) {
-        const per = prior.periodOf('week', anchor, today, value.trackingStart);
-        const wanted = curveOutcome(prior, expected, per);
-        for (const ix of indexes.slice(0, 2)) assert.deepEqual(curveOutcome(M, ix, per), wanted, `case ${c}: bounded curve`);
+        const per = M.periodOf('week', anchor, today, value.trackingStart);
+        const actual = M.curve(indexes[0], per, ALL, ctxOf());
+        assert.deepEqual(actual, M.curve(indexes[1], per, ALL, ctxOf()), `case ${c}: worker/fallback curve`);
+        if (modernOnly) assert.deepEqual(actual, prior.curve(expected, per, ALL, ctxOf()), `case ${c}: frozen modern curve`);
+        else for (const pt of actual.pts) if (pt.k && !pt.edge && !pt.now) {
+          const next = exactReference.addDays(pt.k, 1);
+          // The modern chart path, including its 1980 midnight-gap policy,
+          // remains frozen by the brief; exact conversion covers extremes.
+          const wanted = M.isModernResultsDate(next) ? prior.viennaMidnight(next) : exactReference.midnight(next);
+          assert.equal(pt.x, wanted, `case ${c}: close coordinate ${pt.k}`);
+        }
       }
-      const contexts = [ctxOf(), ctxOf([E('5001'), null, E('4999')], { today: pick(dates), nowMs: null })];
+      const contexts = [ctxOf(), ctxOf([E('5001'), null, E('4999')], { today: pick(expected.dates), nowMs: null }),
+        ctxOf([E('5000'), E('5000'), E('5000')], { today: '10000-01-02', nowMs: null })];
       const desks = [ALL, [pick(ALL)], c % 2 ? ['j', 'joe'] : ['joe', 'joel']];
       for (const ctx of contexts) for (const selected of desks) {
         const periods = new Map();
         for (const date of queries) {
-          const dayExpected = prior.dayResult(expected, date, selected), tradeExpected = prior.tradesOn(expected, date, selected);
-          for (const ix of indexes.slice(0, 2)) {
-            assert.deepEqual(M.dayResult(ix, date, selected), dayExpected, `case ${c}: day ${date}`);
-            assert.deepEqual(M.tradesOn(ix, date, selected), tradeExpected, `case ${c}: tradesOn ${date}`);
-          }
-          for (const p of ['day', 'week', 'month', 'all']) {
-            const per = prior.periodOf(p, date, ctx.today, value.trackingStart);
-            assert.deepEqual(M.periodOf(p, date, ctx.today, value.trackingStart), per, `case ${c}: period derivation`);
+          const wantedDay = modernOnly ? prior.dayResult(expected, date, selected) : expected.dayResult(date, selected);
+          const wantedTrades = modernOnly ? prior.tradesOn(expected, date, selected) : expected.tradesOn(date, selected);
+          assert.deepEqual(M.dayResult(indexes[0], date, selected), wantedDay, `case ${c}: day ${date}`);
+          assert.deepEqual(M.tradesOn(indexes[0], date, selected), wantedTrades, `case ${c}: tradesOn ${date}`);
+          for (const p of ['day', 'week', 'month', 'ytd', 'all']) {
+            const per = M.periodOf(p, date, ctx.today, value.trackingStart);
+            // The frozen oracle covers modern-only contexts; the independent
+            // civil reference covers overflow contexts even for modern trades.
+            if (modernOnly && ctx.today.length === 10) assert.deepEqual(per, prior.periodOf(p, date, ctx.today, value.trackingStart));
+            else assert.deepEqual({ start: per.start, end: per.end }, exactReference.span(p, date, ctx.today, value.trackingStart));
             periods.set(`${p}:${per.start}:${per.end}`, per);
           }
         }
+        const oracle = modernOnly && ctx.today.length !== 10 ? exactReference.reference(value) : expected;
         for (const per of periods.values()) {
-          const wanted = prior.rollup(expected, per, selected, ctx);
-          for (const ix of indexes.slice(0, 2)) assert.deepEqual(M.rollup(ix, per, selected, ctx), wanted,
+          const wanted = modernOnly && ctx.today.length === 10 ? prior.rollup(expected, per, selected, ctx) : oracle.rollup(per, selected, ctx);
+          assert.deepEqual(M.rollup(indexes[0], per, selected, ctx), wanted,
             `seed ${DIFFERENTIAL_SEED}, case ${c}: ${per.p} ${per.start}..${per.end}`);
         }
       }
@@ -2166,7 +2257,7 @@ test('JOED-151 deep links: parsing keeps only valid parts; the canonical form na
   assert.deepEqual(M.parseResultsRoute('period=Week&desk=ALL'), { period: 'week', date: null, desk: 'all' }, 'letter case is ignored');
   assert.deepEqual(M.parseResultsRoute('desk=joel&date=2026-09-10&period=all&extra=1'), { period: 'all', date: '2026-09-10', desk: 'joel' });
   for (const query of ['', '?', 'period=ytd', 'period=quarter', 'period=__proto__', 'period=constructor', 'desk=toString', 'desk=hasOwnProperty',
-    'desk=bob', 'desk=', 'date=2026-02-30', 'date=2026-13-01', 'date=26-10-28', 'date=0099-01-01', 'date=2026-10-28T00:00', 'date=2026-1-5']) {
+    'desk=bob', 'desk=', 'date=2026-02-30', 'date=2026-13-01', 'date=26-10-28', 'date=0099-02-29', 'date=2026-10-28T00:00', 'date=2026-1-5']) {
     assert.deepEqual(M.parseResultsRoute(query), { period: null, date: null, desk: null }, query);
   }
   assert.deepEqual(M.parseResultsRoute(null), { period: null, date: null, desk: null });

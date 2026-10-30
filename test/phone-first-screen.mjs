@@ -106,8 +106,8 @@ test('the whole account above the hero states its own figures in place, with the
   const parts = A.subParts(ctx, null, { reason: 'missing' });
   for (const html of [parts.wide, parts.narrow]) {
     const cash = htmlDocument(html).querySelector('[data-cash="acct.cash"]');
-    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported · broker connection not confirmed');
-    assert.equal(cash.getAttribute('aria-label'), 'Cash not reported · broker connection not confirmed');
+    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · broker connection not confirmed');
+    assert.equal(cash.getAttribute('aria-label'), 'Cash broker connection not confirmed');
     assert.equal(cash.dataset.state, 'broken');
   }
   // On a phone the block is open, no collapsed section of its own: the
@@ -158,8 +158,8 @@ test('missing Cash keeps the figure’s default reason in the whole account abov
     ctx.states.paperCash = absent;
     const cash = htmlDocument(A.subParts(ctx, null, { reason: 'missing' }).narrow).querySelector('[data-cash="acct.cash"]');
     assert.equal(cash.querySelector('b.muted').textContent, '—');
-    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported · no data received yet');
-    assert.equal(cash.getAttribute('aria-label'), 'Cash not reported · no data received yet');
+    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · no data received yet');
+    assert.equal(cash.getAttribute('aria-label'), 'Cash no data received yet');
     assert.doesNotMatch(heroLeft(ctx), /data-cash=/, 'Cash is not a desk figure');
   }
 });

@@ -101,8 +101,10 @@ const parts = (instant, zone = VIENNA) => {
   const hit = seen.get(key);
   if (hit) return hit;
   const w = wall(instant, zone);
+  // Wall-clock years can have one to five digits; parse the clock separately.
+  const [, hms] = w.split(' '), [h, m] = hms.split(':');
   const date = new Date(`${w.slice(0, 10)}T12:00:00Z`);
-  const p = { w, day: w.slice(0, 10), dow: DOW[date.getUTCDay()], d: date.getUTCDate(), mon: MON[date.getUTCMonth()], y: w.slice(0, 4), hm: w.slice(11, 16), hms: w.slice(11, 19) };
+  const p = { w, day: w.slice(0, 10), dow: DOW[date.getUTCDay()], d: date.getUTCDate(), mon: MON[date.getUTCMonth()], y: w.slice(0, 4), hm: `${h}:${m}`, hms };
   if (seen.size >= 512) seen.clear();
   seen.set(key, p);
   return p;

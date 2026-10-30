@@ -12,10 +12,10 @@ export const NOT_EXACT = CELL_REASON.not_exact_yet;
 // A dash's accessible name and title after its label, shared by money cells,
 // positions and Cash: a value the feed sent as not exact says "not exact"
 // (with a reason only when it adds words), never "not reported"; every other
-// missing value keeps its existing words.
+// missing value names its reason once, or says "not reported" without one.
 export function dashWords(reason) {
   const why = reason ? cellReason(reason) : null;
-  return NOT_EXACT_REASONS.has(reason) ? `${NOT_EXACT}${why !== NOT_EXACT ? ` · ${why}` : ''}` : `not reported${why ? ` · ${why}` : ''}`;
+  return NOT_EXACT_REASONS.has(reason) ? `${NOT_EXACT}${why !== NOT_EXACT ? ` · ${why}` : ''}` : why ?? 'not reported';
 }
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -416,7 +416,7 @@ export function cashCaption(cell, key, { figure = false, sharedReason = null } =
   const value = cell?.state === 'broken' && cell.retained ? null : cell?.value;
   const why = cell?.reason ? cellReason(cell.reason) : null;
   // A missing Cash is named like every other dash: "not exact" when the feed
-  // says so, else "not reported" with its reason (no data received yet by default).
+  // says so, else its reason once (no data received yet by default).
   const notExact = value == null && NOT_EXACT_REASONS.has(cell?.reason);
   const missing = dashWords(cell?.reason ?? 'feed_not_received');
   const view = value == null ? { text: missing, title: `Cash${notExact ? ':' : ''} ${missing}` } : cashAmount(value);
@@ -426,7 +426,7 @@ export function cashCaption(cell, key, { figure = false, sharedReason = null } =
     const reason = why ?? (value == null ? cellReason('feed_not_received') : '');
     const localReason = reason !== sharedReason ? reason : '';
     const state = notExact ? `${NOT_EXACT}${localReason && localReason !== NOT_EXACT ? ` · ${esc(localReason)}` : ''}`
-      : value == null ? `not reported${localReason ? ` · ${esc(localReason)}` : ''}` : localReason ? ` · ${esc(localReason)}` : '';
+      : value == null ? esc(localReason) : localReason ? ` · ${esc(localReason)}` : '';
     return `<div class="kpi cash-kpi cash-block"><dt class="cash-label">Cash</dt><dd><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}"><span class="cash-amount${value == null ? ' muted' : ''}">${esc(amount)}</span>
       <span class="cash-caption cash-reserve c"><span class="cash-description">cash · as the broker reports it</span>
         <span class="cash-reason">${state}</span></span></span></dd></div>`;

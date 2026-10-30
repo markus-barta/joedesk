@@ -1779,9 +1779,9 @@ const DESK_TODAY = {
   faultSource: { says: 'withheld for a fault on the source channel', ...AS_FAULT },
   notExactMoneyFaultSource: { says: 'not exact on the money channel but a fault on the source channel', ...AS_FAULT },
   faultMoneyNotExactSource: { says: 'a fault on the money channel but not exact on the source channel', ...AS_FAULT },
-  // The phone row adds its own fallback reason to a reason-less dash (since 811f9b2).
+  // Data arrived; a reason-less desk dash must not claim otherwise.
   unavailable: { says: 'unavailable, with no reason on any channel', fine: false, word: 'not reported', value: false, card: 'Today: not reported',
-    phone: /^Today: not reported(?: · no data received yet)?$/ },
+    phone: 'Today: not reported' },
   lastGood: { says: 'only a last good value from before an outage', fine: false, word: 'last good', reason: BROKER, value: true,
     card: `Today: last good, ${age(30)} ago · ${BROKER}`, phone: `Today: last good · ${BROKER}` },
   valueKeptFaultMoney: { says: 'a value kept beside a fault on the money channel', fine: false, word: 'unavailable', reason: BROKER, value: true,
@@ -1836,7 +1836,7 @@ const sameNames = (named, desks) => JSON.stringify(named.map(([name]) => name).s
 // fault's own words; a fault is never named "not exact".
 const dashNamed = (name, desk) => desk.word === 'not exact' ? name === 'Today: not exact'
   : desk.word === 'not reported' ? name === 'Today: not reported'
-    : name?.startsWith('Today: ') && name.endsWith(` · ${desk.reason}`) && !name.includes('not exact');
+    : name === `Today: ${desk.reason}`;
 // The hero also renders Since start and the account panel; only its Today
 // cell and its sentence are parsed, to keep 4000 renders fast.
 function heroToday(html) {
