@@ -147,12 +147,12 @@ test('cash formatting: exact broker lexemes display at two decimals without a fl
 test('cash captions: null, omitted and broken retained values always explain why', () => {
   for (const key of ['hero.cash', 'rt.cash']) {
     const nullHtml = cashCaption({ state: 'broken', value: null, reason: 'gateway_unconfirmed' }, key);
-    assert.match(nullHtml, />not reported · broker connection not confirmed<\/span>/);
-    assert.match(nullHtml, /title="Cash not reported · broker connection not confirmed" aria-label="Cash not reported · broker connection not confirmed"/);
+    assert.match(nullHtml, />broker connection not confirmed<\/span>/);
+    assert.match(nullHtml, /title="Cash broker connection not confirmed" aria-label="Cash broker connection not confirmed"/);
     const held = cashCaption({ state: 'broken', value: { amount: '12345.67890123', currency: 'EUR' },
       retained: true, reason: 'gateway_unconfirmed' }, key);
     assert.equal(held, nullHtml);
-    assert.match(cashCaption(null, key), />not reported · no data received yet<\/span>/);
+    assert.match(cashCaption(null, key), />no data received yet<\/span>/);
   }
 });
 
@@ -169,8 +169,8 @@ test('JOED-148 cash captions: a not-exact Cash says "not exact" in its caption a
     // A shared section reason is not repeated on the figure.
     assert.equal(htmlDocument(cashCaption(cell, 'hero.cash', { figure: true, sharedReason: why })).querySelector('.cash-reason').textContent, 'not exact');
   }
-  // Faults keep their existing "not reported" naming in both surfaces.
-  assert.ok(cashCaption({ state: 'broken', value: null, reason: 'source_unavailable' }, 'rt.cash').includes('aria-label="Cash not reported · not reported by the broker">not reported · not reported by the broker</span>'));
+  // Faults name their reason once in both surfaces.
+  assert.ok(cashCaption({ state: 'broken', value: null, reason: 'source_unavailable' }, 'rt.cash').includes('aria-label="Cash not reported by the broker">not reported by the broker</span>'));
 });
 
 test('cash captions: stale values keep exact accessibility and their own reason with the same reserve', () => {
@@ -190,8 +190,8 @@ test('cash captions: Amy’s label and caption stay fixed; every null and stale 
     for (const key of ['hero.cash', 'rt.cash']) {
       const html = cashCaption({ state: 'broken', value: null, reason }, key);
       assert.ok(html.includes('<span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span>'));
-      // A not-exact Cash reserves its own not-exact words (JOED-148), the rest "not reported".
-      const missing = NOT_EXACT_REASONS.has(reason) ? `not exact${why === 'not exact' ? '' : ` · ${why}`}` : `not reported · ${why}`;
+      // Reserve the same plain reason the missing Cash actually shows.
+      const missing = NOT_EXACT_REASONS.has(reason) ? `not exact${why === 'not exact' ? '' : ` · ${why}`}` : why;
       assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(missing)}</span>`), reason);
       assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`−€ 999.999,99 · ${why}`)}</span>`), reason);
     }
@@ -323,9 +323,8 @@ test('position rows: null values expose their reasons visibly and in accessible 
   const ctx = { states: cells, feeds: { data: { value: data } }, now: data.receivedAt };
   const kept = keptHtml(ctx), positions = positionsHtml(ctx).html;
   // JOED-148: a not-exact dash says "not exact"; only a value the broker did not report says "not reported".
-  const dashName = why => why === 'not exact' ? why : `not reported · ${why}`;
   for (const label of ['Quantity', 'Last price', 'Worth']) for (const why of ['not exact', 'not reported by the broker']) {
-    assert.ok(kept.includes(`title="${label}: ${dashName(why)}" aria-label="${label}: ${dashName(why)}">—</span>`));
+    assert.ok(kept.includes(`title="${label}: ${why}" aria-label="${label}: ${why}">—</span>`));
     assert.ok(kept.includes(`${label}: ${why}`) || htmlDocument(kept).querySelector('.pstate').textContent.includes(why), 'reason remains visible locally or once in the section');
   }
   const keptDoc = htmlDocument(kept), section = keptDoc.querySelector('.pstate').textContent;
@@ -338,12 +337,12 @@ test('position rows: null values expose their reasons visibly and in accessible 
     assert.ok(row.querySelector('.position-notes'), 'every row keeps the same detail slot');
     if (section.includes(why)) {
       assert.equal(row.querySelector('.position-day')?.textContent, 'Today’s result: —');
-      assert.equal(row.querySelector('.position-day .position-value')?.getAttribute('aria-label'), `Today’s result: ${dashName(why)}`);
+      assert.equal(row.querySelector('.position-day .position-value')?.getAttribute('aria-label'), `Today’s result: ${why}`);
     } else {
       assert.equal(row.querySelector('.position-day'), null, 'independent today’s result stays in the field list');
     }
   }
-  assert.match(positions, /title="Last price: not reported · not reported by the broker"/);
+  assert.match(positions, /title="Last price: not reported by the broker"/);
   assert.match(positions, /class="position-reasons">Last price: not reported by the broker/);
   assert.doesNotMatch(kept.slice(kept.indexOf('<div class="prow"')), /<(?:button|a|input)\b|tabindex=/);
   assert.match(kept, /data-keep="SXR8"/);
@@ -1179,7 +1178,7 @@ test('broker down: Positions and Kept show one section reason and accessible fie
     assert.equal(doc.textContent.match(/broker connection down/g).length, 1, name);
     assert.equal(doc.querySelectorAll('.position-reasons').length, 0, 'no repeated per-row reason list');
     for (const dash of doc.querySelectorAll('.position-value')) {
-      assert.match(dash.getAttribute('aria-label'), /^(Last price|Worth|Today’s result|Open result): not reported · broker connection down$/);
+      assert.match(dash.getAttribute('aria-label'), /^(Last price|Worth|Today’s result|Open result): broker connection down$/);
       assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
       assert.equal(dash.textContent, '—');
     }
@@ -1228,12 +1227,12 @@ test('position reasons: today’s result keeps its name and dash when its reason
       assert.equal(row.querySelector('.position-reasons'), null, 'matching field reasons belong to the section');
       const field = row.querySelector('.position-day'), dash = field?.querySelector('.position-value');
       assert.equal(field?.textContent, 'Today’s result: —');
-      assert.equal(dash?.getAttribute('aria-label'), 'Today’s result: not reported · broker connection down');
+      assert.equal(dash?.getAttribute('aria-label'), 'Today’s result: broker connection down');
       assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
       assert.equal(row.querySelector('.position-notes').getAttribute('aria-hidden'), null, 'populated detail stays accessible');
       assert.doesNotMatch(row.textContent, /broker connection down/, 'the section owns its shared reason');
       for (const dash of row.querySelectorAll('.position-value')) {
-        assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+        assert.match(dash.getAttribute('aria-label'), /: broker connection down$/);
         assert.equal(dash.getAttribute('title'), dash.getAttribute('aria-label'));
       }
     }
@@ -1298,7 +1297,7 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
   for (const html of Object.values(A.subParts(ctx, null, { reason: 'missing' })).slice(0, 2)) {
     const cash = htmlDocument(html).querySelector('[data-cash="acct.cash"]');
     assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported');
-    assert.equal(cash.getAttribute('aria-label'), 'Cash not reported · broker connection down');
+    assert.equal(cash.getAttribute('aria-label'), 'Cash broker connection down');
   }
   for (const id of ['j', 'joe', 'joel']) {
     ctx.states[`desks.${id}.totalPnl`].ageSeconds = 150;
@@ -1322,11 +1321,11 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
   const cold = board(fixture('a-gateway-up-but-dead'), { cold: true });
   const coldHero = htmlDocument(heroLeft(cold));
   assert.equal(coldHero.querySelector('.board-caption').textContent, 'Numbers unavailable · broker connection down');
-  for (const dash of coldHero.querySelectorAll('[data-cell] .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+  for (const dash of coldHero.querySelectorAll('[data-cell] .bn')) assert.match(dash.getAttribute('aria-label'), /: broker connection down$/);
   for (const id of ['j', 'joe', 'joel']) {
     const card = htmlDocument(deskCard(cold, id));
     assert.equal(card.querySelector('.card-status').textContent, 'Numbers: unavailable · broker connection down');
-    for (const dash of card.querySelectorAll('.dnums .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
+    for (const dash of card.querySelectorAll('.dnums .bn')) assert.match(dash.getAttribute('aria-label'), /: broker connection down$/);
   }
 });
 
