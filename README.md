@@ -1540,6 +1540,8 @@ with their full text retained for accessibility and in the hover title.
 Mixed Open blockers name both the desks waiting on prices and the desks whose
 result is not exact, in the same order regardless of the feed's desk ordering.
 An absent P&L source stays absent; it is not evidence of a broker fault.
+Absent Open figures and their summary say “unavailable”, agreeing with the light;
+an all-price-wait household keeps “Waiting on prices” through retained observations.
 
 JOED-148 (board only, no figure changes meaning) states each dash's reason once
 and promises no time. Other missing figures name their supplied reason directly

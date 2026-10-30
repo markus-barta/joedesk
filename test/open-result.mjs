@@ -10,6 +10,7 @@ const board = await import('../public/joe/board-state.js');
 const { localBoardHealth, boardHealthPresentation, boardDiagnostics, statusPresentation } = await import('../public/joe/health.js');
 const { heroLeft, healthPop, compactDesk } = await import('../public/joe/desk.js');
 const { quietResults, withQuietRecord } = await import('./fixtures/quiet-record.mjs');
+const { heroProblemCaption } = await import('../scripts/browser/desk-checks.mjs');
 const { viennaDay } = await import('../time.mjs');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const exact = JSON.parse(readFileSync(new URL('../fixtures/phase-b.json', import.meta.url))).exact;
@@ -58,6 +59,13 @@ test('JOED-158: contract-valid absent P&L has no synthesized fault; supplied fau
     assert.equal(view.states[`today.${field}`].state, 'not reported');
     assert.equal(view.states[`today.${field}`].reason, null);
     assert.doesNotMatch(hero.textContent, /Unavailable for|unavailable for/);
+    if (field === 'openPnl') {
+      assert.equal(localBoardHealth(view.states, view.feeds, now).tone, 'yellow');
+      assert.equal(hero.querySelector('.account-section .summary-text').textContent, 'Open result: unavailable');
+      assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Unavailable');
+      assert.equal(heroProblemCaption(view, 'hero.open').text, 'Unavailable', 'browser expectation agrees');
+      assert.doesNotMatch(hero.querySelector('.account-section').textContent, /no data received yet/);
+    }
     for (const channel of ['money', 'source', 'lastGood']) {
       const faulty = structuredClone(data), desk = faulty.desks[1];
       if (channel === 'money') (desk.money.reasons ??= {})[field] = 'source_unavailable';

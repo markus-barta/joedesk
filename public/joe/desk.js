@@ -554,6 +554,10 @@ export function householdPnlReason(states, data, field, sharedReason = null) {
     return capital(groups.map(g => `${g.word} for ${deskNames(g.ids)}${isFault(g) && g.reason && g.reason !== sharedReason ? ` · ${g.reason}` : ''}`).join('; '));
   }
   if (results.today.kind !== 'notExact') return null;
+  // An all-price-wait household keeps its producer wording through retained
+  // observations. Mixed not-exact blockers still need every desk named.
+  if (field === 'openPnl' && results.today.reason === 'open_pnl_unavailable' &&
+      !DESKS.some(id => results[id].kind === 'notExact' && results[id].reason !== 'open_pnl_unavailable')) return null;
   // Name every desk blocker, including mixed waiting and not-exact states.
   // With no desk blocker the producer's own household caption stays below.
   const blocking = deskDays(states, data, field).filter(g => !['exact', 'estimated'].includes(g.word));
@@ -833,7 +837,8 @@ export function heroLeft(ctx, facts = deskFacts(ctx)) {
   const board = boardCaptionCell(ctx);
   const shared = data ? sharedSectionReason(['today.dayPnl', 'today.totalPnl', 'today.openPnl', 'today.equity'].map(name => states[name])) : null;
   // JOED-157: a household Open withheld because of desks names them, fault first.
-  const openFault = householdPnlReason(states, data, 'openPnl', shared);
+  const openFault = householdPnlReason(states, data, 'openPnl', shared) ??
+    (data && absentPnl(states, data, 'openPnl') ? 'Unavailable' : null);
   const kpi = (termKey, label, name, key, opts) => {
     const v = cellView(states[name], key, { ...opts, sharedReason: shared, label: label ?? { open: OPEN, desksmoney: 'Desks’ money' }[termKey] });
     const caption = reservedCaption(sharesBoardCaption(states[name], board) ? '' : name === 'today.openPnl' && openFault != null ? esc(openFault) : v.caption, opts.captions ?? [opts.caption]);
