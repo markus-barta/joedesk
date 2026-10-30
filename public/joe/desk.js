@@ -41,13 +41,15 @@ const expanded = new Set();
 export function syncDeskDisclosures(phone = matchMedia('(max-width: 480px)').matches) {
   for (const control of document.querySelectorAll('[data-desk-disclosure]')) {
     const open = !phone || expanded.has(control.dataset.deskDisclosure);
-    control.setAttribute('aria-expanded', String(open));
-    document.getElementById(control.getAttribute('aria-controls')).hidden = !open;
+    if (control.getAttribute('aria-expanded') !== String(open)) control.setAttribute('aria-expanded', String(open));
+    const body = document.getElementById(control.getAttribute('aria-controls'));
+    if (body.hidden !== !open) body.hidden = !open;
   }
   const sentence = document.querySelector('#heroL .say > span');
   if (sentence) {
-    sentence.dataset.clamp = phone ? '1' : '2';
-    sentence.parentElement.title = sentence.textContent;
+    const clamp = phone ? '1' : '2';
+    if (sentence.dataset.clamp !== clamp) sentence.dataset.clamp = clamp;
+    if (sentence.parentElement.title !== sentence.textContent) sentence.parentElement.title = sentence.textContent;
   }
 }
 export function toggleDeskDisclosure(key) {
@@ -1237,6 +1239,21 @@ function positionReasons(row, cell, sharedReason = null) {
 // Unknown quantity remains unknown; only an exact, confirmed zero is flat.
 const openPositionRows = cell => cell?.value?.filter(row => row.quantity == null || decimalUnits(row.quantity) !== 0n);
 
+// Feed snapshots and their rows are immutable between accepted reads. A
+// History/account refresh changes neither the fresh positions nor their copy.
+// Faults and retained values keep the uncached path, including ticking ages.
+let positionsMemo = null;
+function positionsFor(ctx) {
+  const data = ctx.feeds.data?.value, cell = ctx.states.positions;
+  if (!data || cell?.state !== 'fresh' || cell.reason || outageValue(cell) || !cell.value) return positionsHtml(ctx);
+  const key = [data, ctx.now ? localDay(ctx.now, NY) : null, cell.valueReceivedAt];
+  if (positionsMemo && key.every((v, i) => v === positionsMemo.key[i]) && cell.value.length === positionsMemo.rows.length &&
+      cell.value.every((row, i) => row === positionsMemo.rows[i])) return positionsMemo.value;
+  const value = positionsHtml(ctx);
+  positionsMemo = { key, rows: cell.value.slice(), value };
+  return value;
+}
+
 export function positionsHtml(ctx) {
   const { states } = ctx;
   const cell = states.positions;
@@ -1259,22 +1276,30 @@ export function positionsHtml(ctx) {
     if (abs > (maxByCurrency.get(currency) ?? 0n)) maxByCurrency.set(currency, abs);
   }
   const today = ctx.now ? localDay(ctx.now, NY) : null;
+  // A snapshot commonly stamps every row at the same instant. Convert each
+  // timestamp once per render; the next render still observes midnight.
+  const openedLabels = new Map(), updatedLabels = new Map();
   const body = sorted.map(r => {
     const cur = r.mark?.currency ?? r.marketValue?.currency ?? 'USD';
     const value = r.marketValue ? decimalUnits(r.marketValue.amount) : null, max = maxByCurrency.get(r.marketValue?.currency) ?? 0n;
     // A bounded percent, rounded to three decimal places from exact money.
     const width = !outageValue(cell) && value != null && max > 0n ? unitsDecimal(divRound((value < 0n ? -value : value) * 100000n, max) * (UNIT / 1000n)) : null;
-    const opened = r.openedAt ? ` · opened ${localDay(r.openedAt, NY) === today ? `today ${timeHM(r.openedAt)}` : dayDDM(r.openedAt)}` : '';
+    if (r.openedAt && !openedLabels.has(r.openedAt)) openedLabels.set(r.openedAt,
+      ` · opened ${localDay(r.openedAt, NY) === today ? `today ${timeHM(r.openedAt)}` : dayDDM(r.openedAt)}`);
+    if (r.updatedAt && !updatedLabels.has(r.updatedAt)) updatedLabels.set(r.updatedAt, timeHM(r.updatedAt));
+    const opened = openedLabels.get(r.openedAt) ?? '';
     const legacy = r.scope === 'legacy' ? ` · older holding, outside the ${term('stage0', 'first stage')}` : '';
     const deskLabel = unmapped(r) ? `No desk · ${cellReason(r.reasons.desk)}` : null;
+    const quantity = positionValue(r, 'quantity', cell), mark = positionValue(r, 'mark', cell);
+    const worth = value === null ? positionValue(r, 'marketValue', cell) : money(value, r.marketValue.currency);
     return `<div class="prow" data-desk="${esc(r.desk ?? '')}">
       ${symBadge(r.symbol, r.desk)}
-      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span${deskLabel ? ` title="${esc(deskLabel)}" aria-label="${esc(deskLabel)}"` : ''}>${deskLabel ? esc(deskLabel) : r.desk ? `${inlineMark(r.desk)} ${LABEL[r.desk]}` : 'No desk'}${opened}${legacy}</span><span class="position-mobile">${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)} · last price ${positionValue(r, 'mark', cell)} · worth ${positionValue(r, 'marketValue', cell)}</span>${positionReasons(r, cell, shared)}</div>
-      <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${positionValue(r, 'quantity', cell)}</div>
-      <div class="r c-px num">${positionValue(r, 'mark', cell)}</div>
-      <div class="c-worth"><span class="num">${positionValue(r, 'marketValue', cell)}</span><span class="vbar"${value == null ? ' style="visibility:hidden"' : ''}>${width !== null ? `<i data-v="${esc(r.marketValue.amount)}" data-cur="${esc(r.marketValue.currency)}" style="width:${width}%"></i>` : ''}</span></div>
+      <div class="name"><b>${esc(r.symbol)}</b>${r.company ? ` · ${esc(r.company)}` : ''}<span${deskLabel ? ` title="${esc(deskLabel)}" aria-label="${esc(deskLabel)}"` : ''}>${deskLabel ? esc(deskLabel) : r.desk ? `${inlineMark(r.desk)} ${LABEL[r.desk]}` : 'No desk'}${opened}${legacy}</span><span class="position-mobile">${r.side === 'long' ? 'Long' : 'Short'} ${quantity} · last price ${mark} · worth ${worth}</span>${positionReasons(r, cell, shared)}</div>
+      <div class="side c-side">${icon(r.side)}${r.side === 'long' ? 'Long' : 'Short'} ${quantity}</div>
+      <div class="r c-px num">${mark}</div>
+      <div class="c-worth"><span class="num">${worth}</span><span class="vbar"${value == null ? ' style="visibility:hidden"' : ''}>${width !== null ? `<i data-v="${esc(r.marketValue.amount)}" data-cur="${esc(r.marketValue.currency)}" style="width:${width}%"></i>` : ''}</span></div>
       <div class="r">${presentNull(r, 'openPnl') ? positionValue(r, 'openPnl', cell) : pl(r.openPnl ? decimalUnits(r.openPnl.amount) : null, r.openPnl?.currency ?? cur)}</div>
-      <div class="r c-opened num">${r.updatedAt ? timeHM(r.updatedAt) : '—'}</div>
+      <div class="r c-opened num">${updatedLabels.get(r.updatedAt) ?? '—'}</div>
     </div>`;
   }).join('');
   const unmatched = rows.filter(unmapped).length;
@@ -1419,7 +1444,7 @@ export function renderDesk(ctx) {
   // update never forces a layout of the whole position list mid-render.
   const history = ctx.states.history?.value?.columns ? ctx.states.history.value : null;
   drawHeroChart(ctx, history, facts.label);
-  const pos = positionsHtml(ctx);
+  const pos = positionsFor(ctx);
   $('#posSub').textContent = pos.sub;
   patch($('#positions'), pos.html);
   patch($('#kept'), keptHtml(ctx));

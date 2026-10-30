@@ -1,0 +1,1629 @@
+{
+  "ticket": "JOED-167",
+  "baseCommit": "4b913c7a17ea41bebc07823f74a9275624ab7bdf",
+  "session": "512c66be-06eb-47d6-8efd-48c446856794",
+  "command": "JOED_P3_ONLY=budget TZ=UTC JOED_QA_DIR=<private run directory> /Users/markus/.nix-profile/bin/node scripts/browser-p3.mjs --subset",
+  "reference": {
+    "browser": "HeadlessChrome/153.0.8010.12",
+    "cpu": "Apple M5 Max",
+    "cores": 18,
+    "platform": "darwin arm64",
+    "node": "v24.20.0",
+    "concurrency": "One headless browser at a time; real board server and unmodified CI workload/limits"
+  },
+  "workload": {
+    "coldHistoryPoints": 9000,
+    "liveHistoryPoints": 7209,
+    "positions": 256,
+    "accountSnapshots": 9057,
+    "accountCloses": 2196,
+    "deskPushesPerWidth": 5,
+    "historyPushesPerWidth": 3
+  },
+  "findings": [
+    {
+      "location": "public/joe/account.js:466; public/joe/account-model.js:223",
+      "cause": "The new whole-account overview walks roughly 2200 daily closes on a full draw. Calendar gap checks repeatedly converted every date to its next calendar day. Instrumented full account draws took 3.4–3.6 ms on the worst desktop data renders; a finer draw profile attributed about 2 ms to the overview.",
+      "fix": "Bound calendar-successor memoization to 4096 dates. Reuse the ResizeObserver chart size and overview handle geometry, including on complete redraws."
+    },
+    {
+      "location": "public/joe/app.js:89",
+      "cause": "Comparing generated SVG markup to browser-serialized innerHTML misses equivalent markup, rebuilding the larger header and forcing a fresh fit measurement.",
+      "fix": "Use the existing structural patch helper and avoid unchanged status attribute writes."
+    },
+    {
+      "location": "public/joe/desk.js:1246",
+      "cause": "History-triggered Desk renders reformatted the unchanged large position list; each fresh row also repeated identical value formatting for mobile and desktop.",
+      "fix": "Reuse a fresh section only for the same snapshot, selected row identities, receipt and NY day; retain uncached state/age updates. Format duplicate values and timestamps once per row/render."
+    },
+    {
+      "location": "public/joe/app.js:361",
+      "cause": "The typography observer queried matchMedia twice per text node after large patches; CPU sampling put matchMedia among the largest script costs.",
+      "fix": "Read the viewport once per synchronous observer delivery."
+    }
+  ],
+  "instrumentedRelease39": {
+    "node": "v26.11.1",
+    "note": "Timing/CPU instrumentation was temporary and kept out of production sources. Uninstrumented comparison measurements below all pin Node v24.20.0.",
+    "viewports": {
+      "1440": {
+        "meanMs": {
+          "events": 0.08,
+          "header": 0.644,
+          "account": 1.878,
+          "facts": 0.411,
+          "hero": 0.178,
+          "market": 0.311,
+          "cards": 0.567,
+          "summaries": 0.178,
+          "chart": 0.6,
+          "positions": 4.111,
+          "desk": 6.367
+        },
+        "worstRender": {
+          "reason": "data",
+          "ms": 13.399999856948853,
+          "parts": [
+            [
+              "events",
+              0.2999999523162842
+            ],
+            [
+              "header",
+              0.5999999046325684
+            ],
+            [
+              "account",
+              3.4000000953674316
+            ],
+            [
+              "facts",
+              0.20000004768371582
+            ],
+            [
+              "hero",
+              0.20000004768371582
+            ],
+            [
+              "market",
+              0.39999985694885254
+            ],
+            [
+              "cards",
+              0.7000000476837158
+            ],
+            [
+              "summaries",
+              0.20000004768371582
+            ],
+            [
+              "chart",
+              0.8999998569488525
+            ],
+            [
+              "positions",
+              6.200000047683716
+            ],
+            [
+              "desk",
+              8.799999952316284
+            ]
+          ]
+        }
+      },
+      "1024": {
+        "meanMs": {
+          "events": 0.02,
+          "header": 0.444,
+          "account": 1.9,
+          "facts": 0.411,
+          "hero": 0.211,
+          "market": 0.267,
+          "cards": 0.544,
+          "summaries": 0.233,
+          "chart": 0.611,
+          "positions": 4.1,
+          "desk": 6.389
+        },
+        "worstRender": {
+          "reason": "data",
+          "ms": 12.5,
+          "parts": [
+            [
+              "events",
+              0.10000014305114746
+            ],
+            [
+              "header",
+              0.39999985694885254
+            ],
+            [
+              "account",
+              3.6000001430511475
+            ],
+            [
+              "facts",
+              0.09999990463256836
+            ],
+            [
+              "hero",
+              0.2999999523162842
+            ],
+            [
+              "market",
+              0.2999999523162842
+            ],
+            [
+              "cards",
+              0.6000001430511475
+            ],
+            [
+              "summaries",
+              0.20000004768371582
+            ],
+            [
+              "chart",
+              0.6999998092651367
+            ],
+            [
+              "positions",
+              5.800000190734863
+            ],
+            [
+              "desk",
+              8.099999904632568
+            ]
+          ]
+        }
+      },
+      "390": {
+        "meanMs": {
+          "events": 0.04,
+          "header": 0.378,
+          "account": 0.911,
+          "facts": 0.422,
+          "hero": 0.156,
+          "market": 0.278,
+          "cards": 0.567,
+          "summaries": 0.178,
+          "chart": 0.356,
+          "positions": 3.244,
+          "desk": 5.211
+        },
+        "worstRender": {
+          "reason": "data",
+          "ms": 8.799999952316284,
+          "parts": [
+            [
+              "events",
+              0.10000014305114746
+            ],
+            [
+              "header",
+              0.2999999523162842
+            ],
+            [
+              "account",
+              1.5999999046325684
+            ],
+            [
+              "facts",
+              0.10000014305114746
+            ],
+            [
+              "hero",
+              0.09999990463256836
+            ],
+            [
+              "market",
+              0.2999999523162842
+            ],
+            [
+              "cards",
+              0.6000001430511475
+            ],
+            [
+              "summaries",
+              0.19999980926513672
+            ],
+            [
+              "chart",
+              0.6000001430511475
+            ],
+            [
+              "positions",
+              4.599999904632568
+            ],
+            [
+              "desk",
+              6.5
+            ]
+          ]
+        }
+      }
+    }
+  },
+  "measurements": [
+    {
+      "run": "r38-node24",
+      "source": "9ec65b46709201669d65fcc04f6a21b1bb567e31",
+      "traces": [
+        {
+          "viewport": "1440",
+          "phase": "cold 9000 points",
+          "workerRead": 269.59999990463257,
+          "renders": 1,
+          "renderWorst": 10.899999856948853,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1024",
+          "phase": "cold 9000 points",
+          "workerRead": 270.09999990463257,
+          "renders": 1,
+          "renderWorst": 10.700000047683716,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "390",
+          "phase": "cold 9000 points",
+          "workerRead": 268.7000000476837,
+          "renders": 1,
+          "renderWorst": 7.900000095367432,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1440",
+          "phase": "live",
+          "deskRenders": 10,
+          "deskWorst": 10,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 11.5,
+          "workerReads": 8,
+          "workerWorst": 226.70000004768372,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 441.5
+            },
+            {
+              "name": "desk updates",
+              "start": 441.5,
+              "end": 3341.5
+            },
+            {
+              "name": "history setup",
+              "start": 3341.5,
+              "end": 3461.7000000476837
+            },
+            {
+              "name": "history updates",
+              "start": 3461.7000000476837,
+              "end": 5240
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [
+            {
+              "startTime": 76.70000004768372,
+              "duration": 57,
+              "name": "self",
+              "attribution": [
+                {
+                  "name": "unknown",
+                  "containerType": "window",
+                  "containerId": "",
+                  "containerName": "",
+                  "containerSrc": ""
+                }
+              ],
+              "phases": [
+                "desk setup"
+              ],
+              "events": [
+                {
+                  "reason": "data",
+                  "ms": 25.600000143051147,
+                  "at": 76.79999995231628
+                }
+              ],
+              "frames": [
+                {
+                  "startTime": 51.200000047683716,
+                  "duration": 80,
+                  "blockingDuration": 9.2,
+                  "renderStart": 76.70000004768372,
+                  "styleAndLayoutStart": 111.29999995231628,
+                  "scripts": [
+                    {
+                      "invoker": "FrameRequestCallback",
+                      "invokerType": "user-callback",
+                      "sourceURL": "http://127.0.0.1:51445/joe/app.js?v=261029075623.0.0",
+                      "sourceFunctionName": "",
+                      "startTime": 76.79999995231628,
+                      "duration": 34.5,
+                      "forcedStyleAndLayoutDuration": 14.5
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1024",
+          "phase": "live",
+          "deskRenders": 10,
+          "deskWorst": 8.700000047683716,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 8.799999952316284,
+          "workerReads": 8,
+          "workerWorst": 228.09999990463257,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 487.2999999523163
+            },
+            {
+              "name": "desk updates",
+              "start": 487.2999999523163,
+              "end": 3353
+            },
+            {
+              "name": "history setup",
+              "start": 3353,
+              "end": 3485.2999999523163
+            },
+            {
+              "name": "history updates",
+              "start": 3485.2999999523163,
+              "end": 5185.799999952316
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "390",
+          "phase": "live",
+          "deskRenders": 10,
+          "deskWorst": 7,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 7.299999952316284,
+          "workerReads": 8,
+          "workerWorst": 221.29999995231628,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 403.7999999523163
+            },
+            {
+              "name": "desk updates",
+              "start": 403.7999999523163,
+              "end": 3250.7000000476837
+            },
+            {
+              "name": "history setup",
+              "start": 3250.7000000476837,
+              "end": 3369.5999999046326
+            },
+            {
+              "name": "history updates",
+              "start": 3369.5999999046326,
+              "end": 5037
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        }
+      ]
+    },
+    {
+      "run": "r38-repeat",
+      "source": "9ec65b46709201669d65fcc04f6a21b1bb567e31",
+      "traces": [
+        {
+          "viewport": "1440",
+          "phase": "cold 9000 points",
+          "workerRead": 261.7999999523163,
+          "renders": 1,
+          "renderWorst": 11.299999952316284,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1024",
+          "phase": "cold 9000 points",
+          "workerRead": 271.2999999523163,
+          "renders": 1,
+          "renderWorst": 9.799999952316284,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "390",
+          "phase": "cold 9000 points",
+          "workerRead": 258.60000014305115,
+          "renders": 1,
+          "renderWorst": 9.600000143051147,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1440",
+          "phase": "live",
+          "deskRenders": 10,
+          "deskWorst": 9.100000143051147,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 8.399999856948853,
+          "workerReads": 8,
+          "workerWorst": 214.59999990463257,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 406.60000014305115
+            },
+            {
+              "name": "desk updates",
+              "start": 406.60000014305115,
+              "end": 3173
+            },
+            {
+              "name": "history setup",
+              "start": 3173,
+              "end": 3306.800000190735
+            },
+            {
+              "name": "history updates",
+              "start": 3306.800000190735,
+              "end": 4924.700000047684
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [
+            {
+              "startTime": 71,
+              "duration": 50,
+              "name": "self",
+              "attribution": [
+                {
+                  "name": "unknown",
+                  "containerType": "window",
+                  "containerId": "",
+                  "containerName": "",
+                  "containerSrc": ""
+                }
+              ],
+              "phases": [
+                "desk setup"
+              ],
+              "events": [
+                {
+                  "reason": "data",
+                  "ms": 23.700000047683716,
+                  "at": 71.10000014305115
+                }
+              ],
+              "frames": [
+                {
+                  "startTime": 49,
+                  "duration": 70.10000014305115,
+                  "blockingDuration": 3,
+                  "renderStart": 71,
+                  "styleAndLayoutStart": 102.30000019073486,
+                  "scripts": [
+                    {
+                      "invoker": "FrameRequestCallback",
+                      "invokerType": "user-callback",
+                      "sourceURL": "http://127.0.0.1:52730/joe/app.js?v=261029075623.0.0",
+                      "sourceFunctionName": "",
+                      "startTime": 71,
+                      "duration": 31.300000190734863,
+                      "forcedStyleAndLayoutDuration": 13.9
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1024",
+          "phase": "live",
+          "deskRenders": 10,
+          "deskWorst": 8.599999904632568,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 7.900000095367432,
+          "workerReads": 8,
+          "workerWorst": 211.29999995231628,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 485.59999990463257
+            },
+            {
+              "name": "desk updates",
+              "start": 485.59999990463257,
+              "end": 3234.2999999523163
+            },
+            {
+              "name": "history setup",
+              "start": 3234.2999999523163,
+              "end": 3354.0999999046326
+            },
+            {
+              "name": "history updates",
+              "start": 3354.0999999046326,
+              "end": 5000.699999809265
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "390",
+          "phase": "live",
+          "deskRenders": 10,
+          "deskWorst": 6.799999952316284,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 7.200000047683716,
+          "workerReads": 8,
+          "workerWorst": 210.39999985694885,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 385.09999990463257
+            },
+            {
+              "name": "desk updates",
+              "start": 385.09999990463257,
+              "end": 3086.5999999046326
+            },
+            {
+              "name": "history setup",
+              "start": 3086.5999999046326,
+              "end": 3203.399999856949
+            },
+            {
+              "name": "history updates",
+              "start": 3203.399999856949,
+              "end": 4835.899999856949
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        }
+      ]
+    },
+    {
+      "run": "r39-node24",
+      "source": "4b913c7",
+      "traces": [
+        {
+          "viewport": "1440",
+          "phase": "cold 9000 points",
+          "workerRead": 254.29999995231628,
+          "renders": 2,
+          "renderWorst": 16.399999856948853,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1024",
+          "phase": "cold 9000 points",
+          "workerRead": 234.90000009536743,
+          "renders": 1,
+          "renderWorst": 5.200000047683716,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "390",
+          "phase": "cold 9000 points",
+          "workerRead": 239.59999990463257,
+          "renders": 2,
+          "renderWorst": 16.600000143051147,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1440",
+          "phase": "live",
+          "deskRenders": 9,
+          "deskWorst": 13,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 9.399999856948853,
+          "workerReads": 7,
+          "workerWorst": 211.10000014305115,
+          "mainThreadHistory": 0,
+          "accountReads": 5,
+          "accountWorst": 40.59999990463257,
+          "mainThreadAccount": 0,
+          "accountSnapshots": 9057,
+          "accountCloses": 2196,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 441
+            },
+            {
+              "name": "desk updates",
+              "start": 441,
+              "end": 2911.7000000476837
+            },
+            {
+              "name": "history setup",
+              "start": 2911.7000000476837,
+              "end": 3043.5
+            },
+            {
+              "name": "history updates",
+              "start": 3043.5,
+              "end": 4906.600000143051
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1024",
+          "phase": "live",
+          "deskRenders": 9,
+          "deskWorst": 12.600000143051147,
+          "historyRenders": 7,
+          "historyRedraws": 4,
+          "historyWorst": 9.100000143051147,
+          "workerReads": 8,
+          "workerWorst": 225.40000009536743,
+          "mainThreadHistory": 0,
+          "accountReads": 5,
+          "accountWorst": 43.700000047683716,
+          "mainThreadAccount": 0,
+          "accountSnapshots": 9057,
+          "accountCloses": 2196,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 385.7000000476837
+            },
+            {
+              "name": "desk updates",
+              "start": 385.7000000476837,
+              "end": 2952.100000143051
+            },
+            {
+              "name": "history setup",
+              "start": 2952.100000143051,
+              "end": 3069.300000190735
+            },
+            {
+              "name": "history updates",
+              "start": 3069.300000190735,
+              "end": 4984.200000047684
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "390",
+          "phase": "live",
+          "deskRenders": 9,
+          "deskWorst": 9.099999904632568,
+          "historyRenders": 7,
+          "historyRedraws": 4,
+          "historyWorst": 7.900000095367432,
+          "workerReads": 7,
+          "workerWorst": 226.20000004768372,
+          "mainThreadHistory": 0,
+          "accountReads": 5,
+          "accountWorst": 41.39999985694885,
+          "mainThreadAccount": 0,
+          "accountSnapshots": 9057,
+          "accountCloses": 2196,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 403.60000014305115
+            },
+            {
+              "name": "desk updates",
+              "start": 403.60000014305115,
+              "end": 2934.2000000476837
+            },
+            {
+              "name": "history setup",
+              "start": 2934.2000000476837,
+              "end": 3051.9000000953674
+            },
+            {
+              "name": "history updates",
+              "start": 3051.9000000953674,
+              "end": 4985.900000095367
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        }
+      ]
+    },
+    {
+      "run": "r39-repeat",
+      "source": "4b913c7",
+      "traces": [
+        {
+          "viewport": "1440",
+          "phase": "cold 9000 points",
+          "workerRead": 306.5,
+          "renders": 1,
+          "renderWorst": 6.700000047683716,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1024",
+          "phase": "cold 9000 points",
+          "workerRead": 309.60000014305115,
+          "renders": 1,
+          "renderWorst": 7.3999998569488525,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "390",
+          "phase": "cold 9000 points",
+          "workerRead": 290.30000019073486,
+          "renders": 1,
+          "renderWorst": 4.1000001430511475,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1440",
+          "phase": "live",
+          "deskRenders": 9,
+          "deskWorst": 14.299999952316284,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 10.299999952316284,
+          "workerReads": 7,
+          "workerWorst": 238,
+          "mainThreadHistory": 0,
+          "accountReads": 5,
+          "accountWorst": 44.200000047683716,
+          "mainThreadAccount": 0,
+          "accountSnapshots": 9057,
+          "accountCloses": 2196,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 429.5
+            },
+            {
+              "name": "desk updates",
+              "start": 429.5,
+              "end": 3207.5999999046326
+            },
+            {
+              "name": "history setup",
+              "start": 3207.5999999046326,
+              "end": 3347.2000000476837
+            },
+            {
+              "name": "history updates",
+              "start": 3347.2000000476837,
+              "end": 5588
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [
+            {
+              "startTime": 81,
+              "duration": 50,
+              "name": "self",
+              "attribution": [
+                {
+                  "name": "unknown",
+                  "containerType": "window",
+                  "containerId": "",
+                  "containerName": "",
+                  "containerSrc": ""
+                }
+              ],
+              "phases": [
+                "desk setup"
+              ],
+              "events": [
+                {
+                  "reason": "data",
+                  "ms": 14.400000095367432,
+                  "at": 81.09999990463257
+                }
+              ],
+              "frames": [
+                {
+                  "startTime": 50.200000047683716,
+                  "duration": 77.29999995231628,
+                  "blockingDuration": 1.5,
+                  "renderStart": 81,
+                  "styleAndLayoutStart": 101.89999985694885,
+                  "scripts": [
+                    {
+                      "invoker": "Response.json.then",
+                      "invokerType": "resolve-promise",
+                      "sourceURL": "http://127.0.0.1:52856/joe/feed.js?v=261029192345.0.0",
+                      "sourceFunctionName": "",
+                      "startTime": 56,
+                      "duration": 5.099999904632568,
+                      "forcedStyleAndLayoutDuration": 0
+                    },
+                    {
+                      "invoker": "FrameRequestCallback",
+                      "invokerType": "user-callback",
+                      "sourceURL": "http://127.0.0.1:52856/joe/app.js?v=261029192345.0.0",
+                      "sourceFunctionName": "",
+                      "startTime": 81,
+                      "duration": 20.899999856948853,
+                      "forcedStyleAndLayoutDuration": 1.5
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1024",
+          "phase": "live",
+          "deskRenders": 9,
+          "deskWorst": 14.099999904632568,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 9.700000047683716,
+          "workerReads": 7,
+          "workerWorst": 245.10000014305115,
+          "mainThreadHistory": 0,
+          "accountReads": 5,
+          "accountWorst": 44,
+          "mainThreadAccount": 0,
+          "accountSnapshots": 9057,
+          "accountCloses": 2196,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 504.10000014305115
+            },
+            {
+              "name": "desk updates",
+              "start": 504.10000014305115,
+              "end": 3291.7000000476837
+            },
+            {
+              "name": "history setup",
+              "start": 3291.7000000476837,
+              "end": 3439.4000000953674
+            },
+            {
+              "name": "history updates",
+              "start": 3439.4000000953674,
+              "end": 5637.200000047684
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "390",
+          "phase": "live",
+          "deskRenders": 9,
+          "deskWorst": 9.100000143051147,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 7.799999952316284,
+          "workerReads": 7,
+          "workerWorst": 232.5,
+          "mainThreadHistory": 0,
+          "accountReads": 5,
+          "accountWorst": 44.09999990463257,
+          "mainThreadAccount": 0,
+          "accountSnapshots": 9057,
+          "accountCloses": 2196,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 520
+            },
+            {
+              "name": "desk updates",
+              "start": 520,
+              "end": 3135.4000000953674
+            },
+            {
+              "name": "history setup",
+              "start": 3135.4000000953674,
+              "end": 3276.2000000476837
+            },
+            {
+              "name": "history updates",
+              "start": 3276.2000000476837,
+              "end": 5403.599999904633
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        }
+      ]
+    },
+    {
+      "run": "final-cache",
+      "source": "candidate",
+      "traces": [
+        {
+          "viewport": "1440",
+          "phase": "cold 9000 points",
+          "workerRead": 262.2000000476837,
+          "renders": 1,
+          "renderWorst": 6,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [
+            59
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [
+            {
+              "startTime": 71.60000014305115,
+              "duration": 59,
+              "name": "self",
+              "attribution": [
+                {
+                  "name": "unknown",
+                  "containerType": "window",
+                  "containerId": "",
+                  "containerName": "",
+                  "containerSrc": ""
+                }
+              ],
+              "phases": [],
+              "events": [
+                {
+                  "reason": "screen",
+                  "ms": 9.700000047683716,
+                  "at": 115.79999995231628
+                }
+              ],
+              "frames": [
+                {
+                  "startTime": 71.60000014305115,
+                  "duration": 60.5,
+                  "blockingDuration": 10,
+                  "renderStart": 131.20000004768372,
+                  "styleAndLayoutStart": 131.20000004768372,
+                  "scripts": [
+                    {
+                      "invoker": "http://127.0.0.1:53535/joe/app.js?v=261029192345.0.0",
+                      "invokerType": "module-script",
+                      "sourceURL": "http://127.0.0.1:53535/joe/app.js?v=261029192345.0.0",
+                      "sourceFunctionName": "",
+                      "startTime": 71.60000014305115,
+                      "duration": 55.5,
+                      "forcedStyleAndLayoutDuration": 5.8
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1024",
+          "phase": "cold 9000 points",
+          "workerRead": 268.2999999523163,
+          "renders": 1,
+          "renderWorst": 5.799999952316284,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "390",
+          "phase": "cold 9000 points",
+          "workerRead": 258.90000009536743,
+          "renders": 1,
+          "renderWorst": 4.3999998569488525,
+          "mainThreadHistory": 0,
+          "longTasks": [],
+          "startup": [],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1440",
+          "phase": "live",
+          "deskRenders": 9,
+          "deskWorst": 11.5,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 11.400000095367432,
+          "workerReads": 7,
+          "workerWorst": 221.20000004768372,
+          "mainThreadHistory": 0,
+          "accountReads": 5,
+          "accountWorst": 42.200000047683716,
+          "mainThreadAccount": 0,
+          "accountSnapshots": 9057,
+          "accountCloses": 2196,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 393.40000009536743
+            },
+            {
+              "name": "desk updates",
+              "start": 393.40000009536743,
+              "end": 2986.7000000476837
+            },
+            {
+              "name": "history setup",
+              "start": 2986.7000000476837,
+              "end": 3123.7999999523163
+            },
+            {
+              "name": "history updates",
+              "start": 3123.7999999523163,
+              "end": 5209.599999904633
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "1024",
+          "phase": "live",
+          "deskRenders": 9,
+          "deskWorst": 10.599999904632568,
+          "historyRenders": 6,
+          "historyRedraws": 3,
+          "historyWorst": 8.5,
+          "workerReads": 7,
+          "workerWorst": 217.09999990463257,
+          "mainThreadHistory": 0,
+          "accountReads": 5,
+          "accountWorst": 41.90000009536743,
+          "mainThreadAccount": 0,
+          "accountSnapshots": 9057,
+          "accountCloses": 2196,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 487.09999990463257
+            },
+            {
+              "name": "desk updates",
+              "start": 487.09999990463257,
+              "end": 3034.5999999046326
+            },
+            {
+              "name": "history setup",
+              "start": 3034.5999999046326,
+              "end": 3176.399999856949
+            },
+            {
+              "name": "history updates",
+              "start": 3176.399999856949,
+              "end": 5186.899999856949
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        },
+        {
+          "viewport": "390",
+          "phase": "live",
+          "deskRenders": 9,
+          "deskWorst": 8.600000143051147,
+          "historyRenders": 7,
+          "historyRedraws": 4,
+          "historyWorst": 8.200000047683716,
+          "workerReads": 8,
+          "workerWorst": 233.09999990463257,
+          "mainThreadHistory": 0,
+          "accountReads": 5,
+          "accountWorst": 42.700000047683716,
+          "mainThreadAccount": 0,
+          "accountSnapshots": 9057,
+          "accountCloses": 2196,
+          "longTasks": [],
+          "windows": [
+            {
+              "name": "desk setup",
+              "start": 0,
+              "end": 436.80000019073486
+            },
+            {
+              "name": "desk updates",
+              "start": 436.80000019073486,
+              "end": 3135.800000190735
+            },
+            {
+              "name": "history setup",
+              "start": 3135.800000190735,
+              "end": 3252.5
+            },
+            {
+              "name": "history updates",
+              "start": 3252.5,
+              "end": 5354
+            }
+          ],
+          "longTaskDetails": [],
+          "setupTasks": [],
+          "frameAttributionSupported": true,
+          "points": 7209,
+          "sizeBytes": 6574598,
+          "attempt": 1,
+          "attempts": 1,
+          "remeasured": false,
+          "offendingTasks": []
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Final worst patches improve to 11.5/10.6/8.6 ms (1440/1024/390), with no measured update task reaching 50 ms. This passes the unchanged local CI guards.",
+    "Release 38 remains faster (9.1–10.0/8.6–8.7/6.8–7.0 ms); the aspirational release-38 ratio was not reached.",
+    "Local timings do not prove agm2 performance. The coordinator must run the cross-family gate and CI. No push, deploy, reseal or review gate was performed."
+  ],
+  "protectedPathsUnchanged": [
+    "public/joe/results.js",
+    "public/joe/results-model.js",
+    "contracts/",
+    "release/",
+    "scripts/check-release.mjs",
+    "scripts/browser/budget.mjs"
+  ],
+  "validation": {
+    "runs": [
+      {
+        "zone": "UTC",
+        "file": "test/ui-modules.mjs",
+        "exit": 0,
+        "tests": 317
+      },
+      {
+        "zone": "UTC",
+        "file": "test/status-line.mjs",
+        "exit": 0,
+        "tests": 44
+      },
+      {
+        "zone": "UTC",
+        "file": "test/performance-glance.mjs",
+        "exit": 0,
+        "tests": 28
+      },
+      {
+        "zone": "UTC",
+        "file": "test/board-state.mjs",
+        "exit": 0,
+        "tests": 212
+      },
+      {
+        "zone": "UTC",
+        "file": "test/open-result.mjs",
+        "exit": 0,
+        "tests": 11
+      },
+      {
+        "zone": "UTC",
+        "file": "test/phone-first-screen.mjs",
+        "exit": 0,
+        "tests": 17
+      },
+      {
+        "zone": "UTC",
+        "file": "test/desk-session.mjs",
+        "exit": 0,
+        "tests": 33
+      },
+      {
+        "zone": "UTC",
+        "file": "test/results-model.mjs",
+        "exit": 0,
+        "tests": 108
+      },
+      {
+        "zone": "UTC",
+        "file": "test/settings-model.mjs",
+        "exit": 0,
+        "tests": 27
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/ui-modules.mjs",
+        "exit": 0,
+        "tests": 317
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/status-line.mjs",
+        "exit": 0,
+        "tests": 44
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/performance-glance.mjs",
+        "exit": 0,
+        "tests": 28
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/board-state.mjs",
+        "exit": 0,
+        "tests": 212
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/open-result.mjs",
+        "exit": 0,
+        "tests": 11
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/phone-first-screen.mjs",
+        "exit": 0,
+        "tests": 17
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/desk-session.mjs",
+        "exit": 0,
+        "tests": 33
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/results-model.mjs",
+        "exit": 0,
+        "tests": 108
+      },
+      {
+        "zone": "Europe/Vienna",
+        "file": "test/settings-model.mjs",
+        "exit": 0,
+        "tests": 27
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/ui-modules.mjs",
+        "exit": 0,
+        "tests": 317
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/status-line.mjs",
+        "exit": 0,
+        "tests": 44
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/performance-glance.mjs",
+        "exit": 0,
+        "tests": 28
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/board-state.mjs",
+        "exit": 0,
+        "tests": 212
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/open-result.mjs",
+        "exit": 0,
+        "tests": 11
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/phone-first-screen.mjs",
+        "exit": 0,
+        "tests": 17
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/desk-session.mjs",
+        "exit": 0,
+        "tests": 33
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/results-model.mjs",
+        "exit": 0,
+        "tests": 108
+      },
+      {
+        "zone": "America/New_York",
+        "file": "test/settings-model.mjs",
+        "exit": 0,
+        "tests": 27
+      }
+    ],
+    "syntax": true,
+    "uiCheckExit": 0,
+    "processes": 27,
+    "testExecutions": 2391,
+    "testOrder": "Each package.json test:ui file ran as its own node --test process, sequentially in each timezone.",
+    "functionalBrowser": {
+      "command": "JOED_P3_ONLY=sessions,nav TZ=UTC node scripts/browser-p3.mjs --subset",
+      "checks": 403,
+      "passed": 403,
+      "exit": 0
+    }
+  },
+  "sourceSha256": {
+    "public/joe/account-model.js": "0dd1aa00c2677b91b542e87be3af60d54adc205dda845e860e7d8cb20d5eadb4",
+    "public/joe/account.js": "a1becb6a5e2514f5993360fb1761d3f24f6f6566b4eddbf0a2a13a98128bef36",
+    "public/joe/app.js": "b2990498f6ab47000534ddd30e33cad8d32892264c08f87123389ca9be5c333d",
+    "public/joe/chart.js": "b3933a7f5270265e60b30e516ac013c55a5568f0bf4b840b5f9b5dd3df82b37d",
+    "public/joe/desk.js": "75c009c2c033764db15cedf209b882294ff56362cbb96f958202c1fc73913f50",
+    "test/account-hero.mjs": "ee044d1983a1c896c20d6d7438a691a7f75e61cfa7013514705b401290613161",
+    "test/account-model.mjs": "527f45e5b2685ebbb60aafdee96d27724d4a20e406a22c150681d3e50c3b175c",
+    "test/chart-axis.mjs": "e523d5b98181d7f967353c2d37e5b34ac2e0d1576c63e230e9af059adb8bc09d",
+    "test/desk-session.mjs": "73a7566e46f4498c312e46f485a5dac88c534b42ce465ff2b7b2693376e39d28",
+    "test/ui-modules.mjs": "4cc8b82c8a2ebcb9eb53380df1f3c3ead3c1f8904ee9061cb4f015216dc1bf4b"
+  }
+}

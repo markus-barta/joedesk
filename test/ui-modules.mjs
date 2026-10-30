@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import * as nodeModule from 'node:module';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
+import { decimalUnits } from '../contracts/decimal.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from '../scripts/browser/budget-tasks.mjs';
 import { CI_GUARD, REFERENCE_BUDGET, TIMING_GUARDS, decideTaskGuard, runBudget, budgetTable } from '../scripts/browser/budget.mjs';
 import { runResultsBudget, resultsBudgetTable } from '../scripts/browser/results-budget.mjs';
@@ -268,6 +269,27 @@ test('hero captions: the two supporting KPIs keep the same reserve through sessi
   assert.ok(reserve(baseline[1]).includes('started with € 15.000'));
   assert.ok(reserve(baseline[1]).includes('started with € 15.000 on 10 Sep'), 'the dated caption reserves its own line');
   assert.ok(reserve(baseline[1]).includes('J’s bookkeeping incomplete · desk total unavailable'));
+});
+
+test('JOED-167 positions: shared timestamp labels preserve distinct values and refresh across New York midnight', () => {
+  const base = valid.data.positions.rows.find(row => row.scope === 'stage0');
+  const rows = [1, 2, 3].map((n, i) => ({ ...base, desk: 'j', symbol: `P${i}`, quantity: String(n),
+    mark: { amount: `${n}.25`, currency: 'USD' }, openedAt: '2026-10-13T14:05:00.000Z',
+    updatedAt: `2026-10-13T17:${i === 2 ? '43' : '42'}:00.000Z` }));
+  const ctx = { feeds: {}, states: { positions: { state: 'fresh', value: rows } }, now: '2026-10-14T03:59:00.000Z' };
+  const render = () => htmlDocument(positionsHtml(ctx).html).querySelectorAll('.prow:not(.hd)');
+  const before = render();
+  assert.deepEqual(before.map(row => row.querySelector('.c-opened').textContent), ['19:42', '19:42', '19:43']);
+  before.forEach((row, i) => {
+    assert.match(row.querySelector('.name').textContent, /opened today 16:05/);
+    assert.ok(row.querySelector('.c-side').textContent.endsWith(String(i + 1)));
+    assert.equal(row.querySelector('.c-px').textContent, format.money(decimalUnits(`${i + 1}.25`), 'USD'));
+  });
+  ctx.now = '2026-10-14T04:00:00.000Z';
+  for (const row of render()) {
+    assert.doesNotMatch(row.querySelector('.name').textContent, /opened today/);
+    assert.match(row.querySelector('.name').textContent, /opened Tue 13/);
+  }
 });
 
 test('position rows: omitted optional P&L stays a plain dash without a reason or title', () => {

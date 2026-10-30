@@ -303,7 +303,8 @@ let watched = null;
 function watchSizes() {
   watched?.disconnect();
   watched = typeof ResizeObserver === 'function' ? new ResizeObserver(entries => {
-    for (const { target, contentRect } of entries) sizes.set(target, { w: Math.round(contentRect.width), h: Math.round(contentRect.height) });
+    for (const { target, contentRect } of entries) sizes.set(target, { w: Math.round(contentRect.width), h: Math.round(contentRect.height),
+      ...(target.id === 'acctTrack' ? { off: target.offsetLeft || 0, room: $('#acctStrip')?.clientWidth || 0 } : {}) });
     if (last.ctx && drawKey(last.ctx) !== last.key) requestDraw();
   }) : null;
   for (const el of [$('#acctChart'), $('#acctTrack')]) if (el) watched?.observe(el);
@@ -391,7 +392,7 @@ function draw() {
   const ctx = last.ctx, inspect = { description: 'acctInspectHelp', live: $('#acctLive'), points: [] }, pad = padFor();
   // What this drawing is for (again below, once the window's kind is known).
   last.drawn = null; last.key = drawKey(ctx);
-  const empty = text => { AS.full = null; AS.shown = null; last.scale = chartDraw(el, { series: [], xDomain: [0, 1], empty: true, emptyText: text, inspect, pad, label: `The whole paper account over time: ${text.toLowerCase()}` }); stripOff(); syncWindowParts(); };
+  const empty = text => { AS.full = null; AS.shown = null; last.scale = chartDraw(el, { size, series: [], xDomain: [0, 1], empty: true, emptyText: text, inspect, pad, label: `The whole paper account over time: ${text.toLowerCase()}` }); stripOff(); syncWindowParts(); };
   if (!ctx?.now) { empty('Waiting for the board server’s clock'); return; }
   const source = M.sourceOf(AS.range), live = M.liveObservation(ctx.states.paperAccount, ctx.feeds.data?.value);
   const series = seriesFor(source, live), now = Date.parse(ctx.now);
@@ -425,6 +426,7 @@ function draw() {
   // (base); Max: every value loaded; Custom: the viewer's own bounds.
   const choice = yAxis.get();
   last.scale = chartDraw(el, {
+    size,
     // Max keeps one base too (the lowest value loaded), so no window rescales it.
     axis: choice, maxValues: ext.loaded ?? null, ease: 180, easeKey: source, again: requestDraw,
     series: [{ pts, color: 'var(--accent)', w: 1.9, live: following && Boolean(series.live), area: false }],
@@ -513,15 +515,16 @@ function stripFor(series, full, width, height, settled) {
 function drawStrip(series, full, [a, b], settled) {
   const strip = $('#acctStrip'), track = $('#acctTrack'), plot = $('#acctMiniPlot');
   if (!strip || !track || !plot) return;
-  const { w: width, h: height } = sizeOf(track);
+  const { w: width, h: height, off = track.offsetLeft || 0, room = strip.clientWidth || 0 } = sizeOf(track);
   if (!width || !height || full[1] <= full[0]) { stripOff(); return; }
+  // The observer measures the handle room with the track. Before its first
+  // report, read once here, before replacing the strip's SVG.
   strip.removeAttribute('data-off');
   setAttrs(strip, { 'data-k0': Math.round(full[0]), 'data-k1': Math.round(full[1]) });
   // Drawn again for a new history, range, size or end (each minute, or each
   // value zoomed in); a new live value inside the minute moves in place.
   stripFor(series, full, width, height, settled);
-  const off = track.offsetLeft || 0;
-  const t = overviewTargets({ width, left: toStrip(full, width, a), right: toStrip(full, width, b), hit: coarse() ? 44 : 16, lo: -off, hi: Math.max(width, (strip.clientWidth || 0) - off) });
+  const t = overviewTargets({ width, left: toStrip(full, width, a), right: toStrip(full, width, b), hit: coarse() ? 44 : 16, lo: -off, hi: Math.max(width, room - off) });
   const win = $('#acctWin'), from = $('#acctStrip [data-edge="from"]'), to = $('#acctStrip [data-edge="to"]');
   win.style.left = `${t.win.x}px`; win.style.width = `${t.win.w}px`;
   win.style.setProperty?.('--hl', `${t.win.hit.x - t.win.x}px`);
