@@ -18,12 +18,6 @@ import './theme-copy.mjs';
 import './board-sweep-plan.mjs';
 import './feed-robust.mjs';
 import './position-claims.mjs';
-import './history-view.mjs';
-import './header-nav.mjs';
-import './chart-axis.mjs';
-import './account-model.mjs';
-import './account-hero.mjs';
-import './account-worker.mjs';
 
 const mapped = (specifier, parentURL) => (parentURL?.includes('/public/joe/') && !parentURL.includes('/public/joe/contracts/') &&
   (specifier === './time.mjs' || specifier === './market-calendar.json' || specifier.startsWith('./contracts/'))
@@ -40,17 +34,14 @@ const { panelStates } = await import('../contracts/panel-state.mjs');
 const { boardStates, NOT_EXACT_REASONS } = await import('../public/joe/board-state.js');
 const { isRTH } = await import('../time.mjs');
 const format = await import('../public/joe/format.js');
-const { cashCaption, stateCaption, reservedCaption, statePhrase, st, CAPTION_PHRASES, CAPTION_RESERVE } = await import('../public/joe/ui.js');
-const { measure, lineCount } = await import('./fixtures/text-width.mjs');
+const { cashCaption, stateCaption, reservedCaption, statePhrase, st } = await import('../public/joe/ui.js');
 const { isCanonicalJoeHost } = await import('../public/joe/host.js');
 const health = await import('../public/joe/health.js');
 const hm = await import('../public/joe/history-model.js');
-const { HS, historyChart, downsample, historyPointDetails, initHistoryInput, initHistoryControls, historyPreset, historyAxis, historyQuery, readHistoryRoute } = await import('../public/joe/history.js');
+const { HS, historyChart, downsample, historyPointDetails } = await import('../public/joe/history.js');
 const { axis } = await import('../public/joe/chart.js');
 const { diffDesk, createObservedEvents, learningLine } = await import('../public/joe/events.js');
 const { cellView, cardStatus, headerHealth, healthPop, executorProblem, heroLeft, keptHtml, positionsHtml, sharedSectionReason, positionSectionReason, compactDesk, disclosureProblem, rowProblems } = await import('../public/joe/desk.js');
-// JOED-156: the whole-account block (the paper account and Cash) above the hero.
-const A = await import('../public/joe/account.js');
 const { builders, htmlDocument } = await import('./fixtures/preview-dom.mjs');
 const { deskCard } = await builders('desk.js', ['deskCard']);
 const { createFeed } = await import('../public/joe/feed.js');
@@ -60,8 +51,6 @@ const { periodOf, resultsToday } = await import('../public/joe/results.js');
 const { TERMS } = await import('../public/joe/terms.js');
 const { singleMissingDesk, coupledUnavailable } = await import('../scripts/browser/board.mjs');
 const { switchSetSnapshot, cashSessionSnapshot } = await import('../scripts/browser/settings-fixtures.mjs');
-const { heroProblemCaption } = await import('../scripts/browser/desk-checks.mjs');
-const { heroWordingFixtures } = await import('../scripts/browser/hero-wording-fixtures.mjs');
 
 const read = file => JSON.parse(readFileSync(new URL(`../fixtures/${file}`, import.meta.url)));
 const valid = read('valid.json');
@@ -85,23 +74,6 @@ function board(fixture, { cold = false, display = false } = {}) {
 }
 const fixture = id => read(`failures/${id}.json`);
 const presentation = (id, opts) => { const b = board(fixture(id), { ...opts, display: true }); return health.boardHealthPresentation(b.states, b.feeds, b.now); };
-
-test('JOED-163: P3 fixture captions keep each household’s classified word, desk attribution and shared reason', () => {
-  const derived = { ...heroWordingFixtures(valid.data), 'p3-coupled-unavailable': coupledUnavailable, 'p3-single-missing-desk': singleMissingDesk };
-  for (const id of ['p3-mixed-not-exact-fault', 'p3-not-exact-yet', 'p3-shared-not-exact', 'p3-coupled-unavailable', 'p3-single-missing-desk']) {
-    const ctx = board(derived[id](), { display: true }), hero = htmlDocument(heroLeft(ctx));
-    for (const c of hero.querySelectorAll('[data-cell]')) {
-      if (c.dataset.state === 'fresh') continue;
-      const expected = heroProblemCaption(ctx, c.dataset.cell);
-      const actual = expected.section ? hero.querySelector('.board-caption').textContent
-        : (c.querySelector('.account-caption')?.children[0] ?? c.querySelector('.c')).textContent;
-      const text = expected.text.replace(/<[^>]*>/g, '');
-      assert.equal(expected.section ? actual.includes(text) : actual === text, true, `${id} ${c.dataset.cell}: ${actual} != ${text}`);
-    }
-    if (id === 'p3-mixed-not-exact-fault') assert.deepEqual(heroProblemCaption(ctx, 'hero.open'),
-      { section: false, text: 'Last good for J, Joe and Joel · not reported by the broker' });
-  }
-});
 
 test('format: Austrian digits, true minus, joined units, zero without sign', () => {
   assert.equal(format.money(-4.05, 'EUR', true), '−€ 4,05');
@@ -155,23 +127,6 @@ test('cash captions: null, omitted and broken retained values always explain why
   }
 });
 
-test('JOED-148 cash captions: a not-exact Cash says "not exact" in its caption and name on Desk and in Settings', () => {
-  for (const reason of NOT_EXACT_REASONS) {
-    const why = health.cellReason(reason), words = `not exact${reason === 'not_exact_yet' ? '' : ` · ${why}`}`;
-    const cell = { state: 'broken', value: null, reason };
-    const settings = cashCaption(cell, 'rt.cash'), desk = htmlDocument(cashCaption(cell, 'hero.cash', { figure: true }));
-    assert.ok(settings.includes(`title="Cash: ${format.esc(words)}" aria-label="Cash: ${format.esc(words)}">${format.esc(words)}</span>`), reason);
-    assert.equal(desk.querySelector('.cash-reason').textContent, words, reason);
-    assert.equal(desk.querySelector('[data-cash]').getAttribute('aria-label'), `Cash: ${words}`, reason);
-    assert.equal(desk.querySelector('.cash-amount').textContent, '—');
-    for (const html of [settings, desk.textContent]) assert.doesNotMatch(html.replace(/<span class="cash-sizing"[^]*?<\/span>/g, ''), /not reported/, reason);
-    // A shared section reason is not repeated on the figure.
-    assert.equal(htmlDocument(cashCaption(cell, 'hero.cash', { figure: true, sharedReason: why })).querySelector('.cash-reason').textContent, 'not exact');
-  }
-  // Faults keep their existing "not reported" naming in both surfaces.
-  assert.ok(cashCaption({ state: 'broken', value: null, reason: 'source_unavailable' }, 'rt.cash').includes('aria-label="Cash not reported · not reported by the broker">not reported · not reported by the broker</span>'));
-});
-
 test('cash captions: stale values keep exact accessibility and their own reason with the same reserve', () => {
   const value = { amount: '12345.67890123', currency: 'EUR' };
   const reserve = html => html.slice(html.indexOf('<span class="cash-sizing"'));
@@ -189,9 +144,7 @@ test('cash captions: Amy’s label and caption stay fixed; every null and stale 
     for (const key of ['hero.cash', 'rt.cash']) {
       const html = cashCaption({ state: 'broken', value: null, reason }, key);
       assert.ok(html.includes('<span class="cash-label">Cash</span><span class="cash-caption">cash · as the broker reports it</span>'));
-      // A not-exact Cash reserves its own not-exact words (JOED-148), the rest "not reported".
-      const missing = NOT_EXACT_REASONS.has(reason) ? `not exact${why === 'not exact' ? '' : ` · ${why}`}` : `not reported · ${why}`;
-      assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(missing)}</span>`), reason);
+      assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`not reported · ${why}`)}</span>`), reason);
       assert.ok(html.includes(`<span class="cash-sizing" aria-hidden="true">${format.esc(`−€ 999.999,99 · ${why}`)}</span>`), reason);
     }
   }
@@ -200,28 +153,14 @@ test('cash captions: Amy’s label and caption stay fixed; every null and stale 
 test('hero captions: every reason reserves retained, stale, broken and null wording with real ages', () => {
   const sizing = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
   const html = reservedCaption('after fees', ['after fees']);
-  // Every phrase the real caption builder writes is a candidate; the box lays
-  // out the longest (JOED-147 render budget), measured below to reserve them all.
-  const phrases = CAPTION_PHRASES;
-  assert.deepEqual(sizing(html), ['after fees', ...CAPTION_RESERVE]);
-  assert.ok(CAPTION_RESERVE.length <= 16 && CAPTION_RESERVE.every(text => phrases.includes(text)));
-  const plain = text => text.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-  // 12 px captions that may break inside a word (overflow-wrap: anywhere), in
-  // the wide font and a font 15 % narrower: at every width the laid-out
-  // phrases need as many lines as the tallest phrase of all.
-  for (const factor of [1, 0.85]) {
-    const all = phrases.map(text => measure(plain(text), 12, { factor })), laid = CAPTION_RESERVE.map(text => measure(plain(text), 12, { factor }));
-    for (let max = 40; max <= 1200; max++) {
-      const most = Math.max(...laid.map(m => lineCount(m, max, { anywhere: true })));
-      assert.ok(all.every(m => lineCount(m, max, { anywhere: true }) <= most), `${max} px (×${factor})`);
-    }
-  }
+  const phrases = sizing(html);
+  assert.ok(phrases.includes('after fees'));
   assert.ok(phrases.includes('Not reported'));
   assert.ok(phrases.includes('Unavailable · not available'));
   for (const [reason, why] of Object.entries(health.CELL_REASON)) {
     const escaped = format.esc(why), capital = health.capital(escaped);
     if (NOT_EXACT_REASONS.has(reason)) {
-      assert.ok(phrases.includes(`Not exact${why === 'not exact' ? '' : ` · ${escaped}`}`), why);
+      assert.ok(phrases.includes(`Not exact yet${why === 'not exact yet' ? '' : ` · ${escaped}`}`), why);
     } else {
       assert.ok(phrases.includes(`Unavailable · ${escaped}`), why);
       assert.ok(phrases.includes(`Not reported · ${escaped}`), why);
@@ -241,32 +180,28 @@ test('hero captions: every reason reserves retained, stale, broken and null word
   assert.ok(phrases.every(text => !text.includes('data-age')));
   const visible = stateCaption({ state: 'broken', value: {}, retained: true, reason: 'gateway_unconfirmed', ageSeconds: 90 }, 'hero.open');
   assert.match(reservedCaption(visible, ['after fees']), /<span class="account-caption"><span>Last good value, <span class="age" data-age="hero.open">1 min ago<\/span> · broker connection not confirmed<\/span>/);
-  assert.deepEqual(sizing(reservedCaption(visible, ['after fees'])), sizing(html), 'reserve stays identical across states');
+  assert.deepEqual(sizing(reservedCaption(visible, ['after fees'])), phrases, 'reserve stays identical across states');
 });
 
-// JOED-153: Open result and Desks' money stay in the desk hero; the paper account
-// moved to the whole-account slot above it with the same reserved caption.
-test('hero captions: the two supporting KPIs keep the same reserve through session loss and incomplete bookkeeping', () => {
+test('hero captions: three supporting KPIs keep the same reserve through session loss and incomplete bookkeeping', () => {
   const fresh = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
   const session = board(fixture('a-gateway-up-but-dead'));
   const incomplete = structuredClone(fresh);
   incomplete.states['desks.j.equity'].value = null;
-  // The whole account's value has its own state line above the hero (JOED-156): no caption reserve.
   const kpis = ctx => [...heroLeft(ctx).matchAll(/<div class="kpi"[\s\S]*?<\/div>/g)].map(m => m[0]);
   const reserve = html => [...html.matchAll(/<span class="cash-sizing" aria-hidden="true">([^<]*)<\/span>/g)].map(m => m[1]);
   const baseline = kpis(fresh);
-  assert.equal(baseline.length, 2);
+  assert.equal(baseline.length, 3);
   for (const ctx of [fresh, session, incomplete]) {
     const actual = kpis(ctx);
-    assert.equal(actual.length, 2);
+    assert.equal(actual.length, 3);
     actual.forEach((html, i) => {
       assert.match(html, /<span class="c"><span class="account-caption">/);
       assert.deepEqual(reserve(html), reserve(baseline[i]));
-      assert.ok(CAPTION_RESERVE.every(text => reserve(html).includes(text)), 'the tallest state phrases');
+      assert.ok(reserve(html).includes('Last good value, 999 days ago · broker connection not confirmed'));
     });
   }
   assert.ok(reserve(baseline[1]).includes('started with € 15.000'));
-  assert.ok(reserve(baseline[1]).includes('started with € 15.000 on 10 Sep'), 'the dated caption reserves its own line');
   assert.ok(reserve(baseline[1]).includes('J’s bookkeeping incomplete · desk total unavailable'));
 });
 
@@ -283,14 +218,13 @@ test('position rows: omitted optional P&L stays a plain dash without a reason or
     row.reasons = { [field]: 'not_exact_yet' };
     const render = value => scope === 'keep' ? keptHtml({ states: { kept: { state: 'fresh', value: [value] } } })
       : positionsHtml({ states: { positions: { state: 'fresh', value: [value] } }, feeds: {}, now: valid.data.receivedAt }).html;
-    assert.doesNotMatch(render(row), /not exact|no data received yet|Open result:|Today’s result:/, `${scope} absent ${field}`);
+    assert.doesNotMatch(render(row), /not exact yet|no data received yet|Open result:|Today’s result:/, `${scope} absent ${field}`);
     row[field] = null;
     const html = render(row), label = field === 'openPnl' ? 'Open result' : 'Today’s result';
-    assert.ok(html.includes(`${label}: not exact`), `${scope} null ${field}`);
-    assert.doesNotMatch(html, /not exact yet/);
-    if (scope === 'stage0' && field === 'openPnl') assert.match(html, /title="Open result: not exact" aria-label="Open result: not exact">—<\/span>/);
+    assert.ok(html.includes(`${label}: not exact yet`), `${scope} null ${field}`);
+    if (scope === 'stage0' && field === 'openPnl') assert.match(html, /title="Open result: not reported · not exact yet" aria-label="Open result: not reported · not exact yet">—<\/span>/);
     row[field] = { amount: '1.25', currency: 'EUR' };
-    assert.doesNotMatch(render(row), /not exact|no data received yet|Open result:|Today’s result:/, `${scope} valued ${field}`);
+    assert.doesNotMatch(render(row), /not exact yet|no data received yet|Open result:|Today’s result:/, `${scope} valued ${field}`);
     if (scope === 'stage0' && field === 'openPnl') assert.match(render(row), /\+€ 1,25/);
   }
 });
@@ -300,15 +234,13 @@ test('position rows: null values expose their reasons visibly and in accessible 
   const cells = panelStates({ data: { value: data } }, data.receivedAt);
   const ctx = { states: cells, feeds: { data: { value: data } }, now: data.receivedAt };
   const kept = keptHtml(ctx), positions = positionsHtml(ctx).html;
-  // JOED-148: a not-exact dash says "not exact"; only a value the broker did not report says "not reported".
-  const dashName = why => why === 'not exact' ? why : `not reported · ${why}`;
-  for (const label of ['Quantity', 'Last price', 'Worth']) for (const why of ['not exact', 'not reported by the broker']) {
-    assert.ok(kept.includes(`title="${label}: ${dashName(why)}" aria-label="${label}: ${dashName(why)}">—</span>`));
+  for (const label of ['Quantity', 'Last price', 'Worth']) for (const why of ['not exact yet', 'not reported by the broker']) {
+    assert.ok(kept.includes(`title="${label}: not reported · ${why}" aria-label="${label}: not reported · ${why}">—</span>`));
     assert.ok(kept.includes(`${label}: ${why}`) || htmlDocument(kept).querySelector('.pstate').textContent.includes(why), 'reason remains visible locally or once in the section');
   }
   const keptDoc = htmlDocument(kept), section = keptDoc.querySelector('.pstate').textContent;
   for (const row of keptDoc.querySelectorAll('.prow')) {
-    const why = row.getAttribute('data-keep') === 'SXR8' ? 'not exact' : 'not reported by the broker';
+    const why = row.getAttribute('data-keep') === 'SXR8' ? 'not exact yet' : 'not reported by the broker';
     const reasons = row.querySelector('.position-reasons')?.textContent ?? '';
     for (const label of ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result']) {
       assert.ok(reasons.includes(`${label}: ${why}`) || section.includes(why), `${label} is named in its row reason list unless the section explains it`);
@@ -316,7 +248,7 @@ test('position rows: null values expose their reasons visibly and in accessible 
     assert.ok(row.querySelector('.position-notes'), 'every row keeps the same detail slot');
     if (section.includes(why)) {
       assert.equal(row.querySelector('.position-day')?.textContent, 'Today’s result: —');
-      assert.equal(row.querySelector('.position-day .position-value')?.getAttribute('aria-label'), `Today’s result: ${dashName(why)}`);
+      assert.equal(row.querySelector('.position-day .position-value')?.getAttribute('aria-label'), `Today’s result: not reported · ${why}`);
     } else {
       assert.equal(row.querySelector('.position-day'), null, 'independent today’s result stays in the field list');
     }
@@ -326,7 +258,7 @@ test('position rows: null values expose their reasons visibly and in accessible 
   assert.doesNotMatch(kept.slice(kept.indexOf('<div class="prow"')), /<(?:button|a|input)\b|tabindex=/);
   assert.match(kept, /data-keep="SXR8"/);
   assert.match(kept, /data-keep="TSLA"/);
-  assert.equal(health.cellReason('not_exact_yet'), 'not exact');
+  assert.equal(health.cellReason('not_exact_yet'), 'not exact yet');
   assert.equal(health.cellReason('source_unavailable'), 'not reported by the broker');
   assert.equal(health.cellReason('source_not_authoritative'), 'held back: the kept-holdings list disagrees');
 });
@@ -371,9 +303,9 @@ test('unmapped positions: visible reason, honest row count, neutral identity, la
   assert.deepEqual([...rendered.html.matchAll(/<div class="name"><b>([^<]+)<\/b>/g)].map(m => m[1]),
     ['OLD', 'DEMO', 'DESK0', 'DESK1', 'AAA'], 'legacy order and all mapped desk order stay unchanged');
   for (const field of ['Quantity', 'Last price', 'Worth', 'Open result']) {
-    assert.ok(row.includes(`title="${field}: not exact" aria-label="${field}: not exact">—</span>`));
+    assert.ok(row.includes(`title="${field}: not reported · not exact yet" aria-label="${field}: not reported · not exact yet">—</span>`));
   }
-  assert.match(htmlDocument(rendered.html).querySelector('.pstate').textContent, /Prices unavailable · not exact$/);
+  assert.match(htmlDocument(rendered.html).querySelector('.pstate').textContent, /Prices unavailable · not exact yet/);
   assert.doesNotMatch(row, /class="position-reasons"/, 'matching row reasons belong to the section; the unmatched desk explanation stays in the row');
   assert.equal(rendered.sub, '5 open · 1 not matched to a desk · each in its own currency');
   assert.equal(Number.parseInt(rendered.sub), [...rendered.html.matchAll(/<div class="prow" data-desk=/g)].length,
@@ -484,7 +416,7 @@ test('health: capture leaves board health unchanged; the full ledger is red imme
     Object.assign(feeds.data.value.safety.gateway, { apiSessionReady: false, reason });
     assert.equal(view(panelStates(feeds, b.now, b.states), feeds).reason, reason);
   }
-  for (const [name, expected] of [['today.dayPnl', 'day_pending'], ['today.openPnl', 'open_fault_rth']]) {
+  for (const [name, expected] of [['today.dayPnl', 'day_pending'], ['today.openPnl', 'open_unavailable_rth']]) {
     const states = structuredClone(b.states);
     states[name].value = null;
     assert.equal(view(states).reason, expected);
@@ -678,9 +610,8 @@ test('health: every P1 fixture lands on today’s light, label and plain reason'
     'b-incomplete-family': ['yellow', 'retained_values', 'Data delayed'],
     'b-equity-null-gateway-ready': ['yellow', 'retained_values', 'Data delayed'],
     'h-keep-policy-mismatch': ['yellow', 'retained_values', 'Data delayed'],
-    // Amy's A3: a Today the feed explains as not exact is not late in regular hours.
-    'b-weekend-no-sod': ['green', 'board_ok', 'Board OK'],
-    'j-ny-midnight-gap': ['green', 'board_ok', 'Board OK'],
+    'b-weekend-no-sod': ['yellow', 'day_pending', 'Data delayed'],
+    'j-ny-midnight-gap': ['yellow', 'day_pending', 'Data delayed'],
     'a-gateway-up-but-dead': ['red', 'gateway_down', 'Needs fix'],
     'c-old-producer-image': ['red', 'feed_disconnected', 'Needs fix'],
     'unknown-schema': ['red', 'feed_disconnected', 'Needs fix'],
@@ -886,7 +817,7 @@ test('health: not-exact switch values keep Board OK and one neutral Details fact
     const html = cardStatus(id, ['dayPnl', 'openPnl', 'totalPnl'].map(field => [field, b.states[`desks.${id}.${field}`]]));
     assert.match(html, /class="st none"/);
     assert.match(html, /href="#i-info"/);
-    assert.match(html, /Numbers: not exact(?! yet)/);
+    assert.match(html, /Numbers: not exact yet/);
     assert.doesNotMatch(html, /st bad|#i-stop/);
   }
 });
@@ -910,7 +841,7 @@ test('JOED-103 health: every shared not-exact reason on every equity surface has
     const p = health.boardHealthPresentation(b.states, b.feeds, b.now);
     assert.equal(p.tone, 'green', `${name}: ${reason}`);
     assert.match(headerHealth(b, p).html, /tone-ok/);
-    assert.match(healthPop(b, p), /Desk values are not exact(?! yet)/);
+    assert.match(healthPop(b, p), /Desk values are not exact yet/);
   }
 });
 
@@ -954,15 +885,8 @@ test('health: not-exact values still run gateway, stuck-desk, transport, feed an
   }
   const payload = switchSetSnapshot(valid.data.generatedAt);
   const rth = board({ feed: 'data', payload, receivedAt: payload.generatedAt, now: at(payload.generatedAt, 9) }, { cold: true });
-  // Amy's A3 excuses Today only; a not-exact Open still warns in regular hours.
-  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
-  // A household Today with no reason on any channel (cell, money, source) is a real gap.
-  const gap = { ...rth, states: { ...rth.states }, feeds: { ...rth.feeds, data: { ...rth.feeds.data, value: structuredClone(rth.feeds.data.value) } } };
-  delete gap.feeds.data.value.totals.reasons.dayPnl;
-  delete gap.feeds.data.value.pnlSources.day.reason;
-  gap.states['today.dayPnl'] = { value: null, reason: null, state: 'broken', retained: false };
-  assert.equal(health.localBoardHealth(gap.states, gap.feeds, gap.now).reason, 'day_pending', 'a Today without a reason is a real gap');
-  rth.states['today.dayPnl'] = { state: 'fresh', value: { amount: '0', currency: 'EUR' }, reason: null, retained: false };
+  assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'day_pending');
+  rth.states['today.dayPnl'] = { value: { amount: '0', currency: 'EUR' }, retained: false };
   assert.equal(health.localBoardHealth(rth.states, rth.feeds, rth.now).reason, 'open_unavailable_rth');
 });
 
@@ -977,7 +901,7 @@ test('health: the single NOT_EXACT_TONE constant can opt into yellow, after othe
   const b = notExactBoard();
   assert.deepEqual(yellow.localBoardHealth(b.states, b.feeds, b.now), { tone: 'yellow', reason: 'values_not_exact' });
   const p = yellow.boardHealthPresentation(b.states, b.feeds, b.now);
-  assert.deepEqual([p.statusTone, p.explanation], ['warn', 'desk values are not exact']);
+  assert.deepEqual([p.statusTone, p.explanation], ['warn', 'desk values are not exact yet']);
   b.states.gateway.state = 'broken';
   assert.equal(yellow.localBoardHealth(b.states, b.feeds, b.now).reason, 'gateway_unconfirmed');
   b.states['desks.j.equity'].reason = 'source_unavailable';
@@ -991,7 +915,7 @@ test('cell presentation: null not-exact values use neutral info; other failures 
   for (const reason of NOT_EXACT_REASONS) for (const state of ['broken', 'stale', 'not reported', 'fresh']) {
     const p = statePhrase({ state, value: null, reason }, 'test');
     assert.deepEqual([p.tone, p.icon], ['none', 'info']);
-    assert.match(p.text, /^not exact(?! yet)/);
+    assert.match(p.text, /^not exact yet/);
     assert.doesNotMatch(p.text, /unavailable/);
     assert.match(st(p.tone, p.text, p.icon), /class="st none".*href="#i-info"/);
   }
@@ -1124,7 +1048,7 @@ test('desk cards: every affected number keeps its own state, age and reason', ()
     ['Since 10 Sep', cell('broken', 'gateway_down', '4.5', '2026-10-14T17:40:00.000Z')],
   ]);
   const text = lines.replace(/<[^>]+>/g, '');
-  assert.match(text, /Today: not exact · today’s result not available/);
+  assert.match(text, /Today: not exact yet · today’s result not available/);
   assert.match(text, /Open positions: last good, 2\smin ago · broker connection down/);
   assert.match(text, /Since 10 Sep: last good, 5\smin ago$/);
   assert.equal(text.match(/broker connection down/g).length, 1, 'the shared reason stays visible once while both ages remain');
@@ -1145,7 +1069,7 @@ test('section reasons: repeated readable reasons share once; single and fresh re
   assert.deepEqual(cells, before, 'presentation never changes selector states');
   const summary = disclosureProblem(cells.map((cell, i) => [`Field ${i}`, cell]));
   assert.equal(summary.detail.match(/broker connection down/g).length, 1);
-  assert.match(summary.detail, /Field 0: not exact(?! yet)/);
+  assert.match(summary.detail, /Field 0: not exact yet/);
 });
 
 test('broker down: Positions and Kept show one section reason and accessible field-specific dashes', () => {
@@ -1174,8 +1098,8 @@ test('broker down: a different position reason remains on its own row and dash',
     const doc = htmlDocument(name === 'positions' ? positionsHtml(ctx).html : keptHtml(ctx));
     assert.equal(doc.textContent.match(/broker connection down/g).length, 1);
     assert.equal(doc.querySelectorAll('.position-reasons').length, 1);
-    assert.equal(doc.querySelector('.position-reasons').textContent, 'Last price: not exact');
-    assert.ok(doc.querySelectorAll('.position-value').some(dash => dash.getAttribute('aria-label') === 'Last price: not exact'));
+    assert.equal(doc.querySelector('.position-reasons').textContent, 'Last price: not exact yet');
+    assert.ok(doc.querySelectorAll('.position-value').some(dash => dash.getAttribute('aria-label') === 'Last price: not reported · not exact yet'));
   }
 });
 
@@ -1217,7 +1141,7 @@ test('position reasons: today’s result keeps its name and dash when its reason
     }
     ctx.states[name].value[0].reasons = { dayPnl: 'not_exact_yet' };
     const different = render().querySelector('.prow:not(.hd)');
-    assert.equal(different.querySelector('.position-reasons').textContent, 'Today’s result: not exact');
+    assert.equal(different.querySelector('.position-reasons').textContent, 'Today’s result: not exact yet');
     assert.equal(different.querySelector('.position-day'), null);
     assert.doesNotMatch(different.textContent, /broker connection down/);
     delete ctx.states[name].value[0].dayPnl;
@@ -1242,7 +1166,7 @@ test('broker down: opened Account explains its figures once inside its own body'
     assert.equal(doc.querySelector('.collapsed-summary .summary-text').textContent.match(/broker connection down/g).length, 1);
     assert.doesNotMatch(doc.querySelector('.expanded-summary')?.textContent ?? '', /broker connection down/);
     ctx.states['today.openPnl'] = { state: 'broken', value: null, reason: 'not_exact_yet' };
-    assert.match(htmlDocument(heroLeft(ctx)).querySelector('#accountDetail').textContent, /Not exact(?! yet)/);
+    assert.match(htmlDocument(heroLeft(ctx)).querySelector('#accountDetail').textContent, /Not exact yet/);
   }
   const ctx = { feeds: { data: { value: valid.data } }, states: panelStates({ data: { value: valid.data } }, valid.data.receivedAt), now: valid.data.receivedAt };
   for (const seconds of [0, 90]) {
@@ -1267,43 +1191,35 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
   assert.doesNotMatch(doc.querySelector('.say').textContent, /broker connection down/);
   assert.match(doc.querySelector('[data-cell="hero.since"] .account-caption').children[0].textContent, /Last good value, 2\smin ago$/);
   assert.match(doc.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, /Last good value, 1\smin ago$/);
+  assert.equal(doc.querySelector('.cash-reason').textContent, 'not reported');
+  assert.match(doc.querySelector('[data-cash="hero.cash"]').getAttribute('aria-label'), /Cash not reported · broker connection down/);
   for (const caption of doc.querySelectorAll('.account-caption')) assert.doesNotMatch(caption.children[0].textContent, /broker connection down/);
-  assert.equal(doc.querySelector('.disclosure-warning .vh').textContent.match(/broker connection down/g).length, 1, 'collapsed Desks’ money retains one reason');
-  // JOED-156: Cash sits in the whole account above the hero and still says the outage once:
-  // the value's state line says it, Cash's dash only "not reported", its name all of it.
-  const state = A.stateLine(ctx.states.paperAccount);
-  assert.equal(state.text.match(/broker connection down/g)?.length, 1, state.text);
-  for (const html of Object.values(A.subParts(ctx, null, { reason: 'missing' })).slice(0, 2)) {
-    const cash = htmlDocument(html).querySelector('[data-cash="acct.cash"]');
-    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported');
-    assert.equal(cash.getAttribute('aria-label'), 'Cash not reported · broker connection down');
-  }
+  assert.equal(doc.querySelector('.disclosure-warning .vh').textContent.match(/broker connection down/g).length, 1, 'collapsed Account retains one reason');
   for (const id of ['j', 'joe', 'joel']) {
     ctx.states[`desks.${id}.totalPnl`].ageSeconds = 150;
-    const card = htmlDocument(deskCard(ctx, id));
-    const status = card.querySelector('.card-status').textContent;
+    const card = htmlDocument(deskCard(ctx, id, 10, false));
+    const status = card.querySelector('.mini-label').textContent;
     assert.equal(status.match(/broker connection down/g).length, 1, id);
-    assert.match(status, /Since 10\sSep: last good, 2\smin ago$/);
+    assert.match(status, /Since start: last good, 2\smin ago$/);
     const compact = htmlDocument(compactDesk(ctx, id));
     assert.equal(compact.querySelector('.summary-text').textContent.match(/broker connection down/g).length, 1);
     assert.equal(compact.querySelector('.vh').textContent.match(/broker connection down/g).length, 1);
-    // History no longer feeds a desk card, so its state is not a desk's warning.
-    assert.doesNotMatch(compact.querySelector('.vh').textContent, /History/);
+    assert.match(compact.querySelector('.expanded-summary .vh').textContent, /History: stale · updates are late/);
     assert.match(compact.querySelector('.expanded-summary .vh').textContent, /Check-in: stale/);
     assert.doesNotMatch(compact.querySelector('.expanded-summary .vh').textContent, /broker connection down/, 'independent warnings survive expansion without repeating the shared outage');
     assert.equal(compact.querySelectorAll('.compact-state').length, 2);
   }
   ctx.states['today.openPnl'] = { state: 'broken', value: null, reason: 'not_exact_yet' };
   const different = htmlDocument(heroLeft(ctx));
-  assert.equal(different.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Not exact');
-  assert.equal(different.querySelector('[data-cell="hero.open"] .bn').getAttribute('aria-label'), 'Open result: not exact');
+  assert.equal(different.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent, 'Not exact yet');
+  assert.equal(different.querySelector('[data-cell="hero.open"] .bn').getAttribute('aria-label'), 'Open positions: not reported · not exact yet');
   const cold = board(fixture('a-gateway-up-but-dead'), { cold: true });
   const coldHero = htmlDocument(heroLeft(cold));
   assert.equal(coldHero.querySelector('.board-caption').textContent, 'Numbers unavailable · broker connection down');
   for (const dash of coldHero.querySelectorAll('[data-cell] .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
   for (const id of ['j', 'joe', 'joel']) {
-    const card = htmlDocument(deskCard(cold, id));
-    assert.equal(card.querySelector('.card-status').textContent, 'Numbers: unavailable · broker connection down');
+    const card = htmlDocument(deskCard(cold, id, 10, false));
+    assert.equal(card.querySelector('.mini-label').textContent, 'Numbers: unavailable · broker connection down');
     for (const dash of card.querySelectorAll('.dnums .bn')) assert.match(dash.getAttribute('aria-label'), /: not reported · broker connection down$/);
   }
 });
@@ -1462,7 +1378,7 @@ const pt = (t, values, basis = {}) => ({ t, desks: Object.fromEntries(hm.DESK_ID
 const T0 = Date.parse('2026-10-14T10:00:00.000Z');
 const iso = minutes => new Date(T0 + minutes * 60000).toISOString();
 
-test('history: empty, leading, internal and trailing gaps are dashed estimates; solid is observed only', () => {
+test('history: empty, leading, internal and trailing gaps are dotted; solid is observed only', () => {
   const end = T0 + 600 * 60000;
   const empty = hm.continuitySeries(hm.toColumns([]), 'j', '1d', end);
   assert.deepEqual(empty.observed, []);
@@ -1477,7 +1393,7 @@ test('history: empty, leading, internal and trailing gaps are dashed estimates; 
   assert.ok(s.observed.every(p => p.y === null || [5001, 5002, 5003, 4990].includes(p.y)), 'observed carries no estimate');
   const outage = hm.continuitySeries(hm.toColumns([pt(iso(0), { j: 5000 }), pt(iso(10), { j: 5001 })]), 'j', '1d', T0 + 3 * 864e5);
   assert.deepEqual(outage.observed, []);
-  assert.ok(outage.gaps.length && outage.gaps.every(g => g.every(p => p.y === 5001)), 'a range wholly inside an outage holds the last value as an estimate');
+  assert.ok(outage.gaps.length && outage.gaps.every(g => g.every(p => p.y === 5001)), 'a range wholly inside an outage holds the last value dotted');
 });
 
 test('history: long null gaps keep every marker without quadratic deduplication', () => {
@@ -1502,13 +1418,12 @@ test('history: long null gaps keep every marker without quadratic deduplication'
 });
 
 // Exercise the real SVG renderer and pointer handler without launching a browser.
-// The tests below read money values, so they draw Money (Change is History's default; its own tests follow).
-function historyPointer(t, points, { width = 300, range = '1d', zoom = null, end = Date.parse(points.at(-1)?.t ?? iso(10)), panning = () => false, thinned = null, measure = 'money' } = {}) {
+function historyPointer(t, points, { width = 300, range = '1d', zoom = null, end = Date.parse(points.at(-1)?.t ?? iso(10)), panning = () => false } = {}) {
   const saved = { document: globalThis.document, matchMedia: globalThis.matchMedia, state: { ...HS } };
   t.after(() => { globalThis.document = saved.document; globalThis.matchMedia = saved.matchMedia; Object.assign(HS, saved.state); });
   globalThis.document = htmlDocument('<div id="histChart"><div id="histStatus"></div><div class="ctip"></div></div><div id="histLive" aria-live="polite" aria-atomic="true"></div>');
   globalThis.matchMedia = () => ({ matches: true });
-  Object.assign(HS, { desks: hm.DESK_IDS.slice(), preset: range, view: zoom, follow: !zoom, measure });
+  Object.assign(HS, { desks: hm.DESK_IDS.slice(), range, zoom });
   const el = document.querySelector('#histChart'), tip = el.querySelector('.ctip');
   Object.assign(el, { clientWidth: width, clientHeight: 250, getBoundingClientRect: () => ({ left: 0 }) });
   const matches = el.matches.bind(el);
@@ -1516,8 +1431,7 @@ function historyPointer(t, points, { width = 300, range = '1d', zoom = null, end
   el.matches = selector => selector === ':focus-visible' ? focusVisible : matches(selector);
   Object.assign(tip, { offsetWidth: 80, offsetHeight: 40, classList: { add() { tip.on = true; }, remove() { tip.on = false; } } });
   const columns = hm.toColumns(points);
-  const value = { columns, ...(thinned === null ? {} : { compactedThrough: new Date(thinned).toISOString() }) };
-  const scale = historyChart({ now: new Date(end).toISOString(), states: { history: { value } }, panning });
+  const scale = historyChart({ now: new Date(end).toISOString(), states: { history: { value: { columns } } }, panning });
   const live = document.querySelector('#histLive');
   return { el, tip, live, columns, scale, focus(keyboard = true) { focusVisible = keyboard; document.activeElement = el; el.onfocus(); }, key(key, extra = {}) {
     let prevented = false;
@@ -1542,23 +1456,21 @@ test('history: dense tooltip hits original observations omitted by drawing thinn
   assert.doesNotMatch(html, /no value here|estimate/);
   for (const label of ['J', 'Joe', 'Joel']) assert.ok(html.includes(`${label} ${format.eur(p.v)}`), `${label} shows the original observed value`);
   focus(); key('Home');
-  // A Week longer than the kept history shows all of it, from the first kept observation.
-  assert.equal(scale.x0, columns.t[0]);
-  for (let i = 0; i < original.indexOf(p); i++) key('ArrowRight');
+  // The window starts with one baseline sample before the original observations.
+  for (let i = 0; i <= original.indexOf(p); i++) key('ArrowRight');
   assert.equal(tip.innerHTML, html, 'keyboard reaches the same original observation omitted by SVG thinning');
   assert.match(live.textContent, /observed/);
 });
 
 test('history: gap interiors interpolate and mark estimates even near observed endpoints', t => {
-  // Rows 30 minutes apart: longer than GAP_MS, a stretch without data.
-  const points = [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(30), { j: 40, joe: 40, joel: 40 })];
-  const { hover } = historyPointer(t, points, { width: 1000, zoom: [T0, T0 + 30 * 60000] });
-  for (const minute of [1, 15, 29]) {
+  const points = [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(10), { j: 20, joe: 20, joel: 20 })];
+  const { hover } = historyPointer(t, points, { width: 1000, zoom: [T0, T0 + 10 * 60000] });
+  for (const minute of [1, 5, 9]) {
     const html = hover(T0 + minute * 60000);
     assert.equal((html.match(/estimate/g) ?? []).length, 3);
     for (const label of ['J', 'Joe', 'Joel']) assert.ok(html.includes(`${label} ${format.eur(10 + minute)}`));
   }
-  for (const [minute, value] of [[0, 10], [30, 40]]) {
+  for (const [minute, value] of [[0, 10], [10, 20]]) {
     const html = hover(T0 + minute * 60000);
     assert.doesNotMatch(html, /estimate/);
     assert.ok(html.includes(`J ${format.eur(value)}`), 'an actual endpoint remains observed');
@@ -1621,13 +1533,13 @@ test('history: one focus stop inspects original points with arrows, ends and lar
   assert.equal(h.key('End', { target: h.el.querySelector('#histStatus') }), false, 'descendant controls keep their keys');
 });
 
-for (const mode of ['mouse', 'touch', 'drag']) test(`history: ${mode} focus leaves pointer inspection alone; arrows can start keyboard inspection`, t => {
+for (const mode of ['mouse', 'touch', 'shift-drag']) test(`history: ${mode} focus leaves pointer inspection alone; arrows can start keyboard inspection`, t => {
   let panning = false;
   const h = historyPointer(t, [pt(iso(0), { j: 10 }), pt(iso(1), { j: 11 }), pt(iso(2), { j: 12 })],
     { zoom: [T0, T0 + 2 * 60000], panning: () => panning });
   h.hover(T0 + 2 * 60000);
   if (mode === 'touch') h.el.onpointerleave();
-  panning = mode === 'drag';
+  panning = mode === 'shift-drag';
   const pointerState = () => ({ html: h.tip.innerHTML, on: h.tip.on, left: h.tip.style.left, top: h.tip.style.top,
     crosshair: h.el.querySelector('.xh').getAttribute('x1'), visible: h.el.querySelector('.xh').getAttribute('visibility'), live: h.live.textContent });
   const before = pointerState();
@@ -1635,7 +1547,7 @@ for (const mode of ['mouse', 'touch', 'drag']) test(`history: ${mode} focus leav
   assert.deepEqual(pointerState(), before, 'pointer focus neither moves the tip nor writes an announcement');
   if (panning) {
     h.hover(T0);
-    assert.deepEqual(pointerState(), before, 'a drag that pans does not activate or move the inspection cursor');
+    assert.deepEqual(pointerState(), before, 'shift-drag does not activate or move the inspection cursor');
   }
   historyChart({ now: iso(2), states: { history: { value: { columns: h.columns } } }, panning: () => panning });
   assert.equal(h.tip.on, false, 'a focused redraw does not pin a keyboard tip after pointer focus');
@@ -1647,9 +1559,8 @@ for (const mode of ['mouse', 'touch', 'drag']) test(`history: ${mode} focus leav
 });
 
 test('history: synthetic edges that repeat the same minute and snapped values are skipped', t => {
-  // Five minutes, the narrowest window, with both edges in an observation's minute.
-  const points = [0.1, 0.8, 1.1, 3, 5.2, 5.9].map((minute, i) => pt(iso(minute), { j: 10 + i, joe: 20 + i, joel: 30 + i }));
-  const h = historyPointer(t, points, { zoom: [T0 + 0.5 * 60000, T0 + 5.5 * 60000] });
+  const points = [0.1, 0.8, 1.1, 1.8, 2.1].map((minute, i) => pt(iso(minute), { j: 10 + i, joe: 20 + i, joel: 30 + i }));
+  const h = historyPointer(t, points, { zoom: [T0 + 0.5 * 60000, T0 + 1.9 * 60000] });
   h.focus();
   assert.match(h.live.textContent, /J €\s11,00 observed/);
   const first = h.live.textContent, html = h.tip.innerHTML, x = h.el.querySelector('.xh').getAttribute('x1');
@@ -1659,19 +1570,19 @@ test('history: synthetic edges that repeat the same minute and snapped values ar
   assert.notEqual(h.el.querySelector('.xh').getAttribute('x1'), x, 'crosshair moves with the announcement');
   assert.match(h.live.textContent, /J €\s12,00 observed/);
   h.key('End');
-  assert.match(h.live.textContent, /J €\s14,00 observed/);
+  assert.match(h.live.textContent, /J €\s13,00 observed/);
   h.key('ArrowLeft');
-  assert.match(h.live.textContent, /J €\s13,00 observed/, 'last Left also skips the redundant edge; original same-minute observations stay reachable');
+  assert.match(h.live.textContent, /J €\s12,00 observed/, 'last Left also skips the redundant edge; original same-minute observations stay reachable');
 });
 
 test('history: estimated edges with different values remain inspection points', t => {
-  const h = historyPointer(t, [pt(iso(0), { j: 10 }), pt(iso(30), { j: 40 })], { zoom: [T0 + 6000, T0 + 30 * 60000 - 6000] });
+  const h = historyPointer(t, [pt(iso(0), { j: 10 }), pt(iso(10), { j: 20 })], { zoom: [T0 + 6000, T0 + 10 * 60000 - 6000] });
   h.focus();
   assert.match(h.live.textContent, /J €\s10,10 estimated/);
   h.key('ArrowRight');
-  assert.match(h.live.textContent, /J €\s25,00 estimated/);
+  assert.match(h.live.textContent, /J €\s15,00 estimated/);
   h.key('End');
-  assert.match(h.live.textContent, /J €\s39,90 estimated/);
+  assert.match(h.live.textContent, /J €\s19,90 estimated/);
 });
 
 test('history: shared point wording names observed, estimated and absent values without inventing money', () => {
@@ -1683,16 +1594,16 @@ test('history: shared point wording names observed, estimated and absent values 
 });
 
 test('history: keyboard crosses a gap through the same estimated point as the pointer', t => {
-  const h = historyPointer(t, [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(30), { j: 40, joe: 40, joel: 40 })], { zoom: [T0, T0 + 30 * 60000] });
+  const h = historyPointer(t, [pt(iso(0), { j: 10, joe: 10, joel: 10 }), pt(iso(10), { j: 20, joe: 20, joel: 20 })], { zoom: [T0, T0 + 10 * 60000] });
   h.focus();
   assert.match(h.live.textContent, /observed/);
   h.key('ArrowRight');
-  assert.match(h.live.textContent, /J €\s25,00 estimated/);
+  assert.match(h.live.textContent, /J €\s15,00 estimated/);
   assert.equal((h.live.textContent.match(/estimated/g) ?? []).length, 3);
   const keyboard = h.tip.innerHTML;
-  assert.equal(h.hover(T0 + 15 * 60000), keyboard);
+  assert.equal(h.hover(T0 + 5 * 60000), keyboard);
   h.key('End');
-  assert.match(h.live.textContent, /J €\s40,00 observed/);
+  assert.match(h.live.textContent, /J €\s20,00 observed/);
 });
 
 test('history: Escape and blur dismiss inspection; focused redraw retains its point and focus', t => {
@@ -1729,428 +1640,6 @@ test('history: Escape and blur dismiss inspection; focused redraw retains its po
   assert.equal(h.el.getAttribute('tabindex'), '-1');
   assert.equal(h.el.onkeydown, null);
   assert.equal(h.live.textContent, '');
-});
-
-test('JOED-145 history: one hatched band where every chosen desk lacks numbers, one dashed estimate style, no area fills', t => {
-  const all = m => ({ j: 10 + m, joe: 20 + m, joel: 30 + m });
-  const points = [0, 0.5, 1, 1.5, 2, 30, 30.5, 31].map(m => pt(iso(m), all(m)));
-  const h = historyPointer(t, points, { zoom: [T0, T0 + 31 * 60000] });
-  const bands = h.el.querySelectorAll('[data-gap]');
-  assert.equal(bands.length, 1, 'one quiet band for the outage every desk shares');
-  assert.equal(bands[0].getAttribute('fill'), 'url(#ht-histChart)');
-  const left = Number(bands[0].getAttribute('x')), right = left + Number(bands[0].getAttribute('width'));
-  assert.ok(Math.abs(left - h.scale.X(T0 + 2 * 60000)) < 0.11 && Math.abs(right - h.scale.X(T0 + 30 * 60000)) < 0.11, 'from the last observation before to the first after');
-  const estimates = h.el.querySelectorAll('[data-estimate]');
-  assert.equal(estimates.length, 3, 'one estimate per desk across it');
-  assert.ok(estimates.every(p => p.getAttribute('stroke-dasharray') === '5 4' && p.getAttribute('stroke') === 'var(--est)'), 'every estimate in the same dashed style');
-  const paths = h.el.querySelectorAll('path');
-  assert.ok(paths.length >= 6 && paths.every(p => !(p.getAttribute('fill') ?? '').startsWith('url(#ga-')), 'History lines carry no area fill');
-  // Joe kept reporting through the outage: the board was observed, so no band; J and Joel stay estimates.
-  const joe = Array.from({ length: 28 }, (_, i) => pt(iso(2.5 + i), { joe: 22 }));
-  const s = historyPointer(t, [...points.slice(0, 5), ...joe, ...points.slice(5)], { zoom: [T0, T0 + 31 * 60000] });
-  assert.equal(s.el.querySelectorAll('[data-gap]').length, 0);
-  assert.equal(s.el.querySelectorAll('[data-estimate]').length, 2);
-});
-
-test('JOED-145 history: a now marker stands at the newest time; a window parked in the past has none', t => {
-  const points = Array.from({ length: 21 }, (_, i) => pt(iso(i), { j: 10 + i, joe: 20, joel: 30 }));
-  const live = historyPointer(t, points, { range: 'all' });
-  const now = live.el.querySelectorAll('[data-now]');
-  assert.equal(now.length, 1);
-  assert.ok(Math.abs(Number(now[0].getAttribute('x1')) - live.scale.X(T0 + 20 * 60000)) < 0.11, 'at the right edge');
-  assert.equal(live.el.querySelectorAll('text').filter(n => n.textContent === 'now').length, 1);
-  const past = historyPointer(t, points, { zoom: [T0, T0 + 10 * 60000] });
-  assert.equal(past.el.querySelectorAll('[data-now]').length, 0);
-});
-
-test('JOED-145 history: the chart says what it shows: all kept history, the last day, or a zoomed span', t => {
-  const points = Array.from({ length: 145 }, (_, i) => pt(iso(i * 30), { j: 10 + i, joe: 20, joel: 30 }));
-  const label = options => historyPointer(t, points, options).el.getAttribute('aria-label');
-  assert.equal(label({ range: 'all' }), 'Each desk’s money, all kept history');
-  assert.equal(label({ range: '1w' }), 'Each desk’s money, all kept history', 'a Week longer than three kept days shows all of them');
-  assert.equal(label({ range: '1d' }), 'Each desk’s money, last day');
-  assert.match(label({ zoom: [T0 + 864e5, T0 + 864e5 + 3600e3] }), /^Each desk’s money, zoomed: .+ to .+ Vienna time$/);
-});
-
-test('JOED-145 history: thinned rows at most GAP_MS apart are observed and the nearest kept row answers; rows an older version left further apart are estimates with coverage unknown', t => {
-  const raw = Array.from({ length: 11 }, (_, i) => pt(iso(120.5 + i / 2), { j: 200, joe: 200, joel: 200 }));
-  const zoom = [T0, T0 + 125 * 60000], mark = T0 + 120 * 60000;
-  // Kept every 20 minutes up to the mark, as the server thins now.
-  const kept = historyPointer(t, [...[0, 20, 40, 60, 80, 100, 120].map(m => pt(iso(m), { j: 10 + m, joe: 20 + m, joel: 30 + m })), ...raw], { zoom, thinned: mark });
-  const html = kept.hover(T0 + 47 * 60000);
-  assert.doesNotMatch(html, /estimate|coverage/);
-  for (const [label, value] of [['J', 50], ['Joe', 60], ['Joel', 70]]) assert.ok(html.includes(`${label} ${format.eur(value)} observed`), `${label} names the kept row at 40 minutes`);
-  assert.equal(kept.el.querySelectorAll('[data-estimate]').length, 0, 'the kept rows draw as one connected line');
-  assert.equal(kept.el.querySelectorAll('[data-gap]').length, 0);
-  // Kept 40 minutes apart, as versions before this rule thinned: never joined.
-  const legacy = [...[0, 40, 80, 120].map(m => pt(iso(m), { j: 10 + m, joe: 20 + m, joel: 30 + m })), ...raw];
-  const older = historyPointer(t, legacy, { zoom, thinned: mark });
-  const tip = older.hover(T0 + 50 * 60000);
-  for (const [label, value] of [['J', 60], ['Joe', 70], ['Joel', 80]]) assert.ok(tip.includes(`${label} ${format.eur(value)} estimated`), `${label} is an estimate`);
-  assert.match(tip, /Thinned or not reported: coverage unknown/);
-  assert.equal(older.el.querySelectorAll('[data-gap]').length, 3, 'each 40-minute step is a stretch without data');
-  // Without the mark nothing was thinned: a stretch without rows, nothing more to say.
-  const unmarked = historyPointer(t, legacy, { zoom }).hover(T0 + 50 * 60000);
-  assert.match(unmarked, /J €\s60,00 estimated/);
-  assert.doesNotMatch(unmarked, /coverage/);
-});
-
-test('JOED-145 history: Shift with arrows, Home and End is left to the window keys; plain arrows still inspect', t => {
-  const h = historyPointer(t, Array.from({ length: 11 }, (_, i) => pt(iso(i), { j: 10 + i })), { zoom: [T0, T0 + 10 * 60000] });
-  h.focus(); h.key('ArrowRight');
-  const before = h.live.textContent;
-  assert.match(before, /J €\s11,00 observed/);
-  for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End']) assert.equal(h.key(key, { shiftKey: true }), false, `Shift+${key} is not taken by inspection`);
-  assert.equal(h.live.textContent, before);
-  assert.equal(h.key('ArrowRight'), true);
-  assert.match(h.live.textContent, /J €\s12,00 observed/);
-});
-
-test('JOED-145 history: the overview strip shows everything kept and the shown window, in step with the chart', t => {
-  const saved = { document: globalThis.document, matchMedia: globalThis.matchMedia, state: { ...HS } };
-  t.after(() => { globalThis.document = saved.document; globalThis.matchMedia = saved.matchMedia; Object.assign(HS, saved.state); });
-  globalThis.document = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
-  globalThis.matchMedia = () => ({ matches: false });
-  const chart = document.querySelector('#histChart'), mini = document.querySelector('#histMini'), track = document.querySelector('#histTrack');
-  Object.assign(chart, { clientWidth: 800, clientHeight: 250, getBoundingClientRect: () => ({ left: 0 }) });
-  Object.assign(track, { clientWidth: 600, clientHeight: 56 });
-  mini.removeAttribute = key => { delete mini.attributes[key]; };
-  const [from, to] = mini.querySelectorAll('[data-edge]'), win = document.querySelector('#histWin');
-  for (const edge of [from, to]) edge.firstElementChild = edge.querySelector('.grip');
-  const points = Array.from({ length: 145 }, (_, i) => pt(iso(i * 30), { j: 10 + i, joe: 20, joel: 30 }));
-  const columns = hm.toColumns(points), end = T0 + 72 * 3600e3, min = ms => String(Math.round(ms / 60e3));
-  const draw = state => {
-    Object.assign(HS, { desks: hm.DESK_IDS.slice(), preset: '1w', view: null, follow: true, ...state });
-    historyChart({ now: new Date(end).toISOString(), states: { history: { value: { columns } } } });
-    return chart.querySelector(':scope > svg').dataset;
-  };
-  let shown = draw({ preset: '1d' });
-  assert.equal(mini.getAttribute('data-off'), null);
-  assert.deepEqual([mini.getAttribute('data-k0'), mini.getAttribute('data-k1')], [String(T0), String(end)], 'the strip spans everything kept');
-  assert.deepEqual([shown.x0, shown.x1], [String(end - 864e5), String(end)]);
-  assert.deepEqual([win.style.left, win.style.width], ['400px', '200px'], 'the window covers the chart’s day');
-  assert.deepEqual(['tabindex', 'aria-hidden', 'aria-valuemin', 'aria-valuemax', 'aria-valuenow'].map(k => win.getAttribute(k)), ['0', 'false', min(T0), min(end - 864e5), min(end - 864e5)]);
-  assert.match(win.getAttribute('aria-valuetext'), /^.+ to .+ Vienna time, 24\sh of 3\sdays kept, following the newest$/);
-  assert.deepEqual([from.getAttribute('aria-valuenow'), to.getAttribute('aria-valuenow'), to.getAttribute('aria-valuemax')], [min(end - 864e5), min(end), min(end)]);
-  assert.match(to.getAttribute('aria-valuetext'), /, the newest$/);
-  assert.match(document.querySelector('#histKept').textContent, /^3\sdays$/);
-  shown = draw({ view: [T0 + 6 * 3600e3, T0 + 18 * 3600e3], follow: false });
-  assert.deepEqual([shown.x0, shown.x1], [String(T0 + 6 * 3600e3), String(T0 + 18 * 3600e3)]);
-  assert.deepEqual([win.style.left, win.style.width], ['50px', '100px'], 'a parked window sits where its time is');
-  assert.doesNotMatch(win.getAttribute('aria-valuetext'), /following/);
-  for (const [edge, x] of [[from, 50], [to, 150]]) {
-    const boxLeft = parseFloat(edge.style.left), boxRight = boxLeft + parseFloat(edge.style.width), grip = boxLeft + parseFloat(edge.firstElementChild.style.left);
-    assert.ok(boxLeft <= x && boxRight >= x && Math.abs(grip - x) <= 2, `the ${edge.dataset.edge} handle holds its edge`);
-  }
-  // An hour of three days is 8 px of strip: the window keeps a 44 px target
-  // around it, inside the strip, and the handles sit outside that target.
-  win.style.setProperty = function (key, value) { this[key] = value; };
-  draw({ view: [end - 3600e3, end], follow: true });
-  const px = v => parseFloat(v), near = (a, b) => Math.abs(a - b) < 1e-6;
-  assert.ok(near(px(win.style.left), 600 - 600 / 72) && near(px(win.style.width), 600 / 72), 'the window is the hour');
-  const target = [px(win.style.left) + px(win.style['--hl']), px(win.style.left) + px(win.style.width) - px(win.style['--hr'])];
-  assert.ok(near(target[0], 556) && near(target[1], 600), `a 44 px target ending at the strip’s end: ${target}`);
-  const [fromBox, toBox] = [from, to].map(edge => [parseFloat(edge.style.left), parseFloat(edge.style.left) + parseFloat(edge.style.width)]);
-  assert.ok(fromBox[1] <= target[0] && toBox[0] >= target[1] && fromBox[1] - fromBox[0] === 16, 'both handles beside the target, never on it');
-  draw({ desks: [] });
-  assert.equal(mini.getAttribute('data-off'), '', 'without desks the strip keeps its place but offers nothing');
-  for (const node of [win, from, to]) assert.deepEqual([node.getAttribute('tabindex'), node.getAttribute('aria-hidden')], ['-1', 'true']);
-  assert.equal(document.querySelector('#histKept').textContent, '');
-});
-
-// History's input on the real page markup: the chart and the strip keep
-// their listeners, and a redraw waits for frame(), as for the next animation
-// frame, so several events can arrive between two drawings.
-function historyInput(t, points, { end = Date.parse(points.at(-1).t), ...state } = {}) {
-  const saved = { document: globalThis.document, matchMedia: globalThis.matchMedia, state: { ...HS } };
-  t.after(() => { globalThis.document = saved.document; globalThis.matchMedia = saved.matchMedia; Object.assign(HS, saved.state); });
-  globalThis.document = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
-  globalThis.matchMedia = query => ({ matches: /reduce/.test(query) });
-  const chart = document.querySelector('#histChart'), track = document.querySelector('#histTrack'), mini = document.querySelector('#histMini');
-  const listen = node => { const on = {}; node.addEventListener = (type, fn) => { on[type] = fn; }; return on; };
-  const on = { chart: listen(chart), track: listen(track) };
-  listen(document);
-  Object.assign(chart, { clientWidth: 878, clientHeight: 250, getBoundingClientRect: () => ({ left: 0 }), setPointerCapture() {}, contains: () => false });
-  Object.assign(track, { clientWidth: 800, clientHeight: 56, getBoundingClientRect: () => ({ left: 0 }), setPointerCapture() {} });
-  mini.removeAttribute = key => { delete mini.attributes[key]; };
-  for (const edge of mini.querySelectorAll('[data-edge]')) edge.firstElementChild = edge.querySelector('.grip');
-  const tip = chart.querySelector('.ctip');
-  Object.assign(tip, { offsetWidth: 80, offsetHeight: 40 });
-  const ctx = { now: new Date(end).toISOString(), states: { history: { value: { columns: hm.toColumns(points) } } } };
-  let pending = 0;
-  initHistoryInput({ schedule: () => { pending++; } });
-  Object.assign(HS, { desks: hm.DESK_IDS.slice(), preset: '1d', view: null, follow: true, measure: 'money', ...state });
-  const frame = () => { pending = 0; historyChart(ctx); return [...HS.shown]; };
-  const target = { closest: () => null };
-  return { chart, tip, frame, pending: () => pending,
-    wheel(e, at) { const event = { deltaX: 0, deltaY: 0, deltaMode: 0, clientX: 464, timeStamp: at, target, prevented: false, preventDefault() { event.prevented = true; }, ...e }; on.chart.wheel(event); return event; },
-    touch(type, id, x, at = 0, y = 120, hit = target) { on.chart[type]({ type, pointerId: id, pointerType: 'touch', clientX: x, clientY: y, button: 0, timeStamp: at, target: hit }); },
-    hover(x) { chart.onpointermove({ clientX: x, target }); return tip.innerHTML; } };
-}
-const threeDays = () => Array.from({ length: 145 }, (_, i) => pt(iso(i * 30), { j: 10 + i, joe: 20, joel: 30 }));
-
-test('JOED-145 input: a sideways wheel of one pixel into the past turns Follow off; small moves before a frame add up', t => {
-  const h = historyInput(t, threeDays());
-  const day = h.frame(), perPx = (day[1] - day[0]) / 800;
-  assert.deepEqual([HS.follow, day[1]], [true, T0 + 72 * 3600e3]);
-  const e = h.wheel({ deltaX: -1 }, 0);
-  assert.ok(e.prevented, 'the chart takes the sideways wheel');
-  assert.equal(HS.follow, false, 'one pixel into the past leaves Follow');
-  let shown = h.frame();
-  assert.ok(Math.abs(shown[1] - (day[1] - perPx)) < 1e-3 && Math.abs(shown[0] - (day[0] - perPx)) < 1e-3, 'and the window moved that pixel');
-  // Ten quarter pixels between two frames, as a slow trackpad sends them.
-  for (let i = 0; i < 10; i++) h.wheel({ deltaX: -0.25 }, 20 + i);
-  assert.ok(h.pending() > 0);
-  shown = h.frame();
-  assert.ok(Math.abs(shown[1] - (day[1] - 3.5 * perPx)) < 1e-3, `ten quarter pixels add up: ${(day[1] - shown[1]) / perPx} px`);
-  assert.ok(Math.abs(shown[1] - shown[0] - (day[1] - day[0])) < 1e-3, 'same width');
-  // Back past the end: the window rests on the newest time and follows again.
-  for (let i = 0; i < 3; i++) h.wheel({ deltaX: 2 }, 40 + i);
-  h.frame();
-  assert.deepEqual([HS.follow, HS.shown[1]], [true, day[1]]);
-  // A plain vertical wheel right after the sideways ones belongs to the page.
-  const page = h.wheel({ deltaY: 120 }, 60);
-  assert.deepEqual([page.prevented, h.pending()], [false, 0], 'never taken, nothing to redraw');
-});
-
-test('JOED-161 pinch: spreading horizontally, vertically or diagonally halves the window around the same time', t => {
-  const h = historyInput(t, threeDays());
-  for (const [dx, dy] of [[50, 0], [0, 50], [30, 40]]) {
-    historyPreset('1d');
-    const start = h.frame(), mid = (start[0] + start[1]) / 2;
-    h.touch('pointerdown', 1, 464 - dx, 1000, 120 - dy);
-    h.touch('pointerdown', 2, 464 + dx, 1000, 120 + dy);
-    h.touch('pointermove', 1, 464 - 2 * dx, 1010, 120 - 2 * dy);
-    h.touch('pointermove', 2, 464 + 2 * dx, 1010, 120 + 2 * dy);
-    const zoom = h.frame(), at = `${dx},${dy}`;
-    assert.equal(zoom[1] - zoom[0], (start[1] - start[0]) / 2, `${at}: twice the finger distance halves the span`);
-    assert.equal((zoom[0] + zoom[1]) / 2, mid, `${at}: the midpoint keeps its time`);
-    assert.equal(HS.follow, false, `${at}: zooming into the middle parks the window`);
-    // Moving both fingers sideways keeps the new scale and pans by that
-    // distance on the zoomed chart, even while the fingers are vertical.
-    h.touch('pointermove', 1, 484 - 2 * dx, 1020, 120 - 2 * dy);
-    h.touch('pointermove', 2, 484 + 2 * dx, 1020, 120 + 2 * dy);
-    const moved = h.frame();
-    assert.equal(moved[1] - moved[0], zoom[1] - zoom[0], `${at}: translation keeps the span`);
-    assert.equal(zoom[0] - moved[0], 20 / 800 * (zoom[1] - zoom[0]), `${at}: translation pans at the new scale`);
-    h.touch('pointerup', 1, 484 - 2 * dx, 1040, 120 - 2 * dy);
-    h.touch('pointerup', 2, 484 + 2 * dx, 1040, 120 + 2 * dy);
-  }
-});
-
-test('JOED-145 input: when the last finger of a pinch lifts no gesture is left, so a mouse inspects again', t => {
-  const h = historyInput(t, threeDays());
-  const day = h.frame();
-  assert.match(h.hover(464), /Vienna time/, 'a mouse inspects before');
-  h.tip.innerHTML = '';
-  for (const [first, last, ending] of [[1, 2, 'pointerup'], [2, 1, 'pointerup'], [1, 2, 'pointercancel']]) {
-    historyPreset('1d'); h.frame();
-    h.touch('pointerdown', 1, 300); h.touch('pointerdown', 2, 500);
-    h.touch('pointermove', 1, 260); h.touch('pointermove', 2, 540);
-    const pinched = h.frame();
-    assert.ok(pinched[1] - pinched[0] < (day[1] - day[0]) * 0.9, 'the pinch zoomed in');
-    h.touch(ending, first, 260, 400);
-    assert.equal(h.hover(464), '', 'one finger still down: no tip');
-    h.touch(ending, last, 540, 420);
-    assert.match(h.hover(464), /Vienna time/, `${ending} of finger ${first}, then ${last}: a mouse inspects again`);
-    h.tip.innerHTML = '';
-    // The fingers are gone: a new single touch starts its own gesture.
-    h.touch('pointerdown', 3, 400, 1000); h.touch('pointermove', 3, 470, 1010);
-    h.frame();
-    h.touch('pointerup', 3, 470, 1020);
-    assert.match(h.hover(464), /Vienna time/, 'after a swipe as well');
-    h.tip.innerHTML = '';
-  }
-});
-
-// Every frame replaces the drawing under a finger, which ends the browser's
-// own hold on it: a finger then lifted beyond the chart (a pinch spreads past
-// its top and bottom) ended nowhere the chart could hear, and every later
-// touch was ignored. The chart now holds each finger itself until it lifts.
-test('JOED-154 input: the chart holds each finger until it lifts, so a gesture ending beyond the chart still ends', t => {
-  const h = historyInput(t, threeDays()), held = [];
-  h.chart.setPointerCapture = id => { held.push(id); };
-  const day = h.frame();
-  h.touch('pointerdown', 1, 300, 0, 60); h.touch('pointerdown', 2, 500, 0, 180);
-  assert.deepEqual(held, [1, 2], 'both fingers of a pinch are held by the chart, not by the drawing under them');
-  h.touch('pointermove', 1, 260, 10, 20); h.touch('pointermove', 2, 540, 10, 220);
-  const zoomed = h.frame();
-  assert.ok(zoomed[1] - zoomed[0] < day[1] - day[0], 'the pinch zoomed');
-  // Held, both ends arrive at the chart wherever the fingers are.
-  h.touch('pointerup', 1, 250, 20, -40); h.touch('pointerup', 2, 560, 20, 300);
-  historyPreset('1d');
-  const before = h.frame();
-  h.touch('pointerdown', 3, 400, 1000);
-  for (const [x, at] of [[430, 1010], [460, 1020], [470, 1030]]) h.touch('pointermove', 3, x, at);
-  const after = h.frame();
-  h.touch('pointerup', 3, 470, 1040);
-  assert.deepEqual(held, [1, 2, 3], 'a later swipe is held as well');
-  assert.ok(after[0] < before[0] && Math.abs(after[1] - after[0] - (before[1] - before[0])) < 1e-3, 'and pans, same width');
-  // A touch on the status line (its Retry button) stays a plain tap.
-  h.touch('pointerdown', 4, 400, 2000, 10, { closest: selector => (selector === '.hist-status' ? {} : null) });
-  h.touch('pointerup', 4, 400, 2010, 10);
-  assert.deepEqual(held, [1, 2, 3], 'the status line is never held');
-});
-
-// The y of a drawn path where it crosses x (its segments are straight).
-function pathY(d, x) {
-  const pts = [...d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])]);
-  for (let i = 1; i < pts.length; i++) {
-    const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
-    if (ax <= x && bx >= x) return bx === ax ? ay : ay + (by - ay) * (x - ax) / (bx - ax);
-  }
-  return null;
-}
-const pathPoints = d => [...d.matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])]);
-const svgRange = h => { const svg = h.el.querySelector(':scope > svg'); return [Number(svg.getAttribute('data-ylo')), Number(svg.getAttribute('data-yhi'))]; };
-
-test('JOED-154 history: Change starts every desk at 0 at the left edge, on a zero line, and its tooltip names since when; Money draws the money', t => {
-  const points = Array.from({ length: 121 }, (_, i) => pt(iso(i), { j: 5000 + i / 2, joe: 5100 - i / 4, joel: 4900 + (i % 10) }));
-  // The left edge falls between two observations, 15 s after minute 30.
-  const zoom = [T0 + 30 * 60000 + 15000, T0 + 90 * 60000];
-  const h = historyPointer(t, points, { zoom, measure: 'change', width: 600 });
-  const svg = h.el.querySelector(':scope > svg'), [lo, hi] = svgRange(h), zeroY = h.scale.Y(0);
-  assert.deepEqual([svg.dataset.measure, svg.getAttribute('data-zero')], ['change', '1']);
-  assert.ok(lo < 0 && hi > 0, `zero inside ${lo}…${hi}`);
-  assert.ok(hi - lo >= Number(svg.getAttribute('data-base')) * 0.01 - 1e-9 && Number(svg.getAttribute('data-base')) > 4900, 'the ±0,5 % floor is of the money');
-  for (const id of hm.DESK_IDS) {
-    const y = pathY(h.el.querySelector(`path[stroke="var(--desk-${id})"]`).getAttribute('d'), h.scale.pad.l);
-    assert.ok(Math.abs(y - zeroY) <= 0.1, `${id} starts at 0: ${y} vs ${zeroY}`);
-  }
-  assert.ok(h.el.querySelectorAll('line').some(l => l.getAttribute('stroke-width') === '1.2' && Math.abs(Number(l.getAttribute('y1')) - zeroY) <= 0.1), 'the zero line');
-  assert.ok(h.el.querySelectorAll('text').some(n => n.textContent === '€\u00a00') && h.el.querySelectorAll('text').some(n => /^\+€/.test(n.textContent)), 'signed axis labels with € 0');
-  assert.match(h.el.getAttribute('aria-label'), /^Each desk’s change since the start of the window, zoomed: /);
-  // At minute 60: J 5030 − 5015,125, Joe 5085 − 5092,4375, Joel 4900 − 4900,25.
-  const tip = h.hover(T0 + 60 * 60000);
-  assert.match(tip, /Change since Wed 14.Oct, 12:30/);
-  assert.match(tip, /J \+€.14,88 observed<br>Joe −€.7,44 observed<br>Joel −€.0,25 observed/);
-  const money = historyPointer(t, points, { zoom, measure: 'money', width: 600 });
-  assert.equal(money.el.querySelector(':scope > svg').getAttribute('data-zero'), null);
-  assert.ok(svgRange(money)[0] >= 4800 && svgRange(money)[1] <= 5200, `Money draws euros as observed: ${svgRange(money)}`);
-  assert.match(money.hover(T0 + 60 * 60000), /J €.5\.030,00 observed<br>Joe €.5\.085,00 observed<br>Joel €.4\.900,00 observed/);
-  assert.doesNotMatch(money.hover(T0 + 60 * 60000), /Change since/);
-});
-
-test('JOED-154 history: in Change the classifier, bands, estimates and coverage notes stay exactly those of Money; only the numbers move', t => {
-  const all = m => ({ j: 10 + m, joe: 20 + m, joel: 30 + m });
-  const points = [0, 0.5, 1, 1.5, 2, 30, 30.5, 31].map(m => pt(iso(m), all(m)));
-  const drawn = {};
-  for (const measure of ['money', 'change']) {
-    const h = historyPointer(t, points, { zoom: [T0, T0 + 31 * 60000], measure });
-    drawn[measure] = { bands: h.el.querySelectorAll('[data-gap]').map(b => [b.getAttribute('x'), b.getAttribute('width')]), estimates: h.el.querySelectorAll('[data-estimate]').length, tip: h.hover(T0 + 16 * 60000), h };
-  }
-  assert.deepEqual(drawn.change.bands, drawn.money.bands, 'the same hatched stretch');
-  assert.equal(drawn.change.estimates, drawn.money.estimates);
-  assert.equal(drawn.change.estimates, 3);
-  // Inside the outage J is estimated: 26 in money, 16 above its 10 at the left edge.
-  assert.match(drawn.money.tip, /J €.26,00 estimated/);
-  assert.match(drawn.change.tip, /J \+€.16,00 estimated/);
-  // A window that starts inside the outage starts from an estimate, and says so.
-  const inside = historyPointer(t, points, { zoom: [T0 + 10 * 60000, T0 + 31 * 60000], measure: 'change' }).hover(T0 + 31 * 60000);
-  assert.match(inside, /J \+€.21,00 observed, from an estimated start<br>Joe \+€.21,00 observed, from an estimated start<br>Joel \+€.21,00 observed, from an estimated start/);
-  assert.doesNotMatch(drawn.change.tip.replace(/estimated<br>/g, ''), /from an estimated start/, 'a start on observed data says nothing more');
-  // Each dashed estimate is shifted with its desk: J's starts at the same height as J's line there.
-  const h = drawn.change.h, j = pathPoints(h.el.querySelector('path[stroke="var(--desk-j)"]').getAttribute('d'));
-  const firstEstimate = pathPoints(h.el.querySelectorAll('[data-estimate]')[0].getAttribute('d'))[0];
-  assert.ok(j.some(([x, y]) => Math.abs(x - firstEstimate[0]) < 0.11 && Math.abs(y - firstEstimate[1]) < 0.11), 'the estimate leaves the line where it ends');
-});
-
-test('JOED-154 history: Auto re-fits as the window moves; Max holds everything kept, in both measures; Custom is exactly the reader’s', t => {
-  t.after(() => { for (const measure of ['change', 'money']) historyAxis(measure).setAxisMode({ mode: 'auto' }); });
-  const points = Array.from({ length: 241 }, (_, i) => pt(iso(i), { j: (5000 + 60 * Math.sin(i / 25)).toFixed(2), joe: (5000 + i / 3).toFixed(2), joel: (5000 - i / 6).toFixed(2) }));
-  const windows = [[T0, T0 + 60 * 60000], [T0 + 70 * 60000, T0 + 100 * 60000], [T0 + 150 * 60000, T0 + 240 * 60000], [T0 + 200 * 60000, T0 + 215 * 60000]];
-  const draw = (zoom, measure) => historyPointer(t, points, { zoom, measure, width: 600 });
-  for (const measure of ['money', 'change']) {
-    historyAxis(measure).setAxisMode({ mode: 'auto' });
-    const auto = windows.map(w => svgRange(draw(w, measure)));
-    assert.ok(new Set(auto.map(String)).size > 1, `${measure}: Auto re-fits to each window: ${JSON.stringify(auto)}`);
-    assert.equal(draw(windows[0], measure).el.querySelector(':scope > svg').getAttribute('data-axis'), 'auto');
-    historyAxis(measure).setAxisMode({ mode: 'max' });
-    const max = windows.map(w => draw(w, measure)), first = svgRange(max[0]);
-    for (const h of max) {
-      assert.deepEqual(svgRange(h), first, `${measure}: Max never rescales`);
-      assert.equal(h.el.querySelector(':scope > svg').getAttribute('data-axis'), 'max');
-      assert.match(h.el.getAttribute('aria-label'), /; vertical axis fixed to all kept history$/);
-      // Nothing is cut: every drawn point inside the plot lies inside the axis.
-      for (const id of hm.DESK_IDS) for (const [x, y] of pathPoints(h.el.querySelector(`path[stroke="var(--desk-${id})"]`).getAttribute('d'))) {
-        if (x >= h.scale.pad.l && x <= h.scale.pad.l + h.scale.pw) assert.ok(y >= h.scale.pad.t - 0.1 && y <= h.scale.pad.t + h.scale.ph + 0.1, `${measure} ${id}: ${y} inside the plot`);
-      }
-    }
-    if (measure === 'change') assert.ok(first[0] < 0 && first[1] > 0, 'Change Max holds the largest fall and rise, around zero');
-    else assert.ok(first[0] <= 4960 && first[1] >= 5080, `Money Max holds every kept value: ${first}`);
-  }
-  const custom = historyAxis('change').setAxisMode({ mode: 'custom', min: '-5', max: '5' });
-  assert.equal(custom.ok, true);
-  const h = draw(windows[2], 'change');
-  assert.deepEqual(svgRange(h), [-5, 5]);
-  assert.deepEqual([h.el.querySelector(':scope > svg').getAttribute('data-axis'), h.el.querySelector(':scope > svg').getAttribute('data-zero')], ['custom', null]);
-  assert.match(h.el.getAttribute('aria-label'), /; custom vertical axis from −€.5,00 to \+€.5,00$/);
-  assert.ok(h.el.querySelectorAll('[data-axis-note]').some(n => /some values lie above it/.test(n.textContent)), 'the cut lines are named');
-  assert.equal(svgRange(draw(windows[2], 'money'))[0] > 4000, true, 'Money keeps its own choice (Max here), Change its custom one');
-});
-
-test('JOED-154 history: the address names the preset, desks and measure; reading one shows its preset from the newest time', t => {
-  const saved = { ...HS, desks: HS.desks.slice() };
-  t.after(() => Object.assign(HS, saved));
-  Object.assign(HS, { desks: hm.DESK_IDS.slice(), preset: '1w', view: [T0, T0 + 60000], follow: false, measure: 'change' });
-  assert.equal(historyQuery(), 'range=week&desk=all&mode=change', 'a manual window keeps the preset it came from');
-  readHistoryRoute(new URLSearchParams('range=day&desk=j,joel&mode=money'));
-  assert.deepEqual([HS.preset, HS.view, HS.follow, HS.desks, HS.measure], ['1d', null, true, ['j', 'joel'], 'money']);
-  assert.equal(historyQuery(), 'range=day&desk=j,joel&mode=money');
-  readHistoryRoute('range=year&desk=j,bob&mode=live');
-  assert.deepEqual([HS.preset, HS.desks, HS.measure], ['1d', ['j', 'joel'], 'money'], 'unreadable parts keep the choice');
-  readHistoryRoute('desk=none');
-  assert.equal(historyQuery(), 'range=day&desk=none&mode=money');
-  readHistoryRoute('range=fit&desk=all&mode=change');
-  assert.equal(historyQuery(), 'range=fit&desk=all&mode=change');
-});
-
-test('JOED-154 fix 3: a corrected bound is valid again: invalid, corrected, then Enter leaves both fields valid, the focused one included', t => {
-  const saved = { document: globalThis.document, state: { ...HS, desks: HS.desks.slice() } };
-  t.after(() => { globalThis.document = saved.document; Object.assign(HS, saved.state); historyAxis('change').setAxisMode({ mode: 'auto' }); });
-  globalThis.document = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
-  const on = new Map(), listen = (node, name) => { node.addEventListener = (type, fn) => on.set(`${name}:${type}`, fn); };
-  const [ctl, axisSeg, form, min, max] = ['#histCtl', '#histAxis', '#histAxisForm', '#histAxisMin', '#histAxisMax'].map(id => document.querySelector(id));
-  listen(ctl, 'ctl'); listen(axisSeg, 'axis'); listen(form, 'form'); listen(document, 'document');
-  for (const field of [ctl, min, max]) field.focus = () => { document.activeElement = field; };
-  Object.assign(HS, { measure: 'change' });
-  initHistoryControls({ schedule: () => {} });
-  historyAxis('change').setAxisMode({ mode: 'custom', min: -10, max: 10 });
-  const submit = () => on.get('form:submit')({ preventDefault() {} });
-  const state = () => [min, max].map(f => [f.getAttribute('aria-invalid'), f.getAttribute('aria-describedby')]);
-  min.value = '4.950'; max.value = '30'; min.focus();
-  submit();
-  assert.deepEqual(state(), [['true', 'histAxisUnit histAxisError'], ['false', 'histAxisUnit']], 'the unreadable bottom is invalid and names the error');
-  assert.match(document.querySelector('#histAxisError').textContent, /without grouping/);
-  assert.equal(document.activeElement, min);
-  min.value = '-12';
-  submit();
-  assert.deepEqual(state(), [['false', 'histAxisUnit'], ['false', 'histAxisUnit']], 'both valid again, the focused one included');
-  assert.equal(document.querySelector('#histAxisError').textContent, '');
-  assert.deepEqual(historyAxis('change').get(), { mode: 'custom', min: -12, max: 30 });
-  assert.deepEqual([min.value, max.value], ['−12', '30'], 'the fields show the bounds as read');
-  // A top that is not above the bottom marks the top only, and a new choice clears it.
-  max.value = '-20'; max.focus();
-  submit();
-  assert.deepEqual(state(), [['false', 'histAxisUnit'], ['true', 'histAxisUnit histAxisError']]);
-  on.get('axis:click')({ target: { closest: () => document.querySelector('#histAxis [data-axis="auto"]') } });
-  assert.deepEqual(state(), [['false', 'histAxisUnit'], ['false', 'histAxisUnit']]);
-});
-
-test('JOED-154 fix 4: the History tools take no CSS order, so Tab follows what the eye sees; a phone shows Follow between the desks and Change | Money, as in the page', () => {
-  const css = readFileSync(new URL('../public/joe/app.css', import.meta.url), 'utf8');
-  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => /hist-tools|hist-view|hist-follow|histDesks|histFollow|histMeasure|histRange/.test(selector));
-  assert.ok(rules.length > 4);
-  assert.deepEqual(rules.filter(([, , body]) => /(^|[\s;])order\s*:/.test(body)).map(([selector]) => selector.trim()), [], 'no rule reorders them');
-  const doc = htmlDocument(readFileSync(new URL('../public/joe/index.html', import.meta.url), 'utf8'));
-  const ids = [], walk = node => { for (const child of node.children) if (typeof child !== 'string') { if (['histDesks', 'histFollowPhone', 'histMeasure', 'histRange', 'histFollow'].includes(child.id)) ids.push(child.id); walk(child); } };
-  walk(doc.querySelector('.hist-tools'));
-  assert.deepEqual(ids, ['histDesks', 'histFollowPhone', 'histMeasure', 'histRange', 'histFollow'], 'page order: desks, Follow (phone), Change | Money, presets, Follow (wider)');
-  assert.ok(['#histFollowPhone', '#histFollow'].every(id => doc.querySelector(id).getAttribute('data-follow') !== null), 'both are the one Follow toggle');
-  // Which copy shows: the phone one only at 480 px or less, the other above.
-  assert.match(css, /\.hist-follow-phone \{ display: none; \}/);
-  const phone = css.slice(css.indexOf('@media (max-width: 480px) {\n  .hist-tools { gap: 8px; }'));
-  assert.match(phone.slice(0, phone.indexOf('\n}')), /\.hist-view > \.grow, #histFollow \{ display: none; \}[\s\S]*\.hist-follow-phone \{ display: inline-flex;/);
 });
 
 test('history: basis breaks exclude older records and compare stays on observed, compatible points', () => {
@@ -2214,7 +1703,7 @@ test('history: a zoom compares exactly the points the chart draws, never a recor
 test('history: compare uses exactly the chart window, anchored to the board time, not the last observation', () => {
   // Observations end on 14 Oct; the board's time is 17 Oct.
   const points = [];
-  for (let m = 0; m < 3 * 24 * 60; m += 15) points.push(pt(new Date(Date.parse('2026-10-12T00:00:00.000Z') + m * 60000).toISOString(), { j: 5000 + m / 30, joe: 5000 - m / 60, joel: 5000 }));
+  for (let m = 0; m < 3 * 24 * 60; m += 30) points.push(pt(new Date(Date.parse('2026-10-12T00:00:00.000Z') + m * 60000).toISOString(), { j: 5000 + m / 30, joe: 5000 - m / 60, joel: 5000 }));
   const cols = hm.toColumns(points);
   const now = Date.parse('2026-10-17T12:00:00.000Z');
   const day = hm.rangeWindow(cols, '1d', now);
@@ -2338,7 +1827,7 @@ test('browser budget: every timing-only combination gets one final re-measure, w
 
 test('browser budget: any non-timing or unknown failure prevents a re-measure even with timing breaches', () => {
   for (const key of ['measured', 'worker', 'historyRead', 'noMainThreadHistory', 'drawn', 'deskPushes', 'historyPushes',
-    'finite', 'redraws', 'historyReads', 'nearMaximum', 'notCompacted', 'accountWorker', 'accountReads', 'noMainThreadAccount', 'unknownBudget']) {
+    'finite', 'redraws', 'historyReads', 'nearMaximum', 'notCompacted', 'unknownBudget']) {
     for (const timingOK of [true, false]) {
       const first = { [key]: false, patchBudget: timingOK, historyBudget: timingOK, renderBudget: timingOK, taskBudget: timingOK };
       for (const second of [null, Object.fromEntries(Object.keys(first).map(key => [key, true]))]) {
@@ -2373,25 +1862,20 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
       if (source.includes('tasks: window.__budgetTasks.snapshot()')) {
         const task = { startTime: phase === 'cold' ? 210 : 150, duration: sample.taskMs ?? 60, attribution: [] };
         return { timings: [...timings('history-worker', 3, 10), ...timings('history', 3, sample.historyMs ?? 10)],
-          tasks: { tasks: sample.taskMs === null ? [] : [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400,
-          accountWorker: sample.accountWorker ?? true };
+          tasks: { tasks: sample.taskMs === null ? [] : [task], frames: [], hasFrames: false }, worker: sample.worker ?? true, lines: 3, end: 400 };
       }
       if (source.includes('timings.splice(0)')) {
         reads++;
-        // The Desk updates: their renders, and (JOED-156) one account worker read each.
-        return { timings: reads === 2 ? [...timings('data', sample.pushes ?? 5, sample.patchMs ?? 10),
-          ...timings('account-worker', sample.accountReads ?? sample.pushes ?? 5, 7), ...timings('account-accept', sample.mainThreadAccount ?? 0, 30)] : [], end: reads * 100 };
+        return { timings: reads === 2 ? timings('data', sample.pushes ?? 5, sample.patchMs ?? 10) : [], end: reads * 100 };
       }
       if (source.includes("filter(t => t.reason === 'history').length")) return 0;
-      if (source.includes("filter(t => t.reason === 'account-worker').length")) return 0;
-      assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()' || source === 'window.__joedesk.refresh(); window.__joedesk.refreshAccount?.()', source);
+      assert.ok(source.includes('.click()') || source === 'window.__joedesk.refresh()', source);
     },
   };
   const context = { decideTaskGuard, TIMING_GUARDS, observeBudgetTasks, attributeBudgetTasks,
     max: list => list.length ? Math.max(...list) : NaN,
     VIEWPORTS: [{ name: '390' }], NOW: '2026-10-14T17:42:22.000Z', ACTOR: 'fixture',
     largeScenario: (now, points = 9000) => ({ snapshot: { seq: 1001 }, history: { receivedAt: now, points: Array(points) } }),
-    accountScenario: (now, { largest } = {}) => ({ largest, short: { points: Array(largest ? 9057 : 841) }, daily: { days: Array(largest ? 2196 : 38) } }),
     wideSnapshot: (snapshot, when, seq, shift) => ({ when, seq, shift }), at: (base, seconds) => `${base}/${seconds}`,
     configure: async () => {}, go: async () => {}, settle: async () => {}, waitFor: async () => {},
     load: async (page, url, panel) => {
@@ -2405,8 +1889,8 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
   };
   const execute = runInNewContext(`(${runBudget.toString()})`, context);
   const traces = await execute({ page, limits,
-    newBoard: async ({ history, accountHistory }) => {
-      const board = { history, accountHistory, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
+    newBoard: async ({ history }) => {
+      const board = { history, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
         async push(payload) { this.pushes.push(payload); return { status: 200 }; } };
       boards.push(board);
       return board;
@@ -2440,21 +1924,6 @@ test('browser budget: cold and live re-measure on fresh boards, retaining both a
   assert.match(table, /Attempt/);
   assert.equal(table.match(/1\/2 \(re-measured\)/g).length, 2);
   assert.equal(table.match(/2\/2 \(re-measured\)/g).length, 2);
-});
-
-test('JOED-156 browser budget: the live boards carry the largest account history, read by its worker on every Desk update', async () => {
-  const { checks, boards, loads } = await simulatedBudget();
-  const liveBoards = boards.filter(b => b.history.points.length === 7200);
-  assert.ok(liveBoards.length >= 1 && liveBoards.every(b => b.accountHistory?.largest === true && b.accountHistory.short.points.length === 9057));
-  assert.ok(boards.filter(b => b.history.points.length === 9000).every(b => b.accountHistory === undefined), 'the cold History read stays as it was');
-  const account = checks.find(c => c.name.includes('whole account'));
-  assert.ok(account?.ok && /9057 snapshots, 2196 closes/.test(account.name), account?.name);
-  for (const sample of [{ accountWorker: false }, { accountReads: 4 }, { mainThreadAccount: 1 }]) {
-    const failed = await simulatedBudget({ live: [sample, sample] });
-    assert.ok(failed.checks.some(c => !c.ok && c.name.includes('whole account')), JSON.stringify(sample));
-    assert.equal(failed.loads.live, 1, 'not a timing breach: no re-measure');
-  }
-  assert.deepEqual(loads, { cold: 1, live: 1 });
 });
 
 test('browser budget: runBudget stops after reproduced breaches and does not retry other failed checks', async () => {

@@ -1,12 +1,11 @@
 // Shared P3/P5 CI scenarios. No browser is launched by importing this module.
 import { readFileSync } from 'node:fs';
-import { configure, load, settle, waitFor, copyText, VIEWPORTS, THEMES } from './shots.mjs';
+import { configure, load, settle, waitFor, VIEWPORTS, THEMES } from './shots.mjs';
 import { WIDE_FONT } from './gate.mjs';
 import { setDeskDisclosures } from './desk-disclosures.mjs';
 import { ingress, at, advance } from './board.mjs';
 
 const fixtures = JSON.parse(readFileSync(new URL('../../fixtures/phase-b.json', import.meta.url)));
-export const DETAIL_MONEY_SELECTOR = '.dnums .v .bn';
 
 export function deskRankingSnapshot(data) {
   const next = advance(data, at(data.generatedAt, 10), data.seq + 1, { cents: [0, 0, 0] });
@@ -80,19 +79,6 @@ export async function deskRankingFocusChecks({ page, newBoard, check }) {
   }
 }
 
-// The mixed snapshot's header, Details and desk evidence, read the same way
-// at every width. On phones the page joins "·" to the word before it with a
-// no-break space (app.js), so visible text compares through copyText; names
-// and titles are attributes and are compared as they are.
-export const mixedHeaderOk = result => result.headerTone === 'warn' && result.headerReason === 'open_unavailable_rth' &&
-  /Desk values are not exact(?! yet)/.test(result.details) &&
-  copyText(result.details).includes('Exact for Joel; not exact for J · desk ledger not reconciled; not exact for Joe · start-of-day value missing') &&
-  !/Today: not exact/.test(result.details);
-export const mixedDesksOk = result => /desk ledger not reconciled/.test(result.j) &&
-  result.joeDay?.name === 'Today: not exact · start-of-day value missing' && result.joeDay.title === result.joeDay.name &&
-  !/start-of-day value missing/.test(result.joe) && result.joeStatus === null &&
-  copyText(result.joeBars) === 'Last sessions · each session’s result in €, after fees' && result.joel.includes('+€5,00');
-
 export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, mixed = false }) {
   for (const viewport of [...VIEWPORTS, { ...VIEWPORTS[2], name: '360', width: 360 }]) for (const theme of THEMES) for (const font of [null, WIDE_FONT]) {
     const data = fixtures[mixed ? 'mixed' : 'exact'];
@@ -105,12 +91,10 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
     await load(page, b.url);
     await setDeskDisclosures(page, true);
     if (font) { await page.evaluate(`document.documentElement.style.setProperty('--font', ${JSON.stringify(font)})`); await settle(page); }
-    // JOED-153 wraps exact Today/Since figures in Results links. Dashes
-    // remain direct children: measure every amount in both states.
-    const geometry = () => page.evaluate(`__audit.rects(${JSON.stringify(['.dnums > div', '.dnums .v', DETAIL_MONEY_SELECTOR])})`);
+    const geometry = () => page.evaluate(`__audit.rects(['.dnums > div', '.dnums .v', '.dnums .v > .bn'])`);
     const before = await geometry();
     const moneyContained = async state => {
-      const money = await page.evaluate(`Array.from(document.querySelectorAll(${JSON.stringify(DETAIL_MONEY_SELECTOR)}), el => {
+      const money = await page.evaluate(`Array.from(document.querySelectorAll('.dnums .v > .bn'), el => {
         const range = document.createRange(); range.selectNodeContents(el);
         const text = range.getBoundingClientRect(), box = el.getBoundingClientRect();
         return { text: el.textContent, left: text.left - box.left, right: box.right - text.right, height: box.height };
@@ -126,9 +110,6 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
         percentages: [...document.querySelectorAll('#heroL .performance-pct')].map(e => e.textContent.replace(/\\s/g, '')),
         j: document.querySelector('#desk-j .desk-detail')?.innerText,
         joe: document.querySelector('#desk-joe .desk-detail')?.innerText,
-        joeDay: (() => { const dash = document.querySelector('#desk-joe .desk-detail .dnums .bn'); return dash ? { name: dash.getAttribute('aria-label'), title: dash.title } : null; })(),
-        joeStatus: document.querySelector('#desk-joe .card-status')?.innerText ?? null,
-        joeBars: document.querySelector('#desk-joe .spark-h')?.innerText,
         joel: text('#desk-joel .dnums'),
         positions: text('#positions'),
         kept: text('#kept'),
@@ -138,17 +119,15 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
         overflow: document.documentElement.scrollWidth > innerWidth,
         mode: document.getElementById('modeLabel')?.innerText,
         headerTone: document.getElementById('hdrHealth')?.dataset.tone,
-        headerReason: document.getElementById('hdrHealth')?.dataset.reason,
         details: document.getElementById('healthPop')?.textContent,
       };
     })()`);
     let result = await inspect();
     if (mixed) {
-      // Amy's A3: the not-exact Today no longer warns; J's not-exact open result keeps the regular-hours warning.
-      check('phase-b', `${tag}: withheld values keep the open-result warning, never a red header, with the not-exact status facts`, mixedHeaderOk(result), result);
+      check('phase-b', `${tag}: withheld values keep the existing Today warning, never a red header, with the not-exact status fact`,
+        result.headerTone === 'warn' && /Desk values are not exact yet/.test(result.details), result);
       check('phase-b', `${tag}: incomplete totals stay dashes with no percentage`, result.day === '—' && result.since === '—' && result.percentages.length === 0, result);
-      // JOED-148: Joe's lone not-exact Today keeps its reason on its own dash; the card adds no line.
-      check('phase-b', `${tag}: independent exact desk survives ledger and SOD failures`, mixedDesksOk(result), result);
+      check('phase-b', `${tag}: independent exact desk survives ledger and SOD failures`, /desk ledger not reconciled/.test(result.j) && /start-of-day value missing/.test(result.joe) && result.joel.includes('+€5,00'), result);
       check('phase-b', `${tag}: stale conid has accessible nulls and one section reason; the fresh conid keeps its worth`,
         result.nulls.length > 0 && result.nulls.every(n => n.text === '—' && n.label === n.title && /position update is old/.test(n.label)) &&
         /position update is old/.test(result.positionReason) && result.positions.includes('$40,01') && !result.positions.includes('$30,02'), result);
@@ -163,9 +142,8 @@ export async function phaseBChecks({ page, newBoard, check, shot, auditScreen, m
       await settle(page);
       result = await inspect();
       await moneyContained('recovered');
-      const after = await geometry();
       check('no-shift', `${tag}: mixed to recovered detail money has exactly 0 px layout shift`,
-        before.length === 27 && after.length === 27 && JSON.stringify(before) === JSON.stringify(after), { before, after });
+        JSON.stringify(before) === JSON.stringify(await geometry()));
     }
     check('phase-b', `${tag}: exact totals render Today and Since start in euros and percent`,
       result.day === '+€50,00' && result.since === '+€150,00' && result.percentages.join() === '+0,33%,+1,00%', result);

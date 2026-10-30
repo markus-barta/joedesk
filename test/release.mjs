@@ -12,7 +12,6 @@ import { closeBrowserProcess } from '../scripts/browser/cdp.mjs';
 import { parseVersion, reserveVersion, compareReleases } from '../release/versioning.mjs';
 import { backupStore, restoreStore, migrateToV2, verifyBackup } from '../release/data-migration.mjs';
 import { createReadModel } from '../server/read-model.mjs';
-import { createBoardSettingsStore } from '../server/board-settings.mjs';
 import { healthProjection } from '../server/health.mjs';
 import { atomicWrite } from '../server/storage.mjs';
 import { createJoeServer } from '../server.mjs';
@@ -130,51 +129,50 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   const later = reserveVersion({ ...next, version_scheme: 'inspr-calendar-v2' }, laterUTC);
   assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, next.release_sequence + 1);
 });
-test('JOED-159: sequence 39 supersedes published, undeployed 38 and preserves deployed 37 and About history', () => {
-  assert.equal(prep.ticket, 'JOED-159');
-  assert.equal(next.release_sequence, 39);
+test('JOED-143: sweep-fix candidate follows the deployed sequence 37; About preserves deployed history and excludes aborted candidates', () => {
+  assert.equal(prep.ticket, 'JOED-143');
+  assert.equal(next.release_sequence, 38);
   assert.equal(active.status, 'candidate');
-  assert.equal(active.note, 'Board redesign: whole-account chart, History minimap and natural zoom, session-dated Desk, Results redesign, honest reasons and quieter board (JOED-144)');
-  assert.equal(oldRelease.version, '261029075623.0.0');
-  assert.equal(oldRelease.release_sequence, 38);
+  assert.equal(active.note, 'Sweeps 2 and 3: KEEP changes enforced at once, robust feeds and settings, truthful positions, accessible Results, clickjacking protection (JOED-123, JOED-135)');
+  assert.equal(oldRelease.version, '261028202622.0.0');
+  assert.equal(oldRelease.release_sequence, 37);
   assert.equal(oldRelease.status, 'published-candidate');
   assert.equal(oldRelease.source_branch, 'main');
-  assert.equal(oldRelease.source_commit, '9ec65b46709201669d65fcc04f6a21b1bb567e31');
-  assert.equal(oldRelease.release_set_ticket, 'JOED-143');
-  assert.equal(oldRelease.disposition, 'superseded-before-deployment');
-  assert.equal(Object.hasOwn(oldRelease, 'deployed'), false);
-  assert.match(oldRelease.note, /40846643125.*never deployed/);
+  assert.equal(oldRelease.source_commit, 'aedc666492a6379bf946900ce8521d105a70ede5');
+  assert.equal(oldRelease.release_set_ticket, 'JOED-122');
+  assert.equal(oldRelease.disposition, 'deployed');
+  assert.equal(oldRelease.deployed, true);
+  assert.equal(oldRelease.note, 'live on csb0 since 2026-10-29T07:51:18Z (JOED-122)');
   assert.deepEqual(prep.anchor, { legacy_scheme: 'calendar', last_legacy_version: '26.09.21.12.00',
     last_legacy_sequence: 23, first_calendar_version: '261016151218.0.0', first_calendar_sequence: 24 });
-  assert.equal(lastDeployed.version, '261028202622.0.0');
-  assert.equal(lastDeployed.release_sequence, 37);
-  assert.equal(lastDeployed.note, 'live on csb0 since 2026-10-29T07:51:18Z (JOED-122)');
+  assert.equal(lastDeployed.version, oldRelease.version);
+  assert.equal(lastDeployed.release_sequence, oldRelease.release_sequence);
+  assert.equal(lastDeployed.note, oldRelease.note);
   const versionSource = fs.readFileSync(new URL('../public/joe/joe-version.js', import.meta.url), 'utf8');
   const ui = new Function('window', `${versionSource}; return window.JoeVersion;`)({});
   assert.equal(ui.APP_VERSION, active.version);
   assert.equal(ui.RELEASE_SEQUENCE, next.release_sequence);
   assert.equal(ui.VERSION_HISTORY[0].version, active.version);
   assert.equal(ui.VERSION_HISTORY[0].date, next.reserved_at.slice(0, 10));
-  assert.equal(ui.VERSION_HISTORY[1].version, oldRelease.version);
-  assert.equal(ui.VERSION_HISTORY[2].version, lastDeployed.version);
-  assert.equal(ui.VERSION_HISTORY[3].version, '261028081016.0.0');
-  assert.equal(ui.VERSION_HISTORY[4].version, '261027124551.0.0');
-  assert.equal(ui.VERSION_HISTORY[5].version, '261026232616.0.0');
-  assert.equal(ui.VERSION_HISTORY[6].version, '261026070713.0.0');
-  assert.equal(ui.VERSION_HISTORY[7].version, '261025221940.0.0');
-  assert.equal(ui.VERSION_HISTORY[8].version, '261025144826.0.0');
-  assert.equal(ui.VERSION_HISTORY[9].version, '261023155418.0.0');
-  assert.equal(ui.VERSION_HISTORY[10].version, '261023100632.0.0');
-  assert.equal(ui.VERSION_HISTORY[11].version, '261021113113.0.0');
-  assert.equal(ui.VERSION_HISTORY[12].version, '261021083537.0.0');
-  assert.equal(ui.VERSION_HISTORY[13].version, '261021015923.0.0');
-  assert.equal(ui.VERSION_HISTORY[14].version, prep.anchor.last_legacy_version);
+  assert.equal(ui.VERSION_HISTORY[1].version, lastDeployed.version);
+  assert.equal(ui.VERSION_HISTORY[2].version, '261028081016.0.0');
+  assert.equal(ui.VERSION_HISTORY[3].version, '261027124551.0.0');
+  assert.equal(ui.VERSION_HISTORY[4].version, '261026232616.0.0');
+  assert.equal(ui.VERSION_HISTORY[5].version, '261026070713.0.0');
+  assert.equal(ui.VERSION_HISTORY[6].version, '261025221940.0.0');
+  assert.equal(ui.VERSION_HISTORY[7].version, '261025144826.0.0');
+  assert.equal(ui.VERSION_HISTORY[8].version, '261023155418.0.0');
+  assert.equal(ui.VERSION_HISTORY[9].version, '261023100632.0.0');
+  assert.equal(ui.VERSION_HISTORY[10].version, '261021113113.0.0');
+  assert.equal(ui.VERSION_HISTORY[11].version, '261021083537.0.0');
+  assert.equal(ui.VERSION_HISTORY[12].version, '261021015923.0.0');
+  assert.equal(ui.VERSION_HISTORY[13].version, prep.anchor.last_legacy_version);
   for (const version of ['261019102825.0.0', prep.anchor.first_calendar_version]) {
     assert.equal(ui.VERSION_HISTORY.some(r => r.version === version), false,
       'About must not imply either superseded candidate was deployed');
   }
 });
-test('JOED-159 check-release: accepts the redesign reservation and rejects equal or earlier reservations after integrity verification', t => {
+test('JOED-143 check-release: accepts the sweep-fix reservation and rejects equal or earlier reservations after integrity verification', t => {
   const root = temporary(t), closure = read('release/closure.json');
   for (const name of [...closure.files.map(f => f.path), 'release/closure.json', 'scripts/check-release.mjs']) {
     const target = join(root, name); fs.mkdirSync(join(target, '..'), { recursive: true });
@@ -184,7 +182,7 @@ test('JOED-159 check-release: accepts the redesign reservation and rejects equal
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.equal(JSON.parse(accepted.stdout).candidate, next.version);
-  for (const [version, reserved_at] of [['261029075623.0.0', '2026-10-29T07:56:23Z'], ['261029075622.0.0', '2026-10-29T07:56:22Z']]) {
+  for (const [version, reserved_at] of [['261028202622.0.0', '2026-10-28T20:26:22Z'], ['261028202621.0.0', '2026-10-28T20:26:21Z']]) {
     const invalid = structuredClone(prep);
     Object.assign(invalid.reservation, { version, reserved_at });
     fs.writeFileSync(join(root, 'release/preparation.json'), JSON.stringify(invalid, null, 2) + '\n');
@@ -247,151 +245,6 @@ test('P6 backup and v2 staging: exact legacy bytes restored; new producer receip
   assert.deepEqual(fs.readFileSync(join(root, 'v2-restore', 'results-state.json')), resultsBytes);
   assert.equal(createReadModel({ dataDir: join(root, 'v2-restore'), clock: () => NOW }).feeds().results.value.seq, results.seq);
   assert.equal(createReadModel({ dataDir: join(root, 'v2-restore'), clock: () => NOW }).feeds().data.value.seq, samples.data.seq);
-});
-function release39Store(root, { damaged = false } = {}) {
-  const source = join(root, 'source'); fs.mkdirSync(source);
-  if (damaged) {
-    for (const name of ['account-history-state.json', 'account-closes-state.json', 'history-continuity.json']) {
-      fs.writeFileSync(join(source, name), Buffer.from([0, 255, 123]));
-    }
-    // A prior preservation at the same instant exercises the account suffix.
-    fs.writeFileSync(join(source, `account-history-state.json.damaged-${NOW}`), 'earlier damaged evidence\n');
-  }
-  const model = createReadModel({ dataDir: source, clock: () => NOW });
-  const snapshot = ingress(); snapshot.brokerAccount.observedAt = NOW;
-  snapshot.brokerAccount.cash = { amount: '100.00000001', currency: 'EUR' };
-  assert.equal(model.accept(snapshot).ok, true);
-  assert.equal(model.feeds().history.reason, null);
-  const results = structuredClone(samples.results); delete results.receivedAt;
-  assert.equal(model.acceptResults(results).ok, true);
-  atomicWrite(join(source, 'fleet-config.json'), samples['fleet-config'], 65536);
-  atomicWrite(join(source, 'fleet-config-actions.json'), audit, 65536);
-  assert.equal(model.observeFleet(samples['fleet-config']).ok, true);
-  assert.equal(model.reject('contract_invalid').ok, false);
-  const settings = createBoardSettingsStore({ dataDir: source });
-  settings.save({ accountStart: { amountEur: 10000.01, date: '2026-10-01' } });
-  return { source, model, settings };
-}
-test('JOED-165 v2 backup covers every release-39 writer and restores damaged evidence, journals, account history and settings byte-exact', t => {
-  const root = temporary(t), { source, model, settings } = release39Store(root, { damaged: true });
-  const expected = [
-    'data-state.json', 'history-state.json', 'results-state.json', 'feed-rejections.json',
-    'fleet-receipt.json', 'fleet-config.json', 'fleet-config-actions.json', 'board-settings.json',
-    'history-continuity.json', 'account-history-state.json', 'account-closes-state.json',
-    'account-history-state.json.discontinuity.json', 'account-closes-state.json.discontinuity.json',
-    `account-history-state.json.damaged-${NOW}`, `account-history-state.json.damaged-${NOW}-1`,
-    `account-closes-state.json.damaged-${NOW}`,
-  ];
-  const names = fs.readdirSync(source).sort();
-  const continuityCopy = names.find(n => n.startsWith('history-continuity.json.damaged-'));
-  assert.match(continuityCopy, /\.damaged-[0-9a-f-]{36}$/);
-  assert.deepEqual(names, [...expected, continuityCopy].sort());
-  assert.equal(model.accountHistory().points.length, 1);
-  assert.equal(model.accountHistory().dailyCloses.days.length, 1);
-  const before = names.map(name => [name, fs.readFileSync(join(source, name))]);
-  const backup = join(root, 'backup'), restored = join(root, 'restored');
-  const manifest = backupStore({ source, destination: backup, boardSchema: 'v2' });
-  assert.deepEqual(verifyBackup(backup), manifest);
-  restoreStore({ backup, destination: restored, boardSchema: 'v2' });
-  assert.deepEqual(fs.readdirSync(restored).sort(), names);
-  for (const [name, bytes] of before) {
-    assert.deepEqual(fs.readFileSync(join(source, name)), bytes, `source unchanged: ${name}`);
-    assert.deepEqual(fs.readFileSync(join(backup, name)), bytes, `backup: ${name}`);
-    assert.deepEqual(fs.readFileSync(join(restored, name)), bytes, `restore: ${name}`);
-  }
-  const reopened = createReadModel({ dataDir: restored, clock: () => NOW });
-  assert.deepEqual(reopened.accountHistory(), model.accountHistory());
-  assert.deepEqual(reopened.historyContinuity(), model.historyContinuity());
-  assert.deepEqual(createBoardSettingsStore({ dataDir: restored }).read(), settings.read());
-  assert.equal(reopened.feeds().data.value.seq, model.feeds().data.value.seq);
-  assert.equal(reopened.feeds().results.value.seq, model.feeds().results.value.seq);
-});
-test('JOED-165 refuses invalid new stores, envelopes, embedded markers and journals on backup and verification', t => {
-  const root = temporary(t), { source } = release39Store(root, { damaged: true });
-  const invalid = [
-    ['board-settings.json', { accountStart: { amountEur: -1, date: '2026-10-01' } }],
-    ['board-settings.json', ' '.repeat(4096) + '{"accountStart":null}'],
-    ['history-continuity.json', { schema: 'joedesk.history-continuity.v1', historySeq: 1, intervals: [['bad', 'bad']] }],
-    ['history-continuity.json', ' '.repeat(1024 * 1024) + '{}'],
-  ];
-  for (const name of ['account-history-state.json', 'account-closes-state.json']) {
-    const stored = JSON.parse(fs.readFileSync(join(source, name)));
-    invalid.push([name, { ...stored, format: 'unknown' }], [name, { ...stored, value: {} }],
-      [name, { ...stored, discontinuity: { ...stored.discontinuity, at: 'invalid' } }],
-      [name, ' '.repeat(2 * 1024 * 1024) + JSON.stringify(stored)]);
-    const journal = `${name}.discontinuity.json`, marker = stored.discontinuity;
-    for (const value of [null, {}, { ...marker, at: '2026-02-30T00:00:00.000Z' },
-      { ...marker, reason: 'unknown' }, { ...marker, extra: true },
-      { ...marker, preservedAs: '../escape' }, { ...marker, preservedAs: 'other.json.damaged-id' },
-      ' '.repeat(4096) + JSON.stringify(marker)]) invalid.push([journal, value]);
-  }
-  for (const [i, [name, value]] of invalid.entries()) {
-    const original = fs.readFileSync(join(source, name)), bytes = Buffer.from(typeof value === 'string' ? value : JSON.stringify(value));
-    const backup = join(root, `verify-${i}`);
-    backupStore({ source, destination: backup, boardSchema: 'v2' });
-    fs.writeFileSync(join(source, name), bytes);
-    const destination = join(root, `refused-${i}`);
-    assert.throws(() => backupStore({ source, destination, boardSchema: 'v2' }), undefined, name);
-    assert.equal(fs.existsSync(destination), false);
-    // Reseal this isolated backup so schema checks, not hashes, reject it.
-    fs.writeFileSync(join(backup, name), bytes);
-    const manifest = JSON.parse(fs.readFileSync(join(backup, 'backup-manifest.json')));
-    Object.assign(manifest.files.find(f => f.name === name), { size: bytes.length,
-      sha256: createHash('sha256').update(bytes).digest('hex') });
-    fs.writeFileSync(join(backup, 'backup-manifest.json'), JSON.stringify(manifest));
-    assert.throws(() => verifyBackup(backup), undefined, name);
-    assert.throws(() => restoreStore({ backup, destination, boardSchema: 'v2' }), undefined, name);
-    assert.equal(fs.existsSync(destination), false);
-    fs.writeFileSync(join(source, name), original);
-  }
-});
-test('JOED-165 damaged-copy allowlist is exact and bounded; backup closure, digests and total size stay enforced', t => {
-  const root = temporary(t), { source } = release39Store(root);
-  for (const [i, name] of ['unknown.json', 'data-state.json.damaged-2026-10-01T00:00:00.000Z',
-    'account-history-state.json.damaged-bad', `account-history-state.json.damaged-${NOW}-0`,
-    `account-history-state.json.damaged-${NOW}\n`, 'account-closes-state.json.damaged-2026-02-30T00:00:00.000Z',
-    'history-continuity.json.damaged-not-a-uuid', 'account-history-state.json.next'].entries()) {
-    fs.writeFileSync(join(source, name), '{}');
-    assert.throws(() => backupStore({ source, destination: join(root, `unknown-${i}`), boardSchema: 'v2' }), /unexpected/);
-    fs.renameSync(join(source, name), join(root, `rejected-file-${i}`));
-  }
-  for (let i = 1; i <= 64; i++) fs.writeFileSync(join(source, `account-history-state.json.damaged-${NOW}-${i}`), 'damaged');
-  const backup = join(root, 'bounded');
-  const manifest = backupStore({ source, destination: backup, boardSchema: 'v2' });
-  assert.equal(verifyBackup(backup).files.length, manifest.files.length);
-  fs.writeFileSync(join(source, `account-history-state.json.damaged-${NOW}-65`), 'damaged');
-  assert.throws(() => backupStore({ source, destination: join(root, 'too-many'), boardSchema: 'v2' }), /unexpected/);
-  const manifestFile = join(backup, 'backup-manifest.json');
-  const saveManifest = value => fs.writeFileSync(manifestFile, JSON.stringify(value));
-  const extra = { name: `account-history-state.json.damaged-${NOW}-65`, size: 7,
-    sha256: createHash('sha256').update('damaged').digest('hex') };
-  saveManifest({ ...manifest, files: [...manifest.files, extra] });
-  assert.throws(() => verifyBackup(backup), /manifest_invalid/);
-  saveManifest({ ...manifest, files: [...manifest.files, manifest.files[0]] });
-  assert.throws(() => verifyBackup(backup), /manifest_invalid/);
-  saveManifest({ ...manifest, files: [...manifest.files.slice(1), { ...manifest.files[0], name: '../escape' }] });
-  assert.throws(() => verifyBackup(backup), /manifest_invalid/);
-  saveManifest(manifest);
-  fs.writeFileSync(join(backup, 'unknown.json'), '{}');
-  assert.throws(() => verifyBackup(backup), /closure_mismatch/);
-  fs.renameSync(join(backup, 'unknown.json'), join(root, 'extra-backup-file'));
-  const damagedName = extra.name.replace('-65', '-64');
-  fs.appendFileSync(join(backup, damagedName), 'altered');
-  assert.throws(() => verifyBackup(backup), /digest_mismatch/);
-  // Individually bounded evidence still cannot exceed the aggregate cap,
-  // including in a manifest whose hashes have been recomputed.
-  const oversized = structuredClone(manifest);
-  for (let i = 1; i <= 3; i++) {
-    const name = `account-history-state.json.damaged-${NOW}-${i}`, bytes = Buffer.alloc(12 * 1024 * 1024);
-    fs.writeFileSync(join(source, name), bytes);
-    fs.writeFileSync(join(backup, name), bytes);
-    Object.assign(oversized.files.find(f => f.name === name), { size: bytes.length,
-      sha256: createHash('sha256').update(bytes).digest('hex') });
-  }
-  fs.renameSync(join(source, extra.name), join(root, 'sixty-fifth'));
-  assert.throws(() => backupStore({ source, destination: join(root, 'too-large'), boardSchema: 'v2' }), /size_limit/);
-  saveManifest(oversized);
-  assert.throws(() => verifyBackup(backup), /size_limit/);
 });
 test('P6 migration refuses malformed audit history before creating a destination; absent log stays absent', t => {
   const root = temporary(t), source = join(root, 'source'); fs.mkdirSync(source);

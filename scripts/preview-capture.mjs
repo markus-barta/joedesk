@@ -20,7 +20,7 @@ const VERSION = /^(?:[1-9][0-9]{11}\.0\.0|[0-9]{2}\.[0-9]{2}\.[0-9]{2}(?:\.[0-9]
 // beyond a section heading. History is checked with Desk, before its PNG.
 export const SECTIONS = Object.freeze([
   { id: 'desk-hero', route: 'desk', screens: ['desk'], selector: '#heroL', content: '.display' },
-  ...['j', 'joe', 'joel'].map(id => ({ id: `desk-${id}`, route: 'desk', screens: ['desk'], selector: `#desk-${id}`, content: '.dnums .v' })),
+  ...['j', 'joe', 'joel'].map(id => ({ id: `desk-${id}`, route: 'desk', screens: ['desk'], selector: `#desk-${id}`, content: '.now' })),
   { id: 'positions', route: 'desk', screens: ['desk', 'positions'], selector: '#positions', content: '.prow:not(.hd) .name' },
   { id: 'kept', route: 'desk', screens: ['desk', 'positions'], selector: '#kept', content: '.prow .name' },
   { id: 'history', route: 'history', screens: ['desk', 'history'], selector: '#histChart', content: 'svg path[stroke]', graphic: true },

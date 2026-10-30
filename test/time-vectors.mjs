@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { wall as productionWall, NY, VIENNA, isRTH, marketSession, nyDay, viennaDay, viennaISOWeek, calendarDays, MARKET_CALENDAR,
-  zonedInstant, sessionBounds, nextOpen, previousSession, sessionLabel, sessionDayName, zoneGap, USUAL_GAP_HOURS } from '../time.mjs';
+  zonedInstant, sessionBounds, nextOpen } from '../time.mjs';
 import { REASONS } from '../contracts/index.mjs';
 import { panelState, feedAge } from '../contracts/panel-state.mjs';
 
@@ -115,80 +115,4 @@ test('time: next regular open skips weekends, holidays and a finished session', 
   assert.equal(nextOpen('2026-10-14T20:30:00.000Z'), '2026-10-15T13:30:00.000Z');
   assert.equal(nextOpen('2026-11-25T22:00:00.000Z'), '2026-11-27T14:30:00.000Z');
   assert.equal(nextOpen('2028-12-30T12:00:00.000Z'), null);
-});
-
-// JOED-153 M1: the session Desk's first figure names, from the pinned calendar.
-test('time: the previous session is the last one closed at or before the instant, over weekends, holidays and early closes', () => {
-  for (const [instant, day] of [
-    ['2026-10-14T17:42:22.000Z', '2026-10-13'], // in the session: the day before
-    ['2026-10-14T19:59:59.999Z', '2026-10-13'], // one millisecond before the close
-    ['2026-10-14T20:00:00.000Z', '2026-10-14'], // at the close it has closed
-    ['2026-10-15T03:59:59.000Z', '2026-10-14'], // after the close, before New York midnight
-    ['2026-10-17T15:00:00.000Z', '2026-10-16'], // Saturday
-    ['2026-10-19T12:00:00.000Z', '2026-10-16'], // Monday before the open
-    ['2026-11-26T15:00:00.000Z', '2026-11-25'], // Thanksgiving
-    ['2026-11-27T18:00:00.000Z', '2026-11-27'], // the early close at 13:00 New York
-    ['2026-09-08T12:00:00.000Z', '2026-09-04'], // after Labor Day weekend
-    ['2026-04-06T12:00:00.000Z', '2026-04-02'], // Good Friday and the weekend
-  ]) {
-    const s = previousSession(instant);
-    assert.equal(s.day, day, instant);
-    assert.deepEqual(s, { day, ...(({ openAt, closeAt }) => ({ openAt, closeAt }))(sessionBounds(zonedInstant(day, '12:00:00', NY))) }, instant);
-    assert.ok(Date.parse(s.closeAt) <= Date.parse(instant));
-  }
-  // Never assumed outside the calendar: walking back from its first days stops.
-  assert.equal(previousSession('2026-01-02T12:00:00.000Z'), null);
-  assert.equal(previousSession('2029-01-02T15:00:00.000Z'), null);
-  assert.equal(previousSession('2026-01-05T12:00:00.000Z').day, '2026-01-02');
-});
-
-test('time: the session label is live in the session, closed until New York midnight, else the last session, through both clock changes', () => {
-  for (const [instant, phase, day, text] of [
-    ['2026-10-14T13:29:59.999Z', 'last', '2026-10-13', 'Last session · Tue 13 Oct'],
-    ['2026-10-14T13:30:00.000Z', 'live', '2026-10-14', 'Today · Wed 14 Oct · live'],
-    ['2026-10-14T20:00:00.000Z', 'closed', '2026-10-14', 'Wed 14 Oct · session closed'],
-    ['2026-10-15T03:59:59.999Z', 'closed', '2026-10-14', 'Wed 14 Oct · session closed'],
-    ['2026-10-15T04:00:00.000Z', 'last', '2026-10-14', 'Last session · Wed 14 Oct'],
-    // The five-hour week: Vienna has left summer time (25 Oct), New York not yet (1 Nov).
-    ['2026-10-29T13:30:00.000Z', 'live', '2026-10-29', 'Today · Thu 29 Oct · live'],
-    ['2026-10-30T03:30:00.000Z', 'closed', '2026-10-29', 'Thu 29 Oct · session closed'],
-    ['2026-10-30T04:30:00.000Z', 'last', '2026-10-29', 'Last session · Thu 29 Oct'],
-    // New York's own change: midnight is 04:00 UTC before it and 05:00 after it.
-    ['2026-11-02T04:30:00.000Z', 'last', '2026-10-30', 'Last session · Fri 30 Oct'],
-    ['2026-11-02T14:30:00.000Z', 'live', '2026-11-02', 'Today · Mon 2 Nov · live'],
-    ['2026-11-03T04:30:00.000Z', 'closed', '2026-11-02', 'Mon 2 Nov · session closed'],
-    ['2026-11-03T05:00:00.000Z', 'last', '2026-11-02', 'Last session · Mon 2 Nov'],
-    // Weekends, holidays and an early close.
-    ['2026-10-17T15:00:00.000Z', 'last', '2026-10-16', 'Last session · Fri 16 Oct'],
-    ['2026-11-26T17:00:00.000Z', 'last', '2026-11-25', 'Last session · Wed 25 Nov'],
-    ['2026-11-27T17:59:59.999Z', 'live', '2026-11-27', 'Today · Fri 27 Nov · live'],
-    ['2026-11-27T18:00:00.000Z', 'closed', '2026-11-27', 'Fri 27 Nov · session closed'],
-    // Spring: New York changes first (14 Mar 2027), Vienna on 28 Mar 2027.
-    ['2027-03-15T13:30:00.000Z', 'live', '2027-03-15', 'Today · Mon 15 Mar · live'],
-    ['2027-03-29T13:30:00.000Z', 'live', '2027-03-29', 'Today · Mon 29 Mar · live'],
-  ]) {
-    const label = sessionLabel(instant);
-    assert.deepEqual([label.phase, label.day, label.text], [phase, day, text], instant);
-    const own = sessionBounds(zonedInstant(day, '12:00:00', NY));
-    assert.deepEqual([label.openAt, label.closeAt], [own.openAt, own.closeAt], `${instant}: the named session's own bounds`);
-  }
-  assert.equal(sessionLabel('2029-01-02T15:00:00.000Z'), null, 'outside the calendar no session is named');
-  assert.equal(sessionDayName('2026-10-28'), 'Wed 28 Oct');
-});
-
-test('time: New York is 6 h behind Vienna except in the weeks the clocks change on different dates, and the gap says until when', () => {
-  assert.equal(USUAL_GAP_HOURS, 6);
-  for (const [instant, hours, until] of [
-    ['2026-10-20T12:00:00.000Z', 6, null],
-    ['2026-10-25T00:59:59.000Z', 6, null], // before Vienna's change at 01:00 UTC
-    ['2026-10-25T01:00:00.000Z', 5, '2026-11-01'],
-    ['2026-10-29T15:40:00.000Z', 5, '2026-11-01'],
-    ['2026-11-01T05:59:59.000Z', 5, '2026-11-01'], // New York changes at 06:00 UTC that Sunday
-    ['2026-11-01T06:00:00.000Z', 6, null],
-    ['2027-03-14T06:59:59.000Z', 6, null],
-    ['2027-03-14T07:00:00.000Z', 5, '2027-03-28'],
-    ['2027-03-20T12:00:00.000Z', 5, '2027-03-28'],
-    ['2027-03-28T01:00:00.000Z', 6, null],
-  ]) assert.deepEqual(zoneGap(instant), { hours, until }, instant);
-  assert.throws(() => zoneGap('2026-10-29T15:40:00Z'), TypeError);
 });

@@ -35,35 +35,15 @@ required(/\.dp-note-lead,\s*\.dp-reason,\s*\.dp-desk-note,\s*\.dp-reasons-extra\
 const reasonsMore = css.match(/\.dp-reasons-more\s*\{([^}]+)\}/)?.[1] ?? '';
 required(/display:\s*block\s*;/.test(reasonsMore) && /width:\s*100%\s*;/.test(reasonsMore) && /min-height:\s*44px\s*;/.test(reasonsMore) && /text-align:\s*left\s*;/.test(reasonsMore) && /padding:\s*0\s*;/.test(reasonsMore), "app.css: reason disclosure has its own full-width row aligned with the text");
 
-// Fleet policy has one writer. Display settings use a separate bounded route;
-// only Settings imports either save function. Neither path can set live mode.
+// The board reads. Its one write (P5) is fleet-write.js: a single POST of a
+// reviewed paper draft to the fleet settings' propagate route, refused unless
+// the mode is paper, imported only by Settings. No other module writes,
+// names the route or the inbox, or can set a live mode.
 const WRITER = 'fleet-write.js';
-const DISPLAY_WRITER = 'board-settings-write.js';
 for (const [name, text] of modules) {
-  if (!['settings.js', 'board-settings.js', DISPLAY_WRITER].includes(name)) {
-    // Match the capability module, regardless of imported binding, alias,
-    // namespace, dynamic import or re-export syntax. The facade is checked below.
-    required(!/board-settings-write\.js|\b(?:createBoardSettings|saveBoardSettings)\b/.test(text), `${name}: only Settings may import the board display writer`);
-  }
   if (name === WRITER) continue;
-  if (name !== DISPLAY_WRITER) required(!/method:\s*['"`](POST|PUT|PATCH|DELETE)/i.test(text) && !/\/inbox|fleet-config\/propagate/.test(text), `${name}: the board only reads`);
+  required(!/method:\s*['"`](POST|PUT|PATCH|DELETE)/i.test(text) && !/\/inbox|fleet-config\/propagate/.test(text), `${name}: the board only reads`);
   if (name !== 'settings.js') required(!/from\s+['"]\.\/fleet-write\.js['"]|import\(\s*['"]\.\/fleet-write/.test(text), `${name}: only Settings may import the fleet settings' writer`);
-}
-{
-  const facade = (files['board-settings.js'] ?? '').replace(/\/\/[^\n]*/g, '');
-  const readExports = [...facade.matchAll(/export\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]\s*;/g)];
-  const expected = {
-    './board-settings-validation.js': ['validateBoardSettings'],
-    './board-settings-write.js': ['accountStart', 'boardSettingsState', 'refreshBoardSettings', 'onBoardSettingsChange'],
-  };
-  required(readExports.length === 2 && readExports.every(([, names, path]) =>
-    expected[path] && JSON.stringify(names.split(',').map(name => name.trim()).sort()) === JSON.stringify([...expected[path]].sort())) &&
-    facade.replace(/export\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"]\s*;/g, '').trim() === '',
-    'board-settings.js: only Settings may access saves; the page facade exports only the named read APIs and validation');
-  const display = files[DISPLAY_WRITER] ?? '';
-  required(/fetcher\('\.\/board-settings\.json',/.test(display) && /request\('POST', value\)/.test(display), 'board-settings-write.js: display writes stay on the board settings route');
-  required(/validateBoardSettings\(value\)/.test(display) && /credentials: 'same-origin'/.test(display), 'board-settings-write.js: validated same-origin display writes');
-  required(!/\/inbox|fleet-config\/propagate/.test(display), 'board-settings-write.js: display settings never write feeds or fleet policy');
 }
 {
   const writer = files[WRITER] ?? '';
@@ -76,7 +56,7 @@ for (const [name, text] of modules) {
   required(!/\bmode\s*[:=]\s*['"`](live|LIVE)['"`]/.test(text) && !/\.mode\s*=\s*(?!['"`]paper['"`])['"`]/.test(text), `${name}: no code path sets a live mode`);
   required(!/serviceWorker/.test(text), `${name}: no service worker`);
   for (const [, key] of text.matchAll(/localStorage\.(?:getItem|setItem|removeItem)\(([^)]+)\)/g)) {
-    required(/THEME_KEY|OBSERVED_EVENTS_KEY|PREVIEW_KEY|joe-board-theme-v1/.test(key) || name === 'chart.js' && /^(CHART_AXES_KEY|CHART_HINT_KEY)\b/.test(key), `${name}: only theme, observed events, the fleet settings draft and the charts' vertical axis and first-visit hint use browser storage (${key})`);
+    required(/THEME_KEY|OBSERVED_EVENTS_KEY|PREVIEW_KEY|joe-board-theme-v1/.test(key), `${name}: only theme, observed events and the fleet settings draft use browser storage (${key})`);
   }
   const code = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/ .*$/gm, '');
   for (const [, quote, body] of code.matchAll(/(['"`])((?:(?!\1)[^\\]|\\.)*)\1/g)) {

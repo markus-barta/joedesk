@@ -2,16 +2,13 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261029192345.0.0` (`inspr-calver-3`, stable sequence 39), reserved once at `2026-10-29T19:23:45Z` for the board redesign (JOED-144, release [JOED-159](https://aeon.barta.cm/p/JOED/JOED-159)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261029075623.0.0` (`inspr-calver-3`, stable sequence 38), reserved once at `2026-10-29T07:56:23Z` for the sweeps 2 and 3 fixes (JOED-129–134, JOED-140–142, release [JOED-143](https://aeon.barta.cm/p/JOED/JOED-143)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
 **Last deployed release:** `inspr-calver-3` / `261028202622.0.0` / sequence 37,
 published on `main` at `aedc666492a6379bf946900ce8521d105a70ede5` under JOED-122,
-live on csb0 since `2026-10-29T07:51:18Z` (JOED-122). `last_deployed_release` records that release. `previous_release` records sequence 38
-(`261029075623.0.0`), published to main at `9ec65b46709201669d65fcc04f6a21b1bb567e31`
-with its release set verified in run `40846643125` (JOED-143), but never deployed.
-Its disposition is `superseded-before-deployment`: Markus requested release 39
-directly on 2026-10-29, without settling or waiting. This history does not claim
-adoption for sequence 39. Sequence 36 (`261028081016.0.0`) was previously deployed
+live on csb0 since `2026-10-29T07:51:18Z` (JOED-122). `previous_release` and
+`last_deployed_release` both record that release. This history does not claim
+adoption for sequence 38. Sequence 36 (`261028081016.0.0`) was previously deployed
 at `2026-10-28T20:23:05Z` (JOED-106). Sequence 35 (`261027124551.0.0`) was previously deployed
 at `2026-10-27T20:18:18Z` (JOED-99). Sequence 34 (`261026232616.0.0`) was previously deployed
 at `2026-10-27T03:30:43Z` (JOED-97). Sequence 33 (`261026070713.0.0`) was previously deployed
@@ -36,14 +33,14 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build, published sequence 38,
+`previous_release` from `last_deployed_release`. About lists the current build,
 deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-39 candidate has not been published. The candidate
+cutover**. The sequence-38 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -93,7 +90,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261029192345.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261029075623.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -865,49 +862,6 @@ worker (shared `acceptRead`, then indexed once) and uses its existing
 live/stale/rejected/unavailable states. History stores only observations
 and null gaps, never the UI's assumed/interpolated continuity values.
 
-JOED-150 records exact whole-account EUR equity/cash (including kept holdings)
-in **`account-history-state.json`**, envelope `joedesk.account-history.v1`.
-It has its own 14-day retention, bounded account compaction and 2 MiB cap.
-Desk `history-state.json` stays byte-compatible v2: its fields, compaction timing
-and `sizeBytes` remain desk-only. Authenticated GET-only
-`/joe/account-history.json` exposes the account points and independent daily
-closes. Each of the three stores writes independently in the snapshot step.
-Account points preserve the same accepted producer timestamps as desk points;
-both envelopes use server receipt time. The contract's shared five-second
-producer-skew tolerance applies without clamping point timestamps.
-
-`account-closes-state.json` stores the last exact value of each field per
-**Vienna calendar day**, using the broker's observation time and separate
-field timestamps. Missing fields/days remain missing; nothing carries into
-another day. These are last-observed daily values, not NY market closing
-valuations. The latest 2,196 observed dates (at least six years of daily data)
-fit a bounded 2 MiB atomic/fsynced mode-0600 store that survives restart and
-the short series' 14-day cut.
-
-For either account store, missing files start empty with `feed_not_received`.
-Damaged/oversized/unknown-format bytes are atomically preserved as
-`<filename>.damaged-<UTC instant>` before a replacement write. A durable
-`discontinuity: {at, reason, preservedAs}` keeps `contract_invalid` visible
-after recovery and restart; a bounded `<filename>.discontinuity.json` journal
-protects the rename/replacement interruption window. Future versions remain
-untouched and read-only with `store_version_unsupported`. Temporary file or
-journal read errors leave bytes in place, report `history_write_failed`, and
-retry the load before appending. Invalid journals keep the affected store
-read-only with `contract_invalid`. Loss markers never expire automatically;
-each later corruption gets a new timestamp/name. To recover a journal or
-acknowledge a loss, stop the server and retain a complete backup, then restore
-a matching valid store/journal pair, or clear the valid envelope's
-`discontinuity` and retire its journal together. Restart and verify the series;
-acknowledgment does not reconstruct missing data. Store failures are
-independent. See [the History contract](docs/joe-history-contract.md) for
-stored shapes, recovery, retention and the endpoint. No pusher contract or
-chart UI changes are part of this recording work.
-
-**Release 39 rollback:** a pre-JOED-150 server loads the unchanged desk v2 file
-and ignores both new account files and their recovery journals/preserved copies.
-No desk conversion is required. Retain these files in backups; account capture
-pauses during rollback and resumes afterward without inventing missing values.
-
 History's chart is one keyboard stop. Keyboard focus starts inspection;
 clicking or tapping leaves the pointer tooltip alone, and arrow keys can then
 start inspection. Left/Right inspect the original observations and gap samples;
@@ -920,75 +874,7 @@ observed, estimated, or no value here. Inspection keeps focus across redraws
 and uses the existing fixed chart box and reduced-motion behavior. The chart's
 description includes its refresh status and inspection instructions. A data
 update or wheel zoom hides a hovering pointer tooltip until the pointer moves
-again, avoiding stale values after a redraw. A two-finger pinch measures the
-distance between the fingers in any direction (horizontal, vertical or
-diagonal); spreading them zooms in around their midpoint's time.
-
-History opens in **Change** (JOED-154, the approved JOED-147 design): every
-desk's line is its change in euros since the left edge of the shown window,
-so all lines start at 0 on a zero line; **Money** shows each desk's money as
-observed. Only the numbers move: the interval classifier, the hatched bands,
-the dashed estimates and "coverage unknown" are exactly those of Money, and
-the scale's ±0,5 % floor is always taken of the money, so a change of a few
-cents never fills the chart. The overview strip keeps the money of all kept
-history in both measures. The comparison line and the tooltip follow the
-measure: "Change from … to …: J −€ 1,20 · …" (exact, from the stored
-decimals) and, in Money, each desk's money at both ends with an arrow
-between them. The address names the view,
-`#history?range=fit|day|week|month&desk=all|none|j,joe,joel&mode=change|money`:
-`onRoute('history', readHistoryRoute)` reads it on every arrival (route.js),
-and after each History render `writeRoute('history', historyQuery())`
-corrects the address in place, without a history entry; an unreadable part
-keeps the current choice, so a link like `#history?range=week&mode=money`
-reads as `#history?range=week&desk=all&mode=money`. A manual pan or zoom is
-not part of the address.
-
-The vertical axis is a choice of the shared chart component (`chart.js`):
-**Auto** re-fits to the shown window on every pan and zoom, gliding over
-180 ms (at once with reduced motion); **Max** holds every value the chart has
-loaded, so moving never rescales it (in Change: the largest fall and rise
-from any kept value to a later one); **Custom** takes a bottom and a top in
-euros of the current measure (a point or a comma, no grouping), says
-"Custom axis" on the chart and names values beyond it. On a custom axis a
-dot (an isolated value's, the newest value's with its halo, the inspected
-one's) is drawn only where all its ink fits inside the plot; a value beyond
-the axis or at its very edge is instead a small chevron at the edge it
-reaches, drawn once, whole and outside the clipped lines (which are clipped
-to the plot box plus half a line's width); an inspected value that already
-has its chevron is marked by that one alone. Automatic fits (Auto, Max) keep
-their dots exactly as before, a compatibility choice: during a re-fit glide,
-or settled on a chart without a margin, the newest value's ring and halo can
-paint a few pixels past the plot's edge (History's 8 % margin keeps settled
-dots inside). A zero line is drawn whenever zero is in
-view, whether or not a label sits there. The choice is kept per
-chart and viewer in this browser (`createAxisMode(id)`: `get()` and
-`setAxisMode({ mode, min, max })`, which returns `{ ok, choice }` or
-`{ ok: false, field, error }`; `drawChart` takes it as `axis`, with
-`yValues`, `maxValues`, `tickGap`, `ease`, `easeKey` and `again`; without
-`axis` every chart draws as before). History keeps one choice per measure
-(`history.change`, `history.money`); the account chart (JOED-156) keeps one
-(`account`), offered in its own Controls as on History (Max holds every value
-of the store it draws, snapshots or daily closes); the Results chart can adopt
-it with its own id. Every label on History's axes
-and strip keeps at least 56 px from the next as drawn (to a tenth of a
-pixel), at every width: ticks sit on whole cents, a label never repeats, and
-a range too small for two ticks is labelled at its bounds. Money labels on a
-2,5 step keep their decimal on every chart: before JOED-154 such a step
-printed whole euros, so Desk's day chart and the Results curve labelled the
-2,5 and 7,5 lines "3" and "8". **Controls**,
-one small button under the strip, opens the gestures and keys and the
-vertical axis; the button again, Escape (focus returns to it) or a click
-outside closes it. A first-visit hint ("Drag or swipe to move · ⌘/Ctrl-scroll
-or pinch to zoom"; on touch screens "Swipe · pinch · double-tap") goes after
-the first drag, swipe, zoom or key and stays gone; its room stays, so nothing
-moves. On a phone (480 px or less) Change | Money and the presets share one
-row under the desks and Follow, so the chart starts higher. Tab follows what
-the eye sees at every width: Follow has a phone copy after the desks (one
-toggle, `data-follow`), no CSS reorders the tools. Within a measure
-nothing moves: the comparison keeps the height of the longest line its
-measure can write. Node tests: `test/chart-axis.mjs`, `test/history-view.mjs`,
-`test/ui-modules.mjs`; browser checks: `historyDesignChecks` in
-`scripts/browser/history-controls.mjs` (P3).
+again, avoiding stale values after a redraw.
 
 P2 persists `data-state.json` (snapshot plus progress and retained-cell receipts),
 `history-state.json` and `results-state.json` as independent atomic/fsynced
@@ -1004,21 +890,11 @@ more than 5 seconds ahead of server receipt is rejected with `clock_ahead`
 before snapshot/history writes, so a higher valid sequence can recover normally.
 Legacy data/history files are neither migrated nor overwritten automatically;
 P6 owns the compatible backup and cutover. History's `sizeBytes` measures its
-complete UTF-8 storage envelope; compaction begins at 80% of 8 MiB. Absolute UTC
-buckets are 4 hours on the newest UTC day, 12 hours on the preceding six days,
-and 24 hours earlier. It preserves representatives/extrema/value-presence and
-bookkeeping edges, daily closes and both ends of every reporting run. The
-optional `history-continuity.json` sidecar (`joedesk.history-continuity.v1`)
-records exact kept-point pairs known to contain no reporting gap over `GAP_MS`
-(20 minutes). Both stores are atomically replaced in the same history-write
-step; a matching `historySeq` binds their versions, so interrupted writes or
-racing reads fail closed to unknown coverage. Both prune by server-time 14-day
-retention. The protected read-only `/joe/history-continuity.json` route serves
-these claims to the worker and fallback. Missing/damaged/future sidecars give
-no continuity claims; damaged bytes are moved aside before recovery. History
-v2 rows and contracts stay unchanged. Compaction keeps history fresh and
-retains `compactedThrough` until that range leaves retention. Actual
-`history_size_limit` and
+complete UTF-8 storage envelope; compaction begins at 80% of 8 MiB, preserves
+endpoints/extrema/gap edges/per-desk basis transitions, and prunes its 14-day
+window by server time. Successful compaction reports the advisory
+`history_compacted` state until the compacted range (`compactedThrough`) leaves
+retention; it does not mark history broken. Actual `history_size_limit` and
 `history_write_failed` alarms remain broken until a successful history write
 resolves them; deduplication alone cannot clear one. A snapshot rename followed
 by a directory-sync failure still records its history point before replying.
@@ -1152,25 +1028,16 @@ counted partial days says **No trades recorded**, as on the calendar month
 line; without them it says **No trades**. Open-position gains or losses keep
 their **Up/Down € …** sentence and its hint; the calendar month line keeps its
 own coverage hint even when the hero cannot state a result.
-The hero's figure column has fixed rows (JOED-151): its heading, the figure
-with its percentage line, a three-line sentence row and the split, so a
-sentence of one to three lines never moves the split, chart, legend or tiles.
-The two explanations that can run longer, a change of basis and an unknown
-result, carry their longest copy invisibly in the same row (all three desks,
-a Wednesday in May, and each of the widest period phrases), so the split
-starts below the sentence's last line and stays put while the view switches
-within that state; the row grows only for them. Browser assertions at
-320 and 390 px require that for a basis change of one desk and of all
-three, and for an unknown result.
-Phones at ≤ 700 px keep at least a two-line sentence box in that row. The
-browser assertions require the longest eligible empty wording, with **Paper
-results start on 30 Sep 2026** and the older **week of 21 Sep**, to fit three
-lines at 360/390 without moving the split rows, chart, legend or tiles.
-Desktop uses the design's 300 px column (280 px at ≤ 1180 px); at ≤ 900 px
-the chart moves under the figures and the sentence spans the hero. Hinted
-result and empty sentences may use three lines at 768/1024. At 1440 they keep
-two lines where they fit, otherwise three, with the same exact zero-movement
-requirement and the hint unbroken.
+Phones at ≤ 700 px keep a two-line sentence reserve inside a fixed 301 px left
+column; its content needs 300.75 px with three lines, leaving slack for a long
+sentence and hint without moving the split or benchmark. The browser assertions
+require the longest eligible empty wording, with **Paper results start on
+30 Sep 2026** and the older **week of 21 Sep**, to fit three lines at 360/390
+without moving the split rows, benchmark, chart, legend or tiles. Desktop keeps
+the original 340 px left column (280 px at ≤ 1180 px); hinted result and empty
+sentences may use three lines at 768/1024. At 1440 they keep two lines where
+they fit, otherwise three, with the same exact zero-movement requirement and
+the hint unbroken.
 The dedicated `period-hint` browser scenario checks zero movement of tiles and
 hero children at 360/390/768/1024/1440, the desktop line limits, warning-icon contrast
 and clipping. It also forbids middle dots in both lines and splitting either
@@ -1214,12 +1081,9 @@ the formatter emits `1M` for € 999.000. Its five calendar crops show October's
 ±€ 1.200.000, gain, loss, zero, k and missing-day warning, under `JOED_QA_DIR`.
 The generated `index.md` and CI log retain the measurement table.
 
-Day-detail trade amounts keep their full value on one right-aligned line,
-with "after fees" under it. Their columns grow to fit, with the original 92 px
-minimum for short amounts on desktop. Each trade has two lines (JOED-151): the
-symbol, name and meta beside the amount, then the prices as traded, the
-trade's own recorded rate ("at € 0,90 per $"; none for a euro price) and its
-fees. Names keep at least 120 px and wrap between whole words; only
+Day-detail trade amounts keep their full value on one right-aligned line.
+Their columns grow to fit, with the original 92 px minimum for short amounts
+on desktop. Names keep at least 120 px and wrap between whole words; only
 an individual token wider than the column may break internally. English
 company letter runs of eight or more contain deterministic soft hyphens,
 with at least three source letters before, between and after opportunities.
@@ -1233,18 +1097,17 @@ Meta units (desk, side/quantity, close time and holding duration) stay together 
 between units. Each middle dot is a nowrap suffix of the preceding unit;
 after layout and resize, line-ending dots use `visibility: hidden`, retaining
 their width so lines stay stable and the next line starts flush.
-Entry/exit prices and the rate wrap first, then the entire panel uses the
-11 px small token if any row needs it, then fees may wrap. Wider panels recover
-their regular price size together. Phone amount columns size to their content;
-at every width the prices, rate and fees span the second row beneath the
-company and amount columns, so the amount never yields to them.
+Entry/exit prices wrap first, then the entire panel uses the 11 px small token
+if any row needs it, then fees may wrap. Wider panels recover their regular
+price size together. Phone amount
+columns size to their content, while prices and fees span the second row
+beneath the company and amount columns.
 The focused `trade-amount` browser scenario checks −€ 100.000,12,
 +€ 999.999,99 and −€ 1.000.000,12 beside USD price pairs with up to eight decimals at
 1440/1024/390/360 in both themes, through the real inbox and worker/fallback.
-It asserts exact amount, price, rate and fee text, no clipping or row overflow,
-common right edges, desktop-only 92 px sizing, phone content sizing, the price
-line under the name (also for the eight-decimal pair at 1440), and exactly
-0 px outer movement on open/close.
+It asserts exact amount, price and fee text, no clipping or row overflow,
+common right edges, desktop-only 92 px sizing, phone content sizing, wrapping
+of the eight-decimal pair at 1440, and exactly 0 px outer movement on open/close.
 Range rectangles check every name/meta word, atomic meta units, the 120 px
 desktop name floor, full panel-header visibility and the price/fee yield order.
 Per-character Range measurements exclude U+00AD, require every broken-word
@@ -1415,81 +1278,6 @@ and reads. The release manifest's pusher/executor requirements carry that
 same digest. This remains a coordinated cutover candidate, pending
 producer rehearsal and sign-off.
 
-### Results screen: layout and deep links (JOED-151)
-
-Results follows the approved board design (JOED-147). Under the period tabs
-(Day · Week · Month · This year · All), the stepper and the desk filter, one
-hero card names what it shows (“Result · All desks · this week”), then the
-figure, the All-desks percentage with the money it divides by (“+0,16 % of
-€ 14.973,88”), one sentence and the split (closed trades, still open, before
-fees, fees) as signed amounts in no-wrap spans. The chart sits beside the
-figures and under them at ≤ 900 px; its legend names the line (“Result so far
-· All desks”), the dashed zero and “No index chosen”, which replaces the
-former benchmark row. Eight compact tiles (four columns, two at ≤ 1180 px, one
-at ≤ 382 px) keep their info controls; a value steps its size down to its
-tile, and phones give each value of a pair its own line. By desk is one card:
-J, Joe, Joel, then All desks, every bar coloured by its own sign; the facts
-column shows above 700 px. The calendar and the selected day's trades share
-one card, and a listed day ends with “Prices in USD, as traded. Fees and
-results in EUR at each trade’s Interactive Brokers rate (€ per $). Kept
-holdings never appear here.” (plain words: no control joins the phone
-sheet's focus order). Phones keep the day sheet; its body ends above the
-home indicator (the bottom inset, `--safe-bottom`, added to its 20 px bottom
-padding, 20 px where unsupported). Numbers, bases, Partial/Stale markers,
-empty and error states are unchanged.
-
-All Results-only CSS is one block in `public/joe/app.css`, between
-`Results (one block)` and `end of Results`; a unit test fails if a
-Results-only rule appears outside it. The hero chart has one seam:
-`renderCurve` (`public/joe/results.js`) describes the line (points, time
-domain, colour, the period-start money for the minimum span, the design's
-quiet time marks, axis labels, tracking marker, words) and `drawResultChart`
-draws that description, today with `chart.js`: one thin line without an
-area, a dashed zero, and a mark at each Vienna midnight in a week, each
-Monday up to 120 days, otherwise each first of a month. The shared
-time-chart component replaces only `drawResultChart`.
-
-**Deep links.** A Results view has one address:
-
-```
-#results?period=day|week|month|year|all&date=YYYY-MM-DD&desk=all|j|joe|joel
-```
-
-- `period`: `day`, `week`, `month`, `year` (This year) or `all` (All time).
-- `date`: the calendar's selected day, a Vienna date inside the period. Day
-  is that date; Week is the Monday-to-Sunday Vienna week that contains it;
-  Month its calendar month; `year` its calendar year (this year runs to
-  today, an earlier year is the whole calendar year); All the whole record.
-- `desk`: `all`, `j`, `joe` or `joel`.
-
-The page keeps the selected day inside the period shown, so one date names
-both: choosing Day, Week or Month shows the one that contains the selected
-day, and selecting a day moves the period to it; This year is this calendar
-year, so a selected day of another year gives way to today; All holds any
-day. Days still ahead are disabled on the calendar, as the stepper stops at
-today. The month the calendar shows is not part of the link.
-
-Every parameter is optional: a missing one keeps the current view, which on a
-fresh page is This week, today and All desks. Invalid values (unknown words,
-impossible dates, dates after today or before the stepper's first month) fall
-back silently. A link from outside waits until the record's tracking start
-and the server's date are known, as a cold load begins before both; it is
-then checked and applied once, and the address keeps it meanwhile. A newer
-address replaces a waiting link, and any change of the view drops it. A link
-whose date is today keeps following the board's today.
-Examples: `/joe/#results?period=day&date=2026-10-28&desk=j` (one session for
-J), `#results?period=all` (All time), `#results?desk=joe`. The address always
-shows the current view in this canonical form with all three parameters (the
-nav's bare `#results` too, once Results shows its view). Each change of
-period, desk, step or selected day adds a history entry, so Back and Forward
-restore every view, each at the reader's place on it; a link from another
-screen opens its view, and `#results/<element-id>` still scrolls to an
-element. Results goes through the one router (route.js): it reads a link with
-`onRoute` before it renders, also one that arrives while Results is shown
-(go() hides tips and closes the day sheet first), and writes its address with
-`writeRoute`, a push for the reader's change and a correction otherwise.
-Desk's links use this format; History has its own `#history?…`.
-
 ### Phase B exact money (JOED-85, contract-set revision 10)
 
 The data ID stays `inspr.joe.household.v2`. Every valid revision-9 payload
@@ -1528,133 +1316,6 @@ does not change revision 10 or require producer re-vendoring.
 When Today is a broken dash, its local caption states the reason unless the
 board's state line already explains it. This includes pending start-of-day
 results and every revision-10 exactness reason; repeated section reasons stay shared.
-
-JOED-148 (board only, no figure changes meaning) states each dash's reason once
-and promises no time. `not_exact_yet` reads “not exact”; the other not-exact
-reasons add their own words (“Not exact · start-of-day value missing”). A
-not-exact household Today names the desks that keep it from being exact,
-from the board's own per-desk cells (“Not exact for J and Joe”); a reason that
-every desk shares needs no names, and other desk states keep their own word
-(“Not exact for J; last good for Joe”). Today's sentence never repeats a reason
-that the caption or section line shows. It gives each exact desk's own Today
-(“Joel is flat today.”), or “No desk has an exact result for today.” A dash
-with neither (a household Today missing without a reason) keeps its statement
-in the sentence: “Today’s result is not available.” Dashes are
-named “‹label›: not exact · ‹reason›”, never “not reported”, and so is a
-not-exact Cash on Desk and in Settings (caption “not exact”, name “Cash: not
-exact”), through one shared `dashWords` in `ui.js`; their info icon is
-a pointer tip hidden from screen readers, so the reason is spoken once. A desk
-card adds no line for a not-exact Today that is its only problem: the icon and
-the dash's name and title carry it. Details' “Today’s result” row lists every
-desk, exact ones first (“Exact for Joel; not exact for J and Joe”).
-
-JOED-148 also removes permanent noise. A desk card shows its Learning line
-only when the feed reports learning. The pusher's own valuation sentences
-(“Paper desk values are available.”, “Some paper desk values are
-unavailable.”, “Valuation is not exact yet.”, “Valuation unavailable pending
-exact source validation.”) are not desk activity: the card says “Joe is
-working.” or “Joel is sitting out.” instead, while any other action sentence
-stays verbatim. Check-in warnings on phone rows and Details' “Checked in” row
-appear only when the feed carries check-ins at all (the v2 feed sends none); a
-desk missing from a feed that does still says “Check-in: not reported”. A stuck
-desk reads “‹desk› is stuck: its trading activity can’t be confirmed.” Today's
-chart renders only with a line to draw: without a clock, on a day without a
-session, before the open or before the first result point the box is hidden
-and takes no space (the market block above already gives the session and the
-next opening), so the hero shrinks wherever the chart's 196 px minimum set its
-height. The phone section is then titled “Market hours” instead of
-“Today’s chart”. Within a phase nothing moves; the box appears with the first
-point of a session.
-
-Amy's A3 (2026-10-29, JOED-148) changes one light rule. During New York
-regular hours a Today that the feed explains as not exact no longer turns the
-header yellow: the board stays green, and Details says why once, in its
-“Today’s result” row (“Exact for Joel; not exact for J and Joe · ‹reason›”, or
-“Household not exact · ‹reason›; each desk exact” when only the household
-total is withheld); no separate note repeats it. One classifier,
-`classifyDay` / `classifyDays` in `board-state.js`, decides every Today, the
-household's and each desk's, over all of its channels: the board's cell (value,
-state, freshness, last good), the money reason, and the source's status and
-reason. A fault on any channel wins over “not exact”; “exact” needs a
-trustworthy current value (`trustedCurrent`: shown, fresh, no reason, not an
-outage's last good value, its source available) and no reason on any channel;
-“not exact” is a dash whose every reason is a not-exact one. The light stays
-green only when the household Today and every desk's Today are each exact or
-not exact: a current household total never excuses a desk whose Today is a
-fault. The board gives such a desk's cell the fault as its own reason, so its
-card, the hero and Details name the same thing, and it withholds the household
-Today rather than show a total across that desk. Real gaps keep yellow
-`day_pending`, now worded “Today’s result is late — reload; if it stays, tell
-Amy” (compact “Result late”), and Details names each one: “Today’s result is
-unavailable during New York regular hours: ‹reason›.” for the household,
-“Joe’s Today is unavailable: ‹reason›.” or “Joe’s Today is only a last good
-value: ‹reason›.” for a desk. The light, the hero's desk names and sentence,
-the cards and Details all use the classifier, while `exactCell` keeps its
-separate money rule (JOED-96 replays). Transport failures and stale or missing
-feeds keep their earlier, higher-ranked warnings. Not-exact values still never
-turn the board red (JOED-103), and no copy promises when a value becomes exact
-(A5).
-
-JOED-157 applies the same classification to Open result. `classifyCell(cell, channels, field = 'dayPnl')`
-is the shared classifier; `pnlChannels(data, scope, field)` gathers the money
-reason and source (desk source, falling back to the household source), and
-`classifyCells(states, data, field)` classifies the household and all three
-desks for `dayPnl` or `openPnl`. The Today APIs remain thin wrappers. Amy's A3
-green-for-not-exact approval applies to Today only. During regular hours,
-Open stays green only when the household and every desk are exact. A not-exact
-Open keeps the existing yellow `open_unavailable_rth` price warning. The producer's
-`open_pnl_unavailable` is an explicit Open-only waiting reason: it keeps “Waiting
-on broker prices” with no reload or “tell Amy” action. Other reasons outside the
-known not-exact set remain faults; Today keeps its original reason set. A fault
-on any channel wins, with yellow `open_fault_rth` and “Open result is unavailable”.
-A desk fault also withholds the household Open amount, including when the
-producer supplied a current total. Household Today and Open captions name the
-faulty desks and their reasons first, using each desk's own state word, followed
-by not-exact desks or desks waiting on prices (for example, “Last good for Joe ·
-not reported by the broker; not exact for J”, or “Unavailable for Joe · not
-reported by the broker; waiting on prices for J and Joel”). Headlines, Details,
-cards and phone summaries agree on those words. Retained observations keep
-their last-good ages. Before any snapshot, or when the household and all faulty
-desks are simply not reported with no reason or unavailable source, the board
-keeps the absent state rather than inventing a fault or blaming desks. The
-cold page still says “No numbers yet: no board data has arrived.”
-Details names each
-faulty desk and its reason and keeps the household problem line for a not-exact
-Open. Its “Open positions” row explains non-exact results
-(“Joe and Joel: exact; J: not exact · ‹reason›”)
-and household-only gaps, rather than showing an available valuation method
-over a fault, including a household fault beside desk gaps. For both Today
-and Open, a faulty blocking desk supplies the withheld household's fault
-caption before any not-exact blocker, regardless of desk order or a preexisting
-not-exact household dash. Open source status alone can invalidate an otherwise
-current amount. Higher-ranked feed and broker warnings retain their priority.
-`test/open-result.mjs` checks all 10,368 combinations of twelve desk conditions
-across three desks and six household conditions (including money-channel and
-source-channel price waits, a household price wait, and an amount beside its
-own fault) against an independent
-plain-words oracle, through the light, hero/summary, Details, cards and phone
-rows. It also covers source fallback, unavailable source status and every
-known not-exact reason; the Today regression suite remains separate.
-
-Amy's A4 (2026-10-29, JOED-148): Since start counts from 10 Sep 2026, 00:00 New
-York, for all three desks. `SINCE_START` in `public/joe/performance.js` holds
-that New York day beside `STARTING_MONEY`, citing the pusher's `PERIOD_START`
-(J's `FIXED_PERIOD_START` is the same instant). A desk's own
-`accounting.periodStart`, when the feed sends one, wins for that desk. The hero
-and the cards read “Since 10 Sep”; the hero caption gives the percentage's
-basis from the configured money (“of € 15.000 · after fees, incl. open
-positions”), Desks' money reads “started with € 15.000 on 10 Sep”, and phone
-rows say “Since” under a phone-only “Since 10 Sep” in the Desks heading. When
-desks start on different days the hero says “Since start” and each card keeps
-its own date. Results' `trackingStart` is checked against each desk's
-effective day (its own accounting date, else 10 Sep), never against the
-fallback alone. A desk's own date stays shown; a fallback day that Results
-contradicts becomes “Since start”. Details then names the actual days, e.g.
-“Since start dates differ: Results start on 12 Sep; J counts from 12 Sep, Joe
-and Joel from 10 Sep. Desk shows no date for Joe and Joel until they agree.”
-The light is unaffected. Since start's explanation retires “J’s bookkeeping starts on its own
-date” and resolves its day, starting money, each desk's share and “Same start as
-Results · All time” (only once Results agrees) from those values at display time.
 
 Release 35 (JOED-96, Markus Desk f3b46a8d) extends this outage policy to a
 stopped DATA feed (`snapshot_stale`) or frozen producer (`producer_frozen`).
@@ -1869,7 +1530,7 @@ keep their precedence.
 
 JOED-57 treats null desk equity with `not_exact_yet` as deliberately uncaptured,
 so an otherwise healthy board stays **Board OK** and Details adds one neutral
-“Desk values are not exact” line. Other missing reasons stay red except for
+“Desk values are not exact yet” line. Other missing reasons stay red except for
 the bounded broker-check gap above; retained values, stuck desks and regular-session result warnings keep
 their existing rules. `NOT_EXACT_TONE` in `health.js` defaults to `green`;
 `yellow` opts into `values_not_exact` after those checks. Null not-exact cells
@@ -1888,9 +1549,8 @@ the status and its label. These browser assertions run in PR CI.
 
 The reason enum appends `not_exact_yet` (the broker reports it, but it is not
 yet captured exactly) and `source_unavailable` (the broker did not report it,
-or did not report it in the required currency). Board copy is “not exact”
-(JOED-148: the board cannot say when a value becomes exact) and “not reported
-by the broker”. `source_not_authoritative` still means the
+or did not report it in the required currency). Board copy is “not exact yet”
+and “not reported by the broker”. `source_not_authoritative` still means the
 kept-holdings list disagrees. Desk and KEEP null values show an accessible
 em dash plus visible per-row reasons; KEEP remains read-only. A missing
 market-value summand makes the entire kept worth unavailable with its reason,
@@ -1904,8 +1564,7 @@ row. Both use the label “Cash” and caption “cash · as the broker reports 
 They show two decimals using exact integer units for display only, with
 the untouched broker lexeme in title and accessible name. Null Cash shows a
 muted dash in the Desk figure with “not reported · [reason]” in its caption;
-Settings retains that wording inline. A not-exact Cash says “not exact”
-instead (JOED-148). Rev-7 omission reads “no data received yet”.
+Settings retains that wording inline. Rev-7 omission reads “no data received yet”.
 Desk reserves fixed caption lines inside each cell; Settings reserves the actual
 wrapped value/stale/null reason forms, including the session reason at 360 px. They wrap
 text and keep the existing header. P5's `cash` cases cover real ingress, stale, null, API-session loss,
@@ -1947,58 +1606,6 @@ Red always uses that line. Each non-green sentence appears once outside Details;
 green may stay compact on narrow screens. The line ends in an ellipsis when
 necessary and retains a complete title. Its space stays reserved in green, so
 tone changes and ticks cannot move the content.
-
-JOED-152 (the JOED-147 design) keeps the header one row at every width: the
-wordmark, PAPER, Desk · Results · History, the light, Settings as a gear and
-the theme button. Settings left the reading nav; the gear carries
-`aria-current="page"` on Settings, as the nav does on its screen. Above 480 px
-the nav stays in the header (tablets included); up to 480 px it is a bottom
-bar: a solid surface with a hairline, padded clear of the safe area
-(`viewport-fit=cover`; page gutters keep clear of a landscape notch), and the
-page's content and Details end above it. Every inset is read once into
-`--safe-bottom`, `--safe-left` and `--safe-right` (app.css), which browser
-checks override to stand in for a phone. Every header control is a 44 px
-target, whatever it draws, and no target overlaps a neighbour's (browser
-checks hit-test them with `elementFromPoint` across the fitted steps). When the measured row does not fit, `fitHeader` (app.js) applies
-steps in order until it does: the wordmark goes, the nav drops its icons, gaps
-tighten, the nav keeps its icons alone (each button keeps its name), and last
-the light narrows without its chevron (its whole sentence stays in its title
-and name). Only the viewport and the fonts decide the steps, never the light's
-words. `moneyNoWrap()` (ui.js) keeps a signed amount and its sign on one line
-in running text; the header shows no amounts, so the screens' captions adopt it.
-
-Routes (route.js) are `#desk`, `#results`, `#history` and `#settings`, with an
-optional `/anchor` to scroll to (`#settings/mode`, `#history/j-accounting`)
-and an optional `?query` that belongs to the screen
-(`#results?period=day&date=2026-10-28&desk=j`, `#history?range=week&mode=money`).
-The address keeps the screen and its query; an anchor only scrolls, and an
-unknown route is Desk. The nav, the gear, `data-go` controls (with an optional
-`data-query`) and plain clicks on same-page links add a history entry, so Back
-and Forward walk the screens; on the screen already shown, a bare one (its own
-nav button, the gear, an anchor) keeps the query that screen gave its address
-and adds none, and the screen's reader does not run again, so its state
-(Results' browsed month) stays and only the scroll or the anchor applies. The
-first load, Back, Forward and a typed address only correct the address. Each entry keeps the reader's place
-(`createPlaces`, which makes every history call the board makes): read before
-the page changes and kept for the entry being left (by the board's navigation
-or the browser's), so Back and Forward return to it. One saver also writes it
-into the entry's state: a scroll or its end asks, a write lands at most once
-per 500 ms, and hiding the page or leaving by the nav flushes it. Saves stop
-at 60 history calls in any 30 s, navigation counted, so WebKit's limit of
-about 100 keeps room for navigation, which always goes through. A reload
-returns to the entry's place once the page has grown to it (its data comes in
-after the load), unless the reader scrolls first or 15 s pass. A
-screen reads its own parameters by registering one reader,
-`onRoute(screen, read)`: `go()` calls it with the route's `URLSearchParams`
-before the screen renders, on every arrival; an absent parameter keeps that
-screen's current choice. A shown screen writes its own query with
-`writeRoute(screen, query, { push })`: the reader's own change of the view
-pushes an entry, so Back returns to the view before; a correction replaces
-the address, and never one that changed outside the page and still waits for
-`follow()`. Both take go()'s history step through the same places, so they
-count against the one budget. Results (JOED-151) is the first screen with a
-reader and a writer. Node tests: `test/header-nav.mjs`; browser checks:
-P3's `nav` group (its `routes`, `bar` and `header` checks) and the width sweeps.
 
 The header button and visible problem line open the shared, opaque Details
 dialog on every screen. Its full sentence wraps at the top, in view on opening.
@@ -2042,9 +1649,8 @@ browser render-budget validation remains in CI. The base includes open-position
 movement without summing closed trades alone or rounding either input to cents. Individual
 desks, empty periods, basis changes, unknown/non-exact results and unknown or
 nonpositive bases omit the percentage. The shared Desk formatter retains its
-two decimals, signs and tones. Since JOED-151 the percentage sits under the
-euros with its base, “of € …”, a term that opens the existing Result
-explanation; “the money at the period start” stays in the accessible text.
+two decimals, signs and tones, with “of the money at the period start” in the
+figure's accessible text and the formula in the existing Result explanation.
 Both figure columns reserve their width when the percentage is absent, with
 tabular numerals and fixed height. Results unit tests cover the exact base,
 rounding boundaries, Since start parity and omissions. P4's existing number
@@ -2053,7 +1659,7 @@ for the standard fixture's All desks and individual-desk selections; its
 existing tick/filter geometry checks include the figure and percentage slot.
 
 A snapshot state shared by money cells appears once in the hero's board caption.
-Shared not-exact reasons use “Numbers: not exact” in both the hero and
+Shared not-exact reasons use “Numbers: not exact yet” in both the hero and
 Account section, appending the reason when it adds information. Real faults
 keep `Numbers unavailable · <reason>`. P3 checks each broken hero cell and
 includes synthetic generic, shared and mixed not-exact/fault cases (JOED-107).
@@ -2106,16 +1712,20 @@ visible collapsed summaries first, then opens the disclosures and checks each
 body and its rows; expanded and collapsed geometry checks remain. Execution
 belongs to agm2 CI.
 The hero keeps its primary results, sentence and board caption on the left,
-with the clock and chart on the right. Its supporting figures (Open result and
-Desks’ money since JOED-153; the paper account and Cash are the whole-account
-block's above the hero since JOED-156, below) share one row below both columns
-above 1180 px. The chart fills the primary area's height, removing the
+with the clock and chart on the right. Open positions, Desks’ money, Paper
+account and Cash share one row below both columns above 1180 px; at 701–1180 px
+they form a 2×2 grid. The chart fills the primary area's height, removing the
 empty right column. At 481–700 px the order stays primary results, secondary
-figures, then clock and chart. Settings keeps its existing cash layout.
+figures (Cash below Paper account), then clock and chart. Cash keeps its exact
+broker lexeme in its title/accessibility name, its independent missing/stale
+reason and a state-independent reserve; Settings keeps its existing cash layout.
 Each secondary cell reserves five 16 px caption lines (eight on phones) inside
-the cell, with a 20 px label and a 28 px value row. AC-19 compares the
-supporting captions through the shared copy normalizer, preserving the phone's
-nonbreaking space before middle dots.
+the cell, with a 20 px label and a 28 px value row. Cash's broker caption uses
+the first two reserved lines; the same `.cash-caption` contains
+“not reported · no data received yet” (or its own reason) below the broker
+description when Cash is a muted em dash. AC-19 compares the four supporting
+captions through the shared copy normalizer, preserving the phone's nonbreaking
+space before middle dots; its Cash reason selector stays inside the caption.
 The fixed 80 px caption block (128 px on phones) remains state-independent. The hero
 has no reserved card height. Fix 4 removes Cash's hidden sizing paragraphs:
 the more-specific `.kpi .c` block display had defeated their grid overlap and
@@ -2127,42 +1737,10 @@ These are CSS estimates; browser height and zero-shift verification stay in CI.
 Desk check-ins stay on one line. A long status yields with an ellipsis and a
 complete native title; cards below 340 px retain the check-in on the name row.
 
-Desk's whole account (JOED-156: `account.js`, `account-model.js`,
-`account-worker.js`) fills JOED-153's slot above the desk hero, its own card:
-the IB paper account incl. kept holdings (`brokerAccount.equity`, EUR) as
-Desk's largest number, its change for the chosen range, Since start from the
-Settings account start, Cash, and the kept holdings each in its own currency
-(display only, never actionable). A value that is not current and exact
-states its own state in the block's change line; the desk hero's board
-caption covers the desk figures. Cash is Desk's Cash figure (JOED-49) in the
-block's “Since start · Cash” line, as designed (“Cash € 4.212,77”; Settings
-keeps the caption “cash · as the broker reports it”): two decimals, the
-broker's exact lexeme in its title and accessible name, a missing Cash a
-muted dash with “not reported · ‹reason›” (“no data received yet” when none
-came), a not-exact one “not exact” (JOED-148) and an outage's kept Cash
-withheld (JOED-91); a reason the account value shares is said once, in the
-change line. On a phone the block stays open, first on the screen (no
-collapsed section): the value, the change, one Since start · Cash line,
-Account details (the kept holdings, the start), the ranges and a 120 px
-chart. Its link to the account start is a plain route link
-(`#settings/set-account`); its chart reads the account history in a module
-worker; its first-visit hint is every chart's (`chartHintSeen`,
-`dismissChartHint`); its Controls offer the vertical axis (Auto · Max ·
-Custom, `createAxisMode('account')`). P3 reads the block where it read the slot: AC-9's paper
-account, AC-19's title, chip and unreported Cash, the fixtures' and journeys'
-account state and change line, the phone first screen and the outage counts;
-P5's Cash phases read its line. The Since start · Cash line reserves, by the
-block's real content width from 240 px up, the lines its longest form needs
-(amounts up to €1e9, ±99.999,99 %, every Cash reason, in SF Pro and DejaVu
-Sans; test/account-hero.mjs); longer content or a narrower block wraps on,
-visibly.
-
 JOED-79 changes only Desk at widths up to 480 px. The first screen contains
 the existing header status control and reserved red/yellow problem line,
-then (since JOED-156) the whole account, open, above the bottom navigation;
-Today and Since start with euros and percentages, the one-line Today summary
-and three ranked desk rows follow it (P3 keeps the 1600 px collapsed page
-budget for everything below the whole account). Each row retains its desk mark, name, state word,
+Today and Since start with euros and percentages, the one-line Today summary,
+and three ranked desk rows. Each row retains its desk mark, name, state word,
 Today and Since start euros, tones and state markers. Tapping it exposes the
 original complete card, including action, all three figures, chart and learning.
 The Account figures, today's clock/chart, Positions and Kept holdings have
@@ -2405,55 +1983,6 @@ metadata only; the full record stays on its worker read path.
 
 ### Fleet Config propagation
 
-Account start is a separate board display setting (JOED-155), saved in
-`/var/lib/joe-board/board-settings.json` as
-`{ "accountStart": { "amountEur": <positive EUR number>, "date": "YYYY-MM-DD" } }`
-or `{ "accountStart": null }`. It never changes `fleet-config.json`, executor
-policy, contracts, or broker data. Amounts have at most two decimal places and
-must retain safe integer cents; dates must be real calendar dates in years
-0001–9999. No amount or date is supplied by default.
-
-`GET /joe/board-settings.json` uses the existing authenticated read path and
-returns `{accountStart, reason}` with no-store and the common CSP/frame headers.
-The reason is `null` when set, `unset` when deliberately cleared, `missing`
-before any save, `invalid` for corrupt/invalid/oversize storage, or `unreadable`
-for other read failures. Failures return a null account start without crashing.
-`POST` on the same route accepts only `{accountStart}` and mirrors Fleet Config's
-trusted proxy identity, same-origin checks, JSON content-type check and 262144-byte
-request limit. Validation failures return 422 with a plain error; auth/origin
-failures return 403, wrong content type 415, malformed JSON 400, oversize bodies
-413 and store failures 500. Successful responses include `{ok:true,accountStart,reason}`.
-The bounded 4096-byte file uses `server/storage.mjs` atomic replacement, fsync
-and mode 0600. Log lines record actor, time, changed key and pending/success/failure,
-never the amount or date. Concurrent saves use the last completed replacement.
-
-Settings → **Account start** works on desktop and phone: Edit, enter amount and
-date, Review changes, tick the review box, then Save account start. Point and
-comma decimal input are accepted without grouping. Clearing also requires review,
-including replacing missing, invalid or unreadable storage with explicit null; the
-review explains which saved state is being replaced. Invalid amount/date fields
-show their own described errors, and focus moves to the first invalid input.
-An unset value reads “Not set: the whole account's 'Since start' stays hidden
-until you set it.” Missing/corrupt/unreadable storage has an additional explanation.
-The form preserves a failed save's draft and asks for a refresh before retrying.
-Fleet policy keeps its existing separate review and propagation flow.
-
-Desk's whole-account block (JOED-156) imports `accountStart()` from
-`public/joe/board-settings.js` to get a defensive `{amountEur,date}` copy or null.
-`onBoardSettingsChange(callback)` adds an independent listener and returns its
-unsubscribe function, so Settings and the hero can both subscribe. This page
-facade exposes no save or writable factory. Only Settings imports the separate
-`board-settings-write.js` capability; the UI source guard checks that boundary,
-including aliases, namespaces, dynamic imports and re-exports.
-Settings initialization loads it for every screen; visible pages refresh it every
-30 seconds and on focus/visibility return. Failed reads hide the accessor's value
-until a valid response recovers. A 15-second deadline bounds response headers
-and body, including saves whose outcome must be checked by refreshing after a timeout.
-A late GET never overwrites a newer save, and
-editing or a changed server value invalidates the form's prior review. This
-ticket adds no Desk UI. Focused tests are `test/board-settings.mjs`,
-`test/board-settings-route.mjs`, `test/board-settings-guard.mjs` and `test/settings-model.mjs`.
-
 Every app response sends `Content-Security-Policy: frame-ancestors 'none'`
 and `X-Frame-Options: DENY` to prevent framing of the board and its settings
 (JOED-141). Open the board directly; HostDash links to its protected address.
@@ -2495,7 +2024,7 @@ the health signal and next action but does not restart the Gateway or pusher.
 ### Preserved contracts
 
 - Storage: `/var/lib/joe-board/data.json`, `history.json`, `fleet-config.json`, `fleet-config-actions.json`
-- Browser `localStorage` keys: `joe-board-theme-v1` (light, dark or system), `joe-board-observed-events-v1` (desk changes this browser saw), `joe-board-chart-axes-v1` (each chart's vertical axis when not Auto) and `joe-board-chart-hint-v1` (the charts' first-visit hint was seen). The GridStack layout keys of the old board are left untouched and unread; the rebuilt board has no layout manager or layout storage.
+- Browser `localStorage` keys: `joe-board-theme-v1` (light, dark or system) and `joe-board-observed-events-v1` (desk changes this browser saw). The GridStack layout keys of the old board are left untouched and unread; the rebuilt board has no layout manager or layout storage.
 - Fleet Config requires Diff → Confirm before Propagate. Save Preview remains browser-local; Propagate writes only a paper-mode config revision and its durable action record. Secret slots list agenix/Janus capability and path refs only and always show REDACTED; they never display plaintext credentials. HOSTD-52 rotation remains a response hook. See `docs/joe-fleet-config-secrets.md`.
 - Gateway light: yellow means the paper connection is unstable or its check-in is late; red means the Gateway reports down. These are health readings, not settings that Fleet Config can fix.
 - API paths: `/healthz`, `/readyz`, `/joe/*`, `/joe/fleet-config.json`, `/joe/fleet-config/actions.json`, `/joe/fleet-config/propagate`
@@ -2615,29 +2144,3 @@ Reseal only this candidate's runtime closure. Keep revision-10 contracts, the
 approved shared presentation pin, legacy anchor and historical artifacts
 unchanged. Review, publication, deployment and live verification remain with
 the coordinator; this reservation grants none of those approvals.
-
-### Release 39 preparation (JOED-159)
-
-Reserve `261029192345.0.0` at `2026-10-29T19:23:45Z`, stable sequence 39, for the
-JOED-144 board redesign. Sequence 38 (`261029075623.0.0`) was published on main
-`9ec65b46709201669d65fcc04f6a21b1bb567e31`; its release set was verified in run
-`40846643125` (JOED-143), but it was never deployed. Reuse the historical
-`superseded-before-deployment` disposition. Markus requested release 39 ASAP
-on 2026-10-29 with no settling or waiting. Last deployed stays sequence 37
-(`261028202622.0.0`), live since `2026-10-29T07:51:18Z` (JOED-122).
-About orders 39, 38, 37 through 26, then legacy; release 38 keeps its own note.
-
-- See the whole account’s value at the top, with a stock-app chart from 1D to All and an overview strip.
-- Explore History in Change mode with a minimap, natural pan and zoom, and Auto, Max or Custom axes.
-- Read dated Desk results with Last session, one market-day bar and labelled session bars for each desk.
-- Explore redesigned Results by period, desk, calendar day and trade, with links back to the same view.
-- Use the quieter header, the Settings gear and the phone bottom bar to move around the board.
-- Get one honest reason for each missing number, with fewer repeated warnings and no empty chart box.
-- Set the account’s starting amount and date in Settings to give Since start a known basis.
-- Build account history from newly recorded values, with daily closes for longer chart ranges.
-
-Reseal the integrated runtime closure once. Contracts revision 10, contract set
-`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
-shared presentation pin and legacy anchor remain unchanged. This candidate
-grants no publication or deployment approval; the coordinator owns the
-cross-family gate, publication and live verification.

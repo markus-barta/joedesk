@@ -62,9 +62,7 @@ export function createGate(QA_DIR) {
     const clamps = await page.evaluate('__audit.clamps()');
     const statusLine = Number(await page.evaluate(`document.getElementById('statusAlert').hasAttribute('data-visible')`));
     const phoneCaption = Number(await page.evaluate(`matchMedia('(max-width: 480px)').matches`));
-    // JOED-156: the whole account's own state line, shown while its value is not current and exact.
-    const accountLine = Number(await page.evaluate(`[...document.querySelectorAll('#acctHero [data-clamp]')].filter(__audit.visible).length`));
-    if (screen.startsWith('desk')) check('clamp', `${tag}: the status, problem line when present, Today's sentence, phone Since start caption and the whole account's state line when present show whole lines, end in an ellipsis and give their full text`, clamps.length === 2 + statusLine + phoneCaption + accountLine && accountLine <= 1 && clamps.every(c => c.ok), clamps);
+    if (screen.startsWith('desk')) check('clamp', `${tag}: the status, problem line when present, Today's sentence and phone Since start caption show whole lines, end in an ellipsis and give their full text`, clamps.length === 2 + statusLine + phoneCaption && clamps.every(c => c.ok), clamps);
     else check('clamp', `${tag}: only the shared status and problem line clamp outside Desk`, clamps.length === 1 + statusLine && clamps.every(c => c.ok), clamps);
     const text = await page.evaluate('__audit.text()');
     const plain = text.filter(t => !t.term).map(t => t.text).join(' ');

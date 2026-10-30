@@ -1,40 +1,19 @@
 // Shared pieces: icons from the inline sprite, terms, big numbers, desk marks
 // and the one opaque tip. Everything returns escaped HTML strings.
 import { TERMS } from './terms.js';
-import { esc, money, eur, digits, tone, arrowOf, isZero, known, age, dayFull, MINUS, currencySymbol, cashAmount } from './format.js';
+import { esc, money, digits, tone, arrowOf, isZero, known, age, MINUS, currencySymbol, cashAmount } from './format.js';
 import { cellReason, capital, CELL_REASON } from './health.js';
-import { NOT_EXACT_REASONS, notExactDash } from './board-state.js';
-import { STARTING_MONEY, sinceStarts } from './performance.js';
+import { NOT_EXACT_REASONS } from './board-state.js';
 import { nyDay, zonedInstant, wall, NY, VIENNA } from './time.mjs';
 
-// The words for every value the feed explains as not exact.
-export const NOT_EXACT = CELL_REASON.not_exact_yet;
-// A dash's accessible name and title after its label, shared by money cells,
-// positions and Cash: a value the feed sent as not exact says "not exact"
-// (with a reason only when it adds words), never "not reported"; every other
-// missing value keeps its existing words.
-export function dashWords(reason) {
-  const why = reason ? cellReason(reason) : null;
-  return NOT_EXACT_REASONS.has(reason) ? `${NOT_EXACT}${why !== NOT_EXACT ? ` · ${why}` : ''}` : `not reported${why ? ` · ${why}` : ''}`;
-}
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 export const icon = (id, cls = 'i') => `<svg class="${cls}" aria-hidden="true"><use href="#i-${id}"/></svg>`;
 // Entries added at run time (each fleet setting's Learn tip) beside the fixed dictionary.
 const added = new Map();
 export const addTerms = entries => { for (const [key, entry] of Object.entries(entries)) added.set(key, entry); };
-// Since start's explanation states the board's configured basis, never a
-// literal: the start day (unless Results' record disagrees), the starting
-// money, each desk's share, and Results' agreement once its record says so.
-function sinceHelp(text, since = sinceStarts(null)) {
-  const day = since.common, money = eur(STARTING_MONEY, false, 0);
-  return text.replace('{since}', day ? ` on ${dayFull(zonedInstant(day, '12:00:00', NY), NY)} (New York trading day)` : '')
-    .replaceAll('{startingMoney}', money).replace('{deskMoney}', eur(STARTING_MONEY / 3n, false, 0))
-    .replace('{sameStart}', day && since.trackingStart === day ? ' Same start as Results · All time.' : '');
-}
-const entryOf = (key, now = null, since = null) => {
+const entryOf = (key, now = null) => {
   const entry = TERMS[key] ?? added.get(key);
-  if (key === 'since') return [entry[0], sinceHelp(entry[1], since ?? undefined), entry[2]];
   if (key !== 'today') return entry;
   // Resolve at each tip render, including after midnight. Intl supplies both
   // zones' offsets at NY midnight itself, even on a clock-change Sunday.
@@ -56,10 +35,6 @@ export function bn(n, currency = 'EUR', signed = true, d = 2) {
   const sign = n < 0 ? MINUS : signed && n > 0 ? '+' : '';
   return `<span class="bn ${signed ? tone(n) : ''}">${signed && n ? icon(arrowOf(n), 'i ar') : ''}${sign}<span class="u">${esc(currencySymbol(currency))}</span>${digits(n, d)}</span>`;
 }
-// Money inside running text (captions, sentences, the header): one unit that
-// never wraps, so a line cannot end in its sign with the amount on the next.
-// bn() and pl() already keep their figures whole.
-export const moneyNoWrap = (n, currency = 'EUR', signed = false, d = 2) => `<span class="nowrap">${esc(money(n, currency, signed, d))}</span>`;
 export const pl = (n, currency = 'EUR') => (n == null || !known(n) ? '<span class="muted">—</span>'
   : isZero(n) ? `<span class="pl">${money(0, currency)}</span>`
     : `<span class="pl ${tone(n)}">${icon(arrowOf(n))}${money(n, currency, true)}</span>`);
@@ -89,7 +64,7 @@ export function fitStatusLine(control, line, narrow = matchMedia('(max-width: 11
 // A clamped sentence (data-say) shows itself whole there on a click, tap or
 // keyboard focus; hovering it shows nothing, as its words are already in view.
 const TRIGGER = '[data-term], [data-say]';
-export function initTips({ now = () => null, since = () => null } = {}) {
+export function initTips({ now = () => null } = {}) {
   const tip = $('#tip');
   let anchor = null, pinned = false, quiet = null, at = null, dismissal = null;
   let restoreFocus = null;
@@ -123,7 +98,7 @@ export function initTips({ now = () => null, since = () => null } = {}) {
       tip.innerHTML = `<b>${esc(TERMS[el.dataset.say][0])}</b>${el.querySelector('[data-clamp]')?.innerHTML ?? ''}`;
       return true;
     }
-    const entry = entryOf(el.dataset.term, now(), since());
+    const entry = entryOf(el.dataset.term, now());
     if (!entry) return false;
     tip.innerHTML = `<b>${esc(entry[0])}</b>${esc(entry[1])}<span class="t2">${el.dataset.learn ? 'Term' : 'Also called'}: ${esc(entry[2])}</span>`;
     return true;
@@ -363,9 +338,8 @@ export function statePhrase(cell, key, held = 'last good value', sharedReason = 
   const localWhy = why !== sharedReason ? why : null;
   const suffix = localWhy ? ` · ${esc(localWhy)}` : '';
   const ago = () => ageSpan(key, cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`);
-  // Said once: the reason follows only when it adds words to "not exact".
-  if (notExactDash(cell)) return { tone: 'none', icon: 'info',
-    text: `${NOT_EXACT}${localWhy === NOT_EXACT ? '' : suffix}`, state };
+  if (cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason)) return { tone: 'none', icon: 'info',
+    text: `not exact yet${localWhy === 'not exact yet' ? '' : suffix}`, state };
   if (state === 'fresh') return { tone: 'ok', text: '', state };
   if (state === 'not reported') return { tone: 'none', text: `not reported${suffix}`, state };
   if (cell.value == null) return { tone: 'bad', text: `unavailable${why ? suffix : ' · not available'}`, state };
@@ -382,7 +356,7 @@ export function stateCaption(cell, key, fresh = '', held, sharedReason = null) {
 // Use the real caption builder for every state/reason combination. Days and
 // hours exercise both long ages and the longest unbroken age token; unknown
 // ages have their own wording. Sizing copies never tick or enter accessibility.
-export const CAPTION_PHRASES = [...new Set([null, ...Object.keys(CELL_REASON)].flatMap(reason =>
+const CAPTION_SIZING = [...new Set([null, ...Object.keys(CELL_REASON)].flatMap(reason =>
   [null, 999 * 86400, 23 * 3600 + 59 * 60].flatMap(ageSeconds => [
     { state: 'not reported', value: null },
     { state: 'broken', value: null },
@@ -390,16 +364,7 @@ export const CAPTION_PHRASES = [...new Set([null, ...Object.keys(CELL_REASON)].f
     { state: 'stale', value: {} },
     { state: 'broken', value: {} },
   ].map(cell => stateCaption({ ...cell, reason, ageSeconds }, 'sizing').replace(AGE_RE, '$2')))
-))];
-// A caption's box is as tall as its tallest phrase, and the tallest phrases
-// are the longest: the sixteen longest are laid out, not all 401 (every Desk
-// update rebuilt some 1,200 hidden boxes for the hero's three captions).
-// ui-modules.mjs measures that they reserve every phrase's lines at every
-// width, in the wide font and in a narrower one.
-const plainLength = text => text.replace(/&[#\w]+;/g, '&').length;
-export const CAPTION_RESERVE = CAPTION_PHRASES.map((text, i) => ({ text, i }))
-  .sort((a, b) => plainLength(b.text) - plainLength(a.text) || a.i - b.i).slice(0, 16).map(p => p.text);
-const CAPTION_SIZING = CAPTION_RESERVE.map(text => `<span class="cash-sizing" aria-hidden="true">${text}</span>`).join('');
+))].map(text => `<span class="cash-sizing" aria-hidden="true">${text}</span>`).join('');
 export function reservedCaption(caption, freshCaptions) {
   const fresh = [...new Set(freshCaptions)].map(text =>
     `<span class="cash-sizing" aria-hidden="true">${stateCaption({ state: 'fresh' }, '', text)}</span>`).join('');
@@ -409,24 +374,20 @@ export function reservedCaption(caption, freshCaptions) {
 // Each reason reserves its actual wrapping, including the session form at
 // 360 px: character count cannot predict how words wrap in a narrow column.
 // The label and Amy's caption have their own fixed rows in both surfaces.
-const CASH_SIZING = [...new Set(Object.keys(CELL_REASON).flatMap(reason =>
-  [dashWords(reason), `−€ 999.999,99 · ${cellReason(reason)}`]))
-].map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
+const CASH_SIZING = [...new Set(Object.values(CELL_REASON))].flatMap(why =>
+  [`not reported · ${why}`, `−€ 999.999,99 · ${why}`]
+).map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
 export function cashCaption(cell, key, { figure = false, sharedReason = null } = {}) {
   const value = cell?.state === 'broken' && cell.retained ? null : cell?.value;
   const why = cell?.reason ? cellReason(cell.reason) : null;
-  // A missing Cash is named like every other dash: "not exact" when the feed
-  // says so, else "not reported" with its reason (no data received yet by default).
-  const notExact = value == null && NOT_EXACT_REASONS.has(cell?.reason);
-  const missing = dashWords(cell?.reason ?? 'feed_not_received');
-  const view = value == null ? { text: missing, title: `Cash${notExact ? ':' : ''} ${missing}` } : cashAmount(value);
+  const view = value == null ? { text: `not reported · ${why ?? cellReason('feed_not_received')}`,
+    title: `Cash not reported · ${why ?? cellReason('feed_not_received')}` } : cashAmount(value);
   if (value != null && why) { view.text += ` · ${why}`; view.title += ` · ${why}`; }
   if (figure) {
     const amount = value == null ? '—' : cashAmount(value).text;
     const reason = why ?? (value == null ? cellReason('feed_not_received') : '');
     const localReason = reason !== sharedReason ? reason : '';
-    const state = notExact ? `${NOT_EXACT}${localReason && localReason !== NOT_EXACT ? ` · ${esc(localReason)}` : ''}`
-      : value == null ? `not reported${localReason ? ` · ${esc(localReason)}` : ''}` : localReason ? ` · ${esc(localReason)}` : '';
+    const state = value == null ? `not reported${localReason ? ` · ${esc(localReason)}` : ''}` : localReason ? ` · ${esc(localReason)}` : '';
     return `<div class="kpi cash-kpi cash-block"><dt class="cash-label">Cash</dt><dd><span class="account-cash" data-cash="${esc(key)}" data-state="${cell?.state ?? 'not reported'}" role="group" title="${esc(view.title)}" aria-label="${esc(view.title)}"><span class="cash-amount${value == null ? ' muted' : ''}">${esc(amount)}</span>
       <span class="cash-caption cash-reserve c"><span class="cash-description">cash · as the broker reports it</span>
         <span class="cash-reason">${state}</span></span></span></dd></div>`;

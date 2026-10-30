@@ -7,7 +7,7 @@ import { validateContract } from '../contracts/index.mjs';
 import { sessionBounds } from '../time.mjs';
 
 const { capturedHtml, compareLine } = await builders('history.js', ['capturedHtml', 'compareLine']);
-const { marketBlock } = await import('../public/joe/desk.js');
+const { sessionRing } = await builders('desk.js', ['sessionRing']);
 const { toColumns, sharedWindowCompare } = await import('../public/joe/history-model.js');
 const { boardStates } = await import('../public/joe/board-state.js');
 const { boardHealthPresentation } = await import('../public/joe/health.js');
@@ -49,36 +49,6 @@ for (const [theme, pattern] of [
       assert.ok(inside >= 3 && outside >= 3, `${selector}/${name}: ${inside.toFixed(2)} / ${outside.toFixed(2)} must be >= 3`);
     }
   }
-});
-
-// JOED-153: J's identity colour is plum in every theme. Each desk colour keeps
-// 3:1 against every backdrop its mark, line or badge sits on, and J's hue is
-// far from the gain green and the loss red, so a desk tint never reads as a result.
-const hue = ([r, g, b]) => {
-  const max = Math.max(r, g, b), min = Math.min(r, g, b), d = max - min;
-  if (!d) return 0;
-  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
-  return (h * 60 + 360) % 360;
-};
-const hueGap = (a, b) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
-for (const [theme, pattern, plum] of [
-  ['light', /:root \{([^}]+)\}/, '#7b51a8'],
-  ['system dark', /:root:not\(\[data-theme="light"\]\) \{([^}]+)\}/, '#c0a2e8'],
-  ['explicit dark', /:root\[data-theme="dark"\] \{([^}]+)\}/, '#c0a2e8'],
-]) test(`JOED-153 desk colours: ${theme} J is plum, keeps 3:1 and is never a gain or loss hue`, t => {
-  const tokens = Object.fromEntries([...css.match(pattern)[1].matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(m => [m[1], m[2]]));
-  const color = name => rgba(tokens[name]);
-  assert.equal(tokens['--desk-j'], plum);
-  const canvas = color('--canvas').slice(0, 3);
-  const backdrops = { canvas, surface: color('--surface').slice(0, 3), card: composite(color('--card'), canvas), sunken: composite(color('--sunken'), canvas) };
-  for (const id of ['j', 'joe', 'joel']) for (const [name, backdrop] of Object.entries(backdrops)) {
-    const ratio = contrast(color(`--desk-${id}`).slice(0, 3), backdrop);
-    t.diagnostic(`${id}/${name}: ${ratio.toFixed(2)}`);
-    assert.ok(ratio >= 3, `${id} on ${name}: ${ratio.toFixed(2)} must be >= 3`);
-  }
-  const j = hue(color('--desk-j').slice(0, 3));
-  assert.ok(j >= 260 && j <= 300, `J's hue ${j.toFixed(0)} is plum`);
-  for (const result of ['--gain', '--loss']) assert.ok(hueGap(j, hue(color(result).slice(0, 3))) >= 90, `J is far from ${result}`);
 });
 
 test('JOED-133 Settings boundaries: forced colors retain a real system-color border', () => {
@@ -143,7 +113,7 @@ test('JOED-133 percentages: zero at display precision has no sign', () => {
   for (const n of [null, undefined, NaN, Infinity, -Infinity]) assert.equal(pct(n, 2, true), '—');
 });
 
-test('JOED-133 History comparison suppresses signed zero without changing model values', () => {
+test('JOED-133 percentages: History comparison suppresses signed zero without changing model values', () => {
   const start = Date.parse(exact().generatedAt), end = start + 300000;
   const row = (ms, values) => ({ t: new Date(ms).toISOString(),
     desks: Object.fromEntries(['j', 'joe', 'joel'].map((id, i) => [id, { money: { equity: { amount: values[i], currency: 'EUR' } } }])), totals: {} });
@@ -151,9 +121,7 @@ test('JOED-133 History comparison suppresses signed zero without changing model 
   const model = sharedWindowCompare(cols, ['j', 'joe', 'joel'], [start, end], end);
   assert.equal(model.ok, true);
   assert.ok(model.desks[0].pct < 0 && model.desks[1].pct > 0, 'actual changes remain nonzero');
-  // Both measures (JOED-154): a change below half a cent reads € 0,00, unsigned.
-  assert.match(compareLine(cols, [start, end], end, 'change').text, /J €\s0,00 · Joe €\s0,00 · Joel €\s0,00$/);
-  assert.match(compareLine(cols, [start, end], end, 'money').text, /J €\s1\.000,00 to €\s1\.000,00 · Joe €\s1\.000,00 to €\s1\.000,00 · Joel €\s1\.000,00 to €\s1\.000,00$/);
+  assert.match(compareLine(cols, [start, end], end), /J 0,00 % · Joe 0,00 % · Joel 0,00 %$/);
 });
 
 test('JOED-133 Board light help: green allows explained not-exact dashes', () => {
@@ -170,8 +138,7 @@ test('JOED-133 Board light help: green allows explained not-exact dashes', () =>
   assert.match(help, /freshness/);
   assert.match(help, /broker connection/);
   assert.match(help, /safety/);
-  assert.match(help, /not exact/);
-  assert.doesNotMatch(help, /not exact yet/, 'the board cannot say when a value becomes exact');
+  assert.match(help, /not exact yet/);
   assert.match(help, /explained dashes/);
   assert.doesNotMatch(help, /every number is fresh and complete/);
 });
@@ -179,12 +146,9 @@ test('JOED-133 Board light help: green allows explained not-exact dashes', () =>
 test('JOED-133 Regular session help: normal hours are qualified by holidays and early closes', () => {
   const instant = '2026-11-27T15:00:00.000Z', bounds = sessionBounds(instant);
   assert.equal(bounds.closeAt, '2026-11-27T18:00:00.000Z');
-  // JOED-153 M3: the market block's day bar ends the session at the calendar's early close.
-  const doc = htmlDocument(marketBlock(instant).html);
-  assert.match(doc.textContent, /closes 19:00 · 3\sh left/);
-  assert.match(doc.textContent, /Early close today · session 15:30–19:00 Vienna/);
-  assert.equal(doc.querySelector('.mkt-s .term').dataset.term, 'session', 'the session help stays one tap away');
-  assert.match(doc.querySelector('.daybar').getAttribute('aria-label'), /regular session 15:30 to 19:00; now 16:00$/);
+  const doc = htmlDocument(sessionRing(instant));
+  assert.match(doc.textContent, /Closes in 3 h, at 19:00 Vienna/);
+  assert.match(doc.textContent, /Regular session 15:30 to 19:00/);
   const help = TERMS.session[1];
   assert.match(help, /[Nn]ormal.*09:30 to 16:00/);
   assert.match(help, /[Hh]olidays and early closes/);

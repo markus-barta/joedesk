@@ -6,7 +6,7 @@
 // history is read and validated in the worker, never on the page. Only the
 // limits differ: the reference device holds the budget itself
 // (scripts/budget-reference.mjs); CI holds a regression guard of 2.5 × it.
-import { largeScenario, wideSnapshot, accountScenario, NOW, at, ACTOR } from './board.mjs';
+import { largeScenario, wideSnapshot, NOW, at, ACTOR } from './board.mjs';
 import { VIEWPORTS, configure, load, go, settle, waitFor } from './shots.mjs';
 import { observeBudgetTasks, attributeBudgetTasks } from './budget-tasks.mjs';
 
@@ -96,11 +96,8 @@ export async function runBudget({ page, newBoard, check, limits }) {
   for (const viewport of VIEWPORTS) await runViewport(viewport, measureCold);
 
   const live = largeScenario(NOW, 7200);
-  // JOED-156: the whole account's largest history the server keeps, read by
-  // its worker on every Desk update below, so this budget covers it too.
-  const account = accountScenario(NOW, { largest: true });
   const measureLive = async viewport => {
-    const b = await newBoard({ history: live.history, accountHistory: account });
+    const b = await newBoard({ history: live.history });
     let seq = live.snapshot.seq, t = 0;
     const pushWide = async () => {
       t += 30; const when = at(NOW, t);
@@ -120,13 +117,10 @@ export async function runBudget({ page, newBoard, check, limits }) {
     await page.s('Page.removeScriptToEvaluateOnNewDocument', { identifier });
     const deskSetup = await page.evaluate('({ timings: window.__joedesk.timings.splice(0), end: performance.now() })');
     const pushes = 5;
-    const accountReads = `window.__joedesk.timings.filter(t => t.reason === 'account-worker').length`;
     for (let i = 0; i < pushes; i++) {
       const mark = await pushWide();
-      const reads = await page.evaluate(accountReads);
-      await page.evaluate('window.__joedesk.refresh(); window.__joedesk.refreshAccount?.()');
+      await page.evaluate('window.__joedesk.refresh()');
       await waitFor(page, `${firstMark} === ${JSON.stringify(mark)}`);
-      await waitFor(page, `${accountReads} > ${reads}`, 30000);
       await settle(page);
     }
     const deskEnd = await page.evaluate('({ timings: window.__joedesk.timings.splice(0), end: performance.now() })');
@@ -144,8 +138,7 @@ export async function runBudget({ page, newBoard, check, limits }) {
       await waitFor(page, `window.__joedesk.timings.filter(t => t.reason === 'history').length > ${redraws}`, 30000);
       await settle(page);
     }
-    const trace = await page.evaluate(`({ timings: window.__joedesk.timings.splice(0), end: performance.now(), tasks: window.__budgetTasks.snapshot(), worker: window.__joedesk.worker(),
-      accountWorker: window.__joedesk.accountWorker?.() === true })`);
+    const trace = await page.evaluate(`({ timings: window.__joedesk.timings.splice(0), end: performance.now(), tasks: window.__budgetTasks.snapshot(), worker: window.__joedesk.worker() })`);
     const deskPhase = deskEnd.timings, histPhase = trace.timings;
     const windows = [{ name: 'desk setup', start: 0, end: deskSetup.end },
       { name: 'desk updates', start: deskSetup.end, end: deskEnd.end },
@@ -159,12 +152,8 @@ export async function runBudget({ page, newBoard, check, limits }) {
     const work = [...deskPhase, ...histPhase].filter(x => x.reason === 'history-worker').map(x => x.ms);
     const mainAccept = [...deskPhase, ...histPhase].filter(x => x.reason === 'history-accept').length;
     const historyRedraws = histPhase.filter(x => x.reason === 'history').length;
-    const accountWork = deskPhase.filter(x => x.reason === 'account-worker').map(x => x.ms);
-    const accountAccept = [...deskSetup.timings, ...deskPhase, ...histPhase].filter(x => x.reason === 'account-accept').length;
     const row = { viewport: viewport.name, phase: 'live', deskRenders: deskRenders.length, deskWorst: max(deskRenders), historyRenders: histRenders.length, historyRedraws, historyWorst: max(histRenders),
       workerReads: work.length, workerWorst: max(work), mainThreadHistory: mainAccept,
-      accountReads: accountWork.length, accountWorst: max(accountWork), mainThreadAccount: accountAccept,
-      accountSnapshots: account.short.points.length, accountCloses: account.daily.days.length,
       longTasks: details.filter(measured).map(t => t.duration), windows,
       longTaskDetails: details.filter(measured), setupTasks: details.filter(t => !measured(t)), frameAttributionSupported: trace.tasks.hasFrames };
     const kept = await (await fetch(`${b.url}history.json`, { headers: { 'x-auth-request-user': ACTOR } })).json();
@@ -181,8 +170,6 @@ export async function runBudget({ page, newBoard, check, limits }) {
         conditions: { taskBudget: !tooLong(row.longTasks).length } },
       { name: `${viewport.name}: history is read and validated in the worker, never on the page`,
         conditions: { worker: trace.worker, historyReads: work.length >= 3, noMainThreadHistory: !mainAccept } },
-      { name: `${viewport.name}: the whole account's largest history (${account.short.points.length} snapshots, ${account.daily.days.length} closes) is read and converted in its worker on every Desk update, never on the page; the task budget above covers its arrival`,
-        conditions: { accountWorker: trace.accountWorker, accountReads: accountWork.length >= pushes, noMainThreadAccount: !accountAccept } },
       { name: `${viewport.name}: the live trace kept a near-maximum history (${kept.points.length} points, ${(kept.sizeBytes / 1048576).toFixed(2)} MiB, not compacted)`,
         conditions: { nearMaximum: kept.points.length > 7200, notCompacted: !kept.compactedThrough } },
     ] };

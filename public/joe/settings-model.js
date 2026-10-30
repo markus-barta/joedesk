@@ -3,47 +3,7 @@
 // Pure functions over plain data; settings.js draws them, fleet-write.js is
 // the only place a reviewed draft leaves the browser. Paper is fixed: no
 // function here can produce anything but mode "paper".
-import { digits, money, NB } from './format.js';
-import { validateBoardSettings } from './board-settings.js';
-
-// Display settings have their own save; never add them to the fleet draft.
-const ACCOUNT_START_UNSET = "Not set: the whole account's 'Since start' stays hidden until you set it.";
-export function accountStartRow(snapshot) {
-  const value = { accountStart: snapshot?.accountStart };
-  const valid = !validateBoardSettings(value) && ((snapshot?.reason === null) === (value.accountStart !== null));
-  const start = valid && snapshot.reason === null ? value.accountStart : null;
-  const reason = snapshot?.reason;
-  const note = ({ loading: 'Loading the saved account start.', missing: 'No account start has been saved.',
-    invalid: 'The saved account start is invalid. Set it again.', unreadable: 'The saved account start could not be read. Retry or save it again.',
-    refresh_failed: 'The account start could not be refreshed. Retry before saving.' })[reason] ?? '';
-  return { text: start ? `Account start: ${money(start.amountEur)} on ${start.date}` : ACCOUNT_START_UNSET,
-    note: valid ? note : 'The account start could not be checked. Retry before saving.',
-    editable: valid && ['missing', 'invalid', 'unreadable', 'unset', null].includes(reason) };
-}
-export function accountStartDraft(start) {
-  return { amount: start ? String(start.amountEur) : '', date: start?.date ?? '', clear: false };
-}
-export function reviewAccountStart(draft, snapshot) {
-  if (!accountStartRow(snapshot).editable) return { error: 'Refresh the saved account start before reviewing.' };
-  const amount = String(draft.amount ?? '').trim().replace(',', '.');
-  const errors = {};
-  if (!draft.clear) {
-    if (!/^\d+(?:\.\d{1,2})?$/.test(amount)) errors.amount = 'Enter a positive EUR amount with at most two decimal places; use a decimal point or comma, without grouping.';
-    else {
-      const error = validateBoardSettings({ accountStart: { amountEur: Number(amount), date: '2000-01-01' } });
-      if (error) errors.amount = error;
-    }
-    const error = validateBoardSettings({ accountStart: { amountEur: 1, date: draft.date } });
-    if (error) errors.date = error;
-  }
-  if (Object.keys(errors).length) return { error: Object.values(errors)[0], errors };
-  const value = { accountStart: draft.clear ? null : { amountEur: Number(amount), date: draft.date } };
-  const replacing = ['missing', 'invalid', 'unreadable'].includes(snapshot.reason);
-  if (!replacing && JSON.stringify(value.accountStart) === JSON.stringify(snapshot.accountStart)) return { error: 'Account start matches the saved value.' };
-  return { value, base: JSON.stringify(snapshot.accountStart),
-    before: draft.clear && replacing ? `Replace the ${snapshot.reason} account start with 'not set'.` : accountStartRow(snapshot).text,
-    after: accountStartRow({ ...value, reason: value.accountStart ? null : 'unset' }).text };
-}
+import { digits, NB } from './format.js';
 
 export const PREVIEW_KEY = 'joe-fleet-config-preview-v1';
 // The two kept holdings the settings format requires; never removable.

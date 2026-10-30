@@ -11,7 +11,7 @@
   --gain-fill: rgba(34, 103, 58, .14); --loss-fill: rgba(163, 56, 47, .13);
   --paper-bg: #dce8f2; --paper-ink: #1b4566; --paper-line: rgba(27, 69, 102, .25);
   --live-bg: #b3261e; --live-ink: #ffffff;
-  --desk-j: #7b51a8; --desk-joe: #2f6fae; --desk-joel: #8a6240; --est: #8f8c83;
+  --desk-j: #3d8a37; --desk-joe: #2f6fae; --desk-joel: #8a6240; --est: #8f8c83;
   --seg-bg: rgba(31, 33, 30, .055); --seg-on: #fffefb; --seg-shadow: 0 1px 2px rgba(31, 33, 30, .12), inset 0 0 0 1px rgba(255, 255, 255, .9);
   --row-hover: rgba(43, 95, 134, .06); --field-bg: #fffefb; --field-line: #7b8075;
   --tip-bg: #1f2124; --tip-ink: #f4f1ea; --tip-ink-2: #c9c5ba;
@@ -37,7 +37,7 @@
     --gain-fill: rgba(147, 207, 133, .16); --loss-fill: rgba(240, 153, 141, .14);
     --paper-bg: #213547; --paper-ink: #cfe3f2; --paper-line: rgba(207, 227, 242, .24);
     --live-bg: #c0392b; --live-ink: #ffffff;
-    --desk-j: #c0a2e8; --desk-joe: #6aaee8; --desk-joel: #c49a6c; --est: #7d7a70;
+    --desk-j: #8ecf78; --desk-joe: #6aaee8; --desk-joel: #c49a6c; --est: #7d7a70;
     --seg-bg: rgba(238, 232, 216, .06); --seg-on: rgba(238, 232, 216, .12); --seg-shadow: 0 1px 2px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 255, 255, .06);
     --row-hover: rgba(156, 194, 221, .07); --field-bg: rgba(0, 0, 0, .2); --field-line: #858b7f;
     --tip-bg: #f1ede3; --tip-ink: #1b1c19; --tip-ink-2: #4a4a43;
@@ -59,7 +59,7 @@
   --gain-fill: rgba(147, 207, 133, .16); --loss-fill: rgba(240, 153, 141, .14);
   --paper-bg: #213547; --paper-ink: #cfe3f2; --paper-line: rgba(207, 227, 242, .24);
   --live-bg: #c0392b; --live-ink: #ffffff;
-  --desk-j: #c0a2e8; --desk-joe: #6aaee8; --desk-joel: #c49a6c; --est: #7d7a70;
+  --desk-j: #8ecf78; --desk-joe: #6aaee8; --desk-joel: #c49a6c; --est: #7d7a70;
   --seg-bg: rgba(238, 232, 216, .06); --seg-on: rgba(238, 232, 216, .12); --seg-shadow: 0 1px 2px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 255, 255, .06);
   --row-hover: rgba(156, 194, 221, .07); --field-bg: rgba(0, 0, 0, .2); --field-line: #858b7f;
   --tip-bg: #f1ede3; --tip-ink: #1b1c19; --tip-ink-2: #4a4a43;
@@ -94,7 +94,7 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .nowrap, .num { white-space: nowrap; }
 .gain { color: var(--gain); } .loss { color: var(--loss); } .muted { color: var(--ink-3); } .ink2 { color: var(--ink-2); }
 .vh { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.page { max-width: var(--maxw); margin: 0 auto; padding: 0 max(var(--gutter), var(--safe-right)) 0 max(var(--gutter), var(--safe-left)); }
+.page { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--gutter); }
 .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow-card); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); }
 .pl { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .pl .i { width: 9px; height: 9px; }
@@ -122,14 +122,14 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .tip b { display: block; font-weight: 650; margin-bottom: 2px; }
 .tip .t2 { display: block; color: var(--tip-ink-2); margin-top: 5px; font: 500 11px/1.5 var(--mono); }
 
-/* ---------- Header (glass, the one ambient Paimos touch) ----------
-   Its widths, the Settings gear, the fitted steps and the phone's bottom bar
-   are in "Header, nav and the phone's bottom bar" at the end. */
+/* ---------- Header (glass, the one ambient Paimos touch) ---------- */
 .top { position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--canvas) 74%, transparent); -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2); box-shadow: 0 1px 0 var(--line); }
 .top-in { height: 58px; display: flex; align-items: center; gap: 12px; }
-.brand { display: flex; flex: none; align-items: center; font-size: 15.5px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
+.brand { display: flex; flex: 0 1 auto; min-width: 24px; align-items: center; font-size: 15.5px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
 .brand .i { width: 24px; height: 24px; }
-/* The wordmark leaves whole when the row is short (the "word" step); it never shows in part. */
+/* Only the wordmark yields. Its inner span retains the font's natural width;
+   the fit observer hides the whole word whenever this flex slot is narrower. */
+.brand .word { min-width: 0; overflow: hidden; }
 .brand .word > span { display: block; width: max-content; padding-left: 9px; }
 .mode-label { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; border-radius: 7px; background: var(--paper-bg); color: var(--paper-ink); box-shadow: inset 0 0 0 1px var(--paper-line); font-size: 12px; font-weight: 650; letter-spacing: .08em; white-space: nowrap; flex: none; }
 .mode-label .i { width: 15px; height: 15px; }
@@ -163,6 +163,12 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .status-alert > button > .i { flex: none; width: 16px; height: 16px; }
 .status-alert > button > span { display: block; flex: 1; min-width: 0; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-alert[data-visible] > button { visibility: visible; }
+/* After the brand has yielded, tighten space only if the measured row still
+   needs it. No viewport or font-width estimate decides this density. */
+.top-in[data-tight] { gap: 2px; }
+.top-in[data-tight] .nav { margin-left: 0; }
+.top-in[data-tight] .nav button { padding-inline: 6px; }
+.top-in[data-tight] .hdr-health { padding-inline: 0; }
 .theme-btn { flex: none; }
 .icon-btn { width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); }
 @media (hover: hover) { .icon-btn:hover { background: var(--row-hover); color: var(--ink); } }
@@ -195,11 +201,13 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 @media (hover: hover) { .btn.quiet:hover { background: var(--row-hover); color: var(--ink); } }
 .btn:disabled, .btn[aria-disabled="true"] { cursor: not-allowed; background: transparent; color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line-2); }
 .btn.quiet:disabled { box-shadow: none; }
+.step { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.step-label { width: 210px; text-align: center; font-weight: 600; white-space: nowrap; }
 
 /* ---------- Charts ---------- */
 .chart { position: relative; }
 .chart svg { display: block; width: 100%; height: 100%; overflow: visible; }
-.chart text { font: 500 10.5px var(--mono); fill: var(--ink-3); }
+.chart text, svg.mini text { font: 500 10.5px var(--mono); fill: var(--ink-3); }
 .ctip { position: absolute; top: 0; left: 0; pointer-events: none; padding: 7px 10px 8px; border-radius: 9px; background: var(--tip-bg); color: var(--tip-ink); font-size: 12px; line-height: 1.45; white-space: nowrap; box-shadow: var(--shadow-pop); opacity: 0; visibility: hidden; }
 .ctip.on { opacity: 1; visibility: visible; }
 .ctip b { font-weight: 650; }
@@ -212,7 +220,7 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 
 /* ---------- Desk ---------- */
 .health-wrap { position: relative; }
-.pop { position: absolute; right: max(var(--gutter), var(--safe-right)); top: 4px; z-index: 25; width: min(560px, calc(100% - 2 * var(--gutter))); max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-pop); padding: 16px 18px; opacity: 0; visibility: hidden; }
+.pop { position: absolute; right: var(--gutter); top: 4px; z-index: 25; width: min(560px, calc(100% - 2 * var(--gutter))); max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-pop); padding: 16px 18px; opacity: 0; visibility: hidden; }
 .health-facts { display: grid; gap: 8px; margin-top: 12px; }
 .health-facts .st { white-space: normal; align-items: flex-start; }
 .health-facts .st > .i { margin-top: 2px; }
@@ -231,6 +239,11 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .kpi dd { margin: 2px 0 0; font-size: 21px; line-height: 28px; font-weight: 650; }
 .kpi .c { display: block; font-size: 12px; font-weight: 400; color: var(--ink-3); line-height: 16px; letter-spacing: 0; }
 .hero-r { display: flex; flex-direction: column; min-width: 0; }
+.session { display: flex; align-items: center; gap: 14px; }
+.session svg { width: 64px; height: 64px; flex: none; }
+.session b { display: block; font-weight: 650; }
+.session span { display: block; color: var(--ink-3); font-size: 12.5px; }
+.hero-chart { height: 196px; margin-top: 12px; }
 .desk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
 .dcard { padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .dcard header { display: flex; align-items: center; gap: 11px; }
@@ -243,17 +256,20 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .dnums { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .dnums .k { font-size: 12px; color: var(--ink-3); display: block; white-space: nowrap; }
 .dnums .v { font-size: 19px; line-height: 26px; font-weight: 650; display: block; container-type: inline-size; }
-/* Results links keep the same full column and line box as a direct dash. */
 /* Inline-flex money (with a small currency span) and a bare dash synthesize
    different baselines. A block flex box keeps both inside the same line. */
 /* At 390 px the padded detail has 102 px columns. Anonymous flex text
    cannot shrink to fit those columns. Size from the full formatted amount,
    reserving room for the arrow, unit and trailing glyph/letter spacing. */
-.dnums .v > .bn, .dnums .v > .fig-link > .bn { display: flex; height: 26px; font-size: min(19px, calc((100cqw - 2px) / var(--digits) * 1.5)); }
+.dnums .v > .bn { display: flex; height: 26px; font-size: min(19px, calc((100cqw - 2px) / var(--digits) * 1.5)); }
 /* Estimate copy uses the existing label line, outside number/control flow. */
 .dnums .k { position: relative; }
 .dnums > div:first-child .k { padding-right: 48px; }
 .estimate-mark { position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: 10px; line-height: 1; font-weight: 400; letter-spacing: -.02em; color: var(--ink-3); white-space: nowrap; pointer-events: none; }
+.dbar { position: relative; height: 4px; border-radius: 2px; background: var(--sunken); margin-top: 4px; width: 100%; }
+.dbar i { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+.dbar::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--line-2); }
+svg.mini { display: block; width: 100%; height: 64px; overflow: visible; }
 .dcard footer { display: flex; align-items: flex-start; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 12.5px; }
 .dcard footer .i { width: 15px; height: 15px; margin-top: 1px; color: var(--ink-3); }
 .sym { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; flex: none; font: 700 10.5px/1 var(--font); letter-spacing: .02em; color: var(--ink); background: color-mix(in srgb, var(--c, var(--accent)) 16%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c, var(--accent)) 30%, transparent); }
@@ -283,6 +299,118 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .keep-cap { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); font-size: 13px; padding: 8px 0 6px; min-height: calc(2lh + 14px); }
 .keep-cap .i { color: var(--ink-3); margin-top: 2px; }
 
+/* ---------- Results ---------- */
+.res-tools { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin: 18px 0 18px; }
+.res-tools .grow { flex: 1; }
+.rhero { padding: 22px 26px 20px; display: grid; grid-template-columns: 340px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 0 34px; height: 352px; }
+.rhero .display { font-size: 40px; line-height: 48px; }
+.result-figure { display: grid; grid-template-columns: minmax(0, 1fr) 9ch; align-items: end; gap: 10px; height: 54px; flex: none; font-size: 16px; }
+.result-figure .display, .period-percent-slot { min-width: 0; container-type: inline-size; }
+.result-figure .display { height: 48px; }
+.result-figure .display > .bn { font-size: min(40px, calc(100cqw / var(--result-digits) * 1.5)); }
+.period-percent-slot { height: 24px; line-height: 24px; font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.period-percent-slot .performance-pct { font-size: min(16px, calc(100cqw / var(--percent-digits) * 1.5)); }
+.rhero .say { font-size: 14px; color: var(--ink-2); min-height: 42px; }
+.rhero .say .st { vertical-align: top; }
+.split { margin: 14px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; font-size: 13.5px; padding-top: 14px; border-top: 1px solid var(--line); }
+.split dt { color: var(--ink-2); } .split dd { margin: 0; text-align: right; white-space: nowrap; }
+.rhero-l { display: flex; flex-direction: column; min-height: 0; }
+.bench { margin-top: auto !important; display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 13px; }
+.rhero-r { display: flex; flex-direction: column; min-width: 0; }
+.rhero-r .legend { justify-content: space-between; min-height: 44px; align-content: flex-start; }
+.rchart { height: 272px; flex: none; margin-top: 10px; }
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 16px; }
+.tile { padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 6px; height: 200px; min-width: 0; }
+.tile-top { display: flex; align-items: flex-start; gap: 9px; min-height: 38px; }
+.tile-top h3 { align-self: center; }
+.tile-top h3 { flex: 1; min-width: 0; font-size: 13.5px; line-height: 18px; font-weight: 600; }
+.tval { font-size: 30px; line-height: 36px; font-weight: 650; letter-spacing: -.025em; white-space: nowrap; margin-top: 2px; }
+.tval .sl { font-size: 18px; color: var(--ink-3); font-weight: 500; margin: 0 6px; }
+.tval small { font-size: 14px; font-weight: 500; color: var(--ink-2); margin-left: 3px; letter-spacing: 0; }
+.tmean { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
+.tfoot { margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--ink-3); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.tfoot .i { width: 12px; height: 12px; }
+.bars { display: grid; gap: 2px; }
+.brow { display: grid; grid-template-columns: 150px minmax(0, 1fr) 110px 280px; gap: 0 18px; align-items: center; height: 48px; padding: 0 6px; border-radius: 10px; }
+.brow.sel { background: var(--accent-tint); }
+.brow .who { display: flex; align-items: center; gap: 9px; font-weight: 650; }
+.brow .who .dmark { width: 28px; height: 28px; border-radius: 8px; }
+.brow .who .dmark svg { width: 18px; height: 18px; }
+.track { position: relative; height: 12px; }
+.track::before { content: ""; position: absolute; left: 0; right: 0; top: 5.5px; height: 1px; background: var(--line); }
+.track .z { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--line-2); }
+.track .b { position: absolute; top: 0; height: 12px; border-radius: 4px; }
+.brow .val { text-align: right; font-weight: 650; }
+.brow .facts { color: var(--ink-3); font-size: 12.5px; white-space: nowrap; text-align: right; }
+.brow.total { margin-top: 6px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; }
+.calcard { padding: 18px 20px 18px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 0 26px; }
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 36px; }
+.cal-head h3 { font-size: 15px; font-weight: 650; width: 136px; text-align: center; white-space: nowrap; }
+#calSum { flex-shrink: 0; white-space: nowrap; }
+#calSum .month-short, #calSum.compact .month-long { display: none; }
+#calSum.compact .month-short { display: inline; }
+#calSum .st, .dp-sum .st { vertical-align: top; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) 78px; gap: 5px; margin-top: 8px; }
+.dow { font-size: 11.5px; color: var(--ink-3); height: 20px; padding-left: 8px; }
+.cell { position: relative; height: 62px; border-radius: 10px; padding: 7px 6px; border: 0; background: transparent; color: var(--ink); text-align: left; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; overflow: hidden; }
+@media (hover: hover) { button.cell:hover { box-shadow: inset 0 0 0 1px var(--line-2); } }
+.cell .d { font-size: 12px; line-height: 1.2; }
+/* Reserve the amount line even before a partial record adds its unknown dash. */
+.cell .v { font-size: 12.5px; font-weight: 650; line-height: 1.2; min-height: 1.2em; white-space: nowrap; }
+.cell .pl { gap: 3px; }
+.cell .n { font-size: 11px; line-height: 1.2; }
+.cell .day-warning { position: absolute; top: 7px; right: 6px; line-height: 1; }
+.cell.out { visibility: hidden; }
+.cell.none { box-shadow: inset 0 0 0 1px var(--line); }
+.cell.we .d, .cell.fut .d, .cell.none .n, .cell.we .n { color: var(--ink-3); }
+.cell.day-incomplete .n { color: var(--ink); }
+.cell.flat { background: var(--flat); }
+.cell.g1 { background: var(--g1); } .cell.g2 { background: var(--g2); } .cell.g3 { background: var(--g3); } .cell.g4 { background: var(--g4); }
+.cell.l1 { background: var(--l1); } .cell.l2 { background: var(--l2); } .cell.l3 { background: var(--l3); } .cell.l4 { background: var(--l4); }
+.cell.inper { box-shadow: inset 0 0 0 1px var(--accent-line); }
+.cell.today .d { font-weight: 700; }
+.cell.today::before { content: ""; position: absolute; top: 7px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
+.cell.sel { box-shadow: inset 0 0 0 2px var(--accent); }
+@media (hover: hover) { button.cell.sel:hover { box-shadow: inset 0 0 0 2px var(--accent); } }
+.cell .vs { display: none; }
+.wk { height: 62px; padding: 7px 2px 7px 8px; display: flex; flex-direction: column; justify-content: space-between; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
+.wk .v { font-size: 13px; font-weight: 650; color: var(--ink); }
+.cal-legend { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--ink-3); }
+.ramp { display: inline-flex; gap: 2px; vertical-align: middle; }
+.ramp i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.daypanel { display: flex; flex-direction: column; min-width: 0; height: 506px; padding-left: 26px; border-left: 1px solid var(--line); }
+.dp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; }
+.dp-head h3 { font-size: 15px; font-weight: 650; white-space: nowrap; }
+.dp-sum { color: var(--ink-2); font-size: 13px; line-height: 20px; white-space: nowrap; }
+.dp-head h3, .dp-head .dp-sum { flex-shrink: 0; }
+.dp-list { flex: 1; overflow-y: auto; margin-top: 8px; }
+.trow { display: grid; grid-template-columns: 38px minmax(120px, 1fr) minmax(0, max-content) minmax(92px, max-content); gap: 2px 12px; align-items: center; padding: 10px 2px; border-top: 1px solid var(--line); }
+.trow .name b { font-weight: 650; }
+.trow .name .meta { display: block; color: var(--ink-3); font-size: 12px; }
+.trow .px { display: grid; grid-template-columns: minmax(0, 1fr) max-content; column-gap: 8px; align-items: start; min-width: 0; text-align: right; font-size: 13px; color: var(--ink-2); white-space: normal; }
+.trow .px .ln { display: inline-flex; align-items: center; gap: 5px; }
+.trow .px .ln .i { width: 12px; height: 12px; color: var(--ink-3); }
+.trow .px .fee { grid-column: 2; display: block; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
+.trow .net { grid-column: 4; grid-row: 1; text-align: right; font-weight: 650; white-space: nowrap; }
+.dp-empty { padding: 22px 0; color: var(--ink-2); display: flex; gap: 10px; align-items: flex-start; }
+.dp-empty .i { color: var(--ink-3); margin-top: 2px; }
+/* Reserve the reason boxes' inline-end overhang inside the note. */
+.dp-note { padding: 10px 0 0; padding-inline-end: 4px; color: var(--ink-3); font-size: 12px; display: flex; gap: 7px; }
+.dp-note .i { width: 14px; height: 14px; margin-top: 1px; flex-shrink: 0; }
+/* The text column keeps its full width when the disclosure is removed. */
+.dp-note-copy { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.dp-note-copy > p { margin: 0; }
+.dp-note-lines { min-width: 0; }
+.dp-note-lead, .dp-reason, .dp-desk-note, .dp-reasons-extra { display: block; }
+/* Every reason keeps its text aligned and leaves 2 px clear of the inset ring. */
+.dp-reason { padding-inline: 4px; margin-inline: -4px; }
+.dp-reason[tabindex="-1"]:focus-visible { outline-offset: -2px; }
+.dp-reasons-more { display: block; width: 100%; min-height: 44px; text-align: left; padding: 0; border: 0; background: transparent; color: var(--ink-2); font: inherit; }
+/* The measured full-content height survives removal of the disclosure. */
+.sheet .dlg-in { height: 100%; }
+.sheet .dlg-h { flex-shrink: 0; }
+.sheet .dlg-b { scrollbar-gutter: stable; }
+
 /* ---------- History ---------- */
 .hist-tools { display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap; margin: 18px 0 12px; }
 .hist-help { font-size: 12.5px; color: var(--ink-3); margin-top: 8px; }
@@ -300,93 +428,6 @@ code, .mono { font-family: var(--mono); font-size: 11.5px; }
 .events .ev .i { width: 15px; height: 15px; }
 .events .m { color: var(--ink-3); font-size: 12px; }
 svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
-/* Follow is a toggle: pressed while the window keeps the newest time in view. */
-.hist-follow .i { width: 8px; height: 8px; color: var(--ink-3); }
-.hist-follow[aria-pressed="true"] { background: var(--accent-tint); color: var(--accent-ink); }
-.hist-follow[aria-pressed="true"] .i { color: var(--accent); }
-.hist-chart.pannable { cursor: grab; }
-.hist-chart.panning { cursor: grabbing; }
-/* The overview strip lines up with the chart's plot (64 px of money axis on
-   the left, 14 px on the right). The window is a tint between two grips. Its
-   target is at least 44 px wide; on a touch screen or phone each grip has a
-   box of up to 44 px beside it, in the room around the track when the window
-   is narrow (history.js, overviewTargets). */
-.hist-mini { position: relative; height: 56px; margin-top: 8px; user-select: none; -webkit-user-select: none; touch-action: pan-y; }
-.mini-kept { position: absolute; left: 0; top: 0; width: 56px; height: 40px; display: flex; align-items: center; justify-content: flex-end; font: 500 10.5px var(--mono); color: var(--ink-3); white-space: nowrap; }
-.mini-track { position: absolute; top: 0; bottom: 0; left: 64px; right: 14px; border-radius: 8px; background: var(--sunken); cursor: pointer; touch-action: pan-y; }
-.mini-plot, .mini-plot svg { position: absolute; inset: 0; display: block; overflow: visible; }
-.mini-plot text { font: 500 10px var(--mono); fill: var(--ink-3); }
-.mini-win { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: var(--accent-tint); cursor: grab; }
-/* A window narrower than a finger keeps a 44 px target around its middle,
-   inside the strip; history.js sets how far it reaches past each side. */
-.mini-win::after { content: ''; position: absolute; top: 0; bottom: 0; left: var(--hl, 0px); right: var(--hr, 0px); }
-.mini-h { position: absolute; top: 0; bottom: 0; z-index: 1; cursor: ew-resize; }
-.mini-h .grip { position: absolute; top: 9px; bottom: 21px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--accent); }
-.mini-track.dragging, .mini-track.dragging .mini-win { cursor: grabbing; }
-.mini-win:focus-visible, .mini-h:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 6px; }
-.hist-mini[data-off] .mini-win, .hist-mini[data-off] .mini-h { visibility: hidden; }
-.hint-touch { display: none; }
-@media (pointer: coarse) { .hint-fine { display: none; } .hint-touch { display: inline; } }
-/* Desks and Change | Money on the left, the presets and Follow on the right.
-   The view group is part of the one row (display: contents) until a phone
-   gives it a row of its own; Follow has a phone copy after the desks, so the
-   Tab order is the visual order at every width, with no CSS order. */
-.hist-view { display: contents; }
-.hist-view > .grow { flex: 1; }
-.hist-follow-phone { display: none; }
-/* The comparison keeps the height of the longest line its measure can write
-   (an invisible copy under it), so presets, desks and the window move nothing. */
-.hist-compare { display: grid; }
-.hist-compare > p { grid-area: 1 / 1; min-width: 0; }
-.hist-compare > .cmp-size { visibility: hidden; }
-.cmp-to { width: 14px; height: 14px; margin: 0 4px; vertical-align: -2px; color: var(--ink-3); }
-/* Under the strip: the first-visit hint (its room stays once it goes) and Controls. */
-.hist-foot { position: relative; display: flex; align-items: center; gap: 6px 12px; min-height: 34px; margin-top: 6px; }
-.hist-hint { flex: 1 1 auto; min-width: 0; font-size: 11.5px; color: var(--ink-3); }
-.hist-hint[data-seen] { visibility: hidden; }
-.btn.hist-ctl { flex: none; margin-left: auto; height: 30px; padding: 0 11px; font-size: 12.5px; box-shadow: inset 0 0 0 1px var(--line); }
-.hist-ctl .i { width: 16px; height: 16px; }
-.btn.hist-ctl[aria-expanded="true"] { background: var(--row-hover); color: var(--accent-ink); box-shadow: inset 0 0 0 1px var(--accent-line); }
-.hist-pop { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; width: min(380px, 100%); max-height: min(72vh, 600px); overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px 14px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); }
-.ctl-list { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 12.5px; line-height: 18px; }
-.ctl-list dt { color: var(--ink); font-weight: 600; }
-.ctl-list dd { margin: 0; color: var(--ink-2); }
-.ctl-list .ctl-touch { display: none; }
-@media (pointer: coarse) { .ctl-list .ctl-fine { display: none; } .ctl-list .ctl-touch { display: block; } }
-.hist-pop kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; padding: 0 5px; border-radius: 5px; box-shadow: inset 0 0 0 1px var(--line-2); font: 600 10.5px/1 var(--mono); color: var(--ink-2); vertical-align: 1px; }
-.hist-pop kbd .i { width: 12px; height: 12px; }
-.hist-pop kbd .k-l { transform: scaleX(-1); }
-.ctl-axis { display: grid; justify-items: start; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
-.ctl-h { font-size: 13px; font-weight: 650; color: var(--ink); }
-.ctl-note { font-size: 12px; color: var(--ink-3); }
-.ctl-err { font-size: 12px; color: var(--bad); }
-.ctl-err:empty { display: none; }
-.ctl-custom { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; gap: 6px 8px; width: 100%; }
-.ctl-custom label { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
-.ctl-custom input { min-width: 0; height: 34px; font-variant-numeric: tabular-nums; }
-.ctl-custom .ctl-note, .ctl-custom .ctl-err { grid-column: 1 / -1; }
-.chart text.axis-note { font: 600 10.5px var(--font); fill: var(--ink-2); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; stroke-linejoin: round; }
-@media (max-width: 700px) { .btn.hist-ctl { height: 44px; } .hist-foot { min-height: 44px; } }
-/* Phones: the desks and Follow, then Change | Money and the presets in one
-   row, so the chart starts higher (the narrowest screens wrap instead). */
-@media (max-width: 480px) {
-  .hist-tools { gap: 8px; }
-  /* At 390 px the row has 358 px: Change | Money (127 px), the gap and the
-     presets (208 px) fit in bold DejaVu Sans, wider than a phone's own face,
-     with 4 px label padding; targets keep 44 px (the .seg phone rule). */
-  .hist-view { display: flex; flex: 1 0 100%; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
-  .hist-view > .grow, #histFollow { display: none; }
-  .hist-follow-phone { display: inline-flex; margin-left: auto; padding: 0 10px; }
-  #histRange { flex: 1 1 0; }
-  #histMeasure button { padding: 0 4px; }
-  #histRange button { flex: 1 1 auto; padding: 0 4px; }
-  .ctl-list { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .ctl-list dd { margin-bottom: 6px; }
-  .ctl-custom { grid-template-columns: auto minmax(0, 1fr); }
-  .ctl-custom input { height: 44px; }
-  .ctl-custom .btn { grid-column: 1 / -1; justify-self: start; }
-  #histAxis button { min-width: 64px; }
-}
 
 .bottom-nav { display: none; }
 .phone-only, .t-short { display: none; }
@@ -405,9 +446,14 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 
 /* ---------- Middle widths ---------- */
 @media (max-width: 1180px) {
+  .rhero { grid-template-columns: 280px minmax(0, 1fr); gap: 0 24px; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .prow { grid-template-columns: 38px minmax(0, 1.4fr) 100px 100px minmax(120px, 1fr) 110px; }
   .prow .c-opened { display: none; }
   .kept .prow { grid-template-columns: 38px minmax(0, 1.4fr) 100px 100px minmax(120px, 1fr) 236px; }
+  .calcard { grid-template-columns: 1fr; }
+  .daypanel { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); margin-top: 18px; padding-top: 12px; }
+  .brow { grid-template-columns: 130px minmax(0, 1fr) 100px 220px; }
   .nav button { padding: 0 10px; }
 }
 @media (max-width: 1100px) {
@@ -415,6 +461,21 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .desk-grid .dcard:last-child { grid-column: 1 / 3; }
 }
 
+/* ---------- Compact header (phones and narrow windows) ----------
+   Up to 960 px the nav moves to the bottom bar and the header's buttons are
+   44 px. Above 700 px the light keeps its broker word. Within either layout,
+   the brand shrinks first; measured overflow selects tighter spacing. */
+@media (max-width: 960px) {
+  .top-in { height: 54px; gap: 8px; }
+  .nav { display: none; }
+  .hdr-health { width: min(350px, calc(100vw - 214px)); padding: 0 8px; height: 44px; }
+  .top .icon-btn { width: 44px; height: 44px; }
+  .bottom-nav { display: flex; position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 30; padding: 4px; border-radius: 22px; background: color-mix(in srgb, var(--surface) 90%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); box-shadow: var(--shadow-pop); }
+  .bottom-nav button { flex: 1; height: 56px; border: 0; background: transparent; color: var(--ink-3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 600; border-radius: 18px; }
+  .bottom-nav button .i { width: 20px; height: 20px; }
+  .bottom-nav button[aria-current="page"] { color: var(--ink); background: var(--accent-tint); }
+  .foot { margin-bottom: 84px; }
+}
 /* Up to 900 px a kept row has two lines: the holding and its worth, then the
    kept label under the holding. Its side and last price are already in the
    holding's second line. */
@@ -429,11 +490,13 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 @media (max-width: 700px) {
   :root { --gutter: 16px; }
   body { font-size: 15px; }
+  .hdr-health { width: min(350px, calc(100vw - 202px)); }
   .icon-btn { width: 44px; height: 44px; }
   .seg button { height: 44px; min-width: 44px; padding: 0 10px; }
   .btn { height: 44px; }
   .learn { height: 44px; padding: 0 13px; }
   .learn::after { inset: 0; }
+  .step .icon-btn { width: 44px; height: 44px; }
   .scr-h { margin-top: 18px; }
   .sec-h .sub { flex-basis: 100%; }
   .hero { padding: 18px 16px 16px; }
@@ -456,13 +519,47 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .kept .kept-label { justify-content: flex-start; }
   .term::after { inset: -13px -12px; }
   .kept { padding: 4px 12px 8px; }
+  .res-tools { gap: 8px; }
+  .res-tools .seg { width: 100%; }
+  .res-tools .seg button { flex: 1; padding: 0 4px; }
+  .res-tools .step { width: 100%; justify-content: space-between; }
+  .step-label { flex: 1; width: auto; }
   .t-long { display: none; } .t-short { display: inline; }
+  .rhero { grid-template-columns: 1fr; grid-template-rows: auto auto; height: auto; padding: 18px 16px; }
+  /* Three sentence lines need 300.75 px: label 20.25 + number 54 +
+     sentence 65 + split 117 + benchmark 44.5 (including margins/borders).
+     Round up so the split's auto margin still has slack on the third line. */
+  .rhero-l { height: 301px; display: flex; flex-direction: column; }
+  .rhero .say { min-height: 2lh; flex-shrink: 0; }
+  .rhero-r { height: 300px; margin-top: 8px; }
+  .rhero-r .legend { flex-direction: column; align-items: flex-start; gap: 3px; }
+  .rchart { height: 196px; }
+  .tiles { grid-template-columns: 1fr; gap: 10px; }
+  .tile { height: 200px; padding: 12px 12px 8px; }
+  .tile-top { flex-wrap: wrap; min-height: 32px; }
+  .tile .ico-sq { display: none; }
+  .tval { font-size: 24px; line-height: 30px; }
+  .tval .sl { font-size: 15px; margin: 0 3px; }
+  .tmean { white-space: normal; }
+  .brow { grid-template-columns: 96px minmax(0, 1fr) 92px; height: 56px; }
+  .brow .facts { display: none; }
+  .calcard { padding: 14px 4px; }
+  .cal { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+  .wk, .dow.wkh { display: none; }
+  .dow { padding-left: 4px; }
+  .cell { height: 52px; padding: 5px 3px; border-radius: 8px; }
+  .cell .day-warning { top: 5px; right: 3px; }
+  .cell .v { font-size: 11.5px; } .cell .n { display: none; }
+  .cell .pl { gap: 2px; } .cell .pl .i { width: 7px; height: 7px; }
+  .cell .vl { display: none; } .cell .vs { display: inline; }
+  /* Scaled phone amounts keep the 10 px floor, including M/B/T and e forms. */
+  #cal .cell .vs .pl.sc, #cal .cell .vs .pl.sx { font-size: 10px; }
+  .cell.today::before { top: 5px; right: 5px; }
+  .daypanel { display: none; }
+  .cal-head .icon-btn { width: 44px; height: 44px; }
+  #calSum { display: none; }
   .hist-tools .seg { max-width: 100%; }
   .hcard { padding: 14px 10px 10px; }
-  /* The strip reaches into the card's padding, so the end handle keeps a
-     24 px box beside the newest time; the track stays in line with the plot. */
-  .hist-mini { margin-right: -10px; }
-  .mini-track { right: 24px; }
   .hist-chart { height: 260px; }
   .hist-cols { grid-template-columns: 1fr; }
   .facts-dl { grid-template-columns: 1fr; }
@@ -479,9 +576,10 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 .hero-l { display: contents; }
 .hero-primary { min-width: 0; container-type: inline-size; grid-column: 1; grid-row: 1; }
 .hero-r { grid-column: 2; grid-row: 1; }
+.hero-r .hero-chart { flex: 1; min-height: 196px; }
 .hero .kpis { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 0; }
 .hero .kpi dt { height: 20px; line-height: 20px; }
-.hero .kpi dd > .bn, .hero .kpi dd > .fig-link > .bn { display: flex; height: 28px; }
+.hero .kpi dd > .bn { display: flex; height: 28px; }
 /* Five caption lines inside every secondary cell, independent of state.
    The hero itself has no reserved height. */
 .hero .kpi .c { height: 80px; min-height: 0; }
@@ -499,11 +597,13 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
   .hero { grid-template-columns: 1fr; }
   .hero-l { display: block; min-width: 0; }
   .hero-r { grid-column: 1; grid-row: 2; }
+  .hero-r .hero-chart { flex: none; }
   .hero .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 20px; }
   .hero .kpi .c { height: 128px; }
   /* Keep the phone's account, then Cash, then chart order for UX 3. */
   .cash-kpi { grid-column: 1; margin-top: -12px; }
 }
+.performance-date { height: 20px; font-size: 12px; color: var(--ink-3); }
 .performance { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 .performance .primary { min-width: 0; }
 .performance .hero-k { height: 32px; gap: 5px; white-space: nowrap; }
@@ -519,7 +619,19 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 }
 .cell-state { display: inline-flex; vertical-align: middle; margin-left: 3px; }
 .cell-state .i { width: 12px; height: 12px; }
+.tile .metric-info { width: 26px; height: 26px; padding: 0; justify-content: center; box-shadow: none; }
+.tile .metric-info .i { width: 15px; height: 15px; }
+.tile .metric-info::after { inset: -9px; }
+.tile .tval { height: 56px; flex: none; }
+.tile { container-type: inline-size; }
+/* Two fixed rows; a long exact numeral scales within its actual card width.
+   Leave room for the SVG arrow and slash even in the wider fallback font. */
+.tile .tval .pair-value { display: block; font-size: min(22px, calc((100cqw - 18px) / var(--characters) * 1.45)); line-height: 26px; }
+.tile .tval .sl { font-size: 14px; margin: 0 5px 0 0; }
 .kpi .c { min-height: 16px; }
+.session > div { min-width: 0; }
+.ring-t { font: 650 11px var(--font); fill: var(--ink); }
+.ring-s { font: 500 8.5px var(--font); fill: var(--ink-3); }
 /* A desk card's status yields to a single-line check-in, with its full title.
    A card narrower than 340 px (phones too) keeps "Checked in … ago"
    right-aligned on the name row and gives the state the row below. */
@@ -541,8 +653,19 @@ svg.capt { display: block; width: 100%; height: 96px; margin: 8px 0 4px; }
 }
 .dcard .state .i { width: 15px; height: 15px; }
 .dnums > div { min-width: 0; }
-span.vbar { display: block; }
+span.dbar, span.vbar { display: block; }
+.dnums .dbar { width: 72px; max-width: 100%; }
+.chart.mini { position: relative; }
+.mini-label { position: absolute; left: 2px; right: 6px; top: -2px; display: flex; align-items: center; gap: 6px; font: 500 10.5px/14px var(--mono); color: var(--ink-3); white-space: nowrap; pointer-events: none; }
+.mini-label .st { font: 500 11.5px/14px var(--font); color: var(--ink-2); gap: 5px; }
+.mini-label .st .i { width: 13px; height: 13px; }
+/* Each number that is not fresh gets its own line, inside the chart's box. */
+.mini-label.off { flex-direction: column; align-items: flex-start; gap: 1px; white-space: normal; }
+.mini-label.off .st { white-space: normal; align-items: flex-start; line-height: 13px; }
+.mini-label.off .st .i { margin-top: 1px; }
 .dnums .k .term { white-space: nowrap; }
+/* Room for one line per not-fresh number (up to three, wrapped) above the sparkline. */
+.chart.mini { height: 84px; }
 .positions .pnote, .kept .pnote, .empty-line { display: flex; align-items: flex-start; gap: 8px; color: var(--ink-2); font-size: 13px; padding: 10px 0; margin: 0; }
 .pnote .i, .empty-line .i { color: var(--ink-3); margin-top: 2px; }
 /* A section's own state line is always there, sized for its longest state. */
@@ -586,12 +709,14 @@ span.vbar { display: block; }
 .sec-h.small { margin: 22px 0 6px; }
 .sec-h.small h2 { font-size: 14px; }
 .events .ev-empty div { color: var(--ink-2); }
+.lg-b { font-weight: 650; color: var(--ink); }
+.cell.nw .d { color: var(--ink); }
 .foot .foot-data { display: block; }
 .foot .foot-data span { display: inline; }
 .foot-data .i { display: inline-block; vertical-align: -3px; margin-right: 6px; }
 .product-version { color: var(--ink); line-height: 44px; min-height: 44px; }
 .version-mode { min-width: 44px; min-height: 44px; margin-left: 8px; padding: 0 6px; background: transparent; color: var(--ink-2); border: 0; font-size: 12px; cursor: pointer; }
-.private { min-height: 100vh; display: grid; place-items: center; padding: 24px max(var(--gutter), var(--safe-right)) 24px max(var(--gutter), var(--safe-left)); }
+.private { min-height: 100vh; display: grid; place-items: center; padding: 24px var(--gutter); }
 .private-card { max-width: 440px; display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .private-card .brand-i { width: 36px; height: 36px; color: var(--ink); }
 .private-card h1 { font-size: 22px; line-height: 28px; font-weight: 650; }
@@ -607,9 +732,60 @@ span.vbar { display: block; }
   .kpi .c { min-height: 3lh; }
   .positions .pstate { min-height: 48px; }
   .kept .pstate { min-height: 62px; }
+  /* Keep the status and icon on one line, inside the existing 44 px target. */
+  .top-in { gap: 6px; }
+  .hdr-health { padding: 0; gap: 2px; }
+  /* Loading keeps the icon's space so every status has the same width. */
+  .hdr-health .i.tone-none { visibility: hidden; }
 }
 
-/* ---------- Dialogs (shared chrome; the Results sheet adds its own rules) ---------- */
+/* ---------- Results (P4) ---------- */
+/* The stepper label and the month title keep one width: their widest forms
+   sit invisibly in the same grid cell, in whatever font the browser has. */
+.step-label, .cal-head h3 { display: inline-grid; justify-items: center; }
+.step-label > span, .cal-head h3 > span { grid-area: 1 / 1; }
+.step-label > [aria-hidden], .cal-head h3 > [aria-hidden] { visibility: hidden; }
+.step-label { min-width: 210px; width: auto; }
+.agenda-date { display: none; }
+.cal-head h3 { min-width: 136px; width: auto; }
+/* The hero: label, number and sentence on top; the split and the benchmark
+   line at the bottom, so a longer sentence never moves the numbers. */
+.rhero-l .split { margin-top: auto; }
+.rhero-l .bench { margin-top: 12px !important; }
+.rhero-l .say { margin-top: 2px; }
+/* The record's own state sits in the chart's fixed box; the plot starts below it. */
+.res-status { position: absolute; left: 0; right: 0; top: 0; z-index: 2; font-size: 12.5px; color: var(--ink-2); pointer-events: none; }
+.res-state .st { white-space: normal; align-items: flex-start; }
+.res-state .st .i { margin-top: 2px; }
+/* A value keeps the box of its line, with or without a sign, unit or arrow:
+   the smaller € and slash never add leading, so a dash and a number match. */
+.rhero .bn .u, .tval .bn .u, .tval .sl, .tval small { line-height: 1; }
+.rhero-l .split dd { height: 1lh; }
+.brow .val { height: 24px; display: flex; align-items: center; justify-content: flex-end; }
+/* A row's facts take a second line in a wide font rather than run past their cell. */
+.brow .facts { white-space: normal; line-height: 16px; }
+.tval.tight { font-size: 23px; }
+.tval .bn .ar { width: 12px; height: 12px; }
+/* Keep whole words together. Only an individual token wider than the name
+   column can break at its soft hyphens; anywhere is the final fallback if
+   even a fragment cannot fit inside the constrained inline block. */
+.trow .name { min-width: 120px; word-break: normal; overflow-wrap: normal; hyphens: manual; }
+.trow .name .word { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+.trow .name .meta-unit { display: inline-block; white-space: nowrap; }
+.trow .name .meta-sep.line-end { visibility: hidden; }
+.trow .name .i.side { width: 12px; height: 12px; display: inline; vertical-align: -1px; }
+.trow .name .i.im { width: 13px; height: 13px; vertical-align: -2px; }
+.trow .px .ln { display: inline-flex; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; column-gap: 5px; white-space: normal; }
+.trow .px .ln > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+/* fitTradeRows tries the wrapped pair first, then the panel-wide small token,
+   then permits the fee to wrap. Amount sizing is independent of these steps. */
+.trow .px.small, .trow .px.small .fee { font-size: var(--trade-price-small); }
+.trow .px.wrap-fee { grid-template-columns: minmax(0, 1fr); }
+.trow .px.wrap-fee .fee { grid-column: 1; white-space: normal; }
+.trow.prices-below .px { grid-column: 2 / -1; }
+.cell.pre .d { color: var(--ink-3); }
+.wk > span:first-child:empty::before { content: "\00a0"; }
+/* Phones: a day's trades open in a bottom sheet. */
 dialog.dlg { padding: 0; border: 0; border-radius: 18px; background: var(--surface); color: var(--ink); box-shadow: var(--shadow-pop); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); }
 dialog.dlg::backdrop { background: var(--scrim); }
 .dlg-in { display: flex; flex-direction: column; max-height: inherit; }
@@ -617,275 +793,29 @@ dialog.dlg::backdrop { background: var(--scrim); }
 .dlg-h h2 { font-size: 17px; font-weight: 650; }
 .dlg-b { padding: 14px 22px 18px; flex: 1; overflow-y: auto; min-height: 0; }
 .dlg-b:focus-visible { outline-offset: -2px; }
+.sheet .dp-sum { margin: 0 0 8px; }
 @media (max-width: 700px) {
   dialog.dlg { margin: auto 0 0; width: 100vw; max-width: 100vw; border-radius: 18px 18px 0 0; max-height: 80vh; }
+  /* Preserve the arrow targets; let long period labels wrap in their track. */
+  .res-tools .step-label { min-width: 0; grid-template-columns: minmax(0, 1fr); white-space: normal; overflow-wrap: anywhere; }
   .dlg-h { padding: 14px 16px 0; }
   .dlg-b { padding: 10px 16px 20px; }
-}
-
-/* ==================== Results (one block) ====================
-   Every Results-only rule lives here, in the approved board design (JOED-147
-   phase JOED-151); no other screen uses these selectors. Each region keeps a
-   fixed line box or row, so switching the period, desk, day or month, and any
-   amount or sentence, moves nothing (exactly 0 px). Dialog chrome is shared
-   and stays with the dialog rules just above. */
-
-/* Controls: period tabs, the stepper, the desk filter. The stepper label and
-   the month title keep one width: their widest forms sit invisibly in the
-   same grid cell, in whatever font the browser has. */
-.res-tools { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin: 14px 0 12px; }
-.res-tools .grow { flex: 1; }
-.step { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.step-label, .cal-head h3 { display: inline-grid; justify-items: center; text-align: center; white-space: nowrap; }
-.step-label > span, .cal-head h3 > span { grid-area: 1 / 1; }
-.step-label > [aria-hidden], .cal-head h3 > [aria-hidden] { visibility: hidden; }
-.step-label { min-width: 210px; font-weight: 600; }
-
-/* The hero: what it shows (result, desks, period), the figure, its percentage
-   with the money it divides by, one sentence, then the split. The sentence
-   row keeps three lines, so a result of one to three lines never moves a
-   number. An explanation that can be longer (a change of basis, an unknown
-   result) carries its longest copy invisibly in the same cell (.say-size):
-   the split starts below it, never under the text, and stays put within
-   that state. */
-.rhero { padding: 20px 22px 16px; display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 0 28px; }
-.rhero-l { display: grid; grid-template-rows: 20px 78px minmax(67px, auto) auto; min-width: 0; }
-.rhero-l > .hero-k { grid-row: 1; }
-.rhero-l > .result-figure { grid-row: 2; }
-.rhero-l > .say, .rhero-l > .say-size { grid-row: 3; grid-column: 1; }
-.rhero-l > .split { grid-row: 4; }
-.rhero .say-size { display: grid; align-self: start; margin-top: 4px; font-size: 14px; line-height: 21px; visibility: hidden; pointer-events: none; }
-.rhero .say-size > span { grid-area: 1 / 1; }
-.rhero .hero-k { display: flex; align-items: center; gap: 8px; height: 20px; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
-.rhero .hero-k .i { width: 15px; height: 15px; color: var(--ink-3); }
-.result-figure { display: grid; grid-template-rows: 56px 22px; min-width: 0; }
-.result-figure .display, .period-percent-slot { min-width: 0; container-type: inline-size; }
-.result-figure .display { display: flex; align-items: center; height: 56px; margin: 0; font-size: 44px; line-height: 56px; font-weight: 650; letter-spacing: -.03em; }
-.result-figure .display > .bn { font-size: min(44px, calc(100cqw / var(--result-digits) * 1.5)); }
-.period-percent-slot { height: 22px; line-height: 22px; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.period-percent-slot > .performance-pct { font-size: min(15px, calc(100cqw / var(--percent-digits) * 1.5)); }
-.period-percent-slot > .term.of { font-size: min(13px, calc(100cqw / var(--percent-digits) * 1.3)); font-weight: 500; color: var(--ink-3); }
-.rhero .say { align-self: start; margin-top: 4px; min-height: 2lh; font-size: 14px; line-height: 21px; color: var(--ink); }
-.rhero .say .st { vertical-align: top; }
-.rhero-l .split { margin: 12px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; }
-.rhero-l .split dt { color: var(--ink-2); }
-.rhero-l .split dd { height: 1lh; margin: 0; text-align: right; white-space: nowrap; font-weight: 600; }
-/* A value keeps the box of its line, with or without a sign, unit or arrow:
-   the smaller € and slash never add leading, so a dash and a number match. */
-.rhero .bn .u, .tval .bn .u, .tval .sl, .tval small { line-height: 1; }
-.rhero-r { display: flex; flex-direction: column; min-width: 0; }
-.rhero-r .legend { justify-content: flex-start; gap: 6px 16px; min-height: 20px; align-content: flex-start; }
-/* The record's own state sits in the chart's fixed box; the plot starts below it. */
-.rchart { height: 258px; flex: none; margin-top: 8px; }
-.res-status { position: absolute; left: 0; right: 0; top: 0; z-index: 2; font-size: 12.5px; color: var(--ink-2); pointer-events: none; }
-.res-state .st { white-space: normal; align-items: flex-start; }
-.res-state .st .i { margin-top: 2px; }
-/* The design's quiet zero line: dashed, at its existing weight. */
-.rchart svg line[stroke-width="1.4"] { stroke-dasharray: 3 3; }
-
-/* Eight tiles: title with its explanation behind the info control, one value
-   that steps its size down to the tile's own width (never clips), what it means. */
-.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
-.tile { container-type: inline-size; display: grid; grid-template-rows: 26px 30px 18px; row-gap: 2px; min-width: 0; padding: 12px 14px 11px; }
-.tile-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.tile-top h3 { flex: 1; min-width: 0; font-size: 12.5px; line-height: 18px; font-weight: 600; color: var(--ink-2); }
-.tile .metric-info { width: 26px; height: 26px; padding: 0; justify-content: center; box-shadow: none; }
-.tile .metric-info .i { width: 15px; height: 15px; }
-.tile .metric-info::after { inset: -9px; }
-/* Room is left for the SVG arrows and the slash, also in the wider fallback font. */
-.tval { height: 30px; font-size: min(22px, calc((100cqw - 32px) / var(--characters) * 1.45)); line-height: 30px; font-weight: 650; letter-spacing: -.02em; white-space: nowrap; }
-.tval .bn .ar { width: .5em; height: .5em; }
-.tval .sl { font-size: .7em; font-weight: 500; color: var(--ink-3); margin: 0 6px; }
-.tval small { font-size: .64em; font-weight: 500; color: var(--ink-2); margin-left: 3px; letter-spacing: 0; }
-.tmean { font-size: 12px; line-height: 18px; color: var(--ink-3); white-space: nowrap; }
-
-/* By desk: every desk and All desks on one scale, in one card. */
-.bdcard { display: grid; gap: 4px; padding: 8px; }
-.brow { display: grid; grid-template-columns: 110px minmax(0, 1fr) 110px 280px; gap: 0 14px; align-items: center; height: 40px; padding: 0 8px; border-radius: 10px; }
-.brow.sel { background: var(--accent-tint); }
-.brow.total { margin-top: 4px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; }
-.brow .who { display: flex; align-items: center; gap: 8px; min-width: 0; font-weight: 650; white-space: nowrap; }
-.brow .who .dmark { width: 24px; height: 24px; border-radius: 7px; }
-.brow .who .dmark svg { width: 16px; height: 16px; }
-.track { position: relative; height: 12px; }
-.track::before { content: ""; position: absolute; left: 0; right: 0; top: 5.5px; height: 1px; background: var(--line); }
-.track .z { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--line-2); }
-.track .b { position: absolute; top: 0; height: 12px; border-radius: 4px; }
-.brow .val { height: 24px; display: flex; align-items: center; justify-content: flex-end; font-weight: 650; }
-/* A row's facts take a second line in a wide font rather than run past their cell. */
-.brow .facts { color: var(--ink-3); font-size: 12px; line-height: 16px; text-align: right; white-space: normal; }
-
-/* The calendar and the selected day's trades share one card. */
-.calcard { padding: 16px 18px; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 0 24px; }
-.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 36px; }
-.cal-head h3 { min-width: 136px; font-size: 15px; font-weight: 650; }
-#calSum { flex-shrink: 0; white-space: nowrap; }
-#calSum .month-short, #calSum.compact .month-long { display: none; }
-#calSum.compact .month-short { display: inline; }
-#calSum .st, .dp-sum .st { vertical-align: top; }
-.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) 78px; gap: 5px; margin-top: 8px; }
-.dow { font-size: 11px; color: var(--ink-3); height: 20px; padding-left: 7px; }
-.cell { position: relative; height: 62px; border-radius: 9px; padding: 7px 6px; border: 0; background: transparent; color: var(--ink); text-align: left; display: flex; flex-direction: column; justify-content: space-between; min-width: 0; overflow: hidden; }
-@media (hover: hover) { button.cell:not(:disabled):hover { box-shadow: inset 0 0 0 1px var(--line-2); } }
-/* Days still ahead are not selectable; their date and name stay. */
-.cell:disabled { cursor: default; }
-.cell .d { font-size: 11.5px; line-height: 1.2; }
-/* Reserve the amount line even before a partial record adds its unknown dash. */
-.cell .v { font-size: 12.5px; font-weight: 650; line-height: 1.2; min-height: 1.2em; white-space: nowrap; }
-.cell .pl { gap: 3px; }
-.cell .n { font-size: 11px; line-height: 1.2; }
-.cell .day-warning { position: absolute; top: 7px; right: 6px; line-height: 1; }
-.cell.out { visibility: hidden; }
-.cell.none { box-shadow: inset 0 0 0 1px var(--line); }
-.cell.we .d, .cell.fut .d, .cell.none .n, .cell.we .n { color: var(--ink-3); }
-.cell.day-incomplete .n { color: var(--ink); }
-.cell.flat { background: var(--flat); }
-.cell.g1 { background: var(--g1); } .cell.g2 { background: var(--g2); } .cell.g3 { background: var(--g3); } .cell.g4 { background: var(--g4); }
-.cell.l1 { background: var(--l1); } .cell.l2 { background: var(--l2); } .cell.l3 { background: var(--l3); } .cell.l4 { background: var(--l4); }
-.cell.inper { box-shadow: inset 0 0 0 1px var(--accent-line); }
-.cell.today .d { font-weight: 700; }
-.cell.today::before { content: ""; position: absolute; top: 7px; right: 8px; width: 6px; height: 6px; border-radius: 50%; background: var(--ink); }
-.cell.sel { box-shadow: inset 0 0 0 2px var(--accent); }
-@media (hover: hover) { button.cell.sel:hover { box-shadow: inset 0 0 0 2px var(--accent); } }
-.cell .vs { display: none; }
-.cell.pre .d { color: var(--ink-3); }
-.cell.nw .d { color: var(--ink); }
-.agenda-date { display: none; }
-.wk { height: 62px; padding: 7px 2px 7px 8px; display: flex; flex-direction: column; justify-content: space-between; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
-.wk .v { font-size: 13px; font-weight: 650; color: var(--ink); }
-.wk > span:first-child:empty::before { content: "\00a0"; }
-.cal-legend { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--ink-3); }
-.ramp { display: inline-flex; gap: 2px; vertical-align: middle; }
-.ramp i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
-
-/* A day's trades: symbol, name and meta, the result after fees; the prices as
-   traded with the trade's own rate and its fees on the line below. */
-.daypanel { display: flex; flex-direction: column; min-width: 0; height: 506px; }
-.dp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 36px; }
-.dp-head h3 { font-size: 15px; font-weight: 650; white-space: nowrap; }
-.dp-sum { color: var(--ink-2); font-size: 13px; line-height: 20px; white-space: nowrap; }
-.dp-head h3, .dp-head .dp-sum { flex-shrink: 0; }
-.dp-list { flex: 1; overflow-y: auto; margin-top: 8px; }
-.trow { display: grid; grid-template-columns: 38px minmax(120px, 1fr) minmax(92px, max-content); gap: 2px 12px; align-items: center; padding: 9px 2px; border-top: 1px solid var(--line); }
-.trow:first-child { border-top: 0; }
-/* Keep whole words together. Only an individual token wider than the name
-   column can break at its soft hyphens; anywhere is the final fallback if
-   even a fragment cannot fit inside the constrained inline block. */
-.trow .name { min-width: 120px; word-break: normal; overflow-wrap: normal; hyphens: manual; }
-.trow .name b { font-weight: 650; }
-.trow .name .meta { display: block; color: var(--ink-3); font-size: 12px; }
-.trow .name .word { display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
-.trow .name .meta-unit { display: inline-block; white-space: nowrap; }
-.trow .name .meta-sep.line-end { visibility: hidden; }
-.trow .name .i.side { width: 12px; height: 12px; display: inline; vertical-align: -1px; }
-.trow .name .i.im { width: 13px; height: 13px; vertical-align: -2px; }
-.trow .px { grid-column: 2 / -1; grid-row: 2; display: grid; grid-template-columns: minmax(0, max-content) max-content; justify-content: start; column-gap: 10px; align-items: start; min-width: 0; text-align: left; font-size: 12.5px; color: var(--ink-2); white-space: normal; }
-.trow .px .ln { display: inline-flex; max-width: 100%; flex-wrap: wrap; justify-content: flex-start; align-items: center; column-gap: 8px; white-space: normal; }
-.trow .px .ln > span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-.trow .px .ln .i { width: 12px; height: 12px; color: var(--ink-3); }
-.trow .px .fee { grid-column: 2; display: block; white-space: nowrap; }
-/* fitTradeRows tries the wrapped pair first, then the panel-wide small token,
-   then permits the fee to wrap. Amount sizing is independent of these steps. */
-.trow .px.small, .trow .px.small .fee { font-size: var(--trade-price-small); }
-.trow .px.wrap-fee { grid-template-columns: minmax(0, 1fr); }
-.trow .px.wrap-fee .fee { grid-column: 1; white-space: normal; }
-.trow.prices-below .px { grid-column: 2 / -1; }
-/* The amount's own words sit under it; the group's name already says them. */
-.trow .net { grid-column: 3; grid-row: 1; align-self: start; position: relative; text-align: right; font-weight: 650; white-space: nowrap; }
-.trow .net::after { content: "after fees"; position: absolute; top: 100%; right: 0; font-size: 11.5px; font-weight: 500; color: var(--ink-3); white-space: nowrap; }
-.dp-empty { padding: 22px 0; color: var(--ink-2); display: flex; gap: 10px; align-items: flex-start; }
-.dp-empty .i { color: var(--ink-3); margin-top: 2px; }
-/* Reserve the reason boxes' inline-end overhang inside the note. */
-.dp-note { padding: 10px 0 0; padding-inline-end: 4px; color: var(--ink-3); font-size: 12px; display: flex; gap: 7px; }
-.dp-note .i { width: 14px; height: 14px; margin-top: 1px; flex-shrink: 0; }
-/* The text column keeps its full width when the disclosure is removed. */
-.dp-note-copy { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-.dp-note-copy > p { margin: 0; }
-.dp-note-lines { min-width: 0; }
-.dp-note-lead, .dp-reason, .dp-desk-note, .dp-reasons-extra { display: block; }
-/* Every reason keeps its text aligned and leaves 2 px clear of the inset ring. */
-.dp-reason { padding-inline: 4px; margin-inline: -4px; }
-.dp-reason[tabindex="-1"]:focus-visible { outline-offset: -2px; }
-.dp-reasons-more { display: block; width: 100%; min-height: 44px; text-align: left; padding: 0; border: 0; background: transparent; color: var(--ink-2); font: inherit; }
-/* How a listed day's prices, rates and euro amounts read. */
-.dp-fx { display: flex; gap: 7px; margin: 0; padding: 12px 0 0; color: var(--ink-3); font-size: 12px; }
-.dp-fx .i { width: 14px; height: 14px; margin-top: 1px; flex-shrink: 0; }
-/* Phones: a day's trades open in a bottom sheet. The measured full-content
-   height survives removal of the disclosure. */
-.sheet .dlg-in { height: 100%; }
-.sheet .dlg-h { flex-shrink: 0; }
-.sheet .dlg-b { scrollbar-gutter: stable; }
-.sheet .dp-sum { margin: 0 0 8px; }
-
-@media (max-width: 1180px) {
-  .rhero { grid-template-columns: 280px minmax(0, 1fr); gap: 0 24px; }
-  .rhero-r .legend { min-height: 44px; }
-  .rchart { height: 234px; }
-  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .brow { grid-template-columns: 110px minmax(0, 1fr) 100px 220px; }
-  .calcard { grid-template-columns: minmax(0, 1fr); }
-  .daypanel { margin-top: 16px; }
-}
-/* Tablets: the chart sits under the figures, as in the design. */
-@media (max-width: 900px) {
-  .rhero { grid-template-columns: minmax(0, 1fr); }
-  .rhero-r { margin-top: 14px; }
-  .rchart { height: 220px; }
-}
-@media (max-width: 700px) {
-  .res-tools { gap: 8px; }
-  .res-tools .seg { width: 100%; }
-  .res-tools .seg button { flex: 1; padding: 0 4px; }
-  .res-tools .step { width: 100%; justify-content: space-between; }
-  /* Preserve the arrow targets; let long period labels wrap in their track. */
-  .res-tools .step-label { min-width: 0; grid-template-columns: minmax(0, 1fr); white-space: normal; overflow-wrap: anywhere; flex: 1; }
-  .rhero { padding: 18px 16px; }
-  .rchart { height: 196px; }
-  .tiles { gap: 8px; }
-  .tile { grid-template-rows: 34px 52px 32px; padding: 10px 12px 9px; }
-  .tile-top { align-items: flex-start; }
-  .tile-top h3 { line-height: 17px; }
-  .tval { height: 52px; }
-  /* Phones put a pair's two values on their own lines, each sized to the tile. */
-  .tval .pair-value { display: block; font-size: min(22px, calc((100cqw - 18px) / var(--characters) * 1.45)); line-height: 26px; }
-  .tval .pair-value .sl { margin: 0 5px 0 0; }
-  .tmean { line-height: 16px; white-space: normal; }
-  .brow { grid-template-columns: 96px minmax(0, 1fr) 92px; height: 48px; }
-  .brow .facts { display: none; }
-  .calcard { padding: 14px 4px; }
-  .cal { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
-  .wk, .dow.wkh { display: none; }
-  .dow { padding-left: 4px; }
-  .cell { height: 52px; padding: 5px 3px; border-radius: 8px; }
-  .cell .day-warning { top: 5px; right: 3px; }
-  .cell .v { font-size: 11.5px; } .cell .n { display: none; }
-  .cell .pl { gap: 2px; } .cell .pl .i { width: 7px; height: 7px; }
-  .cell .vl { display: none; } .cell .vs { display: inline; }
-  /* Scaled phone amounts keep the 10 px floor, including M/B/T and e forms. */
-  #cal .cell .vs .pl.sc, #cal .cell .vs .pl.sx { font-size: 10px; }
-  .cell.today::before { top: 5px; right: 5px; }
-  .daypanel { display: none; }
-  .cal-head .icon-btn { width: 44px; height: 44px; }
-  #calSum { display: none; }
+  .tval.tight { font-size: 20px; }
   .trow { grid-template-columns: 38px minmax(0, 1fr) auto; }
   .trow .name { min-width: 0; }
-  /* The sheet ends above the home indicator once the page may cover it. */
-  .sheet .dlg-b { padding-bottom: 20px; padding-bottom: calc(20px + var(--safe-bottom)); }
+  .trow .px { grid-column: 2 / -1; text-align: left; }
+  .trow .px .ln { justify-content: flex-start; }
+  .trow .net { grid-column: 3; grid-row: 1; }
 }
 /* Seven 44 px days plus gutters/gaps do not fit on small phones. Keep
-   full dates in a three-column agenda; the 42 slots retain a stable height.
-   The tiles take one column so their titles keep two lines. */
+   full dates in a three-column agenda; the 42 slots retain a stable height. */
 @media (max-width: 382px) {
-  /* The comparison may need a third line on the narrowest phones. */
-  .hist-compare { min-height: 3lh; }
   .cal { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .cal .dow { display: none; }
   .cal .cell { min-height: 44px; }
   .cal .agenda-date { display: inline; }
   .cal .grid-date { display: none; }
-  .tiles { grid-template-columns: minmax(0, 1fr); }
 }
-/* ==================== end of Results ==================== */
 
 /* ---------- Settings (P5) ----------
    Mode first, then Runtime state, every fleet setting, How it works, Where
@@ -909,16 +839,6 @@ dialog.dlg::backdrop { background: var(--scrim); }
 .sec-head h2:focus { outline: none; }
 .sec-head p { color: var(--ink-2); margin-top: 2px; }
 .set-phone-note { display: none; }
-.account-start-summary { margin-top: 14px; font-weight: 600; overflow-wrap: anywhere; }
-.account-start-form { margin-top: 14px; max-width: 560px; }
-.account-start-form fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
-.account-start-inputs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; margin: 12px 0; }
-.account-start-inputs label { display: grid; gap: 6px; min-width: 0; }
-.account-start-inputs input { min-width: 0; max-width: 100%; height: 44px; box-sizing: border-box; }
-.account-start-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-#set-account .btn { min-height: 44px; white-space: normal; }
-#accountStartReviewBox { padding: 12px; border-radius: 12px; background: var(--sunken); overflow-wrap: anywhere; }
-#accountStartMessage { margin-top: 10px; }
 .fields { margin-top: 10px; }
 .field { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 4px 28px; padding: 14px 0; border-top: 1px solid var(--line); align-items: start; }
 .field:first-child { border-top: 0; }
@@ -952,8 +872,6 @@ dialog.dlg::backdrop { background: var(--scrim); }
 @media (forced-colors: active) {
   .inp, .affix, .stepper { border: 1px solid CanvasText; box-shadow: none; }
   .affix .inp { border: 0; }
-  .mini-win { outline: 1px solid Highlight; }
-  .mini-h .grip { background: Highlight; }
 }
 .meter { width: 100%; height: 6px; border-radius: 3px; background: var(--sunken); margin-top: 8px; position: relative; overflow: hidden; }
 .meter i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent); }
@@ -1060,10 +978,9 @@ dialog.dlg::backdrop { background: var(--scrim); }
 }
 
 /* The edit bar: fixed at the bottom on Settings, one row above 1180 px and
-   two rows below (the note, then the buttons). Up to 960 px it floats at the
-   bottom, clear of the safe area (the nav stays in the header there); phones
-   are read-only and have none. Its note keeps two lines' room, so no state
-   changes its height. */
+   two rows below (the note, then the buttons). Up to 960 px it floats above
+   the bottom bar; phones are read-only and have none. Its note keeps two
+   lines' room, so no state changes its height. */
 .editbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 28; background: color-mix(in srgb, var(--surface) 94%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); box-shadow: 0 -1px 0 var(--line-2); display: none; }
 body[data-screen="settings"] .editbar { display: block; }
 body[data-screen="settings"] .foot { margin-bottom: 74px; }
@@ -1073,7 +990,7 @@ body[data-screen="settings"] .foot { margin-bottom: 74px; }
 .editbar .note-i .i { width: 16px; height: 16px; }
 .editbar .note-t { min-width: 0; overflow-wrap: anywhere; }
 .edit-btns { display: flex; align-items: center; gap: 8px; flex: none; }
-.toast { position: fixed; right: max(24px, var(--safe-right)); bottom: 76px; z-index: 60; display: flex; align-items: flex-start; gap: 8px; background: var(--tip-bg); color: var(--tip-ink); border-radius: 12px; padding: 11px 15px; font-size: 13px; line-height: 1.45; box-shadow: var(--shadow-pop); max-width: min(460px, calc(100vw - 32px)); opacity: 0; visibility: hidden; pointer-events: none; }
+.toast { position: fixed; right: 24px; bottom: 76px; z-index: 60; display: flex; align-items: flex-start; gap: 8px; background: var(--tip-bg); color: var(--tip-ink); border-radius: 12px; padding: 11px 15px; font-size: 13px; line-height: 1.45; box-shadow: var(--shadow-pop); max-width: min(460px, calc(100vw - 32px)); opacity: 0; visibility: hidden; pointer-events: none; }
 .toast.on { opacity: 1; visibility: visible; }
 .toast .i { margin-top: 2px; }
 body:not([data-screen="settings"]) .toast { bottom: 24px; }
@@ -1152,11 +1069,10 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .rt-row { grid-template-columns: 150px minmax(0, 1fr); gap: 2px 14px; }
   .tbl { table-layout: fixed; }
   .tbl th:nth-child(1) { width: 30%; } .tbl th:nth-child(2) { width: 36%; }
-  .editbar { left: max(8px, var(--safe-left)); right: max(8px, var(--safe-right)); bottom: calc(8px + var(--safe-bottom)); border-radius: 18px; box-shadow: var(--shadow-pop); }
+  .editbar { left: 8px; right: 8px; bottom: 76px; border-radius: 18px; box-shadow: var(--shadow-pop); }
   .editbar-in { padding: 0 14px; }
-  /* The floating edit bar's 8 px offset, its 100 px and 12 px of air, above the safe area. */
-  body[data-screen="settings"] .foot { margin-bottom: calc(120px + var(--safe-bottom)); }
-  .toast { bottom: calc(122px + var(--safe-bottom)); }
+  body[data-screen="settings"] .foot { margin-bottom: 196px; }
+  .toast { bottom: 196px; }
 }
 @media (max-width: 700px) {
   .set-grid { grid-template-columns: minmax(0, 1fr); margin-top: 10px; }
@@ -1177,269 +1093,16 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   .f-saved { display: none; }
   .set-main code, .set-main .mono, .facts-dl dd { overflow-wrap: anywhere; word-break: break-word; }
   .theme-seg button { min-width: 44px; }
-  body[data-screen="settings"] .foot { margin-bottom: 0; }
-  .toast, body:not([data-screen="settings"]) .toast { left: 16px; right: 16px; bottom: calc(96px + var(--safe-bottom)); max-width: none; }
+  body[data-screen="settings"] .foot { margin-bottom: 84px; }
+  .toast, body:not([data-screen="settings"]) .toast { left: 16px; right: 16px; bottom: 96px; max-width: none; }
   .gate { height: 640px; }
   .dlg-f { padding: 12px 16px 16px; }
   .check { min-height: 44px; align-items: center; }
 }
 
-/* ---------- Desk hero and cards (JOED-153, approved design v3) ----------
-   The session-dated hero (M1, A2), the market-day bar (M3), the summary row
-   and the desk cards with their last-ten-sessions bars (M4, M5). Nothing here
-   clips or ends in an ellipsis; boxes that carry a state keep their room.
-   Phone overrides of the shared sections sit in the JOED-79 block below. */
-/* The slot above the hero is the whole-account block's (JOED-156, its own
-   block below); then the line saying whose money the desk figures are. */
-.desks-eyebrow { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 10px; font-size: 12.5px; line-height: 20px; font-weight: 600; color: var(--ink-2); }
-.desks-eyebrow .i { width: 15px; height: 15px; margin-top: 2px; color: var(--ink-3); }
-/* The hero: the two figures with the sentence, the market block beside them;
-   the summary row and the kept-holdings line across the bottom. */
-.hero { grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr); gap: 0 32px; padding: 22px 26px 0; }
-.hero-r { padding-left: 28px; border-left: 1px solid var(--line); }
-.performance { gap: 16px 32px; }
-.performance .hero-k { height: 22px; gap: 8px; }
-.performance .hero-k > .i { width: 15px; height: 15px; color: var(--ink-3); }
-/* A session-dated label longer than its column (phones) ends in an
-   ellipsis, its whole words in its title and the term's name; it never runs
-   under the figure beside it (AC-36). */
-.performance .hero-k > .i, .performance .hero-k > .live-dot, .performance .hero-k > .cell-state { flex: none; }
-.performance .hero-k > .term { flex: 0 1 auto; min-width: 0; }
-.performance .hero-k > .term > .cut-line { display: block; height: 22px; line-height: 22px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.live-dot { flex: none; width: 8px; height: 8px; margin: 0 2px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
-.pct-slot { white-space: nowrap; }
-.pct-slot .basis { margin-left: 2px; font-size: 13px; font-weight: 500; color: var(--ink-3); }
-.pct-slot .term.basis { text-decoration-color: color-mix(in srgb, var(--ink-3) 45%, transparent); }
-.performance .primary-caption { min-height: 32px; }
-.primary-caption .cap-short { display: none; }
-.primary-caption .st, .dnums .c .st { display: inline-flex; gap: 4px; vertical-align: top; white-space: nowrap; }
-.primary-caption .st .i, .dnums .c .st .i { width: 12px; height: 12px; margin-top: 2px; }
-/* M6: figures are links. The amount stays the link's text; hover and focus underline it. */
-.fig-link { position: relative; display: inline-flex; max-width: 100%; color: inherit; text-decoration: none; border-radius: 8px; }
-@media (hover: hover) { .fig-link:hover .bn { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: .18em; } }
-.fig-link:focus-visible .bn { text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: .18em; }
-/* A card's linked amount is a block, as its bare dash is: an inline link
-   would add its own baseline leading (1-3 px) to the figure's line, so a value
-   and a dash would not keep one 26 px box (AC-36, no-shift). */
-.dnums .v > .fig-link { display: flex; }
-.dnums .v > .fig-link > .bn { flex: 1 1 auto; min-width: 0; }
-.hero-l .say .num { font-weight: 600; }
-.hero .kpis { grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 32px; margin: 10px 0 0; padding: 13px 0 12px; }
-/* The summary row keeps one box in every state (no-shift): the label keeps
-   its state icon's slot, the figure is one 28 px box with or without a value
-   (the small € adds no leading of its own), and on wide screens the figure's
-   column holds a signed six-digit amount in the wide font (desk-session.mjs
-   measures it), so the caption beside it never moves. The caption's reserve
-   (its tallest state words) then has one width, so one height. */
-.hero .kpi { display: grid; grid-template-columns: auto minmax(172px, max-content) minmax(0, 1fr); align-items: baseline; column-gap: 10px; }
-.hero .kpi dt { position: relative; height: auto; padding-right: 18px; }
-.hero .kpi dt > .cell-state { position: absolute; right: 0; top: 50%; margin: -6px 0 0; }
-.hero .kpi dd { display: contents; }
-.hero .kpi dd > .bn, .hero .kpi dd > .fig-link > .bn { display: inline-flex; height: 28px; }
-.hero .kpi .bn .u { line-height: 1; }
-/* The caption sits at the figure's text line by its top, not by its first
-   baseline: a caption with no words of its own (a state the board caption
-   says) has no baseline, and the row would change height by 2 px. */
-.hero .kpi .c { height: auto; min-height: 0; align-self: start; margin-top: 9px; }
-.desk-scope { grid-column: 1 / -1; grid-row: 3; min-height: 40px; margin: 0; padding: 11px 0; border-top: 1px dashed var(--line); font-size: 12px; line-height: 18px; color: var(--ink-3); }
-/* M3: the market block, a linear Vienna day 00–24. */
-.session.mkt { display: block; min-width: 0; }
-.mkt-t { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; min-height: 22px; font-weight: 650; }
-.mkt-t .st { font-size: 12.5px; font-weight: 650; }
-.mkt-t .st.ok { color: var(--ok); }
-.mkt-t .rest { font-weight: 500; color: var(--ink-2); }
-.mkt-s { min-height: 20px; margin-top: 2px; font-size: 13px; line-height: 20px; color: var(--ink-2); }
-.mkt-s b { font-weight: 650; color: var(--ink); }
-.mkt-ny { min-height: 18px; margin-top: 2px; font-size: 12px; line-height: 18px; color: var(--ink-3); }
-.daybar { position: relative; display: block; height: 50px; margin-top: 8px; container-type: inline-size; }
-.db-now-l { position: absolute; top: 0; transform: translateX(-50%); font: 650 10.5px/14px var(--mono); color: var(--ink); white-space: nowrap; }
-.db-now-l.r { transform: translateX(-100%); } .db-now-l.l { transform: none; }
-.db-track { position: absolute; left: 0; right: 0; top: 17px; height: 12px; overflow: hidden; border-radius: 6px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--line); }
-.db-ny { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 13%, transparent); }
-.db-sess { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: inset 0 0 0 1.5px var(--accent); }
-.db-sess.done { background: color-mix(in srgb, var(--accent) 42%, transparent); box-shadow: none; }
-.db-sess.none { background: transparent; box-shadow: none; border: 1px dashed var(--line-2); }
-.db-fill { position: absolute; top: 0; bottom: 0; border-radius: 3px 0 0 3px; background: var(--accent); }
-.db-now { position: absolute; top: 13px; width: 2px; height: 20px; margin-left: -1px; border-radius: 1px; background: var(--ink); box-shadow: 0 0 0 2px var(--surface); }
-.db-ticks { position: absolute; left: 0; right: 0; top: 34px; height: 14px; font: 500 10.5px/14px var(--mono); color: var(--ink-3); }
-.db-ticks > span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
-.db-ticks > .s { transform: none; } .db-ticks > .e { transform: translateX(-100%); }
-.db-ticks > .nyl { font: 500 11px/14px var(--font); color: var(--ink-2); }
-@container (max-width: 359.98px) { .db-ticks > .e { display: none; } }
-/* The session line: only in the session and after the close, and only there
-   is its room kept, so it never moves the page within a phase. */
-.sess-slot { display: none; }
-#deskHero[data-phase="live"] .sess-slot, #deskHero[data-phase="closed"] .sess-slot { display: block; height: 46px; margin: 6px 0 14px; }
-.sess-slot .hero-chart { height: 28px; margin: 0; }
-.sess-ax { position: relative; height: 14px; margin-top: 2px; font: 500 10px/14px var(--mono); color: var(--ink-3); }
-.sess-ax > span { position: absolute; top: 0; left: 0; white-space: nowrap; }
-.sess-ax > .e { left: auto; right: 0; }
-.sess-ax > .sl-v { left: clamp(44px, calc(var(--at) * 100%), calc(100% - 44px)); transform: translateX(-50%); font: 650 11px/14px var(--font); }
-/* M5: desk cards. Two columns when a desk is one row; that row spans both. */
-.desk-grid[data-rows="1"], .desk-grid[data-rows="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.desk-grid .dcard[data-layout="row"] { grid-column: 1 / -1; }
-.dcard header { grid-template-columns: 34px minmax(0, 1fr) auto auto; }
-.dcard .who { display: flex; align-items: baseline; gap: 7px; }
-.dcard .who h3 { flex: none; }
-.dcard .who .state .detail { color: var(--ink-2); }
-.card-go { position: relative; display: inline-flex; align-items: center; gap: 3px; min-height: 28px; padding: 0 6px; border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--ink-3); text-decoration: none; white-space: nowrap; }
-.card-go .i { width: 12px; height: 12px; }
-.card-go::after { content: ""; position: absolute; inset: -8px -4px; }
-@media (hover: hover) { .card-go:hover { color: var(--accent-ink); background: var(--row-hover); } }
-.card-go:focus-visible { color: var(--accent-ink); background: var(--row-hover); }
-.dnums { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); }
-.dnums .c { display: block; min-height: 32px; font-size: 11.5px; line-height: 16px; color: var(--ink-3); }
-/* M4: the last ten sessions in a box of their own. When a number is not fresh
-   its line, age and reason take that same box (the bars stay laid out beneath,
-   hidden), so a change of state moves nothing. */
-.spark { position: relative; padding-top: 9px; border-top: 1px solid var(--line); container: spark / inline-size; }
-.spark-h { min-height: 32px; font-size: 11.5px; line-height: 16px; color: var(--ink-3); }
-.spark-h b { font-weight: 600; color: var(--ink-2); }
-.spark.off > :not(.card-status) { visibility: hidden; }
-.card-status { position: absolute; inset: 9px 0 0; display: flex; flex-direction: column; gap: 2px; }
-.card-status .st { align-items: flex-start; gap: 5px; white-space: normal; font-size: 11.5px; line-height: 16px; color: var(--ink-2); }
-.card-status .st .i { width: 13px; height: 13px; margin-top: 1px; }
-.desk-sessions .bars { position: relative; display: flex; gap: 4px; height: 76px; margin-top: 2px; }
-.desk-sessions .bars .bz { position: absolute; left: 0; right: 0; height: 1px; background: var(--line-2); pointer-events: none; }
-.desk-sessions .bars .b { position: relative; flex: 1 1 0; min-width: 0; height: 100%; border-radius: 5px; color: inherit; text-decoration: none; }
-@media (hover: hover) { .desk-sessions .bars .b:hover { background: var(--row-hover); } }
-.desk-sessions .bars .b:focus-visible { background: var(--row-hover); outline-offset: 1px; }
-.desk-sessions .bars .b i { position: absolute; left: 16%; right: 16%; border-radius: 3px; }
-.desk-sessions .bars .b i.gain { background: var(--gain); } .desk-sessions .bars .b i.loss { background: var(--loss); } .desk-sessions .bars .b i.flat { background: var(--ink-3); }
-/* Today's bar still moves: filled at 60 % with its outline. */
-.desk-sessions .bars .b i.live.gain { background: color-mix(in srgb, var(--gain) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--gain); }
-.desk-sessions .bars .b i.live.loss { background: color-mix(in srgb, var(--loss) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--loss); }
-.desk-sessions .bars .b i.live.flat { background: color-mix(in srgb, var(--ink-3) 60%, transparent); box-shadow: inset 0 0 0 1.5px var(--ink-3); }
-.desk-sessions .bars .b i.est { background-image: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in srgb, var(--surface) 55%, transparent) 3px 5px); }
-.desk-sessions .bars .b i.nx { border: 1.5px dashed var(--ink-3); border-radius: 4px; background: transparent; }
-/* Every bar's value: inside the bar when it has room, else beside zero. */
-.desk-sessions .bars .bl { position: absolute; left: 50%; transform: translateX(-50%); width: max-content; font: 600 9.5px/11px var(--mono); letter-spacing: -.02em; white-space: nowrap; pointer-events: none; }
-.desk-sessions .bars .bl.out.gain { color: color-mix(in srgb, var(--gain) 62%, var(--ink-3)); }
-.desk-sessions .bars .bl.out.loss { color: color-mix(in srgb, var(--loss) 62%, var(--ink-3)); }
-.desk-sessions .bars .bl.out.flat { color: var(--ink-3); }
-.desk-sessions .bars .bl.in { display: none; color: var(--surface); }
-@container spark (min-width: 268px) { .desk-sessions .bars .b[data-c="2"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="2"] .bl.out { display: none; } }
-@container spark (min-width: 355px) { .desk-sessions .bars .b[data-c="3"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="3"] .bl.out { display: none; } }
-@container spark (min-width: 442px) { .desk-sessions .bars .b[data-c="4"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="4"] .bl.out { display: none; } }
-@container spark (min-width: 529px) { .desk-sessions .bars .b[data-c="5"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="5"] .bl.out { display: none; } }
-@container spark (min-width: 615px) { .desk-sessions .bars .b[data-c="6"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="6"] .bl.out { display: none; } }
-@container spark (min-width: 702px) { .desk-sessions .bars .b[data-c="7"] .bl.in { display: block; } .desk-sessions .bars .b.has-in[data-c="7"] .bl.out { display: none; } }
-/* Outside labels collide below the width they need (data-need, desk.js):
-   then the extremes and today keep theirs; the rest show on focus, on a tap
-   and, where a pointer can hover, on hover (no :hover outside that query). */
-@container spark (max-width: 99.98px) { .desk-sessions .bars[data-need="100"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 119.98px) { .desk-sessions .bars[data-need="120"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 139.98px) { .desk-sessions .bars[data-need="140"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 159.98px) { .desk-sessions .bars[data-need="160"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 179.98px) { .desk-sessions .bars[data-need="180"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 199.98px) { .desk-sessions .bars[data-need="200"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 219.98px) { .desk-sessions .bars[data-need="220"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 239.98px) { .desk-sessions .bars[data-need="240"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 259.98px) { .desk-sessions .bars[data-need="260"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 279.98px) { .desk-sessions .bars[data-need="280"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 299.98px) { .desk-sessions .bars[data-need="300"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 319.98px) { .desk-sessions .bars[data-need="320"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 339.98px) { .desk-sessions .bars[data-need="340"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 359.98px) { .desk-sessions .bars[data-need="360"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 379.98px) { .desk-sessions .bars[data-need="380"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@container spark (max-width: 399.98px) { .desk-sessions .bars[data-need="400"] .b:not(:focus-visible):not(.tapped) .bl.out:not(.keep) { visibility: hidden; } }
-@media (hover: hover) { .desk-sessions .bars[data-need] .b:hover:not(.tapped) .bl.out:not(.keep) { visibility: visible; } }
-/* Hover or focus: the bar's date and exact amount, on an opaque tip. */
-.desk-sessions .bars .bt { position: absolute; z-index: 6; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: max-content; max-width: 220px; padding: 6px 9px 7px; border-radius: 9px; background: var(--tip-bg); color: var(--tip-ink); box-shadow: var(--shadow-pop); font-size: 12px; line-height: 1.4; white-space: normal; visibility: hidden; pointer-events: none; }
-.desk-sessions .bars .bt b { font-weight: 650; }
-.desk-sessions .bars .bt > span { display: block; font-size: 11px; color: var(--tip-ink-2); }
-.desk-sessions .bars a.b:nth-of-type(-n+3) .bt { left: 0; transform: none; }
-.desk-sessions .bars a.b:nth-last-of-type(-n+3) .bt { left: auto; right: 0; transform: none; }
-@media (hover: hover) { .desk-sessions .bars .b:hover .bt { visibility: visible; } }
-.desk-sessions .bars .b:focus-visible .bt { visibility: visible; }
-/* Touch: a first tap on a bar opens this tip, with the way to Results; a
-   second tap on the bar or the link opens Results (desk.js initBarTaps). */
-.desk-sessions .bars-tap { position: absolute; z-index: 7; left: 0; top: 0; width: max-content; max-width: 240px; padding: 7px 10px 8px; border-radius: 10px; background: var(--tip-bg); color: var(--tip-ink); box-shadow: var(--shadow-pop); font-size: 12px; line-height: 1.4; transform: translateY(calc(-100% - 6px)); }
-.desk-sessions .bars-tap[hidden] { display: none; }
-.desk-sessions .bars-tap b { font-weight: 650; }
-.desk-sessions .bars-tap > span { display: block; font-size: 11px; color: var(--tip-ink-2); }
-.desk-sessions .bars-tap .bars-go { position: relative; display: inline-flex; align-items: center; gap: 3px; margin-top: 4px; font-weight: 650; color: var(--tip-ink); text-decoration: underline; text-underline-offset: 2px; }
-.desk-sessions .bars-tap .bars-go .i { width: 12px; height: 12px; }
-.desk-sessions .bars-tap .bars-go::after { content: ""; position: absolute; inset: -14px -8px; }
-.desk-sessions .bars .b.tapped { background: var(--row-hover); }
-.desk-sessions .bars-ax { display: flex; justify-content: space-between; height: 14px; margin-top: 4px; font: 500 10px/14px var(--mono); color: var(--ink-3); }
-.desk-sessions .bars.bars-why { display: grid; place-items: center; padding: 0 12px; font-size: 12px; line-height: 16px; color: var(--ink-2); text-align: center; }
-/* M5: a desk with no trades since the start is one row. */
-.dcard[data-layout="row"] { padding: 10px 18px; gap: 0; }
-.drow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto auto; align-items: center; gap: 0 14px; min-height: 36px; }
-.drow .dmark { width: 28px; height: 28px; border-radius: 8px; }
-.drow .dmark svg { width: 18px; height: 18px; }
-.drow .who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; min-width: 0; }
-.drow .who h3 { flex: none; font-size: 15px; }
-/* The row's state words wrap; they are never cut (AC-36). */
-.drow .state > span { overflow: visible; white-space: normal; text-overflow: clip; }
-.drow .dnums { display: flex; flex-wrap: wrap; gap: 4px 22px; }
-.drow .dnums > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 7px; }
-.drow .dnums .k { padding-right: 0; }
-.drow .dnums .v { font-size: 15px; line-height: 22px; container-type: normal; }
-.drow .dnums .v > .bn, .drow .dnums .v > .fig-link > .bn { display: inline-flex; height: auto; font-size: inherit; }
-.drow .dnums .v > .fig-link { display: inline-flex; }
-.drow .dnums .v > .fig-link > .bn { flex: none; }
-.drow .dnums .c { min-height: 0; }
-.drow .dnums > div[data-state="fresh"] .c { display: none; }
-/* The row's own status lines (every figure's state, age and reason, Open's
-   too). Their box reserves the worst case at the row's width: three figures,
-   each with its longest line, wrapped (desk-session.mjs measures it in the
-   wide font at every width from a 320 px phone), so a change of state never
-   moves the row. */
-.drow .drow-status { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 2px; min-height: 52px; margin-top: 4px; }
-@container (max-width: 599.98px) { .drow .drow-status { min-height: 100px; } }
-@container (max-width: 339.98px) { .drow .drow-status { min-height: 132px; } }
-@container (max-width: 289.98px) { .drow .drow-status { min-height: 148px; } }
-.drow .drow-status .st { align-items: flex-start; gap: 5px; white-space: normal; font-size: 11.5px; line-height: 16px; color: var(--ink-2); }
-.drow .drow-status .st .i { width: 13px; height: 13px; margin-top: 1px; }
-/* Middle widths: the market block goes under the figures, and each summary
-   figure's caption under its figure, across the figure's whole width. */
-@media (max-width: 1180px) {
-  .hero { grid-template-columns: minmax(0, 1fr); }
-  .hero-r { grid-column: 1; grid-row: 2; margin-top: 12px; padding: 14px 0 0; border-left: 0; border-top: 1px solid var(--line); }
-  .hero .kpis { grid-row: 3; }
-  .desk-scope { grid-row: 4; }
-  .hero .kpi { grid-template-columns: auto minmax(0, 1fr); }
-  .hero .kpi .c { grid-column: 1 / -1; margin-top: 0; }
-}
-@container (max-width: 339.98px) {
-  .dcard .who { display: contents; }
-  .dcard header .card-go { grid-column: 4; grid-row: 1; }
-}
-/* Below 310 px (a 360 px phone) the name row cannot also hold the Results
-   link beside a long check-in: the link closes the state's row instead, so
-   the desk's name keeps its whole width (AC-36). */
-@container (max-width: 309.98px) {
-  .dcard header .hb { grid-column: 3 / 5; }
-  .dcard header .card-go { grid-row: 2; }
-}
-@media (max-width: 480px) {
-  /* Phones: the whole account comes first, then the desk hero without the eyebrow. */
-  .desks-eyebrow { display: none; }
-  /* A phone row's state and what the desk holds: one line that, on the
-     narrowest rows, ends in an ellipsis with its whole words in its title and
-     the row's name, as designed (never cut silently, AC-36). */
-  .compact-word > .cut-line { display: block; min-width: 0; height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-  .pct-slot .basis { display: none; }
-  .primary-caption .cap-long { display: none; }
-  .primary-caption .cap-short { display: inline; }
-}
-@media (max-width: 700px) {
-  .hero .kpis { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  .drow { grid-template-columns: 28px minmax(0, 1fr) auto; }
-  .drow .dnums { grid-column: 1 / 3; grid-row: 2; justify-content: space-between; margin-top: 6px; }
-  .drow .hb { grid-column: 3; grid-row: 1; }
-  .drow .card-go { grid-column: 3; grid-row: 2; margin-top: 6px; }
-  /* 44 px hit areas around the figures and the bars (the bars' overlap their gaps). */
-  .fig-link::after { content: ""; position: absolute; inset: -9px -6px; }
-  .desk-sessions .bars .b::after { content: ""; position: absolute; inset: 0 -8px; }
-}
-/* ---------- end Desk hero and cards (JOED-153) ---------- */
-
 /* JOED-79: wrappers keep the existing grid/flex items above 480 px. */
 .account-section, .desk-section, .disclosure-body { display: contents; }
-.desk-disclosure, .compact-row, .phone-primary-note, .account-state, .desks-since { display: none; }
+.desk-disclosure, .compact-row, .phone-primary-note, .account-state { display: none; }
 .collapsed-summary { display: contents; }
 .expanded-summary { display: none; }
 @media (max-width: 480px) {
@@ -1457,8 +1120,6 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   #heroL .board-caption { height: 36px; line-height: 18px; margin: 0; }
   .desks-heading { order: 2; margin: 16px 0 8px; gap: 0 8px; }
   .desks-heading .sub { line-height: 18px; }
-  /* Rows say "Since"; the one start day for all desks stays on the heading's first line. */
-  .desks-heading .desks-since { display: inline; color: var(--ink-3); font-size: 13px; line-height: 22px; white-space: nowrap; }
   #desks { order: 3; gap: 8px; }
   #desks .dcard { padding: 0; gap: 0; }
   .compact-row { display: contents; }
@@ -1517,168 +1178,4 @@ body:not([data-screen="settings"]) .toast { bottom: 24px; }
   #chartDetail { padding: 0 12px 12px; }
   .positions-section .sec-h, .kept-section .sec-h { margin: 0 0 8px; }
   #positionsDetail, #keptDetail { padding: 0 12px 12px; }
-}
-
-/* ---------- Header, nav and the phone's bottom bar ----------
-   One row at every width: the brand, PAPER, Desk · Results · History, the
-   light (it opens Details), Settings as a gear and the theme button. Above
-   480 px the nav stays in the header; up to 480 px it is a bottom bar: a
-   solid surface with a hairline, padded clear of the safe area, and the
-   page's content ends above it. Every header control is a 44 px target,
-   whatever it draws. When the row does not fit, app.js (fitHeader) adds
-   these steps in order, keeping the earlier ones: "word" (the wordmark
-   goes), "labels" (the nav drops its icons), "tight" (gaps and padding
-   tighten), "icons" (the nav keeps only its icons; each button keeps its
-   name) and "squeeze" (the light may narrow below its reserve, without its
-   chevron; its whole sentence stays in its title and name). */
-:root { --nav-h: 69px; --safe-bottom: env(safe-area-inset-bottom, 0px); --safe-left: env(safe-area-inset-left, 0px); --safe-right: env(safe-area-inset-right, 0px); }
-.top .nav button { position: relative; height: 30px; min-width: 44px; }
-.top .hdr-health, .top .icon-btn { position: relative; }
-.top .nav button::after, .top .hdr-health::after, .top .icon-btn::after { content: ""; position: absolute; inset: min(0px, calc((100% - 44px) / 2)); }
-.gear { flex: none; }
-.gear .i { width: 17px; height: 17px; }
-.gear[aria-current="page"] { color: var(--accent-ink); background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent-line); }
-.top-in[data-fit~="word"] .brand .word { display: none; }
-.top-in[data-fit~="labels"] .nav .i { display: none; }
-.top-in[data-fit~="tight"] { gap: 2px; }
-.top-in[data-fit~="tight"] .nav { margin-left: 0; }
-.top-in[data-fit~="tight"] .nav button { padding-inline: 6px; }
-.top-in[data-fit~="tight"] .hdr-health { gap: 4px; padding-inline: 4px; }
-/* A 36 px icon button reaches 4 px past each side; 9 px from its neighbour keeps every target whole. */
-.top-in[data-fit~="tight"] .icon-btn { margin-left: 7px; }
-.top-in[data-fit~="icons"] .nav .i { display: block; }
-.top-in[data-fit~="icons"] .nav button { padding-inline: 0; }
-.top-in[data-fit~="icons"] .nav button > span { display: none; }
-.top-in[data-fit~="squeeze"] .hdr-health { min-width: 0; padding-inline: 2px; }
-.top-in[data-fit~="squeeze"] .hdr-health > .status-chevron { display: none; }
-@media (max-width: 960px) {
-  .top-in { height: 54px; gap: 8px; }
-  .top .icon-btn { width: 44px; height: 44px; }
-  .top-in[data-fit~="tight"] .icon-btn { margin-left: 0; }
-  /* The light takes the row's free room: at least its reserve for "Live · 59 s", at most 280 px. */
-  .hdr-health { flex: 1 1 0; width: auto; min-width: 128px; max-width: 280px; height: 44px; padding: 0 8px; }
-}
-@media (max-width: 700px) {
-  .top-in { gap: 6px; }
-  /* Loading keeps the icon's space so every status has the same width. */
-  .hdr-health .i.tone-none { visibility: hidden; }
-}
-@media (max-width: 480px) {
-  .top .nav { display: none; }
-  .hdr-health { min-width: 124px; max-width: none; padding: 0 10px; font-size: 13.5px; }
-  .bottom-nav { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; gap: 4px; padding: 6px max(8px, var(--safe-right)) calc(6px + var(--safe-bottom)) max(8px, var(--safe-left)); background: var(--surface); border-top: 1px solid var(--line); }
-  .bottom-nav button { flex: 1 1 0; min-width: 0; height: 56px; border: 0; border-radius: 18px; background: transparent; color: var(--ink-3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 600; }
-  .bottom-nav button .i { width: 20px; height: 20px; }
-  .bottom-nav button[aria-current="page"] { color: var(--ink); background: var(--accent-tint); }
-  /* The page ends above the bar, so nothing renders under it, and Details
-     ends 8 px above it: its top is the 54 px header and its 4 px offset. */
-  #main { padding-bottom: calc(var(--nav-h) + var(--safe-bottom)); }
-  .pop { max-height: calc(100dvh - 54px - 4px - 8px - var(--nav-h) - var(--safe-bottom)); }
-}
-
-/* ---------- Desk: the whole account (JOED-156) ----------
-   The IB paper account, kept holdings included, at the very top of Desk: the
-   value, the change for the chosen range, Since start, Cash and the kept
-   holdings, then the stock-app chart with its overview strip and Controls.
-   Rows that change with the data keep their heights, so no state change
-   moves the desks below. */
-.acct-hero { position: relative; padding: 20px 26px 14px; margin-bottom: 18px; }
-.acct-eyebrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-height: 22px; font-size: 12.5px; line-height: 18px; font-weight: 600; color: var(--ink-2); }
-.acct-eyebrow > .i { width: 15px; height: 15px; color: var(--ink-3); }
-.acct-title { font: inherit; color: inherit; }
-.acct-chip { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; background: var(--sunken); color: var(--ink-2); font: 600 11px/20px var(--mono); letter-spacing: .02em; white-space: nowrap; }
-.acct-chip.keep { background: color-mix(in srgb, var(--desk-joel) 14%, transparent); color: var(--ink); font-family: var(--font); letter-spacing: 0; }
-.acct-narrow, .acct-details { display: none; }
-.acct-value { height: 58px; margin-top: 8px; font-size: 52px; line-height: 58px; font-weight: 650; letter-spacing: -.035em; }
-.acct-change { display: flex; align-items: center; min-width: 0; height: 24px; margin-top: 2px; font-size: 16px; font-weight: 650; }
-.acct-delta { display: inline-flex; align-items: baseline; gap: 8px; white-space: nowrap; }
-.acct-pct.gain { color: var(--gain); } .acct-pct.loss { color: var(--loss); }
-.acct-rng { display: inline-block; padding: 3px 6px; border-radius: 6px; background: var(--sunken); color: var(--ink-3); font: 600 12px/1 var(--mono); letter-spacing: 0; white-space: nowrap; }
-/* The value's own state when it is not current: one line, ellipsis, full words in the title. */
-.acct-state { display: flex; max-width: 100%; min-width: 0; color: var(--ink-2); font-size: 13px; font-weight: 500; }
-.acct-state > [data-clamp] { display: block; min-width: 0; height: 20px; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.acct-dbtn { display: none; }
-.acct-sub { min-height: 36px; margin-top: 6px; font-size: 12.5px; line-height: 18px; color: var(--ink-3); }
-/* The Since start · Cash line, in either form (the phone's, and the wider
-   screens' with the kept holdings), keeps by the block's content width the
-   lines its longest form needs within the documented bound: amounts up to
-   €1e9, ±99.999,99 %, every Cash reason and wording, in SF Pro and DejaVu Sans
-   with tabular figures, at any width from 240 px up (proved in
-   test/account-hero.mjs, which also holds these bands contiguous from 240 px
-   to infinity). A container query reads the real content width, so a
-   scrollbar, page zoom or a side panel lands in the band for the width it
-   leaves; no layout's narrowest width is assumed. Beyond the bound, or below
-   240 px, the line wraps on, visibly; no money figure is ever clipped. A
-   narrower band comes after the wider ones, so it wins below its width. */
-.acct-hero { container: acct / inline-size; }
-@container acct (max-width: 863.98px) { .acct-sub.acct-wide { min-height: 54px; } }
-@container acct (max-width: 611.98px) { .acct-sub.acct-wide { min-height: 72px; } }
-@container acct (max-width: 488.98px) { .acct-sub.acct-wide { min-height: 90px; } }
-@container acct (max-width: 388.98px) { .acct-sub.acct-wide { min-height: 108px; } }
-@container acct (max-width: 347.98px) { .acct-sub.acct-wide { min-height: 126px; } }
-@container acct (max-width: 306.98px) { .acct-sub.acct-wide { min-height: 144px; } }
-@container acct (max-width: 250.98px) { .acct-sub.acct-wide { min-height: 162px; } }
-@container acct (max-width: 241.98px) { .acct-sub.acct-wide { min-height: 180px; } }
-@container acct (max-width: 407.98px) { .acct-sub.acct-narrow { min-height: 51px; } }
-@container acct (max-width: 290.98px) { .acct-sub.acct-narrow { min-height: 68px; } }
-.acct-sub b, .acct-details b { color: var(--ink-2); font-weight: 600; }
-/* A missing Cash is a muted dash, as every dash on Desk. */
-.acct-sub b.muted { color: var(--ink-3); }
-.acct-sub b.acct-fig.gain { color: var(--gain); } .acct-sub b.acct-fig.loss { color: var(--loss); }
-.acct-sep { display: inline-block; width: 1px; height: 12px; margin: 0 9px; vertical-align: -1px; background: var(--line-2); }
-.set-link { position: relative; color: var(--accent-ink); font-weight: 600; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent-ink) 40%, transparent); text-underline-offset: 2px; }
-.set-link::after { content: ""; position: absolute; inset: -16px -6px; }
-.acct-ranges { display: flex; width: max-content; max-width: 100%; margin-top: 12px; }
-.acct-ranges button { min-width: 40px; padding: 0 10px; }
-.acct-ranges .mono { font: 600 12px/1 var(--mono); }
-.acct-chart { height: 230px; margin-top: 10px; touch-action: pan-y; }
-.acct-chart.pannable { cursor: grab; }
-.acct-chart.panning { cursor: grabbing; }
-.acct-strip { position: relative; height: 40px; margin-top: 8px; user-select: none; -webkit-user-select: none; touch-action: pan-y; }
-.acct-strip .mini-track { left: 58px; right: 14px; }
-.acct-strip .mini-h .grip { top: 8px; bottom: 8px; }
-.acct-strip[data-off] .mini-win, .acct-strip[data-off] .mini-h { visibility: hidden; }
-/* One footer line: the first-visit hint or a note about the history, then Controls. */
-.acct-foot { position: relative; display: flex; align-items: center; gap: 12px; height: 30px; margin-top: 6px; }
-.acct-note { display: flex; align-items: center; flex: 1; min-width: 0; height: 30px; font-size: 11.5px; line-height: 15px; color: var(--ink-3); }
-.acct-ctl { position: relative; display: inline-flex; align-items: center; gap: 6px; flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); font-size: 12px; font-weight: 600; }
-.acct-ctl .i { width: 15px; height: 15px; }
-.acct-ctl[aria-expanded="true"] { color: var(--accent-ink); background: var(--row-hover); box-shadow: inset 0 0 0 1px var(--accent-line); }
-@media (hover: hover) { .acct-ctl:hover { color: var(--accent-ink); background: var(--row-hover); box-shadow: inset 0 0 0 1px var(--accent-line); } }
-.acct-pop { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; width: min(380px, 100%); max-height: min(72vh, 600px); overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-pop); }
-.acct-pop[hidden] { display: none; }
-.acct-keys { grid-template-columns: auto minmax(0, 1fr); gap: 5px 12px; margin: 0; font-size: 12px; line-height: 17px; }
-/* One list for this device's pointer: the mouse's, or the finger's. */
-.acct-keys.hint-fine { display: grid; }
-.acct-keys.hint-touch { display: none; }
-.acct-keys dt { color: var(--ink); font-weight: 600; white-space: nowrap; }
-.acct-keys dd { margin: 0; color: var(--ink-2); }
-.acct-keys kbd { font: 600 10.5px/1 var(--mono); padding: 2px 5px; border-radius: 4px; box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-2); }
-@media (pointer: coarse) { .acct-keys.hint-fine { display: none; } .acct-keys.hint-touch { display: grid; } }
-@media (prefers-reduced-motion: no-preference) { .acct-dbtn .i { transition: transform .12s; } }
-@media (max-width: 700px) { .acct-ctl::after { content: ""; position: absolute; inset: -8px 0; } }
-/* Phone: the value, one change line, one Since start · Cash line, Account
-   details, the ranges and a 120 px chart; no overview strip. */
-@media (max-width: 480px) {
-  .acct-hero { padding: 14px; margin-bottom: 12px; }
-  .acct-eyebrow { font-size: 12px; }
-  .acct-hero .acct-wide { display: none; }
-  .acct-hero span.acct-narrow { display: inline; }
-  .acct-hero p.acct-narrow { display: block; }
-  .acct-value { height: 36px; margin-top: 4px; font-size: 30px; line-height: 36px; }
-  .acct-change { font-size: 14px; }
-  /* Account details shares the eyebrow's second line, so the change line keeps the full width. */
-  .acct-dbtn { position: relative; display: inline-flex; align-items: center; gap: 4px; flex: none; height: 20px; margin-left: auto; padding: 0; border: 0; background: none; color: var(--ink-2); font-size: 12px; font-weight: 600; }
-  .acct-dbtn::after { content: ""; position: absolute; inset: -12px -8px; }
-  .acct-dbtn .i { width: 12px; height: 12px; }
-  .acct-dbtn[aria-expanded="true"] .i { transform: rotate(180deg); }
-  .acct-sub { min-height: 34px; margin-top: 4px; font-size: 12px; line-height: 17px; }
-  .acct-details:not([hidden]) { display: block; margin-top: 4px; font-size: 12px; line-height: 17px; color: var(--ink-3); }
-  .acct-details p + p { margin-top: 4px; }
-  .acct-ranges { width: 100%; gap: 0; padding: 2px; margin-top: 10px; }
-  .acct-ranges button { flex: 1; min-width: 0; padding: 0; }
-  .acct-chart { height: 120px; margin-top: 8px; }
-  .acct-strip { display: none; }
-  .acct-foot { margin-top: 4px; }
-  #acctAxis button { min-width: 64px; }
 }

@@ -2,26 +2,10 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261029192345.0.0",
+    APP_VERSION: "261029075623.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 39,
+    RELEASE_SEQUENCE: 38,
     VERSION_HISTORY: [
-      {
-        version: "261029192345.0.0",
-        versionScheme: "inspr-calver-3",
-        date: "2026-10-29",
-        title: "A clearer board and natural charts",
-        changes: [
-          "See the whole account’s value at the top, with a stock-app chart from 1D to All and an overview strip.",
-          "Explore History in Change mode with a minimap, natural pan and zoom, and Auto, Max or Custom axes.",
-          "Read dated Desk results with Last session, one market-day bar and labelled session bars for each desk.",
-          "Explore redesigned Results by period, desk, calendar day and trade, with links back to the same view.",
-          "Use the quieter header, the Settings gear and the phone bottom bar to move around the board.",
-          "Get one honest reason for each missing number, with fewer repeated warnings and no empty chart box.",
-          "Set the account’s starting amount and date in Settings to give Since start a known basis.",
-          "Build account history from newly recorded values, with daily closes for longer chart ranges.",
-        ],
-      },
       {
         version: "261029075623.0.0",
         versionScheme: "inspr-calver-3",

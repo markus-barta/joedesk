@@ -5,46 +5,14 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { CONTRACTS, validateContract } from '../contracts/index.mjs';
 import { createReadModel } from '../server/read-model.mjs';
-import { validateBoardSettings, BOARD_SETTINGS_MAX_BYTES } from '../server/board-settings.mjs';
-import { validContinuity, CONTINUITY_CAP } from '../public/joe/history-continuity.js';
-import { validateAccountHistory, ACCOUNT_HISTORY_FORMAT, ACCOUNT_HISTORY_CAP,
-  validateAccountCloses, ACCOUNT_CLOSES_FORMAT, ACCOUNT_CLOSES_CAP } from '../server/account-history.mjs';
-import { validInstant } from '../contracts/schema-validator.mjs';
 import { inspectFleetConfig, normalizeFleetConfig, fleetInvalid, validateFleetActions,
   appendFleetNormalizationAudit } from '../server/fleet-normalization.mjs';
 
 const FILES = {
   v1: ['data.json', 'history.json', 'fleet-config.json', 'fleet-config-actions.json'],
-  v2: ['data-state.json', 'history-state.json', 'results-state.json', 'feed-rejections.json', 'fleet-receipt.json', 'fleet-config.json', 'fleet-config-actions.json',
-    'board-settings.json', 'history-continuity.json', 'account-history-state.json', 'account-closes-state.json',
-    'account-history-state.json.discontinuity.json', 'account-closes-state.json.discontinuity.json'],
+  v2: ['data-state.json', 'history-state.json', 'results-state.json', 'feed-rejections.json', 'fleet-receipt.json', 'fleet-config.json', 'fleet-config-actions.json'],
 };
 const CAP = 16 * 1024 * 1024;
-const DAMAGED_MAX = 64;
-const ACCOUNT_STORES = [
-  ['account-history-state.json', ACCOUNT_HISTORY_FORMAT, ACCOUNT_HISTORY_CAP, validateAccountHistory],
-  ['account-closes-state.json', ACCOUNT_CLOSES_FORMAT, ACCOUNT_CLOSES_CAP, validateAccountCloses],
-];
-function damagedCopy(name) {
-  if (typeof name !== 'string') return false;
-  const account = /^(account-(?:history|closes)-state\.json)\.damaged-(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)(?:-[1-9][0-9]*)?$/.exec(name);
-  if (account?.[0] === name && validInstant(account[2])) return true;
-  const continuity = /^history-continuity\.json\.damaged-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.exec(name);
-  return continuity?.[0] === name;
-}
-function allowedFiles(boardSchema, names) {
-  const allowed = FILES[boardSchema];
-  return allowed && names.length <= allowed.length + (boardSchema === 'v2' ? DAMAGED_MAX : 0) &&
-    names.filter(damagedCopy).length <= DAMAGED_MAX &&
-    names.every(name => allowed.includes(name) || (boardSchema === 'v2' && damagedCopy(name)));
-}
-// account-store's validMarker is private. Check its persisted three-field shape
-// with the shared instant validator and the exact names its writer generates.
-function checkMarker(marker, store) {
-  if (!marker || Object.keys(marker).length !== 3 || !validInstant(marker.at) ||
-      marker.reason !== 'contract_invalid' || !damagedCopy(marker.preservedAs) ||
-      !marker.preservedAs.startsWith(`${store}.damaged-`)) throw new Error('backup_schema_mismatch');
-}
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 function read(file) {
   const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
@@ -94,22 +62,6 @@ function checkStoreSchema(boardSchema, files) {
       const results = JSON.parse(files['results-state.json']);
       if (results.format !== 'joedesk.results-store.v2' || !validateContract('results', results.feed?.value).ok) throw new Error('backup_schema_mismatch');
     }
-    const boundedJson = (name, cap) => {
-      if (files[name].length > cap) throw new Error('backup_schema_mismatch');
-      return JSON.parse(files[name]);
-    };
-    if (files['board-settings.json'] && validateBoardSettings(boundedJson('board-settings.json', BOARD_SETTINGS_MAX_BYTES))) throw new Error('backup_schema_mismatch');
-    if (files['history-continuity.json'] && !validContinuity(boundedJson('history-continuity.json', CONTINUITY_CAP))) throw new Error('backup_schema_mismatch');
-    for (const [name, format, cap, validate] of ACCOUNT_STORES) {
-      if (files[name]) {
-        const stored = boundedJson(name, cap);
-        if (stored?.format !== format) throw new Error('backup_schema_mismatch');
-        validate(stored.value);
-        if (stored.discontinuity !== undefined) checkMarker(stored.discontinuity, name);
-      }
-      const journal = `${name}.discontinuity.json`;
-      if (files[journal]) checkMarker(boundedJson(journal, 4096), name);
-    }
   }
 }
 export function backupStore({ source, destination, boardSchema }) {
@@ -118,15 +70,10 @@ export function backupStore({ source, destination, boardSchema }) {
   const allowed = FILES[boardSchema];
   if (!allowed || path.resolve(source) === path.resolve(destination)) throw new Error('backup_schema_required');
   const names = fs.readdirSync(source).sort();
-  if (!names.length || !allowedFiles(boardSchema, names)) throw new Error('backup_unexpected_file');
+  if (!names.length || names.some(n => !allowed.includes(n))) throw new Error('backup_unexpected_file');
   // Read all bounded, allowlisted bytes before creating any output.
-  let total = 0;
-  const payloads = names.map(name => {
-    const bytes = read(path.join(source, name));
-    total += bytes.length;
-    if (total > 2 * CAP) throw new Error('backup_size_limit');
-    return { name, bytes };
-  });
+  const payloads = names.map(name => ({ name, bytes: read(path.join(source, name)) }));
+  if (payloads.reduce((n, p) => n + p.bytes.length, 0) > 2 * CAP) throw new Error('backup_size_limit');
   const byName = Object.fromEntries(payloads.map(p => [p.name, p.bytes]));
   checkStoreSchema(boardSchema, byName);
   fs.mkdirSync(destination, { mode: 0o700 });
@@ -138,17 +85,14 @@ export function verifyBackup(backup) {
   const manifest = JSON.parse(read(path.join(backup, 'backup-manifest.json')));
   const allowed = FILES[manifest.boardSchema];
   if (manifest.schema !== 'joedesk.data-backup.v1' || !allowed || !Array.isArray(manifest.files) || !manifest.files.length ||
-      new Set(manifest.files.map(f => f?.name)).size !== manifest.files.length ||
-      !allowedFiles(manifest.boardSchema, manifest.files.map(f => f?.name))) throw new Error('backup_manifest_invalid');
+      manifest.files.length > allowed.length || new Set(manifest.files.map(f => f.name)).size !== manifest.files.length ||
+      manifest.files.some(f => !allowed.includes(f.name))) throw new Error('backup_manifest_invalid');
   const expected = ['backup-manifest.json', ...manifest.files.map(f => f.name)].sort();
   if (JSON.stringify(fs.readdirSync(backup).sort()) !== JSON.stringify(expected)) throw new Error('backup_closure_mismatch');
   const payloads = {};
-  let total = 0;
   for (const f of manifest.files) {
     const bytes = read(path.join(backup, f.name));
     if (bytes.length !== f.size || digest(bytes) !== f.sha256) throw new Error('backup_digest_mismatch');
-    total += bytes.length;
-    if (total > 2 * CAP) throw new Error('backup_size_limit');
     payloads[f.name] = bytes;
   }
   checkStoreSchema(manifest.boardSchema, payloads);

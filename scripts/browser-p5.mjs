@@ -12,10 +12,9 @@ import * as nodeModule from 'node:module';
 import { launch, openPage } from './browser/cdp.mjs';
 import { startBoard, ACTOR, TOKEN, NOW, at } from './browser/board.mjs';
 import { VIEWPORTS, THEMES, configure, load as loadPage, settle, waitFor, pointerMedia, MOUSE, TOUCH, copyText } from './browser/shots.mjs';
-import { setDeskDisclosures, phoneDeskSnapshot, collapsedMoneySummariesOk } from './browser/desk-disclosures.mjs';
+import { setDeskDisclosures, phoneDeskSnapshot } from './browser/desk-disclosures.mjs';
 import { createGate, shifted, WIDE_FONT } from './browser/gate.mjs';
 import { designFleet, designActions, designSnapshot, cashSessionSnapshot, switchSetSnapshot, longFleet } from './browser/settings-fixtures.mjs';
-import { SETTINGS_SECTION_IDS as SECTION_IDS, PHONE_SETTINGS_NOTE, fleetSettingsControls } from './browser/settings-checks.mjs';
 import { designResults } from './browser/results.mjs';
 import { pngColours } from './browser/pixels.mjs';
 import { captureHeaderCrop } from './browser/header-crop.mjs';
@@ -58,9 +57,10 @@ const N = text => String(text ?? '').replace(/[\s ]+/g, ' ').trim();
 const schema = JSON.parse(readFileSync(new URL('../contracts/fleet-config.schema.json', import.meta.url)));
 const LEAVES = M.schemaLeafKeys(schema);
 const HISTORY = (() => { const w = {}; new Function('window', readFileSync(new URL('../public/joe/joe-version.js', import.meta.url), 'utf8'))(w); return w.JoeVersion.VERSION_HISTORY; })();
+const SECTION_IDS = ['set-mode', 'set-runtime', ...M.GROUPS.map(g => `set-${g.id}`), 'set-how', 'set-source', 'set-log', 'set-appearance', 'set-about'];
 const DESKTOP = VIEWPORTS.filter(v => !v.mobile);
 const PHONE = VIEWPORTS.find(v => v.mobile);
-const READS = ['/joe/state.json', '/joe/history.json', '/joe/account-history.json', '/joe/results.json', '/joe/fleet-config.json', '/joe/fleet-config/actions.json'];
+const READS = ['/joe/state.json', '/joe/history.json', '/joe/results.json', '/joe/fleet-config.json', '/joe/fleet-config/actions.json'];
 const PROPAGATE = '/joe/fleet-config/propagate';
 
 const browser = await launch({ hostRules: 'MAP joedesk.example.test 127.0.0.1' });
@@ -150,7 +150,7 @@ const viewShot = async (name, what) => {
 // Absolute boxes of the page (scroll-independent) and viewport boxes of the fixed bar.
 // The sticky header is left out: the page scrolls between steps; boxes are absolute.
 const SHIFT = ['.set-sec', '.set-sec .sec-head', '.mode-panel', '.rt-row', '.field', '.field .f-k', '.field .f-in', '.wrow', '.tbl', 'footer.foot'];
-const ABOVE_LOG = ['#set-mode', '#set-account', '#set-runtime', '.rt-row', ...M.GROUPS.map(g => `#set-${g.id}`), '#setMain [data-row]', '#setMain [data-row] .f-in', '#set-how', '#set-source .sec-head'];
+const ABOVE_LOG = ['#set-mode', '#set-runtime', '.rt-row', ...M.GROUPS.map(g => `#set-${g.id}`), '#setMain [data-row]', '#setMain [data-row] .f-in', '#set-how', '#set-source .sec-head'];
 const rects = list => ev(`__audit.rects(${J(list)})`);
 // Serialized into the page for both real-ingress and synchronous label checks.
 function headerLayout() {
@@ -196,7 +196,7 @@ async function keyChecks(tag) {
   // An array's item keys read as their own names ("id"); data-key holds the full key.
   const missing = LEAVES.filter(k => !seen.out[k].some(e => (e.text === k || (k.includes('[].') && e.text === M.itemName(k))) && e.mono));
   check('AC-22', `${tag}: all ${LEAVES.length} leaf keys of fleet-config.schema.json appear as data-key with visible mono text`, !missing.length, missing);
-  check('AC-22', `${tag}: Settings starts with Mode, Account start, then Runtime state, in the approved section order`, J(seen.order) === J(SECTION_IDS), seen.order);
+  check('AC-22', `${tag}: Settings starts with Mode, then Runtime state, in the spec's section order`, J(seen.order) === J(SECTION_IDS), seen.order);
 }
 
 async function editabilityChecks(tag, viewport, fleet) {
@@ -204,7 +204,7 @@ async function editabilityChecks(tag, viewport, fleet) {
     const ph = await ev(`({ inputs: [...document.querySelectorAll('#scr-settings input, #scr-settings select, #scr-settings textarea, #scr-settings [role=switch], #scr-settings [data-bump], #scr-settings .tog, #scr-settings [data-wwdel], #wwAdd')].filter(__audit.visible).length,
       note: __audit.visible(document.querySelector('.set-phone-note')) ? document.querySelector('.set-phone-note').innerText.trim() : null, bar: __audit.visible(document.getElementById('editbar')),
       values: Object.fromEntries([...document.querySelectorAll('#setMain [data-row]')].map(r => [r.dataset.row, [...r.querySelectorAll('.phone-only [data-value], .ro:not(.phone-only) [data-value]')].filter(__audit.visible).map(e => e.innerText.trim()).join(' | ')])) })`);
-    check('AC-23', `${tag}: phones name the separate Account start and appearance settings; the closed page has no visible inputs or fleet edit bar`, ph.inputs === 0 && ph.note === PHONE_SETTINGS_NOTE && !ph.bar, ph);
+    check('AC-23', `${tag}: phones show the phone note, no inputs and no edit bar`, ph.inputs === 0 && ph.note === 'Read-only on a phone. Change fleet settings on a larger screen.' && !ph.bar, ph);
     const base = M.valuesOf(fleet), wrong = [];
     for (const k of M.EDITABLE) {
       const f = M.FIELD[k];
@@ -377,9 +377,9 @@ try {
       const clip = await ev(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
       const { data } = await page.s('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip });
       writeFileSync(join(QA_DIR, `${name}.png`), Buffer.from(data, 'base64'));
-      shots.push({ file: `${name}.png`, what: `Rev-9 desk values not exact: ${name}` });
+      shots.push({ file: `${name}.png`, what: `Rev-9 desk values not exact yet: ${name}` });
     };
-    const boxes = ['header.top', '.top-in > :not(nav)', '#hdrHealth .lbl', '#hdrHealth b', '#statusAlert', '#acctHero', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .spark'];
+    const boxes = ['header.top', '.top-in > :not(nav)', '#hdrHealth .lbl', '#hdrHealth b', '#statusAlert', '#deskHero', '#desks', '.dcard', '.dcard .dnums', '.dcard .mini'];
     for (const viewport of [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }]) for (const theme of THEMES) {
       const b = await startBoard({ fleetConfig: designFleet() }); boards.push(b);
       b.setNow(base.generatedAt);
@@ -388,7 +388,7 @@ try {
       check('not-exact', `${tag}: real ingress accepts null desk values and account NAV/cash`, accepted.status === 200, accepted);
       b.setNow(at(base.generatedAt, 9));
       await configure(page, viewport, theme); await load(page, b.url, 'desk');
-      await waitFor(page, `document.querySelectorAll('.card-status .st').length === 3`);
+      await waitFor(page, `document.querySelectorAll('.mini-label .st').length === 3`);
       const baseline = await rects(boxes);
       for (const [i, reason] of ['not_exact_yet', 'source_unavailable', 'not_exact_yet'].entries()) {
         if (i) {
@@ -408,9 +408,11 @@ try {
         if (viewport.width <= 480) {
           await setDeskDisclosures(page, false);
           const collapsed = await phoneDeskSnapshot(page).then(copyText);
+          const words = neutral ? 'not exact yet' : 'not reported by the broker';
           const moneySections = collapsed.controls.filter(c => ['j', 'joe', 'joel', 'account'].includes(c.key));
           check('phone-first', `${tag} ${i}: collapsed desk/account summaries expose unavailable money with the true icon and reason`,
-            collapsedMoneySummariesOk(collapsed, neutral), moneySections);
+            moneySections.length === 4 && moneySections.every(c => c.hidden && c.expanded === 'false' && c.warning.includes(words) && c.icon === (neutral ? '#i-info' : '#i-stop')) &&
+            collapsed.horizontal.scroll <= collapsed.horizontal.inner, moneySections);
           await setDeskDisclosures(page, true);
         }
         const seen = await ev(`(() => {
@@ -418,12 +420,12 @@ try {
           const h = document.getElementById('hdrHealth'), hi = h.querySelector('svg');
           return { word: h.title, headerIcon: hi.querySelector('use').getAttribute('href'), headerColour: getComputedStyle(hi).color,
             ok: probe('--ok'), bad: probe('--bad'), neutral: probe('--ink-3'),
-            cards: [...document.querySelectorAll('.card-status .st')].map(e => ({ text: e.textContent.trim(), tone: e.className,
+            cards: [...document.querySelectorAll('.mini-label .st')].map(e => ({ text: e.textContent.trim(), tone: e.className,
               icon: e.querySelector('use').getAttribute('href'), colour: getComputedStyle(e.querySelector('svg')).color, style: getComputedStyle(e).fontStyle })),
             nulls: [...document.querySelectorAll('.dnums .bn')].every(e => e.textContent === '—'),
             headerLayout: (${headerLayout.toString()})(), horizontal: __audit.horizontal(), clipping: __audit.clipping(), gui: __audit.gui27() };
         })()`);
-        const caption = neutral ? 'Numbers: not exact' : 'Numbers: unavailable · not reported by the broker';
+        const caption = neutral ? 'Numbers: not exact yet' : 'Numbers: unavailable · not reported by the broker';
         check('not-exact', `${tag} ${i}: header word, tone and icon reflect the actual null reason`,
           (neutral ? /^Live · updated/.test(seen.word) : seen.word === 'Board numbers are missing') && seen.headerIcon === (neutral ? '#i-check' : '#i-stop') && seen.headerColour === (neutral ? seen.ok : seen.bad), seen);
         checkHeaderLayout('not-exact', `${tag} ${i} ${seen.word}`, seen.headerLayout);
@@ -435,14 +437,11 @@ try {
         await click('#hdrHealth');
         const details = await ev(`(() => {
           const pop = document.getElementById('healthPop');
-          const notes = [...pop.querySelectorAll('.st')].filter(e => /^(Desk values are not exact|Today: not exact)/.test(e.textContent.trim()));
-          const today = [...pop.querySelectorAll('dt')].find(dt => dt.textContent === 'Today’s result')?.nextElementSibling?.textContent ?? null;
-          return { open: pop.classList.contains('on'), text: pop.innerText, today, notes: notes.map(e => ({ text: e.textContent.trim(), tone: e.className, icon: e.querySelector('use').getAttribute('href'), style: getComputedStyle(e).fontStyle })) };
+          const notes = [...pop.querySelectorAll('.st')].filter(e => e.textContent.trim() === 'Desk values are not exact yet');
+          return { open: pop.classList.contains('on'), text: pop.innerText, notes: notes.map(e => ({ tone: e.className, icon: e.querySelector('use').getAttribute('href'), style: getComputedStyle(e).fontStyle })) };
         })()`);
-        // One neutral line for the desk values; the "Today’s result" row states the not-exact Today once (Amy's A3).
-        check('not-exact', `${tag} ${i}: Details has one neutral sentence, one Today row and no false missing-money alarms`, details.open && (neutral
-          ? J(details.notes.map(n => n.text)) === J(['Desk values are not exact']) && details.today === 'Not exact for J, Joe and Joel' &&
-            details.notes.every(n => n.tone === 'st none' && n.icon === '#i-info' && n.style === 'normal') && !details.text.includes('money is unavailable')
+        check('not-exact', `${tag} ${i}: Details has one neutral sentence and no false missing-money alarms`, details.open && (neutral
+          ? details.notes.length === 1 && details.notes[0].tone === 'st none' && details.notes[0].icon === '#i-info' && details.notes[0].style === 'normal' && !details.text.includes('money is unavailable')
           : details.notes.length === 0 && details.text.includes('money is unavailable')), details);
         await key('Escape');
         if (i === 0) {
@@ -456,8 +455,7 @@ try {
   // JOED-49: one real account observation through ingress, shared selectors
   // and both surfaces. Browser execution/crops belong to PR CI.
   if (run('cash')) {
-    // Desk's Cash also at 320 px, the narrowest phone its line is held for (JOED-156).
-    const viewports = [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }, { ...PHONE, name: '320', width: 320 }];
+    const viewports = [...VIEWPORTS, { ...PHONE, name: '360', width: 360 }];
     const amount = '12345.67890123';
     const crop = async (selector, name) => {
       const clip = await ev(`(() => { const r = document.querySelector(${J(selector)}).getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
@@ -480,29 +478,23 @@ try {
         const accepted = await b.push(next);
         check('paper-cash', `${viewport.name} ${theme} ${phase}: real ingress accepts the snapshot`, accepted.status === 200, accepted);
       };
-      for (const screen of viewport.width === 320 ? ['desk'] : ['desk', 'settings']) {
+      for (const screen of ['desk', 'settings']) {
         offset = screen === 'desk' ? 0 : 300;
         await push('value', 0);
         b.setNow(at(NOW, offset + 9));
         await configure(page, viewport, theme);
         await load(page, b.url, screen);
         if (screen === 'settings') await waitFor(page, `document.querySelector('#rtRows [data-cash="rt.cash"]')`);
-        // JOED-156: on Desk, Cash is the whole account's (the block in JOED-153's
-        // slot above the hero), in its Since start · Cash line; a phone shows
-        // the short line, wider screens the long one.
-        const selector = screen === 'desk' ? '#acctHero' : '#rtRows .rt-row:last-child';
-        const cashKey = screen === 'desk' ? 'acct.cash' : 'rt.cash';
-        const surface = screen === 'desk' ? 'desk-account-cash' : 'settings-account-cash';
-        // The boxes around Cash: on Desk the whole account's rows (the line's
-        // text changes width inside its fixed box) and the desk hero below;
-        // in Settings the row, its reserve and the value.
+        const selector = screen === 'desk' ? '#heroL .cash-kpi' : '#rtRows .rt-row:last-child';
+        const cashKey = screen === 'desk' ? 'hero.cash' : 'rt.cash';
+        const surface = screen === 'desk' ? 'desk-hero-cash' : 'settings-account-cash';
+        // Cash now has its own Desk figure; track all four secondary cells too.
+        // Earlier Settings rows have independent state copy.
         const measure = () => ev(`(() => {
           const parent = document.querySelector(${J(selector)}), p = parent.getBoundingClientRect();
-          const nodes = ${J(screen)} === 'desk'
-            ? [['whole account', parent], ['Since start · Cash line', [...parent.querySelectorAll('.acct-sub')].find(__audit.visible)], ['value', document.getElementById('acctValue')],
-              ['change line', document.getElementById('acctChange')], ['chart', document.getElementById('acctChart')], ['desk hero', document.getElementById('deskHero')]]
-            : [['row', parent], ['reserve', parent.querySelector('.cash-reserve')], ['cash', parent.querySelector('[data-cash]')]];
-          return nodes.map(([key, e]) => { const r = e.getBoundingClientRect(); return { key, top: r.top - p.top, left: r.left - p.left, width: r.width, height: r.height }; });
+          const nodes = [parent, parent.querySelector('.cash-reserve'), parent.querySelector('[data-cash]')];
+          if (${J(screen)} === 'desk') nodes.push(...document.querySelectorAll('#heroL .kpi'), document.getElementById('deskHero'));
+          return nodes.map((e, i) => { const r = e.getBoundingClientRect(); return { key: i, top: r.top - p.top, left: r.left - p.left, width: r.width, height: r.height }; });
         })()`);
         const baseline = await measure();
         for (const phase of ['value', 'stale', 'null', 'not-exact', 'session', 'rev7', 'recovered']) {
@@ -511,13 +503,11 @@ try {
           await ev('window.__joedesk.refresh().then(() => true)');
           await settle(page);
           const seen = await ev(`(() => {
-            const e = [...document.querySelectorAll('[data-cash="${cashKey}"]')].find(__audit.visible), parent = document.querySelector(${J(selector)});
+            const e = document.querySelector('[data-cash="${cashKey}"]'), parent = document.querySelector(${J(selector)});
             const r = e.getBoundingClientRect(), p = parent.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(e);
             const glyphs = [...range.getClientRects()].map(g => ({ left: g.left, right: g.right, top: g.top, bottom: g.bottom }));
             const cs = getComputedStyle(e);
-            const block = e.closest('.cash-block');
-            return { text: e.innerText.trim(), label: block?.querySelector('.cash-label').innerText ?? null, caption: block?.querySelector('.cash-caption').innerText ?? null, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'),
-              section: [document.querySelector('#heroL .board-caption')?.innerText ?? '', document.querySelector('#acctChange [data-clamp]')?.innerText ?? ''].join(' '),
+            return { text: e.innerText.trim(), label: e.closest('.cash-block').querySelector('.cash-label').innerText, caption: e.closest('.cash-block').querySelector('.cash-caption').innerText, state: e.dataset.state, title: e.title, name: e.getAttribute('aria-label'), section: document.querySelector('#heroL .board-caption')?.innerText ?? '',
               fits: glyphs.every(g => g.left >= p.left - 0.5 && g.right <= p.right + 0.5 && g.top >= p.top - 0.5 && g.bottom <= p.bottom + 0.5),
               clipped: e.scrollWidth > e.clientWidth || e.scrollHeight > e.clientHeight, style: cs.fontStyle,
               horizontal: __audit.horizontal(), clipping: __audit.clipping() };
@@ -525,43 +515,28 @@ try {
           const tag = `${viewport.name} ${theme} ${screen} cash ${phase}`;
           const hasValue = ['value', 'stale', 'recovered'].includes(phase);
           const why = phase === 'stale' ? 'updates are late' : phase === 'session' ? 'broker connection not confirmed'
-            : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact' : 'not reported by the broker';
+            : phase === 'rev7' ? 'no data received yet' : phase === 'not-exact' ? 'not exact yet' : 'not reported by the broker';
           const brokerCaption = 'cash · as the broker reports it';
-          // On Desk a reason the account value shares (a stale snapshot, a lost
-          // session) is said once, in the whole account's change line.
           const shared = screen === 'desk' && ['stale', 'session'].includes(phase);
-          // JOED-148: a not-exact Cash is named "not exact" like every other dash, on Desk and in Settings.
-          const missing = phase === 'not-exact' ? 'not exact' : `not reported${shared ? '' : ` · ${why}`}`;
-          const cashState = hasValue ? phase === 'stale' && !shared ? ` · ${why}` : '' : ` · ${missing}`;
-          // Desk (the whole account's line, as designed): "Cash", the amount or a dash, its state. Settings: the account row's figure.
-          const expected = screen === 'desk' ? `Cash ${hasValue ? '€ 12.345,68' : '—'}${cashState}`
-            : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'not exact' : `not reported · ${why}`;
-          const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : phase === 'not-exact' ? 'Cash: not exact' : `Cash not reported · ${why}`;
-          const labelled = screen === 'desk' ? seen.label === null : seen.label === 'Cash' && N(seen.caption) === brokerCaption;
-          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme and reason locally or once in the section`, N(seen.text) === expected && labelled && seen.title === exact && seen.name === exact && (!shared || seen.section.includes(why)) && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
-          // Cash's own text, and then the screen around it: each fault is named
-          // where it is (the page-wide audit lists another block's clipping too).
-          check('paper-cash', `${tag}: Cash's text is whole: no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal', seen);
-          check('paper-cash', `${tag}: nothing on the screen scrolls sideways or clips`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, { horizontal: seen.horizontal, clipping: seen.clipping });
+          const cashState = hasValue ? phase === 'stale' && !shared ? `· ${why}` : '' : `not reported${shared ? '' : ` · ${why}`}`;
+          const caption = screen === 'desk' ? `${brokerCaption}${cashState ? ` ${cashState}` : ''}` : brokerCaption;
+          const expected = screen === 'desk' ? `${hasValue ? '€ 12.345,68' : '—'} ${caption}`
+            : hasValue ? `€ 12.345,68${phase === 'stale' ? ` · ${why}` : ''}` : `not reported · ${why}`;
+          const exact = hasValue ? `Cash: EUR ${amount}${phase === 'stale' ? ` · ${why}` : ''}` : `Cash not reported · ${why}`;
+          check('paper-cash', `${tag}: two-decimal display, exact accessible lexeme and reason locally or once in the section`, N(seen.text) === expected && seen.label === 'Cash' && N(seen.caption) === caption && seen.title === exact && seen.name === exact && (!shared || seen.section.includes(why)) && seen.state === (phase === 'stale' ? 'stale' : hasValue ? 'fresh' : phase === 'rev7' ? 'not reported' : 'broken'), seen);
+          check('paper-cash', `${tag}: whole text, no italics, overflow or clipping`, seen.fits && !seen.clipped && seen.style === 'normal' && seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
           const after = await measure();
           const moved = baseline.flatMap((r, i) => ['top', 'left', 'width', 'height'].filter(k => r[k] !== after[i]?.[k]).map(k => ({ key: r.key, k, from: r[k], to: after[i]?.[k] })));
-          // On Desk the desk hero below is measured too: a Cash phase moves or
-          // resizes nothing there either (its own reserves are JOED-153's).
-          const own = moved.filter(m => m.key !== 'desk hero'), below = moved.filter(m => m.key === 'desk hero');
-          check('paper-cash', `${tag}: Cash and the boxes around it have exactly 0 px shift`, !own.length, own);
-          if (screen === 'desk') check('paper-cash', `${tag}: the desk hero below keeps its box through the Cash phases`, !below.length, below);
+          check('paper-cash', `${tag}: cash and account boxes have exactly 0 px shift`, !moved.length, moved);
           if (screen === 'desk' && viewport.width <= 480) {
-            // The whole account is open on a phone, never a collapsed section:
-            // every non-green cash reason is in view, beside Cash or once in the change line.
             await setDeskDisclosures(page, false);
             const collapsed = await phoneDeskSnapshot(page).then(copyText);
-            const account = collapsed.account;
-            check('phone-first', `${tag}: the open whole account carries every non-green cash reason in view`,
-              !collapsed.controls.some(c => c.key === 'whole') && N(account?.cash?.text) === expected && account.cash.bottom <= collapsed.bottomBar.top &&
-              (phase === 'value' || phase === 'recovered' || N(`${account.cash.text} ${account.line ?? ''}`).includes(why)) && collapsed.horizontal.scroll <= collapsed.horizontal.inner, account);
+            const account = collapsed.controls.find(c => c.key === 'account');
+            check('phone-first', `${tag}: collapsed Account carries every non-green cash reason`,
+              account.hidden && account.expanded === 'false' && (phase === 'value' || phase === 'recovered' || (Boolean(account.icon) && account.detail.includes(why))) && collapsed.horizontal.scroll <= collapsed.horizontal.inner, account);
             await setDeskDisclosures(page, true);
           }
-          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? '#acctHero' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
+          if (phase === 'value' || phase === 'null') await crop(screen === 'desk' ? viewport.width <= 480 ? '#accountSection' : '#deskHero' : selector, `${viewport.name}-${theme}-${surface}-${phase}`);
         }
       }
     }
@@ -587,12 +562,12 @@ try {
         await setDeskDisclosures(page, false);
         const collapsed = await phoneDeskSnapshot(page).then(copyText);
         const sections = collapsed.controls.filter(c => ['positions', 'kept'].includes(c.key));
-        check('phone-first', `${tag}: fresh panels with partial rows retain warnings and row reasons when collapsed`, sections.length === 2 && sections.every(c => c.hidden && Boolean(c.icon) && /not exact|not reported by the broker/.test(c.warning)), sections);
+        check('phone-first', `${tag}: fresh panels with partial rows retain warnings and row reasons when collapsed`, sections.length === 2 && sections.every(c => c.hidden && Boolean(c.icon) && /not exact yet|not reported by the broker/.test(c.warning)), sections);
         await setDeskDisclosures(page, true);
       }
-      const figureSelectors = ['#acctHero', '#acctValue', '#acctChange', '#deskHero', '#heroL .kpi', '#desks', '.dcard'];
+      const figureSelectors = ['#deskHero', '#heroL .kpi', '#heroL .cash-reserve', '#desks', '.dcard'];
       const figureBoxes = await rects(figureSelectors);
-      const figures = () => ev(`({ values: [...document.querySelectorAll('#heroL .display, #heroL .kpi dd .bn, #heroL .kpi .c, #acctValue, #acctHero [data-cash], .dcard .dnums .v')].map(e => e.innerText), count: document.getElementById('posSub').innerText })`);
+      const figures = () => ev(`({ values: [...document.querySelectorAll('#heroL .display, #heroL .kpi dd > .bn, #heroL [data-cash], .dcard .dnums .v')].map(e => e.innerText), count: document.getElementById('posSub').innerText })`);
       const before = await figures();
       snapshot.seq++;
       snapshot.positions.rows.unshift({ ...structuredClone(unmapped), updatedAt: NOW });
@@ -630,11 +605,10 @@ try {
         horizontal: __audit.horizontal(), clipping: __audit.clipping()
       }))()`);
       for (const row of seen.kept) {
-        // JOED-148: a not-exact dash is named "not exact", never "not reported".
-        const why = row.symbol === 'SXR8' ? 'not exact' : 'not reported by the broker', dashName = why === 'not exact' ? why : `not reported · ${why}`;
+        const why = row.symbol === 'SXR8' ? 'not exact yet' : 'not reported by the broker';
         check('positions', `${tag} ${row.symbol}: quantity and values visibly explain their nulls`,
           ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => row.reasons?.includes(`${label}: ${why}`) || seen.worth.includes(why)) &&
-          ['Quantity', 'Last price', 'Worth'].every(label => row.dashes.some(d => d.text === '—' && d.title === `${label}: ${dashName}` && d.name === d.title)), row);
+          ['Quantity', 'Last price', 'Worth'].every(label => row.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · ${why}` && d.name === d.title)), row);
         check('KEEP', `${tag} ${row.symbol}: no interactive element inside the kept row`, row.interactive === 0, row);
         check('positions', `${tag} ${row.symbol}: unknown KEEP worth has no bar track`, row.tracks === 0, row);
       }
@@ -645,10 +619,10 @@ try {
       check('desk-unmapped', `${tag}: visible name line, title and accessible name carry the desk reason without a desk colour or mark`,
         u.label === deskLabel && u.title === deskLabel && u.name === deskLabel && !u.colour && u.marks === 0 && J(seen.order) === J(['DEMO', 'AAA']), seen);
       check('desk-unmapped', `${tag}: all null values stay dashes with their own reasons`,
-        ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => u.reason?.includes(`${label}: not exact`) || seen.positionState.includes('not exact')) &&
-        ['Quantity', 'Last price', 'Worth', 'Open result'].every(label => u.dashes.some(d => d.text === '—' && d.title === `${label}: not exact` && d.name === d.title)), u);
+        ['Quantity', 'Last price', 'Worth', 'Today’s result', 'Open result'].every(label => u.reason?.includes(`${label}: not exact yet`) || seen.positionState.includes('not exact yet')) &&
+        ['Quantity', 'Last price', 'Worth', 'Open result'].every(label => u.dashes.some(d => d.text === '—' && d.title === `${label}: not reported · not exact yet` && d.name === d.title)), u);
       check('positions', `${tag}: no partial kept worth is presented as complete and both reasons stay visible`, /worth not available/i.test(N(seen.worth)) &&
-        ['not exact', 'not reported by the broker'].every(why => seen.worth.includes(why) || seen.kept.some(row => row.reasons?.includes(why))) &&
+        ['not exact yet', 'not reported by the broker'].every(why => seen.worth.includes(why) || seen.kept.some(row => row.reasons?.includes(why))) &&
         !/worth [€$]/i.test(N(seen.worth)), seen.worth);
       check('positions', `${tag}: no overflow or clipping`, seen.horizontal.scroll <= seen.horizontal.inner && !seen.clipping.length, seen);
       const clip = await ev(`(() => { const r = document.getElementById('kept').getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, width: r.width, height: r.height, scale: 1 }; })()`);
@@ -764,7 +738,7 @@ try {
         check('executor-health', `${tag}: Desk explains executor health without changing the board tone`, desk.open && N(desk.problem) === (c.problem ?? 'No current problems.') && desk.headerTone === c.headerTone, desk);
         check('executor-health', `${tag}: Desk explanation has no overflow or clipping`, desk.horizontal.scroll <= desk.horizontal.client && !desk.clipping.length, desk);
         if (['capture-degraded', 'ledger-full'].includes(c.name)) await crop('#healthPop', `${viewport.name}-${theme}-desk-executor-${c.name}`);
-        await click('#settingsBtn');
+        await click('.nav [data-go="settings"]');
       }
       // The production status renderer: every ranked reason, in the same
       // viewport/font. Fixed geometry, complete title/name, and one-line clamp.
@@ -1169,9 +1143,9 @@ try {
       await load(page, broken.url, 'settings');
       await waitFor(page, `document.getElementById('setSub').innerText.includes('unavailable')`);
       const s = await ev(`({ sub: document.getElementById('setSub').innerText.trim(), note: document.getElementById('editNote').innerText.trim(), buttons: ['discardBtn', 'savePreview', 'reviewBtn', 'sendBtn'].map(id => document.getElementById(id).disabled),
-        inputs: (${fleetSettingsControls.toString()})(document.getElementById('setMain')).length, floor: document.querySelector('#set-desks .kfloor').innerText.trim(),
+        inputs: [...document.querySelectorAll('#setMain input, #setMain [role=switch], #setMain [data-bump], #setMain .tog')].length, floor: document.querySelector('#set-desks .kfloor').innerText.trim(),
         values: [...document.querySelectorAll('#setMain .field .ro [data-value]')].filter(__audit.visible).map(e => e.innerText.trim()), mode: document.getElementById('modeLabel').innerText.trim() })`);
-      check('AC-24', `${tag}: fleet settings are unavailable: fleet values hidden, no fleet controls, every fleet edit-bar button off`, N(s.sub) === 'Fleet settings unavailable · paper only' && s.inputs === 0 && s.buttons.every(Boolean) &&
+      check('AC-24', `${tag}: the settings are unavailable: values hidden, editing disabled, every button off`, N(s.sub) === 'Fleet settings unavailable · paper only' && s.inputs === 0 && s.buttons.every(Boolean) &&
         (viewport.mobile || N(s.note) === 'Fleet settings unavailable · values are hidden and editing is disabled. Reopen Settings to retry.') && s.values.every(v => /^(Not available|Other kept symbols are hidden|Not reported yet)$/.test(v)), s);
       check('KEEP', `${tag}: SXR8 and TSLA are named as always kept`, s.floor === 'SXR8 and TSLA are always kept' && s.mode === 'PAPER', s.floor);
       await keyChecks(tag);
@@ -1401,7 +1375,7 @@ try {
         const media = await pointerMedia(page);
         if (media !== (width <= 700 ? TOUCH : MOUSE)) fail.pointer.push({ width, media });
         await settle(page);
-        const r = await ev(`__audit.sweep(480, null)`);
+        const r = await ev(`__audit.sweep(960, null)`);
         if (r.scroll > r.inner) fail.scroll.push({ width, scroll: r.scroll });
         if (r.past.length) fail.past.push({ width, past: r.past.slice(0, 3) });
         if (r.header.length) fail.header.push({ width, header: r.header });
@@ -1409,7 +1383,7 @@ try {
         if (r.targets.length) fail.targets.push({ width, targets: r.targets });
         if (r.overlaps.length) fail.overlaps.push({ width, overlaps: r.overlaps.slice(0, 3) });
         if (width > 700) {
-          // The edit bar with its longest notes: inside the bar, the bar inside the window, clear of a bottom bar (phones only).
+          // The edit bar with its longest notes: inside the bar, the bar inside the window, clear of the bottom bar.
           const fit = await ev(`(() => { const n = document.getElementById('editNote'), keep = n.innerHTML, faults = [];
             for (const [lead, rest] of ${J(LONGEST)}) {
               n.querySelector('.note-t').innerHTML = '<b>' + lead + '</b> · ' + rest;
@@ -1429,8 +1403,8 @@ try {
       const n = `${widths.length} widths from 390 to 1440 px`;
       check('AC-28', `sweep ${tag}: no horizontal page scroll at any of ${n}`, !fail.scroll.length, fail.scroll.slice(0, 6));
       check('AC-28', `sweep ${tag}: nothing reaches past the page's right edge at any of ${n}`, !fail.past.length, fail.past.slice(0, 4));
-      check('header', `sweep ${tag}: the header stays in its row; one nav (Desk, Results, History) at every width, with Settings as the header's gear and the shown screen current`, !fail.header.length && !fail.nav.length, { header: fail.header.slice(0, 3), nav: fail.nav.slice(0, 6) });
-      check('AC-30', `sweep ${tag}: every header control's real hit region (elementFromPoint) is whole, 44 px each way and shared with no neighbour at every width, and so is each bottom-bar button's`, !fail.targets.length, fail.targets.slice(0, 3));
+      check('header', `sweep ${tag}: the header stays in its row; one nav at every width`, !fail.header.length && !fail.nav.length, { header: fail.header.slice(0, 3), nav: fail.nav.slice(0, 6) });
+      check('AC-30', `sweep ${tag}: the compact header's buttons and the bottom bar are 44 px targets`, !fail.targets.length, fail.targets.slice(0, 3));
       check('AC-36', `sweep ${tag}: no text overlaps other text at any of ${n}`, !fail.overlaps.length, fail.overlaps.slice(0, 4));
       check('no-shift', `sweep ${tag}: from 710 px the edit bar holds its longest notes and its buttons inside it, inside the window and above the bottom bar`, !fail.bar.length, fail.bar.slice(0, 4));
       check('touch', `sweep ${tag}: read right after each resize, the pointer is touch up to 700 px (no hover, coarse) and a mouse above (hover, fine) at every one of ${n}`, !fail.pointer.length, fail.pointer.slice(0, 8));
@@ -1438,7 +1412,7 @@ try {
     // For the visual check: the edit bar above the bottom bar at a tablet width.
     await openSettings(b, { name: '820', width: 820, height: 1000, mobile: false }, 'light');
     await mouse('[data-bump="1"][data-for="desks.maxBusyDesks"]');
-    await viewShot('820-light-settings-tablet-editbar', 'Settings at 820 px: the edit bar floats at the bottom (two rows); the nav stays in the header');
+    await viewShot('820-light-settings-tablet-editbar', 'Settings at 820 px: the edit bar floats above the bottom bar (two rows)');
     await mouse('#discardBtn');
   }
 
@@ -1628,7 +1602,7 @@ Every screenshot was taken again. What changed, per fix:
   control); only the other symbols are editable. The candidate always starts
   with the floor in its saved order.
 - **Edit bar.** One row above 1180 px; two rows (note, then buttons) at 961 to
-  1180 px; up to 960 px it floats at the bottom, clear of the safe area, with the nav in the header (\`820-light-settings-tablet-editbar.png\`).
+  1180 px; up to 960 px it floats above the bottom bar (\`820-light-settings-tablet-editbar.png\`).
   The note keeps two lines' room, so no state changes the bar.
 - **Saved line (P6 carry-over).** Under a changed control, always one line
   reserved before editing. Long kept lists and wake windows use counts;
@@ -1662,11 +1636,11 @@ Every screenshot was taken again. What changed, per fix:
 
 | AC | Browser (this gate) | Node |
 | --- | --- | --- |
-| AC-22 Mode, Account start, then Runtime state; all leaf keys as data-key with visible mono text, against the schema file | \`AC-22\` (clean, starter file, unavailable; six combos) | \`schema keys\`, \`Settings browser expectations\` (\`test/settings-model.mjs\`) |
-| AC-23 today's editable/read-only split; phone fleet settings read-only with the note, no visible inputs before opening Account start | \`AC-23\` | \`editability\`, \`phone Settings note\` |
+| AC-22 Mode then Runtime state; all leaf keys as data-key with visible mono text, against the schema file | \`AC-22\` (clean, starter file, unavailable; six combos) | \`schema keys\` (\`test/settings-model.mjs\`) |
+| AC-23 today's editable/read-only split; phones read-only with the note, no inputs | \`AC-23\` | \`editability\` |
 | AC-24 Edit → Review changes (dialog + tick) → Confirm → Send; edit-bar states and toasts; stale version "revision changed to …; reload before retrying"; audited | \`AC-24\` (edited, draft, stale = 409, failure = plain 500 / no answer / unreadable, stored = 500 naming the version, malformed draft, long values, unavailable) | \`edit flow\`, \`stale version\`, \`stored, change log unfinished\`, \`review\`, \`load states\`, \`browser draft\`, \`candidate\`, \`validation\`, \`diff model\`; server: \`Fleet Config propagates one atomic paper revision…\` |
 | AC-25 seven rows; "Not reported"; no secrets, tokens, full account numbers or env content | \`AC-25\` (frozen clocks: the same on any runner) | — |
-| AC-26 sub-nav reaches every section, including Account start, and marks the one in view | \`AC-26\` (clicks and scrolling; nothing moves) | \`Settings browser expectations\` |
+| AC-26 sub-nav reaches every section and marks the one in view | \`AC-26\` (clicks and scrolling; nothing moves) | — |
 | AC-27 How it works, Where this is defined with Sources, Change log, Appearance, About | \`AC-27\` | \`change log\` |
 | AC-28 no horizontal scroll 390–1440 | \`AC-28\` (audit at six combos; sweep in 10 px steps, both fonts and themes) | — |
 | AC-29 contrast ≥ 4.5:1 | \`AC-29\` (every audited state, both themes) | — |
