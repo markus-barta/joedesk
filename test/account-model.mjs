@@ -25,6 +25,23 @@ test('JOED-167 account calendar: repeated draws preserve consecutive closes acro
   }
 });
 
+test('JOED-158 calendar memo: the 4097th distinct date evicts old successors; revisiting recomputes correctly', async () => {
+  const { builders } = await import('./fixtures/preview-dom.mjs');
+  const { nextDays, nextDay } = await builders('account-model.js', ['nextDays', 'nextDay']);
+  nextDays.clear();
+  const start = Date.parse('2000-01-01T12:00:00Z');
+  for (let i = 0; i < 4097; i++) {
+    const day = iso(start + i * DAY).slice(0, 10), expected = iso(start + (i + 1) * DAY).slice(0, 10);
+    assert.equal(nextDay(day), expected, day);
+    assert.ok(nextDays.size <= 4096);
+    if (i === 4095) assert.equal(nextDays.size, 4096);
+  }
+  assert.equal(nextDays.size, 1);
+  assert.equal(nextDays.has('2000-01-01'), false, 'the first successor was evicted');
+  assert.equal(nextDay('2000-01-01'), '2000-01-02');
+  assert.equal(nextDays.size, 2, 'the evicted successor was recomputed and cached');
+});
+
 test('JOED-156 model: the endpoint becomes two typed series; anything off the documented shape is refused', () => {
   const h = M.acceptAccountHistory(history());
   assert.equal(h.short.source, 'short');

@@ -111,6 +111,35 @@ test('JOED-167 fresh position sections reuse unchanged rows; changed rows, state
   assert.equal(positionsFor(ctx).html, desk.positionsHtml(ctx).html);
 });
 
+test('JOED-158 positions cache: receipt, reason, retention, KEEP and rejection invalidate a populated section', () => {
+  for (const change of ['receipt', 'reason', 'retention', 'KEEP', 'rejection']) {
+    const ctx = context(), cell = ctx.states.positions, baseline = positionsFor(ctx);
+    assert.equal(positionsFor(ctx), baseline, `${change}: first populate the cache`);
+    if (change === 'receipt') ctx.states.positions = { ...cell, valueReceivedAt: '2026-10-14T17:41:59.000Z' };
+    if (change === 'reason') ctx.states.positions = { ...cell, reason: 'source_unavailable' };
+    if (change === 'retention') ctx.states.positions = { ...cell, state: 'stale', reason: 'snapshot_stale', retained: true, ageSeconds: 65 };
+    if (change === 'KEEP') {
+      const fleet = { desks: { keep: [cell.value[0].symbol] } };
+      ctx.feeds['fleet-config'] = { value: fleet };
+      ctx.states = boardStates(ctx.feeds, ctx.now);
+      assert.ok(ctx.states.kept.value.some(r => r.symbol === fleet.desks.keep[0]));
+    }
+    if (change === 'rejection') ctx.states.positions = { ...cell, state: 'broken', reason: 'contract_invalid', retained: true, ageSeconds: 65 };
+    const changed = positionsFor(ctx);
+    assert.notEqual(changed, baseline, change);
+    assert.deepEqual(changed, desk.positionsHtml(ctx), `${change}: same result as the uncached renderer`);
+    if (change === 'retention' || change === 'rejection') {
+      ctx.states.positions = { ...ctx.states.positions, ageSeconds: 125 };
+      assert.notEqual(positionsFor(ctx).html, changed.html, `${change}: retained ages still tick`);
+    }
+    ctx.states.positions = cell;
+    delete ctx.feeds['fleet-config'];
+    assert.deepEqual(positionsFor(ctx), baseline, `${change}: recovery returns the original fresh section`);
+    const recovered = positionsFor(ctx);
+    assert.equal(positionsFor(ctx), recovered, `${change}: recovered section can be reused`);
+  }
+});
+
 test('JOED-153 M1: the first figure names its session in every phase, with its own link and term', () => {
   for (const [now, phase, label, term, href] of [
     [NOW, 'live', `Today · Wed 14${NB}Oct · live`, 'today', '#results?period=day&date=2026-10-14&desk=all'],

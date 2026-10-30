@@ -2780,3 +2780,33 @@ test('JOED-142 F2: unpaused capture failure keeps continued-trading copy in Desk
   for (const sizing of runtime.querySelectorAll('.rt-sizing')) sizing.remove();
   assert.match(runtime.textContent, /results capture failing — trading continues/);
 });
+
+test('JOED-158 typography observer: each delivery samples the current viewport once across phone/desktop changes', () => {
+  const app = readFileSync(new URL('../public/joe/app.js', import.meta.url), 'utf8');
+  const start = app.indexOf('  const fixUnits = '), end = app.indexOf('  syncThemeButton();', start);
+  assert.ok(start > 0 && end > start);
+  const text = value => ({ nodeType: 3, nodeValue: value });
+  const body = { nodeType: 1, children: [text('2 units · initial')] };
+  let phone = false, reads = 0, deliver;
+  runInNewContext(app.slice(start, end), {
+    NB: '\u00a0', joinUnits: format.joinUnits,
+    isPhone: () => { reads++; return phone; }, NodeFilter: { SHOW_TEXT: 4 },
+    document: { body, createTreeWalker: node => { let i = 0; return { nextNode: () => node.children[i++] ?? null }; } },
+    MutationObserver: class { constructor(callback) { deliver = callback; } observe(target, options) {
+      assert.equal(target, body); assert.equal(options.characterData, true);
+    } },
+  });
+  assert.equal(body.children[0].nodeValue, '2\u00a0units · initial');
+  for (const narrow of [true, false, true, false]) {
+    phone = narrow;
+    const changed = text('3 units · changed'), child = text('4 units · added'), split = text('5 units ');
+    split.nextSibling = { textContent: '· next inline' };
+    const before = reads;
+    deliver([{ type: 'characterData', target: changed }, { type: 'childList', addedNodes: [{ nodeType: 1, children: [child, split] }] }]);
+    assert.equal(reads, before + 1, 'one viewport read for the whole delivery');
+    const space = narrow ? '\u00a0' : ' ';
+    assert.equal(changed.nodeValue, `3\u00a0units${space}· changed`);
+    assert.equal(child.nodeValue, `4\u00a0units${space}· added`);
+    assert.equal(split.nodeValue, `5\u00a0units${space}`, 'inline separators follow the same viewport');
+  }
+});
