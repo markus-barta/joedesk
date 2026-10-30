@@ -2,10 +2,21 @@
   "use strict";
 
   window.JoeVersion = Object.freeze({
-    APP_VERSION: "261029192345.0.0",
+    APP_VERSION: "261030085000.0.0",
     VERSION_SCHEME: "inspr-calver-3",
-    RELEASE_SEQUENCE: 39,
+    RELEASE_SEQUENCE: 40,
     VERSION_HISTORY: [
+      {
+        version: "261030085000.0.0",
+        versionScheme: "inspr-calver-3",
+        date: "2026-10-30",
+        title: "Exact Results dates and clearer missing values",
+        changes: [
+          "Keep Results dates and trade ordering correct, even for records from very distant years.",
+          "Read one clear reason for missing Cash and honest wording for missing desk values.",
+          "Get steadier release speed checks by running browser checks one job at a time and recording machine load.",
+        ],
+      },
       {
         version: "261029192345.0.0",
         versionScheme: "inspr-calver-3",

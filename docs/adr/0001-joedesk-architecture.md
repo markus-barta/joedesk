@@ -1583,3 +1583,31 @@ Reseal the integrated runtime closure once. Contracts revision 10 and contract
 set `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
 shared presentation pin, legacy anchor and published artifacts remain unchanged.
 This local candidate grants no publication or deployment approval.
+
+## Release 40 candidate (JOED-171)
+
+Reserve `261030085000.0.0` at `2026-10-30T08:50:00Z` as `inspr-calver-3`, stable sequence 40,
+for the board redesign follow-ups: exact extreme dates and trade ordering in
+Results (JOED-168), single-reason Cash and honest missing-value wording
+(JOED-158), and steadier CI speed checks with serialized browser jobs and
+machine-load evidence (JOED-169). Timing budgets remain unchanged.
+
+Previous and last deployed release are sequence 39 (`261029192345.0.0`), main
+`95aa934293c4a96b3ad80b64496b53966bc18360` (JOED-159), live on csb0 since
+`2026-10-30T08:44:03Z`, adopted at `2026-10-30T08:46:01Z` as recorded in
+`adoption/261029192345.0.0.json`. Reuse disposition `deployed` and
+`deployed: true`; adoption is evidenced by that existing record. About orders
+40, 39, 38, 37 through 26, then legacy; release 39 retains its original entry.
+Earlier release-preparation sections describe their reservation-time state.
+
+- Keep Results dates and trade ordering correct, even for records from very distant years.
+- Read one clear reason for missing Cash and honest wording for missing desk values.
+- Get steadier release speed checks by running browser checks one job at a time and recording machine load.
+
+Reseal the integrated runtime closure. Contracts revision 10 and contract set
+`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
+shared presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`, legacy
+anchor and historical artifacts remain unchanged. The saved presentation config
+and templates match the local approved source; the offline bundle remains
+active in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.

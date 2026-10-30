@@ -294,12 +294,12 @@ function renderedBoard(t) {
 test('preview sections: the real multi-section board markup passes the entire serialized selector table through capture', async t => {
   const document = renderedBoard(t), dir = temporary(t);
   const versions = document.querySelectorAll('[data-product-version]').map(e => e.dataset.productVersion);
-  assert.equal(versions.length, 15, 'P6 expects the footer and fourteen calendar releases in rendered About');
+  assert.equal(versions.length, 16, 'P6 expects the footer and fifteen calendar releases in rendered About');
   assert.equal(versions.filter(v => v === activeRelease.version).length, 2, 'current release appears in footer and About');
   const history = document.querySelectorAll('#set-about .ver .t').map(e => e.textContent);
-  assert.deepEqual(history.slice(0, 15), [activeRelease.version, '261029075623.0.0', '261028202622.0.0', '261028081016.0.0', '261027124551.0.0', '261026232616.0.0', '261026070713.0.0', '261025221940.0.0', '261025144826.0.0', '261023155418.0.0',
+  assert.deepEqual(history.slice(0, 16), [activeRelease.version, '261029192345.0.0', '261029075623.0.0', '261028202622.0.0', '261028081016.0.0', '261027124551.0.0', '261026232616.0.0', '261026070713.0.0', '261025221940.0.0', '261025144826.0.0', '261023155418.0.0',
     '261023100632.0.0', '261021113113.0.0', '261021083537.0.0', '261021015923.0.0', '26.09.21.12.00'],
-  'rendered About orders sequence 39, published sequence 38, deployed sequences 37 through 26, then legacy history');
+  'rendered About orders sequence 40, deployed and adopted sequence 39, published sequence 38, deployed sequences 37 through 26, then legacy history');
   for (const version of ['261019102825.0.0', '261016151218.0.0']) assert.equal(history.includes(version), false);
   assert.ok(document.querySelector('#tiles [data-tile="pf"] .tval').textContent.trim() === '—');
   assert.match(document.querySelector('#tiles [data-tile="pf"] .tmean').textContent, /losing trade/);
