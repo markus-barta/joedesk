@@ -1372,6 +1372,11 @@ test('cold start: without the server clock every panel still shows its own state
       await feed.refresh();
       const s = feed.select();
       assert.equal(s.now, null, reason);
+      if (reason === 'auth_required') {
+        assert.equal(feed.signedOut(), true);
+        assert.deepEqual(s.feeds, {}, 'auth failure leaves the initial board untouched');
+        feed.stop(); continue;
+      }
       assert.ok(feed.settled());
       for (const name of DATA_PANELS) assert.deepEqual([s.states[name].state, s.states[name].reason, s.states[name].ageSeconds], ['broken', reason, null], `${reason} ${name}`);
       assert.deepEqual([s.states.history.state, s.states.history.reason], ['broken', reason]);
@@ -1393,7 +1398,9 @@ test('cold start: without the server clock every panel still shows its own state
     globalThis.fetch = async () => json(401, { ok: false, reason: 'auth_required' }, { Date: 'Wed, 14 Oct 2026 17:42:22 GMT' });
     const dated = createFeed(() => {});
     await dated.refresh();
-    assert.ok(Math.abs(Date.parse(dated.select().now) - Date.parse('2026-10-14T17:42:22.000Z')) < 1000);
+    assert.equal(dated.signedOut(), true);
+    assert.equal(dated.select().now, null, 'auth response cannot move the board clock');
+    dated.stop();
   } finally { globalThis.fetch = realFetch; }
 });
 

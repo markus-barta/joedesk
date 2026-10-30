@@ -8,11 +8,12 @@ import { toColumns, transferables, sessionCloses, DESK_IDS } from './history-mod
 import { indexResults, transferables as resultsTransferables } from './results-model.js';
 
 const previous = { history: null, results: null }, posted = { history: null, results: null };
-import { readJSON } from './transport.js';
-const auth = {};
+import { readJSON, createBoardSession } from './transport.js';
+const session = createBoardSession();
+let frozen = false;
+const evidence = responses => Object.fromEntries(responses.map(([url, res]) => [url, res.auth]));
 async function read(url) {
   const res = await readJSON(url);
-  auth[url] = res.auth;
   return { ...res, reason: res.headers?.get('X-Joe-Feed-Reason') ?? (res.status === 200 ? undefined : res.payload?.reason),
     generatedAdvancedAt: res.headers?.get('X-Joe-Generated-Advanced-At') ?? undefined };
 }
@@ -22,6 +23,9 @@ const clockNow = res => (res.clock ? { at: new Date(Date.parse(res.clock.at) + p
 
 async function pollHistory(started) {
   const [res, sidecar] = await Promise.all([read('/joe/history.json'), read('/joe/history-continuity.json')]);
+  const auth = evidence([['/joe/history.json', res], ['/joe/history-continuity.json', sidecar]]);
+  for (const [key, authValue] of Object.entries(auth)) session.observe(key, { auth: authValue });
+  if (frozen || session.signedOut()) { self.postMessage({ kind: 'blocked', feed: 'history', auth }); return; }
   const accepted = acceptRead('history', res, previous.history);
   previous.history = accepted;
   const value = accepted.value;
@@ -41,6 +45,9 @@ async function pollHistory(started) {
 // computed from the index on the page); an unchanged record is not re-sent.
 async function pollResults(started) {
   const res = await read('/joe/results.json');
+  const auth = evidence([['/joe/results.json', res]]);
+  session.observe('/joe/results.json', res);
+  if (frozen || session.signedOut()) { self.postMessage({ kind: 'blocked', feed: 'results', auth }); return; }
   const accepted = acceptRead('results', res, previous.results);
   previous.results = accepted;
   const value = accepted.value;
@@ -54,6 +61,13 @@ async function pollResults(started) {
 }
 
 self.onmessage = ({ data }) => {
+  if (typeof data?.frozen === 'boolean') {
+    frozen = data.frozen;
+    // A document posted while another read was expiring may not have reached
+    // the page. Recovery sends complete columns instead of an unchanged hint.
+    posted.history = posted.results = null;
+    return;
+  }
   const started = performance.now();
   if (data === 'poll') pollHistory(started);
   if (data === 'results') pollResults(started);

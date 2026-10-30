@@ -157,6 +157,9 @@
 </section>
 <noscript><section class="private"><div class="private-card"><h1>JavaScript is off.</h1><p>The household board needs JavaScript to read its paper data.</p></div></section></noscript>
 
+<div class="signed-out-banner" id="signedOutBanner" role="status" hidden>
+  <div class="page"><strong>Signed out — reload to sign in</strong><button type="button" class="btn" data-sign-in-reload>Reload</button><span id="lastKnownLabel">Last known — signed out</span></div>
+</div>
 <div id="app">
 <header class="top">
   <div class="page top-in">
@@ -173,7 +176,7 @@
   </div>
   <div class="page health-wrap"><div class="pop" id="healthPop" role="dialog" aria-label="Board status details" tabindex="-1"></div></div>
 </header>
-<div class="page status-alert" id="statusAlert" aria-hidden="true"><button type="button" id="statusAlertControl" aria-expanded="false" aria-controls="healthPop" aria-haspopup="dialog"><svg class="i" aria-hidden="true"><use href="#i-stop"/></svg><span id="statusAlertText" data-clamp="1"></span></button><button type="button" class="btn quiet" id="signInReload" data-sign-in-reload hidden>Reload</button></div>
+<div class="page status-alert" id="statusAlert" aria-hidden="true"><button type="button" id="statusAlertControl" aria-expanded="false" aria-controls="healthPop" aria-haspopup="dialog"><svg class="i" aria-hidden="true"><use href="#i-stop"/></svg><span id="statusAlertText" data-clamp="1"></span></button></div>
 <div class="vh" id="statusAnnouncement" aria-live="polite" aria-atomic="true"></div>
 
 <main class="page" id="main">

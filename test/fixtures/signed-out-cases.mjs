@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 const { CELL_REASON } = await import('../../public/joe/health.js');
 export const reasons = Object.keys(CELL_REASON);
-export const authShapes = ['302 to SSO', 'opaqueredirect', '401', '403', 'HTML body'];
+export const authShapes = ['302 to SSO', '303 to SSO', 'opaqueredirect', '401', '403', 'HTML content type', 'HTML body', 'HTML fragment', 'followed cross-origin redirect'];
 export const widths = [390, 1440];
 export const screens = ['desk', 'history', 'results', 'settings'];
 export const blame = 'Broker connection down — tell Amy to check the feed; stale; not exact';
@@ -22,15 +22,18 @@ export function pageFixture() {
 export const dirtyPreview = config => JSON.stringify({ baseRev: config.rev, values: { 'desks.stage0.capEur': '1001' } });
 export function authResponse(shape) {
   if (shape === 'opaqueredirect') return { type: 'opaqueredirect', status: 0 };
+  if (shape === 'followed cross-origin redirect') return { status: 200, redirected: true, url: 'https://sso.example.invalid/sign_in', headers: new Headers(), json: async () => ({}) };
+  if (shape === 'HTML content type') return new Response('<h1>Sign in</h1>', { headers: { 'Content-Type': 'text/html' } });
+  if (shape === 'HTML fragment') return new Response('<form>Sign in</form>');
+  if (shape === '303 to SSO') return new Response(null, { status: 303, headers: { Location: 'https://sso.example.invalid/sign_in' } });
   if (shape === '302 to SSO') return new Response(null, { status: 302, headers: { Location: 'https://sso.example.invalid/sign_in' } });
   if (shape === 'HTML body') return new Response('<!doctype html><html><body>Sign in</body></html>');
   return new Response('{}', { status: Number(shape) });
 }
 
-// Runs unchanged inside Chrome. Collect the document's rendered text and all
-// rendered titles/accessibility names; never filter by the expected wording.
-// Values are discovered from the rendered DOM before sign-out, not a fixture
-// allow-list. Preserve each region separately so another copy cannot mask loss.
+// Historical non-auth snapshot schema. Keep its shape unchanged so the old
+// hashes remain independently comparable; authentication uses retainedDocument
+// below and never uses these selected-value collections as an oracle.
 export function renderedSnapshot(document, visible) {
   const elements = [...document.querySelectorAll('*')].filter(visible);
   const norm = text => String(text ?? '').replace(/\s+/g, ' ').trim();
@@ -54,18 +57,35 @@ export function renderedSnapshot(document, visible) {
     reload: visible(document.getElementById('signInReload')),
     ages: elements.filter(n => n.hasAttribute('data-age')).map(n => norm(n.innerText)) };
 }
+// Serialize the entire retained body, including hidden markup and every live
+// form value. Only the two documented board-level marking attributes normalize.
+// This has no wording or value allow-list and runs unchanged in the browser.
+export function retainedDocument(document) {
+  const serialize = node => {
+    if (typeof node === 'string') return node;
+    if (node.nodeType === 3 || node.nodeType === 8) return [node.nodeType, node.nodeValue];
+    if (node.id === 'signedOutBanner') return null;
+    const attrs = node.attributes?.[Symbol.iterator] ? Array.from(node.attributes, a => [a.name, a.value]) : Object.entries(node.attributes ?? {});
+    const attributes = attrs.filter(([key]) => !(node.id === 'app' && key === 'data-last-known')).map(([key, value]) =>
+      [key, node.id === 'main' && key === 'aria-describedby' ? value.split(/\s+/).filter(v => v !== 'lastKnownLabel').join(' ') : value])
+      .filter(([key, value]) => !(node.id === 'main' && key === 'aria-describedby' && !value));
+    const children = Array.from(node.childNodes ?? node.children ?? []).map(serialize).filter(v => v !== null);
+    return [node.tagName, attributes, node.value, node.checked, node.selected, children];
+  };
+  const app = document.getElementById('app'), banner = document.getElementById('signedOutBanner');
+  return { dom: JSON.stringify(serialize(document.body)),
+    headline: banner.querySelector('strong').textContent,
+    reload: !banner.hidden && Boolean(banner.querySelector('[data-sign-in-reload]')),
+    marked: app.hasAttribute('data-last-known') && document.getElementById('main').getAttribute('aria-describedby')?.split(/\s+/).includes('lastKnownLabel'),
+    label: document.getElementById('lastKnownLabel').textContent };
+}
 export function assertSignedOutPage(after, before, tag) {
   assert.equal(after.headline, 'Signed out — reload to sign in', tag);
   assert.equal(after.reload, true, `${tag}: Reload visible`);
-  assert.doesNotMatch(after.copy, /broker connection (?:down|unstable|not confirmed|has not)|not reported by the broker|broker is offline|tell Amy|check the feed|feed (?:stopped|failed|down|unavailable)|last good|not set/i, tag);
-  assert.doesNotMatch(after.copy, /\b\d+\s*(?:s|min|h|days?) (?:ago|old)\b/i, `${tag}: ages are unknown`);
-  assert.deepEqual(after.ages, [], `${tag}: no ticking age nodes`);
-  for (const [id, values] of Object.entries(before.values)) {
-    for (const value of values) {
-      // A dirty field's caption changes its state word, retaining its amount.
-      const retained = value.replace(/^Saved: /, '').replace(/^Last good: /, '');
-      assert.ok(after.regions[id].replace(/\s/g, '').includes(retained.replace(/\s/g, '')), `${tag}/${id}: retained ${JSON.stringify(retained)}`);
-    }
-    if (values.length) assert.match(after.copy, /last known/i, `${tag}/${id}: retained values labelled`);
+  assert.equal(after.marked, true, `${tag}: main describes the entire board as last known`);
+  assert.equal(after.label, 'Last known — signed out', tag);
+  if (after.dom !== before.dom) {
+    let at = 0; while (at < before.dom.length && before.dom[at] === after.dom[at]) at++;
+    assert.fail(`${tag}: retained DOM differs at byte ${at}; before ${JSON.stringify(before.dom.slice(Math.max(0, at - 100), at + 180))}; after ${JSON.stringify(after.dom.slice(Math.max(0, at - 100), at + 180))}`);
   }
 }

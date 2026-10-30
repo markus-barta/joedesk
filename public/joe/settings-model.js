@@ -5,18 +5,10 @@
 // function here can produce anything but mode "paper".
 import { digits, money, NB } from './format.js';
 import { validateBoardSettings } from './board-settings.js';
-import { present, signedOut } from './presentation.js';
 
 // Display settings have their own save; never add them to the fleet draft.
 const ACCOUNT_START_UNSET = "Not set: the whole account's 'Since start' stays hidden until you set it.";
-export function accountStartRow(snapshot, board = snapshot) {
-  if (signedOut(board) || signedOut(snapshot) || snapshot?.reason === 'auth_required') {
-    const start = snapshot?.accountStart ?? snapshot?.lastKnownAccountStart;
-    return {
-      text: `Account start: ${start ? `${money(start.amountEur)} on ${start.date} · ` : ''}${present('', { signedOut: true, value: start }, 'warning')}`,
-      note: present('', { signedOut: true }, 'status'), editable: false,
-    };
-  }
+export function accountStartRow(snapshot) {
   const value = { accountStart: snapshot?.accountStart };
   const valid = !validateBoardSettings(value) && ((snapshot?.reason === null) === (value.accountStart !== null));
   const start = valid && snapshot.reason === null ? value.accountStart : null;

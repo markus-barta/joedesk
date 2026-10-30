@@ -13,15 +13,13 @@ const R = await import('../public/joe/results.js');
 const { boardStates } = await import('../public/joe/board-state.js');
 const { toColumns } = await import('../public/joe/history-model.js');
 const { indexResults } = await import('../public/joe/results-model.js');
-const { createFeed } = await import('../public/joe/feed.js');
-const { createBoardSettings } = await import('../public/joe/board-settings-write.js');
 const { statusLine } = await builders('history.js', ['statusLine']);
 const previousDocument = Object.getOwnPropertyDescriptor(globalThis, 'document');
 if (!globalThis.document) globalThis.document = { documentElement: { dataset: {} } };
 let runtimeHtml, sourceHtml, logHtml;
 try { ({ runtimeHtml, sourceHtml, logHtml } = await builders('settings.js', ['runtimeHtml', 'sourceHtml', 'logHtml'])); }
 finally { if (previousDocument) Object.defineProperty(globalThis, 'document', previousDocument); else delete globalThis.document; }
-const { deskCard, deskProblem } = await builders('desk.js', ['deskCard', 'deskProblem']);
+const { deskCard } = await builders('desk.js', ['deskCard']);
 const { dayContent, heroSentence, renderStatus } = await builders('results.js', ['dayContent', 'heroSentence', 'renderStatus']);
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/valid.json', import.meta.url)));
 const start = { amountEur: 100000, date: '2026-01-01' };
@@ -89,16 +87,6 @@ function resultsStatus(view) {
   try { renderStatus(view); return doc.querySelector('#resStatus').innerHTML; }
   finally { if (previous) Object.defineProperty(globalThis, 'document', previous); else delete globalThis.document; }
 }
-const forbidden = /broker (?:connection (?:down|unstable|not confirmed)|is offline)|not reported by the broker|\bAmy\b|\bfeed\b|last good|not set|\b\d+[\s\u00a0]*(?:s|min|h|days?) (?:ago|old)|data-age=/i;
-function readerCopy(html) {
-  const doc = htmlDocument(String(html));
-  for (const node of doc.querySelectorAll('[aria-hidden="true"]')) node.remove();
-  return [doc.textContent, ...[...doc.querySelectorAll('[aria-label]'), ...doc.querySelectorAll('[title]')].flatMap(n => [n.getAttribute('aria-label'), n.getAttribute('title')]),
-    ...(doc.querySelectorAll('[data-age]').length ? ['data-age='] : [])].filter(Boolean).join(' ');
-}
-function assertSignedOut(html, name) {
-  assert.doesNotMatch(readerCopy(html), forbidden, name);
-}
 function nonAuthSnapshot() {
   const result = {};
   for (const reason of failureReasons) for (const missing of [false, true]) {
@@ -119,106 +107,4 @@ if (process.argv.includes('--capture-non-auth')) {
     assert.deepEqual(nonAuthSnapshot(), JSON.parse(readFileSync(snapshotURL)), 'frozen at fa6db1d; compare actual markup, accessible names and status text');
   });
 
-  async function signedOutFeed(t, { failed = false, coldHistory = false } = {}) {
-    t.mock.method(globalThis, 'fetch', async url => {
-      const file = String(url);
-      if (refused && file.endsWith(coldHistory ? 'state.json' : 'history.json')) return new Response('{}', { status: 401 });
-      if (coldHistory && file.endsWith('history.json')) return new Response(JSON.stringify({ reason: 'history_size_limit' }), { status: 503 });
-      if (file.endsWith('state.json')) return new Response(JSON.stringify({ serverNow: data.receivedAt, feeds: { data: { value: data } }, panels: {} }));
-      return new Response(JSON.stringify(file.includes('fleet-config') ? fixture['fleet-config'] : file.endsWith('history.json') ? fixture.history : fixture.results));
-    });
-    const data = failed ? (() => { const f = JSON.parse(readFileSync(new URL('../fixtures/failures/a-gateway-up-but-dead.json', import.meta.url))); return { ...f.payload, receivedAt: f.receivedAt }; })() : structuredClone(fixture.data);
-    let refused = false;
-    const feed = createFeed(() => {});
-    t.after(feed.stop);
-    await feed.refresh(); refused = true; await feed.refresh();
-    assert.equal(feed.select().states.session, 'signed-out');
-    return feed.select();
-  }
-
-  test('JOED-173 fix2 Positions and kept: gateway-dead plus history 401 never blames the broker', async t => {
-    const ctx = await signedOutFeed(t, { failed: true });
-    for (const html of [D.positionsHtml(ctx).html, D.keptHtml(ctx)]) {
-      assertSignedOut(html, 'position body and field dash accessible names');
-      assert.match(readerCopy(html), /last known|unknown while signed out/i);
-    }
-  });
-
-  test('JOED-173 fix2 compact warnings: Check-in and Results inherit the board session', () => {
-    const ctx = inject(context(), 'snapshot_stale');
-    for (const desk of ctx.feeds.data.value.desks) desk.heartbeatAt = new Date(Date.parse(ctx.now) - 180000).toISOString();
-    const problem = deskProblem(ctx, 'j', D.deskFacts(ctx));
-    assert.match(problem.detail, /Check-in:.*unknown while signed out/);
-    assert.match(problem.detail, /Results:.*last known.*unknown while signed out/);
-    assertSignedOut(D.compactDesk(ctx, 'j'), 'compact row');
-    const clock = D.disclosureProblem([['Clock', { state: 'not reported', value: null }]], ctx);
-    assert.match(clock.detail, /unknown while signed out/, 'synthetic warnings use the same board context');
-  });
-
-  test('JOED-173 fix2 account-start auth failure: Since start and Settings never say not set', async t => {
-    let refused = false;
-    t.mock.method(globalThis, 'fetch', async () => refused ? new Response('{}', { status: 401 }) : new Response(JSON.stringify({ accountStart: start, reason: null })));
-    const settings = createBoardSettings();
-    await settings.refresh(); refused = true; await settings.refresh();
-    const snapshot = settings.snapshot();
-    assert.equal(snapshot.reason, 'auth_required');
-    const ctx = inject(context(), 'gateway_down');
-    for (const text of [A.subParts(ctx, null, snapshot).wide, JSON.stringify(S.accountStartRow(snapshot))]) {
-      assertSignedOut(text, 'protected account start');
-      assert.match(text, /signed out/);
-    }
-    assert.equal(S.accountStartRow(snapshot).editable, false);
-  });
-
-  test('JOED-173 fix2 whole-account and Cash: signed-out missing accessible names override broker reasons', async t => {
-    const ctx = await signedOutFeed(t, { failed: true });
-    for (const html of [A.valueHtml(ctx.states.paperAccount), A.cashPart(ctx.states.paperCash), U.cashCaption(ctx.states.paperCash, 'settings')]) {
-      assertSignedOut(html, 'account/Cash labels');
-      assert.match(html, /unknown while signed out/);
-    }
-  });
-
-  test('JOED-173 fix2 Details: row-only source_unavailable diagnostic survives sign-out', () => {
-    const ctx = context(), row = ctx.states.positions.value[0];
-    row.mark = null; row.reasons = { ...row.reasons, mark: 'source_unavailable' };
-    for (const cell of Object.values(ctx.states)) if (cell && typeof cell === 'object') cell.signedOut = true;
-    ctx.states.session = 'signed-out';
-    assert.match(D.healthPop(ctx, H.statusPresentation(ctx)), /Last known diagnostics before sign-out:.*not reported by the broker/);
-    assertSignedOut(D.positionsHtml(ctx).html, 'row diagnostic belongs only in Details');
-    assert.equal(row.reasons.mark, 'source_unavailable');
-  });
-
-  test('JOED-173 fix2 cold History: size-limit failure then state 401 shows signed-out copy without a value', async t => {
-    const ctx = await signedOutFeed(t, { coldHistory: true });
-    assert.equal(ctx.states.history.value, null);
-    assertSignedOut(statusLine(ctx.states.history), 'cold History');
-    assert.match(statusLine(ctx.states.history), /unknown while signed out/);
-    assert.doesNotMatch(statusLine(ctx.states.history), /refresh failed|history is full/i);
-  });
-
-  test('JOED-173 fix2 memoized views: sign-out invalidates Desk facts and the whole Results page with unchanged failure reasons', t => {
-    const ctx = inject(context(), 'snapshot_stale', { signedOut: false });
-    const before = D.deskFacts(ctx);
-    const after = { ...ctx, states: { ...ctx.states, session: 'signed-out',
-      ...Object.fromEntries(Object.entries(ctx.states).map(([key, cell]) => [key, { ...cell, signedOut: true }])) } };
-    assert.equal(D.deskFacts(after).view.cell.signedOut, true, 'memo must not retain the signed-in Results view');
-    assert.equal(before.view.cell.signedOut, false, 'previous view remains unchanged');
-
-    const previous = Object.getOwnPropertyDescriptor(globalThis, 'document'), controls = { ...R.RS };
-    const nodes = new Map();
-    const node = selector => {
-      if (!nodes.has(selector)) nodes.set(selector, { innerHTML: '', textContent: '', clientWidth: 0, clientHeight: 0, querySelector: () => null, querySelectorAll: () => [] });
-      return nodes.get(selector);
-    };
-    globalThis.document = { activeElement: null, querySelector: node, querySelectorAll: () => [] };
-    t.after(() => { if (previous) Object.defineProperty(globalThis, 'document', previous); else delete globalThis.document; Object.assign(R.RS, controls); R.forgetResults(); });
-    Object.assign(R.RS, { period: 'week', anchor: null, sel: null, desk: 'all', cal: null, moved: false });
-    R.forgetResults();
-    R.renderResults(ctx);
-    const signedIn = node('#rheroL').innerHTML;
-    R.renderResults(after);
-    assert.notEqual(node('#rheroL').innerHTML, signedIn, 'sign-out must rerender beyond the chart status');
-    assert.match(node('#rheroL').innerHTML, /unknown while signed out/);
-    for (const [selector, element] of nodes) assertSignedOut(element.innerHTML, selector);
-  });
 }

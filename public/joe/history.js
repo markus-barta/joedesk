@@ -4,10 +4,9 @@
 // with the shown window, its Controls, J's bookkeeping with its captured
 // results, and the desk changes this browser saw.
 import { $, $$, icon, term, st, pl, inlineMark, swatch, ageSpan, patch, statePhrase, stateCaption } from './ui.js';
-import { esc, amountOf, eur, dayDDM, dayDM, timeHM, money, digits, MINUS, NB } from './format.js';
+import { esc, amountOf, eur, age, dayDDM, dayDM, timeHM, money, digits, MINUS, NB } from './format.js';
 import { decimalUnits } from './contracts/decimal.mjs';
 import { cellReason } from './health.js';
-import { present, presentAge as age, signedOut } from './presentation.js';
 import { exactCell } from './performance.js';
 import { drawChart, eurAxis, changeAxis, axis, overviewTargets, createWheelLatch, wheelPixels, wheelZoomFactor, createAxisMode, chartHintSeen, dismissChartHint, DRAWN_SLACK } from './chart.js';
 import { DESK_IDS, ASSUMED_BASELINE, OBSERVATION_INTERVAL_MS, continuitySeries, coverageUnknownAt, sharedWindowCompare, basisNotice, toColumns, rowAt, rangeSpanMs,
@@ -56,11 +55,10 @@ function toolsHtml() {
 // History's own state, with its age and reason. It sits inside the chart's
 // fixed box and the plot starts below it, so a change of state moves nothing.
 function statusLine(cell) {
-  if (signedOut(cell)) return `<div class="hist-state" data-state="broken">${st('none', present('', cell, 'history'))}</div>`;
   const p = statePhrase(cell, 'hist', 'last good history');
   if (p.state === 'fresh') return '';
-  const why = cell?.reason ? esc(cellReason(cell.reason, cell)) : null;
-  const ago = () => ageSpan('hist', cell.ageSeconds == null ? 'an unknown time' : `${age(cell.ageSeconds)} ago`, cell);
+  const why = cell?.reason ? esc(cellReason(cell.reason)) : null;
+  const ago = () => ageSpan('hist', cell.ageSeconds == null ? 'an unknown time' : `${age(cell.ageSeconds)} ago`);
   const text = p.state === 'not reported' ? `History has not arrived yet${why && cell.reason !== 'feed_not_received' ? `: ${why}` : ''}.`
     : cell.value == null ? `History refresh failed: ${why ?? 'not available'}. Nothing to show yet.`
       : cell.retained ? `${p.state === 'broken' ? 'History refresh failed' : 'History update not used'}: ${why ?? 'not available'}. Showing the last good history from ${ago()}.`
@@ -907,7 +905,7 @@ const EVENT_WORD = { state: 'state', action: 'what it does', learning: 'learning
 function eventsHtml(ctx) {
   const list = ctx.events.recent();
   if (!list.length) return `<li class="ev-empty"><span class="ev">${icon('info')}</span><div>${ctx.events.baseline() ? 'Baseline recorded. Changes appear when later snapshots differ.' : 'Waiting for the first snapshot.'}</div></li>`;
-  return list.map(e => `<li><span class="ev">${icon(EVENT_ICON[e.kind] ?? 'info')}</span><div><div>${esc(present(e.summary, { signedOut: signedOut(ctx), value: e }, 'warning'))}</div><div class="m">${dayDDM(e.snapshotAt)}, ${timeHM(e.snapshotAt)} · ${LABEL[e.deskId] ?? esc(e.deskId)} · ${EVENT_WORD[e.kind] ?? esc(e.kind)} · ${esc(present(e.sourceLabel, ctx))}</div></div></li>`).join('');
+  return list.map(e => `<li><span class="ev">${icon(EVENT_ICON[e.kind] ?? 'info')}</span><div><div>${esc(e.summary)}</div><div class="m">${dayDDM(e.snapshotAt)}, ${timeHM(e.snapshotAt)} · ${LABEL[e.deskId] ?? esc(e.deskId)} · ${EVENT_WORD[e.kind] ?? esc(e.kind)} · ${esc(e.sourceLabel)}</div></div></li>`).join('');
 }
 
 const hatch = '<svg viewBox="0 0 22 10" aria-hidden="true"><defs><pattern id="ht-lg" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="4" stroke="var(--ink-3)" stroke-width="1.2"/></pattern></defs><rect x="1" y="0.5" width="20" height="9" rx="2" fill="url(#ht-lg)"/></svg>';

@@ -6,7 +6,7 @@
 // History's natural input and, on wider screens, an overview strip.
 // Read-only: nothing here can trade, and kept holdings are never actionable.
 import { $, $$, icon, term, bn, statePhrase, patch, dashWords, moneyNoWrap, NOT_EXACT } from './ui.js';
-import { esc, money, digits, dayDM, dayDDM, timeHM, MINUS, NB, cashAmount } from './format.js';
+import { esc, money, digits, dayDM, dayDDM, timeHM, age, MINUS, NB, cashAmount } from './format.js';
 import { decimalUnits } from './contracts/decimal.mjs';
 import { cellReason, capital } from './health.js';
 import { outageValue, trustedCurrent, NOT_EXACT_REASONS } from './board-state.js';
@@ -16,7 +16,6 @@ import { panWindow, zoomWindow, placeWindow, endsAtNewest, atLiveEdge, easeOut, 
 import { zonedInstant, VIENNA } from './time.mjs';
 import * as M from './account-model.js';
 import { readJSON, readFailure, boardSession } from './transport.js';
-import { present, presentAge, presentAge as age, signedOut } from './presentation.js';
 
 const TONE_ICON = { ok: 'ok', warn: 'half', bad: 'stop', none: 'ring' };
 const MIN = 60e3;
@@ -59,7 +58,7 @@ export const accountAxis = () => yAxis;
 export function valueHtml(cell) {
   const n = cell?.value?.currency === 'EUR' ? units(cell.value) : null;
   if (n === null) {
-    const words = `Whole account: ${dashWords(cell?.reason ?? (cell?.state === 'not reported' ? 'feed_not_received' : null), cell)}`;
+    const words = `Whole account: ${dashWords(cell?.reason ?? (cell?.state === 'not reported' ? 'feed_not_received' : null))}`;
     return `<span class="bn muted" role="img" title="${esc(words)}" aria-label="${esc(words)}">—</span>`;
   }
   return bn(n, 'EUR', false);
@@ -82,15 +81,6 @@ export function changeHtml(change, chip, chipTitle) {
 // Since start, against the account start in Settings. Until it is set the
 // board shows no figure and says where to set it.
 function sinceParts(cell, start, settings) {
-  if (signedOut(cell) || signedOut(settings) || settings?.reason === 'auth_required') {
-    const known = start ?? settings?.lastKnownAccountStart;
-    if (known && cell?.lastKnown) {
-      const parts = sinceParts(cell.lastKnown, known, { reason: null });
-      return Object.fromEntries(Object.entries(parts).map(([key, value]) => [key, value ? `${value} · ${present('', { signedOut: true, value: known }, 'warning')}` : '']));
-    }
-    const words = `Since start: ${present('', { signedOut: true, value: start }, 'warning')}`;
-    return { wide: words, narrow: words, detail: '' };
-  }
   const n = trustedCurrent(cell) ? units(cell.value) : null;
   if (!start) {
     const reason = settings?.reason;
@@ -114,26 +104,20 @@ function sinceParts(cell, start, settings) {
 // is withheld (JOED-91). A reason the account value shares is said once, in
 // the change line; the name always carries it.
 export function cashPart(cash, shared = null) {
-  if (signedOut(cash)) {
-    const value = cash?.value;
-    const n = value ? units(value) : null, caption = present('', cash, 'warning');
-    const name = `Cash: ${caption}`;
-    return `<span class="acct-cash" data-cash="acct.cash" data-state="${esc(cash?.state ?? 'broken')}" role="group" title="${esc(name)}" aria-label="${esc(name)}">Cash <b>${n === null ? '—' : moneyNoWrap(n, value.currency)}</b> · ${esc(caption)}</span>`;
-  }
   const value = cash?.state === 'broken' && cash.retained ? null : cash?.value ?? null;
   const n = value ? units(value) : null;
   const reason = cash?.reason ?? (n === null ? 'feed_not_received' : null);
-  const why = reason ? cellReason(reason, cash) : '', own = reason && reason !== shared ? why : '';
+  const why = reason ? cellReason(reason) : '', own = reason && reason !== shared ? why : '';
   let shown, name;
   if (n !== null) {
     shown = `<b>${moneyNoWrap(n, value.currency)}</b>${own ? ` · ${esc(own)}` : ''}`;
     name = `${cashAmount(value).title}${cash?.reason ? ` · ${why}` : ''}`;
   } else if (NOT_EXACT_REASONS.has(cash?.reason)) {
     shown = `<b class="muted">—</b> · ${NOT_EXACT}${own && own !== NOT_EXACT ? ` · ${esc(own)}` : ''}`;
-    name = `Cash: ${dashWords(cash.reason, cash)}`;
+    name = `Cash: ${dashWords(cash.reason)}`;
   } else {
     shown = `<b class="muted">—</b>${own ? ` · ${esc(own)}` : ''}`;
-    name = `Cash ${dashWords(reason, cash)}`;
+    name = `Cash ${dashWords(reason)}`;
   }
   return `<span class="acct-cash" data-cash="acct.cash" data-state="${esc(cash?.state ?? 'not reported')}" role="group" title="${esc(name)}" aria-label="${esc(name)}">Cash ${shown}</span>`;
 }
@@ -141,13 +125,13 @@ export function cashPart(cash, shared = null) {
 // Plain text: nothing about a kept holding can be acted on.
 export function keptWorth(kept, shared) {
   const rows = kept?.value;
-  const own = signedOut(kept) ? ` · ${present('', kept, 'warning')}` : kept?.reason && kept.reason !== shared ? ` · ${esc(cellReason(kept.reason, kept))}` : '';
-  if (!rows || (!signedOut(kept) && outageValue(kept))) return { html: `<b>—</b>${own}`, rows: null };
+  const own = kept?.reason && kept.reason !== shared ? ` · ${esc(cellReason(kept.reason))}` : '';
+  if (!rows || outageValue(kept)) return { html: `<b>—</b>${own}`, rows: null };
   const list = [...rows].sort((a, b) => a.symbol.localeCompare(b.symbol)).map(r => {
     const n = units(r.marketValue);
     return `<b class="nowrap">${esc(r.symbol)} ${n === null ? '—' : esc(money(n, r.marketValue.currency))}</b>`;
   });
-  return { html: list.join(' · ') + (signedOut(kept) ? own : ''), rows: rows.length };
+  return { html: list.join(' · '), rows: rows.length };
 }
 export function subParts(ctx, start = accountStart(), settings = boardSettingsState()) {
   const cell = ctx.states.paperAccount, shared = cell?.reason ?? null;
@@ -186,8 +170,8 @@ export function useAccountHistory(body, at = performance.now()) {
 }
 // A worker's or the page's reply; returns whether the history is current.
 function useReply(reply) {
-  boardSession.observe('/joe/account-history.json', { auth: reply?.reason === 'auth_required' ? true
-    : reply?.kind === 'unchanged' || reply?.status === 200 || reply?.value ? false : undefined });
+  if (!boardSession.accept('/joe/account-history.json', { auth: reply?.reason === 'auth_required' ? true
+    : reply?.kind === 'unchanged' || reply?.status === 200 || reply?.value ? false : undefined })) return false;
   if (reply?.kind === 'unchanged' && store.value) { store.reason = null; store.loadedAt = performance.now(); return true; }
   if (reply?.kind === 'account' && reply.value) {
     Object.assign(store, { value: reply.value, reason: null, loadedAt: performance.now(), key: reply.key ?? null, version: store.version + 1 });
@@ -285,10 +269,9 @@ function seriesFor(source, live) {
 // One plain line under the chart about the history shown, or ''. A failed
 // read leads, then the store's own state, then a range longer than the record.
 function noteText(series, source, now) {
-  if (signedOut(boardSession)) return present('', { signedOut: true, value: store.value }, 'account history');
   if (store.reason && store.reason !== 'loading') {
-    const why = store.reason === 'contract_invalid' ? 'the history could not be checked' : cellReason(store.reason, boardSession);
-    return store.value ? `Update failed · showing what loaded ${presentAge(age((performance.now() - store.loadedAt) / 1000), boardSession)} ago` : `History unavailable · ${why}`;
+    const why = store.reason === 'contract_invalid' ? 'the history could not be checked' : cellReason(store.reason);
+    return store.value ? `Update failed · showing what loaded ${age((performance.now() - store.loadedAt) / 1000)} ago` : `History unavailable · ${why}`;
   }
   return M.storeNote(series) || M.recordingText(M.coverage(series, AS.range, now), source, now);
 }
@@ -346,7 +329,7 @@ const whenText = ms => { const at = new Date(Math.round(ms)).toISOString(); retu
 export function pointDetails(p, x, series) {
   if (!p) return { html: '', text: '' };
   if (p.gap) {
-    const lines = [`${whenText(x)} Vienna time`, `No value recorded here${p.why ? ` · ${cellReason(p.why, boardSession)}` : ''}`];
+    const lines = [`${whenText(x)} Vienna time`, `No value recorded here${p.why ? ` · ${cellReason(p.why)}` : ''}`];
     return { text: lines.join('\n'), html: `<b>${esc(lines[0])}</b><br>${esc(lines[1])}` };
   }
   const at = new Date(p.x).toISOString(), value = money(p.u);
@@ -392,6 +375,7 @@ function chartLabel(source, range, choice = { mode: 'auto' }) {
     : `The whole paper account, kept holdings included, zoomed: ${spanLabel(AS.shown, source, false)} Vienna time, in euros${axisWords}`;
 }
 function draw() {
+  if (boardSession.signedOut()) return;
   const el = $('#acctChart'), size = el ? sizeOf(el) : null;
   if (!el || !size.w) { syncWindowParts(); return; }
   const ctx = last.ctx, inspect = { description: 'acctInspectHelp', live: $('#acctLive'), points: [] }, pad = padFor();
@@ -551,6 +535,7 @@ function drawStrip(series, full, [a, b], settled) {
 // The change line (or the value's state), the pressed range and the line
 // under the chart, kept in step with the window drawn.
 function syncWindowParts() {
+  if (boardSession.signedOut()) return;
   const ctx = last.ctx;
   if (!ctx) return;
   const cell = ctx.states.paperAccount, state = stateLine(cell), source = M.sourceOf(AS.range);
@@ -591,6 +576,7 @@ const isMac = () => /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '')
 
 // ---------- Rendering ----------
 export function renderAccount(ctx) {
+  if (boardSession.signedOut()) return;
   last.ctx = ctx;
   const root = $('#acctHero');
   if (!root) return;

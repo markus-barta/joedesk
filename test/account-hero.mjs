@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { htmlDocument } from './fixtures/preview-dom.mjs';
 import { MIN, DAY, iso, valid, words, point, SNAP, NOW, history, ctxFor } from './fixtures/account-fixtures.mjs';
 
+const { boardSession } = await import('../public/joe/transport.js');
 const M = await import('../public/joe/account-model.js');
 const A = await import('../public/joe/account.js');
 const { chartHintSeen, dismissChartHint, forgetChartMemory, createAxisMode, CHART_HINT_KEY, CHART_AXES_KEY } = await import('../public/joe/chart.js');
@@ -21,6 +22,7 @@ function page(t, { phone = false, storage = new Map(), body: answer = history() 
     globalThis.document = saved.document; globalThis.matchMedia = saved.matchMedia; globalThis.fetch = saved.fetch;
     if (saved.window) Object.defineProperty(globalThis, 'window', saved.window); else delete globalThis.window;
     if (saved.add) Object.defineProperty(proto, 'addEventListener', saved.add); else delete proto.addEventListener;
+    boardSession.observe('/joe/account-history.json', { auth: false });
     A.forgetAccountHistory(); forgetChartMemory();
     Object.assign(A.AS, { range: '1M', view: null, follow: true, details: false, full: null, shown: null });
   });
@@ -181,9 +183,8 @@ test('JOED-156 hero: a failed read keeps the last good history and says so; with
   let answer = { status: 401 };
   const p = page(t, { body: () => answer });
   await p.render();
-  assert.equal(p.text('#acctNote'), 'Account history unavailable · ages unknown while signed out');
-  assert.equal(p.svg().getAttribute('aria-label'), 'Account history unavailable', 'no history: the chart says so, the live value alone draws nothing');
-  assert.equal(document.querySelector('#acctHero').dataset.history, 'auth_required');
+  assert.equal(boardSession.signedOut(), true);
+  assert.equal(document.querySelector('#acctHero').dataset.history, 'loading', 'auth failure leaves the prior loading render intact');
   answer = history();
   await A.refreshAccountHistory();
   await p.settle();
@@ -500,10 +501,12 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
   assert.deepEqual(sent[1], { read: 'account', have: 'k1' });
   assert.equal(p.svg().dataset.source, 'daily');
   assert.equal(document.querySelector('#acctHero').dataset.history, 'ok');
-  // A worker's failed read keeps the last good history and says why.
+  // An auth failure leaves the complete last good history render intact.
+  const beforeAuth = p.text('#acctNote');
   reply = () => ({ kind: 'account', status: 401, reason: 'auth_required', value: null, key: null, ms: 1 });
   await A.refreshAccountHistory();
-  assert.equal(p.text('#acctNote'), 'Last known account history · ages unknown while signed out');
+  assert.equal(p.text('#acctNote'), beforeAuth);
+  assert.equal(boardSession.signedOut(), true);
   // A failed worker is terminated and hands its read to the page at once.
   reply = () => 'fail';
   await A.refreshAccountHistory();

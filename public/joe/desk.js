@@ -2,9 +2,8 @@
 // kept holdings. Every number keeps its panel state; matching snapshot captions
 // are shared once, while different ages and reasons stay beside their values.
 import { $, icon, term, st, bn, pl, deskMark, inlineMark, symBadge, ageSpan, patch, statePhrase, stateCaption, reservedCaption, interactionWithin, NOT_EXACT, dashWords } from './ui.js';
-import { present, presentAge, presentAge as age, presentWarning, signedOut } from './presentation.js';
-import { esc, amountOf, money, eur, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB, joinUnits } from './format.js';
-import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, diagnosticReason, capital, deskValuesNotExact, STALE_AFTER_S, STUCK_REASON, statusPresentation, executorPresentation } from './health.js';
+import { esc, amountOf, money, eur, age, quantity, sumByCurrency, timeHM, timeHMS, dayDDM, dayDM, dateTimeFull, isZero, localDay, ledgerSize, digits, MINUS, NB, joinUnits } from './format.js';
+import { boardHealthPresentation, boardDiagnostics, brokerState, dataAge, cellReason, capital, deskValuesNotExact, STALE_AFTER_S, STUCK_REASON, statusPresentation, executorPresentation } from './health.js';
 import { sessionBounds, nextOpen, zonedInstant, nyDay, viennaDay, wall, NY, VIENNA, sessionLabel, sessionDayName, zoneGap, USUAL_GAP_HOURS } from './time.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { termLabel } from './terms.js';
@@ -60,11 +59,10 @@ export function toggleDeskDisclosure(key) {
 // Compare the reader's words: gateway_down and upstream_lost deliberately
 // describe the same problem. Only repeated, affected reasons can be shared.
 export function sharedSectionReason(cells) {
-  if (cells.some(signedOut)) return null;
   const counts = new Map();
   for (const cell of cells) {
     if (!cell?.reason || cell.state === 'fresh') continue;
-    const reason = cellReason(cell.reason, cell);
+    const reason = cellReason(cell.reason);
     counts.set(reason, (counts.get(reason) ?? 0) + 1);
   }
   return [...counts].sort((a, b) => b[1] - a[1]).find(([, count]) => count > 1)?.[0] ?? null;
@@ -72,17 +70,15 @@ export function sharedSectionReason(cells) {
 
 // Shared hero and Account lines use the same not-exact words as the cards.
 export function sharedSectionPhrase(cell) {
-  if (signedOut(cell)) return `${cell.value == null ? 'Numbers unavailable' : `${present('', cell, 'retained')} values`} · ${present('', cell)}`;
   return cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason)
     ? `Numbers: ${statePhrase(cell, '').text}`
-    : `Numbers unavailable · ${esc(cellReason(cell?.reason, cell))}`;
+    : `Numbers unavailable · ${esc(cellReason(cell.reason))}`;
 }
 
 // Open's pending prices have their own word. Keep this scoped to Open so
 // Today's fault vocabulary and last-good observation ages stay unchanged.
 function figurePhrase(cell, key, label, held, sharedReason = null) {
   const p = statePhrase(cell, key, held, sharedReason);
-  if (cell?.signedOut) return p;
   if (label === OPEN && waitingOnPrices(cell)) return { ...p, text: 'waiting on prices' };
   if (['Today', OPEN].includes(label) && cell?.state === 'broken' && cell.value != null && !cell.retained)
     return { ...p, text: `unavailable · ${p.text}` };
@@ -91,13 +87,11 @@ function figurePhrase(cell, key, label, held, sharedReason = null) {
 
 // Rank the actual selector states, including retained values. A fresh panel
 // may still contain partial rows; those reasons join the same summary ranking.
-export function disclosureProblem(candidates, board = null) {
+export function disclosureProblem(candidates) {
   const severity = { bad: 3, warn: 2, none: 1 };
-  const problems = candidates.flatMap(([label, original, caption]) => {
-    const cell = signedOut(board) ? { ...original, signedOut: true } : original;
+  const problems = candidates.flatMap(([label, cell, caption]) => {
     // A figure's own marker (Results' Partial or Stale, the record's state, a
     // missing day's money), in its own words.
-    if (signedOut(cell)) return [{ tone: 'none', icon: 'ring', priority: 3, why: null, reason: null, label: `${label}: ${presentWarning('', cell).toLowerCase()}` }];
     if (cell?.mark) return [{ tone: cell.mark.tone, icon: cell.mark.icon, priority: cell.mark.priority ?? (cell.mark.tone === 'bad' ? 3 : severity[cell.mark.tone] ?? 2),
       why: null, reason: cell.mark.why, label: `${label}: ${cell.mark.state}` }];
     const p = figurePhrase(cell, '', label);
@@ -109,7 +103,7 @@ export function disclosureProblem(candidates, board = null) {
     // Unavailable money leads even when its honest not-exact icon is neutral;
     // an old check-in must not obscure that the row's figures are unknown.
     const priority = cell?.state === 'broken' || state === 'unavailable' ? 3 : severity[p.tone];
-    const why = state === 'waiting on prices' ? null : reason ? cellReason(reason, cell) : null;
+    const why = state === 'waiting on prices' ? null : reason ? cellReason(reason) : null;
     return [{ tone: p.tone, icon: p.icon ?? TONE_ICON[p.tone], priority, why, reason: caption || why === state ? null : why, label: `${label}: ${caption ? caption[0].toLowerCase() + caption.slice(1) : state}` }];
   });
   problems.sort((a, b) => b.priority - a.priority || severity[b.tone] - severity[a.tone]);
@@ -139,7 +133,7 @@ function disclosureButton(key, label, bodyId, problem = null) {
 }
 export function rowProblems(cell) {
   return (cell?.value ?? []).flatMap(row => Object.entries(row.reasons ?? {}).map(([field, reason]) =>
-    [`${row.symbol} ${POSITION_FIELDS[field] ?? field}`, { state: 'broken', value: null, reason, signedOut: signedOut(cell) }]));
+    [`${row.symbol} ${POSITION_FIELDS[field] ?? field}`, { state: 'broken', value: null, reason }]));
 }
 
 // Only a feed that sends check-ins can show one as missing; the v2 feed sends
@@ -169,9 +163,9 @@ function deskProblem(ctx, id, facts = null) {
   if (desk?.learning?.status === 'blocked') cells.push(['Learning blocked', { state: 'broken', value: null }]);
   const elapsed = ctx.feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(ctx.now) - Date.parse(ctx.feeds.data.generatedAdvancedAt)) : 0;
   const heartbeat = desk?.heartbeatAt ? gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, ctx.feeds.data.value.generatedAt, elapsed) : null;
-  if (desk && carriesCheckIns(ctx.feeds.data.value) && (heartbeat == null || heartbeat / 1000 >= STALE_AFTER_S)) cells.unshift(['Check-in', { state: heartbeat == null ? 'not reported' : 'stale', value: heartbeat, signedOut: signedOut(ctx) }]);
+  if (desk && carriesCheckIns(ctx.feeds.data.value) && (heartbeat == null || heartbeat / 1000 >= STALE_AFTER_S)) cells.unshift(['Check-in', { state: heartbeat == null ? 'not reported' : 'stale', value: heartbeat }]);
   if (sayFeed) cells.push(['Results', feed]);
-  return disclosureProblem(cells, ctx);
+  return disclosureProblem(cells);
 }
 // The last session's figure as row problems: the day's own Partial/Stale
 // marker (beside an amount or an empty day's dash) and a day whose money is
@@ -192,12 +186,11 @@ function lastSessionProblems(view, f) {
 // "stale", each with its age and reason; without a record, its reason.
 export function resultsFeedProblem(view) {
   const cell = view.cell;
-  if (signedOut(view)) return { ...cell, signedOut: true };
   if (view.ix) {
     if (!cell || cell.state === 'fresh') return null;
-    const ago = presentAge(cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`, cell);
+    const ago = cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`;
     // A refused refresh outranks a day's marker in the row's one visible line.
-    return { mark: { state: cell.retained ? 'last good' : 'stale', why: cell.reason ? `${ago} · ${cellReason(cell.reason, cell)}` : ago, tone: 'warn', icon: 'half', priority: cell.retained ? 3 : 2 } };
+    return { mark: { state: cell.retained ? 'last good' : 'stale', why: cell.reason ? `${ago} · ${cellReason(cell.reason)}` : ago, tone: 'warn', icon: 'half', priority: cell.retained ? 3 : 2 } };
   }
   if (!cell || cell.state === 'not reported') return { state: 'not reported', value: null, reason: view.reason ?? 'feed_not_received' };
   return { state: 'broken', value: null, reason: view.reason ?? cell.reason ?? null };
@@ -262,8 +255,8 @@ export function cellView(cell, key, { signed = true, caption = '', sharedReason 
   const value = cell?.value ?? null;
   const n = amountOf(value);
   const units = value ? decimalUnits(value.amount) : null;
-  const priceWait = !cell?.signedOut && label === OPEN && waitingOnPrices(cell);
-  const missingLabel = `${label}: ${priceWait ? 'waiting on prices' : dashWords(cell?.reason, cell)}`;
+  const priceWait = label === OPEN && waitingOnPrices(cell);
+  const missingLabel = `${label}: ${priceWait ? 'waiting on prices' : dashWords(cell?.reason)}`;
   const html = value == null && label ? `<span class="bn muted" role="img" title="${esc(missingLabel)}" aria-label="${esc(missingLabel)}">—</span>` : bn(units, value?.currency ?? 'EUR', signed);
   return { html, caption: priceWait ? 'Waiting on prices' : stateCaption(cell, key, caption, undefined, sharedReason), state: cell?.state ?? 'not reported', n, units };
 }
@@ -274,7 +267,6 @@ export function boardCaptionCell(ctx) {
   const data = ctx.feeds.data?.value;
   if (!data || !ctx.now) return null;
   const cell = withGenerationAge(panelState(ctx.feeds.data, data, null, ctx.now), ctx.feeds.data, ctx.now);
-  if (ctx.states.session === 'signed-out') return { ...cell, signedOut: true, state: 'broken', ageSeconds: null, retained: true };
   return cell.state === 'fresh' ? null : cell;
 }
 export function sharesBoardCaption(cell, board) {
@@ -284,11 +276,11 @@ export function sharesBoardCaption(cell, board) {
 function cellIcon(cell, sharedReason = null, figureLabel = null) {
   if (!cell || cell.state === 'fresh') return '';
   const p = figurePhrase(cell, '', figureLabel);
-  if (!cell.signedOut && figureLabel === OPEN && waitingOnPrices(cell)) return `<span class="cell-state tone-${p.tone}" role="img" aria-label="Waiting on prices">${icon(p.icon)}</span>`;
+  if (figureLabel === OPEN && waitingOnPrices(cell)) return `<span class="cell-state tone-${p.tone}" role="img" aria-label="Waiting on prices">${icon(p.icon)}</span>`;
   // A not-exact dash names itself (dashWords); its info icon only marks it, with
   // the same words as a pointer tip, so a screen reader hears the reason once.
-  if (!cell.signedOut && notExactDash(cell)) return `<span class="cell-state tone-${p.tone}" aria-hidden="true" title="${esc(capital(statePhrase(cell, '', undefined, sharedReason).text))}">${icon(p.icon)}</span>`;
-  const label = cell.signedOut ? capital(p.text) : `${capital(p.state)}${cell.reason && cellReason(cell.reason, cell) !== sharedReason ? ` · ${cellReason(cell.reason, cell)}` : ''}`;
+  if (notExactDash(cell)) return `<span class="cell-state tone-${p.tone}" aria-hidden="true" title="${esc(capital(statePhrase(cell, '', undefined, sharedReason).text))}">${icon(p.icon)}</span>`;
+  const label = `${capital(p.state)}${cell.reason && cellReason(cell.reason) !== sharedReason ? ` · ${cellReason(cell.reason)}` : ''}`;
   return `<span class="cell-state tone-${p.tone}" role="img" aria-label="${esc(label)}">${icon(p.icon ?? TONE_ICON[p.tone])}</span>`;
 }
 export function percentHtml(hundredths) {
@@ -302,7 +294,6 @@ function healthFacts(ctx, health) {
   const data = feeds.data?.value;
   const reason = esc(capital(health.reason === 'board_ok' ? 'numbers up to date' : health.explanation));
   const facts = [`<span class="st ${health.statusTone} why">${icon(TONE_ICON[health.statusTone])}<span>${reason}</span></span>`];
-  if (signedOut(ctx)) return `<div class="health-facts">${facts[0]}${st('none', `${term('broker')} ${present('', ctx)}`)}${st('none', present('', { signedOut: true, value: data }, 'warning'))}</div>`;
   if (data) {
     const broker = brokerState(states, data);
     const words = { OK: `checked ${ageSpan('strip.broker', `${age(states.gateway?.ageSeconds)} ago`)}`, degraded: 'unstable', down: 'down', unsure: 'has not checked in' };
@@ -314,7 +305,7 @@ function healthFacts(ctx, health) {
   } else {
     const why = feeds.data?.reason && feeds.data.reason !== 'feed_not_received' ? feeds.data.reason : null;
     facts.push(st('none', `${term('broker')} not reported`), st('none', `${term('halt')} not reported`));
-    facts.push(why ? st('bad', `No data · ${esc(cellReason(why, ctx))}`) : st('none', 'No data yet'));
+    facts.push(why ? st('bad', `No data · ${esc(cellReason(why))}`) : st('none', 'No data yet'));
   }
   return `<div class="health-facts">${facts.join('')}</div>`;
 }
@@ -341,16 +332,6 @@ export function healthPop(ctx, health) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
   const problems = boardDiagnostics(states, feeds, now);
-  if (health.reason === 'signed-out') {
-    // Diagnostics deliberately retain original reasons, including row-only
-    // gaps that have no top-level panel reason. Never use these as status copy.
-    const cells = [...Object.values(states), ...rowProblems(states.positions).map(([, cell]) => cell), ...rowProblems(states.kept).map(([, cell]) => cell)];
-    const reasons = [...new Set(cells.filter(cell => cell?.reason && cell.reason !== 'auth_required').map(cell => diagnosticReason(cell.reason)))];
-    return `<h3>${icon('ring')}Board status details</h3>
-    <p class="status-sentence">${present('', ctx, 'status')}</p>${healthFacts(ctx, health)}
-    <p>${esc(problems.join(' '))}</p>${reasons.length ? `<p>Last known diagnostics before sign-out: ${esc(reasons.join('; '))}.</p>` : ''}
-    <p><button type="button" class="btn" data-sign-in-reload>Reload</button></p>`;
-  }
   const executor = executorProblem(data);
   if (executor) problems.push(executor);
   const rows = [];
@@ -359,8 +340,8 @@ export function healthPop(ctx, health) {
     const gateway = data.safety.gateway;
     const broker = brokerState(states, data);
     rows.push(['Data', `${dateTimeFull(data.generatedAt)} · ${ageSpan('pop.data', `${age(receipt)} old`)} · refreshes every 15${NB}s`]);
-    rows.push(['Broker connection', `${broker.word === 'OK' ? 'Answering' : broker.word === 'down' ? 'Down' : broker.word === 'degraded' ? 'Unstable' : 'Not confirmed'}${gateway?.reason ? ` · ${esc(cellReason(gateway.reason, ctx))}` : ''}${gateway?.checkedAt ? ` · checked ${timeHMS(gateway.checkedAt)}` : ' · no check reported'}`]);
-    rows.push(['Emergency stop', data.safety.halt ? `On: ${esc(cellReason(data.safety.haltReason, ctx))}` : 'Off']);
+    rows.push(['Broker connection', `${broker.word === 'OK' ? 'Answering' : broker.word === 'down' ? 'Down' : broker.word === 'degraded' ? 'Unstable' : 'Not confirmed'}${gateway?.reason ? ` · ${esc(cellReason(gateway.reason))}` : ''}${gateway?.checkedAt ? ` · checked ${timeHMS(gateway.checkedAt)}` : ' · no check reported'}`]);
+    rows.push(['Emergency stop', data.safety.halt ? `On: ${esc(cellReason(data.safety.haltReason))}` : 'Off']);
     if (carriesCheckIns(data)) rows.push([term('heartbeat'), data.desks.map(desk => {
       const elapsed = feeds.data.generatedAdvancedAt ? Math.max(0, Date.parse(now) - Date.parse(feeds.data.generatedAdvancedAt)) : 0;
       const ms = gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed);
@@ -372,7 +353,7 @@ export function healthPop(ctx, health) {
     // existing per-desk row still explains its original not-exact total.
     const inheritedDayFault = DESKS.some(id => days[id].kind === 'fault') && ownDayReasons.length > 0 && ownDayReasons.every(reason => NOT_EXACT_REASONS.has(reason));
     rows.push(['Today’s result', esc(days.today.kind === 'notExact' || inheritedDayFault ? dayBreakdown(states, data)
-      : dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received', ctx)}`)]);
+      : dayMethodLabel(data.pnlSources?.day) ?? `Not available · ${cellReason(data.pnlSources?.day?.reason ?? states['today.dayPnl']?.reason ?? 'feed_not_received')}`)]);
     // Before the open Desk's first figure is the last session's, from Results.
     const label = now ? sessionLabel(now) : null;
     if (label?.phase === 'last') {
@@ -493,7 +474,7 @@ export function deskDays(states, data, field = 'dayPnl') {
       : day.kind === 'exact' ? day.estimated ? 'estimated' : 'exact' : day.kind === 'notExact' ? NOT_EXACT
       : cell?.retained ? 'last good' : cell?.state === 'stale' ? 'stale'
         : cell?.value == null && (cell?.state ?? 'not reported') === 'not reported' ? 'not reported' : 'unavailable';
-    const why = word === 'waiting on prices' ? null : day.reason ? cellReason(day.reason, states) : null;
+    const why = word === 'waiting on prices' ? null : day.reason ? cellReason(day.reason) : null;
     const reason = why !== word ? why : null;
     const group = groups.find(g => g.word === word && g.reason === reason);
     if (group) group.ids.push(id); else groups.push({ word, reason, ids: [id] });
@@ -511,7 +492,7 @@ export function dayBreakdown(states, data) {
   const groups = deskDays(states, data).sort((a, b) => dayRank(a) - dayRank(b) || byDesk(a.ids[0], b.ids[0]));
   const today = classifyDays(states, data).today;
   if (today.kind === 'notExact' && groups.every(g => ['exact', 'estimated'].includes(g.word))) {
-    const why = cellReason(today.reason, states);
+    const why = cellReason(today.reason);
     const desks = groups.length === 1 && groups[0].word === 'exact' ? 'each desk exact' : groups.map(g => `${g.word} for ${deskNames(g.ids)}`).join('; ');
     return `Household not exact${why !== NOT_EXACT ? ` · ${why}` : ''}; ${desks}`;
   }
@@ -527,7 +508,7 @@ function openBreakdown(states, data) {
   const eachExact = groups.every(g => g.word === 'exact');
   if (household.kind === 'fault' || (household.kind === 'notExact' && eachExact)) {
     const word = household.kind === 'notExact' ? household.reason === 'open_pnl_unavailable' ? 'waiting on prices' : NOT_EXACT : 'unavailable';
-    const why = word === 'waiting on prices' ? null : household.reason ? cellReason(household.reason, states) : null;
+    const why = word === 'waiting on prices' ? null : household.reason ? cellReason(household.reason) : null;
     const desks = eachExact ? 'each desk exact' : groups.map(g => `${deskNames(g.ids)}: ${g.word}${g.reason ? ` · ${g.reason}` : ''}`).join('; ');
     return `Household ${word}${why && why !== word ? ` · ${why}` : ''}; ${desks}`;
   }
@@ -557,7 +538,6 @@ export function startsDiffer(feeds) {
 // its caption names that desk's own word, as do Details and the cards.
 // For a not-exact Today, preserve the existing shared-reason presentation.
 export function householdPnlReason(states, data, field, sharedReason = null) {
-  if (states[`today.${field}`]?.signedOut) return null;
   if (absentPnl(states, data, field)) return null;
   const results = classifyCells(states, data, field);
   const faulty = DESKS.filter(id => results[id].kind === 'fault');
@@ -566,7 +546,7 @@ export function householdPnlReason(states, data, field, sharedReason = null) {
     // Keep a figure's own fault, shared outage wording and retained ages.
     // Desk attribution explains only a household dash inherited from desks.
     if (cell?.value != null || outageValue(cell) || NOT_EXACT_REASONS.has(cell?.reason)
-      || (reason && cellReason(reason, states) === sharedReason && states.gateway?.reason && cellReason(states.gateway.reason, states) === sharedReason)
+      || (reason && cellReason(reason) === sharedReason && states.gateway?.reason && cellReason(states.gateway.reason) === sharedReason)
       || (reason !== 'source_unavailable' && !faulty.some(id => results[id].reason === reason))) return null;
     const groups = deskDays(states, data, field).filter(g => !['exact', 'estimated'].includes(g.word));
     const isFault = g => g.ids.some(id => results[id].kind === 'fault');
@@ -621,7 +601,6 @@ export function sessionDays(day, count, from = null) {
 // (results.js dayWarning: a missing daily summary first, then partial coverage).
 export function sessionWarning(view, k, desks) {
   if (!view.ix || k >= view.today) return null;
-  if (signedOut(view)) return { label: present('', view.cell, 'retained'), text: presentWarning('', view.cell) };
   if (view.ix.missingDays?.has(k) && RM.dayResult(view.ix, k, desks).count > 0) return { label: 'Stale', text: `Stale: daily summary missing for ${RM.fmtDay(k)}` };
   if (view.ix.partialDays?.has(k)) {
     const reason = RM.partialReasonLabel(view.ix.partialDetails?.get(k));
@@ -640,7 +619,7 @@ export function sessionWarning(view, k, desks) {
 // (feed, start, cut, empty or money), so a row can tell a fault from a fact.
 export function resultsDay(view, k, desks) {
   const warning = sessionWarning(view, k, desks);
-  if (!view.ix) return { units: null, kind: 'feed', reason: `Results unavailable · ${cellReason(view.reason ?? 'feed_not_received', view)}`, warning };
+  if (!view.ix) return { units: null, kind: 'feed', reason: `Results unavailable · ${cellReason(view.reason ?? 'feed_not_received')}`, warning };
   if (view.trackingStart && k < view.trackingStart) return { units: null, kind: 'start', reason: `paper results start on ${RM.fmtDay(view.trackingStart)}`, warning };
   const per = RM.periodOf('day', k, view.today, view.trackingStart);
   const day = RM.rollup(view.ix, per, desks, RM.moneyContext(view.ix, view, per, desks));
@@ -679,7 +658,7 @@ export function deskFacts(ctx) {
   const view = resultsView(ctx);
   const cuts = JSON.stringify(view.cuts.filter(c => !c.now).map(c => [c.desk, c.from, c.at]));
   const starts = sinceStarts(ctx.feeds).effective;
-  const key = [view.ix, view.cols, view.reason, signedOut(view), view.today, view.trackingStart, label?.phase, label?.day, cuts, JSON.stringify(starts)];
+  const key = [view.ix, view.cols, view.reason, view.today, view.trackingStart, label?.phase, label?.day, cuts, JSON.stringify(starts)];
   let memo = factsMemos.find(m => m.key.every((v, i) => v === key[i]));
   if (!memo) {
     const ts = view.trackingStart, trades = closedTrades(view.ix);
@@ -780,7 +759,7 @@ const markHtml = mark => mark ? ` <span class="st warn" title="${esc(mark.text)}
 const figureLink = (html, href, name) => `<a class="fig-link" href="${esc(href)}" aria-label="${esc(name)}">${html}</a>`;
 const plainText = html => html.replace(/<[^>]+>/g, '');
 // Results' record state, when it is not fresh, beside a figure taken from it.
-export const recordState = view => view.cell && view.ix && (signedOut(view) || view.cell.state !== 'fresh')
+export const recordState = view => view.cell && view.ix && view.cell.state !== 'fresh'
   ? capital(plainText(statePhrase(view.cell, 'desk.results', 'last good results').text).replace(/^as of/, 'Results as of')) : null;
 // The Results feed's own state beside anything Desk takes from the record
 // (Last session, the last sessions' bars, the one-row claim), in every phase:
@@ -790,8 +769,7 @@ export const recordState = view => view.cell && view.ix && (signedOut(view) || v
 export function feedMark(view) {
   const text = recordState(view);
   if (!text) return null;
-  if (signedOut(view)) return { label: present('', view.cell, 'retained'), text, short: presentWarning('', view.cell) };
-  const cell = view.cell, ago = presentAge(cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`, cell);
+  const cell = view.cell, ago = cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`;
   // `short`: the state and its age, for a sentence that already names the day.
   return { label: cell.retained ? 'Last good' : 'Results stale', text, short: cell.retained ? `Results last good, ${ago}` : `Results as of ${ago}` };
 }
@@ -832,7 +810,7 @@ function heroFirst(ctx, facts, shared, board) {
   }
   const dayCell = states['today.dayPnl'], source = data?.pnlSources?.day;
   const day = cellView(dayCell, 'hero.day', { sharedReason: shared, label: 'Today' });
-  const why = dayCell?.reason ? cellReason(dayCell.reason, dayCell) : null, onBoard = sharesBoardCaption(dayCell, board);
+  const why = dayCell?.reason ? cellReason(dayCell.reason) : null, onBoard = sharesBoardCaption(dayCell, board);
   // A dashed Today states its reason once, here, unless the section says it.
   // A not-exact household Today names the desks that keep it from being exact.
   const household = onBoard ? null : householdDayReason(states, data, shared);
@@ -873,7 +851,7 @@ export function heroLeft(ctx, facts = deskFacts(ctx)) {
   const started = `started with ${eur(STARTING_MONEY, false, 0)}`;
   const moneyCaptions = [starts.common ? `${started} on ${dayText(starts.common)}` : started, 'J’s bookkeeping incomplete · desk total unavailable', started];
   const first = heroFirst(ctx, facts, shared, board);
-  const day = cellView(dayCell, 'hero.day', { sharedReason: shared, label: 'Today' }), why = dayCell?.reason ? cellReason(dayCell.reason, dayCell) : null;
+  const day = cellView(dayCell, 'hero.day', { sharedReason: shared, label: 'Today' }), why = dayCell?.reason ? cellReason(dayCell.reason) : null;
   const onBoard = sharesBoardCaption(dayCell, board), dayAmount = day.units === null ? null : eur(day.units < 0n ? -day.units : day.units);
   // JOED-157: a dashed Today whose reason no caption, board or section line
   // gives keeps its one statement in the sentence instead of the desks' figures.
@@ -891,9 +869,9 @@ export function heroLeft(ctx, facts = deskFacts(ctx)) {
   const sinceCell = states['today.totalPnl'], since = cellView(sinceCell, 'hero.since', { caption: SINCE_CAPTION, sharedReason: shared, label: sinceText });
   const sincePct = sincePercent(states);
   const sinceValue = since.units === null ? since.html : figureLink(since.html, resultsHref('all', facts.view.today, 'all'), `${sinceText}: ${eur(since.units, true)}. Opens Results for all time.`);
-  const sharedCell = shared ? Object.values(states).find(cell => cell?.reason && cellReason(cell.reason, cell) === shared && cell.state !== 'fresh') : null;
+  const sharedCell = shared ? Object.values(states).find(cell => cell?.reason && cellReason(cell.reason) === shared && cell.state !== 'fresh') : null;
   const boardText = [board ? st(statePhrase(board, '').tone, stateCaption(board, 'board.caption')) : '',
-    shared && (!board?.reason || cellReason(board.reason, board) !== shared) ? st(statePhrase(sharedCell, '').tone, sharedSectionPhrase(sharedCell), statePhrase(sharedCell, '').icon) : ''].filter(Boolean).join(' ');
+    shared && (!board?.reason || cellReason(board.reason) !== shared) ? st(statePhrase(sharedCell, '').tone, sharedSectionPhrase(sharedCell), statePhrase(sharedCell, '').icon) : ''].filter(Boolean).join(' ');
   const counts = positionCounts(states);
   const openCaption = counts ? `${positionsText(counts.all)} · changes until they close` : 'changes until they close';
   return `<div class="hero-primary"><div class="performance">
@@ -907,7 +885,7 @@ export function heroLeft(ctx, facts = deskFacts(ctx)) {
     <p class="board-caption">${boardText}</p></div>
     <div class="account-section" id="accountSection">${disclosureButton('account', 'Desks’ money', 'accountDetail', disclosureProblem([
       [OPEN, states['today.openPnl'], openFault], ['Desks’ money', states['today.equity']],
-    ], ctx))}<div class="disclosure-body" id="accountDetail"><p class="pstate account-state"${shared ? '' : ' aria-hidden="true"'}>${shared ? st(statePhrase(sharedCell, '').tone, sharedSectionPhrase(sharedCell), statePhrase(sharedCell, '').icon) : ''}</p><dl class="kpis">
+    ]))}<div class="disclosure-body" id="accountDetail"><p class="pstate account-state"${shared ? '' : ' aria-hidden="true"'}>${shared ? st(statePhrase(sharedCell, '').tone, sharedSectionPhrase(sharedCell), statePhrase(sharedCell, '').icon) : ''}</p><dl class="kpis">
       ${kpi('open', null, 'today.openPnl', 'hero.open', { caption: openCaption, captions: [`${positionsText(999)} · changes until they close`, 'changes until they close'] })}
       ${kpi('desksmoney', null, 'today.equity', 'hero.equity', { signed: false, caption: moneyCaptions[jIncomplete ? 1 : 0], captions: moneyCaptions, href: MONEY_HISTORY_HREF, goes: 'Opens History, the desks’ money this week.' })}
     </dl><p class="desk-scope">Desk figures never include the kept holdings. The whole account, with them, is at the top.</p></div></div>`;
@@ -934,7 +912,6 @@ function deskFirst(ctx, facts, id) {
 // where JOED-148 put it: on the dash's own name and title and, unless
 // Today's not-exact dash is the card's only problem, on the status line.
 function cardCaption(cell, designed, board, today = '', label = null) {
-  if (signedOut(cell)) return present('', cell, 'retained');
   // JOED-157's Open words, as the status line says them: a price wait is
   // waiting, never "Unavailable".
   if (label === OPEN && waitingOnPrices(cell)) return 'Waiting on prices';
@@ -995,7 +972,7 @@ function todayBar(ctx, id) {
   const cell = ctx.states[`desks.${id}.dayPnl`], day = classifyDay(cell, dayChannels(ctx.feeds.data?.value, id));
   const units = day.kind === 'exact' ? exactCell(cell) : null;
   if (units !== null) return { units, estimated: day.estimated };
-  const why = day.reason ? cellReason(day.reason, cell) : cell?.reason ? cellReason(cell.reason, cell) : null;
+  const why = day.reason ? cellReason(day.reason) : cell?.reason ? cellReason(cell.reason) : null;
   return { units: null, reason: day.kind === 'notExact' ? `not exact today${why && why !== NOT_EXACT ? ` · ${why}` : ''}` : `unavailable today${why ? ` · ${why}` : ''}` };
 }
 
@@ -1127,7 +1104,7 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
   const elapsed = feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(now) - Date.parse(feeds.data.generatedAdvancedAt)) : 0;
   const hbMs = desk?.heartbeatAt ? gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed) : null;
   const snapshotAge = dataAge(feeds, now).receipt;
-  const hb = signedOut(states) ? presentWarning('', { signedOut: true, value: desk }) : hbMs != null ? hbMs / 1000 >= STALE_AFTER_S
+  const hb = hbMs != null ? hbMs / 1000 >= STALE_AFTER_S
     ? `${term('heartbeat')} ${ageSpan(`hb.${id}`, `${age(hbMs / 1000)} ago`)}` : ''
     : snapshotAge != null && snapshotAge >= STALE_AFTER_S ? `Data ${ageSpan(`hb.${id}`, `${age(snapshotAge)} old`)}` : '';
   const board = boardCaptionCell(ctx), first = deskFirst(ctx, facts, id), today = facts.view.today;
@@ -1177,7 +1154,7 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
   const detail = desk?.state === 'stuck' ? STUCK_REASON : desk ? positionsWord(states, id, held) : '';
   // Only a real activity sentence is shown; the pusher's valuation status
   // sentences say nothing about what the desk is doing (JOED-148 P0-5).
-  const activity = !desk ? 'Waiting for the first valid snapshot.' : PUSHER_STATUS.has(desk.action) ? '' : esc(presentWarning(desk.action, { signedOut: signedOut(ctx), value: desk.action }));
+  const activity = !desk ? 'Waiting for the first valid snapshot.' : PUSHER_STATUS.has(desk.action) ? '' : esc(desk.action);
   const bars = barsHtml(ctx, facts, id), learning = learningLine(desk?.learning);
   // The status lines cover the bars; when those come from an old record, the
   // record's state is one of the lines, as it is the bars' caption otherwise.
@@ -1190,7 +1167,7 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
         ${sinceNum}
       </div>
       <div class="spark desk-sessions${status ? ' off' : ''}"><div class="spark-h"><span><b>${bars.head}</b> · ${bars.feed ? st('warn', esc(bars.feed.text), 'half') : 'each session’s result in €, after fees'}</span></div>${bars.html}<div class="bars-tap" hidden></div>${status ? `<div class="card-status">${status}</div>` : ''}</div>
-      ${learning ? `<footer>${icon('learning')}<span>${term('learning')}: ${esc(presentWarning(learning, { signedOut: signedOut(ctx), value: learning }))}${!signedOut(ctx) && desk.learning.status === 'blocked' ? ' · blocked' : ''}</span></footer>` : ''}`;
+      ${learning ? `<footer>${icon('learning')}<span>${term('learning')}: ${esc(learning)}${desk.learning.status === 'blocked' ? ' · blocked' : ''}</span></footer>` : ''}`;
 }
 
 // The card's numbers that are not fresh, each with its own state, age and
@@ -1213,7 +1190,7 @@ export function cardStatus(id, cells, board = null, total = cells.length) {
   if (!groups.length) return '';
   const seen = new Set();
   return groups.map((g, i) => {
-    const reason = g.cell?.reason ? cellReason(g.cell.reason, g.cell) : null;
+    const reason = g.cell?.reason ? cellReason(g.cell.reason) : null;
     // Every figure of a group says these words on its own; its first speaks for all.
     const p = figurePhrase(g.cell, `card.${id}.${i}`, g.labels[0], 'last good', seen.has(reason) ? reason : null);
     seen.add(reason);
@@ -1227,22 +1204,21 @@ export function cardStatus(id, cells, board = null, total = cells.length) {
 // change of state moves nothing below it.
 function sectionState(cell, key, { fresh, held, missing, absent, sharedReason = null, detail = '' }) {
   const p = statePhrase(cell, key, held, sharedReason);
-  if (signedOut(cell)) return `<p class="pstate" data-state="${p.state}">${st(p.tone, capital(p.text), p.icon)}</p>`;
   const text = sharedReason ? `Prices unavailable · ${esc(sharedReason)}${p.text ? ` · ${p.text}` : ''}` : p.state === 'fresh' ? fresh
-    : cell?.value == null ? (p.state === 'not reported' ? absent : `${missing}: ${esc(cellReason(cell?.reason ?? 'feed_not_received', cell))}.`)
+    : cell?.value == null ? (p.state === 'not reported' ? absent : `${missing}: ${esc(cellReason(cell?.reason ?? 'feed_not_received'))}.`)
       : capital(p.text);
-  const indicator = sharedReason && p.state === 'fresh' ? statePhrase(positionProblems(cell).find(c => cellReason(c.reason, c) === sharedReason), '') : p;
+  const indicator = sharedReason && p.state === 'fresh' ? statePhrase(positionProblems(cell).find(c => cellReason(c.reason) === sharedReason), '') : p;
   return `<p class="pstate" data-state="${p.state}">${st(indicator.tone, text + detail, indicator.icon)}</p>`;
 }
 
 const POSITION_FIELDS = { quantity: 'Quantity', mark: 'Last price', marketValue: 'Worth', dayPnl: 'Today’s result', openPnl: 'Open result' };
 const presentNull = (row, field) => Object.hasOwn(row, field) && row[field] === null;
-const rowReason = (row, field, cell) => cellReason(row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received', cell);
+const rowReason = (row, field, cell) => cellReason(row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received');
 const missingPositionFields = row => Object.entries(POSITION_FIELDS).filter(([field]) =>
   presentNull(row, field) || (['mark', 'marketValue'].includes(field) && row[field] == null));
 function positionProblems(cell) {
   return (cell?.value ?? []).flatMap(row => missingPositionFields(row).map(([field]) =>
-    ({ state: 'broken', value: null, reason: row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received', signedOut: signedOut(cell) })));
+    ({ state: 'broken', value: null, reason: row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received' })));
 }
 export function positionSectionReason(cell) {
   return sharedSectionReason([cell, ...positionProblems(cell)]);
@@ -1250,7 +1226,7 @@ export function positionSectionReason(cell) {
 function positionValue(row, field, cell) {
   const value = row[field];
   if (value != null) return field === 'quantity' ? quantity(value) : money(decimalUnits(value.amount), value.currency);
-  const label = `${POSITION_FIELDS[field]}: ${dashWords(row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received', cell)}`;
+  const label = `${POSITION_FIELDS[field]}: ${dashWords(row.reasons?.[field] ?? cell?.reason ?? 'feed_not_received')}`;
   return `<span class="position-value" role="img" title="${esc(label)}" aria-label="${esc(label)}">—</span>`;
 }
 function positionReasons(row, cell, sharedReason = null) {
@@ -1317,7 +1293,7 @@ export function positionsHtml(ctx) {
     if (r.updatedAt && !updatedLabels.has(r.updatedAt)) updatedLabels.set(r.updatedAt, timeHM(r.updatedAt));
     const opened = openedLabels.get(r.openedAt) ?? '';
     const legacy = r.scope === 'legacy' ? ` · older holding, outside the ${term('stage0', 'first stage')}` : '';
-    const deskLabel = unmapped(r) ? `No desk · ${cellReason(r.reasons.desk, cell)}` : null;
+    const deskLabel = unmapped(r) ? `No desk · ${cellReason(r.reasons.desk)}` : null;
     const quantity = positionValue(r, 'quantity', cell), mark = positionValue(r, 'mark', cell);
     const worth = value === null ? positionValue(r, 'marketValue', cell) : money(value, r.marketValue.currency);
     return `<div class="prow" data-desk="${esc(r.desk ?? '')}">
@@ -1451,11 +1427,11 @@ export function renderDesk(ctx) {
   patch($('#chartSummary'), problemHtml(disclosureProblem([
     ['History', ctx.states.history], ...(!ctx.now ? [['Clock', { state: 'not reported', value: null }]]
       : sessionBounds(ctx.now).reason === 'calendar_unavailable' ? [['Market hours', { state: 'broken', value: null, reason: 'calendar_unavailable' }]] : []),
-  ], ctx)));
+  ])));
   $('#positionsTitle').textContent = `Positions · ${openPositionRows(ctx.states.positions)?.length ?? '—'} open`;
   $('#keptTitle').textContent = `Kept holdings · ${ctx.states.kept?.value?.length ?? '—'}`;
-  patch($('#positionsSummary'), problemHtml(disclosureProblem([['Positions', ctx.states.positions], ...rowProblems(ctx.states.positions)], ctx)));
-  patch($('#keptSummary'), problemHtml(disclosureProblem([['Kept holdings', ctx.states.kept], ...rowProblems(ctx.states.kept)], ctx)));
+  patch($('#positionsSummary'), problemHtml(disclosureProblem([['Positions', ctx.states.positions], ...rowProblems(ctx.states.positions)])));
+  patch($('#keptSummary'), problemHtml(disclosureProblem([['Kept holdings', ctx.states.kept], ...rowProblems(ctx.states.kept)])));
   syncDeskDisclosures();
   const currentOrder = [...grid.children].map(card => card.id.slice(5));
   // Re-ranking must not detach a focused phone row or a term's open tip.

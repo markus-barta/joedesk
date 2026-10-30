@@ -49,7 +49,7 @@ export const readFailure = ({ auth, status }) => auth ? 'auth_required' : status
 // network errors cannot erase positive evidence that the sign-in expired.
 export function createBoardSession() {
   const blocked = new Set(), listeners = new Set();
-  return {
+  const session = {
     signedOut: () => blocked.size > 0,
     observe(key, { auth } = {}) {
       const before = blocked.size > 0;
@@ -58,6 +58,13 @@ export function createBoardSession() {
       if (before !== (blocked.size > 0)) for (const listener of listeners) listener();
     },
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    // An auth response never enters a store. While any protected endpoint is
+    // blocked, later failures and unrelated successes leave every store alone.
+    accept(key, response) {
+      session.observe(key, response);
+      return response?.auth !== true && !session.signedOut();
+    },
   };
+  return session;
 }
 export const boardSession = createBoardSession();

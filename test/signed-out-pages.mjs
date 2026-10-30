@@ -5,11 +5,14 @@ import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { builders, htmlDocument } from './fixtures/preview-dom.mjs';
-import { reasons, authShapes, widths, screens, pageFixture, dirtyPreview, authResponse, renderedSnapshot, assertSignedOutPage, blame } from './fixtures/signed-out-cases.mjs';
+import { reasons, authShapes, widths, screens, pageFixture, dirtyPreview, authResponse, renderedSnapshot, assertSignedOutPage, retainedDocument, blame } from './fixtures/signed-out-cases.mjs';
+const { boardSession } = await import('../public/joe/transport.js');
+const { createBoardFreeze } = await import('../public/joe/presentation.js');
+const { history: accountHistory } = await import('./fixtures/account-fixtures.mjs');
 const { createFeed } = await import('../public/joe/feed.js');
 const { createObservedEvents } = await import('../public/joe/events.js');
 const D = await builders('desk.js', []);
-const A = await builders('account.js', ['store']);
+const A = await builders('account.js', ['store', 'last']);
 A.store.next = Infinity;
 const H = await builders('history.js', []);
 const R = await import('../public/joe/results.js');
@@ -50,7 +53,7 @@ function snapshot(doc, width) {
   return renderedSnapshot(doc, shown);
 }
 let instance = 0;
-async function preview(t, width, shape = '401') {
+async function preview(t, width, shape = '401', populated = true) {
   const controls = { ...R.RS };
   Object.assign(R.RS, { period: 'week', anchor: null, sel: null, desk: 'all', cal: null, moved: false });
   R.forgetResults();
@@ -60,27 +63,37 @@ async function preview(t, width, shape = '401') {
   globalThis.document = doc;
   globalThis.CSS = { escape: text => text };
   globalThis.innerHeight = 900; globalThis.scrollY = 0;
-  globalThis.matchMedia = query => ({ matches: [...query.matchAll(/max-width: (\d+)px/g)].some(m => width <= Number(m[1])) });
+  globalThis.matchMedia = query => ({ matches: /prefers-reduced-motion/.test(query) || [...query.matchAll(/max-width: (\d+)px/g)].some(m => width <= Number(m[1])) });
   const f = pageFixture();
   globalThis.localStorage = { getItem: key => key.includes('preview') ? dirtyPreview(f['fleet-config']) : null, setItem() {}, removeItem() {} };
   globalThis.window = { localStorage: globalThis.localStorage };
   forgetChartMemory();
-  let refused = false;
-  t.mock.method(globalThis, 'fetch', async url => {
+  let refused = false, failed503 = false, pendingPost = null;
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (init?.method === 'POST' && pendingPost) return pendingPost;
     const path = String(url);
+    if (failed503) return new Response('{}', { status: 503 });
     if (refused) return authResponse(shape);
     const payload = path.includes('board-settings') ? { accountStart: { amountEur: 100000, date: '2026-01-01' }, reason: null }
       : path.endsWith('state.json') ? { serverNow: f.data.receivedAt, feeds: { data: { value: f.data } }, panels: {} }
       : path.includes('actions') ? { schema: 'inspr.joe.fleet-config.actions.v1', entries: [] }
-      : path.includes('fleet-config') ? f['fleet-config'] : path.includes('history') ? f.history : f.results;
+      : path.includes('fleet-config') ? f['fleet-config'] : path.includes('account-history') ? accountHistory() : path.includes('history') ? f.history : f.results;
     return new Response(JSON.stringify(payload), { headers: { 'X-Joe-Received-At': f.data.receivedAt } });
   });
   // Fresh module instance gives each scenario its own settings draft/cache.
-  const S = await builders('settings.js', ['buildSkeleton'], String(++instance));
+  const S = await builders('settings.js', ['buildSkeleton', 'reviewAccountStart', 'saveAccountStart'], String(++instance));
   addTerms(M.FIELD_TERMS);
   S.buildSkeleton();
   doc.getElementById('acctHero').innerHTML = A.accountSkeleton();
-  const feed = createFeed(() => {}, () => {}, '', { actionsWanted: () => true });
+  const feed = createFeed(() => {}, () => {}, '', { actionsWanted: () => true, session: boardSession });
+  const freeze = createBoardFreeze(doc, boardSession);
+  A.forgetAccountHistory(); A.store.next = Infinity;
+  Object.assign(A.AS, { range: '1M', view: null, follow: true, details: false, full: null, shown: null });
+  Object.assign(A.last, { key: null, ctx: null, series: null, drawn: null });
+  if (populated) {
+    A.useAccountHistory(accountHistory());
+    Object.assign(doc.getElementById('acctChart'), { clientWidth: width === 390 ? 330 : 900, clientHeight: 230 });
+  }
   await feed.refresh(); await refreshBoardSettings();
   const events = createObservedEvents(null), prior = structuredClone(f.data);
   prior.generatedAt = new Date(Date.parse(f.data.generatedAt) - 1000).toISOString();
@@ -89,7 +102,10 @@ async function preview(t, width, shape = '401') {
   const observed = structuredClone(f.data); observed.desks[0].issues = [blame]; events.observe(observed);
   // Open the phone disclosures so the oracle includes their full bodies.
   for (const id of ['j', 'joe', 'joel', 'positions', 'kept', 'chart']) D.toggleDeskDisclosure(id);
+  let renders = 0;
   const render = (ctx, screen) => {
+    if (freeze.sync()) return;
+    renders++;
     for (const n of doc.querySelectorAll('.screen')) n.classList.toggle('on', n.id === `scr-${screen}`);
     doc.body.dataset.screen = screen;
     const health = boardHealthPresentation(ctx.states, ctx.feeds, ctx.now), head = D.headerHealth(ctx, health);
@@ -98,7 +114,6 @@ async function preview(t, width, shape = '401') {
     doc.getElementById('hdrHealth').title = head.title ?? '';
     doc.getElementById('statusAlertText').textContent = head.alert;
     doc.getElementById('statusAlert').setAttribute('aria-hidden', 'false');
-    doc.getElementById('signInReload').hidden = health.reason !== 'signed-out';
     if (screen === 'desk') {
       // The preview parser retains whitespace text nodes; browser .children
       // contains only elements (the renderer uses it to preserve card order).
@@ -107,7 +122,7 @@ async function preview(t, width, shape = '401') {
     } else if (screen === 'history') H.renderHistory(ctx);
     else if (screen === 'results') { R.forgetResults(); R.renderResults(ctx); }
     else S.renderSettings(ctx);
-    return snapshot(doc, width);
+    return populated ? undefined : snapshot(doc, width);
   };
   const context = reason => {
     const selected = feed.select();
@@ -122,62 +137,138 @@ async function preview(t, width, shape = '401') {
   const close = () => {
     if (closed) return;
     closed = true;
-    feed.stop();
+    feed.stop(); freeze.stop();
+    for (const route of ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json', 'board-settings.json', 'account-history.json']) boardSession.observe('/joe/' + route, { auth: false });
+    A.forgetAccountHistory(); A.store.next = Infinity;
     Object.assign(R.RS, controls); R.forgetResults();
     for (const id of ['j', 'joe', 'joel', 'positions', 'kept', 'chart']) D.toggleDeskDisclosure(id);
     for (const [key, descriptor] of Object.entries(old)) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
     forgetChartMemory();
   };
   t.after(close);
-  return { doc, render, context, close, async signOut() { refused = true; await feed.refresh(); await refreshBoardSettings(); },
-    f };
+  return { doc, render, context, close, settings: S, deferPost() { let resolve; pendingPost = new Promise(done => { resolve = done; }); return resolve; }, capture: () => retainedDocument(doc), renders: () => renders,
+    async signOut() { refused = true; await feed.refresh(); await refreshBoardSettings(); },
+    async fail503() { failed503 = true; await feed.refresh(); await refreshBoardSettings(); },
+    async recover() { refused = failed503 = false; await feed.refresh(); await refreshBoardSettings(); }, f };
 }
 
-if (!process.argv.includes('--capture-pages-non-auth')) for (const [name, screen, check] of [
-  ['warm sign-out keeps the displayed cash amount', 'desk', (after, before) => assert.ok(after.regions.acctHero.includes('1.234,56'))],
-  ['warm sign-out keeps derived Desk amounts and the Since start comparison', 'desk', (after, before) => assertSignedOutPage(after, before, 'derived amounts and Since start')],
-  ['warm sign-out keeps the retained holdings in the account strip', 'desk', after => assert.match(after.regions.acctHero, /SXR8/)],
-  ['warm sign-out keeps Settings Cash visible', 'settings', after => assert.ok(after.regions.rtRows.includes('1.234,56'))],
-  ['dirty Settings caption uses last known after fleet 401', 'settings', after => { assert.doesNotMatch(after.copy, /last good/i); assert.match(after.copy, /Last known:.*250/); }],
-  ['retained desk action suppresses broker blame', 'desk', after => assert.doesNotMatch(after.regions['desk-j'], /Amy|\bfeed\b/i)],
-  ['retained desk learning suppresses broker blame', 'desk', (after, before) => { assert.match(before.regions['desk-j'], /Learning.*Amy/i); assert.doesNotMatch(after.regions['desk-j'], /Learning\s*:.*Amy/i); }],
-  ['History observed issues suppress broker blame after sign-out', 'history', after => assert.doesNotMatch(after.copy, /Amy|\bfeed\b/i)],
-]) test(`JOED-173 fix3: ${name}`, async t => {
-  const p = await preview(t, 1440), before = p.render(p.context(null), screen);
+// Every earlier reproducer now exercises the same structural invariant; these
+// names retain the review history, with populated account history and dirty fields.
+const reproducers = [
+  ['fix1 hero caption age', 'desk'], ['fix1 missing cells and shared hero copy', 'desk'],
+  ['fix1 retained card captions', 'desk'], ['fix2 Positions and kept gateway-dead', 'desk'],
+  ['fix2 Check-in and Results compact warnings', 'desk'], ['fix2 account-start auth failure', 'settings'],
+  ['fix2 whole-account and Cash accessible names', 'desk'], ['fix2 row-only diagnostics', 'desk'],
+  ['fix2 cold History size-limit before 401', 'history'], ['fix2 memoized views', 'results'],
+  ['fix3 displayed Cash amount', 'desk'], ['fix3 derived Desk amounts and Since start', 'desk'],
+  ['fix3 retained holdings in account strip', 'desk'], ['fix3 Settings Cash', 'settings'],
+  ['fix3 dirty Settings caption and saved control descriptions', 'settings'],
+  ['fix3 desk action', 'desk'], ['fix3 desk learning', 'desk'], ['fix3 observed History issues', 'history'],
+  ['fix3 review retained session bars including amounts and CSS off state', 'desk'],
+  ['fix3 review retained position count', 'desk'], ['fix3 review populated account range amount percentage and 1M', 'desk'],
+  ['fix3 review 503 after 401 retains account-start comparison', 'desk'],
+  ['fix3 review phone blocked-learning disclosure retains content', 'desk'],
+  ['fix3 review kept-holdings aggregate worth', 'desk'],
+  ['fix3 review Vienna minute and market countdown boundary', 'desk'],
+  ['fix3 review independent opaque redirects on all transports', 'history'],
+];
+for (const [name, screen] of reproducers) test(`JOED-173 fix4 reproducer: ${name}`, async t => {
+  const p = await preview(t, name.includes('phone') ? 390 : 1440, name.includes('opaque') ? 'opaqueredirect' : '401');
+  const ctx = p.context(name.includes('cold') ? 'history_size_limit' : name.includes('gateway-dead') ? 'gateway_down' : null);
+  if (name.includes('cold')) { ctx.states.history.value = null; ctx.feeds.history.value = null; }
+  ctx.now = '2026-10-14T17:43:59.000Z';
+  p.render(ctx, screen);
+  const before = p.capture(), count = p.renders();
+  if (name.includes('range')) {
+    const text = p.doc.getElementById('acctChange').textContent;
+    assert.match(text, /1M/); assert.match(text, /1.800,00/); assert.match(text, /6,87.*%/);
+  }
+  if (name.includes('session bars')) {
+    assert.ok(p.doc.querySelector('#desk-j .bars .today .bl'), 'the retained Today bar starts with its amount');
+    assert.ok(!p.doc.querySelector('#desk-j .sessions')?.classList.contains('off'), 'session bars start visible');
+  }
+  if (name.includes('position count')) assert.match(p.doc.getElementById('desk-j').textContent, /1\sposition/);
+  if (name.includes('aggregate worth')) assert.match(p.doc.getElementById('kept').textContent, /600,00.*200,00/);
+  if (name.includes('account-start comparison')) assert.match(p.doc.getElementById('acctSub').textContent, /72.000,00.*72,00/);
   await p.signOut();
-  const ctx = p.context('gateway_down'), after = p.render(ctx, screen);
-  check(after, before);
+  p.render({ ...ctx, now: '2026-10-14T17:44:01.000Z' }, screen);
+  assertSignedOutPage(p.capture(), before, name);
+  await p.fail503();
+  p.render(p.context('refresh_failed'), screen);
+  assertSignedOutPage(p.capture(), before, `${name}/503 after 401`);
+  assert.equal(p.renders(), count, 'no renderer runs on auth failure or subsequent 503');
 });
 
-if (!process.argv.includes('--capture-pages-non-auth')) for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix3 rendered pages: ${width}px / ${shape} / every reason`, async t => {
+for (const width of widths) for (const shape of authShapes) test(`JOED-173 fix4 entire document: ${width}px / ${shape} / every reason and page`, async t => {
   const p = await preview(t, width, shape);
-  const before = Object.fromEntries(screens.map(screen => [screen, p.render(p.context(null), screen)]));
-  await p.signOut();
-  for (const reason of reasons) for (const screen of screens) {
-    const ctx = p.context(reason), tag = `${width}/${shape}/${reason}/${screen}`;
-    const accepted = structuredClone(ctx.feeds);
-    const after = p.render(ctx, screen);
-    assertSignedOutPage(after, before[screen], tag);
-    const later = { ...ctx, now: new Date(Date.parse(ctx.now) + 2000).toISOString() };
-    for (const cell of Object.values(later.states)) if (cell && typeof cell === 'object' && cell.ageSeconds != null) cell.ageSeconds += 2;
-    assert.deepEqual(p.render(later, screen), after, `${tag}: two seconds cannot tick any displayed age`);
-    assert.deepEqual(ctx.feeds, accepted, `${tag}: rendering preserves diagnostics`);
-    if (screen === 'desk') {
-      // Also expose every row-level reason through a missing field's visible
-      // caption, title and accessibility name. No missing number is invented.
-      const missing = { ...ctx, states: structuredClone(ctx.states) };
-      for (const key of ['positions', 'kept']) for (const row of missing.states[key]?.value ?? [])
-        for (const field of ['quantity', 'mark', 'marketValue', 'openPnl', 'dayPnl']) row[field] = null;
-      assertSignedOutPage(p.render(missing, screen), { values: {} }, `${tag}/missing fields`);
-    }
+  for (const reason of [null, ...reasons]) for (const screen of screens) {
+    p.render(p.context(reason), screen);
+    const before = p.capture(), count = p.renders(), tag = `${width}/${shape}/${reason}/${screen}`;
+    await p.signOut();
+    const after = p.capture();
+    assertSignedOutPage(after, before, tag);
+    const changed = p.context('refresh_failed');
+    changed.now = new Date(Date.parse(changed.now) + 125000).toISOString();
+    p.render(changed, screen);
+    assert.deepEqual(p.capture(), after, `${tag}: time and changed state cannot re-render`);
+    await p.fail503();
+    assertSignedOutPage(p.capture(), before, `${tag}/503`);
+    assert.equal(p.renders(), count, `${tag}: no failed render`);
+    await p.recover();
+    assert.equal(p.capture().reload, false, `${tag}: recovery hides banner`);
+    assert.equal(p.capture().marked, false, `${tag}: recovery removes last-known marking`);
+    p.render(p.context(null), screen);
+    assert.equal(p.renders(), count + 1, `${tag}: authenticated recovery resumes rendering`);
   }
 });
 
+test('JOED-173 fix4 pending account-start save cannot change the frozen draft or comparison', async t => {
+  const p = await preview(t, 1440);
+  p.render(p.context(null), 'settings');
+  p.doc.getElementById('accountStartAmount').value = '100001';
+  p.doc.getElementById('accountStartDate').value = '2026-01-01';
+  p.doc.getElementById('accountStartClear').checked = false;
+  p.doc.getElementById('accountStartConfirmed').focus = () => {};
+  p.settings.reviewAccountStart();
+  p.doc.getElementById('accountStartConfirmed').checked = true;
+  const complete = p.deferPost();
+  const save = p.settings.saveAccountStart({ preventDefault() {} });
+  const before = p.capture();
+  await p.signOut(); complete(authResponse('401')); await save;
+  assertSignedOutPage(p.capture(), before, 'pending save receives auth failure');
+});
+
+test('JOED-173 fix4 a toast timeout cannot erase retained visible text while signed out', async t => {
+  const p = await preview(t, 1440);
+  p.render(p.context(null), 'settings');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  p.settings.toast('Synthetic saved draft notice'); const before = p.capture();
+  await p.signOut(); t.mock.timers.tick(10000);
+  assertSignedOutPage(p.capture(), before, 'toast timer');
+  await p.recover();
+  assert.equal(p.doc.getElementById('toast').classList.contains('on'), false, 'expired toast dismisses after recovery');
+});
+
+test('JOED-173 fix4 oracle rejects arbitrary added copy and every dropped element or form value', async t => {
+  const p = await preview(t, 1440);
+  p.render(p.context(null), 'settings'); const before = p.capture(); await p.signOut();
+  for (const copy of ['not exact', 'updates are stuck', 'Learning blocked', 'totally new leak']) {
+    const node = p.doc.getElementById('setSub'), children = node.children;
+    node.textContent += copy;
+    assert.throws(() => assertSignedOutPage(p.capture(), before, copy));
+    node.children = children;
+  }
+  const input = p.doc.querySelector('input'), value = input.value;
+  input.value = 'changed'; assert.throws(() => assertSignedOutPage(p.capture(), before, 'input value')); input.value = value;
+  const valueNode = p.doc.getElementById('accountStartSummary'), children = valueNode.children;
+  valueNode.textContent = ''; assert.throws(() => assertSignedOutPage(p.capture(), before, 'lost comparison')); valueNode.children = children;
+  assertSignedOutPage(p.capture(), before, 'restored');
+});
 
 test('JOED-173 fix3 snapshot: complete non-auth pages keep exact text, labels and titles', async t => {
   const output = {};
   for (const width of widths) {
-    const p = await preview(t, width);
+    const p = await preview(t, width, '401', false);
     for (const reason of reasons.filter(r => r !== 'auth_required')) for (const screen of screens) {
       const rendered = p.render(p.context(reason), screen);
       output[`${width}/${reason}/${screen}`] = createHash('sha256').update(JSON.stringify(rendered)).digest('hex');

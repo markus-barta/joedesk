@@ -1,25 +1,27 @@
-import { age as formatAge } from './format.js';
-
-// One presentation policy for a board, a panel, or a derived warning. Never
-// rewrite accepted values/reasons: Details can still explain the last read.
-export function signedOut(board) {
-  if (!board) return false;
-  if (Array.isArray(board)) return board.some(signedOut);
-  if (typeof board.signedOut === 'function') return board.signedOut();
-  return board.signedOut === true || board.session === 'signed-out'
-    || signedOut(board.states) || signedOut(board.cell);
+// One board-level boundary. Auth failures never ask a renderer to reinterpret
+// the last good document; all its text, figures and accessible names stay put.
+export function createBoardFreeze(document, session) {
+  const app = document.getElementById('app');
+  const main = document.getElementById('main');
+  const banner = document.getElementById('signedOutBanner');
+  let frozen = false, description = null;
+  const sync = () => {
+    const next = session.signedOut();
+    if (next === frozen) return frozen;
+    frozen = next;
+    banner.hidden = !frozen;
+    if (frozen) {
+      description = main.getAttribute('aria-describedby');
+      main.setAttribute('aria-describedby', [description, 'lastKnownLabel'].filter(Boolean).join(' '));
+      app.setAttribute('data-last-known', '');
+    } else {
+      if (description === null) main.removeAttribute('aria-describedby');
+      else main.setAttribute('aria-describedby', description);
+      app.removeAttribute('data-last-known');
+    }
+    return frozen;
+  };
+  const unsubscribe = session.subscribe(sync);
+  sync();
+  return { sync, frozen: () => frozen, stop: unsubscribe };
 }
-
-export function present(text, board, kind = 'reason') {
-  if (!signedOut(board)) return text;
-  if (kind === 'status') return 'Signed out — reload to sign in';
-  if (kind === 'label') return 'Signed out';
-  if (kind === 'diagnostics') return 'The sign-in has expired; reload to sign in. Values shown are last known. Broker connection and panel ages are unknown while signed out.';
-  if (['history', 'account history', 'results'].includes(kind)) return `${board?.value == null ? `${kind[0].toUpperCase() + kind.slice(1)} unavailable` : `Last known ${kind}`} · ages unknown while signed out`;
-  if (kind === 'retained') return board?.value == null ? 'Unavailable' : 'Last known';
-  if (kind === 'warning') return `${board?.value == null ? 'Unavailable' : 'Last known value'} · unknown while signed out`;
-  return 'unknown while signed out';
-}
-export const presentReason = (text, board) => present(text, board, 'reason');
-export const presentAge = (value, board) => present(typeof value === 'number' || value == null ? formatAge(value) : value, board, 'age');
-export const presentWarning = (text, board) => present(text, board, 'warning');

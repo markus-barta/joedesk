@@ -2357,54 +2357,58 @@ interaction, one announcement per transition, silent ticks, and recovery.
 Full and browser validation runs on agm2 CI; local work runs only syntax,
 the small unit file, and `git diff --check`.
 
-Expired browser sign-in has its own board state: **Signed out — reload to sign
-in**, with a Reload button that reloads the page. The shared page/worker reader
-recognizes SSO redirects (including opaque and followed cross-origin redirects),
-401/403, and successful HTML responses where JSON was expected. A proxy's 5xx
-HTML error remains an update failure. Each affected endpoint must answer
-successfully before its auth failure clears; unrelated reads cannot restore Live.
-The board keeps last-known values, labels their panel ages and broker connection
-as unknown while signed out, including the shared hero caption. Missing values
-also say unknown while signed out; their original reasons remain in Details as
-last-known diagnostics. Protected board-settings reads use the same transport
-and participate in endpoint-specific sign-in recovery. Recovery restores
-the normal health ranking, including stale-feed and broker reasons when present.
-`test/feed-robust.mjs` covers response shapes, worker/page reads, precedence and
-recovery (also imported by `test/ui-modules.mjs`), plus the named fix1 regressions
-for hero ages, missing-value reasons, settings auth, successful history compaction
-metadata, transport registration/version pinning and last-known card captions.
-All pages use `presentation.js` for signed-out reason, warning, age and
-freshness wording; derived check-in and Results warnings carry the board's
-session too. Cold History and account-start auth failures use that policy,
-and Settings cannot describe an unchecked account start as unset. Details
-retains the original per-value diagnostics, including position-row reasons.
-Signed-out selections freeze the previously displayed values, including Cash,
-kept holdings, derived Desk amounts and the Since start comparison. Settings
-keeps the last known account-start display separately from its unavailable write
-base; editing/saving still requires a successful authenticated refresh. Activity,
-learning and locally observed History problems use the same presentation gate.
+Expired browser sign-in freezes the board at its last successful render. One
+banner above the board says **Signed out — reload to sign in** and offers Reload.
+A visible **Last known — signed out** label describes the main region through
+`aria-describedby`. Figures, comparisons, captions, diagnostic details, form
+values and hidden content remain intact. Ages, wall times, market countdowns
+and freshness lights stop advancing; frozen timer displays add “last known”.
+Reading and scrolling remain available; controls resume after sign-in recovers.
 
-`test/signed-out-pages.mjs` renders complete pages into the preview DOM from
-`index.html`, including dirty Settings, the Results calendar and History events.
-It inspects document text, visible accessibility names and titles at 390 and
-1440 px for all 37 reasons and five auth response shapes (302 to SSO,
-opaqueredirect, 401, 403, HTML body). It checks retained values, missing field
-names, the signed-out headline/Reload and two-second age stability. Eight named
-reproducers fail on `a941776`. Complete non-auth page snapshots are frozen from
-that revision; `test/signed-out-presentation.mjs` retains the earlier exact
-non-auth builder snapshots and focused regressions. Both run in the UI unit suite.
-The preview DOM models shell visibility; Chrome supplies the layout check.
+The shared page/worker reader recognizes SSO 302/303 redirects, opaque and
+followed cross-origin redirects, 401/403, and successful HTML instead of JSON.
+Auth responses are rejected before store acceptance. While signed out, later
+failures (including 503) and successful responses from unrelated endpoints cannot
+alter the retained board. Each blocked endpoint must answer successfully before
+the session recovers. Feed selections and their presentation clock remain the
+same object/time throughout the freeze. History workers pause acceptance too;
+recovery invalidates their unchanged-response hints so ignored columns are sent
+again. Account history and board settings share this boundary. Saving account
+start remains guarded even though its last displayed value stays available.
+A proxy’s 5xx HTML, invalid JSON, contract failures, missing routes and network
+failures retain their existing behavior when the session is authenticated.
 
-`TZ=UTC node scripts/browser/signed-out-pages.mjs` repeats the rendered-document
-oracle in one browser against synthetic loopback fixtures, including all four
-pages, account hero, Positions/kept, header and phone bar. Its two-second pairs
-advance the real page timers with Chrome virtual time. CI runs it under the
-shared browser lock on agm2 (or the hosted fallback); it closes its browser and
-fixture server in `finally`. Static Settings descriptions may name Amy or the
-broker; assertions reject blame, rather than hiding those descriptions.
-P3's `signed-out` group checks a
-state.json 302 to SSO, retained values, Reload and recovery at all standard widths
-and themes; run it later on agm2 with `JOED_P3_ONLY=signed-out node scripts/browser-p3.mjs`.
+`presentation.js` now controls this single board freeze. It no longer rewrites
+per-surface reasons or converts retained cells into broken cells. The shell
+rejects renders during the freeze, including scheduled ticks; asynchronous
+account chart and settings updates, pending saves, tips and toast timeouts use
+the same session guard. Recovery removes the marking and resumes the normal selectors, renderers and timers.
+
+`test/signed-out-pages.mjs` uses the actual page renderers and `index.html` at
+390 and 1440 px, with populated account history, dirty Settings, Results and
+History events. Its oracle serializes the entire retained body, including hidden
+markup, all attributes, titles, accessible names and live form properties. Only
+the two documented last-known marking attributes normalize. Equality is exact;
+there is no phrase denylist or selected-value allowlist. The matrix covers all
+37 reasons, nine auth shapes, four pages, 401→503 retention, elapsed time and
+recovery. Named tests retain the earlier review reproducers, including session
+bars, position counts, the account’s 1M change and Since start comparison,
+phone learning and aggregate kept worth. Oracle mutation tests reject arbitrary
+new wording, changed inputs and vanished values. The historical non-auth page
+hashes from `a941776` and builder hashes from `fa6db1d` remain unchanged.
+
+`TZ=UTC node scripts/browser/signed-out-pages.mjs` runs the same whole-document
+oracle on the actual app in one headless browser, using synthetic loopback reads.
+It exercises every native auth response shape on every protected transport,
+including workers, plus opaque redirects independently on each endpoint. A
+controlled monotonic clock invokes the actual registered page timer callbacks
+125 seconds later to cross minute boundaries without suspending worker event
+loops. Recovery resumes rendering. Followed cross-origin redirects, which native
+`redirect: manual` prevents, are covered at the shared transport boundary in
+unit tests. CI runs this under its existing browser lock; `finally` closes the
+owned browser and fixture server. P3’s `signed-out` group also checks the full
+retained document, a real Reload and recovery at its standard widths/themes:
+`JOED_P3_ONLY=signed-out node scripts/browser-p3.mjs`.
 
 The following paragraph records the earlier header presentation and its
 historical evidence; JOED-70 supersedes its header wording and layout.

@@ -540,7 +540,7 @@ test('JOED-117 fleet transport: a validated same-revision 304 clears rejection w
       const saved = feed.feeds['fleet-config'].value;
       answer = () => { if (!status) throw new TypeError('offline'); return new Response('{}', { status }); };
       await feed.refreshFleet();
-      assert.equal(feed.feeds['fleet-config'].reason, status === 401 ? 'auth_required' : 'refresh_failed');
+      assert.equal(feed.feeds['fleet-config'].reason, status === 401 ? null : 'refresh_failed');
       const later = new Date(Date.parse(receipt) + 60000).toISOString();
       answer = () => new Response(null, { status: 304, headers: { ETag: tag, 'X-Joe-Server-Now': later, 'X-Joe-Received-At': later } });
       const before = notifications.length;
@@ -551,7 +551,7 @@ test('JOED-117 fleet transport: a validated same-revision 304 clears rejection w
       assert.equal(feed.feeds['fleet-config'].receivedAt, receipt);
       assert.equal(feed.select().states['fleet-config'].state, 'stale', 'revalidation does not reset receipt age');
       assert.ok(feed.select().states['fleet-config'].ageSeconds >= 60);
-      assert.deepEqual(notifications.slice(before), status === 401 ? ['session', 'fleet'] : ['fleet'], 'auth recovery redraws the shared status and Settings');
+      assert.deepEqual(notifications.slice(before), status === 401 ? ['session'] : ['fleet'], 'auth recovery redraws the shared status and Settings');
       assert.equal(feed.select().states.session, undefined, 'a validated endpoint clears its auth evidence');
       answer = () => new Response(null, { status: 304, headers: { ETag: '"unrelated"' } });
       await feed.refreshFleet();

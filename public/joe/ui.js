@@ -1,8 +1,8 @@
 // Shared pieces: icons from the inline sprite, terms, big numbers, desk marks
 // and the one opaque tip. Everything returns escaped HTML strings.
 import { TERMS } from './terms.js';
-import { present, presentAge, presentAge as age, signedOut } from './presentation.js';
-import { esc, money, eur, digits, tone, arrowOf, isZero, known, dayFull, MINUS, currencySymbol, cashAmount } from './format.js';
+import { boardSession } from './transport.js';
+import { esc, money, eur, digits, tone, arrowOf, isZero, known, age, dayFull, MINUS, currencySymbol, cashAmount } from './format.js';
 import { cellReason, capital, CELL_REASON } from './health.js';
 import { NOT_EXACT_REASONS, notExactDash } from './board-state.js';
 import { STARTING_MONEY, sinceStarts } from './performance.js';
@@ -14,9 +14,8 @@ export const NOT_EXACT = CELL_REASON.not_exact_yet;
 // positions and Cash: a value the feed sent as not exact says "not exact"
 // (with a reason only when it adds words), never "not reported"; every other
 // missing value names its reason once, or says "not reported" without one.
-export function dashWords(reason, board) {
-  if (signedOut(board)) return present('', board);
-  const why = reason ? cellReason(reason, board) : null;
+export function dashWords(reason) {
+  const why = reason ? cellReason(reason) : null;
   return NOT_EXACT_REASONS.has(reason) ? `${NOT_EXACT}${why !== NOT_EXACT ? ` · ${why}` : ''}` : why ?? 'not reported';
 }
 export const $ = (selector, root = document) => root.querySelector(selector);
@@ -79,9 +78,9 @@ export const isPhone = () => matchMedia('(max-width: 700px)').matches;
 // measuring the full sentence never changes the control's size or oscillates.
 export function fitStatusLine(control, line, narrow = matchMedia('(max-width: 1100px)').matches) {
   const full = control.querySelector('.status-full');
-  const compact = control.dataset.reason === 'signed-out' || control.dataset.tone === 'bad' || narrow || Boolean(full && full.scrollWidth > full.clientWidth + 0.5);
+  const compact = control.dataset.tone === 'bad' || narrow || Boolean(full && full.scrollWidth > full.clientWidth + 0.5);
   control.toggleAttribute('data-compact', compact);
-  const visible = control.dataset.reason === 'signed-out' || control.dataset.tone === 'bad' || (control.dataset.tone === 'warn' && compact);
+  const visible = control.dataset.tone === 'bad' || (control.dataset.tone === 'warn' && compact);
   line.toggleAttribute('data-visible', visible);
   line.setAttribute('aria-hidden', String(!visible));
 }
@@ -108,6 +107,7 @@ export function initTips({ now = () => null, since = () => null } = {}) {
   };
   const delayDismissal = () => { cancelDismissal(); dismissal = setTimeout(() => hide(false), 150); };
   function place(el) {
+    if (boardSession.signedOut()) return;
     const r = el.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
     const x = Math.max(10, Math.min(innerWidth - w - 10, el.dataset.learn ? r.right - w : r.left));
     let y = r.bottom + 8;
@@ -131,6 +131,7 @@ export function initTips({ now = () => null, since = () => null } = {}) {
     return true;
   }
   function show(el, pin) {
+    if (boardSession.signedOut()) return;
     if (!fill(el)) return;
     focusPlacement = null;
     restoreFocus?.();
@@ -149,6 +150,7 @@ export function initTips({ now = () => null, since = () => null } = {}) {
     el.setAttribute('aria-expanded', 'true'); el.setAttribute('aria-describedby', 'tip');
   }
   function hide(force) {
+    if (boardSession.signedOut()) return;
     cancelDismissal();
     if (pinned && !force) return;
     focusPlacement = null;
@@ -303,8 +305,7 @@ export function trapDialogs() {
 // Ages tick every second without rebuilding a section: structure changes
 // replace the section, otherwise only the age texts are patched in place.
 // A rebuild keeps keyboard focus and an open tip on the same control.
-export const ageSpan = (key, text, board) => signedOut(board) ? esc(presentAge(text, board))
-  : `<span class="age" data-age="${key}">${esc(presentAge(text, board))}</span>`;
+export const ageSpan = (key, text) => `<span class="age" data-age="${key}">${esc(text)}</span>`;
 const AGE_RE = /<span class="age" data-age="([^"]+)">([^<]*)<\/span>/g;
 const structure = new WeakMap();
 const rebuilt = { tip: null, busy: false };
@@ -362,9 +363,7 @@ export function patch(el, html) {
 // `held` names a retained value ("last good value", "last good positions").
 export function statePhrase(cell, key, held = 'last good value', sharedReason = null) {
   const state = cell?.state ?? 'not reported';
-  if (signedOut(cell)) return { tone: 'none', icon: 'ring', state,
-    text: present('', cell, 'warning').toLowerCase() };
-  const why = cell?.reason ? cellReason(cell.reason, cell) : null;
+  const why = cell?.reason ? cellReason(cell.reason) : null;
   const localWhy = why !== sharedReason ? why : null;
   const suffix = localWhy ? ` · ${esc(localWhy)}` : '';
   const ago = () => ageSpan(key, cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`);
@@ -381,7 +380,7 @@ export function statePhrase(cell, key, held = 'last good value', sharedReason = 
 // A caption: the designed one when fresh, otherwise the state's own words.
 export function stateCaption(cell, key, fresh = '', held, sharedReason = null) {
   const p = statePhrase(cell, key, held, sharedReason);
-  return p.state === 'fresh' && !signedOut(cell) ? fresh : capital(p.text);
+  return p.state === 'fresh' ? fresh : capital(p.text);
 }
 
 // Use the real caption builder for every state/reason combination. Days and
@@ -415,29 +414,20 @@ export function reservedCaption(caption, freshCaptions) {
 // 360 px: character count cannot predict how words wrap in a narrow column.
 // The label and Amy's caption have their own fixed rows in both surfaces.
 const CASH_SIZING = [...new Set(Object.keys(CELL_REASON).flatMap(reason =>
-  [dashWords(reason, null), `−€ 999.999,99 · ${cellReason(reason, null)}`]))
+  [dashWords(reason), `−€ 999.999,99 · ${cellReason(reason)}`]))
 ].map(text => `<span class="cash-sizing" aria-hidden="true">${esc(text)}</span>`).join('');
 export function cashCaption(cell, key, { figure = false, sharedReason = null } = {}) {
-  if (signedOut(cell)) {
-    const value = cell?.value;
-    const amount = value == null ? '—' : cashAmount(value).text;
-    const caption = present('', cell, 'warning');
-    const name = `Cash: ${caption}`;
-    const attributes = `data-cash="${esc(key)}" data-state="${cell?.state ?? 'broken'}" role="group" title="${esc(name)}" aria-label="${esc(name)}"`;
-    return figure ? `<div class="kpi cash-kpi cash-block"><dt class="cash-label">Cash</dt><dd><span class="account-cash" ${attributes}><span class="cash-amount${value == null ? ' muted' : ''}">${esc(amount)}</span><span class="cash-caption cash-reserve c"><span class="cash-description">${present('', cell, 'retained')}</span><span class="cash-reason">${present('', cell)}</span></span></span></dd></div>`
-      : `<span class="cash-block"><span class="cash-label">Cash</span><span class="cash-caption">${present('', cell, 'retained')}</span><span class="cash-reserve"><span class="account-cash" ${attributes}>${esc(amount)} · ${esc(caption)}</span>${CASH_SIZING}</span></span>`;
-  }
   const value = cell?.state === 'broken' && cell.retained ? null : cell?.value;
-  const why = cell?.reason ? cellReason(cell.reason, cell) : null;
+  const why = cell?.reason ? cellReason(cell.reason) : null;
   // A missing Cash is named like every other dash: "not exact" when the feed
   // says so, else its reason once (no data received yet by default).
   const notExact = value == null && NOT_EXACT_REASONS.has(cell?.reason);
-  const missing = dashWords(cell?.reason ?? 'feed_not_received', cell);
+  const missing = dashWords(cell?.reason ?? 'feed_not_received');
   const view = value == null ? { text: missing, title: `Cash${notExact ? ':' : ''} ${missing}` } : cashAmount(value);
   if (value != null && why) { view.text += ` · ${why}`; view.title += ` · ${why}`; }
   if (figure) {
     const amount = value == null ? '—' : cashAmount(value).text;
-    const reason = why ?? (value == null ? cellReason('feed_not_received', cell) : '');
+    const reason = why ?? (value == null ? cellReason('feed_not_received') : '');
     const localReason = reason !== sharedReason ? reason : '';
     const state = notExact ? `${NOT_EXACT}${localReason && localReason !== NOT_EXACT ? ` · ${esc(localReason)}` : ''}`
       : value == null ? esc(localReason) : localReason ? ` · ${esc(localReason)}` : '';

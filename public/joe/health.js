@@ -4,7 +4,7 @@
 import { feedAge, panelState } from './contracts/panel-state.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { isRTH } from './time.mjs';
-import { presentReason, presentAge as age, present, signedOut } from './presentation.js';
+import { age } from './format.js';
 import { NOT_EXACT_REASONS, stoppedData, classifyDays, classifyCells } from './board-state.js';
 
 // The contract's freshness bound: two 30-second producer cadences.
@@ -79,9 +79,7 @@ export const CELL_REASON = Object.freeze({
   ledger_unreconciled: 'desk ledger not reconciled',
   position_stale: 'position update is old',
 });
-// Details is the sole consumer allowed to show original per-value reasons.
-export const diagnosticReason = reason => CELL_REASON[reason] ?? 'not available';
-export const cellReason = (reason, board) => presentReason(diagnosticReason(reason), board);
+export const cellReason = reason => CELL_REASON[reason] ?? 'not available';
 export const capital = text => text.charAt(0).toUpperCase() + text.slice(1);
 const FALLBACK_COPY = 'the operator must check the details';
 const DESKS = ['j', 'joe', 'joel'];
@@ -102,7 +100,6 @@ const observation = cell => cell?.health ?? { available: cell?.value != null, re
 
 // Broker connection: API session readiness and its check age, never a port.
 export function brokerState(states, data) {
-  if (signedOut(states) || signedOut(states.gateway) || states.gateway?.reason === 'auth_required') return { tone: 'none', word: present('', { signedOut: true }) };
   const cell = states.gateway;
   const gateway = data?.safety.gateway;
   if (gateway?.apiSessionReady === false && ['gateway_down', 'upstream_lost'].includes(gateway.reason)) return { tone: 'bad', word: 'down' };
@@ -180,7 +177,7 @@ export function localBoardHealth(states, feeds, now) {
 export function boardHealthPresentation(states, feeds, now) {
   const health = localBoardHealth(states, feeds, now);
   const { frozen } = dataAge(feeds, now);
-  const label = health.reason === 'signed-out' ? present('', { signedOut: true }, 'label') : health.tone === 'green' ? 'Board OK'
+  const label = health.reason === 'signed-out' ? 'Signed out' : health.tone === 'green' ? 'Board OK'
     : health.tone === 'red' ? 'Needs fix'
       : health.reason === 'snapshot_stale' ? `Stale ${age(frozen)}`
         : health.reason === 'gateway_unconfirmed' ? 'Broker unsure'
@@ -192,7 +189,7 @@ export function boardHealthPresentation(states, feeds, now) {
 // Presentation only: the selector above still owns every threshold and rank.
 // Keep the action from the existing reason copy in Details and the red line.
 export function statusSentence(health, { receipt = null, gatewayAge = null } = {}) {
-  if (health.reason === 'signed-out') return present('', { session: 'signed-out' }, 'status');
+  if (health.reason === 'signed-out') return 'Signed out — reload to sign in';
   if (health.tone === 'green') return `Live · updated ${age(receipt)} ago`;
   if (health.reason === 'halt_on') return 'Emergency stop is ON';
   if (health.reason === 'gateway_unconfirmed') return Number.isFinite(gatewayAge)
@@ -225,12 +222,14 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
 }
 
 const PNL_COPY = { day: 'Today’s result', open: 'The open result' };
-export const isSignedOut = (states, feeds) => states.session === 'signed-out' || Object.values(feeds).some(feed => feed?.reason === 'auth_required');
+// Legacy/server diagnostics may still carry this reason. Browser auth failures
+// are stopped by the transport session before reaching health presentation.
+const isSignedOut = (_states, feeds) => Object.values(feeds).some(feed => feed?.reason === 'auth_required');
 // A stuck desk is one whose positions, orders or executions the pusher cannot
 // currently confirm; its own status text names no cause, so the board says this.
 export const STUCK_REASON = 'its trading activity can’t be confirmed';
 export function boardDiagnostics(states, feeds, now) {
-  if (isSignedOut(states, feeds)) return [present('', { signedOut: true }, 'diagnostics')];
+  if (isSignedOut(states, feeds)) return ['The sign-in has expired; reload to sign in. Values shown are last known.'];
   const data = feeds.data?.value;
   const problems = [];
   if (!data) {

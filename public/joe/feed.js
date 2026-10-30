@@ -22,11 +22,15 @@ import { readJSON, createBoardSession } from './transport.js';
 
 export function createFeed(onChange, measure = () => {}, version = '', { actionsWanted = () => false, session = createBoardSession() } = {}) {
   let anchor = null, serverPanels = {}, fleetTag = null;
-  const unsubscribe = session.subscribe(() => onChange('session'));
+  let frozen = null, selected = null;
+  const unsubscribe = session.subscribe(() => {
+    frozen = session.signedOut() ? selected ?? select() : null;
+    worker?.postMessage({ frozen: session.signedOut() });
+    onChange('session');
+  });
   const read = async (url, init) => {
     const res = await readJSON(url, init);
-    session.observe(new URL(url, 'https://board/joe/').pathname, res);
-    return res;
+    return session.accept(new URL(url, 'https://board/joe/').pathname, res) ? res : null;
   };
   // Where the server read the fleet settings from, and its change log.
   let fleetSource = null, actions = null;
@@ -39,7 +43,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     reads.set(kind, promise);
     return promise;
   };
-  const now = () => (anchor ? new Date(Math.round(anchor.serverMs + performance.now() - anchor.perf)).toISOString() : null);
+  const now = () => frozen ? frozen.now : (anchor ? new Date(Math.round(anchor.serverMs + performance.now() - anchor.perf)).toISOString() : null);
   const settle = (key, value) => { feeds[key] = value; };
 
   // state.json's serverNow owns the clock once it has answered; until then
@@ -55,6 +59,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
 
   function pollState() { return poll('state', async () => {
     const res = await read('./state.json');
+    if (!res || session.signedOut()) return;
     if (res.status !== 200 || !res.payload?.feeds) {
       // Keep the last good snapshot and its original receipts; only the reason changes.
       anchorFrom(res);
@@ -94,11 +99,12 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   try {
     worker = new Worker(new URL(`./v/${encodeURIComponent(version)}/history-worker.js`, import.meta.url), { type: 'module' });
     worker.onmessage = ({ data }) => {
-      const kind = data.kind === 'unchanged' ? data.feed : data.kind;
+      const kind = ['unchanged', 'blocked'].includes(data.kind) ? data.feed : data.kind;
       const pending = workerReads.get(kind);
       workerReads.delete(kind);
       try {
         for (const [key, auth] of Object.entries(data.auth ?? {})) session.observe(key, { auth });
+        if (session.signedOut() || data.kind === 'blocked') return;
         if (data.clock) anchorTo(data.clock.at, data.clock.precise ? 'stamp' : 'date');
         measure(`${kind}-worker`, data.ms);
         if (data.kind === 'unchanged') return;
@@ -119,6 +125,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   function pollHistory() { return poll('history', async () => {
     if (worker) return readInWorker('history', 'poll');
     const [res, sidecar] = await Promise.all([read('./history.json'), read('./history-continuity.json')]);
+    if (!res || !sidecar || session.signedOut()) return;
     anchorFrom(res);
     const reason = res.headers?.get('X-Joe-Feed-Reason') ?? undefined;
     const started = performance.now();
@@ -141,6 +148,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   function pollResults() { return poll('results', async () => {
     if (worker) return readInWorker('results', 'results');
     const res = await read('./results.json');
+    if (!res || session.signedOut()) return;
     anchorFrom(res);
     const reason = res.headers?.get('X-Joe-Feed-Reason') ?? undefined;
     const started = performance.now();
@@ -159,6 +167,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
 
   function pollFleet() { return poll('fleet', async () => {
     const res = await read('./fleet-config.json', fleetTag ? { headers: { 'If-None-Match': fleetTag } } : {});
+    if (!res || session.signedOut()) return;
     anchorFrom(res);
     // Only a conditional response for the validated saved document can clear
     // a rejection. Its receipt still belongs to the original read.
@@ -185,6 +194,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   // A failed read keeps the last good log and says why.
   function pollActions() { return poll('actions', async () => {
     const res = await read('./fleet-config/actions.json');
+    if (!res || session.signedOut()) return;
     anchorFrom(res);
     const entries = res.status === 200 ? acceptActions(res.payload) : null;
     actions = entries ? { entries, reason: null } : { entries: actions?.entries ?? null, reason: res.auth ? 'auth_required' : res.status === 200 ? 'contract_invalid' : 'refresh_failed' };
@@ -195,26 +205,13 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   // server's own panels carry retained last-good values and their receipts.
   // Without any server clock each panel still gets its state and reason: a
   // value that arrived without one cannot be dated, so it is not shown.
-  let lastKnownStates = null;
-  function selectStates(input, at, previous) {
-    const states = boardStates(input, at, previous);
-    if (!session.signedOut()) {
-      lastKnownStates = Object.fromEntries(Object.entries(states).map(([name, cell]) => [name, { ...cell }]));
-      return states;
-    }
-    return { ...Object.fromEntries(Object.entries(states).map(([name, cell]) => [name,
-      // Freeze the last displayed selection, including derived amounts that
-      // normal outage policy would withhold. Authentication cannot revalue it.
-      { ...cell, value: (lastKnownStates?.[name] ?? cell).value,
-        lastKnown: lastKnownStates?.[name] ?? cell, signedOut: true, state: 'broken', ageSeconds: null,
-        retained: (lastKnownStates?.[name] ?? cell).value != null }])), session: 'signed-out' };
-  }
   function select() {
+    if (frozen) return frozen;
     const at = now();
     const input = Object.fromEntries(Object.entries(feeds).filter(([, feed]) => feed));
-    if (at) return { now: at, feeds: input, states: selectStates(input, at, serverPanels), fleetSource, actions };
+    if (at) return (selected = { now: at, feeds: input, states: boardStates(input, at, serverPanels), fleetSource, actions });
     const undated = Object.fromEntries(Object.entries(input).map(([key, feed]) => [key, feed.value == null ? feed : { value: null, reason: feed.reason ?? null }]));
-    return { now: null, feeds: undated, states: selectStates(undated, NO_CLOCK, {}), fleetSource, actions };
+    return (selected = { now: null, feeds: undated, states: boardStates(undated, NO_CLOCK, {}), fleetSource, actions });
   }
   // Every first read (state, history, closed-trade record, fleet settings) has
   // answered, with a value or a reason; the page then marks itself ready.
@@ -228,10 +225,10 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     timers = [
       setInterval(pollState, POLL_DATA_MS),
       setInterval(() => { pollHistory(); pollResults(); pollFleet(); if (actionsWanted()) pollActions(); }, POLL_HISTORY_MS),
-      setInterval(() => onChange('tick'), TICK_MS),
+      setInterval(() => { if (!session.signedOut()) onChange('tick'); }, TICK_MS),
     ];
   }
-  const stop = () => { timers.forEach(clearInterval); timers = []; unsubscribe(); };
+  const stop = () => { timers.forEach(clearInterval); timers = []; worker?.terminate?.(); unsubscribe(); };
   const refresh = () => Promise.all([pollFleet(), pollState(), pollHistory(), pollResults()]);
-  return { start, stop, select, now, settled, refresh, refreshHistory: pollHistory, refreshResults: pollResults, refreshFleet: pollFleet, refreshActions: pollActions, usesWorker: () => Boolean(worker), feeds };
+  return { start, stop, select, now, settled, signedOut: session.signedOut, refresh, refreshState: pollState, refreshHistory: pollHistory, refreshResults: pollResults, refreshFleet: pollFleet, refreshActions: pollActions, usesWorker: () => Boolean(worker), feeds };
 }

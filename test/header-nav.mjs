@@ -183,7 +183,7 @@ const REGIONS = [/^  let shown = [\s\S]*?^  function go\(next[\s\S]*?^  \}$/m, /
 function boot(source, b, extra = {}) {
   const code = REGIONS.map(re => { const m = re.exec(source); assert.ok(m, `app.js region ${re}`); return m[0]; }).join('\n');
   const ctx = { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, applyRoute, onAddress, createPlaces,
-    screen: 'desk', dirtyHistory: false, __joedesk: {}, tips: { hide() {} }, closePop() {}, forgetCharts() {}, forgetResults() {},
+    screen: 'desk', dirtyHistory: false, freeze: { frozen: () => false }, __joedesk: {}, tips: { hide() {} }, closePop() {}, forgetCharts() {}, forgetResults() {},
     feed: { refreshActions() {} }, guard: (_name, fn) => fn(), render: () => b.render(), SETTINGS_SECTIONS: [], showSection() {},
     $: selector => ({ classList: { toggle: (_name, on) => { if (on) b.show(selector.slice('#scr-'.length)); } } }), $$: () => [],
     document: { body: { dataset: {} }, getElementById: () => null, documentElement: {} }, ...extra };
