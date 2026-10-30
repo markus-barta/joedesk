@@ -3,7 +3,6 @@
 // eleven switches, including natural copies; CSSOM reads are counted
 // separately. No browser, timing-budget change or guard change.
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { htmlDocument, builders } from './fixtures/preview-dom.mjs';
@@ -15,7 +14,9 @@ const rootUrl = new URL('../', import.meta.url);
 const moduleUrl = file => new URL(`public/joe/${file}`, rootUrl);
 function sourceModule(file, revision, modelUrl, transform = value => value) {
   const url = moduleUrl(file);
-  const source = transform(revision ? execFileSync('git', ['show', `${revision}:public/joe/${file}`], { cwd: rootUrl, encoding: 'utf8' }) : readFileSync(url, 'utf8'));
+  // The frozen release-40 sources are vendored (byte-identical to rebuild/v2 28e1edb, i.e. 2818f8c),
+  // because CI's shallow checkout has no history to `git show` from.
+  const source = transform(revision ? readFileSync(new URL(`test/fixtures/results-legacy-r40/${file}`, rootUrl), 'utf8') : readFileSync(url, 'utf8'));
   const absolute = source.replace(/from (['"])(\.[^'"]+)\1/g, (_match, _quote, specifier) => {
     const target = specifier === './results-model.js' && modelUrl ? modelUrl
       : new URL(specifier === './time.mjs' || specifier.startsWith('./contracts/') ? `../../${specifier.slice(2)}` : specifier, url).href;
