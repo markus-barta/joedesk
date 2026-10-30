@@ -98,8 +98,8 @@ function sinceParts(cell, start, settings) {
 }
 // Desk's Cash (JOED-49), as the broker reports it: two decimals, the broker's
 // exact lexeme in the title and accessible name, and Desk's dash rules. A
-// missing Cash is "not reported" with its reason ("no data received yet" when
-// none came), a not-exact one "not exact" (JOED-148), and Cash an outage kept
+// missing Cash names its reason once ("no data received yet" when none came),
+// a not-exact one "not exact" (JOED-148), and Cash an outage kept
 // is withheld (JOED-91). A reason the account value shares is said once, in
 // the change line; the name always carries it.
 export function cashPart(cash, shared = null) {
@@ -115,7 +115,7 @@ export function cashPart(cash, shared = null) {
     shown = `<b class="muted">—</b> · ${NOT_EXACT}${own && own !== NOT_EXACT ? ` · ${esc(own)}` : ''}`;
     name = `Cash: ${dashWords(cash.reason)}`;
   } else {
-    shown = `<b class="muted">—</b> · not reported${own ? ` · ${esc(own)}` : ''}`;
+    shown = `<b class="muted">—</b>${own ? ` · ${esc(own)}` : ''}`;
     name = `Cash ${dashWords(reason)}`;
   }
   return `<span class="acct-cash" data-cash="acct.cash" data-state="${esc(cash?.state ?? 'not reported')}" role="group" title="${esc(name)}" aria-label="${esc(name)}">Cash ${shown}</span>`;

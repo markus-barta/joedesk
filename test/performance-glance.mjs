@@ -148,7 +148,7 @@ test('Desk’s Cash, in the whole account, preserves exact values and keeps unav
       assert.equal(plain, 'Cash — · not exact');
       assert.equal(name, 'Cash: not exact');
     } else {
-      assert.equal(plain, `Cash — · not reported · ${why}`);
+      assert.equal(plain, `Cash — · ${why}`);
       assert.equal(name, `Cash ${why}`);
     }
     if (cash.reason === 'gateway_unconfirmed') assert.match(plain, /broker connection not confirmed/);
@@ -156,12 +156,20 @@ test('Desk’s Cash, in the whole account, preserves exact values and keeps unav
   }
 });
 
+test('JOED-158 Cash: a shared missing-value reason stays in the account change line and in the Cash name', () => {
+  const cash = cell(null, { state: 'broken', reason: 'source_unavailable' });
+  const figure = htmlDocument(cashPart(cash, cash.reason)).querySelector('[data-cash="acct.cash"]');
+  assert.equal(figure.textContent, 'Cash —');
+  assert.equal(figure.getAttribute('aria-label'), 'Cash not reported by the broker');
+  assert.equal(figure.getAttribute('title'), figure.getAttribute('aria-label'));
+});
+
 test('omitted Cash is a muted dash with the missing-data explanation beside it', () => {
   const ctx = context();
   delete ctx.states.paperCash;
   const figure = htmlDocument(cashPart(ctx.states.paperCash)).querySelector('[data-cash="acct.cash"]');
   assert.equal(figure.querySelector('b.muted').textContent, '—');
-  assert.equal(figure.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported · no data received yet');
+  assert.equal(figure.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · no data received yet');
   assert.equal(figure.getAttribute('aria-label'), 'Cash no data received yet');
   assert.equal(figure.dataset.state, 'not reported');
 });
@@ -177,8 +185,8 @@ test('AC-19 supporting captions and Cash explanation survive phone separator typ
     // Cash's explanation, in the whole account's line above the hero (JOED-156).
     const reason = joinUnits(cash.querySelector('[data-cash]').textContent.replace(/\s+/g, ' ').trim().replace(/^Cash — · /, ''), { joinDot });
     assert.deepEqual(copyText(captions), [`${positionCount(ctx)}\u00a0position · changes until they close`, `started with ${eur(STARTING_MONEY, false, 0)} on 10\u00a0Sep`]);
-    assert.equal(copyText(reason), 'not reported · no data received yet');
-    if (joinDot) assert.match(reason, /reported\u00a0·/);
+    assert.equal(copyText(reason), 'no data received yet');
+    if (joinDot) assert.match(joinUnits(cash.querySelector('[data-cash]').textContent, { joinDot }), /—\u00a0·/);
   }
 });
 

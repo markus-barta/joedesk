@@ -173,6 +173,24 @@ test('JOED-148 cash captions: a not-exact Cash says "not exact" in its caption a
   assert.ok(cashCaption({ state: 'broken', value: null, reason: 'source_unavailable' }, 'rt.cash').includes('aria-label="Cash not reported by the broker">not reported by the broker</span>'));
 });
 
+test('JOED-158 cash figures: missing values name one reason, matching Settings and accessibility', () => {
+  for (const reason of [null, ...Object.keys(health.CELL_REASON).filter(reason => !NOT_EXACT_REASONS.has(reason))]) {
+    const cell = { state: 'broken', value: null, reason };
+    const why = health.cellReason(reason ?? 'feed_not_received');
+    const settings = htmlDocument(cashCaption(cell, 'rt.cash')).querySelector('[data-cash]');
+    for (const sharedReason of [null, why]) {
+      const desk = htmlDocument(cashCaption(cell, 'hero.cash', { figure: true, sharedReason }));
+      const figure = desk.querySelector('[data-cash]');
+      assert.equal(desk.querySelector('.cash-amount').textContent, '—', reason);
+      assert.equal(desk.querySelector('.cash-reason').textContent, sharedReason ? '' : why, reason);
+      assert.equal(figure.getAttribute('aria-label'), `Cash ${why}`, reason);
+      assert.equal(figure.getAttribute('title'), settings.getAttribute('title'), reason);
+      assert.equal(figure.getAttribute('aria-label'), settings.getAttribute('aria-label'), reason);
+      assert.equal(settings.textContent, why, reason);
+    }
+  }
+});
+
 test('cash captions: stale values keep exact accessibility and their own reason with the same reserve', () => {
   const value = { amount: '12345.67890123', currency: 'EUR' };
   const reserve = html => html.slice(html.indexOf('<span class="cash-sizing"'));
@@ -1291,12 +1309,12 @@ test('broker down: hero, Cash and each desk explain the reason once and keep mix
   for (const caption of doc.querySelectorAll('.account-caption')) assert.doesNotMatch(caption.children[0].textContent, /broker connection down/);
   assert.equal(doc.querySelector('.disclosure-warning .vh').textContent.match(/broker connection down/g).length, 1, 'collapsed Desks’ money retains one reason');
   // JOED-156: Cash sits in the whole account above the hero and still says the outage once:
-  // the value's state line says it, Cash's dash only "not reported", its name all of it.
+  // the value's state line says it, Cash shows a dash and its name carries the reason.
   const state = A.stateLine(ctx.states.paperAccount);
   assert.equal(state.text.match(/broker connection down/g)?.length, 1, state.text);
   for (const html of Object.values(A.subParts(ctx, null, { reason: 'missing' })).slice(0, 2)) {
     const cash = htmlDocument(html).querySelector('[data-cash="acct.cash"]');
-    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported');
+    assert.equal(cash.textContent.replace(/\s+/g, ' ').trim(), 'Cash —');
     assert.equal(cash.getAttribute('aria-label'), 'Cash broker connection down');
   }
   for (const id of ['j', 'joe', 'joel']) {

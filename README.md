@@ -1920,9 +1920,10 @@ separate supporting Cash figure, and Settings appends it to the account
 row. Both use the label “Cash” and caption “cash · as the broker reports it”.
 They show two decimals using exact integer units for display only, with
 the untouched broker lexeme in title and accessible name. Null Cash shows a
-muted dash in the Desk figure with “not reported · [reason]” in its caption;
-Settings retains that wording inline. A not-exact Cash says “not exact”
-instead (JOED-148). Rev-7 omission reads “no data received yet”.
+muted dash in the Desk figure with its reason once beside it; a reason shared
+with the account value stays in the change line. Settings shows the reason
+once inline. Both accessible names carry the same reason. A not-exact Cash
+says “not exact” instead (JOED-148). Rev-7 omission reads “no data received yet”.
 Desk reserves fixed caption lines inside each cell; Settings reserves the actual
 wrapped value/stale/null reason forms, including the session reason at 360 px. They wrap
 text and keep the existing header. P5's `cash` cases cover real ingress, stale, null, API-session loss,

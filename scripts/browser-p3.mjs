@@ -108,7 +108,7 @@ async function phoneFirstScreenChecks(page, viewport, theme, snapshot) {
     d.controls.length === 7 && !d.controls.some(c => c.key === 'whole') && d.controls.every(c => c.expanded === 'false' && c.hidden && !c.visible && c.height >= 44) && d.horizontal.scroll <= d.horizontal.inner &&
     d.account && d.account.height <= 440 && d.pageHeight <= 1600 + d.account.height + d.account.gap, d);
   check('phone-first', `${tag}: missing Cash is visible on the first screen, in the whole account's Since start · Cash line, with its reason and accessible name`,
-    d.account?.cash?.text === 'Cash — · not reported · no data received yet' && d.account.cash.name === 'Cash no data received yet' &&
+    d.account?.cash?.text === 'Cash — · no data received yet' && d.account.cash.name === 'Cash no data received yet' &&
     d.account.cash.top >= d.account.top && d.account.cash.bottom <= Math.min(844, d.bottomBar.top) - 8, d.account);
   await shot(page, viewport, `${viewport.name}-${theme}-desk-first-screen`, 'Phone Desk, default collapsed: status, Today, Since start and three ranked desk rows');
   // Enter and Space use the native button, retain focus, and expose the body.
@@ -183,7 +183,7 @@ async function deskChecks(page, viewport, theme, snapshot) {
     sinceCaption === 'after fees, incl. open positions' && d.primary[1].basis === `of ${fmt.eur(STARTING_MONEY, false, 0)}` &&
     d.scope === 'Desk figures never include the kept holdings. The whole account, with them, is at the top.' && /^Desks J, Joe and Joel · their €\s15\.000 practice capital|^Desks · €\s15\.000 practice capital/.test(d.eyebrow), { primary: d.primary, kpis: d.kpis, account: d.account, sinceCaption, scope: d.scope, eyebrow: d.eyebrow });
   check('AC-19', `${tag}: unreported Cash is a muted dash with its reason beside it, in the whole account`, d.account.cash?.muted && d.account.cash.state === 'not reported' &&
-    d.account.cash.text === 'Cash — · not reported · no data received yet' && d.account.cash.name === 'Cash no data received yet', d.account);
+    d.account.cash.text === 'Cash — · no data received yet' && d.account.cash.name === 'Cash no data received yet', d.account);
   const day = decimalUnits(snapshot.totals.dayPnl.amount), equity = decimalUnits(snapshot.totals.equity.amount), since = decimalUnits(snapshot.totals.totalPnl.amount);
   const percent = percentText;
   check('AC-19', `${tag}: primary euros and percentages use the exact start-of-day and since-start bases, and Today names its base`, d.primary[0].value.replace(/\s/g, '') === fmt.eur(day, true).replace(/\s/g, '') && d.primary[1].value.replace(/\s/g, '') === fmt.eur(since, true).replace(/\s/g, '') &&
@@ -731,9 +731,9 @@ try {
           const warnings = collapsed.controls.filter(c => ['account', 'positions', 'kept', 'j', 'joe', 'joel'].includes(c.key));
           check('fixtures', `${viewport.name} ${theme}: every collapsed outage section retains its icon and one broker-down reason in both short and accessible copy`, warnings.length === 6 &&
             warnings.every(c => c.icon && (c.warning.match(/broker connection down/g) ?? []).length === 1 && (c.detail.match(/broker connection down/g) ?? []).length === 1), warnings);
-          // The whole account above stays open on a phone and says the outage once, in its change line; Cash only "not reported".
+          // The whole account above stays open on a phone and says the outage once, in its change line; Cash shows a dash.
           check('fixtures', `${viewport.name} ${theme}: the open whole account states the broker-down reason once, Cash without repeating it`,
-            (collapsed.account?.line?.match(/broker connection down/g) ?? []).length === 1 && collapsed.account.cash?.text === 'Cash — · not reported' &&
+            (collapsed.account?.line?.match(/broker connection down/g) ?? []).length === 1 && collapsed.account.cash?.text === 'Cash —' &&
             collapsed.account.cash.name === 'Cash broker connection down', collapsed.account);
         }
         check('phone-first', `${viewport.name} ${theme} ${id}: collapsed panels do not scroll horizontally`, collapsed.horizontal.scroll <= collapsed.horizontal.inner, collapsed.horizontal);

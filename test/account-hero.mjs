@@ -81,7 +81,7 @@ test('JOED-156 hero: the whole account first, its change for the range, Cash and
   assert.ok(!p.$('#acctChange [data-clamp]'), 'a current value has no state line');
   const sub = p.text('#acctSub');
   assert.match(sub, /^Account start loading/);
-  assert.match(sub, /Cash — · not reported/);
+  assert.match(sub, /Cash — · no data received yet/);
   assert.match(sub, /incl\. kept holdings SXR8 € 600,00 · TSLA \$ 200,00, each in its own currency$/, 'never converted');
   // Kept holdings are text only: nothing there can be acted on.
   const kept = p.$('#acctSub').innerHTML.slice(p.$('#acctSub').innerHTML.indexOf('incl. kept holdings'));
@@ -102,7 +102,7 @@ test('JOED-156 hero: Since start comes from the Settings start; until it is set 
   const ctx = ctxFor();
   const set = A.subParts(ctx, { amountEur: 1000000, date: '2025-06-02' }, { reason: null });
   assert.match(words(htmlDocument(set.wide).textContent), /^Since start \(€ 1\.000\.000 on 2 Jun 2025\): −€ 972\.000,00 · −97,20 %/);
-  assert.match(words(htmlDocument(set.narrow).textContent), /^Since start −€ 972\.000,00 \(−97,20 %\) · Cash — · not reported · no data received yet$/);
+  assert.match(words(htmlDocument(set.narrow).textContent), /^Since start −€ 972\.000,00 \(−97,20 %\) · Cash — · no data received yet$/);
   assert.match(set.details, /change in Settings/);
   for (const reason of ['missing', 'unset']) {
     const unset = A.subParts(ctx, null, { reason });
@@ -237,7 +237,7 @@ test('JOED-156 hero: on a phone the short eyebrow, one Since start · Cash line,
   const p = page(t, { phone: true });
   await p.render();
   assert.equal(p.text('#acctTitle .acct-narrow'), 'Whole account');
-  assert.match(p.text('#acctSubN'), /^Account start loading · Cash — · not reported · no data received yet$/);
+  assert.match(p.text('#acctSubN'), /^Account start loading · Cash — · no data received yet$/);
   const details = p.$('#acctDetailsBtn');
   assert.deepEqual([details.getAttribute('aria-expanded'), details.getAttribute('aria-controls'), p.$('#acctDetails').getAttribute('hidden')], ['false', 'acctDetails', '']);
   details.listeners.click();
