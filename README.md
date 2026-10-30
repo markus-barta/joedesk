@@ -2658,6 +2658,15 @@ explicit-era Gregorian reference with civil-day arithmetic and raw-record
 scans. Named regressions cover both mixed-year ordering failures, year 0,
 LMT midnight to the millisecond, DST and both modern-window edges.
 
+The Results page uses the same canonical Vienna keys as the index, including
+year 0, padded years before 1000 and the year-10000 rollover. Calendar and
+period navigation, route application, YTD selection, day labels and partial
+warnings use numeric/calendar helpers rather than string ordering or fixed
+year positions. `test/results-page.mjs` exercises the actual page renderer
+and controls; all 11 regressions fail with `RESULTS_PAGE_PARENT=1` against
+`d848cd0` loaded in memory, while modern markup stays byte-identical. These
+tests are also included by `test/results-model.mjs`.
+
 Reseal the integrated runtime closure once. Contracts revision 10, contract set
 `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
 shared presentation pin and legacy anchor remain unchanged. This candidate

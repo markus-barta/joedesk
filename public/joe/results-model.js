@@ -119,6 +119,7 @@ const parse = k => { const [y, m, d] = parts(k); return utcDate(y, m - 1, d); };
 const kOf = dt => dateKey(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate());
 export const addDays = (k, n) => { const d = parse(k); d.setUTCDate(d.getUTCDate() + n); return kOf(d); };
 export const dowOf = k => parse(k).getUTCDay();
+export const dayOf = k => parse(k).getUTCDate();
 export const ymOf = k => [parse(k).getUTCFullYear(), parse(k).getUTCMonth()];
 export const monday = k => addDays(k, -((dowOf(k) + 6) % 7));
 export const daysIn = (y, m) => utcDate(y, m + 1, 0).getUTCDate();
@@ -205,7 +206,7 @@ export function stepAnchor(period, anchor, dir, today, trackingStart = null) {
 const ROUTE_PERIOD = new Map([['day', 'day'], ['week', 'week'], ['month', 'month'], ['year', 'ytd'], ['all', 'all']]);
 const ROUTE_NAME = new Map([...ROUTE_PERIOD].map(([name, period]) => [period, name]));
 const ROUTE_DESKS = new Set(['all', ...DESK_IDS]);
-const validDate = k => /^\d{4}-\d{2}-\d{2}$/.test(k) && kOf(parse(k)) === k;
+const validDate = k => /^-?\d{4,}-\d{2}-\d{2}$/.test(k) && kOf(parse(k)) === k;
 export function parseResultsRoute(query) {
   const params = new URLSearchParams(String(query ?? '').replace(/^\?/, ''));
   const value = key => params.get(key)?.trim().toLowerCase() ?? '';
@@ -232,7 +233,7 @@ function closeCoordinate(k) {
 // Fixed-width schema dates retain their cheap ordering. Expanded years and
 // the preceding day of year 0 use the same numeric calendar order everywhere.
 const numericDate = k => { const [y, m, d] = parts(k); return y * 10000 + m * 100 + d; };
-function compareDates(a, b) {
+export function compareDates(a, b) {
   if (a.length === 10 && b.length === 10) return a < b ? -1 : a > b ? 1 : 0;
   return numericDate(a) - numericDate(b);
 }
