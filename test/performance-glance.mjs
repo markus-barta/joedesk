@@ -149,7 +149,7 @@ test('Desk’s Cash, in the whole account, preserves exact values and keeps unav
       assert.equal(name, 'Cash: not exact');
     } else {
       assert.equal(plain, `Cash — · not reported · ${why}`);
-      assert.equal(name, `Cash not reported · ${why}`);
+      assert.equal(name, `Cash ${why}`);
     }
     if (cash.reason === 'gateway_unconfirmed') assert.match(plain, /broker connection not confirmed/);
     if (cash.reason === 'snapshot_stale') assert.match(plain, /updates are late/);
@@ -162,7 +162,7 @@ test('omitted Cash is a muted dash with the missing-data explanation beside it',
   const figure = htmlDocument(cashPart(ctx.states.paperCash)).querySelector('[data-cash="acct.cash"]');
   assert.equal(figure.querySelector('b.muted').textContent, '—');
   assert.equal(figure.textContent.replace(/\s+/g, ' ').trim(), 'Cash — · not reported · no data received yet');
-  assert.equal(figure.getAttribute('aria-label'), 'Cash not reported · no data received yet');
+  assert.equal(figure.getAttribute('aria-label'), 'Cash no data received yet');
   assert.equal(figure.dataset.state, 'not reported');
 });
 

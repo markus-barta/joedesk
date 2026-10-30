@@ -42,7 +42,7 @@ test('JOED-157 fix3: cold boardStates preserves the browser first-load state and
     assert.equal(hero.querySelector('[data-cell="hero.open"] .account-caption').children[0].textContent,
       rejected ? 'Unavailable · not found on the board server' : 'Not reported');
     const summary = hero.querySelector('.account-section .summary-text').textContent;
-    assert.equal(summary, rejected ? 'Open result: unavailable · not found on the board server' : 'Open result: not reported · no data received yet');
+    assert.equal(summary, rejected ? 'Open result: unavailable · not found on the board server' : 'Open result: not reported');
     assert.doesNotMatch(hero.textContent, /Unavailable for|unavailable for/);
   }
 });

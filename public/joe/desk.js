@@ -99,7 +99,7 @@ export function disclosureProblem(candidates) {
     const state = label === OPEN && waitingOnPrices(cell) ? 'waiting on prices'
       : notExactDash(cell) ? NOT_EXACT : cell?.retained ? 'last good' : p.state === 'stale' ? 'stale'
       : p.state === 'not reported' ? 'not reported' : 'unavailable';
-    const reason = cell?.reason ?? (p.state === 'not reported' ? 'feed_not_received' : null);
+    const reason = cell?.reason ?? (p.state === 'not reported' && !['Today', OPEN].includes(label) ? 'feed_not_received' : null);
     // Unavailable money leads even when its honest not-exact icon is neutral;
     // an old check-in must not obscure that the row's figures are unknown.
     const priority = cell?.state === 'broken' || state === 'unavailable' ? 3 : severity[p.tone];

@@ -1536,7 +1536,10 @@ board's state line already explains it. This includes pending start-of-day
 results and every revision-10 exactness reason; repeated section reasons stay shared.
 
 JOED-148 (board only, no figure changes meaning) states each dash's reason once
-and promises no time. `not_exact_yet` reads “not exact”; the other not-exact
+and promises no time. Other missing figures name their supplied reason directly
+(“Today: not reported by the broker”), or say “not reported” without a reason.
+A reason-less Today or Open summary never claims that board data has not arrived.
+`not_exact_yet` reads “not exact”; the other not-exact
 reasons add their own words (“Not exact · start-of-day value missing”). A
 not-exact household Today names the desks that keep it from being exact,
 from the board's own per-desk cells (“Not exact for J and Joe”); a reason that

@@ -135,7 +135,7 @@ test('JOED-156 hero: a value that is not current and exact keeps its state, neve
   await p.render(ctxFor({ mutate: d => { d.brokerAccount = { equity: null, reason: 'source_unavailable', scope: d.brokerAccount.scope, observedAt: d.brokerAccount.observedAt }; } }));
   const dash = p.$('#acctValue .bn');
   assert.equal(dash.textContent, '—');
-  assert.equal(words(dash.getAttribute('aria-label')), 'Whole account: not reported · not reported by the broker');
+  assert.equal(words(dash.getAttribute('aria-label')), 'Whole account: not reported by the broker');
   assert.equal(words(p.$('#acctChange [data-clamp]').textContent), 'Unavailable · not reported by the broker');
   await p.render(ctxFor({ mutate: d => { d.brokerAccount = { equity: null, reason: 'not_exact_yet', scope: d.brokerAccount.scope, observedAt: d.brokerAccount.observedAt }; } }));
   assert.equal(words(p.$('#acctChange [data-clamp]').textContent), 'Not exact');

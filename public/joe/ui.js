@@ -12,10 +12,10 @@ export const NOT_EXACT = CELL_REASON.not_exact_yet;
 // A dash's accessible name and title after its label, shared by money cells,
 // positions and Cash: a value the feed sent as not exact says "not exact"
 // (with a reason only when it adds words), never "not reported"; every other
-// missing value keeps its existing words.
+// missing value names its reason once, or says "not reported" without one.
 export function dashWords(reason) {
   const why = reason ? cellReason(reason) : null;
-  return NOT_EXACT_REASONS.has(reason) ? `${NOT_EXACT}${why !== NOT_EXACT ? ` · ${why}` : ''}` : `not reported${why ? ` · ${why}` : ''}`;
+  return NOT_EXACT_REASONS.has(reason) ? `${NOT_EXACT}${why !== NOT_EXACT ? ` · ${why}` : ''}` : why ?? 'not reported';
 }
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
