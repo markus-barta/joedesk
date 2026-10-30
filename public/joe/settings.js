@@ -4,7 +4,7 @@
 // (dialog and review tick), Confirm, Send to the desks; fleet-write.js sends.
 // The LIVE gate never sends anything and cannot change the mode.
 import { $, $$, icon, term, learnBtn, st, ageSpan, patch, statePhrase, addTerms, openDialog, fromPointer, isPhone, cashCaption } from './ui.js';
-import { esc, age, money, amountOf, timeHMS, dayDM, dateTimeFull, ledgerSize, NB } from './format.js';
+import { esc, money, amountOf, timeHMS, dayDM, dateTimeFull, ledgerSize, NB } from './format.js';
 import { boardHealthPresentation, brokerState, dataAge, cellReason, executorPresentation, STALE_AFTER_S } from './health.js';
 import { panelState } from './contracts/panel-state.mjs';
 import { setTheme, storedTheme } from './theme.js';
@@ -13,6 +13,7 @@ import { sendFleetDraft } from './fleet-write.js';
 import { boardSettingsState, refreshBoardSettings, onBoardSettingsChange } from './board-settings.js';
 import { saveBoardSettings } from './board-settings-write.js';
 import * as M from './settings-model.js';
+import { present, presentAge as age, signedOut } from './presentation.js';
 
 export const SECTIONS = Object.freeze([
   { id: 'set-mode', nav: 'Mode', icon: 'shield' },
@@ -119,7 +120,7 @@ function accountStartSection() {
 }
 
 function renderAccountStart() {
-  const snapshot = boardSettingsState(), row = M.accountStartRow(snapshot);
+  const snapshot = boardSettingsState(), row = M.accountStartRow(snapshot, lastCtx);
   patch($('#accountStartSummary'), esc(row.text));
   patch($('#accountStartReason'), esc(row.note));
   $('#accountStartEdit').disabled = accountBusy || !row.editable;
@@ -440,26 +441,26 @@ function runtimeHtml(ctx) {
   const mode = data && fleet ? 'the board data and the fleet settings both say paper' : data ? 'the board data says paper; the fleet settings have not reported'
     : fleet ? 'the fleet settings say paper; the board data has not reported' : 'fixed in this phase; neither the board data nor the fleet settings have reported';
   rows.push(rtRow('paper', 'Trading mode', `<span class="st">${icon('paper')}<span>Paper · ${mode}</span></span>`, 'mode'));
-  const notReported = (cell) => st('none', `Not reported${cell?.reason && cell.reason !== 'feed_not_received' ? ` · ${esc(cellReason(cell.reason))}` : ''}`);
+  const notReported = (cell) => st('none', `Not reported${cell?.reason && cell.reason !== 'feed_not_received' ? ` · ${esc(cellReason(cell.reason, ctx))}` : ''}`);
   const halt = states.halt;
   const signedOut = states.session === 'signed-out';
-  rows.push(rtRow('stop', term('halt'), signedOut ? st('none', `${halt?.value == null ? 'Unavailable' : `Last known: ${halt.value ? 'On' : 'Off'}`} · unknown while signed out`) : halt?.value == null ? notReported(halt)
-    : halt.value ? st('bad', `On · ${esc(cellReason(data?.safety.haltReason ?? halt.reason ?? 'halt_on'))}`)
+  rows.push(rtRow('stop', term('halt'), signedOut ? st('none', `${present('', { signedOut: true, value: halt?.value }, 'retained')}${halt?.value == null ? '' : `: ${halt.value ? 'On' : 'Off'}`} · ${present('', ctx)}`) : halt?.value == null ? notReported(halt)
+    : halt.value ? st('bad', `On · ${esc(cellReason(data?.safety.haltReason ?? halt.reason ?? 'halt_on', ctx))}`)
       : withState(halt, 'rt.halt', 'ok', 'Off · paper trading is not paused'), 'safety.halt'));
   let broker;
-  if (states.session === 'signed-out') broker = st('none', 'Unknown while signed out');
+  if (signedOut) broker = st('none', present('', ctx));
   else if (!data || !states.gateway?.value) broker = notReported(states.gateway);
   else {
     const b = brokerState(states, data), g = data.safety.gateway, ago = states.gateway.ageSeconds;
     const words = b.word === 'OK' ? `Answering · checked ${ageSpan('rt.broker', `${age(ago)} ago`)} (${timeHMS(g.checkedAt)})`
-      : b.word === 'down' ? `Down · ${esc(cellReason(g.reason))}` : b.word === 'degraded' ? `Unstable · ${esc(cellReason(g.reason))}`
+      : b.word === 'down' ? `Down · ${esc(cellReason(g.reason, ctx))}` : b.word === 'degraded' ? `Unstable · ${esc(cellReason(g.reason, ctx))}`
         : `Not confirmed · ${ago == null ? 'no check-in time' : `last checked ${ageSpan('rt.broker', `${age(ago)} ago`)}`}`;
     broker = st(b.tone, words);
   }
   rows.push(rtRow('plug', term('broker'), broker, 'safety.gateway'));
   const exCell = states.executor, ex = exCell?.value;
   let executor;
-  if (signedOut) executor = st('none', `${ex ? `Last known: ${executorPresentation(ex).status}` : 'Unavailable'} · unknown while signed out`);
+  if (signedOut) executor = st('none', `${present('', { signedOut: true, value: ex }, 'retained')}${ex ? `: ${executorPresentation(ex).status}` : ''} · ${present('', ctx)}`);
   else if (!ex) executor = notReported(exCell);
   else {
     const { status, tone, reason } = executorPresentation(ex, data?.safety.halt), ledger = ledgerSize(ex);
@@ -472,11 +473,11 @@ function runtimeHtml(ctx) {
   }
   rows.push(rtRow('cpu', term('executor'), rtReserve(executor, EXECUTOR_SIZING), 'GET /v1/health on hsb0'));
   let board;
-  if (signedOut) board = st('none', `${data ? `Last known numbers ${timeHMS(data.generatedAt)}` : 'Unavailable'} · panel ages unknown while signed out`);
-  else if (!data) board = st('none', `Not reported · ${esc(cellReason(feeds.data?.reason ?? 'feed_not_received'))}`);
+  if (signedOut) board = st('none', present('', { signedOut: true, value: data }, 'warning'));
+  else if (!data) board = st('none', `Not reported · ${esc(cellReason(feeds.data?.reason ?? 'feed_not_received', ctx))}`);
   else {
     const { receipt, frozen } = dataAge(feeds, now);
-    const failed = feeds.data.reason ? ` · ${esc(cellReason(feeds.data.reason))}` : '';
+    const failed = feeds.data.reason ? ` · ${esc(cellReason(feeds.data.reason, ctx))}` : '';
     const stuck = frozen !== null && frozen >= STALE_AFTER_S && frozen > (receipt ?? 0) ? ` · unchanged for ${ageSpan('rt.frozen', age(frozen))}` : '';
     const tone = failed || stuck || receipt >= STALE_AFTER_S ? 'warn' : 'ok';
     board = st(tone, `Last numbers ${timeHMS(data.generatedAt)} · ${ageSpan('rt.data', `${age(receipt)} old`)} · refreshes every 15${NB}s${stuck}${failed}`);
@@ -487,9 +488,9 @@ function runtimeHtml(ctx) {
   const acct = states.paperAccount, hint = data?.brokerAccount?.accountHint;
   const who = hint ? term('account', hint) : 'Account number not reported';
   let account;
-  if (signedOut) account = st('none', `${acct?.value == null ? 'Unavailable' : `Last known: ${who} · ${money(amountOf(acct.value), acct.value.currency)}`} · unknown while signed out`);
+  if (signedOut) account = st('none', `${present('', { signedOut: true, value: acct?.value }, 'retained')}${acct?.value == null ? '' : `: ${who} · ${money(amountOf(acct.value), acct.value.currency)}`} · ${present('', ctx)}`);
   else if (acct?.value == null && !hint) account = notReported(acct);
-  else if (acct?.value == null) account = st('none', `${who} · total not reported${acct?.reason ? ` · ${esc(cellReason(acct.reason))}` : ''}`);
+  else if (acct?.value == null) account = st('none', `${who} · total not reported${acct?.reason ? ` · ${esc(cellReason(acct.reason, ctx))}` : ''}`);
   else account = withState(acct, 'rt.account', 'ok', `${who} · ${money(amountOf(acct.value), acct.value.currency)} · checked ${ageSpan('rt.account.age', `${age(acct.ageSeconds)} ago`)}`, 'last good total');
   rows.push(rtRow('wallet', term('paperacct'), `${rtReserve(account, ACCOUNT_SIZING)}<span class="account-cash-line">${cashCaption(states.paperCash, 'rt.cash')}</span>`, 'brokerAccount.accountHint'));
   return rows.join('');
@@ -498,6 +499,7 @@ function runtimeHtml(ctx) {
 // ---------- Where this is defined, change log ----------
 function sourceHtml(ctx) {
   const c = state.config ?? loadedConfig(ctx), src = ctx.fleetSource, log = ctx.actions;
+  if (signedOut(ctx)) return `<dt>Saved settings</dt><dd>${present('', { signedOut: true, value: c }, 'warning')}</dd>`;
   const na = '<span class="muted">Not available</span>';
   const file = src?.path ? `<span class="mono">${breakable(src.path)}</span> · ${src.kind === 'example' ? 'the starter file; nothing has been sent yet' : src.kind === 'stored' ? 'the shared file' : 'kind not reported'}` : 'Not reported';
   const last = log?.entries?.[0];
@@ -515,9 +517,10 @@ function sourceHtml(ctx) {
 
 function logHtml(ctx) {
   const log = ctx.actions;
+  if (signedOut(ctx)) return `<li class="log-empty">${st('none', present('', { signedOut: true, value: log?.entries }, 'warning'))}</li>`;
   if (!log) return '<li class="log-empty">Loading the change log…</li>';
-  if (log.entries == null) return `<li class="log-empty">${st('bad', `The change log is unavailable · ${esc(cellReason(log.reason))}`)}</li>`;
-  const stale = log.reason ? `<li class="log-empty">${st('warn', `The change log could not be refreshed · ${esc(cellReason(log.reason))}; showing the last good log`)}</li>` : '';
+  if (log.entries == null) return `<li class="log-empty">${st('bad', `The change log is unavailable · ${esc(cellReason(log.reason, ctx))}`)}</li>`;
+  const stale = log.reason ? `<li class="log-empty">${st('warn', `The change log could not be refreshed · ${esc(cellReason(log.reason, ctx))}; showing the last good log`)}</li>` : '';
   if (!log.entries.length) return `${stale}<li class="log-empty">Nothing has been sent to the desks yet.</li>`;
   const arrow = icon('arrow', 'i arr');
   return stale + log.entries.map(e => {
@@ -532,6 +535,12 @@ function logHtml(ctx) {
 // ---------- The edit bar ----------
 function renderBar(ctx) {
   const b = M.bar(state);
+  if (signedOut(ctx)) {
+    patch($('#editNote'), esc(present('', ctx, 'status')));
+    for (const id of ['#reviewBtn', '#sendBtn']) $(id).disabled = true;
+    lastNote = null;
+    return;
+  }
   const toneIcon = { ok: 'ok', warn: 'half', bad: 'stop', none: 'ring' }[b.tone];
   const lead = b.state === 'unavailable' ? `${term('fleet', 'Fleet settings')} unavailable` : esc(b.lead);
   const note = `<span class="note-i tone-${b.tone}">${icon(toneIcon)}</span><span class="note-t"><b>${lead}</b>${b.rest ? ` · ${esc(b.rest).replace(/revision changed to (fc-\d{6})/, 'revision changed to <span class="mono">$1</span>')}` : ''}</span>`;
@@ -567,7 +576,7 @@ export function renderSettings(ctx) {
   patch($('#rtRows'), runtimeHtml(ctx));
   patch($('#srcFacts'), sourceHtml(ctx));
   patch($('#log'), logHtml(ctx));
-  const sub = state.config ? `${term('fleet', 'Fleet settings')} ${state.readAvailable ? '' : 'unavailable · last good '}version ${M.vnum(state.config.rev)} · paper only` : `${term('fleet', 'Fleet settings')} ${ctx.feeds['fleet-config']?.reason ? 'unavailable' : 'loading'} · paper only`;
+  const sub = signedOut(ctx) ? `${term('fleet', 'Fleet settings')} · ${present('', { signedOut: true, value: config }, 'warning')}` : state.config ? `${term('fleet', 'Fleet settings')} ${state.readAvailable ? '' : 'unavailable · last good '}version ${M.vnum(state.config.rev)} · paper only` : `${term('fleet', 'Fleet settings')} ${ctx.feeds['fleet-config']?.reason ? 'unavailable' : 'loading'} · paper only`;
   patch($('#setSub'), sub);
   syncTheme();
   renderBar(ctx);

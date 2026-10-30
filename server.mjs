@@ -53,7 +53,7 @@ function feedHeaders(kind) {
 }
 
 // The UI is plain ES modules; every served asset is listed here explicitly.
-const UI_MODULES = ["app.js", "host.js", "route.js", "ui.js", "terms.js", "format.js", "health.js", "transport.js", "feed.js", "board-state.js", "events.js",
+const UI_MODULES = ["app.js", "host.js", "route.js", "ui.js", "terms.js", "format.js", "health.js", "presentation.js", "transport.js", "feed.js", "board-state.js", "events.js",
   "desk.js", "account.js", "account-model.js", "account-worker.js", "performance.js", "history.js", "history-model.js", "history-worker.js", "history-continuity.js", "chart.js", "results.js", "results-model.js", "theme.js",
   "settings.js", "settings-model.js", "board-settings.js", "board-settings-validation.js", "board-settings-write.js", "fleet-write.js", "version-display.js"];
 const VENDOR_FILES = Object.freeze(Object.fromEntries(['display.json', 'version.js', 'presentation.js', 'version-interaction.js', 'schemes.json', 'package.json', 'manifest.json']

@@ -4,7 +4,7 @@
 import { feedAge, panelState } from './contracts/panel-state.mjs';
 import { gatewayCheckAgeMs } from './contracts/gateway.mjs';
 import { isRTH } from './time.mjs';
-import { age } from './format.js';
+import { presentReason, presentAge as age, present, signedOut } from './presentation.js';
 import { NOT_EXACT_REASONS, stoppedData, classifyDays, classifyCells } from './board-state.js';
 
 // The contract's freshness bound: two 30-second producer cadences.
@@ -79,7 +79,9 @@ export const CELL_REASON = Object.freeze({
   ledger_unreconciled: 'desk ledger not reconciled',
   position_stale: 'position update is old',
 });
-export const cellReason = reason => CELL_REASON[reason] ?? 'not available';
+// Details is the sole consumer allowed to show original per-value reasons.
+export const diagnosticReason = reason => CELL_REASON[reason] ?? 'not available';
+export const cellReason = (reason, board) => presentReason(diagnosticReason(reason), board);
 export const capital = text => text.charAt(0).toUpperCase() + text.slice(1);
 const FALLBACK_COPY = 'the operator must check the details';
 const DESKS = ['j', 'joe', 'joel'];
@@ -100,7 +102,7 @@ const observation = cell => cell?.health ?? { available: cell?.value != null, re
 
 // Broker connection: API session readiness and its check age, never a port.
 export function brokerState(states, data) {
-  if (states.session === 'signed-out' || states.gateway?.signedOut || states.gateway?.reason === 'auth_required') return { tone: 'none', word: 'unknown while signed out' };
+  if (signedOut(states) || signedOut(states.gateway) || states.gateway?.reason === 'auth_required') return { tone: 'none', word: present('', { signedOut: true }) };
   const cell = states.gateway;
   const gateway = data?.safety.gateway;
   if (gateway?.apiSessionReady === false && ['gateway_down', 'upstream_lost'].includes(gateway.reason)) return { tone: 'bad', word: 'down' };
@@ -124,7 +126,7 @@ export function executorPresentation(executor, globalHalt = false) {
     : executor.status === 'degraded' || executor.brakes || !executor.gatewayReachable ? 'warn' : 'ok';
   const continues = ['running', 'degraded'].includes(executor.status) && !globalHalt &&
     !executor.halt && !executor.brakes && executor.gatewayReachable !== false;
-  const reason = executor.reason ? cellReason(executor.reason) : null;
+  const reason = executor.reason ? cellReason(executor.reason, executor) : null;
   return { status, tone, reason: reason && executor.reason === 'results_capture_failed' && continues
     ? `${reason} — trading continues` : reason };
 }
@@ -178,7 +180,7 @@ export function localBoardHealth(states, feeds, now) {
 export function boardHealthPresentation(states, feeds, now) {
   const health = localBoardHealth(states, feeds, now);
   const { frozen } = dataAge(feeds, now);
-  const label = health.reason === 'signed-out' ? 'Signed out' : health.tone === 'green' ? 'Board OK'
+  const label = health.reason === 'signed-out' ? present('', { signedOut: true }, 'label') : health.tone === 'green' ? 'Board OK'
     : health.tone === 'red' ? 'Needs fix'
       : health.reason === 'snapshot_stale' ? `Stale ${age(frozen)}`
         : health.reason === 'gateway_unconfirmed' ? 'Broker unsure'
@@ -190,7 +192,7 @@ export function boardHealthPresentation(states, feeds, now) {
 // Presentation only: the selector above still owns every threshold and rank.
 // Keep the action from the existing reason copy in Details and the red line.
 export function statusSentence(health, { receipt = null, gatewayAge = null } = {}) {
-  if (health.reason === 'signed-out') return 'Signed out — reload to sign in';
+  if (health.reason === 'signed-out') return present('', { session: 'signed-out' }, 'status');
   if (health.tone === 'green') return `Live · updated ${age(receipt)} ago`;
   if (health.reason === 'halt_on') return 'Emergency stop is ON';
   if (health.reason === 'gateway_unconfirmed') return Number.isFinite(gatewayAge)
@@ -228,49 +230,49 @@ export const isSignedOut = (states, feeds) => states.session === 'signed-out' ||
 // currently confirm; its own status text names no cause, so the board says this.
 export const STUCK_REASON = 'its trading activity can’t be confirmed';
 export function boardDiagnostics(states, feeds, now) {
-  if (isSignedOut(states, feeds)) return ['The sign-in has expired; reload to sign in. Values shown are last known. Broker connection and panel ages are unknown while signed out.'];
+  if (isSignedOut(states, feeds)) return [present('', { signedOut: true }, 'diagnostics')];
   const data = feeds.data?.value;
   const problems = [];
   if (!data) {
     problems.push(feeds.data?.reason === 'auth_required' ? 'The sign-in has expired; reload the page to sign in again.'
-      : feeds.data?.reason && feeds.data.reason !== 'feed_not_received' ? `No valid numbers yet: ${cellReason(feeds.data.reason)}.`
+      : feeds.data?.reason && feeds.data.reason !== 'feed_not_received' ? `No valid numbers yet: ${cellReason(feeds.data.reason, states)}.`
         : 'No numbers have reached the board yet.');
     return problems;
   }
   const gateway = data.safety.gateway;
   const broker = brokerState(states, data);
   const { receipt, frozen } = dataAge(feeds, now);
-  if (states.halt?.value === true) problems.push(`The emergency stop is on${data.safety.haltReason ? `: ${cellReason(data.safety.haltReason)}` : ''}.`);
-  if (broker.word === 'down' || broker.word === 'degraded') problems.push(`The broker connection is ${broker.word === 'down' ? 'down' : 'unstable'}: ${cellReason(gateway.reason)}.`);
+  if (states.halt?.value === true) problems.push(`The emergency stop is on${data.safety.haltReason ? `: ${cellReason(data.safety.haltReason, states)}` : ''}.`);
+  if (broker.word === 'down' || broker.word === 'degraded') problems.push(`The broker connection is ${broker.word === 'down' ? 'down' : 'unstable'}: ${cellReason(gateway.reason, states)}.`);
   else if (broker.word === 'unsure') problems.push(states.gateway?.ageSeconds == null
     ? 'The broker connection’s check-in time is unknown; the current connection is unconfirmed.'
     : `The broker connection last checked in ${age(states.gateway.ageSeconds)} ago; the current connection is unconfirmed.`);
   if (feeds.data.reason === 'auth_required') problems.push('The sign-in has expired; reload the page to sign in again. The board shows the last good numbers.');
-  else if (feeds.data.reason === 'refresh_failed' || feeds.data.reason === 'route_not_found') problems.push(`The board could not load new numbers (${cellReason(feeds.data.reason)}); it shows the last good numbers.`);
-  else if (feeds.data.reason) problems.push(`The last update was not used (${cellReason(feeds.data.reason)}); the board shows the last good numbers.`);
+  else if (feeds.data.reason === 'refresh_failed' || feeds.data.reason === 'route_not_found') problems.push(`The board could not load new numbers (${cellReason(feeds.data.reason, states)}); it shows the last good numbers.`);
+  else if (feeds.data.reason) problems.push(`The last update was not used (${cellReason(feeds.data.reason, states)}); the board shows the last good numbers.`);
   if (frozen > receipt && frozen >= STALE_AFTER_S) problems.push(`The numbers have not changed for ${age(frozen)}, although updates arrive.`);
   else if (receipt >= STALE_AFTER_S) problems.push(`The data is ${age(receipt)} old.`);
-  if (states.paperAccount?.state === 'broken') problems.push(`The paper account total is unavailable (${cellReason(states.paperAccount.reason)})${states.paperAccount.value ? '; the value shown is the last good one' : ''}.`);
+  if (states.paperAccount?.state === 'broken') problems.push(`The paper account total is unavailable (${cellReason(states.paperAccount.reason, states)})${states.paperAccount.value ? '; the value shown is the last good one' : ''}.`);
   for (const id of DESKS) {
     const cell = states[`desks.${id}.equity`];
-    if (cell?.retained && cell.value) problems.push(`${LABEL[id]}’s money is carried from ${age(cell.ageSeconds)} ago (${cellReason(cell.reason)}).`);
-    else if (cell?.value == null && cell?.reason && !notExact(cell)) problems.push(`${LABEL[id]}’s money is unavailable: ${cellReason(cell.reason)}.`);
+    if (cell?.retained && cell.value) problems.push(`${LABEL[id]}’s money is carried from ${age(cell.ageSeconds)} ago (${cellReason(cell.reason, states)}).`);
+    else if (cell?.value == null && cell?.reason && !notExact(cell)) problems.push(`${LABEL[id]}’s money is unavailable: ${cellReason(cell.reason, states)}.`);
   }
   for (const desk of data.desks) if (desk.state === 'stuck') problems.push(`${desk.label} is stuck: ${STUCK_REASON}.`);
   if (isRTH(now)) {
     // The same classifier as the light: each Today fault, household or desk, once.
     const days = classifyDays(states, data);
-    if (days.today.kind === 'fault') problems.push(`${PNL_COPY.day} is unavailable during New York regular hours: ${cellReason(days.today.reason ?? data.pnlSources?.day?.reason ?? 'feed_not_received')}.`);
+    if (days.today.kind === 'fault') problems.push(`${PNL_COPY.day} is unavailable during New York regular hours: ${cellReason(days.today.reason ?? data.pnlSources?.day?.reason ?? 'feed_not_received', states)}.`);
     for (const id of DESKS) if (days[id].kind === 'fault') {
       const lastGood = states[`desks.${id}.dayPnl`]?.retained, reason = days[id].reason;
-      const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason)}` : '';
+      const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason, states)}` : '';
       problems.push(`${LABEL[id]}’s Today is ${lastGood ? 'only a last good value' : 'unavailable'}${why}.`);
     }
     const opens = classifyCells(states, data, 'openPnl');
-    if (opens.today.kind !== 'exact') problems.push(`${PNL_COPY.open} is unavailable during New York regular hours: ${cellReason(opens.today.reason ?? 'feed_not_received')}.`);
+    if (opens.today.kind !== 'exact') problems.push(`${PNL_COPY.open} is unavailable during New York regular hours: ${cellReason(opens.today.reason ?? 'feed_not_received', states)}.`);
     for (const id of DESKS) if (opens[id].kind === 'fault') {
       const lastGood = states[`desks.${id}.openPnl`]?.retained, reason = opens[id].reason;
-      const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason)}` : '';
+      const why = reason && !(lastGood && reason === 'retained_values') ? `: ${cellReason(reason, states)}` : '';
       problems.push(`${LABEL[id]}’s Open result is ${lastGood ? 'only a last good value' : 'unavailable'}${why}.`);
     }
   }

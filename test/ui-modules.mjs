@@ -19,6 +19,7 @@ import './theme-geometry.mjs';
 import './theme-copy.mjs';
 import './board-sweep-plan.mjs';
 import './feed-robust.mjs';
+import './signed-out-presentation.mjs';
 import './position-claims.mjs';
 import './history-view.mjs';
 import './header-nav.mjs';

@@ -2373,6 +2373,16 @@ the normal health ranking, including stale-feed and broker reasons when present.
 recovery (also imported by `test/ui-modules.mjs`), plus the named fix1 regressions
 for hero ages, missing-value reasons, settings auth, successful history compaction
 metadata, transport registration/version pinning and last-known card captions.
+All pages use `presentation.js` for signed-out reason, warning, age and
+freshness wording; derived check-in and Results warnings carry the board's
+session too. Cold History and account-start auth failures use that policy,
+and Settings cannot describe an unchecked account start as unset. Details
+retains the original per-value diagnostics, including position-row reasons.
+`test/signed-out-presentation.mjs` audits visible copy and accessible names
+across the page builders for every failure reason, rejects raw age imports
+and reason calls without a presentation context, and freezes non-auth output
+against `fa6db1d`. It is included in the UI unit suite. Its six named review
+reproducers and two presentation audits fail on that baseline.
 P3's `signed-out` group checks a
 state.json 302 to SSO, retained values, Reload and recovery at all standard widths
 and themes; run it later on agm2 with `JOED_P3_ONLY=signed-out node scripts/browser-p3.mjs`.

@@ -551,7 +551,8 @@ test('JOED-117 fleet transport: a validated same-revision 304 clears rejection w
       assert.equal(feed.feeds['fleet-config'].receivedAt, receipt);
       assert.equal(feed.select().states['fleet-config'].state, 'stale', 'revalidation does not reset receipt age');
       assert.ok(feed.select().states['fleet-config'].ageSeconds >= 60);
-      assert.deepEqual(notifications.slice(before), ['fleet'], 'recovery redraws Settings');
+      assert.deepEqual(notifications.slice(before), status === 401 ? ['session', 'fleet'] : ['fleet'], 'auth recovery redraws the shared status and Settings');
+      assert.equal(feed.select().states.session, undefined, 'a validated endpoint clears its auth evidence');
       answer = () => new Response(null, { status: 304, headers: { ETag: '"unrelated"' } });
       await feed.refreshFleet();
       assert.equal(feed.feeds['fleet-config'].reason, 'refresh_failed', 'an unrelated 304 cannot validate the saved value');

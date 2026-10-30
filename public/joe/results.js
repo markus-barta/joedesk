@@ -6,8 +6,9 @@
 // estimate.
 import { $, $$, icon, term, deskMark, inlineMark, swatch, patch, bn, pl, st, symBadge, ageSpan, statePhrase, openDialog } from './ui.js';
 import { TERMS } from './terms.js';
-import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, age, quantity, currencySymbol } from './format.js';
+import { esc, eur, digits, pct, money, isZero, MINUS, NB, timeHM, quantity, currencySymbol } from './format.js';
 import { cellReason, STALE_AFTER_S } from './health.js';
+import { present, presentAge as age, presentWarning, signedOut } from './presentation.js';
 import { drawChart, eurAxis } from './chart.js';
 import { decimalUnits, divRound, UNIT } from './contracts/decimal.mjs';
 import { basisKey } from './history-model.js';
@@ -210,9 +211,10 @@ const missingDay = (ix, k, desks) => ix?.missingDays?.has(k) && M.dayResult(ix, 
 const missingDayText = k => `Stale: daily summary missing for ${M.fmtDay(k)}`;
 const PARTIAL_REASON = M.PARTIAL_REASON;
 const partialDay = (view, k) => M.compareDates(k, view.today) < 0 && view.ix?.partialDays?.has(k);
-const partialHint = count => count ? ` ${st('warn', `incl. ${count} partial day${count === 1 ? '' : 's'}`)}` : '';
+const partialHint = (count, view) => count ? ` ${st(signedOut(view) ? 'none' : 'warn', presentWarning(`incl. ${count} partial day${count === 1 ? '' : 's'}`, view?.cell))}` : '';
 // One warning slot, with a missing summary taking priority over partial coverage.
 function dayWarning(view, k, desks) {
+  if (signedOut(view) && view.ix && k < view.today) return { label: present('', view.cell, 'retained'), text: presentWarning('', view.cell), note: '' };
   if (M.compareDates(k, view.today) >= 0) return null;
   if (missingDay(view.ix, k, desks)) return { label: 'Stale', text: missingDayText(k), note: 'Daily summary missing.' };
   if (partialDay(view, k)) {
@@ -238,7 +240,7 @@ export function renderResults(ctx) {
   if (!RS.moved || !RS.anchor) { RS.anchor = RS.sel = today; RS.cal = M.ymOf(today); }
   // A waiting link applies against the authoritative today and tracking start.
   settleResultsRoute(view);
-  const sig = [ix, view.cols, view.reason, view.cell?.state, today, view.todayUnits.join(), view.moneyCells.map(c => c?.reason).join(), view.basis, view.positions.map(p => `${p.desk}|${p.symbol}|${p.company}|${p.openedAt}`).join(),
+  const sig = [ix, view.cols, view.reason, view.cell?.state, signedOut(view), today, view.todayUnits.join(), view.moneyCells.map(c => c?.reason).join(), view.basis, view.positions.map(p => `${p.desk}|${p.symbol}|${p.company}|${p.openedAt}`).join(),
     JSON.stringify(RS), $('#curve').clientWidth, $('#daySheet')?.open];
   // While a link waits, the address keeps it (app.js writes nothing).
   const address = () => (pendingRoute === null ? resultsUrl(view) : '');
@@ -268,7 +270,8 @@ export function renderResults(ctx) {
 const cutSentence = (phrase, cut) => `No result ${phrase}: ${cutText(cut)}, and a change of basis is not a gain or a loss.`;
 const unknownSentence = (phrase, when) => `The result ${phrase} is not known yet: the desks’ money ${when} is not available.`;
 function heroSentence(view, per, R, partialDays) {
-  if (!view.ix) return `Results are unavailable: ${cellReason(view.reason)}.`;
+  if (signedOut(view)) return presentWarning('', view.cell);
+  if (!view.ix) return `Results are unavailable: ${cellReason(view.reason, view)}.`;
   if (R.cut) return cutSentence(per.phrase, R.cut);
   if (R.empty) return `No trades${partialDays ? ' recorded' : ''} ${per.phrase}. Paper results start on ${startText(view.trackingStart)}.`;
   if (R.net === null) return unknownSentence(per.phrase, R.end === view.today ? 'now' : `on ${M.fmtDDM(R.end)}`);
@@ -313,7 +316,7 @@ export function renderHero(view, per, desks, R) {
       <div class="display">${none || R.net === null ? D : bn(R.units.net)}</div>
       <div class="period-percent-slot">${percentMarkup}${percent === null ? '' : ` <button type="button" class="term of" data-term="result">of <span class="nw">${esc(baseText)}</span></button><span class="vh">, the money at the period start</span>`}</div>
     </div>
-    <p class="say">${esc(partialDays ? sentence.replace(/\.$/, '') : sentence)}${partialHint(partialDays)}</p>${reserve.length
+    <p class="say">${esc(partialDays ? sentence.replace(/\.$/, '') : sentence)}${partialHint(partialDays, view)}</p>${reserve.length
       ? `<p class="say-size" aria-hidden="true">${reserve.map(copy => `<span>${esc(copy)}</span>`).join('')}</p>` : ''}
     <dl class="split">
       <dt>${term('closed')}</dt><dd>${none ? '—' : signed(R.units.realised)}</dd>
@@ -439,7 +442,7 @@ export function renderCalendar(view, per, desks) {
   const monthSum = !ix ? 'Unavailable' : monthCount
     ? `${signedWord(monthUnits)} <span class="month-long">over ${plural(monthDays, 'trading day')}</span><span class="month-short">in ${plural(monthDays, 'day')}</span>`
     : partialDays ? 'No trades recorded this month' : 'No trades this month';
-  patch($('#calSum'), `${monthSum}${partialHint(partialDays)}`);
+  patch($('#calSum'), `${monthSum}${partialHint(partialDays, view)}`);
   const start = M.monday(first);
   const inPer = k => (RS.period === 'day' || RS.period === 'week') && M.compareDates(k, per.start) >= 0 && M.compareDates(k, per.end) <= 0;
   let html = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => `<div class="dow" aria-hidden="true">${d}</div>`).join('') + '<div class="dow wkh" aria-hidden="true">Week</div>';
@@ -684,7 +687,7 @@ function dayContent(view, k, desks) {
   const ts = ix ? M.tradesOn(ix, k, desks) : [];
   if (!ix) {
     return { sum: '—', body: `<p class="dp-empty">${icon('info')}<span>${M.compareDates(k, today) > 0 ? `${M.fmtDDM(k)} is still ahead.`
-      : `No closed-trade record for ${M.fmtDDM(k)}: ${esc(cellReason(view.reason))}.`}</span></p>`, note: '' };
+      : `No closed-trade record for ${M.fmtDDM(k)}: ${esc(cellReason(view.reason, view))}.`}</span></p>`, note: '' };
   }
   const r = M.dayResult(ix, k, desks);
   const warning = dayWarning(view, k, desks);
@@ -700,8 +703,8 @@ function dayContent(view, k, desks) {
   const body = ts.length ? tradeRows(ts) : incomplete ? '' : `<p class="dp-empty">${icon(closed ? 'clock' : 'info')}<span>${esc(why)}</span></p>`;
   // A lot opened this day and still held counts in Still open and on Desk.
   const opened = (view.positions ?? []).filter(p => p.openedAt && desks.includes(p.desk) && dateKeyAt(Date.parse(p.openedAt)) === k);
-  const reasons = partial && !missingDay(ix, k, desks) ? M.partialReasons(ix.partialDetails?.get(k)) : [];
-  const note = reasons.length || k === today ? '' : warning?.note ?? (partial ? PARTIAL_REASON : '');
+  const reasons = !signedOut(view) && partial && !missingDay(ix, k, desks) ? M.partialReasons(ix.partialDetails?.get(k)) : [];
+  const note = signedOut(view) ? presentWarning('', view.cell) : reasons.length || k === today ? '' : warning?.note ?? (partial ? PARTIAL_REASON : '');
   const positionNote = opened.map(p => `${p.company ? `${p.company} (${p.symbol}, ${LABEL[p.desk]})` : `${p.symbol} (${LABEL[p.desk]})`}, opened ${k === today ? `today at ${timeHM(p.openedAt)}` : 'this day'}, is still open; it counts as Still open and on Desk.`).join(' ');
   return { sum, body, note, reasons, deskNote: partial && desks.length === 1 && (note || reasons.length) ? M.PARTIAL_DESK_NOTE : '', positionNote,
     currencies: [...new Set(ts.flatMap(t => [t.entry.currency, t.exit.currency, ...(t.fx?.base ? [t.fx.base] : [])]))] };
@@ -802,20 +805,20 @@ export function openDaySheet(view, k, { pointer = false } = {}) {
 function renderStatus(view) {
   const cell = view.cell, el = $('#resStatus');
   if (!el) return;
+  if (signedOut(view)) { patch(el, `<div class="res-state" data-state="broken">${st('none', presentWarning('', cell))}</div>`); return; }
   // The current-money input has its own feed. Explain its absence even when
   // the closed-trade record is fresh, inside the existing fixed chart box.
   const data = deskSet().map(id => view.moneyCells?.[DESKS.indexOf(id)])
     .find(cell => outageValue(cell) || cell?.outageExpired);
-  const dataText = data ? `Desks’ money is not available: ${esc(cellReason(data.reason))}.` : '';
+  const dataText = data ? `Desks’ money is not available: ${esc(cellReason(data.reason, data))}.` : '';
   if (!view.ix || !cell) { patch(el, ''); return; }
   if (cell.state === 'fresh') {
     patch(el, dataText ? `<div class="res-state" data-state="stale">${st('warn', dataText)}</div>` : '');
     return;
   }
   const p = statePhrase(cell, 'res', 'last good results');
-  if (cell.signedOut) { patch(el, `<div class="res-state" data-state="broken">${st('none', 'Last known results · ages unknown while signed out')}</div>`); return; }
-  const why = cell.reason ? esc(cellReason(cell.reason)) : null;
-  const ago = () => ageSpan('res', cell.ageSeconds == null ? 'an unknown time' : `${age(cell.ageSeconds)} ago`);
+  const why = cell.reason ? esc(cellReason(cell.reason, cell)) : null;
+  const ago = () => ageSpan('res', cell.ageSeconds == null ? 'an unknown time' : `${age(cell.ageSeconds)} ago`, cell);
   const text = cell.retained ? `${cell.reason === 'sequence_replayed' ? 'Results update not used' : 'Results refresh failed'}: ${why ?? 'not available'}. Showing the last good results from ${ago()}.`
     : p.state === 'stale' ? `Results as of ${ago()}${why ? ` · ${why}` : ''}.` : `Results: ${why ?? 'not available'} · as of ${ago()}.`;
   const stale = p.state === 'stale' || cell.ageSeconds >= STALE_AFTER_S;
