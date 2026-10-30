@@ -465,6 +465,44 @@ and requires approval for all outside collaborators; `pull_request_target` is
 forbidden. Checkout explicitly cleans the workspace, and CI temporary files and
 npm's cache stay under `RUNNER_TEMP`.
 
+JOED-169: CI keeps every PR run; it has no workflow concurrency group. GitHub's
+default concurrency queue replaces older pending runs even with
+`cancel-in-progress: false`; `queue: max` still cancels overflow beyond 100
+pending runs ([GitHub concurrency semantics](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)).
+Instead, one combined browser step uses `scripts/with-browser-lock.sh`.
+On agm2, `flock` acquires `/dev/shm/joedesk-browser.lock` once for all six
+browser phases: Board, Results (all zones), Settings, both preview checks and
+release carry-overs, including browser teardown. There is no mid-job release
+or reacquisition. Setup and artifact uploads stay outside the lock. Results
+and Settings still execute after an earlier gate failure; preview checks and
+carry-overs require the preceding gates to pass. The three runners must
+share that host-local filesystem and service user; a missing `flock` or denied
+lock access fails the step. Never unlink this lock file while jobs are running:
+its stable inode is the mutual exclusion boundary. No host configuration or
+runner labels are changed by the workflow. Hosted jobs use their isolated VMs
+without the lock; fork PRs retain the hosted-only runner guard.
+
+Jobs can overlap while their browser phases wait for the lock. This preserves
+queued runs without a concurrency-group cap. The job timeout is 120 minutes:
+60 minutes waiting (two typical 30-minute locked runs), 45 minutes for its own
+browser work, and 15 minutes for setup/uploads. `flock --wait 3600` gives lock
+waiting a separate one-hour bound; timeout fails clearly before any browser
+phase starts. This sizes for three overlapping jobs at the typical duration;
+flock makes no FIFO guarantee, so sustained contention can still exhaust the
+explicit wait bound. Timeout or cancellation remains visible; it never
+supersedes another pending PR run. Wait start/acquisition UTC times and waited
+seconds appear in the step log and summary and beside the machine-load tables
+in QA `index.md`; hosted runs report the bypass and zero wait, and commands
+outside the wrapper report unavailable lock evidence. Package/OCI jobs
+and other tenants can still add load; DEVOPS owns agm2's CPU reservation.
+Before each budget attempt, including the one permitted re-measurement, the
+shared budget scripts record UTC sample time, 1/5/15-minute host load averages,
+logical CPU count and host-wide browser process count beside the budget table
+in QA `index.md` (and the reference command's output). Counts include the active
+browser and its helpers; failed process inspection prints `unavailable`, never
+zero. Inspection requests executable names only, not process arguments. Load
+evidence does not change a budget, guard, failure decision or re-measure rule.
+
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
 then `google-chrome` from `PATH`. They export the resolved `BROWSER_PATH` and fail

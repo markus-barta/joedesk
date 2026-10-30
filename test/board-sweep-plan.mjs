@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
@@ -119,11 +120,14 @@ test('Board sweep: executable full/subset loops reconcile and retain identical c
 
 test('Board CI: only PRs choose subset; main pushes and workflow_dispatch choose full', () => {
   const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-  const runLine = /^        run: node scripts\/browser-p3\.mjs (.+)$/m.exec(workflow)?.[1];
-  assert.ok(runLine);
-  const evaluate = new Function('github', `return (${runLine.slice(3, -2)});`);
+  const modeBlock = /^          board_mode=.+\n[\s\S]*?(?=^          JOED_QA_DIR=.*node scripts\/browser-p3\.mjs "\$board_mode")/m.exec(workflow)?.[0];
+  assert.ok(modeBlock, 'the Board phase must pass the selected mode');
   for (const event of ['pull_request', 'push', 'workflow_dispatch']) {
-    const argument = evaluate({ event_name: event });
-    assert.equal(parseBoardSweepArgs([argument]), event === 'pull_request' ? 'subset' : 'full');
+    const result = spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c',
+      `${modeBlock}\nprintf '%s' "$board_mode"`], {
+      encoding: 'utf8', env: { ...process.env, GITHUB_EVENT_NAME: event },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(parseBoardSweepArgs([result.stdout]), event === 'pull_request' ? 'subset' : 'full');
   }
 });
