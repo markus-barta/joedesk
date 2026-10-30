@@ -813,6 +813,7 @@ function renderStatus(view) {
     return;
   }
   const p = statePhrase(cell, 'res', 'last good results');
+  if (cell.signedOut) { patch(el, `<div class="res-state" data-state="broken">${st('none', 'Last known results · ages unknown while signed out')}</div>`); return; }
   const why = cell.reason ? esc(cellReason(cell.reason)) : null;
   const ago = () => ageSpan('res', cell.ageSeconds == null ? 'an unknown time' : `${age(cell.ageSeconds)} ago`);
   const text = cell.retained ? `${cell.reason === 'sequence_replayed' ? 'Results update not used' : 'Results refresh failed'}: ${why ?? 'not available'}. Showing the last good results from ${ago()}.`

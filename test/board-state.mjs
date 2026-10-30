@@ -1371,7 +1371,7 @@ for (const [reason, kind, words] of reasonMatrix) test(`JOED-142 reason matrix: 
   // Feed scope ranks T separately from rejection/advisory, without losing copy.
   if (kind !== 'N' && reason !== 'feed_not_received') {
     const failed = { data: { value: exact, reason } }, selected = boardStates(failed, now, previous);
-    assert.deepEqual(localBoardHealth(selected, failed, now), { tone: 'yellow', reason: kind === 'T' ? 'refresh_failed' : 'retained_values' });
+    assert.deepEqual(localBoardHealth(selected, failed, now), { tone: 'yellow', reason: reason === 'auth_required' ? 'signed-out' : kind === 'T' ? 'refresh_failed' : 'retained_values' });
     assert.equal(selected['desks.j.equity'].state, kind === 'A' ? 'stale' : 'broken');
   }
 });
@@ -1390,10 +1390,15 @@ for (const reason of NOT_EXACT_REASONS) for (const failure of ['refresh_failed',
       assert.ok(phrase.text.includes(cellReason(reason)));
     }
     const health = boardHealthPresentation(states, feeds, now);
-    assert.deepEqual([health.tone, health.reason], ['yellow', ['refresh_failed', 'auth_required', 'route_not_found'].includes(failure) ? 'refresh_failed' : 'retained_values']);
+    assert.deepEqual([health.tone, health.reason], ['yellow', failure === 'auth_required' ? 'signed-out' : ['refresh_failed', 'route_not_found'].includes(failure) ? 'refresh_failed' : 'retained_values']);
     const details = htmlDocument(healthPop({ states, feeds, now }, health)).textContent;
-    assert.match(details, /Desk values are not exact(?! yet)/);
-    assert.ok(details.includes(cellReason(failure)));
+    if (failure === 'auth_required') {
+      assert.match(details, /Signed out — reload to sign in/);
+      assert.doesNotMatch(details, /Amy|broker connection (?:down|not confirmed)/i);
+    } else {
+      assert.match(details, /Desk values are not exact(?! yet)/);
+      assert.ok(details.includes(cellReason(failure)));
+    }
     assert.doesNotMatch(details, /J’s money is unavailable/);
     assert.equal(feeds.data.reason, failure);
     // A later exact observation removes the scoped not-exact classification.

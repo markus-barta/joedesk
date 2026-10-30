@@ -77,9 +77,9 @@ export const isPhone = () => matchMedia('(max-width: 700px)').matches;
 // measuring the full sentence never changes the control's size or oscillates.
 export function fitStatusLine(control, line, narrow = matchMedia('(max-width: 1100px)').matches) {
   const full = control.querySelector('.status-full');
-  const compact = control.dataset.tone === 'bad' || narrow || Boolean(full && full.scrollWidth > full.clientWidth + 0.5);
+  const compact = control.dataset.reason === 'signed-out' || control.dataset.tone === 'bad' || narrow || Boolean(full && full.scrollWidth > full.clientWidth + 0.5);
   control.toggleAttribute('data-compact', compact);
-  const visible = control.dataset.tone === 'bad' || (control.dataset.tone === 'warn' && compact);
+  const visible = control.dataset.reason === 'signed-out' || control.dataset.tone === 'bad' || (control.dataset.tone === 'warn' && compact);
   line.toggleAttribute('data-visible', visible);
   line.setAttribute('aria-hidden', String(!visible));
 }
@@ -359,6 +359,8 @@ export function patch(el, html) {
 // `held` names a retained value ("last good value", "last good positions").
 export function statePhrase(cell, key, held = 'last good value', sharedReason = null) {
   const state = cell?.state ?? 'not reported';
+  if (cell?.signedOut && !notExactDash(cell) && (cell.value != null || !cell.reason)) return { tone: 'none', icon: 'ring', state,
+    text: `${cell.value == null ? 'unavailable' : 'last known value'} · unknown while signed out` };
   const why = cell?.reason ? cellReason(cell.reason) : null;
   const localWhy = why !== sharedReason ? why : null;
   const suffix = localWhy ? ` · ${esc(localWhy)}` : '';

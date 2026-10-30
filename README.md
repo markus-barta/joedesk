@@ -2357,6 +2357,21 @@ interaction, one announcement per transition, silent ticks, and recovery.
 Full and browser validation runs on agm2 CI; local work runs only syntax,
 the small unit file, and `git diff --check`.
 
+Expired browser sign-in has its own board state: **Signed out — reload to sign
+in**, with a Reload button that reloads the page. The shared page/worker reader
+recognizes SSO redirects (including opaque and followed cross-origin redirects),
+401/403, and successful HTML responses where JSON was expected. A proxy's 5xx
+HTML error remains an update failure. Each affected endpoint must answer
+successfully before its auth failure clears; unrelated reads cannot restore Live.
+The board keeps last-known values, labels their panel ages and broker connection
+as unknown while signed out, and removes feed/broker blame from status Details.
+Scoped not-exact dash reasons keep their own single explanation. Recovery restores
+the normal health ranking, including stale-feed and broker reasons when present.
+`test/feed-robust.mjs` covers response shapes, worker/page reads, precedence and
+recovery (also imported by `test/ui-modules.mjs`). P3's `signed-out` group checks a
+state.json 302 to SSO, retained values, Reload and recovery at all standard widths
+and themes; run it later on agm2 with `JOED_P3_ONLY=signed-out node scripts/browser-p3.mjs`.
+
 The following paragraph records the earlier header presentation and its
 historical evidence; JOED-70 supersedes its header wording and layout.
 

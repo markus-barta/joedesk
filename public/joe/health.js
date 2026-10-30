@@ -17,6 +17,7 @@ export const RETAINED_GRACE_S = 300;
 export const NOT_EXACT_TONE = 'green';
 
 export const REASON_COPY = Object.freeze({
+  'signed-out': 'signed out — reload to sign in',
   board_ok: 'numbers are up to date',
   values_not_exact: 'desk values are not exact',
   snapshot_stale: 'updates are late — reload; if still late, tell Amy',
@@ -99,6 +100,7 @@ const observation = cell => cell?.health ?? { available: cell?.value != null, re
 
 // Broker connection: API session readiness and its check age, never a port.
 export function brokerState(states, data) {
+  if (states.session === 'signed-out' || states.gateway?.signedOut || states.gateway?.reason === 'auth_required') return { tone: 'none', word: 'unknown while signed out' };
   const cell = states.gateway;
   const gateway = data?.safety.gateway;
   if (gateway?.apiSessionReady === false && ['gateway_down', 'upstream_lost'].includes(gateway.reason)) return { tone: 'bad', word: 'down' };
@@ -128,6 +130,7 @@ export function executorPresentation(executor, globalHalt = false) {
 }
 
 export function localBoardHealth(states, feeds, now) {
+  if (isSignedOut(states, feeds)) return { tone: 'yellow', reason: 'signed-out' };
   const data = feeds.data?.value;
   if (!data) return { tone: 'red', reason: 'no_snapshot' };
   const broker = brokerState(states, data);
@@ -175,7 +178,7 @@ export function localBoardHealth(states, feeds, now) {
 export function boardHealthPresentation(states, feeds, now) {
   const health = localBoardHealth(states, feeds, now);
   const { frozen } = dataAge(feeds, now);
-  const label = health.tone === 'green' ? 'Board OK'
+  const label = health.reason === 'signed-out' ? 'Signed out' : health.tone === 'green' ? 'Board OK'
     : health.tone === 'red' ? 'Needs fix'
       : health.reason === 'snapshot_stale' ? `Stale ${age(frozen)}`
         : health.reason === 'gateway_unconfirmed' ? 'Broker unsure'
@@ -187,6 +190,7 @@ export function boardHealthPresentation(states, feeds, now) {
 // Presentation only: the selector above still owns every threshold and rank.
 // Keep the action from the existing reason copy in Details and the red line.
 export function statusSentence(health, { receipt = null, gatewayAge = null } = {}) {
+  if (health.reason === 'signed-out') return 'Signed out — reload to sign in';
   if (health.tone === 'green') return `Live · updated ${age(receipt)} ago`;
   if (health.reason === 'halt_on') return 'Emergency stop is ON';
   if (health.reason === 'gateway_unconfirmed') return Number.isFinite(gatewayAge)
@@ -201,8 +205,9 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
     ? ctx.states.gateway?.ageSeconds : null;
   const sentence = statusSentence(health, { receipt, gatewayAge });
   const explanation = REASON_COPY[health.reason] ?? FALLBACK_COPY;
-  const action = explanation.includes(' — ') ? capital(explanation.split(' — ')[1]) : '';
+  const action = health.reason !== 'signed-out' && explanation.includes(' — ') ? capital(explanation.split(' — ')[1]) : '';
   const short = {
+    'signed-out': 'Signed out',
     values_not_exact: 'Not exact', snapshot_stale: 'Updates late', retained_values: 'Older numbers',
     gateway_degraded: 'Broker unstable', gateway_unconfirmed: 'Broker unsure', open_unavailable_rth: 'Prices pending',
     open_fault_rth: 'Open unavailable',
@@ -218,10 +223,12 @@ export function statusPresentation(ctx, health = boardHealthPresentation(ctx.sta
 }
 
 const PNL_COPY = { day: 'Today’s result', open: 'The open result' };
+export const isSignedOut = (states, feeds) => states.session === 'signed-out' || Object.values(feeds).some(feed => feed?.reason === 'auth_required');
 // A stuck desk is one whose positions, orders or executions the pusher cannot
 // currently confirm; its own status text names no cause, so the board says this.
 export const STUCK_REASON = 'its trading activity can’t be confirmed';
 export function boardDiagnostics(states, feeds, now) {
+  if (isSignedOut(states, feeds)) return ['The sign-in has expired; reload to sign in. Values shown are last known. Broker connection and panel ages are unknown while signed out.'];
   const data = feeds.data?.value;
   const problems = [];
   if (!data) {

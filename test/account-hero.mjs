@@ -181,7 +181,7 @@ test('JOED-156 hero: a failed read keeps the last good history and says so; with
   let answer = { status: 401 };
   const p = page(t, { body: () => answer });
   await p.render();
-  assert.equal(p.text('#acctNote'), 'History unavailable · sign-in expired — reload');
+  assert.equal(p.text('#acctNote'), 'Account history unavailable · ages unknown while signed out');
   assert.equal(p.svg().getAttribute('aria-label'), 'Account history unavailable', 'no history: the chart says so, the live value alone draws nothing');
   assert.equal(document.querySelector('#acctHero').dataset.history, 'auth_required');
   answer = history();
@@ -503,7 +503,7 @@ test('JOED-156 fix 4: a worker reads and converts the account history; the page 
   // A worker's failed read keeps the last good history and says why.
   reply = () => ({ kind: 'account', status: 401, reason: 'auth_required', value: null, key: null, ms: 1 });
   await A.refreshAccountHistory();
-  assert.match(p.text('#acctNote'), /^Update failed · showing what loaded \d+ s ago$/);
+  assert.equal(p.text('#acctNote'), 'Last known account history · ages unknown while signed out');
   // A failed worker is terminated and hands its read to the page at once.
   reply = () => 'fail';
   await A.refreshAccountHistory();

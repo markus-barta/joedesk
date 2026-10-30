@@ -15,6 +15,7 @@ import { drawChart, chartAxis, chartDots, axis, eurAxis, overviewTargets, create
 import { panWindow, zoomWindow, placeWindow, endsAtNewest, atLiveEdge, easeOut, lerpWindow, toStrip, fromStrip } from './history-model.js';
 import { zonedInstant, VIENNA } from './time.mjs';
 import * as M from './account-model.js';
+import { readJSON, readFailure, boardSession } from './transport.js';
 
 const TONE_ICON = { ok: 'ok', warn: 'half', bad: 'stop', none: 'ring' };
 const MIN = 60e3;
@@ -158,22 +159,7 @@ const timing = (reason, ms) => {
   list.push({ reason, ms, at: performance.now() });
   if (list.length > 200) list.shift();
 };
-async function read(url) {
-  const controller = new AbortController();
-  let timer;
-  try {
-    return await Promise.race([
-      new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve({ status: 0 }); }, TIMEOUT_MS); }),
-      (async () => {
-        const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', signal: controller.signal });
-        if (response.type === 'opaqueredirect') return { status: 302 };
-        if (response.status !== 200) return { status: response.status };
-        return { status: 200, body: await response.json() };
-      })(),
-    ]);
-  } catch { return { status: 0 }; } finally { clearTimeout(timer); }
-}
-const readReason = status => ([301, 302, 303, 307, 308, 401, 403].includes(status) ? 'auth_required' : status === 404 ? 'route_not_found' : 'refresh_failed');
+const read = readJSON;
 // Takes an endpoint body read on the page; on a refused one the last good series stays.
 export function useAccountHistory(body, at = performance.now()) {
   try {
@@ -184,6 +170,8 @@ export function useAccountHistory(body, at = performance.now()) {
 }
 // A worker's or the page's reply; returns whether the history is current.
 function useReply(reply) {
+  boardSession.observe('/joe/account-history.json', { auth: reply?.reason === 'auth_required' ? true
+    : reply?.kind === 'unchanged' || reply?.status === 200 || reply?.value ? false : undefined });
   if (reply?.kind === 'unchanged' && store.value) { store.reason = null; store.loadedAt = performance.now(); return true; }
   if (reply?.kind === 'account' && reply.value) {
     Object.assign(store, { value: reply.value, reason: null, loadedAt: performance.now(), key: reply.key ?? null, version: store.version + 1 });
@@ -221,9 +209,9 @@ function startWorker() {
 }
 async function readOnPage() {
   const started = performance.now(), res = await read('./account-history.json');
-  if (res.status !== 200) return { kind: 'account', status: res.status, reason: readReason(res.status), value: null };
+  if (res.status !== 200) return { kind: 'account', status: res.status, reason: readFailure(res), value: null };
   try {
-    const value = M.acceptAccountHistory(res.body);
+    const value = M.acceptAccountHistory(res.payload);
     timing('account-accept', performance.now() - started);
     return { kind: 'account', status: 200, reason: null, value };
   } catch { return { kind: 'account', status: 200, reason: 'contract_invalid', value: null }; }
@@ -281,6 +269,7 @@ function seriesFor(source, live) {
 // One plain line under the chart about the history shown, or ''. A failed
 // read leads, then the store's own state, then a range longer than the record.
 function noteText(series, source, now) {
+  if (boardSession.signedOut()) return `${store.value ? 'Last known account history' : 'Account history unavailable'} · ages unknown while signed out`;
   if (store.reason && store.reason !== 'loading') {
     const why = store.reason === 'contract_invalid' ? 'the history could not be checked' : cellReason(store.reason);
     return store.value ? `Update failed · showing what loaded ${age((performance.now() - store.loadedAt) / 1000)} ago` : `History unavailable · ${why}`;

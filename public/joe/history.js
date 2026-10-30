@@ -55,6 +55,7 @@ function toolsHtml() {
 // History's own state, with its age and reason. It sits inside the chart's
 // fixed box and the plot starts below it, so a change of state moves nothing.
 function statusLine(cell) {
+  if (cell?.signedOut && cell.value) return `<div class="hist-state" data-state="broken">${st('none', 'Last known history · ages unknown while signed out')}</div>`;
   const p = statePhrase(cell, 'hist', 'last good history');
   if (p.state === 'fresh') return '';
   const why = cell?.reason ? esc(cellReason(cell.reason)) : null;

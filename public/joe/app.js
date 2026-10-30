@@ -5,6 +5,7 @@ import { isCanonicalJoeHost } from './host.js';
 import { SCREENS, parseRoute, routeHash, sameRoute, historyStep, linkRoute, onRoute, applyRoute, onAddress, writeRoute, createPlaces } from './route.js';
 import { $, $$, icon, initTips, isPhone, trapDialogs, fromPointer, patch, fitStatusLine } from './ui.js';
 import { createFeed } from './feed.js';
+import { boardSession } from './transport.js';
 import { createObservedEvents } from './events.js';
 import { renderDesk, headerHealth, healthPop, forgetCharts, toggleDeskDisclosure, initBarTaps } from './desk.js';
 import { initAccount, renderAccount } from './account.js';
@@ -63,7 +64,7 @@ function start() {
     if (kind === 'history') dirtyHistory = true;
     schedule(kind);
   }, (reason, ms) => { timings.push({ reason, ms, at: performance.now() }); if (timings.length > 200) timings.shift(); }, globalThis.JoeVersion.APP_VERSION,
-  { actionsWanted: () => screen === 'settings' });
+  { actionsWanted: () => screen === 'settings', session: boardSession });
   const tips = initTips({ now: () => feed.now(), since: () => sinceStarts(feed.feeds) });
   initBarTaps();
   // Read-only: fetches the same three reads now instead of at the next poll.
@@ -96,10 +97,13 @@ function start() {
     }
     if (root.dataset.joeState !== health.statusTone) root.dataset.joeState = health.statusTone;
     const alert = $('#statusAlert');
+    if (alert.dataset.reason !== health.reason) alert.dataset.reason = health.reason;
     if (alert.dataset.tone !== health.statusTone) alert.dataset.tone = health.statusTone;
     const use = alert.querySelector('use'), href = health.statusTone === 'warn' ? '#i-half' : '#i-stop';
     if (use.getAttribute('href') !== href) use.setAttribute('href', href);
     const alertText = $('#statusAlertText');
+    const reload = $('#signInReload');
+    reload.hidden = health.reason !== 'signed-out';
     if (alertText.textContent !== head.alert) alertText.textContent = head.alert;
     if (alertText.title !== head.alert) alertText.title = head.alert;
     fitStatusLine(btn, alert);
@@ -235,6 +239,7 @@ function start() {
   const focusables = el => $$('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])', el).filter(n => !n.disabled && n.getClientRects().length);
 
   document.addEventListener('click', e => {
+    if (e.target.closest('[data-sign-in-reload]')) { location.reload(); return; }
     const disclosure = e.target.closest('[data-desk-disclosure]');
     if (disclosure) {
       tips.hide();

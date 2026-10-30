@@ -442,11 +442,13 @@ function runtimeHtml(ctx) {
   rows.push(rtRow('paper', 'Trading mode', `<span class="st">${icon('paper')}<span>Paper · ${mode}</span></span>`, 'mode'));
   const notReported = (cell) => st('none', `Not reported${cell?.reason && cell.reason !== 'feed_not_received' ? ` · ${esc(cellReason(cell.reason))}` : ''}`);
   const halt = states.halt;
-  rows.push(rtRow('stop', term('halt'), halt?.value == null ? notReported(halt)
+  const signedOut = states.session === 'signed-out';
+  rows.push(rtRow('stop', term('halt'), signedOut ? st('none', `${halt?.value == null ? 'Unavailable' : `Last known: ${halt.value ? 'On' : 'Off'}`} · unknown while signed out`) : halt?.value == null ? notReported(halt)
     : halt.value ? st('bad', `On · ${esc(cellReason(data?.safety.haltReason ?? halt.reason ?? 'halt_on'))}`)
       : withState(halt, 'rt.halt', 'ok', 'Off · paper trading is not paused'), 'safety.halt'));
   let broker;
-  if (!data || !states.gateway?.value) broker = notReported(states.gateway);
+  if (states.session === 'signed-out') broker = st('none', 'Unknown while signed out');
+  else if (!data || !states.gateway?.value) broker = notReported(states.gateway);
   else {
     const b = brokerState(states, data), g = data.safety.gateway, ago = states.gateway.ageSeconds;
     const words = b.word === 'OK' ? `Answering · checked ${ageSpan('rt.broker', `${age(ago)} ago`)} (${timeHMS(g.checkedAt)})`
@@ -457,7 +459,8 @@ function runtimeHtml(ctx) {
   rows.push(rtRow('plug', term('broker'), broker, 'safety.gateway'));
   const exCell = states.executor, ex = exCell?.value;
   let executor;
-  if (!ex) executor = notReported(exCell);
+  if (signedOut) executor = st('none', `${ex ? `Last known: ${executorPresentation(ex).status}` : 'Unavailable'} · unknown while signed out`);
+  else if (!ex) executor = notReported(exCell);
   else {
     const { status, tone, reason } = executorPresentation(ex, data?.safety.halt), ledger = ledgerSize(ex);
     const healthReason = ['results_capture_failed', 'ledger_size_limit'].includes(ex.reason);
@@ -469,7 +472,8 @@ function runtimeHtml(ctx) {
   }
   rows.push(rtRow('cpu', term('executor'), rtReserve(executor, EXECUTOR_SIZING), 'GET /v1/health on hsb0'));
   let board;
-  if (!data) board = st('none', `Not reported · ${esc(cellReason(feeds.data?.reason ?? 'feed_not_received'))}`);
+  if (signedOut) board = st('none', `${data ? `Last known numbers ${timeHMS(data.generatedAt)}` : 'Unavailable'} · panel ages unknown while signed out`);
+  else if (!data) board = st('none', `Not reported · ${esc(cellReason(feeds.data?.reason ?? 'feed_not_received'))}`);
   else {
     const { receipt, frozen } = dataAge(feeds, now);
     const failed = feeds.data.reason ? ` · ${esc(cellReason(feeds.data.reason))}` : '';
@@ -483,7 +487,8 @@ function runtimeHtml(ctx) {
   const acct = states.paperAccount, hint = data?.brokerAccount?.accountHint;
   const who = hint ? term('account', hint) : 'Account number not reported';
   let account;
-  if (acct?.value == null && !hint) account = notReported(acct);
+  if (signedOut) account = st('none', `${acct?.value == null ? 'Unavailable' : `Last known: ${who} · ${money(amountOf(acct.value), acct.value.currency)}`} · unknown while signed out`);
+  else if (acct?.value == null && !hint) account = notReported(acct);
   else if (acct?.value == null) account = st('none', `${who} · total not reported${acct?.reason ? ` · ${esc(cellReason(acct.reason))}` : ''}`);
   else account = withState(acct, 'rt.account', 'ok', `${who} · ${money(amountOf(acct.value), acct.value.currency)} · checked ${ageSpan('rt.account.age', `${age(acct.ageSeconds)} ago`)}`, 'last good total');
   rows.push(rtRow('wallet', term('paperacct'), `${rtReserve(account, ACCOUNT_SIZING)}<span class="account-cash-line">${cashCaption(states.paperCash, 'rt.cash')}</span>`, 'brokerAccount.accountHint'));

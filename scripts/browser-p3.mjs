@@ -714,6 +714,18 @@ try {
         await page.evaluate('window.__joedesk.refresh()');
         await settle(page);
       }
+      if (f.transportReason === 'auth_required') {
+        const ui = await page.evaluate(`({ headline: document.getElementById('statusAlertText').textContent,
+          details: document.getElementById('healthPop').textContent, account: document.getElementById('acctChange').textContent,
+          reload: !document.getElementById('signInReload').hidden, reason: document.getElementById('hdrHealth').dataset.reason })`);
+        check('fixtures', `${id}: expired sign-in owns the headline and last-known values, without feed or broker blame`,
+          ui.reason === 'signed-out' && ui.headline === 'Signed out — reload to sign in' && ui.reload &&
+          /last known/i.test(ui.account) && /unknown while signed out/.test(ui.details) &&
+          !/Amy|updates stopped|has not checked in|broker is offline/i.test(ui.details), ui);
+        await page.setHeaders({ 'x-auth-request-user': ACTOR });
+        page.errors.length = 0;
+        continue;
+      }
       if (viewport.width <= 480) {
         await setDeskDisclosures(page, false);
         const collapsed = await phoneDeskSnapshot(page).then(copyText);
@@ -1064,12 +1076,13 @@ try {
         await load(page, cold.url, 'desk');
         await settle(page);
         const words = cellReason(reason);
+        const signedOut = reason === 'auth_required';
         const ui = await page.evaluate(DESK_TEXT);
         const cellsOk = Object.values(ui.cells).every(c => c.state === 'broken') && Object.entries(ui.cells).filter(([k]) => k !== 'hero.day').every(([, c]) => c.cap === `Unavailable · ${words}`) &&
           ui.account.state === 'broken' && ui.account.line === `Unavailable · ${words}`;
-        check('cold', `${tag}: no clock, yet every panel shows broken with its reason`, ui.label === 'No board data' && /^Time not known/.test(ui.marketSub) && cellsOk && ui.say === `No numbers: ${words}.` &&
+        check('cold', `${tag}: no clock, yet every panel shows broken with its reason`, ui.label === (signedOut ? 'Signed out — reload to sign in' : 'No board data') && /^Time not known/.test(ui.marketSub) && cellsOk && ui.say === `No numbers: ${words}.` &&
           ui.cards.every(c => c.status === `Numbers: unavailable · ${words}` && c.nums.every(x => x === 'broken')) && ui.positions === `Position detail is unavailable: ${words}.` &&
-          ui.kept === `Kept holdings are unavailable: ${words}.` && ui.strip.includes(`No data · ${words}`) && !/Data from|refreshes every/.test(ui.foot) && ui.alert.startsWith('No board data') && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
+          ui.kept === `Kept holdings are unavailable: ${words}.` && (signedOut ? ui.strip.includes('unknown while signed out') : ui.strip.includes(`No data · ${words}`)) && !/Data from|refreshes every/.test(ui.foot) && ui.alert.startsWith(signedOut ? 'Signed out — reload to sign in' : 'No board data') && !page.errors.length, { ui, errors: page.errors.slice(0, 3) });
         if (name === 'auth') {
           await auditScreen(page, viewport, theme, 'desk (cold, no clock)');
           if (viewport.name === '1440' || viewport.mobile) await shot(page, viewport, `${viewport.name}-${theme}-desk-state-cold-no-clock`, 'Desk, cold start: sign-in expired before any data or clock');
@@ -1122,6 +1135,44 @@ try {
       page.errors.length = 0;
     }
   }
+  }
+
+  if (run('signed-out')) {
+    // Prepared locally; execute on agm2. Only state.json redirects; successful
+    // worker reads must not erase the board's signed-out state.
+    const { snapshot, history } = scenario(NOW);
+    const b = await newBoard({ history, accountHistory: accountScenario(NOW) });
+    b.setNow(NOW);
+    check('signed-out', 'sign-in regression snapshot accepted', (await b.push(snapshot)).status === 200);
+    b.setNow(at(NOW, 9));
+    for (const viewport of VIEWPORTS) for (const theme of THEMES) {
+      const tag = `${viewport.name} ${theme} signed out`;
+      await configure(page, viewport, theme);
+      await load(page, b.url);
+      const before = await page.evaluate(`document.getElementById('acctValue').textContent`);
+      const unroute = await route([{ path: 'state.json', status: 302, headers: [{ name: 'Location', value: 'https://auth.inspr.at/sign-in' }] }]);
+      try {
+        await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+        const ui = await page.evaluate(`(() => {
+          const reload = document.getElementById('signInReload'), line = document.getElementById('statusAlertText');
+          return { headline: line.textContent, title: document.getElementById('hdrHealth').title,
+            details: document.getElementById('healthPop').textContent, value: document.getElementById('acctValue').textContent,
+            caption: document.getElementById('acctChange').textContent, reload: __audit.visible(reload) && reload.textContent === 'Reload',
+            lineFits: line.scrollHeight <= line.clientHeight + 1, worker: window.__joedesk.worker() };
+        })()`);
+        check('signed-out', `${tag}: a 302 to SSO shows the sign-in headline, reload and last-known values; no Amy or broker blame`,
+          ui.headline === 'Signed out — reload to sign in' && ui.title === ui.headline && ui.reload && ui.lineFits && ui.worker &&
+          ui.value === before && /last known/i.test(ui.caption) && /unknown while signed out/.test(ui.details) &&
+          !/Amy|updates stopped|has not checked in|broker is offline/i.test(`${ui.headline} ${ui.details}`) && !page.errors.length, { ui, errors: page.errors });
+        await page.evaluate(`document.getElementById('hdrHealth').click()`);
+        check('signed-out', `${tag}: Details offers the same reload action`, await page.evaluate(`document.getElementById('healthPop').classList.contains('on') && Boolean(document.querySelector('#healthPop [data-sign-in-reload]'))`));
+        await page.evaluate(`setTimeout(() => document.querySelector('#healthPop [data-sign-in-reload]').click(), 0); true`);
+        await waitFor(page, `performance.getEntriesByType('navigation')[0]?.type === 'reload' && document.documentElement.dataset.ready === '1' && document.getElementById('hdrHealth').dataset.reason === 'signed-out'`);
+        check('signed-out', `${tag}: Reload performs a real page reload and a cold auth failure remains signed out`, true);
+      } finally { await unroute(); }
+      await page.evaluate('window.__joedesk.refresh()'); await settle(page);
+      check('signed-out', `${tag}: successful sign-in reads restore the current health`, await page.evaluate(`document.getElementById('hdrHealth').dataset.reason === 'board_ok' && document.getElementById('signInReload').hidden`));
+    }
   }
 
   if (run('passthrough')) {

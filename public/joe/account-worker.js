@@ -16,25 +16,8 @@
 // exactly the one this worker last sent the page.
 import { acceptAccountHistory, accountTransferables } from './account-model.js';
 
-const AUTH = new Set([301, 302, 303, 307, 308, 401, 403]);
-const READ_TIMEOUT_MS = 15000;
-
-async function read(url) {
-  const controller = new AbortController();
-  let timer;
-  try {
-    return await Promise.race([
-      new Promise(resolve => { timer = setTimeout(() => { controller.abort(); resolve({ status: 0 }); }, READ_TIMEOUT_MS); }),
-      (async () => {
-        const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', signal: controller.signal });
-        if (response.type === 'opaqueredirect') return { status: 302 };
-        if (response.status !== 200) return { status: response.status };
-        return { status: 200, text: await response.text() };
-      })(),
-    ]);
-  } catch { return { status: 0 }; } finally { clearTimeout(timer); }
-}
-const readReason = status => (AUTH.has(status) ? 'auth_required' : status === 404 ? 'route_not_found' : 'refresh_failed');
+import { readJSON, readFailure } from './transport.js';
+const read = url => readJSON(url, {}, { text: true });
 
 // 64-bit FNV-1a over bytes, in four 16-bit limbs (exact without BigInt):
 // hash ^= byte, then hash *= 2^40 + 0x1b3, modulo 2^64.
@@ -58,7 +41,7 @@ let sent = null;
 export async function readAccount(have = null) {
   const started = performance.now(), ms = () => performance.now() - started;
   const res = await read('/joe/account-history.json');
-  if (res.status !== 200) return { message: { kind: 'account', status: res.status, reason: readReason(res.status), value: null, key: null, ms: ms() }, transfer: [] };
+  if (res.status !== 200) return { message: { kind: 'account', status: res.status, reason: readFailure(res), value: null, key: null, ms: ms() }, transfer: [] };
   const key = fingerprint(res.text);
   if (have !== null && have === key && sent?.key === key && sent.text === res.text) return { message: { kind: 'unchanged', feed: 'account', key, ms: ms() }, transfer: [] };
   let value;

@@ -70,6 +70,7 @@ export function sharedSectionReason(cells) {
 
 // Shared hero and Account lines use the same not-exact words as the cards.
 export function sharedSectionPhrase(cell) {
+  if (cell?.signedOut && cell.value != null && !notExactDash(cell)) return 'Last known values · unknown while signed out';
   return cell?.value == null && NOT_EXACT_REASONS.has(cell?.reason)
     ? `Numbers: ${statePhrase(cell, '').text}`
     : `Numbers unavailable · ${esc(cellReason(cell.reason))}`;
@@ -280,7 +281,7 @@ function cellIcon(cell, sharedReason = null, figureLabel = null) {
   // A not-exact dash names itself (dashWords); its info icon only marks it, with
   // the same words as a pointer tip, so a screen reader hears the reason once.
   if (notExactDash(cell)) return `<span class="cell-state tone-${p.tone}" aria-hidden="true" title="${esc(capital(statePhrase(cell, '', undefined, sharedReason).text))}">${icon(p.icon)}</span>`;
-  const label = `${capital(p.state)}${cell.reason && cellReason(cell.reason) !== sharedReason ? ` · ${cellReason(cell.reason)}` : ''}`;
+  const label = cell.signedOut ? capital(p.text) : `${capital(p.state)}${cell.reason && cellReason(cell.reason) !== sharedReason ? ` · ${cellReason(cell.reason)}` : ''}`;
   return `<span class="cell-state tone-${p.tone}" role="img" aria-label="${esc(label)}">${icon(p.icon ?? TONE_ICON[p.tone])}</span>`;
 }
 export function percentHtml(hundredths) {
@@ -294,6 +295,7 @@ function healthFacts(ctx, health) {
   const data = feeds.data?.value;
   const reason = esc(capital(health.reason === 'board_ok' ? 'numbers up to date' : health.explanation));
   const facts = [`<span class="st ${health.statusTone} why">${icon(TONE_ICON[health.statusTone])}<span>${reason}</span></span>`];
+  if (health.reason === 'signed-out') return `<div class="health-facts">${facts[0]}${st('none', `${term('broker')} unknown while signed out`)}${st('none', data ? 'Last known values · panel ages unknown while signed out' : 'Panel ages unknown while signed out')}</div>`;
   if (data) {
     const broker = brokerState(states, data);
     const words = { OK: `checked ${ageSpan('strip.broker', `${age(states.gateway?.ageSeconds)} ago`)}`, degraded: 'unstable', down: 'down', unsure: 'has not checked in' };
@@ -332,6 +334,9 @@ export function healthPop(ctx, health) {
   const { states, feeds, now } = ctx;
   const data = feeds.data?.value;
   const problems = boardDiagnostics(states, feeds, now);
+  if (health.reason === 'signed-out') return `<h3>${icon('ring')}Board status details</h3>
+    <p class="status-sentence">Signed out — reload to sign in</p>${healthFacts(ctx, health)}
+    <p>${esc(problems.join(' '))}</p><p><button type="button" class="btn" data-sign-in-reload>Reload</button></p>`;
   const executor = executorProblem(data);
   if (executor) problems.push(executor);
   const rows = [];
@@ -769,6 +774,7 @@ export const recordState = view => view.cell && view.ix && view.cell.state !== '
 export function feedMark(view) {
   const text = recordState(view);
   if (!text) return null;
+  if (view.cell.signedOut) return { label: 'Last known', text, short: 'Last known results · ages unknown while signed out' };
   const cell = view.cell, ago = cell.ageSeconds == null ? 'age unknown' : `${age(cell.ageSeconds)} ago`;
   // `short`: the state and its age, for a sentence that already names the day.
   return { label: cell.retained ? 'Last good' : 'Results stale', text, short: cell.retained ? `Results last good, ${ago}` : `Results as of ${ago}` };
@@ -1104,7 +1110,7 @@ function deskCard(ctx, id, facts = deskFacts(ctx)) {
   const elapsed = feeds.data?.generatedAdvancedAt ? Math.max(0, Date.parse(now) - Date.parse(feeds.data.generatedAdvancedAt)) : 0;
   const hbMs = desk?.heartbeatAt ? gatewayCheckAgeMs({ checkedAt: desk.heartbeatAt }, data.generatedAt, elapsed) : null;
   const snapshotAge = dataAge(feeds, now).receipt;
-  const hb = hbMs != null ? hbMs / 1000 >= STALE_AFTER_S
+  const hb = states.session === 'signed-out' ? 'Last known · ages unknown while signed out' : hbMs != null ? hbMs / 1000 >= STALE_AFTER_S
     ? `${term('heartbeat')} ${ageSpan(`hb.${id}`, `${age(hbMs / 1000)} ago`)}` : ''
     : snapshotAge != null && snapshotAge >= STALE_AFTER_S ? `Data ${ageSpan(`hb.${id}`, `${age(snapshotAge)} old`)}` : '';
   const board = boardCaptionCell(ctx), first = deskFirst(ctx, facts, id), today = facts.view.today;

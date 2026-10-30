@@ -4,6 +4,11 @@ import { test } from 'node:test';
 import './fixtures/preview-dom.mjs';
 const { createFeed } = await import('../public/joe/feed.js');
 const { statusPresentation } = await import('../public/joe/health.js');
+const { readJSON, createBoardSession, boardSession } = await import('../public/joe/transport.js');
+const { brokerState, boardDiagnostics } = await import('../public/joe/health.js');
+const { statePhrase } = await import('../public/joe/ui.js');
+const { headerHealth, healthPop } = await import('../public/joe/desk.js');
+const { history: accountHistory } = await import('./fixtures/account-fixtures.mjs');
 
 function property(t, key, value) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, key);
@@ -203,4 +208,144 @@ test('JOED-130 timeouts retain warm values and ignore late bodies before a clean
   for (const value of Object.values(feed.feeds)) assert.equal(value.reason, null);
   assert.equal(feed.feeds.data.value.receivedAt, stamp);
   assert.equal(clock.deadlines.size, 0);
+});
+
+const authResponses = {
+  '302 to SSO': () => new Response(null, { status: 302, headers: { Location: 'https://auth.inspr.at/sign-in' } }),
+  '303 to SSO': () => new Response(null, { status: 303, headers: { Location: 'https://auth.inspr.at/sign-in' } }),
+  opaqueredirect: () => ({ type: 'opaqueredirect', status: 0 }),
+  '401': () => new Response('{}', { status: 401 }),
+  '403': () => new Response('{}', { status: 403 }),
+  'HTML content type': () => new Response('<h1>Sign in</h1>', { headers: { 'Content-Type': 'text/html; charset=utf-8' } }),
+  'HTML body': () => new Response(' \n<!doctype html><html><body>Sign in</body></html>', { headers: { 'Content-Type': 'application/json' } }),
+  'HTML fragment': () => new Response('<form action="/login">Sign in</form>'),
+  'followed cross-origin redirect': () => ({ status: 200, redirected: true, url: 'https://auth.inspr.at/sign-in', headers: new Headers(), json: async () => ({}) }),
+};
+for (const route of ['state.json', 'history.json', 'results.json', 'account-history.json', 'healthz']) {
+  for (const [name, response] of Object.entries(authResponses)) test(`JOED-173 shared boundary: ${route}, ${name}`, async t => {
+    t.mock.method(globalThis, 'fetch', async (_url, init) => { assert.equal(init.redirect, 'manual'); return response(); });
+    const res = await readJSON(`https://board.example/joe/${route}`);
+    assert.equal(res.auth, true);
+    assert.equal(res.payload, undefined, 'sign-in responses never become documents');
+  });
+}
+
+for (const route of ['state.json', 'history.json', 'history-continuity.json', 'results.json', 'fleet-config.json', 'fleet-config/actions.json']) {
+  test(`JOED-173 board precedence and recovery: ${route}`, async t => {
+    const clock = scheduler(t);
+    property(t, 'Worker', undefined);
+    let signedOut = false;
+    t.mock.method(globalThis, 'fetch', async url => {
+      if (signedOut && String(url).endsWith(route)) return authResponses['302 to SSO']();
+      const response = reply(url);
+      if (String(url).endsWith('state.json')) response.json = async () => ({ ...payloadFor(String(url)), serverNow: new Date(Date.parse(stamp) + performance.now()).toISOString() });
+      return response;
+    });
+    const feed = createFeed(() => {});
+    t.after(feed.stop);
+    await feed.refresh(); await feed.refreshActions();
+    const known = feed.feeds.data.value;
+    assert.equal(statusPresentation(feed.select()).reason, 'board_ok');
+    clock.advance(240000);
+    assert.equal(statusPresentation(feed.select()).reason, 'feed_disconnected');
+    signedOut = true;
+    await feed.refresh(); await feed.refreshActions();
+    const ctx = feed.select(), status = statusPresentation(ctx);
+    assert.equal(ctx.states.session, 'signed-out');
+    assert.equal(status.reason, 'signed-out', 'auth takes precedence over stopped updates and broker age');
+    assert.equal(status.sentence, 'Signed out — reload to sign in');
+    assert.equal(status.alert, status.sentence, 'one reason and one action');
+    assert.equal(feed.feeds.data.value.receivedAt, known.receivedAt, 'original receipt is preserved');
+    assert.deepEqual(feed.feeds.data.value, known, 'last good snapshot stays available');
+    assert.equal(ctx.states['desks.j.equity'].value.amount, known.desks[0].money.equity.amount);
+    assert.equal(ctx.states.gateway.ageSeconds, null);
+    assert.equal(brokerState(ctx.states, known).word, 'unknown while signed out');
+    assert.match(statePhrase(ctx.states['desks.j.equity'], '').text, /last known value · unknown while signed out/);
+    const health = statusPresentation(ctx);
+    const head = headerHealth(ctx, health), details = healthPop(ctx, health);
+    assert.doesNotMatch([head.label, head.alert, details, ...boardDiagnostics(ctx.states, ctx.feeds, ctx.now)].join(' '), /Amy|updates stopped|has not checked in|broker (?:is offline|connection down|unsure)/i);
+    assert.match(details, /data-sign-in-reload>Reload/);
+    signedOut = false;
+    await feed.refresh(); await feed.refreshActions();
+    assert.equal(feed.select().states.session, undefined);
+    assert.equal(statusPresentation(feed.select()).reason, 'feed_disconnected', 'recovery restores the honest stale reason, not Live');
+  });
+}
+
+test('JOED-173 a session recovers per endpoint; unrelated successes and network errors cannot clear it', () => {
+  const session = createBoardSession();
+  let changes = 0;
+  const stop = session.subscribe(() => changes++);
+  session.observe('state', { auth: true }); session.observe('healthz', { auth: true });
+  session.observe('history', { auth: false }); session.observe('state', { status: 0 });
+  assert.equal(session.signedOut(), true);
+  session.observe('state', { auth: false });
+  assert.equal(session.signedOut(), true);
+  session.observe('healthz', { auth: false });
+  assert.equal(session.signedOut(), false);
+  assert.equal(changes, 2, 'only board-level transitions announce');
+  stop();
+});
+
+for (const route of ['history.json', 'history-continuity.json', 'results.json']) test(`JOED-173 actual history worker reports auth and recovery: ${route}`, async t => {
+  let worker, refused = false;
+  property(t, 'self', { postMessage(data) { worker.onmessage({ data }); } });
+  await import(`../public/joe/history-worker.js?joed173-${route}`);
+  const handle = self.onmessage;
+  property(t, 'Worker', class { constructor() { worker = this; } postMessage(data) { handle({ data }); } });
+  t.mock.method(globalThis, 'fetch', async url => refused && String(url).endsWith(route) ? authResponses['HTML body']() : reply(url));
+  const feed = createFeed(() => {});
+  t.after(feed.stop);
+  await feed.refresh();
+  refused = true; await feed.refresh();
+  assert.equal(statusPresentation(feed.select()).reason, 'signed-out');
+  refused = false; await feed.refresh();
+  assert.equal(statusPresentation(feed.select()).reason, 'board_ok');
+  await feed.refresh();
+  assert.equal(statusPresentation(feed.select()).reason, 'board_ok', 'unchanged worker replies preserve recovered sign-in');
+});
+
+for (const mode of ['page', 'worker']) test(`JOED-173 account history ${mode} participates in the board session`, async t => {
+  let handle, send, refused = false;
+  property(t, 'Worker', undefined);
+  const { refreshAccountHistory, forgetAccountHistory } = await import(`../public/joe/account.js?joed173-${mode}`);
+  if (mode === 'worker') {
+    property(t, 'self', { postMessage(data) { handle.onmessage({ data }); } });
+    await import('../public/joe/account-worker.js?joed173');
+    send = self.onmessage;
+    property(t, 'JoeVersion', { APP_VERSION: 'test' });
+  }
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (String(url).endsWith('account-history.json')) return refused ? authResponses['HTML body']() : new Response(JSON.stringify(accountHistory()));
+    return reply(url);
+  });
+  // Feed uses the application's shared session here; ordinary feeds have
+  // independent sessions so a different board instance cannot contaminate it.
+  const feed = createFeed(() => {}, () => {}, '', { session: boardSession });
+  if (mode === 'worker') globalThis.Worker = class { constructor() { handle = this; } postMessage(data) { send({ data }); } };
+  t.after(() => { feed.stop(); boardSession.observe('/joe/account-history.json', { auth: false }); forgetAccountHistory(); });
+  await feed.refresh(); await refreshAccountHistory();
+  refused = true; await refreshAccountHistory();
+  assert.equal(statusPresentation(feed.select()).reason, 'signed-out');
+  await feed.refresh();
+  assert.equal(statusPresentation(feed.select()).reason, 'signed-out', 'main feed cannot clear an account read failure');
+  refused = false; await refreshAccountHistory();
+  assert.equal(statusPresentation(feed.select()).reason, 'board_ok');
+});
+
+for (const [name, response, expected] of [
+  ['proxy HTML', () => new Response('<html>Bad gateway</html>', { status: 503, headers: { 'Content-Type': 'text/html' } }), 'refresh_failed'],
+  ['invalid JSON', () => new Response('{bad json'), 'refresh_failed'],
+  ['invalid data', () => new Response('{}'), 'refresh_failed'],
+  ['network down', () => { throw new TypeError('offline'); }, 'refresh_failed'],
+  ['missing route', () => new Response('{}', { status: 404 }), 'route_not_found'],
+]) test(`JOED-173 non-auth failure stays honest: ${name}`, async t => {
+  property(t, 'Worker', undefined);
+  let fail = false;
+  t.mock.method(globalThis, 'fetch', async url => fail && String(url).endsWith('state.json') ? response() : reply(url));
+  const feed = createFeed(() => {});
+  t.after(feed.stop);
+  await feed.refresh(); fail = true; await feed.refresh();
+  assert.equal(feed.feeds.data.reason, expected);
+  assert.notEqual(statusPresentation(feed.select()).reason, 'signed-out');
 });

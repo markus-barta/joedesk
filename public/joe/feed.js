@@ -12,46 +12,22 @@ import { acceptActions } from './settings-model.js';
 export const POLL_DATA_MS = 15000;
 export const POLL_HISTORY_MS = 30000;
 export const TICK_MS = 1000;
-const READ_TIMEOUT_MS = 15000;
 // Before any server clock is known no feed holds a value (every read that
 // brings one also brings the clock), so no state can depend on the instant;
 // this fixed one only satisfies the selector's input.
 const NO_CLOCK = '1970-01-01T00:00:00.000Z';
 
-// The server's clock from a response: its own stamp, else the HTTP date.
-export function serverClock(headers) {
-  const own = headers?.get('X-Joe-Server-Now');
-  if (own && Number.isFinite(Date.parse(own))) return { at: own, precise: true };
-  const date = headers?.get('Date');
-  return date && Number.isFinite(Date.parse(date)) ? { at: new Date(Date.parse(date)).toISOString(), precise: false } : null;
-}
+export { serverClock } from './transport.js';
+import { readJSON, createBoardSession } from './transport.js';
 
-const AUTH = new Set([301, 302, 303, 307, 308, 401, 403]);
-async function read(url, init = {}) {
-  const controller = new AbortController();
-  let timer, clock = null, at;
-  try {
-    // One deadline bounds both the response headers and consumption of its body.
-    const deadline = new Promise((_, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new Error('Read timed out')); }, READ_TIMEOUT_MS);
-    });
-    return await Promise.race([deadline, (async () => {
-      const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', ...init, signal: controller.signal });
-      at = performance.now();
-      if (response.type === 'opaqueredirect') return { status: 302, redirected: true };
-      clock = serverClock(response.headers);
-      if (AUTH.has(response.status) || response.status === 304) return { status: response.status, headers: response.headers, clock, at };
-      let payload = null;
-      try { payload = await response.json(); } catch { if (response.ok) return { status: 0, clock, at }; }
-      return { status: response.status, payload, headers: response.headers, clock, at };
-    })()]);
-  } catch {
-    return { status: 0, clock, at };
-  } finally { clearTimeout(timer); }
-}
-
-export function createFeed(onChange, measure = () => {}, version = '', { actionsWanted = () => false } = {}) {
+export function createFeed(onChange, measure = () => {}, version = '', { actionsWanted = () => false, session = createBoardSession() } = {}) {
   let anchor = null, serverPanels = {}, fleetTag = null;
+  const unsubscribe = session.subscribe(() => onChange('session'));
+  const read = async (url, init) => {
+    const res = await readJSON(url, init);
+    session.observe(new URL(url, 'https://board/joe/').pathname, res);
+    return res;
+  };
   // Where the server read the fleet settings from, and its change log.
   let fleetSource = null, actions = null;
   const feeds = { data: null, history: null, results: null, 'fleet-config': null };
@@ -122,6 +98,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       const pending = workerReads.get(kind);
       workerReads.delete(kind);
       try {
+        for (const [key, auth] of Object.entries(data.auth ?? {})) session.observe(key, { auth });
         if (data.clock) anchorTo(data.clock.at, data.clock.precise ? 'stamp' : 'date');
         measure(`${kind}-worker`, data.ms);
         if (data.kind === 'unchanged') return;
@@ -210,7 +187,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
     const res = await read('./fleet-config/actions.json');
     anchorFrom(res);
     const entries = res.status === 200 ? acceptActions(res.payload) : null;
-    actions = entries ? { entries, reason: null } : { entries: actions?.entries ?? null, reason: AUTH.has(res.status) ? 'auth_required' : res.status === 200 ? 'contract_invalid' : 'refresh_failed' };
+    actions = entries ? { entries, reason: null } : { entries: actions?.entries ?? null, reason: res.auth ? 'auth_required' : res.status === 200 ? 'contract_invalid' : 'refresh_failed' };
     onChange('actions');
   }); }
 
@@ -218,12 +195,18 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
   // server's own panels carry retained last-good values and their receipts.
   // Without any server clock each panel still gets its state and reason: a
   // value that arrived without one cannot be dated, so it is not shown.
+  function selectStates(input, at, previous) {
+    const states = boardStates(input, at, previous);
+    if (!session.signedOut()) return states;
+    return { ...Object.fromEntries(Object.entries(states).map(([name, cell]) => [name,
+      { ...cell, signedOut: true, state: 'broken', ageSeconds: null, retained: cell.value != null }])), session: 'signed-out' };
+  }
   function select() {
     const at = now();
     const input = Object.fromEntries(Object.entries(feeds).filter(([, feed]) => feed));
-    if (at) return { now: at, feeds: input, states: boardStates(input, at, serverPanels), fleetSource, actions };
+    if (at) return { now: at, feeds: input, states: selectStates(input, at, serverPanels), fleetSource, actions };
     const undated = Object.fromEntries(Object.entries(input).map(([key, feed]) => [key, feed.value == null ? feed : { value: null, reason: feed.reason ?? null }]));
-    return { now: null, feeds: undated, states: boardStates(undated, NO_CLOCK, {}), fleetSource, actions };
+    return { now: null, feeds: undated, states: selectStates(undated, NO_CLOCK, {}), fleetSource, actions };
   }
   // Every first read (state, history, closed-trade record, fleet settings) has
   // answered, with a value or a reason; the page then marks itself ready.
@@ -240,7 +223,7 @@ export function createFeed(onChange, measure = () => {}, version = '', { actions
       setInterval(() => onChange('tick'), TICK_MS),
     ];
   }
-  const stop = () => { timers.forEach(clearInterval); timers = []; };
+  const stop = () => { timers.forEach(clearInterval); timers = []; unsubscribe(); };
   const refresh = () => Promise.all([pollFleet(), pollState(), pollHistory(), pollResults()]);
   return { start, stop, select, now, settled, refresh, refreshHistory: pollHistory, refreshResults: pollResults, refreshFleet: pollFleet, refreshActions: pollActions, usesWorker: () => Boolean(worker), feeds };
 }

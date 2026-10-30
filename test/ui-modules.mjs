@@ -735,7 +735,7 @@ test('health: every P1 fixture lands on today’s light, label and plain reason'
     'a-gateway-up-but-dead': ['red', 'gateway_down', 'Needs fix'],
     'c-old-producer-image': ['red', 'feed_disconnected', 'Needs fix'],
     'unknown-schema': ['red', 'feed_disconnected', 'Needs fix'],
-    'g-expired-sso': ['red', 'feed_disconnected', 'Needs fix'],
+    'g-expired-sso': ['yellow', 'signed-out', 'Signed out'],
     'd-routing-stub': ['red', 'feed_disconnected', 'Needs fix'],
   };
   for (const [id, [tone, reason, label]] of Object.entries(expect)) {
@@ -1364,7 +1364,7 @@ test('cold start: without the server clock every panel still shows its own state
   const json = (status, body, headers = {}) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
   try {
     for (const [answer, reason] of [[() => json(401, { ok: false, reason: 'auth_required' }), 'auth_required'], [() => json(404, { ok: false, error: 'not found' }), 'route_not_found'],
-      [() => json(503, { ok: false }), 'refresh_failed'], [() => { throw new TypeError('offline'); }, 'refresh_failed'], [() => new Response('<html>', { status: 200 }), 'refresh_failed']]) {
+      [() => json(503, { ok: false }), 'refresh_failed'], [() => { throw new TypeError('offline'); }, 'refresh_failed'], [() => new Response('<html>', { status: 200 }), 'auth_required']]) {
       globalThis.fetch = async () => answer();
       const feed = createFeed(() => {});
       await feed.refresh();

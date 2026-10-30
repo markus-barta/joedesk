@@ -8,39 +8,13 @@ import { toColumns, transferables, sessionCloses, DESK_IDS } from './history-mod
 import { indexResults, transferables as resultsTransferables } from './results-model.js';
 
 const previous = { history: null, results: null }, posted = { history: null, results: null };
-const AUTH = new Set([301, 302, 303, 307, 308, 401, 403]);
-const READ_TIMEOUT_MS = 15000;
-// The board server's clock from a response: its own stamp, else the HTTP date.
-function serverClock(headers) {
-  const own = headers.get('X-Joe-Server-Now');
-  if (own && Number.isFinite(Date.parse(own))) return { at: own, precise: true };
-  const date = headers.get('Date');
-  return date && Number.isFinite(Date.parse(date)) ? { at: new Date(Date.parse(date)).toISOString(), precise: false } : null;
-}
-
+import { readJSON } from './transport.js';
+const auth = {};
 async function read(url) {
-  const controller = new AbortController();
-  let timer, clock = null, at;
-  try {
-    const deadline = new Promise((_, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new Error('Read timed out')); }, READ_TIMEOUT_MS);
-    });
-    return await Promise.race([deadline, (async () => {
-      const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', redirect: 'manual', signal: controller.signal });
-      at = performance.now();
-      if (response.type === 'opaqueredirect') return { status: 302, redirected: true };
-      clock = serverClock(response.headers);
-      if (AUTH.has(response.status)) return { status: response.status, clock, at };
-      const reason = response.headers.get('X-Joe-Feed-Reason') ?? undefined;
-      let payload = null;
-      try { payload = await response.json(); } catch { if (response.ok) return { status: 0, clock, at }; }
-      return { ...(response.ok ? { status: 200, payload, reason,
-        generatedAdvancedAt: response.headers.get('X-Joe-Generated-Advanced-At') ?? undefined }
-        : { status: response.status, payload, reason: payload?.reason ?? undefined }), clock, at };
-    })()]);
-  } catch {
-    return { status: 0, clock, at };
-  } finally { clearTimeout(timer); }
+  const res = await readJSON(url);
+  auth[url] = res.auth;
+  return { ...res, reason: res.headers?.get('X-Joe-Feed-Reason') ?? res.payload?.reason ?? undefined,
+    generatedAdvancedAt: res.headers?.get('X-Joe-Generated-Advanced-At') ?? undefined };
 }
 
 // The server's time when this message leaves: its stamp plus the time spent here.
@@ -55,12 +29,12 @@ async function pollHistory(started) {
     sizeBytes: value.sizeBytes, compactedThrough: value.compactedThrough ?? null, reason: value.reason ?? null, points: value.points.length } : null;
   const provenance = sidecar.status === 200 ? sidecar.payload : null;
   const key = JSON.stringify([meta, accepted.reason, provenance]);
-  if (key === posted.history) { self.postMessage({ kind: 'unchanged', feed: 'history', clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (key === posted.history) { self.postMessage({ auth: { ...auth }, kind: 'unchanged', feed: 'history', clock: clockNow(res), ms: performance.now() - started }); return; }
   posted.history = key;
-  if (!value) { self.postMessage({ kind: 'history', reason: accepted.reason ?? null, meta: null, clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (!value) { self.postMessage({ auth: { ...auth }, kind: 'history', reason: accepted.reason ?? null, meta: null, clock: clockNow(res), ms: performance.now() - started }); return; }
   const columns = toColumns(value.points, provenance, value.seq);
   const closes = Object.fromEntries(DESK_IDS.map(id => [id, sessionCloses(columns, id, 'totalPnl', 9)]));
-  self.postMessage({ kind: 'history', reason: accepted.reason ?? null, meta, columns, closes, clock: clockNow(res), ms: performance.now() - started }, transferables(columns));
+  self.postMessage({ auth: { ...auth }, kind: 'history', reason: accepted.reason ?? null, meta, columns, closes, clock: clockNow(res), ms: performance.now() - started }, transferables(columns));
 }
 
 // The closed-trade record: indexed once per accepted value (spec r3 §4.2 is
@@ -71,11 +45,11 @@ async function pollResults(started) {
   previous.results = accepted;
   const value = accepted.value;
   const key = JSON.stringify([value ? [value.seq, value.generatedAt, value.receivedAt] : null, accepted.reason ?? null]);
-  if (key === posted.results) { self.postMessage({ kind: 'unchanged', feed: 'results', clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (key === posted.results) { self.postMessage({ auth: { ...auth }, kind: 'unchanged', feed: 'results', clock: clockNow(res), ms: performance.now() - started }); return; }
   posted.results = key;
-  if (!value) { self.postMessage({ kind: 'results', reason: accepted.reason ?? null, index: null, clock: clockNow(res), ms: performance.now() - started }); return; }
+  if (!value) { self.postMessage({ auth: { ...auth }, kind: 'results', reason: accepted.reason ?? null, index: null, clock: clockNow(res), ms: performance.now() - started }); return; }
   const index = indexResults(value);
-  self.postMessage({ kind: 'results', reason: accepted.reason ?? null, generatedAdvancedAt: accepted.generatedAdvancedAt,
+  self.postMessage({ auth: { ...auth }, kind: 'results', reason: accepted.reason ?? null, generatedAdvancedAt: accepted.generatedAdvancedAt,
     index, clock: clockNow(res), ms: performance.now() - started }, resultsTransferables(index));
 }
 
