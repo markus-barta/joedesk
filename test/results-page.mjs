@@ -84,6 +84,22 @@ for (const [date, now] of [['0000-01-01', '0000-01-01T12:00:00.000Z'], ['0999-06
   });
 }
 
+for (const [date, instant, clock] of [
+  ['0000-01-01', '0000-01-01T12:00:00.000Z', '13:05'],
+  ['0999-06-15', '0999-06-15T10:00:00.000Z', '11:05'],
+  ['10000-01-01', rollover, '00:30'],
+]) {
+  test(`JOED-168 page: Day trade closing at ${instant} shows ${clock}`, t => {
+    const c = capture(t), ctx = context(record(date, instant), instant);
+    select(date, 'day');
+    page.renderResults(ctx);
+    const rows = c.dom('#daypanel').querySelectorAll('.trow');
+    assert.equal(rows.length, 1);
+    const closed = rows[0].querySelectorAll('.meta-unit').find(unit => unit.textContent.startsWith('closed '));
+    assert.equal(closed?.textContent, `closed ${clock} ·`);
+  });
+}
+
 test('JOED-168 page: rollover renders December 31 as past, in-period, with its boundary-week amount', t => {
   const c = capture(t), ctx = context(record('9999-12-31', '9999-12-31T12:00:00.000Z'), rollover);
   assert.equal(page.resultsToday(rollover), '10000-01-01');

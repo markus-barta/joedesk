@@ -2663,9 +2663,12 @@ year 0, padded years before 1000 and the year-10000 rollover. Calendar and
 period navigation, route application, YTD selection, day labels and partial
 warnings use numeric/calendar helpers rather than string ordering or fixed
 year positions. `test/results-page.mjs` exercises the actual page renderer
-and controls; all 11 regressions fail with `RESULTS_PAGE_PARENT=1` against
+and controls; the original 11 regressions fail with `RESULTS_PAGE_PARENT=1` against
 `d848cd0` loaded in memory, while modern markup stays byte-identical. These
 tests are also included by `test/results-model.mjs`.
+Clock labels parse hours and minutes independently of the wall-clock year's
+width. Format and Day-view regressions cover closing instants in years 0000,
+0999 and the Vienna year-10000 rollover; all three fail against `6d07151`.
 
 Reseal the integrated runtime closure once. Contracts revision 10, contract set
 `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
