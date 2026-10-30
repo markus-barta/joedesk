@@ -804,3 +804,18 @@ test('writer: a non-paper draft, or one not based on the version it names, is re
     assert.deepEqual(JSON.parse(calls[0].init.body), { baseRev: 'fc-000012', config: c });
   } finally { globalThis.fetch = realFetch; }
 });
+
+
+test('JOED-158 p6: Saved-description refusal evaluates all whitespace-separated ID tokens', () => {
+  const source = readFileSync(new URL('../scripts/browser-p6.mjs', import.meta.url), 'utf8');
+  // Select the actual evaluated assertion, including its template escaping.
+  const expression = source.split('discarding clears Saved descriptions')[1]?.match(/page\.evaluate\(`([^`]+)`\)/)?.[1];
+  assert.ok(expression);
+  const evaluated = runInNewContext('`' + expression + '`');
+  for (const value of ['f-saved\tother', 'other\nf-saved', 'other\r\nf-saved', 'f-saved  other']) {
+    const document = { querySelectorAll: selector => selector.includes('[aria-describedby]')
+      ? [{ getAttribute: () => value }] : [{ hidden: true }] };
+    assert.equal(runInNewContext(evaluated, { document }), false, JSON.stringify(value));
+  }
+  assert.equal(runInNewContext(evaluated, { document: { querySelectorAll: () => [] } }), true);
+});
