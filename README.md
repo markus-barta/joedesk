@@ -2,14 +2,16 @@
 
 Standalone Joe household paper-trading desk: static `/joe/` UI plus a small Node inbox server. Paper projection only — no broker access, no order placement.
 
-**Candidate version:** `261030085000.0.0` (`inspr-calver-3`, stable sequence 40), reserved once at `2026-10-30T08:50:00Z` for the board redesign follow-ups (JOED-158, JOED-168, JOED-169; release [JOED-171](https://aeon.barta.cm/p/JOED/JOED-171)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
+**Candidate version:** `261030154842.0.0` (`inspr-calver-3`, stable sequence 41), reserved once at `2026-10-30T15:48:42Z` for faster Results switching (JOED-170; release [JOED-172](https://aeon.barta.cm/p/JOED/JOED-172)). `release.json` is authoritative for this candidate; package, UI and `/joe/healthz` report it. This candidate has not been published or deployed.
 
-**Last deployed release:** `inspr-calver-3` / `261029192345.0.0` / sequence 39,
-published on `main` at `95aa934293c4a96b3ad80b64496b53966bc18360` under JOED-159,
-live on csb0 since `2026-10-30T08:44:03Z` and adopted at `2026-10-30T08:46:01Z`
-(`adoption/261029192345.0.0.json`). Both `previous_release` and
-`last_deployed_release` record sequence 39; its disposition is `deployed` with
-`deployed: true`. Sequence 38 (`261029075623.0.0`) was published but never
+**Last deployed release:** `inspr-calver-3` / `261030085000.0.0` / sequence 40,
+published on `main` at `2ad813216785f7b6fd4b506a26b9a7bc29d72ebc` under JOED-171,
+live on csb0 since `2026-10-30T11:34:29Z` and adopted at `2026-10-30T11:35:36Z`
+(`adoption/261030085000.0.0.json`). Both `previous_release` and
+`last_deployed_release` record sequence 40; its disposition is `deployed` with
+`deployed: true`. Sequence 39 (`261029192345.0.0`) was previously deployed at
+`2026-10-30T08:44:03Z` and adopted at `2026-10-30T08:46:01Z` (JOED-159).
+Sequence 38 (`261029075623.0.0`) was published but never
 deployed, retaining its historical `superseded-before-deployment` disposition.
 Sequence 37 (`261028202622.0.0`) was previously deployed at
 `2026-10-29T07:51:18Z` (JOED-122). Sequence 36 (`261028081016.0.0`) was previously deployed
@@ -37,14 +39,14 @@ published on `main` at `dafe7909af04ba5ded3c4b55504ea10970e07e4d`; JOED-41
 records its verified release set. It was also **never deployed**. Both
 publications' immutable artifacts and the legacy-to-calendar migration
 anchor remain history. `release/preparation.json` distinguishes the
-`previous_release` from `last_deployed_release`. About lists the current build, published sequence 38,
+`previous_release` from `last_deployed_release`. About lists the current build, deployed and adopted sequences 40 and 39, published sequence 38,
 deployed sequences 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27 and 26, then legacy history; neither aborted publication is a deployed entry.
 Never reseal or republish `261016151218.0.0` or `261019102825.0.0` with new bytes.
 
 ## P6a release preparation (JOED-26)
 
 This branch carries paper-only preparation from `rebuild/v2`. It is **not ready for
-cutover**. The sequence-39 candidate has not been published. The candidate
+cutover**. The sequence-41 candidate has not been published. The candidate
 reservation and unchanged legacy anchor live in `release/preparation.json`;
 published artifacts, historical tags and legacy history are preserved. The old CalVer2 proposal JOED-13 is
 superseded by JOED-19's approved CalVer3 decision and consolidated into JOED-26.
@@ -94,7 +96,7 @@ artifact contains `release-set.json` (`joedesk.release-set.v1`) and
 `release-set.json.sha256`. Hand both to OPS for OPS-354 and record them, with the
 validation run URL/attempt, in the cutover commit. OPS pins the **full source
 SHA**; no registry image or tag is needed. Never pin the moving `rebuild/v2` tip.
-An SSH-signed tag `v261030085000.0.0` is optional; only Markus can create it.
+An SSH-signed tag `v261030154842.0.0` is optional; only Markus can create it.
 The version reservation remains unchanged and does not imply cutover approval.
 
 Every PR and `main` push builds two uncached `linux/amd64` OCI outputs from the
@@ -2757,6 +2759,31 @@ Earlier release-preparation sections describe their reservation-time state.
 - Keep Results dates and trade ordering correct, even for records from very distant years.
 - Read one clear reason for missing Cash and honest wording for missing desk values.
 - Get steadier release speed checks by running browser checks one job at a time and recording machine load.
+
+Reseal the integrated runtime closure. Contracts revision 10 and contract set
+`3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved
+shared presentation source `01b3080948c21899cbbacbfa3447da6799af1b56`, legacy
+anchor and historical artifacts remain unchanged. The saved presentation config
+and templates match the local approved source; the offline bundle remains
+active in footer/About. This local candidate grants no publication or deployment
+approval. The coordinator owns the cross-family gate, publication and live verification.
+
+## Release 41 candidate (JOED-172)
+
+Reserve `261030154842.0.0` at `2026-10-30T15:48:42Z` as `inspr-calver-3`, stable sequence 41,
+for faster Results switching on the build machine (JOED-170): measure natural
+rows in order, stop at the first overflow, and use the legacy fitter for an
+overflowing panel. Timing budgets remain unchanged.
+
+Previous and last deployed release are sequence 40 (`261030085000.0.0`), main
+`2ad813216785f7b6fd4b506a26b9a7bc29d72ebc` (JOED-171), live on csb0 since
+`2026-10-30T11:34:29Z`, adopted at `2026-10-30T11:35:36Z` as recorded in
+`adoption/261030085000.0.0.json`. Reuse disposition `deployed` and
+`deployed: true`; adoption is evidenced by that existing record. About orders
+41, 40, 39, 38, 37 through 26, then legacy; release 40 retains its original entry.
+Earlier release-preparation sections describe their reservation-time state.
+
+- Switch Results views faster while keeping rows readable.
 
 Reseal the integrated runtime closure. Contracts revision 10 and contract set
 `3a9e1ae4ff24e063c38d6b7f77844ec03e03c9602d84421393010efacf244350`, the approved

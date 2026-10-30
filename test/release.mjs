@@ -130,31 +130,31 @@ test('P6 reservation: one UTC second, no collisions, continued sequence, mixed-e
   const later = reserveVersion({ ...next, version_scheme: 'inspr-calendar-v2' }, laterUTC);
   assert.equal(later.version_scheme, 'inspr-calver-3'); assert.equal(later.release_sequence, next.release_sequence + 1);
 });
-test('JOED-171: sequence 40 follows deployed and adopted 39 and preserves About history', () => {
-  assert.equal(prep.ticket, 'JOED-171');
-  assert.equal(next.release_sequence, 40);
+test('JOED-172: sequence 41 follows deployed and adopted 40 and preserves About history', () => {
+  assert.equal(prep.ticket, 'JOED-172');
+  assert.equal(next.release_sequence, 41);
   assert.equal(active.status, 'candidate');
-  assert.equal(active.note, 'Follow-ups to the board redesign: exact extreme dates in Results, single-reason Cash, steadier CI speed checks (JOED-158, JOED-168, JOED-169)');
-  const adoption = read('adoption/261029192345.0.0.json');
-  assert.equal(oldRelease.version, '261029192345.0.0');
-  assert.equal(oldRelease.release_sequence, 39);
+  assert.equal(active.note, 'Faster Results switching on the build machine: fit rows by measuring once, legacy fitting only where a row overflows (JOED-170)');
+  const adoption = read('adoption/261030085000.0.0.json');
+  assert.equal(oldRelease.version, '261030085000.0.0');
+  assert.equal(oldRelease.release_sequence, 40);
   assert.equal(oldRelease.status, 'published-candidate');
   assert.equal(oldRelease.source_branch, 'main');
   assert.equal(oldRelease.source_commit, adoption.source.commit);
-  assert.equal(oldRelease.source_commit, '95aa934293c4a96b3ad80b64496b53966bc18360');
-  assert.equal(oldRelease.release_set_ticket, 'JOED-159');
+  assert.equal(oldRelease.source_commit, '2ad813216785f7b6fd4b506a26b9a7bc29d72ebc');
+  assert.equal(oldRelease.release_set_ticket, 'JOED-171');
   assert.equal(oldRelease.disposition, 'deployed');
   assert.equal(oldRelease.deployed, true);
-  assert.equal(oldRelease.note, 'live on csb0 since 2026-10-30T08:44:03Z (JOED-159); adopted 2026-10-30T08:46:01Z (adoption/261029192345.0.0.json)');
+  assert.equal(oldRelease.note, 'live on csb0 since 2026-10-30T11:34:29Z (JOED-171); adopted 2026-10-30T11:35:36Z (adoption/261030085000.0.0.json)');
   assert.equal(adoption.version, oldRelease.version);
   assert.equal(adoption.release_sequence, oldRelease.release_sequence);
-  assert.equal(adoption.deployment.deployed_at, '2026-10-30T08:44:03Z');
-  assert.equal(adoption.adopted_at, '2026-10-30T08:46:01Z');
+  assert.equal(adoption.deployment.deployed_at, '2026-10-30T11:34:29Z');
+  assert.equal(adoption.adopted_at, '2026-10-30T11:35:36Z');
   assert.deepEqual(prep.anchor, { legacy_scheme: 'calendar', last_legacy_version: '26.09.21.12.00',
     last_legacy_sequence: 23, first_calendar_version: '261016151218.0.0', first_calendar_sequence: 24 });
   assert.equal(lastDeployed.version, oldRelease.version);
-  assert.equal(lastDeployed.release_sequence, 39);
-  assert.equal(lastDeployed.note, 'live on csb0 since 2026-10-30T08:44:03Z (JOED-159)');
+  assert.equal(lastDeployed.release_sequence, 40);
+  assert.equal(lastDeployed.note, 'live on csb0 since 2026-10-30T11:34:29Z (JOED-171)');
   const versionSource = fs.readFileSync(new URL('../public/joe/joe-version.js', import.meta.url), 'utf8');
   const ui = new Function('window', `${versionSource}; return window.JoeVersion;`)({});
   assert.equal(ui.APP_VERSION, active.version);
@@ -162,31 +162,39 @@ test('JOED-171: sequence 40 follows deployed and adopted 39 and preserves About 
   assert.equal(ui.VERSION_HISTORY[0].version, active.version);
   assert.equal(ui.VERSION_HISTORY[0].date, next.reserved_at.slice(0, 10));
   assert.deepEqual(ui.VERSION_HISTORY[0].changes, [
-    'Keep Results dates and trade ordering correct, even for records from very distant years.',
-    'Read one clear reason for missing Cash and honest wording for missing desk values.',
-    'Get steadier release speed checks by running browser checks one job at a time and recording machine load.',
+    'Switch Results views faster while keeping rows readable.',
   ]);
   assert.equal(ui.VERSION_HISTORY[1].version, oldRelease.version);
-  assert.equal(ui.VERSION_HISTORY[2].version, '261029075623.0.0');
-  assert.equal(ui.VERSION_HISTORY[3].version, '261028202622.0.0');
-  assert.equal(ui.VERSION_HISTORY[4].version, '261028081016.0.0');
-  assert.equal(ui.VERSION_HISTORY[5].version, '261027124551.0.0');
-  assert.equal(ui.VERSION_HISTORY[6].version, '261026232616.0.0');
-  assert.equal(ui.VERSION_HISTORY[7].version, '261026070713.0.0');
-  assert.equal(ui.VERSION_HISTORY[8].version, '261025221940.0.0');
-  assert.equal(ui.VERSION_HISTORY[9].version, '261025144826.0.0');
-  assert.equal(ui.VERSION_HISTORY[10].version, '261023155418.0.0');
-  assert.equal(ui.VERSION_HISTORY[11].version, '261023100632.0.0');
-  assert.equal(ui.VERSION_HISTORY[12].version, '261021113113.0.0');
-  assert.equal(ui.VERSION_HISTORY[13].version, '261021083537.0.0');
-  assert.equal(ui.VERSION_HISTORY[14].version, '261021015923.0.0');
-  assert.equal(ui.VERSION_HISTORY[15].version, prep.anchor.last_legacy_version);
+  assert.deepEqual(ui.VERSION_HISTORY[1], {
+    version: '261030085000.0.0', versionScheme: 'inspr-calver-3', date: '2026-10-30',
+    title: 'Exact Results dates and clearer missing values',
+    changes: [
+      'Keep Results dates and trade ordering correct, even for records from very distant years.',
+      'Read one clear reason for missing Cash and honest wording for missing desk values.',
+      'Get steadier release speed checks by running browser checks one job at a time and recording machine load.',
+    ],
+  });
+  assert.equal(ui.VERSION_HISTORY[2].version, '261029192345.0.0');
+  assert.equal(ui.VERSION_HISTORY[3].version, '261029075623.0.0');
+  assert.equal(ui.VERSION_HISTORY[4].version, '261028202622.0.0');
+  assert.equal(ui.VERSION_HISTORY[5].version, '261028081016.0.0');
+  assert.equal(ui.VERSION_HISTORY[6].version, '261027124551.0.0');
+  assert.equal(ui.VERSION_HISTORY[7].version, '261026232616.0.0');
+  assert.equal(ui.VERSION_HISTORY[8].version, '261026070713.0.0');
+  assert.equal(ui.VERSION_HISTORY[9].version, '261025221940.0.0');
+  assert.equal(ui.VERSION_HISTORY[10].version, '261025144826.0.0');
+  assert.equal(ui.VERSION_HISTORY[11].version, '261023155418.0.0');
+  assert.equal(ui.VERSION_HISTORY[12].version, '261023100632.0.0');
+  assert.equal(ui.VERSION_HISTORY[13].version, '261021113113.0.0');
+  assert.equal(ui.VERSION_HISTORY[14].version, '261021083537.0.0');
+  assert.equal(ui.VERSION_HISTORY[15].version, '261021015923.0.0');
+  assert.equal(ui.VERSION_HISTORY[16].version, prep.anchor.last_legacy_version);
   for (const version of ['261019102825.0.0', prep.anchor.first_calendar_version]) {
     assert.equal(ui.VERSION_HISTORY.some(r => r.version === version), false,
       'About must not imply either superseded candidate was deployed');
   }
 });
-test('JOED-171 check-release: accepts the follow-up reservation and rejects equal or earlier reservations after integrity verification', t => {
+test('JOED-172 check-release: accepts the Results speed reservation and rejects equal or earlier reservations after integrity verification', t => {
   const root = temporary(t), closure = read('release/closure.json');
   for (const name of [...closure.files.map(f => f.path), 'release/closure.json', 'scripts/check-release.mjs']) {
     const target = join(root, name); fs.mkdirSync(join(target, '..'), { recursive: true });
@@ -196,7 +204,7 @@ test('JOED-171 check-release: accepts the follow-up reservation and rejects equa
   const accepted = run();
   assert.equal(accepted.status, 0, accepted.stderr);
   assert.equal(JSON.parse(accepted.stdout).candidate, next.version);
-  for (const [version, reserved_at] of [['261029192345.0.0', '2026-10-29T19:23:45Z'], ['261029192344.0.0', '2026-10-29T19:23:44Z']]) {
+  for (const [version, reserved_at] of [['261030085000.0.0', '2026-10-30T08:50:00Z'], ['261030084959.0.0', '2026-10-30T08:49:59Z']]) {
     const invalid = structuredClone(prep);
     Object.assign(invalid.reservation, { version, reserved_at });
     fs.writeFileSync(join(root, 'release/preparation.json'), JSON.stringify(invalid, null, 2) + '\n');

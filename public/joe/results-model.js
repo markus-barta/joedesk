@@ -494,9 +494,16 @@ export function periodBase(ix, inputs, per, desks) {
   return base > 0n ? base : null;
 }
 
+// The percentage and the base it divides by, from one prefix search.
+export function periodQuote(ix, inputs, per, desks, result) {
+  if (!result || result.cut || result.empty || result.net == null || typeof result.units?.net !== 'bigint') return { percent: null, base: null };
+  const base = periodBase(ix, inputs, per, desks);
+  const percent = percentOf(result.units.net, base);
+  return { percent, base: percent === null ? null : base };
+}
+
 export function periodPercent(ix, inputs, per, desks, result) {
-  if (!result || result.cut || result.empty || result.net == null || typeof result.units?.net !== 'bigint') return null;
-  return percentOf(result.units.net, periodBase(ix, inputs, per, desks));
+  return periodQuote(ix, inputs, per, desks, result).percent;
 }
 
 // Every §4.2 number for one period and desk set. Display values are rounded
