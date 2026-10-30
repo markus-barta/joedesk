@@ -2804,14 +2804,19 @@ test('JOED-158 typography observer: each delivery samples the current viewport o
   const start = app.indexOf('  const fixUnits = '), end = app.indexOf('  syncThemeButton();', start);
   assert.ok(start > 0 && end > start);
   const text = value => ({ nodeType: 3, nodeValue: value });
-  const body = { nodeType: 1, children: [text('2 units · initial')] };
+  const descendant = { nodeType: 1, children: [] };
+  const body = { nodeType: 1, children: [text('2 units · initial'), descendant] };
+  const textNodes = node => node.nodeType === 3 ? [node] : node.children.flatMap(textNodes);
   let phone = false, reads = 0, deliver;
   runInNewContext(app.slice(start, end), {
     NB: '\u00a0', joinUnits: format.joinUnits,
     isPhone: () => { reads++; return phone; }, NodeFilter: { SHOW_TEXT: 4 },
-    document: { body, createTreeWalker: node => { let i = 0; return { nextNode: () => node.children[i++] ?? null }; } },
+    document: { body, createTreeWalker: node => { const nodes = textNodes(node); let i = 0; return { nextNode: () => nodes[i++] ?? null }; } },
     MutationObserver: class { constructor(callback) { deliver = callback; } observe(target, options) {
-      assert.equal(target, body); assert.equal(options.characterData, true);
+      assert.equal(target, body);
+      assert.equal(options.characterData, true);
+      assert.equal(options.childList, true);
+      assert.equal(options.subtree, true);
     } },
   });
   assert.equal(body.children[0].nodeValue, '2\u00a0units · initial');
@@ -2819,12 +2824,17 @@ test('JOED-158 typography observer: each delivery samples the current viewport o
     phone = narrow;
     const changed = text('3 units · changed'), child = text('4 units · added'), split = text('5 units ');
     split.nextSibling = { textContent: '· next inline' };
+    // A new text node inside an existing descendant needs childList + subtree.
+    const nested = text('6 units · nested');
+    descendant.children.push(nested);
     const before = reads;
-    deliver([{ type: 'characterData', target: changed }, { type: 'childList', addedNodes: [{ nodeType: 1, children: [child, split] }] }]);
+    deliver([{ type: 'characterData', target: changed }, { type: 'childList', addedNodes: [{ nodeType: 1, children: [child, split] }] },
+      { type: 'childList', target: descendant, addedNodes: [nested] }]);
     assert.equal(reads, before + 1, 'one viewport read for the whole delivery');
     const space = narrow ? '\u00a0' : ' ';
     assert.equal(changed.nodeValue, `3\u00a0units${space}· changed`);
     assert.equal(child.nodeValue, `4\u00a0units${space}· added`);
     assert.equal(split.nodeValue, `5\u00a0units${space}`, 'inline separators follow the same viewport');
+    assert.equal(nested.nodeValue, `6\u00a0units${space}· nested`, 'text appended inside an existing descendant follows the new viewport');
   }
 });
