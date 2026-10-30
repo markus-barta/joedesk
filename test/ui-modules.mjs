@@ -14,6 +14,7 @@ import { createGate } from '../scripts/browser/gate.mjs';
 import { captureHeaderCrop } from '../scripts/browser/header-crop.mjs';
 import './browser-settled.mjs';
 import './browser-group-timing.mjs';
+import './browser-machine-load.mjs';
 import './theme-geometry.mjs';
 import './theme-copy.mjs';
 import './board-sweep-plan.mjs';
@@ -2427,6 +2428,7 @@ async function simulatedBudget({ cold = [{}], live = [{}], limits = CI_GUARD } =
   };
   const execute = runInNewContext(`(${runBudget.toString()})`, context);
   const traces = await execute({ page, limits,
+    sampleLoad: () => ({ sampledAt: `sample-${boards.length}`, loadavg: [1, 2, 3], cpuCount: 8, browserProcesses: 4 }),
     newBoard: async ({ history, accountHistory }) => {
       const board = { history, accountHistory, url: `http://fixture/${boards.length}/`, pushes: [], setNow() {},
         async push(payload) { this.pushes.push(payload); return { status: 200 }; } };
@@ -2450,6 +2452,8 @@ test('browser budget: cold and live re-measure on fresh boards, retaining both a
   assert.equal(traces.length, 4);
   assert.ok(traces.every(r => r.attempts === 2 && r.remeasured));
   assert.deepEqual(Array.from(traces, r => r.attempt), [1, 2, 1, 2]);
+  assert.deepEqual(Array.from(traces, r => r.machineLoad.sampledAt), ['sample-0', 'sample-1', 'sample-2', 'sample-3']);
+  assert.match(budgetTable(traces, CI_GUARD), /sample-0.*1\.00 \/ 2\.00 \/ 3\.00.*8.*4/);
   for (const [index, duration, phase] of [[0, 129, 'cold history'], [2, 155, 'desk updates']]) {
     assert.equal(traces[index].offendingTasks[0].duration, duration);
     assert.ok(traces[index].offendingTasks[0].phases.includes(phase));
@@ -2588,12 +2592,17 @@ async function simulatedResultsBudget({ samples = { 390: [{}] }, limits = CI_GUA
     }, settle: async () => {}, waitFor: async () => {},
   };
   const execute = runInNewContext(`(${runResultsBudget.toString()})`, context);
+  let loadSamples = 0;
   const traces = await execute({ page, limits,
+    sampleLoad: () => ({ sampledAt: `sample-${++loadSamples}`, loadavg: [4, 5, 6], cpuCount: 16, browserProcesses: 7 }),
     newBoard: async () => ({ url: 'http://fixture/', setNow() {}, async push() { return { status: 200 }; } }),
     serve: async () => async () => { unserved = true; },
     check: (ac, name, ok, detail) => checks.push({ name, ok, detail }),
   });
   assert.equal(unserved, true, 'the Results interceptor is removed');
+  assert.equal(loadSamples, traces.length, 'one host-load sample per attempt, including re-measurements');
+  assert.equal(new Set(traces.map(r => r.machineLoad.sampledAt)).size, traces.length);
+  assert.match(resultsBudgetTable(traces, limits), /sample-1.*4\.00 \/ 5\.00 \/ 6\.00.*16.*7/);
   assert.equal(observers.filter(o => o.method === 'Page.addScriptToEvaluateOnNewDocument').length,
     Object.values(loads).reduce((sum, count) => sum + count, 0), 'each attempt installs a fresh observer');
   assert.equal(observers.filter(o => o.method === 'Page.removeScriptToEvaluateOnNewDocument').length,
@@ -2642,7 +2651,7 @@ test('Results budget: reference limits and CI-shaped copies never re-measure; bo
     const clean = await simulatedResultsBudget({ samples: { 1024: [sample] }, limits });
     assert.deepEqual(clean.loads, { 1024: 1 });
     assert.ok(clean.checks.every(c => c.ok));
-    assert.doesNotMatch(resultsBudgetTable(clean.traces, limits), /Attempt|re-measured/);
+    assert.doesNotMatch(resultsBudgetTable(clean.traces, limits).split('\n\n')[0], /Attempt|re-measured/);
   }
 });
 
@@ -2694,7 +2703,7 @@ test('browser budgets: absent long-task duration is null in both attempts and a 
   }
   for (const table of [budgetTable(board.traces, CI_GUARD), resultsBudgetTable(results.traces, CI_GUARD)]) {
     assert.match(table, /Long task worst \(ms\)/);
-    const rows = table.trim().split('\n').slice(2);
+    const rows = table.split('\n\n')[0].trim().split('\n').slice(2);
     assert.ok(rows.every(row => /\| — \| 0 \| 0 \|$/.test(row)), table);
   }
 });

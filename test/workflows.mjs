@@ -8,6 +8,7 @@ import { scratch, discard } from '../scripts/browser/scratch.mjs';
 import { parseResultsGateArgs } from '../scripts/results-gate-plan.mjs';
 // Both lightweight suites join the existing contracts/CI path.
 import './results-gate.mjs';
+import './browser-lock.mjs';
 
 const GUARDED_RUNNER = '${{ (vars.JOEDESK_AGM2 == \'on\' && (github.event_name != \'pull_request\' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON(\'["self-hosted","agm2"]\') || \'ubuntu-latest\' }}';
 const directory = new URL('../.github/workflows/', import.meta.url);
@@ -70,6 +71,13 @@ test('runner expression stays hosted by default and for fork PRs even when opted
 });
 
 const ci = parse(workflows.get('ci.yml'));
+test('CI retains every run and all browser launch steps use the same host lock shell', () => {
+  assert.equal(ci.concurrency, undefined, 'workflow concurrency must not replace pending PR runs');
+  for (const job of Object.values(ci.jobs)) assert.equal(job.concurrency, undefined);
+  const steps = ci.jobs.browser.steps.filter(step => /scripts\/(?:browser-p[3456]|preview-capture(?:-ci)?)\.mjs|npm run test:results/.test(step.run ?? ''));
+  assert.equal(steps.length, 6);
+  for (const step of steps) assert.equal(step.shell, 'bash scripts/with-browser-lock.sh {0}', step.name);
+});
 test('Results CI keeps full ×3 on main pushes and full Vienna plus UTC/NY subsets on PRs and dispatch', t => {
   const step = ci.jobs.browser.steps.find(step => step.name?.startsWith('Results gate'));
   assert.equal(step.if, 'always()');

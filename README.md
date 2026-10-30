@@ -465,6 +465,32 @@ and requires approval for all outside collaborators; `pull_request_target` is
 forbidden. Checkout explicitly cleans the workspace, and CI temporary files and
 npm's cache stay under `RUNNER_TEMP`.
 
+JOED-169: CI keeps every PR run; it has no workflow concurrency group. GitHub's
+default concurrency queue replaces older pending runs even with
+`cancel-in-progress: false`; `queue: max` still cancels overflow beyond 100
+pending runs ([GitHub concurrency semantics](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)).
+Instead, every browser execution step uses `scripts/with-browser-lock.sh`.
+On agm2, `flock` holds `/dev/shm/joedesk-browser.lock` for the entire step,
+including the Results zone matrix and browser teardown. The three runners must
+share that host-local filesystem and service user; a missing `flock` or denied
+lock access fails the step. Never unlink this lock file while jobs are running:
+its stable inode is the mutual exclusion boundary. No host configuration or
+runner labels are changed by the workflow. Hosted jobs use their isolated VMs
+without the lock; fork PRs retain the hosted-only runner guard.
+
+Jobs can overlap while their browser phases wait for the lock. This preserves
+queued runs without a concurrency-group cap, but waiting consumes the existing
+45-minute job timeout and flock makes no FIFO guarantee. Timeout or cancellation
+remains visible; it never supersedes another pending PR run. Package/OCI jobs
+and other tenants can still add load; DEVOPS owns agm2's CPU reservation.
+Before each budget attempt, including the one permitted re-measurement, the
+shared budget scripts record UTC sample time, 1/5/15-minute host load averages,
+logical CPU count and host-wide browser process count beside the budget table
+in QA `index.md` (and the reference command's output). Counts include the active
+browser and its helpers; failed process inspection prints `unavailable`, never
+zero. Inspection requests executable names only, not process arguments. Load
+evidence does not change a budget, guard, failure decision or re-measure rule.
+
 Chrome installation runs hosted-only. Self-hosted jobs first use a non-empty,
 executable `BROWSER_PATH`; otherwise they resolve `chromium`, `chromium-browser`,
 then `google-chrome` from `PATH`. They export the resolved `BROWSER_PATH` and fail

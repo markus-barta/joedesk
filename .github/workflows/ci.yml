@@ -9,9 +9,9 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+# Keep every PR run: default concurrency replaces older pending runs, even
+# with cancel-in-progress: false (queue: max also has a 100-pending cap).
+# Browser execution steps instead share a host-local flock across agm2 runners.
 
 jobs:
   package:
@@ -82,10 +82,12 @@ jobs:
           fi
           printf 'BROWSER_PATH=%s\n' "$browser_path" >> "$GITHUB_ENV"
       - name: Board UI gate (390/1024/1440, light and dark, P1 fixtures, privacy)
+        shell: bash scripts/with-browser-lock.sh {0}
         env:
           JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p3
         run: node scripts/browser-p3.mjs ${{ github.event_name == 'pull_request' && '--subset' || '--full' }}
       - name: Results gate (390/1024/1440, light and dark, results v2 fixtures, Vienna dates, budget)
+        shell: bash scripts/with-browser-lock.sh {0}
         if: always()
         env:
           JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p4
@@ -96,12 +98,14 @@ jobs:
             npm run test:results -- --full Europe/Vienna --subset UTC America/New_York
           fi
       - name: Settings gate (390/1024/1440, light and dark, Fleet Config fixtures, LIVE gate at the network layer, sweep)
+        shell: bash scripts/with-browser-lock.sh {0}
         if: always()
         env:
           JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p5
           TZ: UTC
         run: node scripts/browser-p5.mjs
       - name: Preview capture refuses a 0755 output directory (exit 2, no files)
+        shell: bash scripts/with-browser-lock.sh {0}
         run: |
           bad_out=$(mktemp -d "$RUNNER_TEMP/joedesk-preview-public.XXXXXX")
           chmod 0755 "$bad_out"
@@ -110,6 +114,7 @@ jobs:
           test "$status" -eq 2
           test -z "$(ls -A "$bad_out")"
       - name: Preview capture proxy and actor tunnel smoke
+        shell: bash scripts/with-browser-lock.sh {0}
         env:
           TZ: UTC
         run: |
@@ -128,6 +133,7 @@ jobs:
           name: joedesk-p3-screenshots
           path: ${{ runner.temp }}/joedesk-qa/p3
       - name: Release carry-overs (390/1440, light and dark)
+        shell: bash scripts/with-browser-lock.sh {0}
         env:
           JOED_QA_DIR: ${{ runner.temp }}/joedesk-qa/p6a
           TZ: UTC
